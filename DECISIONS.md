@@ -16,11 +16,17 @@ Only the user may merge.
 
 GitHub CLI is authenticated as pwngh. Native subagents expose OpenAI models,
 including GPT Sol. Claude CLI authentication was verified after the user signed
-in with an existing subscription. No Gemini CLI or multi-provider delegation
-tool is available in this session. Council requires three providers and
-prohibits silent substitution. No model inference calls were made. The user's
-explicit unavailable-model stop rule therefore keeps the project on a local
-branch until the third-provider review route is available.
+in with an existing subscription. The user's Gemini CLI login authenticated
+with Google but was rejected because personal-account support for that client
+ended on June 18, 2026. The supported replacement, Antigravity CLI 1.5.10, is
+installed and its version verified; the installer verified its download checksum.
+Personal Google sign-in and access to a suitable Gemini review model still need
+verification. See [Google's migration notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
+
+Council requires three providers and prohibits silent substitution. No model
+inference calls were made. The user's explicit unavailable-model stop rule
+therefore keeps the project on a local branch until the third-provider review
+route is available. No accounts, subscriptions, trials, or API keys were created.
 
 ## Specification research
 
