@@ -1,7 +1,7 @@
 # Connector security review
 
 Scope: one local connector process, an optional local Ollama service, invented
-data, and one operator. This review records the boundary and required evidence.
+data by default, and one operator. This review records the boundary and required evidence.
 It does not grant production approval.
 
 ## Data and permissions
@@ -9,8 +9,9 @@ It does not grant production approval.
 `crm.sqlite3` holds 30 accounts, contacts, opportunities, and activities.
 `calls.sqlite3` holds 29 call notes. `slack.sqlite3` holds 29 account-channel
 messages. Labels are synthetic; email addresses use
-reserved `.example` domains. The connector uses no real CRM, external identity,
-or recording service.
+reserved `.example` domains. The default runtime uses no real CRM, external
+identity, or recording service. An explicit Salesforce backend can read an
+operator's Developer Edition org; calls and Slack still use local fixtures.
 
 | Scope | Allowed tools |
 | --- | --- |
@@ -107,6 +108,30 @@ Snapshot writes are not atomic. An interrupted write can leave unusable JSON;
 generate a new brief. Custom Python adapters are trusted application code and
 are not sandboxed. The CLI cannot load them.
 
+## Optional Salesforce boundary
+
+`serve --crm-backend salesforce` reads a privately supplied instance URL and
+access token from the environment. The constructor performs no HTTP request.
+After the local token and scope checks and pending audit commit, each CRM tool
+queries the org edition and requires `Developer Edition`. The existing local
+owner can grant CRM access to that org. This is not Salesforce user delegation.
+The upstream token may have broader permissions; the adapter implements GET only.
+
+Requests use one configured HTTPS My Domain origin, fixed SOQL fields, escaped
+search text, and bounded results. TLS verification stays on. Proxies, redirects,
+retries, and token refresh are disabled. Pagination must stay on the same query
+endpoint. The adapter exposes no arbitrary query or URL input. External mode
+omits the write tool and rejects hardcoded write attempts with HTTP 403.
+
+Account names, contacts, and opportunity fields reach the authorized client.
+They remain untrusted data. Audit arguments may contain real search terms and
+record IDs. Returned refs persist, but response bodies and the upstream token
+are not copied to the audit. Existing manual retention and local-owner limits
+still apply. No Salesforce credential enters owner.json, Inspector config,
+brief evidence, or model input. Briefing refuses this backend because renewal
+fields are unmapped. Read output has no implicit join to the fixture accounts.
+Tests use invented HTTP responses, not a live org. See [setup and limits](docs/salesforce.md).
+
 ## Required sign-off evidence
 
 A reviewer must inspect the scope-denial and invalid-token tests, audit failure
@@ -115,4 +140,7 @@ the 20-account evaluation with its fixed expected claims. Confirm that the
 clean-checkout demo passes, the injected note creates zero activities, and usage
 totals match receipts. Review [DECISIONS.md](DECISIONS.md) and accept the local
 owner, manual-retention, snapshot, and fixed-vocabulary limits explicitly. Real data
-or shared deployment requires a separate review.
+or shared deployment requires a separate review. Before using an org, inspect
+its permissions and data, the adapter's fixed fields and read-only tests, and
+the local owner's ability to grant access. The test result is not approval to
+read production or client data.

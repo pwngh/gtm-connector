@@ -91,8 +91,9 @@ Open [SECURITY_REVIEW.md](SECURITY_REVIEW.md). Local file ownership is the trust
 boundary. The owner credential can request every scope. Audit arguments and
 evidence snapshots persist until the operator removes the state directory.
 Snapshot files are not tamper-proof or crash-safe. Custom Python adapters are
-not sandboxed. No real CRM integration, web interface, or multi-tenant behavior
-is included.
+not sandboxed. The default walkthrough uses no real CRM integration. The optional
+Salesforce reader requires a separate Developer Edition org and refuses briefs.
+No web interface or multi-tenant behavior is included.
 
 Show the measured scores in the README and the passing test result.
 
@@ -141,3 +142,12 @@ The model receives the supported claim catalog and no tool interface. Its
 response must pass the same checker. A rejected draft prints no candidate and
 exits `2`; saved usage still counts that generation. Nothing downloads a model.
 The default walkthrough stays model-free. See [model results and limits](docs/ollama.md).
+
+## Optional: read a Developer Edition org
+
+Follow [the Salesforce setup](docs/salesforce.md). This is separate from the
+five-minute offline walkthrough. Select the backend explicitly, then use the
+same scoped Inspector client to search accounts and read their opportunities.
+The three CRM tools use external GET requests. Call notes and Slack stay local.
+`log_activity` is absent and hardcoded write attempts return HTTP 403. Renewal
+briefs stop with `renewal_fields_unmapped`. No live org result is claimed here.

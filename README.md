@@ -226,6 +226,20 @@ the extended evaluation found and correctly cited 223 of 223 claims, with zero
 invented claims, 80 audit receipts, and zero activities.
 [Exact command and results](evaluation/RESULTS_SLACK.json)
 
+### Read a Salesforce Developer Edition org
+
+After setting `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` privately:
+
+```sh
+.venv/bin/python -m gtm_connector serve --crm-backend salesforce --state-dir var/salesforce
+```
+
+This replaces the three CRM read tools with Salesforce REST queries. It checks
+Developer Edition before reading account data. `log_activity` is unavailable;
+call notes and Slack remain separate mocks. The adapter does not map renewal
+fields, so it refuses brief generation. Tests use invented HTTP responses.
+No live org has been verified. [Setup, field mapping, and limits](docs/salesforce.md)
+
 ## What the mocks stand for
 
 | Mock | What it represents |
@@ -257,6 +271,9 @@ invented claims, 80 audit receipts, and zero activities.
   assistant applications and interactive external login are unverified.
   [Protocol details](docs/protocol.md)
 
+The following exclusions describe the default fixture runtime. The explicitly
+selected Salesforce read adapter is described above.
+
 Custom Python adapters are not sandboxed or selectable through the CLI. No
 hosted model adapter, real CRM or call-recording integration, web interface,
 or multi-tenant behavior is included.
@@ -266,6 +283,7 @@ or multi-tenant behavior is included.
 [Tools and fixture data](docs/tools.md) · [Design decisions](DECISIONS.md) ·
 [Rules the coding agents worked under](AGENTS.md)
 
-Portfolio project for Preston Neal. All source records use synthetic labels.
+Portfolio project for Preston Neal. The checked-in fixture records use synthetic
+labels. Optional Salesforce reads return records from the operator's org.
 
 MIT licensed.

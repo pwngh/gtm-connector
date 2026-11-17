@@ -123,3 +123,10 @@ audit failures, rate limits, idempotency, and the real HTTPS CLI flow. Brief tes
 cover denied and empty notes, conflicting sources, changes to the evidence copy,
 rejected citations, and instructions that stay data. Tests use temporary data.
 CI runs the full five-minute walkthrough on Python 3.11 and 3.14.
+
+## Optional external CRM reads
+
+`serve --crm-backend salesforce` replaces the three `crm:read` handlers. It
+omits `log_activity` and rejects direct write requests. Calls and Slack remain
+local fixtures. Direct `seed`, `accounts`, and `account` commands still inspect
+SQLite only. See [the Salesforce mapping and limits](salesforce.md).
