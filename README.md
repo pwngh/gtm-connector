@@ -1,13 +1,31 @@
 # GTM connector demo
 
-One MCP connector over two local source systems: a CRM and call notes, each
-with separate permissions. Portfolio project for Preston Neal. The 30 accounts
-and all related records use synthetic labels and reserved `.example` addresses.
+This demo exposes isolated CRM and call-note stores through an MCP server and
+uses a local CLI to generate renewal briefs with checked citations. Run it
+locally with `./scripts/demo.sh` using synthetic fixtures, reserved `.example`
+addresses, and no external runtime services or API keys.
 
-This is PR 3 of four. Alongside the scoped tools, authorization, audit, rate
-limits, and retry-safe writes, it now drafts a renewal-call brief and checks its
-citations before saving or printing it. Drafting uses a deterministic extractive fixture,
-not an LLM. Evaluation, usage reporting, and security review remain in PR 4.
+## What This Implements
+
+- Scope-isolated sources. Separate SQLite stores use `crm:read`, `crm:write`,
+  and `calls:read`. Local authorization uses S256 PKCE. The gateway returns
+  HTTP 403 for a scope denial.
+- Two-phase durable audit receipts. The gateway commits a `pending` row before
+  execution and finalizes that row afterward. If the initial write fails, the
+  tool does not run.
+- Idempotent writes. `log_activity` returns the original activity on an
+  identical retry. A changed payload with the same key returns
+  `idempotency_conflict`.
+- Prompt-injection containment. Call notes remain untrusted data. The fixture
+  briefing workflow quotes the injected instruction and creates zero activities.
+  Record contents cannot choose tools or trigger writes.
+- Cited renewal briefs. A deterministic fixture drafts the text without a model.
+  The verifier checks each claim against supported text and source-qualified
+  references such as `crm/accounts/acc-003` and `calls/call_notes/note-003`.
+  Missing notes cite audit receipts; date calculations also cite the saved run.
+- PRs 1, 2, and 3 are merged. Fixtures, schema, tools, authorization, audit,
+  rate limits, writes, brief generation, and citation verification are complete.
+  PR 4 remains. See [Roadmap and Scope](#roadmap-and-scope).
 
 ## Run
 
@@ -25,12 +43,27 @@ then exercises all five tools and the briefing workflow over the network. Both
 services stop afterward; state remains in the gitignored `var/v2` directory.
 Use another directory with `./scripts/demo.sh --state-dir /tmp/gtm-fixture`.
 
-The final JSON retains the connector demonstration: 30 accounts, notes denied
-with HTTP 403, an empty result, conflicting sources, two writes producing one
-activity, and a clear HTTP 429. It adds three briefs: full access for `acc-003`,
-CRM-only access for `acc-001`, and the injected note for `acc-007`. There are
-14 connector attempts plus nine briefing reads, producing 23 audit receipts.
-The briefing workflow adds no activities, including when the note requests one.
+The final JSON contains these verified fields:
+
+| Field | Result |
+| --- | --- |
+| `accounts` | `30` |
+| `notes_without_scope.status` | HTTP `403` |
+| `empty_notes` | `[]` for `acc-004` |
+| `conflicting_sources` | `opp-003` says `closed_won`; `note-003` reports unapproved procurement |
+| `injection_note.activities_created` | `0` |
+| `idempotent_write` | `requests: 2`, `activities: 1` |
+| `rate_limit.status` | HTTP `429` |
+| `audit_rows` | `14` connector receipts |
+| `briefs` | Two briefs: `acc-003` with calls access, `acc-001` without it |
+| `injection_brief.activities_created` | `0` across all three briefs, including `acc-007` |
+| `brief_audit_rows` | `9` reads across the three briefs |
+| `uncited_candidate_rejected` | `true` |
+
+The run produces 23 audit receipts: 14 connector attempts and nine briefing
+reads. The briefing workflow adds no activities, including when a note requests
+one. `conflicting_sources` displays both records; it does not detect or resolve
+contradictions.
 
 ## Draft and check a brief
 
@@ -51,8 +84,30 @@ The CRM-only brief says that call notes were unavailable because the token lacks
 `calls:read`; the no-notes account says none were returned. These distinct claims
 cite the corresponding audit receipt. Record claims cite their source, and
 renewal-day calculations also cite the saved run date. Contradictory CRM fields
-and note text remain separate, attributed statements. Notes are quoted as
-untrusted source text, including embedded instructions and escaped newlines.
+and note text remain separate, attributed statements. The workflow does not yet
+flag their contradiction. Notes are quoted as untrusted source text, including
+embedded instructions and escaped newlines.
+
+These two lines came from `brief acc-003 --json` on current main:
+
+```text
+- CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. [crm/opportunities/opp-003]
+- Untrusted call note note-003 at "2027-01-12T15:00:00Z" says "Procurement has not approved this renewal. The budget remains unsigned.". [calls/call_notes/note-003]
+```
+
+To inspect the full artifact:
+
+```sh
+.venv/bin/python -m gtm_connector brief acc-003 --json
+```
+
+The JSON fields are `schema_version`, `brief_id`, `account_id`, `as_of`,
+`adapter`, `model_usage`, `status`, `evidence`, and `text`. This fixture run
+returns `schema_version: 1`, `account_id: "acc-003"`, `as_of: "2027-01-15"`,
+`adapter: "fixture"`, and `status: "accepted"`. `model_usage` records
+`model: null`, `input_tokens: 0`, and `output_tokens: 0`. `evidence.receipts`
+contains the three reads. `text` contains the checked brief. Brief and audit IDs
+vary per run. Fixture record IDs stay stable.
 
 Accepted briefs and their evidence snapshots are saved in
 `var/v2/briefs/<brief_id>.json`. Copy the generated brief ID to inspect its three
@@ -64,9 +119,18 @@ receipts or check a candidate text file against that same snapshot:
 ```
 
 Candidate files contain only the brief's cited bullet lines, without the CLI's
-`Brief:` and `As of:` display labels. The checker requires exact supported
-content and record references. It rejects uncited sentences, invented values,
-wrong citations, appended claims, and action-shaped output. It is a controlled
+`Brief:` and `As of:` display labels. Use the `text` field from the JSON artifact.
+Checking that text exits `0` and returns JSON with `status: "valid"` and the
+submitted `brief_id`. Appending `The renewal was approved.` exits `2`, prints
+nothing to stdout, and writes this error to stderr:
+
+```text
+error: Brief contains an uncited, unsupported, or misattributed statement.
+```
+
+The checker requires exact supported content and record references. It rejects
+uncited sentences, invented values, wrong citations, appended claims, and
+action-shaped output. It is a controlled
 vocabulary checker, not a general paraphrase or semantic-entailment judge. A
 supported subset may pass: grounding and coverage are separate. An unavailable
 or empty notes result must remain visible.
@@ -203,7 +267,26 @@ tests cover scope denial versus empty notes, source contradictions, snapshot
 mutation, citation rejection, and injected instructions remaining data. CI runs
 the same demo on Python 3.11 and 3.14. Test data is temporary.
 
-Evaluation scores: not measured yet. PR 4 will report facts found, facts cited
-correctly, and facts invented across 20 accounts, plus model tokens per brief.
+## Roadmap and Scope
+
+PRs 1, 2, and 3 are merged. PR 4 will add:
+
+- An evaluation across 20 accounts. Report facts found, facts cited correctly,
+  and facts invented. Record the measured scores in this README.
+- A usage report from the audit log: calls by token, tool, and day. Include model
+  tokens per brief from the saved artifacts.
+- A one-page security review covering data, scopes, retention, failure modes,
+  and reviewer sign-off requirements.
+- Explicit cross-source contradiction flags, including `opp-003` reporting
+  `closed_won` while `note-003` reports unapproved procurement.
+- A final README pass and a five-minute clean-checkout demo script.
+
+Evaluation scores are not measured yet. The fixture workflow uses no model;
+its tests do not establish model quality. No real CRM or call-recording API,
+web interface, or multi-tenant features are planned.
+
+Portfolio project for Preston Neal. All fixture records use synthetic labels.
 See [DECISIONS.md](DECISIONS.md) for design choices and [AGENTS.md](AGENTS.md)
-for the four-PR plan and review rules. MIT licensed.
+for the four-PR plan and review rules.
+
+MIT licensed.

@@ -243,6 +243,20 @@ fact/citation/invention scores remain PR 4. The default demo keeps the original
 14 connector attempts and adds three briefs with three reads each, for 23
 receipts; the full, restricted, and injection cases have separate brief IDs.
 
+## README baseline after PR 3
+
+Document merged behavior, not the earlier PR 2 snapshot. The README examples
+come from running the CLI on main after PR 3 merged. Keep the 14 connector
+receipts distinct from the nine briefing receipts. The two source statements
+for `opp-003` and `note-003` remain independently cited; the current checker
+does not flag their contradiction. Add that explicit flag in PR 4 alongside
+evaluation, usage reporting, and security review.
+
+Keep this documentation change on the PR 4 branch so it does not consume an
+extra pull request. No runtime behavior changes in this documentation commit.
+The demo uses no external runtime services or API keys. The first dependency
+installation still needs internet, and the demo starts two local HTTPS services.
+
 ## Review configuration
 
 The installed TStack source is [t3dotgg/tstack at 11e37a7](https://github.com/t3dotgg/tstack/tree/11e37a74d0a6868c121cd0910ab2b3bd9873b92a).
