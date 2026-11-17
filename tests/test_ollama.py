@@ -57,7 +57,8 @@ class OllamaTests(unittest.TestCase):
             adapter = self.adapter()
             adapter.draft(self.evidence)
         self.assertEqual(adapter.metadata, {
-            "requested_model": MODEL, "model_digest": DIGEST, "ollama_version": "0.30.0"})
+            "requested_model": MODEL, "request_model": MODEL + ":local",
+            "model_digest": DIGEST, "ollama_version": "0.30.0"})
         self.assertEqual([request.url.path for request in self.requests],
                          ["/api/tags", "/api/show", "/api/version", "/api/chat"])
         self.assertEqual(json.loads(self.requests[1].content), {"model": MODEL})
@@ -85,7 +86,7 @@ class OllamaTests(unittest.TestCase):
         self.assertEqual((result.model, result.input_tokens, result.output_tokens), (MODEL, 137, 83))
         self.assertIsNone(result.error_code)
         payload = json.loads(self.requests[-1].content)
-        self.assertEqual(payload["model"], MODEL)
+        self.assertEqual(payload["model"], MODEL + ":local")
         self.assertFalse(payload["stream"])
         self.assertEqual(payload["options"], {"temperature": 0, "seed": 0, "num_ctx": 8192, "num_predict": 4096})
         self.assertEqual(payload["format"]["required"], ["lines"])
@@ -150,6 +151,49 @@ class OllamaTests(unittest.TestCase):
             self.adapter()
         self.assertEqual([request.url.path for request in self.requests], ["/api/tags"])
 
+    def test_old_service_cannot_silently_ignore_the_local_selector(self):
+        for version in ("0.29.9", "0.9.0", "0.30.0-rc1", "0.30", "0.30.bad"):
+            with self.subTest(version=version):
+                self.version["version"] = version
+                with self.assertRaisesRegex(RuntimeError, "requires Ollama 0.30.0 or newer"):
+                    self.adapter()
+        self.assertFalse(any(request.url.path == "/api/chat" for request in self.requests))
+        for version in ("0.30.0", "0.30.1", "0.31.0", "1.0.0", "0.30.0+build.1"):
+            with self.subTest(version=version):
+                self.version["version"] = version
+                self.assertEqual(self.adapter().metadata["ollama_version"], version)
+
+    def test_changed_alias_uses_local_selector_and_remote_reply_is_rejected(self):
+        adapter = self.adapter()
+        # Simulate Ollama refusing an alias changed to a remote model after
+        # preflight. The request must still carry its explicit local source.
+        self.overrides["/api/chat"] = httpx2.Response(404, json={"error": "private alias detail"})
+        result = adapter.draft(self.evidence)
+        self.assertEqual(json.loads(self.requests[-1].content)["model"], MODEL + ":local")
+        self.assertEqual(result.error_code, "ollama_http_error")
+        self.assertIsNone(result.text)
+        self.assertNotIn("private alias detail", repr(result))
+        self.overrides.clear()
+        for key in ("remote_host", "remote_model"):
+            self.reply[key] = "private remote detail"
+            with self.subTest(field=key):
+                result = adapter.draft(self.evidence)
+                self.assertEqual(result.error_code, "remote_model_not_allowed")
+                self.assertIsNone(result.text)
+                self.assertEqual((result.model, result.input_tokens, result.output_tokens), (MODEL, 137, 83))
+                self.assertNotIn("private remote detail", repr(result))
+            del self.reply[key]
+        self.assertEqual(sum(request.url.path == "/api/chat" for request in self.requests), 3)
+
+    def test_actual_local_qualified_reply_name_is_preserved(self):
+        self.reply["model"] = MODEL + ":local"
+        result = self.adapter().draft(self.evidence)
+        self.assertEqual(result.model, MODEL + ":local")
+        self.assertEqual(result.metadata["requested_model"], MODEL)
+        self.assertEqual(result.metadata["request_model"], MODEL + ":local")
+        self.assertIsNone(result.error_code)
+        self.assertIsNotNone(result.text)
+
     def test_bad_names_and_metadata_cannot_enter_run_provenance(self):
         for model in (None, "", "http://remote.example/model", "model\nsecret", "x" * 129):
             with self.subTest(model=model), self.assertRaisesRegex(ValueError, "invalid_model_name"):
@@ -190,6 +234,30 @@ class OllamaTests(unittest.TestCase):
                 self.assertEqual(result.error_code, "invalid_candidate_format")
                 self.assertEqual((result.model, result.input_tokens, result.output_tokens), (MODEL, 137, 83))
                 self.assertNotIn("private", repr(result))
+
+    def test_duplicate_candidate_keys_cannot_hide_rejected_lines(self):
+        bad = ['- The renewal is guaranteed. [crm/accounts/acc-001]']
+        good = build_facts(self.evidence)
+        self.reply["message"]["content"] = (
+            '{"lines":' + json.dumps(bad) + ',"lines":' + json.dumps(good) + '}')
+        result = self.adapter().draft(self.evidence)
+        self.assertEqual(result.error_code, "invalid_candidate_format")
+        self.assertIsNone(result.text)
+        self.assertEqual((result.model, result.input_tokens, result.output_tokens), (MODEL, 137, 83))
+
+    def test_duplicate_response_keys_are_rejected_instead_of_overwritten(self):
+        adapter = self.adapter()
+        duplicate = json.dumps(self.reply)[:-1] + ',"message":{"role":"assistant","content":"private"}}'
+        self.overrides["/api/chat"] = httpx2.Response(200, content=duplicate.encode())
+        result = adapter.draft(self.evidence)
+        self.assertEqual(result.error_code, "invalid_response")
+        self.assertIsNone(result.text)
+        self.assertIsNone(result.input_tokens)
+        self.assertNotIn("private", repr(result))
+        duplicate = '{"models":[],"models":' + json.dumps(self.tags["models"]) + '}'
+        self.overrides["/api/tags"] = httpx2.Response(200, content=duplicate.encode())
+        with self.assertRaisesRegex(RuntimeError, "invalid_response"):
+            self.adapter()
 
     def test_incomplete_generation_and_tool_calls_are_not_publishable(self):
         adapter = self.adapter()

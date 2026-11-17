@@ -41,6 +41,7 @@ _ERROR_MESSAGES = {
     "remote_model_not_allowed": "Ollama drafting accepts cached local models only.",
     "invalid_model_name": "Ollama requires a valid explicit cached model name.",
     "model_not_supported": "The cached Ollama model does not support completion.",
+    "unsupported_ollama_version": "Local-only drafting requires Ollama 0.30.0 or newer.",
     "invalid_metadata": "Ollama returned invalid local model metadata.",
     "ollama_http_error": "Ollama returned an unsuccessful HTTP response.",
     "invalid_response": "Ollama returned an invalid response.",
@@ -63,6 +64,24 @@ def _count(document, name):
     return value if type(value) is int and value >= 0 else None
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate_json_key")
+        result[key] = value
+    return result
+
+
+def _supports_local_selector(version):
+    matched = re.fullmatch(r"([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([A-Za-z0-9.-]+))?"
+                          r"(?:\+[A-Za-z0-9.-]+)?", version)
+    if matched is None:
+        return False
+    release = tuple(int(value) for value in matched.groups()[:3])
+    return release > (0, 30, 0) or (release == (0, 30, 0) and matched[4] is None)
+
+
 class OllamaAdapter:
     """Use one explicit local model. Never pull a model or fall back to a fixture.
 
@@ -81,6 +100,9 @@ class OllamaAdapter:
         if model.lower().endswith((":cloud", "-cloud")):
             raise ValueError(_ERROR_MESSAGES["remote_model_not_allowed"] + " (remote_model_not_allowed)")
         self.model = model
+        # Ollama checks this selector before forwarding a model alias remotely.
+        # Metadata preflight alone cannot protect against a changed alias.
+        self.request_model = model + ":local"
         try:
             with self._client(read_timeout=5) as client:
                 tags = self._request(client, "GET", "/api/tags")
@@ -110,9 +132,12 @@ class OllamaAdapter:
                 version = self._request(client, "GET", "/api/version").get("version")
                 if not isinstance(version, str) or not _VERSION.fullmatch(version):
                     raise _RequestFailure("invalid_metadata")
+                if not _supports_local_selector(version):
+                    raise _RequestFailure("unsupported_ollama_version")
         except _RequestFailure as exc:
             raise RuntimeError(_ERROR_MESSAGES[exc.code] + f" ({exc.code})") from None
-        self.metadata = {"requested_model": model, "model_digest": digest,
+        self.metadata = {"requested_model": model, "request_model": self.request_model,
+                         "model_digest": digest,
                          "ollama_version": version}
 
     def _client(self, *, read_timeout):
@@ -133,7 +158,7 @@ class OllamaAdapter:
                     if size > _MAX_RESPONSE_BYTES:
                         raise _RequestFailure("response_too_large")
                     chunks.append(chunk)
-                result = json.loads(b"".join(chunks))
+                result = json.loads(b"".join(chunks), object_pairs_hook=_unique_object)
         except httpx2.HTTPError:
             raise _RequestFailure("ollama_unavailable") from None
         except (ValueError, UnicodeError, RecursionError):
@@ -150,7 +175,7 @@ class OllamaAdapter:
         if len(prompt.encode()) > _MAX_CANDIDATE_BYTES:
             return DraftResult(None, error_code="catalog_too_large", metadata=dict(self.metadata))
         payload = {
-            "model": self.model, "stream": False, "format": _SCHEMA,
+            "model": self.request_model, "stream": False, "format": _SCHEMA,
             "messages": [{"role": "system", "content": _SYSTEM},
                          {"role": "user", "content": prompt}],
             "options": {"temperature": 0, "seed": 0, "num_ctx": 8192, "num_predict": 4096},
@@ -163,7 +188,7 @@ class OllamaAdapter:
 
         reported_model = response.get("model")
         model = reported_model if (isinstance(reported_model, str)
-                                   and _MODEL.fullmatch(reported_model)
+                                   and (reported_model == self.request_model or _MODEL.fullmatch(reported_model))
                                    and "://" not in reported_model) else None
         usage = {"model": model, "input_tokens": _count(response, "prompt_eval_count"),
                  "output_tokens": _count(response, "eval_count"), "metadata": dict(self.metadata)}
@@ -171,7 +196,9 @@ class OllamaAdapter:
         def rejected(code):
             return DraftResult(None, error_code=code, **usage)
 
-        if model != self.model or "error" in response:
+        if _remote(response):
+            return rejected("remote_model_not_allowed")
+        if model not in (self.model, self.request_model) or "error" in response:
             return rejected("invalid_response")
         if response.get("done") is not True or response.get("done_reason") != "stop":
             return rejected("generation_incomplete")
@@ -187,7 +214,7 @@ class OllamaAdapter:
         if not valid_content:
             return rejected("invalid_candidate_format")
         try:
-            candidate = json.loads(content)
+            candidate = json.loads(content, object_pairs_hook=_unique_object)
         except (ValueError, RecursionError):
             return rejected("invalid_candidate_format")
         if not isinstance(candidate, dict) or set(candidate) != {"lines"}:
