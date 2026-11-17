@@ -1,5 +1,28 @@
 # Decisions
 
+## Pure request decisions (2026-11-17)
+
+Move the request checks into check_request. Pass parsed request facts, policy,
+token claims, clock readings, and the current rate windows as data. The function
+does no I/O and changes none of those inputs. It returns a rejection or permission
+to dispatch, along with replacement rate windows when the attempt consumes quota.
+A rate-limit rejection also returns the pruned windows without adding a call.
+
+Keep token verification and both clocks in the gateway. The checker requests each
+missing input in the original order. The gateway supplies it and calls the same
+function again. These explicit checkpoints preserve early refusals before
+verification, wall-clock reads only for tokens with an expiry, and rate-clock
+reads only for authenticated tool attempts. They add no callbacks or hidden I/O
+to the checker. Read current rate windows after the verifier await so another
+request's increment cannot be lost while verification is suspended.
+
+Keep the surrounding work in order: read and parse, commit a pending receipt,
+check, verify when needed, apply the returned rate windows, dispatch or reject,
+finalize the receipt, and send. Apply window changes even if a later scope,
+argument, or protocol check refuses the call. Preserve error codes, messages,
+headers, SDK fallback, and the existing exception boundary. Do not add new policy
+or change the existing tests, schemas, demo commands, or measured results.
+
 ## Shared tool definitions (2026-11-17)
 
 Keep one entry per tool in tool_definitions.py. Each entry names its scope,

@@ -4,7 +4,6 @@ from contextlib import closing
 from datetime import datetime, timezone
 import hashlib
 import json
-import math
 from pathlib import Path
 import sqlite3
 import time
@@ -23,8 +22,9 @@ from starlette.responses import JSONResponse
 
 from . import calls, slack, store
 from .audit import AuditLog
+from .request_checks import MISSING, RequestFacts, RequestPolicy, check_request
 from .salesforce import SalesforceReadError
-from .tool_definitions import TOOL_DEFINITIONS, valid_arguments
+from .tool_definitions import TOOL_DEFINITIONS
 
 
 def _json_object(pairs):
@@ -234,56 +234,6 @@ class Connector:
             except (OSError, sqlite3.Error, ValueError):
                 return await JSONResponse({"error": "audit_unavailable; call was not executed"}, 503)(scope, receive, send)
 
-        def error(status, code, message, extra_headers=None):
-            return JSONResponse({"jsonrpc": "2.0", "id": request_id,
-                "error": {"code": code, "message": message}}, status, headers=extra_headers)
-
-        async def dispatch():
-            if len(body) > 65536:
-                return error(413, -32600, "request body exceeds 65536 bytes")
-            if request is None or not isinstance(request, dict):
-                return error(400, -32700, "expected one valid JSON-RPC object")
-            if (scope.get("scheme") != "https" or "origin" in headers
-                    or sum(k.lower() == b"host" for k, _ in scope["headers"]) != 1
-                    or headers.get("host") != urlsplit(self.authority.resource).netloc):
-                return error(403, 1001, "untrusted origin or host")
-            if sum(key.lower() == b"authorization" for key, _ in scope["headers"]) != 1:
-                raw = None
-            else:
-                raw = raw_token
-            token = await self.authority.verify_token(raw) if raw else None
-            if (token is None or token.expires_at is None or token.expires_at <= time.time()
-                    or token.resource != self.authority.resource):
-                return error(401, 1001, "invalid or expired access token", {
-                    "WWW-Authenticate": f'Bearer error="invalid_token", resource_metadata="{self.metadata_url}"'})
-            if is_call:
-                now = self.clock()
-                key = hashlib.sha256(raw.encode()).hexdigest()
-                # Expired windows are removed so rotated tokens do not accumulate forever.
-                self.windows = {k: v for k, v in self.windows.items() if now - v[0] < self.window_seconds}
-                begin, used = self.windows.get(key, (now, 0))
-                if used >= self.rate_limit:
-                    retry = max(1, math.ceil(self.window_seconds - (now - begin)))
-                    return error(429, 1002, f"rate_limited: retry after {retry} seconds", {"Retry-After": str(retry)})
-                self.windows[key] = (begin, used + 1)
-                definition = TOOL_DEFINITIONS.get(tool)
-                required = definition.scope if definition is not None else None
-                if required and required not in token.scopes:
-                    return error(403, 1001, f"insufficient_scope: {required} required", {
-                        "WWW-Authenticate": f'Bearer error="insufficient_scope", scope="{required}", resource_metadata="{self.metadata_url}"'})
-                if definition is not None and not definition.read_only and self.crm_reader is not None:
-                    return error(403, 1001, "crm_write_disabled")
-                if definition is not None and not valid_arguments(definition, arguments):
-                    return error(400, -32602, "invalid tool arguments")
-            version = meta.get("io.modelcontextprotocol/protocolVersion") if isinstance(meta, dict) else None
-            if version is None:
-                return error(400, -32602, "request metadata requires protocolVersion")
-            if headers.get("mcp-protocol-version") != version:
-                return error(400, -32020, "protocol version header must match request metadata")
-            if version != "2026-07-28":
-                return error(400, -32022, "supported protocol version: 2026-07-28")
-            return None
-
         messages = []
         async def capture(message):
             messages.append(message)
@@ -295,8 +245,35 @@ class Connector:
                 return {"type": "http.request", "body": body, "more_body": False}
             return await receive()
         try:
-            rejection = await dispatch()
-            if rejection is not None:
+            facts = RequestFacts(
+                body_size=len(body), parsed=request, scheme=scope.get("scheme"), headers=headers,
+                header_names=tuple(key for key, _ in scope["headers"]), raw_token=raw_token,
+                is_call=is_call, tool=tool, arguments=arguments, meta=meta,
+            )
+            policy = RequestPolicy(
+                resource=self.authority.resource, metadata_url=self.metadata_url,
+                rate_limit=self.rate_limit, window_seconds=self.window_seconds,
+                writes_disabled=self.crm_reader is not None,
+            )
+            token, wall_time = MISSING, MISSING
+            decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS)
+            if decision.needs == "token":
+                token = await self.authority.verify_token(raw_token)
+                decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS, token=token)
+            if decision.needs == "wall_time":
+                wall_time = time.time()
+                decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS,
+                                         token=token, wall_time=wall_time)
+            if decision.needs == "rate_time":
+                rate_time = self.clock()
+                decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS,
+                                         token=token, wall_time=wall_time, rate_time=rate_time)
+            if decision.windows is not None:
+                self.windows = decision.windows
+            if decision.error is not None:
+                error = decision.error
+                rejection = JSONResponse({"jsonrpc": "2.0", "id": request_id,
+                    "error": {"code": error.code, "message": error.message}}, error.status, headers=error.headers)
                 await rejection(scope, replay, capture)
             else:
                 await self.sdk_app(scope, replay, capture)
