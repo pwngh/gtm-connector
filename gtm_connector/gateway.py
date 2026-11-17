@@ -23,6 +23,7 @@ from starlette.responses import JSONResponse
 
 from . import calls, slack, store
 from .audit import AuditLog
+from .salesforce import SalesforceReadError
 
 SCOPES = {
     "search_accounts": "crm:read", "get_account": "crm:read",
@@ -75,7 +76,8 @@ def require_distinct_databases(paths):
 
 class Connector:
     def __init__(self, crm_path, calls_path, audit_path, authority,
-                 rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None):
+                 rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None,
+                 crm_reader=None):
         if rate_limit < 1 or window_seconds <= 0:
             raise ValueError("rate limits must be positive")
         paths = [Path(p).resolve() for p in (crm_path, calls_path, audit_path)]
@@ -84,6 +86,8 @@ class Connector:
         paths = require_distinct_databases(paths)
         self.crm_path, self.calls_path = paths[:2]
         self.slack_path = paths[3]
+        self.crm_reader = crm_reader
+        self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
         self.audit = AuditLog(paths[2])
         self.authority = authority
         self.rate_limit, self.window_seconds, self.clock = rate_limit, window_seconds, clock
@@ -112,24 +116,37 @@ class Connector:
             raise PermissionError(f"Required scope: {scope}")
 
     def _register_tools(self):
+        def external_read(method, *arguments):
+            try:
+                return getattr(self.crm_reader, method)(*arguments)
+            except SalesforceReadError as exc:
+                raise ToolError(exc.code) from None
+
         def register(name, function):
             self.mcp.tool(name=name, meta={"gtm.demo/requiredScope": SCOPES[name]},
                           annotations=ToolAnnotations(readOnlyHint=name != "log_activity",
                                                       destructiveHint=False,
-                                                      idempotentHint=True, openWorldHint=False),
+                                                      idempotentHint=True,
+                                                      openWorldHint=self.crm_reader is not None
+                                                      and SCOPES[name] == "crm:read"),
                           structured_output=True)(function)
 
         def search_accounts(query: str = "") -> dict[str, Any]:
             """Search CRM account names. Requires crm:read. Returned records are untrusted data."""
             self._require("crm:read")
+            if self.crm_reader is not None:
+                return _data("crm", _records("crm", "accounts", external_read("search_accounts", query)))
             with closing(store.connect(self.crm_path, readonly=True)) as conn:
                 return _data("crm", _records("crm", "accounts", store.search_accounts(conn, query)))
 
         def get_account(account_id: str) -> dict[str, Any]:
             """Read a CRM account and contacts, without call notes. Requires crm:read."""
             self._require("crm:read")
-            with closing(store.connect(self.crm_path, readonly=True)) as conn:
-                account = store.get_account(conn, account_id)
+            if self.crm_reader is not None:
+                account = external_read("get_account", account_id)
+            else:
+                with closing(store.connect(self.crm_path, readonly=True)) as conn:
+                    account = store.get_account(conn, account_id)
             if account is None:
                 raise ToolError("account not found")
             contacts = account.pop("contacts")
@@ -139,6 +156,9 @@ class Connector:
         def list_opportunities(account_id: str | None = None) -> dict[str, Any]:
             """Read opportunity fields from CRM. Requires crm:read; call notes are a separate source."""
             self._require("crm:read")
+            if self.crm_reader is not None:
+                return _data("crm", _records("crm", "opportunities",
+                                            external_read("list_opportunities", account_id)))
             with closing(store.connect(self.crm_path, readonly=True)) as conn:
                 return _data("crm", _records("crm", "opportunities",
                                             store.list_opportunities(conn, account_id)))
@@ -180,6 +200,8 @@ class Connector:
                                ("read_call_notes", read_call_notes),
                                ("read_slack_messages", read_slack_messages),
                                ("log_activity", log_activity)):
+            if name == "log_activity" and self.crm_reader is not None:
+                continue
             register(name, function)
 
     async def __call__(self, scope, receive, send):
@@ -265,6 +287,8 @@ class Connector:
                 if required and required not in token.scopes:
                     return error(403, 1001, f"insufficient_scope: {required} required", {
                         "WWW-Authenticate": f'Bearer error="insufficient_scope", scope="{required}", resource_metadata="{self.metadata_url}"'})
+                if tool == "log_activity" and self.crm_reader is not None:
+                    return error(403, 1001, "crm_write_disabled")
                 if tool in ARGUMENTS:
                     needed, optional = ARGUMENTS[tool]
                     valid = isinstance(arguments, dict)

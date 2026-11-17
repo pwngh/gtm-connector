@@ -50,9 +50,11 @@ def certificate(directory):
 class Runtime:
     """One process, two ports, four databases; owns shutdown and a state lock."""
 
-    def __init__(self, directory, *, rate_limit=60):
+    def __init__(self, directory, *, rate_limit=60, crm_reader=None):
         self.directory = Path(directory).resolve()
         self.rate_limit = rate_limit
+        self.crm_reader = crm_reader
+        self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
         self.servers, self.threads, self.sockets = [], [], []
         self.lock = None
 
@@ -87,10 +89,10 @@ class Runtime:
             authority = LocalAuthority(issuer, resource)
             self.config = {"issuer": issuer, "resource": resource, "cert_path": str(cert),
                            "client_id": authority.client_id, "redirect_uri": authority.redirect_uri,
-                           "owner_secret": authority.owner_secret}
+                           "owner_secret": authority.owner_secret, "crm_backend": self.crm_backend}
             self.connector = Connector(self.directory / "crm.sqlite3", self.directory / "calls.sqlite3",
                                        self.directory / "audit.sqlite3", authority, rate_limit=self.rate_limit,
-                                       slack_path=self.directory / "slack.sqlite3")
+                                       slack_path=self.directory / "slack.sqlite3", crm_reader=self.crm_reader)
             for app, sock in zip((create_auth_app(authority), self.connector), self.sockets):
                 server = uvicorn.Server(uvicorn.Config(app, ssl_keyfile=str(key), ssl_certfile=str(cert),
                     log_config=None, access_log=False, log_level="warning", lifespan="on"))
