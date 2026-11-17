@@ -16,10 +16,11 @@ def render(source):
     header, events = entries[0], entries[1:]
     assert header["version"] == 2 and header["width"] == 112 and header["height"] == 28
     assert set(header.get("env", {})) <= {"TERM"}
-    assert events and all(event[1] == "o" for event in events), "Only output may be recorded"
+    assert events and events[-1][1:] == ["x", "0"], "Recording must end with a successful exit"
+    assert all(event[1] == "o" for event in events[:-1]), "Only output may be recorded"
     times = [event[0] for event in events]
     assert times == sorted(times), "Nonmonotonic recording"
-    text = "".join(event[2] for event in events)
+    text = "".join(event[2] for event in events if event[1] == "o")
     assert "Six tools returned by Inspector CLI." in text
     assert "error: Brief contains an uncited, unsupported, or misattributed statement." in text
     assert "HTTP 403" in text and "[crm/opportunities/opp-003]" in text
