@@ -21,6 +21,10 @@ In a second terminal, at the repository root, request CRM access:
 
 ```sh
 .venv/bin/python -m gtm_connector inspector-config --state-dir var/inspector --scope crm:read
+npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --version
+export NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1"
+export no_proxy="${no_proxy:+$no_proxy,}127.0.0.1"
+export NODE_TLS_REJECT_UNAUTHORIZED=1
 export NODE_EXTRA_CA_CERTS="$PWD/var/inspector/tls.pem"
 ```
 
@@ -31,6 +35,9 @@ does not print that token or export the owner credential. The config selects
 
 `NODE_EXTRA_CA_CERTS` adds the generated certificate to this Node process's
 trust. It does not change system trust or disable certificate verification.
+The proxy-bypass entries keep loopback requests out of inherited HTTP proxies.
+Download Inspector before replacing an existing extra-CA setting, since a
+private npm registry may need its own certificate.
 
 ## Discover and call tools
 

@@ -83,7 +83,10 @@ def check():
         environment = dict(os.environ, MCP_STORAGE_DIR=str(directory / "storage"),
                            MCP_CLIENT_CONFIG_PATH=str(directory / "client.json"),
                            MCP_INSPECTOR_OAUTH_STATE_PATH=str(directory / "oauth.json"),
-                           MCP_INSPECTOR_SECRET_STORE="memory", MCP_AUTO_OPEN_ENABLED="false")
+                           MCP_INSPECTOR_SECRET_STORE="memory", MCP_AUTO_OPEN_ENABLED="false",
+                           NODE_TLS_REJECT_UNAUTHORIZED="1")
+        for name in ("NO_PROXY", "no_proxy"):
+            environment[name] = ",".join(filter(None, (environment.get(name), "127.0.0.1")))
         # Permit a first npm download; actual RPC commands keep a shorter timeout.
         version = invoke(["--version"], environment, timeout=240)
         assert version[0] == 0 and version[1].strip() == INSPECTOR, "Inspector version mismatch"
@@ -117,6 +120,7 @@ def check():
 
             discovery = run("initialize")
             assert discovery["protocolVersion"] == PROTOCOL, "Wrong discovered protocol"
+            assert "tools" in discovery["capabilities"], "Missing tools capability"
             assert traffic[-1]["method"] == "server/discover", "Legacy initialization on the wire"
             tools = run("tools/list")["tools"]
             assert {tool["name"]: tool["_meta"]["gtm.demo/requiredScope"] for tool in tools} == SCOPES

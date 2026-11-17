@@ -24,6 +24,11 @@ requests; the included client only provisions its grant. This tests client
 interoperability with a supplied bearer token, not Inspector's interactive
 OAuth login. Browser origins remain rejected by the connector.
 
+Inspector honors inherited HTTP proxy settings. Set a loopback bypass in both
+`NO_PROXY` and `no_proxy`, preserving other entries. The integration check also
+forces certificate verification on. Warm the pinned npm package before changing
+an existing extra-CA setting so a private registry can use its configured trust.
+
 Keep Inspector and Node optional. The Inspector integration test is a separate
 CI job and explicit command. Neither default demo script installs or invokes
 Node, Inspector, a model, or an external source API. The fixed twenty-account

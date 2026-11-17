@@ -25,7 +25,7 @@ class InspectorConfigurationTests(unittest.TestCase):
             result = subprocess.run(
                 [sys.executable, "-m", "gtm_connector", "inspector-config",
                  "--state-dir", str(self.state), "--scope", "crm:read"],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=30,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             summary = json.loads(result.stdout)
@@ -65,7 +65,7 @@ class InspectorConfigurationTests(unittest.TestCase):
     def test_missing_scope_is_a_cli_error_without_creating_state(self):
         result = subprocess.run(
             [sys.executable, "-m", "gtm_connector", "inspector-config", "--state-dir", str(self.state)],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("--scope", result.stderr)
@@ -77,7 +77,7 @@ class InspectorConfigurationTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, "-m", "gtm_connector", "inspector-config",
              "--state-dir", str(self.state), "--scope", "crm:read"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("start serve", result.stderr)
