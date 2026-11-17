@@ -50,6 +50,8 @@ def run(directory):
         with closing(store.connect(runtime.directory / "crm.sqlite3", readonly=True)) as connection:
             before_briefs = connection.execute("SELECT count(*) FROM activities").fetchone()[0]
         full = create_brief(runtime, "acc-003")
+        conflict_flags = [line for line in full["text"].splitlines()
+                          if line.startswith("- Source conflict:")]
         restricted = create_brief(runtime, "acc-001", include_calls=False)
         injected = create_brief(runtime, "acc-007")
         try:
@@ -70,7 +72,8 @@ def run(directory):
         if (len(accounts) != 30 or empty or first != second or activity_count != 1
                 or injected_writes or len(receipts) != 14 or any(r["status"] == "pending" for r in receipts)
                 or before_briefs != after_briefs or len(brief_receipts) != 9
-                or any(row["tool"] == "log_activity" for row in brief_receipts)):
+                or any(row["tool"] == "log_activity" for row in brief_receipts)
+                or len(conflict_flags) != 1):
             raise ValueError("demo invariant failed; inspect the audit log")
         return {"status": "connector", "brief_id": brief_id, "accounts": len(accounts),
                 "renewal_record": account[0], "tools": [t["name"] for t in tools.json()["result"]["tools"]],
@@ -86,4 +89,5 @@ def run(directory):
                 "injection_brief": {"brief_id": injected["brief_id"],
                                     "record_ref": "calls/call_notes/note-007",
                                     "activities_created": after_briefs - before_briefs},
-                "brief_audit_rows": len(brief_receipts), "uncited_candidate_rejected": uncited_rejected}
+                "brief_audit_rows": len(brief_receipts), "uncited_candidate_rejected": uncited_rejected,
+                "contradiction_flags": conflict_flags}

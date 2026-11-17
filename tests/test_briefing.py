@@ -105,12 +105,31 @@ class BriefingTests(unittest.TestCase):
             self.assertIn("Procurement has not approved this renewal.", conflicting["text"])
             self.assertIn("[crm/opportunities/opp-003]", conflicting["text"])
             self.assertIn("[calls/call_notes/note-003]", conflicting["text"])
+            self.assertIn('- Source conflict: CRM opportunity opp-003 reports stage "closed_won", '
+                          'while call note note-003 reports unapproved procurement. '
+                          '[crm/opportunities/opp-003] [calls/call_notes/note-003]', conflicting["text"])
             self.assert_read_plan(runtime, conflicting)
+            restricted = create_brief(runtime, "acc-003", include_calls=False)
+            self.assertNotIn("Source conflict:", restricted["text"])
+            self.assertIn("Call notes were unavailable", restricted["text"])
+            self.assert_read_plan(runtime, restricted)
             risk = create_brief(runtime, "acc-002")
             self.assertIn("at_risk", risk["text"])
             self.assertIn("Renewal budget is not approved.", risk["text"])
             self.assertIn("[crm/accounts/acc-002]", risk["text"])
             self.assert_read_plan(runtime, risk)
+
+    def test_an_adapter_cannot_hide_the_recognized_conflict(self):
+        class OmitConflict:
+            def draft(self, evidence):
+                return "\n".join(line for line in build_facts(evidence)
+                                 if not line.startswith("- Source conflict:"))
+
+        with Runtime(self.state) as runtime:
+            with self.assertRaises(BriefRejected):
+                create_brief(runtime, "acc-003", adapter=OmitConflict())
+            self.assert_no_accepted_artifact()
+            self.assertEqual(self.activities(), [])
 
     def test_injected_note_is_quoted_data_and_cannot_change_the_read_plan(self):
         with Runtime(self.state) as runtime:
