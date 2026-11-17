@@ -12,6 +12,10 @@ temporary state. It does not read or change the operator's CRM. The default runs
 their references separately from the drafting code. Only generated run and
 audit IDs come from the collected evidence.
 
+Add `--with-slack` to select the extended workflow. It makes 80 tool calls and
+appends the manifest's static Slack expectations. The original 182 claims stay
+unchanged. See [the three-source fixture](slack.md).
+
 ## Recorded results
 
 Measured on 2026-11-17 with the fixture adapter and as-of date `2027-01-15`:
@@ -61,8 +65,8 @@ Unsupported text includes paraphrases, so it does not establish factual falsity.
 No rejected candidate text is saved or included in the report.
 
 `scored_briefs` and `unscored_briefs` make missing or malformed candidates visible.
-Candidate totals cover only scored candidates. Published metrics keep all 182
-expected claims in the denominator. A rejected whole brief publishes no lines,
+Candidate totals cover only scored candidates. Published metrics keep every
+selected expected claim in the denominator. A rejected whole brief publishes no lines,
 including any valid lines it contained. Zero published lines yield an undefined
 (`null`) invention rate. `publication_gate_passed` records the publication and
 read-only checks. `status` still requires full coverage and exits `2` otherwise.

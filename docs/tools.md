@@ -1,6 +1,6 @@
 # Tools and source data
 
-The connector exposes five tools over two local SQLite stores. Run the commands
+The connector exposes six tools over three local SQLite source stores. Run the commands
 below from the repository root.
 
 | Tool | Required scope | Records returned |
@@ -9,14 +9,16 @@ below from the repository root.
 | `get_account` | `crm:read` | One account and its contacts |
 | `list_opportunities` | `crm:read` | Opportunities, optionally filtered by account |
 | `read_call_notes` | `calls:read` | Notes from the separate calls database |
+| `read_slack_messages` | `slack:read` | Messages from the separate Slack database |
 | `log_activity` | `crm:write` | An activity created or reused by idempotency key |
 
-CRM permission does not grant access to calls. A calls-only token cannot read
-CRM records. Each tool declares its scope in `gtm.demo/requiredScope` metadata.
+CRM, calls, and Slack grants do not imply one another. Each tool declares its
+scope in `gtm.demo/requiredScope` metadata.
 The gateway and handler both enforce it. A scope denial returns HTTP 403.
 
 Results include source-qualified references such as `crm/accounts/acc-001` and
-`calls/call_notes/note-007`. Returned record content is marked as untrusted data.
+`calls/call_notes/note-007` and `slack/messages/msg-007`. Returned record content
+is marked as untrusted data.
 
 ## Fixtures
 
@@ -24,6 +26,10 @@ Results include source-qualified references such as `crm/accounts/acc-001` and
 `calls.sqlite3` holds 29 call notes. Account `acc-004` has none. Display names use
 labels such as `Fixture account acc-001`; email addresses use reserved `.example`
 domains. The data uses no plausible company, person, or product names.
+
+`slack.sqlite3` holds 29 messages in account-specific channels. Account `acc-005`
+has none. `msg-003` reports delayed security review and pending procurement.
+`msg-007` asks the model to invoke a write. Both remain quoted source data.
 
 The fixed demo date is `2027-01-15`:
 
@@ -51,7 +57,7 @@ model, or API key is needed.
 
 The script creates `.venv`, installs `requirements.lock`, runs the tests, and
 starts two temporary HTTPS services on the loopback interface. The CLI obtains
-scoped tokens with PKCE, calls all five tools, and builds renewal briefs from
+scoped tokens with PKCE, calls the five CRM/calls tools, and builds renewal briefs from
 the results. Both services stop afterward. State stays in the gitignored
 `var/v2` directory. To use another directory, run:
 
@@ -86,6 +92,12 @@ For the full walkthrough, including evaluation, usage, and a live checker
 rejection, run `./scripts/five-minute-demo.sh`. It prints the private directory
 where it saves its output. See [DEMO.md](../DEMO.md). First-install download
 time varies.
+
+Add `--with-slack` to the demo command to include all three sources. This mode
+adds CRM-to-Slack, Slack-to-CRM, and Slack-to-calls denial examples. Its three
+briefs use four reads each. The full brief includes a three-source conflict and
+a cited follow-up proposal. The restricted brief reports both denied grants.
+See [Slack context](slack.md).
 
 ## Inspect the local CRM
 

@@ -17,9 +17,22 @@ EXPECTED_PATH = Path(__file__).resolve().parents[1] / "evaluation" / "expected.j
 _REFERENCES = re.compile(r"(?: \[[^\[\]\r\n]+\])+$")
 
 
-def load_expectations():
+def load_expectations(*, include_slack=False):
     """Load the checked-in twenty-account gold set, separate from source seeding."""
-    return json.loads(EXPECTED_PATH.read_text())
+    expected = json.loads(EXPECTED_PATH.read_text())
+    if include_slack:
+        extension = expected["extensions"]["slack"]
+        cases = extension["cases"]
+        by_account = {case["account_id"]: case["claims"] for case in cases}
+        if len(by_account) != len(cases) or set(by_account) != {
+                case["account_id"] for case in expected["cases"]}:
+            raise ValueError("Slack expectations must match every evaluation account once.")
+        expected["cases"] = [{**case, "claims": case["claims"] + by_account[case["account_id"]]}
+                             for case in expected["cases"]]
+        expected["name"] = extension["name"]
+        expected["scopes"] = expected["scopes"] + ["slack:read"]
+        expected["workflow_version"] = 2
+    return expected
 
 
 def score_claims(candidate, expected):
@@ -67,6 +80,12 @@ def _resolve_references(case, artifact):
     if len(notes) != 1:
         raise ValueError("Evaluation requires one call-notes receipt per brief.")
     substitutions["{read_call_notes_audit_id}"] = notes[0]["audit_id"]
+    if artifact["evidence"].get("workflow_version", 1) == 2:
+        slack = [row for row in artifact["evidence"]["receipts"]
+                 if row["tool"] == "read_slack_messages"]
+        if len(slack) != 1:
+            raise ValueError("Evaluation requires one Slack receipt per extended brief.")
+        substitutions["{read_slack_messages_audit_id}"] = slack[0]["audit_id"]
     claims = []
     for expected in case["claims"]:
         references = []
@@ -78,14 +97,15 @@ def _resolve_references(case, artifact):
     return claims
 
 
-def run_evaluation(*, adapter=None, command=None):
+def run_evaluation(*, adapter=None, command=None, include_slack=False):
     """Run twenty HTTPS briefs in disposable state, never in an operator's CRM."""
     from .briefing import create_brief
     from .citations import BriefRejected, diagnose_brief
     from .runtime import Runtime
     from . import store
 
-    expected = load_expectations()
+    expected = load_expectations(include_slack=include_slack)
+    expected_receipts = 80 if include_slack else 60
     started_at = datetime.now(timezone.utc).isoformat()
     model_run = adapter is not None
     cases = []
@@ -110,7 +130,8 @@ def run_evaluation(*, adapter=None, command=None):
 
                 try:
                     artifact = create_brief(runtime, case["account_id"], as_of=expected["as_of"],
-                                            adapter=adapter, observe_draft=observe if model_run else None)
+                                            adapter=adapter, observe_draft=observe if model_run else None,
+                                            include_slack=include_slack)
                     claims = _resolve_references(case, artifact)
                     scored = score_claims(artifact["text"], claims)
                     cases.append({"account_id": case["account_id"], "status": "accepted", **scored})
@@ -137,7 +158,7 @@ def run_evaluation(*, adapter=None, command=None):
     passed = (outcomes["accepted"] == 20
               and sums["facts_found"] == sums["facts_cited_correctly"] == sums["expected_facts"]
               and sums["facts_invented"] == sums["duplicate_claims"] == activities == 0
-              and len(receipts) == 60 and all(row["status"] == "ok" for row in receipts))
+              and len(receipts) == expected_receipts and all(row["status"] == "ok" for row in receipts))
     report = {
         "status": "passed" if passed else "failed", "evaluation": expected["name"],
         "as_of": expected["as_of"], "accounts": len(cases),
@@ -177,8 +198,10 @@ def run_evaluation(*, adapter=None, command=None):
             publication_gate_passed=(outcomes["failed"] == 0 and sums["facts_invented"] == 0
                                      and sums["facts_found"] == sums["facts_cited_correctly"]
                                      and sums["duplicate_claims"] == activities == 0
-                                     and len(receipts) == 60
+                                     and len(receipts) == expected_receipts
                                      and all(row["status"] == "ok" for row in receipts)))
+    if include_slack:
+        report.update(workflow="crm-calls-slack", workflow_version=2)
     report["run"] = {"started_at": started_at,
                      "completed_at": datetime.now(timezone.utc).isoformat(), "command": command}
     return report

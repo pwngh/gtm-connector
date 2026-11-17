@@ -29,7 +29,7 @@ PROTOCOL = "2026-07-28"
 COMMAND = ["npx", "--yes", f"@modelcontextprotocol/inspector@{INSPECTOR}", "--cli"]
 SCOPES = {"search_accounts": "crm:read", "get_account": "crm:read",
           "list_opportunities": "crm:read", "read_call_notes": "calls:read",
-          "log_activity": "crm:write"}
+          "log_activity": "crm:write", "read_slack_messages": "slack:read"}
 
 
 def invoke(arguments, environment, timeout=60):
@@ -115,7 +115,8 @@ def check():
                 error = json.loads(stderr)
                 assert set(error) == {"error"} and "message" in error["error"], "Missing CLI error envelope"
                 assert not any(text in stderr for text in (
-                    "Fixture account", "contact003@", "Procurement has not approved", "record_ref"
+                    "Fixture account", "contact003@", "Procurement has not approved", "record_ref",
+                    "Security review is delayed", "Fixture Slack author"
                 )), "Denied command leaked source data"
                 return error
 
@@ -125,7 +126,7 @@ def check():
             assert traffic[-1]["method"] == "server/discover", "Legacy initialization on the wire"
             tools = run("tools/list")["tools"]
             assert {tool["name"]: tool["_meta"]["gtm.demo/requiredScope"] for tool in tools} == SCOPES
-            assert len(tools) == 5, "Unexpected tool count"
+            assert len(tools) == 6, "Unexpected tool count"
             for tool in tools:
                 for field in ("inputSchema", "outputSchema"):
                     validator_for(tool[field]).check_schema(tool[field])
@@ -137,9 +138,19 @@ def check():
             notes = run("tools/call", "read_call_notes")
             denied_crm = run("tools/call", "get_account", 403)
             assert "crm:read" in denied_crm["error"]["message"]
+            write_inspector_config(runtime.directory, ["crm:read"])
+            assert "slack:read" in run("tools/call", "read_slack_messages", 403)["error"]["message"]
+            write_inspector_config(runtime.directory, ["calls:read"])
+            assert "slack:read" in run("tools/call", "read_slack_messages", 403)["error"]["message"]
+            write_inspector_config(runtime.directory, ["slack:read"])
+            messages = run("tools/call", "read_slack_messages")
+            assert "crm:read" in run("tools/call", "get_account", 403)["error"]["message"]
+            write_inspector_config(runtime.directory, ["slack:read"])
+            assert "calls:read" in run("tools/call", "read_call_notes", 403)["error"]["message"]
             for result, source, refs in (
                 (account, "crm", ["crm/accounts/acc-003", "crm/contacts/con-003"]),
                 (notes, "calls", ["calls/call_notes/note-003"]),
+                (messages, "slack", ["slack/messages/msg-003"]),
             ):
                 data = result["structuredContent"]
                 assert result["isError"] is False and data["source"] == source and data["untrusted_data"] is True
@@ -149,12 +160,13 @@ def check():
             private_file(config_path, json.dumps(config).encode())
             run("initialize", status=401)
             receipts = runtime.connector.audit.read()
-            assert len(receipts) == 5 and len({row["audit_id"] for row in receipts}) == 5
-            assert [row["http_status"] for row in receipts] == [200, 403, 429, 200, 403]
-            assert [row["row_count"] for row in receipts] == [2, 0, 0, 1, 0]
+            assert len(receipts) == 10 and len({row["audit_id"] for row in receipts}) == 10
+            assert [row["http_status"] for row in receipts] == [200, 403, 429, 200, 403, 403, 403, 200, 403, 403]
+            assert [row["row_count"] for row in receipts] == [2, 0, 0, 1, 0, 0, 0, 1, 0, 0]
             assert all(row["status"] != "pending" for row in receipts)
             assert [row["audit_id"] for row in receipts if row["status"] == "ok"] == [
-                account["_meta"]["gtm.demo/auditId"], notes["_meta"]["gtm.demo/auditId"]]
+                account["_meta"]["gtm.demo/auditId"], notes["_meta"]["gtm.demo/auditId"],
+                messages["_meta"]["gtm.demo/auditId"]]
             posts = [row for row in traffic if row["http_method"] == "POST" and row["path"] == "/mcp"]
             assert sum(row["method"] == "tools/call" for row in posts) == len(receipts)
             assert all(row["protocol_header"] == row["protocol_meta"] == PROTOCOL
@@ -163,9 +175,11 @@ def check():
                 assert store.counts(connection)["activities"] == 0, "Unexpected activity"
     return {"status": "passed", "inspector_version": INSPECTOR, "protocol_version": PROTOCOL,
             "discovery_method": "server/discover", "tools": sorted(SCOPES),
-            "schemas_checked": 10, "record_counts": {"crm": 2, "calls": 1},
-            "scope_denials": {"crm_only_calls": 403, "calls_only_crm": 403},
-            "rate_limit": 429, "invalid_bearer": 401, "audit_receipts": 5,
+            "schemas_checked": 12, "record_counts": {"crm": 2, "calls": 1, "slack": 1},
+            "scope_denials": {"crm_only_calls": 403, "calls_only_crm": 403,
+                             "crm_only_slack": 403, "calls_only_slack": 403,
+                             "slack_only_crm": 403, "slack_only_calls": 403},
+            "rate_limit": 429, "invalid_bearer": 401, "audit_receipts": 10,
             "activities_created": 0}
 
 

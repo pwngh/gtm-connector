@@ -30,7 +30,7 @@ class CLITests(unittest.TestCase):
             cwd=ROOT,
             text=True,
             capture_output=True,
-            timeout=30,
+            timeout=60,
             check=False,
         )
 
@@ -52,7 +52,8 @@ class CLITests(unittest.TestCase):
                 self.assertTrue(summary["brief_id"].startswith("demo-"))
                 self.assertEqual(summary["accounts"], 30)
                 self.assertEqual(set(summary["tools"]), {
-                    "search_accounts", "get_account", "list_opportunities", "read_call_notes", "log_activity"
+                    "search_accounts", "get_account", "list_opportunities", "read_call_notes",
+                    "read_slack_messages", "log_activity"
                 })
                 self.assertEqual(summary["renewal_record"]["record_ref"], "crm/accounts/acc-001")
                 self.assertEqual(summary["notes_without_scope"]["status"], 403)
@@ -128,6 +129,35 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("call_notes", account)
         self.assertNotIn("opportunities", account)
         self.assertNotIn("IGNORE PREVIOUS INSTRUCTIONS", json.dumps(account))
+
+    def test_optional_slack_demo_and_evaluation_keep_follow_up_grounded(self):
+        summary = self.json_result(self.run_cli("demo", "--with-slack"))
+        self.assertEqual(summary["workflow"], "crm-calls-slack")
+        self.assertEqual(summary["audit_rows"], 18)
+        self.assertEqual(summary["brief_audit_rows"], 12)
+        self.assertEqual(summary["slack"]["record"]["record_ref"], "slack/messages/msg-003")
+        for direction in ("crm_without_slack", "slack_without_crm", "slack_without_calls"):
+            self.assertEqual(summary["slack"][direction]["status"], 403)
+        self.assertEqual(len(summary["contradiction_flags"]), 2)
+        self.assertEqual(summary["injection_brief"]["activities_created"], 0)
+        for brief in summary["briefs"]:
+            self.assertIn(brief["proposed_follow_up"], brief["text"].splitlines())
+            receipts = self.json_result(self.run_cli("audit", "--brief", brief["brief_id"]))
+            self.assertEqual([row["tool"] for row in receipts], [
+                "get_account", "list_opportunities", "read_call_notes", "read_slack_messages"])
+        restricted = summary["briefs"][1]
+        self.assertIn("lacks slack:read", restricted["text"])
+        self.assertNotIn("slack/messages/", restricted["text"])
+        usage = self.json_result(self.run_cli("usage"))
+        self.assertEqual(usage["calls"], {"total": 30, "ok": 23, "error": 7, "pending": 0})
+        self.assertEqual(usage["model_tokens"]["input_tokens"], 0)
+        report = self.json_result(self.run_cli("evaluate", "--with-slack"))
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["workflow"], "crm-calls-slack")
+        self.assertGreater(report["expected_facts"], 182)
+        self.assertEqual(report["facts_cited_correctly"], report["expected_facts"])
+        self.assertEqual(report["audit_rows"], 80)
+        self.assertEqual(report["activities_created"], 0)
 
     def test_missing_account_exits_two_without_json_on_stdout(self):
         self.json_result(self.run_cli("seed"))

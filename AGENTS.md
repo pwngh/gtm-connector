@@ -62,7 +62,7 @@ Keep fixture IDs stable and readable across reseeds. Use synthetic display
 labels, not plausible company, person, or product names. Preserve examples of
 a renewal within 30 days of the fixed demo date, an at-risk account, conflicting
 CRM and call-note facts, an account without notes, and an instruction inside a
-note. The two source systems are SQLite mocks; do not claim live integrations.
+note. CRM, calls, and Slack are SQLite mocks; do not claim live integrations.
 
 ## Council
 
