@@ -1,5 +1,35 @@
 # Decisions
 
+## Recorded walkthrough and Inspector output (2026-11-17)
+
+Make the existing proof visible without asking every reader to install the demo.
+Record a checked-in script running real fixture commands. Keep runtime code,
+existing tests, demo behavior, and evaluation measurements unchanged. Codespaces
+belongs in the next PR; neither this capture nor its tooling creates a codespace.
+
+Use asciinema for terminal output and agg for repository-local GIFs. This avoids
+a video-hosting account or external player. Keep the timed capture and a plain
+transcript beside the images so a reader can inspect or replay the same output.
+Select fields from captured results, label them as excerpts, and cap idle time
+in playback. Do not present the recording duration as an execution benchmark.
+
+Capture the official Inspector CLI tools/list response through the existing
+gateway with an explicit local CRM grant. It lists six tools, including Slack.
+Show a name/scope projection in the final frame and retain the complete response.
+This proves a CLI exchange with a supplied grant, not an Inspector UI session or
+interactive login. The existing integration test remains the broader protocol proof.
+
+Run in fresh invented state. Keep raw logs, local credentials, and absolute paths
+out of displayed output. Record source revision, commands, exits, tool versions,
+and UTC capture times. Scan the published text before rendering and inspect the
+images before filing. Private state remains under gitignored var/ with manual
+retention. The local-owner boundary does not change.
+
+Require a clean source tree before capture, excluding generated media, so the
+recorded commit identifies the executed inputs. Use isolated Python for capture
+and rendering. Keep privacy checks active under optimization and require the
+captured terminal output to match the saved transcript before making images.
+
 ## Saved evidence and audit inspection (2026-11-17)
 
 Finish the reliability work that was parked while the optional adapters shipped.

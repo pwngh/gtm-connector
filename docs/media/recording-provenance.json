@@ -1,0 +1,199 @@
+{
+  "started_at_utc": "2026-11-17T22:15:51.633554Z",
+  "completed_at_utc": "2026-11-17T22:17:44.500381Z",
+  "git_revision": "e4c3afb2d10d18a6cf5af2b226b3265d7fb0e032",
+  "git_tree": "6f446d7a229bbc81d0a75860a35a88d9d6c28173",
+  "recording_script_sha256": "a0c52535e089ec9aad8350834bec9522067ef55deeb5daae70df66b99ab601ee",
+  "versions": {
+    "python": "3.14.6",
+    "mcp_sdk": "2.3.0",
+    "node": "v22.23.4",
+    "inspector": "2.15.0"
+  },
+  "commands": [
+    {
+      "argv": [
+        "git",
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        ".",
+        ":(exclude)docs/media"
+      ],
+      "started_at_utc": "2026-11-17T22:15:51.633766Z",
+      "exit_code": 0,
+      "completed_at_utc": "2026-11-17T22:15:51.681245Z"
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "started_at_utc": "2026-11-17T22:15:51.681314Z",
+      "exit_code": 0,
+      "completed_at_utc": "2026-11-17T22:15:51.712667Z"
+    },
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD^{tree}"
+      ],
+      "started_at_utc": "2026-11-17T22:15:51.712744Z",
+      "exit_code": 0,
+      "completed_at_utc": "2026-11-17T22:15:51.747289Z"
+    },
+    {
+      "argv": [
+        "./scripts/demo.sh",
+        "--state-dir",
+        "var/recording-d0o8fva5/state"
+      ],
+      "started_at_utc": "2026-11-17T22:15:51.747629Z",
+      "exit_code": 0,
+      "completed_at_utc": "2026-11-17T22:16:49.878134Z"
+    },
+    {
+      "argv": [
+        ".venv/bin/python",
+        "-m",
+        "gtm_connector",
+        "check-brief",
+        "brief-1ead875bcc1a45f9b9c41ed2aa593d89",
+        "var/recording-d0o8fva5/candidate.txt",
+        "--state-dir",
+        "var/recording-d0o8fva5/state"
+      ],
+      "started_at_utc": "2026-11-17T22:16:59.884998Z",
+      "exit_code": 0,
+      "completed_at_utc": "2026-11-17T22:17:00.114517Z"
+    },
+    {
+      "argv": [
+        ".venv/bin/python",
+        "-m",
+        "gtm_connector",
+        "check-brief",
+        "brief-1ead875bcc1a45f9b9c41ed2aa593d89",
+        "var/recording-d0o8fva5/candidate.txt",
+        "--state-dir",
+        "var/recording-d0o8fva5/state"
+      ],
+      "started_at_utc": "2026-11-17T22:17:20.124815Z",
+      "exit_code": 2,
+      "completed_at_utc": "2026-11-17T22:17:20.331460Z"
+    },
+    {
+      "argv": [
+        "node",
+        "--version"
+      ],
+      "started_at_utc": "2026-11-17T22:17:30.336891Z",
+      "exit_code": 0,
+      "completed_at_utc": "2026-11-17T22:17:30.374632Z"
+    },
+    {
+      "argv": [
+        "npx",
+        "--yes",
+        "@modelcontextprotocol/inspector@2.15.0",
+        "--cli",
+        "--version"
+      ],
+      "started_at_utc": "2026-11-17T22:17:30.374687Z",
+      "exit_code": 0,
+      "completed_at_utc": "2026-11-17T22:17:31.845687Z"
+    },
+    {
+      "argv": [
+        "npx",
+        "--yes",
+        "@modelcontextprotocol/inspector@2.15.0",
+        "--cli",
+        "--config",
+        "var/recording-d0o8fva5/inspector-state/inspector.json",
+        "--server",
+        "gtm-connector",
+        "--stored-auth-only",
+        "--quiet",
+        "--format",
+        "json",
+        "--method",
+        "tools/list"
+      ],
+      "started_at_utc": "2026-11-17T22:17:33.048441Z",
+      "exit_code": 0,
+      "completed_at_utc": "2026-11-17T22:17:34.313266Z"
+    }
+  ],
+  "intentional_pause_seconds": 50,
+  "draft_adapter": "fixture",
+  "model": null,
+  "inspector_scopes": [
+    "crm:read"
+  ],
+  "tests": {
+    "run": 231,
+    "result": "OK",
+    "elapsed_seconds": 51.611
+  },
+  "rendering": {
+    "asciinema": "asciinema 3.2.1",
+    "agg": "agg 1.9.0",
+    "commands": [
+      [
+        "agg",
+        "--quiet",
+        "--theme",
+        "github-dark",
+        "--font-size",
+        "18",
+        "--line-height",
+        "1.25",
+        "--idle-time-limit",
+        "12",
+        "--fps-cap",
+        "5",
+        "--select",
+        "event:1..",
+        "--last-frame-duration",
+        "10",
+        "docs/media/walkthrough.cast",
+        "docs/media/walkthrough.gif"
+      ],
+      [
+        "agg",
+        "--quiet",
+        "--theme",
+        "github-dark",
+        "--font-size",
+        "18",
+        "--line-height",
+        "1.25",
+        "--idle-time-limit",
+        "12",
+        "--fps-cap",
+        "5",
+        "--select",
+        "100%",
+        "--last-frame-duration",
+        "1",
+        "docs/media/walkthrough.cast",
+        "docs/media/inspector-cli.gif"
+      ]
+    ],
+    "idle_limit_seconds": 12,
+    "source_duration_seconds": 113.231214,
+    "script_sha256": "2290eedcda02c5c762f2cd6b7440ca13a1ecf036ac3b31409b3161bd5195fccc",
+    "note": "Real output; selected fields; idle periods capped; fixed reading pauses."
+  },
+  "artifact_sha256": {
+    "inspector-cli.gif": "7b60f0f72be0d4e6a425b4b2c72e526622eb12950638c7b00e8bf042c161bd75",
+    "inspector-tools.json": "4949535125ba7b3ba1fb5a24ffe9d21ec9e5b1a066a034713a4a38ac61a72723",
+    "recording-session.txt": "9331a9576856c1c6be2fbc6092ca3599aac66ed7c89747c7ebf1c86e27200a37",
+    "walkthrough.cast": "08ae7c51f0c49f4ef84fe3979366f1e5ed5b8a8b457bfebe277540d9837b25a8",
+    "walkthrough.gif": "34fcb0ca14d459f793d6f85fd3f5dbeec259eb53270fdd3c0a6cc61a61bdb305"
+  }
+}
