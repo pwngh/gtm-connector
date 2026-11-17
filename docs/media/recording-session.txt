@@ -1,9 +1,9 @@
 1. Run the fixture demo
 
 Actual execution. Dependency and test logs are captured privately.
-$ ./scripts/demo.sh --state-dir var/recording-ux96i6u2/state
+$ ./scripts/demo.sh --state-dir var/recording-d0o8fva5/state
 Selected output:
-Test suite: OK (231 tests in 54.069 seconds)
+Test suite: OK (231 tests in 51.611 seconds)
 Accounts: 30
 Call-note scope denial: HTTP 403
 Injected-note activities: 0
@@ -23,17 +23,17 @@ Recorded response excerpt for a CRM-only grant:
   "message": "insufficient_scope: calls:read required"
 }
 Exact line from the restricted brief:
-- Call notes were unavailable because the token lacks calls:read. [audit/bb651321-0921-4d3d-9eac-96b220cd3b6c]
+- Call notes were unavailable because the token lacks calls:read. [audit/f1e38373-ef0c-4028-9ab5-b38cdb6c3076]
 4. Reject an uncited sentence
 
 Candidate: the generated brief plus 'The renewal was approved.'
-$ .venv/bin/python -m gtm_connector check-brief brief-6fae6c87ef324720a20a1ab074d46f58 var/recording-ux96i6u2/candidate.txt --state-dir var/recording-ux96i6u2/state
+$ .venv/bin/python -m gtm_connector check-brief brief-1ead875bcc1a45f9b9c41ed2aa593d89 var/recording-d0o8fva5/candidate.txt --state-dir var/recording-d0o8fva5/state
 error: Brief contains an uncited, unsupported, or misattributed statement.
 Exit: 2. Standard output is empty.
 5. List tools through the official Inspector CLI
 
 Fixture backend. Fresh loopback TLS server and an explicit crm:read grant.
-$ npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/recording-ux96i6u2/inspector-state/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/list
+$ npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/recording-d0o8fva5/inspector-state/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/list
 Name and required-scope projection of the actual Inspector JSON:
 {
   "search_accounts": "crm:read",
