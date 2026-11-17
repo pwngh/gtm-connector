@@ -4,7 +4,8 @@ A planned local MCP connector for an invented CRM, with a renewal-call brief
 workflow. Portfolio project for Preston Neal.
 
 Status: repository bootstrap only. There is no runnable demo or evaluation score
-yet. Implementation is blocked on the required TStack skills being available.
+yet. The required TStack skills are installed; work is stopped locally because
+the three-provider council review is not available. See DECISIONS.md.
 
 Planned scope: 30 invented accounts in SQLite; scoped read tools and an idempotent
 activity write; per-call audit records; checked citations; and a 20-account
