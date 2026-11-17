@@ -56,10 +56,27 @@ when the earlier change is still under review.
     Save brief snapshots by atomic replacement, make audit inspection read-only,
     and reject malformed saved evidence with a clean CLI error. Port only the
     relevant code and tests; keep the current README wording and measurements.
+11. Record a rerunnable fixture walkthrough and the official Inspector CLI
+    listing of all six tools. Keep credentials and local home paths off screen.
+    Publish the script, recording, selected transcript, and capture provenance.
+    Do not claim the Inspector UI or interactive login was tested.
+12. Add a development container and an Open in Codespaces badge separately.
+    Do not create a codespace or change repository settings. Run the container
+    locally or label it unverified.
+
+After these presentation slices, the user requested one branch and PR per item:
+one tool-definition table; pure request decisions; pinned lint/type tooling and
+main-branch CI; fixed refusal reasons; generated audit sequences; audit CHECK
+constraints; tool-definition hashes; control-character handling; confirmation
+of the minimal metadata scope; owner-approved write proposals; and, later,
+Salesforce renewal-field mapping. Check main first and skip work already done.
+The first three are behavior-preserving, with existing tests unchanged.
+Stop after each open PR. The user decides when to continue.
 
 Preserve the synthetic labels and fixed evaluation assertions until the
-explicitly scoped source expansion. Do not add write approval prompts, a web
-interface, or speculative rollout documents. Keep the parked reliability fixes in their
+explicitly scoped source expansion. Write approval belongs only in its separately
+requested later slice. Do not add a web interface or speculative rollout documents.
+Keep the parked reliability fixes in their
 own follow-up slice. Do not restore the old prose rewrite or add unrelated
 improvements.
 

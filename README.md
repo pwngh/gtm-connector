@@ -14,6 +14,14 @@ Run `./scripts/demo.sh` from a clean checkout. It installs dependencies, runs
 the tests, and shows those cases on invented data. The first install needs
 internet; the default runtime needs no external service or key.
 
+[![Terminal recording of the fixture demo, cited brief, scope denial, and rejected sentence](docs/media/walkthrough.gif)](docs/recording.md)
+
+This scripted recording runs real commands on fresh fixtures. It shows selected
+output and shortens long waits. No model runs.
+[Transcript](docs/media/recording-session.txt),
+[capture details](docs/media/recording-provenance.json), and
+[rerun instructions](docs/recording.md).
+
 ## What it guarantees
 
 The default demo uses a fixed drafting step. An optional local Ollama model
@@ -213,6 +221,12 @@ rejection:
 It prints its private output directory. Follow [the five-minute guide](DEMO.md).
 
 ### Use an external MCP client
+
+![Inspector CLI tools/list response, showing the six tool names and their scopes](docs/media/inspector-cli.gif)
+
+This frame shows the names and scopes from a real Inspector CLI response.
+[Full tools/list JSON](docs/media/inspector-tools.json).
+It uses a supplied local grant, not an interactive login or the Inspector UI.
 
 The optional [Inspector walkthrough](docs/inspector.md) starts the server and
 creates a private config with explicitly granted scopes. After that setup:

@@ -1,5 +1,8 @@
 # Five-minute demo
 
+For the short recorded walkthrough, see [the recording and rerun script](docs/recording.md).
+It shows actual fixture commands and a separate Inspector CLI listing.
+
 From a clean checkout, run:
 
 ```sh
