@@ -44,6 +44,7 @@ class CLITests(unittest.TestCase):
         self.assertNotEqual(first["brief_id"], second["brief_id"])
         self.assertEqual(first["renewal_record"], second["renewal_record"])
         self.assertEqual(first["idempotent_write"], second["idempotent_write"])
+        generated_briefs = []
         for summary in (first, second):
             with self.subTest(brief=summary["brief_id"]):
                 self.assertEqual(summary["status"], "connector")
@@ -73,8 +74,28 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(sum(row["http_status"] == 403 for row in rows), 1)
                 self.assertEqual(sum(row["http_status"] == 429 for row in rows), 1)
                 self.assertFalse(any(row["status"] == "pending" for row in rows))
+                self.assertEqual(summary["brief_audit_rows"], 9)
+                full, restricted = summary["briefs"]
+                self.assertEqual(full["account_id"], "acc-003")
+                self.assertIn("closed_won", full["text"])
+                self.assertIn("Procurement has not approved this renewal.", full["text"])
+                self.assertIn("[calls/call_notes/note-003]", full["text"])
+                self.assertEqual(restricted["account_id"], "acc-001")
+                self.assertIn("Call notes were unavailable because the token lacks calls:read.",
+                              restricted["text"])
+                self.assertEqual(summary["injection_brief"]["record_ref"], "calls/call_notes/note-007")
+                self.assertEqual(summary["injection_brief"]["activities_created"], 0)
+                self.assertTrue(summary["uncited_candidate_rejected"])
+                generated_briefs.extend([full["brief_id"], restricted["brief_id"],
+                                         summary["injection_brief"]["brief_id"]])
         all_rows = self.json_result(self.run_cli("audit"))
-        self.assertEqual(len(all_rows), 28)
+        self.assertEqual(len(all_rows), 46)
+        self.assertEqual(len(set(generated_briefs)), 6)
+        for identifier in generated_briefs:
+            rows = [row for row in all_rows if row["brief_id"] == identifier]
+            self.assertEqual([row["tool"] for row in rows],
+                             ["get_account", "list_opportunities", "read_call_notes"])
+            self.assertFalse(any(row["status"] == "pending" for row in rows))
         self.assertEqual(self.json_result(self.run_cli("audit", "--brief", "unknown-brief")), [])
         owner = json.loads((self.state / "owner.json").read_text())
         self.assertNotIn(owner["owner_secret"], json.dumps([first, second, all_rows]))
@@ -120,6 +141,59 @@ class CLITests(unittest.TestCase):
         self.assertIn("audit database not found", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertFalse(missing.exists())
+
+    def test_brief_text_displays_the_checked_draft_and_requested_date(self):
+        result = self.run_cli("brief", "acc-001", "--as-of", "2027-02-01")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertRegex(result.stdout, r"\ABrief: brief-[0-9a-f]{32}\nAs of: 2027-02-01\n\n")
+        identifier = result.stdout.splitlines()[0].removeprefix("Brief: ")
+        artifact = json.loads((self.state / "briefs" / (identifier + ".json")).read_text())
+        self.assertEqual(result.stdout.split("\n\n", 1)[1].strip(), artifact["text"].strip())
+        self.assertIn("Renewal is due on 2027-02-01.", result.stdout)
+        rows = self.json_result(self.run_cli("audit", "--brief", identifier))
+        self.assertEqual(len(rows), 3)
+
+    def test_json_brief_and_offline_checker_reject_uncited_and_misattributed_edits(self):
+        brief = self.json_result(self.run_cli("brief", "acc-001", "--without-calls", "--json"))
+        self.assertEqual(brief["status"], "accepted")
+        self.assertEqual(brief["evidence"]["notes_status"], "denied")
+        self.assertEqual(brief["model_usage"], {"model": None, "input_tokens": 0, "output_tokens": 0})
+        self.assertIn("Call notes were unavailable", brief["text"])
+        saved = self.state / "briefs" / (brief["brief_id"] + ".json")
+        original_artifact = saved.read_bytes()
+        candidate = Path(self.directory.name) / "candidate.txt"
+        candidate.write_text(brief["text"])
+        valid = self.json_result(self.run_cli("check-brief", brief["brief_id"], str(candidate)))
+        self.assertEqual(valid, {"status": "valid", "brief_id": brief["brief_id"]})
+        for changed in (brief["text"] + "The renewal was approved.\n",
+                        brief["text"].replace("[crm/accounts/acc-001]", "[crm/accounts/acc-030]")):
+            with self.subTest(candidate=changed):
+                candidate.write_text(changed)
+                rejected = self.run_cli("check-brief", brief["brief_id"], str(candidate))
+                self.assertEqual(rejected.returncode, 2)
+                self.assertEqual(rejected.stdout, "")
+                self.assertIn("unsupported", rejected.stderr)
+                self.assertNotIn("Traceback", rejected.stderr)
+                self.assertEqual(saved.read_bytes(), original_artifact)
+
+    def test_invalid_brief_inputs_and_missing_saved_evidence_exit_two(self):
+        for arguments in (("brief", "acc-missing"),
+                          ("brief", "acc-999"),
+                          ("brief", "acc-001", "--as-of", "2027-02-30")):
+            with self.subTest(arguments=arguments):
+                rejected = self.run_cli(*arguments)
+                self.assertEqual(rejected.returncode, 2)
+                self.assertEqual(rejected.stdout, "")
+                self.assertTrue(rejected.stderr.strip())
+                self.assertNotIn("Traceback", rejected.stderr)
+        candidate = Path(self.directory.name) / "candidate.txt"
+        candidate.write_text("An unsupported sentence.\n")
+        missing = self.run_cli("check-brief", "brief-" + "0" * 32, str(candidate))
+        self.assertEqual(missing.returncode, 2)
+        self.assertEqual(missing.stdout, "")
+        self.assertNotIn("Traceback", missing.stderr)
+        self.assertFalse((self.state / "briefs").exists())
 
     def test_serve_prints_endpoints_and_shuts_down_on_interrupt(self):
         process = subprocess.Popen(
