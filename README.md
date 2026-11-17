@@ -8,9 +8,9 @@ tie to a record.
 
 ## What it guarantees
 
-This portfolio demo uses a fixed drafting step. No model runs. The checker
-verifies supported wording and citations. It cannot establish whether a source
-is true.
+The default demo uses a fixed drafting step. An optional local Ollama model
+can assemble a candidate from the same supported claims. Both paths pass through
+the same checker. It verifies wording and citations, not whether a source is true.
 
 - **Source permissions stay separate.** CRM access does not grant call-note
   access, or vice versa. Scope denials return HTTP 403.
@@ -108,6 +108,33 @@ receipts, zero activities, and zero model tokens.
 [Results](evaluation/RESULTS.json) · [Expected claims](evaluation/expected.json) ·
 [Scoring rules](docs/evaluation.md)
 
+### Local model measurement
+
+The optional drafter ran `llama3.2:latest` through Ollama 0.30.0 on 2026-11-17,
+from `20:51:09` to `20:53:23` UTC. The response identified the model as
+`llama3.2:latest:local`. The request used the local-only selector.
+
+```sh
+.venv/bin/python -m gtm_connector evaluate --adapter ollama --model llama3.2:latest
+```
+
+| Measure | Fixture baseline | Local model |
+| --- | --- | --- |
+| Accepted briefs | 20 / 20 | 20 / 20 |
+| Published claims found and cited | 182 / 182 | 182 / 182 |
+| Rejected briefs | 0 | 0 |
+| Unsupported published claims | 0 | 0 |
+| Reported input / output tokens | 0 / 0 | 3384 / 5500 |
+
+The model emitted 182 candidate lines. All 20 candidates were scored. The checker
+rejected zero lines in this run. This proves local inference passed through the
+gate; it does not prove the model hallucinated or that a hallucination was caught.
+The task is fixed-claim assembly. Adverse tests separately reject uncited,
+invented, miscited, duplicate, and action-shaped candidates without publishing
+any part of the failed brief.
+[Model results and exact command](evaluation/RESULTS_OLLAMA.json) ·
+[Rejection tests](tests/test_model_workflow.py) · [Local model limits](docs/ollama.md)
+
 ## Request path
 
 ```mermaid
@@ -119,7 +146,7 @@ flowchart LR
     MCP -->|"crm:read or crm:write"| CRM[("CRM SQLite")]
     MCP -->|"calls:read"| Calls[("Call-note SQLite")]
     MCP -->|"Records or scope denial"| CLI
-    CLI --> Draft["Fixture draft"]
+    CLI --> Draft["Fixture or optional local model draft"]
     Draft --> Check["Citation checker"]
     Check -->|"Accepted text"| Brief["Renewal brief"]
 ```
@@ -137,7 +164,7 @@ From a clean checkout:
 
 Requires macOS or Linux and Python 3.11+ with SQLite and venv support. The first
 dependency install needs internet. The runtime needs no external service,
-account, model, or API key. The script runs 120 tests and two local HTTPS services.
+account, model, or API key. The script runs the test suite and two local HTTPS services.
 
 With 30 invented accounts and reserved `.example` addresses, it demonstrates
 HTTP 403 scope denial, HTTP 429 rate limiting, deduplicated writes, and zero
@@ -167,6 +194,20 @@ sources through the existing gateway. The [integration check](scripts/check-insp
 proves both scope-denial directions, HTTP 429, HTTP 401, and one receipt per tool
 attempt. Node and npm downloads are needed only for this optional client check.
 
+### Use a local model
+
+With Ollama running and a local model already installed:
+
+```sh
+.venv/bin/python -m gtm_connector brief acc-003 --adapter ollama --model llama3.2:latest --json
+.venv/bin/python -m gtm_connector evaluate --adapter ollama --model llama3.2:latest
+```
+
+The adapter never downloads a model or calls a hosted service. It rejects cloud
+aliases. The model receives supported claims from the authorized evidence, with
+no credentials or tool access. Any invalid line rejects the entire draft.
+[Setup, measurements, and limits](docs/ollama.md)
+
 ## What the mocks stand for
 
 | Mock | What it represents |
@@ -176,8 +217,9 @@ attempt. Node and npm downloads are needed only for this optional client check.
 
 ## Limits worth reading
 
-- No model drafts these briefs. A deterministic fixture produces the text.
-  The score measures that fixture workflow, not model quality.
+- The default drafter is a deterministic fixture. Its score measures that
+  workflow, not model quality. Optional Ollama drafting assembles fixed claims;
+  it does not support unrestricted summaries.
 - The checker accepts fixed wording and permits some omissions. Missing notes
   and the exact procurement conflict must stay visible. [Brief limits](docs/briefs.md)
 - Authorization uses a local owner emulator. The file owner can request every

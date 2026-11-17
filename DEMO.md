@@ -109,3 +109,17 @@ denies a call-note request, and repeats it after an explicit `calls:read` grant.
 Inspector uses `server/discover` and the same HTTPS gateway. No authorization or
 audit check is bypassed. This optional client requires Node and a first npm
 download. The default five-minute script remains independent of it.
+
+## Optional: use a local model
+
+With Ollama 0.30.0 or newer running and `llama3.2:latest` already cached:
+
+```sh
+.venv/bin/python -m gtm_connector brief acc-003 --adapter ollama --model llama3.2:latest --json
+```
+
+Inspect `adapter`, `model_usage`, `draft_diagnostics`, and the checked `text`.
+The model receives the supported claim catalog and no tool interface. Its
+response must pass the same checker. A rejected draft prints no candidate and
+exits `2`; saved usage still counts that generation. Nothing downloads a model.
+The default walkthrough stays model-free. See [model results and limits](docs/ollama.md).

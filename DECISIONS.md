@@ -1,5 +1,60 @@
 # Decisions
 
+## Optional local model drafting (2026-11-17)
+
+Keep fixture drafting as the default. Select Ollama only with `--adapter ollama`
+and an explicit `--model`. Reuse the installed HTTP dependency against fixed
+loopback port 11434. Disable proxies and redirects. Require a cached completion
+model with no remote metadata or cloud suffix. Never install or pull a model,
+change the running service, or fall back to another drafter. The local service
+and model files remain trusted operator software, not a sandbox boundary.
+
+Preserve the existing exact-text checker. Give the model a catalog derived from
+the authorized evidence and ask it to assemble those claim lines. Do not call
+this unrestricted summarization or semantic verification. The external prompt
+contains no credentials, audit fingerprints, or tool interface. The model's
+actual reply must pass the existing whole-brief gate without repair or filtering.
+Malformed output, unsupported wording, duplicate lines, and missing mandatory
+disclosures reject publication. Supported subsets can still pass the checker;
+the independent expected claims measure omitted facts.
+
+Add a typed draft result without breaking custom adapters that return strings.
+Record API-reported input and output tokens before checking, including rejected
+generations. Unknown counts stay null. A trusted evaluation callback sees the
+candidate and an evidence copy in memory. Persist only safe diagnostics and
+usage when rejected, never raw candidate text. The original evidence remains
+separate from adapter and observer copies.
+
+Keep the twenty-account expected manifest unchanged. Score raw candidates and
+published briefs separately. Candidate metrics cover only extractable candidate
+text and report unscored cases. Unsupported wording is not proof of factual
+falsity. Keep zero-output invention rates undefined. The existing evaluation
+success condition still requires full coverage; a new publication-gate field
+reports that rejected drafts stayed unpublished and no activities were created.
+Record exact CLI arguments, UTC times, model digest, service version, and usage
+in each measured model report. Do not fabricate a rejection to improve a table.
+
+Use the already cached `llama3.2:latest` for the local benchmark. It is the
+smallest cached completion model on this machine. No model download is required.
+Default demos and automated tests remain model-free. Mock HTTP responses test
+error handling; only an executed local CLI evaluation supplies model metrics.
+
+The first local run rejected 19 responses as invalid JSON. A diagnostic request
+showed the small model repeating the JSON schema before its answer. Keep the
+schema in the API `format` field and use a short response-shape example in the
+prompt. Do not strip prefixed objects or repair generated content. Rerun the
+full evaluation after this prompt change and report its measured results.
+
+Sol review identified two parser and routing gaps. Reject duplicate JSON keys
+instead of accepting the last claim array. Require Ollama 0.30.0 or newer and
+append its explicit `:local` selector for every generation. Preflight metadata
+alone cannot prevent an ordinary tag update from selecting a remote model.
+The local-only selector rejects that case before cloud forwarding. Reject
+remote metadata in responses too. Record the actual echoed model identifier
+and the preflight digest; stable local tags remain a reproducibility assumption.
+The independently scored publication flag also checks citation coverage for
+every published expected claim, even if the production checker regresses.
+
 ## External Inspector client (2026-11-17)
 
 Re-read the current MCP specification, authorization section, and official
