@@ -409,6 +409,24 @@ class GatewayTests(unittest.TestCase):
         self.assertNotIn("Fixture account", response.text)
         self.assertEqual(self.activities(), [])
 
+    def test_write_committed_before_audit_failure_is_reused_on_retry(self):
+        self.open_connector()
+        arguments = self.activity_arguments()
+        with patch.object(self.connector.audit, "finish", side_effect=sqlite3.OperationalError("fixture audit unavailable")):
+            response = self.tool("log_activity", arguments, token="write")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(len(self.activities()), 1)
+        original_id = self.activities()[0]["id"]
+        pending = self.connector.audit.read()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["status"], "pending")
+        retried = self.records(self.tool("log_activity", arguments, token="write"), "crm")
+        self.assertEqual(retried[0]["id"], original_id)
+        self.assertEqual(len(self.activities()), 1)
+        receipts = self.connector.audit.read()
+        self.assertEqual([row["status"] for row in receipts], ["pending", "ok"])
+        self.assertEqual(receipts[1]["rows"], ["crm/activities/" + original_id])
+
 
 if __name__ == "__main__":
     unittest.main()

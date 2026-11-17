@@ -23,9 +23,9 @@ addresses, and no external runtime services or API keys.
   The verifier checks each claim against supported text and source-qualified
   references such as `crm/accounts/acc-003` and `calls/call_notes/note-003`.
   Missing notes cite audit receipts; date calculations also cite the saved run.
-- PRs 1, 2, and 3 are merged. Fixtures, schema, tools, authorization, audit,
-  rate limits, writes, brief generation, and citation verification are complete.
-  PR 4 remains. See [Roadmap and Scope](#roadmap-and-scope).
+- Evaluation and usage. Twenty accounts have fixed expected claims and measured
+  citation scores. Usage groups audit attempts by token, tool, and UTC day and
+  reports model tokens per saved brief. PR 4 completes the planned scope.
 
 ## Run
 
@@ -36,6 +36,10 @@ or API key is needed. From a clean checkout:
 ```sh
 ./scripts/demo.sh
 ```
+
+For the complete five-minute walkthrough, including evaluation, usage, and a
+live checker rejection, run `./scripts/five-minute-demo.sh`. See
+[DEMO.md](DEMO.md). First-install download time varies.
 
 This creates `.venv`, installs `requirements.lock`, runs the tests, and starts
 two temporary HTTPS loopback services. The CLI obtains scoped tokens with PKCE,
@@ -59,11 +63,12 @@ The final JSON contains these verified fields:
 | `injection_brief.activities_created` | `0` across all three briefs, including `acc-007` |
 | `brief_audit_rows` | `9` reads across the three briefs |
 | `uncited_candidate_rejected` | `true` |
+| `contradiction_flags` | One flag citing `opp-003` and `note-003` |
 
 The run produces 23 audit receipts: 14 connector attempts and nine briefing
 reads. The briefing workflow adds no activities, including when a note requests
-one. `conflicting_sources` displays both records; it does not detect or resolve
-contradictions.
+one. `conflicting_sources` displays both records. `contradiction_flags` contains
+the brief's required flag for the explicit fixture rule described below.
 
 ## Draft and check a brief
 
@@ -84,16 +89,22 @@ The CRM-only brief says that call notes were unavailable because the token lacks
 `calls:read`; the no-notes account says none were returned. These distinct claims
 cite the corresponding audit receipt. Record claims cite their source, and
 renewal-day calculations also cite the saved run date. Contradictory CRM fields
-and note text remain separate, attributed statements. The workflow does not yet
-flag their contradiction. Notes are quoted as untrusted source text, including
-embedded instructions and escaped newlines.
+and note text remain separate, attributed statements. Notes are quoted as
+untrusted source text, including embedded instructions and escaped newlines.
 
-These two lines came from `brief acc-003 --json` on current main:
+These lines come from `brief acc-003 --json`:
 
 ```text
 - CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. [crm/opportunities/opp-003]
 - Untrusted call note note-003 at "2027-01-12T15:00:00Z" says "Procurement has not approved this renewal. The budget remains unsigned.". [calls/call_notes/note-003]
+- Source conflict: CRM opportunity opp-003 reports stage "closed_won", while call note note-003 reports unapproved procurement. [crm/opportunities/opp-003] [calls/call_notes/note-003]
 ```
+
+The conflict rule requires `closed_won` and that exact note body for the same
+account. Its flag must remain in the brief and cite both records. It resolves
+neither source. Other wording, denied notes, and arbitrary contradictions are
+outside this rule. Regenerate an older `acc-003` brief if it lacks the flag;
+`check-brief` applies the current rules to its saved evidence.
 
 To inspect the full artifact:
 
@@ -130,10 +141,10 @@ error: Brief contains an uncited, unsupported, or misattributed statement.
 
 The checker requires exact supported content and record references. It rejects
 uncited sentences, invented values, wrong citations, appended claims, and
-action-shaped output. It is a controlled
-vocabulary checker, not a general paraphrase or semantic-entailment judge. A
+action-shaped output. It is a controlled vocabulary checker, not a general
+paraphrase or semantic-entailment judge. A
 supported subset may pass: grounding and coverage are separate. An unavailable
-or empty notes result must remain visible.
+or empty notes result and a recognized source conflict must remain visible.
 
 The adapter receives a copy of the evidence, without owner credentials or
 reusable bearer tokens; the checker retains the original snapshot. Rejected
@@ -267,23 +278,76 @@ tests cover scope denial versus empty notes, source contradictions, snapshot
 mutation, citation rejection, and injected instructions remaining data. CI runs
 the same demo on Python 3.11 and 3.14. Test data is temporary.
 
+## Evaluation
+
+```sh
+.venv/bin/python -m gtm_connector evaluate
+```
+
+The command uses fresh temporary state and makes 60 HTTPS tool calls for
+`acc-001` through `acc-020`. It does not read or change the operator's CRM.
+[expected.json](evaluation/expected.json) contains 182 fixed expected claims and
+references, separate from the drafting code. Only run and audit IDs are filled
+from the collected evidence. No model runs.
+
+Measured on 2026-11-17 with the fixture adapter and as-of date `2027-01-15`:
+
+| Metric | Result |
+| --- | --- |
+| Accounts with accepted briefs | 20 / 20 |
+| Facts found | 182 / 182 (100%) |
+| Facts cited correctly | 182 / 182 (100%) |
+| Facts invented | 0 / 182 emitted claims (0%) |
+| Rejected or failed briefs | 0 |
+| Audit receipts | 60 |
+| Activities created | 0 |
+| Model input / output tokens | 0 / 0 |
+
+The recorded output is in [RESULTS.json](evaluation/RESULTS.json), including
+per-account counts. A fact is one displayed claim line. Compound contact and
+opportunity statements each count once. Coverage counts expected text, even if
+its citation is missing or wrong. Citation coverage also requires the exact
+reference set. Unsupported text counts as invented. Duplicate claims do not
+increase coverage and fail the evaluation. Failed or rejected briefs keep their
+expected claims in the denominator. They have no published text to score for
+invention. The CLI exits `2` if any case or invariant fails.
+
+The scorer has separate tests for missing facts, missing or wrong references,
+invented text, appended claims, and duplicates. Scores measure published fixture
+output against a controlled vocabulary. They do not measure general model
+reasoning, arbitrary paraphrases, or the truth of a source claim.
+
+## Usage reporting
+
+```sh
+.venv/bin/python -m gtm_connector usage
+.venv/bin/python -m gtm_connector usage --brief brief-REPLACE_WITH_ID
+```
+
+Add `--state-dir PATH` for another state directory. This is a read-only local
+report, outside MCP authorization. It groups receipts in `by_token`, `by_tool`,
+`by_day`, and `by_token_tool_day`. Day boundaries use UTC. Each group and `calls`
+contain `total`, `ok`, `error`, and `pending` counts. Scope denials, limited
+calls, and retries count as attempts. Token fingerprints identify grants, not
+people. The report excludes arguments and source text.
+
+`briefs` reports each saved brief's status, correlated `audit_calls`, and
+`model_usage`. `model_tokens` totals cover saved artifacts only. Fixture counts
+are zero. Unknown counts stay `null`, including in the corresponding total;
+`unknown_briefs` makes the gap explicit. Deleted artifacts cannot supply usage.
+A malformed or partial artifact stops the report with a clear error. Missing
+state creates no files. These counts are not billing data.
+
 ## Roadmap and Scope
 
-PRs 1, 2, and 3 are merged. PR 4 will add:
+The four planned slices are implemented: fixtures and schema; scoped MCP tools,
+authorization, audit, limits, and writes; cited briefs; then evaluation, usage,
+conflict flags, and review. [SECURITY_REVIEW.md](SECURITY_REVIEW.md) records the
+data, scopes, retention, failure modes, and reviewer sign-off requirements.
+[DEMO.md](DEMO.md) gives the five-minute walkthrough.
 
-- An evaluation across 20 accounts. Report facts found, facts cited correctly,
-  and facts invented. Record the measured scores in this README.
-- A usage report from the audit log: calls by token, tool, and day. Include model
-  tokens per brief from the saved artifacts.
-- A one-page security review covering data, scopes, retention, failure modes,
-  and reviewer sign-off requirements.
-- Explicit cross-source contradiction flags, including `opp-003` reporting
-  `closed_won` while `note-003` reports unapproved procurement.
-- A final README pass and a five-minute clean-checkout demo script.
-
-Evaluation scores are not measured yet. The fixture workflow uses no model;
-its tests do not establish model quality. No real CRM or call-recording API,
-web interface, or multi-tenant features are planned.
+The fixture workflow uses no model. A hosted adapter is not implemented. No real
+CRM or call-recording API, web interface, or multi-tenant features are included.
 
 Portfolio project for Preston Neal. All fixture records use synthetic labels.
 See [DECISIONS.md](DECISIONS.md) for design choices and [AGENTS.md](AGENTS.md)

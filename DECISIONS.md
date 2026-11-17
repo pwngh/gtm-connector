@@ -14,8 +14,8 @@ utility, not a claim of authorization enforcement.
 The PR 3 briefing adapter uses a deterministic extractive fixture without a
 model. Its output must still pass the citation checker. A hosted adapter is
 optional future work and is not required by the demo command. No LLM quality
-claim or evaluation score follows from passing these fixture tests; the
-twenty-account evaluation remains PR 4.
+claim follows from fixture tests. PR 4 measures the twenty-account fixture
+workflow against independent expected claims.
 
 ## Four reviewable slices
 
@@ -142,8 +142,8 @@ references rather than copying all returned record bodies.
 Arguments are retained verbatim, including an activity body. The log is local
 data, not a redacted telemetry feed. Runtime state uses an owner-only directory
 and owner-readable/writable files. There is no automatic retention expiry yet;
-the operator removes the chosen local state directory when finished. PR 4's
-security review must state that limit. Audit fingerprints distinguish grants,
+the operator removes the chosen local state directory when finished. The
+security review states that limit. Audit fingerprints distinguish grants,
 not people, and are not an identity or billing system.
 
 If the pending receipt cannot be committed, do not execute the call. If audit
@@ -238,24 +238,77 @@ SQLite audit receipts retain their existing durability behavior.
 
 Record fixture model usage as model `null` and zero input/output tokens because
 no model ran. For custom Python adapters, record unknown token counts as `null`
-rather than estimating them from text. The audit usage report and twenty-account
-fact/citation/invention scores remain PR 4. The default demo keeps the original
+rather than estimating them from text. PR 4 adds the audit usage report and
+twenty-account fact/citation/invention scores. The default demo keeps the original
 14 connector attempts and adds three briefs with three reads each, for 23
 receipts; the full, restricted, and injection cases have separate brief IDs.
 
 ## README baseline after PR 3
 
 Document merged behavior, not the earlier PR 2 snapshot. The README examples
-come from running the CLI on main after PR 3 merged. Keep the 14 connector
-receipts distinct from the nine briefing receipts. The two source statements
-for `opp-003` and `note-003` remain independently cited; the current checker
-does not flag their contradiction. Add that explicit flag in PR 4 alongside
-evaluation, usage reporting, and security review.
+initially came from running the CLI on main after PR 3 merged. Keep the 14
+connector receipts distinct from the nine briefing receipts. PR 3 preserved the
+two source statements for `opp-003` and `note-003` without flagging their conflict.
+PR 4 adds that flag alongside evaluation, usage reporting, and security review.
 
 Keep this documentation change on the PR 4 branch so it does not consume an
 extra pull request. No runtime behavior changes in this documentation commit.
 The demo uses no external runtime services or API keys. The first dependency
 installation still needs internet, and the demo starts two local HTTPS services.
+
+## Explicit conflict rule
+
+Recognize one bounded condition: an opportunity's stage is `closed_won` and a
+call note for the same account exactly matches the fixture's unapproved
+procurement statement, including the unsigned-budget sentence. Require a
+`Source conflict:` claim with both record references. Preserve the original
+opportunity statement and note quote. Resolve neither source. Do not infer a
+conflict from denied notes, another stage, a paraphrase, or a larger instruction
+containing this text. This is a transparent fixture rule, not a general semantic
+contradiction detector. The rule uses record content, not hard-coded record IDs.
+
+The checker requires recognized conflicts even when a draft includes only a
+supported subset. Otherwise an adapter could hide the known disagreement while
+passing the grounding check. Existing PR 3 snapshots still contain usable
+evidence, but an older `acc-003` text without the new flag fails the current
+checker. Regenerate the brief. There is no promise to freeze verification rules
+for old saved text.
+
+## Evaluation and usage measurements
+
+Keep 20 fixed cases in `evaluation/expected.json`, covering `acc-001` through
+`acc-020` at `2027-01-15`. The expected text and source references are checked in
+separately from the draft generator and citation checker. Runtime evaluation
+does not derive expectations from either. Substitute only the generated run ID
+and empty-notes receipt ID. Use fresh temporary source databases so operator
+edits cannot silently change the benchmark. Remove that temporary state on exit;
+the JSON result retains per-account metrics, not the temporary snapshots.
+
+Measure published fixture output. One fact means one displayed claim line;
+compound contact and opportunity statements each count once. Count coverage by
+unique expected text and citation coverage by the exact reference set. Count
+unsupported text as invented. Duplicates cannot inflate coverage. Rejected or
+failed briefs retain their expected claims in the denominator. No output means
+no invention rate to measure, not a fabricated perfect score. The evaluator
+fails unless all 20 briefs pass with full coverage, correct citations, no
+invented or repeated claims, 60 successful audit receipts, and no activities.
+The recorded score is a fixture regression result, not an LLM quality claim.
+
+Read usage directly from the existing audit database in SQLite read-only mode.
+Count all receipts, including failed and pending calls, by grant fingerprint,
+tool, and UTC day. Report saved brief status and token usage separately. A
+fingerprint is not a person. Token totals cover saved artifacts only; unknown
+values remain `null`, and deleted artifacts cannot contribute usage. Stop with
+a clear error on partial or invalid artifact JSON instead of silently losing
+its usage. The report never copies audit arguments or source text.
+
+`scripts/five-minute-demo.sh` creates a private temporary output directory and
+runs setup, tests, connector cases, evaluation, usage, and an actual CLI checker
+rejection. It keeps the demo state and JSON output for inspection. The operator
+chooses when to remove it. Five minutes is the presentation outline in DEMO.md;
+first-install downloads have no fixed duration. A focused test also proves that
+a write committed before audit-finalization failure is reused on retry while
+the original receipt remains pending.
 
 ## Review configuration
 
