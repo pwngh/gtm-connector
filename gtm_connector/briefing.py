@@ -3,8 +3,10 @@
 from copy import deepcopy
 from datetime import date
 import json
+import os
 from pathlib import Path
 import re
+from tempfile import NamedTemporaryFile
 import uuid
 
 import httpx2
@@ -74,6 +76,24 @@ def _artifact_path(directory, brief_id):
     return Path(directory) / "briefs" / (brief_id + ".json")
 
 
+def _save_artifact(path, artifact):
+    """Replace a complete snapshot atomically, without a power-loss guarantee."""
+    payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, indent=2).encode()
+    if path.is_symlink():
+        raise ValueError("brief artifact must not be a symbolic link")
+    temporary = None
+    try:
+        with NamedTemporaryFile(mode="wb", dir=path.parent, prefix=f".{path.name}.",
+                                suffix=".tmp", delete=False) as output:
+            temporary = Path(output.name)
+            os.fchmod(output.fileno(), 0o600)
+            output.write(payload)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, adapter=None,
                  observe_draft=None, include_slack=False, grant_slack=True):
     """Collect, draft, check, then publish; the draft adapter receives data only."""
@@ -81,7 +101,6 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, a
         raise BriefingError("renewal_fields_unmapped")
     # Offline citation checks do not need to import the MCP server or TLS runtime.
     from .client import LocalClient
-    from .runtime import private_file
 
     brief_id = "brief-" + uuid.uuid4().hex
     scopes = ["crm:read"] + (["calls:read"] if include_calls else [])
@@ -109,7 +128,7 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, a
     path.parent.chmod(0o700)
 
     def save():
-        private_file(path, json.dumps(artifact, ensure_ascii=False, allow_nan=False, indent=2).encode())
+        _save_artifact(path, artifact)
 
     save()
     try:
@@ -159,7 +178,9 @@ def check_saved_brief(directory, brief_id, candidate):
     """Check candidate text against the stored MCP snapshot, never its own citations alone."""
     path = _artifact_path(directory, brief_id)
     artifact = json.loads(path.read_text())
-    if (artifact.get("schema_version") != 1 or artifact.get("brief_id") != brief_id
-            or artifact.get("evidence", {}).get("brief_id") != brief_id):
+    if (not isinstance(artifact, dict) or artifact.get("schema_version") != 1
+            or artifact.get("brief_id") != brief_id
+            or not isinstance(artifact.get("evidence"), dict)
+            or artifact["evidence"].get("brief_id") != brief_id):
         raise ValueError("invalid saved brief evidence")
     return check_brief(candidate, artifact["evidence"])
