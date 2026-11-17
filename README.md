@@ -196,6 +196,22 @@ against the same records later.
 
 ## Run it
 
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/pwngh/gtm-connector)
+
+To use a browser terminal, open the link, create a codespace, and run the command
+below. The [development container](.devcontainer/devcontainer.json) supplies
+Python 3.11. The demo installs its dependencies when you run it. Setup needs
+internet. The client and services run together inside the container; automatic
+port forwarding is disabled.
+
+Codespaces uses your account's compute and storage allowance.
+[GitHub explains the billing rules](https://docs.github.com/en/billing/concepts/product-billing/github-codespaces).
+Stop the codespace when finished. Delete it when you no longer need its files;
+stopped codespaces still use storage.
+
+The container passed the five-minute demo locally on Linux arm64 with Python
+3.11.18. Codespaces creation and the browser editor have not been tested.
+
 From a clean checkout:
 
 ```sh

@@ -1,5 +1,34 @@
 # Decisions
 
+## Development container and Codespaces (2026-11-17)
+
+Use the existing demo commands inside a Python development container. The README
+badge opens GitHub's creation page for the default branch. The reader creates
+and owns the codespace. This change creates no codespace or repository setting.
+
+Pin the published Python 3.11 Bookworm image by its multi-architecture manifest
+digest. Python 3.11 is the oldest version covered by CI. The digest makes the
+base image repeatable; updating it requires another reviewed change. Run terminal
+commands as the image's non-root vscode user. Reuse scripts/demo.sh for dependency
+installation and testing instead of adding a second setup command or startup hook.
+
+Keep the client and both HTTPS services inside the container. Configure no
+forwarded ports and tell the editor to ignore automatic forwarding. The existing
+loopback addresses and certificate remain unchanged. This is a development
+environment, not a hosted connector or a new isolation guarantee. No keys, model
+downloads, external adapters, or additional credential mounts are configured.
+
+The image and first dependency install need internet. Codespaces compute and
+storage follow the reader's account rules. Stopping ends running processes but
+retains storage, so link to GitHub's billing explanation rather than promise
+unlimited free use.
+
+Validated the configuration with Dev Containers CLI 0.90.0 and Docker locally.
+The clean-checkout five-minute demo passed all 231 tests, evaluation, usage, and
+citation rejection on Linux arm64 with Python 3.11.18. Docker reported no
+published ports or privileged mode. No hosted codespace was created. Keep that
+untested browser path explicit in the README.
+
 ## Recorded walkthrough and Inspector output (2026-11-17)
 
 Make the existing proof visible without asking every reader to install the demo.
