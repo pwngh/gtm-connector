@@ -91,6 +91,10 @@ class OllamaTests(unittest.TestCase):
         self.assertEqual(payload["format"]["required"], ["lines"])
         self.assertFalse(payload["format"]["additionalProperties"])
         self.assertNotIn("tools", payload)
+        system = payload["messages"][0]["content"]
+        self.assertNotIn("additionalProperties", system)
+        self.assertIn("Do not repeat a JSON schema", system)
+        self.assertTrue(system.endswith('{"lines":["..."]}'))
         self.assertEqual(json.loads(payload["messages"][1]["content"]), {"supported_claims": lines})
         for secret in ("never-send-owner", "never-send-token", "never-send-fingerprint", '"receipts"'):
             self.assertNotIn(secret, self.requests[-1].content.decode())
