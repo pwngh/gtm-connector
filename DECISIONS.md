@@ -15,11 +15,12 @@ upstream dependency of full-stop; its merge permission does not apply here.
 Only the user may merge.
 
 GitHub CLI is authenticated as pwngh. Native subagents expose OpenAI models,
-including GPT Sol. Claude CLI reports loggedIn=false. No Gemini CLI or
-multi-provider delegation tool is available in this session. Council requires
-three providers and prohibits silent substitution. No provider calls were
-made. The user's explicit unavailable-model stop rule therefore keeps the
-project on a local branch until those review routes are available.
+including GPT Sol. Claude CLI authentication was verified after the user signed
+in with an existing subscription. No Gemini CLI or multi-provider delegation
+tool is available in this session. Council requires three providers and
+prohibits silent substitution. No model inference calls were made. The user's
+explicit unavailable-model stop rule therefore keeps the project on a local
+branch until the third-provider review route is available.
 
 ## Specification research
 
