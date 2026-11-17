@@ -30,7 +30,7 @@ Call notes live separately in `calls.sqlite3`, which holds 29 notes. Account
 
 `slack.sqlite3` holds 29 messages in account-specific channels. Account
 `acc-005` has none. `msg-003` reports delayed security review and pending
-procurement, while `msg-007` asks the model to invoke a write.
+procurement, while `msg-007` contains an instruction to invoke a write.
 Both remain quoted source data.
 
 On the fixed demo date `2027-01-15`, `acc-001` renews in 17 days and `acc-002`

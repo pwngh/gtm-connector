@@ -39,7 +39,7 @@ redirect without a browser or callback listener. This is not production consent.
 
 ## Keep the services running
 
-You can keep the services running from the repository root after setup:
+You can start the services from the repository root after setup and leave them running:
 
 ```sh
 .venv/bin/python -m gtm_connector serve

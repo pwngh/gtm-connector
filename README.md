@@ -190,7 +190,7 @@ untrusted data, each with a `record_ref`. Before returning the result, the gatew
 finalizes the receipt: a record of the attempt and its outcome.
 
 The briefing workflow requests read scopes only. The default brief has three
-receipts. `--with-slack` adds a fourth read and a checked follow-up draft.
+receipts. `--with-slack` adds a fourth read and a checked follow-up proposal.
 
 Returned records and receipts form a saved evidence snapshot. The drafter gets a
 copy, without a token or tool interface. Each candidate line must match supported

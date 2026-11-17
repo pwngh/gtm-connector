@@ -67,7 +67,8 @@ npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/in
 
 The gateway returns HTTP 403. Inspector exits 1 with empty stdout and reports
 `Insufficient scope: required "calls:read"` in its stderr JSON error.
-`--stored-auth-only` prevents interactive login. The client does not request more scopes.
+`--stored-auth-only` prevents interactive login. With that flag, the client also
+requests no additional scopes.
 
 An explicit calls grant lets the same Inspector command read the notes:
 
