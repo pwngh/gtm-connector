@@ -19,7 +19,8 @@ plain and finish one runnable PR slice at a time. Use Python and SQLite.
 
 ## Four pull requests
 
-Keep the project to these four runnable slices. Do not add a web interface.
+The initial build shipped in these four runnable slices. Do not add a web
+interface.
 
 1. Seeded CRM, CLI inspection, and data tests.
 2. MCP tools, local authorization, separate CRM and calls permissions, audit,
@@ -31,6 +32,33 @@ Keep the project to these four runnable slices. Do not add a web interface.
 4. Twenty-account evaluation with recorded README scores, one-page security
    review, audit-based usage by token/tool/day and model tokens per brief,
    README polish, and a five-minute clean-checkout demo.
+
+## Requested follow-up
+
+5. Finish the README for a hiring manager who has two minutes. This pull request
+   changes documentation only. Lead with the purpose, test-linked guarantees,
+   real output, a Mermaid request-path diagram, and the run commands. Move
+   reference material into `docs/` without losing limits. Add no behavior
+   changes, including the reliability fixes preserved on a separate local
+   branch. Verify every README command from a clean checkout, every output
+   against that run, every link, and the rendered page on GitHub. Run one council
+   round using only the README and the three reader questions below. Fix the
+   points raised by two or more members. File the PR and leave the merge to the
+   user. Do not change the resume or cover letter.
+
+Keep the separately requested MCP Inspector and standard-client compatibility
+work in its own implementation PR. This documentation branch must continue to
+describe the behavior already on main. Do not imply Inspector compatibility,
+change protocol behavior, or add a drafting model here. The next separate
+implementation slices are an optional local Ollama drafter, an isolated mock
+Slack source with a cited follow-up draft, and an optional read-only Salesforce
+Developer Edition adapter, in that order. Keep each in its own PR. The default
+demo and CI remain model-free and need no external keys.
+
+For the documentation council, give every member only the README and ask:
+what does the project do, what is proven, and what confused you? This is one
+round, not another code council. Record each member's answers, exact model ID,
+effort, round, and returned score or `no score` in the PR description.
 
 Keep fixture IDs stable and readable across reseeds. Use synthetic display
 labels, not plausible company, person, or product names. Preserve examples of

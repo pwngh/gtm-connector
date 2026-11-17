@@ -21,8 +21,8 @@ demo_state='/replace/with/printed/output/directory/state'
 
 ## 0:00 to 1:00: show the boundary
 
-Open [README.md](README.md). Point to the five tools and their independent
-`crm:read`, `crm:write`, and `calls:read` scopes. One MCP connector fronts two
+Open [README.md](README.md), then the [five tools and their scopes](docs/tools.md).
+Point to the independent `crm:read`, `crm:write`, and `calls:read` grants. One MCP connector fronts two
 SQLite source stores. The local authorization server uses S256 PKCE.
 
 Read the connector results. There are 30 accounts. The CRM token receives
@@ -93,5 +93,4 @@ Snapshot files are not tamper-proof or crash-safe. Custom Python adapters are
 not sandboxed. No real CRM integration, web interface, or multi-tenant behavior
 is included.
 
-Show the measured scores in the README and the passing test result. Leave the
-pull request open for the reviewer to inspect and merge.
+Show the measured scores in the README and the passing test result.
