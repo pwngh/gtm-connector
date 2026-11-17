@@ -1,6 +1,6 @@
 # Usage reporting
 
-The report counts tool attempts and model tokens recorded in saved briefs.
+The report counts tool attempts from audit receipts and model tokens from saved briefs.
 
 These commands report usage from the repository root after setup. The
 placeholder takes a generated brief ID:

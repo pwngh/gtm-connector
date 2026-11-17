@@ -34,7 +34,7 @@ what ran. It refuses a changed working tree, except for generated files in `docs
 
 The script installs existing Python requirements and downloads the pinned
 Inspector package if uncached. It runs `./scripts/demo.sh` in fresh fixture
-state. Only selected output reaches the terminal; the capture excludes the
+state. The recording script controls what reaches the terminal; the capture excludes the
 desktop, a user's shell prompt, and keyboard input.
 
 Generated files live in `docs/media/`:

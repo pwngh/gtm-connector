@@ -1,8 +1,7 @@
 # Tools and source data
 
-Six tools read customer records or log an activity, a note about an account
-interaction. They use three local SQLite source stores. Run these commands from
-the repository root.
+Six tools read from three local SQLite source stores or log an activity, a note
+about an account interaction. Run these commands from the repository root.
 
 | Tool | Required scope | Records returned |
 | --- | --- | --- |
@@ -119,8 +118,8 @@ is missing. The account view excludes opportunities and call notes.
 ```
 
 Tests run the real HTTPS CLI flow with temporary data. They cover stable fixtures
-and edge cases, independent scopes, invalid tokens, and PKCE. Authorization tests
-also check resources, issuers, and protocol headers.
+and edge cases, independent scopes, invalid tokens, and PKCE. They also check
+resources, issuers, and protocol headers.
 
 Gateway tests cover one receipt per tool attempt, audit failures, rate limits,
 and idempotency. Brief tests distinguish denied and empty notes, preserve

@@ -1,7 +1,7 @@
 # Read a Salesforce Developer Edition org
 
-This option reads accounts and opportunities from a Developer Edition org,
-a test Salesforce environment you supply. The three CRM read tools use Salesforce
+This option reads accounts, contacts, and opportunities from a Developer Edition
+org, a free Salesforce development org you supply. The three CRM read tools use Salesforce
 REST v68.0; call notes and Slack keep their isolated SQLite stores.
 
 Default demos, evaluation, and model benchmarks still use invented records.
@@ -70,8 +70,8 @@ Search returns at most 100 accounts; refine the query after
 `salesforce_result_limit`. Opportunity and contact queries also reject results
 over 100 rows rather than return partial answers.
 
-The external backend lists five read tools without `log_activity`. A direct
-write attempt with a valid grant returns HTTP 403 and `crm_write_disabled`,
+The external backend lists five read tools; the write tool `log_activity` is absent.
+A direct write attempt with a valid write grant returns HTTP 403 and `crm_write_disabled`,
 creating no activity locally or remotely. Mock call notes and Slack have no
 ID mapping from external accounts to fixture notes or messages.
 
@@ -98,7 +98,7 @@ Results carry `source: crm`, `untrusted_data: true`, and a `record_ref` under
 | Opportunity | `Name` to `name`; raw `StageName` to `stage`; `CloseDate` to `close_date`; `IsClosed` and `IsWon` to `is_closed` and `is_won`; `AccountId` to namespaced `account_id` or null |
 | Opportunity amount | `Amount` to `amount_decimal`, a decimal string or null; `currency` is null, meaning unknown |
 
-`CurrencyIsoCode` is unavailable in some orgs, so currency remains unknown.
+`CurrencyIsoCode` is unavailable in some orgs. The adapter always leaves currency unknown.
 The adapter does not treat `Account.AnnualRevenue` as ARR or `CloseDate` as a
 renewal date. It preserves custom stages and invents no renewal risk.
 
@@ -168,6 +168,7 @@ enforcement, pending audit receipts, and offline defaults.
 Responses are synthetic, not recorded from an org; no Salesforce token is
 required. [Adapter tests](../tests/test_salesforce.py),
 [Gateway tests](../tests/test_salesforce_gateway.py), and [CLI tests](../tests/test_salesforce_cli.py)
+cover these cases.
 
 The trusted local file owner can grant CRM access. Read-only behavior comes
 from the adapter's GET-only interface and absent write tool; the upstream token

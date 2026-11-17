@@ -7,8 +7,8 @@ The server implements [MCP revision 2026-07-28](https://modelcontextprotocol.io/
 and its [authorization section, revision 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization).
 Both were read on **2026-11-17**. The official Python SDK is pinned to **2.3.0**.
 
-Requests carry protocol metadata over stateless Streamable HTTP with
-`server/discover`. Only this protocol revision is accepted.
+The transport is stateless Streamable HTTP with per-request protocol metadata
+and `server/discover`. Only this protocol revision is accepted.
 Subscriptions and legacy initialization sessions are not supported.
 [DECISIONS.md](../DECISIONS.md) explains the checks the gateway adds to the SDK.
 
@@ -23,13 +23,13 @@ clients is not claimed.
 ## Local authorization
 
 The local owner approves explicit scopes for one pre-registered public CLI
-client. S256 PKCE binds the authorization-code exchange to that client. Codes
-expire after 60 seconds and can be used once; opaque tokens last five minutes.
+client. S256 PKCE requires the code exchange to present a verifier matching the
+original challenge. Codes expire after 60 seconds and can be used once; opaque tokens last five minutes.
 The flow binds access to the resource and checks state and issuer.
 
 Both services use HTTPS on `127.0.0.1`. The client trusts only the locally
-generated certificate, leaving system trust and certificate verification
-unchanged. Browser origins are rejected. A restart invalidates all tokens and
+generated certificate without changing system trust or disabling verification.
+Browser origins are rejected. A restart invalidates all tokens and
 authorization codes. Refresh tokens and dynamic client registration are not
 supported.
 
@@ -39,8 +39,7 @@ redirect without a browser or callback listener. This is not production consent.
 
 ## Keep the services running
 
-The services stay running with this command, issued from the repository root
-after setup:
+You can keep the services running from the repository root after setup:
 
 ```sh
 .venv/bin/python -m gtm_connector serve

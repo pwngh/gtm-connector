@@ -30,9 +30,8 @@ after setup. Replace the placeholder with the generated brief ID:
 .venv/bin/python -m gtm_connector audit --brief brief-REPLACE_WITH_ID
 ```
 
-The command lists all receipts without `--brief`; `--state-dir PATH` selects
-another directory.
-The command opens SQLite read-only without initializing tables or changing
+Omitting `--brief` lists all receipts; `--state-dir PATH` selects another state
+directory. The audit command opens SQLite read-only without initializing tables or changing
 permissions. A missing database or receipt schema is an error.
 [Inspection tests](../tests/test_audit_reader.py) cover these cases;
 [Usage reporting](usage.md) provides a read-only summary.
@@ -48,7 +47,7 @@ the allowance. This local guard does not enforce a distributed quota.
 
 ## Idempotent writes
 
-`log_activity` takes an account ID, kind, body, and idempotency key. Retrying the
+`log_activity` requires an account ID, kind, body, and idempotency key. Retrying the
 same key and payload returns the original activity; changing the payload returns
 `idempotency_conflict`. Keys are unique across this local CRM. Record contents
 cannot trigger writes, and there are no update or delete tools.

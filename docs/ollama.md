@@ -1,7 +1,7 @@
 # Local model drafting
 
-Ollama lets a local model assemble a renewal brief: an account summary for a
-contract-renewal call. The citation checker must accept it before publication.
+Ollama lets a local model assemble a renewal brief. The citation checker must
+accept it before publication.
 
 The default demos and CI use fixed drafting (the fixture adapter), with no
 inference service or model download. The optional adapter calls only
@@ -71,10 +71,10 @@ semantic truth. No rejected lines means no evidence that hallucinations were
 caught. With no published lines, invention rate is `null`, not a perfect score.
 See [scoring rules](evaluation.md).
 
-The operator must trust the local service and its model metadata. Rejecting cloud
-suffixes and remote metadata cannot sandbox a malicious replacement service.
-Environment proxies and redirects are disabled. Existing snapshot, retention,
-and file-owner limits still apply.
+The operator must trust the local service and its model metadata. The adapter
+rejects cloud suffixes and remote metadata, disables environment proxies, and
+follows no redirects. Those checks cannot sandbox a malicious replacement service.
+Existing snapshot, retention, and file-owner limits still apply.
 
 This guide uses API references read on 2026-11-17:
 [chat](https://docs.ollama.com/api/chat),

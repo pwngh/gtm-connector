@@ -1,8 +1,8 @@
 # Evaluation
 
-The evaluation checks renewal briefs, account summaries for contract-renewal
-calls. It measures which expected claims appear and whether they cite the right
-records. Rejected drafts receive no credit for unpublished text.
+The evaluation measures which expected claims appear in renewal briefs and
+whether they cite the right records. Rejected drafts receive no credit for
+unpublished text.
 
 Evaluation runs from the repository root after setup:
 
@@ -10,7 +10,7 @@ Evaluation runs from the repository root after setup:
 .venv/bin/python -m gtm_connector evaluate
 ```
 
-Each run makes 60 HTTPS tool calls for `acc-001` through `acc-020` in fresh
+The default evaluation makes 60 HTTPS tool calls for `acc-001` through `acc-020` in fresh
 temporary state. It neither reads nor changes the operator's CRM. The default
 runs no model.
 [expected.json](../evaluation/expected.json) defines 182 expected claims and

@@ -1,7 +1,7 @@
 # Account-channel context
 
-A renewal brief summarizes an account before a contract-renewal call. This option
-adds the team's account-channel context using invented Slack messages.
+This option adds the team's account-channel context to a renewal brief using
+invented Slack messages.
 
 `read_slack_messages` requires an independent `slack:read` grant. Its
 `slack.sqlite3` store stays separate from CRM, calls, and audit. It uses no Slack
@@ -23,7 +23,7 @@ default three reads, it calls `read_slack_messages`, never requesting
 cannot read CRM or call notes. Every attempt is audited.
 
 Default briefs, evaluation, and the five-minute script retain their two-source
-workflow and measured 182-claim baseline. Slack selects four-read briefs and
+workflow and measured 182-claim baseline. The Slack option selects four-read briefs and
 extended expectations; fixture drafting still runs without a model. Ollama
 accepts `--with-slack`, but its recorded benchmark covers the default two-source
 task only. No three-source model score is claimed.
@@ -50,9 +50,9 @@ These lines were captured from the documented `acc-003` command:
 - Proposed follow-up: Ask the account owner to confirm procurement and security review status. [crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]
 ```
 
-`msg-007` asks the reader to invoke `log_activity`. The workflow quotes it as
+`msg-007` contains an instruction to invoke `log_activity`. The workflow quotes it as
 data, performs its fixed reads, and creates no activity. The model receives no
-tool interface. This test proves the boundary, not the truth of arbitrary source
+tool interface. This test checks the boundary, not the truth of arbitrary source
 text.
 
 An empty successful read produces a statement that no messages were returned,
@@ -63,7 +63,7 @@ Other failures stop the brief.
 ## Follow-up proposal
 
 The extended brief requires exactly one supported `Proposed follow-up:` line,
-a draft request to the account owner. For the recognized conflict, it asks to
+a suggested next step. For the recognized conflict, it asks to
 confirm procurement and security review status, citing all three records. If
 only the CRM/calls conflict is known, it covers procurement and cites those two
 records. Otherwise it asks for review of renewal context and cites the account.
@@ -76,8 +76,8 @@ brief. No separate unchecked model field or sending tool exists.
 ## Snapshots and evaluation
 
 Four-read evidence uses `workflow_version: 2`. Missing version or explicit
-version `1` means existing three-read evidence. A saved snapshot fetches no new
-sources. Version 1 rejects Slack records, receipts, or status; unknown versions
+version `1` means existing three-read evidence. The checker fetches no new sources
+when checking a saved snapshot. Version 1 rejects Slack records, receipts, or status; unknown versions
 fail. Rejected and legacy artifacts gain no follow-up field.
 
 The expected manifest retains its original 182 claim objects. Static Slack

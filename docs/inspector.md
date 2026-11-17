@@ -2,17 +2,18 @@
 
 Inspector is a test client for MCP servers. Inspector 2.15.0 discovers and calls
 the connector's tools through its existing Streamable HTTP endpoint, using
-MCP 2026-07-28. TLS verification stays on. Its explicitly scoped bearer token
-faces the same authorization, audit, and rate-limit checks as the included client.
+MCP 2026-07-28. TLS verification stays on. Tool calls use an explicitly scoped
+bearer token and pass through the same authorization, audit, and rate-limit checks
+as the included client.
 
-`./scripts/demo.sh` installs the Python dependencies first. This optional
+You must run `./scripts/demo.sh` first to install the Python dependencies. This optional
 client also requires Node 22.23.4+, 24.22.1+, or 26.12.1+ and `npx`. The first
 Inspector invocation downloads its pinned npm package. Neither default demo
 script needs Node or Inspector.
 
 ## Start the server
 
-The server runs in one terminal:
+The server must stay running in one terminal while you use the client:
 
 ```sh
 .venv/bin/python -m gtm_connector serve --state-dir var/inspector
@@ -66,7 +67,7 @@ npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/in
 
 The gateway returns HTTP 403. Inspector exits 1 with empty stdout and reports
 `Insufficient scope: required "calls:read"` in its stderr JSON error.
-`--stored-auth-only` prevents interactive login without requesting more scopes.
+`--stored-auth-only` prevents interactive login. The client does not request more scopes.
 
 An explicit calls grant lets the same Inspector command read the notes:
 

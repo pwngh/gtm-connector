@@ -1,7 +1,7 @@
 # Briefs and citations
 
 A renewal brief summarizes an account before a contract renewal conversation.
-Its claims cite saved records and must pass the checker before publication.
+Its claims cite saved evidence and must pass the checker before publication.
 Citations identify sources; they do not prove those sources are true.
 
 These brief commands run from the repository root after setup:
@@ -29,8 +29,8 @@ The `--as-of YYYY-MM-DD` option replaces the fixed demo date. `--json` prints
 the full saved result, and `--state-dir PATH` selects another state directory.
 
 The `--with-slack` option adds a fourth read under `slack:read`, a three-source
-conflict flag, and a cited `proposed_follow_up`. This suggested message to the account
-owner is checked but never sent. The default three-read workflow stays unchanged.
+conflict flag, and a cited `proposed_follow_up`. This suggested next step is
+checked but never sent. The default three-read workflow stays unchanged.
 See [Slack context](slack.md).
 
 ## What the citations mean
@@ -55,9 +55,9 @@ These lines come from `brief acc-003 --json`:
 
 The flag is required when `closed_won` appears with that exact note body for the
 same account. Both records must be cited; their disagreement stays unresolved.
-The rule does not infer conflicts from other wording or unreadable notes. It is
-not a general contradiction detector. Regenerate older `acc-003` briefs without
-the flag: `check-brief` applies current rules to saved evidence.
+The rule does not infer conflicts from other wording or notes the caller cannot
+read. It is not a general contradiction detector. Regenerate an older `acc-003`
+brief if it lacks the flag; `check-brief` applies current rules to saved evidence.
 
 ## Inspect the saved result
 
@@ -65,8 +65,8 @@ the flag: `check-brief` applies current rules to saved evidence.
 .venv/bin/python -m gtm_connector brief acc-003 --json
 ```
 
-The JSON includes `schema_version`, `brief_id`, `account_id`, `as_of`, and
-`adapter`, followed by `model_usage`, `status`, `evidence`, and `text`.
+The JSON contains `schema_version`, `brief_id`, `account_id`, `as_of`, `adapter`,
+`model_usage`, `status`, `evidence`, and `text`.
 This fixture run returns:
 
 | Field | Value |
@@ -104,9 +104,9 @@ to stdout, and writes this error to stderr:
 error: Brief contains an uncited, unsupported, or misattributed statement.
 ```
 
-The checker accepts fixed supported claims with exact record references.
-Uncited sentences fail, as do invented values or wrong citations. Appended claims
-and direct tool requests also fail. It cannot assess arbitrary paraphrases or
+The checker accepts fixed supported claims with exact record references. It
+rejects uncited sentences, invented values, wrong citations, appended claims,
+and direct tool requests. The checker cannot assess arbitrary paraphrases or
 establish semantic entailment.
 
 A passing brief can still omit supported facts; the

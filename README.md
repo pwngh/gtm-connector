@@ -5,9 +5,9 @@ renewal. This project drafts one from a mock CRM (customer records) and call
 notes, with optional Slack account messages. Each statement cites its source or
 audit record.
 
-An MCP (Model Context Protocol) server controls access through scoped tokens and
-logs recognized tool calls. A rep who gets one wrong answer about an account
-stops opening the tool, so the checker rejects any line it cannot tie to a record.
+The MCP (Model Context Protocol) server gives clients scoped access to these
+sources and logs recognized tool calls. The brief checker requires supported
+wording and matching citations.
 
 The command `./scripts/demo.sh` installs dependencies, then runs the tests and
 demo on invented data from a clean checkout. The first install needs internet; the
@@ -15,8 +15,8 @@ default runtime needs no external service or key.
 
 [![Terminal recording of the fixture demo, cited brief, scope denial, and rejected sentence](docs/media/walkthrough.gif)](docs/recording.md)
 
-The recording follows real commands on fresh fixtures, with selected output and
-shortened waits. No model runs.
+This scripted recording runs real commands on fresh fixtures, with selected
+output and shortened waits. No model runs.
 [Transcript](docs/media/recording-session.txt),
 [capture details](docs/media/recording-provenance.json), and
 [rerun instructions](docs/recording.md).
@@ -50,8 +50,6 @@ not whether a source is true.
   [conflict test](tests/test_citations.py#L150)
 
 ## What the mocks stand for
-
-The default run uses local stand-ins for these sales systems.
 
 | Mock | What it represents |
 | --- | --- |
@@ -155,8 +153,8 @@ from `20:51:09` to `20:53:23` UTC. The response identified the model as
 | Reported input / output tokens | 0 / 0 | 3384 / 5500 |
 
 The model emitted 182 candidate lines. All 20 candidates were scored, with zero
-lines rejected. Local inference passed through the checker, but this run shows
-no hallucination and none being caught.
+lines rejected. Local inference passed through the checker. This run provides no
+evidence that the model hallucinated or that the checker caught a hallucination.
 
 The model's task is fixed-claim assembly. Separate adverse tests supply uncited,
 invented, miscited, duplicate, and action-shaped candidates. Each fails without
@@ -207,7 +205,8 @@ operator check another candidate against the same records later.
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/pwngh/gtm-connector)
 
-The link above opens Codespaces setup for a browser terminal. The
+You can create a codespace through the link above, then run the command below
+in its browser terminal. The
 [development container](.devcontainer/devcontainer.json)
 supplies Python 3.11; the demo installs its dependencies. Setup needs internet.
 Client and services run inside the container with automatic port forwarding disabled.
@@ -287,8 +286,8 @@ service.
 .venv/bin/python -m gtm_connector evaluate --with-slack
 ```
 
-This requires `slack:read` and a fourth audited read. The output includes
-`proposed_follow_up`, an unsent message copied from the checked brief. The
+This adds a `slack:read` grant and a fourth audited read. The output includes
+`proposed_follow_up`, a suggested next step copied from the checked brief. The
 `acc-003` fixture flags the CRM, call-note, and Slack disagreement with all three
 references. The proposal sends nothing.
 [Slack fixtures, denial cases, and limits](docs/slack.md)
@@ -333,8 +332,8 @@ Retry the same key and reconcile any pending row. The audit CLI reads existing
 receipts without initializing tables or changing file permissions.
 [Audit details](docs/audit.md)
 
-Usage reporting reads local records and groups attempts by credential, tool, and
-UTC day. Rejected credentials and `anonymous` count too. Unknown model usage
+Read-only usage reporting groups attempts by credential, tool, and UTC day.
+Rejected credentials and `anonymous` count too. Unknown model usage
 stays `null`, and totals cover saved snapshots only. [Usage details](docs/usage.md)
 
 The implemented MCP and authorization revision is **2026-07-28**, read
@@ -352,7 +351,7 @@ or multi-tenant behavior is included.
 
 ## Reference
 
-[Tools and fixture data](docs/tools.md) describes arguments and permissions.
+[Tools and fixture data](docs/tools.md) documents each tool and its required scope.
 [Design decisions](DECISIONS.md) explains the choices;
 [Rules the coding agents worked under](AGENTS.md) records the constraints.
 
