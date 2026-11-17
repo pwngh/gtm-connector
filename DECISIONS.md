@@ -1,5 +1,31 @@
 # Decisions
 
+## Saved evidence and audit inspection (2026-11-17)
+
+Finish the reliability work that was parked while the optional adapters shipped.
+Port the persistence and inspection fixes onto current main. Keep the existing
+source adapters, scopes, draft checker, evaluation results, and README structure.
+
+Serialize a brief before opening any file. Write it to a private temporary file
+in the same directory, close it, then replace the destination atomically. Readers
+see a complete old or new snapshot. A failed write or replacement keeps the
+previous snapshot, which may still say collected. A failed first save prevents
+drafting. Ordinary failures remove the temporary file; a killed process can
+leave one behind. Temporary names do not match saved-brief JSON files, so usage
+reporting ignores them. Retention remains manual.
+
+Do not claim power-loss durability or signed evidence. There is no file or
+directory fsync. The local owner can still change or delete the files. This
+change protects an existing snapshot from an interrupted replacement, not from
+an untrusted operator. The SQLite audit keeps its separate durability behavior.
+
+Audit inspection must not run the writer's initializer. Open the existing file
+with SQLite mode=ro, select the expected receipt columns, and preserve row order
+and brief filtering. Missing databases or schemas are errors, not empty logs to
+initialize. Keep audit creation and write-time permission setup in AuditLog.
+A malformed saved brief or evidence container must produce a CLI error instead
+of an AttributeError traceback. The citation rules stay unchanged.
+
 ## Optional Salesforce reads (2026-11-17)
 
 Select the external reader only with `serve --crm-backend salesforce`. Environment
@@ -429,10 +455,10 @@ same records later; it does not consult a later, possibly changed CRM. The local
 file owner remains trusted, so these snapshots are neither signed nor
 tamper-proof. Retention is manual, as for the other local state.
 
-Snapshot file replacement is not atomic. An interrupted write can leave partial
-JSON instead of a usable snapshot; the checker rejects it and the operator must
-generate a new brief. Crash-safe snapshot replacement is deferred. The separate
-SQLite audit receipts retain their existing durability behavior.
+Snapshot saves now use atomic replacement, as described above. A failed write
+keeps the previous complete snapshot. If no snapshot was saved, generate a new
+brief. No power-loss durability is claimed. The separate SQLite audit receipts
+retain their existing durability behavior.
 
 Record fixture model usage as model `null` and zero input/output tokens because
 no model ran. For custom Python adapters, record unknown token counts as `null`

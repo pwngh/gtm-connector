@@ -104,9 +104,13 @@ cites all three records. The follow-up is a checked proposal, never a sent
 message or a promise. It cannot create an activity or contact an external service.
 Legacy three-read snapshots cannot introduce Slack evidence or a follow-up.
 
-Snapshot writes are not atomic. An interrupted write can leave unusable JSON;
-generate a new brief. Custom Python adapters are trusted application code and
-are not sandboxed. The CLI cannot load them.
+Snapshot saves write a mode-0600 temporary file, then replace the destination
+atomically. A failed replacement keeps the previous complete snapshot. There is
+no power-loss durability guarantee. A killed process can leave a private temporary
+file, which follows the same manual retention rule. Audit inspection opens the
+existing database read-only without initializing tables or changing permissions.
+Custom Python adapters are trusted application code and are not sandboxed. The
+CLI cannot load them.
 
 ## Optional Salesforce boundary
 

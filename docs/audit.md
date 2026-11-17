@@ -29,10 +29,10 @@ setup. Replace the placeholder with the generated brief ID:
 ```
 
 Omit `--brief` to inspect all receipts. Use `--state-dir PATH` for another state
-directory. The audit command opens the store through its initializer. It can
-set the database file's permissions to 0600 and create a missing `audit_log`
-table in an existing database file. It is not a strictly read-only command.
-[Usage reporting](usage.md) provides a read-only summary.
+directory. The audit command opens the existing database in SQLite read-only
+mode. It does not initialize tables or change file permissions. A missing database
+or receipt schema is an error. [Inspection tests](../tests/test_audit_reader.py)
+cover these cases. [Usage reporting](usage.md) provides a read-only summary.
 
 ## Rate limits
 

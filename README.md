@@ -289,11 +289,12 @@ No live org has been verified. [Setup, field mapping, and limits](docs/salesforc
   empty or denied outcome and a cited follow-up proposal. [Brief limits](docs/briefs.md)
 - Authorization uses a local owner emulator. The file owner can request every
   scope and alter the stores. Retention is manual. Audit records and snapshots
-  are not tamper-proof; snapshot writes are not atomic.
+  are not tamper-proof. Snapshot replacement is atomic, but it does not guarantee
+  power-loss durability.
   [Security review](SECURITY_REVIEW.md)
 - Audit finalization can return HTTP 503 after a committed write. Retry the same
-  key and reconcile any pending row. The audit CLI can initialize its table and
-  change file permissions. [Audit details](docs/audit.md)
+  key and reconcile any pending row. The audit CLI reads existing receipts without
+  initializing tables or changing file permissions. [Audit details](docs/audit.md)
 - Read-only usage reporting groups credentials, tools, and UTC days. Rejected
   credentials and `anonymous` count too. Unknown model usage stays `null`, and
   totals cover saved snapshots only. [Usage details](docs/usage.md)
