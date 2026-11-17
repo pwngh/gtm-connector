@@ -90,7 +90,8 @@ test fixture coverage and citation handling, not model reasoning quality.
 Open [SECURITY_REVIEW.md](SECURITY_REVIEW.md). Local file ownership is the trust
 boundary. The owner credential can request every scope. Audit arguments and
 evidence snapshots persist until the operator removes the state directory.
-Snapshot files are not tamper-proof or crash-safe. Custom Python adapters are
+Snapshot files are not tamper-proof. Atomic replacement prevents partial updates,
+but does not guarantee power-loss durability. Custom Python adapters are
 not sandboxed. The default walkthrough uses no real CRM integration. The optional
 Salesforce reader requires a separate Developer Edition org and refuses briefs.
 No web interface or multi-tenant behavior is included.

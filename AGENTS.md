@@ -52,11 +52,16 @@ when the earlier change is still under review.
 8. An isolated mock Slack store, its own read scope, and a cited follow-up draft.
 9. An optional read-only Salesforce Developer Edition adapter. Never write to
    an external organization. Use HTTP fixtures in tests; request no keys.
+10. Finish the parked local reliability fixes after the feature slices merge.
+    Save brief snapshots by atomic replacement, make audit inspection read-only,
+    and reject malformed saved evidence with a clean CLI error. Port only the
+    relevant code and tests; keep the current README wording and measurements.
 
 Preserve the synthetic labels and fixed evaluation assertions until the
 explicitly scoped source expansion. Do not add write approval prompts, a web
-interface, or speculative rollout documents. Keep the separately parked
-reliability fixes out of these changes unless a slice requires one explicitly.
+interface, or speculative rollout documents. Keep the parked reliability fixes in their
+own follow-up slice. Do not restore the old prose rewrite or add unrelated
+improvements.
 
 Keep fixture IDs stable and readable across reseeds. Use synthetic display
 labels, not plausible company, person, or product names. Preserve examples of

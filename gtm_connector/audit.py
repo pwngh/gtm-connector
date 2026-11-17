@@ -10,6 +10,35 @@ import sqlite3
 import uuid
 
 
+def read_audit(path: str | Path, brief_id: str | None = None) -> list[dict]:
+    """Read existing receipts without initializing or changing the database."""
+    database = Path(path).expanduser().absolute()
+    if database.is_symlink():
+        raise ValueError("Audit database must not be a symbolic link.")
+    if not database.is_file():
+        raise ValueError("audit database not found; run the demo first")
+    query = """SELECT audit_id, started_at, token_id, tool, arguments, request_id,
+                      brief_id, status, http_status, row_count, rows, elapsed_ms, error
+               FROM audit_log"""
+    parameters = ()
+    if brief_id is not None:
+        query += " WHERE brief_id = ?"
+        parameters = (brief_id,)
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=10)) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(query + " ORDER BY rowid", parameters).fetchall()
+    records = []
+    for row in rows:
+        record = dict(row)
+        try:
+            for field in ("arguments", "request_id", "rows"):
+                record[field] = json.loads(record[field])
+        except (ValueError, TypeError, RecursionError):
+            raise ValueError("Audit receipt contains invalid JSON.") from None
+        records.append(record)
+    return records
+
+
 class AuditLog:
     def __init__(self, path: str | Path):
         self.path = Path(path).expanduser().absolute()
@@ -85,17 +114,4 @@ class AuditLog:
 
     def read(self, brief_id: str | None = None) -> list[dict]:
         """Return receipts in insertion order, optionally for one brief."""
-        query = "SELECT * FROM audit_log"
-        parameters = ()
-        if brief_id is not None:
-            query += " WHERE brief_id = ?"
-            parameters = (brief_id,)
-        with closing(self._connect()) as connection:
-            rows = connection.execute(query + " ORDER BY rowid", parameters).fetchall()
-        records = []
-        for row in rows:
-            record = dict(row)
-            for field in ("arguments", "request_id", "rows"):
-                record[field] = json.loads(record[field])
-            records.append(record)
-        return records
+        return read_audit(self.path, brief_id)

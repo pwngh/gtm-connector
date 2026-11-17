@@ -81,8 +81,9 @@ gain a follow-up field.
 The expected manifest preserves its original 182 claim objects. Its static
 Slack extension adds message, conflict, and follow-up expectations for the same
 20 accounts. Extended evaluation uses 80 tool calls. The score still measures
-supported wording and exact references, not semantic truth. Local-owner access,
-manual retention, and non-atomic snapshots retain their existing limits.
+supported wording and exact references, not semantic truth. Local-owner access
+and manual retention retain their existing limits. Snapshot replacement is atomic;
+it does not guarantee power-loss durability.
 
 Measured with `.venv/bin/python -m gtm_connector evaluate --with-slack` on
 2026-11-17 from `21:11:19` to `21:11:21` UTC, using the fixture adapter and no model:

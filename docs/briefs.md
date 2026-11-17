@@ -115,9 +115,15 @@ text is neither printed nor saved. Saved files record `collected`, `accepted`,
 or `rejected` status and use owner-only permissions.
 
 Snapshots preserve the records read for that brief. They do not reflect later
-CRM changes and are not tamper-proof. Writes are not atomic. An interruption
-can leave partial JSON, so the operator must generate a new brief. Retention is
-manual, as described in [Audit, rate limits, and writes](audit.md).
+CRM changes and are not tamper-proof. Saves write a private temporary file and
+replace the snapshot atomically. A failed replacement leaves the previous complete
+snapshot, which may still have `collected` status. If the first save fails, drafting
+does not run. Model usage can remain unknown when the final save fails.
+
+There is no power-loss durability guarantee. A killed process can leave a private
+temporary file. Retention is manual, as described in
+[Audit, rate limits, and writes](audit.md). [Persistence tests](../tests/test_brief_persistence.py)
+cover interrupted writes and replacement failures.
 
 Custom Python adapters are not sandboxed, and the CLI cannot load one. The
 fixture records zero model tokens. Ollama records the service's reported input
