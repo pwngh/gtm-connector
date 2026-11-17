@@ -1,12 +1,15 @@
 # Account-channel context
 
-The connector exposes mock Slack messages through `read_slack_messages` and an
-independent `slack:read` grant. `slack.sqlite3` is separate from CRM, calls, and
-audit. No Slack account, API token, network request, or message sending is used.
+A renewal brief summarizes an account before a contract-renewal call. This option
+adds the team's account-channel context using invented Slack messages.
+
+`read_slack_messages` requires an independent `slack:read` grant. Its
+`slack.sqlite3` store stays separate from CRM, calls, and audit. It uses no Slack
+account, API token, or network request, and sends no messages.
 
 ## Run
 
-After setup, run from the repository root:
+These commands run from the repository root after setup:
 
 ```sh
 .venv/bin/python -m gtm_connector brief acc-003 --with-slack --json
@@ -14,31 +17,31 @@ After setup, run from the repository root:
 .venv/bin/python -m gtm_connector demo --with-slack --state-dir var/slack-demo
 ```
 
-The full brief requests `crm:read`, `calls:read`, and `slack:read`. It makes the
-same three reads as the default, then `read_slack_messages`. It never requests
-`crm:write`. The demo also proves that CRM grants cannot read Slack, and a
-Slack-only token cannot read CRM or call notes. Every attempt is audited.
+The full brief requests `crm:read`, `calls:read`, and `slack:read`. After the
+default three reads, it calls `read_slack_messages`, never requesting
+`crm:write`. The demo proves CRM grants cannot read Slack and a Slack-only token
+cannot read CRM or call notes. Every attempt is audited.
 
-The default brief, evaluation, and five-minute script retain their two-source
-workflow and measured 182-claim baseline. Selecting Slack adds four-read briefs
-and the extended expectation set. Model-free fixture drafting remains the default.
-Ollama accepts the same `--with-slack` flag, but the recorded Ollama benchmark
-covers the default two-source task only. No three-source model score is claimed.
+Default briefs, evaluation, and the five-minute script retain their two-source
+workflow and measured 182-claim baseline. Slack selects four-read briefs and
+extended expectations; fixture drafting still runs without a model. Ollama
+accepts `--with-slack`, but its recorded benchmark covers the default two-source
+task only. No three-source model score is claimed.
 
 ## Source data and claims
 
-There are 29 messages with stable IDs `msg-001` through `msg-030`, excluding
-`msg-005`. Each belongs to one synthetic account channel. References use
+The 29 messages belong to synthetic account channels. Stable IDs run from
+`msg-001` through `msg-030`, excluding `msg-005`; references use
 `slack/messages/msg-003`. `msg-002` reports a departed champion. `msg-003` says:
 
 ```text
 Security review is delayed. Procurement approval is still pending.
 ```
 
-For the same account, `opp-003` reports `closed_won` and `note-003` reports
-unapproved procurement. The additional conflict flag requires those exact
-record contents and cites all three records. It preserves the existing two-source
-flag and resolves neither source. Other wording is not a detected conflict.
+For that account, `opp-003` reports `closed_won`, while `note-003` reports
+unapproved procurement. Those exact contents trigger an additional conflict
+flag citing all three records. The existing two-source flag remains; neither
+source is resolved. Other wording does not trigger a detected conflict.
 
 These lines were captured from the documented `acc-003` command:
 
@@ -47,46 +50,45 @@ These lines were captured from the documented `acc-003` command:
 - Proposed follow-up: Ask the account owner to confirm procurement and security review status. [crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]
 ```
 
-`msg-007` contains an instruction to invoke `log_activity`. The workflow quotes
-it as data, performs only its fixed reads, and creates no activity. The model
-receives no tool interface. The test checks this boundary, not the truth of
-arbitrary source text.
+`msg-007` asks the reader to invoke `log_activity`. The workflow quotes it as
+data, performs its fixed reads, and creates no activity. The model receives no
+tool interface. This test proves the boundary, not the truth of arbitrary source
+text.
 
-Empty and denied Slack reads differ. A successful empty result cites its audit
-receipt and says no messages were returned. A matching HTTP 403 cites its denial
-receipt and says the token lacks `slack:read`. The checker requires the matching
-disclosure. Other failures stop the brief.
+An empty successful read produces a statement that no messages were returned,
+citing its audit receipt. A matching HTTP 403 instead cites the denial receipt
+and reports missing `slack:read`. The checker requires the matching disclosure.
+Other failures stop the brief.
 
 ## Follow-up proposal
 
-The extended brief requires exactly one supported `Proposed follow-up:` line.
-For the recognized conflict, it asks the account owner to confirm procurement
-and security review status and cites all three records. If only the CRM/calls
-procurement conflict is known, it asks to confirm procurement and cites those
-two records. Otherwise it asks for review of the cited renewal context and cites the account. It names no owner,
-deadline, discount, or promise that the sources did not provide.
+The extended brief requires exactly one supported `Proposed follow-up:` line,
+a draft request to the account owner. For the recognized conflict, it asks to
+confirm procurement and security review status, citing all three records. If
+only the CRM/calls conflict is known, it covers procurement and cites those two
+records. Otherwise it asks for review of renewal context and cites the account.
+It invents no owner, deadline, discount, or promise.
 
-After the entire brief passes, the artifact copies that complete cited line into
-`proposed_follow_up`. An uncited or altered proposal rejects the whole brief.
-There is no separate unchecked model field and no sending tool.
+After the entire brief passes, the artifact copies that complete cited line
+into `proposed_follow_up`. An uncited or altered proposal rejects the whole
+brief. No separate unchecked model field or sending tool exists.
 
 ## Snapshots and evaluation
 
 Four-read evidence uses `workflow_version: 2`. Missing version or explicit
-version `1` means the existing three-read evidence. The checker does not fetch
-new sources while reading a saved snapshot. Version 1 rejects Slack records,
-receipts, or status. Unknown versions fail. Rejected and legacy artifacts do not
-gain a follow-up field.
+version `1` means existing three-read evidence. A saved snapshot fetches no new
+sources. Version 1 rejects Slack records, receipts, or status; unknown versions
+fail. Rejected and legacy artifacts gain no follow-up field.
 
-The expected manifest preserves its original 182 claim objects. Its static
-Slack extension adds message, conflict, and follow-up expectations for the same
-20 accounts. Extended evaluation uses 80 tool calls. The score still measures
-supported wording and exact references, not semantic truth. Local-owner access
-and manual retention retain their existing limits. Snapshot replacement is atomic;
-it does not guarantee power-loss durability.
+The expected manifest retains its original 182 claim objects. Static Slack
+expectations add messages, conflicts, and follow-ups for the same 20 accounts.
+Extended evaluation uses 80 tool calls, scoring supported wording and exact
+references rather than semantic truth. Local-owner access and manual retention
+retain their limits. Atomic snapshot replacement does not guarantee power-loss
+durability.
 
-Measured with `.venv/bin/python -m gtm_connector evaluate --with-slack` on
-2026-11-17 from `21:11:19` to `21:11:21` UTC, using the fixture adapter and no model:
+The fixture adapter produced these results with `.venv/bin/python -m gtm_connector evaluate --with-slack`
+on 2026-11-17 from `21:11:19` to `21:11:21` UTC, using no model:
 
 | Measure | Result |
 | --- | --- |
@@ -97,4 +99,4 @@ Measured with `.venv/bin/python -m gtm_connector evaluate --with-slack` on
 | Activities created | 0 |
 | Input / output model tokens | 0 / 0 |
 
-[Recorded output and exact invocation](../evaluation/RESULTS_SLACK.json)
+The [Recorded output and exact invocation](../evaluation/RESULTS_SLACK.json) file preserves the run details.

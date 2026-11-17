@@ -73,12 +73,20 @@ Salesforce renewal-field mapping. Check main first and skip work already done.
 The first three are behavior-preserving, with existing tests unchanged.
 Stop after each open PR. The user decides when to continue.
 
+After pure request decisions, finish the separately requested README and reference
+documentation pass before starting tooling. Lead with the reader's purpose, then
+explain how the parts work and where their guarantees end. Define unfamiliar
+product terms briefly. Use tables, diagrams, and examples where they explain
+more directly than prose. Keep useful wording and vary sentence structure
+without expanding every technical term. Preserve existing commands, captured output,
+tables, numbers, links, and limits. Change no runtime behavior or tests. Record
+the scope choice in DECISIONS.md and use the same full-stop workflow.
+
 Preserve the synthetic labels and fixed evaluation assertions until the
 explicitly scoped source expansion. Write approval belongs only in its separately
 requested later slice. Do not add a web interface or speculative rollout documents.
-Keep the parked reliability fixes in their
-own follow-up slice. Do not restore the old prose rewrite or add unrelated
-improvements.
+Keep the parked reliability fixes in their own follow-up slice. The documentation
+pass has its own scope above; do not add unrelated improvements.
 
 Keep fixture IDs stable and readable across reseeds. Use synthetic display
 labels, not plausible company, person, or product names. Preserve examples of

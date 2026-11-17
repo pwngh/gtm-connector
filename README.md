@@ -1,58 +1,69 @@
 # GTM connector demo
 
-This is an MCP server in front of a mock CRM, call notes, and Slack account
-messages. It gives clients scoped access, records recognized tool calls in an
-audit log, and drafts renewal briefs that cite the source or audit record behind
-each statement.
+A renewal brief is an account summary a sales rep reads before a contract
+renewal. This project drafts one from a mock CRM (customer records) and call
+notes, with optional Slack account messages. Each statement cites its source or
+audit record.
 
-A rep who gets one wrong answer about an account stops opening the tool. The
-checker rejects any line it cannot tie to a record. The tests below prove the
-permission checks, audit boundary, write retries, and rejection of unsupported
-claims.
+An MCP (Model Context Protocol) server controls access through scoped tokens and
+logs recognized tool calls. A rep who gets one wrong answer about an account
+stops opening the tool, so the checker rejects any line it cannot tie to a record.
 
-Run `./scripts/demo.sh` from a clean checkout. It installs dependencies, runs
-the tests, and shows those cases on invented data. The first install needs
-internet; the default runtime needs no external service or key.
+The command `./scripts/demo.sh` installs dependencies, then runs the tests and
+demo on invented data from a clean checkout. The first install needs internet; the
+default runtime needs no external service or key.
 
 [![Terminal recording of the fixture demo, cited brief, scope denial, and rejected sentence](docs/media/walkthrough.gif)](docs/recording.md)
 
-This scripted recording runs real commands on fresh fixtures. It shows selected
-output and shortens long waits. No model runs.
+The recording follows real commands on fresh fixtures, with selected output and
+shortened waits. No model runs.
 [Transcript](docs/media/recording-session.txt),
 [capture details](docs/media/recording-provenance.json), and
 [rerun instructions](docs/recording.md).
 
 ## What it guarantees
 
-The default demo uses a fixed drafting step. An optional local Ollama model
-can assemble a candidate from the same supported claims. Both paths pass through
-the same checker. It verifies wording and citations, not whether a source is true.
+The default drafter uses fixed claims; an optional local Ollama model can assemble
+them too. Both pass through the same checker. It verifies wording and citations,
+not whether a source is true.
 
-- **Source permissions stay separate.** CRM, call notes, and Slack messages
-  require independent grants. Scope denials return HTTP 403.
+- **Access to one source does not grant access to another.** CRM, call notes,
+  and Slack messages require independent grants. Scope denials return HTTP 403.
   [Scope tests](tests/test_gateway.py#L182), [Slack scope tests](tests/test_slack_gateway.py)
-- **Execution depends on an audit receipt.** The gateway commits a `pending`
-  row before running a tool, then finalizes that row. If the first write fails,
-  the tool does not run. Unparseable traffic with no tool-call marker and
-  requests disconnected before execution fall outside the receipt guarantee.
+- **A tool needs an audit receipt before it runs.** The gateway commits a `pending`
+  row first and finalizes that row afterward. Failure to write the initial row
+  stops execution. The guarantee excludes unparseable traffic with no tool-call
+  marker and requests disconnected before execution.
   [Receipt test](tests/test_audit.py#L25),
   [failure test](tests/test_gateway.py#L373)
-- **Retries do not duplicate an activity.** The same idempotency key and payload
-  return the original activity. A changed payload returns
+- **Retrying a write does not duplicate the activity.** Send the same idempotency
+  key and payload to get the original activity. A changed payload returns
   `idempotency_conflict`. [Write test](tests/test_gateway.py#L293)
-- **Note instructions stay data.** The fixed workflow has a read-only token.
-  It quotes the injected note, makes its three planned reads, and creates no
-  activity. This tests the workflow boundary without a model interpreting text.
+- **A note cannot direct the fixed workflow.** Its token is read-only, and its
+  three reads are planned in advance. The injected instruction appears as quoted
+  data and creates no activity. This tests the workflow boundary without a model
+  interpreting text.
   [Injection test](tests/test_briefing.py#L134)
-- **Published claims need matching evidence.** The checker rejects uncited,
-  altered, or misattributed statements. It also requires the known conflict flag
-  to cite both records. [Citation tests](tests/test_citations.py#L54),
+- **The evidence must support the published claim.** An uncited, altered, or
+  misattributed statement fails the check. The known conflict flag must cite both
+  records. [Citation tests](tests/test_citations.py#L54),
   [conflict test](tests/test_citations.py#L150)
+
+## What the mocks stand for
+
+The default run uses local stand-ins for these sales systems.
+
+| Mock | What it represents |
+| --- | --- |
+| CRM store | The account, contact, deal, renewal, and activity records a sales team keeps. |
+| Call-note store | Notes a call-recording service would attach to those accounts. This fixture stores text only. |
+| Slack-message store | Internal account-channel messages about a renewal. This fixture has no connection to Slack. |
 
 ## See it
 
-These lines were captured for `acc-003`. The fixed demo date `2027-01-15`
-keeps renewal calculations repeatable; it is not the execution date.
+The captured brief for `acc-003` shows a deal marked won while its call note says
+approval is missing. The fixed demo date `2027-01-15` keeps renewal calculations
+repeatable; it is not the execution date.
 
 ```text
 - CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. [crm/opportunities/opp-003]
@@ -60,8 +71,8 @@ keeps renewal calculations repeatable; it is not the execution date.
 - Source conflict: CRM opportunity opp-003 reports stage "closed_won", while call note note-003 reports unapproved procurement. [crm/opportunities/opp-003] [calls/call_notes/note-003]
 ```
 
-Record claims cite `crm/...` or `calls/call_notes/...`. Empty query results
-and call-note scope denials cite the relevant `audit/...` receipt. Renewal-day
+Record claims cite `crm/...` or `calls/call_notes/...`. An empty query result or
+denied call-note grant cites its `audit/...` receipt instead. Renewal-day
 calculations also cite the saved `run/...` date.
 
 The checker accepted the captured brief. Appending `The renewal was approved.`
@@ -74,8 +85,8 @@ error: Brief contains an uncited, unsupported, or misattributed statement.
 <details>
 <summary>Inspect a real call-note receipt</summary>
 
-This is the complete receipt from the captured brief. `token_id` is a SHA-256
-fingerprint, not a reusable bearer token. IDs and timestamps vary per run.
+The complete receipt below belongs to the captured brief. Its `token_id` is a
+SHA-256 fingerprint, not a reusable bearer token. IDs and timestamps vary per run.
 
 ```json
 {
@@ -103,11 +114,11 @@ fingerprint, not a reusable bearer token. IDs and timestamps vary per run.
 
 ### Fixture evaluation
 
-The evaluation compares 20 fixed accounts with checked-in expected claims.
-Each displayed claim line counts once, including compound contact and opportunity
-statements.
+The evaluation compares briefs for 20 fixed accounts with checked-in expected
+claims. Each displayed line counts once, including compound contact and
+opportunity statements.
 
-Measured on 2026-11-17 with `.venv/bin/python -m gtm_connector evaluate`.
+The recorded run used `.venv/bin/python -m gtm_connector evaluate` on 2026-11-17.
 The adapter is `fixture`; the model is `null` because no model runs.
 
 | Measure | Result |
@@ -117,10 +128,10 @@ The adapter is `fixture`; the model is `null` because no model runs.
 | Claims cited correctly | 182 / 182 |
 | Invented claims | 0 of 182 emitted claims |
 
-The 182 of 182 counts measure fixed claim lines found and cited correctly
-against fixed expected answers. The drafter and checker share supported wording;
-these scores do not measure model quality. The run recorded 60 successful audit
-receipts, zero activities, and zero model tokens.
+The 182 of 182 counts measure fixed claim lines found and cited correctly against
+fixed answers. They do not measure model quality; the drafter and checker share
+supported wording. The run recorded 60 successful audit receipts, zero activities,
+and zero model tokens.
 [Results](evaluation/RESULTS.json)
 [Expected claims](evaluation/expected.json)
 [Scoring rules](docs/evaluation.md)
@@ -143,12 +154,13 @@ from `20:51:09` to `20:53:23` UTC. The response identified the model as
 | Unsupported published claims | 0 | 0 |
 | Reported input / output tokens | 0 / 0 | 3384 / 5500 |
 
-The model emitted 182 candidate lines. All 20 candidates were scored. The checker
-rejected zero lines in this run. This proves local inference passed through the
-gate; it does not prove the model hallucinated or that a hallucination was caught.
-The task is fixed-claim assembly. Adverse tests separately reject uncited,
-invented, miscited, duplicate, and action-shaped candidates without publishing
-any part of the failed brief.
+The model emitted 182 candidate lines. All 20 candidates were scored, with zero
+lines rejected. Local inference passed through the checker, but this run shows
+no hallucination and none being caught.
+
+The model's task is fixed-claim assembly. Separate adverse tests supply uncited,
+invented, miscited, duplicate, and action-shaped candidates. Each fails without
+publishing any part of the brief.
 [Model results and exact command](evaluation/RESULTS_OLLAMA.json)
 [Rejection tests](tests/test_model_workflow.py)
 [Local model limits](docs/ollama.md)
@@ -170,39 +182,35 @@ flowchart LR
     Check -->|"Accepted text"| Brief["Renewal brief"]
 ```
 
-The client names a tool and supplies its arguments. The local authorization
-server issues a token with named permissions, called scopes. CRM, calls, and
-Slack each need their own grant.
+The local authorization server issues a token with named permissions, called
+scopes. CRM, calls, and Slack need separate grants. The client sends its token
+with the tool name and arguments.
 
-The gateway writes a pending audit receipt, then checks the token, scope, and
-rate limit. A receipt records the attempt and its outcome. A rejected call
-stops there. An allowed tool reads its source and returns records marked as
-untrusted data, with a `record_ref` for each record. The gateway finalizes the
-receipt before returning the result.
+The gateway writes a pending audit receipt before checking the token, scope, and
+rate limit. Rejected calls stop there. Allowed tools return records marked as
+untrusted data, each with a `record_ref`. Before returning the result, the gateway
+finalizes the receipt: a record of the attempt and its outcome.
 
 The briefing workflow requests read scopes only. The default brief has three
 receipts. `--with-slack` adds a fourth read and a checked follow-up draft.
 
-The workflow saves the returned records and receipts as an evidence snapshot.
-The drafter gets a copy of that evidence. It has no token or tool interface.
-The checker compares each candidate line with supported wording and its exact
-references. Only a brief that passes the whole check is published.
+Returned records and receipts form a saved evidence snapshot. The drafter gets a
+copy, without a token or tool interface. Each candidate line must match supported
+wording and exact references.
 
-An empty call-note or Slack result and a denied grant are different outcomes.
-The brief states which occurred and cites the receipt. Other read failures stop the brief.
-A failed citation check rejects the whole draft; it does not publish the lines
-that happened to pass. Saved evidence lets the operator check another candidate
-against the same records later.
+The brief distinguishes an empty call-note or Slack result from a denied grant
+and cites the receipt. Other read failures stop it. A failed citation check
+withholds the whole draft, including lines that passed. Saved evidence lets the
+operator check another candidate against the same records later.
 
 ## Run it
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/pwngh/gtm-connector)
 
-To use a browser terminal, open the link, create a codespace, and run the command
-below. The [development container](.devcontainer/devcontainer.json) supplies
-Python 3.11. The demo installs its dependencies when you run it. Setup needs
-internet. The client and services run together inside the container; automatic
-port forwarding is disabled.
+The link above opens Codespaces setup for a browser terminal. The
+[development container](.devcontainer/devcontainer.json)
+supplies Python 3.11; the demo installs its dependencies. Setup needs internet.
+Client and services run inside the container with automatic port forwarding disabled.
 
 Codespaces uses your account's compute and storage allowance.
 [GitHub explains the billing rules](https://docs.github.com/en/billing/concepts/product-billing/github-codespaces).
@@ -212,23 +220,23 @@ stopped codespaces still use storage.
 The container passed the five-minute demo locally on Linux arm64 with Python
 3.11.18. Codespaces creation and the browser editor have not been tested.
 
-From a clean checkout:
+The demo runs from a clean checkout:
 
 ```sh
 ./scripts/demo.sh
 ```
 
-Requires macOS or Linux and Python 3.11+ with SQLite and venv support. The first
-dependency install needs internet. The runtime needs no external service,
-account, model, or API key. The script runs the test suite and two local HTTPS services.
+A local run needs macOS or Linux and Python 3.11+ with SQLite and venv support. The
+first dependency install needs internet. Runtime needs no external service,
+account, model, or API key. The script runs the tests and two local HTTPS services.
 
-With 30 invented accounts and reserved `.example` addresses, it demonstrates
-HTTP 403 scope denial, HTTP 429 rate limiting, deduplicated writes, and zero
-writes from the injected note. It creates 14 connector receipts and nine briefing
-receipts, then stops both services. State stays in the gitignored `var/v2` directory.
+The 30 invented accounts use reserved `.example` addresses. You will see HTTP 403
+for a denied read and HTTP 429 at the rate limit. Retried writes create no
+duplicates; the injected note causes zero writes. The run creates 14 connector
+receipts and nine briefing receipts, then stops both services. State stays in
+the gitignored `var/v2` directory.
 
-For the full walkthrough, including evaluation, usage, and a live citation
-rejection:
+The full walkthrough adds evaluation, usage, and a live citation rejection:
 
 ```sh
 ./scripts/five-minute-demo.sh
@@ -240,7 +248,7 @@ It prints its private output directory. Follow [the five-minute guide](DEMO.md).
 
 ![Inspector CLI tools/list response, showing the six tool names and their scopes](docs/media/inspector-cli.gif)
 
-This frame shows the names and scopes from a real Inspector CLI response.
+Inspector tests MCP servers. This frame shows tool names and scopes from a real CLI response.
 [Full tools/list JSON](docs/media/inspector-tools.json).
 It uses a supplied local grant, not an interactive login or the Inspector UI.
 
@@ -252,22 +260,24 @@ NODE_EXTRA_CA_CERTS="$PWD/var/inspector/tls.pem" npx --yes @modelcontextprotocol
 ```
 
 Inspector 2.15.0 discovers MCP 2026-07-28, lists all six tools, and reads the three
-sources through the existing gateway. The [integration check](scripts/check-inspector.py)
-proves every pair of source grants stays separate, HTTP 429, HTTP 401, and one receipt per tool
-attempt. Node and npm downloads are needed only for this optional client check.
+sources through the gateway. The [integration check](scripts/check-inspector.py)
+proves separation for every pair of source grants and one receipt per tool
+attempt. It also checks HTTP 429 and HTTP 401. Only this optional client check
+needs Node and npm downloads.
 
 ### Use a local model
 
-With Ollama running and a local model already installed:
+These commands require Ollama to be running with a model already installed:
 
 ```sh
 .venv/bin/python -m gtm_connector brief acc-003 --adapter ollama --model llama3.2:latest --json
 .venv/bin/python -m gtm_connector evaluate --adapter ollama --model llama3.2:latest
 ```
 
-The adapter never downloads a model or calls a hosted service. It rejects cloud
-aliases. The model receives supported claims from the authorized evidence, with
-no credentials or tool access. Any invalid line rejects the entire draft.
+The model gets supported claims derived from authorized evidence. It receives
+no credentials or tool access, and any invalid line rejects the entire draft.
+The adapter rejects cloud aliases; it never downloads a model or calls a hosted
+service.
 [Setup, measurements, and limits](docs/ollama.md)
 
 ### Include account-channel context
@@ -277,61 +287,61 @@ no credentials or tool access. Any invalid line rejects the entire draft.
 .venv/bin/python -m gtm_connector evaluate --with-slack
 ```
 
-This adds a `slack:read` grant, a fourth audited read, and `proposed_follow_up`
-copied from the checked brief. The `acc-003` fixture flags the CRM, call-note,
-and Slack disagreement with all three references. The proposal sends nothing.
+This requires `slack:read` and a fourth audited read. The output includes
+`proposed_follow_up`, an unsent message copied from the checked brief. The
+`acc-003` fixture flags the CRM, call-note, and Slack disagreement with all three
+references. The proposal sends nothing.
 [Slack fixtures, denial cases, and limits](docs/slack.md)
 
-Measured on 2026-11-17 at `21:11:19` UTC with the fixture adapter and no model:
-the extended evaluation found and correctly cited 223 of 223 claims, with zero
+The extended evaluation ran on 2026-11-17 at `21:11:19` UTC with the fixture adapter
+and no model. It found and correctly cited 223 of 223 claims, with zero
 invented claims, 80 audit receipts, and zero activities.
 [Exact command and results](evaluation/RESULTS_SLACK.json)
 
 ### Read a Salesforce Developer Edition org
 
-After setting `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` privately:
+The server requires `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` to be
+set privately before this command runs:
 
 ```sh
 .venv/bin/python -m gtm_connector serve --crm-backend salesforce --state-dir var/salesforce
 ```
 
-This replaces the three CRM read tools with Salesforce REST queries. It checks
-Developer Edition before reading account data. `log_activity` is unavailable;
-call notes and Slack remain separate mocks. The adapter does not map renewal
-fields, so it refuses brief generation. Tests use invented HTTP responses.
-No live org has been verified. [Setup, field mapping, and limits](docs/salesforce.md)
-
-## What the mocks stand for
-
-| Mock | What it represents |
-| --- | --- |
-| CRM store | The account, contact, deal, renewal, and activity records a sales team keeps. |
-| Call-note store | Notes a call-recording service would attach to those accounts. This fixture stores text only. |
-| Slack-message store | Internal account-channel messages about a renewal. This fixture has no connection to Slack. |
+The three CRM read tools now issue Salesforce REST queries, after checking that
+the org is Developer Edition. In this mode, `log_activity` is unavailable.
+Call notes and Slack remain separate mocks. Because renewal fields are not
+mapped, the adapter refuses brief generation. Tests use invented HTTP responses;
+no live org has been verified. [Setup, field mapping, and limits](docs/salesforce.md)
 
 ## Limits worth reading
 
-- The default drafter is a deterministic fixture. Its score measures that
-  workflow, not model quality. Optional Ollama drafting assembles fixed claims;
-  it does not support unrestricted summaries.
-- The checker accepts fixed wording and permits some omissions. Missing notes
-  and recognized conflicts must stay visible. Slack mode also requires its
-  empty or denied outcome and a cited follow-up proposal. [Brief limits](docs/briefs.md)
-- Authorization uses a local owner emulator. The file owner can request every
-  scope and alter the stores. Retention is manual. Audit records and snapshots
-  are not tamper-proof. Snapshot replacement is atomic, but it does not guarantee
-  power-loss durability.
-  [Security review](SECURITY_REVIEW.md)
-- Audit finalization can return HTTP 503 after a committed write. Retry the same
-  key and reconcile any pending row. The audit CLI reads existing receipts without
-  initializing tables or changing file permissions. [Audit details](docs/audit.md)
-- Read-only usage reporting groups credentials, tools, and UTC days. Rejected
-  credentials and `anonymous` count too. Unknown model usage stays `null`, and
-  totals cover saved snapshots only. [Usage details](docs/usage.md)
-- MCP and authorization revision: **2026-07-28**, read **2026-11-17**. Python SDK:
-  **2.3.0**. The included client and Inspector CLI 2.15.0 are tested. Other
-  assistant applications and interactive external login are unverified.
-  [Protocol details](docs/protocol.md)
+The default drafter is a deterministic fixture, so its score measures that
+workflow rather than model quality. Optional Ollama drafting also assembles
+fixed claims. It does not support unrestricted summaries.
+
+The checker accepts fixed wording and permits some omissions. Missing notes
+and recognized conflicts must stay visible. Slack mode also requires its
+empty or denied outcome and a cited follow-up proposal. [Brief limits](docs/briefs.md)
+
+Authorization uses a local owner emulator. The file owner can request every
+scope and alter the stores; audit records and snapshots are not tamper-proof.
+Retention is manual. Snapshot replacement is atomic, but it does not guarantee
+power-loss durability. [Security review](SECURITY_REVIEW.md)
+
+If audit finalization returns HTTP 503, a write may already have committed.
+Retry the same key and reconcile any pending row. The audit CLI reads existing
+receipts without initializing tables or changing file permissions.
+[Audit details](docs/audit.md)
+
+Usage reporting reads local records and groups attempts by credential, tool, and
+UTC day. Rejected credentials and `anonymous` count too. Unknown model usage
+stays `null`, and totals cover saved snapshots only. [Usage details](docs/usage.md)
+
+The implemented MCP and authorization revision is **2026-07-28**, read
+**2026-11-17**. The Python SDK version is **2.3.0**. The included client and
+Inspector CLI 2.15.0 are tested. Other
+assistant applications and interactive external login are unverified.
+[Protocol details](docs/protocol.md)
 
 The following exclusions describe the default fixture runtime. The explicitly
 selected Salesforce read adapter is described above.
@@ -342,11 +352,11 @@ or multi-tenant behavior is included.
 
 ## Reference
 
-[Tools and fixture data](docs/tools.md)
-[Design decisions](DECISIONS.md)
-[Rules the coding agents worked under](AGENTS.md)
+[Tools and fixture data](docs/tools.md) describes arguments and permissions.
+[Design decisions](DECISIONS.md) explains the choices;
+[Rules the coding agents worked under](AGENTS.md) records the constraints.
 
-Portfolio project for Preston Neal. The checked-in fixture records use synthetic
+This is a portfolio project for Preston Neal. The checked-in fixture records use synthetic
 labels. Optional Salesforce reads return records from the operator's org.
 
-MIT licensed.
+The project is MIT licensed.

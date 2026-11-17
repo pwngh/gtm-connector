@@ -1,24 +1,29 @@
 # Evaluation
 
-After setup, run this from the repository root:
+The evaluation checks renewal briefs, account summaries for contract-renewal
+calls. It measures which expected claims appear and whether they cite the right
+records. Rejected drafts receive no credit for unpublished text.
+
+Evaluation runs from the repository root after setup:
 
 ```sh
 .venv/bin/python -m gtm_connector evaluate
 ```
 
-The evaluation makes 60 HTTPS tool calls for `acc-001` through `acc-020` in fresh
-temporary state. It does not read or change the operator's CRM. The default runs no model.
+Each run makes 60 HTTPS tool calls for `acc-001` through `acc-020` in fresh
+temporary state. It neither reads nor changes the operator's CRM. The default
+runs no model.
 [expected.json](../evaluation/expected.json) defines 182 expected claims and
-their references separately from the drafting code. Only generated run and
-audit IDs come from the collected evidence.
+their references separately from the drafting code. The collected evidence
+supplies only the generated run and audit IDs.
 
-Add `--with-slack` to select the extended workflow. It makes 80 tool calls and
-appends the manifest's static Slack expectations. The original 182 claims stay
-unchanged. See [the three-source fixture](slack.md).
+`--with-slack` includes account-channel context. It makes 80 tool calls and adds
+fixed Slack expectations, preserving the original 182 claims. See
+[the three-source fixture](slack.md).
 
 ## Recorded results
 
-Measured on 2026-11-17 with the fixture adapter and as-of date `2027-01-15`:
+The fixture adapter produced these results on 2026-11-17 with as-of date `2027-01-15`:
 
 | Metric | Result |
 | --- | --- |
@@ -31,47 +36,46 @@ Measured on 2026-11-17 with the fixture adapter and as-of date `2027-01-15`:
 | Activities created | 0 |
 | Model input / output tokens | 0 / 0 |
 
-See [RESULTS.json](../evaluation/RESULTS.json) for the recorded output and counts
-for each account.
+[RESULTS.json](../evaluation/RESULTS.json) records the output and counts for each account.
 
 ## How scoring works
 
-One fact means one displayed claim line. A compound contact or opportunity
-statement counts once.
+For scoring, a fact is a displayed claim line. Compound contact and opportunity
+statements count once:
 
 - Facts found: expected text appears, even if its citation is missing or wrong.
 - Facts cited correctly: expected text appears with the exact reference set.
 - Facts invented: emitted text is not in the expected claims.
 
-Duplicate claims do not increase coverage and fail the evaluation. Failed or
-rejected briefs keep their expected claims in the denominator. They have no
-published text to score for invention. The CLI exits `2` if any case or required
-check fails.
+Duplicates fail evaluation without increasing coverage. Failed or rejected
+briefs keep their expected claims in the denominator but publish no text to
+score for invention. Any failed case or required check makes the CLI exit `2`.
 
-Separate scorer tests cover missing facts, missing or wrong references,
-invented text, appended claims, and duplicates. The score measures published
-fixture output against the fixed vocabulary. It does not measure model
-reasoning, assess arbitrary paraphrases, or establish whether a source is true.
+Scorer tests cover missing facts, missing or wrong references, invented or
+appended text, and duplicates. The score measures published fixture output
+against fixed wording. It cannot assess model reasoning or arbitrary paraphrases,
+or establish whether a source is true.
 
-See [Briefs and citations](briefs.md) for the checker and its limits.
+[Briefs and citations](briefs.md) explains the checker and its limits.
 
 ## Optional local model comparison
 
 `evaluate --adapter ollama --model NAME` uses the same twenty accounts and
-expected claims. The top-level scores still describe published text. `candidate`
-scores the actual model-returned lines in memory before the gate runs. It counts
-uncited or unsupported lines, duplicates, and omitted required disclosures.
-Unsupported text includes paraphrases, so it does not establish factual falsity.
-No rejected candidate text is saved or included in the report.
+expected claims. Top-level scores describe published text. Before the gate runs,
+`candidate` scores actual returned lines in memory. It counts uncited or
+unsupported lines, duplicates, and omitted required disclosures. Unsupported
+paraphrases need not be false. Rejected text is neither saved nor reported.
 
-`scored_briefs` and `unscored_briefs` make missing or malformed candidates visible.
+`scored_briefs` and `unscored_briefs` expose missing or malformed candidates.
 Candidate totals cover only scored candidates. Published metrics keep every
-selected expected claim in the denominator. A rejected whole brief publishes no lines,
-including any valid lines it contained. Zero published lines yield an undefined
-(`null`) invention rate. `publication_gate_passed` records the publication and
-read-only checks. `status` still requires full coverage and exits `2` otherwise.
+selected expected claim in the denominator. A rejected brief publishes none of
+its lines, even valid ones. Zero published lines means an undefined (`null`)
+invention rate.
 
-`model_usage` sums actual service counts, including rejected generations. Any
-missing count makes that dimension unknown. `model_metadata` records the selected
-model digest and service version. `run` records the command and UTC start/end
-times. See [the local-model run](ollama.md).
+`publication_gate_passed` records publication and read-only checks. `status`
+still requires full coverage and exits `2` otherwise.
+
+`model_usage` sums service counts, including rejected generations; a missing
+count makes that dimension unknown. `model_metadata` records the selected model
+digest and service version. For reproduction, `run` records the command and UTC
+start/end times. See [the local-model run](ollama.md).

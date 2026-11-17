@@ -1,7 +1,8 @@
 # Tools and source data
 
-The connector exposes six tools over three local SQLite source stores. Run the commands
-below from the repository root.
+Six tools read customer records or log an activity, a note about an account
+interaction. They use three local SQLite source stores. Run these commands from
+the repository root.
 
 | Tool | Required scope | Records returned |
 | --- | --- | --- |
@@ -13,41 +14,41 @@ below from the repository root.
 | `log_activity` | `crm:write` | An activity created or reused by idempotency key |
 
 CRM, calls, and Slack grants do not imply one another. Each tool declares its
-scope in `gtm.demo/requiredScope` metadata.
-The gateway and handler both enforce it. A scope denial returns HTTP 403.
+scope in `gtm.demo/requiredScope` metadata. The gateway and handler enforce it;
+a denial returns HTTP 403.
 
-Results include source-qualified references such as `crm/accounts/acc-001` and
-`calls/call_notes/note-007` and `slack/messages/msg-007`. Returned record content
-is marked as untrusted data.
+Each returned record has a reference that names its source, such as
+`crm/accounts/acc-001`, `calls/call_notes/note-007`, or `slack/messages/msg-007`.
+The content is marked as untrusted data.
 
 ## Fixtures
 
-`crm.sqlite3` holds 30 accounts and their contacts, opportunities, and activities.
-`calls.sqlite3` holds 29 call notes. Account `acc-004` has none. Display names use
-labels such as `Fixture account acc-001`; email addresses use reserved `.example`
-domains. The data uses no plausible company, person, or product names.
+Fixtures use labels such as `Fixture account acc-001` and reserved `.example`
+email domains, with no plausible company, person, or product names.
+`crm.sqlite3` holds 30 accounts with their contacts, opportunities, and activities.
+Call notes live separately in `calls.sqlite3`, which holds 29 notes. Account
+`acc-004` has none.
 
-`slack.sqlite3` holds 29 messages in account-specific channels. Account `acc-005`
-has none. `msg-003` reports delayed security review and pending procurement.
-`msg-007` asks the model to invoke a write. Both remain quoted source data.
+`slack.sqlite3` holds 29 messages in account-specific channels. Account
+`acc-005` has none. `msg-003` reports delayed security review and pending
+procurement, while `msg-007` asks the model to invoke a write.
+Both remain quoted source data.
 
-The fixed demo date is `2027-01-15`:
+On the fixed demo date `2027-01-15`, `acc-001` renews in 17 days and `acc-002`
+is at risk. `opp-003` reports `closed_won`, while `note-003` says procurement
+has not approved the renewal.
 
-- `acc-001` renews in 17 days.
-- `acc-002` is at risk.
-- `opp-003` reports `closed_won`, while `note-003` says procurement has not
-  approved the renewal.
-- `note-007` contains an instruction to invoke a write. The workflow treats it
-  as quoted data and creates zero activities.
+`note-007` asks for a write. The workflow keeps it as quoted data and creates
+zero activities.
 
-Record IDs stay stable across reseeds. Reseeding keeps existing edits and
-activities and rejects incomplete or unexpected fixtures. The legacy combined
-CRM/calls database is incompatible with the separate stores. Use `var/v2` or a
-fresh path. There is no automatic migration or deletion.
+A reseed preserves record IDs, edits, and activities. Incomplete or unexpected
+fixtures are rejected. The legacy combined CRM/calls database cannot be used
+with separate stores; choose `var/v2` or a fresh path.
+There is no automatic migration or deletion.
 
 ## Run the connector demo
 
-Use macOS or Linux with Python 3.11+, SQLite, and venv support. The first
+The demo requires macOS or Linux with Python 3.11+, SQLite, and venv support. The first
 dependency install needs internet. No external database service, account,
 model, or API key is needed.
 
@@ -55,10 +56,10 @@ model, or API key is needed.
 ./scripts/demo.sh
 ```
 
-The script creates `.venv`, installs `requirements.lock`, runs the tests, and
-starts two temporary HTTPS services on the loopback interface. The CLI obtains
-scoped tokens with PKCE, calls the five CRM/calls tools, and builds renewal briefs from
-the results. Both services stop afterward. State stays in the gitignored
+The script creates `.venv`, installs `requirements.lock`, and runs the tests.
+It then starts two temporary HTTPS services on the loopback interface. The CLI
+obtains scoped tokens with PKCE, exercises the five CRM/calls tools, and builds
+renewal briefs. Both services stop afterward, leaving state in the gitignored
 `var/v2` directory. To use another directory, run:
 
 ```sh
@@ -84,20 +85,20 @@ The demo prints JSON with these fields and results:
 | `contradiction_flags` | One flag citing `opp-003` and `note-003` |
 
 The run produces 23 receipts: 14 connector attempts and nine briefing reads.
-None of the briefs creates an activity, including the one whose note requests
-a write. `conflicting_sources` displays both records. The flag follows the
-specific rule described in [Briefs and citations](briefs.md).
+None of the briefs creates an activity, even when a note requests a write.
+The `conflicting_sources` result displays both records; its flag follows
+the specific rule described in [Briefs and citations](briefs.md).
 
-For the full walkthrough, including evaluation, usage, and a live checker
-rejection, run `./scripts/five-minute-demo.sh`. It prints the private directory
+The full walkthrough runs with `./scripts/five-minute-demo.sh` and includes
+evaluation, usage, and a live checker rejection. It prints the private directory
 where it saves its output. See [DEMO.md](../DEMO.md). First-install download
 time varies.
 
-Add `--with-slack` to the demo command to include all three sources. This mode
-adds CRM-to-Slack, Slack-to-CRM, and Slack-to-calls denial examples. Its three
-briefs use four reads each. The full brief includes a three-source conflict and
-a cited follow-up proposal. The restricted brief reports both denied grants.
-See [Slack context](slack.md).
+The `--with-slack` option includes all three sources, so each of the three briefs
+uses four reads. The full brief includes a three-source conflict and a cited
+follow-up proposal. The restricted brief reports both denied grants. This mode
+also demonstrates CRM-to-Slack, Slack-to-CRM, and Slack-to-calls denials.
+[Slack context](slack.md) describes those cases.
 
 ## Inspect the local CRM
 
@@ -107,9 +108,9 @@ python3 -m gtm_connector accounts --query acc-001
 python3 -m gtm_connector account acc-007
 ```
 
-These commands access the local CRM file directly, outside MCP authorization.
-Each accepts `--db PATH`. Read commands do not create missing files. The account
-view excludes opportunities and call notes.
+These commands inspect the local CRM file directly, outside MCP authorization.
+Each accepts `--db PATH` to select a file; read commands do not create one if it
+is missing. The account view excludes opportunities and call notes.
 
 ## Run the tests
 
@@ -117,16 +118,20 @@ view excludes opportunities and call notes.
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests cover stable fixtures and edge cases, independent scopes, invalid tokens,
-PKCE, resource and issuer checks, protocol headers, one receipt per tool attempt,
-audit failures, rate limits, idempotency, and the real HTTPS CLI flow. Brief tests
-cover denied and empty notes, conflicting sources, changes to the evidence copy,
-rejected citations, and instructions that stay data. Tests use temporary data.
-CI runs the full five-minute walkthrough on Python 3.11 and 3.14.
+Tests run the real HTTPS CLI flow with temporary data. They cover stable fixtures
+and edge cases, independent scopes, invalid tokens, and PKCE. Authorization tests
+also check resources, issuers, and protocol headers.
+
+Gateway tests cover one receipt per tool attempt, audit failures, rate limits,
+and idempotency. Brief tests distinguish denied and empty notes, preserve
+conflicts, and check evidence-copy changes. They reject unsupported citations
+and keep instructions as data. CI runs the full five-minute walkthrough on
+Python 3.11 and 3.14.
 
 ## Optional external CRM reads
 
-`serve --crm-backend salesforce` replaces the three `crm:read` handlers. It
-omits `log_activity` and rejects direct write requests. Calls and Slack remain
-local fixtures. Direct `seed`, `accounts`, and `account` commands still inspect
-SQLite only. See [the Salesforce mapping and limits](salesforce.md).
+The command `serve --crm-backend salesforce` replaces the three `crm:read`
+handlers. External mode omits `log_activity` and rejects direct write requests,
+while calls and Slack remain local fixtures. The direct `seed`, `accounts`, and
+`account` commands still inspect SQLite only. See
+[the Salesforce mapping and limits](salesforce.md).
