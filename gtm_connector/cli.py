@@ -22,10 +22,11 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--query", default="")
         elif name == "account":
             command.add_argument("account_id")
-    for name in ("demo", "serve", "audit", "brief", "check-brief"):
+    commands.add_parser("evaluate", help="score 20 fixed accounts in a fresh temporary fixture")
+    for name in ("demo", "serve", "audit", "brief", "check-brief", "usage"):
         command = commands.add_parser(name)
         command.add_argument("--state-dir", type=Path, default=Path("var/v2"))
-        if name == "audit":
+        if name in ("audit", "usage"):
             command.add_argument("--brief", help="filter the caller-supplied brief/run correlation ID")
         elif name == "brief":
             command.add_argument("account_id")
@@ -38,7 +39,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        if args.command == "brief":
+        if args.command == "evaluate":
+            from .evaluation import run_evaluation
+            result = run_evaluation()
+        elif args.command == "usage":
+            from .usage import build_usage_report
+            result = build_usage_report(args.state_dir, args.brief)
+        elif args.command == "brief":
             from .briefing import create_brief
             from .runtime import Runtime
             with Runtime(args.state_dir) as runtime:
@@ -86,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
                     if result is None:
                         raise ValueError(f"account not found: {args.account_id}")
         print(json.dumps(result, indent=2, ensure_ascii=False))
-        return 0
+        return 2 if args.command == "evaluate" and result["status"] != "passed" else 0
     except (OSError, sqlite3.Error, ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

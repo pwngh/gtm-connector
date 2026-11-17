@@ -1,0 +1,228 @@
+{
+  "status": "passed",
+  "evaluation": "fixture-20",
+  "as_of": "2027-01-15",
+  "accounts": 20,
+  "claim_unit": "one displayed statement; compound statements count once",
+  "expected_facts": 182,
+  "facts_found": 182,
+  "facts_cited_correctly": 182,
+  "facts_invented": 0,
+  "claims_emitted": 182,
+  "duplicate_claims": 0,
+  "fact_recall": 1,
+  "citation_recall": 1,
+  "invention_rate": 0,
+  "accepted_briefs": 20,
+  "rejected_briefs": 0,
+  "failed_briefs": 0,
+  "audit_rows": 60,
+  "activities_created": 0,
+  "model_usage": {
+    "model": null,
+    "input_tokens": 0,
+    "output_tokens": 0
+  },
+  "cases": [
+    {
+      "account_id": "acc-001",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-002",
+      "status": "accepted",
+      "expected_facts": 10,
+      "facts_found": 10,
+      "facts_cited_correctly": 10,
+      "facts_invented": 0,
+      "claims_emitted": 10,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-003",
+      "status": "accepted",
+      "expected_facts": 10,
+      "facts_found": 10,
+      "facts_cited_correctly": 10,
+      "facts_invented": 0,
+      "claims_emitted": 10,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-004",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-005",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-006",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-007",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-008",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-009",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-010",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-011",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-012",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-013",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-014",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-015",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-016",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-017",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-018",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-019",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    },
+    {
+      "account_id": "acc-020",
+      "status": "accepted",
+      "expected_facts": 9,
+      "facts_found": 9,
+      "facts_cited_correctly": 9,
+      "facts_invented": 0,
+      "claims_emitted": 9,
+      "duplicate_claims": 0
+    }
+  ]
+}

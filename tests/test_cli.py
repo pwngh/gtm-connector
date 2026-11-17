@@ -21,7 +21,8 @@ class CLITests(unittest.TestCase):
         self.state = Path(self.directory.name).resolve() / "state"
 
     def run_cli(self, *arguments, database=None, state=None):
-        location = (["--db", str(database or self.database)]
+        location = ([] if arguments[0] == "evaluate" else
+                    ["--db", str(database or self.database)]
                     if arguments[0] in ("seed", "accounts", "account")
                     else ["--state-dir", str(state or self.state)])
         return subprocess.run(
@@ -75,6 +76,9 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(sum(row["http_status"] == 429 for row in rows), 1)
                 self.assertFalse(any(row["status"] == "pending" for row in rows))
                 self.assertEqual(summary["brief_audit_rows"], 9)
+                self.assertEqual(len(summary["contradiction_flags"]), 1)
+                self.assertIn("[crm/opportunities/opp-003] [calls/call_notes/note-003]",
+                              summary["contradiction_flags"][0])
                 full, restricted = summary["briefs"]
                 self.assertEqual(full["account_id"], "acc-003")
                 self.assertIn("closed_won", full["text"])
@@ -99,6 +103,16 @@ class CLITests(unittest.TestCase):
         self.assertEqual(self.json_result(self.run_cli("audit", "--brief", "unknown-brief")), [])
         owner = json.loads((self.state / "owner.json").read_text())
         self.assertNotIn(owner["owner_secret"], json.dumps([first, second, all_rows]))
+        usage = self.json_result(self.run_cli("usage"))
+        self.assertEqual(usage["calls"], {"total": 46, "ok": 40, "error": 6, "pending": 0})
+        self.assertEqual({row["tool"]: row["total"] for row in usage["by_tool"]},
+                         {"search_accounts": 2, "get_account": 18, "read_call_notes": 14,
+                          "list_opportunities": 8, "log_activity": 4})
+        self.assertEqual(usage["model_tokens"], {"saved_briefs": 6, "unknown_briefs": 0,
+                                                "input_tokens": 0, "output_tokens": 0})
+        scoped = self.json_result(self.run_cli("usage", "--brief", generated_briefs[0]))
+        self.assertEqual(scoped["calls"]["total"], 3)
+        self.assertEqual(len(scoped["briefs"]), 1)
 
     def test_seed_then_list_search_and_inspect_records(self):
         self.json_result(self.run_cli("seed"))
@@ -141,6 +155,26 @@ class CLITests(unittest.TestCase):
         self.assertIn("audit database not found", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertFalse(missing.exists())
+
+    def test_usage_does_not_create_missing_state(self):
+        missing = Path(self.directory.name) / "missing-state"
+        result = self.run_cli("usage", state=missing)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("audit database not found", result.stderr)
+        self.assertFalse(missing.exists())
+
+    def test_evaluate_reports_twenty_account_fixture_score(self):
+        result = self.json_result(self.run_cli("evaluate"))
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["accounts"], 20)
+        self.assertEqual(result["expected_facts"], 182)
+        self.assertEqual(result["facts_found"], 182)
+        self.assertEqual(result["facts_cited_correctly"], 182)
+        self.assertEqual(result["facts_invented"], 0)
+        self.assertEqual(result["audit_rows"], 60)
+        self.assertEqual(result["activities_created"], 0)
+        self.assertFalse(self.state.exists())
 
     def test_brief_text_displays_the_checked_draft_and_requested_date(self):
         result = self.run_cli("brief", "acc-001", "--as-of", "2027-02-01")
