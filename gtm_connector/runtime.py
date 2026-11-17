@@ -19,7 +19,7 @@ import uvicorn
 
 from . import calls, slack, store
 from .auth import LocalAuthority, create_auth_app
-from .gateway import Connector
+from .gateway import Connector, require_distinct_databases
 
 
 def private_file(path, content):
@@ -66,6 +66,8 @@ class Runtime:
                 fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise ValueError("this state directory already has a running connector") from exc
+            require_distinct_databases([self.directory / f"{name}.sqlite3"
+                                        for name in ("crm", "calls", "slack", "audit")])
             for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
                 path = self.directory / f"{name}.sqlite3"
                 if path.is_symlink():

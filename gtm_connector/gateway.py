@@ -58,6 +58,21 @@ def _data(source, rows):
     return {"source": source, "records": rows, "untrusted_data": True}
 
 
+def require_distinct_databases(paths):
+    """Reject path aliases and existing hardlinks before initializing a store."""
+    resolved = [Path(path).resolve() for path in paths]
+    identities = []
+    for path in resolved:
+        try:
+            info = path.stat()
+        except FileNotFoundError:
+            continue
+        identities.append((info.st_dev, info.st_ino))
+    if len(set(resolved)) != len(resolved) or len(set(identities)) != len(identities):
+        raise ValueError("CRM, calls, Slack, and audit require different database files")
+    return resolved
+
+
 class Connector:
     def __init__(self, crm_path, calls_path, audit_path, authority,
                  rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None):
@@ -66,8 +81,7 @@ class Connector:
         paths = [Path(p).resolve() for p in (crm_path, calls_path, audit_path)]
         paths.append(Path(slack_path).resolve() if slack_path is not None
                      else paths[0].with_name("slack.sqlite3").resolve())
-        if len(set(paths)) != 4:
-            raise ValueError("CRM, calls, Slack, and audit require different database files")
+        paths = require_distinct_databases(paths)
         self.crm_path, self.calls_path = paths[:2]
         self.slack_path = paths[3]
         self.audit = AuditLog(paths[2])
