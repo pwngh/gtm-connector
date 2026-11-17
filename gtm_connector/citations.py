@@ -20,6 +20,9 @@ _SOURCES = {
     "opportunities": ("crm", "opp", "list_opportunities"),
     "call_notes": ("calls", "note", "read_call_notes"),
 }
+_SLACK_SOURCE = {"messages": ("slack", "msg", "read_slack_messages")}
+_PROCUREMENT_NOTE = "Procurement has not approved this renewal. The budget remains unsigned."
+_SECURITY_MESSAGE = "Security review is delayed. Procurement approval is still pending."
 
 
 def _text(value):
@@ -43,13 +46,19 @@ def _money(cents):
 
 
 def _catalog(evidence):
+    version = evidence.get("workflow_version", 1)
+    if type(version) is not int or version not in (1, 2):
+        raise BriefRejected("Unsupported evidence workflow version.")
+    if version == 1 and "slack_status" in evidence:
+        raise BriefRejected("Legacy evidence cannot contain a Slack outcome.")
+    sources = {**_SOURCES, **(_SLACK_SOURCE if version == 2 else {})}
     account_id, brief_id = evidence["account_id"], evidence["brief_id"]
     if not all(isinstance(value, str) and _ID.fullmatch(value)
                for value in (account_id, brief_id)):
         raise BriefRejected("Invalid account or brief identifier.")
     as_of = _day(evidence["as_of"])
-    groups = {name: [] for name in _SOURCES}
-    expected_rows = {tool: [] for _, _, tool in _SOURCES.values()}
+    groups = {name: [] for name in sources}
+    expected_rows = {tool: [] for _, _, tool in sources.values()}
     seen = set()
     if not isinstance(evidence["records"], list) or not isinstance(evidence["receipts"], list):
         raise BriefRejected("Evidence records and receipts must be lists.")
@@ -58,10 +67,10 @@ def _catalog(evidence):
         if not isinstance(reference, str) or not isinstance(identifier, str):
             raise BriefRejected("Record identifiers must be strings.")
         parts = reference.split("/")
-        if len(parts) != 3 or parts[1] not in _SOURCES or reference in seen:
+        if len(parts) != 3 or parts[1] not in sources or reference in seen:
             raise BriefRejected("Unknown or duplicate source reference.")
         table = parts[1]
-        system, prefix, tool = _SOURCES[table]
+        system, prefix, tool = sources[table]
         if (not _ID.fullmatch(identifier) or not identifier.startswith(prefix + "-")
                 or reference != f"{system}/{table}/{identifier}"):
             raise BriefRejected("Record reference does not identify its source.")
@@ -75,6 +84,8 @@ def _catalog(evidence):
 
     if evidence["notes_status"] not in ("available", "denied"):
         raise BriefRejected("Unknown call-notes outcome.")
+    if version == 2 and evidence["slack_status"] not in ("available", "denied"):
+        raise BriefRejected("Unknown Slack outcome.")
     receipts, receipt_ids = {}, set()
     for receipt in evidence["receipts"]:
         tool, audit_id = receipt["tool"], receipt["audit_id"]
@@ -90,12 +101,14 @@ def _catalog(evidence):
                 or receipt["row_count"] != len(refs)
                 or sorted(refs) != sorted(expected_rows[tool])):
             raise BriefRejected("Audit receipt does not match returned records.")
-        denied = tool == "read_call_notes" and evidence["notes_status"] == "denied"
+        denied = ((tool == "read_call_notes" and evidence["notes_status"] == "denied")
+                  or (tool == "read_slack_messages" and evidence["slack_status"] == "denied"))
         expected_outcome = ("error", 403) if denied else ("ok", 200)
         if (receipt["status"], receipt["http_status"]) != expected_outcome:
             raise BriefRejected("Audit receipt has an unsupported outcome.")
         if denied and refs:
-            raise BriefRejected("Denied notes must not contain returned records.")
+            raise BriefRejected("Denied notes must not contain returned records." if tool == "read_call_notes"
+                                else "Denied Slack reads must not contain returned records.")
         receipt_ids.add(audit_id)
         receipts[tool] = receipt
     if set(receipts) != set(expected_rows):
@@ -136,6 +149,7 @@ def _catalog(evidence):
         add(f"No opportunities were returned for {account_id}.",
             f"audit/{receipts['list_opportunities']['audit_id']}")
     required = set()
+    procurement_conflicts = []
     notes_receipt = f"audit/{receipts['read_call_notes']['audit_id']}"
     if evidence["notes_status"] == "denied":
         required.add(add("Call notes were unavailable because the token lacks calls:read.", notes_receipt))
@@ -146,15 +160,51 @@ def _catalog(evidence):
             add(f"Untrusted call note {note['id']} at {_text(note['called_at'])} "
                 f"says {_text(note['body'])}.", note["record_ref"])
             # One explicit fixture rule, not inference over arbitrary note prose.
-            if note["body"] != ("Procurement has not approved this renewal. "
-                                "The budget remains unsigned."):
+            if note["body"] != _PROCUREMENT_NOTE:
                 continue
             for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
                 if opportunity["stage"] == "closed_won":
+                    procurement_conflicts.append((opportunity, note))
                     required.add(add(
                         f'Source conflict: CRM opportunity {opportunity["id"]} reports stage '
                         f'"closed_won", while call note {note["id"]} reports unapproved procurement.',
                         opportunity["record_ref"], note["record_ref"]))
+    if version == 2:
+        slack_receipt = f"audit/{receipts['read_slack_messages']['audit_id']}"
+        conflict_refs = set()
+        if evidence["slack_status"] == "denied":
+            required.add(add("Slack messages were unavailable because the token lacks slack:read.",
+                             slack_receipt))
+        elif not groups["messages"]:
+            required.add(add(f"No Slack messages were returned for {account_id}.", slack_receipt))
+        else:
+            for message in sorted(groups["messages"], key=lambda row: row["id"]):
+                add(f"Untrusted Slack message {message['id']} at {_text(message['sent_at'])} "
+                    f"in {_text(message['channel'])} from {_text(message['author'])} "
+                    f"says {_text(message['body'])}.", message["record_ref"])
+                if message["body"] != _SECURITY_MESSAGE:
+                    continue
+                for opportunity, note in procurement_conflicts:
+                    refs = (opportunity["record_ref"], note["record_ref"], message["record_ref"])
+                    conflict_refs.update(refs)
+                    required.add(add(
+                        f'Three-source conflict: CRM opportunity {opportunity["id"]} reports stage '
+                        f'"closed_won", call note {note["id"]} reports unapproved procurement, '
+                        f'and Slack message {message["id"]} reports a delayed security review.', *refs))
+        source_order = {"crm": 0, "calls": 1, "slack": 2}
+        if conflict_refs:
+            # One proposed action, even if several records match the bounded rule.
+            refs = sorted(conflict_refs, key=lambda ref: (source_order[ref.split("/")[0]], ref))
+            required.add(add("Proposed follow-up: Ask the account owner to confirm procurement "
+                             "and security review status.", *refs))
+        elif procurement_conflicts:
+            refs = {row["record_ref"] for pair in procurement_conflicts for row in pair}
+            refs = sorted(refs, key=lambda ref: (source_order[ref.split("/")[0]], ref))
+            required.add(add("Proposed follow-up: Ask the account owner to confirm procurement status.",
+                             *refs))
+        else:
+            required.add(add("Proposed follow-up: Ask the account owner to review the cited renewal context.",
+                             account["record_ref"]))
     return lines, required
 
 
@@ -201,7 +251,7 @@ def check_brief(candidate: str, evidence: dict) -> str:
     """Reject uncited, altered, misattributed, or extra prose before publication.
 
     A valid subset is allowed: grounding and coverage are different checks.
-    Unavailable/empty notes outcomes and recognized source conflicts must remain visible.
+    Required source outcomes, recognized conflicts, and v2 follow-up must remain visible.
     """
     if not isinstance(candidate, str) or not candidate.strip():
         raise BriefRejected("A brief must contain supported, cited statements.")
@@ -212,5 +262,7 @@ def check_brief(candidate: str, evidence: dict) -> str:
     if len(lines) != len(set(lines)):
         raise BriefRejected("Brief repeats a statement.")
     if not required <= set(lines):
-        raise BriefRejected("Brief must disclose required call-notes outcomes and source conflicts.")
+        if evidence.get("workflow_version", 1) == 1:
+            raise BriefRejected("Brief must disclose required call-notes outcomes and source conflicts.")
+        raise BriefRejected("Brief must disclose required source outcomes, source conflicts, and proposed follow-up.")
     return "\n".join(lines) + "\n"
