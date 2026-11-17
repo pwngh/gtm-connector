@@ -23,10 +23,14 @@ def main(argv: list[str] | None = None) -> int:
         elif name == "account":
             command.add_argument("account_id")
     commands.add_parser("evaluate", help="score 20 fixed accounts in a fresh temporary fixture")
-    for name in ("demo", "serve", "audit", "brief", "check-brief", "usage"):
+    for name in ("demo", "serve", "audit", "brief", "check-brief", "usage", "inspector-config"):
         command = commands.add_parser(name)
         command.add_argument("--state-dir", type=Path, default=Path("var/v2"))
-        if name in ("audit", "usage"):
+        if name == "inspector-config":
+            command.add_argument("--scope", action="append", required=True,
+                                 choices=("crm:read", "calls:read", "crm:write"),
+                                 help="grant only these scopes; repeat for each grant")
+        elif name in ("audit", "usage"):
             command.add_argument("--brief", help="filter the caller-supplied brief/run correlation ID")
         elif name == "brief":
             command.add_argument("account_id")
@@ -39,7 +43,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        if args.command == "evaluate":
+        if args.command == "inspector-config":
+            from .inspector import write_inspector_config
+            result = write_inspector_config(args.state_dir, args.scope)
+        elif args.command == "evaluate":
             from .evaluation import run_evaluation
             result = run_evaluation()
         elif args.command == "usage":

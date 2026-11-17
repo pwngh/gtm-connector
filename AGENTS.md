@@ -3,7 +3,8 @@
 This is a small portfolio demo using invented CRM data. Keep the implementation
 plain and finish one runnable PR slice at a time. Use Python and SQLite.
 
-- Do not use employer/client code, data, names, documents, or real CRM APIs.
+- Do not use employer/client code, data, names, or documents. Real APIs belong
+  only in explicitly selected adapters; the default stays offline.
 - The default demo and evaluation must run without a paid model key.
 - Back every README behavior claim with a test or recorded measurement.
 - Use full-stop: finish, test, review, file the PR, watch checks, and leave it
@@ -17,10 +18,9 @@ plain and finish one runnable PR slice at a time. Use Python and SQLite.
   implementing the protocol. Both researched revisions are 2026-07-28, read on
   2026-11-17. Record revision and reading date in the README.
 
-## Four pull requests
+## Reviewable slices
 
-The initial build shipped in these four runnable slices. Do not add a web
-interface.
+The first four runnable slices are complete. Do not add a web interface.
 
 1. Seeded CRM, CLI inspection, and data tests.
 2. MCP tools, local authorization, separate CRM and calls permissions, audit,
@@ -33,32 +33,30 @@ interface.
    review, audit-based usage by token/tool/day and model tokens per brief,
    README polish, and a five-minute clean-checkout demo.
 
-## Requested follow-up
+## Requested follow-ups
 
-5. Finish the README for a hiring manager who has two minutes. This pull request
-   changes documentation only. Lead with the purpose, test-linked guarantees,
-   real output, a Mermaid request-path diagram, and the run commands. Move
-   reference material into `docs/` without losing limits. Add no behavior
-   changes, including the reliability fixes preserved on a separate local
-   branch. Verify every README command from a clean checkout, every output
-   against that run, every link, and the rendered page on GitHub. Run one council
-   round using only the README and the three reader questions below. Fix the
-   points raised by two or more members. File the PR and leave the merge to the
-   user. Do not change the resume or cover letter.
+Keep one PR per slice, in this order. The user merges. Each change gets its own
+proof and Sol review; leave every PR open and unmerged. Stack dependent branches
+when the earlier change is still under review.
 
-Keep the separately requested MCP Inspector and standard-client compatibility
-work in its own implementation PR. This documentation branch must continue to
-describe the behavior already on main. Do not imply Inspector compatibility,
-change protocol behavior, or add a drafting model here. The next separate
-implementation slices are an optional local Ollama drafter, an isolated mock
-Slack source with a cited follow-up draft, and an optional read-only Salesforce
-Developer Edition adapter, in that order. Keep each in its own PR. The default
-demo and CI remain model-free and need no external keys.
+5. Finish the README with test-linked guarantees, actual output, a request-path
+   diagram, and reference docs. Change documentation only. Preserve all limits.
+   Check commands from a clean checkout, links, and the rendered GitHub page.
+   Run one reader council round using only the README. Ask what the project
+   does, what is proven, and what confused each member. Fix findings raised by
+   at least two members. Record model, effort, round, and score or `no score`.
+6. Official MCP Inspector compatibility. Prove capability discovery, five tool
+   schemas, reads, and scope denial through the existing audited gateway.
+7. Optional local Ollama drafting and measured rejection results. No hosted
+   model calls. Keep the default demo and CI model-free.
+8. An isolated mock Slack store, its own read scope, and a cited follow-up draft.
+9. An optional read-only Salesforce Developer Edition adapter. Never write to
+   an external organization. Use HTTP fixtures in tests; request no keys.
 
-For the documentation council, give every member only the README and ask:
-what does the project do, what is proven, and what confused you? This is one
-round, not another code council. Record each member's answers, exact model ID,
-effort, round, and returned score or `no score` in the PR description.
+Preserve the synthetic labels and fixed evaluation assertions until the
+explicitly scoped source expansion. Do not add write approval prompts, a web
+interface, or speculative rollout documents. Keep the separately parked
+reliability fixes out of these changes unless a slice requires one explicitly.
 
 Keep fixture IDs stable and readable across reseeds. Use synthetic display
 labels, not plausible company, person, or product names. Preserve examples of

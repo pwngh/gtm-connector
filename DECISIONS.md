@@ -1,5 +1,38 @@
 # Decisions
 
+## External Inspector client (2026-11-17)
+
+Re-read the current MCP specification, authorization section, and official
+Inspector documentation on 2026-11-17. The current protocol remains 2026-07-28.
+Inspector 2.15.0 supports it through `protocolEra: modern`. Modern discovery
+uses `server/discover`, not the older `initialize` handshake. Keep the existing
+Streamable HTTP endpoint and pinned Python SDK 2.3.0. Do not add a second tool
+dispatch path or weaken protocol-header validation to accommodate older clients.
+
+Add `inspector-config` as a local owner utility. It uses the existing S256 PKCE
+flow to request exactly the scopes named by repeated `--scope` flags. It writes
+a mode-0600 `inspector.json` containing the resource URL, modern protocol choice,
+and bearer header. It prints paths and scopes, never a credential. The owner
+credential stays out of that file. Scope denial does not acquire a broader grant.
+The token expires after five minutes; re-run the utility to request another.
+Restarting `serve` changes the endpoints and invalidates every old grant.
+
+The external client trusts the generated certificate through
+`NODE_EXTRA_CA_CERTS`. TLS verification stays enabled. This grants trust to that
+Node process without changing the system trust store. Inspector handles MCP
+requests; the included client only provisions its grant. This tests client
+interoperability with a supplied bearer token, not Inspector's interactive
+OAuth login. Browser origins remain rejected by the connector.
+
+Keep Inspector and Node optional. The Inspector integration test is a separate
+CI job and explicit command. Neither default demo script installs or invokes
+Node, Inspector, a model, or an external source API. The fixed twenty-account
+evaluation stays unchanged. The documentation follow-up remains a separate PR.
+
+References: [Inspector](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector),
+[protocol eras](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector/protocol-eras),
+and [configuration](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector/configuration).
+
 ## Scope and implementation
 
 Use Python 3.11+ and SQLite. PR 1 used only the standard library; PR 2 adds the
