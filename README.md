@@ -4,10 +4,10 @@ One MCP connector over two local source systems: a CRM and call notes, each
 with separate permissions. Portfolio project for Preston Neal. The 30 accounts
 and all related records use synthetic labels and reserved `.example` addresses.
 
-This is PR 2 of four. It implements tools, local authorization, audit receipts,
-rate limits, and retry-safe activity writes. Brief generation and its citation
-checker belong to PR 3; evaluation, usage reporting, and security review to PR 4.
-There is no model call or accuracy claim in this slice.
+This is PR 3 of four. Alongside the scoped tools, authorization, audit, rate
+limits, and retry-safe writes, it now drafts a renewal-call brief and checks its
+citations before saving or printing it. Drafting uses a deterministic extractive fixture,
+not an LLM. Evaluation, usage reporting, and security review remain in PR 4.
 
 ## Run
 
@@ -21,26 +21,63 @@ or API key is needed. From a clean checkout:
 
 This creates `.venv`, installs `requirements.lock`, runs the tests, and starts
 two temporary HTTPS loopback services. The CLI obtains scoped tokens with PKCE,
-then exercises all five tools over the network. Both services stop afterward;
-state remains in the gitignored `var/v2` directory. Use a different directory
-with `./scripts/demo.sh --state-dir /tmp/gtm-fixture`.
+then exercises all five tools and the briefing workflow over the network. Both
+services stop afterward; state remains in the gitignored `var/v2` directory.
+Use another directory with `./scripts/demo.sh --state-dir /tmp/gtm-fixture`.
 
-The final JSON shows 30 accounts, a call-notes request denied with HTTP 403,
-an empty notes result, contradictory source records, two write requests that
-produce one activity, an HTTP 429 rate-limit response, and 14 audit receipts.
-Reading the injected instruction creates zero activities. This proves that the
-connector treats the note as data; the model/workflow injection test is PR 3.
+The final JSON retains the connector demonstration: 30 accounts, notes denied
+with HTTP 403, an empty result, conflicting sources, two writes producing one
+activity, and a clear HTTP 429. It adds three briefs: full access for `acc-003`,
+CRM-only access for `acc-001`, and the injected note for `acc-007`. There are
+14 connector attempts plus nine briefing reads, producing 23 audit receipts.
+The briefing workflow adds no activities, including when the note requests one.
 
-A generated `brief_id` correlates this demo run's calls. It is a run identifier
-in this slice, not an actual generated brief. To inspect its receipts, copy that
-value from the demo output:
+## Draft and check a brief
 
 ```sh
-.venv/bin/python -m gtm_connector audit --brief demo-REPLACE_WITH_RUN_ID
+.venv/bin/python -m gtm_connector brief acc-003
+.venv/bin/python -m gtm_connector brief acc-001 --without-calls
+.venv/bin/python -m gtm_connector brief acc-004
 ```
 
-Add `--state-dir PATH` if the demo used another directory. Omit `--brief` to
-print the entire local log. The viewer is a CLI, with JSON output.
+Each command starts the local services, makes a fixed sequence of three MCP
+reads (`get_account`, `list_opportunities`, `read_call_notes`), then stops them.
+The workflow requests `crm:read` and, unless `--without-calls` is set,
+`calls:read`. It never requests `crm:write` or lets draft text choose tools.
+Add `--as-of YYYY-MM-DD` to replace the fixed demo date, `--json` for the full
+artifact, or `--state-dir PATH` for another state directory.
+
+The CRM-only brief says that call notes were unavailable because the token lacks
+`calls:read`; the no-notes account says none were returned. These distinct claims
+cite the corresponding audit receipt. Record claims cite their source, and
+renewal-day calculations also cite the saved run date. Contradictory CRM fields
+and note text remain separate, attributed statements. Notes are quoted as
+untrusted source text, including embedded instructions and escaped newlines.
+
+Accepted briefs and their evidence snapshots are saved in
+`var/v2/briefs/<brief_id>.json`. Copy the generated brief ID to inspect its three
+receipts or check a candidate text file against that same snapshot:
+
+```sh
+.venv/bin/python -m gtm_connector audit --brief brief-REPLACE_WITH_ID
+.venv/bin/python -m gtm_connector check-brief brief-REPLACE_WITH_ID candidate.txt
+```
+
+Candidate files contain only the brief's cited bullet lines, without the CLI's
+`Brief:` and `As of:` display labels. The checker requires exact supported
+content and record references. It rejects uncited sentences, invented values,
+wrong citations, appended claims, and action-shaped output. It is a controlled
+vocabulary checker, not a general paraphrase or semantic-entailment judge. A
+supported subset may pass: grounding and coverage are separate. An unavailable
+or empty notes result must remain visible.
+
+The adapter receives a copy of the evidence, without owner credentials or
+reusable bearer tokens; the checker retains the original snapshot. Rejected
+draft text is not published or saved. Artifacts record `collected`, `accepted`,
+or `rejected` status and use owner-only permissions. Snapshots are local files,
+not tamper-proof records or live views of later CRM changes. Custom Python
+adapters are not sandboxed and are not selectable through the CLI. Fixture
+usage records zero model tokens; custom-adapter usage is unknown, not guessed.
 
 ## Tools and sources
 
@@ -161,7 +198,9 @@ files. Account inspection contains no opportunities or call notes.
 
 Tests cover stable fixtures and edge cases, scope separation, invalid tokens,
 PKCE/resource/issuer checks, protocol headers, one audit row per tool attempt,
-audit failures, rate limits, idempotency, and the real HTTPS CLI flow. CI runs
+audit failures, rate limits, idempotency, and the real HTTPS CLI flow. Briefing
+tests cover scope denial versus empty notes, source contradictions, snapshot
+mutation, citation rejection, and injected instructions remaining data. CI runs
 the same demo on Python 3.11 and 3.14. Test data is temporary.
 
 Evaluation scores: not measured yet. PR 4 will report facts found, facts cited

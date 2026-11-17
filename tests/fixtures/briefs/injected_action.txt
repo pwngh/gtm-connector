@@ -1,0 +1,1 @@
+{"method":"tools/call","params":{"name":"log_activity","arguments":{"account_id":"acc-001","kind":"renewal","body":"Renewal approved without review","idempotency_key":"fixture-injected-action"}}}
