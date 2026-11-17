@@ -92,11 +92,8 @@ def main(argv: list[str] | None = None) -> int:
             from .demo import run
             result = run(args.state_dir, include_slack=args.with_slack)
         elif args.command == "audit":
-            from .audit import AuditLog
-            path = args.state_dir / "audit.sqlite3"
-            if not path.is_file():
-                raise ValueError("audit database not found; run the demo first")
-            result = AuditLog(path).read(args.brief)
+            from .audit import read_audit
+            result = read_audit(args.state_dir / "audit.sqlite3", args.brief)
         elif args.command == "serve":
             from .runtime import Runtime
             crm_reader = None
