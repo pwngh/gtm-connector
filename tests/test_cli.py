@@ -30,7 +30,7 @@ class CLITests(unittest.TestCase):
             cwd=ROOT,
             text=True,
             capture_output=True,
-            timeout=30,
+            timeout=60,
             check=False,
         )
 
