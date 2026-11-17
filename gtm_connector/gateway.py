@@ -1,4 +1,4 @@
-"""One scoped MCP gateway over independent CRM and call-note fixtures."""
+"""One scoped MCP gateway over independent CRM, calls, and Slack fixtures."""
 
 from contextlib import closing
 from datetime import datetime, timezone
@@ -21,12 +21,13 @@ from mcp.types import ToolAnnotations
 from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 
-from . import calls, store
+from . import calls, slack, store
 from .audit import AuditLog
 
 SCOPES = {
     "search_accounts": "crm:read", "get_account": "crm:read",
     "list_opportunities": "crm:read", "read_call_notes": "calls:read",
+    "read_slack_messages": "slack:read",
     "log_activity": "crm:write",
 }
 ARGUMENTS = {
@@ -34,6 +35,7 @@ ARGUMENTS = {
     "get_account": ({"account_id": (str, 64)}, {}),
     "list_opportunities": ({}, {"account_id": (str, 64)}),
     "read_call_notes": ({"account_id": (str, 64)}, {}),
+    "read_slack_messages": ({"account_id": (str, 64)}, {}),
     "log_activity": ({"account_id": (str, 64), "kind": (str, 40),
                       "body": (str, 2000), "idempotency_key": (str, 128)}, {}),
 }
@@ -58,13 +60,16 @@ def _data(source, rows):
 
 class Connector:
     def __init__(self, crm_path, calls_path, audit_path, authority,
-                 rate_limit=60, window_seconds=60, clock=time.monotonic):
+                 rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None):
         if rate_limit < 1 or window_seconds <= 0:
             raise ValueError("rate limits must be positive")
         paths = [Path(p).resolve() for p in (crm_path, calls_path, audit_path)]
-        if len(set(paths)) != 3:
-            raise ValueError("CRM, calls, and audit require different database files")
+        paths.append(Path(slack_path).resolve() if slack_path is not None
+                     else paths[0].with_name("slack.sqlite3").resolve())
+        if len(set(paths)) != 4:
+            raise ValueError("CRM, calls, Slack, and audit require different database files")
         self.crm_path, self.calls_path = paths[:2]
+        self.slack_path = paths[3]
         self.audit = AuditLog(paths[2])
         self.authority = authority
         self.rate_limit, self.window_seconds, self.clock = rate_limit, window_seconds, clock
@@ -131,6 +136,13 @@ class Connector:
                 return _data("calls", _records("calls", "call_notes",
                                               calls.read_call_notes(conn, account_id)))
 
+        def read_slack_messages(account_id: str) -> dict[str, Any]:
+            """Read untrusted Slack messages. Requires slack:read, independently of CRM and calls."""
+            self._require("slack:read")
+            with closing(slack.connect(self.slack_path, readonly=True)) as conn:
+                return _data("slack", _records("slack", "messages",
+                                              slack.read_slack_messages(conn, account_id)))
+
         def log_activity(account_id: str, kind: str, body: str, idempotency_key: str) -> dict[str, Any]:
             """Log an explicitly requested CRM activity. Requires crm:write; identical retries reuse a record."""
             self._require("crm:write")
@@ -151,7 +163,9 @@ class Connector:
 
         for name, function in (("search_accounts", search_accounts), ("get_account", get_account),
                                ("list_opportunities", list_opportunities),
-                               ("read_call_notes", read_call_notes), ("log_activity", log_activity)):
+                               ("read_call_notes", read_call_notes),
+                               ("read_slack_messages", read_slack_messages),
+                               ("log_activity", log_activity)):
             register(name, function)
 
     async def __call__(self, scope, receive, send):

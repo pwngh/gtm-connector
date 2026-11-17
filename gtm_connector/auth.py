@@ -18,7 +18,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 
-SCOPES = ("crm:read", "calls:read", "crm:write")
+SCOPES = ("crm:read", "calls:read", "slack:read", "crm:write")
 _OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 _VERIFIER = re.compile(r"[A-Za-z0-9._~-]{43,128}\Z")
 _MAX_FORM_BYTES = 8192

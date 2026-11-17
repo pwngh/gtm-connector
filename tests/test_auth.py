@@ -104,6 +104,17 @@ class AuthorizationTests(unittest.TestCase):
         code = parse_qs(urlsplit(response.headers["location"]).query)["code"][0]
         self.assertEqual(self.exchange(code).json()["scope"], "crm:read")
 
+    def test_slack_scope_is_granted_only_when_explicitly_requested(self):
+        response = self.authorize(scope="slack:read")
+        self.assertEqual(response.status_code, 302, response.text)
+        code = parse_qs(urlsplit(response.headers["location"]).query)["code"][0]
+        issued = self.exchange(code).json()
+        self.assertEqual(issued["scope"], "slack:read")
+        token = asyncio.run(self.authority.verify_token(issued["access_token"]))
+        self.assertEqual(token.scopes, ["slack:read"])
+        existing = self.exchange(self.code()).json()
+        self.assertNotIn("slack:read", existing["scope"].split())
+
     def test_wrong_verifier_and_replayed_code_are_rejected(self):
         code = self.code()
         wrong = self.exchange(code, code_verifier="x" * 64)

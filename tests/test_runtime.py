@@ -32,6 +32,7 @@ class RuntimeTests(unittest.TestCase):
             **{table: self.database_rows("crm", table)
                for table in ("accounts", "contacts", "opportunities", "activities")},
             "call_notes": self.database_rows("calls", "call_notes"),
+            "messages": self.database_rows("slack", "messages"),
         }
 
     def records(self, response):
@@ -90,7 +91,7 @@ class RuntimeTests(unittest.TestCase):
         with Runtime(self.state) as first:
             self.assertEqual(stat.S_IMODE(self.state.stat().st_mode), 0o700)
             for name in ("server.lock", "owner.json", "tls.key", "tls.pem",
-                         "crm.sqlite3", "calls.sqlite3", "audit.sqlite3"):
+                         "crm.sqlite3", "calls.sqlite3", "slack.sqlite3", "audit.sqlite3"):
                 with self.subTest(file=name):
                     self.assertEqual(stat.S_IMODE((self.state / name).stat().st_mode), 0o600)
             owner = json.loads((self.state / "owner.json").read_text())
@@ -106,6 +107,37 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(self.source_snapshot(), before)
         self.assertEqual(len(before["accounts"]), 30)
         self.assertEqual(len(before["call_notes"]), 29)
+        self.assertEqual(len(before["messages"]), 29)
+
+    def test_slack_scope_over_https_does_not_grant_crm_calls_or_writes(self):
+        with Runtime(self.state) as runtime, LocalClient(runtime.config) as client:
+            token = client.authorize(["slack:read"])
+            response = client.call(token, "read_slack_messages", {"account_id": "acc-007"})
+            messages = self.records(response)
+            self.assertEqual(messages[0]["record_ref"], "slack/messages/msg-007")
+            self.assertIn("slack-seed-injection", messages[0]["body"])
+            for tool in ("get_account", "read_call_notes"):
+                denied = client.call(token, tool, {"account_id": "acc-007"})
+                self.assertEqual(denied.status_code, 403)
+            crm_token = client.authorize(["crm:read"])
+            denied = client.call(crm_token, "read_slack_messages", {"account_id": "acc-007"})
+            self.assertEqual(denied.status_code, 403)
+            self.assertIn('scope="slack:read"', denied.headers["WWW-Authenticate"])
+            self.assertEqual(self.database_rows("crm", "activities"), [])
+            rows = runtime.connector.audit.read()
+            self.assertEqual([row["http_status"] for row in rows], [200, 403, 403, 403])
+            self.assertEqual(rows[0]["rows"], ["slack/messages/msg-007"])
+            self.assertTrue(all(row["rows"] == [] for row in rows[1:]))
+
+    def test_runtime_rejects_a_symlink_slack_source(self):
+        self.state.mkdir()
+        target = self.state.parent / "outside.sqlite3"
+        target.write_bytes(b"unchanged fixture sentinel")
+        (self.state / "slack.sqlite3").symlink_to(target)
+        with self.assertRaisesRegex(ValueError, "symbolic links"):
+            with Runtime(self.state):
+                self.fail("Runtime followed a Slack source symlink")
+        self.assertEqual(target.read_bytes(), b"unchanged fixture sentinel")
 
 
 if __name__ == "__main__":

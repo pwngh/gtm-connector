@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 import uvicorn
 
-from . import calls, store
+from . import calls, slack, store
 from .auth import LocalAuthority, create_auth_app
 from .gateway import Connector
 
@@ -48,7 +48,7 @@ def certificate(directory):
 
 
 class Runtime:
-    """One process, two ports, three databases; owns shutdown and a state lock."""
+    """One process, two ports, four databases; owns shutdown and a state lock."""
 
     def __init__(self, directory, *, rate_limit=60):
         self.directory = Path(directory).resolve()
@@ -66,7 +66,7 @@ class Runtime:
                 fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise ValueError("this state directory already has a running connector") from exc
-            for name, module in (("crm", store), ("calls", calls)):
+            for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
                 path = self.directory / f"{name}.sqlite3"
                 if path.is_symlink():
                     raise ValueError("source databases must not be symbolic links")
@@ -87,7 +87,8 @@ class Runtime:
                            "client_id": authority.client_id, "redirect_uri": authority.redirect_uri,
                            "owner_secret": authority.owner_secret}
             self.connector = Connector(self.directory / "crm.sqlite3", self.directory / "calls.sqlite3",
-                                       self.directory / "audit.sqlite3", authority, rate_limit=self.rate_limit)
+                                       self.directory / "audit.sqlite3", authority, rate_limit=self.rate_limit,
+                                       slack_path=self.directory / "slack.sqlite3")
             for app, sock in zip((create_auth_app(authority), self.connector), self.sockets):
                 server = uvicorn.Server(uvicorn.Config(app, ssl_keyfile=str(key), ssl_certfile=str(cert),
                     log_config=None, access_log=False, log_level="warning", lifespan="on"))

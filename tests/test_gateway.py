@@ -23,13 +23,14 @@ ISSUER = "https://127.0.0.1:8766"
 VERSION = "2026-07-28"
 TOKEN_VALUES = {
     name: f"fixture-only-{name}-bearer-value"
-    for name in ("crm", "calls", "write", "full", "expired", "wrong_audience")
+    for name in ("crm", "calls", "slack", "write", "full", "expired", "wrong_audience")
 }
 TOOL_SCOPES = {
     "search_accounts": "crm:read",
     "get_account": "crm:read",
     "list_opportunities": "crm:read",
     "read_call_notes": "calls:read",
+    "read_slack_messages": "slack:read",
     "log_activity": "crm:write",
 }
 
@@ -44,8 +45,9 @@ class FixtureAuthority:
         scopes = {
             "crm": ["crm:read"],
             "calls": ["calls:read"],
+            "slack": ["slack:read"],
             "write": ["crm:write"],
-            "full": ["crm:read", "calls:read", "crm:write"],
+            "full": ["crm:read", "calls:read", "slack:read", "crm:write"],
             "expired": ["crm:read", "calls:read", "crm:write"],
             "wrong_audience": ["crm:read", "calls:read", "crm:write"],
         }
