@@ -27,6 +27,15 @@ database and snapshot. Possession of `owner.json` permits requesting all scopes.
 Direct administration and usage commands bypass MCP authorization by reading
 local files. This is not multi-user isolation or production identity.
 
+`inspector-config` is another local owner utility. It requests only the named
+scopes and writes a bearer credential to mode-0600 `inspector.json`. The external
+Inspector client receives that grant, not the owner credential. Keep the file
+private and remove it with the state directory. The five-minute token expires
+normally; no refresh or automatic scope increase is added. Inspector sends its
+tool calls through the same gateway, audit log, and rate limit. It trusts the
+generated certificate through `NODE_EXTRA_CA_CERTS`; TLS verification remains on.
+This path tests supplied-token MCP access, not an external client's login flow.
+
 Both services bind HTTPS to `127.0.0.1`. The client explicitly trusts the
 generated certificate. It validates the issuer, resource, redirect, and state.
 Authorization uses a preregistered public client and S256 PKCE. Codes expire

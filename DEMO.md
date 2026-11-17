@@ -94,3 +94,18 @@ not sandboxed. No real CRM integration, web interface, or multi-tenant behavior
 is included.
 
 Show the measured scores in the README and the passing test result.
+
+## Optional: show the official Inspector
+
+Follow [the Inspector setup](docs/inspector.md) in two terminals. It creates
+`var/inspector/inspector.json` with a CRM-only grant. Then run:
+
+```sh
+NODE_EXTRA_CA_CERTS="$PWD/var/inspector/tls.pem" npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/list
+```
+
+Show the five tools and their scope metadata. The guide then reads `acc-003`,
+denies a call-note request, and repeats it after an explicit `calls:read` grant.
+Inspector uses `server/discover` and the same HTTPS gateway. No authorization or
+audit check is bypassed. This optional client requires Node and a first npm
+download. The default five-minute script remains independent of it.

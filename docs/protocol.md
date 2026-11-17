@@ -10,6 +10,12 @@ not support subscriptions or legacy initialization sessions. Compatibility with
 arbitrary clients is not claimed. [DECISIONS.md](../DECISIONS.md) explains the
 checks the gateway adds to the SDK.
 
+The official Inspector CLI 2.15.0 is tested with `protocolEra: modern` and an
+explicit bearer grant. It sends `server/discover`, matching version headers,
+and per-request protocol metadata. See [the Inspector walkthrough](inspector.md).
+This proves MCP transport and tool access, not its interactive OAuth login or
+compatibility with an untested assistant application.
+
 ## Local authorization
 
 The flow uses one pre-registered public CLI client, explicit scope approval,
