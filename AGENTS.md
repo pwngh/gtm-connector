@@ -84,6 +84,12 @@ the scope choice in DECISIONS.md and use the same full-stop workflow.
 The user also requested an adversarial council comparison against main after
 editing. Apply the roster and three-round limit below, then record the conclusion.
 
+The later README comparison with Soulbeet, Homelable, and HomeButler changes
+navigation only. Keep the merged prose and reference pages. Add section links,
+put the local run before Codespaces, and separate optional features. Treat these
+repositories as structural examples, not measured proof of README performance.
+Use council against main and full-stop for this documentation-only change.
+
 Preserve the synthetic labels and fixed evaluation assertions until the
 explicitly scoped source expansion. Write approval belongs only in its separately
 requested later slice. Do not add a web interface or speculative rollout documents.

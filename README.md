@@ -13,6 +13,9 @@ The command `./scripts/demo.sh` installs dependencies, then runs the tests and
 demo on invented data from a clean checkout. The first install needs internet; the
 default runtime needs no external service or key.
 
+[See it](#see-it) | [Run it](#run-it) | [Guarantees](#what-it-guarantees) |
+[Limits](#limits-worth-reading) | [Reference](#reference)
+
 [![Terminal recording of the fixture demo, cited brief, scope denial, and rejected sentence](docs/media/walkthrough.gif)](docs/recording.md)
 
 This scripted recording runs real commands on fresh fixtures, with selected
@@ -203,22 +206,6 @@ operator check another candidate against the same records later.
 
 ## Run it
 
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/pwngh/gtm-connector)
-
-You can create a codespace through the link above, then run the command below
-in its browser terminal. The
-[development container](.devcontainer/devcontainer.json)
-supplies Python 3.11; the demo installs its dependencies. Setup needs internet.
-Client and services run inside the container with automatic port forwarding disabled.
-
-Codespaces uses your account's compute and storage allowance.
-[GitHub explains the billing rules](https://docs.github.com/en/billing/concepts/product-billing/github-codespaces).
-Stop the codespace when finished. Delete it when you no longer need its files;
-stopped codespaces still use storage.
-
-The container passed the five-minute demo locally on Linux arm64 with Python
-3.11.18. Codespaces creation and the browser editor have not been tested.
-
 The demo runs from a clean checkout:
 
 ```sh
@@ -242,6 +229,26 @@ The full walkthrough adds evaluation, usage, and a live citation rejection:
 ```
 
 It prints its private output directory. Follow [the five-minute guide](DEMO.md).
+
+### Run in Codespaces
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/pwngh/gtm-connector)
+
+You can create a codespace through the link above, then run the demo command above
+in its browser terminal. The
+[development container](.devcontainer/devcontainer.json)
+supplies Python 3.11; the demo installs its dependencies. Setup needs internet.
+Client and services run inside the container with automatic port forwarding disabled.
+
+Codespaces uses your account's compute and storage allowance.
+[GitHub explains the billing rules](https://docs.github.com/en/billing/concepts/product-billing/github-codespaces).
+Stop the codespace when finished. Delete it when you no longer need its files;
+stopped codespaces still use storage.
+
+The container passed the five-minute demo locally on Linux arm64 with Python
+3.11.18. Codespaces creation and the browser editor have not been tested.
+
+## Optional features
 
 ### Use an external MCP client
 
