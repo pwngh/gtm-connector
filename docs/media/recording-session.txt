@@ -1,0 +1,46 @@
+1. Run the fixture demo
+
+Actual execution. Dependency and test logs are captured privately.
+$ ./scripts/demo.sh --state-dir var/recording-ux96i6u2/state
+Selected output:
+Test suite: OK (231 tests in 54.069 seconds)
+Accounts: 30
+Call-note scope denial: HTTP 403
+Injected-note activities: 0
+Idempotent write: 2 requests, 1 activity
+2. Read the cited renewal conflict
+
+Three exact lines from the demo's acc-003 brief:
+- CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. [crm/opportunities/opp-003]
+- Untrusted call note note-003 at "2027-01-12T15:00:00Z" says "Procurement has not approved this renewal. The budget remains unsigned.". [calls/call_notes/note-003]
+- Source conflict: CRM opportunity opp-003 reports stage "closed_won", while call note note-003 reports unapproved procurement. [crm/opportunities/opp-003] [calls/call_notes/note-003]
+Citation checker: valid.
+3. Keep missing permission visible
+
+Recorded response excerpt for a CRM-only grant:
+{
+  "status": 403,
+  "message": "insufficient_scope: calls:read required"
+}
+Exact line from the restricted brief:
+- Call notes were unavailable because the token lacks calls:read. [audit/bb651321-0921-4d3d-9eac-96b220cd3b6c]
+4. Reject an uncited sentence
+
+Candidate: the generated brief plus 'The renewal was approved.'
+$ .venv/bin/python -m gtm_connector check-brief brief-6fae6c87ef324720a20a1ab074d46f58 var/recording-ux96i6u2/candidate.txt --state-dir var/recording-ux96i6u2/state
+error: Brief contains an uncited, unsupported, or misattributed statement.
+Exit: 2. Standard output is empty.
+5. List tools through the official Inspector CLI
+
+Fixture backend. Fresh loopback TLS server and an explicit crm:read grant.
+$ npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/recording-ux96i6u2/inspector-state/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/list
+Name and required-scope projection of the actual Inspector JSON:
+{
+  "search_accounts": "crm:read",
+  "get_account": "crm:read",
+  "list_opportunities": "crm:read",
+  "read_call_notes": "calls:read",
+  "read_slack_messages": "slack:read",
+  "log_activity": "crm:write"
+}
+Six tools returned by Inspector CLI.
