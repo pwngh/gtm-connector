@@ -377,6 +377,30 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503, response.text)
         self.assertEqual(self.activities(), [])
 
+    def test_deeply_nested_marked_request_is_rejected_and_audited(self):
+        self.open_connector()
+        # Older supported Python parsers raise RecursionError here; 3.14 can
+        # parse it. Both paths must reject this non-object and keep one receipt.
+        response = self.client.post("/mcp", content="[" * 10000 + "0" + "]" * 10000,
+                                    headers={"Mcp-Method": "tools/call", "Mcp-Name": "get_account"})
+        self.assertEqual(response.status_code, 400)
+        rows = self.connector.audit.read()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["tool"], rows[0]["status"], rows[0]["http_status"], rows[0]["row_count"]),
+                         ("get_account", "error", 400, 0))
+        self.assertEqual(self.activities(), [])
+
+    def test_unknown_account_write_returns_an_explicit_audited_tool_error(self):
+        self.open_connector()
+        response = self.tool("log_activity", self.activity_arguments(account_id="acc-missing"), token="write")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["result"]["isError"])
+        self.assertIn("account not found", response.json()["result"]["content"][0]["text"])
+        self.assertEqual(self.activities(), [])
+        rows = self.connector.audit.read()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["status"], rows[0]["row_count"]), ("error", 0))
+
     def test_audit_finish_failure_withholds_data(self):
         self.open_connector()
         with patch.object(self.connector.audit, "finish", side_effect=sqlite3.OperationalError("fixture audit unavailable")):

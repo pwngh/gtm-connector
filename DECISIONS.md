@@ -100,6 +100,12 @@ The HTTP boundary checks scope before execution, and each handler checks it
 again. Tool metadata declares the scope using the private
 `gtm.demo/requiredScope` key; the metadata itself is not an enforcement mechanism.
 
+Protected-resource metadata advertises only `crm:read` for basic functionality.
+The current specification's scope-selection strategy calls for this minimal
+initial set; per-operation challenges advertise `calls:read` or `crm:write`
+when required. The authorization server advertises all three supported scopes.
+The client returns a denied operation without automatically acquiring more access.
+
 Run one local authorization server and one connector on separate HTTPS
 loopback ports. Generate a short-lived certificate locally; the CLI explicitly
 trusts that certificate and validates the pinned issuer and resource metadata.
@@ -160,6 +166,12 @@ Repeated calls with the same key and identical account, kind, and body return
 the original activity. Reusing the key with different arguments is a conflict.
 The unique constraint and transaction enforce this across concurrent retries.
 There is no update or delete tool.
+
+Council identified a parser difference across supported Python versions: older
+versions raise `RecursionError` for deeply nested JSON within the body-size limit.
+Treat that as malformed input so a marked tool attempt still receives a receipt.
+Unknown-account writes also return an explicit tool error, rather than relying
+on the SDK's generic handling of a foreign-key failure. Both have regression tests.
 
 ## Review configuration
 

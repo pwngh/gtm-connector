@@ -135,6 +135,8 @@ class Connector:
             """Log an explicitly requested CRM activity. Requires crm:write; identical retries reuse a record."""
             self._require("crm:write")
             with closing(store.connect(self.crm_path)) as conn, conn:
+                if conn.execute("SELECT 1 FROM accounts WHERE id = ?", (account_id,)).fetchone() is None:
+                    raise ToolError("account not found")
                 conn.execute(
                     "INSERT INTO activities VALUES (?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(idempotency_key) DO NOTHING",
@@ -174,7 +176,7 @@ class Connector:
             def reject_constant(_):
                 raise ValueError("non-finite JSON number")
             request = json.loads(body, object_pairs_hook=_json_object, parse_constant=reject_constant)
-        except (ValueError, UnicodeError):
+        except (ValueError, UnicodeError, RecursionError):
             request = None
         params = request.get("params", {}) if isinstance(request, dict) else {}
         params = params if isinstance(params, dict) else {}
