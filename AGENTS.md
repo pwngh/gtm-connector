@@ -46,12 +46,14 @@ interface.
    points raised by two or more members. File the PR and leave the merge to the
    user. Do not change the resume or cover letter.
 
-After that documentation PR merges, a separate requested task may add an
-optional local drafting model through Ollama. It must be off by default, use the
-same evidence and checker, count rejected drafts without publishing them, and
-report evaluation, tokens, model name, and date. The default demo and CI stay
-model-free. Missing Ollama must produce a clear error. No hosted model calls.
-Do not begin that implementation as part of the documentation PR.
+Keep the separately requested MCP Inspector and standard-client compatibility
+work in its own implementation PR. This documentation branch must continue to
+describe the behavior already on main. Do not imply Inspector compatibility,
+change protocol behavior, or add a drafting model here. The next separate
+implementation slices are an optional local Ollama drafter, an isolated mock
+Slack source with a cited follow-up draft, and an optional read-only Salesforce
+Developer Edition adapter, in that order. Keep each in its own PR. The default
+demo and CI remain model-free and need no external keys.
 
 For the documentation council, give every member only the README and ask:
 what does the project do, what is proven, and what confused you? This is one

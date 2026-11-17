@@ -15,15 +15,19 @@ services. The workflow requests `crm:read` and, unless `--without-calls` is set,
 sequence or trigger another call. A deterministic fixture drafts the text;
 no model runs.
 
+A recognized call-note scope denial is the only partial-success case. Other
+HTTP errors, transport failures, failed tools, and incomplete evidence stop
+the brief rather than being reported as unavailable notes.
+
 Use `--as-of YYYY-MM-DD` to replace the fixed demo date, `--json` to print the
 full saved result, or `--state-dir PATH` to use another state directory.
 
 ## What the citations mean
 
-Without `calls:read`, the brief says call notes were unavailable. For an account
-with no notes, it says none were returned. Both statements cite the audit receipt
-that records the outcome. Other claims cite their source records. Renewal-day
-calculations also cite the saved run date.
+Without `calls:read`, the brief says call notes were unavailable. Empty notes or
+opportunities produce a statement that none were returned. These statements cite
+the audit receipt that records the outcome. Record claims cite their source
+records. Renewal-day calculations also cite the saved run date.
 
 The brief keeps conflicting CRM fields and notes as separate, attributed claims.
 It quotes note text as untrusted data, including any instructions. Newlines stay
