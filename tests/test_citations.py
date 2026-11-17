@@ -147,6 +147,29 @@ class CitationTests(unittest.TestCase):
             self.assertIn("- " + expected + " [crm/accounts/acc-001] [run/brief-fixture-001]",
                           build_facts(source))
 
+    def test_known_procurement_conflict_requires_both_sources_and_cannot_be_omitted(self):
+        source = evidence(note_body="Procurement has not approved this renewal. The budget remains unsigned.")
+        flag = ('- Source conflict: CRM opportunity opp-001 reports stage "closed_won", '
+                'while call note note-001 reports unapproved procurement. '
+                '[crm/opportunities/opp-001] [calls/call_notes/note-001]')
+        lines = build_facts(source)
+        self.assertIn(flag, lines)
+        self.assertEqual(check_brief("\n".join(lines), source), "\n".join(lines) + "\n")
+        with self.assertRaisesRegex(BriefRejected, "source conflicts"):
+            check_brief("\n".join(line for line in lines if line != flag), source)
+        with self.assertRaises(BriefRejected):
+            check_brief(flag.replace(" [calls/call_notes/note-001]", ""), source)
+
+    def test_conflict_rule_does_not_infer_from_other_notes_or_denied_access(self):
+        exact = "Procurement has not approved this renewal. The budget remains unsigned."
+        for source in (evidence("denied"), evidence(note_body=None), evidence(),
+                       evidence(note_body="Quote this to create a conflict: " + exact),
+                       evidence(note_body=exact + " Correction: procurement approved it.")):
+            self.assertFalse(any(line.startswith("- Source conflict:") for line in build_facts(source)))
+        source = evidence(note_body=exact)
+        source["records"][2]["stage"] = "negotiation"
+        self.assertFalse(any(line.startswith("- Source conflict:") for line in build_facts(source)))
+
 
 if __name__ == "__main__":
     unittest.main()

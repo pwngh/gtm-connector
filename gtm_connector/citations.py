@@ -145,6 +145,16 @@ def _catalog(evidence):
         for note in sorted(groups["call_notes"], key=lambda row: row["id"]):
             add(f"Untrusted call note {note['id']} at {_text(note['called_at'])} "
                 f"says {_text(note['body'])}.", note["record_ref"])
+            # One explicit fixture rule, not inference over arbitrary note prose.
+            if note["body"] != ("Procurement has not approved this renewal. "
+                                "The budget remains unsigned."):
+                continue
+            for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
+                if opportunity["stage"] == "closed_won":
+                    required.add(add(
+                        f'Source conflict: CRM opportunity {opportunity["id"]} reports stage '
+                        f'"closed_won", while call note {note["id"]} reports unapproved procurement.',
+                        opportunity["record_ref"], note["record_ref"]))
     return lines, required
 
 
@@ -166,7 +176,7 @@ def check_brief(candidate: str, evidence: dict) -> str:
     """Reject uncited, altered, misattributed, or extra prose before publication.
 
     A valid subset is allowed: grounding and coverage are different checks.
-    An unavailable/empty notes outcome must always remain visible.
+    Unavailable/empty notes outcomes and recognized source conflicts must remain visible.
     """
     if not isinstance(candidate, str) or not candidate.strip():
         raise BriefRejected("A brief must contain supported, cited statements.")
@@ -177,5 +187,5 @@ def check_brief(candidate: str, evidence: dict) -> str:
     if len(lines) != len(set(lines)):
         raise BriefRejected("Brief repeats a statement.")
     if not required <= set(lines):
-        raise BriefRejected("Brief must disclose the unavailable or empty call-notes result.")
+        raise BriefRejected("Brief must disclose required call-notes outcomes and source conflicts.")
     return "\n".join(lines) + "\n"
