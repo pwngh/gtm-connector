@@ -231,6 +231,11 @@ same records later; it does not consult a later, possibly changed CRM. The local
 file owner remains trusted, so these snapshots are neither signed nor
 tamper-proof. Retention is manual, as for the other local state.
 
+Snapshot file replacement is not atomic. An interrupted write can leave partial
+JSON instead of a usable snapshot; the checker rejects it and the operator must
+generate a new brief. Crash-safe snapshot replacement is deferred. The separate
+SQLite audit receipts retain their existing durability behavior.
+
 Record fixture model usage as model `null` and zero input/output tokens because
 no model ran. For custom Python adapters, record unknown token counts as `null`
 rather than estimating them from text. The audit usage report and twenty-account
