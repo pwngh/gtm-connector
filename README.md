@@ -137,7 +137,7 @@ From a clean checkout:
 
 Requires macOS or Linux and Python 3.11+ with SQLite and venv support. The first
 dependency install needs internet. The runtime needs no external service,
-account, model, or API key. The script runs 116 tests and two local HTTPS services.
+account, model, or API key. The script runs 120 tests and two local HTTPS services.
 
 With 30 invented accounts and reserved `.example` addresses, it demonstrates
 HTTP 403 scope denial, HTTP 429 rate limiting, deduplicated writes, and zero
@@ -152,6 +152,20 @@ rejection:
 ```
 
 It prints its private output directory. Follow [the five-minute guide](DEMO.md).
+
+### Use an external MCP client
+
+The optional [Inspector walkthrough](docs/inspector.md) starts the server and
+creates a private config with explicitly granted scopes. After that setup:
+
+```sh
+NODE_EXTRA_CA_CERTS="$PWD/var/inspector/tls.pem" npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/list
+```
+
+Inspector 2.15.0 discovers MCP 2026-07-28, lists all five tools, and reads the two
+sources through the existing gateway. The [integration check](scripts/check-inspector.py)
+proves both scope-denial directions, HTTP 429, HTTP 401, and one receipt per tool
+attempt. Node and npm downloads are needed only for this optional client check.
 
 ## What the mocks stand for
 
@@ -177,7 +191,9 @@ It prints its private output directory. Follow [the five-minute guide](DEMO.md).
   credentials and `anonymous` count too. Unknown model usage stays `null`, and
   totals cover saved snapshots only. [Usage details](docs/usage.md)
 - MCP and authorization revision: **2026-07-28**, read **2026-11-17**. Python SDK:
-  **2.3.0**. Only the included client is tested. [Protocol details](docs/protocol.md)
+  **2.3.0**. The included client and Inspector CLI 2.15.0 are tested. Other
+  assistant applications and interactive external login are unverified.
+  [Protocol details](docs/protocol.md)
 
 Custom Python adapters are not sandboxed or selectable through the CLI. No
 hosted model adapter, real CRM or call-recording integration, web interface,
