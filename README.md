@@ -1,10 +1,18 @@
 # GTM connector demo
 
-An MCP server sits in front of a mock CRM, call notes, and Slack account messages, with scoped tokens,
-an audit log of recognized tool calls, and a workflow that drafts a renewal brief
-and cites the source or audit record behind each statement. A rep who gets one wrong answer about
-an account stops opening the tool, so the checker rejects any line it cannot
-tie to a record.
+This is an MCP server in front of a mock CRM, call notes, and Slack account
+messages. It gives clients scoped access, records recognized tool calls in an
+audit log, and drafts renewal briefs that cite the source or audit record behind
+each statement.
+
+A rep who gets one wrong answer about an account stops opening the tool. The
+checker rejects any line it cannot tie to a record. The tests below prove the
+permission checks, audit boundary, write retries, and rejection of unsupported
+claims.
+
+Run `./scripts/demo.sh` from a clean checkout. It installs dependencies, runs
+the tests, and shows those cases on invented data. The first install needs
+internet; the default runtime needs no external service or key.
 
 ## What it guarantees
 
@@ -105,7 +113,8 @@ The 182 of 182 counts measure fixed claim lines found and cited correctly
 against fixed expected answers. The drafter and checker share supported wording;
 these scores do not measure model quality. The run recorded 60 successful audit
 receipts, zero activities, and zero model tokens.
-[Results](evaluation/RESULTS.json) · [Expected claims](evaluation/expected.json) ·
+[Results](evaluation/RESULTS.json)
+[Expected claims](evaluation/expected.json)
 [Scoring rules](docs/evaluation.md)
 
 ### Local model measurement
@@ -132,8 +141,9 @@ gate; it does not prove the model hallucinated or that a hallucination was caugh
 The task is fixed-claim assembly. Adverse tests separately reject uncited,
 invented, miscited, duplicate, and action-shaped candidates without publishing
 any part of the failed brief.
-[Model results and exact command](evaluation/RESULTS_OLLAMA.json) ·
-[Rejection tests](tests/test_model_workflow.py) · [Local model limits](docs/ollama.md)
+[Model results and exact command](evaluation/RESULTS_OLLAMA.json)
+[Rejection tests](tests/test_model_workflow.py)
+[Local model limits](docs/ollama.md)
 
 ## Request path
 
@@ -152,8 +162,29 @@ flowchart LR
     Check -->|"Accepted text"| Brief["Renewal brief"]
 ```
 
+The client names a tool and supplies its arguments. The local authorization
+server issues a token with named permissions, called scopes. CRM, calls, and
+Slack each need their own grant.
+
+The gateway writes a pending audit receipt, then checks the token, scope, and
+rate limit. A receipt records the attempt and its outcome. A rejected call
+stops there. An allowed tool reads its source and returns records marked as
+untrusted data, with a `record_ref` for each record. The gateway finalizes the
+receipt before returning the result.
+
 The briefing workflow requests read scopes only. The default brief has three
 receipts. `--with-slack` adds a fourth read and a checked follow-up draft.
+
+The workflow saves the returned records and receipts as an evidence snapshot.
+The drafter gets a copy of that evidence. It has no token or tool interface.
+The checker compares each candidate line with supported wording and its exact
+references. Only a brief that passes the whole check is published.
+
+An empty source result and a denied grant are different outcomes. The brief
+states which occurred and cites the receipt. Other read failures stop the brief.
+A failed citation check rejects the whole draft; it does not publish the lines
+that happened to pass. Saved evidence lets the operator check another candidate
+against the same records later.
 
 ## Run it
 
@@ -280,7 +311,8 @@ or multi-tenant behavior is included.
 
 ## Reference
 
-[Tools and fixture data](docs/tools.md) · [Design decisions](DECISIONS.md) ·
+[Tools and fixture data](docs/tools.md)
+[Design decisions](DECISIONS.md)
 [Rules the coding agents worked under](AGENTS.md)
 
 Portfolio project for Preston Neal. The checked-in fixture records use synthetic
