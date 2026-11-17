@@ -1,40 +1,41 @@
 # Record the walkthrough
 
-The README recording runs the fixture demo, shows three cited lines from
-`acc-003`, refuses a call-note read without its scope, and rejects an appended
-uncited sentence. The final frame shows the six tools returned by the official
-Inspector CLI. It displays their names and scopes; the full response is saved
-separately. No model, real CRM, Inspector UI, or interactive login is involved.
+The README recording shows the connector before a reader installs it. It runs
+the fixture demo on invented data, then shows three cited lines from `acc-003`.
+It refuses a call-note read without its scope and rejects an appended uncited
+sentence. The final frame lists six tools from the official Inspector CLI by
+name and scope; the full response is saved separately. No model, real CRM,
+Inspector UI, or interactive login is involved.
 
-The session script runs real commands and checks their outcomes before showing
-selected fields. It adds reading pauses. Playback caps idle periods at twelve
-seconds, so installation and test waits do not determine the recording length.
-The recording is a walkthrough, not a performance measurement.
+The script checks real command outcomes before displaying selected fields and
+pausing for the reader. Playback caps idle periods at twelve seconds, so install
+and test waits do not determine recording length. It is a walkthrough, not a
+performance measurement.
 
 ## Regenerate it
 
-Use macOS or Linux with Python 3.11+, Node and npx as described in the
-[Inspector guide](inspector.md), asciinema 3.2.1, and agg 1.9.0. These are optional
-documentation tools. The default demo and CI do not need the recording tools.
-On macOS, the tools are available from Homebrew:
+Recording requires macOS or Linux with Python 3.11+. Set up Node and npx through the
+[Inspector guide](inspector.md). Recording also requires asciinema 3.2.1 and
+agg 1.9.0; the default demo and CI need neither. On macOS, these optional tools
+are available from Homebrew:
 
 ```sh
 brew install asciinema agg
 ```
 
-From the repository root, run:
+The recording script runs from the repository root:
 
 ```sh
 ./scripts/record-demo.sh
 ```
 
-Commit source changes first. The script refuses a changed working tree, except
-for generated files in `docs/media/`, so its source revision describes what ran.
+The script requires committed source changes so the recorded revision identifies
+what ran. It refuses a changed working tree, except for generated files in `docs/media/`.
 
-The script installs the existing Python requirements and downloads the pinned
-Inspector package if it is not cached. It then runs `./scripts/demo.sh` in fresh
-fixture state. The recording script controls what reaches the terminal. It does
-not capture the desktop, a user's shell prompt, or keyboard input.
+The script installs existing Python requirements and downloads the pinned
+Inspector package if uncached. It runs `./scripts/demo.sh` in fresh fixture
+state. The recording script controls what reaches the terminal; the capture excludes the
+desktop, a user's shell prompt, and keyboard input.
 
 Generated files live in `docs/media/`:
 
@@ -47,23 +48,23 @@ Generated files live in `docs/media/`:
 | `recording-session.txt` | The displayed text without terminal clear sequences. |
 | `recording-provenance.json` | Source revision, commands, exits, times, versions, and artifact hashes. |
 
-The capture script keeps raw logs, fixture databases, and credentials under
-private, gitignored `var/` directories. Only selected output is published. The
-renderer checks the text artifacts for credential patterns, issued credentials
-still in local config files, and local home paths before rendering. It also
-requires the capture to match the saved transcript after removing terminal clears
-and normalizing line endings. These checks remain active when Python optimization
-is enabled. Review the
-transcript and both images before committing. Do not add the private directories.
-Retention remains manual, as described in the [security review](../SECURITY_REVIEW.md).
+Raw logs, fixture databases, and credentials stay in private, gitignored `var/`
+directories. Only selected output is published. Before rendering, the renderer
+checks text artifacts for credential patterns, local home paths, and issued
+credentials still in local config files.
 
-If a command or assertion fails, generation stops. Read the private logs under
-`var/recording-*` and `var/capture.*`; do not paste them into an issue or recording.
-Check the Python dependencies, Node version, and cached Inspector installation.
-Fix the failure and rerun the script. A failed run can leave partial media files,
-so do not publish them as a completed recording.
+The capture must match the saved transcript after removing terminal clears and
+normalizing line endings. These checks remain active under Python optimization.
+Review the transcript and both images before committing; exclude the private
+directories. Retention stays manual under the [security review](../SECURITY_REVIEW.md).
 
-To replay the original capture locally:
+Failed commands or assertions stop generation. Read the private logs under
+`var/recording-*` and `var/capture.*`, but do not paste them into an issue or
+recording. Check Python dependencies, Node version, and cached Inspector
+installation, fix the failure, and rerun. Partial media from a failed run is
+not a completed recording; do not publish it as one.
+
+This command replays the original capture locally:
 
 ```sh
 asciinema play docs/media/walkthrough.cast

@@ -1,23 +1,25 @@
 # Use the official MCP Inspector
 
-Inspector 2.15.0 connects to the existing Streamable HTTP endpoint. This path
-uses MCP 2026-07-28, TLS verification, and a bearer token with explicit scopes.
-All tool calls pass through the same authorization, audit, and rate-limit checks.
+Inspector is a test client for MCP servers. Inspector 2.15.0 discovers and calls
+the connector's tools through its existing Streamable HTTP endpoint, using
+MCP 2026-07-28. TLS verification stays on. Tool calls use an explicitly scoped
+bearer token and pass through the same authorization, audit, and rate-limit checks
+as the included client.
 
-Install the Python dependencies with `./scripts/demo.sh` first. This optional
+You must run `./scripts/demo.sh` first to install the Python dependencies. This optional
 client also requires Node 22.23.4+, 24.22.1+, or 26.12.1+ and `npx`. The first
 Inspector invocation downloads its pinned npm package. Neither default demo
 script needs Node or Inspector.
 
 ## Start the server
 
-Keep this command running in one terminal:
+The server must stay running in one terminal while you use the client:
 
 ```sh
 .venv/bin/python -m gtm_connector serve --state-dir var/inspector
 ```
 
-In a second terminal, at the repository root, request CRM access:
+The configuration command requests CRM access from a second terminal at the repository root:
 
 ```sh
 .venv/bin/python -m gtm_connector inspector-config --state-dir var/inspector --scope crm:read
@@ -30,16 +32,15 @@ export NODE_TLS_REJECT_UNAUTHORIZED=1
 export NODE_EXTRA_CA_CERTS="$PWD/var/inspector/tls.pem"
 ```
 
-The utility prints the config path, certificate path, and granted scopes. It
-writes the bearer token to `var/inspector/inspector.json` with mode 0600. It
-does not print that token or export the owner credential. The config selects
-`protocolEra: modern`. Keep it private. It is ignored by git.
+The utility prints config and certificate paths with the granted scopes. It
+writes the bearer token to `var/inspector/inspector.json` with mode 0600, without
+printing it or exporting the owner credential. The config selects
+`protocolEra: modern`. Git ignores this file; keep it private.
 
-`NODE_EXTRA_CA_CERTS` adds the generated certificate to this Node process's
-trust. It does not change system trust or disable certificate verification.
-The proxy-bypass entries keep loopback requests out of inherited HTTP proxies.
-Download Inspector before replacing an existing extra-CA setting, since a
-private npm registry may need its own certificate.
+`NODE_EXTRA_CA_CERTS` lets this Node process trust the generated certificate
+without changing system trust or disabling verification. The proxy bypass keeps
+loopback requests out of inherited HTTP proxies. Download Inspector before
+replacing an extra-CA setting; a private npm registry may need its own certificate.
 
 ## Discover and call tools
 
@@ -49,12 +50,14 @@ npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/in
 npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/call --tool-name get_account --tool-arg account_id=acc-003
 ```
 
-Inspector calls its connection-summary command `initialize`. With this modern
-config, it sends `server/discover` on the wire, not a legacy handshake. The
-summary reports `result.protocolVersion: "2026-07-28"`. Tool listing returns
-all six tools, their input and output schemas, and required-scope metadata.
-Account output appears in `result.structuredContent.records` with references
-`crm/accounts/acc-003` and `crm/contacts/con-003`.
+Inspector calls its connection-summary command `initialize`. This modern config
+sends `server/discover` on the wire, not a legacy handshake. The summary reports
+`result.protocolVersion: "2026-07-28"`.
+
+The listing describes all six tools with input and output schemas and
+required-scope metadata. The account read returns
+`result.structuredContent.records` with references `crm/accounts/acc-003` and
+`crm/contacts/con-003`.
 
 This next call fails because the token has no calls grant:
 
@@ -62,12 +65,12 @@ This next call fails because the token has no calls grant:
 npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/call --tool-name read_call_notes --tool-arg account_id=acc-003
 ```
 
-The gateway returns HTTP 403. Inspector exits 1, leaves stdout empty, and reports
-`Insufficient scope: required "calls:read"` in its stderr JSON error. The
-`--stored-auth-only` flag prevents an interactive login attempt. It does not
-request more scopes.
+The gateway returns HTTP 403. Inspector exits 1 with empty stdout and reports
+`Insufficient scope: required "calls:read"` in its stderr JSON error.
+`--stored-auth-only` prevents interactive login. With that flag, the client also
+requests no additional scopes.
 
-Request calls access explicitly, then repeat that exact Inspector command:
+An explicit calls grant lets the same Inspector command read the notes:
 
 ```sh
 .venv/bin/python -m gtm_connector inspector-config --state-dir var/inspector --scope crm:read --scope calls:read
@@ -81,13 +84,12 @@ as untrusted. Inspect the receipts with:
 .venv/bin/python -m gtm_connector audit --state-dir var/inspector
 ```
 
-Tokens expire after five minutes; re-run
-`inspector-config` to request another grant. Restarting the server changes its
-ports and invalidates old tokens, so regenerate the config after every restart.
-The state directory retains credentials and receipts until you remove it.
+After five minutes the token expires; re-run `inspector-config` for another
+grant. A server restart also requires a fresh config because its ports change
+and old tokens become invalid. Credentials and receipts remain in the state
+directory until removed.
 
-To read only Slack messages, leave the server running and explicitly replace
-the config grant:
+A Slack-only grant replaces the config while the server stays running:
 
 ```sh
 .venv/bin/python -m gtm_connector inspector-config --state-dir var/inspector --scope slack:read
@@ -104,17 +106,20 @@ or call notes. Stop the server with Ctrl-C when finished.
 ```
 
 This separate CI check uses the pinned official CLI in fresh temporary state.
-It validates discovery, all twelve tool schemas, all three source reads, all six
-cross-source denials, HTTP 429, an invalid-bearer HTTP 401, ten finalized receipts
-for ten tool attempts, and zero activities. It observes actual HTTP protocol
-headers and metadata. The included client only provisions grants; Inspector
-sends the MCP requests. Test state is removed afterward.
+Inspector sends MCP requests; the included client only provisions grants. The
+check observes actual HTTP protocol headers and metadata, validating discovery
+and all twelve tool schemas.
 
-This proves Inspector CLI interoperability with a supplied bearer token. It
-does not prove another assistant application's compatibility or Inspector's
-interactive OAuth flow. The authorization server remains a local owner emulator
-with one preregistered public client. Browser origins, legacy initialization,
-subscriptions, and dynamic client registration remain unsupported.
+It requires all three source reads and all six cross-source denials, plus
+HTTP 429 and an invalid-bearer HTTP 401. It confirms ten finalized receipts for
+ten tool attempts with zero activities, then removes test state.
 
-Read the official [Inspector guide](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector)
-and [protocol-era reference](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector/protocol-eras).
+This proves Inspector CLI interoperability with a supplied bearer token, not
+another assistant application's compatibility or Inspector's interactive OAuth
+flow. The authorization server remains a local owner emulator with one
+preregistered public client. Browser origins and legacy initialization remain
+unsupported, as do subscriptions and dynamic client registration.
+
+The official [Inspector guide](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector)
+and [protocol-era reference](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector/protocol-eras)
+explain the client and its protocol modes.

@@ -1,28 +1,30 @@
 # Read a Salesforce Developer Edition org
 
-This optional adapter replaces the three CRM read tools. It uses Salesforce
-REST v68.0. Call notes and Slack stay in their isolated SQLite stores. The
-default demo, evaluation, and model benchmark still use invented records.
-Tests exercise the adapter with invented HTTP responses. No live org result
-or production compatibility is claimed.
+This option reads accounts, contacts, and opportunities from a Developer Edition
+org, a free Salesforce development org you supply. The three CRM read tools use Salesforce
+REST v68.0; call notes and Slack keep their isolated SQLite stores.
+
+Default demos, evaluation, and model benchmarks still use invented records.
+Adapter tests use invented HTTP responses, with no live org result or production
+compatibility claimed.
 
 ## Prepare an org yourself
 
-Use your own Developer Edition org with invented data and API access. Salesforce
+Your Developer Edition org needs invented data and API access. Salesforce
 provides a [free Developer Edition signup](https://developer.salesforce.com/docs/platform/api-rest/guide/quickstart-dev-org.html).
 The connector creates no org, user, application, or key. Do not use a production
-org or employer/client data. Every CRM operation checks `OrganizationType` and
-requires exactly `Developer Edition`; other editions fail before CRM queries.
+org or employer/client data. Before querying CRM records, every operation checks
+`OrganizationType` for exactly `Developer Edition`. Other editions fail.
 
-Install the current [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli).
-Authenticate your org, using a separate alias:
+Setup requires the current [Salesforce CLI](https://developer.salesforce.com/tools/salesforcecli).
+The command authenticates your org under a separate alias:
 
 ```sh
 sf org login web --alias gtm-de
 ```
 
-Supply `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` privately in the
-terminal that will run the server. These commands capture the values without
+The server reads `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` from its
+terminal environment. These commands capture the values privately, without
 printing the credential or placing its value in shell history:
 
 ```sh
@@ -32,25 +34,26 @@ export SALESFORCE_ACCESS_TOKEN="$(sf org auth show-access-token --target-org gtm
 
 Current CLI versions redact the token in `org display`; use the explicit
 [show-access-token command](https://developer.salesforce.com/docs/platform/salesforce-cli-reference/guide/cli_reference_org_auth_show-access-token.html).
-Do not enable shell tracing or paste the credential into a tool argument.
+Keep shell tracing off and do not paste the credential into a tool argument.
+
 The connector accepts an HTTPS My Domain origin ending in `.my.salesforce.com`,
-without a path, query, credentials, or nonstandard port. A login URL such as
-`login.salesforce.com` is not an instance URL. Use the CLI's `instanceUrl`.
-No credential file is loaded automatically.
+with no path, query, credentials, or nonstandard port. A login URL such as
+`login.salesforce.com` is not an instance URL; use the CLI's `instanceUrl`.
+No credential file loads automatically.
 
 ## Start and read
 
-After installing the Python dependencies, keep this command running:
+The server runs after the Python dependencies are installed:
 
 ```sh
 .venv/bin/python -m gtm_connector serve --crm-backend salesforce --state-dir var/salesforce
 ```
 
-Startup validates configuration locally. The first authorized CRM tool performs
-the edition check and data query. Environment variables alone never activate
-the adapter. With no backend flag, `serve` still uses SQLite.
+Startup validates configuration locally. The first authorized CRM tool checks
+the edition and queries data. Environment variables alone never activate the
+adapter; without a backend flag, `serve` uses SQLite.
 
-In another terminal, follow the [Inspector setup](inspector.md) with
+A second terminal uses the [Inspector setup](inspector.md) with
 `var/salesforce` in place of `var/inspector`. Grant `crm:read`. Set that state's
 certificate in `NODE_EXTRA_CA_CERTS`. Search first:
 
@@ -58,31 +61,33 @@ certificate in `NODE_EXTRA_CA_CERTS`. Search first:
 npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/salesforce/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/call --tool-name search_accounts
 ```
 
-Copy an actual returned `id`, then pass it as `account_id` to `get_account` or
-`list_opportunities` using the same Inspector command. An account ID has the
-form `acc-sf-` followed by its 18-character Salesforce ID. Do not use `acc-003`;
-that belongs to the fixture. Search returns at most 100 accounts. Refine the
-query if it reports `salesforce_result_limit`. Opportunity and contact queries
-also reject results over 100 rows instead of returning a partial answer.
+Subsequent reads take an actual returned `id` as `account_id` for `get_account`
+or `list_opportunities` through the same Inspector command. Account IDs use
+`acc-sf-` followed by the 18-character Salesforce ID. Do not use the fixture's
+`acc-003`.
 
-The external backend lists five read tools. `log_activity` is absent. A direct
-write attempt with a valid write grant returns HTTP 403 and `crm_write_disabled`.
-No activity is created locally or remotely. Call notes and Slack remain mocks;
-there is no ID mapping from external accounts to fixture notes or messages.
+Search returns at most 100 accounts; refine the query after
+`salesforce_result_limit`. Opportunity and contact queries also reject results
+over 100 rows rather than return partial answers.
 
-Stop with Ctrl-C. Remove the variables from that terminal when finished:
+The external backend lists five read tools; the write tool `log_activity` is absent.
+A direct write attempt with a valid write grant returns HTTP 403 and `crm_write_disabled`,
+creating no activity locally or remotely. Mock call notes and Slack have no
+ID mapping from external accounts to fixture notes or messages.
+
+Ctrl-C stops the server. This command then removes the variables from that terminal:
 
 ```sh
 unset SALESFORCE_INSTANCE_URL SALESFORCE_ACCESS_TOKEN
 ```
 
-The adapter does not refresh tokens. Obtain a new access token and restart the
-server when needed. The local MCP tokens have their separate five-minute expiry.
+The adapter does not refresh tokens. Obtain a new access token and restart when
+needed. Local MCP tokens have a separate five-minute expiry.
 
 ## Field mapping
 
-The gateway returns `source: crm`, `untrusted_data: true`, and a `record_ref`
-under `crm/accounts/`, `crm/contacts/`, or `crm/opportunities/`. Each row also has
+Results carry `source: crm`, `untrusted_data: true`, and a `record_ref` under
+`crm/accounts/`, `crm/contacts/`, or `crm/opportunities/`. Each row has
 `backend: salesforce`, its native `source_id`, and an `id` prefixed with
 `acc-sf-`, `con-sf-`, or `opp-sf-`. Nullable mapped fields preserve null values.
 
@@ -93,9 +98,9 @@ under `crm/accounts/`, `crm/contacts/`, or `crm/opportunities/`. Each row also h
 | Opportunity | `Name` to `name`; raw `StageName` to `stage`; `CloseDate` to `close_date`; `IsClosed` and `IsWon` to `is_closed` and `is_won`; `AccountId` to namespaced `account_id` or null |
 | Opportunity amount | `Amount` to `amount_decimal`, a decimal string or null; `currency` is null, meaning unknown |
 
-`CurrencyIsoCode` is not available in every org. This adapter does not infer a
-currency. It does not treat `Account.AnnualRevenue` as ARR, relabel `CloseDate`
-as a renewal date, normalize custom stages, or invent renewal risk.
+`CurrencyIsoCode` is unavailable in some orgs. The adapter always leaves currency unknown.
+The adapter does not treat `Account.AnnualRevenue` as ARR or `CloseDate` as a
+renewal date. It preserves custom stages and invents no renewal risk.
 
 Those missing mappings prevent renewal briefs from this backend. This command
 exits 2 with `renewal_fields_unmapped`, before reading data or invoking a model:
@@ -110,20 +115,25 @@ its fixture files but does not copy org records into them.
 
 ## Request and failure boundary
 
-The local gateway still commits a pending receipt, checks the bearer grant,
-and applies its rate limit before tool execution. A missing `crm:read` grant
-returns HTTP 403 without an upstream request. Initial audit failure returns
-HTTP 503 without an upstream request. A successful external read or failed
-query finalizes the same receipt. Audit rows store returned references, not
-record bodies. Search terms and supplied IDs remain in arguments.
+Before tool execution, the gateway commits a pending receipt, checks the bearer
+grant, and applies its rate limit. Missing `crm:read` returns HTTP 403 without
+contacting the org. Initial audit failure returns HTTP 503 without an upstream
+request either.
 
-The adapter sends only GET requests with fixed field lists and escaped search
-text. It uses TLS verification, no proxies, no redirects, and no retries.
-Pagination accepts only relative query locators on the configured instance.
-Each operation has limits of 12 requests, 1 MiB of decoded response data,
-10 pages per query, and a 20-second deadline checked around reads. Each request sets its network timeout from the remaining deadline at request
-start, up to 5 seconds. This is not a hard wall-clock cancellation. Compressed
-responses are rejected; requests explicitly ask for identity encoding.
+Successful reads and failed queries finalize the same receipt. Audit rows keep
+returned references, not record bodies. Arguments retain search terms and
+supplied IDs.
+
+The adapter sends GET requests with fixed field lists and escaped search text.
+TLS verification stays on. It uses no proxies, follows no redirects, and makes
+no retries. Pagination accepts only relative query locators on the configured
+instance.
+
+Each operation allows 12 requests and 1 MiB of decoded response data, with
+10 pages per query. A 20-second deadline is checked around reads. Each request's
+network timeout uses the remaining deadline at request start, up to 5 seconds.
+This is not hard wall-clock cancellation. Requests ask for identity encoding;
+compressed responses are rejected.
 
 | Condition | Result |
 | --- | --- |
@@ -136,11 +146,13 @@ responses are rejected; requests explicitly ask for identity encoding.
 | Other upstream HTTP status | `salesforce_http_error` |
 | Invalid payload, locator, arguments, or exceeded bound | Fixed `salesforce_*` error; no partial records |
 
-Upstream failures are MCP tool errors (`isError: true` over HTTP 200). They do
-not become local OAuth challenges. The SDK may prefix the fixed code with the
-tool name. The connector's own authentication failures remain HTTP 401, scope
-and disabled-write failures remain HTTP 403, and its own rate limit remains
-HTTP 429 with `Retry-After`. Raw upstream messages and credentials are withheld.
+An upstream failure arrives as an MCP tool error (`isError: true` over HTTP 200),
+not a local OAuth challenge. The SDK may prefix the fixed code with the tool
+name. Raw upstream messages and credentials are withheld.
+
+The connector keeps its own failure responses: authentication returns HTTP 401,
+scope and disabled-write failures return HTTP 403, and the local rate limit
+returns HTTP 429 with `Retry-After`.
 
 ## Verification and limits
 
@@ -148,21 +160,25 @@ HTTP 429 with `Retry-After`. Raw upstream messages and credentials are withheld.
 .venv/bin/python -m unittest discover -s tests -p 'test_salesforce*.py' -v
 ```
 
-Tests cover edition checks, field mapping, decimal preservation, hostile search
-text, response limits, pagination, credential-safe errors, disabled writes,
-HTTPS MCP scope enforcement, pending audit receipts, and offline defaults.
-They use synthetic responses, not recordings from an org. No Salesforce token
-is required. [Adapter tests](../tests/test_salesforce.py) ·
-[Gateway tests](../tests/test_salesforce_gateway.py) · [CLI tests](../tests/test_salesforce_cli.py)
+Tests check editions and field mapping, including decimal preservation. Hostile
+search text, pagination, and response limits exercise the request boundary.
+Other cases cover credential-safe errors and disabled writes, HTTPS MCP scope
+enforcement, pending audit receipts, and offline defaults.
 
-The local file owner remains trusted and can grant CRM access. The upstream
-token may carry broader permissions; read-only behavior comes from this
-adapter's GET-only interface and missing write tool. This is not delegated
-Salesforce user identity. The operator must review org permissions and data
-before using it. Real search terms and record references can persist in the
-local audit. Retention stays manual. See [the security review](../SECURITY_REVIEW.md).
+Responses are synthetic, not recorded from an org; no Salesforce token is
+required. [Adapter tests](../tests/test_salesforce.py),
+[Gateway tests](../tests/test_salesforce_gateway.py), and [CLI tests](../tests/test_salesforce_cli.py)
+cover these cases.
 
-Protocol references read on 2026-11-17: [Query](https://developer.salesforce.com/docs/platform/api-rest/guide/resources-query.html),
+The trusted local file owner can grant CRM access. Read-only behavior comes
+from the adapter's GET-only interface and absent write tool; the upstream token
+may have broader permissions. This is not delegated Salesforce user identity.
+
+Operators must review org permissions and data before use. Real search terms and record
+references can persist in the local audit. Retention remains manual. See
+[the security review](../SECURITY_REVIEW.md).
+
+This guide uses protocol references read on 2026-11-17: [Query](https://developer.salesforce.com/docs/platform/api-rest/guide/resources-query.html),
 [HTTP errors](https://developer.salesforce.com/docs/platform/api-rest/guide/errorcodes.html),
 [Organization fields](https://developer.salesforce.com/docs/platform/object-reference/references/standard-objects/object-organization.html),
 and [currency fields](https://developer.salesforce.com/docs/platform/object-reference/guide/field-types.html).

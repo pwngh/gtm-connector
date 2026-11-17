@@ -1,43 +1,45 @@
 # Protocol and authorization
 
+The connector grants client access through a local owner emulator, without
+production login or user identity.
+
 The server implements [MCP revision 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
 and its [authorization section, revision 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization).
 Both were read on **2026-11-17**. The official Python SDK is pinned to **2.3.0**.
 
 The transport is stateless Streamable HTTP with per-request protocol metadata
-and `server/discover`. The server accepts only this protocol revision. It does
-not support subscriptions or legacy initialization sessions. Compatibility with
-arbitrary clients is not claimed. [DECISIONS.md](../DECISIONS.md) explains the
-checks the gateway adds to the SDK.
+and `server/discover`. Only this protocol revision is accepted.
+Subscriptions and legacy initialization sessions are not supported.
+[DECISIONS.md](../DECISIONS.md) explains the checks the gateway adds to the SDK.
 
 The official Inspector CLI 2.15.0 is tested with `protocolEra: modern` and an
-explicit bearer grant. It sends `server/discover`, matching version headers,
-and per-request protocol metadata. See [the Inspector walkthrough](inspector.md).
-This proves MCP transport and tool access, not its interactive OAuth login or
-compatibility with an untested assistant application.
+explicit bearer grant. It sends `server/discover`
+with matching version headers and per-request protocol metadata. See
+[the Inspector walkthrough](inspector.md) to reproduce the exchange. This proves
+MCP transport and tool access. Inspector's interactive OAuth login and
+untested assistant applications remain unverified. Compatibility with arbitrary
+clients is not claimed.
 
 ## Local authorization
 
-The flow uses one pre-registered public CLI client, explicit scope approval,
-and S256 PKCE. Authorization codes expire after 60 seconds and can be used once.
-Opaque access tokens last five minutes. The flow binds access to the resource
-and checks state and issuer.
+The local owner approves explicit scopes for one pre-registered public CLI
+client. S256 PKCE requires the code exchange to present a verifier matching the
+original challenge. Codes expire after 60 seconds and can be used once; opaque tokens last five minutes.
+The flow binds access to the resource and checks state and issuer.
 
 Both services use HTTPS on `127.0.0.1`. The client trusts only the locally
-generated certificate. It does not change system trust or disable verification.
-The connector rejects browser origins. Restarting invalidates all tokens and
+generated certificate without changing system trust or disabling verification.
+Browser origins are rejected. A restart invalidates all tokens and
 authorization codes. Refresh tokens and dynamic client registration are not
 supported.
 
-The resource owner is a local fixture emulator. Its generated credential lives
-in owner-only `owner.json`. Anyone who can read it can request every supported
-scope. The CLI validates the authorization redirect directly, without opening
-a browser or running a callback listener. This does not provide production
-login, consent, or user identity.
+The generated credential lives in owner-only `owner.json`. Anyone who can read
+it can request every supported scope. The CLI validates the authorization
+redirect without a browser or callback listener. This is not production consent.
 
 ## Keep the services running
 
-After setup, run this from the repository root:
+You can start the services from the repository root after setup and leave them running:
 
 ```sh
 .venv/bin/python -m gtm_connector serve
@@ -58,7 +60,7 @@ with LocalClient(config) as client:
 PY
 ```
 
-Stop the services with Ctrl-C. Keep owner configuration and bearer tokens out
-of model inputs. Local file access is the trust boundary. The file owner can
-inspect SQLite directly and change the fixtures. See the
-[security review](../SECURITY_REVIEW.md) for the remaining boundaries.
+The services stop when you press Ctrl-C. The file owner can inspect SQLite directly and
+change the fixtures, so local file access remains the trust boundary. Keep
+owner configuration and bearer tokens out of model inputs. The
+[security review](../SECURITY_REVIEW.md) describes the remaining boundaries.

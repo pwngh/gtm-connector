@@ -1,5 +1,34 @@
 # Decisions
 
+## Documentation for readers new to the project (2026-11-17)
+
+Start with the renewal brief a reader would use, then explain the connector
+behind it. The README keeps the evidence near that introduction so someone
+evaluating the project can see what was tested before studying the protocol.
+Reference pages introduce the purpose of each part before its mechanics.
+Define unfamiliar product terms briefly. Let the source table explain the inputs
+before the brief example, and let the request-path diagram show how the parts
+connect. Do not turn each technical term into another introductory paragraph.
+
+Use paragraphs to explain a sequence or a reason. Keep lists where readers need
+to compare independent guarantees, and tables where values belong side by side.
+Vary sentence structure without replacing precise terms with synonyms that
+could change their meaning.
+
+This pass changes the README and reference prose only, alongside these decision
+notes and the agent work plan. Preserve commands, output blocks, tables, numbers,
+links, and limits. The recordings and measured results remain historical evidence
+from their documented runs. Do not recapture them or suggest this wording pass
+produced a new benchmark. Runtime code, tests, and the security review stay unchanged.
+
+The user requested council to compare the completed wording with main. Keep the
+product definition and earlier source table. Restore precise qualifiers where
+simplification blurs a boundary: the model run supplies no evidence of caught
+hallucinations, usage reads audit receipts separately from saved model counts,
+and the follow-up is a suggested next step rather than a drafted message. Keep
+setup instructions actionable without fragment openings. The new pass does not
+restore the abandoned prose rewrite from the parked branch.
+
 ## Pure request decisions (2026-11-17)
 
 Move the request checks into check_request. Pass parsed request facts, policy,

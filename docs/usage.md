@@ -1,38 +1,40 @@
 # Usage reporting
 
-After setup, run these commands from the repository root. Replace the placeholder
-with a generated brief ID:
+The report counts tool attempts from audit receipts and model tokens from saved briefs.
+
+These commands report usage from the repository root after setup. The
+placeholder takes a generated brief ID:
 
 ```sh
 .venv/bin/python -m gtm_connector usage
 .venv/bin/python -m gtm_connector usage --brief brief-REPLACE_WITH_ID
 ```
 
-Use `--state-dir PATH` for another state directory. This command reads local
-files without changing them. It runs outside MCP authorization and excludes
-arguments and source text from the report. Missing state creates no files.
+The `--state-dir PATH` option selects another state directory. The command reads
+local files without changing them and runs outside MCP authorization. The report
+excludes arguments and source text. Missing state creates no files.
 
 ## Tool calls
 
-Receipts are grouped in `by_token`, `by_tool`, `by_day`, and
-`by_token_tool_day`. Days use UTC boundaries. Each group and the overall `calls`
-field contain `total`, `ok`, `error`, and `pending` counts. Scope denials,
-limited calls, and retries each count as an attempt.
+Receipts appear in `by_token`, `by_tool`, and `by_day`, with UTC day boundaries.
+`by_token_tool_day` combines those views. Each group and the overall `calls`
+field report `total`, `ok`, `error`, and `pending` counts. Scope denials, limited
+calls, and retries each count as an attempt.
 
-Token groups use fingerprints of presented credentials, including rejected
-ones. Missing credentials use `anonymous`. A group does not establish who made
-the call or whether the credential was valid. These counts are not billing data.
+Token groups use fingerprints of presented credentials, including rejected ones.
+Missing credentials appear as `anonymous`. Groups establish neither a caller's
+identity nor a valid grant. These counts are not billing data.
 
 ## Model usage
 
-`briefs` lists each saved brief's status, matching `audit_calls`, and
-`model_usage`. The `model_tokens` totals cover saved files only. Fixture counts
-are zero. Unknown counts stay `null`, including in the corresponding total.
-`unknown_briefs` reports how many briefs have that gap. Deleted files cannot
-supply usage. Ollama artifacts include reported counts for rejected drafts too.
-A malformed or partial saved result stops the report with a clear
-error.
+`briefs` lists each saved result's status, matching `audit_calls`, and
+`model_usage`. The `model_tokens` totals cover saved files only; deleted files
+cannot supply usage. Ollama counts include rejected drafts.
 
-See [Audit, rate limits, and writes](audit.md) for receipt contents, pending
+Fixture counts are zero. Unknown counts remain `null` in both the brief and the
+corresponding total; `unknown_briefs` reports how many briefs have that gap.
+A malformed or partial saved result stops the report with a clear error.
+
+[Audit, rate limits, and writes](audit.md) explains receipt contents, pending
 outcomes, and retention. [Briefs and citations](briefs.md) describes the saved
 evidence and model-usage fields.
