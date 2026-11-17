@@ -22,7 +22,9 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--query", default="")
         elif name == "account":
             command.add_argument("account_id")
-    commands.add_parser("evaluate", help="score 20 fixed accounts in a fresh temporary fixture")
+    evaluate = commands.add_parser("evaluate", help="score 20 fixed accounts in a fresh temporary fixture")
+    evaluate.add_argument("--adapter", choices=("fixture", "ollama"), default="fixture")
+    evaluate.add_argument("--model", help="an already installed local Ollama model")
     for name in ("demo", "serve", "audit", "brief", "check-brief", "usage", "inspector-config"):
         command = commands.add_parser(name)
         command.add_argument("--state-dir", type=Path, default=Path("var/v2"))
@@ -37,18 +39,30 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--without-calls", action="store_true", help="request only crm:read")
             command.add_argument("--as-of", default=DEMO_AS_OF)
             command.add_argument("--json", action="store_true", help="print the full evidence artifact")
+            command.add_argument("--adapter", choices=("fixture", "ollama"), default="fixture")
+            command.add_argument("--model", help="an already installed local Ollama model")
         elif name == "check-brief":
             command.add_argument("brief_id")
             command.add_argument("candidate", type=Path, help="candidate text file to check against the saved evidence")
     args = parser.parse_args(argv)
 
     try:
+        adapter = None
+        if args.command in ("brief", "evaluate"):
+            if args.adapter == "fixture" and args.model is not None:
+                raise ValueError("--model requires --adapter ollama")
+            if args.adapter == "ollama":
+                if not args.model:
+                    raise ValueError("--adapter ollama requires --model with an installed local model")
+                from .ollama import OllamaAdapter
+                adapter = OllamaAdapter(args.model)
         if args.command == "inspector-config":
             from .inspector import write_inspector_config
             result = write_inspector_config(args.state_dir, args.scope)
         elif args.command == "evaluate":
             from .evaluation import run_evaluation
-            result = run_evaluation()
+            result = run_evaluation(adapter=adapter,
+                                    command=sys.orig_argv if argv is None else [sys.executable, "-m", "gtm_connector", *argv])
         elif args.command == "usage":
             from .usage import build_usage_report
             result = build_usage_report(args.state_dir, args.brief)
@@ -57,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
             from .runtime import Runtime
             with Runtime(args.state_dir) as runtime:
                 result = create_brief(runtime, args.account_id, include_calls=not args.without_calls,
-                                      as_of=args.as_of)
+                                      as_of=args.as_of, adapter=adapter)
             if not args.json:
                 print(f"Brief: {result['brief_id']}\nAs of: {result['as_of']}\n\n{result['text']}")
                 return 0

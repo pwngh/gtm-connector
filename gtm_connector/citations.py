@@ -172,6 +172,31 @@ def build_facts(evidence: dict) -> list[str]:
     return _validated_catalog(evidence)[0]
 
 
+def diagnose_brief(candidate: str, evidence: dict) -> dict:
+    """Count failed line positions without retaining their untrusted text.
+
+    Unsupported wording includes paraphrases. These counts do not establish
+    whether a statement is factually false. Missing disclosures have no line
+    position and are counted separately. Publication still uses check_brief.
+    """
+    supported, required = _validated_catalog(evidence)
+    lines = [line.strip() for line in candidate.splitlines() if line.strip()]
+    reasons = {key: 0 for key in ("uncited", "unsupported_or_miscited", "duplicate")}
+    seen = set()
+    for line in lines:
+        if line not in supported:
+            reason = ("unsupported_or_miscited" if re.search(r" \[[^\[\]\r\n]+\]$", line)
+                      else "uncited")
+            reasons[reason] += 1
+        elif line in seen:
+            reasons["duplicate"] += 1
+        seen.add(line)
+    missing = len(required - set(lines))
+    return {"candidate_lines": len(lines), "rejected_lines": sum(reasons.values()),
+            "missing_required_claims": missing,
+            "reason_counts": {**reasons, "missing_required": missing, "empty": int(not lines)}}
+
+
 def check_brief(candidate: str, evidence: dict) -> str:
     """Reject uncited, altered, misattributed, or extra prose before publication.
 

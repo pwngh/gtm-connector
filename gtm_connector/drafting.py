@@ -1,6 +1,20 @@
-"""A deterministic draft fixture, with no model or tool execution."""
+"""Draft results and the default fixture, which runs no model or tools."""
+
+from dataclasses import dataclass, field
 
 from .citations import build_facts
+
+
+@dataclass(frozen=True)
+class DraftResult:
+    """Untrusted candidate text plus reported usage, never a publication result."""
+
+    text: str | None
+    model: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    error_code: str | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 class FixtureDraftAdapter:
