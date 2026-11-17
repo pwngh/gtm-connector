@@ -86,7 +86,8 @@ def check():
                            MCP_INSPECTOR_SECRET_STORE="memory", MCP_AUTO_OPEN_ENABLED="false",
                            NODE_TLS_REJECT_UNAUTHORIZED="1")
         for name in ("NO_PROXY", "no_proxy"):
-            environment[name] = ",".join(filter(None, (environment.get(name), "127.0.0.1")))
+            inherited = os.environ.get(name, os.environ.get(name.swapcase()))
+            environment[name] = ",".join(filter(None, (inherited, "127.0.0.1")))
         # Permit a first npm download; actual RPC commands keep a shorter timeout.
         version = invoke(["--version"], environment, timeout=240)
         assert version[0] == 0 and version[1].strip() == INSPECTOR, "Inspector version mismatch"

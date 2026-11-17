@@ -22,6 +22,8 @@ In a second terminal, at the repository root, request CRM access:
 ```sh
 .venv/bin/python -m gtm_connector inspector-config --state-dir var/inspector --scope crm:read
 npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --version
+NO_PROXY="${NO_PROXY-${no_proxy-}}"
+no_proxy="${no_proxy-$NO_PROXY}"
 export NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1"
 export no_proxy="${no_proxy:+$no_proxy,}127.0.0.1"
 export NODE_TLS_REJECT_UNAUTHORIZED=1
