@@ -15,9 +15,10 @@ and requests that disconnect before reaching execution.
 ## Audit failures
 
 If the first audit write fails, the tool does not run. If finalization fails,
-the server returns HTTP 503 and leaves the receipt pending. An activity may
-already have committed, so retry with the same idempotency key. The pending row
-still needs reconciliation. The log is not tamper-proof and is not a billing
+the server returns HTTP 503 and tries to finalize an error receipt. If that
+also fails, the receipt remains pending. An activity may already have committed,
+so retry with the same idempotency key and reconcile any pending row.
+The log is not tamper-proof and is not a billing
 system.
 
 To inspect the receipts for one brief, run this from the repository root after

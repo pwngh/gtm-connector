@@ -1,8 +1,8 @@
 # GTM connector demo
 
 An MCP server sits in front of a mock CRM and call notes, with scoped tokens,
-an audit log of every tool call, and a workflow that drafts a renewal brief and
-cites the record behind each statement. A rep who gets one wrong answer about
+an audit log of recognized tool calls, and a workflow that drafts a renewal brief
+and cites the source or audit record behind each statement. A rep who gets one wrong answer about
 an account stops opening the tool, so the checker rejects any line it cannot
 tie to a record.
 
@@ -171,7 +171,7 @@ It prints its private output directory. Follow [the five-minute guide](DEMO.md).
   are not tamper-proof; snapshot writes are not atomic.
   [Security review](SECURITY_REVIEW.md)
 - Audit finalization can return HTTP 503 after a committed write. Retry the same
-  key and reconcile the pending row. The audit CLI can initialize its table and
+  key and reconcile any pending row. The audit CLI can initialize its table and
   change file permissions. [Audit details](docs/audit.md)
 - Read-only usage reporting groups credentials, tools, and UTC days. Rejected
   credentials and `anonymous` count too. Unknown model usage stays `null`, and
