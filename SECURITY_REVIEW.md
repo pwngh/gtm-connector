@@ -46,8 +46,9 @@ receipt copies. Never put owner credentials or bearer tokens into a draft input.
 Runtime directories use mode 0700; files use mode 0600. Retention has no automatic
 expiry. The operator removes the chosen state directory when finished. The
 evaluation uses disposable state. Usage counts audit attempts by token, tool,
-and day. Fingerprints identify grants, not people. Model usage comes from saved
-briefs: fixture counts are zero; unknown counts remain unknown. These local
+and day. Fingerprints include rejected credentials; missing credentials use
+`anonymous`. Groups do not establish identity or a valid grant. Model usage
+comes from saved briefs: fixture counts are zero; unknown counts remain unknown. These local
 records are neither tamper-proof evidence nor billing data.
 
 ## Failure modes and untrusted text

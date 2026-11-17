@@ -1,4 +1,4 @@
-"""Read-only usage summaries. Token fingerprints identify grants, not people."""
+"""Read-only usage summaries over presented credentials, including invalid ones."""
 
 from collections import Counter
 from contextlib import closing

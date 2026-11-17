@@ -143,8 +143,9 @@ Arguments are retained verbatim, including an activity body. The log is local
 data, not a redacted telemetry feed. Runtime state uses an owner-only directory
 and owner-readable/writable files. There is no automatic retention expiry yet;
 the operator removes the chosen local state directory when finished. The
-security review states that limit. Audit fingerprints distinguish grants,
-not people, and are not an identity or billing system.
+security review states that limit. Audit fingerprints distinguish presented
+credentials, including invalid ones. Missing credentials use `anonymous`.
+These groups are not an identity or billing system.
 
 If the pending receipt cannot be committed, do not execute the call. If audit
 finalization fails, withhold the result with HTTP 503; the pending receipt
@@ -295,10 +296,11 @@ invented or repeated claims, 60 successful audit receipts, and no activities.
 The recorded score is a fixture regression result, not an LLM quality claim.
 
 Read usage directly from the existing audit database in SQLite read-only mode.
-Count all receipts, including failed and pending calls, by grant fingerprint,
+Count all receipts, including failed and pending calls, by credential fingerprint,
 tool, and UTC day. Report saved brief status and token usage separately. A
-fingerprint is not a person. Token totals cover saved artifacts only; unknown
-values remain `null`, and deleted artifacts cannot contribute usage. Stop with
+fingerprint can represent an invalid credential and is not a person or verified
+grant. Missing credentials use `anonymous`. Token totals cover saved artifacts
+only; unknown values remain `null`, and deleted artifacts cannot contribute usage. Stop with
 a clear error on partial or invalid artifact JSON instead of silently losing
 its usage. The report never copies audit arguments or source text.
 

@@ -276,7 +276,7 @@ PKCE/resource/issuer checks, protocol headers, one audit row per tool attempt,
 audit failures, rate limits, idempotency, and the real HTTPS CLI flow. Briefing
 tests cover scope denial versus empty notes, source contradictions, snapshot
 mutation, citation rejection, and injected instructions remaining data. CI runs
-the same demo on Python 3.11 and 3.14. Test data is temporary.
+the full five-minute walkthrough on Python 3.11 and 3.14. Test data is temporary.
 
 ## Evaluation
 
@@ -328,8 +328,10 @@ Add `--state-dir PATH` for another state directory. This is a read-only local
 report, outside MCP authorization. It groups receipts in `by_token`, `by_tool`,
 `by_day`, and `by_token_tool_day`. Day boundaries use UTC. Each group and `calls`
 contain `total`, `ok`, `error`, and `pending` counts. Scope denials, limited
-calls, and retries count as attempts. Token fingerprints identify grants, not
-people. The report excludes arguments and source text.
+calls, and retries count as attempts. Token groups fingerprint presented
+credentials, including rejected ones. Missing credentials use `anonymous`.
+These groups do not establish identity or a valid grant. The report excludes
+arguments and source text.
 
 `briefs` reports each saved brief's status, correlated `audit_calls`, and
 `model_usage`. `model_tokens` totals cover saved artifacts only. Fixture counts

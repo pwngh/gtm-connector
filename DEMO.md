@@ -69,8 +69,9 @@ these commands with that value:
 
 The audit lists the three planned reads. Usage groups attempts by token, tool,
 and UTC day and reports model tokens for the saved brief. The fixture uses zero
-model tokens. Unknown usage must not become zero. Counts describe grants and
-attempts, not people or bills.
+model tokens. Unknown usage must not become zero. Token groups include rejected
+credentials and `anonymous` for missing credentials. Counts describe attempts,
+not people or bills.
 
 Read the evaluation result from the script. To reproduce it separately:
 
