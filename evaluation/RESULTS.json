@@ -10,9 +10,9 @@
   "facts_invented": 0,
   "claims_emitted": 182,
   "duplicate_claims": 0,
-  "fact_recall": 1,
-  "citation_recall": 1,
-  "invention_rate": 0,
+  "fact_recall": 1.0,
+  "citation_recall": 1.0,
+  "invention_rate": 0.0,
   "accepted_briefs": 20,
   "rejected_briefs": 0,
   "failed_briefs": 0,
@@ -224,5 +224,15 @@
       "claims_emitted": 9,
       "duplicate_claims": 0
     }
-  ]
+  ],
+  "run": {
+    "started_at": "2026-11-17T20:44:56.033793+00:00",
+    "completed_at": "2026-11-17T20:44:57.199976+00:00",
+    "command": [
+      "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+      "-m",
+      "gtm_connector",
+      "evaluate"
+    ]
+  }
 }

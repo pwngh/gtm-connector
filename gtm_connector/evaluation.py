@@ -6,6 +6,7 @@ semantic-entailment benchmark. Expected text never comes from the draft code.
 """
 
 from contextlib import closing
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -77,20 +78,39 @@ def _resolve_references(case, artifact):
     return claims
 
 
-def run_evaluation():
+def run_evaluation(*, adapter=None, command=None):
     """Run twenty HTTPS briefs in disposable state, never in an operator's CRM."""
     from .briefing import create_brief
-    from .citations import BriefRejected
+    from .citations import BriefRejected, diagnose_brief
     from .runtime import Runtime
     from . import store
 
     expected = load_expectations()
+    started_at = datetime.now(timezone.utc).isoformat()
+    model_run = adapter is not None
     cases = []
     with tempfile.TemporaryDirectory(prefix="gtm-evaluation-") as directory:
         with Runtime(directory) as runtime:
             for case in expected["cases"]:
+                observed = {}
+
+                def observe(result, evidence):
+                    observed["model_usage"] = {
+                        "model": result.model, "input_tokens": result.input_tokens,
+                        "output_tokens": result.output_tokens}
+                    if isinstance(result.text, str):
+                        claims = _resolve_references(case, {"brief_id": evidence["brief_id"],
+                                                            "evidence": evidence})
+                        observed["candidate"] = {**score_claims(result.text, claims),
+                                                 **diagnose_brief(result.text, evidence)}
+                    else:
+                        observed["candidate"] = None
+                    if result.error_code:
+                        observed["draft_error"] = result.error_code
+
                 try:
-                    artifact = create_brief(runtime, case["account_id"], as_of=expected["as_of"])
+                    artifact = create_brief(runtime, case["account_id"], as_of=expected["as_of"],
+                                            adapter=adapter, observe_draft=observe if model_run else None)
                     claims = _resolve_references(case, artifact)
                     scored = score_claims(artifact["text"], claims)
                     cases.append({"account_id": case["account_id"], "status": "accepted", **scored})
@@ -101,6 +121,10 @@ def run_evaluation():
                     cases.append({"account_id": case["account_id"],
                                   "status": "rejected" if isinstance(exc, BriefRejected) else "failed",
                                   "error": type(exc).__name__, **scored})
+                if model_run:
+                    cases[-1].update({"candidate": None,
+                                      "model_usage": {"model": None, "input_tokens": None,
+                                                      "output_tokens": None}}, **observed)
             receipts = runtime.connector.audit.read()
             with closing(store.connect(runtime.directory / "crm.sqlite3", readonly=True)) as connection:
                 activities = connection.execute("SELECT count(*) FROM activities").fetchone()[0]
@@ -114,7 +138,7 @@ def run_evaluation():
               and sums["facts_found"] == sums["facts_cited_correctly"] == sums["expected_facts"]
               and sums["facts_invented"] == sums["duplicate_claims"] == activities == 0
               and len(receipts) == 60 and all(row["status"] == "ok" for row in receipts))
-    return {
+    report = {
         "status": "passed" if passed else "failed", "evaluation": expected["name"],
         "as_of": expected["as_of"], "accounts": len(cases),
         "claim_unit": "one displayed statement; compound statements count once",
@@ -129,3 +153,32 @@ def run_evaluation():
         "model_usage": {"model": None, "input_tokens": 0, "output_tokens": 0},
         "cases": cases,
     }
+    if model_run:
+        candidates = [case["candidate"] for case in cases if case["candidate"] is not None]
+        candidate_keys = ("facts_found", "facts_cited_correctly", "facts_invented",
+                          "claims_emitted", "duplicate_claims", "rejected_lines",
+                          "missing_required_claims")
+        reasons = {key: sum(candidate["reason_counts"][key] for candidate in candidates)
+                   for key in ("uncited", "unsupported_or_miscited", "duplicate",
+                               "missing_required", "empty")}
+        models = sorted({case["model_usage"]["model"] for case in cases
+                         if case["model_usage"]["model"] is not None})
+        usage = {"model": models[0] if len(models) == 1 else None}
+        for field in ("input_tokens", "output_tokens"):
+            counts = [case["model_usage"][field] for case in cases]
+            usage[field] = None if any(value is None for value in counts) else sum(counts)
+        report.update(
+            adapter=getattr(adapter, "name", "custom"),
+            model_metadata=getattr(adapter, "metadata", {}), returned_models=models,
+            candidate={"scored_briefs": len(candidates), "unscored_briefs": len(cases) - len(candidates),
+                       **{key: sum(candidate[key] for candidate in candidates) for key in candidate_keys},
+                       "reason_counts": reasons},
+            model_usage=usage,
+            publication_gate_passed=(outcomes["failed"] == 0 and sums["facts_invented"] == 0
+                                     and sums["facts_found"] == sums["facts_cited_correctly"]
+                                     and sums["duplicate_claims"] == activities == 0
+                                     and len(receipts) == 60
+                                     and all(row["status"] == "ok" for row in receipts)))
+    report["run"] = {"started_at": started_at,
+                     "completed_at": datetime.now(timezone.utc).isoformat(), "command": command}
+    return report

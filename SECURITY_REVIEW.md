@@ -1,7 +1,8 @@
 # Connector security review
 
-Scope: one local process, invented data, one operator. This review records the
-boundary and required evidence. It does not grant production approval.
+Scope: one local connector process, an optional local Ollama service, invented
+data, and one operator. This review records the boundary and required evidence.
+It does not grant production approval.
 
 ## Data and permissions
 
@@ -74,6 +75,17 @@ per valid token per 60-second window. Scope denials count. New tokens and proces
 restarts reset the allowance; this is not a distributed quota.
 
 Notes and draft text remain untrusted data. The fixture adapter runs no model.
+The optional Ollama adapter sends only a supported-claim catalog to a fixed
+loopback endpoint. It checks cached model metadata and rejects cloud aliases.
+It requires Ollama 0.30.0 or newer and adds `:local` to each generation request
+so a changed alias cannot trigger cloud forwarding. The recorded digest is a
+preflight identity; keep local tags stable for reproducible measurements.
+It has no credentials or tool interface, downloads no models, and uses no proxy
+or redirects. The local Ollama service and its model files are operator-trusted;
+these checks cannot constrain a malicious replacement service. Rejected drafts
+retain usage and bounded counts, never their candidate text. One invalid line
+rejects the whole brief. Duplicate JSON keys also reject the response instead
+of silently discarding an earlier claim array. Default demos and CI use no inference service.
 The verifier accepts exact supported claims and references, not arbitrary
 paraphrases. A citation attributes a source; it does not establish source truth.
 The conflict rule matches `closed_won` against the exact fixture note reporting
@@ -91,5 +103,5 @@ and committed-write retry tests, injection and citation-rejection tests, and
 the 20-account evaluation with its fixed expected claims. Confirm that the
 clean-checkout demo passes, the injected note creates zero activities, and usage
 totals match receipts. Review [DECISIONS.md](DECISIONS.md) and accept the local
-owner, manual-retention, snapshot, and fixture-only limits explicitly. Real data
+owner, manual-retention, snapshot, and fixed-vocabulary limits explicitly. Real data
 or shared deployment requires a separate review.

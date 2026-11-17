@@ -7,7 +7,7 @@ After setup, run this from the repository root:
 ```
 
 The evaluation makes 60 HTTPS tool calls for `acc-001` through `acc-020` in fresh
-temporary state. It does not read or change the operator's CRM and runs no model.
+temporary state. It does not read or change the operator's CRM. The default runs no model.
 [expected.json](../evaluation/expected.json) defines 182 expected claims and
 their references separately from the drafting code. Only generated run and
 audit IDs come from the collected evidence.
@@ -50,3 +50,24 @@ fixture output against the fixed vocabulary. It does not measure model
 reasoning, assess arbitrary paraphrases, or establish whether a source is true.
 
 See [Briefs and citations](briefs.md) for the checker and its limits.
+
+## Optional local model comparison
+
+`evaluate --adapter ollama --model NAME` uses the same twenty accounts and
+expected claims. The top-level scores still describe published text. `candidate`
+scores the actual model-returned lines in memory before the gate runs. It counts
+uncited or unsupported lines, duplicates, and omitted required disclosures.
+Unsupported text includes paraphrases, so it does not establish factual falsity.
+No rejected candidate text is saved or included in the report.
+
+`scored_briefs` and `unscored_briefs` make missing or malformed candidates visible.
+Candidate totals cover only scored candidates. Published metrics keep all 182
+expected claims in the denominator. A rejected whole brief publishes no lines,
+including any valid lines it contained. Zero published lines yield an undefined
+(`null`) invention rate. `publication_gate_passed` records the publication and
+read-only checks. `status` still requires full coverage and exits `2` otherwise.
+
+`model_usage` sums actual service counts, including rejected generations. Any
+missing count makes that dimension unknown. `model_metadata` records the selected
+model digest and service version. `run` records the command and UTC start/end
+times. See [the local-model run](ollama.md).

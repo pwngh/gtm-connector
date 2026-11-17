@@ -29,7 +29,8 @@ the call or whether the credential was valid. These counts are not billing data.
 `model_usage`. The `model_tokens` totals cover saved files only. Fixture counts
 are zero. Unknown counts stay `null`, including in the corresponding total.
 `unknown_briefs` reports how many briefs have that gap. Deleted files cannot
-supply usage. A malformed or partial saved result stops the report with a clear
+supply usage. Ollama artifacts include reported counts for rejected drafts too.
+A malformed or partial saved result stops the report with a clear
 error.
 
 See [Audit, rate limits, and writes](audit.md) for receipt contents, pending

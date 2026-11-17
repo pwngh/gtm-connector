@@ -43,7 +43,7 @@ def _saved_briefs(directory, brief_id, call_counts):
             if (not isinstance(identifier, str) or not re.fullmatch(r"brief-[0-9a-f]{32}", identifier)
                     or identifier != artifact_path.stem or artifact["schema_version"] != 1
                     or artifact["status"] not in ("collected", "accepted", "rejected")
-                    or artifact["adapter"] not in ("fixture", "custom")
+                    or artifact["adapter"] not in ("fixture", "custom", "ollama")
                     or not isinstance(artifact["account_id"], str)):
                 raise ValueError("unsupported artifact metadata")
             usage = artifact["model_usage"]

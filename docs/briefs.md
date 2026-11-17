@@ -12,8 +12,8 @@ Each command starts the local services, calls `get_account`,
 `list_opportunities`, and `read_call_notes` in that order, then stops the
 services. The workflow requests `crm:read` and, unless `--without-calls` is set,
 `calls:read`. It never requests `crm:write`. Draft text cannot change the tool
-sequence or trigger another call. A deterministic fixture drafts the text;
-no model runs.
+sequence or trigger another call. A deterministic fixture drafts the default
+text. [Optional Ollama drafting](ollama.md) uses the same publication gate.
 
 A recognized call-note scope denial is the only partial-success case. Other
 HTTP errors, transport failures, failed tools, and incomplete evidence stop
@@ -115,6 +115,8 @@ can leave partial JSON, so the operator must generate a new brief. Retention is
 manual, as described in [Audit, rate limits, and writes](audit.md).
 
 Custom Python adapters are not sandboxed, and the CLI cannot load one. The
-fixture records zero model tokens. Custom-adapter usage stays unknown rather
-than being estimated. A hosted model adapter is not implemented. These fixture
+fixture records zero model tokens. Ollama records the service's reported input
+and output counts, including rejected generations. Missing counts stay unknown.
+Custom adapters returning only strings retain unknown usage. A `DraftResult`
+can carry reported counts. A hosted model adapter is not implemented. Fixture
 checks do not establish how an untested model would handle injected instructions.

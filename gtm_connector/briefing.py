@@ -9,8 +9,8 @@ import uuid
 
 import httpx2
 
-from .citations import BriefRejected, build_facts, check_brief
-from .drafting import FixtureDraftAdapter
+from .citations import BriefRejected, build_facts, check_brief, diagnose_brief
+from .drafting import DraftResult, FixtureDraftAdapter
 from .seed import DEMO_AS_OF
 
 
@@ -64,7 +64,8 @@ def _artifact_path(directory, brief_id):
     return Path(directory) / "briefs" / (brief_id + ".json")
 
 
-def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, adapter=None):
+def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, adapter=None,
+                 observe_draft=None):
     """Collect, draft, check, then publish; the draft adapter receives data only."""
     # Offline citation checks do not need to import the MCP server or TLS runtime.
     from .client import LocalClient
@@ -81,7 +82,8 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, a
     adapter = FixtureDraftAdapter() if adapter is None else adapter
     fixture = type(adapter) is FixtureDraftAdapter
     artifact = {"schema_version": 1, "brief_id": brief_id, "account_id": account_id, "as_of": as_of,
-                "adapter": "fixture" if fixture else "custom",
+                "adapter": "fixture" if fixture else
+                           "ollama" if getattr(adapter, "name", None) == "ollama" else "custom",
                 "model_usage": {"model": None, "input_tokens": 0 if fixture else None,
                                 "output_tokens": 0 if fixture else None},
                 "status": "collected", "evidence": evidence}
@@ -98,6 +100,29 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, a
     try:
         # Candidate text and mutations to this copy cannot change the trusted snapshot.
         candidate = adapter.draft(deepcopy(evidence))
+        result = candidate if isinstance(candidate, DraftResult) else DraftResult(
+            candidate, input_tokens=0 if fixture else None, output_tokens=0 if fixture else None)
+        if (result.model is not None and not isinstance(result.model, str)) or any(
+                value is not None and (type(value) is not int or value < 0)
+                for value in (result.input_tokens, result.output_tokens)):
+            raise BriefRejected("Draft adapter returned invalid usage.")
+        artifact["model_usage"] = {"model": result.model, "input_tokens": result.input_tokens,
+                                   "output_tokens": result.output_tokens}
+        if isinstance(candidate, DraftResult):
+            artifact["model_metadata"] = result.metadata
+            artifact["draft_diagnostics"] = (
+                diagnose_brief(result.text, evidence) if isinstance(result.text, str) else
+                {"candidate_lines": None, "rejected_lines": None,
+                 "missing_required_claims": None, "reason_counts": {}})
+            if result.error_code:
+                artifact["draft_diagnostics"]["error_code"] = result.error_code
+        if observe_draft is not None:
+            # Trusted evaluation code may inspect the raw candidate in memory.
+            # Its copy cannot replace evidence used by the publication gate.
+            observe_draft(result, deepcopy(evidence))
+        if result.error_code:
+            raise BriefRejected("Draft adapter did not return a complete candidate.")
+        candidate = result.text
         checked = check_brief(candidate, evidence)
     except Exception as exc:
         artifact["status"] = "rejected"
