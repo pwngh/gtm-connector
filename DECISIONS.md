@@ -1,71 +1,62 @@
 # Decisions
 
-## 2026-11-17: local bootstrap and shipping prerequisites
+## Scope and implementation
 
-The repository starts with a README stub and MIT license on main. All later
-work belongs on task branches. The current branch is codex/01-mcp-foundation.
-There is no remote, push, pull request, or implementation yet.
+Use Python 3.11+ and SQLite. The foundation needs only the standard library,
+which keeps its clean-checkout command small. No data or code comes from a real
+CRM, employer, or client. Seed values are fixed, use stable record IDs, and use
+reserved `.example` email domains. Currency values are integer USD cents.
 
-Installed all nine upstream TStack skills into the local Codex skills directory:
-babysit-pr, council, file-pr, full-send, full-stop, leaving-pr-comments,
-modernize, sol-loop, and takeover. Source:
-[t3dotgg/tstack at 11e37a74d0a6868c121cd0910ab2b3bd9873b92a](https://github.com/t3dotgg/tstack/tree/11e37a74d0a6868c121cd0910ab2b3bd9873b92a).
-All 14 installed files match the upstream Git blob hashes. Full-send is an
-upstream dependency of full-stop; its merge permission does not apply here.
-Only the user may merge.
+Reseeding must preserve existing content. Missing or extra fixture records are
+an error; a new database path is the explicit way to start fresh. Reads use
+SQLite read-only connections. Direct CLI inspection is a developer fixture
+utility, not a claim of authorization enforcement.
 
-GitHub CLI is authenticated as pwngh. Native subagents expose OpenAI models,
-including GPT Sol. Claude CLI authentication was verified after the user signed
-in with an existing subscription. The user's Gemini CLI login authenticated
-with Google but was rejected because personal-account support for that client
-ended on June 18, 2026. The supported replacement, Antigravity CLI 1.5.10, is
-installed and its version verified; the installer verified its download checksum.
-Personal Google sign-in and access to a suitable Gemini review model still need
-verification. See [Google's migration notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
+The default briefing adapter will use deterministic fixtures rather than a
+paid model. It must still pass the citation checker and evaluation. A hosted
+adapter is optional and will not be required by the demo command.
 
-Council requires three providers and prohibits silent substitution. No model
-inference calls were made. The user's explicit unavailable-model stop rule
-therefore keeps the project on a local branch until the third-provider review
-route is available. No accounts, subscriptions, trials, or API keys were created.
-
-## Specification research
-
-Read the current MCP specification and authorization pages before implementation.
-The latest URL resolved to revision 2026-07-28 on 2026-11-17:
-
-- [Specification](https://modelcontextprotocol.io/specification/2026-07-28)
-- [Key changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
-- [Authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
-- [Authorization server discovery](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/authorization-server-discovery)
-- [Client registration](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration)
-- [Authorization security](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/security-considerations)
-
-This revision uses stateless requests and server/discover rather than the old
-initialization handshake. Implementation must be checked against this revision,
-including the transport and schema, before choosing an SDK.
-
-Authorization research identified protected-resource and authorization-server
-metadata discovery, resource-bound access tokens, scoped challenges, PKCE,
-issuer validation, and HTTPS authorization endpoints as relevant requirements.
-These are research notes, not claims of implemented conformance.
-
-## Planned implementation choices
-
-Use Python and SQLite, with invented seed data and a deterministic fixture
-adapter for the default brief workflow. These avoid a database service and a
-paid model key. Decide SDK and local TLS setup after the shipping blocker is
-resolved. No real CRM or employer materials will be used.
-
-Proposed four runnable pull-request slices, each stopped for manual merge:
+## Four reviewable slices
 
 1. Seeded SQLite CRM, CLI inspection, and data tests.
 2. Local authorization and MCP tools, audit records, idempotent activity writes,
    and scope enforcement tests. Run council on this core-logic PR.
 3. Brief workflow, citation checker, restricted-scope behavior, and injection test.
-4. Twenty-account evaluation, recorded measurements, security review, and the
-   clean-checkout demo command.
+4. Twenty-account evaluation, recorded scores, one-page security review, and the
+   complete clean-checkout demo.
 
-Each slice uses full-stop and its Sol review. Before the first push, inspect
-the entire tree and history for secrets and private source material. Create
-only a private repository under pwngh, push the bootstrap once to main, and
-push later work only to task branches. Do not merge or publish.
+Each slice must run and pass its tests before full-stop handoff. The user merges.
+Only the initial README/license bootstrap goes directly to main. No deployments,
+package publishing, real CRM APIs, web UI, or multi-tenant features.
+
+## Protocol research (2026-11-17)
+
+Read the current specification and authorization documents before implementation.
+The latest URL resolved to MCP revision 2026-07-28:
+
+- [Specification](https://modelcontextprotocol.io/specification/2026-07-28)
+- [Key changes](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
+- [Authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
+- [Discovery](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/authorization-server-discovery)
+- [Client registration](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/client-registration)
+- [Authorization security](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/security-considerations)
+
+This revision uses stateless requests and server/discover rather than the old
+initialization handshake. Before choosing an SDK, check it against the current
+transport and schema. Relevant authorization requirements include discovery
+metadata, resource-bound tokens, scoped challenges, PKCE, issuer validation,
+and HTTPS authorization endpoints. These are research notes; no protocol or
+authorization conformance is claimed by the foundation.
+
+## Review configuration
+
+The installed TStack source is [t3dotgg/tstack at 11e37a7](https://github.com/t3dotgg/tstack/tree/11e37a74d0a6868c121cd0910ab2b3bd9873b92a).
+Full-stop uses Sol review for each slice. Council runs once on the core-logic PR.
+The user selected GPT Sol, Claude Opus, and Gemini 3.8 Flash at High as three full
+members. Gemini Flash is not described as a flagship. Record actual model IDs
+and scores in the PR table; three council rounds is the hard limit. See
+AGENTS.md for the durable rules.
+
+Google's supported personal-account route is Antigravity CLI; legacy Gemini CLI
+sign-in is retired. Review tooling uses existing accounts and is separate from
+the demo runtime. It must not create accounts, trials, subscriptions, or keys.
