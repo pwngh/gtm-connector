@@ -21,6 +21,8 @@ def render(source):
     times = [event[0] for event in events]
     assert times == sorted(times), "Nonmonotonic recording"
     text = "".join(event[2] for event in events if event[1] == "o")
+    opening = next(index for index, event in enumerate(events)
+                   if event[1] == "o" and "1. Run the fixture demo" in event[2])
     assert "Six tools returned by Inspector CLI." in text
     assert "error: Brief contains an uncited, unsupported, or misattributed statement." in text
     assert "HTTP 403" in text and "[crm/opportunities/opp-003]" in text
@@ -44,7 +46,8 @@ def render(source):
     common = ["agg", "--quiet", "--theme", "github-dark", "--font-size", "18",
               "--line-height", "1.25", "--idle-time-limit", "12", "--fps-cap", "5"]
     commands = [
-        common + ["--last-frame-duration", "3", str(cast), str(media / "walkthrough.gif")],
+        common + ["--select", f"event:{opening}..", "--last-frame-duration", "10",
+                  str(cast), str(media / "walkthrough.gif")],
         common + ["--select", "100%", "--last-frame-duration", "1",
                   str(cast), str(media / "inspector-cli.gif")],
     ]
@@ -58,6 +61,7 @@ def render(source):
         "commands": commands,
         "idle_limit_seconds": 12,
         "source_duration_seconds": times[-1],
+        "script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "note": "Real output; selected fields; idle periods capped; fixed reading pauses.",
     }
     provenance["artifact_sha256"] = {
