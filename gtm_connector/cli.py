@@ -25,12 +25,16 @@ def main(argv: list[str] | None = None) -> int:
     evaluate = commands.add_parser("evaluate", help="score 20 fixed accounts in a fresh temporary fixture")
     evaluate.add_argument("--adapter", choices=("fixture", "ollama"), default="fixture")
     evaluate.add_argument("--model", help="an already installed local Ollama model")
+    evaluate.add_argument("--with-slack", action="store_true", help="include the isolated Slack fixture")
     for name in ("demo", "serve", "audit", "brief", "check-brief", "usage", "inspector-config"):
         command = commands.add_parser(name)
         command.add_argument("--state-dir", type=Path, default=Path("var/v2"))
+        if name in ("demo", "brief"):
+            command.add_argument("--with-slack", action="store_true",
+                                 help="include Slack reads and a checked follow-up draft")
         if name == "inspector-config":
             command.add_argument("--scope", action="append", required=True,
-                                 choices=("crm:read", "calls:read", "crm:write"),
+                                 choices=("crm:read", "calls:read", "crm:write", "slack:read"),
                                  help="grant only these scopes; repeat for each grant")
         elif name in ("audit", "usage"):
             command.add_argument("--brief", help="filter the caller-supplied brief/run correlation ID")
@@ -61,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
             result = write_inspector_config(args.state_dir, args.scope)
         elif args.command == "evaluate":
             from .evaluation import run_evaluation
-            result = run_evaluation(adapter=adapter,
+            result = run_evaluation(adapter=adapter, include_slack=args.with_slack,
                                     command=sys.orig_argv if argv is None else [sys.executable, "-m", "gtm_connector", *argv])
         elif args.command == "usage":
             from .usage import build_usage_report
@@ -71,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             from .runtime import Runtime
             with Runtime(args.state_dir) as runtime:
                 result = create_brief(runtime, args.account_id, include_calls=not args.without_calls,
-                                      as_of=args.as_of, adapter=adapter)
+                                      as_of=args.as_of, adapter=adapter, include_slack=args.with_slack)
             if not args.json:
                 print(f"Brief: {result['brief_id']}\nAs of: {result['as_of']}\n\n{result['text']}")
                 return 0
@@ -81,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
             result = {"status": "valid", "brief_id": args.brief_id}
         elif args.command == "demo":
             from .demo import run
-            result = run(args.state_dir)
+            result = run(args.state_dir, include_slack=args.with_slack)
         elif args.command == "audit":
             from .audit import AuditLog
             path = args.state_dir / "audit.sqlite3"
