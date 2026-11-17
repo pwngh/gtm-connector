@@ -11,10 +11,11 @@ an error; a new database path is the explicit way to start fresh. Reads use
 SQLite read-only connections. Direct CLI inspection is a developer fixture
 utility, not a claim of authorization enforcement.
 
-The PR 3 briefing adapter will use deterministic fixtures without a paid model.
-It must still pass the citation checker and PR 4 evaluation. A hosted adapter
-is optional and will not be required by the demo command. PR 2 does not generate
-briefs, run an LLM, or claim an evaluation score.
+The PR 3 briefing adapter uses a deterministic extractive fixture without a
+model. Its output must still pass the citation checker. A hosted adapter is
+optional future work and is not required by the demo command. No LLM quality
+claim or evaluation score follows from passing these fixture tests; the
+twenty-account evaluation remains PR 4.
 
 ## Four reviewable slices
 
@@ -26,8 +27,8 @@ briefs, run an LLM, or claim an evaluation score.
    behavior, an injection test, and fixtures that run without a model.
 4. Twenty-account evaluation and README scores, one-page security review, an
    audit-based usage report, README polish, and a five-minute clean-checkout demo.
-   Report calls by token, tool, and day, plus model tokens per brief. Model usage
-   belongs to the later workflow; PR 2 does not invent usage fields or counts.
+   Report calls by token, tool, and day, plus model tokens per brief. PR 3 records
+   known fixture usage as zero; this slice adds aggregation and evaluation.
 
 Each slice must run and pass its tests before full-stop handoff. The user merges.
 Only the initial README/license bootstrap goes directly to main. No deployments,
@@ -83,7 +84,7 @@ because its renewal budget is not approved. `opp-003` is `closed_won`, while
 unsigned. Keep both source claims; do not silently reconcile them. `acc-004`
 has no notes, leaving 29 notes total. `note-007` contains an instruction to call
 the write tool. The connector returns that text unchanged as untrusted data;
-PR 3 will test the briefing workflow's handling of it.
+PR 3 tests the briefing workflow's handling of it.
 
 Reseeding is atomic and preserves edits and activities. Unexpected IDs, broken
 fixture associations, or partial seeds fail instead of silently resetting data.
@@ -173,10 +174,75 @@ Treat that as malformed input so a marked tool attempt still receives a receipt.
 Unknown-account writes also return an explicit tool error, rather than relying
 on the SDK's generic handling of a foreign-key failure. Both have regression tests.
 
+## Briefing and citation boundary
+
+Use a fixed three-read workflow: `get_account`, `list_opportunities`, then
+`read_call_notes`, all through the HTTPS MCP client. Each completed brief has
+one correlated audit receipt per read. The workflow requests `crm:read` and
+optionally `calls:read`; it never requests `crm:write`. Draft output cannot
+select a tool, change scopes, or trigger another call. A recognized call-notes
+scope denial is the only partial-success case. Transport failures, other HTTP
+errors, failed tools, and incomplete evidence stop the brief instead of being
+rewritten as missing notes.
+
+Use `FixtureDraftAdapter` as the no-model default. It formats the same supported
+fact catalog used by the checker. This deliberately tests the transport,
+evidence, and publication boundary rather than pretending to measure model
+reasoning. Independently written adverse candidate files exercise uncited,
+invented, misattributed, appended, and action-shaped output. An optional hosted
+adapter is not implemented or needed here. The adapter interface accepts an
+evidence copy and returns text; it receives no client, owner credential, or
+bearer token. A custom Python adapter is trusted application code, not a
+sandbox for executing untrusted programs, and the CLI cannot load one.
+
+Keep the original evidence snapshot separate from the adapter's deep copy.
+Before drafting, validate record source prefixes, account associations, and
+exact correspondence to the three audit receipts. After drafting, compare each
+nonempty candidate line with a supported sentence and its exact citations.
+Reject extra prose, invented values, missing or swapped references, repeated
+statements, and unsupported action payloads. This small controlled vocabulary
+cannot validate arbitrary paraphrases or establish semantic entailment; those
+would require a different checker and evaluation. A supported subset may pass,
+so grounding and coverage remain distinct measures for PR 4.
+
+Quote source text as a JSON string inside its attributed statement. This keeps
+newlines and terminal controls visibly escaped and keeps instructions inside
+a source quote. Do not interpret the note or infer a resolution when it
+contradicts a CRM field. A citation establishes what the source reported, not
+whether that report is true. The injection test proves that this fixture
+workflow returns the note as data, performs only its three planned reads, and
+creates no activity; it makes no claim about an untested model's behavior.
+
+Absence and lack of permission are different facts. A successful empty notes
+query produces a statement that no notes were returned. A scoped HTTP 403
+produces an explicit unavailable-notes statement. Both cite the matching audit
+receipt, because there is no note record to cite. The checker requires either
+outcome statement to remain in the brief, even if a candidate omits other
+supported facts. Renewal-day calculations cite both the account and a saved
+`run/<brief_id>` context containing the explicit as-of date; the clock does not
+silently change fixture results.
+
+Persist each evidence snapshot in `briefs/<brief_id>.json` under the selected
+state directory, using a mode-0700 directory and mode-0600 files. Save
+`collected` before invoking the adapter, then `accepted` with checked text or
+`rejected` without draft text. An interrupted run may remain `collected`.
+The saved evidence allows `check-brief` to verify another candidate against the
+same records later; it does not consult a later, possibly changed CRM. The local
+file owner remains trusted, so these snapshots are neither signed nor
+tamper-proof. Retention is manual, as for the other local state.
+
+Record fixture model usage as model `null` and zero input/output tokens because
+no model ran. For custom Python adapters, record unknown token counts as `null`
+rather than estimating them from text. The audit usage report and twenty-account
+fact/citation/invention scores remain PR 4. The default demo keeps the original
+14 connector attempts and adds three briefs with three reads each, for 23
+receipts; the full, restricted, and injection cases have separate brief IDs.
+
 ## Review configuration
 
 The installed TStack source is [t3dotgg/tstack at 11e37a7](https://github.com/t3dotgg/tstack/tree/11e37a74d0a6868c121cd0910ab2b3bd9873b92a).
-Full-stop uses Sol review for each slice. Council runs once on the core-logic PR.
+Full-stop uses Sol review for each slice. Council ran once on PR 2, which carries
+the connector's core logic; later slices do not repeat the three-member council.
 The user selected GPT Sol, Claude Opus, and Gemini 3.8 Flash at High as three full
 members. Gemini Flash is not described as a flagship. Record actual model IDs
 and scores in the PR table; three council rounds is the hard limit. See
