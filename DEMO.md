@@ -21,9 +21,10 @@ demo_state='/replace/with/printed/output/directory/state'
 
 ## 0:00 to 1:00: show the boundary
 
-Open [README.md](README.md), then the [five tools and their scopes](docs/tools.md).
-Point to the independent `crm:read`, `crm:write`, and `calls:read` grants. One MCP connector fronts two
-SQLite source stores. The local authorization server uses S256 PKCE.
+Open [README.md](README.md), then the [tools and their scopes](docs/tools.md).
+Point to the independent `crm:read`, `crm:write`, and `calls:read` grants. The
+default brief uses two of the connector's three SQLite sources. The third store
+exposes mock Slack messages under `slack:read`. The local authorization server uses S256 PKCE.
 
 Read the connector results. There are 30 accounts. The CRM token receives
 HTTP 403 when it requests call notes. `acc-004` has an empty notes result, which
@@ -104,11 +105,28 @@ Follow [the Inspector setup](docs/inspector.md) in two terminals. It creates
 NODE_EXTRA_CA_CERTS="$PWD/var/inspector/tls.pem" npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/list
 ```
 
-Show the five tools and their scope metadata. The guide then reads `acc-003`,
+Show the six tools and their scope metadata. The guide then reads `acc-003`,
 denies a call-note request, and repeats it after an explicit `calls:read` grant.
 Inspector uses `server/discover` and the same HTTPS gateway. No authorization or
 audit check is bypassed. This optional client requires Node and a first npm
 download. The default five-minute script remains independent of it.
+
+## Optional: include account-channel messages
+
+```sh
+.venv/bin/python -m gtm_connector demo --with-slack --state-dir var/slack-demo
+.venv/bin/python -m gtm_connector brief acc-003 --with-slack --json --state-dir var/slack-demo
+.venv/bin/python -m gtm_connector evaluate --with-slack
+```
+
+Show `slack/messages/msg-003` alongside the opportunity and call note. The
+three-source flag cites all three records. `proposed_follow_up` contains a
+checked proposal to confirm the conflicting status. Nothing sends it.
+
+The extended demo produces 18 connector receipts and 12 briefing receipts.
+It shows three more scope denials, both injected records creating no activity,
+and a restricted brief that reports both missing grants. The default script
+retains its 23 receipts and 182-claim score. See [Slack context](docs/slack.md).
 
 ## Optional: use a local model
 

@@ -7,7 +7,8 @@ It does not grant production approval.
 ## Data and permissions
 
 `crm.sqlite3` holds 30 accounts, contacts, opportunities, and activities.
-`calls.sqlite3` holds 29 call notes. Labels are synthetic; email addresses use
+`calls.sqlite3` holds 29 call notes. `slack.sqlite3` holds 29 account-channel
+messages. Labels are synthetic; email addresses use
 reserved `.example` domains. The connector uses no real CRM, external identity,
 or recording service.
 
@@ -16,10 +17,12 @@ or recording service.
 | `crm:read` | `search_accounts`, `get_account`, `list_opportunities` |
 | `crm:write` | `log_activity` |
 | `calls:read` | `read_call_notes` |
+| `slack:read` | `read_slack_messages` |
 
 Scopes do not imply one another. The gateway and handlers enforce them. A scope
 denial returns HTTP 403. The briefing workflow requests read scopes only and
-makes three fixed calls. It cannot select a write from record or draft text.
+makes three fixed calls by default. `--with-slack` adds a fourth read and an
+explicit Slack grant. It cannot select a write from record or draft text.
 
 ## Trust boundary
 
@@ -91,6 +94,14 @@ paraphrases. A citation attributes a source; it does not establish source truth.
 The conflict rule matches `closed_won` against the exact fixture note reporting
 unapproved procurement. Its required flag cites both sources and resolves
 neither. It does not detect arbitrary contradictions.
+
+Slack messages remain untrusted data in a separate store and scope. The optional
+four-read workflow requires a matching receipt for each source. It distinguishes
+empty messages from a denied grant. Its additional conflict rule matches the
+exact delayed-review message against the existing procurement conflict and
+cites all three records. The follow-up is a checked proposal, never a sent
+message or a promise. It cannot create an activity or contact an external service.
+Legacy three-read snapshots cannot introduce Slack evidence or a follow-up.
 
 Snapshot writes are not atomic. An interrupted write can leave unusable JSON;
 generate a new brief. Custom Python adapters are trusted application code and

@@ -1,5 +1,60 @@
 # Decisions
 
+## Optional account-channel context (2026-11-17)
+
+Add a third isolated SQLite source for mock Slack account messages. Use stable
+`msg-NNN` IDs and account-specific channel labels. Keep message text untrusted.
+The new `slack:read` grant implies neither CRM nor call-note access. Register
+one tool through the existing gateway so its reads and denials use the same
+scope checks, rate limit, and two-phase audit path. All four database paths,
+including audit, must resolve to distinct files.
+
+Check existing device/inode identities before seeding as well as path names.
+Different hardlinked paths can otherwise combine the Slack and audit tables
+inside one file. Reject that configuration before either table is initialized.
+This startup check does not defend against a malicious local file owner.
+
+The clean-checkout run hit three 30-second CLI subprocess deadlines under local
+host load. Those same tests passed unchanged in 11 seconds combined when run
+alone. Give these CLI integration subprocesses 60 seconds, still bounded, and
+rerun the clean walkthrough. This changes the test deadline, not runtime request
+timeouts or a performance claim.
+
+Select three-source briefing with `--with-slack`. Keep default commands and
+the existing 182 expected claims unchanged so the recorded two-source model
+benchmark remains reproducible. The source store and tool are available to
+scoped clients regardless of which briefing mode is selected. The extended
+demo proves denial in both source directions; Inspector tests all six pairs.
+No Slack account or external API is used.
+
+Version the evidence, not the outer artifact envelope. Missing version or
+integer version 1 retains the three-read validator. Version 2 requires four
+receipts and an explicit Slack outcome. Unknown or malformed versions fail.
+Legacy snapshots reject Slack records, receipts, and status. A saved snapshot
+does not silently acquire new evidence or follow-up text. Read-only failure
+handling remains the same: only the matching insufficient-scope denial permits
+a partial brief. Empty messages and denied messages cite distinct receipts.
+
+Keep the old procurement conflict claim. Add one bounded three-source rule
+matching that exact procurement note, `closed_won`, and the exact delayed
+security-review message. Cite all three records and resolve none of them.
+Do not infer arbitrary contradictions or claim that a channel message is true.
+
+Version 2 requires one supported follow-up proposal with citations. For the
+recognized conflict it asks for confirmation of procurement and security review.
+If only the CRM/calls conflict is known, it asks about procurement with those two
+citations and makes no security-review claim. Otherwise it asks for review of
+the cited renewal context. It names no owner
+and promises no action, date, or discount. Copy the checked line into
+`proposed_follow_up` only after the whole brief passes. Add no sending tool,
+unchecked model field, or approval prompt.
+
+Keep the original claim objects in `evaluation/expected.json`. Store static
+Slack additions in its extension and select them explicitly. The full mode
+uses 80 read receipts. Keep the default Ollama prompt unchanged; only version 2
+adds Slack and follow-up instructions. Existing model results cover the default
+task, and no three-source model metric is claimed without a separate run.
+
 ## Optional local model drafting (2026-11-17)
 
 Keep fixture drafting as the default. Select Ollama only with `--adapter ollama`

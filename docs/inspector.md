@@ -52,7 +52,7 @@ npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/in
 Inspector calls its connection-summary command `initialize`. With this modern
 config, it sends `server/discover` on the wire, not a legacy handshake. The
 summary reports `result.protocolVersion: "2026-07-28"`. Tool listing returns
-all five tools, their input and output schemas, and required-scope metadata.
+all six tools, their input and output schemas, and required-scope metadata.
 Account output appears in `result.structuredContent.records` with references
 `crm/accounts/acc-003` and `crm/contacts/con-003`.
 
@@ -81,10 +81,21 @@ as untrusted. Inspect the receipts with:
 .venv/bin/python -m gtm_connector audit --state-dir var/inspector
 ```
 
-Stop the server with Ctrl-C. Tokens expire after five minutes; re-run
+Tokens expire after five minutes; re-run
 `inspector-config` to request another grant. Restarting the server changes its
 ports and invalidates old tokens, so regenerate the config after every restart.
 The state directory retains credentials and receipts until you remove it.
+
+To read only Slack messages, leave the server running and explicitly replace
+the config grant:
+
+```sh
+.venv/bin/python -m gtm_connector inspector-config --state-dir var/inspector --scope slack:read
+npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/call --tool-name read_slack_messages --tool-arg account_id=acc-003
+```
+
+The result contains `slack/messages/msg-003`. The same grant cannot read CRM
+or call notes. Stop the server with Ctrl-C when finished.
 
 ## Automated proof and limits
 
@@ -93,9 +104,9 @@ The state directory retains credentials and receipts until you remove it.
 ```
 
 This separate CI check uses the pinned official CLI in fresh temporary state.
-It validates discovery, all ten tool schemas, both source reads, both directions
-of scope denial, HTTP 429, an invalid-bearer HTTP 401, five finalized receipts
-for five tool attempts, and zero activities. It observes actual HTTP protocol
+It validates discovery, all twelve tool schemas, all three source reads, all six
+cross-source denials, HTTP 429, an invalid-bearer HTTP 401, ten finalized receipts
+for ten tool attempts, and zero activities. It observes actual HTTP protocol
 headers and metadata. The included client only provisions grants; Inspector
 sends the MCP requests. Test state is removed afterward.
 

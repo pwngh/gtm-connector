@@ -1,6 +1,6 @@
 # GTM connector demo
 
-An MCP server sits in front of a mock CRM and call notes, with scoped tokens,
+An MCP server sits in front of a mock CRM, call notes, and Slack account messages, with scoped tokens,
 an audit log of recognized tool calls, and a workflow that drafts a renewal brief
 and cites the source or audit record behind each statement. A rep who gets one wrong answer about
 an account stops opening the tool, so the checker rejects any line it cannot
@@ -12,9 +12,9 @@ The default demo uses a fixed drafting step. An optional local Ollama model
 can assemble a candidate from the same supported claims. Both paths pass through
 the same checker. It verifies wording and citations, not whether a source is true.
 
-- **Source permissions stay separate.** CRM access does not grant call-note
-  access, or vice versa. Scope denials return HTTP 403.
-  [Scope tests](tests/test_gateway.py#L182)
+- **Source permissions stay separate.** CRM, call notes, and Slack messages
+  require independent grants. Scope denials return HTTP 403.
+  [Scope tests](tests/test_gateway.py#L182), [Slack scope tests](tests/test_slack_gateway.py)
 - **Execution depends on an audit receipt.** The gateway commits a `pending`
   row before running a tool, then finalizes that row. If the first write fails,
   the tool does not run. Unparseable traffic with no tool-call marker and
@@ -145,14 +145,15 @@ flowchart LR
     MCP -->|"Pending row, then outcome"| Audit[("Audit SQLite")]
     MCP -->|"crm:read or crm:write"| CRM[("CRM SQLite")]
     MCP -->|"calls:read"| Calls[("Call-note SQLite")]
+    MCP -->|"slack:read"| Slack[("Slack-message SQLite")]
     MCP -->|"Records or scope denial"| CLI
     CLI --> Draft["Fixture or optional local model draft"]
     Draft --> Check["Citation checker"]
     Check -->|"Accepted text"| Brief["Renewal brief"]
 ```
 
-The briefing workflow requests read scopes only. Each completed brief has three
-receipts, one for each planned read.
+The briefing workflow requests read scopes only. The default brief has three
+receipts. `--with-slack` adds a fourth read and a checked follow-up draft.
 
 ## Run it
 
@@ -189,9 +190,9 @@ creates a private config with explicitly granted scopes. After that setup:
 NODE_EXTRA_CA_CERTS="$PWD/var/inspector/tls.pem" npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/inspector/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/list
 ```
 
-Inspector 2.15.0 discovers MCP 2026-07-28, lists all five tools, and reads the two
+Inspector 2.15.0 discovers MCP 2026-07-28, lists all six tools, and reads the three
 sources through the existing gateway. The [integration check](scripts/check-inspector.py)
-proves both scope-denial directions, HTTP 429, HTTP 401, and one receipt per tool
+proves every pair of source grants stays separate, HTTP 429, HTTP 401, and one receipt per tool
 attempt. Node and npm downloads are needed only for this optional client check.
 
 ### Use a local model
@@ -208,12 +209,30 @@ aliases. The model receives supported claims from the authorized evidence, with
 no credentials or tool access. Any invalid line rejects the entire draft.
 [Setup, measurements, and limits](docs/ollama.md)
 
+### Include account-channel context
+
+```sh
+.venv/bin/python -m gtm_connector brief acc-003 --with-slack --json
+.venv/bin/python -m gtm_connector evaluate --with-slack
+```
+
+This adds a `slack:read` grant, a fourth audited read, and `proposed_follow_up`
+copied from the checked brief. The `acc-003` fixture flags the CRM, call-note,
+and Slack disagreement with all three references. The proposal sends nothing.
+[Slack fixtures, denial cases, and limits](docs/slack.md)
+
+Measured on 2026-11-17 at `21:11:19` UTC with the fixture adapter and no model:
+the extended evaluation found and correctly cited 223 of 223 claims, with zero
+invented claims, 80 audit receipts, and zero activities.
+[Exact command and results](evaluation/RESULTS_SLACK.json)
+
 ## What the mocks stand for
 
 | Mock | What it represents |
 | --- | --- |
 | CRM store | The account, contact, deal, renewal, and activity records a sales team keeps. |
 | Call-note store | Notes a call-recording service would attach to those accounts. This fixture stores text only. |
+| Slack-message store | Internal account-channel messages about a renewal. This fixture has no connection to Slack. |
 
 ## Limits worth reading
 
@@ -221,7 +240,8 @@ no credentials or tool access. Any invalid line rejects the entire draft.
   workflow, not model quality. Optional Ollama drafting assembles fixed claims;
   it does not support unrestricted summaries.
 - The checker accepts fixed wording and permits some omissions. Missing notes
-  and the exact procurement conflict must stay visible. [Brief limits](docs/briefs.md)
+  and recognized conflicts must stay visible. Slack mode also requires its
+  empty or denied outcome and a cited follow-up proposal. [Brief limits](docs/briefs.md)
 - Authorization uses a local owner emulator. The file owner can request every
   scope and alter the stores. Retention is manual. Audit records and snapshots
   are not tamper-proof; snapshot writes are not atomic.

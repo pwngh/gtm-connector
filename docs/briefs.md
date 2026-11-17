@@ -10,17 +10,22 @@ After setup, run these commands from the repository root:
 
 Each command starts the local services, calls `get_account`,
 `list_opportunities`, and `read_call_notes` in that order, then stops the
-services. The workflow requests `crm:read` and, unless `--without-calls` is set,
+services. The default workflow requests `crm:read` and, unless `--without-calls` is set,
 `calls:read`. It never requests `crm:write`. Draft text cannot change the tool
 sequence or trigger another call. A deterministic fixture drafts the default
 text. [Optional Ollama drafting](ollama.md) uses the same publication gate.
 
-A recognized call-note scope denial is the only partial-success case. Other
-HTTP errors, transport failures, failed tools, and incomplete evidence stop
-the brief rather than being reported as unavailable notes.
+A recognized call-note scope denial is the default workflow's only partial-success
+case. Slack mode also permits its matching `slack:read` scope denial. Other HTTP
+errors, transport failures, failed tools, and incomplete evidence stop the brief
+rather than being reported as an unavailable source.
 
 Use `--as-of YYYY-MM-DD` to replace the fixed demo date, `--json` to print the
 full saved result, or `--state-dir PATH` to use another state directory.
+
+Add `--with-slack` for a fourth read with `slack:read`, a three-source conflict
+flag, and a cited `proposed_follow_up`. This is an unsent proposal checked with
+the brief. The default three-read workflow stays unchanged. See [Slack context](slack.md).
 
 ## What the citations mean
 
