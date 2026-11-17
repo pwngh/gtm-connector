@@ -1,5 +1,27 @@
 # Decisions
 
+## Shared tool definitions (2026-11-17)
+
+Keep one entry per tool in tool_definitions.py. Each entry names its scope,
+read/write mode, and string argument rules. Registration, the HTTP boundary,
+and the handler scope check read that entry. This removes separate policy maps
+and the special-case nullable filter from the gateway. Handlers still check
+scope before opening a store. External CRM mode still omits the write tool and
+refuses hardcoded write calls after authentication and scope checks.
+
+Preserve the existing argument behavior. Limits count characters, not bytes.
+Required strings must contain a non-whitespace character. Optional query text
+can be empty. Only the optional opportunity account filter accepts null. Do not
+trim or coerce values. Unknown tools still reach the SDK's existing rejection.
+Keep audit, authentication, rate-limit, scope, argument, and protocol check order.
+
+Leave handler signatures and descriptions unchanged so the SDK produces the
+same public schemas. The gateway enforces length limits; this refactor does not
+add schema constraints. Keep the authorization server's grant roster separate
+from per-tool requirements. Its supported scopes and the protected resource's
+minimal initial scope do not change. Independent scope expectations in tests
+and Inspector checks remain independent of the table.
+
 ## Development container and Codespaces (2026-11-17)
 
 Use the existing demo commands inside a Python development container. The README
