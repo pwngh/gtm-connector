@@ -234,7 +234,7 @@ It prints its private output directory. Follow [the five-minute guide](DEMO.md).
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/pwngh/gtm-connector)
 
-You can create a codespace through the link above, then run the demo command above
+You can create a codespace through the link above, then run `./scripts/demo.sh`
 in its browser terminal. The
 [development container](.devcontainer/devcontainer.json)
 supplies Python 3.11; the demo installs its dependencies. Setup needs internet.
