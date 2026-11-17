@@ -55,7 +55,7 @@ In another terminal, follow the [Inspector setup](inspector.md) with
 certificate in `NODE_EXTRA_CA_CERTS`. Search first:
 
 ```sh
-npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/salesforce/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/call --tool-name search_accounts --tool-arg query=
+npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/salesforce/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/call --tool-name search_accounts
 ```
 
 Copy an actual returned `id`, then pass it as `account_id` to `get_account` or

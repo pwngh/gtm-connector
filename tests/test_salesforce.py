@@ -304,7 +304,8 @@ class SalesforceTests(unittest.TestCase):
 
     def test_malformed_json_and_records_fail_without_echoing_the_body(self):
         bodies = (b"not json " + TOKEN.encode(), b'{"records":[],"records":[]}',
-                  b'{"totalSize":NaN,"done":true,"records":[]}')
+                  b'{"totalSize":NaN,"done":true,"records":[]}',
+                  b'{"totalSize":1e999999999999999999999999999,"done":true,"records":[]}')
         for body in bodies:
             with self.subTest(body=body):
                 self.assert_error("salesforce_invalid_response",
@@ -312,10 +313,12 @@ class SalesforceTests(unittest.TestCase):
         for changes in ({"totalSize": True}, {"done": 1}, {"records": [None]}, {"totalSize": 2}):
             response = {**fixture("account.json"), **changes}
             self.assert_error("salesforce_invalid_response", self.adapter("organization_developer.json", response).search_accounts)
-        for field, value in (("Id", "short"), ("Name", None), ("Industry", [])):
+        for field, value in (("Id", "short"), ("Name", None), ("Industry", []),
+                             ("Name", "\ud800"), ("Industry", "\udfff")):
             response = fixture("account.json")
             response["records"][0][field] = value
-            self.assert_error("salesforce_invalid_response", self.adapter("organization_developer.json", response).search_accounts)
+            encoded = httpx2.Response(200, content=json.dumps(response).encode())
+            self.assert_error("salesforce_invalid_response", self.adapter("organization_developer.json", encoded).search_accounts)
 
     def test_cross_account_records_are_rejected_instead_of_reassociated(self):
         contacts = fixture("contacts.json")

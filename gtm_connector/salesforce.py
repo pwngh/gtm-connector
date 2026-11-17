@@ -2,7 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 import json
 import os
 import re
@@ -66,6 +66,11 @@ def _native_id(value):
 def _text(row, field, *, nullable=False):
     if field not in row or not (isinstance(row[field], str) or (nullable and row[field] is None)):
         raise SalesforceReadError("salesforce_invalid_response")
+    if isinstance(row[field], str):
+        try:
+            row[field].encode("utf-8")
+        except UnicodeError:
+            raise SalesforceReadError("salesforce_invalid_response") from None
     return row[field]
 
 
@@ -175,7 +180,7 @@ class SalesforceReadOnlyAdapter:
                     document = json.loads(b"".join(chunks), parse_float=Decimal,
                                           parse_constant=_reject_constant,
                                           object_pairs_hook=_unique_object)
-                except (ValueError, UnicodeError, RecursionError):
+                except (ValueError, UnicodeError, RecursionError, DecimalException):
                     code = "salesforce_forbidden" if status == 403 else "salesforce_invalid_response"
                     raise SalesforceReadError(code) from None
                 if time.monotonic() >= budget["deadline"]:

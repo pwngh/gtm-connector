@@ -180,8 +180,8 @@ The drafter gets a copy of that evidence. It has no token or tool interface.
 The checker compares each candidate line with supported wording and its exact
 references. Only a brief that passes the whole check is published.
 
-An empty source result and a denied grant are different outcomes. The brief
-states which occurred and cites the receipt. Other read failures stop the brief.
+An empty call-note or Slack result and a denied grant are different outcomes.
+The brief states which occurred and cites the receipt. Other read failures stop the brief.
 A failed citation check rejects the whole draft; it does not publish the lines
 that happened to pass. Saved evidence lets the operator check another candidate
 against the same records later.
