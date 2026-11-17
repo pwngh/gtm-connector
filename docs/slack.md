@@ -81,7 +81,7 @@ gain a follow-up field.
 The expected manifest preserves its original 182 claim objects. Its static
 Slack extension adds message, conflict, and follow-up expectations for the same
 20 accounts. Extended evaluation uses 80 tool calls. The score still measures
-supported wording and exact references, not semantic truth. Local-owner access,
+supported wording and exact references, not semantic truth. Local-owner access
 and manual retention retain their existing limits. Snapshot replacement is atomic;
 it does not guarantee power-loss durability.
 
