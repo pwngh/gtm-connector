@@ -14,12 +14,34 @@ plain and finish one runnable PR slice at a time. Use Python and SQLite.
   and before sending source to external review providers.
 - Record material scope choices and limitations in DECISIONS.md.
 - Read the current MCP specification and authorization requirements before
-  implementing the protocol. The researched revision is 2026-07-28.
+  implementing the protocol. Both researched revisions are 2026-07-28, read on
+  2026-11-17. Record revision and reading date in the README.
+
+## Four pull requests
+
+Keep the project to these four runnable slices. Do not add a web interface.
+
+1. Seeded CRM, CLI inspection, and data tests.
+2. MCP tools, local authorization, separate CRM and calls permissions, audit,
+   rate limits, and idempotent writes. Include the small fixture update here.
+   Prove scope denial, one audit receipt per tool call, safe write retries, and
+   a clear rate-limit error. Run council on this PR.
+3. Brief workflow with source citations, an uncited-sentence checker, an
+   injection test, and fixtures that run without a model.
+4. Twenty-account evaluation with recorded README scores, one-page security
+   review, audit-based usage by token/tool/day and model tokens per brief,
+   README polish, and a five-minute clean-checkout demo.
+
+Keep fixture IDs stable and readable across reseeds. Use synthetic display
+labels, not plausible company, person, or product names. Preserve examples of
+a renewal within 30 days of the fixed demo date, an at-risk account, conflicting
+CRM and call-note facts, an account without notes, and an instruction inside a
+note. The two source systems are SQLite mocks; do not claim live integrations.
 
 ## Council
 
-Run council once on the PR carrying MCP and authorization core logic; skip it
-for the seed/CLI foundation and housekeeping. Use all three full members:
+Run council once on PR 2, which carries MCP and authorization core logic; skip
+it for the seed/CLI foundation and housekeeping. Use all three full members:
 
 | Provider | Member | Effort |
 | --- | --- | --- |
@@ -31,6 +53,14 @@ Gemini 3.8 Flash is explicitly selected by the user as a full member. Do not
 describe it as a flagship or treat its review as non-blocking. Include actual
 model names and effort in the PR council table, with each round's returned score
 or `no score`. No fabricated usage, scores, or agreement.
+
+Give all members the same code, tests, and these attack questions. Put each
+member's answers and evidence in the PR table, not just a general verdict:
+
+- Can any tool return data outside the token's scopes?
+- Can a tool call miss the audit log, including rejected calls and failures?
+- What happens with an expired, malformed, or wrong-audience token?
+- Is anything inside a source record ever treated as an instruction?
 
 Maximum three council rounds total. If the council has not agreed after three,
 stop and show the user the open findings and disagreements with evidence. Do

@@ -1,4 +1,4 @@
-name: Test foundation demo
+name: Test connector demo
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     strategy:
       matrix:
         python-version: ['3.11', '3.14']
