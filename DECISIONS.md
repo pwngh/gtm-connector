@@ -1,5 +1,53 @@
 # Decisions
 
+## Optional Salesforce reads (2026-11-17)
+
+Select the external reader only with `serve --crm-backend salesforce`. Environment
+variables alone never change the backend. Keep the default demo, evaluation,
+and source fixtures unchanged. Pass an injected reader to Runtime and Connector;
+the three existing CRM handlers retain their scope and audit boundary.
+
+Use REST v68.0 and fixed GET queries for Account, Contact, and Opportunity.
+Read OrganizationType on each operation and require `Developer Edition` before
+CRM queries. Do not create an org, request credentials, or claim a live test.
+Tests use invented HTTP responses. The constructor validates configuration
+locally and sends no request. An edition lookup happens inside tool execution,
+after the pending receipt and CRM grant check.
+
+Accept one explicit HTTPS My Domain host and one access token from the environment.
+Disable environment proxies, redirects, refresh, and retries. Bound query pages,
+records, response bytes, and time. Follow only same-origin relative query
+locators. Escape SOQL string and LIKE metacharacters; accept only namespaced
+18-character IDs for account lookup. Errors expose fixed codes, not response
+bodies or credentials. Scope failures never contact the external service.
+
+Preserve native IDs as source_id and prefix adapter IDs with acc-sf-, con-sf-,
+or opp-sf-. The gateway still supplies crm/... references and untrusted_data.
+This prevents accidental joins with the fixture IDs. Do not invent a cross-org
+identity system. The runtime is single-operator and configured for one org.
+
+Standard Account fields do not identify this connector's ARR, renewal date,
+or renewal risk. AnnualRevenue is not ARR. CloseDate is an opportunity field,
+not an account renewal. Keep raw StageName and the source IsClosed and IsWon
+flags. Preserve Amount as a decimal string or null; currency stays null because
+CurrencyIsoCode is not available in every org. No USD assumption, stage rewrite,
+or fabricated renewal field is allowed. Brief creation refuses the external
+backend with renewal_fields_unmapped before reads or drafting. A later mapping
+needs explicit field choices and its own evaluation.
+
+Remove log_activity from the external tool registry and reject hardcoded calls
+with HTTP 403 after authentication and scope validation. Do not write to the
+local CRM either. Runtime still initializes the fixture files for local calls,
+Slack, and direct owner administration. That startup work does not copy org
+records. Existing SQLite writes and their idempotency behavior stay unchanged.
+
+The local owner controls which MCP clients receive crm:read. The Salesforce
+credential remains an operator credential, not delegated end-user identity.
+An upstream HTTP 401 becomes a bounded MCP tool error; it must not masquerade
+as a local OAuth challenge. Audit arguments and returned record references may
+now identify real records, so retain the existing private-state and manual
+retention limits and document this additional boundary.
+
 ## Optional account-channel context (2026-11-17)
 
 Add a third isolated SQLite source for mock Slack account messages. Use stable
@@ -152,7 +200,7 @@ and [configuration](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspec
 
 Use Python 3.11+ and SQLite. PR 1 used only the standard library; PR 2 adds the
 official MCP Python SDK 2.3.0 and local HTTPS dependencies. No data or code comes
-from a real CRM, employer, or client. Currency values are integer USD cents.
+from an employer or client. Fixture currency values are integer USD cents.
 
 Reseeding must preserve existing content. Missing or extra fixture records are
 an error; a new database path is the explicit way to start fresh. Reads use
@@ -180,7 +228,8 @@ workflow against independent expected claims.
 
 Each slice must run and pass its tests before full-stop handoff. The user merges.
 Only the initial README/license bootstrap goes directly to main. No deployments,
-package publishing, real CRM APIs, web UI, or multi-tenant features.
+package publishing, web UI, or multi-tenant features. External CRM reads are
+limited to the explicitly requested adapter described above.
 
 ## Protocol research (2026-11-17)
 

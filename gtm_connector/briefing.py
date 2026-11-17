@@ -77,6 +77,8 @@ def _artifact_path(directory, brief_id):
 def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, adapter=None,
                  observe_draft=None, include_slack=False, grant_slack=True):
     """Collect, draft, check, then publish; the draft adapter receives data only."""
+    if getattr(runtime, "crm_backend", "sqlite") != "sqlite":
+        raise BriefingError("renewal_fields_unmapped")
     # Offline citation checks do not need to import the MCP server or TLS runtime.
     from .client import LocalClient
     from .runtime import private_file

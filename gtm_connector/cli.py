@@ -13,7 +13,7 @@ from .seed import DEMO_AS_OF
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the invented CRM/calls connector.")
+    parser = argparse.ArgumentParser(description="Run the scoped CRM, calls, and Slack connector.")
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("seed", "accounts", "account"):
         command = commands.add_parser(name, help="local CRM administration (direct file access)")
@@ -29,6 +29,9 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("demo", "serve", "audit", "brief", "check-brief", "usage", "inspector-config"):
         command = commands.add_parser(name)
         command.add_argument("--state-dir", type=Path, default=Path("var/v2"))
+        if name in ("serve", "brief"):
+            command.add_argument("--crm-backend", choices=("sqlite", "salesforce"), default="sqlite",
+                                 help="Salesforce supports read tools only; renewal briefs require SQLite fixtures")
         if name in ("demo", "brief"):
             command.add_argument("--with-slack", action="store_true",
                                  help="include Slack reads and a checked follow-up draft")
@@ -51,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.command == "brief" and args.crm_backend != "sqlite":
+            raise ValueError("renewal_fields_unmapped: Salesforce brief generation is unavailable")
         adapter = None
         if args.command in ("brief", "evaluate"):
             if args.adapter == "fixture" and args.model is not None:
@@ -94,8 +99,13 @@ def main(argv: list[str] | None = None) -> int:
             result = AuditLog(path).read(args.brief)
         elif args.command == "serve":
             from .runtime import Runtime
-            with Runtime(args.state_dir) as runtime:
+            crm_reader = None
+            if args.crm_backend == "salesforce":
+                from .salesforce import SalesforceReadOnlyAdapter
+                crm_reader = SalesforceReadOnlyAdapter.from_env()
+            with Runtime(args.state_dir, crm_reader=crm_reader) as runtime:
                 print(json.dumps({"resource": runtime.config["resource"], "issuer": runtime.config["issuer"],
+                                  "crm_backend": runtime.crm_backend,
                                   "owner_config": str(runtime.directory / "owner.json")}), flush=True)
                 try:
                     while True:

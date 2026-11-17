@@ -1,10 +1,18 @@
 # GTM connector demo
 
-An MCP server sits in front of a mock CRM, call notes, and Slack account messages, with scoped tokens,
-an audit log of recognized tool calls, and a workflow that drafts a renewal brief
-and cites the source or audit record behind each statement. A rep who gets one wrong answer about
-an account stops opening the tool, so the checker rejects any line it cannot
-tie to a record.
+This is an MCP server in front of a mock CRM, call notes, and Slack account
+messages. It gives clients scoped access, records recognized tool calls in an
+audit log, and drafts renewal briefs that cite the source or audit record behind
+each statement.
+
+A rep who gets one wrong answer about an account stops opening the tool. The
+checker rejects any line it cannot tie to a record. The tests below prove the
+permission checks, audit boundary, write retries, and rejection of unsupported
+claims.
+
+Run `./scripts/demo.sh` from a clean checkout. It installs dependencies, runs
+the tests, and shows those cases on invented data. The first install needs
+internet; the default runtime needs no external service or key.
 
 ## What it guarantees
 
@@ -105,7 +113,8 @@ The 182 of 182 counts measure fixed claim lines found and cited correctly
 against fixed expected answers. The drafter and checker share supported wording;
 these scores do not measure model quality. The run recorded 60 successful audit
 receipts, zero activities, and zero model tokens.
-[Results](evaluation/RESULTS.json) · [Expected claims](evaluation/expected.json) ·
+[Results](evaluation/RESULTS.json)
+[Expected claims](evaluation/expected.json)
 [Scoring rules](docs/evaluation.md)
 
 ### Local model measurement
@@ -132,8 +141,9 @@ gate; it does not prove the model hallucinated or that a hallucination was caugh
 The task is fixed-claim assembly. Adverse tests separately reject uncited,
 invented, miscited, duplicate, and action-shaped candidates without publishing
 any part of the failed brief.
-[Model results and exact command](evaluation/RESULTS_OLLAMA.json) ·
-[Rejection tests](tests/test_model_workflow.py) · [Local model limits](docs/ollama.md)
+[Model results and exact command](evaluation/RESULTS_OLLAMA.json)
+[Rejection tests](tests/test_model_workflow.py)
+[Local model limits](docs/ollama.md)
 
 ## Request path
 
@@ -152,8 +162,29 @@ flowchart LR
     Check -->|"Accepted text"| Brief["Renewal brief"]
 ```
 
+The client names a tool and supplies its arguments. The local authorization
+server issues a token with named permissions, called scopes. CRM, calls, and
+Slack each need their own grant.
+
+The gateway writes a pending audit receipt, then checks the token, scope, and
+rate limit. A receipt records the attempt and its outcome. A rejected call
+stops there. An allowed tool reads its source and returns records marked as
+untrusted data, with a `record_ref` for each record. The gateway finalizes the
+receipt before returning the result.
+
 The briefing workflow requests read scopes only. The default brief has three
 receipts. `--with-slack` adds a fourth read and a checked follow-up draft.
+
+The workflow saves the returned records and receipts as an evidence snapshot.
+The drafter gets a copy of that evidence. It has no token or tool interface.
+The checker compares each candidate line with supported wording and its exact
+references. Only a brief that passes the whole check is published.
+
+An empty call-note or Slack result and a denied grant are different outcomes.
+The brief states which occurred and cites the receipt. Other read failures stop the brief.
+A failed citation check rejects the whole draft; it does not publish the lines
+that happened to pass. Saved evidence lets the operator check another candidate
+against the same records later.
 
 ## Run it
 
@@ -226,6 +257,20 @@ the extended evaluation found and correctly cited 223 of 223 claims, with zero
 invented claims, 80 audit receipts, and zero activities.
 [Exact command and results](evaluation/RESULTS_SLACK.json)
 
+### Read a Salesforce Developer Edition org
+
+After setting `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` privately:
+
+```sh
+.venv/bin/python -m gtm_connector serve --crm-backend salesforce --state-dir var/salesforce
+```
+
+This replaces the three CRM read tools with Salesforce REST queries. It checks
+Developer Edition before reading account data. `log_activity` is unavailable;
+call notes and Slack remain separate mocks. The adapter does not map renewal
+fields, so it refuses brief generation. Tests use invented HTTP responses.
+No live org has been verified. [Setup, field mapping, and limits](docs/salesforce.md)
+
 ## What the mocks stand for
 
 | Mock | What it represents |
@@ -257,15 +302,20 @@ invented claims, 80 audit receipts, and zero activities.
   assistant applications and interactive external login are unverified.
   [Protocol details](docs/protocol.md)
 
+The following exclusions describe the default fixture runtime. The explicitly
+selected Salesforce read adapter is described above.
+
 Custom Python adapters are not sandboxed or selectable through the CLI. No
 hosted model adapter, real CRM or call-recording integration, web interface,
 or multi-tenant behavior is included.
 
 ## Reference
 
-[Tools and fixture data](docs/tools.md) · [Design decisions](DECISIONS.md) ·
+[Tools and fixture data](docs/tools.md)
+[Design decisions](DECISIONS.md)
 [Rules the coding agents worked under](AGENTS.md)
 
-Portfolio project for Preston Neal. All source records use synthetic labels.
+Portfolio project for Preston Neal. The checked-in fixture records use synthetic
+labels. Optional Salesforce reads return records from the operator's org.
 
 MIT licensed.

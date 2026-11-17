@@ -1,0 +1,233 @@
+"""Exercise optional upstream reads through real local OAuth and MCP HTTPS."""
+
+import asyncio
+from contextlib import closing
+import json
+from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+
+import httpx2
+from mcp.server.mcpserver.exceptions import ToolError
+
+from gtm_connector.briefing import BriefingError, create_brief
+from gtm_connector.client import LocalClient
+from gtm_connector.runtime import Runtime
+from gtm_connector.salesforce import SalesforceReadOnlyAdapter
+
+
+ACCOUNT = "001000000000001AAA"
+CONTACT = "003000000000001AAA"
+OPPORTUNITY = "006000000000001AAA"
+ORGANIZATION = "00D000000000001AAA"
+ACCOUNT_ID = "acc-sf-" + ACCOUNT
+UPSTREAM_TOKEN = "invented-salesforce-token-for-http-fixtures"
+INSTANCE = "https://fixture-unit-test.my.salesforce.com"
+ORGANIZATION_QUERY = "SELECT Id, OrganizationType FROM Organization LIMIT 1"
+
+
+class SalesforceGatewayTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.state = Path(directory.name) / "state"
+        self.requests = []
+        self.edition = "Developer Edition"
+        self.failure = None
+        self.runtime = None
+        self.reader = SalesforceReadOnlyAdapter(
+            INSTANCE, UPSTREAM_TOKEN, transport=httpx2.MockTransport(self.respond))
+
+    def respond(self, request):
+        # The remote service is a mock; the OAuth/MCP sockets remain real HTTPS.
+        self.requests.append(request)
+        self.assertEqual(request.method, "GET")
+        self.assertEqual(request.url.host, "fixture-unit-test.my.salesforce.com")
+        self.assertEqual(request.headers["Authorization"], "Bearer " + UPSTREAM_TOKEN)
+        receipts = self.runtime.connector.audit.read()
+        self.assertEqual(len([row for row in receipts if row["status"] == "pending"]), 1)
+        query = request.url.params["q"]
+        if query == ORGANIZATION_QUERY:
+            rows = [{"Id": ORGANIZATION, "OrganizationType": self.edition}]
+        elif self.failure is not None:
+            if self.failure == "timeout":
+                raise httpx2.ReadTimeout(UPSTREAM_TOKEN, request=request)
+            if self.failure == "malformed":
+                return httpx2.Response(200, content=UPSTREAM_TOKEN)
+            return httpx2.Response(self.failure, json=[{
+                "message": UPSTREAM_TOKEN + " private upstream detail", "errorCode": "FIXTURE_ERROR"}])
+        elif " FROM Account" in query:
+            rows = [{"Id": ACCOUNT, "Name": "Fixture Salesforce account", "Industry": None}]
+        elif " FROM Contact" in query:
+            rows = [{"Id": CONTACT, "AccountId": ACCOUNT, "Name": "Fixture Salesforce contact",
+                     "Title": None, "Email": "contact@fixture.example"}]
+        elif " FROM Opportunity" in query:
+            rows = [{"Id": OPPORTUNITY, "AccountId": ACCOUNT, "Name": "Fixture Salesforce opportunity",
+                     "StageName": "Fixture selected stage", "Amount": 1234.5,
+                     "CloseDate": "2027-01-31", "IsClosed": False, "IsWon": False}]
+        else:
+            self.fail("Unexpected upstream query")
+        return httpx2.Response(200, json={"totalSize": len(rows), "done": True, "records": rows})
+
+    def open_runtime(self):
+        self.runtime = self.enterContext(Runtime(self.state, crm_reader=self.reader))
+        client = self.enterContext(LocalClient(self.runtime.config))
+        self.assertEqual(self.requests, [])
+        return client
+
+    def records(self, response):
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()["result"]
+        self.assertFalse(result.get("isError"), response.text)
+        data = result["structuredContent"]
+        self.assertEqual(data["source"], "crm")
+        self.assertIs(data["untrusted_data"], True)
+        return data["records"]
+
+    def activities(self):
+        with closing(sqlite3.connect(self.state / "crm.sqlite3")) as connection:
+            return connection.execute("SELECT count(*) FROM activities").fetchone()[0]
+
+    def test_scoped_reads_are_qualified_and_audited_before_every_upstream_request(self):
+        client = self.open_runtime()
+        token = client.authorize(["crm:read"])
+        search = self.records(client.call(token, "search_accounts", {"query": "Fixture"}))
+        account = self.records(client.call(token, "get_account", {"account_id": ACCOUNT_ID}))
+        opportunity = self.records(client.call(token, "list_opportunities", {"account_id": ACCOUNT_ID}))
+        self.assertEqual(search[0]["record_ref"], "crm/accounts/" + ACCOUNT_ID)
+        self.assertEqual([row["record_ref"] for row in account],
+                         ["crm/accounts/" + ACCOUNT_ID, "crm/contacts/con-sf-" + CONTACT])
+        self.assertEqual(opportunity[0]["record_ref"], "crm/opportunities/opp-sf-" + OPPORTUNITY)
+        for row in search + account + opportunity:
+            self.assertEqual(row["backend"], "salesforce")
+            self.assertEqual(len(row["source_id"]), 18)
+            self.assertNotIn("renewal_date", row)
+            self.assertNotIn("risk", row)
+            self.assertNotIn("arr_cents", row)
+        self.assertEqual(opportunity[0]["amount_decimal"], "1234.5")
+        self.assertIsNone(opportunity[0]["currency"])
+        self.assertNotIn("amount_cents", opportunity[0])
+        self.assertEqual(opportunity[0]["stage"], "Fixture selected stage")
+        self.assertEqual(sum(request.url.params["q"] == ORGANIZATION_QUERY for request in self.requests), 3)
+        receipts = self.runtime.connector.audit.read()
+        self.assertEqual(len(receipts), 3)
+        self.assertEqual([row["status"] for row in receipts], ["ok"] * 3)
+        self.assertEqual([row["rows"] for row in receipts],
+                         [[row["record_ref"] for row in result] for result in (search, account, opportunity)])
+        self.assertEqual(self.activities(), 0)
+
+    def test_missing_crm_scope_makes_no_upstream_request_including_edition_check(self):
+        client = self.open_runtime()
+        token = client.authorize(["calls:read"])
+        for tool, arguments in (("search_accounts", {}), ("get_account", {"account_id": ACCOUNT_ID}),
+                                ("list_opportunities", {"account_id": ACCOUNT_ID})):
+            response = client.call(token, tool, arguments)
+            self.assertEqual(response.status_code, 403)
+            self.assertIn('scope="crm:read"', response.headers["WWW-Authenticate"])
+        self.assertEqual(self.requests, [])
+        receipts = self.runtime.connector.audit.read()
+        self.assertEqual(len(receipts), 3)
+        self.assertTrue(all(row["http_status"] == 403 and row["rows"] == [] for row in receipts))
+
+    def test_external_writer_is_absent_from_sdk_and_hardcoded_calls_cannot_mutate(self):
+        client = self.open_runtime()
+        read_token = client.authorize(["crm:read"])
+        listing = client.rpc(read_token, "tools/list").json()["result"]["tools"]
+        self.assertNotIn("log_activity", {tool["name"] for tool in listing})
+        for tool in listing:
+            self.assertTrue(tool["annotations"]["readOnlyHint"])
+            self.assertEqual(tool["annotations"]["openWorldHint"],
+                             tool["name"] in {"search_accounts", "get_account", "list_opportunities"})
+        self.assertNotIn("log_activity", {tool.name for tool in asyncio.run(self.runtime.connector.mcp.list_tools())})
+        arguments = {"account_id": ACCOUNT_ID, "kind": "fixture", "body": "Fixture attempted write",
+                     "idempotency_key": "fixture-salesforce-write"}
+        with self.assertRaises(ToolError):
+            asyncio.run(self.runtime.connector.mcp.call_tool("log_activity", arguments))
+        write_token = client.authorize(["crm:write"])
+        cases = (("invalid-fixture-token", 401, "invalid or expired"),
+                 (read_token, 403, "insufficient_scope"), (write_token, 403, "crm_write_disabled"))
+        for token, status, message in cases:
+            response = client.call(token, "log_activity", arguments)
+            self.assertEqual(response.status_code, status)
+            self.assertIn(message, response.text)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.activities(), 0)
+        receipts = self.runtime.connector.audit.read()
+        self.assertEqual(len(receipts), 3)
+        self.assertEqual([row["http_status"] for row in receipts], [401, 403, 403])
+        self.assertTrue(all(row["rows"] == [] and row["status"] == "error" for row in receipts))
+
+    def test_upstream_failures_return_only_safe_codes_and_one_error_receipt(self):
+        client = self.open_runtime()
+        token = client.authorize(["crm:read"])
+        cases = ((401, "salesforce_auth_required"), (403, "salesforce_forbidden"),
+                 (429, "salesforce_rate_limited"), (500, "salesforce_http_error"),
+                 ("timeout", "salesforce_timeout"), ("malformed", "salesforce_invalid_response"))
+        for count, (failure, code) in enumerate(cases, 1):
+            self.failure = failure
+            response = client.call(token, "search_accounts", {})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["result"]["isError"])
+            self.assertEqual(response.json()["result"]["content"][0]["text"],
+                             "Error executing tool search_accounts: " + code)
+            receipts = self.runtime.connector.audit.read()
+            self.assertEqual(len(receipts), count)
+            self.assertEqual((receipts[-1]["status"], receipts[-1]["rows"]), ("error", []))
+            self.assertNotIn(UPSTREAM_TOKEN, response.text + json.dumps(receipts))
+        owner = (self.state / "owner.json").read_text()
+        self.assertNotIn(UPSTREAM_TOKEN, owner)
+        self.assertNotIn(INSTANCE, owner)
+        self.assertEqual(json.loads(owner)["crm_backend"], "salesforce")
+        self.assertNotIn(UPSTREAM_TOKEN.encode(), (self.state / "audit.sqlite3").read_bytes())
+
+    def test_wrong_or_missing_edition_stops_before_crm_queries(self):
+        client = self.open_runtime()
+        token = client.authorize(["crm:read"])
+        for edition in ("Enterprise Edition", "Developer", None):
+            self.edition = edition
+            response = client.call(token, "search_accounts", {})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["result"]["isError"])
+            self.assertIn("salesforce_edition_required", response.text)
+        self.assertEqual([request.url.params["q"] for request in self.requests], [ORGANIZATION_QUERY] * 3)
+        self.assertEqual(len(self.runtime.connector.audit.read()), 3)
+
+    def test_initial_audit_failure_prevents_all_upstream_reads(self):
+        client = self.open_runtime()
+        token = client.authorize(["crm:read"])
+        with patch.object(self.runtime.connector.audit, "start", side_effect=sqlite3.OperationalError("fixture")):
+            response = client.call(token, "get_account", {"account_id": ACCOUNT_ID})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.runtime.connector.audit.read(), [])
+
+    def test_external_renewal_brief_is_refused_before_authorization_or_drafting(self):
+        self.open_runtime()
+        adapter = Mock()
+        with patch("gtm_connector.client.LocalClient") as client:
+            for include_slack in (False, True):
+                with self.assertRaisesRegex(BriefingError, "^renewal_fields_unmapped$"):
+                    create_brief(self.runtime, ACCOUNT_ID, adapter=adapter, include_slack=include_slack)
+        client.assert_not_called()
+        adapter.draft.assert_not_called()
+        self.assertEqual(self.requests, [])
+        self.assertEqual(self.runtime.connector.audit.read(), [])
+        self.assertFalse((self.state / "briefs").exists())
+
+    def test_default_runtime_keeps_closed_world_tools_and_local_writer(self):
+        with Runtime(self.state) as runtime, LocalClient(runtime.config) as client:
+            self.assertEqual(runtime.crm_backend, "sqlite")
+            self.assertEqual(runtime.connector.crm_backend, "sqlite")
+            token = client.authorize(["crm:read"])
+            listing = client.rpc(token, "tools/list").json()["result"]["tools"]
+            self.assertIn("log_activity", {tool["name"] for tool in listing})
+            self.assertTrue(all(not tool["annotations"]["openWorldHint"] for tool in listing))
+            account = self.records(client.call(token, "get_account", {"account_id": "acc-001"}))
+            self.assertEqual(account[0]["record_ref"], "crm/accounts/acc-001")
+        self.assertEqual(self.requests, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
