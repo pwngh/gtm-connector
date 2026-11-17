@@ -92,6 +92,10 @@ class Session:
         return result
 
     def capture(self):
+        changes = self.successful(["git", "status", "--porcelain", "--untracked-files=all",
+                                   "--", ".", ":(exclude)docs/media"]).stdout
+        if changes:
+            raise ValueError("commit source changes before recording")
         revision = self.successful(["git", "rev-parse", "HEAD"]).stdout.strip()
         tree = self.successful(["git", "rev-parse", "HEAD^{tree}"]).stdout.strip()
         self.scene("1. Run the fixture demo")

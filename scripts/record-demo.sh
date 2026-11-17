@@ -32,6 +32,6 @@ printf 'Recording real commands. Long idle periods will be shortened in playback
 asciinema rec --headless --quiet --return --output-format asciicast-v2 \
     --window-size 112x28 --capture-env TERM --idle-time-limit 12 \
     --title 'GTM connector: fixture walkthrough and Inspector CLI' \
-    --command '.venv/bin/python scripts/recording-session.py' "$capture_dir/session.cast"
-.venv/bin/python scripts/render-recording.py "$capture_dir/session.cast"
+    --command '.venv/bin/python -I scripts/recording-session.py' "$capture_dir/session.cast"
+.venv/bin/python -I scripts/render-recording.py "$capture_dir/session.cast"
 printf 'Recording and Inspector frame saved in docs/media/.\n'

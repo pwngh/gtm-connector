@@ -25,6 +25,11 @@ and UTC capture times. Scan the published text before rendering and inspect the
 images before filing. Private state remains under gitignored var/ with manual
 retention. The local-owner boundary does not change.
 
+Require a clean source tree before capture, excluding generated media, so the
+recorded commit identifies the executed inputs. Use isolated Python for capture
+and rendering. Keep privacy checks active under optimization and require the
+captured terminal output to match the saved transcript before making images.
+
 ## Saved evidence and audit inspection (2026-11-17)
 
 Finish the reliability work that was parked while the optional adapters shipped.

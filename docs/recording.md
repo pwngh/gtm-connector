@@ -28,6 +28,9 @@ From the repository root, run:
 ./scripts/record-demo.sh
 ```
 
+Commit source changes first. The script refuses a changed working tree, except
+for generated files in `docs/media/`, so its source revision describes what ran.
+
 The script installs the existing Python requirements and downloads the pinned
 Inspector package if it is not cached. It then runs `./scripts/demo.sh` in fresh
 fixture state. The recording script controls what reaches the terminal. It does
@@ -47,7 +50,10 @@ Generated files live in `docs/media/`:
 The capture script keeps raw logs, fixture databases, and credentials under
 private, gitignored `var/` directories. Only selected output is published. The
 renderer checks the text artifacts for credential patterns, issued credentials
-still in local config files, and local home paths before rendering. Review the
+still in local config files, and local home paths before rendering. It also
+requires the capture to match the saved transcript after removing terminal clears
+and normalizing line endings. These checks remain active when Python optimization
+is enabled. Review the
 transcript and both images before committing. Do not add the private directories.
 Retention remains manual, as described in the [security review](../SECURITY_REVIEW.md).
 

@@ -9,38 +9,46 @@ import subprocess
 import sys
 
 
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
 def render(source):
     media = Path("docs/media")
     raw = source.read_text()
     entries = [json.loads(line) for line in raw.splitlines()]
     header, events = entries[0], entries[1:]
-    assert header["version"] == 2 and header["width"] == 112 and header["height"] == 28
-    assert set(header.get("env", {})) <= {"TERM"}
-    assert events and events[-1][1:] == ["x", "0"], "Recording must end with a successful exit"
-    assert all(event[1] == "o" for event in events[:-1]), "Only output may be recorded"
+    require(header["version"] == 2 and header["width"] == 112 and header["height"] == 28, "Wrong format")
+    require(set(header.get("env", {})) <= {"TERM"}, "Unexpected environment capture")
+    require(events and events[-1][1:] == ["x", "0"], "Recording must end with a successful exit")
+    require(all(event[1] == "o" for event in events[:-1]), "Only output may be recorded")
     times = [event[0] for event in events]
-    assert times == sorted(times), "Nonmonotonic recording"
+    require(times == sorted(times), "Nonmonotonic recording")
     text = "".join(event[2] for event in events if event[1] == "o")
+    displayed = text.replace("\r\n", "\n").replace("\033[2J\033[H", "")
+    require(displayed == (media / "recording-session.txt").read_text(), "Capture differs from transcript")
     opening = next(index for index, event in enumerate(events)
                    if event[1] == "o" and "1. Run the fixture demo" in event[2])
-    assert "Six tools returned by Inspector CLI." in text
-    assert "error: Brief contains an uncited, unsupported, or misattributed statement." in text
-    assert "HTTP 403" in text and "[crm/opportunities/opp-003]" in text
+    require("Six tools returned by Inspector CLI." in text, "Missing tools")
+    require("error: Brief contains an uncited, unsupported, or misattributed statement." in text,
+            "Missing citation rejection")
+    require("HTTP 403" in text and "[crm/opportunities/opp-003]" in text, "Missing evidence")
     published = [media / name for name in (
         "recording-session.txt", "recording-provenance.json", "inspector-tools.json")]
     contents = raw + "\n" + "\n".join(path.read_text() for path in published)
     forbidden = (r"Bearer\s+\S+|owner_secret|access_token|refresh_token|BEGIN .*PRIVATE KEY|"
                  r"/Users/|/home/|/Volumes/|/private/var/|/var/folders/")
-    assert not re.search(forbidden, contents), "Private material in recording output"
+    require(not re.search(forbidden, contents), "Private material in recording output")
     # Check actual locally issued credentials as well as recognizable patterns.
     for path in Path("var").glob("recording-*/**/owner.json"):
         secret = json.loads(path.read_text()).get("owner_secret")
-        assert not secret or secret not in contents, "Owner credential in recording output"
+        require(not secret or secret not in contents, "Owner credential in recording output")
     for path in Path("var").glob("recording-*/**/inspector.json"):
         config = json.loads(path.read_text())
         for server in config.get("mcpServers", {}).values():
             credential = server.get("headers", {}).get("Authorization", "").removeprefix("Bearer ")
-            assert not credential or credential not in contents, "Bearer credential in recording output"
+            require(not credential or credential not in contents, "Bearer credential in recording output")
     cast = media / "walkthrough.cast"
     cast.write_text(raw)
     common = ["agg", "--quiet", "--theme", "github-dark", "--font-size", "18",
