@@ -175,6 +175,7 @@ def run_evaluation(*, adapter=None, command=None):
                        "reason_counts": reasons},
             model_usage=usage,
             publication_gate_passed=(outcomes["failed"] == 0 and sums["facts_invented"] == 0
+                                     and sums["facts_found"] == sums["facts_cited_correctly"]
                                      and sums["duplicate_claims"] == activities == 0
                                      and len(receipts) == 60
                                      and all(row["status"] == "ok" for row in receipts)))

@@ -75,6 +75,23 @@ class ModelEvaluationTests(unittest.TestCase):
         self.assertEqual(report["candidate"]["unscored_briefs"], 20)
         self.assertTrue(all(case["candidate"] is None for case in report["cases"]))
 
+    def test_independent_publication_flag_checks_citations_even_if_the_gate_regresses(self):
+        class WrongCitation:
+            def draft(self, evidence):
+                lines = build_facts(evidence)
+                lines[0] = lines[0].replace("crm/accounts/" + evidence["account_id"],
+                                            "crm/accounts/acc-030")
+                return DraftResult("\n".join(lines), "test-local-model", 10, 5)
+
+        # Simulate a publication-checker regression. The separate scorer must
+        # still report that these published citations are wrong.
+        with patch("gtm_connector.briefing.check_brief", side_effect=lambda text, evidence: text):
+            report = run_evaluation(adapter=WrongCitation())
+        self.assertEqual(report["accepted_briefs"], 20)
+        self.assertEqual(report["facts_found"], 182)
+        self.assertEqual(report["facts_cited_correctly"], 162)
+        self.assertFalse(report["publication_gate_passed"])
+
     def test_cli_requires_explicit_local_model_and_reports_preflight_failure(self):
         for args, message in ((["evaluate", "--model", "example"], "--model requires"),
                               (["brief", "acc-001", "--adapter", "ollama"], "requires --model")):
