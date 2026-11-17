@@ -23,6 +23,12 @@ storage follow the reader's account rules. Stopping ends running processes but
 retains storage, so link to GitHub's billing explanation rather than promise
 unlimited free use.
 
+Validated the configuration with Dev Containers CLI 0.90.0 and Docker locally.
+The clean-checkout five-minute demo passed all 231 tests, evaluation, usage, and
+citation rejection on Linux arm64 with Python 3.11.18. Docker reported no
+published ports or privileged mode. No hosted codespace was created. Keep that
+untested browser path explicit in the README.
+
 ## Recorded walkthrough and Inspector output (2026-11-17)
 
 Make the existing proof visible without asking every reader to install the demo.

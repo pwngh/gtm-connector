@@ -209,6 +209,9 @@ Codespaces uses your account's compute and storage allowance.
 Stop the codespace when finished. Delete it when you no longer need its files;
 stopped codespaces still use storage.
 
+The container passed the five-minute demo locally on Linux arm64 with Python
+3.11.18. Codespaces creation and the browser editor have not been tested.
+
 From a clean checkout:
 
 ```sh
