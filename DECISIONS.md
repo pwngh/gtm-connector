@@ -1,5 +1,36 @@
 # Decisions
 
+## Python checks and dependency hashes (2026-11-17)
+
+Run Ruff and mypy in CI for pull requests and pushes to main. Ruff checks the
+application and scripts for common errors and lines over 120 characters. Mypy
+checks every application module, including unannotated function bodies. This is
+an initial type-checking baseline, not strict typing: unannotated interfaces and
+dynamic JSON still use Any. Keep existing tests byte-for-byte unchanged and
+outside these static checks. The behavioral suite still runs on Python 3.11 and
+3.14. Avoid a formatter pass that would obscure this change.
+
+Use explicit re-exports for the shared seed and database functions. Keep the
+Inspector script's path setup before its imports, with a scoped E402 exception.
+Use the SDK's Python field names for ToolAnnotations; its wire aliases stay the
+same. Mark the authority factory's one SDK protocol mismatch with a targeted
+arg-type suppression. The protocol also requires an identity-assertion hook;
+this issuer advertises only authorization_code and does not implement that hook.
+Do not add a grant or change rejection behavior to satisfy a type checker.
+
+Freeze the existing runtime versions in requirements.in and add published
+artifact hashes to requirements.lock. Keep Ruff, mypy, and pip-tools in a separate
+development input and lock. The default demo installs only the runtime lock.
+Require hashes at each checked-in pip install entry point. Hashes detect an
+artifact that differs from the reviewed lock; they do not establish that an
+upstream package is safe or make source-build dependencies fully reproducible.
+The locks include hashes for multiple platform wheels. Regenerate them with
+Python 3.14 and the pinned tooling, then verify both supported CI versions.
+
+The README badge follows the main branch. Its first push-triggered run starts
+after the owner merges this change. The badge links to the workflow results;
+it does not imply that CI or a type checker proves security.
+
 ## README navigation (2026-11-17)
 
 Compare the README with [Soulbeet](https://github.com/terry90/soulbeet/blob/dfd46b90ac49a9571a8d4d36d17604b92233b7e7/README.md),

@@ -10,3 +10,5 @@ var/
 inspector.json
 *.pem
 *.key
+.ruff_cache/
+.mypy_cache/

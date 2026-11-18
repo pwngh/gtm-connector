@@ -24,7 +24,7 @@ export ASCIINEMA_STATE_HOME="$PWD/$capture_dir/state"
 export TERM=xterm-256color
 printf 'Preparing the optional recording tools and Python environment.\n'
 python3 -m venv .venv
-.venv/bin/python -m pip install --quiet --disable-pip-version-check -r requirements.lock \
+.venv/bin/python -m pip install --quiet --disable-pip-version-check --require-hashes -r requirements.lock \
     > "$capture_dir/setup.log" 2>&1
 npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --version \
     > "$capture_dir/inspector-version.log" 2>&1

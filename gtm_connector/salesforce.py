@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 import httpx2
@@ -197,7 +198,8 @@ class SalesforceReadOnlyAdapter:
             raise SalesforceReadError("salesforce_unavailable") from None
 
     def _query(self, client, query, budget, *, max_rows=_MAX_ROWS):
-        rows, seen_ids, seen_locators = [], set(), set()
+        rows: list[dict[str, Any]] = []
+        seen_ids, seen_locators = set(), set()
         path, total = _QUERY_PATH, None
         for page in range(_MAX_PAGES):
             document = self._request(client, path, budget, query=query if page == 0 else None)
@@ -259,8 +261,9 @@ class SalesforceReadOnlyAdapter:
             raise SalesforceReadError("salesforce_invalid_response")
         if amount is not None:
             amount = Decimal(amount)
+            # The finite check short-circuits before the exponent, which is then an int.
             if (not amount.is_finite() or len(amount.as_tuple().digits) > 28
-                    or abs(amount.as_tuple().exponent) > 28):
+                    or abs(cast(int, amount.as_tuple().exponent)) > 28):
                 raise SalesforceReadError("salesforce_invalid_response")
         close_date = _text(row, "CloseDate")
         try:
@@ -286,15 +289,17 @@ class SalesforceReadOnlyAdapter:
     def get_account(self, account_id):
         native_id = _account_id(account_id)
         with self._operation() as (client, budget):
-            rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account WHERE Id = '{native_id}' ORDER BY Id LIMIT 101",
-                               budget, max_rows=1)
+            rows = self._query(
+                client, f"SELECT {_ACCOUNT_FIELDS} FROM Account WHERE Id = '{native_id}' ORDER BY Id LIMIT 101",
+                budget, max_rows=1)
             if not rows:
                 return None
             if rows[0]["Id"] != native_id:
                 raise SalesforceReadError("salesforce_invalid_response")
             account = self._account(rows[0])
-            contacts = self._query(client, f"SELECT {_CONTACT_FIELDS} FROM Contact WHERE AccountId = '{native_id}' ORDER BY Id LIMIT 101",
-                                   budget)
+            contacts = self._query(
+                client, f"SELECT {_CONTACT_FIELDS} FROM Contact WHERE AccountId = '{native_id}' ORDER BY Id LIMIT 101",
+                budget)
             account["contacts"] = [self._contact(row, native_id) for row in contacts]
             return account
 
@@ -302,5 +307,6 @@ class SalesforceReadOnlyAdapter:
         native_id = _account_id(account_id) if account_id is not None else None
         where = f" WHERE AccountId = '{native_id}'" if native_id is not None else ""
         with self._operation() as (client, budget):
-            rows = self._query(client, f"SELECT {_OPPORTUNITY_FIELDS} FROM Opportunity{where} ORDER BY Id LIMIT 101", budget)
+            rows = self._query(
+                client, f"SELECT {_OPPORTUNITY_FIELDS} FROM Opportunity{where} ORDER BY Id LIMIT 101", budget)
             return [self._opportunity(row, native_id) for row in rows]

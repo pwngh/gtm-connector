@@ -20,7 +20,7 @@ def read_audit(path: str | Path, brief_id: str | None = None) -> list[dict]:
     query = """SELECT audit_id, started_at, token_id, tool, arguments, request_id,
                       brief_id, status, http_status, row_count, rows, elapsed_ms, error
                FROM audit_log"""
-    parameters = ()
+    parameters: tuple[str, ...] = ()
     if brief_id is not None:
         query += " WHERE brief_id = ?"
         parameters = (brief_id,)

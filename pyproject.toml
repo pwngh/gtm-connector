@@ -1,0 +1,21 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+# Preserve the existing behavioral tests during this tooling-only slice.
+extend-exclude = ["tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# This standalone script adds the checkout root before importing the package.
+"scripts/check-inspector.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["gtm_connector"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+show_error_codes = true

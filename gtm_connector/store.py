@@ -3,7 +3,7 @@
 from pathlib import Path
 import sqlite3
 
-from .seed import seed
+from .seed import seed as seed
 
 
 TABLES = ("accounts", "contacts", "opportunities", "activities")

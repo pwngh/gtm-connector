@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 import hashlib
 import math
-from typing import Literal, Mapping
+from typing import Literal, Mapping, cast
 from urllib.parse import urlsplit
 
 from mcp.server.auth.provider import AccessToken
@@ -79,7 +79,8 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
         return RequestDecision(needs="token")
     if token is not None and token.expires_at is not None and wall_time is MISSING:
         return RequestDecision(needs="wall_time")
-    if (token is None or token.expires_at is None or token.expires_at <= wall_time
+    # A supplied token expiry requested wall_time above; no clock value is read here.
+    if (token is None or token.expires_at is None or token.expires_at <= cast(float, wall_time)
             or token.resource != policy.resource):
         return RequestDecision(error=RequestError(401, 1001, "invalid or expired access token", {
             "WWW-Authenticate": f'Bearer error="invalid_token", resource_metadata="{policy.metadata_url}"',
@@ -88,7 +89,8 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
     if request.is_call:
         if rate_time is MISSING:
             return RequestDecision(needs="rate_time")
-        key = hashlib.sha256(raw.encode()).hexdigest()
+        # Missing credentials already returned the invalid-token decision.
+        key = hashlib.sha256(cast(str, raw).encode()).hexdigest()
         updated = {key: value for key, value in windows.items() if rate_time - value[0] < policy.window_seconds}
         begin, used = updated.get(key, (rate_time, 0))
         if used >= policy.rate_limit:
