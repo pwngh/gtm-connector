@@ -115,8 +115,8 @@ def check():
                 error = json.loads(stderr)
                 assert set(error) == {"error"} and "message" in error["error"], "Missing CLI error envelope"
                 assert not any(text in stderr for text in (
-                    "Fixture account", "contact003@", "Procurement has not approved", "record_ref",
-                    "Security review is delayed", "Fixture Slack author"
+                    "Cedarline Analytics", "ellis@cedarline.example", "Procurement has not approved", "record_ref",
+                    "Security review is delayed", "Avery Linden"
                 )), "Denied command leaked source data"
                 return error
 

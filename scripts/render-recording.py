@@ -29,14 +29,18 @@ def render(source):
     displayed = text.replace("\r\n", "\n").replace("\033[2J\033[H", "")
     require(displayed == (media / "recording-session.txt").read_text(), "Capture differs from transcript")
     opening = next(index for index, event in enumerate(events)
-                   if event[1] == "o" and "1. Run the fixture demo" in event[2])
+                   if event[1] == "o" and "1. Prepare Juniper Crest Learning's renewal" in event[2])
     require("Six tools returned by Inspector CLI." in text, "Missing tools")
     errors = [json.loads(line).get("error") for line in displayed.splitlines()
               if line.startswith('{"error":')]
     require(errors == [{"code": "check_failed",
                         "message": "Brief contains an uncited, unsupported, or misattributed statement.",
                         "next": "gtm-connector check-brief --help"}], "Missing citation rejection")
-    require("HTTP 403" in text and "[crm/opportunities/opp-003]" in text, "Missing evidence")
+    require("HTTP 403" in text and "[crm/accounts/acc-007]" in text, "Missing lookup or refusal")
+    require("[calls/call_notes/note-007]" in text and "[slack/messages/msg-007]" in text,
+            "Missing three-source evidence")
+    require("Observed state: 0 activities; 6 completed tool receipts." in text and
+            "- Proposed follow-up:" in text and "Morgan Reed" in text, "Missing story outcome")
     published = [media / name for name in (
         "recording-session.txt", "recording-provenance.json", "inspector-tools.json")]
     contents = raw + "\n" + "\n".join(path.read_text() for path in published)

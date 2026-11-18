@@ -14,7 +14,7 @@ from gtm_connector.runtime import Runtime
 from gtm_connector.usage import build_usage_report
 
 
-GROUNDED = '- Account: "Fixture account acc-001". [crm/accounts/acc-001]\n'
+GROUNDED = '- Account: "Alder Vale Packaging". [crm/accounts/acc-001]\n'
 MODEL = "fixture-local-model:1"
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Record actual fixture commands and labeled excerpts, never credential files."""
 
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import closing, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 import hashlib
 from importlib.metadata import version
@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import shlex
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,8 @@ class Session:
         # Do not pass model, Salesforce, or other API credentials to subprocesses.
         self.environment = {name: os.environ[name] for name in ("PATH", "HOME", "TMPDIR")
                             if name in os.environ}
+        self.environment["PATH"] = str(ROOT / ".venv" / "bin") + os.pathsep + self.environment.get("PATH", "")
+        self.environment["NO_COLOR"] = "1"
         self.started = utc_now()
 
     def relative(self, path):
@@ -98,61 +101,74 @@ class Session:
             raise ValueError("commit source changes before recording")
         revision = self.successful(["git", "rev-parse", "HEAD"]).stdout.strip()
         tree = self.successful(["git", "rev-parse", "HEAD^{tree}"]).stdout.strip()
-        self.scene("1. Run the fixture demo")
-        self.show("Actual execution. Dependency and test logs are captured privately.")
-        demo_run = self.successful(["./scripts/demo.sh", "--json", "--state-dir", self.relative(self.state)],
-                                   timeout=600, display=True)
-        demo = json.loads(demo_run.stdout)
-        tests = re.search(r"Ran (\d+) tests in ([0-9.]+)s\s+OK(?:\s|$)", demo_run.stderr)
-        if not tests or (demo["accounts"], demo["notes_without_scope"]["status"],
-                         demo["injection_note"]["activities_created"],
-                         demo["idempotent_write"]["requests"],
-                         demo["idempotent_write"]["activities"]) != (30, 403, 0, 2, 1):
-            raise ValueError("demo proof did not match")
+        tests_run = self.successful([".venv/bin/python", "-m", "unittest", "discover", "-s", "tests"],
+                                    timeout=600)
+        tests = re.search(r"Ran (\d+) tests in ([0-9.]+)s\s+OK(?:\s|$)", tests_run.stderr)
+        if not tests:
+            raise ValueError("test proof did not match")
+        self.scene("1. Prepare Juniper Crest Learning's renewal")
+        demo_run = self.successful(["gtm-connector", "demo", "--state-dir", self.relative(self.state)],
+                                   timeout=60, display=True)
         self.secrets.append(json.loads((self.state / "owner.json").read_text())["owner_secret"])
-        self.show("Selected output:")
-        self.show(f"Test suite: OK ({tests[1]} tests in {tests[2]} seconds)")
-        self.show(f"Accounts: {demo['accounts']}")
-        self.show(f"Call-note scope denial: HTTP {demo['notes_without_scope']['status']}")
-        self.show(f"Injected-note activities: {demo['injection_note']['activities_created']}")
-        self.show(f"Idempotent write: {demo['idempotent_write']['requests']} requests, "
-                  f"{demo['idempotent_write']['activities']} activity")
+        artifacts = list((self.state / "briefs").glob("brief-*.json"))
+        if len(artifacts) != 1:
+            raise ValueError("demo must save one brief")
+        full = json.loads(artifacts[0].read_text())
+        from gtm_connector.audit import read_audit
+
+        receipts = read_audit(self.state / "audit.sqlite3")
+        expected = ["search_accounts", "read_call_notes", "get_account", "list_opportunities",
+                    "read_call_notes", "read_slack_messages"]
+        with closing(sqlite3.connect((self.state / "crm.sqlite3").as_uri() + "?mode=ro", uri=True)) as database:
+            activities = database.execute("SELECT COUNT(*) FROM activities").fetchone()[0]
+        if (full["status"] != "accepted" or full["account_id"] != "acc-007" or activities != 0
+                or full["text"] not in demo_run.stdout or demo_run.stderr
+                or [row["tool"] for row in receipts] != expected
+                or [row["http_status"] for row in receipts] != [200, 403, 200, 200, 200, 200]
+                or any(row["status"] == "pending" for row in receipts)):
+            raise ValueError("renewal story proof did not match")
+        self.show("Opening lines from the command's actual output:")
+        opening = demo_run.stdout.split(full["text"], 1)[0].rstrip()
+        if "Morgan Reed" not in opening or "Juniper Crest Learning" not in opening:
+            raise ValueError("missing rep or account")
+        self.show(opening)
         time.sleep(10)
 
-        self.scene("2. Read the cited renewal conflict")
-        full = next(brief for brief in demo["briefs"] if brief["account_id"] == "acc-003")
+        self.scene("2. Read the same account's checked brief")
+        self.show("Exact CRM lines from that saved brief:")
         lines = [line for line in full["text"].splitlines() if line.startswith(
-            ("- CRM opportunity opp-003:", "- Untrusted call note note-003 ", "- Source conflict:"))]
-        if len(lines) != 3:
-            raise ValueError("missing cited conflict")
-        self.show("Three exact lines from the demo's acc-003 brief:")
+            ("- Account:", "- Renewal ", "- CRM opportunity ", "- Contact "))]
+        if len(lines) < 3 or not any("[crm/accounts/acc-007]" in line for line in lines):
+            raise ValueError("missing cited CRM context")
         for line in lines:
             self.show(line)
+        time.sleep(10)
+
+        self.scene("3. Read the call and Slack context as evidence")
+        self.show("Exact lines from the same brief. Instructions remain quoted source data:")
+        lines = [line for line in full["text"].splitlines() if line.startswith(
+            ("- Untrusted call note note-007 ", "- Untrusted Slack message msg-007 "))]
+        if (len(lines) != 2 or not any("[calls/call_notes/note-007]" in line for line in lines)
+                or not any("[slack/messages/msg-007]" in line for line in lines)):
+            raise ValueError("missing cited call or Slack context")
+        for line in lines:
+            self.show(line)
+        self.show(f"Observed state: {activities} activities; {len(receipts)} completed tool receipts.")
+        self.show("The fixed workflow requested read scopes only. Nothing was sent.")
+        time.sleep(10)
+
+        self.scene("4. Keep the follow-up proposed and the claims checked")
+        self.show(full["proposed_follow_up"])
         candidate = self.private / "candidate.txt"
         candidate.write_text(full["text"])
-        check_command = [".venv/bin/python", "-m", "gtm_connector", "check-brief", "--json", full["brief_id"],
+        check_command = ["gtm-connector", "check-brief", "--json", full["brief_id"],
                          self.relative(candidate), "--state-dir", self.relative(self.state)]
         accepted = self.successful(check_command)
         if json.loads(accepted.stdout) != {"status": "valid", "brief_id": full["brief_id"]}:
             raise ValueError("generated brief was not accepted")
-        self.show("Citation checker: valid.")
-        time.sleep(10)
-
-        self.scene("3. Keep missing permission visible")
-        self.show("Recorded response excerpt for a CRM-only grant:")
-        self.show(json.dumps(demo["notes_without_scope"], indent=2))
-        restricted = next(brief for brief in demo["briefs"] if brief["account_id"] == "acc-001")
-        denied = [line for line in restricted["text"].splitlines()
-                  if line.startswith("- Call notes were unavailable")]
-        if len(denied) != 1:
-            raise ValueError("missing scope-denial disclosure")
-        self.show("Exact line from the restricted brief:")
-        self.show(denied[0])
-        time.sleep(10)
-
-        self.scene("4. Reject an uncited sentence")
+        self.show("Citation checker: accepted the saved brief.")
         candidate.write_text(full["text"] + "The renewal was approved.\n")
-        self.show("Candidate: the generated brief plus 'The renewal was approved.'")
+        self.show("Candidate: the same brief plus 'The renewal was approved.'")
         checked = self.run(check_command, display=True)
         error = json.loads(checked.stderr).get("error", {})
         if (checked.returncode != 4 or checked.stdout or error.get("message") !=
@@ -206,6 +222,9 @@ class Session:
                          "node": node, "inspector": inspector},
             "commands": self.commands, "intentional_pause_seconds": 50,
             "draft_adapter": "fixture", "model": None, "inspector_scopes": ["crm:read"],
+            "demo": {"account_id": "acc-007", "rep": "Morgan Reed", "receipt_count": len(receipts),
+                     "activities": activities, "brief_id": full["brief_id"],
+                     "sources": {"crm": "demo_fixture", "calls": "demo_fixture", "slack": "demo_fixture"}},
             "tests": {"run": int(tests[1]), "result": "OK", "elapsed_seconds": float(tests[2])}}
         artifacts = {"inspector-tools.json": result.stdout,
                      "recording-session.txt": "\n".join(self.transcript) + "\n",

@@ -164,7 +164,8 @@ def _catalog(evidence):
         if account["risk_reason"]:
             add(f"CRM risk reason: {reason}.", ref)
         for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
-            add(f"Contact {_text(contact['name'])}: role {_text(contact['title'])}; "
+            role = "not provided" if contact["title"] == "" else _text(contact["title"])
+            add(f"Contact {_text(contact['name'])}: role {role}; "
                 f"email {_text(contact['email'])}.", contact["record_ref"])
         for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
             add(f"CRM opportunity {opportunity['id']}: stage {_text(opportunity['stage'])}; "

@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = (
-    "seed", "accounts", "account", "evaluate", "demo", "serve", "audit", "brief",
+    "seed", "accounts", "account", "evaluate", "demo", "verify", "serve", "audit", "brief",
     "check-brief", "usage", "inspector-config", "doctor", "connect", "completion",
 )
 

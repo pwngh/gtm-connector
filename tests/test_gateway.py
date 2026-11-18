@@ -235,7 +235,7 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(response.json()["error"]["code"], 1001)
                 self.assertIn('error="invalid_token"', response.headers["WWW-Authenticate"])
                 self.assertIn("resource_metadata=", response.headers["WWW-Authenticate"])
-                self.assertNotIn("Fixture account", response.text)
+                self.assertNotIn("Alder Vale Packaging", response.text)
                 if token is not None:
                     self.assertNotIn(TOKEN_VALUES.get(token, token), response.text)
         self.assertEqual(len(self.connector.audit.read()), len(tokens))
@@ -255,7 +255,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(response.json()["error"]["data"]["reason"], "invalid_token")
         self.assertEqual(response.json()["error"]["code"], 1001)
         self.assertIn('error="invalid_token"', response.headers["WWW-Authenticate"])
-        self.assertNotIn("Fixture account", response.text)
+        self.assertNotIn("Alder Vale Packaging", response.text)
         for token in TOKEN_VALUES.values():
             self.assertNotIn(token, response.text)
         receipts = self.connector.audit.read()
@@ -266,7 +266,7 @@ class GatewayTests(unittest.TestCase):
     def test_every_tool_attempt_has_one_complete_audit_row(self):
         self.open_connector()
         attempts = [
-            ("search_accounts", {"query": "acc-001"}, "crm", None),
+            ("search_accounts", {"query": "Alder Vale Packaging"}, "crm", None),
             ("get_account", {"account_id": "acc-001"}, "crm", None),
             ("list_opportunities", {"account_id": "acc-003"}, "crm", None),
             ("read_call_notes", {"account_id": "acc-004"}, "calls", None),
@@ -392,7 +392,7 @@ class GatewayTests(unittest.TestCase):
                 self.assertEqual(response.json()["error"]["code"], -32020)
                 if "MCP-Protocol-Version" in headers:
                     self.assertEqual(response.json()["error"]["data"]["reason"], "protocol_version_mismatch")
-                self.assertNotIn("Fixture account", response.text)
+                self.assertNotIn("Alder Vale Packaging", response.text)
         self.assertEqual(len(self.connector.audit.read()), len(cases))
         encoded = "=?base64?" + base64.b64encode(b"get_account").decode() + "?="
         self.records(self.tool("get_account", {"account_id": "acc-001"}, headers={"Mcp-Name": encoded}), "crm")
@@ -403,7 +403,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(response.json()["error"]["data"]["reason"], "untrusted_origin_or_host")
         self.assertEqual(response.json()["error"]["code"], 1003)
-        self.assertNotIn("Fixture account", response.text)
+        self.assertNotIn("Alder Vale Packaging", response.text)
         self.assertEqual(len(self.connector.audit.read()), 1)
         self.assertEqual(self.connector.audit.read()[0]["rows"], [])
 
@@ -445,7 +445,7 @@ class GatewayTests(unittest.TestCase):
             response = self.tool("get_account", {"account_id": "acc-001"}, token="crm")
         self.assertEqual(response.status_code, 503, response.text)
         self.assertEqual(response.json(), {"error": "execution_or_audit_unavailable; no result released"})
-        self.assertNotIn("Fixture account", response.text)
+        self.assertNotIn("Alder Vale Packaging", response.text)
         self.assertEqual(self.activities(), [])
 
     def test_write_committed_before_audit_failure_is_reused_on_retry(self):

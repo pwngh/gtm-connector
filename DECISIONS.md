@@ -1,5 +1,50 @@
 # Decisions
 
+## A renewal story and separate guarantee checks (2026-11-17)
+
+Make `demo` follow Morgan Reed, an invented account rep, preparing Juniper Crest
+Learning's renewal. Use acc-007 for the lookup, call-note scope refusal, four-read
+brief, quoted injection, and proposed follow-up so each part belongs to the same
+job. The fixed planning date is 2027-01-15 and the renewal is fourteen days later.
+The rep's introduction is scenario narration outside the checked brief. The
+brief and follow-up are the exact accepted artifact, not a rewritten summary.
+
+Include Slack by default in this story and retain `demo --with-slack` as a
+compatible spelling. Six attempts produce six receipts: one account lookup,
+one refused call-note read, and four authorized source reads. The story grants
+read scopes only and checks that no activity was created. Keep the old guarantee
+runner under `verify`, including its existing JSON shape and optional Slack
+checks. Its explicit local activity proves idempotent retries. Separate the two
+state directories because a story about read-only preparation should not inherit
+that intentional test write. The quick and long walkthroughs follow the same
+person and account; the longer path inspects that brief's usage and citation
+checks. Keep the broader guarantees as separately run `verify` checks.
+
+Use a fixed invented book with mixed industries, reserved email domains,
+account-specific context, a missing contact role, and an October note beside a
+January Slack update. This implements the user's explicitly requested source
+expansion and supersedes the earlier synthetic-label-only restriction. Preserve
+the IDs, row counts, exact procurement/security conflict fixtures, and injection
+strings. An empty fixture contact role displays as `not provided`; the stored
+field stays empty. Keep source dates and differing advice visible without adding
+a general contradiction or freshness classifier.
+
+Author the expected claim changes independently of the fixture renderer and
+produced drafts. Rerun both fixture evaluations for the new book while retaining
+the historical Ollama report and its original invocation. That model result
+belongs to the original synthetic-label corpus, not the current book. Rerecord
+the walkthrough through the existing clean-tree capture and validation path so
+the GIF, transcript, and provenance refer to actual CLI output. Add no runtime
+dependency, hosted model call, or external integration in this slice. The later
+real-source and experience work remains separate from the original six PRs.
+
+The user's later review instruction requires the installed TStack full-stop
+workflow and three-provider council for this PR and each remaining PR. Use the
+same scope for Sol, Claude Opus, and the selected Gemini 3.8 Flash member, with
+High effort and no more than three complete rounds. Reachability probes are
+tooling checks, not reviews or scores. Stop at a local branch if a required
+member cannot be reached. The user still merges every ready PR.
+
 ## An explicitly bound Salesforce demo book (2026-11-17)
 
 Package one canonical plan, Account tree, and manifest with the Python package
@@ -1004,9 +1049,11 @@ only; unknown values remain `null`, and deleted artifacts cannot contribute usag
 a clear error on partial or invalid artifact JSON instead of silently losing
 its usage. The report never copies audit arguments or source text.
 
-`scripts/five-minute-demo.sh` creates a private temporary output directory and
-runs setup, tests, connector cases, evaluation, usage, and an actual CLI checker
-rejection. It keeps the demo state and JSON output for inspection. The operator
+The original `scripts/five-minute-demo.sh` created a private temporary output
+directory and ran setup, tests, connector cases, evaluation, usage, and an actual
+CLI checker rejection. The later renewal-story decision replaces that outline
+with one account's brief, usage, and citation checks. It keeps the demo state and
+JSON output for inspection. The operator
 chooses when to remove it. Five minutes is the presentation outline in DEMO.md;
 first-install downloads have no fixed duration. A focused test also proves that
 a write committed before audit-finalization failure is reused on retry while
@@ -1015,12 +1062,23 @@ the original receipt remains pending.
 ## Review configuration
 
 The installed TStack source is [t3dotgg/tstack at 11e37a7](https://github.com/t3dotgg/tstack/tree/11e37a74d0a6868c121cd0910ab2b3bd9873b92a).
-Full-stop uses Sol review for each slice. Council ran once on PR 2, which carries
-the connector's core logic; later slices do not repeat the three-member council.
-The user selected GPT Sol, Claude Opus, and Gemini 3.8 Flash at High as three full
-members. Gemini Flash is not described as a flagship. Record actual model IDs
-and scores in the PR table; three council rounds is the hard limit. See
-AGENTS.md for the durable rules.
+TStack supplies the installed skills used for full-stop. The user's latest
+instruction requires three-provider council for the renewal-demo PR and every
+remaining PR in this sequence,
+superseding the earlier Sol-only follow-up rule. Full-stop ends each ready PR,
+then work continues on the next authorized slice. The user merges.
+
+The selected full members are OpenAI `gpt-6.2-sol`, Anthropic
+`claude-opus-5-5`, and Google `gemini-3.8-flash-high`, each at High effort.
+The available Claude Code 2.1.326 `opus` route returned the stated Opus model ID;
+Antigravity CLI 1.5.10 listed and reached the selected Gemini model. These
+reachability probes are not review findings or scores. Record the actual model
+IDs returned for each review, effort, round number, findings, and score or
+`no score` in the PR table. All three receive the same review scope and count
+toward agreement. Gemini 3.8 Flash is not described as a flagship. Three complete
+council rounds is the hard limit. If agreement is absent after round three,
+report the remaining findings and stop. If a selected member cannot be reached,
+stop on a local branch without substituting a model or provider.
 
 Google's supported personal-account route is Antigravity CLI; legacy Gemini CLI
 sign-in is retired. Review tooling uses existing accounts and is separate from

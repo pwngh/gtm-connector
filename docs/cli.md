@@ -7,8 +7,8 @@ accepts the same arguments. `gtm-connector --version` prints the installed versi
 Start with invented data:
 
 ```sh
-gtm-connector demo --with-slack
-gtm-connector brief acc-003 --with-slack
+gtm-connector demo
+gtm-connector brief acc-007 --with-slack
 ```
 
 The CLI uses readable text by default. Terminal tables have headings; pipes have
@@ -18,7 +18,9 @@ source text already uses quoted, escaped literals. Data goes to stdout. Errors,
 server startup messages, and shutdown notices go to stderr.
 
 Every command accepts `--json`, before or after its name. Use it when parsing
-output. JSON results retain the existing command-specific shapes below. Keys
+output. JSON results use the command-specific shapes below. `verify` retains
+the former demo's guarantee-check result; `demo` now returns the renewal story.
+Update scripts that consumed the former demo fields to call `verify`. Keys
 may be added; their existing meaning and type stay stable within version 0.1.
 Human text is intended for reading and can change independently.
 
@@ -34,7 +36,8 @@ Human text is intended for reading and can change independently.
 | `audit` | Array of receipts, ordered as stored. With `--follow`, each changed receipt is one JSON line. Fields and filters are documented in [audit](audit.md). |
 | `usage` | Object with `brief_id`, `day_basis`, `calls`, `by_token`, `by_tool`, `by_day`, `by_token_tool_day`, `briefs`, and `model_tokens`. Active receipt filters add `filters`. With `--follow`, each changed report is one JSON line. See [usage](usage.md). |
 | `evaluate` | Object with `status`, account and claim counts, per-account `cases`, receipt counts, and model usage. See [evaluation](evaluation.md). |
-| `demo` | Object containing the connector checks, `briefs`, receipt counts, and `injection_brief`. Slack mode adds `slack` and `workflow`. |
+| `demo` | Narrative result with `schema_version: 1`, `status`, `workflow`, `data_mode`, source labels, rep, account, lookup, denied read, checked brief, injection outcome, audit counts, and `activities_created`. See [the renewal demo](#renewal-demo). |
+| `verify` | Object containing the connector checks, `briefs`, receipt counts, and `injection_brief`. `--with-slack` adds `slack` and `workflow`, retaining the former demo shape. See [guarantee checks](tools.md#run-the-guarantee-checks). |
 | `serve` | A `ready` JSON line, followed by one `tool_call` JSON line per observed tool attempt. See [server output](#server-output). |
 | `inspector-config` | Object with `config`, `certificate`, and `scopes`. Credentials stay in the private file. |
 | `connect` | Object with `app`, `status`, `setup`, `limits`, and `documentation`. Creating a grant adds `config`, the private file's path. See [client setup](clients.md). |
@@ -62,7 +65,7 @@ See [evaluation progress](evaluation.md#progress) and [Salesforce checks](salesf
 | 1 | A local file, database, or runtime operation failed. | `local_failure` |
 | 2 | Arguments or local configuration are missing or invalid. | `usage_error` |
 | 3 | The requested operation was refused. | `refused` |
-| 4 | The evidence checker, demo, evaluation, doctor, or Salesforce check failed. | `check_failed` |
+| 4 | The evidence checker, demo, verification, evaluation, doctor, or Salesforce check failed. | `check_failed` |
 | 5 | A source service or its transport failed. | `upstream_failure` |
 | 130 | Ctrl-C interrupted a command. Completed local writes remain. | `interrupted` |
 
@@ -77,6 +80,46 @@ Salesforce briefs use today's local date unless `--as-of` is supplied; fixture
 briefs use `2027-01-15`. A missing eligible Contract refuses with
 `renewal_fields_unmapped` and exit `3`. The
 [Salesforce guide](salesforce.md) explains mapping, refresh, and private output.
+
+## Renewal demo
+
+`demo` follows Morgan Reed preparing Juniper Crest Learning's renewal. All people,
+companies, CRM records, call notes, and Slack messages are invented. It includes
+Slack by default; the existing `demo --with-slack` spelling has the same result.
+The quick and longer walkthroughs use this same story. `verify` runs the separate
+guarantee checks and intentionally creates one local activity for the retry test.
+
+```sh
+gtm-connector demo --state-dir var/renewal-demo --json
+gtm-connector verify --state-dir var/verification --json
+```
+
+The narrative JSON has these fields:
+
+| Field | Meaning and type |
+| --- | --- |
+| `schema_version`, `status`, `workflow`, `data_mode` | Integer `1` and strings `"accepted"`, `"renewal-demo"`, and `"demo"`. |
+| `sources` | Object whose `crm`, `calls`, and `slack` strings are each `"demo_fixture"`. |
+| `rep` | Object with invented `name` and `role` strings. |
+| `account` | Object with string `id`, `name`, `record_ref`, and `renewal_date`. |
+| `lookup` | Object with the search `query` string, integer `matches`, and `receipt_id` string. |
+| `denied_read` | Object with `tool: "read_call_notes"`, integer `status: 403`, `required_scope: "calls:read"`, and a `receipt_id` string. |
+| `brief` | Object with string `brief_id`, `account_id`, `as_of`, `text`, and `proposed_follow_up`, copied from the accepted saved artifact. |
+| `injection` | Object with call-note `record_ref` and `slack_record_ref` strings, boolean `quoted: true`, and integer `activities_created: 0`. |
+| `audit` | Object with `run_id` string and integer `rows: 6`. |
+| `activities_created` | Integer activity-count change during the narrative run, required to be `0`. |
+
+The lookup and refused read use `audit.run_id`. The four briefing reads use
+`brief.brief_id`. Together they produce five successful receipts and one error
+receipt, with no pending receipt. The accepted brief quotes the injected source
+text and contains a checked follow-up proposal. It sends nothing and requests
+no write grant. Run IDs and receipt IDs change on each run.
+
+Each run adds one saved brief and six receipts to its selected state folder.
+A fresh folder has zero activities. A reused folder retains existing activities;
+`activities_created` measures only this run's change. Seeding preserves existing
+fixture edits and older names, so choose a fresh state folder for the current
+story rather than overwriting an existing book.
 
 ## Server output
 

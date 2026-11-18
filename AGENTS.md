@@ -111,24 +111,35 @@ put the local run before Codespaces, and separate optional features. Treat these
 repositories as structural examples, not measured proof of README performance.
 Use council against main and full-stop for this documentation-only change.
 
-Preserve the synthetic labels and fixed evaluation assertions until the
-explicitly scoped source expansion. Write approval belongs only in its separately
+The user's later renewal-demo slice explicitly permits plausible invented names
+and account-specific source text. Keep its independently authored expected claims
+in sync when those fixtures change. Write approval belongs only in its separately
 requested later slice. Do not add a web interface or speculative rollout documents.
 Keep the parked reliability fixes in their own follow-up slice. The documentation
 pass has its own scope above; do not restore the old prose rewrite or add unrelated
 improvements.
 
-Keep fixture IDs stable and readable across reseeds. Use synthetic display
-labels, not plausible company, person, or product names. Preserve examples of
+Keep fixture IDs stable and readable across reseeds. Use the fixed invented
+book and reserved `.example` email domains; never copy names or records from an
+org or employer. Preserve examples of
 a renewal within 30 days of the fixed demo date, an at-risk account, conflicting
 CRM and call-note facts, an account without notes, and an instruction inside a
-note. CRM, calls, and Slack default to SQLite mocks. The optional Salesforce
+note. Preserve the missing contact role and dated old note in the fixture book.
+CRM, calls, and Slack default to SQLite mocks. The optional Salesforce
 adapter uses HTTP fixtures in tests; do not claim a live org was verified.
+
+`demo` follows Morgan Reed preparing Juniper Crest Learning's renewal with one
+checked CRM, calls, and Slack brief. `verify` retains the separate guarantee
+checks and their JSON shape. The quick and long walkthroughs use the same
+invented story. Keep verification state separate because its retry check creates
+one local activity. The historical Ollama report remains evidence for its original
+fixture corpus, not a new run against the current book.
 
 ## Council
 
-Run council once on PR 2, which carries MCP and authorization core logic; skip
-it for the seed/CLI foundation and housekeeping. Use all three full members:
+The user's later instruction requires council for the renewal-demo PR and each
+remaining PR in the authorized sequence. This supersedes the earlier one-time
+core review and Sol-only follow-up rules. Use all three full members:
 
 | Provider | Member | Effort |
 | --- | --- | --- |

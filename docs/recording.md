@@ -1,22 +1,20 @@
 # Record the walkthrough
 
-The README recording shows the connector before a reader installs it. It runs
-the fixture demo on invented data, then shows three cited lines from `acc-003`.
-It refuses a call-note read without its scope and rejects an appended uncited
-sentence. The final frame lists six tools from the official Inspector CLI by
-name and scope; the full response is saved separately. No model, real CRM,
-Inspector UI, or interactive login is involved.
+The README recording follows Morgan Reed preparing Juniper Crest Learning's
+renewal. It expands the same account and saved brief as `gtm-connector demo`:
+lookup, a refused call-note read, cited CRM/call/Slack context, and a proposed
+follow-up. All source records are invented. The final frame is a separate
+Inspector CLI tools listing, not a second business story. No model, real CRM,
+Inspector UI, or interactive assistant login is involved.
 
-The script checks real command outcomes before displaying selected fields and
-pausing for the reader. Playback caps idle periods at twelve seconds, so install
-and test waits do not determine recording length. It is a walkthrough, not a
-performance measurement.
+The script runs the installed human command once, then checks its saved brief,
+six receipts, and zero activities. Scenes show labeled, exact excerpts from
+that output and artifact. It accepts the saved text and rejects an appended
+uncited sentence with exit `4`. The test suite runs privately, with its command
+and result in provenance.
 
-The checked-in capture preserves the CLI at its recorded source revision. It
-shows the former default JSON output and failed-check exit `2`. The current CLI
-requires `--json` for JSON output and returns exit `4` for a failed evidence check.
-The rerun script uses those current options and checks; the existing transcript
-and provenance retain the commands that actually ran.
+Playback caps idle periods at twelve seconds, so install and test waits do not
+determine recording length. It is a walkthrough, not a performance measurement.
 
 ## Regenerate it
 
@@ -38,9 +36,10 @@ The recording script runs from the repository root:
 The script requires committed source changes so the recorded revision identifies
 what ran. It refuses a changed working tree, except for generated files in `docs/media/`.
 
-The script installs existing Python requirements and downloads the pinned
-Inspector package if uncached. It runs `./scripts/demo.sh --json` in fresh fixture
-state. The recording script controls what reaches the terminal; the capture excludes the
+The script installs the existing hashed development requirements and the local
+package without dependency resolution or build isolation. It downloads the
+pinned Inspector package if uncached, then runs `gtm-connector demo` in fresh
+fixture state. The recording script controls what reaches the terminal; the capture excludes the
 desktop, a user's shell prompt, and keyboard input.
 
 Generated files live in `docs/media/`:

@@ -24,7 +24,7 @@ class SlackTests(unittest.TestCase):
         self.addCleanup(self.connection.close)
         slack.initialize(self.connection)
 
-    def test_stable_messages_have_only_synthetic_account_channel_context(self):
+    def test_stable_messages_have_invented_account_channel_context(self):
         slack.seed(self.connection)
         self.assertEqual(slack.counts(self.connection), 29)
         tables = {row[0] for row in self.connection.execute(
@@ -36,8 +36,13 @@ class SlackTests(unittest.TestCase):
         for row in rows:
             number = row["id"].removeprefix("msg-")
             self.assertEqual(row["account_id"], "acc-" + number)
-            self.assertEqual(row["channel"], "acct-acc-" + number)
-            self.assertEqual(row["author"], "Fixture Slack author msg-" + number)
+            self.assertTrue(row["channel"].startswith("acct-"))
+            self.assertNotIn("acc-", row["channel"])
+            self.assertIn(row["author"], {"Morgan Reed", "Quinn Moss", "Avery Linden"})
+        self.assertEqual(len({row["channel"] for row in rows}), 29)
+        self.assertEqual(rows[0]["channel"], "acct-alder-vale")
+        self.assertEqual(rows[0]["author"], "Morgan Reed")
+        self.assertEqual(slack.read_slack_messages(self.connection, "acc-007")[0]["channel"], "acct-juniper-crest")
         self.assertEqual(rows[0]["sent_at"], "2027-01-14T16:00:00Z")
         for account in ("acc-005", "acc-missing", "acc-001' OR 1=1 --"):
             self.assertEqual(slack.read_slack_messages(self.connection, account), [])
