@@ -230,20 +230,40 @@ def table(headers, rows):
                                 for row in rows])
 
 
-def human_result(command, result, *, crm_backend="sqlite"):
+def human_result(command, result, *, crm_backend="sqlite", state_dir=None):
     if command == "calls":
         if "imports" in result:
-            display = table(["IMPORT", "ACCOUNT", "ACTIVE", "CALLED AT", "IMPORTED AT", "RANGE"],
-                            [[row["import_id"], row["account_id"], row["active"], row["called_at"],
-                              row["imported_at"], _call_range(row)] for row in result["imports"]])
+            if sys.stdout.isatty():
+                display = "\n\n".join("\n".join(safe_text(line) for line in [
+                    row["import_id"], f"  Account: {row['account_id']}. Active: {'yes' if row['active'] else 'no'}.",
+                    f"  Called: {row['called_at'] or 'unknown'}. Imported: {row['imported_at']}.",
+                    f"  Requested: {_call_range(row, 'requested_range', context=False)}. "
+                    f"Cited: {_call_range(row, context=False)}."])
+                    for row in result["imports"])
+                if display:
+                    display += "\nOne adjacent unit on each available side is included in the cited range."
+            else:
+                display = table(["IMPORT", "ACCOUNT", "ACTIVE", "CALLED AT", "IMPORTED AT", "RANGE"],
+                                [[row["import_id"], row["account_id"], row["active"], row["called_at"],
+                                  row["imported_at"], _call_range(row)] for row in result["imports"]])
             if result["next_after"] is not None:
-                display += "\nMore imports are available. Repeat calls list with --after " + result["next_after"] + "."
+                if sys.stdout.isatty():
+                    resume = "gtm-connector calls list --after " + result["next_after"]
+                    if state_dir is not None and Path(state_dir) != Path("var/imported-calls"):
+                        resume += " \\\n  --state-dir " + shlex.quote(str(state_dir))
+                    display += "\nMore imports are available. Continue with:\n" + resume
+                else:
+                    display += ("\nMore imports are available. Repeat calls list with --after " +
+                                result["next_after"] + ".")
             return display or "No transcript imports are stored."
         metadata = result.get("import", result)
         display = table(["FIELD", "VALUE"], [
             ["Import", metadata["import_id"]], ["Account", metadata["account_id"]],
             ["Call time", metadata["called_at"]], ["Import time", metadata["imported_at"]],
-            ["Cited excerpt", _call_range(metadata)], ["Total units", metadata["total_units"]]])
+            ["Requested excerpt", _call_range(metadata, "requested_range", context=False)],
+            ["Cited excerpt", _call_range(metadata, context=False)],
+            ["Context", "One adjacent unit on each available side is included in the cited range."],
+            ["Total units", metadata["total_units"]]])
         if "import" not in result:
             return f"Transcript {result['status']}. The excerpt is selected for this account.\n" + display
         display += "\n\nExact excerpt units" if "original_text" not in result else "\n\nAll imported units"
@@ -330,9 +350,10 @@ def human_result(command, result, *, crm_backend="sqlite"):
     raise ValueError("No display is available for this command.")
 
 
-def _call_range(metadata):
-    selected = metadata["cited_range"]
-    return f"{metadata['unit_kind']} {selected['first']}:{selected['last']} (includes adjacent context)"
+def _call_range(metadata, field="cited_range", *, context=True):
+    selected = metadata[field]
+    return (f"{metadata['unit_kind']} {selected['first']}:{selected['last']}" +
+            (" (includes adjacent context)" if context else ""))
 
 
 def _print_event(event, as_json):
@@ -368,12 +389,15 @@ def _salesforce_progress(as_json):
     return report
 
 
-def _salesforce_sources(environment, *, mixed=False, calls_backend="fixture"):
+def _salesforce_sources(environment, *, mixed=False, calls_backend="fixture", include_slack=True):
     if mixed:
         if calls_backend == "imported":
-            return (f"Sources: mixed. CRM uses Salesforce ({environment}); calls use user-supplied transcript exports. "
-                    "Slack uses demo fixtures when requested. Connection identity is verified for CRM.")
-        return (f"Sources: mixed. CRM uses Salesforce ({environment}); call notes and Slack use demo fixtures. "
+            slack = "Slack uses demo fixtures when requested. " if include_slack else ""
+            return (f"Sources: mixed. CRM uses Salesforce ({environment}); "
+                    "calls use user-supplied transcript exports. " +
+                    slack + "Connection identity is verified for CRM.")
+        fixtures = "call notes and Slack" if include_slack else "call notes"
+        return (f"Sources: mixed. CRM uses Salesforce ({environment}); {fixtures} use demo fixtures. "
                 "Connection identity is verified.")
     return f"Sources: live. CRM uses Salesforce ({environment}). Connection identity is verified."
 
@@ -662,10 +686,12 @@ def _run(args, argv):
         with Runtime(args.state_dir, crm_reader=crm_reader, demo_binding=demo_binding,
                      calls_backend=args.calls_backend) as runtime:
             if crm_reader is not None and not args.json:
-                print(_salesforce_sources(args.sf_environment, mixed=True, calls_backend=args.calls_backend),
+                print(_salesforce_sources(args.sf_environment, mixed=True, calls_backend=args.calls_backend,
+                                          include_slack=args.with_slack),
                       file=sys.stderr)
             elif args.calls_backend == "imported" and not args.json:
-                print("Sources: mixed. Calls use user-supplied transcript exports; CRM and Slack use demo fixtures.",
+                fixtures = "CRM and Slack use" if args.with_slack else "CRM uses"
+                print(f"Sources: mixed. Calls use user-supplied transcript exports; {fixtures} demo fixtures.",
                       file=sys.stderr)
             return create_brief(runtime, args.account_id, include_calls=not args.without_calls,
                                 as_of=as_of,
@@ -872,7 +898,8 @@ def _main(argv):
         result = _run(args, argv)
         if result is not None:
             print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else
-                  human_result(args.command, result, crm_backend=getattr(args, "crm_backend", "sqlite")))
+                  human_result(args.command, result, crm_backend=getattr(args, "crm_backend", "sqlite"),
+                               state_dir=getattr(args, "state_dir", None)))
         if args.command == "doctor" and result["status"] != "passed":
             return _error("Setup checks failed. Apply the fix beside each failed check.", 4,
                           f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}", as_json=args.json)

@@ -223,6 +223,66 @@ class CallsCLITests(unittest.TestCase):
         self.assertIn('Transcript imported.', out)
         self.assertNotIn('Invented line 1.', out + err)
 
+    def test_terminal_list_stacks_full_identifiers_and_preserves_piped_tsv(self):
+        from gtm_connector.cli import human_result
+        self.success(self.import_file('--lines', '3:4'))
+        listed = self.success(self.invoke('calls', 'list'))
+        row = listed['imports'][0]
+        with patch('sys.stdout.isatty', return_value=True), patch.dict(os.environ, {'NO_COLOR': '1'}):
+            terminal = human_result('calls', listed)
+        self.assertIn(row['import_id'], terminal.splitlines())
+        self.assertLessEqual(max(map(len, terminal.splitlines())), 112)
+        self.assertIn('Requested: lines 3:4', terminal)
+        self.assertIn('Cited: lines 2:5', terminal)
+        with patch('sys.stdout.isatty', return_value=False):
+            piped = human_result('calls', listed)
+        self.assertEqual(piped, '\t'.join([row['import_id'], row['account_id'], 'True', 'unknown',
+                                           row['imported_at'], 'lines 2:5 (includes adjacent context)']))
+        listed['next_after'] = row['import_id']
+        with patch('sys.stdout.isatty', return_value=True), patch.dict(os.environ, {'NO_COLOR': '1'}):
+            paginated = human_result('calls', listed, state_dir=Path('var/private-calls'))
+        self.assertIn('gtm-connector calls list --after ' + row['import_id'] + ' \\', paginated.splitlines())
+        self.assertIn('  --state-dir var/private-calls', paginated.splitlines())
+        self.assertLessEqual(max(map(len, paginated.splitlines())), 112)
+
+    def test_import_and_inspection_show_requested_and_cited_ranges(self):
+        from gtm_connector.cli import human_result
+        imported = self.success(self.import_file('--lines', '3:4'))
+        inspected = self.success(self.invoke('calls', 'inspect', imported['import_id']))
+        for result in (imported, inspected):
+            with patch('sys.stdout.isatty', return_value=False):
+                rendered = human_result('calls', result)
+            self.assertIn('Requested excerpt\tlines 3:4', rendered)
+            self.assertIn('Cited excerpt\tlines 2:5', rendered)
+            self.assertIn('One adjacent unit on each available side is included in the cited range.', rendered)
+
+    def test_imported_brief_banner_names_slack_only_when_requested(self):
+        self.success(self.import_file())
+        for include_slack in (False, True):
+            code, out, err = self.invoke('brief', 'acc-003', '--calls-backend', 'imported',
+                                        *(['--with-slack'] if include_slack else []), json_output=False)
+            self.assertEqual(code, 0, err)
+            self.assertIn('Brief:', out)
+            self.assertEqual(err.count('Sources:'), 1)
+            self.assertEqual('Slack' in err, include_slack)
+
+    def test_salesforce_brief_banner_follows_requested_slack_for_each_calls_mode(self):
+        artifact = {'brief_id': 'invented-brief', 'as_of': '2027-01-15', 'text': 'Invented checked text.'}
+        for calls_backend in ('fixture', 'imported'):
+            for include_slack in (False, True):
+                with self.subTest(calls=calls_backend, slack=include_slack), \
+                        patch.object(SalesforceReadOnlyAdapter, 'from_env', return_value=object()), \
+                        patch('gtm_connector.runtime.Runtime'), \
+                        patch('gtm_connector.briefing.create_brief', return_value=artifact) as create:
+                    code, out, err = self.invoke('brief', ACCOUNT, '--crm-backend', 'salesforce',
+                                                '--calls-backend', calls_backend,
+                                                *(['--with-slack'] if include_slack else []), json_output=False)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(err.count('Sources:'), 1)
+                self.assertEqual('Slack' in err, include_slack)
+                self.assertEqual(create.call_args.kwargs['include_slack'], include_slack)
+        self.assertFalse(self.state.exists())
+
     def test_action_conflicts_fail_before_source_or_credentials_or_state(self):
         cases = [
             ['calls', 'import', str(self.export)],
