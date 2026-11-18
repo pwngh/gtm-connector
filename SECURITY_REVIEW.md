@@ -243,13 +243,16 @@ citation checks still apply.
 The owner-run helper under scripts is separate from the installed connector.
 Its import and removal commands use Salesforce CLI writes at the owner's request;
 the connector stays GET-only. Cleanup reads only the imported IDs, verifies the
-kit's supplied fields and parent associations across all four object types,
+kit's supplied fields, three intentionally null fields, and parent associations across all four object types,
 and requires imported Contracts to remain Draft. It inspects described
 cascading and restricted relationships before starting deletes. The fixed
 AccountHistory, ContactHistory, OpportunityHistory, OpportunityFieldHistory,
 and ContractHistory objects are treated as system-derived history. AccountShare,
 ContactShare, and OpportunityShare rows are allowed only with RowCause Owner.
-Other related records or sharing causes refuse cleanup. No broad name, marker,
+Checked fields must be present in the response. Fields outside the kit are not
+compared. Ordinary children must have passed the direct inventory and field
+checks and be scheduled for deletion. Other related records or sharing causes
+refuse cleanup. No broad name, marker,
 or prefix query substitutes for a missing imported ID.
 
 Cleanup then deletes Contact, Opportunity, Contract, and Account records in

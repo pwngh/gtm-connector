@@ -90,12 +90,17 @@ Stop the demo server and finish editing the book before removal. Run one command
 .venv/bin/python scripts/salesforce-demo.py remove --sf-org gtm-de --binding var/salesforce-demo/binding.json
 ```
 
-The helper checks the selected edition, exact imported IDs, original field values,
-account associations, and Draft status. It checks cascading and restricted child
+The helper checks the selected edition, exact imported IDs, original kit field
+values, account associations, and Draft status. The third account's empty Industry,
+contact Title, and opportunity Amount must still be null. Every checked field
+must be present in the response. Fields outside the kit are not compared.
+It checks cascading and restricted child
 relationships on Accounts, Contacts, Opportunities, and Contracts before the
-first delete. It refuses edited records, unrelated children, manual shares, or
+first delete. It refuses changed kit fields, unrelated children, manual shares, or
 relationships it cannot inspect. A small fixed list permits system-created
 history and Owner sharing rows derived from the imported records.
+An ordinary related record must also have passed the direct inventory and field
+checks and be scheduled for deletion; a missing inventory row is not sufficient.
 
 Contacts, Opportunities, and Contracts are removed before Accounts. The helper
 then verifies that all imported IDs are absent. Missing records are skipped on

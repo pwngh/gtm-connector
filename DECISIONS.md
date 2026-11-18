@@ -37,11 +37,14 @@ still trusted and can edit the marker or stores.
 
 Keep import and cleanup writes in the owner-run script outside the installed
 connector. The connector remains GET-only and exposes no new write tool.
-Cleanup reads only the exact imported IDs, checks the kit's supplied fields and
-parent associations for all four types, and refuses activated or edited kit
-records. Inspect described cascading and restricted relationships before any
+Cleanup reads only the exact imported IDs, checks the kit's supplied fields,
+its three intentionally null fields, and parent associations for all four types.
+Require every checked response field to be present, and refuse activation or
+changes to those kit fields. Fields outside the kit are not compared.
+Inspect described cascading and restricted relationships before any
 delete. Permit only a fixed set of system history objects and sharing rows
-whose RowCause is Owner; refuse other linked records. Delete children before
+whose RowCause is Owner; other children must have passed the direct inventory
+and field checks and be scheduled for deletion. Refuse other linked records. Delete children before
 Accounts and verify the imported IDs are absent. Never fall back to deleting a
 name, marker prefix, or arbitrary query result.
 

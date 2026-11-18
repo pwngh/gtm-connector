@@ -116,6 +116,9 @@ def expected_records(binding):
             record = by_reference[source["attributes"]["referenceId"]]
             fields = {key: value for key, value in source.items() if key != "attributes"
                       and not isinstance(value, dict)}
+            nullable = {"Account": "Industry", "Contact": "Title", "Opportunity": "Amount"}
+            if record["object"] in nullable:
+                fields.setdefault(nullable[record["object"]], None)
             if record["object"] != "Account":
                 fields["AccountId"] = parent["id"]
             if record["object"] == "Contract":
@@ -201,14 +204,17 @@ def remove(binding, sf, progress=None):
             identifier = row.get("Id")
             if identifier not in candidates or identifier in identifiers:
                 raise KitError("Cleanup did not identify the imported records. No deletes have started.")
-            if any(row.get(field) != value for field, value in candidates[identifier]["fields"].items()):
-                raise KitError("An imported record was edited or activated. Restore it or clean it up manually.")
+            if any(field not in row or row[field] != value
+                   for field, value in candidates[identifier]["fields"].items()):
+                raise KitError("An imported kit field changed or its record was activated. "
+                               "Restore it or clean it up manually.")
             identifiers.add(identifier)
         present[object_name] = identifiers
+    validated = {identifier: expected[identifier] for identifiers in present.values() for identifier in identifiers}
     for object_name, identifiers in present.items():
         if identifiers:
             report("checking related records", object_name)
-            check_children(sf, object_name, identifiers, expected)
+            check_children(sf, object_name, identifiers, validated)
     for object_name in OBJECTS:
         report("removing imported records", object_name)
         for identifier in sorted(present[object_name]):

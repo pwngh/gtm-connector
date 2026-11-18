@@ -55,6 +55,11 @@ class FakeSF:
                         row["AccountId"] = parent
                     if bound["object"] == "Contract":
                         row["StatusCode"] = "Draft"
+                    # Salesforce returns explicitly queried nullable fields, even
+                    # when the tree import omitted them.
+                    if bound["object"] == "Account": row.setdefault("Industry", None)
+                    if bound["object"] == "Contact": row.setdefault("Title", None)
+                    if bound["object"] == "Opportunity": row.setdefault("Amount", None)
                     self.inventory[bound["object"]][bound["id"]] = row
         self.metadata = {name: {"childRelationships": []} for name in self.inventory}
         for child, relation in (("Contact", "Contacts"), ("Opportunity", "Opportunities"),
@@ -170,6 +175,33 @@ class DemoCleanupTests(unittest.TestCase):
                 self.sf.extra_children[(self.identifier(parent), relation)] = [{"Id": "00T999999999999AAA"}]
                 self.assert_refuses_without_delete("unexpected related record")
 
+    def test_intentionally_blank_fields_must_remain_null_and_present(self):
+        for name, field, value in (("Account", "Industry", "New industry"),
+                                   ("Contact", "Title", "New title"), ("Opportunity", "Amount", 500)):
+            for missing in (False, True):
+                with self.subTest(object=name, field=field, missing=missing):
+                    self.sf = FakeSF(self.binding)
+                    identifier = next(row["id"] for row in self.binding.records
+                                      if row["ref_id"] == name + "Ref3")
+                    row = self.sf.inventory[name][identifier]
+                    self.assertIsNone(row[field])
+                    if missing:
+                        del row[field]
+                    else:
+                        row[field] = value
+                    self.assert_refuses_without_delete("kit field changed")
+
+    def test_cascade_child_missing_from_direct_inventory_cannot_be_deleted(self):
+        hidden = self.identifier("Contact")
+        self.sf.inventory["Contact"][hidden]["Title"] = "Edited but hidden from the direct read"
+        def hide_direct_contact(query, response):
+            if "(SELECT " not in query and " FROM Contact WHERE Id IN " in query:
+                return result([row for row in response["records"] if row["Id"] != hidden])
+            return response
+        self.sf.transform = hide_direct_contact
+        self.assert_refuses_without_delete("unexpected related record")
+        self.assertIn(hidden, self.sf.inventory["Contact"])
+
     def test_manual_share_after_owner_share_is_not_hidden(self):
         for parent in ("Account", "Contact", "Opportunity"):
             with self.subTest(parent=parent):
@@ -275,7 +307,7 @@ class DemoCleanupTests(unittest.TestCase):
             with self.subTest(name=name, field=field):
                 self.sf = FakeSF(self.binding)
                 self.sf.inventory[name][self.identifier(name)][field] = value
-                self.assert_refuses_without_delete("edited or activated")
+                self.assert_refuses_without_delete("kit field changed")
 
     def test_retry_skips_already_absent_records_and_verifies_all_ids(self):
         self.sf.fail_delete_at = 5
