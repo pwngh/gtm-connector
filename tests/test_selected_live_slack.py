@@ -126,6 +126,29 @@ class SelectedLiveSlackTests(LiveSlackFixture, unittest.TestCase):
             self.assertTrue(narrowed["content"][0]["text"].endswith("brief_source_changed"))
             self.assertEqual(len(self.requests), 1)
 
+    def test_a_caller_without_slack_read_gets_the_denial_whatever_the_connection_state(self):
+        with self.runtime() as runtime:
+            self.map_account(runtime)
+        selection = self.selection([{"account_id": ACCOUNT, "slack": True}])
+        with self.runtime(selection=selection) as runtime, LocalClient(runtime.config) as owner:
+            token = owner.authorize(["crm:read", "calls:read"])
+            briefs = []
+            # Neither a busy nor a disconnected Slack connection is touched for this caller.
+            with held_slack_connection(self.connection):
+                briefs.append(owner.call(token, "prepare_renewal_brief", {"account_id": ACCOUNT}).json()["result"])
+            disconnect_slack(self.connection)
+            briefs.append(owner.call(token, "prepare_renewal_brief", {"account_id": ACCOUNT}).json()["result"])
+            receipts = runtime.connector.audit.read()
+            for result in briefs:
+                self.assertFalse(result.get("isError"), result)
+                brief = result["structuredContent"]["brief"]
+                self.assertEqual(brief["slack_status"], "denied")
+                self.assertIn("Slack messages were unavailable because the token lacks slack:read.", brief["text"])
+                slack_reads = [row for row in receipts
+                               if row["brief_id"] == brief["brief_id"] and row["tool"] == "read_slack_messages"]
+                self.assertEqual([(row["status"], row["http_status"]) for row in slack_reads], [("error", 403)])
+            self.assertEqual(self.requests, [])
+
     def test_an_unmapped_selected_thread_refuses_startup(self):
         with self.runtime() as runtime:
             self.map_account(runtime)
