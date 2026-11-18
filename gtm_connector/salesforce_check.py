@@ -120,6 +120,11 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
                 code = getattr(exc, "code", "check_failed")
                 code = code if code in _FAILURES else "check_failed"
                 message, fix = _FAILURES[code]
+                metadata_steps = {"environment", *(name.lower() + "_fields" for name in REQUIRED_FIELDS)}
+                if code == "salesforce_result_limit" and environment != "developer" and name in metadata_steps:
+                    message = "Salesforce startup metadata exceeded the shared request or response-size bound."
+                    fix = ("Use a connection whose required metadata fits the startup limits. "
+                           "Run gtm-connector salesforce check --help to review the check.")
                 row.update(code=code, message=message, fix=fix)
                 if "reader" not in state:
                     extra_sf = getattr(exc, "sf_cli_invocations", 0)
@@ -140,7 +145,11 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
     credential_ok = step("credentials", credentials)
 
     def edition():
-        state["reader"].check_edition()
+        if environment == "developer":
+            state["reader"].check_edition()
+        else:
+            state["metadata_budget"] = state["reader"]._metadata_check_budget()
+            state["reader"].check_edition(_budget=state["metadata_budget"])
         return 1, ("Developer Edition was confirmed." if environment == "developer"
                    else f"The selected {environment} environment was confirmed.")
 
@@ -148,7 +157,8 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
     schema_ok = edition_ok
     for object_name, fields in REQUIRED_FIELDS.items():
         def schema(name=object_name, required=fields):
-            missing = required - state["reader"].describe_fields(name)
+            options = {} if environment == "developer" else {"_budget": state["metadata_budget"]}
+            missing = required - state["reader"].describe_fields(name, **options)
             if missing:
                 raise MissingFields(name, missing)
             return len(required), f"Required {name} fields are exposed by describe."

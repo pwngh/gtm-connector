@@ -169,6 +169,7 @@ Python 3.11 and 3.14.
 
 The command `serve --crm-backend salesforce` replaces the three `crm:read`
 handlers. External mode omits `log_activity` and rejects direct write requests,
-while calls and Slack remain local fixtures. The direct `seed`, `accounts`, and
-`account` commands still inspect SQLite only. See
-[the Salesforce mapping and limits](salesforce.md).
+while calls and Slack remain local fixtures. `seed` operates on SQLite only.
+`accounts` and `account` use SQLite by default; with `--crm-backend salesforce`,
+they read through the scoped, audited gateway. See
+[Salesforce account reads](salesforce.md#read-records-and-create-a-brief).

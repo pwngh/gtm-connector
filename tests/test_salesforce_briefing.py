@@ -212,10 +212,11 @@ class SalesforceBriefingTests(unittest.TestCase):
         self.assertEqual(request.method, "GET")
         self.assertEqual(request.url.host, "fixture-brief.my.salesforce.com")
         query = request.url.params["q"]
+        if hasattr(self, "runtime"):
+            self.assertEqual(sum(row["status"] == "pending" for row in self.runtime.connector.audit.read()), 1)
         if " FROM Organization" in query:
             rows = [{"Id": "00D000000000001AAA", "OrganizationType": "Developer Edition", "IsSandbox": False}]
             return httpx2.Response(200, json={"done": True, "totalSize": 1, "records": rows})
-        self.assertEqual(sum(row["status"] == "pending" for row in self.runtime.connector.audit.read()), 1)
         if " FROM Account" in query:
             rows = [{"Id": ACCOUNT, "Name": "Invented contract account", "Industry": None, "AccountNumber": None}]
         elif " FROM Contact" in query:

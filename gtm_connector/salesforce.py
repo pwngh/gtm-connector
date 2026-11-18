@@ -181,6 +181,15 @@ class SalesforceReadOnlyAdapter:
     def sf_cli_invocations(self):
         return self._credentials.invocations if self._credentials is not None else 0
 
+    @staticmethod
+    def _new_budget():
+        return {"deadline": time.monotonic() + _OPERATION_SECONDS, "bytes": 0, "requests": 0}
+
+    def _metadata_check_budget(self):
+        """Check all startup metadata together without retaining partial capabilities."""
+        self._checked_objects.clear()
+        return {**self._new_budget(), "checked_objects": set()}
+
     def _refresh(self, client, budget):
         if self._credentials is None or budget.get("refreshed"):
             raise SalesforceReadError("salesforce_auth_required")
@@ -196,8 +205,8 @@ class SalesforceReadOnlyAdapter:
         return validated._access_token
 
     @contextmanager
-    def _operation(self, *, require_capabilities=True):
-        budget = {"deadline": time.monotonic() + _OPERATION_SECONDS, "bytes": 0, "requests": 0}
+    def _operation(self, *, require_capabilities=True, _budget=None):
+        budget = self._new_budget() if _budget is None else _budget
         with httpx2.Client(
             verify=True, trust_env=False, follow_redirects=False, transport=self._transport,
             headers={"Authorization": "Bearer " + self._access_token, "Accept": "application/json",
@@ -207,6 +216,8 @@ class SalesforceReadOnlyAdapter:
             if not self._edition_verified:
                 organization = self._query(client, _ORGANIZATION_QUERY, budget, max_rows=1)
                 self._validate_environment(organization)
+                if "initial_refreshed_token" in budget:
+                    self._access_token = budget.pop("initial_refreshed_token")
                 self._edition_verified = True
             if require_capabilities and self.environment != "developer":
                 self._check_capabilities(client, budget)
@@ -261,15 +272,20 @@ class SalesforceReadOnlyAdapter:
                                   "salesforce_invalid_response"):
                     raise SalesforceReadError("salesforce_auth_required") from None
                 raise
-        # Keep a refreshed credential only after it proves the existing identity.
-        # A failed check leaves the old credential and pinned identity untouched.
-        self._access_token = refreshed_token
+            # This credential has proved the existing identity.
+            self._access_token = refreshed_token
+        else:
+            # The initial Organization response still needs query and environment
+            # validation in _operation before this credential may be retained.
+            budget["initial_refreshed_token"] = refreshed_token
         return self._request_once(client, path, budget, query=query)
 
     def _request_once(self, client, path, budget, *, query=None):
         remaining = budget["deadline"] - time.monotonic()
         if remaining <= 0:
             raise SalesforceReadError("salesforce_timeout")
+        if budget["bytes"] > _MAX_BYTES:
+            raise SalesforceReadError("salesforce_result_limit")
         budget["requests"] += 1
         if budget["requests"] > _MAX_REQUESTS:
             raise SalesforceReadError("salesforce_result_limit")
@@ -473,9 +489,9 @@ class SalesforceReadOnlyAdapter:
                 client, f"SELECT {_OPPORTUNITY_FIELDS} FROM Opportunity{where} ORDER BY Id LIMIT 101", budget)
             return [self._opportunity(row, native_id) for row in rows]
 
-    def check_edition(self):
+    def check_edition(self, *, _budget=None):
         """Validate the selected environment, retaining the earlier method name."""
-        with self._operation(require_capabilities=False):
+        with self._operation(require_capabilities=False, _budget=_budget):
             pass
 
     def prepare_connection(self):
@@ -501,15 +517,21 @@ class SalesforceReadOnlyAdapter:
             names.add(name)
         return names
 
-    def describe_fields(self, object_name):
+    def describe_fields(self, object_name, *, _budget=None):
         """Return field names for one fixed object without exposing its schema."""
         if not isinstance(object_name, str) or object_name not in _DESCRIBE_OBJECTS:
             raise SalesforceReadError("salesforce_invalid_arguments")
         self._checked_objects.discard(object_name)
-        with self._operation(require_capabilities=False) as (client, budget):
+        with self._operation(require_capabilities=False, _budget=_budget) as (client, budget):
             names = self._describe_fields(client, budget, object_name)
         if self.environment != "developer" and REQUIRED_FIELDS[object_name] <= names:
-            self._checked_objects.add(object_name)
+            if _budget is None:
+                self._checked_objects.add(object_name)
+            else:
+                checked = _budget["checked_objects"]
+                checked.add(object_name)
+                if REQUIRED_FIELDS.keys() <= checked:
+                    self._checked_objects.update(checked)
         return names
 
     def candidate_account(self, as_of):

@@ -288,6 +288,11 @@ at most one account for this step, so a large healthy book does not fail solely
 because it has more than 100 accounts. The count describes the sample, not the
 size of the org. Ordinary `accounts` searches still enforce the 100-row bound.
 The remaining steps exercise one renewal candidate, not every account.
+In sandbox and production modes, Organization and all four descriptions share
+the same 12-request, 1-MiB, 20-second budget as a cold server startup. Descriptions
+that each fit but exceed that combined bound fail the check. Reducing an account
+search does not reduce schema metadata; this connection cannot start within
+these limits. Individual field failures still name the missing standard fields.
 A prerequisite failure marks dependent steps as failed with a next action.
 
 JSON has `schema_version: 1`, `status` (`passed` or `failed`), `as_of`, `steps`,

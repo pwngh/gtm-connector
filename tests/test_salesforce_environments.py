@@ -319,6 +319,50 @@ class SalesforceEnvironmentTests(unittest.TestCase):
         self.assertEqual(report["api_calls"], 5)
         self.assert_metadata_only()
 
+    def test_paid_check_and_startup_share_the_same_combined_metadata_byte_bound(self):
+        for description in self.describes.values():
+            description["unusedPadding"] = "x" * 300_000
+        self.assert_error("salesforce_result_limit", self.adapter().prepare_connection)
+        self.requests.clear()
+        reader = self.adapter()
+        report = run_check(environment="production", as_of=AS_OF, adapter_factory=lambda: reader)
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["steps"][5]["code"], "salesforce_result_limit")
+        self.assertEqual(report["api_calls"], 5)
+        self.assert_metadata_only()
+        self.assertEqual(reader._checked_objects, set())
+        for description in self.describes.values():
+            del description["unusedPadding"]
+        reader.prepare_connection()
+        self.assertEqual(reader.http_requests, 9)
+
+    def test_paid_check_metadata_steps_share_one_deadline_and_request_limit(self):
+        for bound, code, calls in (("time", "salesforce_timeout", 4),
+                                   ("requests", "salesforce_result_limit", 4)):
+            with self.subTest(bound=bound):
+                self.requests.clear()
+                now = [0.0]
+
+                def elapsed(request):
+                    if request.url.path.endswith("/describe"):
+                        now[0] += 7.0
+                    return None
+
+                self.fail_request = elapsed if bound == "time" else None
+                reader = self.adapter()
+                # Replace only this module's clock; local HTTPS service clocks remain real.
+                with patch("gtm_connector.salesforce.time", Mock(monotonic=lambda: now[0])), \
+                        patch("gtm_connector.salesforce._MAX_REQUESTS", 4 if bound == "requests" else 12):
+                    report = run_check(environment="production", as_of=AS_OF, adapter_factory=lambda: reader)
+                self.assertEqual(report["status"], "failed")
+                self.assertIn(code, [step["code"] for step in report["steps"]])
+                self.assertEqual(report["api_calls"], calls)
+                self.assert_metadata_only()
+                self.assertEqual(reader._checked_objects, set())
+                self.fail_request = None
+                reader.prepare_connection()
+                self.assertEqual(reader.http_requests, calls + 4)
+
     def test_invalid_check_environment_does_not_construct_an_adapter(self):
         factory = Mock()
         for value in (None, "", "unknown", [], False):

@@ -185,6 +185,8 @@ there is no cross-file transaction or power-loss guarantee. The independent
 kit binding must also match before source data opens. Existing private owner
 metadata also prevents fixture fallback after accidental removal of only the
 connection marker. The trusted local owner can still edit or remove both files.
+The complete owner format written before Salesforce support can still reopen
+fixture state; incomplete or unknown metadata cannot select that legacy path.
 
 Metadata preflight is an explicit local-owner operation outside the MCP audit.
 Client CRM record reads still require a grant and committed receipt before any

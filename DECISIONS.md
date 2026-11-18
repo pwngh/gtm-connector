@@ -29,6 +29,8 @@ mode, or malformed marker cannot. Require fresh state for older unpinned files
 because their source identity cannot be established from their contents. Keep
 the independent demo-kit binding guard. Write private markers atomically; this
 is not a power-loss durability or multi-user isolation guarantee.
+The complete owner format from before Salesforce support remains valid for
+fixture state. Incomplete or unknown owner metadata still refuses.
 
 Cache only successful environment and fixed-schema checks for one adapter
 lifetime. Preserve all GET, pagination, byte, row, deadline, and one-refresh
@@ -46,6 +48,10 @@ unfiltered book search. A healthy real org can contain more than 100 accounts;
 the diagnostic must not fail merely because the full book exceeds the ordinary
 search bound. Keep the count as a sample count and retain default Developer
 Edition check behavior. Normal tools keep the existing 100-row refusal.
+The nondeveloper check shares the server's combined startup metadata budget
+across Organization and four describe steps. Separate per-object budgets could
+otherwise report success for a connection that cannot start. Preserve individual
+field diagnostics and the existing 15-GET successful check without extra reads.
 
 Add Salesforce to `accounts` and `account` through the same local OAuth, MCP,
 and audit path used by briefs. Keep existing SQLite commands and JSON shapes.

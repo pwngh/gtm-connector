@@ -236,6 +236,58 @@ print(json.dumps({{"status": 0, "result": result}}))
         search = report["steps"][6]
         self.assertEqual((search["api_calls"], search["sf_cli_invocations"]), (3, 2))
 
+    def test_initial_refresh_is_not_retained_until_the_first_org_response_validates(self):
+        responses = (
+            (httpx2.Response(200, content=b"invalid private JSON"), "salesforce_invalid_response"),
+            (httpx2.Response(403, json=[{"message": SECRET}]), "salesforce_forbidden"),
+            (httpx2.Response(401, json=[{"message": SECRET}]), "salesforce_auth_required"),
+            (httpx2.Response(200, json={"done": True, "totalSize": 1, "records": [
+                {"Id": ORGANIZATION, "OrganizationType": "Developer Edition", "IsSandbox": True}]}),
+             "salesforce_environment_mismatch"),
+        )
+        for rejected, code in responses:
+            with self.subTest(code=code):
+                self.requests.clear()
+                (self.directory / "count").unlink(missing_ok=True)
+
+                def respond(request):
+                    self.requests.append(request)
+                    self.assertEqual(request.method, "GET")
+                    self.assertEqual(request.url.params["q"],
+                                     "SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1")
+                    if request.headers["Authorization"] == "Bearer " + TOKEN:
+                        return httpx2.Response(401, json=[{"message": SECRET}])
+                    self.assertEqual(request.headers["Authorization"], "Bearer " + FRESH_TOKEN)
+                    return rejected
+
+                reader = self.original_from_sf(ALIAS, transport=httpx2.MockTransport(respond))
+                for _ in range(2):
+                    with self.assertRaises(SalesforceReadError) as failure:
+                        reader.prepare_connection()
+                    self.assertEqual(failure.exception.code, code)
+                    self.assertEqual(reader._access_token, TOKEN)
+                    self.assertIsNone(reader._organization_id)
+                    self.assertFalse(reader._edition_verified)
+                self.assertEqual(reader.http_requests, 4)
+                self.assertEqual(reader.sf_cli_invocations, 6)
+
+    def test_initial_refresh_is_retained_after_the_first_org_response_validates(self):
+        def respond(request):
+            if request.headers["Authorization"] == "Bearer " + TOKEN:
+                self.requests.append(request)
+                return httpx2.Response(401, json=[{"message": SECRET}])
+            return self.respond(request)
+
+        reader = self.original_from_sf(ALIAS, transport=httpx2.MockTransport(respond))
+        identity = reader.prepare_connection()
+        self.assertEqual(identity["organization_id"], ORGANIZATION)
+        self.assertEqual(reader._access_token, FRESH_TOKEN)
+        self.assertEqual(reader.http_requests, 2)
+        self.assertEqual(reader.sf_cli_invocations, 4)
+        self.assertEqual(len(reader.search_accounts()), 1)
+        self.assertEqual(reader.http_requests, 3)
+        self.assertEqual(reader.sf_cli_invocations, 4)
+
     def test_same_origin_refresh_cannot_replace_the_pinned_org_or_environment(self):
         for change in ({"Id": "00D000000000002AAA"}, {"IsSandbox": True},
                        {"OrganizationType": "Enterprise Edition"}):

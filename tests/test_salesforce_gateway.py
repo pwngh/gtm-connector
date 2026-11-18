@@ -50,12 +50,13 @@ class SalesforceGatewayTests(unittest.TestCase):
         self.assertEqual(request.url.host, "fixture-unit-test.my.salesforce.com")
         self.assertEqual(request.headers["Authorization"], "Bearer " + UPSTREAM_TOKEN)
         query = request.url.params["q"]
+        if self.runtime is not None:
+            receipts = self.runtime.connector.audit.read()
+            self.assertEqual(len([row for row in receipts if row["status"] == "pending"]), 1)
         if query == ORGANIZATION_QUERY:
             # Owner startup checks metadata before a tool or source store exists.
             rows = [{"Id": ORGANIZATION, "OrganizationType": self.edition, "IsSandbox": False}]
             return httpx2.Response(200, json={"totalSize": 1, "done": True, "records": rows})
-        receipts = self.runtime.connector.audit.read()
-        self.assertEqual(len([row for row in receipts if row["status"] == "pending"]), 1)
         if self.failure is not None:
             if self.failure == "timeout":
                 raise httpx2.ReadTimeout(UPSTREAM_TOKEN, request=request)
@@ -140,6 +141,22 @@ class SalesforceGatewayTests(unittest.TestCase):
         receipts = self.runtime.connector.audit.read()
         self.assertEqual(len(receipts), 3)
         self.assertTrue(all(row["http_status"] == 403 and row["rows"] == [] for row in receipts))
+
+    def test_refresh_identity_query_stays_under_the_tool_pending_receipt(self):
+        client = self.open_runtime()
+        self.reader._credentials = Mock(read=Mock(return_value=(INSTANCE, UPSTREAM_TOKEN)))
+        token = client.authorize(["crm:read"])
+        self.failure = 401
+        response = client.call(token, "search_accounts", {"query": "Fixture"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["result"]["isError"])
+        self.assertEqual(sum(request.url.params["q"] == ORGANIZATION_QUERY for request in self.requests), 2)
+        self.reader._credentials.read.assert_called_once()
+        receipts = self.runtime.connector.audit.read()
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(receipts[0]["status"], "error")
+        self.assertEqual(receipts[0]["rows"], [])
+        self.assertEqual(self.activities(), 0)
 
     def test_external_writer_is_absent_from_sdk_and_hardcoded_calls_cannot_mutate(self):
         client = self.open_runtime()

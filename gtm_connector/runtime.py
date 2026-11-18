@@ -150,9 +150,17 @@ def _prepare_source_state(directory, reader, binding):
         if not connected_state:
             try:
                 owner = _read_marker(directory / "owner.json", require_schema=False)
-                if owner is not None and owner.get("crm_backend") not in ("sqlite", "salesforce"):
-                    raise ValueError
-                connected_state = owner is not None and owner["crm_backend"] == "salesforce"
+                if owner is not None:
+                    if "crm_backend" not in owner:
+                        # Before Salesforce support, this complete owner shape
+                        # represented SQLite. An incomplete document proves no mode.
+                        legacy_keys = {"issuer", "resource", "cert_path", "client_id", "redirect_uri", "owner_secret"}
+                        if set(owner) != legacy_keys or any(not isinstance(value, str) or not value
+                                                            for value in owner.values()):
+                            raise ValueError
+                    elif owner["crm_backend"] not in ("sqlite", "salesforce"):
+                        raise ValueError
+                    connected_state = owner.get("crm_backend", "sqlite") == "salesforce"
             except (OSError, ValueError, UnicodeError, RecursionError):
                 raise SourceIdentityError("The prior local backend cannot be verified from private owner metadata. "
                                           "Use a fresh --state-dir.") from None
