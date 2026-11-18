@@ -579,14 +579,16 @@ class BudgetTransportTests(unittest.TestCase):
             closed = False
             async def __aiter__(self):
                 while True:
-                    await asyncio.sleep(0.015)
                     yield b" "
+                    await asyncio.sleep(0.015)
             async def aclose(self):
                 self.closed = True
         stream = Slow()
         provider = reader.SlackRepliesProvider(_transport=httpx2.MockTransport(
             lambda _: httpx2.Response(200, stream=stream)))
-        with patch.object(reader, "OPERATION_SECONDS", 0.08):
+        # Leave time to open the local client before exercising cancellation of
+        # its dribbling body. The production operation limit remains 20 seconds.
+        with patch.object(reader, "OPERATION_SECONDS", 1):
             budget = reader.SlackOperationBudget()
         with self.assertRaises(reader.SlackReadError) as raised:
             provider.replies(ACCESS, channel_id=CHANNEL, parent_ts=PARENT, latest=REPLY,
