@@ -1,5 +1,38 @@
 # Decisions
 
+## Generated audit receipt sequences (2026-11-17)
+
+The audit implementation already commits a pending row before dispatch and
+updates a receipt only while it is pending. Add generated sequences around those
+rules without changing production code or schema. Hypothesis varies calls through
+the actual gateway and six tool handlers using an in-process HTTP test client.
+The existing demo continues to cover local HTTPS.
+
+Observe each source connection opening, before its query runs. A separate
+read-only SQLite connection must see exactly one matching pending receipt for
+that request. Store any observation failure and assert it outside dispatch;
+the SDK can otherwise convert an assertion into a tool error. Start each sequence
+with a successful read so an all-denied sequence cannot pass without execution.
+
+A test-only trigger records committed audit updates. Require at most one final
+update per receipt and preserve every field of finalized rows. Generate explicit
+finish retries against earlier receipt IDs. Inject failed inserts and updates
+through SQLite triggers, and an exception after a finish commits through a test
+wrapper. The latter exercises the gateway's fallback finish attempt: calling
+finish twice is allowed, but committing two finalizations is not.
+
+Bound each search to 50 examples and 20 state-machine steps. Use deterministic
+generation and no example database, so prior runs do not change the inputs.
+Sequences may change with Python, Hypothesis, or test revisions. Disable per-step
+timing deadlines because SQLite latency depends on the host. This is a bounded
+sequential search, not proof of every concurrent schedule or power-loss behavior.
+
+Pin Hypothesis and its dependency only in the hash-checked development lock.
+Keep the suite in tests_stateful and run its explicit command in CI on Python
+3.11 and 3.14. Missing Hypothesis must fail that command, not silently skip it.
+The default demo still installs the runtime lock and runs its existing tests.
+Keep the next schema-constraint slice separate.
+
 ## Request refusal reasons (2026-11-17)
 
 Give each gateway request-check refusal a fixed `error.data.reason`. A client

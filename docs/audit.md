@@ -13,6 +13,13 @@ copied into the log.
 The receipt guarantee excludes unparseable traffic with no tool-call marker
 and requests that disconnect before reaching execution.
 
+The [generated-sequence test](../tests_stateful/test_audit_receipts.py) checks
+receipt ordering and repeated finalization across calls and injected audit
+failures. It reads committed state through a separate SQLite connection before
+source access. This supplements the fixed tests; it does not prove crash durability
+or every possible concurrent schedule. See [development checks](development.md)
+to run it.
+
 ## Audit failures
 
 If the first audit write fails, the tool does not run. A finalization failure

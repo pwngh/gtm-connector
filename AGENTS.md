@@ -73,6 +73,12 @@ Salesforce renewal-field mapping. Check main first and skip work already done.
 The first three are behavior-preserving, with existing tests unchanged.
 Stop after each open PR. The user decides when to continue.
 
+The refusal catalog is merged. Add Hypothesis sequence tests for committed audit
+receipts before tool execution and at-most-once receipt finalization. Keep
+Hypothesis in the development lock and run it explicitly in CI. The default demo
+and runtime dependencies stay unchanged. Use real SQLite observation and failure
+injection. Leave production constraints and schema changes for their own slice.
+
 The tooling slice is merged. Next, give request-check refusals fixed reason names
 and one status/code table. Preserve messages, HTTP statuses, authorization
 challenges, and check order. Keep SDK errors, tool errors, OAuth errors, and audit
