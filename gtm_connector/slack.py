@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import sqlite3
 
 from .seed import ACCOUNT_COUNT, DEMO_AS_OF
-from .store import connect
+from .store import connect as connect
 
 
 CONFLICT_TEXT = "Security review is delayed. Procurement approval is still pending."

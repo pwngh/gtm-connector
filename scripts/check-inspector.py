@@ -189,6 +189,8 @@ if __name__ == "__main__":
     except (AssertionError, OSError, RuntimeError, ValueError, KeyError) as error:
         # Do not echo external process output, configuration, or credentials.
         message = (str(error) if isinstance(error, (AssertionError, RuntimeError)) else "")
-        print(json.dumps({"status": "failed", "error": type(error).__name__,
-                          "message": message or "Inspector check failed; verify Node 22, npx, and Python dependencies."}), file=sys.stderr)
+        print(json.dumps({
+            "status": "failed", "error": type(error).__name__,
+            "message": message or "Inspector check failed; verify Node 22, npx, and Python dependencies.",
+        }), file=sys.stderr)
         raise SystemExit(1)

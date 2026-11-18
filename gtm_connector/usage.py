@@ -16,7 +16,7 @@ def _counts(rows):
 
 
 def _groups(rows, fields):
-    groups = {}
+    groups: dict[tuple[str, ...], list[dict[str, str | None]]] = {}
     for row in rows:
         key = tuple(row[field] for field in fields)
         groups.setdefault(key, []).append(row)
@@ -81,7 +81,7 @@ def build_usage_report(directory, brief_id=None):
     if not path.is_file():
         raise ValueError("audit database not found; run the demo first")
     query = "SELECT token_id, tool, started_at, status, brief_id FROM audit_log"
-    parameters = ()
+    parameters: tuple[str, ...] = ()
     if brief_id is not None:
         query += " WHERE brief_id = ?"
         parameters = (brief_id,)

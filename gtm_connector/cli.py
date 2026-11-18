@@ -70,8 +70,10 @@ def main(argv: list[str] | None = None) -> int:
             result = write_inspector_config(args.state_dir, args.scope)
         elif args.command == "evaluate":
             from .evaluation import run_evaluation
-            result = run_evaluation(adapter=adapter, include_slack=args.with_slack,
-                                    command=sys.orig_argv if argv is None else [sys.executable, "-m", "gtm_connector", *argv])
+            result = run_evaluation(
+                adapter=adapter, include_slack=args.with_slack,
+                command=sys.orig_argv if argv is None else [sys.executable, "-m", "gtm_connector", *argv],
+            )
         elif args.command == "usage":
             from .usage import build_usage_report
             result = build_usage_report(args.state_dir, args.brief)

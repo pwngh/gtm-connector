@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import re
 import tempfile
+from typing import Any
 
 
 EXPECTED_PATH = Path(__file__).resolve().parents[1] / "evaluation" / "expected.json"
@@ -112,7 +113,7 @@ def run_evaluation(*, adapter=None, command=None, include_slack=False):
     with tempfile.TemporaryDirectory(prefix="gtm-evaluation-") as directory:
         with Runtime(directory) as runtime:
             for case in expected["cases"]:
-                observed = {}
+                observed: dict[str, Any] = {}
 
                 def observe(result, evidence):
                     observed["model_usage"] = {

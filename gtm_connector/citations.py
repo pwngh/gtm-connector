@@ -7,6 +7,7 @@ text is quoted as data; the checker never treats it as a command or as truth.
 from datetime import date
 import json
 import re
+from typing import Any
 
 
 class BriefRejected(ValueError):
@@ -57,8 +58,8 @@ def _catalog(evidence):
                for value in (account_id, brief_id)):
         raise BriefRejected("Invalid account or brief identifier.")
     as_of = _day(evidence["as_of"])
-    groups = {name: [] for name in sources}
-    expected_rows = {tool: [] for _, _, tool in sources.values()}
+    groups: dict[str, list[dict[str, Any]]] = {name: [] for name in sources}
+    expected_rows: dict[str, list[str]] = {tool: [] for _, _, tool in sources.values()}
     seen = set()
     if not isinstance(evidence["records"], list) or not isinstance(evidence["receipts"], list):
         raise BriefRejected("Evidence records and receipts must be lists.")
@@ -171,7 +172,7 @@ def _catalog(evidence):
                         opportunity["record_ref"], note["record_ref"]))
     if version == 2:
         slack_receipt = f"audit/{receipts['read_slack_messages']['audit_id']}"
-        conflict_refs = set()
+        conflict_refs: set[str] = set()
         if evidence["slack_status"] == "denied":
             required.add(add("Slack messages were unavailable because the token lacks slack:read.",
                              slack_receipt))
@@ -247,7 +248,7 @@ def diagnose_brief(candidate: str, evidence: dict) -> dict:
             "reason_counts": {**reasons, "missing_required": missing, "empty": int(not lines)}}
 
 
-def check_brief(candidate: str, evidence: dict) -> str:
+def check_brief(candidate: object, evidence: dict) -> str:
     """Reject uncited, altered, misattributed, or extra prose before publication.
 
     A valid subset is allowed: grounding and coverage are different checks.

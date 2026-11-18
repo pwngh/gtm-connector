@@ -12,6 +12,7 @@ import uuid
 from typing import Any
 
 from mcp.server import MCPServer
+from mcp.server.auth.provider import AccessToken
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
@@ -22,7 +23,7 @@ from starlette.responses import JSONResponse
 
 from . import calls, slack, store
 from .audit import AuditLog
-from .request_checks import MISSING, RequestFacts, RequestPolicy, check_request
+from .request_checks import MISSING, Missing, RequestFacts, RequestPolicy, check_request
 from .salesforce import SalesforceReadError
 from .tool_definitions import TOOL_DEFINITIONS
 
@@ -181,8 +182,8 @@ class Connector:
             self.mcp.tool(
                 name=name, meta={"gtm.demo/requiredScope": definition.scope},
                 annotations=ToolAnnotations(
-                    readOnlyHint=definition.read_only, destructiveHint=False, idempotentHint=True,
-                    openWorldHint=self.crm_reader is not None and definition.scope == "crm:read",
+                    read_only_hint=definition.read_only, destructive_hint=False, idempotent_hint=True,
+                    open_world_hint=self.crm_reader is not None and definition.scope == "crm:read",
                 ),
                 structured_output=True,
             )(handlers[name])
@@ -229,10 +230,13 @@ class Connector:
         if is_call:
             try:
                 audit_id = self.audit.start(token=raw_token or raw_auth or None, tool=tool,
-                    arguments=arguments if request is not None else {"unparsed_sha256": hashlib.sha256(body).hexdigest()},
+                    arguments=(arguments if request is not None
+                               else {"unparsed_sha256": hashlib.sha256(body).hexdigest()}),
                     request_id=request_id, brief_id=brief_id)
             except (OSError, sqlite3.Error, ValueError):
-                return await JSONResponse({"error": "audit_unavailable; call was not executed"}, 503)(scope, receive, send)
+                return await JSONResponse(
+                    {"error": "audit_unavailable; call was not executed"}, 503,
+                )(scope, receive, send)
 
         messages = []
         async def capture(message):
@@ -255,7 +259,8 @@ class Connector:
                 rate_limit=self.rate_limit, window_seconds=self.window_seconds,
                 writes_disabled=self.crm_reader is not None,
             )
-            token, wall_time = MISSING, MISSING
+            token: AccessToken | None | Missing = MISSING
+            wall_time: float | Missing = MISSING
             decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS)
             if decision.needs == "token":
                 token = await self.authority.verify_token(raw_token)
@@ -292,7 +297,9 @@ class Connector:
                 if isinstance(result, dict) and "result" in response:
                     result.setdefault("_meta", {})["gtm.demo/auditId"] = audit_id
                     payload = json.dumps(response).encode()
-                    response_start["headers"] = [(k, v) for k, v in response_start["headers"] if k.lower() != b"content-length"]
+                    response_start["headers"] = [
+                        (k, v) for k, v in response_start["headers"] if k.lower() != b"content-length"
+                    ]
                     response_start["headers"].append((b"content-length", str(len(payload)).encode()))
                     messages = [response_start, {"type": "http.response.body", "body": payload}]
         except BaseException as exc:
@@ -304,6 +311,8 @@ class Connector:
                     pass  # The already-committed pending receipt remains visible.
             if not isinstance(exc, Exception):
                 raise
-            return await JSONResponse({"error": "execution_or_audit_unavailable; no result released"}, 503)(scope, receive, send)
+            return await JSONResponse(
+                {"error": "execution_or_audit_unavailable; no result released"}, 503,
+            )(scope, receive, send)
         for message in messages:
             await send(message)

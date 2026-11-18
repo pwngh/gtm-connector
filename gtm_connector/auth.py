@@ -268,8 +268,10 @@ def create_auth_app(authority: LocalAuthority):
             "authorization_response_iss_parameter_supported": True,
         }, headers={"Cache-Control": "no-store"})
 
+    # The SDK protocol also requires identity-assertion exchange. This issuer
+    # advertises only authorization_code and keeps that unsupported hook absent.
     routes = create_auth_routes(
-        authority, AnyHttpUrl(authority.issuer),
+        authority, AnyHttpUrl(authority.issuer),  # type: ignore[arg-type]
         client_registration_options=ClientRegistrationOptions(enabled=False, valid_scopes=list(SCOPES)),
     )
     routes[0] = Route("/.well-known/oauth-authorization-server", metadata, methods=["GET"])

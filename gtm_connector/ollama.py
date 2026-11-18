@@ -2,6 +2,7 @@
 
 import json
 import re
+from typing import Any, cast
 
 import httpx2
 
@@ -174,7 +175,7 @@ class OllamaAdapter:
         prompt = json.dumps({"supported_claims": catalog}, ensure_ascii=True)
         if len(prompt.encode()) > _MAX_CANDIDATE_BYTES:
             return DraftResult(None, error_code="catalog_too_large", metadata=dict(self.metadata))
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.request_model, "stream": False, "format": _SCHEMA,
             "messages": [{"role": "system", "content": _SYSTEM},
                          {"role": "user", "content": prompt}],
@@ -219,7 +220,8 @@ class OllamaAdapter:
         if not valid_content:
             return rejected("invalid_candidate_format")
         try:
-            candidate = json.loads(content, object_pairs_hook=_unique_object)
+            # valid_content already established a bounded, UTF-8-encodable string.
+            candidate = json.loads(cast(str, content), object_pairs_hook=_unique_object)
         except (ValueError, RecursionError):
             return rejected("invalid_candidate_format")
         if not isinstance(candidate, dict) or set(candidate) != {"lines"}:
