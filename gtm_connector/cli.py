@@ -280,10 +280,9 @@ def _run(args, argv):
             try:
                 _print_event(event, args.json)
             except BrokenPipeError:
-                _discard_stdout()
+                _discard_output(sys.stdout)
                 message = "Event output closed. The server continues until Ctrl-C."
-                print(json.dumps({"message": message}) if args.json else message,
-                      file=sys.stderr, flush=True)
+                _server_notice(message, args.json)
         crm_reader = None
         if args.crm_backend == "salesforce":
             from .salesforce import SalesforceReadOnlyAdapter
@@ -295,11 +294,11 @@ def _run(args, argv):
             if args.json:
                 print(json.dumps(ready), flush=True)
             else:
-                print(f"Connector ready at {ready['resource']}\nBackend: {runtime.crm_backend}\n"
-                      f"State folder: {runtime.directory}\nGranted scopes: none. Each client needs an explicit grant.\n"
-                      "Connect: gtm-connector connect inspector --scope crm:read "
-                      f"--state-dir {shlex.quote(str(runtime.directory))}\nStop with Ctrl-C.",
-                      file=sys.stderr, flush=True)
+                _server_notice(f"Connector ready at {ready['resource']}\nBackend: {runtime.crm_backend}\n"
+                               f"State folder: {runtime.directory}\n"
+                               "Granted scopes: none. Each client needs an explicit grant.\n"
+                               "Connect: gtm-connector connect inspector --scope crm:read "
+                               f"--state-dir {shlex.quote(str(runtime.directory))}\nStop with Ctrl-C.", False)
             try:
                 while True:
                     try:
@@ -311,7 +310,7 @@ def _run(args, argv):
         while not events.empty():
             emit(events.get_nowait())
         stopped = "Connector stopped. Local state is retained."
-        print(json.dumps({"message": stopped}) if args.json else stopped, file=sys.stderr)
+        _server_notice(stopped, args.json)
         return None
     from contextlib import closing
     from . import store
@@ -424,12 +423,19 @@ def _main(argv):
         return _failure(exc, args)
 
 
-def _discard_stdout():
+def _discard_output(stream):
     descriptor = os.open(os.devnull, os.O_WRONLY)
     try:
-        os.dup2(descriptor, sys.stdout.fileno())
+        os.dup2(descriptor, stream.fileno())
     finally:
         os.close(descriptor)
+
+
+def _server_notice(message, as_json):
+    try:
+        print(json.dumps({"message": message}) if as_json else message, file=sys.stderr, flush=True)
+    except BrokenPipeError:
+        _discard_output(sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -443,5 +449,5 @@ def main(argv: list[str] | None = None) -> int:
         return _error("Interrupted. Completed local writes are retained.", 130,
                       "gtm-connector audit --help", as_json=_json_requested(arguments))
     except BrokenPipeError:
-        _discard_stdout()
+        _discard_output(sys.stdout)
         return 0

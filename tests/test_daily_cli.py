@@ -111,6 +111,34 @@ class DailyCLITests(unittest.TestCase):
                 process.stdout.close()
                 process.stderr.close()
 
+    def test_closed_combined_output_keeps_server_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "serve", "--json",
+                                        "--state-dir", directory], cwd=ROOT, stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            try:
+                readable, _, _ = select.select([process.stdout], [], [], 15)
+                self.assertTrue(readable)
+                self.assertEqual(json.loads(process.stdout.readline())["type"], "ready")
+                process.stdout.close()
+                config = json.loads((Path(directory) / "owner.json").read_text())
+                with LocalClient(config) as client:
+                    token = client.authorize(["crm:read"])
+                    self.assertEqual(client.call(token, "get_account", {"account_id": "acc-001"}).status_code, 200)
+                    # Give the consumer time to observe its failed event and notice writes.
+                    with self.assertRaises(subprocess.TimeoutExpired):
+                        process.wait(timeout=2)
+                    self.assertEqual(client.call(token, "get_account", {"account_id": "acc-002"}).status_code, 200)
+                process.send_signal(signal.SIGINT)
+                process.wait(timeout=15)
+                self.assertEqual(process.returncode, 0)
+                self.assertEqual(len(read_audit(Path(directory) / "audit.sqlite3")), 2)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+                process.stdout.close()
+
     def test_doctor_reports_missing_setup_without_creating_it(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "missing"

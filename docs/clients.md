@@ -72,8 +72,7 @@ gtm-connector connect claude-code --state-dir var/clients --scope crm:read
 ```
 
 The command creates a private `var/clients/claude-code.json` with an HTTP server
-entry and authorization header. It also creates the underlying Inspector grant
-file. It prints this launch command with absolute paths:
+entry and authorization header. It prints this launch command with absolute paths:
 
 ```sh
 NODE_EXTRA_CA_CERTS="$PWD/var/clients/tls.pem" \
@@ -97,7 +96,7 @@ server's protocol or completes a request.
 gtm-connector connect cursor --state-dir var/clients --scope crm:read
 ```
 
-This creates private `var/clients/cursor.json` and Inspector grant files. Merge
+This creates private `var/clients/cursor.json`. Merge
 only the `gtm-connector` entry from `cursor.json` into your project's
 `.cursor/mcp.json`, preserving existing server entries. Keep that file private
 and ignored by Git. Quit Cursor completely, then run the printed launch command:

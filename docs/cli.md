@@ -141,7 +141,7 @@ starting the connector or reading its state.
 For the current Bash session:
 
 ```bash
-source <(gtm-connector completion bash)
+eval "$(gtm-connector completion bash)"
 ```
 
 Add that line to `~/.bashrc` to load it in new interactive Bash sessions. For
