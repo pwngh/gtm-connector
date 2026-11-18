@@ -31,8 +31,11 @@ def render(source):
     opening = next(index for index, event in enumerate(events)
                    if event[1] == "o" and "1. Run the fixture demo" in event[2])
     require("Six tools returned by Inspector CLI." in text, "Missing tools")
-    require("error: Brief contains an uncited, unsupported, or misattributed statement." in text,
-            "Missing citation rejection")
+    errors = [json.loads(line).get("error") for line in displayed.splitlines()
+              if line.startswith('{"error":')]
+    require(errors == [{"code": "check_failed",
+                        "message": "Brief contains an uncited, unsupported, or misattributed statement.",
+                        "next": "gtm-connector check-brief --help"}], "Missing citation rejection")
     require("HTTP 403" in text and "[crm/opportunities/opp-003]" in text, "Missing evidence")
     published = [media / name for name in (
         "recording-session.txt", "recording-provenance.json", "inspector-tools.json")]
