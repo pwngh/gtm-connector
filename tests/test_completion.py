@@ -41,6 +41,11 @@ class CompletionTests(unittest.TestCase):
                  (["gtm-connector", "brief", "--crm-backend", "sa"], "salesforce"),
                  (["gtm-connector", "accounts", "--sf-environment", "pr"], "production"),
                  (["gtm-connector", "salesforce", "--sf-environment", "sandbox", "ch"], "check"),
+                 (["gtm-connector", "calls", "--json", "im"], "import"),
+                 (["gtm-connector", "calls", "--state-dir", "import", "ins"], "inspect"),
+                 (["gtm-connector", "calls", "import", "--sf-environment", "sa"], "sandbox"),
+                 (["gtm-connector", "calls", "inspect", "--f"], "--full"),
+                 (["gtm-connector", "serve", "--calls-backend", "im"], "imported"),
                  (["gtm-connector", "connect", "cl"], "claude-code"),
                  (["gtm-connector", "connect", "--json", "ins"], "inspector"),
                  (["gtm-connector", "connect", "--state-dir", "inspector", "cu"], "cursor"),
@@ -73,11 +78,32 @@ class CompletionTests(unittest.TestCase):
         result = subprocess.run([executable, "-c", script], capture_output=True, text=True)
         self.assertEqual(result.stdout.strip(), "", result.stderr)
 
+    def test_bash_nested_options_and_import_filename(self):
+        executable, path = self.script("bash")
+        exported = self.root / "invented transcript.vtt"
+        exported.write_text("WEBVTT\n")
+        for words, expected, forbidden in (
+            (["gtm-connector", "calls", "inspect", "--"], "--full", "--sf-org"),
+            (["gtm-connector", "calls", "list", "--"], "--after", "--full"),
+            (["gtm-connector", "calls", "import", str(self.root / "invented")], str(exported), "--full"),
+        ):
+            script = (f"source {path}; COMP_WORDS=({shlex.join(words)}); COMP_CWORD={len(words)-1}; "
+                      '_gtm_connector_complete; printf "%s\\n" "${COMPREPLY[@]}"')
+            result = subprocess.run([executable, "-c", script], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(expected, result.stdout.splitlines())
+            self.assertNotIn(forbidden, result.stdout.splitlines())
+
     def test_zsh_completion_dispatch(self):
         executable, path = self.script("zsh")
         for words, expected in ((["gtm-connector", "bri"], "brief"),
                                 (["gtm-connector", "brief", "--crm-backend", "sa"], "salesforce"),
                                 (["gtm-connector", "account", "--sf-environment", "sa"], "sandbox"),
+                                (["gtm-connector", "calls", "--json", "ins"], "inspect"),
+                                (["gtm-connector", "calls", "--state-dir", "import", "li"], "list"),
+                                (["gtm-connector", "calls", "import", "--sf-environment", "sa"], "sandbox"),
+                                (["gtm-connector", "calls", "inspect", "--f"], "--full"),
+                                (["gtm-connector", "brief", "--calls-backend", "im"], "imported"),
                                 (["gtm-connector", "serve", "--crm"], "--crm-backend"),
                                 (["gtm-connector", "connect", "--json", "ins"], "inspector"),
                                 (["gtm-connector", "connect", "--state-dir", "inspector", "cu"], "cursor"),
@@ -104,6 +130,11 @@ class CompletionTests(unittest.TestCase):
                                 ("gtm-connector serve --crm", "--crm-backend"),
                                 ("gtm-connector brief --crm-backend sa", "salesforce"),
                                 ("gtm-connector accounts --sf-environment pr", "production"),
+                                ("gtm-connector calls --json li", "list"),
+                                ("gtm-connector calls --state-dir import ins", "inspect"),
+                                ("gtm-connector calls import --sf-environment sa", "sandbox"),
+                                ("gtm-connector calls inspect --f", "--full"),
+                                ("gtm-connector serve --calls-backend im", "imported"),
                                 ("gtm-connector connect --json ins", "inspector"),
                                 ("gtm-connector connect --state-dir inspector cu", "cursor"),
                                 ("gtm-connector connect --scope crm:read ins", "inspector"),

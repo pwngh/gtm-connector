@@ -2,7 +2,8 @@
 
 The optional Salesforce backend reads standard Account, Contact, Opportunity,
 and Contract records through REST v68.0. It can produce a cited renewal-planning
-brief without custom fields. Call notes and Slack remain separate local fixtures.
+brief without custom fields. Call notes default to separate local fixtures and
+can instead use [explicitly imported transcripts](calls.md). Slack remains a local fixture.
 The optional [demo kit](salesforce-demo.md) binds invented context to imported
 accounts through their standard AccountNumber values. It reads no call provider
 or live Slack workspace.

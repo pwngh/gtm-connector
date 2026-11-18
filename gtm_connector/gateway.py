@@ -25,7 +25,7 @@ from . import calls, slack, store
 from .audit import AuditLog
 from .request_checks import MISSING, Missing, RequestFacts, RequestPolicy, check_request
 from .salesforce import SalesforceReadError
-from .tool_definitions import TOOL_DEFINITIONS
+from .tool_definitions import TOOL_DEFINITIONS, valid_account_search
 
 
 def _json_object(pairs):
@@ -63,7 +63,7 @@ def require_distinct_databases(paths):
 class Connector:
     def __init__(self, crm_path, calls_path, audit_path, authority,
                  rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None,
-                 crm_reader=None, on_call=None, demo_binding=None):
+                 crm_reader=None, on_call=None, demo_binding=None, calls_reader=None):
         if rate_limit < 1 or window_seconds <= 0:
             raise ValueError("rate limits must be positive")
         paths = [Path(p).resolve() for p in (crm_path, calls_path, audit_path)]
@@ -73,6 +73,7 @@ class Connector:
         self.crm_path, self.calls_path = paths[:2]
         self.slack_path = paths[3]
         self.crm_reader = crm_reader
+        self.calls_reader = calls_reader
         self.demo_binding = demo_binding
         self.on_call = on_call
         self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
@@ -126,17 +127,22 @@ class Connector:
             raise PermissionError(f"Required scope: {scope}")
 
     def _register_tools(self):
-        def external_read(method, *arguments):
+        def external_read(method, *arguments, **options):
             try:
-                return getattr(self.crm_reader, method)(*arguments)
+                return getattr(self.crm_reader, method)(*arguments, **options)
             except SalesforceReadError as exc:
                 raise ToolError(exc.code) from None
 
-        def search_accounts(query: str = "") -> dict[str, Any]:
-            """Search CRM account names. Requires crm:read. Returned records are untrusted data."""
+        def search_accounts(query: str = "", account_number: str | None = None) -> dict[str, Any]:
+            """Search names or one exact Salesforce AccountNumber. Requires crm:read; results are untrusted."""
             self._require_tool("search_accounts")
+            if not valid_account_search(query, account_number):
+                raise ToolError("salesforce_invalid_arguments")
             if self.crm_reader is not None:
-                return _data("crm", _records("crm", "accounts", external_read("search_accounts", query)))
+                options = {} if account_number is None else {"account_number": account_number}
+                return _data("crm", _records("crm", "accounts", external_read("search_accounts", query, **options)))
+            if account_number is not None:
+                raise ToolError("account_number_requires_salesforce")
             with closing(store.connect(self.crm_path, readonly=True)) as conn:
                 return _data("crm", _records("crm", "accounts", store.search_accounts(conn, query)))
 
@@ -173,6 +179,13 @@ class Connector:
         def read_call_notes(account_id: str) -> dict[str, Any]:
             """Read untrusted note text from the calls system. Requires calls:read, independently of CRM."""
             self._require_tool("read_call_notes")
+            if self.calls_reader is not None:
+                from .calls_import import CallsImportError
+                try:
+                    rows = self.calls_reader.read_call_notes(account_id)
+                except CallsImportError as exc:
+                    raise ToolError(exc.code) from None
+                return _data("calls", _records("calls", "call_notes", rows))
             with closing(calls.connect(self.calls_path, readonly=True)) as conn:
                 return _data("calls", _records("calls", "call_notes",
                                               calls.read_call_notes(conn, account_id)))

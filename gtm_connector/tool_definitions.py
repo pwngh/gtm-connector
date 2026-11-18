@@ -20,7 +20,8 @@ class ToolDefinition:
 TOOL_DEFINITIONS = {
     "search_accounts": ToolDefinition(
         scope="crm:read", read_only=True,
-        arguments={"query": StringArgument(200, required=False)},
+        arguments={"query": StringArgument(200, required=False),
+                   "account_number": StringArgument(40, required=False, nullable=True)},
     ),
     "get_account": ToolDefinition(
         scope="crm:read", read_only=True,
@@ -46,6 +47,21 @@ TOOL_DEFINITIONS = {
 }
 
 
+def valid_account_search(query, account_number):
+    """An exact account number cannot be combined with a name query or normalized."""
+    if account_number is None:
+        return True
+    if (query != "" or not isinstance(account_number, str) or not account_number.strip()
+            or len(account_number) > 40
+            or any(ord(character) < 32 or ord(character) == 127 for character in account_number)):
+        return False
+    try:
+        account_number.encode("utf-8")
+    except UnicodeError:
+        return False
+    return True
+
+
 def valid_arguments(definition: ToolDefinition, arguments: object) -> bool:
     """Check string lengths in characters without coercing or trimming values."""
     if not isinstance(arguments, dict) or not arguments.keys() <= definition.arguments.keys():
@@ -61,4 +77,5 @@ def valid_arguments(definition: ToolDefinition, arguments: object) -> bool:
         if (not isinstance(value, str) or len(value) > rule.max_length
                 or (rule.required and not value.strip())):
             return False
-    return True
+    return (definition != TOOL_DEFINITIONS["search_accounts"]
+            or valid_account_search(arguments.get("query", ""), arguments.get("account_number")))

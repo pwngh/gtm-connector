@@ -15,6 +15,8 @@ from . import __version__
 
 
 COMMANDS = {
+    "calls": ("Import and inspect private transcript exports without contacting a call provider.",
+              "calls import call.vtt --account acc-003"),
     "salesforce": ("Check Salesforce setup and a renewal brief without printing org records.",
                    "salesforce check --sf-org gtm-de"),
     "doctor": ("Check the local setup and show a fix for each failure.", "doctor --state-dir var/v2"),
@@ -39,6 +41,23 @@ COMMANDS = {
 }
 EXIT_NAMES = {1: "local_failure", 2: "usage_error", 3: "refused", 4: "check_failed", 5: "upstream_failure",
               130: "interrupted"}
+CALL_FAILURES = {
+    "calls_import_invalid": "The export or range is invalid. Use a valid UTF-8 TXT or VTT transcript and unit range.",
+    "calls_import_too_large": "The export exceeds 2 MiB or 10,000 units. Choose a smaller export.",
+    "calls_excerpt_too_large": "The excerpt exceeds its text, unit, or metadata limit. Select fewer cues or lines.",
+    "calls_import_not_found": "This import is not in the selected state folder. Run calls list to find its identifier.",
+    "calls_account_not_found": "No CRM account matched the selection. Check its ID or exact AccountNumber.",
+    "calls_not_imported": "This account has no selected transcript. Import an export before reading its calls.",
+    "calls_reassign_required": "This content belongs to another account. Use --reassign only to move that association.",
+    "calls_association_changed": "AccountNumber now resolves to another account. Review it before using --reassign.",
+    "calls_source_mismatch": "The calls mode or CRM binding differs from this state. Use its original selection.",
+    "calls_account_ambiguous": "More than one account uses this AccountNumber. Select its canonical ID with --account.",
+    "calls_import_corrupt": "The import failed integrity checks. Retain this state and reimport into a fresh folder.",
+    "calls_association_invalid": "The CRM response and audit receipt did not agree. No transcript was imported.",
+    "calls_association_failed": "The authorized CRM read did not complete. No transcript was imported.",
+    "calls_source_unavailable": "The local CRM connection could not be reached. Check the setup and repeat the import.",
+    "calls_import_io": "The export or private store could not be read or written. Check permissions and retry.",
+}
 
 
 def safe_text(value):
@@ -66,6 +85,48 @@ class Parser(argparse.ArgumentParser):
         raise ParserError(message)
 
 
+def _calls_commands(command):
+    command.add_argument("--state-dir", type=Path, default=Path("var/imported-calls"),
+                         help="Use this private import state folder (default: var/imported-calls).")
+    actions = command.add_subparsers(dest="action", required=True, metavar="ACTION")
+    descriptions = {"import": "Import an existing transcript and select an account excerpt.",
+                    "list": "List private import metadata without reading transcripts or credentials.",
+                    "inspect": "Inspect a selected transcript excerpt or explicitly show the complete export."}
+    examples = {"import": "calls import call.vtt --account acc-003",
+                "list": "calls list --account acc-003", "inspect": "calls inspect IMPORT_ID --full"}
+    for action, description in descriptions.items():
+        child = actions.add_parser(action, help=description, description=description,
+                                   epilog=f"Example: gtm-connector {examples[action]}")
+        child.set_defaults(value=None, account=None, account_number=None, called_at=None, cues=None, lines=None,
+                           reassign=False, full=False, after=None, crm_backend=None, sf_org=None, sf_environment=None)
+        child.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                           help="Write the documented JSON result for scripts.")
+        child.add_argument("--state-dir", type=Path, default=argparse.SUPPRESS,
+                           help="Use this private import state folder (default: var/imported-calls).")
+        if action == "import":
+            child.add_argument("value", type=Path, metavar="FILE", help="Read an existing UTF-8 TXT or VTT export.")
+            account = child.add_mutually_exclusive_group(required=True)
+            account.add_argument("--account", help="Associate this canonical CRM account ID.")
+            account.add_argument("--account-number", help="Resolve this exact Salesforce AccountNumber.")
+            child.add_argument("--crm-backend", choices=("sqlite", "salesforce"),
+                               help="Select the CRM used for association (default: sqlite).")
+            child.add_argument("--sf-org", help="Read Salesforce credentials from this signed-in sf CLI alias.")
+            child.add_argument("--sf-environment", choices=("developer", "sandbox", "production"),
+                               help="Require this Salesforce environment (default: developer).")
+            child.add_argument("--called-at", help="Record the supplied meeting timestamp with its UTC offset.")
+            excerpt = child.add_mutually_exclusive_group()
+            excerpt.add_argument("--cues", help="Select an inclusive one-based VTT cue range, such as 3:8.")
+            excerpt.add_argument("--lines", help="Select an inclusive one-based TXT line range, such as 3:8.")
+            child.add_argument("--reassign", action="store_true", help="Explicitly reassign imported content locally.")
+        elif action == "list":
+            child.add_argument("--account", help="Filter by this canonical CRM account ID.")
+            child.add_argument("--after", help="Continue after the import ID returned as next_after.")
+        else:
+            child.add_argument("value", metavar="IMPORT_ID",
+                               help="Select the import identifier returned by calls list.")
+            child.add_argument("--full", action="store_true", help="Show all units and the original export text.")
+
+
 def build_parser():
     parser = Parser(prog="gtm-connector",
                     description="Create cited renewal briefs from scoped CRM, calls, and Slack reads.",
@@ -79,8 +140,14 @@ def build_parser():
         command = commands.add_parser(name, help=description, description=description,
                                       epilog=f"Example: gtm-connector {example}",
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
+        if name == "calls":
+            command.epilog = ("Examples:\n  gtm-connector calls import call.vtt --account acc-003\n"
+                              "  gtm-connector calls list\n  gtm-connector calls inspect IMPORT_ID --full")
         command.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                              help="Write the documented JSON result for scripts.")
+        if name == "calls":
+            _calls_commands(command)
+            continue
         if name in ("seed", "accounts", "account"):
             command.add_argument("--db", type=Path, default=Path("var/v2/crm.sqlite3") if name == "seed" else None,
                                  help="Read or seed this local CRM database (default: var/v2/crm.sqlite3).")
@@ -96,8 +163,12 @@ def build_parser():
         if name in ("account", "brief"):
             command.add_argument("account_id", help="Select an account, such as acc-003.")
         if name in ("serve", "brief", "accounts", "account"):
-            command.add_argument("--crm-backend", choices=("sqlite", "salesforce"), default="sqlite",
+            command.add_argument("--crm-backend", choices=("sqlite", "salesforce"),
+                                 default="sqlite",
                                  help="Select local fixtures or the read-only Salesforce CRM reader.")
+        if name in ("serve", "brief", "accounts", "account"):
+            command.add_argument("--calls-backend", choices=("fixture", "imported"),
+                                 help="Select demo notes or imported transcripts (default: fixture).")
         if name in ("serve", "brief"):
             command.add_argument("--salesforce-demo-binding", type=Path,
                                  help="Load private imported account bindings for invented call and Slack fixtures.")
@@ -160,6 +231,28 @@ def table(headers, rows):
 
 
 def human_result(command, result, *, crm_backend="sqlite"):
+    if command == "calls":
+        if "imports" in result:
+            display = table(["IMPORT", "ACCOUNT", "ACTIVE", "CALLED AT", "IMPORTED AT", "RANGE"],
+                            [[row["import_id"], row["account_id"], row["active"], row["called_at"],
+                              row["imported_at"], _call_range(row)] for row in result["imports"]])
+            if result["next_after"] is not None:
+                display += "\nMore imports are available. Repeat calls list with --after " + result["next_after"] + "."
+            return display or "No transcript imports are stored."
+        metadata = result.get("import", result)
+        display = table(["FIELD", "VALUE"], [
+            ["Import", metadata["import_id"]], ["Account", metadata["account_id"]],
+            ["Call time", metadata["called_at"]], ["Import time", metadata["imported_at"]],
+            ["Cited excerpt", _call_range(metadata)], ["Total units", metadata["total_units"]]])
+        if "import" not in result:
+            return f"Transcript {result['status']}. The excerpt is selected for this account.\n" + display
+        display += "\n\nExact excerpt units" if "original_text" not in result else "\n\nAll imported units"
+        for unit in result["units"]:
+            timing = "" if unit["start_ms"] is None else f" ({unit['start_ms']} to {unit['end_ms']} ms)"
+            display += f"\n{unit['index']}{timing}: " + json.dumps(unit["text"], ensure_ascii=True)
+        if "original_text" in result:
+            display += "\n\nOriginal export text (quoted)\n" + json.dumps(result["original_text"], ensure_ascii=True)
+        return display
     if command == "salesforce":
         return table(["STEP", "STATUS", "COUNT", "MS", "API GETS", "SF COMMANDS", "DETAIL", "FIX"],
                      [[row[key] for key in ("name", "status", "count", "duration_ms", "api_calls",
@@ -237,6 +330,11 @@ def human_result(command, result, *, crm_backend="sqlite"):
     raise ValueError("No display is available for this command.")
 
 
+def _call_range(metadata):
+    selected = metadata["cited_range"]
+    return f"{metadata['unit_kind']} {selected['first']}:{selected['last']} (includes adjacent context)"
+
+
 def _print_event(event, as_json):
     if as_json:
         print(json.dumps(event, ensure_ascii=True), flush=True)
@@ -270,11 +368,129 @@ def _salesforce_progress(as_json):
     return report
 
 
-def _salesforce_sources(environment, *, mixed=False):
+def _salesforce_sources(environment, *, mixed=False, calls_backend="fixture"):
     if mixed:
+        if calls_backend == "imported":
+            return (f"Sources: mixed. CRM uses Salesforce ({environment}); calls use user-supplied transcript exports. "
+                    "Slack uses demo fixtures when requested. Connection identity is verified for CRM.")
         return (f"Sources: mixed. CRM uses Salesforce ({environment}); call notes and Slack use demo fixtures. "
                 "Connection identity is verified.")
     return f"Sources: live. CRM uses Salesforce ({environment}). Connection identity is verified."
+
+
+def _calls_arguments(args):
+    """Validate owner options and the bounded export before opening state or credentials."""
+    import re
+    from datetime import datetime, timezone
+    import stat
+    from .calls_import import CallsImportError, MAX_RAW_BYTES, parse_transcript, select_excerpt
+
+    def invalid(message):
+        raise ValueError(message)
+
+    if args.action == "inspect" and not re.fullmatch(r"note-[0-9a-f]{64}", args.value):
+        invalid("The import ID must be the note- identifier returned by calls import or calls list.")
+    if args.after is not None and not re.fullmatch(r"note-[0-9a-f]{64}", args.after):
+        invalid("--after requires the import ID returned as next_after by calls list.")
+    if args.account is not None and not re.fullmatch(r"acc-(?:[0-9]{3}|sf-[A-Za-z0-9]{18})", args.account):
+        invalid("The account must be a canonical acc-NNN or acc-sf- Salesforce identifier.")
+    if args.action != "import":
+        return None
+    args.crm_backend = args.crm_backend or "sqlite"
+    if (args.sf_org is not None or args.sf_environment is not None) and args.crm_backend != "salesforce":
+        invalid("Salesforce options require --crm-backend salesforce.")
+    if args.account_number is not None:
+        if args.crm_backend != "salesforce":
+            invalid("--account-number requires --crm-backend salesforce.")
+        if (not args.account_number.strip() or len(args.account_number) > 40
+                or any(ord(character) < 32 or ord(character) == 127 for character in args.account_number)):
+            invalid("AccountNumber must be nonblank, at most 40 characters, and contain no control characters.")
+        try:
+            args.account_number.encode("utf-8")
+        except UnicodeError:
+            invalid("AccountNumber must contain valid Unicode text.")
+    if args.account is not None and args.account.startswith("acc-sf-") != (args.crm_backend == "salesforce"):
+        invalid("The canonical account ID must match the selected CRM backend.")
+    called_at = None
+    if args.called_at is not None:
+        try:
+            timestamp = datetime.fromisoformat(args.called_at)
+            if "T" not in args.called_at or timestamp.utcoffset() is None:
+                raise ValueError
+            called_at = timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        except (ValueError, OverflowError):
+            invalid("--called-at requires an ISO timestamp with a UTC offset, such as 2027-01-15T10:00:00Z.")
+    path = Path(args.value)
+    format_name = path.suffix.lower().lstrip(".")
+    if format_name not in ("txt", "vtt"):
+        invalid("Import an existing UTF-8 .txt or .vtt transcript export.")
+    if (args.cues is not None and format_name != "vtt") or (args.lines is not None and format_name != "txt"):
+        invalid("Use --cues with VTT or --lines with TXT.")
+    selected_range = None
+    supplied = args.cues if args.cues is not None else args.lines
+    if supplied is not None:
+        if not re.fullmatch(r"[1-9][0-9]{0,4}:[1-9][0-9]{0,4}", supplied):
+            invalid("Select an inclusive one-based range such as 3:8.")
+        first, last = map(int, supplied.split(":"))
+        if first > last:
+            invalid("The first selected unit must not follow the last selected unit.")
+        selected_range = first, last
+    _calls_progress(args.json, "reading_export")
+    try:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise CallsImportError("calls_import_invalid")
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor, "rb") as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise CallsImportError("calls_import_invalid")
+            if info.st_size > MAX_RAW_BYTES:
+                raise CallsImportError("calls_import_too_large")
+            raw = source.read(MAX_RAW_BYTES + 1)
+    except OSError:
+        raise CallsImportError("calls_import_io") from None
+    parsed = parse_transcript(raw, format=format_name)
+    excerpt = select_excerpt(parsed, requested_range=selected_range)
+    return parsed, excerpt, called_at
+
+
+def _calls_progress(as_json, step):
+    messages = {"reading_export": "Reading the transcript export.",
+                "preparing_state": "Preparing the selected CRM and private state.",
+                "resolving_account": "Resolving the account through an audited CRM read.",
+                "saving_import": "Saving the private transcript selection."}
+    output = {"progress": {"command": "calls import", "step": step}}
+    print(json.dumps(output) if as_json else messages[step], file=sys.stderr, flush=True)
+
+
+def _run_calls(args, prepared, crm_reader):
+    from datetime import datetime, timezone
+    from .calls_import import inspect_import, list_imports, store_import
+    from .runtime import Runtime, open_import_state
+    if args.action == "import":
+        from .call_workflow import resolve_call_account
+        parsed, excerpt, called_at = prepared
+        with Runtime(args.state_dir, crm_reader=crm_reader, calls_backend="imported") as runtime:
+            _calls_progress(args.json, "resolving_account")
+            association = resolve_call_account(runtime, account_id=args.account, account_number=args.account_number)
+            _calls_progress(args.json, "saving_import")
+            result = store_import(runtime.imports_path, parsed, excerpt, association=association,
+                                  called_at=called_at, imported_at=datetime.now(timezone.utc).isoformat().replace(
+                                      "+00:00", "Z"), reassign=args.reassign)
+    else:
+        with open_import_state(args.state_dir) as state:
+            result = (list_imports(state.imports_path, crm_binding=state.calls_binding, account_id=args.account,
+                                   limit=100, after=args.after) if args.action == "list" else
+                      inspect_import(state.imports_path, args.value, crm_binding=state.calls_binding, full=args.full))
+    if not args.json:
+        if args.action == "import":
+            crm = f"Salesforce ({args.sf_environment})" if args.crm_backend == "salesforce" else "demo fixtures"
+            label = (f"Sources: CRM uses {crm}; calls use user-supplied transcript exports. "
+                     "Transcript provider identity and statements are unverified.")
+        else:
+            label = "Source: user-supplied transcript export. Provider identity and source statements are unverified."
+        print(label, file=sys.stderr)
+    return result
 
 
 def _salesforce_account_read(args, reader):
@@ -287,7 +503,8 @@ def _salesforce_account_read(args, reader):
 
     tool = "search_accounts" if args.command == "accounts" else "get_account"
     arguments = {"query": args.query} if args.command == "accounts" else {"account_id": args.account_id}
-    with Runtime(args.state_dir, crm_reader=reader) as runtime, LocalClient(runtime.config) as client:
+    with Runtime(args.state_dir, crm_reader=reader, calls_backend=args.calls_backend) as runtime, \
+            LocalClient(runtime.config) as client:
         if not args.json:
             print(_salesforce_sources(args.sf_environment), file=sys.stderr)
         token = client.authorize(["crm:read"])
@@ -344,9 +561,19 @@ def _run(args, argv):
         from .completion import generate
         return {"shell": args.shell, "script": generate(build_parser(), args.shell)}
     # Dependencies belong to the command that uses them, after help is handled.
+    prepared_calls = _calls_arguments(args) if args.command == "calls" else None
     crm_reader = None
     demo_binding = None
     if args.command in ("serve", "brief", "accounts", "account"):
+        if args.command in ("accounts", "account") and args.crm_backend == "sqlite" and args.calls_backend is not None:
+            raise ValueError("--calls-backend is available only with --crm-backend salesforce for account inspection.")
+        args.calls_backend = args.calls_backend or "fixture"
+        if getattr(args, "salesforce_demo_binding", None) is not None and args.calls_backend == "imported":
+            raise ValueError("--salesforce-demo-binding cannot be combined with --calls-backend imported.")
+    if args.command == "calls" and args.action == "import":
+        _calls_progress(args.json, "preparing_state")
+    if (args.command in ("serve", "brief", "accounts", "account")
+            or (args.command == "calls" and args.action == "import")):
         if args.sf_org is not None and args.crm_backend != "salesforce":
             raise ValueError("--sf-org requires --crm-backend salesforce")
         if args.sf_environment is not None and args.crm_backend != "salesforce":
@@ -379,6 +606,8 @@ def _run(args, argv):
             crm_reader = (SalesforceReadOnlyAdapter.from_sf(args.sf_org, environment=args.sf_environment)
                           if args.sf_org is not None else
                           SalesforceReadOnlyAdapter.from_env(environment=args.sf_environment))
+    if args.command == "calls":
+        return _run_calls(args, prepared_calls, crm_reader)
     if args.command == "salesforce":
         from .salesforce_check import run_check
         return run_check(sf_org=args.sf_org, as_of=args.as_of, environment=args.sf_environment,
@@ -430,9 +659,14 @@ def _run(args, argv):
         as_of = args.as_of
         if as_of is None:
             as_of = date.today().isoformat() if crm_reader is not None else DEMO_AS_OF
-        with Runtime(args.state_dir, crm_reader=crm_reader, demo_binding=demo_binding) as runtime:
+        with Runtime(args.state_dir, crm_reader=crm_reader, demo_binding=demo_binding,
+                     calls_backend=args.calls_backend) as runtime:
             if crm_reader is not None and not args.json:
-                print(_salesforce_sources(args.sf_environment, mixed=True), file=sys.stderr)
+                print(_salesforce_sources(args.sf_environment, mixed=True, calls_backend=args.calls_backend),
+                      file=sys.stderr)
+            elif args.calls_backend == "imported" and not args.json:
+                print("Sources: mixed. Calls use user-supplied transcript exports; CRM and Slack use demo fixtures.",
+                      file=sys.stderr)
             return create_brief(runtime, args.account_id, include_calls=not args.without_calls,
                                 as_of=as_of,
                                 adapter=adapter, include_slack=args.with_slack)
@@ -457,12 +691,14 @@ def _run(args, argv):
                 _discard_output(sys.stdout)
                 message = "Event output closed. The server continues until Ctrl-C."
                 _server_notice(message, args.json)
-        with Runtime(args.state_dir, crm_reader=crm_reader, on_call=events.put, demo_binding=demo_binding) as runtime:
+        with Runtime(args.state_dir, crm_reader=crm_reader, on_call=events.put, demo_binding=demo_binding,
+                     calls_backend=args.calls_backend) as runtime:
             ready = {"type": "ready", "resource": runtime.config["resource"], "issuer": runtime.config["issuer"],
                      "crm_backend": runtime.crm_backend, "owner_config": str(runtime.directory / "owner.json"),
                      "state_dir": str(runtime.directory), "granted_scopes": [],
                      "sources": {"crm": "salesforce" if runtime.crm_backend == "salesforce" else "demo_fixture",
-                                 "calls": "demo_fixture", "slack": "demo_fixture"}}
+                                 "calls": "imported_transcript" if args.calls_backend == "imported" else "demo_fixture",
+                                 "slack": "demo_fixture"}}
             if demo_binding is not None:
                 ready["demo_kit_id"] = demo_binding.kit_id
             if runtime.crm_backend == "salesforce":
@@ -470,8 +706,11 @@ def _run(args, argv):
             if args.json:
                 print(json.dumps(ready), flush=True)
             else:
-                sources = (_salesforce_sources(args.sf_environment, mixed=True)
+                sources = (_salesforce_sources(args.sf_environment, mixed=True, calls_backend=args.calls_backend)
                            if runtime.crm_backend == "salesforce" else
+                           "Sources: mixed. Calls use user-supplied transcript exports; "
+                           "CRM and Slack use demo fixtures."
+                           if args.calls_backend == "imported" else
                            "Sources: CRM, call notes, and Slack use demo fixtures.")
                 if demo_binding is not None:
                     sources += f" The bound demo kit is {demo_binding.kit_id}."
@@ -519,7 +758,16 @@ def _failure(exc, args):
     next_command = f"gtm-connector {command} --help"
     message = str(exc)
     code = 2 if isinstance(exc, ValueError) else 1
-    if isinstance(exc, BriefRejected) or (command in ("demo", "verify") and message.startswith("demo ")):
+    if type(exc).__name__ == "CallsImportError":
+        code = exc.exit_code
+        message = f"{exc.code}: {CALL_FAILURES[exc.code]}"
+        next_command = "gtm-connector calls import --help"
+        if exc.code == "calls_import_not_found":
+            next_command = "gtm-connector calls list --state-dir " + shlex.quote(str(args.state_dir))
+        elif exc.code in ("calls_account_not_found", "calls_account_ambiguous"):
+            next_command = "gtm-connector accounts --help"
+        return _error(message, code, next_command, as_json=args.json)
+    elif isinstance(exc, BriefRejected) or (command in ("demo", "verify") and message.startswith("demo ")):
         code = 4
     elif getattr(exc, "code", None) == "renewal_fields_unmapped":
         code = 3
@@ -536,6 +784,9 @@ def _failure(exc, args):
         next_command = f"gtm-connector audit --state-dir {shlex.quote(str(args.state_dir))}"
     elif isinstance(exc, sqlite3.Error):
         code = 1
+    if command == "calls" and isinstance(exc, (OSError, sqlite3.Error)):
+        message = "The private transcript operation could not finish. Check the source and state folder permissions."
+        code = 1
     if getattr(exc, "code", None) == "demo_state_mismatch":
         code = 4
         fresh = args.state_dir.parent / "renewal-demo-fresh"
@@ -545,10 +796,12 @@ def _failure(exc, args):
             suffix += 1
         next_command = shlex.join(["gtm-connector", "demo", "--state-dir", str(fresh)])
     if getattr(exc, "code", None) == "source_identity_mismatch":
-        fresh = args.state_dir.parent / "salesforce-fresh"
+        imported = command == "calls" or getattr(args, "calls_backend", None) == "imported"
+        folder = "imported-calls-fresh" if imported else "salesforce-fresh"
+        fresh = args.state_dir.parent / folder
         suffix = 2
         while os.path.lexists(fresh):
-            fresh = args.state_dir.parent / f"salesforce-fresh-{suffix}"
+            fresh = args.state_dir.parent / f"{folder}-{suffix}"
             suffix += 1
         message = (f"source_identity_mismatch: {message} "
                    f"Repeat this command with --state-dir {shlex.quote(str(fresh))}. Existing files are retained.")
@@ -557,7 +810,8 @@ def _failure(exc, args):
     elif "database not found" in message:
         next_command = f"gtm-connector seed --db {shlex.quote(str(args.db))}"
     elif "account not found" in message:
-        next_command = ("gtm-connector accounts --help" if getattr(args, "crm_backend", None) == "salesforce" else
+        next_command = ("gtm-connector accounts --help" if command == "calls" or
+                        getattr(args, "crm_backend", None) == "salesforce" else
                         f"gtm-connector accounts --db {shlex.quote(str(args.db))}")
     elif command in ("inspector-config", "connect") and (
             isinstance(exc, FileNotFoundError) or type(exc).__name__ == "InspectorConnectionError"):
@@ -601,6 +855,12 @@ def _main(argv):
     except ParserError as exc:
         suggestion = "gtm-connector --help"
         candidate = next((argument for argument in arguments if not argument.startswith("-")), "")
+        if candidate == "calls":
+            index = arguments.index("calls") + 1
+            action = arguments[index] if index < len(arguments) else ""
+            suggestion = "gtm-connector calls" + (" " + action if action in ("import", "list", "inspect") else "")
+            return _error("The calls arguments do not match this action. Check its required arguments and options.",
+                          2, suggestion + " --help", as_json=as_json)
         if candidate not in COMMANDS:
             close = difflib.get_close_matches(candidate, COMMANDS, n=1)
             if close:

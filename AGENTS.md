@@ -135,6 +135,25 @@ invented story. Keep verification state separate because its retry check creates
 one local activity. The historical Ollama report remains evidence for its original
 fixture corpus, not a new run against the current book.
 
+## Authorized connected MVP sequence
+
+After the original six CLI, performance, Salesforce, kit, and narrative PRs,
+the user authorized a usable single-operator MVP. Finish one reviewed runnable
+slice at a time: explicit Salesforce environments and connection identity;
+transcript imports; existing Slack user authentication; bounded mapped Slack
+threads; selected-source permissions and caller-safe briefs; a local stdio MCP
+bridge; Deal card projections; MCP Apps and Slack rich-response contracts;
+Windows, Linux, and macOS support; explicit authentication/configuration and
+saved daily profiles; then the default interactive chooser. Check main before
+each slice and stack on the last ready branch unless it has merged.
+
+Keep authentication, source selection, and daily use separate. The no-setup demo
+remains available, source labels distinguish fixtures from selected real data,
+and failures never silently substitute fixtures. Local card previews and MCP
+resources are explicitly authorized later; public deployment and Slack sending
+remain outside scope. Use existing provider registrations only. Do not claim
+real-host login or rendering from a fake provider or local protocol harness.
+
 ## Council
 
 The user explicitly instructed "Keep going without Gemini" on 2026-11-18 after

@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import httpx2
 
 from .sf_credentials import SFCredentials, SFCredentialsError
+from .tool_definitions import valid_account_search
 
 
 API_VERSION = "v68.0"
@@ -446,12 +447,22 @@ class SalesforceReadOnlyAdapter:
                 "close_date": close_date, "is_closed": row["IsClosed"], "is_won": row["IsWon"],
                 "amount_decimal": format(amount, "f") if amount is not None else None, "currency": None}
 
-    def search_accounts(self, query=""):
-        escaped = _like_literal(query)
-        where = f" WHERE Name LIKE '%{escaped}%'" if query else ""
+    def search_accounts(self, query="", account_number=None):
+        if not valid_account_search(query, account_number):
+            raise SalesforceReadError("salesforce_invalid_arguments")
+        if account_number is not None:
+            escaped = account_number.replace("\\", "\\\\").replace("'", "\\'")
+            where, limit, max_rows = f" WHERE AccountNumber = '{escaped}'", 2, 2
+        else:
+            escaped = _like_literal(query)
+            where, limit, max_rows = (f" WHERE Name LIKE '%{escaped}%'" if query else ""), 101, _MAX_ROWS
         with self._operation() as (client, budget):
-            rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account{where} ORDER BY Id LIMIT 101", budget)
-            return [self._account(row) for row in rows]
+            rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account{where} ORDER BY Id LIMIT {limit}",
+                               budget, max_rows=max_rows)
+            accounts = [self._account(row) for row in rows]
+            if account_number is not None and any(row["account_number"] != account_number for row in accounts):
+                raise SalesforceReadError("salesforce_invalid_response")
+            return accounts
 
     def probe_accounts(self):
         """Read at most one Account for an owner-selected setup check."""

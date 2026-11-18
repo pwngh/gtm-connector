@@ -18,7 +18,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = (
     "seed", "accounts", "account", "evaluate", "demo", "verify", "serve", "audit", "brief",
-    "check-brief", "usage", "inspector-config", "doctor", "connect", "completion", "salesforce",
+    "check-brief", "usage", "inspector-config", "doctor", "connect", "completion", "salesforce", "calls",
 )
 
 
@@ -46,6 +46,23 @@ class CLIContractTests(unittest.TestCase):
                 self.assertIn("--json", result.stdout)
                 self.assertIn(command, result.stdout)
                 self.assertEqual(result.stderr, "")
+
+    def test_calls_action_help_only_shows_valid_options(self):
+        for action in ("import", "list", "inspect"):
+            result = self.run_cli("calls", action, "--help")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(f"Example: gtm-connector calls {action}", result.stdout)
+            self.assertIn("--json", result.stdout)
+            self.assertIn("--state-dir", result.stdout)
+            if action != "import":
+                for flag in ("--sf-org", "--sf-environment", "--crm-backend", "--called-at", "--reassign", "--cues"):
+                    self.assertNotIn(flag, result.stdout)
+            if action == "inspect":
+                self.assertIn("--full", result.stdout)
+                self.assertNotIn("--account", result.stdout)
+            elif action == "list":
+                self.assertIn("--after", result.stdout)
+                self.assertNotIn("--full", result.stdout)
 
     def test_demo_and_verification_have_separate_defaults_without_changing_daily_commands(self):
         from gtm_connector.cli import build_parser
@@ -76,6 +93,7 @@ sys.argv = ["gtm-connector", *sys.argv[1:]]
 runpy.run_module("gtm_connector", run_name="__main__")
 '''
         for arguments in (("--version",), ("--help",),
+                          *(("calls", action, "--help") for action in ("import", "list", "inspect")),
                           *((command, "--help") for command in COMMANDS)):
             with self.subTest(arguments=arguments):
                 result = subprocess.run(

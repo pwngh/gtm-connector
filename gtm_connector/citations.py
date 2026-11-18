@@ -53,12 +53,26 @@ def _money(cents):
 
 def _catalog(evidence, *, legacy_empty_roles=False):
     version = evidence.get("workflow_version", 1)
-    if type(version) is not int or version not in (1, 2, 3):
+    if type(version) is not int or version not in (1, 2, 3, 4):
         raise BriefRejected("Unsupported evidence workflow version.")
     if version == 1 and "slack_status" in evidence:
         raise BriefRejected("Legacy evidence cannot contain a Slack outcome.")
-    salesforce = version == 3
-    include_slack = version == 2 or (salesforce and "slack_status" in evidence)
+    imported = version == 4
+    if imported:
+        allowed = {"brief_id", "account_id", "as_of", "records", "receipts", "notes_status",
+                   "workflow_version", "crm_backend", "calls_backend", "calls_binding", "slack_status"}
+        binding = evidence.get("calls_binding")
+        if (not evidence.keys() <= allowed or evidence.get("calls_backend") != "imported"
+                or evidence.get("crm_backend") not in ("sqlite", "salesforce")
+                or not isinstance(binding, dict)
+                or set(binding) != {"schema_version", "crm_backend", "identity_sha256"}
+                or type(binding["schema_version"]) is not int or binding["schema_version"] != 1
+                or binding["crm_backend"] != evidence["crm_backend"]
+                or not isinstance(binding["identity_sha256"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", binding["identity_sha256"]) is None):
+            raise BriefRejected("Imported evidence requires a supported source binding and bounded snapshot.")
+    salesforce = version == 3 or (imported and evidence["crm_backend"] == "salesforce")
+    include_slack = version == 2 or (version in (3, 4) and "slack_status" in evidence)
     if salesforce and evidence.get("crm_backend") != "salesforce":
         raise BriefRejected("Salesforce evidence must identify its CRM backend.")
     sources = {**_SOURCES, **(_SLACK_SOURCE if include_slack else {}),
@@ -95,6 +109,13 @@ def _catalog(evidence, *, legacy_empty_roles=False):
                 raise BriefRejected("Salesforce record identity does not match its source.")
         if (identifier if table == "accounts" else record["account_id"]) != account_id:
             raise BriefRejected("Evidence contains a record for a different account.")
+        if imported and table == "call_notes":
+            from .calls_import import CallsImportError, validate_imported_record
+            try:
+                record = validate_imported_record(record, account_id=account_id, crm_binding=evidence["calls_binding"])
+            except CallsImportError:
+                raise BriefRejected(
+                    "Imported transcript evidence does not match its immutable selected revision.") from None
         seen.add(reference)
         groups[table].append(record)
         expected_rows[tool].append(reference)
@@ -103,6 +124,8 @@ def _catalog(evidence, *, legacy_empty_roles=False):
 
     if evidence["notes_status"] not in ("available", "denied"):
         raise BriefRejected("Unknown call-notes outcome.")
+    if imported and evidence["notes_status"] == "available" and len(groups["call_notes"]) != 1:
+        raise BriefRejected("Imported calls require exactly one selected transcript excerpt.")
     if include_slack and evidence["slack_status"] not in ("available", "denied"):
         raise BriefRejected("Unknown Slack outcome.")
     receipts, receipt_ids = {}, set()
@@ -183,6 +206,19 @@ def _catalog(evidence, *, legacy_empty_roles=False):
         required.add(add(f"No call notes were returned for {account_id}.", notes_receipt))
     else:
         for note in sorted(groups["call_notes"], key=lambda row: row["id"]):
+            if imported:
+                manifest = note["manifest"]
+                selected, cited = manifest["requested_range"], manifest["cited_range"]
+                when = "not provided" if note["called_at"] is None else _text(note["called_at"])
+                required.add(add(
+                    f"User-supplied transcript excerpt {note['id']}: call time {when}; "
+                    f"imported at {_text(manifest['imported_at'])}; "
+                    f"requested {manifest['unit_kind']} {selected['first']} through {selected['last']}; "
+                    f"quoted {manifest['unit_kind']} {cited['first']} through {cited['last']} "
+                    f"of {manifest['total_units']} including available adjacent context. "
+                    f"This is an excerpt, not a complete call summary. It says {_text(note['body'])}.",
+                    note["record_ref"]))
+                continue
             add(f"Untrusted call note {note['id']} at {_text(note['called_at'])} "
                 f"says {_text(note['body'])}.", note["record_ref"])
             # One explicit fixture rule, not inference over arbitrary note prose.

@@ -108,6 +108,16 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(report["day_basis"], "UTC")
         self.assertEqual(report["by_day"][0]["day"], "2026-11-17")
 
+    def test_imported_extractive_briefs_have_known_zero_model_usage(self):
+        self.save_brief(BRIEF_A, adapter="extractive")
+        report = build_usage_report(self.state)
+        self.assertEqual(report["briefs"][0]["adapter"], "extractive")
+        self.assertEqual(report["model_tokens"], {"saved_briefs": 1, "unknown_briefs": 0,
+                                                  "input_tokens": 0, "output_tokens": 0})
+        self.save_brief(BRIEF_A, adapter="extractive", input_tokens=None)
+        with self.assertRaisesRegex(ValueError, "invalid brief usage artifact"):
+            build_usage_report(self.state)
+
     def test_usage_totals_distinguish_known_and_unknown_dimensions(self):
         self.save_brief(BRIEF_A, status="collected")
         self.save_brief(BRIEF_B, adapter="custom", model="fixture-test-model",

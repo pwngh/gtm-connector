@@ -155,7 +155,8 @@ class SourceStateTests(unittest.TestCase):
 
     def test_complete_pre_salesforce_owner_shape_preserves_fixture_state(self):
         with Runtime(self.state) as runtime:
-            legacy = {key: value for key, value in runtime.config.items() if key != "crm_backend"}
+            legacy = {key: value for key, value in runtime.config.items()
+                      if key not in ("crm_backend", "calls_backend")}
         # This is the complete owner shape written before cdab7ba introduced Salesforce.
         self.assertEqual(set(legacy), {"issuer", "resource", "cert_path", "client_id",
                                        "redirect_uri", "owner_secret"})
