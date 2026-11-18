@@ -31,12 +31,15 @@ Human text is intended for reading and can change independently.
 | `account` | Account object with `id`, `name`, `industry`, renewal fields, and a `contacts` array. |
 | `brief` | Saved artifact with `schema_version: 1`, identifiers, `as_of`, `status`, `evidence`, `text`, and `model_usage`. Slack mode adds `proposed_follow_up`. |
 | `check-brief` | Object with `status: "valid"` and `brief_id`. |
-| `audit` | Array of receipts, ordered as stored. Fields are documented in [audit](audit.md). |
-| `usage` | Object with `brief_id`, `day_basis`, `calls`, `by_token`, `by_tool`, `by_day`, `by_token_tool_day`, `briefs`, and `model_tokens`. See [usage](usage.md). |
+| `audit` | Array of receipts, ordered as stored. With `--follow`, each changed receipt is one JSON line. Fields and filters are documented in [audit](audit.md). |
+| `usage` | Object with `brief_id`, `day_basis`, `calls`, `by_token`, `by_tool`, `by_day`, `by_token_tool_day`, `briefs`, and `model_tokens`. Active receipt filters add `filters`. With `--follow`, each changed report is one JSON line. See [usage](usage.md). |
 | `evaluate` | Object with `status`, account and claim counts, per-account `cases`, receipt counts, and model usage. See [evaluation](evaluation.md). |
 | `demo` | Object containing the connector checks, `briefs`, receipt counts, and `injection_brief`. Slack mode adds `slack` and `workflow`. |
-| `serve` | One compact JSON startup object with `resource`, `issuer`, `crm_backend`, and `owner_config`. It contains no credential. |
+| `serve` | A `ready` JSON line, followed by one `tool_call` JSON line per observed tool attempt. See [server output](#server-output). |
 | `inspector-config` | Object with `config`, `certificate`, and `scopes`. Credentials stay in the private file. |
+| `connect` | Object with `app`, `status`, `setup`, `limits`, and `documentation`. Creating a grant adds `config`, the private file's path. See [client setup](clients.md). |
+| `doctor` | Object with `status` and a `checks` array. Each check has `name`, `status`, `message`, and `fix`. |
+| `completion` | Object with `shell` and `script`. Without `--json`, stdout contains only the shell script. |
 
 Help remains plain help text, even with `--json`. JSON errors are one object on
 stderr, with an empty stdout unless the command has already produced results:
@@ -46,8 +49,10 @@ stderr, with an empty stdout unless the command has already produced results:
 ```
 
 Treat `error.code` and the process exit as the machine contract. Read `message`
-for the cause and `next` for a suggested command. A failed evaluation still
-prints its complete result on stdout before reporting failure on stderr.
+for the cause and `next` for a suggested command. A failed evaluation or doctor
+check still prints its complete report on stdout before reporting failure on
+stderr. Evaluation also writes progress to stderr, so its error object can
+follow progress lines. See [evaluation progress](evaluation.md#progress).
 
 | Exit | Meaning | JSON error code |
 | --- | --- | --- |
@@ -55,7 +60,7 @@ prints its complete result on stdout before reporting failure on stderr.
 | 1 | A local file, database, or runtime operation failed. | `local_failure` |
 | 2 | Arguments or local configuration are missing or invalid. | `usage_error` |
 | 3 | The requested operation was refused. | `refused` |
-| 4 | The evidence checker, demo check, or evaluation failed. | `check_failed` |
+| 4 | The evidence checker, demo check, evaluation, or doctor failed. | `check_failed` |
 | 5 | A source service or its transport failed. | `upstream_failure` |
 | 130 | Ctrl-C interrupted a command. Completed local writes remain. | `interrupted` |
 
@@ -63,6 +68,104 @@ A command typo suggests the nearest command without running it. A broken pipe
 closes output quietly. Help and version build no runtime and import neither
 SQLite, the MCP SDK, nor the HTTP client. The CLI contract tests hold that import
 boundary without depending on elapsed time.
+
+## Server output
+
+Start the local services and leave this terminal open:
+
+```sh
+gtm-connector serve --state-dir var/session
+```
+
+Startup on stderr identifies the address, CRM backend, state folder, granted
+scopes, connection command, and Ctrl-C stop instruction. No scope is granted at
+startup. A client needs an explicit grant from the local owner. Shutdown also
+goes to stderr and leaves local state in place.
+
+While the server runs, stdout receives one line for each observed tool attempt:
+UTC completion time, tool, caller fingerprint, decision, duration in milliseconds,
+and receipt ID. A refusal includes its reason. This stream includes no raw
+arguments, source text, or bearer credentials. A fingerprint groups a presented
+credential; it does not identify a person or establish a valid grant.
+
+`serve --json` uses JSON lines on stdout. The first line has this shape; addresses
+and paths here are placeholders:
+
+```json
+{"type":"ready","resource":"https://127.0.0.1:PORT/mcp","issuer":"https://127.0.0.1:PORT","crm_backend":"sqlite","owner_config":"/STATE/owner.json","state_dir":"/STATE","granted_scopes":[]}
+```
+
+Subsequent lines have `type: "tool_call"`, `time` (UTC ISO 8601), `tool`,
+`caller` (a complete SHA-256 fingerprint or `"anonymous"`), `decision`
+(`"allowed"`, `"refused"`, or `"failed"`), `duration_ms` (number),
+`receipt_id` (string or `null`), and `reason` (string or `null`). An audit write
+failure can leave the event without a receipt ID. Duration includes the audit
+write. The event observer is best effort; [durable receipts](audit.md) remain
+the record to inspect. Unparseable traffic without a `tools/call` marker and
+requests that disconnect before recognition are outside this stream. A marked
+attempt can still produce an event when its payload cannot be parsed.
+Tool names outside the registered catalog appear as `"<unknown>"`; malformed
+names use fixed markers. Closing the event pipe leaves the server running and
+discards further event output. The private audit still records each attempt.
+
+The JSON shutdown notice is a separate stderr line:
+`{"message":"Connector stopped. Local state is retained."}`. Ctrl-C stops
+`serve` with exit `0`; it stops an inspection `--follow` with exit `130`.
+
+## Check the setup
+
+```sh
+gtm-connector doctor --state-dir var/session
+gtm-connector doctor --state-dir var/session --json
+```
+
+Doctor checks Python, installed dependencies, SQLite support, private state
+files, owner configuration, certificate validity, and both local services'
+metadata. It stops before dependent checks if private state or configuration
+is unsafe to read. Each failure gives a suggested fix; doctor does not apply
+fixes, create state, grant access, or read CRM, call, or Slack records. Its
+network checks are GET requests to validated local HTTPS endpoints.
+
+Output includes check names and bounded messages, never owner secrets, tokens,
+or source values. The JSON check `status` is `"pass"` or `"fail"`; `fix` is an
+empty string for a pass. The top-level `status` is `"passed"` or `"failed"`.
+A failed report exits `4`. [Doctor tests](../tests/test_doctor.py) cover failures,
+redaction, and unchanged state.
+
+## Shell completion
+
+These commands use an installed `gtm-connector`; no repository clone is needed.
+Completion lists command names, options, fixed choices, and paths without
+starting the connector or reading its state.
+
+For the current Bash session:
+
+```bash
+eval "$(gtm-connector completion bash)"
+```
+
+Add that line to `~/.bashrc` to load it in new interactive Bash sessions. For
+Zsh, initialize its completion system before loading the script:
+
+```zsh
+autoload -Uz compinit
+compinit
+source <(gtm-connector completion zsh)
+```
+
+Put those lines in `~/.zshrc`, or put the final line after an existing `compinit`.
+For Fish, save the script in its completion directory and load it now:
+
+```fish
+mkdir -p ~/.config/fish/completions
+gtm-connector completion fish > ~/.config/fish/completions/gtm-connector.fish
+source ~/.config/fish/completions/gtm-connector.fish
+```
+
+The checked behavior includes Bash and Zsh completion-function dispatch locally
+and Bash, Zsh, and Fish dispatch in the Linux development container. These are
+shell execution checks, not an interactive terminal UI test. The
+[completion tests](../tests/test_completion.py) exercise the generated scripts.
 
 The interface follows [Command Line Interface Guidelines](https://clig.dev/)
 and GitHub's [Primer CLI guidelines](https://github.com/cli/cli/tree/trunk/docs/primer).

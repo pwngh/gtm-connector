@@ -41,6 +41,21 @@ tool calls through the same gateway, audit log, and rate limit. It trusts the
 generated certificate through `NODE_EXTRA_CA_CERTS`; TLS verification remains on.
 This path tests supplied-token MCP access, not an external client's login flow.
 
+`connect` writes supplied-token configs only for explicit scopes. Inspector
+uses its existing private config; Claude Code and Cursor get separate private
+files. No command launches a hosted assistant. Those app paths are untested,
+and their ordinary login does not work with this local owner emulator. Keep
+all generated app configs out of Git. `doctor` inspects file types, permissions,
+certificate dates, and validated loopback metadata without obtaining a grant,
+reading CRM records, or printing raw configuration and transport errors.
+
+The running server's event stream contains time, tool, caller fingerprint,
+decision, duration, receipt ID, and a fixed reason. It contains neither bearer
+tokens nor arguments or source bodies. Tool names are untrusted and the human
+renderer escapes controls. JSON escapes its string values. These events are
+operator diagnostics; the SQLite receipt remains the persisted audit record.
+An event callback failure cannot bypass a receipt failure or alter a response.
+
 Both services bind HTTPS to `127.0.0.1`. The client explicitly trusts the
 generated certificate. It validates the issuer, resource, redirect, and state.
 Authorization uses a preregistered public client and S256 PKCE. Codes expire

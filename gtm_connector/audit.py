@@ -9,9 +9,13 @@ from pathlib import Path
 import sqlite3
 import uuid
 
+from .inspection import ReceiptFilters
 
-def read_audit(path: str | Path, brief_id: str | None = None) -> list[dict]:
+
+def read_audit(path: str | Path, brief_id: str | None = None, *,
+               tool=None, caller=None, since=None, until=None, status=None) -> list[dict]:
     """Read existing receipts without initializing or changing the database."""
+    filters = ReceiptFilters(tool=tool, caller=caller, since=since, until=until, status=status)
     database = Path(path).expanduser().absolute()
     if database.is_symlink():
         raise ValueError("Audit database must not be a symbolic link.")
@@ -20,15 +24,15 @@ def read_audit(path: str | Path, brief_id: str | None = None) -> list[dict]:
     query = """SELECT audit_id, started_at, token_id, tool, arguments, request_id,
                       brief_id, status, http_status, row_count, rows, elapsed_ms, error
                FROM audit_log"""
-    parameters: tuple[str, ...] = ()
-    if brief_id is not None:
-        query += " WHERE brief_id = ?"
-        parameters = (brief_id,)
+    condition, parameters = filters.sql(brief_id)
+    query += condition
     with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=10)) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(query + " ORDER BY rowid", parameters).fetchall()
     records = []
     for row in rows:
+        if not filters.includes_time(row["started_at"]):
+            continue
         record = dict(row)
         try:
             for field in ("arguments", "request_id", "rows"):

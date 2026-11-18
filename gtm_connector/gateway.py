@@ -63,7 +63,7 @@ def require_distinct_databases(paths):
 class Connector:
     def __init__(self, crm_path, calls_path, audit_path, authority,
                  rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None,
-                 crm_reader=None):
+                 crm_reader=None, on_call=None):
         if rate_limit < 1 or window_seconds <= 0:
             raise ValueError("rate limits must be positive")
         paths = [Path(p).resolve() for p in (crm_path, calls_path, audit_path)]
@@ -73,6 +73,7 @@ class Connector:
         self.crm_path, self.calls_path = paths[:2]
         self.slack_path = paths[3]
         self.crm_reader = crm_reader
+        self.on_call = on_call
         self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
         self.audit = AuditLog(paths[2])
         self.authority = authority
@@ -94,6 +95,25 @@ class Connector:
                 allowed_hosts=[urlsplit(authority.resource).netloc], allowed_origins=[]),
         )
         self.app = self
+
+    def _emit_call(self, *, started, token, tool, decision, receipt_id, reason):
+        """Observe a completed attempt without changing its response or audit receipt."""
+        if self.on_call is None:
+            return
+        event = {
+            "type": "tool_call",
+            "time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "tool": tool if tool in TOOL_DEFINITIONS or tool in ("<unparsed>", "<invalid>") else "<unknown>",
+            "caller": "anonymous" if token is None else hashlib.sha256(token.encode()).hexdigest(),
+            "decision": decision,
+            "duration_ms": (time.perf_counter() - started) * 1000,
+            "receipt_id": receipt_id,
+            "reason": reason,
+        }
+        try:
+            self.on_call(event)
+        except Exception:
+            pass  # The observer is best effort; the durable audit remains authoritative.
 
     @staticmethod
     def _require_tool(name):
@@ -227,13 +247,17 @@ class Connector:
         brief_id = brief_id if isinstance(brief_id, str) and len(brief_id) <= 128 else None
         request_id = request.get("id") if isinstance(request, dict) else None
         started, audit_id = self.clock(), None
+        event_started = time.perf_counter() if is_call and self.on_call is not None else None
+        caller_token = raw_token or raw_auth or None
         if is_call:
             try:
-                audit_id = self.audit.start(token=raw_token or raw_auth or None, tool=tool,
+                audit_id = self.audit.start(token=caller_token, tool=tool,
                     arguments=(arguments if request is not None
                                else {"unparsed_sha256": hashlib.sha256(body).hexdigest()}),
                     request_id=request_id, brief_id=brief_id)
             except (OSError, sqlite3.Error, ValueError):
+                self._emit_call(started=event_started, token=caller_token, tool=tool,
+                                decision="failed", receipt_id=None, reason="audit_unavailable")
                 return await JSONResponse(
                     {"error": "audit_unavailable; call was not executed"}, 503,
                 )(scope, receive, send)
@@ -310,10 +334,18 @@ class Connector:
                                       elapsed_ms=(self.clock() - started) * 1000, error="execution_or_audit_failure")
                 except (OSError, sqlite3.Error, ValueError):
                     pass  # The already-committed pending receipt remains visible.
+            if is_call:
+                self._emit_call(started=event_started, token=caller_token, tool=tool,
+                                decision="failed", receipt_id=audit_id, reason="execution_or_audit_failure")
             if not isinstance(exc, Exception):
                 raise
             return await JSONResponse(
                 {"error": "execution_or_audit_unavailable; no result released"}, 503,
             )(scope, receive, send)
+        if is_call:
+            call_decision = "refused" if decision.error is not None else "failed" if failed else "allowed"
+            reason = decision.error.reason if decision.error is not None else "tool_error" if failed else None
+            self._emit_call(started=event_started, token=caller_token, tool=tool,
+                            decision=call_decision, receipt_id=audit_id, reason=reason)
         for message in messages:
             await send(message)

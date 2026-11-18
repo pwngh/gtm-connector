@@ -30,11 +30,11 @@ An activity may already have committed when this happens. Retry with the same
 idempotency key and reconcile any pending row. The log is neither tamper-proof
 evidence nor a billing system.
 
-The audit command lists receipts for a brief. It runs from the repository root
-after setup. Replace the placeholder with the generated brief ID:
+The audit command lists receipts for a brief. Replace the placeholder with the
+generated brief ID:
 
 ```sh
-.venv/bin/python -m gtm_connector audit --brief brief-REPLACE_WITH_ID
+gtm-connector audit --brief brief-REPLACE_WITH_ID
 ```
 
 The default output is a receipt table. Add `--json` for the complete receipt
@@ -44,6 +44,48 @@ The audit command opens SQLite read-only without initializing tables or changing
 permissions. A missing database or receipt schema is an error.
 [Inspection tests](../tests/test_audit_reader.py) cover these cases;
 [Usage reporting](usage.md) provides a read-only summary.
+
+## Filter and follow receipts
+
+Combine filters to narrow the receipt table or JSON array:
+
+```sh
+gtm-connector audit --state-dir var/session --tool get_account --status error
+gtm-connector audit --state-dir var/session --caller anonymous --json
+gtm-connector audit --state-dir var/session --since 2026-11-17T00:00:00Z --until 2026-11-18T00:00:00Z
+```
+
+`--tool`, `--caller`, `--status`, and `--brief` match exact values and combine
+with AND. Status is `ok`, `error`, or `pending`. Caller is a complete lowercase
+SHA-256 fingerprint from a receipt, or `anonymous`; do not pass a bearer token.
+Fingerprints identify presented credentials, including rejected ones, rather
+than people or valid grants.
+
+`--since` includes receipts started at or after its timestamp. `--until`
+excludes receipts started at or after its timestamp. Both require ISO 8601 with
+`Z` or an explicit UTC offset; comparisons use UTC. The start must precede the
+end. These filters use the attempt's `started_at`, even if it finishes later.
+
+Follow starts with all current matches, then prints new or changed matching
+receipts until Ctrl-C:
+
+```sh
+gtm-connector audit --state-dir var/session --follow
+gtm-connector audit --state-dir var/session --tool get_account --follow --json
+```
+
+With `--json`, each line is a complete receipt object, not an array or an
+envelope. A pending receipt and its final result share the same `audit_id` and
+can both appear. Other changes to that receipt also appear; an unchanged row
+does not repeat. Filters apply to each observed version, so `--status pending`
+does not print its eventual `ok` version. Deletions produce no event.
+
+Follow polls every half second and closes the read-only database connection
+between snapshots. It can miss changes made and reversed between polls. Ctrl-C
+exits `130` and leaves state unchanged. [Inspection tests](../tests/test_inspection.py)
+cover time boundaries, pending finalization, repeated rows, and changed summaries.
+The running server's [tool-call stream](cli.md#server-output) gives a smaller
+event without the arguments and record references included in audit JSON.
 
 ## Rate limits
 

@@ -245,6 +245,28 @@ The full walkthrough adds evaluation, usage, and a live citation rejection:
 
 It prints its private output directory. Follow [the five-minute guide](DEMO.md).
 
+### Use the daily commands
+
+```sh
+gtm-connector serve --state-dir var/v2
+gtm-connector doctor --state-dir var/v2
+gtm-connector connect inspector --scope crm:read --state-dir var/v2
+gtm-connector audit --tool get_account --follow --state-dir var/v2
+gtm-connector usage --state-dir var/v2
+```
+
+The server prints its address and setup instructions, then one line for each
+recognized tool attempt. The line includes its decision and receipt ID. Audit
+and usage support filters and follow mode. Doctor reports local setup failures
+with fixes. Evaluation reports progress on stderr. `completion` prints setup
+for bash, zsh, or fish. [Daily command reference](docs/cli.md)
+
+Inspector CLI is tested with an explicit local grant. `connect` also prints
+configuration for Claude Code and Cursor, marked untested. Claude Desktop
+cannot reach this loopback HTTP server through its remote connector; its local
+stdio path is not implemented. Normal assistant login cannot complete against
+the local owner emulator. [Client setup and exact limits](docs/clients.md)
+
 ### Run in Codespaces
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/pwngh/gtm-connector)

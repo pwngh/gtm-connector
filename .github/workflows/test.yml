@@ -29,6 +29,12 @@ jobs:
           .venv/bin/python -m pip check
           .venv/bin/python -m ruff check .
           .venv/bin/python -m mypy
+      - name: Check all shell completion scripts
+        if: matrix.python-version == '3.11'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y fish zsh
+          GTM_REQUIRE_SHELLS=1 .venv/bin/python -m unittest discover -s tests -p test_completion.py -v
       - name: Check the installed command outside the checkout
         run: |
           .venv/bin/python -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/wheels" .

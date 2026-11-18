@@ -102,7 +102,7 @@ def _resolve_references(case, artifact):
     return claims
 
 
-def run_evaluation(*, adapter=None, command=None, include_slack=False):
+def run_evaluation(*, adapter=None, command=None, include_slack=False, progress=None):
     """Run twenty HTTPS briefs in disposable state, never in an operator's CRM."""
     from .briefing import create_brief
     from .citations import BriefRejected, diagnose_brief
@@ -114,6 +114,8 @@ def run_evaluation(*, adapter=None, command=None, include_slack=False):
     started_at = datetime.now(timezone.utc).isoformat()
     model_run = adapter is not None
     cases = []
+    if progress is not None:
+        progress(0, len(expected["cases"]), None)
     with tempfile.TemporaryDirectory(prefix="gtm-evaluation-") as directory:
         with Runtime(directory) as runtime:
             for case in expected["cases"]:
@@ -151,6 +153,8 @@ def run_evaluation(*, adapter=None, command=None, include_slack=False):
                     cases[-1].update({"candidate": None,
                                       "model_usage": {"model": None, "input_tokens": None,
                                                       "output_tokens": None}}, **observed)
+                if progress is not None:
+                    progress(len(cases), len(expected["cases"]), cases[-1]["status"])
             receipts = runtime.connector.audit.read()
             with closing(store.connect(runtime.directory / "crm.sqlite3", readonly=True)) as connection:
                 activities = connection.execute("SELECT count(*) FROM activities").fetchone()[0]
