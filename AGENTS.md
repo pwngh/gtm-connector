@@ -193,23 +193,26 @@ Two checks come before the numbered slices:
   never reads a real transcript. The owner then runs the script on five real
   transcripts they are free to use, on their own machine, and reads the result
   as a rep would. If it is thin or wrong, stop and report before starting
-  slice 1. The rules below on keys, hosted endpoints, and giving the model no
-  tool apply to this test. The gateway and audit rules apply to product calls,
-  not to this standalone script. The owner chooses the model for the real run
-  and may choose a hosted one. Commit only invented transcripts.
+  slice 1. The rules below on keys, hosted endpoints, pending records, and
+  giving the model no tool apply to this test. The script commits its pending
+  records to a private local file, so a hosted call is never sent without one.
+  The gateway and its receipts apply to product calls, not to this standalone
+  script. The owner chooses the model for the real run and may choose a hosted
+  one. Commit only invented transcripts.
 
 Then finish one reviewed PR per slice, in this order:
 
 1. Selected sources and caller-safe briefs. The design notes are outside the
    repository, so this slice's PR records its design in DECISION_LOG.md. The
    requirements are fixed. A remote brief tool runs under the caller's own
-   token and never the owner's. Every read is limited to the caller's scopes,
-   the saved selection, and what the provider shows. Each composite call
-   commits one outer receipt and one receipt per attempted read. Reading a
-   saved brief makes no provider call. It releases the brief only if the
-   caller's current scopes, the current selection, and the current source
-   bindings still cover everything the brief contains. It cannot recheck what
-   the provider shows now, and its result says so.
+   token and never the owner's. Every live read is limited to the caller's
+   scopes, the saved selection, and what the provider shows. Each composite
+   call commits one outer receipt and one receipt per attempted read. Reading a
+   saved brief is not a live read, because it makes no provider call. It
+   releases the brief only if the caller's current scopes, the current
+   selection, and the current source bindings still cover everything the brief
+   contains. It cannot recheck what the provider shows now, and its result
+   says so.
 2. The local stdio MCP bridge. Every request still goes through the existing
    gateway, with scopes named at launch, a receipt committed before execution,
    and the rate limit. At launch the bridge requests a grant for exactly the
@@ -223,9 +226,13 @@ Then finish one reviewed PR per slice, in this order:
    a symlink for the file or the backup, and it refuses to write if the file
    changed after it was read. The file holds paths and scopes, never a token
    or an owner credential.
-3. A Slack channel window. The operator pins one channel per account. The read
-   keeps the existing shared budget of HTTP attempts, response bytes, and one
-   deadline, and adds hard caps on days, messages, and thread replies.
+3. A Slack channel window. The operator pins one channel per account. Before
+   choosing caps, the slice checks which Slack rate limit the operator's
+   existing registration falls under. That depends on how the app is
+   distributed and when it was created and installed, so the owner supplies
+   those facts. The read keeps the existing shared budget of HTTP attempts,
+   response bytes, and one deadline, and adds hard caps on days, messages, and
+   thread replies.
 4. Model-read claims. A model reads the selected evidence and proposes claims
    that cite numbered units. Repeat the extraction test with channel context
    before calling this slice ready.
@@ -243,12 +250,13 @@ Then finish one reviewed PR per slice, in this order:
    how several files for one account are ordered and bounded.
 9. A renewals-due command that prepares briefs for selected accounts renewing
    within a chosen number of days. The operator schedules it. It calls the
-   audited tools with explicitly named scopes, like any other caller, and
-   obtains its grant for those scopes the same way the bridge does. The
-   existing bounded, non-interactive credential refresh still applies. If the
-   local token or a Slack or Salesforce credential is still unusable after
-   that, it fails that account with a recorded receipt and a clear error. It
-   never prompts, signs in, or substitutes fixtures.
+   audited tools with explicitly named scopes, like any other caller. It only
+   reuses or silently renews an existing grant for those scopes or fewer.
+   Unlike the bridge, it never starts the owner flow. The existing bounded,
+   non-interactive credential refresh still applies. If the local token or a
+   Slack or Salesforce credential is still unusable after that, it fails that
+   account with a recorded receipt and a clear error. It never prompts, signs
+   in, or substitutes fixtures.
 10. A PyPI release. The owner publishes it.
 
 Rules for model-read claims:
@@ -348,13 +356,18 @@ the PR description. When unsure, use the council.
 | Anthropic | Claude Fable 5.2, model ID `claude-fable-5-2`, through the `claude` CLI | High | Blocking |
 | OpenAI | GPT Sol; record the exact Sol model ID. PRs #25 through #29 used `gpt-6.2-sol` | High | Blocking |
 | Google | Gemini 4 Argon, model ID `gemini-4-argon-high`, through the `agy` CLI | High | Blocking |
-| xAI | Grok 4.7, model ID `grok-4.7`, through the `grok` CLI, version 1.0.13 or later | High | Non-blocking |
+| xAI | Grok 4.7, model ID `grok-4.7`, through the `grok` CLI, version 1.0.13 or later | Low, or High for a diff of 150,000 bytes or more | Non-blocking |
 
 Grok runs alongside the others under the same time limit for each reviewer.
 Treat a finding it returns in time like any other finding: fix it or decline
 it with a written reason. Its verdict does not gate the PR. A failed or late
 Grok run does not stop the PR and gets no score.
 Its first complete review took about twelve minutes, the longest of the four.
+It now runs at Low in one pass, with the diff inside its prompt and no tools.
+On a 25 KB prompt on 2026-11-18 that took 159 seconds and returned three valid
+findings. The same prompt took 339 seconds at Medium and found no more, and a
+review with tools at High takes 7 to 14 minutes. For a diff of 150,000 bytes
+or more, Grok instead reads its exported copy with tools at High.
 If a blocking member cannot be reached, stop on a local branch and report the
 failure without substitution.
 

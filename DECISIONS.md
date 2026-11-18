@@ -57,7 +57,9 @@ earlier sequence.
   default stays offline. A hosted endpoint sends selected source text off the
   machine, so the choice is explicit and labeled. A pending record is
   committed before each call is sent, so a crash or a failed call still leaves
-  a record of what left the machine.
+  a record that a call to that host and model was attempted. The record never
+  holds the prompt or source text, and only a finished outcome can show that
+  the call was sent.
 - The key comes from an environment variable or a private file with mode 0600.
   A flag would leak it into shell history and the process list.
 - A cited range shows where a claim points. It does not prove the claim. An
@@ -191,8 +193,9 @@ by the operator's choice and with their own key.
 
 ## Entries in the decision log
 
-Dated entries come first, newest first. The undated entries after them are the
-original slices in the order they were built. Each title links to its entry in
+The later dated entries come first, newest first. The entries for the original
+slices follow in the order they were built. They are undated except the third,
+"Protocol research (2026-11-17)". Each title links to its entry in
 DECISION_LOG.md.
 
 - [Explicit mapped Slack reads and source observations (2026-11-18)](DECISION_LOG.md#explicit-mapped-slack-reads-and-source-observations-2026-11-18)

@@ -1,7 +1,8 @@
 # Decision log
 
-Dated entries come first, newest first. The undated entries after them are
-the original slices in the order they were built. Each entry records a material
+The later dated entries come first, newest first. The entries for the original
+slices follow in the order they were built. They are undated except the third,
+"Protocol research (2026-11-17)". Each entry records a material
 scope choice or limit and its reason. [DECISIONS.md](DECISIONS.md) holds the
 current build order and review configuration, and lists these entries. Add a
 new entry at the top.
