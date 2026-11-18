@@ -268,11 +268,11 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(result.scopes, ("channels:history",))
         self.validate(result)
 
-        # A credential that returned a page keeps its scopes after a broader replacement.
-        seed(self.connection, saved_document(self.clock.now()))
+        # A credential that returned a page keeps its scopes after a narrower replacement.
+        seed(self.connection, broad)
         self.requests.clear()
         result = self.read([page(message(), cursor="next"), {"ok": False, "error": "token_expired"},
-                            page(message(REPLY))], before=replace_on(2, both))
+                            page(message(REPLY))], before=replace_on(2, ["channels:history"]))
         self.assertEqual(self.requests[-1].headers["Authorization"], "Bearer " + NEW_ACCESS)
         self.assertEqual(result.scopes, ("channels:history", "groups:history"))
         self.validate(result)

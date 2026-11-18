@@ -570,7 +570,7 @@ every scope the brief's content needs, the CRM, calls, and Slack bindings are
 unchanged, and imported calls and live Slack still use the same transcript
 revision and mapping. For live Slack it also requires the local connection to
 hold a ready credential for the same identity with at least the scopes of each
-credential that returned part of the brief's Slack thread. It makes that decision while
+credential that returned a page of the brief's Slack thread. It makes that decision while
 holding the connection lock, so a disconnect or narrower reconnect cannot land
 between the checks and withholds saved Slack text afterward. A disconnect that
 finishes after the decision does not recall the response being sent. It reports that it
