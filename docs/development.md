@@ -28,7 +28,7 @@ fixture walkthrough:
 CI runs the checks on Python 3.11 and 3.14 for pull requests and pushes to main.
 It also runs the separate Inspector check. These checks use fixtures and require
 no model or external account. The [workflow](../.github/workflows/test.yml) defines
-the commands. 
+the commands.
 
 ## Dependency locks
 
@@ -41,8 +41,8 @@ build environment when pip needs to build a source distribution.
 
 Edit the input files deliberately, then regenerate with Python 3.14 and the
 pinned pip-tools from the development environment. Use the command in each
-lock's header. Set CUSTOM_COMPILE_COMMAND to that command if you need an identical
-header when running the generator from another environment. Review every changed
+lock's header. For a byte-identical header, set `CUSTOM_COMPILE_COMMAND` to the full
+command shown in that header before running it. Review every changed
 version and hash before committing. Run installation and checks on both CI Python
 versions; a lock generated on one interpreter can miss a conditional dependency.
 
