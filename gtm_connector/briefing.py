@@ -27,10 +27,12 @@ class RenewalFieldsUnmapped(BriefingError):
 
 
 def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_OF,
-                     *, include_slack=False, crm_backend="sqlite"):
+                     *, include_slack=False, crm_backend="sqlite", calls_backend="fixture", calls_binding=None):
     """Read through MCP; recognized calls/Slack scope denials may remain visible."""
     if crm_backend not in ("sqlite", "salesforce"):
         raise ValueError("unsupported CRM backend")
+    if calls_backend not in ("fixture", "imported"):
+        raise ValueError("unsupported calls backend")
     pattern = r"acc-sf-[A-Za-z0-9]{18}" if crm_backend == "salesforce" else r"acc-[0-9]{3}"
     if not isinstance(account_id, str) or not re.fullmatch(pattern, account_id):
         raise ValueError("account ID must use acc-sf- followed by the 18-character Salesforce ID"
@@ -60,6 +62,14 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
             raise BriefingError(f"{tool}: HTTP {response.status_code}; no brief generated")
         try:
             result = response.json()["result"]
+            if result.get("isError") is True and calls_backend == "imported" and source == "calls":
+                from .calls_import import CallsImportError, ERROR_CODES
+                content = result.get("content")
+                if (isinstance(content, list) and len(content) == 1 and isinstance(content[0], dict)
+                        and content[0].get("type") == "text"):
+                    for code in ERROR_CODES:
+                        if content[0].get("text") == f"Error executing tool {tool}: {code}":
+                            raise CallsImportError(code)
             if result.get("isError") is True and crm_backend == "salesforce" and source == "crm":
                 from .salesforce import SalesforceReadError, _ERROR_CODES
                 # Only exact SDK messages for our fixed adapter codes are diagnostics.
@@ -83,7 +93,10 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
             raise BriefingError(f"{tool}: invalid or failed tool result; no brief generated") from exc
     evidence = {"brief_id": brief_id, "account_id": account_id, "as_of": as_of,
                 "records": records, "receipts": audit.read(brief_id), **statuses}
-    if crm_backend == "salesforce":
+    if calls_backend == "imported":
+        evidence.update(workflow_version=4, crm_backend=crm_backend, calls_backend="imported",
+                        calls_binding=deepcopy(calls_binding))
+    elif crm_backend == "salesforce":
         evidence.update(workflow_version=3, crm_backend="salesforce")
     elif include_slack:
         evidence["workflow_version"] = 2
@@ -134,17 +147,22 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, a
         with LocalClient(runtime.config) as client:
             token = client.authorize(scopes)
             evidence = collect_evidence(client, token, runtime.connector.audit, account_id, brief_id,
-                                        as_of, include_slack=include_slack, crm_backend=crm_backend)
+                                        as_of, include_slack=include_slack, crm_backend=crm_backend,
+                                        calls_backend=getattr(runtime, "calls_backend", "fixture"),
+                                        calls_binding=getattr(runtime, "calls_binding", None))
     except httpx2.HTTPError as exc:
         raise BriefingError("authorization transport failed; no brief generated") from exc
     adapter = FixtureDraftAdapter() if adapter is None else adapter
     fixture = type(adapter) is FixtureDraftAdapter
     artifact = {"schema_version": 1, "brief_id": brief_id, "account_id": account_id, "as_of": as_of,
-                "adapter": "fixture" if fixture else
+                "adapter": ("extractive" if evidence.get("workflow_version") == 4 else "fixture") if fixture else
                            "ollama" if getattr(adapter, "name", None) == "ollama" else "custom",
                 "model_usage": {"model": None, "input_tokens": 0 if fixture else None,
                                 "output_tokens": 0 if fixture else None},
                 "status": "collected", "evidence": evidence}
+    if evidence.get("workflow_version") == 4:
+        artifact["sources"] = {"crm": "salesforce" if crm_backend == "salesforce" else "demo_fixture",
+                               "calls": "imported_transcript", **({"slack": "demo_fixture"} if include_slack else {})}
     path = _artifact_path(runtime.directory, brief_id)
     if path.parent.is_symlink():
         raise ValueError("briefs directory must not be a symbolic link")

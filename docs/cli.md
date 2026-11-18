@@ -44,6 +44,9 @@ Human text is intended for reading and can change independently.
 | `doctor` | Object with `status` and a `checks` array. Each check has `name`, `status`, `message`, and `fix`. |
 | `completion` | Object with `shell` and `script`. Without `--json`, stdout contains only the shell script. |
 | `salesforce check` | Sanitized object with `schema_version: 1`, `status`, `as_of`, `steps`, request counts, and count definitions. [Salesforce checks](salesforce.md#run-the-shareable-setup-check) defines each field. |
+| `calls import` | Versioned import metadata, its selected revision ID, account association, and `created`/`selected`/`reassigned` outcomes. It contains no transcript text. |
+| `calls list` | Versioned object with an `imports` array and nullable `next_after` cursor. Rows identify historical revisions and the active selection. |
+| `calls inspect` | Versioned selected import metadata and excerpt units. Explicit `--full` also returns all units and exact decoded `original_text`. |
 
 Salesforce account inspection keeps the CLI array/object shape. Its row `id`
 values are namespaced; `source_id` is the native provider ID. The CLI projection
@@ -92,6 +95,22 @@ Salesforce briefs use today's local date unless `--as-of` is supplied; fixture
 briefs use `2027-01-15`. A missing eligible Contract refuses with
 `renewal_fields_unmapped` and exit `3`. The
 [Salesforce guide](salesforce.md) explains mapping, refresh, and private output.
+
+`calls import` reads a user-selected TXT or VTT export into separate private
+state. `calls list` and `calls inspect` inspect that saved state without a CRM
+connection. Daily `serve` and `brief` use `--calls-backend imported` with the same
+explicit `--state-dir`; Salesforce account inspection has the same requirement
+in imported mode. Omitting the folder refuses before credentials or state are
+opened, preserving the ordinary fixture defaults. SQLite's direct account `--db` reads retain their existing
+behavior. [Transcript imports](calls.md) defines ranges, limits, identity,
+reassignment, and the distinction between an excerpt and a complete original.
+
+Imported briefs add `sources`, use evidence workflow version 4, and label the
+default formatter `extractive`. The source names are `demo_fixture` or
+`salesforce` for CRM, `imported_transcript` for calls, and `demo_fixture` for
+Slack when requested. Import progress goes to stderr; with `--json`, each line
+has `progress.command: "calls import"` and a fixed `step`. Stdout remains the
+single final import result. Fixed import reasons use the existing exit categories.
 
 ## Renewal demo
 
@@ -153,7 +172,8 @@ gtm-connector serve --state-dir var/session
 Startup on stderr identifies the address, CRM backend, sources, state folder,
 granted scopes, connection command, and Ctrl-C stop instruction. The source
 summary labels CRM as demo fixtures or Salesforce data with the selected
-environment. Call notes and Slack are always demo fixtures in this version.
+environment. Call notes default to demo fixtures; imported mode labels them as
+user-supplied transcript exports. Slack still uses demo fixtures.
 A bound Salesforce demo also names its public kit ID. Salesforce startup checks
 Organization metadata and the private connection identity; sandbox and
 production also check the required standard-object capabilities. This is an
@@ -176,7 +196,8 @@ and paths here are placeholders:
 
 `sources` describes the selected data sources, not connection verification.
 `sources.crm` is `"demo_fixture"` for SQLite or `"salesforce"` for Salesforce.
-`sources.calls` and `sources.slack` are `"demo_fixture"`. Supplying
+`sources.calls` is `"demo_fixture"` or `"imported_transcript"` for the selected
+mode, and `sources.slack` is `"demo_fixture"`. Supplying
 `--salesforce-demo-binding` adds `demo_kit_id`, the public kit identifier, to the
 ready object. Salesforce additionally includes `sf_environment`
 (`"developer"`, `"sandbox"`, or `"production"`) and `crm_identity_verified: true`

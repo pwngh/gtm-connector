@@ -1,8 +1,10 @@
 """Run two HTTPS loopback services with a private, local fixture owner."""
 
-from contextlib import ExitStack, closing
+from contextlib import ExitStack, closing, contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import fcntl
+import hashlib
 import ipaddress
 import json
 import os
@@ -23,6 +25,10 @@ import uvicorn
 from . import calls, slack, store
 from .auth import LocalAuthority, create_auth_app
 from .gateway import Connector, require_distinct_databases
+
+
+_FIXTURE_CRM_IDENTITY = {"schema_version": 1, "backend": "sqlite", "fixture_book": "renewal-book-v2"}
+_DATABASE_NAMES = ("crm", "calls", "slack", "audit", "imports")
 
 
 def private_file(path, content):
@@ -115,6 +121,76 @@ def _valid_connection_identity(identity):
             and identity["environment"] in ("developer", "sandbox", "production"))
 
 
+def _calls_binding(identity):
+    document = _FIXTURE_CRM_IDENTITY if identity is None else identity
+    canonical = json.dumps(document, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return {"schema_version": 1, "crm_backend": document["backend"],
+            "identity_sha256": hashlib.sha256(canonical).hexdigest()}
+
+
+def _valid_calls_marker(marker):
+    if (not isinstance(marker, dict) or set(marker) != {"schema_version", "backend", "crm_binding"}
+            or type(marker["schema_version"]) is not int or marker["schema_version"] != 1
+            or marker["backend"] != "imported"):
+        return False
+    binding = marker["crm_binding"]
+    return (isinstance(binding, dict) and set(binding) == {"schema_version", "crm_backend", "identity_sha256"}
+            and type(binding["schema_version"]) is int and binding["schema_version"] == 1
+            and binding["crm_backend"] in ("sqlite", "salesforce")
+            and isinstance(binding["identity_sha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", binding["identity_sha256"]) is not None)
+
+
+def _prepare_calls_selection(directory, backend, demo_binding):
+    """Reject a calls mode switch before reading CRM metadata or changing source state."""
+    try:
+        marker = _read_marker(directory / "calls-source.json")
+        if marker is not None and not _valid_calls_marker(marker):
+            raise ValueError
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        raise SourceIdentityError("The private calls source metadata is invalid. "
+                                  "Use the original private state or a fresh --state-dir.") from None
+    try:
+        owner = _read_marker(directory / "owner.json", require_schema=False)
+        prior_backend = owner.get("calls_backend", "fixture") if owner is not None else None
+        if prior_backend not in (None, "fixture", "imported"):
+            raise ValueError
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        raise SourceIdentityError("The prior local backend cannot be verified from private owner metadata. "
+                                  "Use a fresh --state-dir.") from None
+    if backend == "fixture":
+        if (marker is not None or prior_backend == "imported"
+                or any(os.path.lexists(directory / name) for name in ("imports.sqlite3", "imports.sqlite3-journal"))):
+            raise SourceIdentityError("This state folder uses imported transcripts. "
+                                      "Select --calls-backend imported or use a fresh --state-dir.")
+        return None
+    if (demo_binding is not None or os.path.lexists(directory / "source-profile.json")
+            or os.path.lexists(directory / "calls.sqlite3") or prior_backend == "fixture"):
+        raise SourceIdentityError("Imported transcripts cannot reuse fixture calls or a Salesforce demo binding. "
+                                  "Select a fresh --state-dir with --calls-backend imported.")
+    if marker is None and any(child.name not in ("server.lock", "crm-connection.json")
+                              for child in directory.iterdir()):
+        raise SourceIdentityError("This state folder has no pinned imported calls source. "
+                                  "Select fresh state with --calls-backend imported.")
+    if marker is not None and not os.path.lexists(directory / "imports.sqlite3") and any(
+            child.name not in ("server.lock", "crm-connection.json", "calls-source.json")
+            for child in directory.iterdir()):
+        raise SourceIdentityError("The imported calls database is missing from existing state. "
+                                  "Restore the original private state or select a fresh --state-dir.")
+    return marker
+
+
+def _new_calls_marker(backend, marker, identity):
+    if backend != "imported":
+        return None
+    expected = {"schema_version": 1, "backend": "imported", "crm_binding": _calls_binding(identity)}
+    if marker is not None and marker != expected:
+        raise SourceIdentityError("The imported calls source belongs to a different CRM connection. "
+                                  "Select the original connection or a fresh --state-dir.")
+    return expected if marker is None else None
+
+
 def _prepare_demo_state(directory, binding):
     """Validate a demo binding and return a missing marker for later publication."""
     path = directory / "source-profile.json"
@@ -142,9 +218,19 @@ def _prepare_demo_state(directory, binding):
     return expected
 
 
-def _prepare_source_state(directory, reader, binding):
+def _prepare_source_state(directory, reader, binding, *, calls_backend="fixture"):
     """Validate both source selections before publishing either marker or source data."""
     path = directory / "crm-connection.json"
+    marker = None
+    if reader is not None:
+        try:
+            marker = _read_marker(path)
+            if marker is not None and not _valid_connection_identity(marker):
+                raise ValueError
+        except (OSError, ValueError, UnicodeError, RecursionError):
+            raise SourceIdentityError("The private Salesforce connection marker is invalid. "
+                                      "Use the original private state or a fresh --state-dir.") from None
+    calls_marker = _prepare_calls_selection(directory, calls_backend, binding)
     if reader is None:
         connected_state = os.path.lexists(path)
         if not connected_state:
@@ -169,14 +255,14 @@ def _prepare_source_state(directory, reader, binding):
                                       "Select its original connection or use a fresh --state-dir.")
     demo_marker = _prepare_demo_state(directory, binding)
     if reader is None:
+        new_calls = _new_calls_marker(calls_backend, calls_marker, None)
+        if new_calls is not None:
+            try:
+                _write_marker(directory / "calls-source.json", new_calls)
+            except OSError:
+                raise SourceIdentityError("The private calls source marker could not be saved. "
+                                          "Check private folder permissions, then retry the same selection.") from None
         return None
-    try:
-        marker = _read_marker(path)
-        if marker is not None and not _valid_connection_identity(marker):
-            raise ValueError
-    except (OSError, ValueError, UnicodeError, RecursionError):
-        raise SourceIdentityError("The private Salesforce connection marker is invalid. "
-                                  "Use the original private state or a fresh --state-dir.") from None
     if marker is None and any(child.name not in ("server.lock", "source-profile.json")
                               for child in directory.iterdir()):
         raise SourceIdentityError("This state folder has no pinned Salesforce connection. "
@@ -188,15 +274,89 @@ def _prepare_source_state(directory, reader, binding):
     if marker is not None and marker != identity:
         raise SourceIdentityError("This state folder belongs to a different Salesforce connection or environment. "
                                   "Select its original connection or use a fresh --state-dir.")
+    new_calls = _new_calls_marker(calls_backend, calls_marker, identity)
     try:
         if marker is None:
             _write_marker(path, identity)
         if demo_marker is not None:
             _write_marker(directory / "source-profile.json", demo_marker)
+        if new_calls is not None:
+            _write_marker(directory / "calls-source.json", new_calls)
     except OSError:
         raise SourceIdentityError("The private source markers could not be saved. "
                                   "Check the state folder permissions, then retry with the same connection.") from None
     return identity
+
+
+def _state_directory(directory):
+    path = Path(directory).absolute()
+    return path.resolve() if path.name == ".." else path.parent.resolve() / path.name
+
+
+def _private_existing(path, *, directory=False):
+    info = path.lstat()
+    correct_type = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
+    if not correct_type or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError
+
+
+@dataclass(frozen=True)
+class ImportState:
+    directory: Path
+    calls_binding: dict
+    imports_path: Path
+    crm_backend: str
+
+
+def _inspect_import_state(directory):
+    """Inspect only private pins and store metadata; do not read transcript blobs."""
+    from .calls_import import validate_import_store
+
+    directory = _state_directory(directory)
+    try:
+        _private_existing(directory, directory=True)
+        marker = _prepare_calls_selection(directory, "imported", None)
+        if marker is None:
+            raise ValueError
+        identity = _read_marker(directory / "crm-connection.json")
+        if marker["crm_binding"]["crm_backend"] == "salesforce":
+            if not _valid_connection_identity(identity):
+                raise ValueError
+        elif identity is not None:
+            raise ValueError
+        _new_calls_marker("imported", marker, identity)
+        require_distinct_databases([directory / f"{name}.sqlite3" for name in _DATABASE_NAMES])
+        imports_path = directory / "imports.sqlite3"
+        _private_existing(imports_path)
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        raise SourceIdentityError("Imported calls state or its private CRM binding is invalid. "
+                                  "Use the original private state or a fresh --state-dir.") from None
+    validate_import_store(imports_path, crm_binding=marker["crm_binding"])
+    return ImportState(directory, dict(marker["crm_binding"]), imports_path, marker["crm_binding"]["crm_backend"])
+
+
+@contextmanager
+def open_import_state(directory):
+    """Lock and validate existing imports without creating state or contacting a provider."""
+    directory = _state_directory(directory)
+    try:
+        _private_existing(directory, directory=True)
+        lock_path = directory / "server.lock"
+        _private_existing(lock_path)
+        descriptor = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except (OSError, ValueError):
+        raise SourceIdentityError("Existing private imported calls state is required. "
+                                  "Run gtm-connector calls import --help before selecting its --state-dir.") from None
+    with os.fdopen(descriptor, "r+b") as lock:
+        opened = os.fstat(lock.fileno())
+        if not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid() or opened.st_mode & 0o077:
+            raise SourceIdentityError("The existing state lock is not private. Use the original private state.")
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise StateInUseError("This state directory already has a running connector; "
+                                  "stop it with Ctrl-C before inspecting imports.") from None
+        yield _inspect_import_state(directory)
 
 
 def _seed_demo_sources(directory, binding):
@@ -226,14 +386,23 @@ def _seed_demo_sources(directory, binding):
 class Runtime:
     """One process, two ports, four databases; owns shutdown and a state lock."""
 
-    def __init__(self, directory, *, rate_limit=60, crm_reader=None, on_call=None, demo_binding=None):
-        self.directory = Path(directory).resolve()
+    def __init__(self, directory, *, rate_limit=60, crm_reader=None, on_call=None, demo_binding=None,
+                 calls_backend="fixture", calls_reader=None):
+        if calls_backend not in ("fixture", "imported"):
+            raise ValueError("The calls backend must be fixture or imported.")
+        if calls_reader is not None and (calls_backend != "imported" or calls_reader.name != "imported"):
+            raise ValueError("An imported calls reader requires --calls-backend imported.")
+        self.directory = _state_directory(directory)
         self.rate_limit = rate_limit
         self.crm_reader = crm_reader
         self.on_call = on_call
         self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
         self.demo_binding = demo_binding
         self.crm_connection_identity = None
+        self.calls_backend = calls_backend
+        self.calls_reader = calls_reader
+        self.calls_binding = None
+        self.imports_path = self.directory / "imports.sqlite3"
         if demo_binding is not None and self.crm_backend != "salesforce":
             raise ValueError("--salesforce-demo-binding requires --crm-backend salesforce")
         self.servers, self.threads, self.sockets = [], [], []
@@ -241,6 +410,14 @@ class Runtime:
 
     def __enter__(self):
         try:
+            if self.directory.is_symlink():
+                raise SourceIdentityError("The state folder must not be a symbolic link. Use a private --state-dir.")
+            if self.calls_backend == "imported" and self.directory.exists():
+                try:
+                    _private_existing(self.directory, directory=True)
+                except (OSError, ValueError):
+                    raise SourceIdentityError("Imported calls require a private state folder. "
+                                              "Select a fresh --state-dir.") from None
             self.directory.mkdir(parents=True, mode=0o700, exist_ok=True)
             self.directory.chmod(0o700)
             descriptor = os.open(self.directory / "server.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
@@ -250,13 +427,30 @@ class Runtime:
             except BlockingIOError as exc:
                 raise StateInUseError("this state directory already has a running connector; "
                                       "stop it with Ctrl-C or choose another --state-dir") from exc
-            self.crm_connection_identity = _prepare_source_state(self.directory, self.crm_reader, self.demo_binding)
+            self.crm_connection_identity = _prepare_source_state(self.directory, self.crm_reader, self.demo_binding,
+                                                                  calls_backend=self.calls_backend)
             require_distinct_databases([self.directory / f"{name}.sqlite3"
-                                        for name in ("crm", "calls", "slack", "audit")])
+                                        for name in _DATABASE_NAMES])
+            if self.calls_backend == "imported":
+                from .calls_import import ImportedCallsReader, initialize_import_store
+                self.calls_binding = _calls_binding(self.crm_connection_identity)
+                if self.calls_reader is not None:
+                    try:
+                        if (Path(self.calls_reader.path).resolve() != self.imports_path
+                                or self.calls_reader.crm_binding != self.calls_binding):
+                            raise ValueError
+                    except (AttributeError, TypeError, ValueError):
+                        raise SourceIdentityError("The imported calls reader does not match this private source. "
+                                                  "Select the original connection and state folder.") from None
+                initialize_import_store(self.imports_path, crm_binding=self.calls_binding)
+                if self.calls_reader is None:
+                    self.calls_reader = ImportedCallsReader(self.imports_path, crm_binding=self.calls_binding)
             if self.demo_binding is not None:
                 _seed_demo_sources(self.directory, self.demo_binding)
             else:
                 for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
+                    if name == "calls" and self.calls_backend == "imported":
+                        continue
                     path = self.directory / f"{name}.sqlite3"
                     if path.is_symlink():
                         raise ValueError("source databases must not be symbolic links")
@@ -275,13 +469,16 @@ class Runtime:
             authority = LocalAuthority(issuer, resource)
             self.config = {"issuer": issuer, "resource": resource, "cert_path": str(cert),
                            "client_id": authority.client_id, "redirect_uri": authority.redirect_uri,
-                           "owner_secret": authority.owner_secret, "crm_backend": self.crm_backend}
+                           "owner_secret": authority.owner_secret, "crm_backend": self.crm_backend,
+                           "calls_backend": self.calls_backend}
             if self.crm_connection_identity is not None:
                 self.config["sf_environment"] = self.crm_connection_identity["environment"]
-            self.connector = Connector(self.directory / "crm.sqlite3", self.directory / "calls.sqlite3",
+            calls_path = self.imports_path if self.calls_backend == "imported" else self.directory / "calls.sqlite3"
+            self.connector = Connector(self.directory / "crm.sqlite3", calls_path,
                                        self.directory / "audit.sqlite3", authority, rate_limit=self.rate_limit,
                                        slack_path=self.directory / "slack.sqlite3", crm_reader=self.crm_reader,
-                                       on_call=self.on_call, demo_binding=self.demo_binding)
+                                       on_call=self.on_call, demo_binding=self.demo_binding,
+                                       calls_reader=self.calls_reader)
             for app, sock in zip((create_auth_app(authority), self.connector), self.sockets):
                 server = uvicorn.Server(uvicorn.Config(app, ssl_keyfile=str(key), ssl_certfile=str(cert),
                     log_config=None, access_log=False, log_level="warning", lifespan="on"))

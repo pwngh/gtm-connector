@@ -47,7 +47,7 @@ def _saved_briefs(directory, brief_id, call_counts, matching_briefs=None):
             if (not isinstance(identifier, str) or not re.fullmatch(r"brief-[0-9a-f]{32}", identifier)
                     or identifier != artifact_path.stem or artifact["schema_version"] != 1
                     or artifact["status"] not in ("collected", "accepted", "rejected")
-                    or artifact["adapter"] not in ("fixture", "custom", "ollama")
+                    or artifact["adapter"] not in ("fixture", "extractive", "custom", "ollama")
                     or not isinstance(artifact["account_id"], str)):
                 raise ValueError("unsupported artifact metadata")
             usage = artifact["model_usage"]
@@ -58,9 +58,9 @@ def _saved_briefs(directory, brief_id, call_counts, matching_briefs=None):
             if any(value is not None and (type(value) is not int or value < 0)
                    for value in tokens.values()):
                 raise ValueError("invalid token counts")
-            if artifact["adapter"] == "fixture" and (model is not None or
-                                                    any(value != 0 for value in tokens.values())):
-                raise ValueError("fixture usage must record no model and zero tokens")
+            if artifact["adapter"] in ("fixture", "extractive") and (model is not None or
+                                                                      any(value != 0 for value in tokens.values())):
+                raise ValueError("extractive usage must record no model and zero tokens")
             # Null is unknown, including an interrupted or rejected custom draft.
             briefs.append({"brief_id": identifier, "account_id": artifact["account_id"],
                            "status": artifact["status"], "adapter": artifact["adapter"],

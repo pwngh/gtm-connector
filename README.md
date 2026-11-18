@@ -338,7 +338,8 @@ the Salesforce flags and read through the audited gateway. The standard-object
 capability and state-switch tests use invented responses; paid orgs have not
 been exercised. [Connection choices and account reads](docs/salesforce.md#choose-the-expected-environment)
 
-Call notes and Slack remain local fixtures. The optional invented demo kit binds
+Call notes default to local fixtures and can instead use an explicitly imported
+transcript. Slack remains a local fixture. The optional invented demo kit binds
 them to imported accounts through standard AccountNumber values; it does not
 connect a call-recording provider or Slack.
 
@@ -356,6 +357,24 @@ removes the exact imported records after checking their fields and relationships
 The connector stays GET-only. Keep import receipts, bindings, recordings, and
 source-bearing state private under `var/`; cleanup has the visibility and
 concurrency limits described in the guide.
+
+### Use an existing call transcript
+
+Import a TXT or VTT export, associate it with an account, and quote an exact
+excerpt in the brief:
+
+```sh
+gtm-connector calls import meeting.vtt --account acc-007
+gtm-connector brief acc-007 --calls-backend imported --state-dir var/imported-calls
+```
+
+This example uses the invented CRM account and your selected file. Salesforce
+imports use an explicit AccountNumber or native account ID with the same
+connection flags. The import resolves that association through an audited CRM
+read. Later call reads require their separate scope and quote only the selected
+units. Unknown meeting time stays unknown; originals and older revisions remain
+private. No call provider, recording, transcription, or hosted model is started.
+[Import commands, export locations, and evidence limits](docs/calls.md)
 
 ## Limits worth reading
 
@@ -387,11 +406,11 @@ Inspector CLI 2.15.0 are tested. Other
 assistant applications and interactive external login are unverified.
 [Protocol details](docs/protocol.md)
 
-The following exclusions describe the default fixture runtime. The explicitly
-selected Salesforce read adapter is described above.
+The default runtime stays offline. The explicitly selected Salesforce reader
+and local transcript importer are described above.
 
 Custom Python adapters are not sandboxed or selectable through the CLI. No
-hosted model adapter, real CRM or call-recording integration, web interface,
+hosted model adapter, call-recording provider API, web interface,
 or multi-tenant behavior is included.
 
 ## Reference
@@ -399,6 +418,7 @@ or multi-tenant behavior is included.
 [Development checks](docs/development.md) explains linting, type checks, and dependency locks.
 [Performance measurements](docs/performance.md) records startup and audited call timings with rerun commands.
 [Tools and fixture data](docs/tools.md) documents each tool and its required scope.
+[Imported transcripts](docs/calls.md) explains explicit account associations and cited excerpts.
 [Design decisions](DECISIONS.md) explains the choices;
 [Rules the coding agents worked under](AGENTS.md) records the constraints.
 

@@ -12,8 +12,7 @@ import sys
 from urllib.parse import urlsplit
 
 
-_REQUIRED_FILES = ("owner.json", "tls.pem", "tls.key", "crm.sqlite3", "calls.sqlite3",
-                   "slack.sqlite3", "audit.sqlite3")
+_REQUIRED_FILES = ("owner.json", "tls.pem", "tls.key", "crm.sqlite3", "slack.sqlite3", "audit.sqlite3")
 _DEPENDENCIES = ("mcp", "httpx2", "cryptography", "uvicorn")
 
 
@@ -36,18 +35,37 @@ def _private(path, *, directory=False):
     return correct_type and info.st_uid == os.getuid() and info.st_mode & 0o077 == 0
 
 
-def load_local_owner(directory):
+def _unique_owner(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError
+        value[key] = item
+    return value
+
+
+def _source_files(owner):
+    if owner.get("calls_backend", "fixture") == "fixture":
+        return ("calls.sqlite3",)
+    return ("imports.sqlite3", "calls-source.json") + (
+        ("crm-connection.json",) if owner.get("crm_backend", "sqlite") == "salesforce" else ())
+
+
+def _read_owner(directory):
     """Return validated local settings; error text never contains their values."""
     directory = _directory(directory)
-    if not _private(directory, directory=True) or any(
-            not _private(directory / name) for name in _REQUIRED_FILES):
+    if not _private(directory, directory=True) or not _private(directory / "owner.json"):
         raise ValueError("State must contain regular, owner-only files. Run gtm-connector doctor.")
     try:
-        with (directory / "owner.json").open() as source:
+        descriptor = os.open(directory / "owner.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(descriptor) as source:
+            opened = os.fstat(source.fileno())
+            if not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid() or opened.st_mode & 0o077:
+                raise ValueError
             content = source.read(65537)
         if len(content) > 65536:
             raise ValueError
-        owner = json.loads(content)
+        owner = json.loads(content, object_pairs_hook=_unique_owner)
         required = {"issuer", "resource", "redirect_uri", "client_id", "owner_secret", "cert_path"}
         if not isinstance(owner, dict) or not required <= owner.keys():
             raise ValueError
@@ -63,10 +81,34 @@ def load_local_owner(directory):
         if (owner["redirect_uri"] != "http://127.0.0.1:8767/callback"
                 or owner["client_id"] != "gtm-demo-cli"
                 or owner["cert_path"] != str(directory / "tls.pem")
-                or owner.get("crm_backend", "sqlite") not in ("sqlite", "salesforce")):
+                or owner.get("crm_backend", "sqlite") not in ("sqlite", "salesforce")
+                or owner.get("calls_backend", "fixture") not in ("fixture", "imported")):
             raise ValueError
-    except (OSError, ValueError, TypeError, KeyError, UnicodeError):
+    except (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError):
         raise ValueError("Owner configuration is invalid. Run gtm-connector doctor.") from None
+    return owner
+
+
+def _validate_sources(directory, owner):
+    if owner.get("calls_backend", "fixture") == "imported":
+        from .runtime import _inspect_import_state
+        try:
+            state = _inspect_import_state(directory)
+            if state.crm_backend != owner.get("crm_backend", "sqlite"):
+                raise ValueError
+        except Exception:
+            raise ValueError("Imported calls state is invalid. Run gtm-connector doctor.") from None
+    elif any(os.path.lexists(directory / name) for name in ("calls-source.json", "imports.sqlite3")):
+        raise ValueError("Calls source selection is invalid. Run gtm-connector doctor.")
+
+
+def load_local_owner(directory):
+    """Load fixed source-aware files only after validating the private owner document."""
+    directory = _directory(directory)
+    owner = _read_owner(directory)
+    if any(not _private(directory / name) for name in _REQUIRED_FILES + _source_files(owner)):
+        raise ValueError("State must contain regular, owner-only files. Run gtm-connector doctor.")
+    _validate_sources(directory, owner)
     return owner
 
 
@@ -110,7 +152,11 @@ def doctor(directory):
     if not files_ok:
         return report()
     try:
-        owner = load_local_owner(directory)
+        owner = _read_owner(directory)
+        if any(not _private(directory / name) for name in _source_files(owner)):
+            checks[-1].update(status="fail", fix="Stop the server and use a fresh private folder: " + fresh + ".")
+            return report()
+        _validate_sources(directory, owner)
     except ValueError:
         check("configuration", False, "Owner settings must use the supported HTTPS loopback endpoints.",
               "Stop the server and keep this folder. Rerun your original serve command with a fresh --state-dir. "
@@ -121,7 +167,12 @@ def doctor(directory):
     start_fix = "Start the server in another terminal with " + serve + "."
     if owner.get("crm_backend") == "salesforce":
         start_fix = ("Rerun the original Salesforce serve command for this state folder with the same connection, "
-                     "environment, and demo binding, if used. Run gtm-connector serve --help to check the flags.")
+                     "environment, calls backend, and demo binding, if used. "
+                     "Run gtm-connector serve --help to check the flags.")
+        restart_fix = "Stop the server to renew its certificate. " + start_fix
+    elif owner.get("calls_backend") == "imported":
+        start_fix = ("Rerun the original serve command for this folder with --calls-backend imported. "
+                     "Run gtm-connector serve --help to check the flags.")
         restart_fix = "Stop the server to renew its certificate. " + start_fix
     if not dependencies_ok:
         return report()

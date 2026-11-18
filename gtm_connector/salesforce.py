@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import httpx2
 
 from .sf_credentials import SFCredentials, SFCredentialsError
+from .tool_definitions import valid_account_search
 
 
 API_VERSION = "v68.0"
@@ -48,6 +49,7 @@ _ERROR_CODES = frozenset({
     "salesforce_unavailable", "salesforce_timeout", "salesforce_invalid_response",
     "salesforce_result_limit", "salesforce_pagination_invalid",
     "salesforce_environment_mismatch", "salesforce_api_disabled", "salesforce_schema_unavailable",
+    "salesforce_account_number_ambiguous",
 })
 
 
@@ -446,12 +448,25 @@ class SalesforceReadOnlyAdapter:
                 "close_date": close_date, "is_closed": row["IsClosed"], "is_won": row["IsWon"],
                 "amount_decimal": format(amount, "f") if amount is not None else None, "currency": None}
 
-    def search_accounts(self, query=""):
-        escaped = _like_literal(query)
-        where = f" WHERE Name LIKE '%{escaped}%'" if query else ""
+    def search_accounts(self, query="", account_number=None):
+        if not valid_account_search(query, account_number):
+            raise SalesforceReadError("salesforce_invalid_arguments")
+        if account_number is not None:
+            escaped = account_number.replace("\\", "\\\\").replace("'", "\\'")
+            where, limit, max_rows = f" WHERE AccountNumber = '{escaped}'", 2, 2
+        else:
+            escaped = _like_literal(query)
+            where, limit, max_rows = (f" WHERE Name LIKE '%{escaped}%'" if query else ""), 101, _MAX_ROWS
         with self._operation() as (client, budget):
-            rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account{where} ORDER BY Id LIMIT 101", budget)
-            return [self._account(row) for row in rows]
+            rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account{where} ORDER BY Id LIMIT {limit}",
+                               budget, max_rows=max_rows)
+            accounts = [self._account(row) for row in rows]
+            if account_number is not None:
+                if any(row["account_number"] is None for row in accounts):
+                    raise SalesforceReadError("salesforce_invalid_response")
+                if any(row["account_number"] != account_number for row in accounts):
+                    raise SalesforceReadError("salesforce_account_number_ambiguous")
+            return accounts
 
     def probe_accounts(self):
         """Read at most one Account for an owner-selected setup check."""

@@ -1,14 +1,15 @@
 # Tools and source data
 
-Six tools read from three local SQLite source stores or log an activity, a note
-about an account interaction. Run these commands from the repository root.
+Six tools read selected CRM, calls, and Slack sources or log a fixture activity,
+a note about an account interaction. The default sources use independent local
+SQLite stores. Run these commands from the repository root.
 
 | Tool | Required scope | Records returned |
 | --- | --- | --- |
-| `search_accounts` | `crm:read` | Accounts matching a literal name substring |
-| `get_account` | `crm:read` | One account and its contacts |
+| `search_accounts` | `crm:read` | Accounts matching a literal name substring, or at most two exact Salesforce AccountNumber matches |
+| `get_account` | `crm:read` | One account, its contacts, and standard Contracts when using Salesforce |
 | `list_opportunities` | `crm:read` | Opportunities, optionally filtered by account |
-| `read_call_notes` | `calls:read` | Notes from the separate calls database |
+| `read_call_notes` | `calls:read` | Fixture notes or one explicitly selected imported transcript excerpt |
 | `read_slack_messages` | `slack:read` | Messages from the separate Slack database |
 | `log_activity` | `crm:write` | An activity created or reused by idempotency key |
 
@@ -19,6 +20,11 @@ a denial returns HTTP 403.
 Each returned record has a reference that names its source, such as
 `crm/accounts/acc-001`, `calls/call_notes/note-007`, or `slack/messages/msg-007`.
 The content is marked as untrusted data.
+
+Imported transcripts keep the same calls tool and permission. Their immutable
+`note-` reference identifies a selected revision whose manifest names exact cue
+or line ranges. The tool never returns the complete original export. See
+[transcript import, inspection, and limits](calls.md).
 
 ## Fixtures
 
@@ -169,7 +175,8 @@ Python 3.11 and 3.14.
 
 The command `serve --crm-backend salesforce` replaces the three `crm:read`
 handlers. External mode omits `log_activity` and rejects direct write requests,
-while calls and Slack remain local fixtures. `seed` operates on SQLite only.
+while Slack remains a local fixture. Calls use fixtures by default or the
+explicitly selected imported transcripts. `seed` operates on SQLite only.
 `accounts` and `account` use SQLite by default; with `--crm-backend salesforce`,
 they read through the scoped, audited gateway. See
 [Salesforce account reads](salesforce.md#read-records-and-create-a-brief).

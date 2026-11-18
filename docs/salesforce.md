@@ -2,7 +2,8 @@
 
 The optional Salesforce backend reads standard Account, Contact, Opportunity,
 and Contract records through REST v68.0. It can produce a cited renewal-planning
-brief without custom fields. Call notes and Slack remain separate local fixtures.
+brief without custom fields. Call notes default to separate local fixtures and
+can instead use [explicitly imported transcripts](calls.md). Slack remains a local fixture.
 The optional [demo kit](salesforce-demo.md) binds invented context to imported
 accounts through their standard AccountNumber values. It reads no call provider
 or live Slack workspace.
@@ -357,7 +358,8 @@ write, and pool timeouts remain 10 seconds.
 | Selected environment does not match returned metadata | `salesforce_environment_mismatch`; no CRM record query. |
 | API access is disabled for the org | `salesforce_api_disabled`. |
 | Required standard schema is unavailable | `salesforce_schema_unavailable`; run the setup check for missing fields. |
-| Private state belongs to another connection or cannot establish identity | `source_identity_mismatch`; select a fresh state folder. |
+| Private state belongs to another connection or cannot establish identity | `source_identity_mismatch`; restore the original connection and private state. Imported daily commands require the existing import folder; use `calls import` to initialize fresh import state. |
+| AccountNumber equality returns a non-literal number within the two-row bound | `salesforce_account_number_ambiguous`; import reports `calls_account_ambiguous` and directs canonical `--account` selection. |
 | Upstream HTTP 401 after the permitted refresh, or environment-token expiry | `salesforce_auth_required`. |
 | Upstream HTTP 429 or 403 with `REQUEST_LIMIT_EXCEEDED` | `salesforce_rate_limited`. |
 | Other upstream HTTP 403 | `salesforce_forbidden`. |

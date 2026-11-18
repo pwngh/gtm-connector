@@ -1,5 +1,70 @@
 # Decisions
 
+## Imported call excerpts with explicit account associations (2026-11-18)
+
+Use existing UTF-8 TXT and WebVTT exports to complete the call-source path
+without a recording account, paid key, audio upload, or transcription service.
+The connector imports a file the owner selects. It does not claim that a call
+provider, speaker, or meeting was authenticated. Keep the zero-setup demo and
+its fixture sources unchanged.
+
+Separate import from daily use. `calls import` parses before creating state,
+resolves an explicit account through an audited `crm:read` request, and stores
+one immutable selected revision. Later `read_call_notes` needs only `calls:read`
+and performs no CRM query. AccountNumber uses a fixed exact equality query with
+at most two matches; ambiguity cannot be resolved by company name or domain.
+The existing native account-detail read is the fallback when no usable number
+exists. Preserve its three-GET cost and existing child-record bounds.
+Salesforce equality can return case variants; refuse non-literal returned
+numbers and direct the owner to a canonical ID instead of treating them as a
+provider outage or inferring a unique match outside the two-row bound. Keep
+the raw selector only in private reassignment state and the owner CRM receipt.
+The returned transcript manifest omits it because `calls:read` must not reveal
+the CRM's AccountNumber. Retry identity uses the resolved account and selection,
+not the raw selector.
+
+Pin imported mode and its CRM identity in private `calls-source.json` under the
+state lock. Use separate `imports.sqlite3` with no seeded fixture notes. A source
+mode change, changed org, malformed binding, or demo-kit binding conflict refuses
+before source initialization. Local list and inspect commands validate saved
+state without starting a server or contacting a provider. Their saved context
+is not a current connection check.
+Require an explicit state folder with imported mode on daily commands. A missing
+flag must not initialize the ordinary fixture folder as imported state. Local
+inspection directs recovery to existing import state; it cannot initialize a
+fresh folder by repeating an inspection command.
+
+Keep original bytes and immutable revision manifests in one SQLite transaction,
+with one active excerpt per account. A deterministic request key makes identical
+retries reuse their original import time and receipt. Changing bytes, date, or
+range makes a new revision. Explicit reassignment creates another association
+generation and preserves historical evidence, including a move back to an
+earlier account. No external record is written.
+
+Bound each source to 2 MiB and 10,000 units. Bound a selected quote to 16 KiB,
+256 units including context, and 128 KiB for its ASCII-serialized record. The
+default uses the first 20 complete units plus available adjacent context, with
+a shorter disclosed prefix when needed. Explicit oversized ranges refuse.
+These limits bound a normal read even as import history grows. List returns at
+most 100 metadata rows and a continuation cursor. No runtime package is added.
+
+The source reader rehashes and reparses private original bytes before returning
+selected units. Ordinary MCP results and saved briefs contain only that bounded
+selection, its canonical manifest, source digest, and provenance. They do not
+carry an unrequested full transcript. Only explicit local full inspection
+returns original text. Saved checks verify selected snapshot and receipt
+consistency; they do not independently prove correspondence to unseen original
+bytes or resist an owner who rewrites all manifests and receipts. This keeps
+assistant input small while stating the narrower integrity guarantee accurately.
+
+Workflow version 4 identifies imported calls, their expected binding, and the
+CRM backend. It requires the exact selected excerpt and disclosure, with unknown
+call time preserved. File modification time is never a meeting date. The default
+formatter is labeled `extractive` for this workflow, with no model and zero
+model tokens. Existing fixture evidence versions remain unchanged. Provider
+login, Slack reads, caller-safe remote briefs, cards, and interactive selection
+remain separate later slices.
+
 ## Explicit Salesforce environments and private connection state (2026-11-18)
 
 The user requested a usable connection to existing CRM data after the six demo

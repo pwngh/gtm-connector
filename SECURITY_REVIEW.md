@@ -11,8 +11,9 @@ It does not grant production approval.
 messages. Company names, people, and source text are invented; email addresses use
 reserved `.example` domains. The default runtime uses no real CRM, external
 identity, or recording service. An explicit Salesforce backend can read an
-operator's existing org with an explicit environment expectation; calls and
-Slack still use local fixtures.
+operator's existing org with an explicit environment expectation. Calls default
+to fixtures and can instead use explicitly imported exports. Slack still uses
+local fixtures.
 
 | Scope | Allowed tools |
 | --- | --- |
@@ -221,11 +222,12 @@ and rejection of altered or omitted disclosures using invented records.
 
 Account, contact, opportunity, and contract fields reach the authorized client
 as untrusted data. `source_id` and namespaced `crm/...` references preserve
-provenance. A Salesforce snapshot uses workflow version 3 inside schema version
-1; fixture workflows remain unchanged. No record text can request an additional
+provenance. A Salesforce snapshot with fixture calls uses workflow version 3
+inside schema version 1; imported calls use version 4. No record text can request an additional
 tool or grant. AccountNumber creates no implicit join; the demo kit requires an
-explicit private import binding. Calls and Slack still use isolated invented
-sources and independent scopes.
+explicit private import binding. Transcript imports resolve an explicit exact
+AccountNumber or native account selection through a separate audited CRM read.
+Calls and Slack retain independent scopes.
 
 Audit arguments can contain real search terms and IDs. Returned refs persist,
 but response bodies and the upstream token are not copied to the audit. A
@@ -260,6 +262,47 @@ report is still required for verification. See [setup, report shape, and
 limits](docs/salesforce.md).
 
 No live org has been verified.
+
+## Imported transcript boundary
+
+`calls import` is an explicit local owner operation. It parses a selected TXT
+or VTT export, obtains only `crm:read`, and resolves the selected account through
+the audited gateway before committing an association. The exact Salesforce
+AccountNumber lookup is fixed, escaped, and bounded to two matches. There is no
+name-based inference. A missing, ambiguous, changed, or unreceipted association
+cannot publish an import. No provider record is written.
+The raw AccountNumber selector stays in private reassignment state and owner
+CRM audit arguments. The public transcript manifest omits it, so a calls-only
+grant does not reveal that CRM field through import provenance.
+
+Imported mode pins the selected CRM identity and uses private `imports.sqlite3`
+under the existing state lock. It does not seed fixture call notes. Mode and
+identity mismatches refuse before source initialization. Construction validates
+metadata without reading transcript blobs. `read_call_notes` checks `calls:read`
+before opening a selected blob and makes no CRM request. Missing imports refuse
+instead of returning demo content. The source permissions remain independent.
+
+Original bytes, manifests, and active selections commit transactionally. Import
+bounds are 2 MiB and 10,000 units; returned excerpts are at most 16 KiB of text,
+256 units, and 128 KiB of ASCII-serialized record data. MCP wrappers add overhead.
+The reader rehashes and reparses the original before returning selected units.
+Ordinary tools, briefs, and inspection do not expose unselected content. Explicit
+local `calls inspect --full` returns the complete original; it is not an MCP tool.
+
+Workflow 4 validates the selected manifest, canonical ID, account binding, and
+the brief's matching committed call-read receipt. The association receipt ID
+is carried as provenance. Saved checks do not reopen the original bytes, prove
+source truth, or authenticate a provider or speaker. An owner able to rewrite
+all snapshots and receipts can alter that evidence. Reassignment creates a new
+association revision and preserves accepted historical snapshots. Unknown call
+time remains unknown; import time is not a meeting timestamp.
+
+[Parser and store tests](tests/test_calls_import.py) use invented files.
+[Brief integration tests](tests/test_imported_briefing.py) exercise local HTTPS,
+an invented Salesforce AccountNumber/Contract flow, failed receipts, quoted
+injection, bounded selection, snapshot tampering, and historical checks. No live
+call provider or real transcript was accessed. The existing manual retention
+policy applies to original exports, imported state, and saved brief evidence.
 
 ## Bound Salesforce demo kit
 

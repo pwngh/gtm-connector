@@ -49,6 +49,9 @@ _FAILURES = {
     "salesforce_invalid_response": (
         "Salesforce returned data outside the supported response shape.",
         "Check access to the listed standard fields, then repeat the check."),
+    "salesforce_account_number_ambiguous": (
+        "AccountNumber did not resolve to a literal match within the bounded lookup.",
+        "Select the canonical account ID with --account. Run gtm-connector calls import --help."),
     "salesforce_pagination_invalid": (
         "Salesforce returned an unsupported result-page locator.",
         "Repeat the check on a smaller account book."),

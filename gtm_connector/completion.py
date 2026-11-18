@@ -5,7 +5,20 @@ import shlex
 
 
 def _commands(parser):
-    return next(action.choices for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+    return next((action.choices for action in parser._actions if isinstance(action, argparse._SubParsersAction)), {})
+
+
+def _command_tree(parser, prefix=""):
+    result = {}
+    for name, child in _commands(parser).items():
+        path = (prefix + " " + name).strip()
+        result[path] = child
+        result.update(_command_tree(child, path))
+    return result
+
+
+def _transitions(commands):
+    return [(name, action, name + " " + action) for name, parser in commands.items() for action in _commands(parser)]
 
 
 def _options(parser):
@@ -23,6 +36,10 @@ def _value_options(commands):
 
 def _fish_position(commands):
     """Locate a positional without treating an option's value as one."""
+    transitions = [line for name, action, path in _transitions(commands)
+                   for line in ("      case " + shlex.quote(name + ":" + action),
+                                "        set command_name " + shlex.quote(path),
+                                "        set positional 0; continue")]
     return [
         "function __gtm_connector_at_position",
         '  set -l command_name ""',
@@ -48,28 +65,37 @@ def _fish_position(commands):
         "    end",
         '    if test -z "$command_name"',
         "      switch $word",
-        "        case " + _words(commands),
+        "        case " + _words(name for name in commands if " " not in name),
         '          set command_name "$word"',
         "      end",
         "      continue",
         "    end",
+        '    switch "$command_name:$word"', *transitions, "    end",
         "    set positional (math $positional + 1)",
         "  end",
-        '  test "$command_name" = "$argv[1]"; and test $pending = 0; and test $positional = $argv[2]',
+        '  test "$command_name" = "$argv[1]"; or return 1',
+        '  if test "$argv[2]" = any; return 0; end',
+        '  test $pending = 0; and test $positional = $argv[2]',
         "end",
     ]
 
 
 def generate(parser, shell):
-    commands = _commands(parser)
-    root = [*commands, *(flag for action in _options(parser) for flag in action.option_strings)]
+    commands = _command_tree(parser)
+    root_commands = _commands(parser)
+    root = [*root_commands, *(flag for action in _options(parser) for flag in action.option_strings)]
     if shell == "fish":
         lines = ["# Load with: gtm-connector completion fish | source", *_fish_position(commands)]
-        for command, subparser in commands.items():
+        for command, subparser in root_commands.items():
             lines.append(f"complete -c gtm-connector -n '__fish_use_subcommand' -a {shlex.quote(command)} "
                          f"-d {shlex.quote(subparser.description)}")
+        for name, action, path in _transitions(commands):
+            condition = "__gtm_connector_at_position " + shlex.quote(name) + " 0"
+            lines.append(f"complete -c gtm-connector -n {shlex.quote(condition)} -f -a {shlex.quote(action)} "
+                         f"-d {shlex.quote(commands[path].description)}")
         for name, subparser in [("", parser), *commands.items()]:
-            condition = "__fish_use_subcommand" if not name else f"__fish_seen_subcommand_from {name}"
+            condition = ("__fish_use_subcommand" if not name else
+                         "__gtm_connector_at_position " + shlex.quote(name) + " any")
             for action in _options(subparser):
                 flags = " ".join(("-l " + flag[2:]) if flag.startswith("--") else ("-s " + flag[1:])
                                  for flag in action.option_strings)
@@ -83,7 +109,7 @@ def generate(parser, shell):
                            and not isinstance(action, argparse._SubParsersAction)]
             for index, action in enumerate(positionals):
                 if action.choices:
-                    at_position = f"__gtm_connector_at_position {name} {index}"
+                    at_position = f"__gtm_connector_at_position {shlex.quote(name)} {index}"
                     lines.append(f"complete -c gtm-connector -n {shlex.quote(at_position)} -f -a "
                                  + shlex.quote(" ".join(map(str, action.choices))))
         return "\n".join(lines) + "\n"
@@ -121,8 +147,12 @@ def generate(parser, shell):
               + ') previous="$word"; continue;;',
               '      esac', '      case "$word" in -*) continue;; esac', '    fi',
               '    if [[ -z "$command" ]]; then',
-              f"      case \"$word\" in {'|'.join(commands)}) command=\"$word\";; esac",
-              '      continue', '    fi', '    ((positional+=1))', '  done']
+              f"      case \"$word\" in {'|'.join(root_commands)}) command=\"$word\";; esac",
+              '      continue', '    fi', '    case "$command:$word" in']
+    for name, action, path in _transitions(commands):
+        lines.append(f"      {shlex.quote(name + ':' + action)}) command={shlex.quote(path)}; "
+                     "positional=0; continue;;")
+    lines += ['    esac', '    ((positional+=1))', '  done']
 
     def offer(values):
         if bash:
@@ -155,12 +185,16 @@ def generate(parser, shell):
             if action.choices:
                 lines.append(f"    {shlex.quote(name + ':' + str(index))})")
                 lines += offer(list(map(str, action.choices)))
+            elif action.type is not None and getattr(action.type, "__name__", "") == "Path":
+                lines.append(f"    {shlex.quote(name + ':' + str(index))})")
+                lines += (['      while IFS= read -r match; do COMPREPLY+=("$match"); done '
+                           '< <(compgen -f -- "$current"); return;;'] if bash else ['      _files; return;;'])
     lines += ['    esac', '  fi']
     lines.append('  case "$command" in')
     lines.append('    "")')
     lines += offer(root)
     for name, subparser in commands.items():
-        lines.append(f"    {name})")
+        lines.append(f"    {shlex.quote(name)})")
         lines += offer([flag for action in _options(subparser) for flag in action.option_strings])
     lines += ['  esac', '}']
     lines.append(f"complete -o default -F {function} gtm-connector" if bash else "compdef _gtm_connector gtm-connector")

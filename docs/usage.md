@@ -64,7 +64,9 @@ identity nor a valid grant. These counts are not billing data.
 `model_usage`. The `model_tokens` totals cover saved files only; deleted files
 cannot supply usage. Ollama counts include rejected drafts.
 
-Fixture counts are zero. Unknown counts remain `null` in both the brief and the
+Fixture and extractive transcript formatter counts are zero. The extractive
+formatter quotes the selected imported excerpt without calling a model.
+Unknown counts remain `null` in both the brief and the
 corresponding total; `unknown_briefs` reports how many briefs have that gap.
 A malformed or partial saved result stops the report with a clear error.
 
