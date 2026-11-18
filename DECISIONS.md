@@ -171,9 +171,10 @@ reasons.
   at a tool approval, and its first complete review took about twelve minutes.
   Its findings were as useful as the others', so it still runs every time.
   It now runs at Low with the brief and the diff inside its prompt and no
-  tools. A Medium run of the same prompt took about twice as long and found
-  no more, and a High review with tools takes 7 to 14 minutes. That run gets
-  no exported copy, the one exception to identical material.
+  tools. On a 25 KB prompt a Medium run took about twice as long and found no
+  more, and a High review with tools takes 7 to 14 minutes. The Low run gets
+  no exported copy, the one exception to identical material. A diff of
+  150,000 bytes or more still goes to Grok's copy with tools at High.
 - **Exported copies, not the live checkout.** `grok` and `agy` cannot ask for
   approval in a non-interactive run, so they run with automatic approval
   inside their sandboxes. The sandbox is the isolation. The private copy keeps
