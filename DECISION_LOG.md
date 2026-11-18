@@ -50,8 +50,8 @@ makes no source system call and releases the brief only while the account and
 any Slack thread it contains are selected, the caller's grant covers each source
 in it, the CRM, calls, and Slack bindings are unchanged, and imported calls and
 live Slack still use the same transcript revision and mapping. For live Slack
-it also reads the local connection's identity, because the owner can disconnect
-Slack while the server runs. Comparing the
+it also requires a ready local credential for the same identity, because the
+owner can disconnect or reconnect Slack while the server runs. Comparing the
 brief's own contributions, not the whole selection, keeps a brief readable when
 an unrelated account is added.
 
@@ -81,8 +81,14 @@ credential value, and ran both checks once. The sf CLI on this machine fails at
 startup with a Node.js module error before it reads any org, so `salesforce
 check` stopped at its credentials step and read no records. This checkout had no
 Slack connection or mapped thread, so `slack check` stopped at its private-state
-step. No live org or workspace has been verified, and the extraction test has
-not run on real transcripts. Its script was proven on invented transcripts only.
+step. The owner then confirmed that the Developer Edition login works in their
+own terminal. The agent's shell found an older Node.js, so it ran the check
+again with a newer Node.js first on PATH for that one command. `sf org display`
+then reported the login as connected, but it took 27 seconds on this heavily
+loaded machine, longer than the connector's 10-second limit for one sf command.
+The check stopped at its credentials step again and read no records. No live
+org or workspace has been verified, and the extraction test has not run on real
+transcripts. Its script was proven on invented transcripts only.
 
 ## Explicit mapped Slack reads and source observations (2026-11-18)
 

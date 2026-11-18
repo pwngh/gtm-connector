@@ -11,6 +11,7 @@ from gtm_connector.slack_auth import disconnect_slack
 from gtm_connector.slack_mapping import save_slack_mapping
 from gtm_connector.slack_workflow import resolve_slack_account
 from slack_live_fixtures import ACCOUNT, CHANNEL, LiveSlackFixture
+from test_slack_auth import saved_document, seed
 
 
 class SelectedLiveSlackTests(LiveSlackFixture, unittest.TestCase):
@@ -65,6 +66,15 @@ class SelectedLiveSlackTests(LiveSlackFixture, unittest.TestCase):
             token = owner.authorize(["crm:read", "calls:read", "slack:read"])
             brief = owner.call(token, "prepare_renewal_brief",
                                {"account_id": ACCOUNT}).json()["result"]["structuredContent"]["brief"]
+            self.assertFalse(owner.call(token, "read_renewal_brief",
+                                        {"brief_id": brief["brief_id"]}).json()["result"].get("isError"))
+            # A replacement credential whose identity is still unchecked is not enough.
+            seed(self.connection, {**saved_document(self.clock.now(), rotating=False),
+                                   "credential_state": "identity_unchecked"})
+            unchecked = owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}).json()["result"]
+            self.assertTrue(unchecked["isError"])
+            self.assertTrue(unchecked["content"][0]["text"].endswith("brief_source_changed"))
+            seed(self.connection, saved_document(self.clock.now(), rotating=False))
             self.assertFalse(owner.call(token, "read_renewal_brief",
                                         {"brief_id": brief["brief_id"]}).json()["result"].get("isError"))
             # Removing local credentials makes no provider request.

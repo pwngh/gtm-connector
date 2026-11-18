@@ -352,10 +352,12 @@ class SelectedSourceTests(SelectedFixture, unittest.TestCase):
             load_selection(link, crm_backend="sqlite")
         fifo = self.root / "selection.fifo"
         os.mkfifo(fifo, 0o600)
-        started = time.monotonic()
-        with self.assertRaises(SelectionError):
-            load_selection(fifo, crm_backend="sqlite")
-        self.assertLess(time.monotonic() - started, 5)
+        # A child process keeps a regression to a blocking open from hanging the suite.
+        probe = subprocess.run(
+            [sys.executable, "-c", "import sys\nfrom gtm_connector.selection import SelectionError, load_selection\n"
+             "try:\n    load_selection(sys.argv[1], crm_backend='sqlite')\nexcept SelectionError:\n    print('refused')\n",
+             str(fifo)], cwd=ROOT, capture_output=True, text=True, timeout=10, check=False)
+        self.assertEqual(probe.stdout.strip(), "refused", probe.stderr)
         with self.assertRaises(SelectionError):
             load_selection(self.root / "missing.json", crm_backend="sqlite")
         self.assertEqual(load_selection(path, crm_backend="sqlite").accounts, frozenset({"acc-007", "acc-012"}))

@@ -566,8 +566,9 @@ no source system call. It releases the brief only while the account and any
 Slack thread it contains are still selected, the caller's current grant has
 every scope the brief's content needs, the CRM, calls, and Slack bindings are
 unchanged, and imported calls and live Slack still use the same transcript
-revision and mapping. For live Slack it also reads the local connection's
-identity, so disconnecting Slack withholds saved Slack text. It reports that it
+revision and mapping. For live Slack it also requires the local connection to
+hold a ready credential for the same identity, so disconnecting Slack withholds
+saved Slack text. It reports that it
 did not recheck the source systems. A brief ID alone grants nothing.
 
 The selection chooses accounts and Slack threads, not fields. Without

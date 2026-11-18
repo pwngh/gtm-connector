@@ -102,8 +102,9 @@ pending receipt, or a changed file makes it unreadable.
   call notes and `slack:read` if it contains Slack messages;
 - the CRM, calls, and Slack bindings equal the running server's; and
 - for imported calls and live Slack, the current transcript revision and Slack
-  mapping are the ones the brief used, and the local Slack connection still has
-  the same identity. Disconnecting Slack withholds saved Slack text.
+  mapping are the ones the brief used, and the local Slack connection still
+  holds a ready credential for the same identity. Disconnecting Slack withholds
+  saved Slack text.
 
 Knowing a brief ID is not permission. Any caller that meets these checks may read
 the brief again. The result includes `provider_rechecked: false` and a notice,

@@ -284,7 +284,10 @@ def read_brief(connector, token, brief_id) -> dict:
             from .slack_auth import inspect_slack_connection
             from .slack_mapping import load_slack_mapping, slack_identity_binding
             connection = inspect_slack_connection(context.slack_connection_dir)
-            if connection.needs_login or slack_identity_binding(connection.identity) != context.slack_binding:
+            # Startup requires a ready credential; a refresh whose identity check has not
+            # finished is not proof that the same identity still holds.
+            if (connection.needs_login or connection.credential_state != "ready"
+                    or slack_identity_binding(connection.identity) != context.slack_binding):
                 raise ToolError("brief_source_changed")
             mapping = load_slack_mapping(context.slack_mapping_path, account_id=account_id,
                                          crm_binding=context.crm_binding, slack_binding=context.slack_binding)
