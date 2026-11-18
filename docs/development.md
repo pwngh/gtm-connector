@@ -41,6 +41,11 @@ It runs generated sequences as well as the separate Inspector check. These check
 use fixtures and require no model or external account. The
 [workflow](../.github/workflows/test.yml) defines the commands.
 
+The suite also checks the benchmark report and the mechanisms used by the
+[performance measurements](performance.md). Run the full benchmark with
+`.venv/bin/python scripts/benchmark.py`. CI checks key generation, import
+boundaries, and committed receipts without imposing a stopwatch threshold.
+
 ## Dependency locks
 
 The runtime lock pins package versions and artifact hashes. The default demo

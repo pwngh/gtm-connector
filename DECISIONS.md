@@ -1,5 +1,30 @@
 # Decisions
 
+## Measure process startup and audited calls (2026-11-17)
+
+Use one fixture-only benchmark for fresh-process version, help, brief, server
+readiness, and audited HTTPS calls. Record raw samples and nearest-rank p95 with
+the source commit, script hash, date, and machine details. A fresh process does
+not imply an empty operating-system cache. Include shutdown in the brief time;
+stop the server-readiness timer at its flushed ready event. Exclude receipt
+verification from the call timer, then require a committed successful receipt.
+Compare each complete call with a direct SQLite read to state the connector's
+added cost. Do not use the audit row's elapsed time, which precedes its final
+commit. These measurements describe one machine, not a latency guarantee.
+
+Generate a fresh P-256 certificate on each start using the existing cryptography
+dependency. Certificate generation was a measured source of startup variation;
+[before and after measurements](docs/performance.md) record the effect. Keep
+the loopback subject alternative name, one-day validity, private key permissions,
+and explicit client trust. Do not cache keys or skip authorization or audit work.
+The [cryptography API](https://cryptography.io/en/latest/hazmat/primitives/asymmetric/ec/)
+provides the key generator; local HTTPS and Inspector tests verify these clients.
+No runtime dependency changes.
+
+CI holds the mechanisms rather than timing a shared runner. It checks the fresh
+key type and identity, help/version import boundaries, committed receipts, and a
+small benchmark report. Existing HTTPS, Inspector, and audit tests still run.
+
 ## Running server and daily commands (2026-11-17)
 
 Emit one bounded event after each recognized tool attempt. Use a separate

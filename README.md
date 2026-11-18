@@ -396,6 +396,7 @@ or multi-tenant behavior is included.
 ## Reference
 
 [Development checks](docs/development.md) explains linting, type checks, and dependency locks.
+[Performance measurements](docs/performance.md) records startup and audited call timings with rerun commands.
 [Tools and fixture data](docs/tools.md) documents each tool and its required scope.
 [Design decisions](DECISIONS.md) explains the choices;
 [Rules the coding agents worked under](AGENTS.md) records the constraints.
