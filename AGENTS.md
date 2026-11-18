@@ -137,22 +137,20 @@ fixture corpus, not a new run against the current book.
 
 ## Council
 
-The user's later instruction requires council for the renewal-demo PR and each
-remaining PR in the authorized sequence. This supersedes the earlier one-time
-core review and Sol-only follow-up rules. Use all three full members:
+The user explicitly instructed "Keep going without Gemini" on 2026-11-18 after
+Gemini's second and third renewal-demo reviews ended with capacity errors.
+Use these two full members for the remaining authorized PRs:
 
 | Provider | Member | Effort |
 | --- | --- | --- |
 | OpenAI | GPT Sol; record the exact available Sol model ID | High |
 | Anthropic | Claude Opus; record the exact available Opus model ID | High |
-| Google | Gemini 3.8 Flash (`gemini-3.8-flash-high`) | High |
 
-Gemini 3.8 Flash is explicitly selected by the user as a full member. Do not
-describe it as a flagship or treat its review as non-blocking. Include actual
-model names and effort in the PR council table, with each round's returned score
-or `no score`. No fabricated usage, scores, or agreement.
+Record actual model IDs, effort, round numbers, findings, and returned scores
+or `no score` in each PR description. Do not count a failed provider completion
+as approval, invent consensus, or silently substitute another provider.
 
-Give all members the same code, tests, and these attack questions. Put each
+Give both members the same code, tests, and these attack questions. Put each
 member's answers and evidence in the PR table, not just a general verdict:
 
 - Can any tool return data outside the token's scopes?
@@ -160,7 +158,8 @@ member's answers and evidence in the PR table, not just a general verdict:
 - What happens with an expired, malformed, or wrong-audience token?
 - Is anything inside a source record ever treated as an instruction?
 
-Maximum three council rounds total. If the council has not agreed after three,
-stop and show the user the open findings and disagreements with evidence. Do
-not run more rounds. If any selected member cannot be reached, stop on a local
-branch and report it without substituting a different model.
+Maximum three council rounds per PR. If agreement is absent after round three,
+report open findings and disagreements. Do not start a fourth round or imply
+approval. If either remaining selected member cannot be reached, stop on a
+local branch and report the failure without substitution. Full stop ends each
+PR, then work continues through the authorized sequence. The user merges.

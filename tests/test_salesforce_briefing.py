@@ -203,17 +203,20 @@ class SalesforceBriefingTests(unittest.TestCase):
         reader = SalesforceReadOnlyAdapter("https://fixture-brief.my.salesforce.com", TOKEN,
                                            transport=httpx2.MockTransport(self.respond))
         self.runtime = self.enterContext(Runtime(self.state, crm_reader=reader))
-        self.assertEqual(self.requests, [])
+        self.assertEqual(len(self.requests), 1)
+        self.assertIn(" FROM Organization", self.requests[0].url.params["q"])
+        self.startup_requests = list(self.requests)
 
     def respond(self, request):
         self.requests.append(request)
         self.assertEqual(request.method, "GET")
         self.assertEqual(request.url.host, "fixture-brief.my.salesforce.com")
-        self.assertEqual(sum(row["status"] == "pending" for row in self.runtime.connector.audit.read()), 1)
         query = request.url.params["q"]
         if " FROM Organization" in query:
-            rows = [{"Id": "00D000000000001AAA", "OrganizationType": "Developer Edition"}]
-        elif " FROM Account" in query:
+            rows = [{"Id": "00D000000000001AAA", "OrganizationType": "Developer Edition", "IsSandbox": False}]
+            return httpx2.Response(200, json={"done": True, "totalSize": 1, "records": rows})
+        self.assertEqual(sum(row["status"] == "pending" for row in self.runtime.connector.audit.read()), 1)
+        if " FROM Account" in query:
             rows = [{"Id": ACCOUNT, "Name": "Invented contract account", "Industry": None, "AccountNumber": None}]
         elif " FROM Contact" in query:
             rows = [{"Id": CONTACT, "AccountId": ACCOUNT, "Name": "Invented contact", "Title": None, "Email": None}]
@@ -292,7 +295,7 @@ class SalesforceBriefingTests(unittest.TestCase):
                 response = client.call(token, tool, {"account_id": ACCOUNT_ID})
                 self.assertEqual(response.status_code, 200)
                 self.assertFalse(response.json()["result"].get("isError"))
-        self.assertEqual(self.requests, [])
+        self.assertEqual(self.requests, self.startup_requests)
         brief = create_brief(self.runtime, ACCOUNT_ID, as_of=AS_OF, include_slack=True)
         self.assertIn("[calls/call_notes/note-sf-fixture]", brief["text"])
         self.assertIn("[slack/messages/msg-sf-fixture]", brief["text"])

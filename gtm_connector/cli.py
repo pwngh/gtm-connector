@@ -27,8 +27,8 @@ COMMANDS = {
     "brief": ("Create a cited renewal brief from authorized source reads.", "brief acc-003 --with-slack"),
     "serve": ("Start the local HTTPS connector and authorization server.", "serve --state-dir var/v2"),
     "seed": ("Create the local CRM fixture without replacing existing records.", "seed --db var/v2/crm.sqlite3"),
-    "accounts": ("Search the local CRM by account name.", "accounts --query Cedarline"),
-    "account": ("Read one local CRM account and its contacts.", "account acc-003"),
+    "accounts": ("Search the selected CRM by account name.", "accounts --query Cedarline"),
+    "account": ("Read one account, its contacts, and available contracts.", "account acc-003"),
     "audit": ("Read tool-call receipts from the local audit database.", "audit --state-dir var/renewal-demo"),
     "usage": ("Summarize tool calls and saved model token counts.", "usage --state-dir var/renewal-demo"),
     "evaluate": ("Check briefs for twenty fixed accounts in temporary state.", "evaluate --with-slack --json"),
@@ -82,8 +82,11 @@ def build_parser():
         command.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                              help="Write the documented JSON result for scripts.")
         if name in ("seed", "accounts", "account"):
-            command.add_argument("--db", type=Path, default=Path("var/v2/crm.sqlite3"),
-                                 help="Read or seed this local CRM database.")
+            command.add_argument("--db", type=Path, default=Path("var/v2/crm.sqlite3") if name == "seed" else None,
+                                 help="Read or seed this local CRM database (default: var/v2/crm.sqlite3).")
+            if name != "seed":
+                command.add_argument("--state-dir", type=Path,
+                                     help="Use this private Salesforce state folder (default: var/salesforce).")
         elif name not in ("evaluate", "completion", "salesforce"):
             state_dir = {"demo": "var/renewal-demo", "verify": "var/verification"}.get(name, "var/v2")
             command.add_argument("--state-dir", type=Path, default=Path(state_dir),
@@ -92,13 +95,17 @@ def build_parser():
             command.add_argument("--query", default="", help="Match this literal part of an account name.")
         if name in ("account", "brief"):
             command.add_argument("account_id", help="Select an account, such as acc-003.")
-        if name in ("serve", "brief"):
+        if name in ("serve", "brief", "accounts", "account"):
             command.add_argument("--crm-backend", choices=("sqlite", "salesforce"), default="sqlite",
                                  help="Select local fixtures or the read-only Salesforce CRM reader.")
+        if name in ("serve", "brief"):
             command.add_argument("--salesforce-demo-binding", type=Path,
                                  help="Load private imported account bindings for invented call and Slack fixtures.")
-        if name in ("serve", "brief", "salesforce"):
+        if name in ("serve", "brief", "accounts", "account", "salesforce"):
             command.add_argument("--sf-org", help="Read Salesforce credentials from this signed-in sf CLI alias.")
+            command.add_argument("--sf-environment", choices=("developer", "sandbox", "production"),
+                                 default="developer" if name == "salesforce" else None,
+                                 help="Require this Salesforce environment (default: developer).")
         if name == "salesforce":
             command.add_argument("action", choices=("check",), help="Run the private, read-only setup check.")
         if name in ("brief", "salesforce"):
@@ -152,7 +159,7 @@ def table(headers, rows):
                                 for row in rows])
 
 
-def human_result(command, result):
+def human_result(command, result, *, crm_backend="sqlite"):
     if command == "salesforce":
         return table(["STEP", "STATUS", "COUNT", "MS", "API GETS", "SF COMMANDS", "DETAIL", "FIX"],
                      [[row[key] for key in ("name", "status", "count", "duration_ms", "api_calls",
@@ -175,11 +182,19 @@ def human_result(command, result):
         return table(["ID", "ACCOUNT", "INDUSTRY", "RENEWAL"],
                      [[row.get(key) for key in ("id", "name", "industry", "renewal_date")] for row in result])
     if command == "account":
-        fields = [[key.replace("_", " ").capitalize(), value] for key, value in result.items() if key != "contacts"]
+        keys = ("id", "name", "industry", "account_number") if crm_backend == "salesforce" else result
+        fields = [[key.replace("_", " ").capitalize(), result.get(key)] for key in keys
+                  if key not in ("contacts", "contracts")]
         contacts = result["contacts"]
-        return table(["FIELD", "VALUE"], fields) + "\n\nContacts\n" + table(
+        displayed = table(["FIELD", "VALUE"], fields) + "\n\nContacts\n" + table(
             ["ID", "NAME", "TITLE", "EMAIL"], [[row.get(key) for key in ("id", "name", "title", "email")]
                                               for row in contacts])
+        if "contracts" in result:
+            displayed += "\n\nContracts\n" + table(
+                ["ID", "STATUS", "CATEGORY", "START", "END", "TERM MONTHS"],
+                [[row.get(key) for key in ("id", "status", "status_code", "start_date", "end_date", "contract_term")]
+                 for row in result["contracts"]])
+        return displayed
     if command == "audit":
         return table(["TIME", "TOOL", "CALLER", "DECISION", "MS", "RECEIPT", "REASON"],
                      [[row["started_at"], row["tool"], row["token_id"], row["status"],
@@ -255,6 +270,75 @@ def _salesforce_progress(as_json):
     return report
 
 
+def _salesforce_sources(environment, *, mixed=False):
+    if mixed:
+        return (f"Sources: mixed. CRM uses Salesforce ({environment}); call notes and Slack use demo fixtures. "
+                "Connection identity is verified.")
+    return f"Sources: live. CRM uses Salesforce ({environment}). Connection identity is verified."
+
+
+def _salesforce_account_read(args, reader):
+    """Inspect through the same scoped, audited HTTPS tools as a brief."""
+    import uuid
+    from .briefing import BriefingError
+    from .client import LocalClient
+    from .runtime import Runtime
+    from .salesforce import SalesforceReadError, _ERROR_CODES
+
+    tool = "search_accounts" if args.command == "accounts" else "get_account"
+    arguments = {"query": args.query} if args.command == "accounts" else {"account_id": args.account_id}
+    with Runtime(args.state_dir, crm_reader=reader) as runtime, LocalClient(runtime.config) as client:
+        if not args.json:
+            print(_salesforce_sources(args.sf_environment), file=sys.stderr)
+        token = client.authorize(["crm:read"])
+        response = client.call(token, tool, arguments, brief_id="inspect-" + uuid.uuid4().hex)
+        if response.status_code != 200:
+            raise BriefingError(f"{tool}: HTTP {response.status_code}; no account data returned")
+        try:
+            result = response.json()["result"]
+            if result.get("isError"):
+                content = result.get("content")
+                if (isinstance(content, list) and len(content) == 1 and isinstance(content[0], dict)
+                        and content[0].get("type") == "text"):
+                    text = content[0].get("text")
+                    for code in _ERROR_CODES:
+                        if text == f"Error executing tool {tool}: {code}":
+                            raise SalesforceReadError(code)
+                    if tool == "get_account" and text == "Error executing tool get_account: account not found":
+                        raise LookupError("account not found in the selected Salesforce CRM")
+                raise ValueError
+            data = result["structuredContent"]
+            if (result.get("resultType") != "complete" or data["source"] != "crm"
+                    or data.get("untrusted_data") is not True):
+                raise ValueError
+            rows = data["records"]
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise ValueError
+            groups: dict[str, list[dict]] = {"accounts": [], "contacts": [], "contracts": []}
+            for row in rows:
+                group = next((name for name in groups if row.get("record_ref") ==
+                              f"crm/{name}/{row.get('id')}"), None)
+                if group is None or row.get("backend") != "salesforce":
+                    raise ValueError
+                groups[group].append({key: value for key, value in row.items() if key != "record_ref"})
+            if args.command == "accounts":
+                if groups["contacts"] or groups["contracts"]:
+                    raise ValueError
+                return groups["accounts"]
+            accounts = groups["accounts"]
+            if len(accounts) != 1 or accounts[0].get("id") != args.account_id:
+                raise ValueError
+            if any(row.get("account_id") != args.account_id for row in groups["contacts"] + groups["contracts"]):
+                raise ValueError
+            return {**accounts[0], "contacts": groups["contacts"], "contracts": groups["contracts"]}
+        except LookupError as exc:
+            if isinstance(exc, KeyError):
+                raise SalesforceReadError("salesforce_invalid_response") from None
+            raise ValueError(str(exc)) from None
+        except (TypeError, ValueError, AttributeError):
+            raise SalesforceReadError("salesforce_invalid_response") from None
+
+
 def _run(args, argv):
     if args.command == "completion":
         from .completion import generate
@@ -262,21 +346,45 @@ def _run(args, argv):
     # Dependencies belong to the command that uses them, after help is handled.
     crm_reader = None
     demo_binding = None
-    if args.command in ("serve", "brief"):
+    if args.command in ("serve", "brief", "accounts", "account"):
         if args.sf_org is not None and args.crm_backend != "salesforce":
             raise ValueError("--sf-org requires --crm-backend salesforce")
-        if args.salesforce_demo_binding is not None:
+        if args.sf_environment is not None and args.crm_backend != "salesforce":
+            raise ValueError("--sf-environment requires --crm-backend salesforce")
+        args.sf_environment = args.sf_environment or "developer"
+        if args.command in ("accounts", "account"):
+            if args.crm_backend == "salesforce":
+                if args.db is not None:
+                    raise ValueError("--db cannot be combined with --crm-backend salesforce; use --state-dir")
+                args.state_dir = args.state_dir or Path("var/salesforce")
+                from .salesforce import SalesforceReadError, _account_id, _like_literal
+                try:
+                    _like_literal(args.query) if args.command == "accounts" else _account_id(args.account_id)
+                except SalesforceReadError:
+                    message = ("The search must contain at most 200 characters and no control characters."
+                               if args.command == "accounts" else
+                               "The account ID must use acc-sf- followed by its 18-character Salesforce ID.")
+                    raise ValueError(message) from None
+            else:
+                if args.state_dir is not None:
+                    raise ValueError("--state-dir requires --crm-backend salesforce for account inspection; use --db")
+                args.db = args.db or Path("var/v2/crm.sqlite3")
+        if getattr(args, "salesforce_demo_binding", None) is not None:
             if args.crm_backend != "salesforce":
                 raise ValueError("--salesforce-demo-binding requires --crm-backend salesforce")
             from .salesforce_demo import load_binding
             demo_binding = load_binding(args.salesforce_demo_binding)
         if args.crm_backend == "salesforce":
             from .salesforce import SalesforceReadOnlyAdapter
-            crm_reader = (SalesforceReadOnlyAdapter.from_sf(args.sf_org) if args.sf_org is not None
-                          else SalesforceReadOnlyAdapter.from_env())
+            crm_reader = (SalesforceReadOnlyAdapter.from_sf(args.sf_org, environment=args.sf_environment)
+                          if args.sf_org is not None else
+                          SalesforceReadOnlyAdapter.from_env(environment=args.sf_environment))
     if args.command == "salesforce":
         from .salesforce_check import run_check
-        return run_check(sf_org=args.sf_org, as_of=args.as_of, progress=_salesforce_progress(args.json))
+        return run_check(sf_org=args.sf_org, as_of=args.as_of, environment=args.sf_environment,
+                         progress=_salesforce_progress(args.json))
+    if args.command in ("accounts", "account") and crm_reader is not None:
+        return _salesforce_account_read(args, crm_reader)
     adapter = None
     if args.command in ("brief", "evaluate"):
         if args.adapter == "fixture" and args.model is not None:
@@ -323,6 +431,8 @@ def _run(args, argv):
         if as_of is None:
             as_of = date.today().isoformat() if crm_reader is not None else DEMO_AS_OF
         with Runtime(args.state_dir, crm_reader=crm_reader, demo_binding=demo_binding) as runtime:
+            if crm_reader is not None and not args.json:
+                print(_salesforce_sources(args.sf_environment, mixed=True), file=sys.stderr)
             return create_brief(runtime, args.account_id, include_calls=not args.without_calls,
                                 as_of=as_of,
                                 adapter=adapter, include_slack=args.with_slack)
@@ -355,16 +465,18 @@ def _run(args, argv):
                                  "calls": "demo_fixture", "slack": "demo_fixture"}}
             if demo_binding is not None:
                 ready["demo_kit_id"] = demo_binding.kit_id
+            if runtime.crm_backend == "salesforce":
+                ready.update(sf_environment=args.sf_environment, crm_identity_verified=True)
             if args.json:
                 print(json.dumps(ready), flush=True)
             else:
-                sources = ("CRM uses selected Salesforce data; call notes and Slack use demo fixtures."
+                sources = (_salesforce_sources(args.sf_environment, mixed=True)
                            if runtime.crm_backend == "salesforce" else
-                           "CRM, call notes, and Slack use demo fixtures.")
+                           "Sources: CRM, call notes, and Slack use demo fixtures.")
                 if demo_binding is not None:
                     sources += f" The bound demo kit is {demo_binding.kit_id}."
                 _server_notice(f"Connector ready at {ready['resource']}\nBackend: {runtime.crm_backend}\n"
-                               f"Sources: {sources}\n"
+                               f"{sources}\n"
                                f"State folder: {runtime.directory}\n"
                                "Granted scopes: none. Each client needs an explicit grant.\n"
                                "Connect: gtm-connector connect inspector --scope crm:read "
@@ -413,6 +525,8 @@ def _failure(exc, args):
         code = 3
         message = "renewal_fields_unmapped: " + message
         next_command = "gtm-connector salesforce check --help"
+    elif getattr(exc, "code", None) in ("salesforce_environment_mismatch", "source_identity_mismatch"):
+        code = 3
     elif (type(exc).__name__ in ("SalesforceReadError", "BriefingError", "OllamaError",
                                    "InspectorConnectionError") or
           type(exc).__module__.startswith(("httpx", "httpcore"))):
@@ -430,12 +544,21 @@ def _failure(exc, args):
             fresh = args.state_dir.parent / f"renewal-demo-fresh-{suffix}"
             suffix += 1
         next_command = shlex.join(["gtm-connector", "demo", "--state-dir", str(fresh)])
+    if getattr(exc, "code", None) == "source_identity_mismatch":
+        fresh = args.state_dir.parent / "salesforce-fresh"
+        suffix = 2
+        while os.path.lexists(fresh):
+            fresh = args.state_dir.parent / f"salesforce-fresh-{suffix}"
+            suffix += 1
+        message = (f"source_identity_mismatch: {message} "
+                   f"Repeat this command with --state-dir {shlex.quote(str(fresh))}. Existing files are retained.")
     if "audit database not found" in message:
         next_command = f"gtm-connector demo --state-dir {shlex.quote(str(args.state_dir))}"
     elif "database not found" in message:
         next_command = f"gtm-connector seed --db {shlex.quote(str(args.db))}"
     elif "account not found" in message:
-        next_command = f"gtm-connector accounts --db {shlex.quote(str(args.db))}"
+        next_command = ("gtm-connector accounts --help" if getattr(args, "crm_backend", None) == "salesforce" else
+                        f"gtm-connector accounts --db {shlex.quote(str(args.db))}")
     elif command in ("inspector-config", "connect") and (
             isinstance(exc, FileNotFoundError) or type(exc).__name__ == "InspectorConnectionError"):
         next_command = f"gtm-connector serve --state-dir {shlex.quote(str(args.state_dir))}"
@@ -488,7 +611,8 @@ def _main(argv):
     try:
         result = _run(args, argv)
         if result is not None:
-            print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else human_result(args.command, result))
+            print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else
+                  human_result(args.command, result, crm_backend=getattr(args, "crm_backend", "sqlite")))
         if args.command == "doctor" and result["status"] != "passed":
             return _error("Setup checks failed. Apply the fix beside each failed check.", 4,
                           f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}", as_json=args.json)

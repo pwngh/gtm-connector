@@ -1,4 +1,4 @@
-"""Private demo bindings seed isolated sources without implicit Salesforce reads."""
+"""Private demo bindings keep source reads separate after connection metadata preflight."""
 
 from contextlib import closing, redirect_stderr, redirect_stdout
 import io
@@ -62,7 +62,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
         if self.account_number_override is not None:
             number = self.account_number_override
         if " FROM Organization" in query:
-            rows = [{"Id": "00D000000000001AAA", "OrganizationType": "Developer Edition"}]
+            rows = [{"Id": "00D000000000001AAA", "OrganizationType": "Developer Edition", "IsSandbox": False}]
         elif " FROM Account" in query:
             rows = [{"Id": native, "Name": "Invented imported account", "Industry": "Manufacturing",
                      "AccountNumber": number}]
@@ -93,6 +93,10 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
         return {path.name: path.read_bytes() for path in self.state.iterdir()
                 if path.is_file() and path.name != "server.lock"}
 
+    def assert_connection_check_only(self):
+        self.assertEqual(len(self.requests), 1)
+        self.assertIn(" FROM Organization", self.requests[0].url.params["q"])
+
     def records(self, response):
         self.assertEqual(response.status_code, 200, response.text)
         result = response.json()["result"]
@@ -102,7 +106,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
 
     def test_bound_brief_cites_all_three_sources_and_has_no_default_source_overlay(self):
         with self.runtime() as runtime:
-            self.assertEqual(self.requests, [])
+            self.assert_connection_check_only()
             notes = self.rows("calls", "call_notes")
             messages = self.rows("slack", "messages")
             self.assertEqual([row["id"] for row in notes], ["note-demo-001", "note-demo-002", "note-demo-003"])
@@ -142,7 +146,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
                 for identifier in (UNKNOWN_ACCOUNT, "acc-001"):
                     self.assertEqual(self.records(client.call(token, tool, {"account_id": identifier})), [])
                 self.assertEqual(client.call(token, "get_account", {"account_id": self.account_id}).status_code, 403)
-            self.assertEqual(self.requests, [])
+            self.assert_connection_check_only()
             self.assertEqual(len(runtime.connector.audit.read()), 8)
 
     def test_account_number_mismatch_is_safe_and_does_not_add_a_crm_round_trip(self):
@@ -185,7 +189,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
         with self.runtime(reloaded):
             self.assertEqual((self.rows("calls", "call_notes"), self.rows("slack", "messages")), before)
             self.assertEqual((self.state / "source-profile.json").read_bytes(), profile)
-            self.assertEqual(self.requests, [])
+            self.assert_connection_check_only()
 
     def test_changed_binding_and_default_mode_refuse_before_database_or_owner_mutation(self):
         with self.runtime():
@@ -201,7 +205,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
                 with candidate:
                     self.fail("A different source profile started")
             self.assertEqual(self.source_bytes(), before)
-        self.assertEqual(self.requests, [])
+        self.assert_connection_check_only()
 
     def test_existing_state_without_marker_is_not_converted_to_a_bound_profile(self):
         with Runtime(self.state):
@@ -241,7 +245,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
             connection.execute("UPDATE messages SET account_id = ? WHERE id = ?", (self.account_id, "msg-demo-001"))
         with self.runtime():
             self.assertEqual(len(self.rows("calls", "call_notes")), 3)
-        self.assertEqual(self.requests, [])
+        self.assert_connection_check_only()
 
     def test_invalid_or_symlink_profile_fails_without_reading_or_changing_sources(self):
         with self.runtime():
@@ -294,7 +298,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
                          "--with-slack", "--as-of", self.binding.as_of, "--json"])
         self.assertEqual(code, 0, stderr.getvalue())
         self.assertEqual(stderr.getvalue(), "")
-        credentials.assert_called_once_with("invented")
+        credentials.assert_called_once_with("invented", environment="developer")
         result = json.loads(stdout.getvalue())
         self.assertEqual(result["status"], "accepted")
         self.assertIn("[calls/call_notes/note-demo-001]", result["text"])
@@ -302,7 +306,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
         self.assertEqual(len(self.requests), 5)
         self.assertNotIn(TOKEN, stdout.getvalue())
 
-    def test_cli_serve_labels_selected_sources_without_querying_crm(self):
+    def test_cli_serve_labels_verified_connection_without_reading_crm_records(self):
         class InterruptQueue(SimpleQueue):
             def get(self, *args, **kwargs):
                 raise KeyboardInterrupt
@@ -333,7 +337,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
                         code = main(arguments)
                     self.assertEqual(code, 0, stderr.getvalue())
                     if backend == "salesforce":
-                        credentials.assert_called_once_with("private-invented-alias")
+                        credentials.assert_called_once_with("private-invented-alias", environment="developer")
                     else:
                         credentials.assert_not_called()
                     if as_json:
@@ -348,19 +352,29 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
                             self.assertEqual(ready["demo_kit_id"], self.binding.kit_id)
                         else:
                             self.assertNotIn("demo_kit_id", ready)
+                        if backend == "salesforce":
+                            self.assertEqual(ready["sf_environment"], "developer")
+                            self.assertIs(ready["crm_identity_verified"], True)
+                        else:
+                            self.assertNotIn("sf_environment", ready)
+                            self.assertNotIn("crm_identity_verified", ready)
                         self.assertIn("Connector stopped", json.loads(stderr.getvalue())["message"])
                     else:
                         self.assertEqual(stdout.getvalue(), "")
-                        sources = ("CRM uses selected Salesforce data; call notes and Slack use demo fixtures."
+                        sources = ("mixed. CRM uses Salesforce (developer); call notes and Slack use demo fixtures. "
+                                   "Connection identity is verified."
                                    if backend == "salesforce" else "CRM, call notes, and Slack use demo fixtures.")
                         self.assertIn("Sources: " + sources, stderr.getvalue())
                         self.assertEqual(stderr.getvalue().count("Sources:"), 1)
                         self.assertEqual("The bound demo kit is " + self.binding.kit_id in stderr.getvalue(), bound)
-                        self.assertNotIn("verified", stderr.getvalue())
+                        self.assertEqual("Connection identity is verified." in stderr.getvalue(), backend == "salesforce")
                     self.assertEqual(len(self.rows("calls", "call_notes")), 3 if bound else 29)
                     self.assertEqual(len(self.rows("slack", "messages")), 3 if bound else 29)
                     self.assertEqual((self.state / "source-profile.json").is_file(), bound)
-                    self.assertEqual(self.requests, [])
+                    if backend == "salesforce":
+                        self.assert_connection_check_only()
+                    else:
+                        self.assertEqual(self.requests, [])
                     for secret in (TOKEN, "private-invented-alias", "fixture-demo-runtime.my.salesforce.com",
                                    self.account_id, "GTM-DEMO-001"):
                         self.assertNotIn(secret, stdout.getvalue() + stderr.getvalue())

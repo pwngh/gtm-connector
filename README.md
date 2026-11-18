@@ -316,7 +316,7 @@ It found and correctly cited 223 of 223 claims, with zero
 invented claims, 80 audit receipts, and zero activities.
 [Exact command and results](evaluation/RESULTS_SLACK.json)
 
-### Read a Salesforce Developer Edition org
+### Read an existing Salesforce org
 
 Use an existing Salesforce CLI login to check and start the read-only backend:
 
@@ -330,6 +330,14 @@ is needed. The existing environment-variable path remains available. Standard
 Contract records supply the renewal-planning date. Draft and InApproval records
 must be labeled as planning candidates, and an account without an eligible
 EndDate refuses a brief. The adapter is GET-only and omits `log_activity`.
+Developer Edition remains the default. An existing sandbox or production
+connection requires an explicit `--sf-environment sandbox` or
+`--sf-environment production`. Startup checks that expectation and pins the
+connection to its private state folder. `accounts` and `account` also accept
+the Salesforce flags and read through the audited gateway. The standard-object
+capability and state-switch tests use invented responses; paid orgs have not
+been exercised. [Connection choices and account reads](docs/salesforce.md#choose-the-expected-environment)
+
 Call notes and Slack remain local fixtures. The optional invented demo kit binds
 them to imported accounts through standard AccountNumber values; it does not
 connect a call-recording provider or Slack.

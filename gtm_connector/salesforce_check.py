@@ -6,15 +6,9 @@ from tempfile import TemporaryDirectory
 import time
 from typing import Any
 
-from .salesforce import SalesforceReadOnlyAdapter
+from .salesforce import REQUIRED_FIELDS as REQUIRED_FIELDS, SalesforceReadOnlyAdapter
 
 
-REQUIRED_FIELDS = {
-    "Account": {"Id", "Name", "Industry", "AccountNumber"},
-    "Contact": {"Id", "AccountId", "Name", "Title", "Email"},
-    "Opportunity": {"Id", "AccountId", "Name", "StageName", "Amount", "CloseDate", "IsClosed", "IsWon"},
-    "Contract": {"Id", "AccountId", "Status", "StatusCode", "StartDate", "ContractTerm", "EndDate"},
-}
 _FAILURES = {
     "salesforce_invalid_configuration": (
         "Salesforce credentials or the sf CLI configuration are unavailable.",
@@ -22,6 +16,15 @@ _FAILURES = {
     "salesforce_edition_required": (
         "The selected org did not report Developer Edition.",
         "Select a Developer Edition alias with --sf-org."),
+    "salesforce_environment_mismatch": (
+        "The selected org does not match the expected Salesforce environment.",
+        "Check the selected alias and repeat with the intended --sf-environment."),
+    "salesforce_api_disabled": (
+        "Salesforce reports that API access is disabled for this org.",
+        "Use an existing API-enabled org and a user with the API Enabled permission."),
+    "salesforce_schema_unavailable": (
+        "The selected org does not expose all required standard fields.",
+        "Run gtm-connector salesforce check with the same alias and environment to see the missing fields."),
     "salesforce_auth_required": (
         "The sf CLI login or token refresh did not provide usable credentials.",
         "Install Salesforce CLI if missing. Run sf org login web --alias gtm-de, then repeat with --sf-org gtm-de."),
@@ -33,7 +36,7 @@ _FAILURES = {
         "Wait for API capacity, then repeat the check."),
     "salesforce_result_limit": (
         "The read exceeded the connector's request, row, or response-size bound.",
-        "Use a small Developer Edition demo book, then repeat the check."),
+        "Select a smaller account book or narrower search, then repeat the check."),
     "salesforce_timeout": (
         "The Salesforce read or credential refresh exceeded its time limit.",
         "Check connectivity and sf login, then repeat the check."),
@@ -48,7 +51,7 @@ _FAILURES = {
         "Check access to the listed standard fields, then repeat the check."),
     "salesforce_pagination_invalid": (
         "Salesforce returned an unsupported result-page locator.",
-        "Repeat the check on a small Developer Edition demo book."),
+        "Repeat the check on a smaller account book."),
     "salesforce_invalid_arguments": (
         "A read could not use the returned account or date.",
         "Run gtm-connector salesforce check --help and repeat with a valid date."),
@@ -70,7 +73,7 @@ class NoCandidate(Exception):
     code = "renewal_fields_unmapped"
 
 
-def run_check(*, sf_org=None, as_of=None, adapter_factory=None, progress=None):
+def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_factory=None, progress=None):
     """Never return records, configuration, credentials, exception text, or identifiers."""
     as_of = date.today().isoformat() if as_of is None else as_of
     try:
@@ -78,8 +81,16 @@ def run_check(*, sf_org=None, as_of=None, adapter_factory=None, progress=None):
             raise ValueError
     except (TypeError, ValueError):
         raise ValueError("The planning date must use YYYY-MM-DD.") from None
-    factory = adapter_factory or (lambda: SalesforceReadOnlyAdapter.from_sf(sf_org) if sf_org is not None
-                                  else SalesforceReadOnlyAdapter.from_env())
+    if not isinstance(environment, str) or environment not in ("developer", "sandbox", "production"):
+        raise ValueError("The Salesforce environment must be developer, sandbox, or production.")
+
+    def configured_adapter():
+        # Preserve the earlier default factory call for existing Python callers.
+        options = {} if environment == "developer" else {"environment": environment}
+        return (SalesforceReadOnlyAdapter.from_sf(sf_org, **options) if sf_org is not None
+                else SalesforceReadOnlyAdapter.from_env(**options))
+
+    factory = adapter_factory or configured_adapter
     state: dict[str, Any] = {}
     steps: list[dict[str, Any]] = []
 
@@ -122,15 +133,18 @@ def run_check(*, sf_org=None, as_of=None, adapter_factory=None, progress=None):
 
     def credentials():
         state["reader"] = factory()
+        if state["reader"].environment != environment:
+            raise ValueError("The reader does not match the selected environment.")
         return 2, "Instance and token were loaded in memory."
 
     credential_ok = step("credentials", credentials)
 
     def edition():
         state["reader"].check_edition()
-        return 1, "Developer Edition was confirmed."
+        return 1, ("Developer Edition was confirmed." if environment == "developer"
+                   else f"The selected {environment} environment was confirmed.")
 
-    edition_ok = step("edition", edition, ready=credential_ok)
+    edition_ok = step("edition" if environment == "developer" else "environment", edition, ready=credential_ok)
     schema_ok = edition_ok
     for object_name, fields in REQUIRED_FIELDS.items():
         def schema(name=object_name, required=fields):
@@ -142,6 +156,9 @@ def run_check(*, sf_org=None, as_of=None, adapter_factory=None, progress=None):
         schema_ok = schema_ok and passed
 
     def search():
+        if environment != "developer":
+            rows = state["reader"].probe_accounts()
+            return len(rows), "The one-account read probe completed. Its count is a sample, not the account book size."
         rows = state["reader"].search_accounts("")
         return len(rows), "The bounded Account search completed."
 

@@ -21,7 +21,7 @@ TOKEN = "fixture-only-first-token"
 FRESH_TOKEN = "fixture-only-fresh-token"
 EMPTY = {"totalSize": 0, "done": True, "records": []}
 ORG = {"totalSize": 1, "done": True,
-       "records": [{"Id": "00D000000000001AAA", "OrganizationType": "Developer Edition"}]}
+       "records": [{"Id": "00D000000000001AAA", "OrganizationType": "Developer Edition", "IsSandbox": False}]}
 REAL_RUN = subprocess.run
 
 
@@ -75,7 +75,7 @@ print(json.dumps({"status": 0, "result": value}))
         self.addCleanup(environment.stop)
         self.requests = []
 
-    def adapter(self, *responses):
+    def adapter(self, *responses, environment="developer"):
         pending = list(responses)
 
         def respond(request):
@@ -88,7 +88,8 @@ print(json.dumps({"status": 0, "result": value}))
                 response = response(request)
             return response if isinstance(response, httpx2.Response) else httpx2.Response(200, json=response)
 
-        return SalesforceReadOnlyAdapter.from_sf("invented-alias", transport=httpx2.MockTransport(respond))
+        return SalesforceReadOnlyAdapter.from_sf("invented-alias", environment=environment,
+                                                 transport=httpx2.MockTransport(respond))
 
     def assert_auth_error(self, function):
         with self.assertRaises(SalesforceReadError) as caught:
@@ -117,14 +118,46 @@ print(json.dumps({"status": 0, "result": value}))
         self.assertEqual(sorted(path.name for path in self.directory.iterdir()), ["count", "sf"])
 
     def test_first_401_refreshes_once_and_retries_same_get_with_new_token(self):
-        adapter = self.adapter(ORG, httpx2.Response(401), EMPTY, EMPTY)
+        adapter = self.adapter(ORG, httpx2.Response(401), ORG, EMPTY, EMPTY)
         self.assertEqual(adapter.search_accounts(), [])
         self.assertEqual(adapter.search_accounts(), [])
         self.assertEqual(adapter.sf_cli_invocations, 4)
-        self.assertEqual(adapter.http_requests, 4)
-        self.assertEqual(self.requests[1].url, self.requests[2].url)
+        self.assertEqual(adapter.http_requests, 5)
+        self.assertEqual(self.requests[1].url, self.requests[3].url)
+        self.assertIn(" FROM Organization", self.requests[2].url.params["q"])
         self.assertEqual([request.headers["Authorization"] for request in self.requests],
-                         ["Bearer " + TOKEN] * 2 + ["Bearer " + FRESH_TOKEN] * 2)
+                         ["Bearer " + TOKEN] * 2 + ["Bearer " + FRESH_TOKEN] * 3)
+
+    def test_explicit_paid_environments_keep_identity_and_cached_capabilities_after_fake_cli_refresh(self):
+        fields = {
+            "Account": ("Id", "Name", "Industry", "AccountNumber"),
+            "Contact": ("Id", "AccountId", "Name", "Title", "Email"),
+            "Opportunity": ("Id", "AccountId", "Name", "StageName", "Amount", "CloseDate", "IsClosed", "IsWon"),
+            "Contract": ("Id", "AccountId", "Status", "StatusCode", "StartDate", "ContractTerm", "EndDate"),
+        }
+        for environment in ("sandbox", "production"):
+            with self.subTest(environment=environment):
+                (self.directory / "count").unlink(missing_ok=True)
+                self.requests.clear()
+                organization = {"totalSize": 1, "done": True, "records": [{
+                    "Id": "00D000000000001AAA", "OrganizationType": "Enterprise Edition",
+                    "IsSandbox": environment == "sandbox"}]}
+                descriptions = [{"name": name, "queryable": True,
+                                 "fields": [{"name": field} for field in names]}
+                                for name, names in fields.items()]
+                adapter = self.adapter(organization, *descriptions, httpx2.Response(401), organization, EMPTY,
+                                       environment=environment)
+                identity = adapter.prepare_connection()
+                self.assertEqual(identity["environment"], environment)
+                self.assertEqual(adapter.http_requests, 5)
+                self.assertEqual(adapter.search_accounts(), [])
+                self.assertEqual(adapter.prepare_connection(), identity)
+                self.assertEqual(adapter.sf_cli_invocations, 4)
+                self.assertEqual(adapter.http_requests, 8)
+                self.assertEqual(self.requests[-3].url, self.requests[-1].url)
+                self.assertIn(" FROM Organization", self.requests[-2].url.params["q"])
+                self.assertEqual(self.requests[-3].headers["Authorization"], "Bearer " + TOKEN)
+                self.assertEqual(self.requests[-1].headers["Authorization"], "Bearer " + FRESH_TOKEN)
 
     def test_second_401_and_later_query_401_do_not_refresh_twice_in_one_operation(self):
         for responses in ((httpx2.Response(401), httpx2.Response(401)),
@@ -175,7 +208,7 @@ print(json.dumps({"status": 0, "result": value}))
         self.assertEqual(adapter.http_requests, 2)
         self.assertEqual(adapter.sf_cli_invocations, 4)
 
-        adapter = self.adapter(ORG, httpx2.Response(401), EMPTY)
+        adapter = self.adapter(ORG, httpx2.Response(401), ORG, EMPTY)
         with patch("gtm_connector.salesforce._MAX_BYTES", len(json.dumps(ORG).encode()) + 1):
             with self.assertRaises(SalesforceReadError) as caught:
                 adapter.search_accounts()

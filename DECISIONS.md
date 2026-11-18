@@ -1,5 +1,65 @@
 # Decisions
 
+## Explicit Salesforce environments and private connection state (2026-11-18)
+
+The user requested a usable connection to existing CRM data after the six demo
+PRs. Keep the default offline and Developer Edition as the default Salesforce
+expectation. Add explicit `developer`, `sandbox`, and `production` expectations
+because an existing CLI alias alone does not tell an operator which environment
+will be read. The flag does not create an environment or select a default alias.
+
+Use the Organization response's typed IsSandbox field to distinguish sandboxes.
+Developer mode additionally requires the existing Developer Edition label and
+IsSandbox false. Production requires IsSandbox false and a non-Developer Edition
+label. Reject missing or malformed metadata instead of inferring an environment.
+Do not maintain a paid-edition allowlist: actual API access and required readable
+Account, Contact, Opportunity, and Contract fields decide whether the selected
+connection can support this fixed reader. Salesforce documents both org API
+access and the user's API Enabled permission as requirements. See the official
+[API requirements](https://developer.salesforce.com/docs/platform/api-rest/guide/intro-rest-compatible-editions.html)
+and [Organization reference](https://developer.salesforce.com/docs/platform/object-reference/references/standard-objects/object-organization.html).
+
+Before opening source databases or writing owner credentials, check the selected
+connection under the existing state lock and pin its validated origin, org ID,
+and environment in private `crm-connection.json`. This metadata check belongs to
+the operator's startup, not a client tool call. All subsequent CRM record reads
+still require the normal grant and committed receipt. A different alias for the
+same identity can reuse state. A different org, origin, environment, fixture
+mode, or malformed marker cannot. Require fresh state for older unpinned files
+because their source identity cannot be established from their contents. Keep
+the independent demo-kit binding guard. Write private markers atomically; this
+is not a power-loss durability or multi-user isolation guarantee.
+
+Cache only successful environment and fixed-schema checks for one adapter
+lifetime. Preserve all GET, pagination, byte, row, deadline, and one-refresh
+bounds. When an expired token refreshes after identity is known, reread
+Organization before retrying the record request. This single extra GET stays
+inside the original budget and detects a replaced sandbox behind the same
+origin. The initial Organization retry already checks identity, so it needs no
+second metadata request. A later provider permission failure still refuses;
+no CRM records are cached. Distinguish an API-disabled org, denied permission, mismatched expected
+environment, and unavailable standard schema with fixed diagnostics. Existing
+Developer Edition error names and check-report shape remain supported.
+
+For nondeveloper setup checks, sample at most one Account instead of running an
+unfiltered book search. A healthy real org can contain more than 100 accounts;
+the diagnostic must not fail merely because the full book exceeds the ordinary
+search bound. Keep the count as a sample count and retain default Developer
+Edition check behavior. Normal tools keep the existing 100-row refusal.
+
+Add Salesforce to `accounts` and `account` through the same local OAuth, MCP,
+and audit path used by briefs. Keep existing SQLite commands and JSON shapes.
+The real-source account commands use separate default state in `var/salesforce`;
+explicit conflicting database and backend flags fail before credentials are
+loaded. Human output labels the selected source and checked connection identity
+once on stderr. Shared check reports contain no org identity or source data.
+
+This slice uses invented HTTP and fake CLI responses for sandbox and production
+proof. It contacts no paid org and makes no production compatibility claim.
+No live org has been verified. Real transcript imports, Slack authentication,
+source selection, remote caller-safe briefs, and interactive setup remain their
+own later slices. No runtime dependency is added.
+
 ## A renewal story and separate guarantee checks (2026-11-17)
 
 Make `demo` follow Morgan Reed, an invented account rep, preparing Juniper Crest
@@ -52,12 +112,14 @@ the GIF, transcript, and provenance refer to actual CLI output. Add no runtime
 dependency, hosted model call, or external integration in this slice. The later
 real-source and experience work remains separate from the original six PRs.
 
-The user's later review instruction requires the installed TStack full-stop
+The user's initial review instruction required the installed TStack full-stop
 workflow and three-provider council for this PR and each remaining PR. Use the
 same scope for Sol, Claude Opus, and the selected Gemini 3.8 Flash member, with
 High effort and no more than three complete rounds. Reachability probes are
 tooling checks, not reviews or scores. Stop at a local branch if a required
-member cannot be reached. The user still merges every ready PR.
+member cannot be reached. The later review configuration below records the
+user's instruction to continue without Gemini after repeated capacity failures.
+The user still merges every ready PR.
 
 ## An explicitly bound Salesforce demo book (2026-11-17)
 
@@ -1076,24 +1138,24 @@ the original receipt remains pending.
 ## Review configuration
 
 The installed TStack source is [t3dotgg/tstack at 11e37a7](https://github.com/t3dotgg/tstack/tree/11e37a74d0a6868c121cd0910ab2b3bd9873b92a).
-TStack supplies the installed skills used for full-stop. The user's latest
-instruction requires three-provider council for the renewal-demo PR and every
-remaining PR in this sequence,
-superseding the earlier Sol-only follow-up rule. Full-stop ends each ready PR,
-then work continues on the next authorized slice. The user merges.
+TStack supplies the installed full-stop, council, review, filing, and CI-watching
+skills. Full stop ends each ready PR, then work continues on the next authorized
+slice. The user merges.
 
-The selected full members are OpenAI `gpt-6.2-sol`, Anthropic
-`claude-opus-5-5`, and Google `gemini-3.8-flash-high`, each at High effort.
-The available Claude Code 2.1.326 `opus` route returned the stated Opus model ID;
-Antigravity CLI 1.5.10 listed and reached the selected Gemini model. These
-reachability probes are not review findings or scores. Record the actual model
-IDs returned for each review, effort, round number, findings, and score or
-`no score` in the PR table. All three receive the same review scope and count
-toward agreement. Gemini 3.8 Flash is not described as a flagship. Three complete
-council rounds is the hard limit. If agreement is absent after round three,
-report the remaining findings and stop. If a selected member cannot be reached,
-stop on a local branch without substituting a model or provider.
+The renewal-demo PR used OpenAI `gpt-6.2-sol`, Anthropic `claude-opus-5-5`, and
+Google `gemini-3.8-flash-high`, each at High. Gemini's second and third review
+responses included approval text but ended with an API 503 capacity error. Those
+failed completions were not counted as approval. The user then explicitly said
+"Keep going without Gemini" on 2026-11-18. The completed Sol and Opus reviews
+satisfied the revised gate; no fourth review round ran.
 
-Google's supported personal-account route is Antigravity CLI; legacy Gemini CLI
-sign-in is retired. Review tooling uses existing accounts and is separate from
-the demo runtime. It must not create accounts, trials, subscriptions, or keys.
+Use Sol and Opus as the two full members for subsequent PRs. Give both the same
+scope and record actual model IDs, effort, round numbers, findings, and returned
+scores or `no score`. Maximum three rounds per PR. Report unresolved findings
+or disagreements after round three instead of implying approval. Do not invent
+usage, scores, identities, or a successful provider completion. If either
+remaining selected member cannot be reached, stop locally and report it.
+
+Review tooling uses existing accounts and is separate from the product runtime.
+It must not create accounts, trials, subscriptions, or keys. The connector calls
+no hosted model.
