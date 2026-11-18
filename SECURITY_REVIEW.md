@@ -470,6 +470,8 @@ response bound. The reader allows at most 100 raw rows, 16 KiB per literal text,
 64 KiB combined text, and 256 KiB for the normalized source envelope. MCP text
 and structured wrappers can duplicate that envelope. Filesystem operations
 remain synchronous and have no hard preemption guarantee.
+Shutdown retains TLS and the state lock until active services finish. There is
+no guaranteed total shutdown time.
 
 Only exact token expiry permits one recovery retry. Credential recovery rereads
 under the connection lock and checks the expected identity before verification
@@ -480,8 +482,10 @@ different verified token can be reused without a duplicate refresh. One local
 refresh is the maximum. Terminal rejection quarantines only the exact saved
 token and identity; it preserves a concurrently saved replacement. Rotation
 requires room for both refresh and identity HTTP attempts before a pending
-marker is written. Insufficient request capacity leaves credentials unchanged
-and reports the resource limit instead of an unconsumed-token login failure.
+marker is written. With insufficient request slots, the reader leaves credentials
+unchanged and reports the resource limit instead of requiring another login.
+Only request slots are reserved. The shared byte or time budget can still run
+out after rotation starts; an ambiguous refresh then requires browser login.
 One message rate-limit retry must have a valid delay
 of at most five seconds within the remaining budget. An ambiguous refresh is
 not retried. Expired unchecked credentials require browser authorization.

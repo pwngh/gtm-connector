@@ -232,6 +232,7 @@ cannot be forcibly interrupted by the HTTP deadline.
 Shutdown waits for active reads and their receipt handling before removing the
 temporary check service. Ctrl-C can therefore wait for an in-flight read to
 finish or reach its deadline. It does not promise rollback of completed work.
+There is no guaranteed total shutdown time.
 
 One exact `token_expired` response can retry after credential recovery under
 the same budget. A different verified token from another process is reused
@@ -245,6 +246,8 @@ unusable. A newer credential saved concurrently is preserved. Refresh requires
 two remaining request slots for rotation and identity verification; otherwise
 the read reports its resource limit before changing credentials. A later read
 can retry with a fresh operation budget.
+This reserves request slots only. The shared byte or time budget can still run
+out after rotation starts; an ambiguous refresh then requires browser login.
 
 The normalizer accepts plain message text and the supported `bot_message`,
 `me_message`, legacy `file_share`, and `thread_broadcast` forms. Empty text is
