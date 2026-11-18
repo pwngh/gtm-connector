@@ -837,8 +837,14 @@ def _failure(exc, args):
             # Runtime's fixed first sentence explains the failure; its generic
             # fresh-state advice applies to import, not existing-source use.
             message = message.split(". ", 1)[0].rstrip(".") + "."
+            recovery = ("Select the original existing import state folder with --state-dir. " if command == "calls"
+                        else "Restore the original CRM connection and select its existing import state folder "
+                             "with --state-dir. ")
+            if command != "calls" and getattr(args, "crm_backend", None) == "salesforce":
+                recovery += ("Use the original --sf-org or environment credentials and "
+                             "the original --sf-environment value. ")
             message = (f"source_identity_mismatch: {message} "
-                       "Select the original existing import state folder with --state-dir. "
+                       + recovery +
                        "To start importing, run calls import --help. Existing files are retained.")
             next_command = "gtm-connector calls import --help"
         else:

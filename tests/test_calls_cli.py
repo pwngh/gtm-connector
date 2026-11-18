@@ -65,14 +65,14 @@ class CallsCLITests(unittest.TestCase):
         self.assertNotIn(ORIGIN, err)
         return error
 
-    def reader(self, *, duplicate=False, missing=False):
+    def reader(self, *, duplicate=False, missing=False, organization='00D000000000001AAA'):
         def respond(request):
             self.requests.append(request)
             self.assertEqual(request.method, 'GET')
             self.assertEqual(request.url.host, 'invented-calls.my.salesforce.com')
             query = request.url.params['q']
             if ' FROM Organization ' in query:
-                rows = [{'Id': '00D000000000001AAA', 'OrganizationType': 'Developer Edition', 'IsSandbox': False}]
+                rows = [{'Id': organization, 'OrganizationType': 'Developer Edition', 'IsSandbox': False}]
             elif ' FROM Account ' in query:
                 rows = [] if missing else [{'Id': ACCOUNT[7:], 'Name': 'Invented imported account',
                                            'Industry': None, 'AccountNumber': 'INVENTED-001'}]
@@ -393,6 +393,31 @@ class CallsCLITests(unittest.TestCase):
         # An explicit import can initialize a new folder before daily use.
         import_error = self.error(self.import_file(), 3)
         self.assertIn('Repeat this command with --state-dir', import_error['message'])
+
+    def test_imported_brief_with_wrong_org_recovers_to_original_connection_and_state(self):
+        with patch.object(SalesforceReadOnlyAdapter, 'from_sf', return_value=self.reader()):
+            self.success(self.import_file('--crm-backend', 'salesforce', '--sf-org', 'invented-original',
+                                          account=ACCOUNT))
+        before = {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}
+        prior_requests = len(self.requests)
+        other = self.reader(organization='00D000000000002AAA')
+        with patch.object(SalesforceReadOnlyAdapter, 'from_sf', return_value=other):
+            error = self.error(self.invoke('brief', ACCOUNT, '--crm-backend', 'salesforce',
+                                           '--sf-org', 'invented-other', '--calls-backend', 'imported'), 3)
+        self.assertEqual(error['code'], 'refused')
+        self.assertIn('source_identity_mismatch', error['message'])
+        self.assertIn('different Salesforce connection or environment', error['message'])
+        self.assertIn('original CRM connection', error['message'])
+        self.assertIn('existing import state folder', error['message'])
+        self.assertIn('original --sf-org or environment credentials', error['message'])
+        self.assertIn('original --sf-environment value', error['message'])
+        self.assertNotIn('fresh', error['message'])
+        self.assertEqual(error['next'], 'gtm-connector calls import --help')
+        for private in ('invented-original', 'invented-other', '00D000000000001AAA', '00D000000000002AAA'):
+            self.assertNotIn(private, json.dumps(error))
+        self.assertEqual(before, {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()})
+        self.assertEqual(len(self.requests), prior_requests + 1)
+        self.assertIn(' FROM Organization ', self.requests[-1].url.params['q'])
 
     def test_salesforce_account_number_resolves_once_through_audited_search(self):
         reader = self.reader()
