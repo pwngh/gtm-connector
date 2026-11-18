@@ -11,7 +11,7 @@ import uuid
 
 import httpx2
 
-from .citations import BriefRejected, build_facts, check_brief, diagnose_brief
+from .citations import BriefRejected, NoRenewalCandidate, build_facts, check_brief, diagnose_brief
 from .drafting import DraftResult, FixtureDraftAdapter
 from .seed import DEMO_AS_OF
 
@@ -20,11 +20,21 @@ class BriefingError(RuntimeError):
     """Required evidence could not be collected; no brief can be published."""
 
 
+class RenewalFieldsUnmapped(BriefingError):
+    """The account has no standard Contract date suitable for renewal planning."""
+
+    code = "renewal_fields_unmapped"
+
+
 def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_OF,
-                     *, include_slack=False):
+                     *, include_slack=False, crm_backend="sqlite"):
     """Read through MCP; recognized calls/Slack scope denials may remain visible."""
-    if not isinstance(account_id, str) or not re.fullmatch(r"acc-[0-9]{3}", account_id):
-        raise ValueError("account ID must have the form acc-001")
+    if crm_backend not in ("sqlite", "salesforce"):
+        raise ValueError("unsupported CRM backend")
+    pattern = r"acc-sf-[A-Za-z0-9]{18}" if crm_backend == "salesforce" else r"acc-[0-9]{3}"
+    if not isinstance(account_id, str) or not re.fullmatch(pattern, account_id):
+        raise ValueError("account ID must use acc-sf- followed by the 18-character Salesforce ID"
+                         if crm_backend == "salesforce" else "account ID must have the form acc-001")
     if not isinstance(as_of, str) or date.fromisoformat(as_of).isoformat() != as_of:
         raise ValueError("as-of date must use YYYY-MM-DD")
     records, statuses = [], {"notes_status": "available"}
@@ -50,6 +60,16 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
             raise BriefingError(f"{tool}: HTTP {response.status_code}; no brief generated")
         try:
             result = response.json()["result"]
+            if result.get("isError") is True and crm_backend == "salesforce" and source == "crm":
+                from .salesforce import SalesforceReadError, _ERROR_CODES
+                # Only exact SDK messages for our fixed adapter codes are diagnostics.
+                # Never surface arbitrary tool content or an upstream response body.
+                content = result.get("content")
+                if (isinstance(content, list) and len(content) == 1 and isinstance(content[0], dict)
+                        and content[0].get("type") == "text"):
+                    for code in _ERROR_CODES:
+                        if content[0].get("text") == f"Error executing tool {tool}: {code}":
+                            raise SalesforceReadError(code)
             if result.get("isError") or result.get("resultType") != "complete":
                 raise ValueError("incomplete or failed tool result")
             data = result["structuredContent"]
@@ -63,10 +83,15 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
             raise BriefingError(f"{tool}: invalid or failed tool result; no brief generated") from exc
     evidence = {"brief_id": brief_id, "account_id": account_id, "as_of": as_of,
                 "records": records, "receipts": audit.read(brief_id), **statuses}
-    if include_slack:
+    if crm_backend == "salesforce":
+        evidence.update(workflow_version=3, crm_backend="salesforce")
+    elif include_slack:
         evidence["workflow_version"] = 2
     # This also verifies account associations and one matching receipt per read.
-    build_facts(evidence)
+    try:
+        build_facts(evidence)
+    except NoRenewalCandidate as exc:
+        raise RenewalFieldsUnmapped(str(exc)) from None
     return evidence
 
 
@@ -97,8 +122,7 @@ def _save_artifact(path, artifact):
 def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, adapter=None,
                  observe_draft=None, include_slack=False, grant_slack=True):
     """Collect, draft, check, then publish; the draft adapter receives data only."""
-    if getattr(runtime, "crm_backend", "sqlite") != "sqlite":
-        raise BriefingError("renewal_fields_unmapped")
+    crm_backend = getattr(runtime, "crm_backend", "sqlite")
     # Offline citation checks do not need to import the MCP server or TLS runtime.
     from .client import LocalClient
 
@@ -110,7 +134,7 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, a
         with LocalClient(runtime.config) as client:
             token = client.authorize(scopes)
             evidence = collect_evidence(client, token, runtime.connector.audit, account_id, brief_id,
-                                        as_of, include_slack=include_slack)
+                                        as_of, include_slack=include_slack, crm_backend=crm_backend)
     except httpx2.HTTPError as exc:
         raise BriefingError("authorization transport failed; no brief generated") from exc
     adapter = FixtureDraftAdapter() if adapter is None else adapter

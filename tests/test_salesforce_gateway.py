@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 import httpx2
 from mcp.server.mcpserver.exceptions import ToolError
 
-from gtm_connector.briefing import BriefingError, create_brief
+from gtm_connector.briefing import RenewalFieldsUnmapped, create_brief
 from gtm_connector.client import LocalClient
 from gtm_connector.runtime import Runtime
 from gtm_connector.salesforce import SalesforceReadOnlyAdapter
@@ -21,6 +21,7 @@ from gtm_connector.salesforce import SalesforceReadOnlyAdapter
 ACCOUNT = "001000000000001AAA"
 CONTACT = "003000000000001AAA"
 OPPORTUNITY = "006000000000001AAA"
+CONTRACT = "800000000000001AAA"
 ORGANIZATION = "00D000000000001AAA"
 ACCOUNT_ID = "acc-sf-" + ACCOUNT
 UPSTREAM_TOKEN = "invented-salesforce-token-for-http-fixtures"
@@ -36,6 +37,8 @@ class SalesforceGatewayTests(unittest.TestCase):
         self.requests = []
         self.edition = "Developer Edition"
         self.failure = None
+        self.contracts = [{"Id": CONTRACT, "AccountId": ACCOUNT, "Status": "Draft", "StatusCode": "Draft",
+                           "StartDate": "2026-02-01", "ContractTerm": 12, "EndDate": "2027-01-31"}]
         self.runtime = None
         self.reader = SalesforceReadOnlyAdapter(
             INSTANCE, UPSTREAM_TOKEN, transport=httpx2.MockTransport(self.respond))
@@ -59,7 +62,7 @@ class SalesforceGatewayTests(unittest.TestCase):
             return httpx2.Response(self.failure, json=[{
                 "message": UPSTREAM_TOKEN + " private upstream detail", "errorCode": "FIXTURE_ERROR"}])
         elif " FROM Account" in query:
-            rows = [{"Id": ACCOUNT, "Name": "Fixture Salesforce account", "Industry": None}]
+            rows = [{"Id": ACCOUNT, "Name": "Fixture Salesforce account", "Industry": None, "AccountNumber": None}]
         elif " FROM Contact" in query:
             rows = [{"Id": CONTACT, "AccountId": ACCOUNT, "Name": "Fixture Salesforce contact",
                      "Title": None, "Email": "contact@fixture.example"}]
@@ -67,6 +70,8 @@ class SalesforceGatewayTests(unittest.TestCase):
             rows = [{"Id": OPPORTUNITY, "AccountId": ACCOUNT, "Name": "Fixture Salesforce opportunity",
                      "StageName": "Fixture selected stage", "Amount": 1234.5,
                      "CloseDate": "2027-01-31", "IsClosed": False, "IsWon": False}]
+        elif " FROM Contract" in query:
+            rows = self.contracts
         else:
             self.fail("Unexpected upstream query")
         return httpx2.Response(200, json={"totalSize": len(rows), "done": True, "records": rows})
@@ -98,7 +103,8 @@ class SalesforceGatewayTests(unittest.TestCase):
         opportunity = self.records(client.call(token, "list_opportunities", {"account_id": ACCOUNT_ID}))
         self.assertEqual(search[0]["record_ref"], "crm/accounts/" + ACCOUNT_ID)
         self.assertEqual([row["record_ref"] for row in account],
-                         ["crm/accounts/" + ACCOUNT_ID, "crm/contacts/con-sf-" + CONTACT])
+                         ["crm/accounts/" + ACCOUNT_ID, "crm/contacts/con-sf-" + CONTACT,
+                          "crm/contracts/ctr-sf-" + CONTRACT])
         self.assertEqual(opportunity[0]["record_ref"], "crm/opportunities/opp-sf-" + OPPORTUNITY)
         for row in search + account + opportunity:
             self.assertEqual(row["backend"], "salesforce")
@@ -110,7 +116,7 @@ class SalesforceGatewayTests(unittest.TestCase):
         self.assertIsNone(opportunity[0]["currency"])
         self.assertNotIn("amount_cents", opportunity[0])
         self.assertEqual(opportunity[0]["stage"], "Fixture selected stage")
-        self.assertEqual(sum(request.url.params["q"] == ORGANIZATION_QUERY for request in self.requests), 3)
+        self.assertEqual(sum(request.url.params["q"] == ORGANIZATION_QUERY for request in self.requests), 1)
         receipts = self.runtime.connector.audit.read()
         self.assertEqual(len(receipts), 3)
         self.assertEqual([row["status"] for row in receipts], ["ok"] * 3)
@@ -206,17 +212,18 @@ class SalesforceGatewayTests(unittest.TestCase):
         self.assertEqual(self.requests, [])
         self.assertEqual(self.runtime.connector.audit.read(), [])
 
-    def test_external_renewal_brief_is_refused_before_authorization_or_drafting(self):
+    def test_external_account_without_contract_is_refused_before_drafting(self):
         self.open_runtime()
+        self.contracts = []
         adapter = Mock()
-        with patch("gtm_connector.client.LocalClient") as client:
-            for include_slack in (False, True):
-                with self.assertRaisesRegex(BriefingError, "^renewal_fields_unmapped$"):
-                    create_brief(self.runtime, ACCOUNT_ID, adapter=adapter, include_slack=include_slack)
-        client.assert_not_called()
+        for include_slack in (False, True):
+            with self.assertRaisesRegex(RenewalFieldsUnmapped, "No Draft, InApproval, or Activated Contract") as error:
+                create_brief(self.runtime, ACCOUNT_ID, adapter=adapter, as_of="2027-01-15",
+                             include_slack=include_slack)
+            self.assertEqual(error.exception.code, "renewal_fields_unmapped")
         adapter.draft.assert_not_called()
-        self.assertEqual(self.requests, [])
-        self.assertEqual(self.runtime.connector.audit.read(), [])
+        self.assertEqual(len(self.runtime.connector.audit.read()), 7)
+        self.assertTrue(all(request.method == "GET" for request in self.requests))
         self.assertFalse((self.state / "briefs").exists())
 
     def test_default_runtime_keeps_closed_world_tools_and_local_writer(self):

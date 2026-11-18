@@ -138,7 +138,7 @@ class Connector:
                 return _data("crm", _records("crm", "accounts", store.search_accounts(conn, query)))
 
         def get_account(account_id: str) -> dict[str, Any]:
-            """Read a CRM account and contacts, without call notes. Requires crm:read."""
+            """Read a CRM account, contacts, and available contracts. Requires crm:read."""
             self._require_tool("get_account")
             if self.crm_reader is not None:
                 account = external_read("get_account", account_id)
@@ -148,8 +148,9 @@ class Connector:
             if account is None:
                 raise ToolError("account not found")
             contacts = account.pop("contacts")
+            contracts = account.pop("contracts", [])
             return _data("crm", _records("crm", "accounts", [account]) +
-                         _records("crm", "contacts", contacts))
+                         _records("crm", "contacts", contacts) + _records("crm", "contracts", contracts))
 
         def list_opportunities(account_id: str | None = None) -> dict[str, Any]:
             """Read opportunity fields from CRM. Requires crm:read; call notes are a separate source."""

@@ -133,27 +133,80 @@ CLI cannot load them.
 
 ## Optional Salesforce boundary
 
-`serve --crm-backend salesforce` reads a privately supplied instance URL and
-access token from the environment. The constructor performs no HTTP request.
-After the local token and scope checks and pending audit commit, each CRM tool
-queries the org edition and requires `Developer Edition`. The existing local
-owner can grant CRM access to that org. This is not Salesforce user delegation.
-The upstream token may have broader permissions; the adapter implements GET only.
+`serve --crm-backend salesforce --sf-org ALIAS` and the matching `brief` option
+capture an existing Salesforce CLI login inside the connector process. The
+provider invokes only `sf org display` and `sf org auth show-access-token`, with
+an explicit alias and `--json`, using argument arrays and no shell. Stdin is
+closed; stdout and stderr are captured. CLI telemetry, automatic updates, and
+file logging are disabled for these child commands. A command has at most
+10 seconds within the original 20-second credential deadline. Errors expose a
+fixed code, never the alias, child output, arguments, or token. The connector
+stores no Salesforce credential file. The owner's existing CLI login storage
+and installed `sf` executable remain trusted.
 
-Requests use one configured HTTPS My Domain origin, fixed SOQL fields, escaped
-search text, and bounded results. TLS verification stays on. Proxies, redirects,
-retries, and token refresh are disabled. Pagination must stay on the same query
-endpoint. The adapter exposes no arbitrary query or URL input. External mode
-omits the write tool and rejects hardcoded write attempts with HTTP 403.
+Without `--sf-org`, the explicit backend uses `SALESFORCE_INSTANCE_URL` and
+`SALESFORCE_ACCESS_TOKEN`; an explicit alias takes precedence. There is no
+implicit selection of a default CLI org. Both paths validate one HTTPS My Domain origin and a
+bounded printable token. The constructor performs no adapter REST query.
+After the local grant checks and pending audit commit, the first CRM tool
+requires `Developer Edition`. Only that successful edition result is cached,
+for this adapter's pinned origin and lifetime. CRM records are not cached.
+The local owner can grant CRM access; this is not Salesforce user delegation.
+The upstream token may have broader permissions. The adapter implements GET only.
 
-Account names, contacts, and opportunity fields reach the authorized client.
-They remain untrusted data. Audit arguments may contain real search terms and
-record IDs. Returned refs persist, but response bodies and the upstream token
-are not copied to the audit. Existing manual retention and local-owner limits
-still apply. No Salesforce credential enters owner.json, Inspector config,
-brief evidence, or model input. Briefing refuses this backend because renewal
-fields are unmapped. Read output has no implicit join to the fixture accounts.
-Tests use invented HTTP responses, not a live org. See [setup and limits](docs/salesforce.md).
+Requests use fixed SOQL fields, escaped search text, and bounded results.
+TLS verification stays on; proxies and redirects are disabled. Pagination must
+stay on the same query endpoint. Each operation retains the 12-GET, 1-MiB,
+20-second bounds, with at most 10 pages and 100 rows per query. The first HTTP
+401 in an operation may reacquire credentials once through `sf` and retry the
+same GET. Credential lookup and retry share the original budget. A second 401,
+lookup failure, or changed origin returns `salesforce_auth_required`. Other
+errors are not retried. The environment-token path cannot refresh. This is
+separate from local MCP tokens, which still expire after five minutes.
+
+The adapter exposes no arbitrary query or URL input. External mode omits the
+write tool and rejects hardcoded writes with HTTP 403. Standard Contract records
+join the existing `get_account` result and receipt. Their IDs, associations,
+dates, category, and nullable integer term are validated. Briefs use the actual
+returned EndDate, never an inferred date. Draft and InApproval contracts require
+an explicit non-activation disclosure; Activated is a distinct category. An
+account with no eligible dated Contract refuses before drafting. ARR, CRM risk,
+and opportunity currency stay unknown rather than being inferred from unrelated
+fields. [Briefing tests](tests/test_salesforce_briefing.py) cover required claims
+and rejection of altered or omitted disclosures using invented records.
+
+Account, contact, opportunity, and contract fields reach the authorized client
+as untrusted data. `source_id` and namespaced `crm/...` references preserve
+provenance. A Salesforce snapshot uses workflow version 3 inside schema version
+1; fixture workflows remain unchanged. No record text can request an additional
+tool or grant. AccountNumber is returned but creates no implicit fixture join.
+Calls and Slack still use isolated mocks and independent scopes.
+
+Audit arguments can contain real search terms and IDs. Returned refs persist,
+but response bodies and the upstream token are not copied to the audit. A
+saved brief does contain source evidence and receipt copies in private state.
+No Salesforce credential enters owner.json, Inspector config, brief evidence,
+or model input. Existing private permissions and manual retention apply.
+
+`salesforce check` is an explicit local-owner diagnostic. It probes credentials,
+edition, a fixed allowlist of describe fields, and bounded reads directly, then
+runs a brief through the local HTTPS gateway in temporary private state. Normal
+completion removes that state. Its report contains only fixed step names,
+pass/fail outcomes, counts, timings, fixed errors and fixes, and missing names
+from the required-field allowlist. It returns no source records, native or
+namespaced IDs, org details, credential values, or raw describe metadata. Its
+`api_calls` count covers the connector's REST GET attempts, including retries;
+it cannot measure the CLI's internal HTTP requests or total org quota usage.
+The `sf_cli_invocations` count includes failed child-launch attempts. The
+ordinary tool output, brief, and audit are not sanitized by this command.
+Progress on stderr contains fixed step names, status, and counts only. In JSON
+mode it uses JSON lines while stdout contains one final report.
+
+[Credential tests](tests/test_sf_credentials.py) use only a fake CLI on PATH;
+[adapter tests](tests/test_salesforce.py) use invented HTTP responses. The
+[gateway tests](tests/test_salesforce_gateway.py) exercise scope denial, audit
+failure, disabled writes, and accepted reads through local HTTPS. No live org
+has been verified. See [setup, report shape, and limits](docs/salesforce.md).
 
 ## Required sign-off evidence
 
