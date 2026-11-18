@@ -274,6 +274,16 @@ raise SystemExit(main(sys.argv[1:]))
             else:
                 self.assertIn('did not contact Slack', out)
 
+    def test_unchecked_credentials_needing_login_do_not_recommend_another_check(self):
+        saved = {**READY, 'verification': 'saved', 'credential_state': 'identity_unchecked', 'needs_login': True}
+        with patch('gtm_connector.slack_auth.slack_status', return_value=saved):
+            code, out, err = self.invoke('slack', 'status', as_json=False)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(err, '')
+        self.assertIn('Next: gtm-connector slack connect --help', out)
+        self.assertNotIn('--check', out)
+        self.assertIn('Browser authorization is required.', out)
+
     def test_human_disconnect_distinguishes_local_and_remote_results(self):
         for requested, revoked in ((False, False), (True, True), (True, False)):
             result = {**DISCONNECTED, 'remote_revoke_requested': requested, 'remote_access_token_revoked': revoked,

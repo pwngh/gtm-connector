@@ -559,6 +559,9 @@ def _remove_credentials(directory_fd):
 def _needs_login(document, now):
     if document["credential_state"] == "refresh_pending" or now < _date(document["access_obtained_at"]):
         return True
+    if (document["credential_state"] == "identity_unchecked" and document["access_expires_at"] is not None
+            and now >= _date(document["access_expires_at"])):
+        return True
     if document["last_verified_at"] is not None and now < _date(document["last_verified_at"]):
         return True
     refresh_at = document["refresh_obtained_at"]

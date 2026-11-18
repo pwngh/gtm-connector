@@ -448,6 +448,38 @@ except KeyboardInterrupt:
 
 
 class BrowserHelperTests(unittest.TestCase):
+    def test_isolated_helper_ignores_working_directory_module_shadow(self):
+        url = "https://slack.com/oauth/v2/authorize?state=invented-isolated-state"
+        program = """import sys, sysconfig, webbrowser
+from pathlib import Path
+assert Path(webbrowser.__file__).resolve().is_relative_to(Path(sysconfig.get_path('stdlib')).resolve())
+raw = sys.stdin.buffer.read()
+assert raw and raw.decode() not in repr(sys.argv)
+Path('received').write_bytes(raw)
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "webbrowser.py").write_text(
+                "from pathlib import Path\nPath('shadow-imported').write_text('imported')\n")
+            before = subprocess.run([sys.executable, "-c", program], input=url.encode(), cwd=root,
+                                    capture_output=True, timeout=3)
+            self.assertNotEqual(before.returncode, 0)
+            self.assertTrue((root / "shadow-imported").exists())
+            self.assertFalse((root / "received").exists())
+            (root / "shadow-imported").unlink()
+            launched = []
+
+            def create(args, **kwargs):
+                launched.append(args)
+                return REAL_POPEN(args, cwd=root, **kwargs)
+
+            with patch.object(callback, "_BROWSER_PROGRAM", program), \
+                    patch.object(callback.subprocess, "Popen", create):
+                self.assertTrue(callback._open_system_browser(url, deadline=time.monotonic() + 3))
+            self.assertEqual(launched, [[sys.executable, "-I", "-c", program]])
+            self.assertFalse((root / "shadow-imported").exists())
+            self.assertEqual((root / "received").read_bytes(), url.encode())
+
     def test_real_helper_receives_url_via_stdin_not_its_arguments(self):
         url = "https://slack.com/oauth/v2/authorize?state=invented-private-state"
         with tempfile.TemporaryDirectory() as directory:
@@ -473,8 +505,11 @@ class BrowserHelperTests(unittest.TestCase):
                 return process
 
             program = "import sys; sys.exit(7)" if mode == "failed" else "import time; time.sleep(60)"
+            # Only the hung case tests the short timeout. Child startup is not a performance assertion.
+            browser_seconds = .2 if mode == "hung" else 3
             with self.subTest(mode=mode), patch.object(callback, "_BROWSER_PROGRAM", program), \
-                    patch.object(callback, "BROWSER_SECONDS", .2), patch.object(callback.subprocess, "Popen", create):
+                    patch.object(callback, "BROWSER_SECONDS", browser_seconds), \
+                    patch.object(callback.subprocess, "Popen", create):
                 if mode == "failed":
                     self.assertFalse(callback._open_system_browser(SECRET, deadline=time.monotonic() + 3))
                 elif mode == "hung":

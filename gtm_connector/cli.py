@@ -469,7 +469,7 @@ def _human_slack(result, *, action, connection_dir):
         return ("No Slack connection is saved. An existing registered public app is required.\n"
                 "Next: gtm-connector slack connect --help")
     next_command = None
-    if result["credential_state"] == "identity_unchecked":
+    if result["credential_state"] == "identity_unchecked" and not result["needs_login"]:
         headline = "Saved credentials require an authentication check."
         next_command = _slack_status_command(connection_dir, check=True)
     elif result["credential_state"] == "refresh_pending":

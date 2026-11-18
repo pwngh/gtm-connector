@@ -319,6 +319,33 @@ class StateTests(_StateCase):
         auth.slack_status(self.directory, check=True, _provider=self.provider, _clock=self.clock)
         self.assertEqual([call[0] for call in self.provider.calls], ["refresh", "identity", "identity"])
 
+    def test_expired_unchecked_replacement_requires_login_without_more_http(self):
+        self.save(expired=True)
+        self.provider.identified = auth.SlackAuthError("slack_unavailable")
+        self.expect_error("slack_unavailable", auth.slack_status, self.directory, check=True,
+                          _provider=self.provider, _clock=self.clock)
+        self.assertEqual(self.stored()["credential_state"], "identity_unchecked")
+        self.assertEqual(self.stored()["access_token"], NEW_ACCESS)
+        self.clock.advance(3600)
+        self.provider.identified = identity()
+        with self.subTest(operation="local status"):
+            result = auth.slack_status(self.directory, _clock=self.clock)
+            self.assertEqual(result["credential_state"], "identity_unchecked")
+            self.assertTrue(result["needs_login"])
+        for operation in ("check", "access"):
+            with self.subTest(operation=operation):
+                before = len(self.provider.calls)
+                if operation == "check":
+                    self.expect_error("slack_reconnect_required", auth.slack_status, self.directory, check=True,
+                                      _provider=self.provider, _clock=self.clock)
+                else:
+                    self.expect_error("slack_reconnect_required", auth.get_slack_access, self.directory,
+                                      required_scopes=auth.DEFAULT_USER_SCOPES,
+                                      _provider=self.provider, _clock=self.clock)
+                self.assertEqual(len(self.provider.calls), before)
+        self.assertEqual(self.stored()["credential_state"], "identity_unchecked")
+        self.assertEqual(self.stored()["refresh_token"], NEW_REFRESH)
+
     def test_refresh_mismatch_is_quarantined_and_never_releases_replacement(self):
         self.save(expired=True)
         self.provider.identified["user_id"] = "U87654321"

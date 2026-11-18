@@ -77,7 +77,8 @@ A rotating token is marked as pending before the refresh request. An ambiguous
 refresh outcome requires browser authorization because reusing a single-use
 refresh token could lose the connection. A successfully received replacement
 is saved before its identity check. A temporary check failure can therefore
-resume with `slack status --check` without repeating the refresh. Identity
+resume with `slack status --check` while the replacement is unexpired, without
+repeating the refresh. Identity
 mismatch or a definitive rejection of saved credentials refuses subsequent
 use and requires reconnecting the original identity. The saved `refresh_pending`
 state also represents this unsafe credential outcome, including a nonrotating
@@ -87,6 +88,9 @@ An explicit check first marks saved credentials as `identity_unchecked`. If
 that save fails, no check request starts. A temporary failure leaves a check-only
 retry, and a failed attempt to mark rejected credentials cannot restore a usable
 `ready` state. A later read must finish verification before receiving the token.
+If an unchecked access token expires before verification can finish, status
+requires browser authorization. It does not recommend another check or blindly
+refresh an unverified credential.
 
 One local process holds the connection lock. A competing command fails promptly
 with a retry instruction. Existing private files are preserved on invalid
@@ -122,7 +126,7 @@ errors go to stderr. Connection and status results have this stable shape:
 | `requested_scopes`, `granted_scopes` | Arrays in stable history-scope order. Missing state has empty arrays. |
 | `rotation` | Whether the grant has a refresh credential; `null` for missing state. |
 | `access_expires_at`, `last_verified_at` | UTC timestamps or `null`. |
-| `needs_login` | Whether browser authorization is needed. An expired access token with a usable refresh credential can be checked instead. |
+| `needs_login` | Whether browser authorization is needed. An expired ready credential with a usable refresh token can be checked instead. An expired unchecked credential needs browser authorization. |
 
 Missing local status exits `0` with `configured: false`, `credential_state:
 "missing"`, `verification: "saved"`, null timestamps, and `needs_login: true`.

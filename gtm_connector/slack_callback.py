@@ -229,7 +229,7 @@ def _open_system_browser(url: str, *, deadline: float) -> bool:
         raise CallbackError("login_timeout")
     process = None
     try:
-        process = subprocess.Popen([sys.executable, "-c", _BROWSER_PROGRAM], stdin=subprocess.PIPE,
+        process = subprocess.Popen([sys.executable, "-I", "-c", _BROWSER_PROGRAM], stdin=subprocess.PIPE,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
         process.communicate(input=url.encode("utf-8"), timeout=remaining)
         return process.returncode == 0
