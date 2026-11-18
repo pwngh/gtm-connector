@@ -12,8 +12,14 @@ pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git@main' gtm-connec
 Git must already have permission to read the repository. The first run downloads
 Python dependencies. The fixture demo uses local HTTPS services and invented
 data; it needs no model, Salesforce login, or external service at runtime.
-It writes private state under `var/v2` in the current directory. Pass
-`--state-dir PATH` to choose another location.
+The story follows Morgan Reed preparing Juniper Crest Learning's renewal with
+cited CRM, call-note, and Slack evidence. All people and records are invented.
+It writes private state under `var/renewal-demo` in the current directory. The
+separate `verify` command defaults to `var/verification`; daily commands retain
+`var/v2`. Pass `--state-dir PATH` to choose another location. This keeps an older
+demo in `var/v2` untouched when you run the new story. Existing books are not
+upgraded. If an explicitly selected folder contains an older or edited book,
+the error gives a concrete retry command using a fresh folder.
 
 Replace `main` in the URL with a reviewed commit to choose an exact source
 revision. The package keeps the runtime versions from `requirements.in`.
@@ -42,7 +48,13 @@ checked-in hashes and run the fixture checks:
 ./scripts/five-minute-demo.sh
 ```
 
+The first script runs the renewal story. The longer walkthrough follows the
+same person and account, then inspects that brief's usage and runs its citation
+checks. Both paths use invented fixtures. Run `gtm-connector verify --help` to
+inspect the separate guarantee command, which covers scopes, retries, and rate
+limits.
+
 The package build uses the same setuptools version already pinned in the
 development lock. It adds no runtime dependency. CI installs the wheel and runs
-the demo and evaluation from a directory outside the checkout, on Python 3.11
-and 3.14.
+the demo, verification, and evaluation from a directory outside the checkout,
+on Python 3.11 and 3.14.

@@ -33,6 +33,12 @@ conflict flag, and a cited `proposed_follow_up`. This suggested next step is
 checked but never sent. The default three-read workflow stays unchanged.
 See [Slack context](slack.md).
 
+`gtm-connector demo` uses that four-read workflow for Juniper Crest Learning
+(`acc-007`) after its account lookup and scope refusal. Its rep narration is
+outside the checked brief. The saved text and proposed follow-up use the same
+four-read workflow as `brief acc-007 --with-slack`. The quick and longer
+walkthroughs both use this invented book; neither reads live CRM, calls, or Slack.
+
 ## What the citations mean
 
 Claims cite source records. Without `calls:read`, the brief says notes were
@@ -58,6 +64,16 @@ same account. Both records must be cited; their disagreement stays unresolved.
 The rule does not infer conflicts from other wording or notes the caller cannot
 read. It is not a general contradiction detector. Regenerate an older `acc-003`
 brief if it lacks the flag; `check-brief` applies current rules to saved evidence.
+
+The fixture book also includes a missing contact role and an old call note.
+Dana Crest's empty role is rendered as `not provided` and remains empty in the
+stored record. Saved fixture briefs may retain the earlier `role ""` spelling
+for that same empty field. `check-brief` accepts either complete wording format
+against saved evidence, but rejects duplicate claims that mix the two. New
+drafts use `not provided`; incorrect roles and references still fail.
+Harborlight Field Services has an October call note alongside a
+January Slack update with different seat-count advice. The brief preserves their
+timestamps and quoted contents; it does not infer which advice is current.
 
 ## Inspect the saved result
 

@@ -21,17 +21,19 @@ COMMANDS = {
     "connect": ("Print client setup and its tested or untested limits.",
                 "connect inspector --scope crm:read --state-dir var/v2"),
     "completion": ("Print shell completion without reading local state.", "completion bash"),
-    "demo": ("Run the connector demonstration on invented records.", "demo --with-slack"),
+    "demo": ("Follow Morgan Reed through a renewal brief using invented demo data.", "demo"),
+    "verify": ("Check scopes, citations, injection handling, retries, and rate limits on invented data.",
+               "verify --with-slack"),
     "brief": ("Create a cited renewal brief from authorized source reads.", "brief acc-003 --with-slack"),
     "serve": ("Start the local HTTPS connector and authorization server.", "serve --state-dir var/v2"),
     "seed": ("Create the local CRM fixture without replacing existing records.", "seed --db var/v2/crm.sqlite3"),
-    "accounts": ("Search the local CRM by account name.", "accounts --query acc-003"),
+    "accounts": ("Search the local CRM by account name.", "accounts --query Cedarline"),
     "account": ("Read one local CRM account and its contacts.", "account acc-003"),
-    "audit": ("Read tool-call receipts from the local audit database.", "audit --state-dir var/v2"),
-    "usage": ("Summarize tool calls and saved model token counts.", "usage --state-dir var/v2"),
+    "audit": ("Read tool-call receipts from the local audit database.", "audit --state-dir var/renewal-demo"),
+    "usage": ("Summarize tool calls and saved model token counts.", "usage --state-dir var/renewal-demo"),
     "evaluate": ("Check briefs for twenty fixed accounts in temporary state.", "evaluate --with-slack --json"),
     "check-brief": ("Check candidate text against a saved evidence snapshot.",
-                    "check-brief brief-REPLACE candidate.txt --state-dir var/v2"),
+                    "check-brief brief-REPLACE candidate.txt --state-dir var/renewal-demo"),
     "inspector-config": ("Write a private Inspector configuration with explicit scopes.",
                          "inspector-config --scope crm:read --scope calls:read"),
 }
@@ -67,7 +69,7 @@ class Parser(argparse.ArgumentParser):
 def build_parser():
     parser = Parser(prog="gtm-connector",
                     description="Create cited renewal briefs from scoped CRM, calls, and Slack reads.",
-                    epilog="Example: gtm-connector demo --with-slack\n"
+                    epilog="Example: gtm-connector demo\n"
                            "Documentation: https://github.com/pwngh/gtm-connector#readme",
                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="store_true", help="Show the installed version and exit.")
@@ -83,8 +85,9 @@ def build_parser():
             command.add_argument("--db", type=Path, default=Path("var/v2/crm.sqlite3"),
                                  help="Read or seed this local CRM database.")
         elif name not in ("evaluate", "completion", "salesforce"):
-            command.add_argument("--state-dir", type=Path, default=Path("var/v2"),
-                                 help="Use this private state folder (default: var/v2).")
+            state_dir = {"demo": "var/renewal-demo", "verify": "var/verification"}.get(name, "var/v2")
+            command.add_argument("--state-dir", type=Path, default=Path(state_dir),
+                                 help=f"Use this private state folder (default: {state_dir}).")
         if name == "accounts":
             command.add_argument("--query", default="", help="Match this literal part of an account name.")
         if name in ("account", "brief"):
@@ -101,7 +104,10 @@ def build_parser():
         if name in ("brief", "salesforce"):
             command.add_argument("--as-of", help="Use YYYY-MM-DD for renewal planning. Salesforce uses today; "
                                  "fixtures use 2027-01-15.")
-        if name in ("demo", "brief", "evaluate"):
+        if name == "demo":
+            command.add_argument("--with-slack", action="store_true",
+                                 help="Keep this compatible spelling. The demo always includes Slack.")
+        if name in ("verify", "brief", "evaluate"):
             command.add_argument("--with-slack", action="store_true",
                                  help="Include Slack evidence and a checked follow-up proposal.")
         if name in ("brief", "evaluate"):
@@ -197,7 +203,18 @@ def human_result(command, result):
         return (f"Inspector configuration: {result['config']}\nCertificate: {result['certificate']}\n"
                 f"Granted scopes: {', '.join(result['scopes'])}")
     if command == "demo":
-        return ("Connector demonstration on invented records\n\n" + result["briefs"][0]["text"] + "\n" +
+        account = result["account"]
+        return (f"{safe_text(result['rep']['name'])} prepares {safe_text(account['name'])}'s renewal.\n"
+                "Sources: CRM, call notes, and Slack use invented demo fixtures.\n"
+                f"Found {safe_text(account['name'])}. Renewal: {safe_text(account['renewal_date'])}.\n"
+                f"Call-note access was refused (HTTP {result['denied_read']['status']}) "
+                "because the CRM-only grant lacks calls:read.\n"
+                "The local demo owner grants read access to CRM, calls, and Slack.\n\n"
+                f"Brief: {result['brief']['brief_id']}\nAs of: {result['brief']['as_of']}\n\n"
+                f"{result['brief']['text']}\n"
+                "No activities were created. The follow-up remains a proposal.")
+    if command == "verify":
+        return ("Connector checks on invented demo data\n\n" + result["briefs"][0]["text"] + "\n" +
                 table(["CHECK", "RESULT"], [["Read without calls:read", "Denied (HTTP 403)"],
                     ["Injected instruction", "Quoted as data; zero activities created"],
                     ["Uncited claim", "Rejected"], ["Retried write", "One activity"],
@@ -315,7 +332,10 @@ def _run(args, argv):
         return {"status": "valid", "brief_id": args.brief_id}
     if args.command == "demo":
         from .demo import run
-        return run(args.state_dir, include_slack=args.with_slack)
+        return run(args.state_dir)
+    if args.command == "verify":
+        from .verification import run as run_verification
+        return run_verification(args.state_dir, include_slack=args.with_slack)
     if args.command == "serve":
         from queue import Empty, SimpleQueue
         from .runtime import Runtime
@@ -387,7 +407,7 @@ def _failure(exc, args):
     next_command = f"gtm-connector {command} --help"
     message = str(exc)
     code = 2 if isinstance(exc, ValueError) else 1
-    if isinstance(exc, BriefRejected) or (command == "demo" and message.startswith("demo ")):
+    if isinstance(exc, BriefRejected) or (command in ("demo", "verify") and message.startswith("demo ")):
         code = 4
     elif getattr(exc, "code", None) == "renewal_fields_unmapped":
         code = 3
@@ -402,6 +422,14 @@ def _failure(exc, args):
         next_command = f"gtm-connector audit --state-dir {shlex.quote(str(args.state_dir))}"
     elif isinstance(exc, sqlite3.Error):
         code = 1
+    if getattr(exc, "code", None) == "demo_state_mismatch":
+        code = 4
+        fresh = args.state_dir.parent / "renewal-demo-fresh"
+        suffix = 2
+        while os.path.lexists(fresh):
+            fresh = args.state_dir.parent / f"renewal-demo-fresh-{suffix}"
+            suffix += 1
+        next_command = shlex.join(["gtm-connector", "demo", "--state-dir", str(fresh)])
     if "audit database not found" in message:
         next_command = f"gtm-connector demo --state-dir {shlex.quote(str(args.state_dir))}"
     elif "database not found" in message:
@@ -432,8 +460,8 @@ def _main(argv):
     as_json = _json_requested(arguments)
     parser = build_parser()
     if not arguments or arguments == ["--json"]:
-        quickstart = {"description": parser.description, "try": ["gtm-connector demo --with-slack",
-                      "gtm-connector brief acc-003 --with-slack"], "help": "gtm-connector --help"}
+        quickstart = {"description": parser.description, "try": ["gtm-connector demo",
+                      "gtm-connector brief acc-007 --with-slack"], "help": "gtm-connector --help"}
         print(json.dumps(quickstart) if as_json else
               f"{quickstart['description']}\n\nTry first:\n  " + "\n  ".join(quickstart["try"]) +
               "\n\nRun gtm-connector --help for all commands.")

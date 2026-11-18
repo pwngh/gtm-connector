@@ -4,8 +4,7 @@ cd "$(dirname "$0")/.."
 umask 077
 demo_dir=$(mktemp -d "${TMPDIR:-/tmp}/gtm-demo.XXXXXX")
 printf 'Demo output directory: %s\n' "$demo_dir"
-./scripts/demo.sh --json --state-dir "$demo_dir/state" > "$demo_dir/connector.json"
-.venv/bin/python -m gtm_connector evaluate --json > "$demo_dir/evaluation.json"
+./scripts/demo.sh --json --state-dir "$demo_dir/state" > "$demo_dir/demo.json"
 .venv/bin/python -m gtm_connector usage --json --state-dir "$demo_dir/state" > "$demo_dir/usage.json"
 .venv/bin/python - "$demo_dir" <<'PY'
 import json
@@ -13,11 +12,23 @@ from pathlib import Path
 import subprocess
 import sys
 
+from gtm_connector.cli import human_result
+
 directory = Path(sys.argv[1])
-demo = json.loads((directory / "connector.json").read_text())
-evaluation = json.loads((directory / "evaluation.json").read_text())
+demo = json.loads((directory / "demo.json").read_text())
 usage = json.loads((directory / "usage.json").read_text())
-brief = demo["briefs"][0]
+brief = demo["brief"]
+saved = json.loads((directory / "state" / "briefs" / (brief["brief_id"] + ".json")).read_text())
+assert {key: saved[key] for key in brief} == brief
+assert demo["status"] == "accepted" and demo["rep"]["name"] == "Morgan Reed"
+assert demo["account"]["id"] == brief["account_id"] == "acc-007"
+assert demo["denied_read"]["status"] == 403 and demo["audit"]["rows"] == 6
+assert demo["injection"]["quoted"] and demo["activities_created"] == 0
+assert usage["calls"] == {"total": 6, "ok": 5, "error": 1, "pending": 0}
+assert usage["model_tokens"] == {"saved_briefs": 1, "unknown_briefs": 0,
+                                 "input_tokens": 0, "output_tokens": 0}
+for reference in ("crm/accounts/acc-007", "calls/call_notes/note-007", "slack/messages/msg-007"):
+    assert "[" + reference + "]" in brief["text"]
 candidate = directory / "candidate.txt"
 candidate.write_text(brief["text"])
 command = [sys.executable, "-m", "gtm_connector", "check-brief", "--json", brief["brief_id"],
@@ -29,26 +40,15 @@ candidate.write_text(brief["text"] + "The renewal was approved.\n")
 rejected = subprocess.run(command, capture_output=True, text=True, check=False)
 (directory / "rejected.stderr.txt").write_text(rejected.stderr)
 assert rejected.returncode == 4 and rejected.stdout == ""
-assert "unsupported" in rejected.stderr
+assert json.loads(rejected.stderr)["error"]["code"] == "check_failed"
 candidate.write_text(brief["text"])
-assert evaluation["status"] == "passed" and evaluation["accounts"] == 20
-assert usage["calls"] == {"total": 23, "ok": 20, "error": 3, "pending": 0}
-assert usage["model_tokens"] == {"saved_briefs": 3, "unknown_briefs": 0,
-                                 "input_tokens": 0, "output_tokens": 0}
-print(f'Accounts: {demo["accounts"]}')
-print(f'Calls scope denial: HTTP {demo["notes_without_scope"]["status"]}')
-print(f'Idempotent write: {demo["idempotent_write"]["requests"]} requests, '
-      f'{demo["idempotent_write"]["activities"]} activity')
-print(f'Rate limit: HTTP {demo["rate_limit"]["status"]}')
-print(f'Audit receipts: {demo["audit_rows"]} connector + {demo["brief_audit_rows"]} briefing')
-print(demo["contradiction_flags"][0])
-print(f'Activities from briefing: {demo["injection_brief"]["activities_created"]}')
-print('Citation checker: accepted generated text; rejected an uncited claim with exit 4')
-print(f'Evaluation: {evaluation["accounts"]} accounts, '
-      f'{evaluation["facts_found"]}/{evaluation["expected_facts"]} facts found, '
-      f'{evaluation["facts_cited_correctly"]}/{evaluation["expected_facts"]} cited correctly, '
-      f'{evaluation["facts_invented"]} invented')
-print(f'Usage: {usage["calls"]["total"]} calls, {usage["model_tokens"]["saved_briefs"]} saved briefs, '
-      '0 input and 0 output model tokens')
-print(f'Inspect {directory}/connector.json, evaluation.json, usage.json, and state/')
+print(human_result("demo", demo))
+print("\nInspect the same renewal brief.")
+print("The citation checker accepted Morgan's saved brief.")
+print("Appending 'The renewal was approved.' was rejected with exit 4 and empty stdout.")
+print("The saved audit has six receipts: five successful reads and one scope refusal.")
+print("One brief was saved. No model tokens or activity writes were used.")
+print(f"Inspect {directory}/demo.json, usage.json, candidate.txt, and state/.")
+print("Run separate connector checks with: .venv/bin/python -m gtm_connector verify "
+      "--with-slack --state-dir var/verification")
 PY

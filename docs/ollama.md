@@ -16,8 +16,10 @@ The commands run after repository setup:
 
 ```sh
 .venv/bin/python -m gtm_connector brief acc-003 --adapter ollama --model llama3.2:latest --json
-.venv/bin/python -m gtm_connector evaluate --adapter ollama --model llama3.2:latest --json > evaluation/RESULTS_OLLAMA.json
+.venv/bin/python -m gtm_connector evaluate --adapter ollama --model llama3.2:latest --json > ollama-evaluation.json
 ```
+
+This saves a new local report without replacing the historical checked-in run.
 
 `--model` is required with `--adapter ollama` and is an error with the fixture
 adapter. Invalid arguments exit `2`. An unavailable service, missing model, or
@@ -61,8 +63,11 @@ The [recorded model report](../evaluation/RESULTS_OLLAMA.json) records the actua
 command and UTC timestamps. It includes requested and returned model names,
 cached digest, Ollama version, token counts, and per-account metrics. The
 [fixture report](../evaluation/RESULTS.json) remains a separate baseline.
-Those reports preserve the commands used before the CLI required `--json` for
-JSON output; their recorded invocation and results have not been rewritten.
+The model report is the November 17, 2026 run against the original fixture corpus,
+whose names were synthetic labels such as `Fixture account acc-001`. Its command
+predates the CLI's explicit `--json` requirement and remains unchanged.
+It has not been rerun against the current invented book or the three-source
+workflow. Current fixture scores do not establish model performance on either.
 
 `candidate` counts returned lines before checking. Malformed or unavailable
 candidates are explicitly unscored; published counts include only whole briefs

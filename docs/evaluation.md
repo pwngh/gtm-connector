@@ -25,8 +25,13 @@ their references separately from the drafting code. The collected evidence
 supplies only the generated run and audit IDs.
 
 `--with-slack` includes account-channel context. It makes 80 tool calls and adds
-fixed Slack expectations, preserving the original 182 claims. See
+fixed Slack expectations, bringing the total from 182 to 223 claims. See
 [the three-source fixture](slack.md).
+
+The current book uses invented names and account-specific source text while
+keeping record IDs and claim counts stable. The expected wording was updated
+separately from the drafting code. The missing contact role, dated old note,
+scope denials, empty sources, and exact conflict cases remain explicit cases.
 
 ## Progress
 
@@ -57,7 +62,7 @@ notifications and preserve the report when no callback is supplied.
 
 ## Recorded results
 
-The fixture adapter produced these results on 2026-11-17 with as-of date `2027-01-15`:
+The fixture report records these results with as-of date `2027-01-15`:
 
 | Metric | Result |
 | --- | --- |
@@ -70,9 +75,12 @@ The fixture adapter produced these results on 2026-11-17 with as-of date `2027-0
 | Activities created | 0 |
 | Model input / output tokens | 0 / 0 |
 
-[RESULTS.json](../evaluation/RESULTS.json) records the output and counts for each account.
-The checked-in reports are historical runs from before explicit `--json` was
-required. Their stored commands and results remain unchanged.
+[RESULTS.json](../evaluation/RESULTS.json) records the exact invocation, UTC run
+times, output, and counts for each account. The separate
+[Slack report](../evaluation/RESULTS_SLACK.json) covers the four-read workflow.
+Both fixture reports are rerun when the current book changes. The historical
+[Ollama report](../evaluation/RESULTS_OLLAMA.json) retains the original
+synthetic-label corpus and has not been rerun against this book.
 
 ## How scoring works
 

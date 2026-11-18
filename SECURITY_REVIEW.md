@@ -8,7 +8,7 @@ It does not grant production approval.
 
 `crm.sqlite3` holds 30 accounts, contacts, opportunities, and activities.
 `calls.sqlite3` holds 29 call notes. `slack.sqlite3` holds 29 account-channel
-messages. Labels are synthetic; email addresses use
+messages. Company names, people, and source text are invented; email addresses use
 reserved `.example` domains. The default runtime uses no real CRM, external
 identity, or recording service. An explicit Salesforce backend can read an
 operator's Developer Edition org; calls and Slack still use local fixtures.
@@ -24,6 +24,16 @@ Scopes do not imply one another. The gateway and handlers enforce them. A scope
 denial returns HTTP 403. The briefing workflow requests read scopes only and
 makes three fixed calls by default. `--with-slack` adds a fourth read and an
 explicit Slack grant. It cannot select a write from record or draft text.
+
+The default `demo` follows one invented rep and account. A CRM-only lookup and
+call-note refusal precede one four-read brief with explicit CRM, calls, and Slack
+grants. Its six receipts record five successful reads and one refusal. It
+requests no write scope and creates no activity. The separate `verify` command
+keeps the broader guarantee checks, including an explicitly authorized local
+activity and its idempotent retry. The walkthrough scripts inspect narrative
+state; verification runs separately with its own state in CI. The
+[narrative tests](tests/test_demo.py) check the saved artifact, receipts, quoted
+injections, repeated runs, and unchanged activities through local HTTPS.
 
 ## Trust boundary
 
@@ -114,6 +124,13 @@ paraphrases. A citation attributes a source; it does not establish source truth.
 The conflict rule matches `closed_won` against the exact fixture note reporting
 unapproved procurement. Its required flag cites both sources and resolves
 neither. It does not detect arbitrary contradictions.
+
+The fixture book contains a missing contact role and a dated old note whose
+seat advice differs from a later Slack message. The renderer states the missing
+role and preserves source dates and quotations. It does not infer the right
+role, classify freshness, or resolve that disagreement. The recorded Ollama run
+uses the earlier synthetic-label fixture corpus; it proves no model result for
+the current book. The narrative demo uses fixed drafting without a model.
 
 Slack messages remain untrusted data in a separate store and scope. The optional
 four-read workflow requires a matching receipt for each source. It distinguishes
@@ -210,6 +227,8 @@ failure, disabled writes, and accepted reads through local HTTPS. The separate
 lead-agent live demo observation is recorded below; an owner-provided check
 report is still required for verification. See [setup, report shape, and
 limits](docs/salesforce.md).
+
+No live org has been verified.
 
 ## Bound Salesforce demo kit
 

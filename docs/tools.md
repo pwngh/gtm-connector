@@ -22,8 +22,8 @@ The content is marked as untrusted data.
 
 ## Fixtures
 
-Fixtures use labels such as `Fixture account acc-001` and reserved `.example`
-email domains, with no plausible company, person, or product names.
+The fixed book uses invented company and person names, mixed industries, and
+reserved `.example` email domains. No fixture comes from a live org or employer.
 `crm.sqlite3` holds 30 accounts with their contacts, opportunities, and activities.
 Call notes live separately in `calls.sqlite3`, which holds 29 notes. Account
 `acc-004` has none.
@@ -40,10 +40,18 @@ has not approved the renewal.
 `note-007` asks for a write. The workflow keeps it as quoted data and creates
 zero activities.
 
+The renewal story follows Morgan Reed, an invented account rep, and Juniper
+Crest Learning (`acc-007`). It renews on `2027-01-29`, fourteen days after the
+fixed demo date. Its contact Dana Crest has no recorded role. Harborlight Field
+Services (`acc-006`) has an October call note whose seat-count advice disagrees
+with a January Slack update. Those dates and source statements remain visible;
+the checker does not infer arbitrary contradictions or classify stale notes.
+
 A reseed preserves record IDs, edits, and activities. Incomplete or unexpected
 fixtures are rejected. The legacy combined CRM/calls database cannot be used
 with separate stores; choose `var/v2` or a fresh path.
-There is no automatic migration or deletion.
+Existing complete fixtures retain their old names and content. Use a fresh
+`--state-dir` for the new story. There is no automatic migration or deletion.
 
 ## Run the connector demo
 
@@ -57,22 +65,48 @@ model, or API key is needed.
 
 The script creates `.venv`, installs `requirements.lock`, and runs the tests.
 It then starts two temporary HTTPS services on the loopback interface. The CLI
-obtains scoped tokens with PKCE, exercises the five CRM/calls tools, and builds
-renewal briefs. Both services stop afterward, leaving state in the gitignored
-`var/v2` directory. To use another directory, run:
+looks up Juniper Crest Learning with a CRM-only grant, receives a call-note
+refusal, and obtains explicit CRM, calls, and Slack read grants for a cited
+renewal brief. Both services stop afterward, leaving state in the gitignored
+`var/renewal-demo` directory. To use another directory, run:
 
 ```sh
 ./scripts/demo.sh --state-dir /tmp/gtm-fixture
 ```
 
-The demo prints a readable brief and check summary by default. To inspect the
-complete result as JSON, run:
+The demo prints the rep's workflow and checked brief by default. The injected
+note stays quoted, no activity is created, and the follow-up remains a proposal.
+Slack is part of the story; `demo --with-slack` remains an accepted spelling.
+To inspect the complete result as JSON, run:
 
 ```sh
 ./scripts/demo.sh --json
 ```
 
-That JSON has these fields and results:
+The narrative run makes six tool attempts: the lookup, the denied call-note
+read, and four authorized briefing reads. It saves one accepted brief, records
+five successful receipts and one error receipt, and creates zero activities.
+[The CLI contract](cli.md) describes its JSON result. Repeated runs retain
+existing state and add one brief and six receipts each.
+
+The full walkthrough runs with `./scripts/five-minute-demo.sh`. It follows the
+same invented rep and account, inspects that brief's usage, and demonstrates
+acceptance of its saved text followed by rejection of an appended unsupported
+sentence. It prints the private directory where it saves its output and the
+command for separate guarantee checks. See [DEMO.md](../DEMO.md). First-install
+download time varies.
+
+## Run the guarantee checks
+
+`verify` retains the earlier demo's checks and JSON shape. Its explicit local
+write checks create one fixture activity to prove idempotent retries. Keep its
+state separate from the read-only story:
+
+```sh
+.venv/bin/python -m gtm_connector verify --state-dir var/verification --json
+```
+
+That command returns these fields and results:
 
 | Field | Result |
 | --- | --- |
@@ -95,12 +129,7 @@ None of the briefs creates an activity, even when a note requests a write.
 The `conflicting_sources` result displays both records; its flag follows
 the specific rule described in [Briefs and citations](briefs.md).
 
-The full walkthrough runs with `./scripts/five-minute-demo.sh` and includes
-evaluation, usage, and a live checker rejection. It prints the private directory
-where it saves its output. See [DEMO.md](../DEMO.md). First-install download
-time varies.
-
-The `--with-slack` option includes all three sources, so each of the three briefs
+The `verify --with-slack` option includes all three sources, so each of the three briefs
 uses four reads. The full brief includes a three-source conflict and a cited
 follow-up proposal. The restricted brief reports both denied grants. This mode
 also demonstrates CRM-to-Slack, Slack-to-CRM, and Slack-to-calls denials.
@@ -110,7 +139,7 @@ also demonstrates CRM-to-Slack, Slack-to-CRM, and Slack-to-calls denials.
 
 ```sh
 python3 -m gtm_connector seed
-python3 -m gtm_connector accounts --query acc-001
+python3 -m gtm_connector accounts --query 'Alder Vale'
 python3 -m gtm_connector account acc-007
 ```
 

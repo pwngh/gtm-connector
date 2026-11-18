@@ -70,7 +70,7 @@ class SlackGatewayTests(unittest.TestCase):
         for token, scope in (("crm", "crm:read"), ("calls", "calls:read"),
                              ("slack", "slack:read"), ("write", "crm:write")):
             for tool in reads:
-                arguments = {"query": "acc-007"} if tool == "search_accounts" else {"account_id": "acc-007"}
+                arguments = {"query": "Juniper Crest Learning"} if tool == "search_accounts" else {"account_id": "acc-007"}
                 with self.subTest(token=token, tool=tool):
                     response = self.tool(tool, arguments, token=token)
                     if TOOL_SCOPES[tool] == scope:
@@ -79,7 +79,7 @@ class SlackGatewayTests(unittest.TestCase):
                         self.assertEqual(response.status_code, 403, response.text)
                         self.assertIn(f'scope="{TOOL_SCOPES[tool]}"', response.headers["WWW-Authenticate"])
                         self.assertNotIn("IGNORE PREVIOUS INSTRUCTIONS", response.text)
-                        self.assertNotIn("Fixture account", response.text)
+                        self.assertNotIn("Juniper Crest Learning", response.text)
             if token != "write":
                 response = self.tool("log_activity", {"account_id": "acc-007", "kind": "renewal",
                     "body": "Must not be written", "idempotency_key": "denied-slack-write"}, token=token)
@@ -113,7 +113,7 @@ class SlackGatewayTests(unittest.TestCase):
             messages = self.records(self.tool("read_slack_messages"))
         connect.assert_called_once_with(self.paths["slack"], readonly=True)
         self.assertIn(slack.INJECTION_TEXT, messages[0]["body"])
-        self.assertEqual(messages[0]["channel"], "acct-acc-007")
+        self.assertEqual(messages[0]["channel"], "acct-juniper-crest")
         self.assertEqual(self.paths["slack"].read_bytes(), original)
         self.assertEqual(self.activities(), 0)
         self.assertEqual([row["tool"] for row in self.connector.audit.read()], ["read_slack_messages"])

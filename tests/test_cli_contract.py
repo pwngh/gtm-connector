@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = (
-    "seed", "accounts", "account", "evaluate", "demo", "serve", "audit", "brief",
+    "seed", "accounts", "account", "evaluate", "demo", "verify", "serve", "audit", "brief",
     "check-brief", "usage", "inspector-config", "doctor", "connect", "completion",
 )
 
@@ -46,6 +46,17 @@ class CLIContractTests(unittest.TestCase):
                 self.assertIn("--json", result.stdout)
                 self.assertIn(command, result.stdout)
                 self.assertEqual(result.stderr, "")
+
+    def test_demo_and_verification_have_separate_defaults_without_changing_daily_commands(self):
+        from gtm_connector.cli import build_parser
+
+        parser = build_parser()
+        self.assertEqual(parser.parse_args(["demo"]).state_dir, Path("var/renewal-demo"))
+        self.assertEqual(parser.parse_args(["verify"]).state_dir, Path("var/verification"))
+        for arguments in (["brief", "acc-007"], ["serve"], ["doctor"], ["audit"], ["usage"]):
+            self.assertEqual(parser.parse_args(arguments).state_dir, Path("var/v2"))
+        for command in ("demo", "verify"):
+            self.assertEqual(parser.parse_args([command, "--state-dir", "var/chosen"]).state_dir, Path("var/chosen"))
 
     def test_version_and_help_do_not_attempt_runtime_imports(self):
         # Block import attempts, rather than merely checking the final module set.

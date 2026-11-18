@@ -1,4 +1,4 @@
-"""Behavior checks for synthetic CRM records and the SQLite boundary."""
+"""Behavior checks for invented CRM records and the SQLite boundary."""
 
 import sqlite3
 import tempfile
@@ -31,7 +31,7 @@ class StoreTests(unittest.TestCase):
         self.addCleanup(self.connection.close)
         initialize(self.connection)
 
-    def test_seed_has_thirty_complete_synthetic_accounts(self):
+    def test_seed_has_thirty_complete_invented_accounts(self):
         seed(self.connection)
         self.assertEqual(
             counts(self.connection),
@@ -39,9 +39,14 @@ class StoreTests(unittest.TestCase):
         )
         accounts = search_accounts(self.connection)
         self.assertEqual([row["id"] for row in accounts], [f"acc-{i:03}" for i in range(1, 31)])
+        self.assertEqual(len({row["name"] for row in accounts}), 30)
+        self.assertEqual(accounts[0]["name"], "Alder Vale Packaging")
+        self.assertEqual(accounts[-1]["name"], "Riverbend Civic Services")
+        industries = set()
         for row in accounts:
             account = get_account(self.connection, row["id"])
-            self.assertEqual(account["name"], f"Fixture account {account['id']}")
+            self.assertNotIn(account["id"], account["name"])
+            industries.add(account["industry"])
             self.assertEqual(date.fromisoformat(account["renewal_date"]).year, 2027)
             self.assertIsInstance(account["arr_cents"], int)
             self.assertGreater(account["arr_cents"], 0)
@@ -50,15 +55,16 @@ class StoreTests(unittest.TestCase):
             self.assertNotIn("call_notes", account)
             for contact in account["contacts"]:
                 self.assertEqual(contact["account_id"], account["id"])
-                self.assertEqual(contact["name"], f"Fixture contact {contact['id']}")
+                self.assertNotIn(contact["id"], contact["name"])
                 self.assertTrue(contact["email"].split("@", 1)[1].endswith(".example"))
             opportunities = list_opportunities(self.connection, account["id"])
             self.assertEqual(len(opportunities), 1)
             for opportunity in opportunities:
-                self.assertEqual(opportunity["name"], f"Fixture renewal {opportunity['id']}")
+                self.assertEqual(opportunity["name"], account["name"] + " 2027 renewal")
                 self.assertEqual(opportunity["account_id"], account["id"])
                 self.assertIsInstance(opportunity["amount_cents"], int)
         self.assertEqual(self.connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+        self.assertGreaterEqual(len(industries), 10)
 
     def test_briefing_edge_cases_exist_in_crm_source(self):
         seed(self.connection)
@@ -68,6 +74,13 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(risk["risk_status"], "at_risk")
         self.assertTrue(risk["risk_reason"])
         self.assertEqual(list_opportunities(self.connection, "acc-003")[0]["stage"], "closed_won")
+        story = get_account(self.connection, "acc-007")
+        self.assertEqual(story["name"], "Juniper Crest Learning")
+        self.assertEqual((date.fromisoformat(story["renewal_date"]) - date.fromisoformat(DEMO_AS_OF)).days, 14)
+        self.assertEqual(story["contacts"][0]["name"], "Dana Crest")
+        self.assertEqual(story["contacts"][0]["title"], "")
+        self.assertEqual(story["contacts"][0]["email"], "dana@juniper-crest.example")
+        self.assertEqual(list_opportunities(self.connection, "acc-007")[0]["close_date"], "2027-01-22")
 
     def test_crm_has_no_call_notes_table_or_enrichment(self):
         seed(self.connection)

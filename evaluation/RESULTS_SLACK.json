@@ -228,14 +228,15 @@
   "workflow": "crm-calls-slack",
   "workflow_version": 2,
   "run": {
-    "started_at": "2026-11-17T21:11:19.960222+00:00",
-    "completed_at": "2026-11-17T21:11:21.246270+00:00",
+    "started_at": "2026-11-18T04:29:41.829416+00:00",
+    "completed_at": "2026-11-18T04:29:42.998874+00:00",
     "command": [
       "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
       "-m",
       "gtm_connector",
       "evaluate",
-      "--with-slack"
+      "--with-slack",
+      "--json"
     ]
   }
 }

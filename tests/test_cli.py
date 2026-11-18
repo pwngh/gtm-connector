@@ -40,9 +40,9 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
         return json.loads(result.stdout)
 
-    def test_demo_runs_twice_with_distinct_audit_groups_and_one_activity(self):
-        first = self.json_result(self.run_cli("demo"))
-        second = self.json_result(self.run_cli("demo"))
+    def test_verification_runs_twice_with_distinct_audit_groups_and_one_activity(self):
+        first = self.json_result(self.run_cli("verify"))
+        second = self.json_result(self.run_cli("verify"))
         self.assertNotEqual(first["brief_id"], second["brief_id"])
         self.assertEqual(first["renewal_record"], second["renewal_record"])
         self.assertEqual(first["idempotent_write"], second["idempotent_write"])
@@ -131,8 +131,8 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("opportunities", account)
         self.assertNotIn("IGNORE PREVIOUS INSTRUCTIONS", json.dumps(account))
 
-    def test_optional_slack_demo_and_evaluation_keep_follow_up_grounded(self):
-        summary = self.json_result(self.run_cli("demo", "--with-slack"))
+    def test_optional_slack_verification_and_evaluation_keep_follow_up_grounded(self):
+        summary = self.json_result(self.run_cli("verify", "--with-slack"))
         self.assertEqual(summary["workflow"], "crm-calls-slack")
         self.assertEqual(summary["audit_rows"], 18)
         self.assertEqual(summary["brief_audit_rows"], 12)

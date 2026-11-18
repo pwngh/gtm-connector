@@ -30,11 +30,11 @@ An activity may already have committed when this happens. Retry with the same
 idempotency key and reconcile any pending row. The log is neither tamper-proof
 evidence nor a billing system.
 
-The audit command lists receipts for a brief. Replace the placeholder with the
-generated brief ID:
+The audit command lists receipts for a brief. These examples inspect the default
+renewal-demo folder. Replace the placeholder with its generated brief ID:
 
 ```sh
-gtm-connector audit --brief brief-REPLACE_WITH_ID
+gtm-connector audit --brief brief-REPLACE_WITH_ID --state-dir var/renewal-demo
 ```
 
 The default output is a receipt table. Add `--json` for the complete receipt
@@ -91,7 +91,8 @@ event without the arguments and record references included in audit JSON.
 
 Each token has a default allowance of 60 tool calls per fixed 60-second window.
 Scope denials count; invalid tokens create no counters. A limited call returns
-HTTP 429 with `rate_limited` and `Retry-After`. The demo uses a limit of four.
+HTTP 429 with `rate_limited` and `Retry-After`. The `verify` command uses a limit
+of four.
 
 The counters live in process memory, so a new token or server restart resets
 the allowance. This local guard does not enforce a distributed quota.

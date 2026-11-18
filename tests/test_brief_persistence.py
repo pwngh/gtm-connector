@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from gtm_connector.briefing import _save_artifact, check_saved_brief, create_brief
-from gtm_connector.citations import build_facts
+from gtm_connector.citations import BriefRejected, build_facts
 from gtm_connector.drafting import DraftResult
 from gtm_connector.runtime import Runtime
 from gtm_connector.usage import build_usage_report
@@ -21,6 +21,61 @@ class BriefPersistenceTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.state = Path(self.directory.name) / "state"
+
+    def test_saved_empty_role_keeps_legacy_spelling_without_loosening_new_drafts(self):
+        for include_slack in (False, True):
+            state = self.state / ("slack" if include_slack else "calls")
+            with self.subTest(include_slack=include_slack), Runtime(state) as runtime:
+                current = create_brief(runtime, "acc-007", include_slack=include_slack)
+                current_line = ('- Contact "Dana Crest": role not provided; '
+                                'email "dana@juniper-crest.example". [crm/contacts/con-007]')
+                legacy_line = current_line.replace("role not provided;", 'role "";')
+                self.assertIn(current_line, current["text"].splitlines())
+                self.assertNotIn(legacy_line, current["text"].splitlines())
+                legacy_text = current["text"].replace(current_line, legacy_line)
+                path = state / "briefs" / (current["brief_id"] + ".json")
+                _save_artifact(path, {**current, "text": legacy_text})
+                before = path.read_bytes()
+                receipts = runtime.connector.audit.read()
+                self.assertEqual(check_saved_brief(state, current["brief_id"], legacy_text), legacy_text)
+                self.assertEqual(check_saved_brief(state, current["brief_id"], current["text"]), current["text"])
+                bad_candidates = (
+                    legacy_text.replace('role "";', 'role "Decision maker";'),
+                    legacy_text.replace(legacy_line,
+                                        legacy_line.replace("crm/contacts/con-007", "crm/accounts/acc-007")),
+                    legacy_text + legacy_line + "\n",
+                    legacy_text + current_line + "\n",
+                )
+                for candidate in bad_candidates:
+                    with self.subTest(candidate=candidate), self.assertRaises(BriefRejected):
+                        check_saved_brief(state, current["brief_id"], candidate)
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(runtime.connector.audit.read(), receipts)
+                regenerated = create_brief(runtime, "acc-007", include_slack=include_slack)
+                self.assertIn(current_line, regenerated["text"].splitlines())
+                self.assertNotIn(legacy_line, regenerated["text"].splitlines())
+
+    def test_current_saved_brief_keeps_missing_follow_up_and_duplicate_failure_reasons(self):
+        with Runtime(self.state) as runtime:
+            current = create_brief(runtime, "acc-007", include_slack=True)
+            contact = next(line for line in current["text"].splitlines() if line.startswith("- Contact "))
+            self.assertIn("role not provided;", contact)
+            path = self.state / "briefs" / (current["brief_id"] + ".json")
+            before = path.read_bytes()
+            receipts = runtime.connector.audit.read()
+            candidates = (
+                (current["text"].replace(current["proposed_follow_up"] + "\n", ""),
+                 "Brief must disclose required source outcomes, source conflicts, and proposed follow-up."),
+                (current["text"] + contact + "\n", "Brief repeats a statement."),
+                (None, "A brief must contain supported, cited statements."),
+            )
+            for candidate, message in candidates:
+                with self.subTest(message=message):
+                    with self.assertRaises(BriefRejected) as failure:
+                        check_saved_brief(self.state, current["brief_id"], candidate)
+                    self.assertEqual(str(failure.exception), message)
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(runtime.connector.audit.read(), receipts)
 
     def test_failed_initial_save_never_invokes_the_drafter(self):
         adapter = Mock()

@@ -15,7 +15,7 @@ class SlackEvaluationTests(unittest.TestCase):
         base = load_expectations()
         original = [case["claims"] for case in base["cases"]]
         digest = hashlib.sha256(json.dumps(original, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        self.assertEqual(digest, "de7bda02d0126aa1c59628cac7ffcd8b9e8c7df216e006018f91c15a1558a73c")
+        self.assertEqual(digest, "171cd6b60df934ca3c8f0e15a82acaed1027125663e655971683b25d5e1f430e")
         self.assertEqual(sum(map(len, original)), 182)
         extended = load_expectations(include_slack=True)
         self.assertEqual(sum(len(case["claims"]) for case in extended["cases"]), 223)

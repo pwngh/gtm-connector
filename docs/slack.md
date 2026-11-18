@@ -14,26 +14,34 @@ These commands run from the repository root after setup:
 ```sh
 .venv/bin/python -m gtm_connector brief acc-003 --with-slack --json
 .venv/bin/python -m gtm_connector evaluate --with-slack
-.venv/bin/python -m gtm_connector demo --with-slack --state-dir var/slack-demo
+.venv/bin/python -m gtm_connector demo --state-dir var/renewal-demo
+.venv/bin/python -m gtm_connector verify --with-slack --state-dir var/slack-verification
 ```
 
-The brief command above returns JSON. Evaluation and demo print readable
-summaries; add `--json` to inspect their full result objects.
+The brief command above returns JSON. Evaluation, demo, and verification print
+readable summaries; add `--json` to inspect their full result objects.
 
 The full brief requests `crm:read`, `calls:read`, and `slack:read`. After the
 default three reads, it calls `read_slack_messages`, never requesting
-`crm:write`. The demo proves CRM grants cannot read Slack and a Slack-only token
-cannot read CRM or call notes. Every attempt is audited.
+`crm:write`. The separate `verify --with-slack` run proves CRM grants cannot read
+Slack and a Slack-only token cannot read CRM or call notes. Every attempt is audited.
 
-Default briefs, evaluation, and the five-minute script retain their two-source
-workflow and measured 182-claim baseline. The Slack option selects four-read briefs and
-extended expectations; fixture drafting still runs without a model. Ollama
-accepts `--with-slack`, but its recorded benchmark covers the default two-source
-task only. No three-source model score is claimed.
+The demo includes Slack by default and accepts `--with-slack` for compatibility.
+It follows Morgan Reed preparing Juniper Crest Learning's renewal, with a checked
+brief, quoted injected note, and proposed follow-up. The longer walkthrough uses
+the same invented person, account, and sources while inspecting that brief's
+usage and citation checks. Neither walkthrough connects to Slack.
+
+Default `brief` and `evaluate` commands retain their two-source workflow and
+182-claim baseline. Their Slack option selects four-read briefs and extended
+expectations; fixture drafting still runs without a model. Ollama accepts
+`--with-slack`, but its historical benchmark covers only the original two-source
+fixture corpus. No model score is claimed for the current book or Slack workflow.
 
 ## Source data and claims
 
-The 29 messages belong to synthetic account channels. Stable IDs run from
+The 29 invented messages belong to account channels such as
+`acct-juniper-crest`. Stable IDs run from
 `msg-001` through `msg-030`, excluding `msg-005`; references use
 `slack/messages/msg-003`. `msg-002` reports a departed champion. `msg-003` says:
 
@@ -53,10 +61,13 @@ These lines were captured from the documented `acc-003` command:
 - Proposed follow-up: Ask the account owner to confirm procurement and security review status. [crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]
 ```
 
-`msg-007` contains an instruction to invoke `log_activity`. The workflow quotes it as
-data, performs its fixed reads, and creates no activity. The model receives no
-tool interface. This test checks the boundary, not the truth of arbitrary source
-text.
+`msg-007` starts with the learning team's need for a training owner and a final
+seat count, then contains an instruction to invoke `log_activity`. The workflow
+quotes it as data, performs its fixed reads, and creates no activity. The model
+receives no tool interface. This test checks the boundary, not the truth of
+arbitrary source text. The October call note and January Slack update for
+`acc-006` disagree about seat needs; their dates and wording stay visible without
+a general contradiction or staleness detector.
 
 An empty successful read produces a statement that no messages were returned,
 citing its audit receipt. A matching HTTP 403 instead cites the denial receipt
@@ -83,15 +94,15 @@ version `1` means existing three-read evidence. The checker fetches no new sourc
 when checking a saved snapshot. Version 1 rejects Slack records, receipts, or status; unknown versions
 fail. Rejected and legacy artifacts gain no follow-up field.
 
-The expected manifest retains its original 182 claim objects. Static Slack
+The expected manifest contains 182 base claim objects. Static Slack
 expectations add messages, conflicts, and follow-ups for the same 20 accounts.
 Extended evaluation uses 80 tool calls, scoring supported wording and exact
 references rather than semantic truth. Local-owner access and manual retention
 retain their limits. Atomic snapshot replacement does not guarantee power-loss
 durability.
 
-The fixture adapter produced these results with `.venv/bin/python -m gtm_connector evaluate --with-slack`
-on 2026-11-17 from `21:11:19` to `21:11:21` UTC, using no model:
+The fixture report records these results for
+`.venv/bin/python -m gtm_connector evaluate --with-slack --json`, using no model:
 
 | Measure | Result |
 | --- | --- |
@@ -102,6 +113,5 @@ on 2026-11-17 from `21:11:19` to `21:11:21` UTC, using no model:
 | Activities created | 0 |
 | Input / output model tokens | 0 / 0 |
 
-The [recorded output and exact invocation](../evaluation/RESULTS_SLACK.json) file preserves the run details.
-That historical command predates the explicit `--json` requirement. Use
-`evaluate --with-slack --json` to produce a JSON report with the current CLI.
+The [recorded output and exact invocation](../evaluation/RESULTS_SLACK.json) file
+preserves UTC run times and per-account counts for the current invented book.

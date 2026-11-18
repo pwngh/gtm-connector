@@ -3,9 +3,10 @@
 [![Test connector demo](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml?query=branch%3Amain)
 
 A renewal brief is an account summary a sales rep reads before a contract
-renewal. This project drafts one from a mock CRM (customer records) and call
-notes, with optional Slack account messages. Each statement cites its source or
-audit record.
+renewal. Run `gtm-connector demo` to follow Morgan Reed preparing Juniper Crest Learning's
+renewal from CRM records, a call note, and a Slack message. Every person, company,
+and source in the demo is invented. The brief cites its records and receipts;
+the follow-up remains a proposal.
 
 The MCP (Model Context Protocol) server gives clients scoped access to these
 sources and logs recognized tool calls. The brief checker requires supported
@@ -15,7 +16,7 @@ Run the installed demo without cloning the repository (requires Python 3.11+
 and pipx, with Git access to this repository):
 
 ```sh
-pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo --with-slack
+pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo
 ```
 
 Nothing is published to a package registry. The first install needs internet;
@@ -30,8 +31,9 @@ repository tests and fixture demo from a checkout.
 
 [![Terminal recording of the fixture demo, cited brief, scope denial, and rejected sentence](docs/media/walkthrough.gif)](docs/recording.md)
 
-This scripted recording runs real commands on fresh fixtures, with selected
-output and shortened waits. No model runs.
+The quick demo, this recording, and the longer walkthrough follow the same
+rep and account. The recording expands the same saved brief with selected
+output from actual commands and shortened waits. No model runs.
 [Transcript](docs/media/recording-session.txt),
 [capture details](docs/media/recording-provenance.json), and
 [rerun instructions](docs/recording.md).
@@ -55,7 +57,7 @@ not whether a source is true.
   key and payload to get the original activity. A changed payload returns
   `idempotency_conflict`. [Write test](tests/test_gateway.py#L293)
 - **A note cannot direct the fixed workflow.** Its token is read-only, and its
-  three reads are planned in advance. The injected instruction appears as quoted
+  reads are planned in advance. The injected instruction appears as quoted
   data and creates no activity. This tests the workflow boundary without a model
   interpreting text.
   [Injection test](tests/test_briefing.py#L134)
@@ -74,59 +76,23 @@ not whether a source is true.
 
 ## See it
 
-The captured brief for `acc-003` shows a deal marked won while its call note says
-approval is missing. The fixed demo date `2027-01-15` keeps renewal calculations
-repeatable; it is not the execution date.
+Morgan finds Juniper Crest Learning with a renewal in 14 days. A CRM-only grant
+cannot read its call note. The demo then grants the three read scopes explicitly
+and prepares one brief from CRM, calls, and Slack. An instruction embedded in a
+note stays quoted evidence. No activity is created and nothing is sent.
 
-```text
-- CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. [crm/opportunities/opp-003]
-- Untrusted call note note-003 at "2027-01-12T15:00:00Z" says "Procurement has not approved this renewal. The budget remains unsigned.". [calls/call_notes/note-003]
-- Source conflict: CRM opportunity opp-003 reports stage "closed_won", while call note note-003 reports unapproved procurement. [crm/opportunities/opp-003] [calls/call_notes/note-003]
-```
+The fixed date `2027-01-15` keeps renewal calculations repeatable; it is not the
+execution date. The longer [walkthrough](DEMO.md) expands this same brief with
+its receipts, an evidence check, and a rejected uncited sentence.
 
-Record claims cite `crm/...` or `calls/call_notes/...`. An empty query result or
-denied call-note grant cites its `audit/...` receipt instead. Renewal-day
-calculations also cite the saved `run/...` date.
+Record claims cite `crm/...`, `calls/call_notes/...`, or `slack/messages/...`.
+An empty query or denied grant cites its `audit/...` receipt. Renewal-day
+calculations also cite the saved `run/...` date. The checker validates supported
+wording against this evidence; it does not establish whether a source is true.
 
-The checker accepted the captured brief. Appending `The renewal was approved.`
-made the original recorded version exit with code `2`, print nothing to stdout, and return:
-
-```text
-error: Brief contains an uncited, unsupported, or misattributed statement.
-```
-
-The current CLI uses exit `4` for a failed check and also prints the next command
-to run. The recording above retains its original capture revision.
-
-<details>
-<summary>Inspect a real call-note receipt</summary>
-
-The complete receipt below belongs to the captured brief. Its `token_id` is a
-SHA-256 fingerprint, not a reusable bearer token. IDs and timestamps vary per run.
-
-```json
-{
-  "audit_id": "9684fab8-5e7e-41a8-86e5-dec22e774624",
-  "started_at": "2026-11-17T19:56:52.314305Z",
-  "token_id": "905a643f389384f2267fb155184c25fce82d1b69ee91b8b140795b4c0d28454b",
-  "tool": "read_call_notes",
-  "arguments": {
-    "account_id": "acc-003"
-  },
-  "request_id": 3,
-  "brief_id": "brief-008c10f70b2c4d05ad78368d22a2568f",
-  "status": "ok",
-  "http_status": 200,
-  "row_count": 1,
-  "rows": [
-    "calls/call_notes/note-003"
-  ],
-  "elapsed_ms": 3.656832966953516,
-  "error": null
-}
-```
-
-</details>
+The separate `gtm-connector verify` command runs the guarantee checks, including
+rate limits and idempotent writes to the local demo store. It is a verification
+tool, not another version of the rep's story.
 
 ### Fixture evaluation
 
@@ -134,8 +100,9 @@ The evaluation compares briefs for 20 fixed accounts with checked-in expected
 claims. Each displayed line counts once, including compound contact and
 opportunity statements.
 
-The recorded run used `.venv/bin/python -m gtm_connector evaluate` on 2026-11-17.
-The adapter is `fixture`; the model is `null` because no model runs.
+The current fixture run and exact command are saved in
+[evaluation/RESULTS.json](evaluation/RESULTS.json). The adapter is `fixture`;
+the model is `null` because no model runs.
 
 | Measure | Result |
 | --- | --- |
@@ -154,6 +121,8 @@ and zero model tokens.
 
 ### Local model measurement
 
+This historical run used the earlier synthetic-label fixture book, before the
+current invented companies and notes. It has not been rerun on the current book.
 The optional drafter ran `llama3.2:latest` through Ollama 0.30.0 on 2026-11-17,
 from `20:51:09` to `20:53:23` UTC. The response identified the model as
 `llama3.2:latest:local`. The request used the local-only selector.
@@ -231,19 +200,25 @@ A local run needs macOS or Linux and Python 3.11+ with SQLite and venv support. 
 first dependency install needs internet. Runtime needs no external service,
 account, model, or API key. The script runs the tests and two local HTTPS services.
 
-The 30 invented accounts use reserved `.example` addresses. You will see HTTP 403
-for a denied read and HTTP 429 at the rate limit. Retried writes create no
-duplicates; the injected note causes zero writes. The run creates 14 connector
-receipts and nine briefing receipts, then stops both services. State stays in
-the gitignored `var/v2` directory.
+The 30 invented accounts span several industries and use reserved `.example`
+addresses. The book includes conflicting signals, a dated October note, an
+unrecorded contact role, and missing sources. The quick demo follows just one
+account. It creates six receipts and one saved brief, changes no activity rows,
+and stops both services. State stays in the gitignored `var/renewal-demo`
+directory. Existing `var/v2` data is preserved.
 
-The full walkthrough adds evaluation, usage, and a live citation rejection:
+The longer walkthrough expands the same account's evidence and receipts:
 
 ```sh
 ./scripts/five-minute-demo.sh
 ```
 
-It prints its private output directory. Follow [the five-minute guide](DEMO.md).
+It prints its private output directory. Follow [the guide](DEMO.md). To run the
+separate guarantee checks in their own state:
+
+```sh
+gtm-connector verify --with-slack --state-dir var/verification
+```
 
 ### Use the daily commands
 
@@ -336,8 +311,8 @@ This adds a `slack:read` grant and a fourth audited read. The output includes
 references. The proposal sends nothing.
 [Slack fixtures, denial cases, and limits](docs/slack.md)
 
-The extended evaluation ran on 2026-11-17 at `21:11:19` UTC with the fixture adapter
-and no model. It found and correctly cited 223 of 223 claims, with zero
+The current extended evaluation uses the fixture adapter and no model.
+It found and correctly cited 223 of 223 claims, with zero
 invented claims, 80 audit receipts, and zero activities.
 [Exact command and results](evaluation/RESULTS_SLACK.json)
 
@@ -419,7 +394,6 @@ or multi-tenant behavior is included.
 [Design decisions](DECISIONS.md) explains the choices;
 [Rules the coding agents worked under](AGENTS.md) records the constraints.
 
-This is a portfolio project for Preston Neal. The checked-in fixture records use synthetic
-labels. Optional Salesforce reads return records from the operator's org.
+This is a portfolio project for Preston Neal. The checked-in companies, people, and records are invented. Optional Salesforce reads return records from the operator's org.
 
 The project is MIT licensed.

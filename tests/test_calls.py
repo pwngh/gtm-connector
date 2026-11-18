@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gtm_connector import calls, store
+from gtm_connector import calls, slack, store
 
 
 def notes_snapshot(connection):
@@ -59,6 +59,19 @@ class CallsTests(unittest.TestCase):
         self.assertEqual(note["body"], self.connection.execute("SELECT body FROM call_notes WHERE id = 'note-007'").fetchone()[0])
         self.assertEqual(store.get_account(crm, "acc-007"), before)
         self.assertEqual(store.counts(crm)["activities"], 0)
+
+    def test_old_note_and_current_message_retain_their_different_seat_reports(self):
+        calls.seed(self.connection)
+        source = slack.connect(Path(self.directory.name) / "slack.sqlite3")
+        self.addCleanup(source.close)
+        slack.initialize(source)
+        slack.seed(source)
+        note = calls.read_call_notes(self.connection, "acc-006")[0]
+        message = slack.read_slack_messages(source, "acc-006")[0]
+        self.assertEqual(note["called_at"], "2026-10-03T15:00:00Z")
+        self.assertEqual(note["body"], "The field rollout is complete. The current seat count should remain unchanged.")
+        self.assertEqual(message["sent_at"], "2027-01-14T16:00:00Z")
+        self.assertEqual(message["body"], "The January staffing review added two field teams. The seat count needs review.")
 
     def test_fresh_seeds_match_and_reseeds_preserve_edits(self):
         calls.seed(self.connection)
