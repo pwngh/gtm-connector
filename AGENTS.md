@@ -366,7 +366,7 @@ Its first complete review took about twelve minutes, the longest of the four.
 It now runs at Low in one pass, with the diff inside its prompt and no tools.
 On a 25 KB prompt on 2026-11-18 that took 159 seconds and returned three valid
 findings. The same prompt took 339 seconds at Medium and found no more, and a
-review with tools at High takes 7 to 14 minutes. In that mode Grok is the one
+review with tools at High takes 7 to 14 minutes. At Low, Grok is the one
 exception to the rule below on identical material: it gets the brief and the
 diff, not an exported copy, and says when it would need another file. For a
 diff of 150,000 bytes or more, Grok instead reads its exported copy with tools
