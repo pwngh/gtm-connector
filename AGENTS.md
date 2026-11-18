@@ -253,10 +253,10 @@ Then finish one reviewed PR per slice, in this order:
    audited tools with explicitly named scopes, like any other caller. It only
    reuses or silently renews an existing grant for those scopes or fewer.
    Unlike the bridge, it never starts the owner flow. The existing bounded,
-   non-interactive credential refresh still applies. If the local token or a
-   Slack or Salesforce credential is still unusable after that, it fails that
-   account with a recorded receipt and a clear error. It never prompts, signs
-   in, or substitutes fixtures.
+   non-interactive refresh of Slack and Salesforce credentials still applies.
+   If no such grant is usable, or a Slack or Salesforce credential is still
+   unusable after that refresh, it fails that account with a recorded receipt
+   and a clear error. It never prompts, signs in, or substitutes fixtures.
 10. A PyPI release. The owner publishes it.
 
 Rules for model-read claims:
@@ -366,8 +366,11 @@ Its first complete review took about twelve minutes, the longest of the four.
 It now runs at Low in one pass, with the diff inside its prompt and no tools.
 On a 25 KB prompt on 2026-11-18 that took 159 seconds and returned three valid
 findings. The same prompt took 339 seconds at Medium and found no more, and a
-review with tools at High takes 7 to 14 minutes. For a diff of 150,000 bytes
-or more, Grok instead reads its exported copy with tools at High.
+review with tools at High takes 7 to 14 minutes. In that mode Grok is the one
+exception to the rule below on identical material: it gets the brief and the
+diff, not an exported copy, and says when it would need another file. For a
+diff of 150,000 bytes or more, Grok instead reads its exported copy with tools
+at High.
 If a blocking member cannot be reached, stop on a local branch and report the
 failure without substitution.
 
