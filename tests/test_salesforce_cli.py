@@ -40,10 +40,10 @@ class SalesforceCLITests(unittest.TestCase):
     def test_external_brief_refuses_before_credentials_or_model_startup(self):
         result = self.run_cli("brief", "acc-sf-001000000000001AAA", "--crm-backend", "salesforce",
                               "--adapter", "ollama", "--model", "not-installed")
-        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.returncode, 3)
         self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr,
-                         "error: renewal_fields_unmapped: Salesforce brief generation is unavailable\n")
+        self.assertIn("renewal_fields_unmapped", result.stderr)
+        self.assertIn("gtm-connector", result.stderr)
         self.assertFalse(self.state.exists())
 
     def test_default_ignores_external_environment_and_explicit_serve_is_lazy(self):
@@ -53,7 +53,7 @@ class SalesforceCLITests(unittest.TestCase):
                                 SALESFORCE_ACCESS_TOKEN="synthetic-test-credential")
                 arguments = ["--crm-backend", "salesforce"] if selected else []
                 process = subprocess.Popen(
-                    [sys.executable, "-m", "gtm_connector", "serve", *arguments,
+                    [sys.executable, "-m", "gtm_connector", "serve", "--json", *arguments,
                      "--state-dir", str(self.state)], cwd=ROOT, env=self.env,
                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True,

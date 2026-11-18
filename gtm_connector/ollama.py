@@ -50,6 +50,10 @@ _ERROR_MESSAGES = {
 }
 
 
+class OllamaError(RuntimeError):
+    """The local model service could not complete its preflight checks."""
+
+
 class _RequestFailure(Exception):
     def __init__(self, code):
         self.code = code
@@ -136,7 +140,7 @@ class OllamaAdapter:
                 if not _supports_local_selector(version):
                     raise _RequestFailure("unsupported_ollama_version")
         except _RequestFailure as exc:
-            raise RuntimeError(_ERROR_MESSAGES[exc.code] + f" ({exc.code})") from None
+            raise OllamaError(_ERROR_MESSAGES[exc.code] + f" ({exc.code})") from None
         self.metadata = {"requested_model": model, "request_model": self.request_model,
                          "model_digest": digest,
                          "ollama_version": version}

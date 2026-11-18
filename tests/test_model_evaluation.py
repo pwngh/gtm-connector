@@ -9,6 +9,7 @@ from gtm_connector.citations import build_facts
 from gtm_connector.cli import main
 from gtm_connector.drafting import DraftResult
 from gtm_connector.evaluation import run_evaluation
+from gtm_connector.ollama import OllamaError
 
 
 class ModelEvaluationTests(unittest.TestCase):
@@ -98,10 +99,10 @@ class ModelEvaluationTests(unittest.TestCase):
             with self.subTest(args=args), redirect_stderr(io.StringIO()) as err:
                 self.assertEqual(main(args), 2)
                 self.assertIn(message, err.getvalue())
-        with patch("gtm_connector.ollama.OllamaAdapter", side_effect=RuntimeError(
+        with patch("gtm_connector.ollama.OllamaAdapter", side_effect=OllamaError(
                 "Ollama is unavailable at http://127.0.0.1:11434")):
             with redirect_stderr(io.StringIO()) as err, redirect_stdout(io.StringIO()) as out:
-                self.assertEqual(main(["evaluate", "--adapter", "ollama", "--model", "example"]), 2)
+                self.assertEqual(main(["evaluate", "--adapter", "ollama", "--model", "example"]), 5)
                 self.assertIn("Ollama is unavailable", err.getvalue())
                 self.assertEqual(out.getvalue(), "")
 

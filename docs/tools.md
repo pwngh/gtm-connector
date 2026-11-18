@@ -65,7 +65,14 @@ renewal briefs. Both services stop afterward, leaving state in the gitignored
 ./scripts/demo.sh --state-dir /tmp/gtm-fixture
 ```
 
-The demo prints JSON with these fields and results:
+The demo prints a readable brief and check summary by default. To inspect the
+complete result as JSON, run:
+
+```sh
+./scripts/demo.sh --json
+```
+
+That JSON has these fields and results:
 
 | Field | Result |
 | --- | --- |
@@ -109,7 +116,9 @@ python3 -m gtm_connector account acc-007
 
 These commands inspect the local CRM file directly, outside MCP authorization.
 Each accepts `--db PATH` to select a file; read commands do not create one if it
-is missing. The account view excludes opportunities and call notes.
+is missing. The account view excludes opportunities and call notes. Output is
+readable text by default. Add `--json` for counts, an account array, or the full
+account object, respectively. See [the CLI contract](cli.md).
 
 ## Run the tests
 

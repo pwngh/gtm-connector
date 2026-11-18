@@ -186,7 +186,8 @@ class BriefPersistenceTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, "")
-        self.assertEqual(result.stderr, "error: invalid saved brief evidence\n")
+        self.assertIn("invalid saved brief evidence", result.stderr)
+        self.assertIn("gtm-connector", result.stderr)
         self.assertEqual(path.read_text(), "[]")
 
 

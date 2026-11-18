@@ -28,15 +28,15 @@ class AuditReaderTests(unittest.TestCase):
             return connection.execute("SELECT type, name, sql FROM sqlite_schema ORDER BY name").fetchall()
 
     def run_cli(self, state=None, brief=None):
-        command = [sys.executable, "-m", "gtm_connector", "audit", "--state-dir",
+        command = [sys.executable, "-m", "gtm_connector", "audit", "--json", "--state-dir",
                    str(self.root if state is None else state)]
         if brief is not None:
             command += ["--brief", brief]
         return subprocess.run(command, cwd=Path(__file__).resolve().parents[1],
                               capture_output=True, text=True, timeout=10)
 
-    def assert_cli_error(self, result, message):
-        self.assertEqual(result.returncode, 2)
+    def assert_cli_error(self, result, message, code=2):
+        self.assertEqual(result.returncode, code)
         self.assertEqual(result.stdout, "")
         self.assertIn(message, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
@@ -135,7 +135,7 @@ class AuditReaderTests(unittest.TestCase):
                 with self.assertRaises(sqlite3.DatabaseError):
                     read_audit(path)
                 result = self.run_cli(state)
-                self.assert_cli_error(result, "error:")
+                self.assert_cli_error(result, '"error"', code=1)
                 self.assertEqual(self.snapshot(path), before)
                 if schema is not None:
                     self.assertEqual(self.schema(path), schema)

@@ -12,6 +12,12 @@ pausing for the reader. Playback caps idle periods at twelve seconds, so install
 and test waits do not determine recording length. It is a walkthrough, not a
 performance measurement.
 
+The checked-in capture preserves the CLI at its recorded source revision. It
+shows the former default JSON output and failed-check exit `2`. The current CLI
+requires `--json` for JSON output and returns exit `4` for a failed evidence check.
+The rerun script uses those current options and checks; the existing transcript
+and provenance retain the commands that actually ran.
+
 ## Regenerate it
 
 Recording requires macOS or Linux with Python 3.11+. Set up Node and npx through the
@@ -33,7 +39,7 @@ The script requires committed source changes so the recorded revision identifies
 what ran. It refuses a changed working tree, except for generated files in `docs/media/`.
 
 The script installs existing Python requirements and downloads the pinned
-Inspector package if uncached. It runs `./scripts/demo.sh` in fresh fixture
+Inspector package if uncached. It runs `./scripts/demo.sh --json` in fresh fixture
 state. The recording script controls what reaches the terminal; the capture excludes the
 desktop, a user's shell prompt, and keyboard input.
 

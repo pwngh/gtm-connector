@@ -29,6 +29,16 @@ jobs:
           .venv/bin/python -m pip check
           .venv/bin/python -m ruff check .
           .venv/bin/python -m mypy
+      - name: Check the installed command outside the checkout
+        run: |
+          .venv/bin/python -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/wheels" .
+          .venv/bin/python -m pip install --no-deps "$RUNNER_TEMP"/wheels/gtm_connector-*.whl
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE/.venv/bin/gtm-connector" --version
+          "$GITHUB_WORKSPACE/.venv/bin/python" -m gtm_connector --help
+          "$GITHUB_WORKSPACE/.venv/bin/gtm-connector" demo --json > installed-demo.json
+          "$GITHUB_WORKSPACE/.venv/bin/gtm-connector" evaluate --json > installed-evaluation.json
+          "$GITHUB_WORKSPACE/.venv/bin/python" -c 'import json; r=json.load(open("installed-evaluation.json")); assert r["status"] == "passed" and r["accounts"] == 20'
       - name: Check generated audit sequences
         run: .venv/bin/python -m unittest discover -s tests_stateful -v
 

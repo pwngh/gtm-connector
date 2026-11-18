@@ -16,19 +16,21 @@ The commands run after repository setup:
 
 ```sh
 .venv/bin/python -m gtm_connector brief acc-003 --adapter ollama --model llama3.2:latest --json
-.venv/bin/python -m gtm_connector evaluate --adapter ollama --model llama3.2:latest > evaluation/RESULTS_OLLAMA.json
+.venv/bin/python -m gtm_connector evaluate --adapter ollama --model llama3.2:latest --json > evaluation/RESULTS_OLLAMA.json
 ```
 
 `--model` is required with `--adapter ollama` and is an error with the fixture
-adapter. An unavailable service, missing model, or cloud-model metadata stops
-the command with a clear error before it creates brief state. No signup or key
-is needed.
+adapter. Invalid arguments exit `2`. An unavailable service, missing model, or
+rejected model metadata fails preflight with exit `5`, before brief state is
+created. No signup or key is needed.
 
-`brief` prints only accepted output. Rejection exits `2` without candidate text;
-counts and fixed error codes remain in the private saved artifact under
-`draft_diagnostics` and `model_usage`. By contrast, `evaluate` writes its report
-even when rejection or incomplete coverage makes it exit `2`. That measured
-outcome does not permit publication of a failed draft.
+`brief` prints only accepted output. A failed evidence check exits `4` without
+candidate text; counts and fixed error codes remain in the private saved artifact
+under `draft_diagnostics` and `model_usage`. By contrast, `evaluate` writes its
+report even when rejection or incomplete coverage makes it exit `4`. Use `--json`
+when saving that report for scripts. Without it, the CLI prints a readable summary.
+Errors and recovery commands go to stderr. That measured failure does not permit
+publication of a failed draft. See [the CLI exit codes](cli.md).
 
 ## What the model does
 
@@ -59,6 +61,8 @@ The [recorded model report](../evaluation/RESULTS_OLLAMA.json) records the actua
 command and UTC timestamps. It includes requested and returned model names,
 cached digest, Ollama version, token counts, and per-account metrics. The
 [fixture report](../evaluation/RESULTS.json) remains a separate baseline.
+Those reports preserve the commands used before the CLI required `--json` for
+JSON output; their recorded invocation and results have not been rewritten.
 
 `candidate` counts returned lines before checking. Malformed or unavailable
 candidates are explicitly unscored; published counts include only whole briefs

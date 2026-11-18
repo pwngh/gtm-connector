@@ -20,13 +20,14 @@ class CLITests(unittest.TestCase):
         self.database = Path(self.directory.name) / "crm.sqlite3"
         self.state = Path(self.directory.name).resolve() / "state"
 
-    def run_cli(self, *arguments, database=None, state=None):
+    def run_cli(self, *arguments, database=None, state=None, json_output=True):
         location = ([] if arguments[0] == "evaluate" else
                     ["--db", str(database or self.database)]
                     if arguments[0] in ("seed", "accounts", "account")
                     else ["--state-dir", str(state or self.state)])
         return subprocess.run(
-            [sys.executable, "-m", "gtm_connector", *arguments, *location],
+            [sys.executable, "-m", "gtm_connector", *arguments, *location,
+             *(["--json"] if json_output else [])],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -207,7 +208,7 @@ class CLITests(unittest.TestCase):
         self.assertFalse(self.state.exists())
 
     def test_brief_text_displays_the_checked_draft_and_requested_date(self):
-        result = self.run_cli("brief", "acc-001", "--as-of", "2027-02-01")
+        result = self.run_cli("brief", "acc-001", "--as-of", "2027-02-01", json_output=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertRegex(result.stdout, r"\ABrief: brief-[0-9a-f]{32}\nAs of: 2027-02-01\n\n")
@@ -235,33 +236,33 @@ class CLITests(unittest.TestCase):
             with self.subTest(candidate=changed):
                 candidate.write_text(changed)
                 rejected = self.run_cli("check-brief", brief["brief_id"], str(candidate))
-                self.assertEqual(rejected.returncode, 2)
+                self.assertEqual(rejected.returncode, 4)
                 self.assertEqual(rejected.stdout, "")
                 self.assertIn("unsupported", rejected.stderr)
                 self.assertNotIn("Traceback", rejected.stderr)
                 self.assertEqual(saved.read_bytes(), original_artifact)
 
-    def test_invalid_brief_inputs_and_missing_saved_evidence_exit_two(self):
-        for arguments in (("brief", "acc-missing"),
-                          ("brief", "acc-999"),
-                          ("brief", "acc-001", "--as-of", "2027-02-30")):
+    def test_invalid_brief_inputs_and_missing_saved_evidence_use_distinct_exits(self):
+        for arguments, expected_exit in ((("brief", "acc-missing"), 2),
+                                         (("brief", "acc-999"), 5),
+                                         (("brief", "acc-001", "--as-of", "2027-02-30"), 2)):
             with self.subTest(arguments=arguments):
                 rejected = self.run_cli(*arguments)
-                self.assertEqual(rejected.returncode, 2)
+                self.assertEqual(rejected.returncode, expected_exit)
                 self.assertEqual(rejected.stdout, "")
                 self.assertTrue(rejected.stderr.strip())
                 self.assertNotIn("Traceback", rejected.stderr)
         candidate = Path(self.directory.name) / "candidate.txt"
         candidate.write_text("An unsupported sentence.\n")
         missing = self.run_cli("check-brief", "brief-" + "0" * 32, str(candidate))
-        self.assertEqual(missing.returncode, 2)
+        self.assertEqual(missing.returncode, 1)
         self.assertEqual(missing.stdout, "")
         self.assertNotIn("Traceback", missing.stderr)
         self.assertFalse((self.state / "briefs").exists())
 
     def test_serve_prints_endpoints_and_shuts_down_on_interrupt(self):
         process = subprocess.Popen(
-            [sys.executable, "-m", "gtm_connector", "serve", "--state-dir", str(self.state)],
+            [sys.executable, "-m", "gtm_connector", "serve", "--json", "--state-dir", str(self.state)],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True,
         )

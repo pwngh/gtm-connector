@@ -100,7 +100,7 @@ class Session:
         tree = self.successful(["git", "rev-parse", "HEAD^{tree}"]).stdout.strip()
         self.scene("1. Run the fixture demo")
         self.show("Actual execution. Dependency and test logs are captured privately.")
-        demo_run = self.successful(["./scripts/demo.sh", "--state-dir", self.relative(self.state)],
+        demo_run = self.successful(["./scripts/demo.sh", "--json", "--state-dir", self.relative(self.state)],
                                    timeout=600, display=True)
         demo = json.loads(demo_run.stdout)
         tests = re.search(r"Ran (\d+) tests in ([0-9.]+)s\s+OK(?:\s|$)", demo_run.stderr)
@@ -130,7 +130,7 @@ class Session:
             self.show(line)
         candidate = self.private / "candidate.txt"
         candidate.write_text(full["text"])
-        check_command = [".venv/bin/python", "-m", "gtm_connector", "check-brief", full["brief_id"],
+        check_command = [".venv/bin/python", "-m", "gtm_connector", "check-brief", "--json", full["brief_id"],
                          self.relative(candidate), "--state-dir", self.relative(self.state)]
         accepted = self.successful(check_command)
         if json.loads(accepted.stdout) != {"status": "valid", "brief_id": full["brief_id"]}:
@@ -154,11 +154,13 @@ class Session:
         candidate.write_text(full["text"] + "The renewal was approved.\n")
         self.show("Candidate: the generated brief plus 'The renewal was approved.'")
         checked = self.run(check_command, display=True)
-        if (checked.returncode != 2 or checked.stdout or checked.stderr !=
-                "error: Brief contains an uncited, unsupported, or misattributed statement.\n"):
+        error = json.loads(checked.stderr).get("error", {})
+        if (checked.returncode != 4 or checked.stdout or error.get("message") !=
+                "Brief contains an uncited, unsupported, or misattributed statement."
+                or not error.get("next")):
             raise ValueError("citation rejection did not match")
         self.show(checked.stderr.rstrip())
-        self.show("Exit: 2. Standard output is empty.")
+        self.show("Exit: 4. Standard output is empty.")
         time.sleep(10)
 
         self.scene("5. List tools through the official Inspector CLI")

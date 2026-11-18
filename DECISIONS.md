@@ -1,5 +1,34 @@
 # Decisions
 
+## Installed CLI and output contract (2026-11-17)
+
+Install the existing package as `gtm-connector` with the same `python -m`
+entry point. Keep argparse and small standard-library renderers because the
+existing parser is sufficient and help must not import the server or SQLite.
+No runtime dependency is added. Package the independent evaluation manifest
+so installed evaluation works outside the source checkout. Dependency metadata
+reads the existing exact pins; the checked-in locks retain their hashes.
+
+Follow clig.dev and GitHub CLI's maintained Primer guidelines, read on
+2026-11-17. Default output is human-readable. Terminal tables use headings;
+pipes use complete plain tab-separated rows. `--json` preserves the existing
+command-specific success shapes so scripts can opt in without a new envelope.
+Errors use a small documented stderr object in JSON mode. Split usage, refusal,
+failed-check, upstream, and local-operation exits so automation can respond.
+Help remains text in JSON mode because it describes invocation, not a result.
+
+Move runtime imports after argument parsing. Keep the fixed demo date loaded
+only when a brief runs. Do not change the gateway's refusal codes or citation
+rules. Update scripts that consume results to request JSON, including the
+recording rerun checks; historical recordings retain their original provenance
+until the separately requested narrative recording is made.
+
+Use the manual stack fallback because tstack was not available on PATH or in
+the local executable search. PR #19 was merged before this work began. Keep
+one own branch per slice, Sol review on high, green CI, and no merge or auto-merge.
+The user's six-slice instruction supersedes the older stop-after-one follow-up
+and the restriction on plausible invented labels for the later demo slice.
+
 ## Generated audit receipt sequences (2026-11-17)
 
 The audit implementation already commits a pending row before dispatch and

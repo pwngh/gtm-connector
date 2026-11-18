@@ -47,6 +47,10 @@ def certificate(directory):
     return key_path, cert_path
 
 
+class StateInUseError(ValueError):
+    """Another connector owns the requested local state folder."""
+
+
 class Runtime:
     """One process, two ports, four databases; owns shutdown and a state lock."""
 
@@ -67,7 +71,8 @@ class Runtime:
             try:
                 fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
-                raise ValueError("this state directory already has a running connector") from exc
+                raise StateInUseError("this state directory already has a running connector; "
+                                      "stop it with Ctrl-C or choose another --state-dir") from exc
             require_distinct_databases([self.directory / f"{name}.sqlite3"
                                         for name in ("crm", "calls", "slack", "audit")])
             for name, module in (("crm", store), ("calls", calls), ("slack", slack)):

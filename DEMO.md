@@ -13,7 +13,9 @@ Use macOS or Linux with Python 3.11+, SQLite, and venv support. The first
 dependency installation needs internet. Download time varies and sits outside
 the five-minute walkthrough. The runtime needs no external services, account,
 model, or API key. The script runs the tests, connector demo, evaluation, and
-usage report. A failed check stops it.
+usage report. It requests `--json` for the result files it saves. A failed check
+stops it; the deliberate citation rejection is checked for exit `4`. Errors and
+recovery commands go to stderr. See [the CLI contract](docs/cli.md).
 
 The script prints its private output directory. Set `demo_state` to that
 directory's `state` subdirectory. Replace this placeholder with the actual path:
@@ -68,10 +70,10 @@ these commands with that value:
 
 ```sh
 .venv/bin/python -m gtm_connector audit --brief brief-REPLACE_WITH_ID --state-dir "$demo_state"
-.venv/bin/python -m gtm_connector usage --brief brief-REPLACE_WITH_ID --state-dir "$demo_state"
+.venv/bin/python -m gtm_connector usage --brief brief-REPLACE_WITH_ID --state-dir "$demo_state" --json
 ```
 
-The audit lists the three planned reads. Usage groups attempts by token, tool,
+The audit table lists the three planned reads. The usage JSON groups attempts by token, tool,
 and UTC day and reports model tokens for the saved brief. The fixture uses zero
 model tokens. Unknown usage must not become zero. Token groups include rejected
 credentials and `anonymous` for missing credentials. Counts describe attempts,
@@ -144,7 +146,7 @@ With Ollama 0.30.0 or newer running and `llama3.2:latest` already cached:
 Inspect `adapter`, `model_usage`, `draft_diagnostics`, and the checked `text`.
 The model receives the supported claim catalog and no tool interface. Its
 response must pass the same checker. A rejected draft prints no candidate and
-exits `2`; saved usage still counts that generation. Nothing downloads a model.
+exits `4`; saved usage still counts that generation. Nothing downloads a model.
 The default walkthrough stays model-free. See [model results and limits](docs/ollama.md).
 
 ## Optional: read a Developer Edition org
@@ -154,4 +156,4 @@ five-minute offline walkthrough. Select the backend explicitly, then use the
 same scoped Inspector client to search accounts and read their opportunities.
 The three CRM tools use external GET requests. Call notes and Slack stay local.
 `log_activity` is absent and hardcoded write attempts return HTTP 403. Renewal
-briefs stop with `renewal_fields_unmapped`. No live org result is claimed here.
+briefs stop with `renewal_fields_unmapped` and exit `3`. No live org result is claimed here.

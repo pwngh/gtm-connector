@@ -79,7 +79,12 @@ You can start the services from the repository root after setup and leave them r
 .venv/bin/python -m gtm_connector serve
 ```
 
-The command prints the public endpoints and the path to the owner configuration.
+The command prints the connector address, backend, state folder, connection
+command, and stop instruction on stderr. Its stdout stays available for data.
+For a script, `serve --json` writes one JSON startup object to stdout with
+`resource`, `issuer`, `crm_backend`, and `owner_config`. The object contains the
+configuration path, not the owner credential. Shutdown notices remain on stderr.
+
 In a second terminal, use the included client to request a CRM read:
 
 ```sh

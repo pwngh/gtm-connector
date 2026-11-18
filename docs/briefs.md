@@ -45,7 +45,7 @@ Note text is quoted as untrusted data, including any instructions, and newlines
 stay visibly escaped. The injected note does not cause the workflow to create
 an activity.
 
-These lines come from `brief acc-003 --json`:
+These lines are from the `text` field returned by `brief acc-003 --json`:
 
 ```text
 - CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. [crm/opportunities/opp-003]
@@ -91,18 +91,22 @@ brief ID to inspect its receipts or check a text file against the same evidence:
 
 ```sh
 .venv/bin/python -m gtm_connector audit --brief brief-REPLACE_WITH_ID
-.venv/bin/python -m gtm_connector check-brief brief-REPLACE_WITH_ID candidate.txt
+.venv/bin/python -m gtm_connector check-brief brief-REPLACE_WITH_ID candidate.txt --json
 ```
 
 The cited bullet lines from the JSON `text` field belong in `candidate.txt`. Leave
 out the CLI's `Brief:` and `As of:` display labels. Checking the original text
 exits `0` and returns JSON with `status: "valid"` and the submitted `brief_id`.
-Append `The renewal was approved.` and the same check exits `2`, prints nothing
-to stdout, and writes this error to stderr:
+Append `The renewal was approved.` and the same check exits `4`, prints nothing
+to stdout, and writes this JSON error to stderr:
 
-```text
-error: Brief contains an uncited, unsupported, or misattributed statement.
+```json
+{"error":{"code":"check_failed","message":"Brief contains an uncited, unsupported, or misattributed statement.","next":"gtm-connector check-brief --help"}}
 ```
+
+Without `--json`, a successful check prints a readable confirmation. A failed
+check prints the error and a next command on stderr. See [CLI output and exit
+codes](cli.md) for the other failure categories.
 
 The checker accepts fixed supported claims with exact record references. It
 rejects uncited sentences, invented values, wrong citations, appended claims,

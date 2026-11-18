@@ -11,9 +11,19 @@ The MCP (Model Context Protocol) server gives clients scoped access to these
 sources and logs recognized tool calls. The brief checker requires supported
 wording and matching citations.
 
-The command `./scripts/demo.sh` installs dependencies, then runs the tests and
-demo on invented data from a clean checkout. The first install needs internet; the
-default runtime needs no external service or key.
+Run the installed demo without cloning the repository (requires Python 3.11+
+and pipx, with Git access to this repository):
+
+```sh
+pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo --with-slack
+```
+
+Nothing is published to a package registry. The first install needs internet;
+the default runtime needs no external service or key. [Installation](docs/install.md)
+explains Git access and repeatable installs. `gtm-connector --help` lists commands
+and examples. Use `--json` for scripts. [Output and exit codes](docs/cli.md)
+describes the stable machine interface. `./scripts/demo.sh` still runs the
+repository tests and fixture demo from a checkout.
 
 [See it](#see-it) | [Run it](#run-it) | [Guarantees](#what-it-guarantees) |
 [Limits](#limits-worth-reading) | [Reference](#reference)
@@ -79,11 +89,14 @@ denied call-note grant cites its `audit/...` receipt instead. Renewal-day
 calculations also cite the saved `run/...` date.
 
 The checker accepted the captured brief. Appending `The renewal was approved.`
-made it exit with code `2`, print nothing to stdout, and return:
+made the original recorded version exit with code `2`, print nothing to stdout, and return:
 
 ```text
 error: Brief contains an uncited, unsupported, or misattributed statement.
 ```
+
+The current CLI uses exit `4` for a failed check and also prints the next command
+to run. The recording above retains its original capture revision.
 
 <details>
 <summary>Inspect a real call-note receipt</summary>
