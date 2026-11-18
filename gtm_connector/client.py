@@ -10,6 +10,7 @@ from urllib.parse import parse_qsl, urlsplit, urlunsplit
 import httpx2
 
 from .auth import SCOPES
+from .sf_credentials import CREDENTIAL_SECONDS
 
 
 PROTOCOL_VERSION = "2026-07-28"
@@ -47,10 +48,11 @@ class LocalClient:
             path="/.well-known/oauth-protected-resource" + resource.path))
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.load_verify_locations(cafile=str(config["cert_path"]))
-        # A Salesforce or Slack operation can spend 20 seconds on reads and refresh.
-        # Let the gateway finish that operation and its audit receipt before timing out.
-        timeout = httpx2.Timeout(10, read=25 if config.get("crm_backend") == "salesforce"
-                               or config.get("slack_backend") == "slack" else 10)
+        # A Slack read can take 20 seconds. A Salesforce read can also wait for sf to refresh
+        # the login. Let the gateway finish the read and its receipt before timing out.
+        read = (CREDENTIAL_SECONDS + 25 if config.get("crm_backend") == "salesforce"
+                else 25 if config.get("slack_backend") == "slack" else 10)
+        timeout = httpx2.Timeout(10, read=read)
         self._http = httpx2.Client(verify=context, trust_env=False, follow_redirects=False,
                                    timeout=timeout, transport=transport)
         self._request_id = 0

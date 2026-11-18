@@ -1,5 +1,6 @@
 """Optional, bounded reads from an explicitly selected Salesforce environment."""
 
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal, DecimalException
@@ -45,6 +46,7 @@ _OPERATION_SECONDS = 20
 _ERROR_CODES = frozenset({
     "salesforce_invalid_configuration", "salesforce_invalid_arguments",
     "salesforce_edition_required", "salesforce_auth_required",
+    "salesforce_cli_timeout",
     "salesforce_rate_limited", "salesforce_forbidden", "salesforce_http_error",
     "salesforce_unavailable", "salesforce_timeout", "salesforce_invalid_response",
     "salesforce_result_limit", "salesforce_pagination_invalid",
@@ -150,6 +152,9 @@ class SalesforceReadOnlyAdapter:
         self._access_token = access_token
         self._transport = transport
         self._credentials: SFCredentials | None = None
+        # Called with ("running", 0.0) when a read starts a login refresh and with
+        # ("ready" or its failure code, seconds) when it ends.
+        self.on_refresh: Callable[[str, float], None] | None = None
         self._edition_verified = False
         self._organization_id: str | None = None
         self._checked_objects: set[str] = set()
@@ -168,10 +173,10 @@ class SalesforceReadOnlyAdapter:
         credentials = None
         try:
             credentials = SFCredentials(alias)
-            origin, token = credentials.read(time.monotonic() + _OPERATION_SECONDS)
-            adapter = cls(origin, token, environment=environment, transport=transport)
-        except (SFCredentialsError, SalesforceReadError):
-            error = SalesforceReadError("salesforce_auth_required")
+            adapter = cls(*credentials.read(), environment=environment, transport=transport)
+        except (SFCredentialsError, SalesforceReadError) as exc:
+            code = exc.code if isinstance(exc, SFCredentialsError) else "salesforce_auth_required"
+            error = SalesforceReadError(code)
             error.sf_cli_invocations = credentials.invocations if credentials is not None else 0
             raise error from None
         adapter._credentials = credentials
@@ -190,17 +195,36 @@ class SalesforceReadOnlyAdapter:
         self._checked_objects.clear()
         return {**self._new_budget(), "checked_objects": set()}
 
+    def _notify(self, status, seconds):
+        if self.on_refresh is not None:
+            try:
+                self.on_refresh(status, seconds)
+            except Exception:
+                # A failed notice must not change the read's outcome.
+                pass
+
     def _refresh(self, client, budget):
         if self._credentials is None or budget.get("refreshed"):
             raise SalesforceReadError("salesforce_auth_required")
         budget["refreshed"] = True
+        started = time.monotonic()
+        self._notify("running", 0.0)
+        outcome = "salesforce_auth_required"
         try:
-            origin, token = self._credentials.read(budget["deadline"])
-            validated = type(self)(origin, token, environment=self.environment)
+            validated = type(self)(*self._credentials.read(), environment=self.environment)
             if validated.instance_url != self.instance_url:
                 raise SalesforceReadError("salesforce_auth_required")
-        except (SFCredentialsError, SalesforceReadError):
+            outcome = "ready"
+        except SFCredentialsError as exc:
+            outcome = exc.code
+            raise SalesforceReadError(exc.code) from None
+        except SalesforceReadError:
             raise SalesforceReadError("salesforce_auth_required") from None
+        finally:
+            waited = time.monotonic() - started
+            # Waiting for sf does not use up this read's own time.
+            budget["deadline"] += waited
+            self._notify(outcome, waited)
         client.headers["Authorization"] = "Bearer " + validated._access_token
         return validated._access_token
 

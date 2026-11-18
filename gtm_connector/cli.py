@@ -664,10 +664,7 @@ def _run_slack_source(args):
     progress("preparing_state", "running")
     crm_reader = None
     if args.crm_backend == "salesforce":
-        from .salesforce import SalesforceReadOnlyAdapter
-        crm_reader = (SalesforceReadOnlyAdapter.from_sf(args.sf_org, environment=args.sf_environment)
-                      if args.sf_org is not None else
-                      SalesforceReadOnlyAdapter.from_env(environment=args.sf_environment))
+        crm_reader = _salesforce_reader(args)
     from .runtime import Runtime
     from .slack_workflow import resolve_slack_account
     with Runtime(args.state_dir, crm_reader=crm_reader, calls_backend=args.calls_backend,
@@ -762,6 +759,55 @@ def _salesforce_progress(as_json):
             print(f"Salesforce {name.replace('_', ' ')}: {status}." +
                   (f" Count: {count}." if count is not None else ""), file=sys.stderr, flush=True)
     return report
+
+
+def _sf_waiting(as_json):
+    """Say that sf is still working: after two seconds, then every ten.
+
+    JSON output stays unchanged, so a script still reads one error object on stderr.
+    """
+    if as_json:
+        return None
+    due = [2.0]
+
+    def report(seconds):
+        if seconds < due[0]:
+            return
+        due[0] = seconds + 10
+        try:
+            print(f"Waiting for the Salesforce CLI (sf) to return the saved login: {int(seconds)} s.",
+                  file=sys.stderr, flush=True)
+        except BrokenPipeError:
+            _discard_output(sys.stderr)
+    return report
+
+
+def _sf_refresh_notice(as_json):
+    """Say when a read has to refresh the login through sf, and how that ended."""
+    def notice(status, seconds):
+        if status == "running":
+            message = "Salesforce login refresh: sf is running."
+        elif status == "ready":
+            message = f"Salesforce login refresh: finished in {round(seconds)} s."
+        else:
+            message = f"Salesforce login refresh: {status} after {round(seconds)} s."
+        _server_notice(message, as_json)
+    return notice
+
+
+def _salesforce_reader(args):
+    """Open the explicit Salesforce backend, and say so while sf is slow to answer."""
+    from .salesforce import SalesforceReadOnlyAdapter
+    if args.sf_org is None:
+        return SalesforceReadOnlyAdapter.from_env(environment=args.sf_environment)
+    from .sf_credentials import reporting
+    with reporting(_sf_waiting(getattr(args, "json", False))):
+        reader = SalesforceReadOnlyAdapter.from_sf(args.sf_org, environment=args.sf_environment)
+    as_json = getattr(args, "json", False)
+    if args.command == "serve" or not as_json:
+        # A one-shot JSON command keeps stderr to its single error object.
+        reader.on_refresh = _sf_refresh_notice(as_json)
+    return reader
 
 
 def _salesforce_sources(environment, *, mixed=False, calls_backend="fixture", include_slack=True):
@@ -1043,16 +1089,15 @@ def _run(args, argv):
             from .selection import load_selection
             args.loaded_selection = load_selection(args.selection, crm_backend=args.crm_backend)
         if args.crm_backend == "salesforce":
-            from .salesforce import SalesforceReadOnlyAdapter
-            crm_reader = (SalesforceReadOnlyAdapter.from_sf(args.sf_org, environment=args.sf_environment)
-                          if args.sf_org is not None else
-                          SalesforceReadOnlyAdapter.from_env(environment=args.sf_environment))
+            crm_reader = _salesforce_reader(args)
     if args.command == "calls":
         return _run_calls(args, prepared_calls, crm_reader)
     if args.command == "salesforce":
         from .salesforce_check import run_check
-        return run_check(sf_org=args.sf_org, as_of=args.as_of, environment=args.sf_environment,
-                         progress=_salesforce_progress(args.json))
+        from .sf_credentials import reporting
+        with reporting(_sf_waiting(args.json)):
+            return run_check(sf_org=args.sf_org, as_of=args.as_of, environment=args.sf_environment,
+                             progress=_salesforce_progress(args.json))
     if args.command in ("accounts", "account") and crm_reader is not None:
         return _salesforce_account_read(args, crm_reader)
     adapter = None
