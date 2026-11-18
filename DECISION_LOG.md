@@ -1,8 +1,10 @@
 # Decision log
 
-Dated entries, newest first. Each records a material scope choice or limit
-and its reason. [DECISIONS.md](DECISIONS.md) holds the current build order and
-review configuration, and lists these entries. Add a new entry at the top.
+Dated entries come first, newest first. The undated entries after them are
+the original slices in the order they were built. Each entry records a material
+scope choice or limit and its reason. [DECISIONS.md](DECISIONS.md) holds the
+current build order and review configuration, and lists these entries. Add a
+new entry at the top.
 
 ## Explicit mapped Slack reads and source observations (2026-11-18)
 

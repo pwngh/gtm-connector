@@ -542,7 +542,7 @@ A reviewer must inspect the scope-denial and invalid-token tests, audit failure
 and committed-write retry tests, injection and citation-rejection tests, and
 the 20-account evaluation with its fixed expected claims. Confirm that the
 clean-checkout demo passes, the injected note creates zero activities, and usage
-totals match receipts. Review [DECISIONS.md](DECISIONS.md) and accept the local
+totals match receipts. Review [DECISION_LOG.md](DECISION_LOG.md) and accept the local
 owner, manual-retention, snapshot, and fixed-vocabulary limits explicitly. Real data
 or shared deployment requires a separate review. Before using an org, inspect
 its permissions and data, the adapter's fixed fields and read-only tests, and

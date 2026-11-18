@@ -63,4 +63,4 @@ version and hash before committing. Run installation and checks on both CI Pytho
 versions; a lock generated on one interpreter can miss a conditional dependency.
 
 The lock inputs record the chosen versions. The reasons and static check
-boundaries are recorded in [DECISIONS.md](../DECISIONS.md).
+boundaries are recorded in [DECISION_LOG.md](../DECISION_LOG.md).

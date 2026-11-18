@@ -448,7 +448,7 @@ or multi-tenant behavior is included.
 [Imported transcripts](docs/calls.md) explains explicit account associations and cited excerpts.
 [Slack authentication](docs/slack-auth.md) explains existing-app login, checks, and disconnect.
 [Selected Slack threads](docs/slack-live.md) explains account mapping, bounded reads, and shareable checks.
-[Design decisions](DECISIONS.md) explains the choices;
+[Design decisions](DECISION_LOG.md) explains the choices;
 [Rules the coding agents worked under](AGENTS.md) records the constraints.
 
 This is a portfolio project for Preston Neal. The checked-in companies, people, and records are invented. Optional Salesforce reads return records from the operator's org.

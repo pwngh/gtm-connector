@@ -20,9 +20,9 @@ plain and finish one runnable PR slice at a time. Use Python and SQLite.
   rest of DECISIONS.md only when the build order or review configuration
   changes. Put build logs, test counts, and review transcripts in the PR
   description, not in either file.
-- Before a task, read this file and DECISIONS.md. Then read only the documents
-  and modules the task touches. Search DECISION_LOG.md for a past decision. Do
-  not read it whole.
+- Before a task, read this file and DECISIONS.md. Then read the documents and
+  modules the task touches and what they depend on, such as callers and tests.
+  Search DECISION_LOG.md for a past decision. Do not read it whole.
 - Read the current MCP specification and authorization requirements before
   implementing the protocol. Both researched revisions are 2026-07-28, read on
   2026-11-17. Record revision and reading date in the README.
@@ -193,8 +193,10 @@ Two checks come before the numbered slices:
   never reads a real transcript. The owner then runs the script on five real
   transcripts they are free to use, on their own machine, and reads the result
   as a rep would. If it is thin or wrong, stop and report before starting
-  slice 1. The model rules below apply to this test. Commit only invented
-  transcripts.
+  slice 1. The rules below on keys, hosted endpoints, and giving the model no
+  tool apply to this test. The gateway and audit rules apply to product calls,
+  not to this standalone script. The owner chooses the model for the real run
+  and may choose a hosted one. Commit only invented transcripts.
 
 Then finish one reviewed PR per slice, in this order:
 
@@ -204,15 +206,23 @@ Then finish one reviewed PR per slice, in this order:
    token and never the owner's. Every read is limited to the caller's scopes,
    the saved selection, and what the provider shows. Each composite call
    commits one outer receipt and one receipt per attempted read. Reading a
-   saved brief rechecks current permissions and makes no provider call.
+   saved brief makes no provider call. It releases the brief only if the
+   caller's current scopes, the current selection, and the current source
+   bindings still cover everything the brief contains. It cannot recheck what
+   the provider shows now, and its result says so.
 2. The local stdio MCP bridge. Every request still goes through the existing
    gateway, with scopes named at launch, a receipt committed before execution,
-   and the rate limit. An expired, malformed, or wrong-audience token is
-   refused as it is today, with no owner fallback. `connect --transport stdio`
+   and the rate limit. At launch the bridge requests a grant for exactly the
+   named scopes through the existing local owner flow, and keeps the token in
+   memory only. It may renew that grant for the same scopes or fewer and never
+   for more. An expired, malformed, or wrong-audience token is refused as it
+   is today, and a request is never retried with wider authority.
+   `connect --transport stdio`
    also writes the client configuration. It merges only the connector's entry,
-   keeps the file's mode, saves a backup with that mode first, and refuses to
-   write through a symlink. The file holds paths and scopes, never a token or
-   an owner credential.
+   keeps the file's mode, and saves a backup with that mode first. It refuses
+   a symlink for the file or the backup, and it refuses to write if the file
+   changed after it was read. The file holds paths and scopes, never a token
+   or an owner credential.
 3. A Slack channel window. The operator pins one channel per account. The read
    keeps the existing shared budget of HTTP attempts, response bytes, and one
    deadline, and adds hard caps on days, messages, and thread replies.
@@ -233,10 +243,12 @@ Then finish one reviewed PR per slice, in this order:
    how several files for one account are ordered and bounded.
 9. A renewals-due command that prepares briefs for selected accounts renewing
    within a chosen number of days. The operator schedules it. It calls the
-   audited tools with explicitly named scopes, like any other caller. If the
-   local token or a Slack or Salesforce credential is expired or rejected, it
-   fails that account with a recorded receipt and a clear error. It never
-   prompts, signs in, or substitutes fixtures.
+   audited tools with explicitly named scopes, like any other caller, and
+   obtains its grant for those scopes the same way the bridge does. The
+   existing bounded, non-interactive credential refresh still applies. If the
+   local token or a Slack or Salesforce credential is still unusable after
+   that, it fails that account with a recorded receipt and a clear error. It
+   never prompts, signs in, or substitutes fixtures.
 10. A PyPI release. The owner publishes it.
 
 Rules for model-read claims:
@@ -256,9 +268,11 @@ Rules for model-read claims:
 - Selecting a hosted endpoint sends selected source text off the machine. Say
   so when it is selected, and show the endpoint host and model in the source
   labels.
-- Record every model call, including a failed or rejected one: endpoint host,
-  model, outcome, and usage counts. Never record the key, the prompt, or
-  rejected candidate text.
+- Commit a pending record before a model call is sent, and send nothing if
+  that commit fails. Finish the record with the outcome and usage counts,
+  including for a failed or rejected call. A pending record stays if finishing
+  fails. The record names the endpoint host and model. Never record the key,
+  the prompt, or rejected candidate text.
 - The model receives only evidence that already passed the source selection and
   the caller's scope checks. It receives no credential, tool definition, or
   tool. A model-read claim is returned only to a caller that holds every scope
@@ -324,8 +338,10 @@ the PR description. When unsure, use the council.
 - **Council.** A change that touches `gateway.py`, `auth.py`, `audit.py`,
   `citations.py`, `store.py`, `request_checks.py`, `tool_definitions.py`,
   `refusals.py`, `runtime.py`, `briefing.py`, `client.py`, credential or token
-  handling, a new outside connection, a model call, the rules in this file,
-  SECURITY_REVIEW.md, or the README's guarantees.
+  handling, source selection or read bounds (for example `slack_reader.py`,
+  `slack_mapping.py`, and `calls_import.py`), a new outside connection, a
+  model call, the rules in this file, the build order or review configuration
+  in DECISIONS.md, SECURITY_REVIEW.md, or the README's guarantees.
 
 | Provider | Member | Effort | Gate |
 | --- | --- | --- | --- |
@@ -334,8 +350,10 @@ the PR description. When unsure, use the council.
 | Google | Gemini 4 Argon, model ID `gemini-4-argon-high`, through the `agy` CLI | High | Blocking |
 | xAI | Grok 4.7, model ID `grok-4.7`, through the `grok` CLI, version 1.0.13 or later | High | Non-blocking |
 
-Grok runs alongside the others. Use its findings when it finishes inside the
-time limit. A failed or late Grok run does not stop the PR and gets no score.
+Grok runs alongside the others under the same time limit for each reviewer.
+Treat a finding it returns in time like any other finding: fix it or decline
+it with a written reason. Its verdict does not gate the PR. A failed or late
+Grok run does not stop the PR and gets no score.
 Its first complete review took about twelve minutes, the longest of the four.
 If a blocking member cannot be reached, stop on a local branch and report the
 failure without substitution.
@@ -343,11 +361,13 @@ failure without substitution.
 Each review is a separate, independent run. The orchestrating session does not
 count as a member's review, even when it runs on a member's provider.
 
-Give every member the same prompt, code, tests, and proof. Give each member its
-own exported copy of the reviewed commit with the diff as a file, not the live
-checkout. A reviewer with tool approval then cannot change the repository, and
-work can continue while a slow member reads. Tell reviewers to read the diff
-first and to search DECISION_LOG.md instead of reading it whole.
+Give every member the same prompt, code, tests, and proof. Run each member
+read-only or inside its tool's sandbox. Give each member its own exported copy
+of the reviewed commit with the diff as a file, and do not run a reviewer in
+the live checkout. The copy does not isolate a reviewer by itself. It keeps
+every member on identical material and lets work continue while a slow member
+reads. Tell reviewers to read the diff first and to search DECISION_LOG.md
+instead of reading it whole.
 
 Ask every member these questions. Put each member's answers and evidence in the
 PR table, not just a general verdict:
@@ -369,8 +389,9 @@ rounds review only changed text and open findings. If agreement is absent
 after round three, report open findings and disagreements. Do not start a
 fourth round or imply approval.
 
-Before coding a council-tier slice, list the three most likely ways it could
-break a guarantee and write a failing test for each one first. After each edit
+Before coding a council-tier slice that changes code, list the three most
+likely ways it could break a guarantee and write a failing test for each one
+first. After each edit
 to a module in the council list, run the tests behind the README's guarantees:
 
 ```sh

@@ -10,7 +10,7 @@ Both were read on **2026-11-17**. The official Python SDK is pinned to **2.3.0**
 The transport is stateless Streamable HTTP with per-request protocol metadata
 and `server/discover`. Only this protocol revision is accepted.
 Subscriptions and legacy initialization sessions are not supported.
-[DECISIONS.md](../DECISIONS.md) explains the checks the gateway adds to the SDK.
+[DECISION_LOG.md](../DECISION_LOG.md) explains the checks the gateway adds to the SDK.
 
 The official Inspector CLI 2.15.0 is tested with `protocolEra: modern` and an
 explicit bearer grant. It sends `server/discover`

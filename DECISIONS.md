@@ -55,8 +55,9 @@ earlier sequence.
   key. For slice 4 this replaces the "No hosted model calls" limit of the
   earlier local-model slice. The existing Ollama adapter stays local and the
   default stays offline. A hosted endpoint sends selected source text off the
-  machine, so the choice is explicit and labeled, and every call is recorded,
-  including a failed or rejected one.
+  machine, so the choice is explicit and labeled. A pending record is
+  committed before each call is sent, so a crash or a failed call still leaves
+  a record of what left the machine.
 - The key comes from an environment variable or a private file with mode 0600.
   A flag would leak it into shell history and the process list.
 - A cited range shows where a claim points. It does not prove the claim. An
@@ -85,10 +86,10 @@ earlier sequence.
 Slack limits new commercially distributed apps outside its Marketplace, and new
 installations of them, to 15 messages per request and one request per minute on
 the two history methods. Marketplace apps, internal customer-built apps, and
-existing installations are outside that limit. The intended setup for a channel
-window is the operator's own internal app. An agent never creates or changes an
-app, and under the restricted limit a window can be incomplete by design. Read
-on 2026-11-18:
+existing installations are outside that limit. The operator's existing
+registration decides which limit applies, and the channel slice checks it. An
+agent never creates or changes an app, and under the restricted limit a window
+can be incomplete by design. Read on 2026-11-18:
 [rate limit changes](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps),
 [rate limits](https://docs.slack.dev/apis/web-api/rate-limits).
 
@@ -130,8 +131,8 @@ team deployment.
 No extraction test has run. No live org or workspace has been read by the
 owner's check. The channel window, model-read claims, and every later slice are
 plans, not implemented behavior. The review tiers have not been used on a slice
-yet. README and SECURITY_REVIEW.md are unchanged and still describe only what
-exists.
+yet. README, SECURITY_REVIEW.md, and two reference pages change one link each,
+to point at the decision log. They still describe only what exists.
 
 ## Review configuration
 
@@ -167,7 +168,8 @@ reasons.
   Its findings were as useful as the others', so it still runs every time.
 - **Exported copies, not the live checkout.** `grok` and `agy` cannot ask for
   approval in a non-interactive run, so they run with automatic approval
-  inside their sandboxes. A private copy of the commit keeps that safe.
+  inside their sandboxes. The sandbox is the isolation. The private copy keeps
+  every member on identical material and out of the live checkout.
 - **The guarantee tests stay in unittest.** A proposal to add a pytest marker
   suite that runs in under two seconds did not fit this repository. It has no
   pytest dependency, and the five test files behind the README's guarantees
@@ -189,39 +191,41 @@ by the operator's choice and with their own key.
 
 ## Entries in the decision log
 
-Newest first. Search [DECISION_LOG.md](DECISION_LOG.md) for the title.
+Dated entries come first, newest first. The undated entries after them are the
+original slices in the order they were built. Each title links to its entry in
+DECISION_LOG.md.
 
-- Explicit mapped Slack reads and source observations (2026-11-18)
-- Separate Slack authentication from source selection (2026-11-18)
-- Imported call excerpts with explicit account associations (2026-11-18)
-- Explicit Salesforce environments and private connection state (2026-11-18)
-- A renewal story and separate guarantee checks (2026-11-17)
-- An explicitly bound Salesforce demo book (2026-11-17)
-- Standard Salesforce renewal planning and CLI credentials (2026-11-17)
-- Measure process startup and audited calls (2026-11-17)
-- Running server and daily commands (2026-11-17)
-- Installed CLI and output contract (2026-11-17)
-- Generated audit receipt sequences (2026-11-17)
-- Request refusal reasons (2026-11-17)
-- Python checks and dependency hashes (2026-11-17)
-- README navigation (2026-11-17)
-- Documentation for readers new to the project (2026-11-17)
-- Pure request decisions (2026-11-17)
-- Shared tool definitions (2026-11-17)
-- Development container and Codespaces (2026-11-17)
-- Recorded walkthrough and Inspector output (2026-11-17)
-- Saved evidence and audit inspection (2026-11-17)
-- Optional Salesforce reads (2026-11-17)
-- Optional account-channel context (2026-11-17)
-- Optional local model drafting (2026-11-17)
-- External Inspector client (2026-11-17)
-- Scope and implementation
-- Four reviewable slices
-- Protocol research (2026-11-17)
-- Two source systems and fixed fixtures
-- Local authorization boundary
-- Audit, limits, and writes
-- Briefing and citation boundary
-- README baseline after PR 3
-- Explicit conflict rule
-- Evaluation and usage measurements
+- [Explicit mapped Slack reads and source observations (2026-11-18)](DECISION_LOG.md#explicit-mapped-slack-reads-and-source-observations-2026-11-18)
+- [Separate Slack authentication from source selection (2026-11-18)](DECISION_LOG.md#separate-slack-authentication-from-source-selection-2026-11-18)
+- [Imported call excerpts with explicit account associations (2026-11-18)](DECISION_LOG.md#imported-call-excerpts-with-explicit-account-associations-2026-11-18)
+- [Explicit Salesforce environments and private connection state (2026-11-18)](DECISION_LOG.md#explicit-salesforce-environments-and-private-connection-state-2026-11-18)
+- [A renewal story and separate guarantee checks (2026-11-17)](DECISION_LOG.md#a-renewal-story-and-separate-guarantee-checks-2026-11-17)
+- [An explicitly bound Salesforce demo book (2026-11-17)](DECISION_LOG.md#an-explicitly-bound-salesforce-demo-book-2026-11-17)
+- [Standard Salesforce renewal planning and CLI credentials (2026-11-17)](DECISION_LOG.md#standard-salesforce-renewal-planning-and-cli-credentials-2026-11-17)
+- [Measure process startup and audited calls (2026-11-17)](DECISION_LOG.md#measure-process-startup-and-audited-calls-2026-11-17)
+- [Running server and daily commands (2026-11-17)](DECISION_LOG.md#running-server-and-daily-commands-2026-11-17)
+- [Installed CLI and output contract (2026-11-17)](DECISION_LOG.md#installed-cli-and-output-contract-2026-11-17)
+- [Generated audit receipt sequences (2026-11-17)](DECISION_LOG.md#generated-audit-receipt-sequences-2026-11-17)
+- [Request refusal reasons (2026-11-17)](DECISION_LOG.md#request-refusal-reasons-2026-11-17)
+- [Python checks and dependency hashes (2026-11-17)](DECISION_LOG.md#python-checks-and-dependency-hashes-2026-11-17)
+- [README navigation (2026-11-17)](DECISION_LOG.md#readme-navigation-2026-11-17)
+- [Documentation for readers new to the project (2026-11-17)](DECISION_LOG.md#documentation-for-readers-new-to-the-project-2026-11-17)
+- [Pure request decisions (2026-11-17)](DECISION_LOG.md#pure-request-decisions-2026-11-17)
+- [Shared tool definitions (2026-11-17)](DECISION_LOG.md#shared-tool-definitions-2026-11-17)
+- [Development container and Codespaces (2026-11-17)](DECISION_LOG.md#development-container-and-codespaces-2026-11-17)
+- [Recorded walkthrough and Inspector output (2026-11-17)](DECISION_LOG.md#recorded-walkthrough-and-inspector-output-2026-11-17)
+- [Saved evidence and audit inspection (2026-11-17)](DECISION_LOG.md#saved-evidence-and-audit-inspection-2026-11-17)
+- [Optional Salesforce reads (2026-11-17)](DECISION_LOG.md#optional-salesforce-reads-2026-11-17)
+- [Optional account-channel context (2026-11-17)](DECISION_LOG.md#optional-account-channel-context-2026-11-17)
+- [Optional local model drafting (2026-11-17)](DECISION_LOG.md#optional-local-model-drafting-2026-11-17)
+- [External Inspector client (2026-11-17)](DECISION_LOG.md#external-inspector-client-2026-11-17)
+- [Scope and implementation](DECISION_LOG.md#scope-and-implementation)
+- [Four reviewable slices](DECISION_LOG.md#four-reviewable-slices)
+- [Protocol research (2026-11-17)](DECISION_LOG.md#protocol-research-2026-11-17)
+- [Two source systems and fixed fixtures](DECISION_LOG.md#two-source-systems-and-fixed-fixtures)
+- [Local authorization boundary](DECISION_LOG.md#local-authorization-boundary)
+- [Audit, limits, and writes](DECISION_LOG.md#audit-limits-and-writes)
+- [Briefing and citation boundary](DECISION_LOG.md#briefing-and-citation-boundary)
+- [README baseline after PR 3](DECISION_LOG.md#readme-baseline-after-pr-3)
+- [Explicit conflict rule](DECISION_LOG.md#explicit-conflict-rule)
+- [Evaluation and usage measurements](DECISION_LOG.md#evaluation-and-usage-measurements)
