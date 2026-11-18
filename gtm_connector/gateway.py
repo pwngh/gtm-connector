@@ -317,7 +317,9 @@ class Connector:
                     raise ToolError(error.code) from None
                 if private is not None:
                     # Only a composite read asks; the scopes never enter the tool result.
-                    private["slack_scopes"] = sorted(getattr(read, "scopes", ()))
+                    # Missing or malformed scopes pass through as given, and the brief refuses them.
+                    scopes = getattr(read, "scopes", None)
+                    private["slack_scopes"] = list(scopes) if isinstance(scopes, (list, tuple)) else None
                 return {**_data("slack", _records("slack", "messages", read.records)),
                         "thread_snapshot": read.snapshot}
             with closing(slack.connect(self.slack_path, readonly=True)) as conn:

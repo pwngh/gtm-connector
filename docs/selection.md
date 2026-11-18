@@ -105,9 +105,9 @@ pending receipt, or a changed file makes it unreadable.
 - the CRM, calls, and Slack bindings equal the running server's; and
 - for imported calls and live Slack, the current transcript revision and Slack
   mapping are the ones the brief used, and the local Slack connection still
-  holds a ready credential for the same identity with at least the scopes its
-  credential held when the brief's Slack read ran. Disconnecting Slack, or
-  reconnecting with fewer scopes, withholds saved Slack text. The Slack checks
+  holds a ready credential for the same identity with at least the scopes of
+  each credential that returned part of the brief's Slack thread. Disconnecting
+  Slack, or reconnecting with fewer scopes, withholds saved Slack text. The Slack checks
   and the release decision happen while the connection is locked, so a
   disconnect cannot land between them. A disconnect that finishes after that
   decision, while the receipt is written and the response is sent, does not

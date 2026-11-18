@@ -11,6 +11,7 @@ from gtm_connector.runtime import SourceIdentityError
 from gtm_connector.selection import load_selection
 from gtm_connector.slack_auth import SlackAuthError, disconnect_slack, held_slack_connection
 from gtm_connector.slack_mapping import save_slack_mapping
+from gtm_connector.slack_reader import SlackThreadReader, ThreadRead
 from gtm_connector.slack_workflow import resolve_slack_account
 from slack_live_fixtures import ACCOUNT, CHANNEL, LiveSlackFixture
 from test_slack_auth import saved_document, seed
@@ -148,6 +149,36 @@ class SelectedLiveSlackTests(LiveSlackFixture, unittest.TestCase):
                                if row["brief_id"] == brief["brief_id"] and row["tool"] == "read_slack_messages"]
                 self.assertEqual([(row["status"], row["http_status"]) for row in slack_reads], [("error", 403)])
             self.assertEqual(self.requests, [])
+
+    def test_a_reader_that_reports_no_scopes_saves_nothing(self):
+        with self.runtime() as runtime:
+            self.map_account(runtime)
+        selection = self.selection([{"account_id": ACCOUNT, "slack": True}])
+        real_read = SlackThreadReader.read_slack_messages
+
+        def without_scopes(reader, account_id):
+            read = real_read(reader, account_id)
+            return ThreadRead(read.records, read.snapshot)
+
+        with self.runtime(selection=selection) as runtime, LocalClient(runtime.config) as owner, \
+                patch.object(SlackThreadReader, "read_slack_messages", without_scopes):
+            token = owner.authorize(["crm:read", "calls:read", "slack:read"])
+            result = owner.call(token, "prepare_renewal_brief", {"account_id": ACCOUNT}).json()["result"]
+        self.assertTrue(result["isError"])
+        self.assertTrue(result["content"][0]["text"].endswith("brief_evidence_invalid"))
+        self.assertEqual(list((self.state / "selected-briefs").glob("*.json")), [])
+
+    def test_a_prepare_with_slack_read_reports_a_busy_connection(self):
+        with self.runtime() as runtime:
+            self.map_account(runtime)
+        selection = self.selection([{"account_id": ACCOUNT, "slack": True}])
+        with self.runtime(selection=selection) as runtime, LocalClient(runtime.config) as owner:
+            token = owner.authorize(["crm:read", "calls:read", "slack:read"])
+            with held_slack_connection(self.connection):
+                result = owner.call(token, "prepare_renewal_brief", {"account_id": ACCOUNT}).json()["result"]
+        self.assertTrue(result["isError"])
+        self.assertTrue(result["content"][0]["text"].endswith("slack_connection_busy"))
+        self.assertEqual(self.requests, [])
 
     def test_an_unmapped_selected_thread_refuses_startup(self):
         with self.runtime() as runtime:

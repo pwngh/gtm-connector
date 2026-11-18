@@ -382,7 +382,7 @@ def _output_size(records, snapshot):
 class ThreadRead:
     records: list[dict]
     snapshot: dict
-    # Every scope held by each credential used for this read. Private; never in tool output.
+    # Every scope held by each credential that returned a page of this read. Private; never in tool output.
     scopes: tuple[str, ...] = ()
 
 
@@ -438,7 +438,6 @@ class SlackThreadReader:
             if slack_identity_binding(access.identity) != self.slack_binding:
                 raise SlackReadError("slack_source_mismatch")
             budget.remaining()
-            used_scopes.update(access.scopes)
             credential_ok = True
             set_phase("thread_read")
             return access
@@ -511,6 +510,9 @@ class SlackThreadReader:
                         manifests[stamp] = manifest
                         if sum(len(item["text"].encode("utf-8")) for item in manifests.values()) > MAX_TOTAL_TEXT_BYTES:
                             raise SlackReadError("slack_output_too_large")
+                # Only a credential that returned a page of the thread adds its scopes. One that
+                # expired before returning anything contributed no text.
+                used_scopes.update(access.scopes)
                 following = _cursor(document, cursor)
                 if following is None:
                     complete = True

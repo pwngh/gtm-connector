@@ -145,10 +145,14 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
         child = _child(connector, invocation, tool, account_id, brief_id, ordinal)
         children.append(child.audit_id)
         if tool == "read_slack_messages" and context.slack_backend == "slack" and child.envelope is not None:
-            # The scopes of the credentials the audited read itself used.
-            slack_scopes = child.private.get("slack_scopes")
-            if not isinstance(slack_scopes, list):
+            # The scopes of the credentials that returned the thread to the audited read. A
+            # reader that reports none would let any later credential release the text.
+            from .slack_auth import ALLOWED_USER_SCOPES
+            reported = child.private.get("slack_scopes")
+            if (not isinstance(reported, list) or not reported
+                    or any(scope not in ALLOWED_USER_SCOPES for scope in reported)):
                 raise ToolError("brief_evidence_invalid")
+            slack_scopes = sorted(set(reported))
         if child.envelope is None:
             statuses["notes_status" if tool == "read_call_notes" else "slack_status"] = "denied"
             continue
@@ -292,12 +296,13 @@ def read_brief(connector, token, brief_id) -> dict:
         from .slack_auth import SlackAuthError, held_slack_connection
         from .slack_mapping import load_slack_mapping, slack_identity_binding
         try:
-            # Decide and release while holding the connection lock, so a disconnect or
-            # reconnect cannot land between the checks. This reads local metadata only.
+            # Make the release decision while holding the connection lock, so a disconnect or
+            # reconnect cannot land between the checks. Sending the response happens after the
+            # lock is released. This reads local metadata only.
             with held_slack_connection(context.slack_connection_dir) as connection:
                 if (connection.needs_login or connection.credential_state != "ready"
                         or slack_identity_binding(connection.identity) != context.slack_binding
-                        or not isinstance(artifact["slack_scopes"], list)
+                        or not isinstance(artifact["slack_scopes"], list) or not artifact["slack_scopes"]
                         or not set(artifact["slack_scopes"]) <= set(connection.granted_scopes)):
                     raise ToolError("brief_source_changed")
                 mapping = load_slack_mapping(context.slack_mapping_path, account_id=account_id,

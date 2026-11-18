@@ -569,12 +569,13 @@ Slack thread it contains are still selected, the caller's current grant has
 every scope the brief's content needs, the CRM, calls, and Slack bindings are
 unchanged, and imported calls and live Slack still use the same transcript
 revision and mapping. For live Slack it also requires the local connection to
-hold a ready credential for the same identity with at least the scopes its
-credential held when the brief's Slack read ran. It makes that decision while
+hold a ready credential for the same identity with at least the scopes of each
+credential that returned part of the brief's Slack thread. It makes that decision while
 holding the connection lock, so a disconnect or narrower reconnect cannot land
 between the checks and withholds saved Slack text afterward. A disconnect that
 finishes after the decision does not recall the response being sent. It reports that it
-did not recheck the source systems. A brief ID alone grants nothing.
+did not recheck the source systems. A brief ID alone grants nothing. A prepare
+whose Slack reader reports no scopes saves nothing.
 
 The selection chooses accounts and Slack threads, not fields. Without
 `--selection`, a connected server still exposes its whole source to any
