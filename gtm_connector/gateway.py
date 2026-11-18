@@ -278,7 +278,8 @@ class Connector:
             if decision.error is not None:
                 error = decision.error
                 rejection = JSONResponse({"jsonrpc": "2.0", "id": request_id,
-                    "error": {"code": error.code, "message": error.message}}, error.status, headers=error.headers)
+                    "error": {"code": error.code, "message": error.message, "data": {"reason": error.reason}}},
+                    error.status, headers=error.headers)
                 await rejection(scope, replay, capture)
             else:
                 await self.sdk_app(scope, replay, capture)

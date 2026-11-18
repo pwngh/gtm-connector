@@ -73,6 +73,12 @@ Salesforce renewal-field mapping. Check main first and skip work already done.
 The first three are behavior-preserving, with existing tests unchanged.
 Stop after each open PR. The user decides when to continue.
 
+The tooling slice is merged. Next, give request-check refusals fixed reason names
+and one status/code table. Preserve messages, HTTP statuses, authorization
+challenges, and check order. Keep SDK errors, tool errors, OAuth errors, and audit
+failure responses outside this catalog. Add focused contract tests and document
+the distinction. Do not change audit storage or add the later policy features.
+
 The shared tool definitions, pure request decisions, and documentation passes are
 merged. The tooling slice adds Ruff and mypy in pyproject.toml, hash-checked
 runtime and development locks, and CI on main. Preserve runtime versions and

@@ -146,12 +146,15 @@ class SalesforceGatewayTests(unittest.TestCase):
         with self.assertRaises(ToolError):
             asyncio.run(self.runtime.connector.mcp.call_tool("log_activity", arguments))
         write_token = client.authorize(["crm:write"])
-        cases = (("invalid-fixture-token", 401, "invalid or expired"),
-                 (read_token, 403, "insufficient_scope"), (write_token, 403, "crm_write_disabled"))
-        for token, status, message in cases:
+        cases = (("invalid-fixture-token", 401, "invalid or expired", "invalid_token", 1001),
+                 (read_token, 403, "insufficient_scope", "insufficient_scope", 1004),
+                 (write_token, 403, "crm_write_disabled", "crm_write_disabled", 1005))
+        for token, status, message, reason, code in cases:
             response = client.call(token, "log_activity", arguments)
             self.assertEqual(response.status_code, status)
             self.assertIn(message, response.text)
+            self.assertEqual(response.json()["error"]["data"]["reason"], reason)
+            self.assertEqual(response.json()["error"]["code"], code)
         self.assertEqual(self.requests, [])
         self.assertEqual(self.activities(), 0)
         receipts = self.runtime.connector.audit.read()

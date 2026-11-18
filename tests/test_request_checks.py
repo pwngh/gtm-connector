@@ -27,6 +27,42 @@ class RequestCheckTests(unittest.TestCase):
         self.token = AccessToken(token=self.raw, client_id="fixture-client", scopes=["crm:read"],
                                  expires_at=2000, resource=self.policy.resource)
 
+    def test_refusals_have_fixed_reasons_statuses_and_codes(self):
+        write_token = AccessToken(token=self.raw, client_id="fixture-client", scopes=["crm:write"],
+                                  expires_at=2000, resource=self.policy.resource)
+        cases = (
+            ("request_too_large", 413, -32600, {"request": replace(self.request, body_size=65537)}),
+            ("invalid_json", 400, -32700, {"request": replace(self.request, parsed=None)}),
+            ("untrusted_origin_or_host", 403, 1003, {"request": replace(self.request, scheme="http")}),
+            ("invalid_token", 401, 1001, {"token": None}),
+            ("rate_limited", 429, 1002, {"windows": {self.key: (90.0, 2)}}),
+            ("insufficient_scope", 403, 1004, {"request": replace(self.request, tool="read_call_notes")}),
+            ("crm_write_disabled", 403, 1005, {
+                "request": replace(self.request, tool="log_activity"),
+                "policy": replace(self.policy, writes_disabled=True), "token": write_token,
+            }),
+            ("invalid_arguments", 400, -32602, {"request": replace(self.request, arguments={})}),
+            ("missing_protocol_version", 400, -32602, {"request": replace(self.request, meta={})}),
+            ("protocol_version_mismatch", 400, -32020, {
+                "request": replace(self.request, headers={"host": "127.0.0.1:8765"}),
+            }),
+            ("unsupported_protocol_version", 400, -32022, {
+                "request": replace(self.request,
+                                   headers={"host": "127.0.0.1:8765", "mcp-protocol-version": "2099-01-01"},
+                                   meta={"io.modelcontextprotocol/protocolVersion": "2099-01-01"}),
+            }),
+        )
+        for reason, status, code, overrides in cases:
+            with self.subTest(reason=reason):
+                decision = check_request(
+                    overrides.get("request", self.request), overrides.get("policy", self.policy),
+                    overrides.get("windows", {}), TOOL_DEFINITIONS,
+                    token=overrides.get("token", self.token), wall_time=1000, rate_time=100.0,
+                )
+                self.assertIsNone(decision.needs)
+                self.assertEqual((decision.error.reason, decision.error.status, decision.error.code),
+                                 (reason, status, code))
+
     def test_inputs_are_requested_in_order_without_changing_windows(self):
         windows = MappingProxyType({self.key: (90.0, 1)})
         self.assertEqual(check_request(self.request, self.policy, windows, TOOL_DEFINITIONS).needs, "token")

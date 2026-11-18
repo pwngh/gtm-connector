@@ -1,5 +1,31 @@
 # Decisions
 
+## Request refusal reasons (2026-11-17)
+
+Give each gateway request-check refusal a fixed `error.data.reason`. A client
+can branch on that field without parsing the message. One table supplies the
+HTTP status and JSON-RPC code. Keep `1001` for invalid credentials and `1002` for
+rate limits. Assign `1003`, `1004`, and `1005` to an untrusted origin or host,
+insufficient scope, and disabled CRM writes. Preserve the standard negative
+protocol codes; a reason distinguishes cases that share one of those codes.
+
+Preserve existing messages, status codes, challenges, and decision order. Missing,
+malformed, expired, and wrong-resource credentials all remain `invalid_token`.
+Clients do not need the credential's failure details to request a new grant.
+Scope and rate details remain in `WWW-Authenticate` and `Retry-After`.
+
+The catalog covers request checks, not every error returned by the service.
+Leave SDK-owned rejections, OAuth responses, and tool execution errors unchanged.
+Keep the two HTTP 503 fallback bodies: an initial audit failure prevents execution,
+while a later failure can follow a committed write. Audit rows still record their
+existing outcomes. This slice adds no schema or permission changes.
+
+Read the [MCP error contract](https://modelcontextprotocol.io/specification/2026-07-28/basic)
+and [authorization requirements](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
+on 2026-11-17. Use the optional JSON-RPC error data field. The idea of a stable
+reason follows [AIP-193](https://google.aip.dev/193); this connector does not adopt
+its protobuf response format or claim AIP compliance.
+
 ## Python checks and dependency hashes (2026-11-17)
 
 Run Ruff and mypy in CI for pull requests and pushes to main. Ruff checks the

@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 from mcp.server.auth.provider import AccessToken
 
+from .refusals import REFUSALS
 from .tool_definitions import ToolDefinition, valid_arguments
 
 
@@ -45,10 +46,17 @@ class RequestPolicy:
 
 @dataclass(frozen=True)
 class RequestError:
-    status: int
-    code: int
+    reason: str
     message: str
     headers: dict[str, str] | None = None
+
+    @property
+    def status(self) -> int:
+        return REFUSALS[self.reason].status
+
+    @property
+    def code(self) -> int:
+        return REFUSALS[self.reason].code
 
 
 @dataclass(frozen=True)
@@ -65,13 +73,13 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
                   rate_time: float | Missing = MISSING) -> RequestDecision:
     """Request missing inputs in order, then return a decision without changing inputs."""
     if request.body_size > 65536:
-        return RequestDecision(error=RequestError(413, -32600, "request body exceeds 65536 bytes"))
+        return RequestDecision(error=RequestError("request_too_large", "request body exceeds 65536 bytes"))
     if not isinstance(request.parsed, dict):
-        return RequestDecision(error=RequestError(400, -32700, "expected one valid JSON-RPC object"))
+        return RequestDecision(error=RequestError("invalid_json", "expected one valid JSON-RPC object"))
     if (request.scheme != "https" or "origin" in request.headers
             or sum(name.lower() == b"host" for name in request.header_names) != 1
             or request.headers.get("host") != urlsplit(policy.resource).netloc):
-        return RequestDecision(error=RequestError(403, 1001, "untrusted origin or host"))
+        return RequestDecision(error=RequestError("untrusted_origin_or_host", "untrusted origin or host"))
     raw = request.raw_token if sum(name.lower() == b"authorization" for name in request.header_names) == 1 else None
     if not raw:
         token = None
@@ -82,7 +90,7 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
     # A supplied token expiry requested wall_time above; no clock value is read here.
     if (token is None or token.expires_at is None or token.expires_at <= cast(float, wall_time)
             or token.resource != policy.resource):
-        return RequestDecision(error=RequestError(401, 1001, "invalid or expired access token", {
+        return RequestDecision(error=RequestError("invalid_token", "invalid or expired access token", {
             "WWW-Authenticate": f'Bearer error="invalid_token", resource_metadata="{policy.metadata_url}"',
         }))
     updated = None
@@ -96,7 +104,7 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
         if used >= policy.rate_limit:
             retry = max(1, math.ceil(policy.window_seconds - (rate_time - begin)))
             return RequestDecision(windows=updated, error=RequestError(
-                429, 1002, f"rate_limited: retry after {retry} seconds", {"Retry-After": str(retry)},
+                "rate_limited", f"rate_limited: retry after {retry} seconds", {"Retry-After": str(retry)},
             ))
         updated[key] = (begin, used + 1)
         definition = definitions.get(request.tool)
@@ -105,23 +113,23 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
             challenge = (f'Bearer error="insufficient_scope", scope="{required}", '
                          f'resource_metadata="{policy.metadata_url}"')
             return RequestDecision(windows=updated, error=RequestError(
-                403, 1001, f"insufficient_scope: {required} required", {"WWW-Authenticate": challenge},
+                "insufficient_scope", f"insufficient_scope: {required} required", {"WWW-Authenticate": challenge},
             ))
         if definition is not None and not definition.read_only and policy.writes_disabled:
-            return RequestDecision(windows=updated, error=RequestError(403, 1001, "crm_write_disabled"))
+            return RequestDecision(windows=updated, error=RequestError("crm_write_disabled", "crm_write_disabled"))
         if definition is not None and not valid_arguments(definition, request.arguments):
-            return RequestDecision(windows=updated, error=RequestError(400, -32602, "invalid tool arguments"))
+            return RequestDecision(windows=updated, error=RequestError("invalid_arguments", "invalid tool arguments"))
     version = request.meta.get("io.modelcontextprotocol/protocolVersion") if isinstance(request.meta, dict) else None
     if version is None:
         return RequestDecision(windows=updated, error=RequestError(
-            400, -32602, "request metadata requires protocolVersion",
+            "missing_protocol_version", "request metadata requires protocolVersion",
         ))
     if request.headers.get("mcp-protocol-version") != version:
         return RequestDecision(windows=updated, error=RequestError(
-            400, -32020, "protocol version header must match request metadata",
+            "protocol_version_mismatch", "protocol version header must match request metadata",
         ))
     if version != "2026-07-28":
         return RequestDecision(windows=updated, error=RequestError(
-            400, -32022, "supported protocol version: 2026-07-28",
+            "unsupported_protocol_version", "supported protocol version: 2026-07-28",
         ))
     return RequestDecision(windows=updated)

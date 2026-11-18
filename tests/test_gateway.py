@@ -201,6 +201,8 @@ class GatewayTests(unittest.TestCase):
             with self.subTest(tool=name, token=token):
                 response = self.tool(name, arguments, token=token)
                 self.assertEqual(response.status_code, 403, response.text)
+                self.assertEqual(response.json()["error"]["data"]["reason"], "insufficient_scope")
+                self.assertEqual(response.json()["error"]["code"], 1004)
                 challenge = response.headers["WWW-Authenticate"]
                 self.assertIn('error="insufficient_scope"', challenge)
                 self.assertIn(f'scope="{scope}"', challenge)
@@ -229,10 +231,37 @@ class GatewayTests(unittest.TestCase):
             with self.subTest(token=token):
                 response = self.tool("get_account", {"account_id": "acc-001"}, token=token)
                 self.assertEqual(response.status_code, 401, response.text)
+                self.assertEqual(response.json()["error"]["data"]["reason"], "invalid_token")
+                self.assertEqual(response.json()["error"]["code"], 1001)
+                self.assertIn('error="invalid_token"', response.headers["WWW-Authenticate"])
                 self.assertIn("resource_metadata=", response.headers["WWW-Authenticate"])
                 self.assertNotIn("Fixture account", response.text)
+                if token is not None:
+                    self.assertNotIn(TOKEN_VALUES.get(token, token), response.text)
         self.assertEqual(len(self.connector.audit.read()), len(tokens))
         self.assertTrue(all(row["row_count"] == 0 for row in self.connector.audit.read()))
+
+    def test_duplicate_authorization_headers_have_the_same_invalid_token_reason(self):
+        self.open_connector()
+        response = self.client.post("/mcp", json={
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "get_account", "arguments": {"account_id": "acc-001"}},
+        }, headers=[
+            ("Mcp-Method", "tools/call"),
+            ("Authorization", "Bearer " + TOKEN_VALUES["crm"]),
+            ("Authorization", "Bearer " + TOKEN_VALUES["full"]),
+        ])
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["error"]["data"]["reason"], "invalid_token")
+        self.assertEqual(response.json()["error"]["code"], 1001)
+        self.assertIn('error="invalid_token"', response.headers["WWW-Authenticate"])
+        self.assertNotIn("Fixture account", response.text)
+        for token in TOKEN_VALUES.values():
+            self.assertNotIn(token, response.text)
+        receipts = self.connector.audit.read()
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual((receipts[0]["http_status"], receipts[0]["rows"]), (401, []))
+        self.assertEqual(self.activities(), [])
 
     def test_every_tool_attempt_has_one_complete_audit_row(self):
         self.open_connector()
@@ -315,6 +344,8 @@ class GatewayTests(unittest.TestCase):
         self.records(self.tool("search_accounts", token="crm"), "crm")
         limited = self.tool("get_account", {"account_id": "acc-001"}, token="crm")
         self.assertEqual(limited.status_code, 429, limited.text)
+        self.assertEqual(limited.json()["error"]["data"]["reason"], "rate_limited")
+        self.assertEqual(limited.json()["error"]["code"], 1002)
         self.assertGreater(int(limited.headers["Retry-After"]), 0)
         self.assertRegex(limited.text.lower(), "rate.?limit")
         self.records(self.tool("read_call_notes", {"account_id": "acc-001"}, token="calls"), "calls")
@@ -359,6 +390,8 @@ class GatewayTests(unittest.TestCase):
                 response = self.tool("get_account", {"account_id": "acc-001"}, headers=headers)
                 self.assertEqual(response.status_code, 400, response.text)
                 self.assertEqual(response.json()["error"]["code"], -32020)
+                if "MCP-Protocol-Version" in headers:
+                    self.assertEqual(response.json()["error"]["data"]["reason"], "protocol_version_mismatch")
                 self.assertNotIn("Fixture account", response.text)
         self.assertEqual(len(self.connector.audit.read()), len(cases))
         encoded = "=?base64?" + base64.b64encode(b"get_account").decode() + "?="
@@ -368,6 +401,8 @@ class GatewayTests(unittest.TestCase):
         self.open_connector()
         response = self.tool("get_account", {"account_id": "acc-001"}, headers={"Origin": "https://untrusted.example"})
         self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(response.json()["error"]["data"]["reason"], "untrusted_origin_or_host")
+        self.assertEqual(response.json()["error"]["code"], 1003)
         self.assertNotIn("Fixture account", response.text)
         self.assertEqual(len(self.connector.audit.read()), 1)
         self.assertEqual(self.connector.audit.read()[0]["rows"], [])
@@ -377,6 +412,7 @@ class GatewayTests(unittest.TestCase):
         with patch.object(self.connector.audit, "start", side_effect=sqlite3.OperationalError("fixture audit unavailable")):
             response = self.tool("log_activity", self.activity_arguments(), token="write")
         self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.json(), {"error": "audit_unavailable; call was not executed"})
         self.assertEqual(self.activities(), [])
 
     def test_deeply_nested_marked_request_is_rejected_and_audited(self):
@@ -408,6 +444,7 @@ class GatewayTests(unittest.TestCase):
         with patch.object(self.connector.audit, "finish", side_effect=sqlite3.OperationalError("fixture audit unavailable")):
             response = self.tool("get_account", {"account_id": "acc-001"}, token="crm")
         self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.json(), {"error": "execution_or_audit_unavailable; no result released"})
         self.assertNotIn("Fixture account", response.text)
         self.assertEqual(self.activities(), [])
 
@@ -417,6 +454,7 @@ class GatewayTests(unittest.TestCase):
         with patch.object(self.connector.audit, "finish", side_effect=sqlite3.OperationalError("fixture audit unavailable")):
             response = self.tool("log_activity", arguments, token="write")
         self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"error": "execution_or_audit_unavailable; no result released"})
         self.assertEqual(len(self.activities()), 1)
         original_id = self.activities()[0]["id"]
         pending = self.connector.audit.read()
