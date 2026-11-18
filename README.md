@@ -65,6 +65,12 @@ not whether a source is true.
   misattributed statement fails the check. The known conflict flag must cite both
   records. [Citation tests](tests/test_citations.py#L54),
   [conflict test](tests/test_citations.py#L150)
+- **A selected server shows a client only the selected accounts.** With
+  `serve --selection`, an unselected account is refused before any source read,
+  and a brief a client prepares runs under that client's own grant with one
+  receipt per read. A saved brief is released again only while the client's
+  scopes, the selection, and the source bindings still cover it.
+  [Selection tests](tests/test_selected_sources.py)
 
 ## What the mocks stand for
 
@@ -401,6 +407,15 @@ The [reader tests](tests/test_slack_reader.py) cover bounded paging, shared
 authentication limits, literal text, and offline snapshot checks with invented
 responses. [Brief tests](tests/test_live_slack_briefing.py) exercise cited local
 flows. These tests do not establish live Slack access. No message is sent.
+
+### Serve only selected accounts
+
+Before connecting a client to real data, write a small private selection that
+names the accounts it may read and whether each account's Slack thread is
+included, then start `serve --selection selection.json`. The client can then
+prepare a cited brief with its own grant through `prepare_renewal_brief` and
+read it again later through `read_renewal_brief`. Writes are off in this mode.
+[Selection format, tools, and limits](docs/selection.md)
 
 ## Limits worth reading
 

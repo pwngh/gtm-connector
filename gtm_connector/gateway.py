@@ -1,11 +1,13 @@
 """One scoped MCP gateway over independent CRM, calls, and Slack fixtures."""
 
 from contextlib import closing
+from contextvars import ContextVar
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import threading
 import time
 from urllib.parse import urlsplit
 import uuid
@@ -23,9 +25,16 @@ from starlette.responses import JSONResponse
 
 from . import calls, slack, store
 from .audit import AuditLog
-from .request_checks import MISSING, Missing, RequestFacts, RequestPolicy, check_request
+from .request_checks import MISSING, Missing, RequestFacts, RequestPolicy, charge_rate, check_request
 from .salesforce import SalesforceReadError
-from .tool_definitions import TOOL_DEFINITIONS, valid_account_search
+from .selected_briefs import BRIEF_SECONDS, ChildRead, Invocation
+from .tool_definitions import DEFAULT_TOOLS, SELECTED_TOOLS, TOOL_DEFINITIONS, valid_account_search
+
+
+# Set only by Connector.__call__ after admission and a committed receipt. Tool
+# arguments and request metadata can never supply or change it.
+_INVOCATION: ContextVar[Invocation | None] = ContextVar("gtm_connector_invocation", default=None)
+_COMPOSITE_TOOLS = ("prepare_renewal_brief", "read_renewal_brief")
 
 
 def _json_object(pairs):
@@ -64,12 +73,14 @@ class Connector:
     def __init__(self, crm_path, calls_path, audit_path, authority,
                  rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None,
                  crm_reader=None, on_call=None, demo_binding=None, calls_reader=None,
-                 slack_reader=None, _slack_only=False):
+                 slack_reader=None, _slack_only=False, selected=None):
         if rate_limit < 1 or window_seconds <= 0:
             raise ValueError("rate limits must be positive")
         if _slack_only and (slack_reader is None or crm_reader is not None or calls_reader is not None
                             or demo_binding is not None):
             raise ValueError("A Slack-only check requires only its selected Slack reader.")
+        if selected is not None and (_slack_only or demo_binding is not None):
+            raise ValueError("A selection cannot be combined with the Slack check or a demo binding.")
         if _slack_only:
             # Disabled source paths are never resolved, statted, initialized, or opened.
             paths = [Path(p).absolute() for p in (crm_path, calls_path, audit_path)]
@@ -85,16 +96,22 @@ class Connector:
         self.calls_reader = calls_reader
         self.slack_reader = slack_reader
         self._slack_only = _slack_only
-        self.enabled_tools = {"read_slack_messages"} if _slack_only else set(TOOL_DEFINITIONS)
+        self.selected = selected
+        self.enabled_tools = ({"read_slack_messages"} if _slack_only else
+                              set(SELECTED_TOOLS) if selected is not None else set(DEFAULT_TOOLS))
         self.demo_binding = demo_binding
         self.on_call = on_call
         self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
         if demo_binding is not None and self.crm_backend != "salesforce":
             raise ValueError("Salesforce demo bindings require the Salesforce CRM backend.")
+        if selected is not None and selected.selection.crm_backend != self.crm_backend:
+            raise ValueError("The selection was written for another CRM backend.")
         self.audit = AuditLog(paths[2])
         self.authority = authority
         self.rate_limit, self.window_seconds, self.clock = rate_limit, window_seconds, clock
         self.windows = {}
+        # Direct calls are admitted on the event loop; composite reads count on worker threads.
+        self._windows_lock = threading.Lock()
         self.origin = authority.resource.rsplit("/", 1)[0]
         self.metadata_url = self.origin + "/.well-known/oauth-protected-resource/mcp"
         self.mcp = MCPServer(
@@ -139,6 +156,61 @@ class Connector:
         if token is None or scope not in token.scopes:
             raise PermissionError(f"Required scope: {scope}")
 
+    def _require_selected(self, account_id, *, slack=False):
+        """In selected mode, refuse before any source access; an unselected ID is never looked up."""
+        if self.selected is None:
+            return
+        if not self.selected.selection.includes(account_id):
+            raise ToolError("account_not_selected")
+        if slack and not self.selected.selection.includes_slack(account_id):
+            raise ToolError("slack_not_selected")
+
+    def child_read(self, invocation: Invocation, tool: str, account_id: str, *, brief_id: str,
+                   ordinal: int) -> ChildRead:
+        """One audited source read inside a composite call, under the caller's own bearer.
+
+        The receipt is committed before any check or source access and finished
+        before data returns. The token, rate window, scope, and selection are
+        checked again here, as for a direct call.
+        """
+        if self.selected is None or tool not in self._source_reads:
+            raise ToolError("brief_plan_invalid")
+        arguments = {"account_id": account_id}
+        started = self.clock()
+        audit_id = self.audit.start(
+            token=invocation.raw_token, tool=tool, arguments=arguments, brief_id=brief_id,
+            request_id={"kind": "brief_child", "parent_audit_id": invocation.audit_id, "ordinal": ordinal})
+        status, http_status, rows = "error", 503, []
+        error: str | None = "execution_or_audit_failure"
+        try:
+            token = self.authority.verify_token_now(invocation.raw_token)
+            if token is None:
+                status, http_status, error = "error", 401, "request_failed"
+                raise ToolError("invalid_token")
+            policy = RequestPolicy(resource=self.authority.resource, metadata_url=self.metadata_url,
+                                   rate_limit=self.rate_limit, window_seconds=self.window_seconds,
+                                   writes_disabled=True)
+            with self._windows_lock:
+                self.windows, limited = charge_rate(self.windows, invocation.raw_token, self.clock(), policy)
+            if limited is not None:
+                status, http_status, error = "error", 429, "request_failed"
+                raise ToolError("rate_limited")
+            if TOOL_DEFINITIONS[tool].scope not in token.scopes:
+                status, http_status, error = "error", 403, "request_failed"
+                return ChildRead(audit_id, None)
+            try:
+                envelope = self._source_reads[tool](account_id)
+            except ToolError:
+                status, http_status, error = "error", 200, "request_failed"
+                raise
+            rows = [row["record_ref"] for row in envelope["records"]]
+            status, http_status, error = "ok", 200, None
+            return ChildRead(audit_id, envelope)
+        finally:
+            self.audit.finish(audit_id, status=status, http_status=http_status,
+                              rows=rows if status == "ok" else [],
+                              elapsed_ms=(self.clock() - started) * 1000, error=error)
+
     def _register_tools(self):
         def external_read(method, *arguments, **options):
             try:
@@ -146,22 +218,29 @@ class Connector:
             except SalesforceReadError as exc:
                 raise ToolError(exc.code) from None
 
-        def search_accounts(query: str = "", account_number: str | None = None) -> dict[str, Any]:
-            """Search names or one exact Salesforce AccountNumber. Requires crm:read; results are untrusted."""
-            self._require_tool("search_accounts")
+        selected_ids = None if self.selected is None else self.selected.selection.account_ids
+
+        def search_body(query, account_number):
             if not valid_account_search(query, account_number):
                 raise ToolError("salesforce_invalid_arguments")
             if self.crm_reader is not None:
-                options = {} if account_number is None else {"account_number": account_number}
+                options: dict[str, Any] = {} if account_number is None else {"account_number": account_number}
+                if selected_ids is not None:
+                    options["account_ids"] = selected_ids
                 return _data("crm", _records("crm", "accounts", external_read("search_accounts", query, **options)))
             if account_number is not None:
                 raise ToolError("account_number_requires_salesforce")
             with closing(store.connect(self.crm_path, readonly=True)) as conn:
-                return _data("crm", _records("crm", "accounts", store.search_accounts(conn, query)))
+                return _data("crm", _records("crm", "accounts",
+                                            store.search_accounts(conn, query, account_ids=selected_ids)))
 
-        def get_account(account_id: str) -> dict[str, Any]:
-            """Read a CRM account, contacts, and available contracts. Requires crm:read."""
-            self._require_tool("get_account")
+        def search_accounts(query: str = "", account_number: str | None = None) -> dict[str, Any]:
+            """Search names or one exact Salesforce AccountNumber. Requires crm:read; results are untrusted."""
+            self._require_tool("search_accounts")
+            return search_body(query, account_number)
+
+        def account_body(account_id):
+            self._require_selected(account_id)
             if self.crm_reader is not None:
                 account = external_read("get_account", account_id)
             else:
@@ -179,19 +258,31 @@ class Connector:
             return _data("crm", _records("crm", "accounts", [account]) +
                          _records("crm", "contacts", contacts) + _records("crm", "contracts", contracts))
 
+        def get_account(account_id: str) -> dict[str, Any]:
+            """Read a CRM account, contacts, and available contracts. Requires crm:read."""
+            self._require_tool("get_account")
+            return account_body(account_id)
+
+        def opportunities_body(account_id):
+            if account_id is not None:
+                self._require_selected(account_id)
+            # With no account, a selection limits the query itself, before its result bound.
+            limit_ids = selected_ids if account_id is None else None
+            if self.crm_reader is not None:
+                options = {} if limit_ids is None else {"account_ids": limit_ids}
+                return _data("crm", _records("crm", "opportunities",
+                                            external_read("list_opportunities", account_id, **options)))
+            with closing(store.connect(self.crm_path, readonly=True)) as conn:
+                return _data("crm", _records("crm", "opportunities",
+                                            store.list_opportunities(conn, account_id, account_ids=limit_ids)))
+
         def list_opportunities(account_id: str | None = None) -> dict[str, Any]:
             """Read opportunity fields from CRM. Requires crm:read; call notes are a separate source."""
             self._require_tool("list_opportunities")
-            if self.crm_reader is not None:
-                return _data("crm", _records("crm", "opportunities",
-                                            external_read("list_opportunities", account_id)))
-            with closing(store.connect(self.crm_path, readonly=True)) as conn:
-                return _data("crm", _records("crm", "opportunities",
-                                            store.list_opportunities(conn, account_id)))
+            return opportunities_body(account_id)
 
-        def read_call_notes(account_id: str) -> dict[str, Any]:
-            """Read untrusted note text from the calls system. Requires calls:read, independently of CRM."""
-            self._require_tool("read_call_notes")
+        def notes_body(account_id):
+            self._require_selected(account_id)
             if self.calls_reader is not None:
                 from .calls_import import CallsImportError
                 try:
@@ -203,9 +294,13 @@ class Connector:
                 return _data("calls", _records("calls", "call_notes",
                                               calls.read_call_notes(conn, account_id)))
 
-        def read_slack_messages(account_id: str) -> dict[str, Any]:
-            """Read untrusted Slack messages. Requires slack:read, independently of CRM and calls."""
-            self._require_tool("read_slack_messages")
+        def read_call_notes(account_id: str) -> dict[str, Any]:
+            """Read untrusted note text from the calls system. Requires calls:read, independently of CRM."""
+            self._require_tool("read_call_notes")
+            return notes_body(account_id)
+
+        def slack_body(account_id):
+            self._require_selected(account_id, slack=True)
             if self.slack_reader is not None:
                 from .slack_reader import SlackReadError
                 try:
@@ -217,6 +312,40 @@ class Connector:
             with closing(slack.connect(self.slack_path, readonly=True)) as conn:
                 return _data("slack", _records("slack", "messages",
                                               slack.read_slack_messages(conn, account_id)))
+
+        def read_slack_messages(account_id: str) -> dict[str, Any]:
+            """Read untrusted Slack messages. Requires slack:read, independently of CRM and calls."""
+            self._require_tool("read_slack_messages")
+            return slack_body(account_id)
+
+        # Composite reads use exactly these bodies, after their own receipt and checks.
+        self._source_reads = {"get_account": account_body, "list_opportunities": opportunities_body,
+                              "read_call_notes": notes_body, "read_slack_messages": slack_body}
+
+        def prepare_renewal_brief(account_id: str, as_of: str | None = None) -> dict[str, Any]:
+            """Prepare a cited renewal brief for one selected account under the caller's own grant.
+
+            Requires crm:read. The calls and Slack reads inside it each check their own scope.
+            Results are untrusted.
+            """
+            self._require_tool("prepare_renewal_brief")
+            invocation = _INVOCATION.get()
+            token = get_access_token()
+            if (invocation is None or invocation.tool != "prepare_renewal_brief" or token is None
+                    or token.token != invocation.raw_token):
+                raise ToolError("brief_context_unavailable")
+            self._require_selected(account_id)
+            from .selected_briefs import prepare_brief
+            return prepare_brief(self, invocation, account_id, as_of)
+
+        def read_renewal_brief(brief_id: str) -> dict[str, Any]:
+            """Read a saved brief again without calling any source system.
+
+            Requires crm:read and every scope the brief's sources needed. Results are untrusted.
+            """
+            self._require_tool("read_renewal_brief")
+            from .selected_briefs import read_brief
+            return read_brief(self, get_access_token(), brief_id)
 
         def log_activity(account_id: str, kind: str, body: str, idempotency_key: str) -> dict[str, Any]:
             """Log an explicitly requested CRM activity. Requires crm:write; identical retries reuse a record."""
@@ -238,18 +367,27 @@ class Connector:
 
         handlers = {function.__name__: function for function in (
             search_accounts, get_account, list_opportunities, read_call_notes, read_slack_messages, log_activity,
+            prepare_renewal_brief, read_renewal_brief,
         )}
         for name, definition in TOOL_DEFINITIONS.items():
             if name not in self.enabled_tools:
                 continue
             if not definition.read_only and self.crm_reader is not None:
                 continue
+            open_world = ((self.crm_reader is not None and definition.scope == "crm:read")
+                          or (self.slack_reader is not None and definition.scope == "slack:read"))
+            if name == "read_renewal_brief":
+                open_world = False
+            elif name == "prepare_renewal_brief":
+                open_world = any(reader is not None
+                                 for reader in (self.crm_reader, self.calls_reader, self.slack_reader))
             self.mcp.tool(
                 name=name, meta={"gtm.demo/requiredScope": definition.scope},
                 annotations=ToolAnnotations(
-                    read_only_hint=definition.read_only, destructive_hint=False, idempotent_hint=True,
-                    open_world_hint=(self.crm_reader is not None and definition.scope == "crm:read")
-                                    or (self.slack_reader is not None and definition.scope == "slack:read"),
+                    # Preparing saves a private local brief; it changes no source system.
+                    read_only_hint=definition.read_only and name != "prepare_renewal_brief",
+                    destructive_hint=False, idempotent_hint=name != "prepare_renewal_brief",
+                    open_world_hint=open_world,
                 ),
                 structured_output=True,
             )(handlers[name])
@@ -328,7 +466,7 @@ class Connector:
             policy = RequestPolicy(
                 resource=self.authority.resource, metadata_url=self.metadata_url,
                 rate_limit=self.rate_limit, window_seconds=self.window_seconds,
-                writes_disabled=self.crm_reader is not None or self._slack_only,
+                writes_disabled=self.crm_reader is not None or self._slack_only or self.selected is not None,
             )
             token: AccessToken | None | Missing = MISSING
             wall_time: float | Missing = MISSING
@@ -341,11 +479,13 @@ class Connector:
                 decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS,
                                          token=token, wall_time=wall_time)
             if decision.needs == "rate_time":
-                rate_time = self.clock()
-                decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS,
-                                         token=token, wall_time=wall_time, rate_time=rate_time)
-            if decision.windows is not None:
-                self.windows = decision.windows
+                # Composite reads update the same windows from worker threads.
+                with self._windows_lock:
+                    rate_time = self.clock()
+                    decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS,
+                                             token=token, wall_time=wall_time, rate_time=rate_time)
+                    if decision.windows is not None:
+                        self.windows = decision.windows
             if decision.error is not None:
                 error = decision.error
                 rejection = JSONResponse({"jsonrpc": "2.0", "id": request_id,
@@ -353,7 +493,15 @@ class Connector:
                     error.status, headers=error.headers)
                 await rejection(scope, replay, capture)
             else:
-                await self.sdk_app(scope, replay, capture)
+                frame = None
+                if is_call and audit_id and raw_token is not None and self.selected is not None:
+                    frame = _INVOCATION.set(Invocation(raw_token, audit_id, tool,
+                                                       time.monotonic() + BRIEF_SECONDS))
+                try:
+                    await self.sdk_app(scope, replay, capture)
+                finally:
+                    if frame is not None:
+                        _INVOCATION.reset(frame)
             response_start = next(m for m in messages if m["type"] == "http.response.start")
             status = response_start["status"]
             payload = b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body")

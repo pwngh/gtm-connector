@@ -84,13 +84,27 @@ def counts(connection: sqlite3.Connection) -> dict[str, int]:
     }
 
 
+def _selected(account_ids):
+    if account_ids is None:
+        return "", ()
+    identifiers = tuple(account_ids)
+    if not identifiers or len(identifiers) > 100 or any(not isinstance(value, str) for value in identifiers):
+        raise ValueError("Select 1 to 100 account IDs.")
+    return "(" + ", ".join("?" for _ in identifiers) + ")", identifiers
+
+
 def search_accounts(
-    connection: sqlite3.Connection, query: str = ""
+    connection: sqlite3.Connection, query: str = "", *, account_ids=None
 ) -> list[dict]:
-    """Find account names containing the literal query, ignoring ASCII case."""
+    """Find account names containing the literal query, ignoring ASCII case.
+
+    ``account_ids`` limits the search inside the query, before ordering.
+    """
+    placeholders, selected = _selected(account_ids)
+    condition = f" AND id IN {placeholders}" if placeholders else ""
     rows = connection.execute(
-        "SELECT * FROM accounts WHERE instr(lower(name), lower(?)) > 0 ORDER BY id",
-        (query,),
+        f"SELECT * FROM accounts WHERE instr(lower(name), lower(?)) > 0{condition} ORDER BY id",
+        (query, *selected),
     )
     return [dict(row) for row in rows]
 
@@ -113,10 +127,14 @@ def get_account(connection: sqlite3.Connection, account_id: str) -> dict | None:
 
 
 def list_opportunities(
-    connection: sqlite3.Connection, account_id: str | None = None
+    connection: sqlite3.Connection, account_id: str | None = None, *, account_ids=None
 ) -> list[dict]:
     """Return opportunity records without enriching them from the calls source."""
-    if account_id is None:
+    if account_id is None and account_ids is not None:
+        placeholders, selected = _selected(account_ids)
+        rows = connection.execute(
+            f"SELECT * FROM opportunities WHERE account_id IN {placeholders} ORDER BY id", selected)
+    elif account_id is None:
         rows = connection.execute("SELECT * FROM opportunities ORDER BY id")
     else:
         rows = connection.execute(

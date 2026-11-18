@@ -26,6 +26,10 @@ Imported transcripts keep the same calls tool and permission. Their immutable
 or line ranges. The tool never returns the complete original export. See
 [transcript import, inspection, and limits](calls.md).
 
+`serve --selection FILE` limits these reads to the selected accounts, replaces
+`log_activity` with `prepare_renewal_brief` and `read_renewal_brief`, and turns
+writes off. See [the selection guide](selection.md).
+
 ## Fixtures
 
 The fixed book uses invented company and person names, mixed industries, and

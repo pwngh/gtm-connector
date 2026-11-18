@@ -301,6 +301,10 @@ def build_parser():
         if name in ("serve", "brief"):
             command.add_argument("--salesforce-demo-binding", type=Path,
                                  help="Load private imported account bindings for invented call and Slack fixtures.")
+        if name == "serve":
+            command.add_argument("--selection", type=Path,
+                                 help="Serve only the accounts and Slack threads in this private selection file. "
+                                      "Adds the caller-run brief tools and turns writes off.")
         if name in ("serve", "brief", "accounts", "account", "salesforce"):
             command.add_argument("--sf-org", help="Read Salesforce credentials from this signed-in sf CLI alias.")
             command.add_argument("--sf-environment", choices=("developer", "sandbox", "production"),
@@ -1038,8 +1042,14 @@ def _run(args, argv):
         if getattr(args, "salesforce_demo_binding", None) is not None:
             if args.crm_backend != "salesforce":
                 raise ValueError("--salesforce-demo-binding requires --crm-backend salesforce")
+            if getattr(args, "selection", None) is not None:
+                raise ValueError("--selection cannot be combined with --salesforce-demo-binding.")
             from .salesforce_demo import load_binding
             demo_binding = load_binding(args.salesforce_demo_binding)
+        if getattr(args, "selection", None) is not None:
+            # Check the owner's file before any credential or source is opened.
+            from .selection import load_selection
+            args.loaded_selection = load_selection(args.selection, crm_backend=args.crm_backend)
         if args.crm_backend == "salesforce":
             from .salesforce import SalesforceReadOnlyAdapter
             crm_reader = (SalesforceReadOnlyAdapter.from_sf(args.sf_org, environment=args.sf_environment)
@@ -1135,15 +1145,20 @@ def _run(args, argv):
                 _discard_output(sys.stdout)
                 message = "Event output closed. The server continues until Ctrl-C."
                 _server_notice(message, args.json)
+        selection = getattr(args, "loaded_selection", None)
         with Runtime(args.state_dir, crm_reader=crm_reader, on_call=events.put, demo_binding=demo_binding,
                      calls_backend=args.calls_backend, slack_backend=args.slack_backend,
-                     slack_connection_dir=args.slack_connection_dir) as runtime:
+                     slack_connection_dir=args.slack_connection_dir, selection=selection) as runtime:
             ready = {"type": "ready", "resource": runtime.config["resource"], "issuer": runtime.config["issuer"],
                      "crm_backend": runtime.crm_backend, "owner_config": str(runtime.directory / "owner.json"),
                      "state_dir": str(runtime.directory), "granted_scopes": [],
                      "sources": {"crm": "salesforce" if runtime.crm_backend == "salesforce" else "demo_fixture",
                                  "calls": "imported_transcript" if args.calls_backend == "imported" else "demo_fixture",
                                  "slack": "slack" if args.slack_backend == "slack" else "demo_fixture"}}
+            if selection is not None:
+                ready["selection"] = {"accounts": len(selection.accounts),
+                                      "slack_accounts": len(selection.slack_accounts),
+                                      "tools": sorted(runtime.connector.enabled_tools)}
             if demo_binding is not None:
                 ready["demo_kit_id"] = demo_binding.kit_id
             if runtime.crm_backend == "salesforce":
@@ -1160,6 +1175,10 @@ def _run(args, argv):
                            "Sources: CRM, call notes, and Slack use demo fixtures.")
                 if demo_binding is not None:
                     sources += f" The bound demo kit is {demo_binding.kit_id}."
+                if selection is not None:
+                    sources += (f"\nSelection: {len(selection.accounts)} accounts, "
+                                f"{len(selection.slack_accounts)} with a Slack thread. Callers can read only these "
+                                "and can prepare and reread briefs for them. Writes are off.")
                 _server_notice(f"Connector ready at {ready['resource']}\nBackend: {runtime.crm_backend}\n"
                                f"{sources}\n"
                                f"State folder: {runtime.directory}\n"
