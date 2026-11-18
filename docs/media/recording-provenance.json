@@ -1,13 +1,13 @@
 {
-  "started_at_utc": "2026-11-18T04:35:25.889524Z",
-  "completed_at_utc": "2026-11-18T04:37:51.848677Z",
-  "git_revision": "1d9e97745ec77bcaa67154fdfe585fe3e09cf9f5",
-  "git_tree": "d9ac65f4ce2380f18795b774080428dc686db12b",
+  "started_at_utc": "2026-11-18T04:55:41.559925Z",
+  "completed_at_utc": "2026-11-18T04:58:10.334848Z",
+  "git_revision": "0e78a5c10a2cfc5a8d4abd274e63dc5e216b7eb7",
+  "git_tree": "b5c0eb9f6bfed427e9edac3088158068f947dce3",
   "recording_script_sha256": "e433e3f18a0796c98cf0fd71fb76967fbff4995662f7af97e4315c88cc8e6aa6",
   "versions": {
     "python": "3.14.6",
     "mcp_sdk": "2.3.0",
-    "node": "v22.23.0",
+    "node": "v22.23.4",
     "inspector": "2.15.0"
   },
   "commands": [
@@ -21,9 +21,9 @@
         ".",
         ":(exclude)docs/media"
       ],
-      "started_at_utc": "2026-11-18T04:35:25.889907Z",
+      "started_at_utc": "2026-11-18T04:55:41.560273Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:35:25.924276Z"
+      "completed_at_utc": "2026-11-18T04:55:41.599953Z"
     },
     {
       "argv": [
@@ -31,9 +31,9 @@
         "rev-parse",
         "HEAD"
       ],
-      "started_at_utc": "2026-11-18T04:35:25.924443Z",
+      "started_at_utc": "2026-11-18T04:55:41.600028Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:35:25.951723Z"
+      "completed_at_utc": "2026-11-18T04:55:41.626144Z"
     },
     {
       "argv": [
@@ -41,9 +41,9 @@
         "rev-parse",
         "HEAD^{tree}"
       ],
-      "started_at_utc": "2026-11-18T04:35:25.951781Z",
+      "started_at_utc": "2026-11-18T04:55:41.626227Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:35:25.981593Z"
+      "completed_at_utc": "2026-11-18T04:55:41.656003Z"
     },
     {
       "argv": [
@@ -54,57 +54,57 @@
         "-s",
         "tests"
       ],
-      "started_at_utc": "2026-11-18T04:35:25.981664Z",
+      "started_at_utc": "2026-11-18T04:55:41.656088Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:36:56.532115Z"
+      "completed_at_utc": "2026-11-18T04:57:15.163983Z"
     },
     {
       "argv": [
         "gtm-connector",
         "demo",
         "--state-dir",
-        "var/recording-hnn3j8oj/state"
+        "var/recording-1mh58xhg/state"
       ],
-      "started_at_utc": "2026-11-18T04:36:56.532610Z",
+      "started_at_utc": "2026-11-18T04:57:15.164434Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:36:57.883936Z"
+      "completed_at_utc": "2026-11-18T04:57:16.534379Z"
     },
     {
       "argv": [
         "gtm-connector",
         "check-brief",
         "--json",
-        "brief-2ae89a88866346c59e532f87ee767736",
-        "var/recording-hnn3j8oj/candidate.txt",
+        "brief-a09208a50f8c41fe86cb80c6cc88038d",
+        "var/recording-1mh58xhg/candidate.txt",
         "--state-dir",
-        "var/recording-hnn3j8oj/state"
+        "var/recording-1mh58xhg/state"
       ],
-      "started_at_utc": "2026-11-18T04:37:27.940427Z",
+      "started_at_utc": "2026-11-18T04:57:46.597536Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:37:28.113194Z"
+      "completed_at_utc": "2026-11-18T04:57:46.767963Z"
     },
     {
       "argv": [
         "gtm-connector",
         "check-brief",
         "--json",
-        "brief-2ae89a88866346c59e532f87ee767736",
-        "var/recording-hnn3j8oj/candidate.txt",
+        "brief-a09208a50f8c41fe86cb80c6cc88038d",
+        "var/recording-1mh58xhg/candidate.txt",
         "--state-dir",
-        "var/recording-hnn3j8oj/state"
+        "var/recording-1mh58xhg/state"
       ],
-      "started_at_utc": "2026-11-18T04:37:28.113501Z",
+      "started_at_utc": "2026-11-18T04:57:46.768297Z",
       "exit_code": 4,
-      "completed_at_utc": "2026-11-18T04:37:28.279325Z"
+      "completed_at_utc": "2026-11-18T04:57:46.939654Z"
     },
     {
       "argv": [
         "node",
         "--version"
       ],
-      "started_at_utc": "2026-11-18T04:37:38.292755Z",
+      "started_at_utc": "2026-11-18T04:57:56.947069Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:37:38.321244Z"
+      "completed_at_utc": "2026-11-18T04:57:56.981359Z"
     },
     {
       "argv": [
@@ -114,9 +114,9 @@
         "--cli",
         "--version"
       ],
-      "started_at_utc": "2026-11-18T04:37:38.321342Z",
+      "started_at_utc": "2026-11-18T04:57:56.981415Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:37:39.581810Z"
+      "completed_at_utc": "2026-11-18T04:57:58.260688Z"
     },
     {
       "argv": [
@@ -125,7 +125,7 @@
         "@modelcontextprotocol/inspector@2.15.0",
         "--cli",
         "--config",
-        "var/recording-hnn3j8oj/inspector-state/inspector.json",
+        "var/recording-1mh58xhg/inspector-state/inspector.json",
         "--server",
         "gtm-connector",
         "--stored-auth-only",
@@ -135,9 +135,9 @@
         "--method",
         "tools/list"
       ],
-      "started_at_utc": "2026-11-18T04:37:40.453295Z",
+      "started_at_utc": "2026-11-18T04:57:58.948941Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:37:41.684145Z"
+      "completed_at_utc": "2026-11-18T04:58:00.215115Z"
     }
   ],
   "intentional_pause_seconds": 50,
@@ -151,7 +151,7 @@
     "rep": "Morgan Reed",
     "receipt_count": 6,
     "activities": 0,
-    "brief_id": "brief-2ae89a88866346c59e532f87ee767736",
+    "brief_id": "brief-a09208a50f8c41fe86cb80c6cc88038d",
     "sources": {
       "crm": "demo_fixture",
       "calls": "demo_fixture",
@@ -159,9 +159,9 @@
     }
   },
   "tests": {
-    "run": 396,
+    "run": 401,
     "result": "OK",
-    "elapsed_seconds": 88.666
+    "elapsed_seconds": 92.422
   },
   "rendering": {
     "asciinema": "asciinema 3.2.1",
@@ -209,15 +209,15 @@
       ]
     ],
     "idle_limit_seconds": 12,
-    "source_duration_seconds": 146.217957,
+    "source_duration_seconds": 149.036773,
     "script_sha256": "a0cc6f85600ce44a737803663268731ba76a68266878ba4143677832e17947a2",
     "note": "Real output; selected fields; idle periods capped; fixed reading pauses."
   },
   "artifact_sha256": {
-    "inspector-cli.gif": "e3c1b5eb55d87bebbd2fe4c64bb5c688eb34d0d2252a7cdb543d222288d84f69",
+    "inspector-cli.gif": "2a2f1bbf8fb8d46e95e5be6d97e812afc9c5490b9854aa3bb57fa3edea7e14f8",
     "inspector-tools.json": "b69f838dbca389db37d48ad7f83a86f30cc1dca2cec6dc1f5f8e3aaa6c2aa60d",
-    "recording-session.txt": "5fb0e2cc12895ec6aee5195f34ce4b80de6438a73c5744cd96fa118ebdcea858",
-    "walkthrough.cast": "e7dc7b6fc5be41dbf57fa2fff121bb45af6d4bce778b9cd3884f3612ab9fe34c",
-    "walkthrough.gif": "65b28ada6165e9cffcf10dcf46b660f66ae9de9e56d3ebcd64e89b1caebe3744"
+    "recording-session.txt": "82b22f0852834b13a27a707452545946aac1ff5f364fa196905b8e1fefaf7481",
+    "walkthrough.cast": "38615e23eee840402310418cb818bf3b37884b92edb97d89ba7b8edf81db4b4a",
+    "walkthrough.gif": "0bc387512c48fa30a6de15434d4df707132962da927b1f7801dd934400f8bedc"
   }
 }
