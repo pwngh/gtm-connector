@@ -18,11 +18,12 @@ records what was kept, what waits, and what was dropped. AGENTS.md holds the
 resulting order and rules. No behavior changes in this entry's PR.
 
 **The gap that decides usefulness.** A brief quotes one transcript excerpt per
-account, and the person chooses it. The default is the first 20 lines or cues.
-Slack contributes one thread, mapped by hand. The default drafter formats fixed
-facts, and the optional local model assembles the same fixed claims. The brief
-therefore saves formatting time. It does not save reading time, because the
-person still finds the important moment in the call and the right thread.
+account, and the person chooses it. The default is up to the first 20 lines or
+cues plus one adjacent unit of context, and fewer when the quote bound requires
+it. Slack contributes one thread, mapped by hand. The default drafter formats
+fixed facts, and the optional local model assembles the same fixed claims. The
+brief therefore saves formatting time. It does not save reading time, because
+the person still finds the important moment in the call and the right thread.
 
 **The test for each item.** Does it shorten the path from install to a brief
 someone would use before a real renewal call, or remove a reason they would
@@ -41,7 +42,9 @@ earlier sequence.
 - The extraction test runs before slice 1. It needs only the transcript parser,
   a model, and a range check, and it decides whether the later slices are worth
   building. Spending two security-heavy PRs first would test the cheapest
-  assumption last.
+  assumption last. An agent proves the script on invented transcripts and the
+  owner runs it on real ones, because an agent session is itself a hosted
+  model and the rule against employer or client material still applies.
 - The Slack channel window comes before model-read claims. Otherwise the model
   reads a whole call but the person still hunts for the thread.
 - The model cites numbered units instead of retyping quotes. Transcripts are
@@ -49,24 +52,43 @@ earlier sequence.
   filler words and changes punctuation, and loosening the match to tolerate
   that would weaken the check. A cited range needs no approximate matching.
 - A hosted model is allowed only by the operator's choice and with their own
-  key. This replaces the earlier absolute rule that the runtime calls no hosted
-  model. The default stays offline. A hosted endpoint sends selected source
-  text off the machine, so the choice is explicit, labeled, and recorded.
-- The key comes from an environment variable or a private file. A flag would
-  leak it into shell history and the process list.
+  key. For slice 4 this replaces the "No hosted model calls" limit of the
+  earlier local-model slice. The existing Ollama adapter stays local and the
+  default stays offline. A hosted endpoint sends selected source text off the
+  machine, so the choice is explicit and labeled, and every call is recorded,
+  including a failed or rejected one.
+- The key comes from an environment variable or a private file with mode 0600.
+  A flag would leak it into shell history and the process list.
+- A cited range shows where a claim points. It does not prove the claim. An
+  instruction inside a transcript could still steer the wording of a claim
+  that cites a real line. Model-read claims are therefore labeled as
+  model-proposed and shown beside their cited text, and the instruction case
+  stays in the evaluation.
+- One model call can read CRM, call, and Slack evidence together, and the
+  citation the model picks is not proof of where a sentence came from. A
+  model-read claim is returned only to a caller holding every scope the call's
+  input required.
+- Saved call evidence is a selected excerpt today. Reading a whole transcript
+  is a separate explicit choice, so that selecting a model does not quietly
+  widen what leaves the audited calls read.
 - Deal cards ship as terminal text and local HTML. A Block Kit export proves
   nothing until something sends it.
 - The chooser uses a numbered menu from the standard library. A prompt library
   would add runtime dependencies and startup cost for arrow keys.
 - Transcript intake uses one subfolder per account. A filename prefix would
   still make the person rename every export.
-- Bot messages excluded from a channel window are counted. Silent removal would
-  make an incomplete window look complete.
+- The current thread reader includes bot messages and refuses unsupported
+  subtypes. The channel slice keeps that unless it records a reason to change
+  it. If it excludes automated messages, it counts them, because silent
+  removal would make an incomplete window look complete.
 
-Slack's limit for commercially distributed apps outside its Marketplace is 15
-messages per request and one request per minute on the two history methods.
-Internal customer-built apps keep the higher limits. A useful channel window
-therefore needs the operator's own internal app. Read on 2026-11-18:
+Slack limits new commercially distributed apps outside its Marketplace, and new
+installations of them, to 15 messages per request and one request per minute on
+the two history methods. Marketplace apps, internal customer-built apps, and
+existing installations are outside that limit. The intended setup for a channel
+window is the operator's own internal app. An agent never creates or changes an
+app, and under the restricted limit a window can be incomplete by design. Read
+on 2026-11-18:
 [rate limit changes](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps),
 [rate limits](https://docs.slack.dev/apis/web-api/rate-limits).
 
@@ -89,11 +111,12 @@ team deployment.
 
 - A ports-and-adapters refactor as its own PR. Extract an interface when a
   second implementation arrives.
-- A snapshot cache with background refresh. The saved-brief read in slice 1
-  already returns without provider calls.
+- A snapshot cache with background refresh. Slice 1 requires its saved-brief
+  read to return without provider calls, and `check-brief` already validates a
+  saved brief offline.
 - Email, support, and product-usage connectors.
-- Follow-up question threads in Slack. An assistant already asks follow-ups
-  through the tools.
+- Follow-up question threads in Slack. A connected MCP client can call the
+  read tools again to follow up, so a separate thread feature is not needed.
 - A real-time drift watcher. It needs public ingress.
 - A policy file, a model router with failover, a telemetry dashboard, and a
   plugin SDK.
@@ -106,8 +129,9 @@ team deployment.
 
 No extraction test has run. No live org or workspace has been read by the
 owner's check. The channel window, model-read claims, and every later slice are
-plans, not implemented behavior. README and SECURITY_REVIEW.md are unchanged
-and still describe only what exists.
+plans, not implemented behavior. The review tiers have not been used on a slice
+yet. README and SECURITY_REVIEW.md are unchanged and still describe only what
+exists.
 
 ## Review configuration
 
@@ -125,20 +149,38 @@ satisfied the revised gate; no fourth review round ran.
 
 Sol and Opus were the two full members for PRs #26 through #29.
 
-The user chose the roster "Fable, Sol, Grok" on 2026-11-18 for the remaining
-PRs. Use Anthropic `claude-fable-5-2` through the `claude` CLI, an available
-OpenAI GPT Sol model, and xAI `grok-4.7` through the `grok` CLI at version
-1.0.13 or later, each at High. A one-word test prompt reached Fable and Grok
-through those CLIs on 2026-11-18. No council review has run with this roster
-yet. Each review is a separate run; the orchestrating session does not count
-as a member's review.
+The user chose the roster "Fable, Sol, Grok" on 2026-11-18, added Gemini 4
+Argon through the `agy` CLI the same day, and accepted two review tiers.
+AGENTS.md holds the roster, the tier rule, and the questions. These are the
+reasons.
 
-Give all three members the same scope and record actual model IDs, effort,
-round numbers, findings, and returned scores or `no score`. Maximum three
-rounds per PR. Report unresolved findings or disagreements after round three
-instead of implying approval. Do not invent usage, scores, identities, or a
-successful provider completion. If any selected member cannot be reached, stop
-locally and report it.
+- **Two tiers.** A four-member council on every PR costs time and adds little
+  on a change that is far from the guarantees. Those changes get the Sol loop.
+- **Rule changes are council-tier.** Round one of this entry's PR was a
+  two-file documentation change, and every member returned real findings
+  about the rules it added.
+- **One prompt for every member.** Independent reviews of identical material
+  are the point of a council. Giving each member a different question would
+  leave each area with one reviewer.
+- **Grok is non-blocking.** Its first two non-interactive runs were cancelled
+  at a tool approval, and its first complete review took about twelve minutes.
+  Its findings were as useful as the others', so it still runs every time.
+- **Exported copies, not the live checkout.** `grok` and `agy` cannot ask for
+  approval in a non-interactive run, so they run with automatic approval
+  inside their sandboxes. A private copy of the commit keeps that safe.
+- **The guarantee tests stay in unittest.** A proposal to add a pytest marker
+  suite that runs in under two seconds did not fit this repository. It has no
+  pytest dependency, and the five test files behind the README's guarantees
+  ran 53 tests in about 35 seconds on 2026-11-18.
+- **The log was moved, not deleted.** Lines 3 through 1400 of the previous
+  DECISIONS.md are byte-identical in DECISION_LOG.md. Reviewers in round one
+  cited those entries to catch contradictions, so they stay searchable.
+
+Record actual model IDs as each tool reports them, effort, round numbers,
+findings, and returned scores or `no score`. Maximum three rounds per PR.
+Report unresolved findings or disagreements after round three instead of
+implying approval. Do not invent usage, scores, identities, or a successful
+provider completion.
 
 Review tooling uses existing accounts and is separate from the product runtime.
 It must not create accounts, trials, subscriptions, or keys. The connector calls

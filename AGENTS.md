@@ -15,7 +15,14 @@ plain and finish one runnable PR slice at a time. Use Python and SQLite.
   pushes must be to this task's own branches. Create only a private pwngh repo.
 - Inspect the full tree and history for private material before the first push
   and before sending source to external review providers.
-- Record material scope choices and limitations in DECISIONS.md.
+- Record a material scope choice or limit as a dated entry at the top of
+  DECISION_LOG.md, and add its title to the list in DECISIONS.md. Change the
+  rest of DECISIONS.md only when the build order or review configuration
+  changes. Put build logs, test counts, and review transcripts in the PR
+  description, not in either file.
+- Before a task, read this file and DECISIONS.md. Then read only the documents
+  and modules the task touches. Search DECISION_LOG.md for a past decision. Do
+  not read it whole.
 - Read the current MCP specification and authorization requirements before
   implementing the protocol. Both researched revisions are 2026-07-28, read on
   2026-11-17. Record revision and reading date in the README.
@@ -159,7 +166,11 @@ real-host login or rendering from a fake provider or local protocol harness.
 ## Build order from 2026-11-18
 
 The user asked for a product a person can use, not a coding exercise. This
-order replaces the remaining part of the sequence above. DECISIONS.md records
+section replaces the list of remaining slices in the sequence above. The rules
+in that section still apply: keep authentication, source selection, and daily
+use separate, label sources, never substitute fixtures silently, and use
+existing provider registrations only. The earlier authorization for MCP
+resources is withdrawn until the user asks for it again. DECISIONS.md records
 the reasons, the deferred items with their triggers, and the dropped items.
 
 Judge every item by one test. Does it shorten the path from install to a brief
@@ -170,68 +181,126 @@ Close that gap before adding surfaces.
 Two checks come before the numbered slices:
 
 - The owner runs `salesforce check` and `slack check` against a real org and
-  workspace. This checks sign-in, visibility, and bounds only. Agents never run
-  it. Keep "No live org has been verified." until the owner supplies the report.
-- Run an extraction test outside the repository on five messy transcripts. A
-  model proposes claims that cite numbered lines or cues, and a script prints
-  the saved text for each cited range. The user reads the result as a rep
-  would. If it is thin or wrong, stop and report before starting slice 1.
-  Never commit a real transcript. Use a local model unless the user explicitly
-  chooses a hosted one for this test.
+  workspace. Agents never run them. `salesforce check` reads account, contact,
+  contract, and opportunity records and makes one brief in temporary private
+  state. `slack check` reads the mapped thread. Both print a sanitized report
+  without source text. Keep "No live org has been verified." until the owner
+  supplies the report.
+- Run an extraction test outside the repository. A model proposes claims that
+  cite numbered lines or cues, and a script prints the saved text for each
+  cited range. An agent builds the script and proves it on invented messy
+  transcripts only. An agent session is itself a hosted model, so an agent
+  never reads a real transcript. The owner then runs the script on five real
+  transcripts they are free to use, on their own machine, and reads the result
+  as a rep would. If it is thin or wrong, stop and report before starting
+  slice 1. The model rules below apply to this test. Commit only invented
+  transcripts.
 
 Then finish one reviewed PR per slice, in this order:
 
-1. Selected sources and caller-safe briefs, as already designed.
-2. The local stdio MCP bridge. `connect --transport stdio` also writes the
-   client configuration, after saving a backup of the existing file.
+1. Selected sources and caller-safe briefs. The design notes are outside the
+   repository, so this slice's PR records its design in DECISION_LOG.md. The
+   requirements are fixed. A remote brief tool runs under the caller's own
+   token and never the owner's. Every read is limited to the caller's scopes,
+   the saved selection, and what the provider shows. Each composite call
+   commits one outer receipt and one receipt per attempted read. Reading a
+   saved brief rechecks current permissions and makes no provider call.
+2. The local stdio MCP bridge. Every request still goes through the existing
+   gateway, with scopes named at launch, a receipt committed before execution,
+   and the rate limit. An expired, malformed, or wrong-audience token is
+   refused as it is today, with no owner fallback. `connect --transport stdio`
+   also writes the client configuration. It merges only the connector's entry,
+   keeps the file's mode, saves a backup with that mode first, and refuses to
+   write through a symlink. The file holds paths and scopes, never a token or
+   an owner credential.
 3. A Slack channel window. The operator pins one channel per account. The read
-   has hard caps on days, messages, and thread replies.
-4. Model-read claims. A model reads the whole selected transcript and channel
-   window and proposes claims. The checker accepts a claim only when its cited
-   units exist in the saved evidence. Repeat the five-transcript test with
-   channel context before calling this slice ready.
-5. Deal cards as terminal text and a local HTML preview. No Block Kit export
-   yet, because nothing sends it.
+   keeps the existing shared budget of HTTP attempts, response bytes, and one
+   deadline, and adds hard caps on days, messages, and thread replies.
+4. Model-read claims. A model reads the selected evidence and proposes claims
+   that cite numbered units. Repeat the extraction test with channel context
+   before calling this slice ready.
+5. Deal cards as terminal text and a local HTML preview. The preview is one
+   static file with source text escaped, no script, no remote resource, and no
+   server. No Block Kit export yet, because nothing sends it.
 6. Explicit `auth` and `configure` commands and saved daily profiles. Split
    `cli.py` in this slice.
 7. The default chooser, as a numbered menu from the standard library. Add a
    macOS CI runner. Test on Linux and macOS.
 8. Transcript folder intake. One subfolder per selected account, so exported
    files need no renaming. Import runs on command. There is no watcher process.
+   The account association uses the audited CRM read, as `calls import` does
+   today. Never choose a file by its modification time. The slice's PR states
+   how several files for one account are ordered and bounded.
 9. A renewals-due command that prepares briefs for selected accounts renewing
-   within a chosen number of days. The operator schedules it. It follows the
-   profile's model choice and writes its normal receipts.
+   within a chosen number of days. The operator schedules it. It calls the
+   audited tools with explicitly named scopes, like any other caller. If the
+   local token or a Slack or Salesforce credential is expired or rejected, it
+   fails that account with a recorded receipt and a clear error. It never
+   prompts, signs in, or substitutes fixtures.
 10. A PyPI release. The owner publishes it.
 
 Rules for model-read claims:
 
-- The default demo, evaluation, and CI stay offline and use no model.
-- The operator selects a model per profile. Local Ollama needs no key. A hosted
-  endpoint needs the operator's own key, read from an environment variable or a
-  private file. Never accept the key as a command-line flag. The key never
-  enters a selection, profile, receipt, log, or tool result.
+- The default demo, evaluation, and CI stay offline and use no model. The
+  existing Ollama adapter stays local. For slice 4 only, these rules replace
+  the "No hosted model calls" limit in follow-up 7 above.
+- The operator selects the model. Until saved profiles exist in slice 6, that
+  is an explicit command option, and slice 6 stores the same choice. Local
+  Ollama needs no key. A hosted endpoint needs the operator's own key, read
+  from an environment variable or a private regular file with mode 0600. Never
+  accept the key as a command-line flag. The key never enters a selection,
+  profile, saved brief, receipt, log, error message, or tool result.
+- A hosted request uses HTTPS with verified TLS, no redirects, and no
+  environment proxy. It sends the key only to the configured host, and it has
+  a time limit and a response size limit.
 - Selecting a hosted endpoint sends selected source text off the machine. Say
-  so when it is selected, show the endpoint host and model in the source
-  labels, and record them with the brief.
+  so when it is selected, and show the endpoint host and model in the source
+  labels.
+- Record every model call, including a failed or rejected one: endpoint host,
+  model, outcome, and usage counts. Never record the key, the prompt, or
+  rejected candidate text.
 - The model receives only evidence that already passed the source selection and
   the caller's scope checks. It receives no credential, tool definition, or
-  tool. Its output is untrusted until the checker accepts it.
-- The model cites numbered units. The connector prints the saved text for the
-  cited range. Do not accept a retyped quote by approximate matching. Numbers
-  and dates in a claim must appear in its cited units.
+  tool. A model-read claim is returned only to a caller that holds every scope
+  the model call's input required.
+- Today the saved evidence for a call is a selected excerpt. The model reads
+  more than that excerpt only when the operator explicitly selects the whole
+  transcript for that account. The whole transcript then reaches the model
+  through the audited calls read into saved evidence, inside a stated unit and
+  byte bound, and never by reading the import store directly. Bound the model's
+  input and output. Never truncate evidence silently.
+- The model cites numbered units, and the connector prints the saved text for
+  the cited range. Do not accept a retyped quote by approximate matching.
+  Numbers and dates in a claim must appear in its cited units.
+- A cited range shows where a claim points. It does not prove the claim. Label
+  model-read claims as model-proposed in briefs and tool results, and show the
+  cited text beside each one. Source text reaches the model as quoted data.
+  Source text and accepted claims stay data. They never select a tool, a
+  grant, or a write.
+- Never publish a claim that failed the check. The slice's PR decides whether
+  a failed claim rejects the whole brief, as the current checker does, or is
+  withheld with a visible count, and records the reason. Required disclosures
+  for conflicts and for missing, denied, or incomplete sources stay required
+  whatever the model writes.
 - Keep the 182-claim and 223-claim fixed suites unchanged as the offline
-  baseline. Add a separate evaluation track for model-read claims.
+  baseline. Add a separate evaluation track for model-read claims, and keep
+  the instruction-inside-a-source case in it.
 
 Rules for the Slack channel window:
 
 - The channel is pinned explicitly in the saved selection. Do not guess a
-  channel from its name.
-- Count excluded automated messages in the evidence instead of dropping them
-  silently. A window that hit a cap is incomplete, not empty.
-- Slack limits commercially distributed apps outside its Marketplace to 15
-  messages per request and one request per minute on `conversations.history`
-  and `conversations.replies`. Internal customer-built apps are exempt. Read
-  Slack's current policy before choosing bounds and state the requirement.
+  channel from its name. An agent never creates or changes a Slack app.
+- Keep the current handling of message subtypes unless the slice's PR changes
+  it with a recorded reason. If the slice excludes automated messages, the
+  evidence records how many, without their text.
+- A window that hit a cap is incomplete. The brief must say so. Do not present
+  it as empty or complete.
+- Slack limits new commercially distributed apps outside its Marketplace, and
+  new installations of them, to 15 messages per request and one request per
+  minute on `conversations.history` and `conversations.replies`. Marketplace
+  apps, internal customer-built apps, and existing installations are outside
+  that limit. Under it a window can be incomplete by design. Read Slack's
+  current policy before choosing bounds.
 
 Do not start these without the user's explicit request: MCP Apps and Slack
 rich-response contracts, native Windows support, CRM writes, a Slack bot,
@@ -240,37 +309,75 @@ deployment bundle of Postgres, single sign-on, per-user tokens, a container,
 a hash-chained audit log, and redaction. Do not add a `ROADMAP.md`; this
 section and DECISIONS.md hold the plan.
 
-## Council
+## Review tiers and council
 
-The user chose the roster "Fable, Sol, Grok" on 2026-11-18 for the remaining
-authorized PRs. It replaces the two-member roster that followed the earlier
-instruction "Keep going without Gemini". PRs #26 through #29 were reviewed by
-Sol and Opus under that earlier roster. Use these three full members from the
-next PR onward:
+The user set the council on 2026-11-18 as "Fable, Sol, Grok", added Gemini 4
+Argon the same day, and accepted two review tiers. This replaces the two-member
+roster that followed the earlier instruction "Keep going without Gemini". PRs
+#26 through #29 were reviewed by Sol and Opus under that roster.
 
-| Provider | Member | Effort |
-| --- | --- | --- |
-| Anthropic | Claude Fable 5.2, model ID `claude-fable-5-2`, through the `claude` CLI | High |
-| OpenAI | GPT Sol; record the exact available Sol model ID | High |
-| xAI | Grok 4.7, model ID `grok-4.7`, through the `grok` CLI, version 1.0.13 or later | High |
+Choose the tier from what the diff touches. State the tier and the reason in
+the PR description. When unsure, use the council.
+
+- **Sol loop only.** A change that touches none of the items in the next
+  bullet. Run the `sol-loop` skill with GPT Sol at High.
+- **Council.** A change that touches `gateway.py`, `auth.py`, `audit.py`,
+  `citations.py`, `store.py`, `request_checks.py`, `tool_definitions.py`,
+  `refusals.py`, `runtime.py`, `briefing.py`, `client.py`, credential or token
+  handling, a new outside connection, a model call, the rules in this file,
+  SECURITY_REVIEW.md, or the README's guarantees.
+
+| Provider | Member | Effort | Gate |
+| --- | --- | --- | --- |
+| Anthropic | Claude Fable 5.2, model ID `claude-fable-5-2`, through the `claude` CLI | High | Blocking |
+| OpenAI | GPT Sol; record the exact Sol model ID. PRs #25 through #29 used `gpt-6.2-sol` | High | Blocking |
+| Google | Gemini 4 Argon, model ID `gemini-4-argon-high`, through the `agy` CLI | High | Blocking |
+| xAI | Grok 4.7, model ID `grok-4.7`, through the `grok` CLI, version 1.0.13 or later | High | Non-blocking |
+
+Grok runs alongside the others. Use its findings when it finishes inside the
+time limit. A failed or late Grok run does not stop the PR and gets no score.
+Its first complete review took about twelve minutes, the longest of the four.
+If a blocking member cannot be reached, stop on a local branch and report the
+failure without substitution.
 
 Each review is a separate, independent run. The orchestrating session does not
 count as a member's review, even when it runs on a member's provider.
 
-Record actual model IDs, effort, round numbers, findings, and returned scores
-or `no score` in each PR description. Do not count a failed provider completion
-as approval, invent consensus, or silently substitute another provider.
+Give every member the same prompt, code, tests, and proof. Give each member its
+own exported copy of the reviewed commit with the diff as a file, not the live
+checkout. A reviewer with tool approval then cannot change the repository, and
+work can continue while a slow member reads. Tell reviewers to read the diff
+first and to search DECISION_LOG.md instead of reading it whole.
 
-Give all three members the same code, tests, and these attack questions. Put each
-member's answers and evidence in the PR table, not just a general verdict:
+Ask every member these questions. Put each member's answers and evidence in the
+PR table, not just a general verdict:
 
 - Can any tool return data outside the token's scopes?
 - Can a tool call miss the audit log, including rejected calls and failures?
 - What happens with an expired, malformed, or wrong-audience token?
 - Is anything inside a source record ever treated as an instruction?
+- Can a race, lock, timeout, or cancellation break one of the guarantees?
+- Does the diff do anything its stated scope and contracts do not include?
 
-Maximum three council rounds per PR. If agreement is absent after round three,
-report open findings and disagreements. Do not start a fourth round or imply
-approval. If any selected member cannot be reached, stop on a
-local branch and report the failure without substitution. Full stop ends each
-PR, then work continues through the authorized sequence. The user merges.
+Record actual model IDs as each tool reports them, effort, round numbers,
+findings, and returned scores or `no score` in each PR description. Do not
+count a failed provider completion as approval, invent consensus, or silently
+substitute another provider.
+
+Maximum three council rounds per PR. Round one reviews the whole change. Later
+rounds review only changed text and open findings. If agreement is absent
+after round three, report open findings and disagreements. Do not start a
+fourth round or imply approval.
+
+Before coding a council-tier slice, list the three most likely ways it could
+break a guarantee and write a failing test for each one first. After each edit
+to a module in the council list, run the tests behind the README's guarantees:
+
+```sh
+.venv/bin/python -m unittest tests.test_audit tests.test_citations tests.test_gateway tests.test_slack_gateway tests.test_briefing
+```
+
+That ran 53 tests in about 35 seconds on a loaded machine on 2026-11-18.
+
+Full stop ends each PR, then work continues through the build order above.
+The user merges.
