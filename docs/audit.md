@@ -37,8 +37,10 @@ after setup. Replace the placeholder with the generated brief ID:
 .venv/bin/python -m gtm_connector audit --brief brief-REPLACE_WITH_ID
 ```
 
-Omitting `--brief` lists all receipts; `--state-dir PATH` selects another state
-directory. The audit command opens SQLite read-only without initializing tables or changing
+The default output is a receipt table. Add `--json` for the complete receipt
+array, including arguments and returned record references. Omitting `--brief`
+lists all receipts; `--state-dir PATH` selects another state directory.
+The audit command opens SQLite read-only without initializing tables or changing
 permissions. A missing database or receipt schema is an error.
 [Inspection tests](../tests/test_audit_reader.py) cover these cases;
 [Usage reporting](usage.md) provides a read-only summary.

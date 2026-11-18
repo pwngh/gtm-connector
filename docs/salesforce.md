@@ -103,11 +103,16 @@ The adapter does not treat `Account.AnnualRevenue` as ARR or `CloseDate` as a
 renewal date. It preserves custom stages and invents no renewal risk.
 
 Those missing mappings prevent renewal briefs from this backend. This command
-exits 2 with `renewal_fields_unmapped`, before reading data or invoking a model:
+exits `3` with `renewal_fields_unmapped`, before reading data or invoking a model:
 
 ```sh
 .venv/bin/python -m gtm_connector brief acc-sf-REPLACE_WITH_RETURNED_ID --crm-backend salesforce
 ```
+
+The refusal writes its reason and a next command to stderr, leaving stdout
+empty. Add `--json` for a structured error with `error.code: "refused"`.
+Missing or invalid Salesforce configuration remains a usage error with exit `2`.
+See [the CLI contract](cli.md).
 
 The local `seed`, `accounts`, and `account` commands remain direct SQLite
 administration. They never query or modify Salesforce. The runtime initializes

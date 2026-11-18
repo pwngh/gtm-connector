@@ -1,3 +1,37 @@
+[build-system]
+requires = ["setuptools==84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gtm-connector"
+description = "Create cited renewal briefs from scoped CRM, call, and Slack reads."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dynamic = ["version", "dependencies"]
+
+[project.scripts]
+gtm-connector = "gtm_connector.cli:main"
+
+[project.urls]
+Repository = "https://github.com/pwngh/gtm-connector"
+Documentation = "https://github.com/pwngh/gtm-connector#readme"
+Issues = "https://github.com/pwngh/gtm-connector/issues"
+
+[tool.setuptools]
+packages = ["gtm_connector", "gtm_connector._evaluation_data"]
+include-package-data = false
+
+[tool.setuptools.package-dir]
+"gtm_connector._evaluation_data" = "evaluation"
+
+[tool.setuptools.package-data]
+"gtm_connector._evaluation_data" = ["expected.json"]
+
+[tool.setuptools.dynamic]
+version = {attr = "gtm_connector.__version__"}
+dependencies = {file = ["requirements.in"]}
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"

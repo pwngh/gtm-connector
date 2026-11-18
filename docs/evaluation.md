@@ -10,6 +10,13 @@ Evaluation runs from the repository root after setup:
 .venv/bin/python -m gtm_connector evaluate
 ```
 
+The command prints a readable summary. Add `--json` for the complete report,
+including the per-account `cases` and model-usage fields described below:
+
+```sh
+.venv/bin/python -m gtm_connector evaluate --json
+```
+
 The default evaluation makes 60 HTTPS tool calls for `acc-001` through `acc-020` in fresh
 temporary state. It neither reads nor changes the operator's CRM. The default
 runs no model.
@@ -37,6 +44,8 @@ The fixture adapter produced these results on 2026-11-17 with as-of date `2027-0
 | Model input / output tokens | 0 / 0 |
 
 [RESULTS.json](../evaluation/RESULTS.json) records the output and counts for each account.
+The checked-in reports are historical runs from before explicit `--json` was
+required. Their stored commands and results remain unchanged.
 
 ## How scoring works
 
@@ -49,7 +58,10 @@ statements count once:
 
 Duplicates fail evaluation without increasing coverage. Failed or rejected
 briefs keep their expected claims in the denominator but publish no text to
-score for invention. Any failed case or required check makes the CLI exit `2`.
+score for invention. Any failed case or required check makes the CLI exit `4`.
+The report still goes to stdout, and an error with a recovery command goes to
+stderr. Invalid arguments exit `2`; a service preflight failure exits `5` before
+a report is produced. See [CLI output and exit codes](cli.md).
 
 Scorer tests cover missing facts, missing or wrong references, invented or
 appended text, and duplicates. The score measures published fixture output
@@ -60,7 +72,7 @@ or establish whether a source is true.
 
 ## Optional local model comparison
 
-`evaluate --adapter ollama --model NAME` uses the same twenty accounts and
+`evaluate --adapter ollama --model NAME --json` uses the same twenty accounts and
 expected claims. Top-level scores describe published text. Before the gate runs,
 `candidate` scores actual returned lines in memory. It counts uncited or
 unsupported lines, duplicates, and omitted required disclosures. Unsupported
@@ -73,7 +85,7 @@ its lines, even valid ones. Zero published lines means an undefined (`null`)
 invention rate.
 
 `publication_gate_passed` records publication and read-only checks. `status`
-still requires full coverage and exits `2` otherwise.
+still requires full coverage and exits `4` otherwise.
 
 `model_usage` sums service counts, including rejected generations; a missing
 count makes that dimension unknown. `model_metadata` records the selected model

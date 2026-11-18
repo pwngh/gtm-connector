@@ -9,6 +9,10 @@ from .client import LocalClient
 from .runtime import private_file
 
 
+class InspectorConnectionError(RuntimeError):
+    """The local authorization service could not be reached."""
+
+
 def write_inspector_config(directory, scopes):
     """Keep the bearer credential in a private file, not terminal output."""
     directory = Path(directory).resolve()
@@ -22,7 +26,8 @@ def write_inspector_config(directory, scopes):
         with LocalClient(owner) as client:
             token = client.authorize(scopes)
     except httpx2.HTTPError:
-        raise RuntimeError("Cannot reach the local authority; start serve in this state directory.") from None
+        raise InspectorConnectionError(
+            "Cannot reach the local authority; start serve in this state directory.") from None
     config = {"mcpServers": {"gtm-connector": {
         "type": "streamable-http", "url": owner["resource"],
         "protocolEra": "modern", "headers": {"Authorization": "Bearer " + token},

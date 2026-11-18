@@ -17,6 +17,9 @@ These commands run from the repository root after setup:
 .venv/bin/python -m gtm_connector demo --with-slack --state-dir var/slack-demo
 ```
 
+The brief command above returns JSON. Evaluation and demo print readable
+summaries; add `--json` to inspect their full result objects.
+
 The full brief requests `crm:read`, `calls:read`, and `slack:read`. After the
 default three reads, it calls `read_slack_messages`, never requesting
 `crm:write`. The demo proves CRM grants cannot read Slack and a Slack-only token
@@ -99,4 +102,6 @@ on 2026-11-17 from `21:11:19` to `21:11:21` UTC, using no model:
 | Activities created | 0 |
 | Input / output model tokens | 0 / 0 |
 
-The [Recorded output and exact invocation](../evaluation/RESULTS_SLACK.json) file preserves the run details.
+The [recorded output and exact invocation](../evaluation/RESULTS_SLACK.json) file preserves the run details.
+That historical command predates the explicit `--json` requirement. Use
+`evaluate --with-slack --json` to produce a JSON report with the current CLI.

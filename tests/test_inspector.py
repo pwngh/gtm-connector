@@ -23,7 +23,7 @@ class InspectorConfigurationTests(unittest.TestCase):
     def test_cli_exports_only_the_explicit_grant_in_a_private_config(self):
         with Runtime(self.state) as runtime:
             result = subprocess.run(
-                [sys.executable, "-m", "gtm_connector", "inspector-config",
+                [sys.executable, "-m", "gtm_connector", "inspector-config", "--json",
                  "--state-dir", str(self.state), "--scope", "crm:read"],
                 capture_output=True, text=True, timeout=30,
             )
@@ -79,7 +79,7 @@ class InspectorConfigurationTests(unittest.TestCase):
              "--state-dir", str(self.state), "--scope", "crm:read"],
             capture_output=True, text=True, timeout=30,
         )
-        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.returncode, 5)
         self.assertIn("start serve", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertEqual(result.stdout, "")

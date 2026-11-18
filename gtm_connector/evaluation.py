@@ -14,7 +14,11 @@ import tempfile
 from typing import Any
 
 
-EXPECTED_PATH = Path(__file__).resolve().parents[1] / "evaluation" / "expected.json"
+# The wheel maps the canonical evaluation directory into this private package.
+# A checkout reads the same source file without needing an editable install.
+EXPECTED_PATH = Path(__file__).resolve().parent / "_evaluation_data" / "expected.json"
+if not EXPECTED_PATH.is_file():
+    EXPECTED_PATH = Path(__file__).resolve().parents[1] / "evaluation" / "expected.json"
 _REFERENCES = re.compile(r"(?: \[[^\[\]\r\n]+\])+$")
 
 

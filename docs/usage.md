@@ -10,13 +10,20 @@ placeholder takes a generated brief ID:
 .venv/bin/python -m gtm_connector usage --brief brief-REPLACE_WITH_ID
 ```
 
+The default output shows tool counts and model-token totals as tables. Add
+`--json` to read every group and saved-brief entry described below:
+
+```sh
+.venv/bin/python -m gtm_connector usage --json
+```
+
 The `--state-dir PATH` option selects another state directory. The command reads
 local files without changing them and runs outside MCP authorization. The report
 excludes arguments and source text. Missing state creates no files.
 
 ## Tool calls
 
-Receipts appear in `by_token`, `by_tool`, and `by_day`, with UTC day boundaries.
+In the JSON report, receipts appear in `by_token`, `by_tool`, and `by_day`, with UTC day boundaries.
 `by_token_tool_day` combines those views. Each group and the overall `calls`
 field report `total`, `ok`, `error`, and `pending` counts. Scope denials, limited
 calls, and retries each count as an attempt.
