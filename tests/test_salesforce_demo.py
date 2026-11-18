@@ -164,6 +164,7 @@ class DemoKitTests(unittest.TestCase):
         large = self.directory / "large.json"; large.write_bytes(b" " * (128 * 1024 + 1)); large.chmod(0o600)
         with self.assertRaises(DemoBindingError): load_binding(large)
         public = self.directory / "public"; public.mkdir(mode=0o755)
+        public.chmod(0o755)
         with self.assertRaises(DemoBindingError): write_binding(public / "binding.json", self.document)
         with patch("gtm_connector.salesforce_demo.os.getuid", return_value=os.getuid() + 1):
             with self.assertRaises(DemoBindingError): load_binding(path)
