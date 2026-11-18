@@ -20,6 +20,40 @@ MCP transport and tool access. Inspector's interactive OAuth login and
 untested assistant applications remain unverified. Compatibility with arbitrary
 clients is not claimed.
 
+## Request refusals
+
+A client can identify a gateway refusal through `error.data.reason` instead of
+parsing its message. The [request-check tests](../tests/test_request_checks.py)
+cover each row below. The [HTTP tests](../tests/test_gateway.py) check the response
+and authorization headers; [external-backend tests](../tests/test_salesforce_gateway.py)
+cover disabled writes.
+
+| Reason | HTTP status | JSON-RPC code |
+| --- | --- | --- |
+| `request_too_large` | 413 | -32600 |
+| `invalid_json` | 400 | -32700 |
+| `untrusted_origin_or_host` | 403 | 1003 |
+| `invalid_token` | 401 | 1001 |
+| `rate_limited` | 429 | 1002 |
+| `insufficient_scope` | 403 | 1004 |
+| `crm_write_disabled` | 403 | 1005 |
+| `invalid_arguments` | 400 | -32602 |
+| `missing_protocol_version` | 400 | -32602 |
+| `protocol_version_mismatch` | 400 | -32020 |
+| `unsupported_protocol_version` | 400 | -32022 |
+
+Missing, malformed, expired, and wrong-resource credentials share `invalid_token`.
+The response does not reveal which credential check failed. Scope challenges still
+name the required grant in `WWW-Authenticate`; rate limits still send `Retry-After`.
+Messages and HTTP statuses are unchanged. The three 403 refusals now have distinct
+application codes instead of sharing `1001`.
+
+This table covers the gateway's request checks. SDK rejections, OAuth errors,
+and tool execution errors retain their own formats. The two audit or execution
+failure responses remain HTTP 503 with an error string, without `error.data.reason`.
+An activity may already have committed before the latter response. See
+[audit failure handling](audit.md#audit-failures) before retrying a write.
+
 ## Local authorization
 
 The local owner approves explicit scopes for one pre-registered public CLI
