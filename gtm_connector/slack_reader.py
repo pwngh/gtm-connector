@@ -382,6 +382,8 @@ def _output_size(records, snapshot):
 class ThreadRead:
     records: list[dict]
     snapshot: dict
+    # Every scope held by each credential that returned a page of this read. Private; never in tool output.
+    scopes: tuple[str, ...] = ()
 
 
 def _auth_error(error):
@@ -416,6 +418,7 @@ class SlackThreadReader:
         mapping_ok = credential_ok = complete = False
         pages = raw_rows = duplicates = 0
         manifests: dict[str, dict] = {}
+        used_scopes: set[str] = set()
         result = None
         code = "slack_unavailable"
 
@@ -507,6 +510,9 @@ class SlackThreadReader:
                         manifests[stamp] = manifest
                         if sum(len(item["text"].encode("utf-8")) for item in manifests.values()) > MAX_TOTAL_TEXT_BYTES:
                             raise SlackReadError("slack_output_too_large")
+                # Only a credential that returned a page of the thread adds its scopes. One that
+                # expired before returning anything contributed no text.
+                used_scopes.update(access.scopes)
                 following = _cursor(document, cursor)
                 if following is None:
                     complete = True
@@ -534,7 +540,7 @@ class SlackThreadReader:
             if _output_size(records, snapshot) > MAX_OUTPUT_BYTES:
                 raise SlackReadError("slack_output_too_large")
             budget.remaining()
-            result = ThreadRead(records, snapshot)
+            result = ThreadRead(records, snapshot, tuple(sorted(used_scopes)))
             code = "ok"
             return result
         except SlackAuthError as exc:

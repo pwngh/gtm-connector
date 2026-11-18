@@ -696,6 +696,15 @@ class ImportedCallsReader:
         self.path = Path(path)
         self.crm_binding = deepcopy(crm_binding)
 
+    def active_import_id(self, account_id: str) -> str | None:
+        """Return the current revision ID from metadata only, without reading transcript content."""
+        if not _valid_binding(self.crm_binding) or not _valid_account(account_id, self.crm_binding):
+            raise CallsImportError("calls_import_invalid")
+        with _database(self.path, binding=self.crm_binding) as connection:
+            row = connection.execute("SELECT import_id FROM active_imports WHERE account_id = ?",
+                                     (account_id,)).fetchone()
+        return None if row is None else row[0]
+
     def read_call_notes(self, account_id: str) -> list[dict]:
         if not _valid_binding(self.crm_binding) or not _valid_account(account_id, self.crm_binding):
             raise CallsImportError("calls_import_invalid")

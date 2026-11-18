@@ -789,16 +789,24 @@ def reject_slack_access(connection_dir, access):
             _write_credentials(directory_fd, {**document, "credential_state": "refresh_pending"})
 
 
-def inspect_slack_connection(connection_dir, *, _clock=None):
-    """Inspect a saved identity under its lock without requesting or releasing a token."""
+@contextmanager
+def held_slack_connection(connection_dir, *, _clock=None):
+    """Yield the saved selection while holding the connection lock, so no connect or
+    disconnect can change it before the caller's decision finishes."""
     clock = _clock or _Clock()
     with _connection_lock(connection_dir, create=False) as directory_fd:
         document = None if directory_fd is None else _read_credentials(directory_fd)
         if document is None:
             raise SlackAuthError("slack_not_connected")
-        return SlackConnectionSelection(dict(document["identity"]), document["workspace_origin"],
-                                        tuple(document["granted_scopes"]), document["credential_state"],
-                                        _needs_login(document, clock.now()))
+        yield SlackConnectionSelection(dict(document["identity"]), document["workspace_origin"],
+                                       tuple(document["granted_scopes"]), document["credential_state"],
+                                       _needs_login(document, clock.now()))
+
+
+def inspect_slack_connection(connection_dir, *, _clock=None):
+    """Inspect a saved identity under its lock without requesting or releasing a token."""
+    with held_slack_connection(connection_dir, _clock=_clock) as selection:
+        return selection
 
 
 def disconnect_slack(connection_dir, *, revoke=False, progress=None, _provider=None, _clock=None):

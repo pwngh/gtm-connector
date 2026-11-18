@@ -245,6 +245,38 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(len(self.requests), 2)
         self.assertEqual(self.requests[-1].headers["Authorization"], "Bearer " + NEW_ACCESS)
 
+    def test_only_credentials_that_returned_pages_add_their_scopes(self):
+        both = ["channels:history", "groups:history"]
+
+        def replace_on(attempt, scopes):
+            def other_process(request):
+                replies = sum(seen.url.path.endswith("conversations.replies") for seen in self.requests)
+                if request.url.path.endswith("conversations.replies") and replies == attempt:
+                    document = saved_document(self.clock.now())
+                    document.update(access_token=NEW_ACCESS, refresh_token=NEW_REFRESH,
+                                    requested_scopes=scopes, granted_scopes=scopes)
+                    seed(self.connection, document)
+            return other_process
+
+        # A broad credential that expired before returning a page adds nothing.
+        broad = saved_document(self.clock.now())
+        broad.update(requested_scopes=both, granted_scopes=both)
+        seed(self.connection, broad)
+        result = self.read([{"ok": False, "error": "token_expired"}, page(message())],
+                           before=replace_on(1, ["channels:history"]))
+        self.assertEqual(self.requests[-1].headers["Authorization"], "Bearer " + NEW_ACCESS)
+        self.assertEqual(result.scopes, ("channels:history",))
+        self.validate(result)
+
+        # A credential that returned a page keeps its scopes after a narrower replacement.
+        seed(self.connection, broad)
+        self.requests.clear()
+        result = self.read([page(message(), cursor="next"), {"ok": False, "error": "token_expired"},
+                            page(message(REPLY))], before=replace_on(2, ["channels:history"]))
+        self.assertEqual(self.requests[-1].headers["Authorization"], "Bearer " + NEW_ACCESS)
+        self.assertEqual(result.scopes, ("channels:history", "groups:history"))
+        self.validate(result)
+
     def test_nonrotating_expiry_and_second_local_refresh_refuse(self):
         seed(self.connection, saved_document(self.clock.now(), rotating=False))
         self.refuses([{"ok": False, "error": "token_expired"}], "slack_reconnect_required")

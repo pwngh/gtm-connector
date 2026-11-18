@@ -105,6 +105,17 @@ def _account_id(value):
     return matched[1]
 
 
+def _selected_ids(account_ids, field):
+    """A fixed IN clause from at most 100 validated canonical account IDs, or "" for no selection."""
+    if account_ids is None:
+        return ""
+    identifiers = tuple(account_ids)
+    if not 1 <= len(identifiers) <= 100:
+        raise SalesforceReadError("salesforce_invalid_arguments")
+    native = sorted({_account_id(value) for value in identifiers})
+    return f"{field} IN (" + ", ".join(f"'{value}'" for value in native) + ")"
+
+
 def _like_literal(value):
     if (not isinstance(value, str) or len(value) > 200
             or any(ord(character) < 32 or ord(character) == 127 for character in value)):
@@ -448,19 +459,24 @@ class SalesforceReadOnlyAdapter:
                 "close_date": close_date, "is_closed": row["IsClosed"], "is_won": row["IsWon"],
                 "amount_decimal": format(amount, "f") if amount is not None else None, "currency": None}
 
-    def search_accounts(self, query="", account_number=None):
+    def search_accounts(self, query="", account_number=None, *, account_ids=None):
         if not valid_account_search(query, account_number):
             raise SalesforceReadError("salesforce_invalid_arguments")
+        selected = _selected_ids(account_ids, "Id")
         if account_number is not None:
             escaped = account_number.replace("\\", "\\\\").replace("'", "\\'")
             where, limit, max_rows = f" WHERE AccountNumber = '{escaped}'", 2, 2
         else:
             escaped = _like_literal(query)
             where, limit, max_rows = (f" WHERE Name LIKE '%{escaped}%'" if query else ""), 101, _MAX_ROWS
+        if selected:
+            where += (" AND " if where else " WHERE ") + selected
         with self._operation() as (client, budget):
             rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account{where} ORDER BY Id LIMIT {limit}",
                                budget, max_rows=max_rows)
             accounts = [self._account(row) for row in rows]
+            if account_ids is not None and any(row["id"] not in account_ids for row in accounts):
+                raise SalesforceReadError("salesforce_invalid_response")
             if account_number is not None:
                 if any(row["account_number"] is None for row in accounts):
                     raise SalesforceReadError("salesforce_invalid_response")
@@ -496,13 +512,19 @@ class SalesforceReadOnlyAdapter:
             account["contracts"] = [self._contract(row, native_id) for row in contracts]
             return account
 
-    def list_opportunities(self, account_id=None):
+    def list_opportunities(self, account_id=None, *, account_ids=None):
         native_id = _account_id(account_id) if account_id is not None else None
         where = f" WHERE AccountId = '{native_id}'" if native_id is not None else ""
+        if native_id is None and account_ids is not None:
+            where = " WHERE " + _selected_ids(account_ids, "AccountId")
         with self._operation() as (client, budget):
             rows = self._query(
                 client, f"SELECT {_OPPORTUNITY_FIELDS} FROM Opportunity{where} ORDER BY Id LIMIT 101", budget)
-            return [self._opportunity(row, native_id) for row in rows]
+            opportunities = [self._opportunity(row, native_id) for row in rows]
+            if (native_id is None and account_ids is not None
+                    and any(row["account_id"] not in account_ids for row in opportunities)):
+                raise SalesforceReadError("salesforce_invalid_response")
+            return opportunities
 
     def check_edition(self, *, _budget=None):
         """Validate the selected environment, retaining the earlier method name."""

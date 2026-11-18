@@ -66,6 +66,20 @@ class RequestDecision:
     windows: dict[str, tuple[float, int]] | None = None
 
 
+def charge_rate(windows: Windows, raw_token: str, rate_time: float,
+                policy: RequestPolicy) -> tuple[dict[str, tuple[float, int]], RequestError | None]:
+    """Count one attempt against this credential's window, or refuse it when the window is full."""
+    key = hashlib.sha256(raw_token.encode()).hexdigest()
+    updated = {name: value for name, value in windows.items() if rate_time - value[0] < policy.window_seconds}
+    begin, used = updated.get(key, (rate_time, 0))
+    if used >= policy.rate_limit:
+        retry = max(1, math.ceil(policy.window_seconds - (rate_time - begin)))
+        return updated, RequestError("rate_limited", f"rate_limited: retry after {retry} seconds",
+                                     {"Retry-After": str(retry)})
+    updated[key] = (begin, used + 1)
+    return updated, None
+
+
 def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows,
                   definitions: Mapping[str, ToolDefinition], *,
                   token: AccessToken | None | Missing = MISSING,
@@ -98,15 +112,9 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
         if rate_time is MISSING:
             return RequestDecision(needs="rate_time")
         # Missing credentials already returned the invalid-token decision.
-        key = hashlib.sha256(cast(str, raw).encode()).hexdigest()
-        updated = {key: value for key, value in windows.items() if rate_time - value[0] < policy.window_seconds}
-        begin, used = updated.get(key, (rate_time, 0))
-        if used >= policy.rate_limit:
-            retry = max(1, math.ceil(policy.window_seconds - (rate_time - begin)))
-            return RequestDecision(windows=updated, error=RequestError(
-                "rate_limited", f"rate_limited: retry after {retry} seconds", {"Retry-After": str(retry)},
-            ))
-        updated[key] = (begin, used + 1)
+        updated, limited = charge_rate(windows, cast(str, raw), rate_time, policy)
+        if limited is not None:
+            return RequestDecision(windows=updated, error=limited)
         definition = definitions.get(request.tool)
         required = definition.scope if definition is not None else None
         if required and required not in token.scopes:

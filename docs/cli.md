@@ -238,6 +238,9 @@ ready object. Salesforce additionally includes `sf_environment`
 after successful startup metadata and identity checks. These fields do not
 promise access to every record. The source summary contains no Salesforce alias,
 address, org ID, or record IDs. The binding workflow is documented in [the Salesforce demo kit](salesforce-demo.md).
+`serve --selection FILE` adds a `selection` object with `accounts` and
+`slack_accounts` counts and the seven `tools` names; it contains no account IDs.
+See [the selection guide](selection.md).
 
 Subsequent lines have `type: "tool_call"`, `time` (UTC ISO 8601), `tool`,
 `caller` (a complete SHA-256 fingerprint or `"anonymous"`), `decision`

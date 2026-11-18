@@ -44,7 +44,23 @@ TOOL_DEFINITIONS = {
         arguments={"account_id": StringArgument(64), "kind": StringArgument(40),
                    "body": StringArgument(2000), "idempotency_key": StringArgument(128)},
     ),
+    # Selected mode only. Each source read inside these tools checks its own scope.
+    "prepare_renewal_brief": ToolDefinition(
+        scope="crm:read", read_only=True,
+        arguments={"account_id": StringArgument(64), "as_of": StringArgument(10, required=False, nullable=True)},
+    ),
+    "read_renewal_brief": ToolDefinition(
+        scope="crm:read", read_only=True,
+        arguments={"brief_id": StringArgument(64)},
+    ),
 }
+
+# The default demo keeps its historical six tools. A selection replaces the write
+# with the two caller-run brief tools.
+DEFAULT_TOOLS = frozenset({"search_accounts", "get_account", "list_opportunities", "read_call_notes",
+                           "read_slack_messages", "log_activity"})
+SELECTED_TOOLS = frozenset({"search_accounts", "get_account", "list_opportunities", "read_call_notes",
+                            "read_slack_messages", "prepare_renewal_brief", "read_renewal_brief"})
 
 
 def valid_account_search(query, account_number):

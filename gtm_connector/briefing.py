@@ -107,8 +107,18 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
             records.extend(rows)
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise BriefingError(f"{tool}: invalid or failed tool result; no brief generated") from exc
+    return assemble_evidence(brief_id, account_id, as_of, records, audit.read(brief_id), statuses,
+                             thread_snapshot, include_slack=include_slack, crm_backend=crm_backend,
+                             calls_backend=calls_backend, calls_binding=calls_binding,
+                             slack_backend=slack_backend, crm_binding=crm_binding, slack_binding=slack_binding)
+
+
+def assemble_evidence(brief_id, account_id, as_of, records, receipts, statuses, thread_snapshot, *,
+                      include_slack, crm_backend, calls_backend, calls_binding, slack_backend,
+                      crm_binding, slack_binding):
+    """Build one workflow's evidence and check it, including one matching receipt per read."""
     evidence = {"brief_id": brief_id, "account_id": account_id, "as_of": as_of,
-                "records": records, "receipts": audit.read(brief_id), **statuses}
+                "records": records, "receipts": receipts, **statuses}
     if include_slack and slack_backend == "slack":
         evidence.update(workflow_version=5, crm_backend=crm_backend, crm_binding=deepcopy(crm_binding),
                         calls_backend=calls_backend, slack_backend="slack", slack_binding=deepcopy(slack_binding),

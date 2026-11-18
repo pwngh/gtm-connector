@@ -536,6 +536,55 @@ registration, workspace approval, response compatibility, retention, and the
 app's distribution-specific rate policy remain live-use prerequisites.
 See [owner commands and limits](docs/slack-live.md).
 
+## Selected sources and caller-run briefs
+
+`serve --selection FILE` limits every client read to the accounts and Slack
+threads in an owner-written file. The file must be a regular file the owner owns
+that others cannot write. `serve` validates it before opening any credential or
+source, and the running server never reloads it. Each read checks the selection
+before any source access. An unselected account is refused with
+`account_not_selected` and is never looked up. A Slack read also needs that
+account's Slack thread selected. Searches and account-wide opportunity lists add
+the selected IDs to the SQLite or Salesforce query itself, before ordering and
+the result limit. A selected server offers no write, and a write attempt is
+refused as `crm_write_disabled`.
+
+`prepare_renewal_brief` runs under the bearer token the client presented. The
+remote path never reads `owner.json`, uses the owner credential, or calls the
+local server over HTTP. Each read inside it commits its own pending receipt with
+the caller's credential fingerprint, verifies the token again, counts one
+attempt against the caller's rate window, and checks its own scope and the
+selection. It then runs the same source code as the direct tool and finishes the
+receipt before the data reaches the brief. A missing calls or Slack scope gives
+the existing denial disclosure. Any other failure, including an audit write
+failure, an expired token, a rate limit, or a 45-second brief deadline, leaves
+no readable brief. Caller-supplied metadata cannot change which receipts a
+brief's evidence uses, and an object-valued JSON-RPC id is recorded as a fixed
+marker, so it cannot imitate the reads' correlation.
+
+A saved brief counts only if its own outer call finished successfully and that
+receipt names the SHA-256 digest of the saved file. `read_renewal_brief` makes
+no source system call. It releases the brief only while the account and any
+Slack thread it contains are still selected, the caller's current grant has
+every scope the brief's content needs, the CRM, calls, and Slack bindings are
+unchanged, and imported calls and live Slack still use the same transcript
+revision and mapping. For live Slack it also requires the local connection to
+hold a ready credential for the same identity with at least the scopes of each
+credential that returned a page of the brief's Slack thread. It makes that decision while
+holding the connection lock, so a disconnect or narrower reconnect cannot land
+between the checks and withholds saved Slack text afterward. A disconnect that
+finishes after the decision does not recall the response being sent. It reports that it
+did not recheck the source systems. A brief ID alone grants nothing. A prepare
+whose Slack reader reports no scopes saves nothing.
+
+The selection chooses accounts and Slack threads, not fields. Without
+`--selection`, a connected server still exposes its whole source to any
+`crm:read` grant. The final grant check runs when the tool finishes, so a grant
+that expires before the receipt is written can still receive that one response.
+[Selection tests](tests/test_selected_sources.py) and
+[live Slack selection tests](tests/test_selected_live_slack.py) exercise these
+boundaries over local HTTPS with invented sources. See [the selection guide](docs/selection.md).
+
 ## Required sign-off evidence
 
 A reviewer must inspect the scope-denial and invalid-token tests, audit failure

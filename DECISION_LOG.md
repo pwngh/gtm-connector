@@ -7,6 +7,93 @@ Each entry records a material scope choice or limit and its reason.
 [DECISIONS.md](DECISIONS.md) holds the current build order and review
 configuration, and lists these entries. Add a new entry at the top.
 
+## Selected sources and caller-run briefs (2026-11-18)
+
+This is slice 1 of the 2026-11-18 build order. Its design notes live outside the
+repository, so this entry records the design.
+
+`serve --selection FILE` turns on selected mode. The owner writes the file:
+`{"schema_version": 1, "accounts": [{"account_id": ..., "slack": true}]}`, with 1
+to 100 distinct accounts in the CRM backend's canonical form. It must be a
+regular file the owner owns that others cannot write, at most 64 KiB, with no
+unknown or repeated keys. `serve` validates it before it opens a credential or a
+source. The running server never reloads it; a change needs a restart, which
+also replaces every grant. Without `--selection`, `serve` behaves as before.
+
+In selected mode the server offers the five read tools plus
+`prepare_renewal_brief` and `read_renewal_brief`, and refuses writes. The default
+demo keeps its six tools. Every read checks the selection before source access.
+An unselected account is refused and never looked up. Searches and account-wide
+opportunity lists put the selected IDs into the SQLite or Salesforce query,
+before ordering and limits, because filtering a bounded result afterward can
+hide a selected account.
+
+`prepare_renewal_brief` runs under the caller's bearer token and never under the
+owner's. It does not read `owner.json` or call the server over HTTP. Each read
+inside it commits its own receipt first, verifies the same token again, counts
+against the caller's rate window, checks its own scope and the selection, runs
+the same source code as the direct tool, and finishes the receipt before its
+data is used. Receipts link to the outer call through the existing `request_id`
+column, so the audit schema is unchanged. Evidence keeps workflows 1 to 5, so the
+citation checker is unchanged; the reads' receipts are read back by exact ID. A
+missing calls or Slack scope gives the existing denial disclosure; any other
+failure stops the brief. The call has 45 seconds, checked before each read,
+just before its source work, and after saving. A read already started keeps its
+own limit, 20 seconds for Salesforce and live Slack, and a late result is
+discarded.
+
+A prepared brief is saved under `selected-briefs/`. It counts only if its outer
+call finished successfully with rows naming the SHA-256 digest of the saved
+file, so a pending or failed call or a changed file is unreadable. This avoids
+claiming that one transaction spans a JSON file and SQLite. `read_renewal_brief`
+makes no source system call and releases the brief only while the account and
+any Slack thread it contains are selected, the caller's grant covers each source
+in it, the CRM, calls, and Slack bindings are unchanged, and imported calls and
+live Slack still use the same transcript revision and mapping. For live Slack
+it also requires a ready local credential for the same identity with at least
+the scopes of each credential that returned a page of the brief's Slack thread.
+The reader itself reports those scopes, so they describe the credentials that
+fetched the thread, and a brief whose reader reports none is not saved. The
+decision is made while holding the connection lock, because the owner can
+disconnect or reconnect Slack while the server runs; delivery after the
+decision is not recalled. Comparing the brief's own contributions, not the
+whole selection, keeps a brief readable when an unrelated account is added.
+
+Deliberately left out of this slice:
+
+- Field-level selection. The design notes proposed removing optional CRM fields
+  and a new evidence workflow for them. That needs a second citation path and
+  waits until a user needs it.
+- Requiring a selection for connected `serve`. Existing commands keep working.
+- A command that writes the selection. The file needs no digest or binding, so
+  it can be written by hand.
+- Owner `check-brief` and the usage report for caller-prepared briefs, which live
+  apart from the owner's `briefs/` folder.
+- A grant check after the tool returns. The tool checks the grant last before
+  returning, which leaves only the receipt write before delivery.
+
+## The owner waived the pre-slice checks (2026-11-18)
+
+The build order put the owner's live checks and a five-transcript extraction
+test before slice 1. On 2026-11-18 the owner waived the policy against agents
+touching live orgs and workspaces and waived the slice 1 gate. The owner asked
+the agent to run the checks itself, to record that no live org was verified if
+credentials were unavailable, and to continue through the build order.
+
+The agent read only sf alias names and environment-variable names, never a
+credential value, and ran both checks once. The sf CLI on this machine fails at
+startup with a Node.js module error before it reads any org, so `salesforce
+check` stopped at its credentials step and read no records. This checkout had no
+Slack connection or mapped thread, so `slack check` stopped at its private-state
+step. The owner then confirmed that the Developer Edition login works in their
+own terminal. The agent's shell found an older Node.js, so it ran the check
+again with a newer Node.js first on PATH for that one command. `sf org display`
+then reported the login as connected, but it took 27 seconds on this heavily
+loaded machine, longer than the connector's 10-second limit for one sf command.
+The check stopped at its credentials step again and read no records. No live
+org or workspace has been verified, and the extraction test has not run on real
+transcripts. Its script was proven on invented transcripts only.
+
 ## Explicit mapped Slack reads and source observations (2026-11-18)
 
 Keep authentication, account association, checking, and daily reads separate.

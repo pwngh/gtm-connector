@@ -206,6 +206,8 @@ are dated. The entries for the original slices follow in the order they were
 built. They are undated except the third, "Protocol research (2026-11-17)".
 Each title links to its entry in DECISION_LOG.md.
 
+- [Selected sources and caller-run briefs (2026-11-18)](DECISION_LOG.md#selected-sources-and-caller-run-briefs-2026-11-18)
+- [The owner waived the pre-slice checks (2026-11-18)](DECISION_LOG.md#the-owner-waived-the-pre-slice-checks-2026-11-18)
 - [Explicit mapped Slack reads and source observations (2026-11-18)](DECISION_LOG.md#explicit-mapped-slack-reads-and-source-observations-2026-11-18)
 - [Separate Slack authentication from source selection (2026-11-18)](DECISION_LOG.md#separate-slack-authentication-from-source-selection-2026-11-18)
 - [Imported call excerpts with explicit account associations (2026-11-18)](DECISION_LOG.md#imported-call-excerpts-with-explicit-account-associations-2026-11-18)

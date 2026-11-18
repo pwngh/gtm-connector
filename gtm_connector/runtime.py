@@ -637,9 +637,19 @@ class Runtime:
 
     def __init__(self, directory, *, rate_limit=60, crm_reader=None, on_call=None, demo_binding=None,
                  calls_backend="fixture", calls_reader=None, slack_backend="fixture", slack_connection_dir=None,
-                 slack_reader=None, on_source_read=None, slack_expected_binding=None):
+                 slack_reader=None, on_source_read=None, slack_expected_binding=None, selection=None):
         if calls_backend not in ("fixture", "imported"):
             raise ValueError("The calls backend must be fixture or imported.")
+        if selection is not None:
+            from .selection import Selection
+            if not isinstance(selection, Selection):
+                raise ValueError("A selection must come from load_selection.")
+            if demo_binding is not None:
+                raise SourceIdentityError("A selection cannot be combined with --salesforce-demo-binding.")
+            if selection.crm_backend != ("sqlite" if crm_reader is None else crm_reader.name):
+                raise SourceIdentityError("The selection was written for another CRM backend. "
+                                          "Use acc-007 style IDs for fixtures or acc-sf- IDs for Salesforce.")
+        self.selection = selection
         if calls_reader is not None and (calls_backend != "imported" or calls_reader.name != "imported"):
             raise ValueError("An imported calls reader requires --calls-backend imported.")
         if slack_backend not in ("fixture", "slack"):
@@ -739,13 +749,15 @@ class Runtime:
                         module.seed(connection)
                     path.chmod(0o600)
             calls_path = self.imports_path if self.calls_backend == "imported" else self.directory / "calls.sqlite3"
+            selected = self._selected_context()
 
             def connector_factory(authority):
                 return Connector(self.directory / "crm.sqlite3", calls_path,
                                  self.directory / "audit.sqlite3", authority, rate_limit=self.rate_limit,
                                  slack_path=self.directory / "slack.sqlite3", crm_reader=self.crm_reader,
                                  on_call=self.on_call, demo_binding=self.demo_binding,
-                                 calls_reader=self.calls_reader, slack_reader=self.slack_reader)
+                                 calls_reader=self.calls_reader, slack_reader=self.slack_reader,
+                                 selected=selected)
 
             self._services = _LocalHTTPS(self.directory, connector_factory)
             self._services.__enter__()
@@ -763,6 +775,28 @@ class Runtime:
         except BaseException:
             self.__exit__(None, None, None)
             raise
+
+    def _selected_context(self):
+        """Bind the immutable selection to this state's sources, reading metadata only."""
+        if self.selection is None:
+            return None
+        from .selected_briefs import SelectedContext
+        if self.slack_backend == "slack":
+            from .slack_mapping import SlackMappingError, load_slack_mapping
+            for account_id in sorted(self.selection.slack_accounts):
+                try:
+                    load_slack_mapping(self.slack_mapping_path, account_id=account_id,
+                                       crm_binding=self.crm_binding, slack_binding=self.slack_binding)
+                except SlackMappingError:
+                    raise SourceIdentityError(
+                        "A selected Slack thread is not mapped in this state folder. Map it with "
+                        "gtm-connector slack map, or set slack to false for that account.") from None
+        return SelectedContext(
+            selection=self.selection, state_directory=self.directory, crm_binding=deepcopy(self.crm_binding),
+            calls_backend=self.calls_backend, calls_binding=deepcopy(self.calls_binding),
+            slack_backend=self.slack_backend, slack_binding=deepcopy(self.slack_binding),
+            slack_mapping_path=self.slack_mapping_path if self.slack_backend == "slack" else None,
+            slack_connection_dir=self.slack_connection_dir if self.slack_backend == "slack" else None)
 
     def __exit__(self, *_):
         if self._services is not None:

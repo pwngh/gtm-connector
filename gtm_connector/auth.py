@@ -123,6 +123,10 @@ class LocalAuthority:
                           scope=" ".join(record.scopes))
 
     async def verify_token(self, raw: str) -> AccessToken | None:
+        return self.verify_token_now(raw)
+
+    def verify_token_now(self, raw: str) -> AccessToken | None:
+        """Synchronous verification for in-process reads; the same checks as verify_token."""
         if not isinstance(raw, str) or not _OPAQUE_TOKEN.fullmatch(raw):
             return None
         with self._lock:
