@@ -50,8 +50,10 @@ makes no source system call and releases the brief only while the account and
 any Slack thread it contains are selected, the caller's grant covers each source
 in it, the CRM, calls, and Slack bindings are unchanged, and imported calls and
 live Slack still use the same transcript revision and mapping. For live Slack
-it also requires a ready local credential for the same identity, because the
-owner can disconnect or reconnect Slack while the server runs. Comparing the
+it also requires a ready local credential for the same identity with at least
+the scopes the brief's read used, and it decides while holding the connection
+lock, because the owner can disconnect or reconnect Slack while the server
+runs. Comparing the
 brief's own contributions, not the whole selection, keeps a brief readable when
 an unrelated account is added.
 

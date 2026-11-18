@@ -442,10 +442,13 @@ class Connector:
         caller_token = raw_token or raw_auth or None
         if is_call:
             try:
+                # JSON-RPC ids are strings or integers. Any other value is recorded as a fixed
+                # marker, so a caller cannot imitate the server's own correlation for brief reads.
+                receipt_id = request_id if request_id is None or type(request_id) in (int, str) else "<invalid>"
                 audit_id = self.audit.start(token=caller_token, tool=tool,
                     arguments=(arguments if request is not None
                                else {"unparsed_sha256": hashlib.sha256(body).hexdigest()}),
-                    request_id=request_id, brief_id=brief_id)
+                    request_id=receipt_id, brief_id=brief_id)
             except (OSError, sqlite3.Error, ValueError):
                 self._emit_call(started=event_started, token=caller_token, tool=tool,
                                 decision="failed", receipt_id=None, reason="audit_unavailable")

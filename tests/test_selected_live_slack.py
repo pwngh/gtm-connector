@@ -3,11 +3,13 @@
 import json
 import os
 import unittest
+from unittest.mock import patch
 
+from gtm_connector import slack_mapping
 from gtm_connector.client import LocalClient
 from gtm_connector.runtime import SourceIdentityError
 from gtm_connector.selection import load_selection
-from gtm_connector.slack_auth import disconnect_slack
+from gtm_connector.slack_auth import SlackAuthError, disconnect_slack, held_slack_connection
 from gtm_connector.slack_mapping import save_slack_mapping
 from gtm_connector.slack_workflow import resolve_slack_account
 from slack_live_fixtures import ACCOUNT, CHANNEL, LiveSlackFixture
@@ -82,6 +84,46 @@ class SelectedLiveSlackTests(LiveSlackFixture, unittest.TestCase):
             refused = owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}).json()["result"]
             self.assertTrue(refused["isError"])
             self.assertTrue(refused["content"][0]["text"].endswith("brief_source_changed"))
+            self.assertEqual(len(self.requests), 1)
+
+    def test_release_decisions_hold_the_connection_lock_and_respect_its_scopes(self):
+        broad = {**saved_document(self.clock.now(), rotating=False),
+                 "requested_scopes": ["channels:history", "groups:history"],
+                 "granted_scopes": ["channels:history", "groups:history"]}
+        with self.runtime() as runtime:
+            self.map_account(runtime)
+        seed(self.connection, broad)
+        selection = self.selection([{"account_id": ACCOUNT, "slack": True}])
+        with self.runtime(selection=selection) as runtime, LocalClient(runtime.config) as owner:
+            token = owner.authorize(["crm:read", "calls:read", "slack:read"])
+            brief = owner.call(token, "prepare_renewal_brief",
+                               {"account_id": ACCOUNT}).json()["result"]["structuredContent"]["brief"]
+            saved = json.loads((self.state / "selected-briefs" / (brief["brief_id"] + ".json")).read_text())
+            self.assertEqual(saved["slack_scopes"], ["channels:history", "groups:history"])
+
+            # A disconnect attempted while the decision runs cannot land between its checks.
+            real_load, attempts = slack_mapping.load_slack_mapping, []
+
+            def disconnect_mid_decision(*args, **kwargs):
+                try:
+                    disconnect_slack(self.connection)
+                except SlackAuthError as exc:
+                    attempts.append(exc.code)
+                return real_load(*args, **kwargs)
+
+            with patch("gtm_connector.slack_mapping.load_slack_mapping", side_effect=disconnect_mid_decision):
+                released = owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}).json()["result"]
+            self.assertFalse(released.get("isError"), released)
+            self.assertEqual(attempts, ["slack_connection_busy"])
+
+            with held_slack_connection(self.connection):
+                busy = owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}).json()["result"]
+            self.assertTrue(busy["content"][0]["text"].endswith("brief_source_busy"))
+
+            # A narrower reconnect for the same identity no longer covers the saved Slack text.
+            seed(self.connection, saved_document(self.clock.now(), rotating=False))
+            narrowed = owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}).json()["result"]
+            self.assertTrue(narrowed["content"][0]["text"].endswith("brief_source_changed"))
             self.assertEqual(len(self.requests), 1)
 
     def test_an_unmapped_selected_thread_refuses_startup(self):

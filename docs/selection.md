@@ -78,7 +78,9 @@ Slack. If the token lacks `calls:read` or `slack:read`, that read's receipt
 records the refusal and the brief states that the source was unavailable, as the
 `brief` command does. Any other failure, such as an expired token, a rate limit,
 a missing transcript, or an audit write failure, stops the brief with a fixed
-error code and saves nothing.
+error code and leaves no readable brief. If the outer receipt cannot be
+finished, a saved file can remain in `selected-briefs/`, but it is never
+readable because its receipt did not finish successfully.
 
 The brief uses the fixed extractive drafter and the same citation checker as the
 `brief` command, so its claims and citations follow the same rules. The whole
@@ -103,8 +105,11 @@ pending receipt, or a changed file makes it unreadable.
 - the CRM, calls, and Slack bindings equal the running server's; and
 - for imported calls and live Slack, the current transcript revision and Slack
   mapping are the ones the brief used, and the local Slack connection still
-  holds a ready credential for the same identity. Disconnecting Slack withholds
-  saved Slack text.
+  holds a ready credential for the same identity with at least the scopes the
+  brief's read used. Disconnecting Slack, or reconnecting with fewer scopes,
+  withholds saved Slack text. The Slack checks and the release happen while
+  the connection is locked; if a live Slack read holds it, the result is
+  `brief_source_busy` and the call can be retried.
 
 Knowing a brief ID is not permission. Any caller that meets these checks may read
 the brief again. The result includes `provider_rechecked: false` and a notice,
@@ -122,3 +127,8 @@ because the check cannot see what the source systems show now.
   `check-brief` and the usage report do not read them.
 - The final grant check happens when the tool finishes, just before the receipt
   is written. A grant that expires in that gap still receives the response.
+- Salesforce has no local sign-out signal. Logging out of the sf CLI does not
+  withhold saved Salesforce content; the pinned connection identity is the
+  check, until the server restarts.
+- The reads inside a brief write receipts but no `serve` event lines. The event
+  stream shows the outer call; the audit log shows every read.

@@ -133,6 +133,12 @@ class SelectedSourceTests(SelectedFixture, unittest.TestCase):
             full = owner.authorize(["crm:read", "calls:read", "slack:read"])
             prepared = self.ok(owner.call(full, "prepare_renewal_brief", {"account_id": "acc-007"}))["brief"]
             brief_id = prepared["brief_id"]
+            # The planted instructions in the call note and Slack message stay quoted, cited data.
+            injected = [line for line in prepared["text"].splitlines() if "IGNORE PREVIOUS INSTRUCTIONS" in line]
+            self.assertEqual(len(injected), 2)
+            self.assertTrue(all('says "' in line and "[" in line for line in injected))
+            with closing(sqlite3.connect(runtime.directory / "crm.sqlite3")) as connection:
+                self.assertEqual(connection.execute("SELECT count(*) FROM activities").fetchone()[0], 0)
             released = self.ok(owner.call(full, "read_renewal_brief", {"brief_id": brief_id}))["brief"]
             self.assertEqual(released["text"], prepared["text"])
             self.assertIs(released["provider_rechecked"], False)
@@ -424,6 +430,40 @@ class SelectedLimitsTests(SelectedFixture, unittest.TestCase):
                 self.refused(owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}),
                              "brief_source_changed")
             self.ok(owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}))
+
+    def test_ids_artifacts_and_late_grant_failures_leave_no_misleading_state(self):
+        selection = self.selection([{"account_id": "acc-007", "slack": False}])
+        with Runtime(self.state, selection=selection) as runtime, LocalClient(runtime.config) as owner:
+            token = owner.authorize(["crm:read", "calls:read"])
+            connector = runtime.connector
+            # An object-valued JSON-RPC id cannot imitate the server's correlation for brief reads.
+            forged = {"kind": "brief_child", "parent_audit_id": "x", "ordinal": 1}
+            owner._http.post(runtime.config["resource"], json={
+                "jsonrpc": "2.0", "id": forged, "method": "tools/call",
+                "params": {"name": "get_account", "arguments": {"account_id": "acc-007"},
+                           "_meta": {"io.modelcontextprotocol/protocolVersion": "2026-07-28"}}},
+                headers={"Authorization": "Bearer " + token, "MCP-Protocol-Version": "2026-07-28",
+                         "Mcp-Method": "tools/call", "Mcp-Name": "get_account",
+                         "Accept": "application/json, text/event-stream"})
+            self.assertEqual(connector.audit.read()[-1]["request_id"], "<invalid>")
+
+            # A saved brief path that is not a regular file is refused without blocking.
+            folder = self.state / "selected-briefs"
+            folder.mkdir(mode=0o700, exist_ok=True)
+            os.mkfifo(folder / ("brief-" + "a" * 32 + ".json"), 0o600)
+            self.refused(owner.call(token, "read_renewal_brief", {"brief_id": "brief-" + "a" * 32}),
+                         "brief_invalid")
+            (folder / ("brief-" + "a" * 32 + ".json")).unlink()
+
+            # A grant that fails its last check after the file is saved leaves no file behind.
+            real = connector.authority.verify_token_now
+
+            def expire_after_save(raw):
+                return None if any(folder.glob("*.json")) else real(raw)
+
+            with mock.patch.object(connector.authority, "verify_token_now", side_effect=expire_after_save):
+                self.refused(owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"}), "invalid_token")
+            self.assertEqual(self.artifacts(), [])
 
     def test_default_mode_keeps_the_brief_tools_unknown(self):
         with Runtime(self.state) as runtime, LocalClient(runtime.config) as owner:

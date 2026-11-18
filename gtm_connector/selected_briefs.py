@@ -36,7 +36,7 @@ NOTICE = ("This saved brief was not rechecked against what the source systems sh
 _BRIEF_ID = re.compile(r"brief-[0-9a-f]{32}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _ARTIFACT_KEYS = {"kind", "schema_version", "brief_id", "account_id", "as_of", "adapter", "prepared_by",
-                  "bindings", "sources", "text", "proposed_follow_up", "evidence"}
+                  "bindings", "slack_scopes", "sources", "text", "proposed_follow_up", "evidence"}
 
 
 @dataclass(frozen=True)
@@ -125,6 +125,17 @@ def _child(connector, invocation, tool, account_id, brief_id, ordinal) -> ChildR
         raise ToolError("brief_source_failed") from None
 
 
+def _slack_scopes(context: SelectedContext) -> list[str]:
+    """The scopes of the local Slack credential, read from metadata only."""
+    from .slack_auth import SlackAuthError, held_slack_connection
+    try:
+        with held_slack_connection(context.slack_connection_dir) as connection:
+            return sorted(connection.granted_scopes)
+    except SlackAuthError as exc:
+        raise ToolError("brief_source_busy" if exc.code == "slack_connection_busy"
+                        else "brief_source_changed") from None
+
+
 def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> dict:
     """Read, check, and save one brief. Only the caller's grant authorizes each read."""
     context: SelectedContext = connector.selected
@@ -135,13 +146,21 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
     if include_slack:
         plan.append(("read_slack_messages", "slack"))
     records, statuses, snapshot, children = [], {"notes_status": "available"}, None, []
+    slack_scopes = None
     if include_slack:
         statuses["slack_status"] = "available"
     for ordinal, (tool, source) in enumerate(plan, 1):
         if time.monotonic() >= invocation.deadline:
             raise ToolError("brief_deadline_exceeded")
+        live_slack = tool == "read_slack_messages" and context.slack_backend == "slack"
+        before = _slack_scopes(context) if live_slack else None
         child = _child(connector, invocation, tool, account_id, brief_id, ordinal)
         children.append(child.audit_id)
+        if live_slack and child.envelope is not None:
+            # A reconnect during the read would leave the brief's authority unclear.
+            if _slack_scopes(context) != before:
+                raise ToolError("brief_source_changed")
+            slack_scopes = before
         if child.envelope is None:
             statuses["notes_status" if tool == "read_call_notes" else "slack_status"] = "denied"
             continue
@@ -179,7 +198,8 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
         "as_of": as_of, "adapter": "extractive" if evidence.get("workflow_version") in (4, 5) else "fixture",
         "prepared_by": {"outer_audit_id": invocation.audit_id,
                         "token_id": hashlib.sha256(invocation.raw_token.encode()).hexdigest()},
-        "bindings": context.bindings(connector.crm_backend), "sources": sources,
+        "bindings": context.bindings(connector.crm_backend), "slack_scopes": slack_scopes,
+        "sources": sources,
         "text": text, "proposed_follow_up": follow_up, "evidence": evidence,
     }
     payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2).encode()
@@ -204,6 +224,7 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
         path.unlink(missing_ok=True)
         raise ToolError("brief_deadline_exceeded")
     if connector.authority.verify_token_now(invocation.raw_token) is None:
+        path.unlink(missing_ok=True)
         raise ToolError("invalid_token")
     reference = f"briefs/{brief_id}/{digest}"
     return {"source": "brief", "records": [{"id": brief_id, "record_ref": reference}], "untrusted_data": True,
@@ -216,7 +237,7 @@ def _load(context: SelectedContext, brief_id) -> tuple[dict, str]:
         raise ToolError("brief_not_found")
     path = context.state_directory / ARTIFACT_DIRECTORY / (brief_id + ".json")
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         raise ToolError("brief_not_found") from None
     try:
@@ -278,28 +299,38 @@ def read_brief(connector, token, brief_id) -> dict:
                         if record["record_ref"].startswith("calls/call_notes/")]
             if len(note_ids) != 1 or connector.calls_reader.active_import_id(account_id) != note_ids[0]:
                 raise ToolError("brief_source_changed")
-        if slack and context.slack_backend == "slack":
-            # The owner can disconnect or reconnect Slack while the server runs. This reads
-            # local connection metadata only; it makes no provider call.
-            from .slack_auth import inspect_slack_connection
-            from .slack_mapping import load_slack_mapping, slack_identity_binding
-            connection = inspect_slack_connection(context.slack_connection_dir)
-            # Startup requires a ready credential; a refresh whose identity check has not
-            # finished is not proof that the same identity still holds.
-            if (connection.needs_login or connection.credential_state != "ready"
-                    or slack_identity_binding(connection.identity) != context.slack_binding):
-                raise ToolError("brief_source_changed")
-            mapping = load_slack_mapping(context.slack_mapping_path, account_id=account_id,
-                                         crm_binding=context.crm_binding, slack_binding=context.slack_binding)
-            if mapping["mapping_id"] != evidence["thread_snapshot"]["mapping"]["mapping_id"]:
-                raise ToolError("brief_source_changed")
+        if not (slack and context.slack_backend == "slack"):
+            return _release(connector, token, brief_id, artifact, reference)
+        from .slack_auth import SlackAuthError, held_slack_connection
+        from .slack_mapping import load_slack_mapping, slack_identity_binding
+        try:
+            # Decide and release while holding the connection lock, so a disconnect or
+            # reconnect cannot land between the checks. This reads local metadata only.
+            with held_slack_connection(context.slack_connection_dir) as connection:
+                if (connection.needs_login or connection.credential_state != "ready"
+                        or slack_identity_binding(connection.identity) != context.slack_binding
+                        or not isinstance(artifact["slack_scopes"], list)
+                        or not set(artifact["slack_scopes"]) <= set(connection.granted_scopes)):
+                    raise ToolError("brief_source_changed")
+                mapping = load_slack_mapping(context.slack_mapping_path, account_id=account_id,
+                                             crm_binding=context.crm_binding, slack_binding=context.slack_binding)
+                if mapping["mapping_id"] != evidence["thread_snapshot"]["mapping"]["mapping_id"]:
+                    raise ToolError("brief_source_changed")
+                return _release(connector, token, brief_id, artifact, reference)
+        except SlackAuthError as exc:
+            if exc.code == "slack_connection_busy":
+                raise ToolError("brief_source_busy") from None
+            raise ToolError("brief_source_changed") from None
     except ToolError:
         raise
     except Exception:
         raise ToolError("brief_source_changed") from None
+
+
+def _release(connector, token, brief_id, artifact, reference) -> dict:
     if connector.authority.verify_token_now(token.token) is None:
         raise ToolError("invalid_token")
     return {"source": "brief", "records": [{"id": brief_id, "record_ref": reference}], "untrusted_data": True,
-            "brief": {"brief_id": brief_id, "account_id": account_id, "as_of": artifact["as_of"],
+            "brief": {"brief_id": brief_id, "account_id": artifact["account_id"], "as_of": artifact["as_of"],
                       "text": artifact["text"], "proposed_follow_up": artifact["proposed_follow_up"],
                       "sources": artifact["sources"], "provider_rechecked": False, "notice": NOTICE}}

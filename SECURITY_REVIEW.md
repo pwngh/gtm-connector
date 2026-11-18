@@ -557,8 +557,10 @@ attempt against the caller's rate window, and checks its own scope and the
 selection. It then runs the same source code as the direct tool and finishes the
 receipt before the data reaches the brief. A missing calls or Slack scope gives
 the existing denial disclosure. Any other failure, including an audit write
-failure, an expired token, a rate limit, or a 45-second brief deadline, saves no
-brief. Caller-supplied metadata cannot set the reads' correlation.
+failure, an expired token, a rate limit, or a 45-second brief deadline, leaves
+no readable brief. Caller-supplied metadata cannot change which receipts a
+brief's evidence uses, and an object-valued JSON-RPC id is recorded as a fixed
+marker, so it cannot imitate the reads' correlation.
 
 A saved brief counts only if its own outer call finished successfully and that
 receipt names the SHA-256 digest of the saved file. `read_renewal_brief` makes
@@ -567,8 +569,9 @@ Slack thread it contains are still selected, the caller's current grant has
 every scope the brief's content needs, the CRM, calls, and Slack bindings are
 unchanged, and imported calls and live Slack still use the same transcript
 revision and mapping. For live Slack it also requires the local connection to
-hold a ready credential for the same identity, so disconnecting Slack withholds
-saved Slack text. It reports that it
+hold a ready credential for the same identity with at least the scopes the
+brief's read used, and it decides while holding the connection lock, so a
+disconnect or narrower reconnect withholds saved Slack text. It reports that it
 did not recheck the source systems. A brief ID alone grants nothing.
 
 The selection chooses accounts and Slack threads, not fields. Without
