@@ -1,8 +1,8 @@
 {
-  "started_at_utc": "2026-11-18T04:55:41.559925Z",
-  "completed_at_utc": "2026-11-18T04:58:10.334848Z",
-  "git_revision": "0e78a5c10a2cfc5a8d4abd274e63dc5e216b7eb7",
-  "git_tree": "b5c0eb9f6bfed427e9edac3088158068f947dce3",
+  "started_at_utc": "2026-11-18T12:44:30.303526Z",
+  "completed_at_utc": "2026-11-18T12:48:05.267820Z",
+  "git_revision": "b8c755d89ed2c8069a24efb793093f60480b24c2",
+  "git_tree": "4ce004caf2aa67c4ad22e1701886ae0ac9ed6bc0",
   "recording_script_sha256": "e433e3f18a0796c98cf0fd71fb76967fbff4995662f7af97e4315c88cc8e6aa6",
   "versions": {
     "python": "3.14.6",
@@ -21,9 +21,9 @@
         ".",
         ":(exclude)docs/media"
       ],
-      "started_at_utc": "2026-11-18T04:55:41.560273Z",
+      "started_at_utc": "2026-11-18T12:44:30.303731Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:55:41.599953Z"
+      "completed_at_utc": "2026-11-18T12:44:30.369942Z"
     },
     {
       "argv": [
@@ -31,9 +31,9 @@
         "rev-parse",
         "HEAD"
       ],
-      "started_at_utc": "2026-11-18T04:55:41.600028Z",
+      "started_at_utc": "2026-11-18T12:44:30.370022Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:55:41.626144Z"
+      "completed_at_utc": "2026-11-18T12:44:30.418577Z"
     },
     {
       "argv": [
@@ -41,9 +41,9 @@
         "rev-parse",
         "HEAD^{tree}"
       ],
-      "started_at_utc": "2026-11-18T04:55:41.626227Z",
+      "started_at_utc": "2026-11-18T12:44:30.418725Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:55:41.656003Z"
+      "completed_at_utc": "2026-11-18T12:44:30.468716Z"
     },
     {
       "argv": [
@@ -54,57 +54,57 @@
         "-s",
         "tests"
       ],
-      "started_at_utc": "2026-11-18T04:55:41.656088Z",
+      "started_at_utc": "2026-11-18T12:44:30.468794Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:57:15.163983Z"
+      "completed_at_utc": "2026-11-18T12:47:06.614787Z"
     },
     {
       "argv": [
         "gtm-connector",
         "demo",
         "--state-dir",
-        "var/recording-1mh58xhg/state"
+        "var/recording-arr6dn2e/state"
       ],
-      "started_at_utc": "2026-11-18T04:57:15.164434Z",
+      "started_at_utc": "2026-11-18T12:47:06.615537Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:57:16.534379Z"
+      "completed_at_utc": "2026-11-18T12:47:09.146195Z"
     },
     {
       "argv": [
         "gtm-connector",
         "check-brief",
         "--json",
-        "brief-a09208a50f8c41fe86cb80c6cc88038d",
-        "var/recording-1mh58xhg/candidate.txt",
+        "brief-67a30e5d8f6c47179e2bc8519641e801",
+        "var/recording-arr6dn2e/candidate.txt",
         "--state-dir",
-        "var/recording-1mh58xhg/state"
+        "var/recording-arr6dn2e/state"
       ],
-      "started_at_utc": "2026-11-18T04:57:46.597536Z",
+      "started_at_utc": "2026-11-18T12:47:39.218326Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:57:46.767963Z"
+      "completed_at_utc": "2026-11-18T12:47:39.531410Z"
     },
     {
       "argv": [
         "gtm-connector",
         "check-brief",
         "--json",
-        "brief-a09208a50f8c41fe86cb80c6cc88038d",
-        "var/recording-1mh58xhg/candidate.txt",
+        "brief-67a30e5d8f6c47179e2bc8519641e801",
+        "var/recording-arr6dn2e/candidate.txt",
         "--state-dir",
-        "var/recording-1mh58xhg/state"
+        "var/recording-arr6dn2e/state"
       ],
-      "started_at_utc": "2026-11-18T04:57:46.768297Z",
+      "started_at_utc": "2026-11-18T12:47:39.534398Z",
       "exit_code": 4,
-      "completed_at_utc": "2026-11-18T04:57:46.939654Z"
+      "completed_at_utc": "2026-11-18T12:47:39.895553Z"
     },
     {
       "argv": [
         "node",
         "--version"
       ],
-      "started_at_utc": "2026-11-18T04:57:56.947069Z",
+      "started_at_utc": "2026-11-18T12:47:49.903598Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:57:56.981359Z"
+      "completed_at_utc": "2026-11-18T12:47:49.955632Z"
     },
     {
       "argv": [
@@ -114,9 +114,9 @@
         "--cli",
         "--version"
       ],
-      "started_at_utc": "2026-11-18T04:57:56.981415Z",
+      "started_at_utc": "2026-11-18T12:47:49.956024Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:57:58.260688Z"
+      "completed_at_utc": "2026-11-18T12:47:51.798016Z"
     },
     {
       "argv": [
@@ -125,7 +125,7 @@
         "@modelcontextprotocol/inspector@2.15.0",
         "--cli",
         "--config",
-        "var/recording-1mh58xhg/inspector-state/inspector.json",
+        "var/recording-arr6dn2e/inspector-state/inspector.json",
         "--server",
         "gtm-connector",
         "--stored-auth-only",
@@ -135,9 +135,9 @@
         "--method",
         "tools/list"
       ],
-      "started_at_utc": "2026-11-18T04:57:58.948941Z",
+      "started_at_utc": "2026-11-18T12:47:53.117125Z",
       "exit_code": 0,
-      "completed_at_utc": "2026-11-18T04:58:00.215115Z"
+      "completed_at_utc": "2026-11-18T12:47:55.080124Z"
     }
   ],
   "intentional_pause_seconds": 50,
@@ -151,7 +151,7 @@
     "rep": "Morgan Reed",
     "receipt_count": 6,
     "activities": 0,
-    "brief_id": "brief-a09208a50f8c41fe86cb80c6cc88038d",
+    "brief_id": "brief-67a30e5d8f6c47179e2bc8519641e801",
     "sources": {
       "crm": "demo_fixture",
       "calls": "demo_fixture",
@@ -159,9 +159,9 @@
     }
   },
   "tests": {
-    "run": 401,
+    "run": 402,
     "result": "OK",
-    "elapsed_seconds": 92.422
+    "elapsed_seconds": 154.009
   },
   "rendering": {
     "asciinema": "asciinema 3.2.1",
@@ -209,15 +209,15 @@
       ]
     ],
     "idle_limit_seconds": 12,
-    "source_duration_seconds": 149.036773,
+    "source_duration_seconds": 215.57084,
     "script_sha256": "a0cc6f85600ce44a737803663268731ba76a68266878ba4143677832e17947a2",
     "note": "Real output; selected fields; idle periods capped; fixed reading pauses."
   },
   "artifact_sha256": {
-    "inspector-cli.gif": "2a2f1bbf8fb8d46e95e5be6d97e812afc9c5490b9854aa3bb57fa3edea7e14f8",
+    "inspector-cli.gif": "97250dc0661718323c4119638a14cb2da266a291368024efce42b28509ae8b29",
     "inspector-tools.json": "b69f838dbca389db37d48ad7f83a86f30cc1dca2cec6dc1f5f8e3aaa6c2aa60d",
-    "recording-session.txt": "82b22f0852834b13a27a707452545946aac1ff5f364fa196905b8e1fefaf7481",
-    "walkthrough.cast": "38615e23eee840402310418cb818bf3b37884b92edb97d89ba7b8edf81db4b4a",
-    "walkthrough.gif": "0bc387512c48fa30a6de15434d4df707132962da927b1f7801dd934400f8bedc"
+    "recording-session.txt": "ea23ad0ea9e99ee3493e15a759a2aa3ce0a07fb41a70344eaa74ed9ae7c1c947",
+    "walkthrough.cast": "3ee1cb9055058c8e0a54130d3304739f3cac795e2cad8b9ef706c516bd1c1136",
+    "walkthrough.gif": "06cb6228902f634c27bce13a1e0d5fe261204a4d4fee26b7507f624344f2dbac"
   }
 }

@@ -1,6 +1,6 @@
 1. Prepare Juniper Crest Learning's renewal
 
-$ gtm-connector demo --state-dir var/recording-1mh58xhg/state
+$ gtm-connector demo --state-dir var/recording-arr6dn2e/state
 Opening lines from the command's actual output:
 Morgan Reed prepares Juniper Crest Learning's renewal.
 Sources: CRM, call notes, and Slack use invented demo fixtures.
@@ -8,14 +8,14 @@ Found Juniper Crest Learning. Renewal: 2027-01-29.
 Call-note access was refused (HTTP 403) because the CRM-only grant lacks calls:read.
 The local demo owner grants read access to CRM, calls, and Slack.
 
-Brief: brief-a09208a50f8c41fe86cb80c6cc88038d
+Brief: brief-67a30e5d8f6c47179e2bc8519641e801
 As of: 2027-01-15
 2. Read the same account's checked brief
 
 Exact CRM lines from that saved brief:
 - Account: "Juniper Crest Learning". [crm/accounts/acc-007]
 - Renewal date: 2027-01-29. [crm/accounts/acc-007]
-- Renewal is in 14 days as of 2027-01-15. [crm/accounts/acc-007] [run/brief-a09208a50f8c41fe86cb80c6cc88038d]
+- Renewal is in 14 days as of 2027-01-15. [crm/accounts/acc-007] [run/brief-67a30e5d8f6c47179e2bc8519641e801]
 - Contact "Dana Crest": role not provided; email "dana@juniper-crest.example". [crm/contacts/con-007]
 - CRM opportunity opp-007: stage "proposal"; amount USD 35,500.00; close date 2027-01-22. [crm/opportunities/opp-007]
 3. Read the call and Slack context as evidence
@@ -30,13 +30,13 @@ The fixed workflow requested read scopes only. Nothing was sent.
 - Proposed follow-up: Ask the account owner to review the cited renewal context. [crm/accounts/acc-007]
 Citation checker: accepted the saved brief.
 Candidate: the same brief plus 'The renewal was approved.'
-$ gtm-connector check-brief --json brief-a09208a50f8c41fe86cb80c6cc88038d var/recording-1mh58xhg/candidate.txt --state-dir var/recording-1mh58xhg/state
+$ gtm-connector check-brief --json brief-67a30e5d8f6c47179e2bc8519641e801 var/recording-arr6dn2e/candidate.txt --state-dir var/recording-arr6dn2e/state
 {"error": {"code": "check_failed", "message": "Brief contains an uncited, unsupported, or misattributed statement.", "next": "gtm-connector check-brief --help"}}
 Exit: 4. Standard output is empty.
 5. List tools through the official Inspector CLI
 
 Fixture backend. Fresh loopback TLS server and an explicit crm:read grant.
-$ npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/recording-1mh58xhg/inspector-state/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/list
+$ npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config var/recording-arr6dn2e/inspector-state/inspector.json --server gtm-connector --stored-auth-only --quiet --format json --method tools/list
 Name and required-scope projection of the actual Inspector JSON:
 {
   "search_accounts": "crm:read",
