@@ -60,6 +60,16 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
             raise BriefingError(f"{tool}: HTTP {response.status_code}; no brief generated")
         try:
             result = response.json()["result"]
+            if result.get("isError") is True and crm_backend == "salesforce" and source == "crm":
+                from .salesforce import SalesforceReadError, _ERROR_CODES
+                # Only exact SDK messages for our fixed adapter codes are diagnostics.
+                # Never surface arbitrary tool content or an upstream response body.
+                content = result.get("content")
+                if (isinstance(content, list) and len(content) == 1 and isinstance(content[0], dict)
+                        and content[0].get("type") == "text"):
+                    for code in _ERROR_CODES:
+                        if content[0].get("text") == f"Error executing tool {tool}: {code}":
+                            raise SalesforceReadError(code)
             if result.get("isError") or result.get("resultType") != "complete":
                 raise ValueError("incomplete or failed tool result")
             data = result["structuredContent"]

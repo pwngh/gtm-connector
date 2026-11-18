@@ -78,6 +78,7 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.no_candidate = False
         self.refresh_search = False
         self.refreshed = False
+        self.fail_brief_read = None
         self.original_from_sf = SalesforceReadOnlyAdapter.from_sf
 
     def adapter(self):
@@ -101,6 +102,9 @@ print(json.dumps({{"status": 0, "result": result}}))
         if " FROM Organization" in query:
             rows = [{"Id": ORGANIZATION, "OrganizationType": "Developer Edition", "Name": NAME}]
         elif " FROM Account" in query:
+            account_reads = sum(" FROM Account WHERE Id" in r.url.params.get("q", "") for r in self.requests)
+            if self.fail_brief_read is not None and " WHERE Id" in query and account_reads >= 2:
+                return httpx2.Response(self.fail_brief_read, json=[{"errorCode": "PRIVATE_CODE", "message": SECRET}])
             if self.refresh_search and " WHERE Id" not in query and not self.refreshed:
                 self.refreshed = True
                 return httpx2.Response(401, json=[{"message": SECRET}])
@@ -326,6 +330,32 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.assertEqual((self.directory / "count").read_text(), "2")
         for private in (TOKEN, FRESH_TOKEN, ALIAS, ORIGIN, USERNAME, SECRET):
             self.assertNotIn(private, stdout)
+
+    def test_check_preserves_safe_upstream_failure_seen_only_in_repeated_brief_read(self):
+        for status, expected in ((401, "salesforce_auth_required"), (429, "salesforce_rate_limited")):
+            with self.subTest(status=status):
+                self.requests.clear()
+                (self.directory / "count").unlink(missing_ok=True)
+                self.fail_brief_read = status
+                report = run_check(as_of=AS_OF, adapter_factory=self.adapter)
+                self.assert_report(report)
+                self.assertTrue(all(row["status"] == "pass" for row in report["steps"][:-1]))
+                row = report["steps"][-1]
+                self.assertEqual((row["name"], row["status"], row["code"]), ("brief", "fail", expected))
+                self.assertNotIn("local HTTPS", row["fix"])
+                self.assertIn("sf org login" if status == 401 else "API capacity", row["fix"])
+
+    def test_cli_brief_preserves_upstream_code_without_private_error_text(self):
+        for status, expected in ((401, "salesforce_auth_required"), (429, "salesforce_rate_limited")):
+            with self.subTest(status=status):
+                self.fail_edition = status
+                code, stdout, stderr, state = self.brief_cli()
+                self.assertEqual((code, stdout), (5, ""))
+                error = json.loads(stderr)["error"]
+                self.assertIn(expected, error["message"])
+                self.assertEqual(error["next"], "gtm-connector salesforce check --help")
+                self.assert_safe(stderr)
+                self.assertFalse((state / "briefs").exists())
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 import httpx2
 
-from gtm_connector.briefing import RenewalFieldsUnmapped, collect_evidence, create_brief
+from gtm_connector.briefing import BriefingError, RenewalFieldsUnmapped, collect_evidence, create_brief
 from gtm_connector.citations import BriefRejected, NoRenewalCandidate, build_facts, check_brief
 from gtm_connector.client import LocalClient
 from gtm_connector.runtime import Runtime
@@ -71,6 +71,22 @@ def evidence(contracts=None, *, with_slack=False):
 
 
 class SalesforceFactTests(unittest.TestCase):
+    def test_failed_tool_text_is_not_an_arbitrary_salesforce_diagnostic(self):
+        private = "invented-private-error-text"
+        for message in ("salesforce_auth_required " + private,
+                        "Error executing tool get_account: salesforce_unknown",
+                        "Error executing tool get_account: salesforce_auth_required " + private):
+            client = Mock()
+            client.call.return_value = httpx2.Response(200, json={"result": {
+                "isError": True, "content": [{"type": "text", "text": message}]}})
+            audit = Mock()
+            with self.subTest(message=message), self.assertRaises(BriefingError) as caught:
+                collect_evidence(client, "invented-local-token", audit, ACCOUNT_ID,
+                                 "brief-invented", as_of=AS_OF, crm_backend="salesforce")
+            self.assertEqual(str(caught.exception), "get_account: invalid or failed tool result; no brief generated")
+            self.assertNotIn(private, str(caught.exception))
+            audit.read.assert_not_called()
+
     def test_contract_end_date_is_returned_value_and_draft_disclosure_is_required(self):
         source = evidence()
         lines = build_facts(source)
