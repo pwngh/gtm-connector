@@ -51,16 +51,75 @@ def _money(cents):
     return f"USD {cents // 100:,}.{cents % 100:02}"
 
 
+def _valid_binding(value, *, key, backend):
+    return (isinstance(value, dict) and set(value) == {"schema_version", key, "identity_sha256"}
+            and type(value["schema_version"]) is int and value["schema_version"] == 1
+            and value[key] == backend and isinstance(value["identity_sha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", value["identity_sha256"]) is not None)
+
+
+def _live_slack_sources(evidence):
+    expected = {"brief_id", "account_id", "as_of", "records", "receipts", "notes_status", "slack_status",
+                "workflow_version", "crm_backend", "crm_binding", "calls_backend", "slack_backend",
+                "slack_binding", "thread_snapshot"}
+    if evidence.get("calls_backend") == "imported":
+        expected.add("calls_binding")
+    if (set(evidence) != expected or evidence.get("crm_backend") not in ("sqlite", "salesforce")
+            or evidence.get("calls_backend") not in ("fixture", "imported")
+            or evidence.get("slack_backend") != "slack"
+            or not _valid_binding(evidence.get("crm_binding"), key="crm_backend", backend=evidence["crm_backend"])
+            or not _valid_binding(evidence.get("slack_binding"), key="provider", backend="slack")
+            or (evidence["calls_backend"] == "imported" and evidence["calls_binding"] != evidence["crm_binding"])):
+        raise BriefRejected("Live Slack evidence requires its exact source selections and bindings.")
+
+
+def _live_slack_facts(evidence, messages, receipt_ref, add):
+    """Quote observed text and disclose what a bounded API observation cannot prove."""
+    snapshot = evidence["thread_snapshot"]
+    counts = snapshot["counts"]
+    message_word = "message" if counts["messages"] == 1 else "messages"
+    page_word = "page" if counts["pages"] == 1 else "pages"
+    required = {add(
+        f"Slack observation: {counts['messages']} {message_word} returned across {counts['pages']} {page_word}; "
+        f"creation cutoff {_text(snapshot['cutoff_ts'])}; fetched at {_text(snapshot['fetched_at'])}. "
+        "Paging completed for the selected API-visible thread text. This is not a complete archive; "
+        "previous edits and deletions are unknown, and content may have changed during paging.", receipt_ref)}
+    required.add(add(
+        f"Slack non-text content was omitted from evidence. Omitted entry counts are files {counts['omitted_files']}, "
+        f"attachments {counts['omitted_attachments']}, and blocks {counts['omitted_blocks']}. "
+        "No separate requests fetched non-text resources. "
+        "Links and mentions remain literal source text.", receipt_ref))
+    # The validated reader order is chronological; immutable hash IDs do not encode time.
+    for message in messages:
+        metadata = message["slack_message"]
+        edited = metadata["edited"]
+        edit = ("Edit metadata was not reported; earlier edits are unknown." if edited is None else
+                f"Slack reports an edit at {_text(edited['ts'])}; earlier text is unknown.")
+        subtype = metadata["subtype"]
+        kind = "" if subtype is None else f" Message kind: {_text(subtype)}."
+        required.add(add(
+            f"Untrusted Slack message at {_text(message['sent_at'])} from {_text(message['author'])} "
+            f"says {_text(message['body'])}. {edit}{kind}", message["record_ref"]))
+    return required
+
+
 def _catalog(evidence, *, legacy_empty_roles=False):
     version = evidence.get("workflow_version", 1)
-    if type(version) is not int or version not in (1, 2, 3, 4):
+    if type(version) is not int or version not in (1, 2, 3, 4, 5):
         raise BriefRejected("Unsupported evidence workflow version.")
     if version == 1 and "slack_status" in evidence:
         raise BriefRejected("Legacy evidence cannot contain a Slack outcome.")
-    imported = version == 4
+    live_slack = version == 5
+    if live_slack:
+        _live_slack_sources(evidence)
+    elif {"slack_backend", "slack_binding", "thread_snapshot", "crm_binding"} & evidence.keys():
+        raise BriefRejected("Legacy evidence cannot contain a live Slack source selection.")
+    imported = version == 4 or (live_slack and evidence["calls_backend"] == "imported")
     if imported:
         allowed = {"brief_id", "account_id", "as_of", "records", "receipts", "notes_status",
                    "workflow_version", "crm_backend", "calls_backend", "calls_binding", "slack_status"}
+        if live_slack:
+            allowed.update({"crm_binding", "slack_backend", "slack_binding", "thread_snapshot"})
         binding = evidence.get("calls_binding")
         if (not evidence.keys() <= allowed or evidence.get("calls_backend") != "imported"
                 or evidence.get("crm_backend") not in ("sqlite", "salesforce")
@@ -71,8 +130,8 @@ def _catalog(evidence, *, legacy_empty_roles=False):
                 or not isinstance(binding["identity_sha256"], str)
                 or re.fullmatch(r"[0-9a-f]{64}", binding["identity_sha256"]) is None):
             raise BriefRejected("Imported evidence requires a supported source binding and bounded snapshot.")
-    salesforce = version == 3 or (imported and evidence["crm_backend"] == "salesforce")
-    include_slack = version == 2 or (version in (3, 4) and "slack_status" in evidence)
+    salesforce = version == 3 or ((imported or live_slack) and evidence["crm_backend"] == "salesforce")
+    include_slack = version == 2 or (version in (3, 4, 5) and "slack_status" in evidence)
     if salesforce and evidence.get("crm_backend") != "salesforce":
         raise BriefRejected("Salesforce evidence must identify its CRM backend.")
     sources = {**_SOURCES, **(_SLACK_SOURCE if include_slack else {}),
@@ -83,6 +142,8 @@ def _catalog(evidence, *, legacy_empty_roles=False):
         raise BriefRejected("Invalid account or brief identifier.")
     if salesforce and not re.fullmatch(r"acc-sf-[A-Za-z0-9]{18}", account_id):
         raise BriefRejected("Salesforce evidence requires a namespaced account identifier.")
+    if live_slack and not salesforce and not re.fullmatch(r"acc-[0-9]{3}", account_id):
+        raise BriefRejected("Fixture CRM evidence requires its canonical account identifier.")
     as_of = _day(evidence["as_of"])
     groups: dict[str, list[dict[str, Any]]] = {name: [] for name in sources}
     expected_rows: dict[str, list[str]] = {tool: [] for _, _, tool in sources.values()}
@@ -97,6 +158,10 @@ def _catalog(evidence, *, legacy_empty_roles=False):
         if len(parts) != 3 or parts[1] not in sources or reference in seen:
             raise BriefRejected("Unknown or duplicate source reference.")
         table = parts[1]
+        if not live_slack and "slack_message" in record:
+            raise BriefRejected("A live Slack message requires workflow 5 and its complete source snapshot.")
+        if not imported and table == "call_notes" and "manifest" in record:
+            raise BriefRejected("An imported transcript requires its declared source binding.")
         system, prefix, tool = sources[table]
         if (not _ID.fullmatch(identifier) or not identifier.startswith(prefix + "-")
                 or reference != f"{system}/{table}/{identifier}"):
@@ -128,6 +193,18 @@ def _catalog(evidence, *, legacy_empty_roles=False):
         raise BriefRejected("Imported calls require exactly one selected transcript excerpt.")
     if include_slack and evidence["slack_status"] not in ("available", "denied"):
         raise BriefRejected("Unknown Slack outcome.")
+    if live_slack:
+        if evidence["slack_status"] == "denied":
+            if groups["messages"] or evidence["thread_snapshot"] is not None:
+                raise BriefRejected("A denied Slack read cannot contain a source snapshot or messages.")
+        else:
+            from .slack_reader import SlackReadError, validate_slack_snapshot
+            try:
+                validate_slack_snapshot(groups["messages"], evidence["thread_snapshot"], account_id=account_id,
+                                        crm_binding=evidence["crm_binding"], slack_binding=evidence["slack_binding"])
+            except SlackReadError:
+                raise BriefRejected(
+                    "Live Slack evidence does not match its complete bounded source snapshot.") from None
     receipts, receipt_ids = {}, set()
     for receipt in evidence["receipts"]:
         tool, audit_id = receipt["tool"], receipt["audit_id"]
@@ -237,6 +314,8 @@ def _catalog(evidence, *, legacy_empty_roles=False):
         if evidence["slack_status"] == "denied":
             required.add(add("Slack messages were unavailable because the token lacks slack:read.",
                              slack_receipt))
+        elif live_slack:
+            required.update(_live_slack_facts(evidence, groups["messages"], slack_receipt, add))
         elif not groups["messages"]:
             required.add(add(f"No Slack messages were returned for {account_id}.", slack_receipt))
         else:

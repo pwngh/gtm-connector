@@ -67,6 +67,17 @@ class SlackAccess:
     workspace_origin: str | None = field(default=None, repr=False)
 
 
+@dataclass(frozen=True)
+class SlackConnectionSelection:
+    """Private saved selection metadata; never an access credential."""
+
+    identity: dict = field(repr=False)
+    workspace_origin: str | None = field(repr=False)
+    granted_scopes: tuple[str, ...]
+    credential_state: str
+    needs_login: bool
+
+
 class _Clock:
     monotonic = staticmethod(time.monotonic)
 
@@ -199,25 +210,27 @@ class SlackProvider:
         self._transport = _transport
         self._clock = _clock or _Clock()
 
-    def exchange(self, code, verifier, client_id, redirect_uri, deadline):
+    def exchange(self, code, verifier, client_id, redirect_uri, deadline, *, _budget=None):
         return self._request("POST", _TOKEN_URL, deadline, "exchange", data={
             "grant_type": "authorization_code", "client_id": client_id, "code": code,
-            "redirect_uri": redirect_uri, "code_verifier": verifier})
+            "redirect_uri": redirect_uri, "code_verifier": verifier}, _budget=_budget)
 
-    def refresh(self, refresh_token, client_id, deadline):
+    def refresh(self, refresh_token, client_id, deadline, *, _budget=None):
         return self._request("POST", _TOKEN_URL, deadline, "refresh", data={
-            "grant_type": "refresh_token", "client_id": client_id, "refresh_token": refresh_token})
+            "grant_type": "refresh_token", "client_id": client_id, "refresh_token": refresh_token}, _budget=_budget)
 
-    def identity(self, access_token, deadline):
-        return self._request("POST", _IDENTITY_URL, deadline, "identity", token=access_token)
+    def identity(self, access_token, deadline, *, _budget=None):
+        return self._request("POST", _IDENTITY_URL, deadline, "identity", token=access_token, _budget=_budget)
 
-    def revoke(self, access_token, deadline):
-        return self._request("GET", _REVOKE_URL, deadline, "revoke", token=access_token)
+    def revoke(self, access_token, deadline, *, _budget=None):
+        return self._request("GET", _REVOKE_URL, deadline, "revoke", token=access_token, _budget=_budget)
 
-    def _request(self, method, url, deadline, operation, *, data=None, token=None):
+    def _request(self, method, url, deadline, operation, *, data=None, token=None, _budget=None):
         import httpx2
 
         async def bounded():
+            if _budget is not None:
+                _budget.begin_request(kind="auth")
             remaining = deadline - self._clock.monotonic()
             if remaining <= 0:
                 raise SlackAuthError("slack_timeout")
@@ -230,6 +243,19 @@ class SlackProvider:
                 async with httpx2.AsyncClient(transport=self._transport, trust_env=False,
                                              follow_redirects=False, timeout=timeout) as client:
                     async with client.stream(method, url, data=data, headers=headers) as response:
+                        encoding = response.headers.get("content-encoding", "identity").lower()
+                        length = response.headers.get("content-length")
+                        if encoding != "identity" or (length is not None and (
+                                not re.fullmatch(r"[0-9]{1,10}", length) or int(length) > MAX_RESPONSE_BYTES)):
+                            raise SlackAuthError("slack_response_invalid")
+                        body = bytearray()
+                        # Accepted responses use identity encoding, so decoded and raw bytes agree.
+                        async for part in response.aiter_bytes():
+                            if _budget is not None:
+                                _budget.add_bytes(len(part), kind="auth")
+                            body.extend(part)
+                            if len(body) > MAX_RESPONSE_BYTES:
+                                raise SlackAuthError("slack_response_invalid")
                         if response.status_code == 429:
                             raise SlackAuthError("slack_rate_limited")
                         if response.status_code >= 500:
@@ -239,17 +265,6 @@ class SlackProvider:
                                                  else "slack_reconnect_required")
                         if response.status_code != 200:
                             raise SlackAuthError("slack_response_invalid")
-                        encoding = response.headers.get("content-encoding", "identity").lower()
-                        length = response.headers.get("content-length")
-                        if encoding != "identity" or (length is not None and (
-                                not re.fullmatch(r"[0-9]{1,10}", length) or int(length) > MAX_RESPONSE_BYTES)):
-                            raise SlackAuthError("slack_response_invalid")
-                        body = bytearray()
-                        # Accepted responses use identity encoding, so decoded and raw bytes agree.
-                        async for part in response.aiter_bytes():
-                            body.extend(part)
-                            if len(body) > MAX_RESPONSE_BYTES:
-                                raise SlackAuthError("slack_response_invalid")
                         document = _decode(bytes(body))
                         _ok(document, operation)
                 if self._clock.monotonic() >= deadline:
@@ -591,11 +606,13 @@ def _deadline(clock, deadline):
         raise SlackAuthError("slack_timeout")
 
 
-def _verify_and_save(directory_fd, candidate, *, provider, clock, deadline, progress, persisted=False):
+def _verify_and_save(directory_fd, candidate, *, provider, clock, deadline, progress, persisted=False, budget=None):
     _deadline(clock, deadline)
     _progress(progress, "identity", "running")
     try:
-        origin = _verify_identity(provider.identity(candidate["access_token"], deadline), candidate=candidate)
+        options = {} if budget is None else {"_budget": budget}
+        origin = _verify_identity(provider.identity(candidate["access_token"], deadline, **options),
+                                  candidate=candidate)
     except SlackAuthError as exc:
         if persisted and exc.code in ("slack_identity_mismatch", "slack_reconnect_required",
                                        "slack_token_type_unsupported"):
@@ -663,34 +680,47 @@ def connect_slack(connection_dir, *, client_id, redirect_uri, user_scopes=DEFAUL
             raise SlackAuthError(codes[exc.code]) from None
 
 
-def _usable(directory_fd, document, *, provider, clock, deadline, progress, check):
+def _usable(directory_fd, document, *, provider, clock, deadline, progress, check, budget=None, force_refresh=False):
     if document is None:
         raise SlackAuthError("slack_not_connected")
     if _needs_login(document, clock.now()):
         raise SlackAuthError("slack_reconnect_required")
     if document["credential_state"] == "identity_unchecked":
-        return _verify_and_save(directory_fd, document, provider=provider, clock=clock, deadline=deadline,
-                                progress=progress, persisted=True)
+        document = _verify_and_save(directory_fd, document, provider=provider, clock=clock, deadline=deadline,
+                                    progress=progress, persisted=True, budget=budget)
+        if not force_refresh:
+            return document
     expiry = document["access_expires_at"]
-    if expiry is not None and clock.now() + timedelta(seconds=EXPIRY_MARGIN_SECONDS) >= _date(expiry):
+    if force_refresh or (expiry is not None
+                         and clock.now() + timedelta(seconds=EXPIRY_MARGIN_SECONDS) >= _date(expiry)):
+        if document["refresh_token"] is None:
+            if force_refresh:
+                _write_credentials(directory_fd, {**document, "credential_state": "refresh_pending"})
+            raise SlackAuthError("slack_reconnect_required")
+        if budget is not None:
+            if force_refresh and budget.refresh_attempts >= 1:
+                _write_credentials(directory_fd, {**document, "credential_state": "refresh_pending"})
+            budget.begin_refresh()
         pending = {**document, "credential_state": "refresh_pending"}
         _deadline(clock, deadline)
         _write_credentials(directory_fd, pending)
         _deadline(clock, deadline)
         _progress(progress, "refresh", "running")
         obtained = clock.now()
-        replacement = _parse_refresh(provider.refresh(document["refresh_token"], document["client_id"], deadline),
+        options = {} if budget is None else {"_budget": budget}
+        replacement = _parse_refresh(provider.refresh(document["refresh_token"], document["client_id"], deadline,
+                                                       **options),
                                      previous=document, obtained_at=obtained)
         _write_credentials(directory_fd, replacement)
         return _verify_and_save(directory_fd, replacement, provider=provider, clock=clock, deadline=deadline,
-                                progress=progress, persisted=True)
+                                progress=progress, persisted=True, budget=budget)
     if check:
         # A failed quarantine write must not leave a known-invalid token reusable as ready.
         unchecked = {**document, "credential_state": "identity_unchecked"}
         _deadline(clock, deadline)
         _write_credentials(directory_fd, unchecked)
         return _verify_and_save(directory_fd, unchecked, provider=provider, clock=clock, deadline=deadline,
-                                progress=progress, persisted=True)
+                                progress=progress, persisted=True, budget=budget)
     return document
 
 
@@ -706,22 +736,69 @@ def slack_status(connection_dir, *, check=False, progress=None, _provider=None, 
         return _public_status(document, verification="live" if check else "saved", now=clock.now())
 
 
-def get_slack_access(connection_dir, *, required_scopes, _provider=None, _clock=None):
+def get_slack_access(connection_dir, *, required_scopes, _provider=None, _clock=None, _budget=None,
+                     _expired_access=None, expected_binding=None):
     """Return private usable access; no browser flow or source read occurs here."""
+    if expected_binding is not None:
+        from .slack_mapping import slack_identity_binding, valid_slack_binding
+        if not valid_slack_binding(expected_binding):
+            raise SlackAuthError("slack_invalid_configuration")
     try:
-        required = _scopes(required_scopes)
+        required = () if required_scopes == () else _scopes(required_scopes)
     except ValueError:
         raise SlackAuthError("slack_invalid_configuration") from None
     clock = _clock or _Clock()
     deadline = clock.monotonic() + OPERATION_SECONDS
+    if _budget is not None:
+        deadline = min(deadline, _budget.deadline)
+        _budget.remaining()
     with _connection_lock(connection_dir, create=False) as directory_fd:
         document = None if directory_fd is None else _read_credentials(directory_fd)
+        # Check the caller's pinned identity under the same lock as rotation.
+        # A replaced connection must not be verified or refreshed for that caller.
+        if (document is not None and expected_binding is not None
+                and slack_identity_binding(document["identity"]) != expected_binding):
+            raise SlackAuthError("slack_identity_mismatch")
+        force_refresh = False
+        if _expired_access is not None:
+            if not isinstance(_expired_access, SlackAccess):
+                raise SlackAuthError("slack_invalid_configuration")
+            if document is not None:
+                if document["identity"] != _expired_access.identity:
+                    raise SlackAuthError("slack_identity_mismatch")
+                force_refresh = document["access_token"] == _expired_access.access_token
         if document is not None and not set(required) <= set(document["granted_scopes"]):
             raise SlackAuthError("slack_scope_mismatch")
         document = _usable(directory_fd, document, provider=_provider or SlackProvider(_clock=clock),
-                           clock=clock, deadline=deadline, progress=None, check=False)
+                           clock=clock, deadline=deadline, progress=None, check=False,
+                           budget=_budget, force_refresh=force_refresh)
+        _deadline(clock, deadline)
         return SlackAccess(document["access_token"], dict(document["identity"]), tuple(document["granted_scopes"]),
                            document["access_expires_at"], document["workspace_origin"])
+
+
+def reject_slack_access(connection_dir, access):
+    """Quarantine an exactly rejected saved credential without a provider request."""
+    if not isinstance(access, SlackAccess):
+        raise SlackAuthError("slack_invalid_configuration")
+    with _connection_lock(connection_dir, create=False) as directory_fd:
+        document = None if directory_fd is None else _read_credentials(directory_fd)
+        if (document is not None and document["identity"] == access.identity
+                and document["access_token"] == access.access_token
+                and document["credential_state"] != "refresh_pending"):
+            _write_credentials(directory_fd, {**document, "credential_state": "refresh_pending"})
+
+
+def inspect_slack_connection(connection_dir, *, _clock=None):
+    """Inspect a saved identity under its lock without requesting or releasing a token."""
+    clock = _clock or _Clock()
+    with _connection_lock(connection_dir, create=False) as directory_fd:
+        document = None if directory_fd is None else _read_credentials(directory_fd)
+        if document is None:
+            raise SlackAuthError("slack_not_connected")
+        return SlackConnectionSelection(dict(document["identity"]), document["workspace_origin"],
+                                        tuple(document["granted_scopes"]), document["credential_state"],
+                                        _needs_login(document, clock.now()))
 
 
 def disconnect_slack(connection_dir, *, revoke=False, progress=None, _provider=None, _clock=None):

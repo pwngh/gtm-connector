@@ -132,10 +132,27 @@ a speaker, or the truth of the source. An owner who rewrites all evidence and
 receipts remains outside this integrity boundary.
 
 The default formatter records `adapter: "extractive"` for imported workflows,
-with no model and zero model tokens. Evidence uses workflow version 4 and names
-the CRM backend, imported calls mode, and saved source binding. Fixture workflows
+with no model and zero model tokens. Evidence with fixture Slack uses workflow
+version 4 and names the CRM backend, imported calls mode, and saved source binding. Fixture workflows
 keep their existing versions and output. Optional local-model limits still apply
 when the owner explicitly selects Ollama; the default requires no model.
+
+## Combine an import with selected Slack
+
+Choose both source modes when initializing a fresh folder. A first `slack map`
+can select `--calls-backend imported`, after which `calls import` uses the same
+folder with `--slack-backend slack --slack-connection-dir var/slack-connection`.
+Alternatively, the first import can include those Slack flags, and mapping can
+follow with imported calls selected. Neither operation silently migrates an
+existing fixture folder. Credentials remain in their separate connection folder.
+
+Daily briefs use that same `--state-dir`, `--calls-backend imported`,
+`--slack-backend slack`, `--slack-connection-dir`, and `--with-slack`. Live Slack
+uses workflow version 5 while preserving the exact imported excerpt and its
+manifest. `calls list` and `calls inspect` remain offline; they need no Slack
+credentials. The [live Slack guide](slack-live.md#combine-salesforce-a-transcript-and-slack)
+has complete examples for both orders with an existing Salesforce alias. A
+Slack-only check does not verify that a call export exists or is current.
 
 ## Obtain an existing export
 

@@ -1,6 +1,7 @@
 """Run two HTTPS loopback services with a private, local fixture owner."""
 
 from contextlib import ExitStack, closing, contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import fcntl
@@ -29,6 +30,8 @@ from .gateway import Connector, require_distinct_databases
 
 _FIXTURE_CRM_IDENTITY = {"schema_version": 1, "backend": "sqlite", "fixture_book": "renewal-book-v2"}
 _DATABASE_NAMES = ("crm", "calls", "slack", "audit", "imports")
+_INITIAL_METADATA = {"server.lock", "crm-connection.json", "calls-source.json", "slack-source.json",
+                     "slack-mappings.json"}
 
 
 def private_file(path, content):
@@ -81,13 +84,14 @@ def _read_marker(path, *, require_schema=True):
         info = path.lstat()
     except FileNotFoundError:
         return None
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_nlink != 1:
         raise ValueError
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(descriptor) as source:
         opened = os.fstat(source.fileno())
         if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid()
-                or opened.st_mode & 0o077 or opened.st_size > 4096):
+                or opened.st_mode & 0o077 or opened.st_size > 4096 or opened.st_nlink != 1
+                or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)):
             raise ValueError
         marker = json.loads(source.read(4097), object_pairs_hook=_unique_marker)
     if not isinstance(marker, dict) or (require_schema and type(marker.get("schema_version")) is not int):
@@ -169,12 +173,12 @@ def _prepare_calls_selection(directory, backend, demo_binding):
             or os.path.lexists(directory / "calls.sqlite3") or prior_backend == "fixture"):
         raise SourceIdentityError("Imported transcripts cannot reuse fixture calls or a Salesforce demo binding. "
                                   "Select a fresh --state-dir with --calls-backend imported.")
-    if marker is None and any(child.name not in ("server.lock", "crm-connection.json")
+    if marker is None and any(child.name not in _INITIAL_METADATA
                               for child in directory.iterdir()):
         raise SourceIdentityError("This state folder has no pinned imported calls source. "
                                   "Select fresh state with --calls-backend imported.")
     if marker is not None and not os.path.lexists(directory / "imports.sqlite3") and any(
-            child.name not in ("server.lock", "crm-connection.json", "calls-source.json")
+            child.name not in _INITIAL_METADATA
             for child in directory.iterdir()):
         raise SourceIdentityError("The imported calls database is missing from existing state. "
                                   "Restore the original private state or select a fresh --state-dir.")
@@ -383,15 +387,272 @@ def _seed_demo_sources(directory, binding):
             path.chmod(0o600)
 
 
+def _valid_slack_marker(marker):
+    from .slack_mapping import valid_crm_binding, valid_slack_binding
+    return (isinstance(marker, dict)
+            and set(marker) == {"schema_version", "backend", "crm_binding", "slack_binding"}
+            and type(marker["schema_version"]) is int and marker["schema_version"] == 1
+            and marker["backend"] == "slack" and valid_crm_binding(marker["crm_binding"])
+            and valid_slack_binding(marker["slack_binding"]))
+
+
+def _validate_saved_slack_crm(directory, marker):
+    identity = _read_marker(directory / "crm-connection.json")
+    if marker["crm_binding"]["crm_backend"] == "salesforce":
+        if not _valid_connection_identity(identity):
+            raise ValueError
+    elif identity is not None:
+        raise ValueError
+    if marker["crm_binding"] != _calls_binding(identity):
+        raise ValueError
+
+
+def _prepare_slack_selection(directory, backend, connection_dir, expected_binding=None):
+    from .slack_mapping import SlackMappingError, slack_identity_binding
+    try:
+        marker = _read_marker(directory / "slack-source.json")
+        if marker is not None and not _valid_slack_marker(marker):
+            raise ValueError
+        if marker is not None:
+            _validate_saved_slack_crm(directory, marker)
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        raise SlackMappingError("slack_mapping_invalid") from None
+    try:
+        owner = _read_marker(directory / "owner.json", require_schema=False)
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        if backend == "fixture" and marker is None and not os.path.lexists(directory / "slack-mappings.json"):
+            # Existing CRM/calls preparation rejects this owner before any source
+            # work. Preserve that established diagnostic when no live Slack is selected.
+            return None, None
+        raise SlackMappingError("slack_mapping_invalid") from None
+    prior = owner.get("slack_backend", "fixture") if owner is not None else None
+    if prior not in (None, "fixture", "slack"):
+        raise SlackMappingError("slack_mapping_invalid")
+    if backend == "fixture":
+        if marker is not None or prior == "slack" or os.path.lexists(directory / "slack-mappings.json"):
+            raise SlackMappingError("slack_source_mismatch")
+        return None, None
+    if prior == "fixture" or any(os.path.lexists(directory / name)
+                                for name in ("slack.sqlite3", "source-profile.json")):
+        raise SlackMappingError("slack_source_mismatch")
+    if marker is None and any(child.name not in {"server.lock", "crm-connection.json", "calls-source.json"}
+                              for child in directory.iterdir()):
+        raise SlackMappingError("slack_source_mismatch")
+    if marker is not None and not os.path.lexists(directory / "slack-mappings.json") and any(
+            child.name not in _INITIAL_METADATA - {"slack-mappings.json"} for child in directory.iterdir()):
+        raise SlackMappingError("slack_mapping_invalid")
+    from .slack_auth import SlackAuthError, inspect_slack_connection
+    selection = inspect_slack_connection(connection_dir)
+    binding = slack_identity_binding(selection.identity)
+    if expected_binding is not None and binding != expected_binding:
+        raise SlackMappingError("slack_source_mismatch")
+    if selection.needs_login:
+        raise SlackAuthError("slack_reconnect_required")
+    if selection.credential_state != "ready":
+        raise SlackMappingError("slack_identity_unchecked")
+    if marker is not None and marker["slack_binding"] != binding:
+        raise SlackMappingError("slack_source_mismatch")
+    return marker, binding
+
+
+def _finish_slack_selection(directory, marker, crm_binding, slack_binding):
+    from .slack_mapping import SlackMappingError, initialize_slack_mapping_store
+    expected = {"schema_version": 1, "backend": "slack", "crm_binding": crm_binding, "slack_binding": slack_binding}
+    if marker is not None and marker != expected:
+        raise SlackMappingError("slack_source_mismatch")
+    try:
+        if marker is None:
+            _write_marker(directory / "slack-source.json", expected)
+        initialize_slack_mapping_store(directory / "slack-mappings.json", crm_binding=crm_binding,
+                                       slack_binding=slack_binding)
+    except OSError:
+        raise SlackMappingError("slack_storage_failed") from None
+
+
+def _selected_slack_reader(reader, mapping_path, connection_dir, crm_binding, slack_binding, on_read):
+    from .slack_mapping import SlackMappingError
+    if reader is None:
+        from .slack_reader import SlackThreadReader
+        return SlackThreadReader(mapping_path, connection_dir=connection_dir, crm_binding=crm_binding,
+                                 slack_binding=slack_binding, on_read=on_read)
+    try:
+        if (reader.name != "slack" or Path(reader.mapping_path).absolute() != mapping_path
+                or Path(reader.connection_dir).absolute() != connection_dir
+                or reader.crm_binding != crm_binding or reader.slack_binding != slack_binding):
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
+        raise SlackMappingError("slack_source_mismatch") from None
+    if on_read is not None:
+        reader.on_read = on_read
+    return reader
+
+
+@dataclass(frozen=True)
+class SlackState:
+    directory: Path
+    crm_binding: dict
+    slack_binding: dict
+    mapping_path: Path
+    crm_backend: str
+    mapping_count: int
+
+
+def inspect_slack_state(directory):
+    """Validate saved association metadata without opening CRM, calls, or credentials."""
+    from .slack_mapping import SlackMappingError, validate_slack_mapping_store
+    directory = _state_directory(directory)
+    try:
+        _private_existing(directory, directory=True)
+        marker = _read_marker(directory / "slack-source.json")
+        if not _valid_slack_marker(marker) or os.path.lexists(directory / "slack.sqlite3"):
+            raise ValueError
+        _validate_saved_slack_crm(directory, marker)
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        raise SlackMappingError("slack_mapping_invalid") from None
+    count = validate_slack_mapping_store(directory / "slack-mappings.json", crm_binding=marker["crm_binding"],
+                                         slack_binding=marker["slack_binding"])
+    return SlackState(directory, dict(marker["crm_binding"]), dict(marker["slack_binding"]),
+                      directory / "slack-mappings.json", marker["crm_binding"]["crm_backend"], count)
+
+
+class _LocalHTTPS:
+    """Own only the existing two-port HTTPS services, with no source preparation."""
+
+    def __init__(self, tls_directory, connector_factory):
+        self.tls_directory, self.connector_factory = tls_directory, connector_factory
+        self.servers, self.threads, self.sockets = [], [], []
+
+    def __enter__(self):
+        try:
+            key, cert = certificate(self.tls_directory)
+            for _ in range(2):
+                sock = socket.socket()
+                self.sockets.append(sock)
+                sock.bind(("127.0.0.1", 0))
+                sock.listen(128)
+            issuer = f"https://127.0.0.1:{self.sockets[0].getsockname()[1]}"
+            resource = f"https://127.0.0.1:{self.sockets[1].getsockname()[1]}/mcp"
+            authority = LocalAuthority(issuer, resource)
+            self.config = {"issuer": issuer, "resource": resource, "cert_path": str(cert),
+                           "client_id": authority.client_id, "redirect_uri": authority.redirect_uri,
+                           "owner_secret": authority.owner_secret}
+            self.connector = self.connector_factory(authority)
+            for app, sock in zip((create_auth_app(authority), self.connector), self.sockets):
+                server = uvicorn.Server(uvicorn.Config(app, ssl_keyfile=str(key), ssl_certfile=str(cert),
+                    log_config=None, access_log=False, log_level="warning", lifespan="on"))
+                thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
+                self.servers.append(server)
+                self.threads.append(thread)
+                thread.start()
+            deadline = time.monotonic() + 10
+            while not all(server.started for server in self.servers):
+                if time.monotonic() > deadline or not all(thread.is_alive() for thread in self.threads):
+                    raise RuntimeError("local HTTPS services did not start")
+                time.sleep(0.02)
+            return self
+        except BaseException:
+            self.__exit__(None, None, None)
+            raise
+
+    def __exit__(self, *_):
+        for server in self.servers:
+            server.should_exit = True
+        for thread in self.threads:
+            if thread.ident is not None:
+                # A bounded source read can outlast the old ten-second join.
+                # Keep its state lock and TLS files until its server has finished.
+                thread.join()
+        for sock in self.sockets:
+            sock.close()
+
+
+class SlackCheckRuntime:
+    """Check saved Slack associations with ephemeral HTTPS and no CRM/calls source access."""
+
+    def __init__(self, directory, *, slack_connection_dir, _slack_reader=None, on_call=None, on_source_read=None):
+        self.directory = _state_directory(directory)
+        self.slack_connection_dir = Path(slack_connection_dir).expanduser().absolute()
+        self.slack_reader = _slack_reader
+        self.slack_backend = "slack"
+        self.on_call, self.on_source_read = on_call, on_source_read
+        self._stack = ExitStack()
+
+    def __enter__(self):
+        from .slack_mapping import SlackMappingError
+        import sqlite3
+        try:
+            _private_existing(self.directory, directory=True)
+            lock_path = self.directory / "server.lock"
+            _private_existing(lock_path)
+            descriptor = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+            lock = self._stack.enter_context(os.fdopen(descriptor, "r+b"))
+            opened = os.fstat(lock.fileno())
+            if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid()
+                    or opened.st_mode & 0o077 or opened.st_nlink != 1):
+                raise SlackMappingError("slack_mapping_invalid")
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise StateInUseError("This state directory has a running connector. "
+                                      "Stop it before checking Slack.") from None
+            state = inspect_slack_state(self.directory)
+            self.crm_binding, self.slack_binding = state.crm_binding, state.slack_binding
+            self.crm_backend, self.slack_mapping_path = state.crm_backend, state.mapping_path
+            audit_path = self.directory / "audit.sqlite3"
+            _private_existing(audit_path)
+            if audit_path.stat().st_nlink != 1:
+                raise SlackMappingError("slack_mapping_invalid")
+            with closing(sqlite3.connect(audit_path.as_uri() + "?mode=ro", uri=True)) as audit:
+                audit.execute("SELECT audit_id, started_at, token_id, tool, arguments, request_id, brief_id, "
+                              "status, http_status, row_count, rows, elapsed_ms, error FROM audit_log WHERE 0")
+            self.slack_reader = _selected_slack_reader(
+                self.slack_reader, self.slack_mapping_path, self.slack_connection_dir,
+                self.crm_binding, self.slack_binding, self.on_source_read)
+            tls_directory = Path(self._stack.enter_context(tempfile.TemporaryDirectory(prefix="gtm-slack-check-")))
+
+            def connector_factory(authority):
+                return Connector(self.directory / "crm.sqlite3", self.directory / "calls.sqlite3", audit_path,
+                                 authority, slack_reader=self.slack_reader, _slack_only=True, on_call=self.on_call)
+
+            services = self._stack.enter_context(_LocalHTTPS(tls_directory, connector_factory))
+            self.config, self.connector = services.config, services.connector
+            self.config.update(crm_backend=self.crm_backend, slack_backend="slack")
+            return self
+        except BaseException as error:
+            self._stack.close()
+            if isinstance(error, sqlite3.Error):
+                raise SlackMappingError("slack_mapping_invalid") from None
+            if isinstance(error, OSError):
+                raise SlackMappingError("slack_storage_failed") from None
+            if isinstance(error, ValueError) and not isinstance(error, StateInUseError):
+                raise SlackMappingError("slack_mapping_invalid") from None
+            raise
+
+    def __exit__(self, *_):
+        self._stack.close()
+
+
 class Runtime:
     """One process, two ports, four databases; owns shutdown and a state lock."""
 
     def __init__(self, directory, *, rate_limit=60, crm_reader=None, on_call=None, demo_binding=None,
-                 calls_backend="fixture", calls_reader=None):
+                 calls_backend="fixture", calls_reader=None, slack_backend="fixture", slack_connection_dir=None,
+                 slack_reader=None, on_source_read=None, slack_expected_binding=None):
         if calls_backend not in ("fixture", "imported"):
             raise ValueError("The calls backend must be fixture or imported.")
         if calls_reader is not None and (calls_backend != "imported" or calls_reader.name != "imported"):
             raise ValueError("An imported calls reader requires --calls-backend imported.")
+        if slack_backend not in ("fixture", "slack"):
+            raise ValueError("The Slack backend must be fixture or slack.")
+        if slack_backend == "slack" and (slack_connection_dir is None or demo_binding is not None):
+            raise SourceIdentityError("Live Slack requires its private connection folder and no demo binding.")
+        if slack_reader is not None and (slack_backend != "slack" or slack_reader.name != "slack"):
+            raise SourceIdentityError("The Slack reader does not match the selected source mode.")
+        if slack_expected_binding is not None:
+            from .slack_mapping import valid_slack_binding
+            if slack_backend != "slack" or not valid_slack_binding(slack_expected_binding):
+                raise SourceIdentityError("The expected Slack identity does not match the selected source mode.")
+        self.slack_expected_binding = deepcopy(slack_expected_binding)
         self.directory = _state_directory(directory)
         self.rate_limit = rate_limit
         self.crm_reader = crm_reader
@@ -402,17 +663,26 @@ class Runtime:
         self.calls_backend = calls_backend
         self.calls_reader = calls_reader
         self.calls_binding = None
+        self.crm_binding = None
+        self.slack_backend = slack_backend
+        self.slack_connection_dir = (None if slack_connection_dir is None
+                                     else Path(slack_connection_dir).expanduser().absolute())
+        self.slack_reader = slack_reader
+        self.slack_binding = None
+        self.slack_mapping_path = self.directory / "slack-mappings.json"
+        self.on_source_read = on_source_read
         self.imports_path = self.directory / "imports.sqlite3"
         if demo_binding is not None and self.crm_backend != "salesforce":
             raise ValueError("--salesforce-demo-binding requires --crm-backend salesforce")
         self.servers, self.threads, self.sockets = [], [], []
         self.lock = None
+        self._services = None
 
     def __enter__(self):
         try:
             if self.directory.is_symlink():
                 raise SourceIdentityError("The state folder must not be a symbolic link. Use a private --state-dir.")
-            if self.calls_backend == "imported" and self.directory.exists():
+            if (self.calls_backend == "imported" or self.slack_backend == "slack") and self.directory.exists():
                 try:
                     _private_existing(self.directory, directory=True)
                 except (OSError, ValueError):
@@ -427,13 +697,21 @@ class Runtime:
             except BlockingIOError as exc:
                 raise StateInUseError("this state directory already has a running connector; "
                                       "stop it with Ctrl-C or choose another --state-dir") from exc
+            slack_marker, self.slack_binding = _prepare_slack_selection(
+                self.directory, self.slack_backend, self.slack_connection_dir, self.slack_expected_binding)
             self.crm_connection_identity = _prepare_source_state(self.directory, self.crm_reader, self.demo_binding,
                                                                   calls_backend=self.calls_backend)
+            self.crm_binding = _calls_binding(self.crm_connection_identity)
+            if self.slack_backend == "slack":
+                _finish_slack_selection(self.directory, slack_marker, self.crm_binding, self.slack_binding)
+                self.slack_reader = _selected_slack_reader(
+                    self.slack_reader, self.slack_mapping_path, self.slack_connection_dir,
+                    self.crm_binding, self.slack_binding, self.on_source_read)
             require_distinct_databases([self.directory / f"{name}.sqlite3"
                                         for name in _DATABASE_NAMES])
             if self.calls_backend == "imported":
                 from .calls_import import ImportedCallsReader, initialize_import_store
-                self.calls_binding = _calls_binding(self.crm_connection_identity)
+                self.calls_binding = self.crm_binding
                 if self.calls_reader is not None:
                     try:
                         if (Path(self.calls_reader.path).resolve() != self.imports_path
@@ -451,6 +729,8 @@ class Runtime:
                 for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
                     if name == "calls" and self.calls_backend == "imported":
                         continue
+                    if name == "slack" and self.slack_backend == "slack":
+                        continue
                     path = self.directory / f"{name}.sqlite3"
                     if path.is_symlink():
                         raise ValueError("source databases must not be symbolic links")
@@ -458,39 +738,26 @@ class Runtime:
                         module.initialize(connection)
                         module.seed(connection)
                     path.chmod(0o600)
-            key, cert = certificate(self.directory)
-            for _ in range(2):
-                sock = socket.socket()
-                sock.bind(("127.0.0.1", 0))
-                sock.listen(128)
-                self.sockets.append(sock)
-            issuer = f"https://127.0.0.1:{self.sockets[0].getsockname()[1]}"
-            resource = f"https://127.0.0.1:{self.sockets[1].getsockname()[1]}/mcp"
-            authority = LocalAuthority(issuer, resource)
-            self.config = {"issuer": issuer, "resource": resource, "cert_path": str(cert),
-                           "client_id": authority.client_id, "redirect_uri": authority.redirect_uri,
-                           "owner_secret": authority.owner_secret, "crm_backend": self.crm_backend,
-                           "calls_backend": self.calls_backend}
+            calls_path = self.imports_path if self.calls_backend == "imported" else self.directory / "calls.sqlite3"
+
+            def connector_factory(authority):
+                return Connector(self.directory / "crm.sqlite3", calls_path,
+                                 self.directory / "audit.sqlite3", authority, rate_limit=self.rate_limit,
+                                 slack_path=self.directory / "slack.sqlite3", crm_reader=self.crm_reader,
+                                 on_call=self.on_call, demo_binding=self.demo_binding,
+                                 calls_reader=self.calls_reader, slack_reader=self.slack_reader)
+
+            self._services = _LocalHTTPS(self.directory, connector_factory)
+            self._services.__enter__()
+            self.config, self.connector = self._services.config, self._services.connector
+            self.servers, self.threads, self.sockets = (self._services.servers, self._services.threads,
+                                                       self._services.sockets)
+            self.config.update(crm_backend=self.crm_backend, calls_backend=self.calls_backend,
+                               slack_backend=self.slack_backend)
+            if self.slack_backend == "slack":
+                self.config["slack_connection_dir"] = str(self.slack_connection_dir)
             if self.crm_connection_identity is not None:
                 self.config["sf_environment"] = self.crm_connection_identity["environment"]
-            calls_path = self.imports_path if self.calls_backend == "imported" else self.directory / "calls.sqlite3"
-            self.connector = Connector(self.directory / "crm.sqlite3", calls_path,
-                                       self.directory / "audit.sqlite3", authority, rate_limit=self.rate_limit,
-                                       slack_path=self.directory / "slack.sqlite3", crm_reader=self.crm_reader,
-                                       on_call=self.on_call, demo_binding=self.demo_binding,
-                                       calls_reader=self.calls_reader)
-            for app, sock in zip((create_auth_app(authority), self.connector), self.sockets):
-                server = uvicorn.Server(uvicorn.Config(app, ssl_keyfile=str(key), ssl_certfile=str(cert),
-                    log_config=None, access_log=False, log_level="warning", lifespan="on"))
-                thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
-                self.servers.append(server)
-                self.threads.append(thread)
-                thread.start()
-            deadline = time.monotonic() + 10
-            while not all(server.started for server in self.servers):
-                if time.monotonic() > deadline or not all(thread.is_alive() for thread in self.threads):
-                    raise RuntimeError("local HTTPS services did not start")
-                time.sleep(0.02)
             private_file(self.directory / "owner.json", json.dumps(self.config).encode())
             return self
         except BaseException:
@@ -498,11 +765,7 @@ class Runtime:
             raise
 
     def __exit__(self, *_):
-        for server in self.servers:
-            server.should_exit = True
-        for thread in self.threads:
-            thread.join(timeout=10)
-        for sock in self.sockets:
-            sock.close()
+        if self._services is not None:
+            self._services.__exit__(None, None, None)
         if self.lock is not None:
             self.lock.close()

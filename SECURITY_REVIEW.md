@@ -12,9 +12,10 @@ messages. Company names, people, and source text are invented; email addresses u
 reserved `.example` domains. The default runtime uses no real CRM, external
 identity, or recording service. An explicit Salesforce backend can read an
 operator's existing org with an explicit environment expectation. Calls default
-to fixtures and can instead use explicitly imported exports. Slack still uses
-local fixtures. Separate owner commands can authenticate an existing Slack app;
-authentication does not enable message reads.
+to fixtures and can instead use explicitly imported exports. Slack defaults to
+local fixtures and can instead read an explicitly mapped thread. Separate owner
+commands authenticate an existing Slack app and select that source;
+authentication alone does not enable message reads.
 
 | Scope | Allowed tools |
 | --- | --- |
@@ -135,12 +136,12 @@ role, classify freshness, or resolve that disagreement. The recorded Ollama run
 uses the earlier synthetic-label fixture corpus; it proves no model result for
 the current book. The narrative demo uses fixed drafting without a model.
 
-Slack messages remain untrusted data in a separate store and scope. The optional
+Fixture Slack messages remain untrusted data in a separate store and scope. The optional
 four-read workflow requires a matching receipt for each source. It distinguishes
 empty messages from a denied grant. Its additional conflict rule matches the
 exact delayed-review message against the existing procurement conflict and
 cites all three records. The follow-up is a checked proposal, never a sent
-message or a promise. It cannot create an activity or contact an external service.
+message or a promise. The fixture workflow cannot create an activity or contact an external service.
 Legacy three-read snapshots cannot introduce Slack evidence or a follow-up.
 
 Snapshot saves write a mode-0600 temporary file, then replace the destination
@@ -385,7 +386,8 @@ The owner explicitly invokes `slack connect` for an existing PKCE public app.
 It requests user history grants only, validates their exact set, and verifies
 the returned workspace and user. Credentials are pinned to app, workspace and
 user in a separate private folder. Authentication does not enable a source,
-change the demo or grant a caller `slack:read`. No message endpoint is called.
+change the demo or grant a caller `slack:read`. These authentication commands
+call no message endpoint.
 The existing local MCP token, scope and audit boundaries are unchanged.
 
 The browser flow uses fresh state and S256 PKCE. Only the exact registered
@@ -430,6 +432,109 @@ No real Slack login, message read, app rendering or hosted assistant connection
 has been verified. Actual use requires an existing approved public app with the
 matching registered callback. Current credential filesystem proof is POSIX;
 native Windows support requires its separately authorized platform slice.
+
+## Selected live Slack boundary
+
+`slack map` is an explicit owner operation. It resolves one account through the
+existing audited `crm:read` tool and saves one thread selection, without reading
+messages. Private source markers pin the selected CRM identity and the Slack
+app/workspace/user/enterprise identity digest. Tokens, scopes, workspace origin,
+and credential path are not identity keys. The copied URL must match the saved
+workspace origin; it never supplies an HTTP destination or chooses credentials.
+The native channel and parent timestamp are the fallback when no supported
+origin is saved. There is no arbitrary query or channel-search tool.
+
+The saved mapping contains the canonical account, selected channel and parent,
+bindings, selection time, and the audited CRM association receipt reference.
+It contains no raw AccountNumber or selector hash. Same-selection retries keep
+the original entry. Replacement and reassignment require explicit flags and
+publish one complete bounded document under the existing state lock. Changing
+a source mode or identity refuses before seeding; live Slack has no fixture
+message database or fallback. Imported calls and live Slack can initialize
+together in either order without mixing fixture and selected-source state.
+
+The existing `read_slack_messages` tool keeps its independent `slack:read`
+guard and committed pending receipt before mapping, credential, or provider
+work. Initial audit failure does no source work; final audit failure releases
+no source result. The source makes only fixed GET conversations.replies requests
+with a bearer header, verified TLS, no redirect, and no environment proxy.
+Source text, file links, cursor values, and copied URLs cannot redirect it.
+The scope permits requests for any mapped account in this connector. Per-caller
+account and resource selections remain a separate slice; a mapping is not a
+caller-specific grant.
+
+One shared budget includes message pages, authentication, failed requests, and
+retries: ten HTTP attempts, 1 MiB of response bytes, and an absolute 20-second
+cancellable HTTP deadline. Authentication also keeps its individual 64 KiB
+response bound. The reader allows at most 100 raw rows, 16 KiB per literal text,
+64 KiB combined text, and 256 KiB for the normalized source envelope. MCP text
+and structured wrappers can duplicate that envelope. Filesystem operations
+remain synchronous and have no hard preemption guarantee.
+Shutdown retains TLS and the state lock until active services finish. There is
+no guaranteed total shutdown time.
+
+Only exact token expiry permits one recovery retry. Credential recovery rereads
+under the connection lock and checks the expected identity before verification
+or rotation, including initial acquisition. Mapping setup also carries the
+initially inspected identity forward, so a concurrent connection switch refuses
+before source pinning or CRM resolution. Another process's
+different verified token can be reused without a duplicate refresh. One local
+refresh is the maximum. Terminal rejection quarantines only the exact saved
+token and identity; it preserves a concurrently saved replacement. Rotation
+requires room for both refresh and identity HTTP attempts before a pending
+marker is written. With insufficient request slots, the reader leaves credentials
+unchanged and reports the resource limit instead of requiring another login.
+Only request slots are reserved. The shared byte or time budget can still run
+out after rotation starts; an ambiguous refresh then requires browser login.
+One message rate-limit retry must have a valid delay
+of at most five seconds within the remaining budget. An ambiguous refresh is
+not retried. Expired unchecked credentials require browser authorization.
+No tool starts that browser flow, sends a message, or broadens a grant.
+
+The reader requires the selected parent on the first page, strict membership,
+valid timestamps, and completed cursor pagination through one creation cutoff.
+Identical duplicates consume bounds; conflicting duplicates refuse. Missing
+text, unsupported subtypes, hidden content, and event wrappers refuse the whole
+observation. Files, blocks, and attachments contribute omission counts only.
+Their inline content is received in the API response and omitted from evidence;
+no separate non-text resource requests are made.
+Literal text remains untrusted; author labels do not authenticate a person.
+Cursor completion does not establish a full archive, earlier edits/deletions,
+current source truth, or an atomic view while messages change.
+
+Workflow 5 binds the selected mapping, ordered message hashes, counters,
+observation times, record IDs, and matching tool receipts. The extractive brief
+requires literal quotes, edit and omission disclosures, and the observation
+limits. Saved checks use copied evidence only. They do not reopen credentials,
+source files, or Slack, and they cannot resist an owner rewriting all evidence.
+Older evidence versions cannot accept live Slack metadata by dropping its
+workflow version. Source snapshots and ordinary tool output remain private;
+they contain selected text and provider identifiers.
+
+`slack check` prepares only the existing saved Slack association and audit
+boundary. Its temporary local HTTPS service enables only the Slack read tool,
+including when a caller presents a broader local grant. It opens no CRM or call
+source, loads no Salesforce credential, and preserves the ordinary owner/TLS
+files. Its shareable report contains fixed steps, outcomes, counts, timings,
+and recovery commands, with no account/workspace identifiers, paths, URLs, or
+message text. It explicitly does not check current CRM or call access. Missing
+telemetry never becomes an invented successful result or a zero-work claim.
+Shutdown waits for active service threads before releasing temporary TLS files
+and the state lock. Cancellation can wait for an in-flight read and receipt
+handling; filesystem operations still have no hard interruption guarantee.
+
+[Mapping tests](tests/test_slack_mapping.py),
+[runtime tests](tests/test_live_slack_runtime.py),
+[reader tests](tests/test_slack_reader.py),
+[CLI tests](tests/test_slack_source_cli.py),
+[brief tests](tests/test_live_slack_briefing.py), and
+[check tests](tests/test_slack_workflow.py) exercise these implementation
+contracts with invented inputs and local HTTPS. [Local HTTP tests](tests/test_live_slack_http.py)
+exercise actual socket requests and streamed-body cancellation. No real Slack login, thread
+read, app rendering, or hosted assistant connection has been verified. Existing
+registration, workspace approval, response compatibility, retention, and the
+app's distribution-specific rate policy remain live-use prerequisites.
+See [owner commands and limits](docs/slack-live.md).
 
 ## Required sign-off evidence
 

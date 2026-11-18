@@ -63,17 +63,29 @@ def require_distinct_databases(paths):
 class Connector:
     def __init__(self, crm_path, calls_path, audit_path, authority,
                  rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None,
-                 crm_reader=None, on_call=None, demo_binding=None, calls_reader=None):
+                 crm_reader=None, on_call=None, demo_binding=None, calls_reader=None,
+                 slack_reader=None, _slack_only=False):
         if rate_limit < 1 or window_seconds <= 0:
             raise ValueError("rate limits must be positive")
-        paths = [Path(p).resolve() for p in (crm_path, calls_path, audit_path)]
-        paths.append(Path(slack_path).resolve() if slack_path is not None
-                     else paths[0].with_name("slack.sqlite3").resolve())
-        paths = require_distinct_databases(paths)
+        if _slack_only and (slack_reader is None or crm_reader is not None or calls_reader is not None
+                            or demo_binding is not None):
+            raise ValueError("A Slack-only check requires only its selected Slack reader.")
+        if _slack_only:
+            # Disabled source paths are never resolved, statted, initialized, or opened.
+            paths = [Path(p).absolute() for p in (crm_path, calls_path, audit_path)]
+            paths.append(paths[0].with_name("slack.sqlite3"))
+        else:
+            paths = [Path(p).resolve() for p in (crm_path, calls_path, audit_path)]
+            paths.append(Path(slack_path).resolve() if slack_path is not None
+                         else paths[0].with_name("slack.sqlite3").resolve())
+            paths = require_distinct_databases(paths)
         self.crm_path, self.calls_path = paths[:2]
         self.slack_path = paths[3]
         self.crm_reader = crm_reader
         self.calls_reader = calls_reader
+        self.slack_reader = slack_reader
+        self._slack_only = _slack_only
+        self.enabled_tools = {"read_slack_messages"} if _slack_only else set(TOOL_DEFINITIONS)
         self.demo_binding = demo_binding
         self.on_call = on_call
         self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
@@ -119,8 +131,9 @@ class Connector:
         except Exception:
             pass  # The observer is best effort; the durable audit remains authoritative.
 
-    @staticmethod
-    def _require_tool(name):
+    def _require_tool(self, name):
+        if name not in self.enabled_tools:
+            raise PermissionError("This tool is disabled in the Slack-only check.")
         scope = TOOL_DEFINITIONS[name].scope
         token = get_access_token()
         if token is None or scope not in token.scopes:
@@ -193,6 +206,14 @@ class Connector:
         def read_slack_messages(account_id: str) -> dict[str, Any]:
             """Read untrusted Slack messages. Requires slack:read, independently of CRM and calls."""
             self._require_tool("read_slack_messages")
+            if self.slack_reader is not None:
+                from .slack_reader import SlackReadError
+                try:
+                    read = self.slack_reader.read_slack_messages(account_id)
+                except SlackReadError as error:
+                    raise ToolError(error.code) from None
+                return {**_data("slack", _records("slack", "messages", read.records)),
+                        "thread_snapshot": read.snapshot}
             with closing(slack.connect(self.slack_path, readonly=True)) as conn:
                 return _data("slack", _records("slack", "messages",
                                               slack.read_slack_messages(conn, account_id)))
@@ -219,13 +240,16 @@ class Connector:
             search_accounts, get_account, list_opportunities, read_call_notes, read_slack_messages, log_activity,
         )}
         for name, definition in TOOL_DEFINITIONS.items():
+            if name not in self.enabled_tools:
+                continue
             if not definition.read_only and self.crm_reader is not None:
                 continue
             self.mcp.tool(
                 name=name, meta={"gtm.demo/requiredScope": definition.scope},
                 annotations=ToolAnnotations(
                     read_only_hint=definition.read_only, destructive_hint=False, idempotent_hint=True,
-                    open_world_hint=self.crm_reader is not None and definition.scope == "crm:read",
+                    open_world_hint=(self.crm_reader is not None and definition.scope == "crm:read")
+                                    or (self.slack_reader is not None and definition.scope == "slack:read"),
                 ),
                 structured_output=True,
             )(handlers[name])
@@ -235,7 +259,8 @@ class Connector:
             return await self.sdk_app(scope, receive, send)
         if scope["path"] in ("/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"):
             return await JSONResponse({"resource": self.authority.resource,
-                "authorization_servers": [self.authority.issuer], "scopes_supported": ["crm:read"],
+                "authorization_servers": [self.authority.issuer],
+                "scopes_supported": ["slack:read"] if self._slack_only else ["crm:read"],
                 "bearer_methods_supported": ["header"]})(scope, receive, send)
         if scope["path"] != "/mcp" or scope["method"] != "POST":
             return await self.sdk_app(scope, receive, send)
@@ -303,7 +328,7 @@ class Connector:
             policy = RequestPolicy(
                 resource=self.authority.resource, metadata_url=self.metadata_url,
                 rate_limit=self.rate_limit, window_seconds=self.window_seconds,
-                writes_disabled=self.crm_reader is not None,
+                writes_disabled=self.crm_reader is not None or self._slack_only,
             )
             token: AccessToken | None | Missing = MISSING
             wall_time: float | Missing = MISSING

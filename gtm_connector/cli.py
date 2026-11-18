@@ -15,7 +15,7 @@ from . import __version__
 
 
 COMMANDS = {
-    "slack": ("Manage one private Slack user connection without reading messages.", "slack status"),
+    "slack": ("Manage Slack authentication, select a thread, or check its audited read.", "slack status"),
     "calls": ("Import and inspect private transcript exports without contacting a call provider.",
               "calls import call.vtt --account acc-003"),
     "salesforce": ("Check Salesforce setup and a renewal brief without printing org records.",
@@ -124,6 +124,15 @@ class StateDirectory(argparse.Action):
         namespace.state_dir_explicit = True
 
 
+def _slack_source_options(command):
+    command.add_argument("--slack-backend", choices=("fixture", "slack"),
+                         help="Select demo messages or a saved Slack thread (default: fixture). "
+                              "Live Slack requires an explicit --state-dir.")
+    command.add_argument("--slack-connection-dir", type=Path,
+                         help="Use this private connection with --slack-backend slack "
+                              "(default: var/slack-connection).")
+
+
 def _slack_commands(command):
     command.add_argument("--connection-dir", type=Path, default=Path("var/slack-connection"),
                          help="Use this private Slack credential folder (default: var/slack-connection).")
@@ -132,10 +141,15 @@ def _slack_commands(command):
         "connect": "Authorize an existing public Slack app through the system browser.",
         "status": "Inspect saved authentication, or explicitly verify it with Slack.",
         "disconnect": "Remove local credentials, with an optional access-token revocation attempt.",
+        "map": "Save one thread selection for an account after an audited CRM lookup.",
+        "check": "Read the selected thread through the audited Slack tool without accessing CRM or calls.",
     }
     for action, description in descriptions.items():
         example = ("slack connect --client-id EXISTING_PUBLIC_CLIENT_ID "
                    "--redirect-uri http://localhost:8765/slack/callback" if action == "connect" else
+                   "slack map --state-dir var/selected-sources --account acc-003 "
+                   "--channel C12345678 --thread-ts 1790000000.000001" if action == "map" else
+                   "slack check --state-dir var/selected-sources --account acc-003" if action == "check" else
                    f"slack {action} --connection-dir var/slack-connection")
         epilog = f"Example: gtm-connector {example}"
         if action == "connect":
@@ -163,13 +177,35 @@ def _slack_commands(command):
             child.add_argument("--check", action="store_true",
                                help="Verify authentication with Slack, refreshing once if needed. "
                                     "No messages are read.")
-        else:
+        elif action == "disconnect":
             child.add_argument("--revoke", action="store_true",
                                help="Attempt access-token revocation before local removal, without refreshing.")
+        else:
+            child.add_argument("--state-dir", type=Path, required=True,
+                               help="Use this explicitly selected private source state folder.")
+            if action == "check":
+                child.add_argument("--account", required=True, help="Check this mapped canonical CRM account ID.")
+                continue
+            account = child.add_mutually_exclusive_group(required=True)
+            account.add_argument("--account", help="Associate this canonical CRM account ID.")
+            account.add_argument("--account-number", help="Resolve this exact Salesforce AccountNumber.")
+            thread = child.add_mutually_exclusive_group(required=True)
+            thread.add_argument("--thread-url", help="Select a copied thread link from the saved Slack workspace.")
+            thread.add_argument("--channel", help="Select this channel ID together with --thread-ts.")
+            child.add_argument("--thread-ts", help="Use the exact parent timestamp with --channel.")
+            child.add_argument("--crm-backend", choices=("sqlite", "salesforce"), default="sqlite",
+                               help="Select the CRM used for association (default: sqlite).")
+            child.add_argument("--sf-org", help="Read Salesforce credentials from this signed-in sf CLI alias.")
+            child.add_argument("--sf-environment", choices=("developer", "sandbox", "production"),
+                               help="Require this Salesforce environment (default: developer).")
+            child.add_argument("--calls-backend", choices=("fixture", "imported"), default="fixture",
+                               help="Select demo notes or imported transcripts in this state (default: fixture).")
+            child.add_argument("--replace", action="store_true", help="Replace this account's selected thread.")
+            child.add_argument("--reassign", action="store_true", help="Move a thread from another account.")
 
 
 def _calls_commands(command):
-    command.add_argument("--state-dir", type=Path, default=Path("var/imported-calls"),
+    command.add_argument("--state-dir", type=Path, default=Path("var/imported-calls"), action=StateDirectory,
                          help="Use this private import state folder (default: var/imported-calls).")
     actions = command.add_subparsers(dest="action", required=True, metavar="ACTION")
     descriptions = {"import": "Import an existing transcript and select an account excerpt.",
@@ -184,9 +220,10 @@ def _calls_commands(command):
                            reassign=False, full=False, after=None, crm_backend=None, sf_org=None, sf_environment=None)
         child.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                            help="Write the documented JSON result for scripts.")
-        child.add_argument("--state-dir", type=Path, default=argparse.SUPPRESS,
+        child.add_argument("--state-dir", type=Path, default=argparse.SUPPRESS, action=StateDirectory,
                            help="Use this private import state folder (default: var/imported-calls).")
         if action == "import":
+            _slack_source_options(child)
             child.add_argument("value", type=Path, metavar="FILE", help="Read an existing UTF-8 TXT or VTT export.")
             account = child.add_mutually_exclusive_group(required=True)
             account.add_argument("--account", help="Associate this canonical CRM account ID.")
@@ -228,7 +265,8 @@ def build_parser():
                               "  gtm-connector calls list\n  gtm-connector calls inspect IMPORT_ID --full")
         elif name == "slack":
             command.epilog = ("Examples:\n  gtm-connector slack connect --help\n"
-                              "  gtm-connector slack status\n  gtm-connector slack disconnect")
+                              "  gtm-connector slack status\n  gtm-connector slack map --help\n"
+                              "  gtm-connector slack check --help\n  gtm-connector slack disconnect")
         command.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                              help="Write the documented JSON result for scripts.")
         if name == "calls":
@@ -256,6 +294,7 @@ def build_parser():
                                  default="sqlite",
                                  help="Select local fixtures or the read-only Salesforce CRM reader.")
         if name in ("serve", "brief", "accounts", "account"):
+            _slack_source_options(command)
             command.add_argument("--calls-backend", choices=("fixture", "imported"),
                                  help="Select demo notes or imported transcripts (default: fixture). "
                                       "Imported transcripts require an explicit --state-dir.")
@@ -457,6 +496,26 @@ def _slack_status_command(connection_dir, *, check=False):
 
 
 def _human_slack(result, *, action, connection_dir):
+    if action == "map":
+        return (f"Slack thread selection {result['status']}. Thread access has not been checked.\n"
+                "Next: gtm-connector slack check --help")
+    if action == "check":
+        headline = f"Slack thread check {result['status']}. CRM and calls access were not checked.\n"
+        keys = ("name", "status", "count", "duration_ms", "api_calls", "response_bytes")
+        headers = ["STEP", "STATUS", "COUNT", "MS", "API CALLS", "BYTES"]
+        if not sys.stdout.isatty():
+            return headline + table(headers + ["DETAIL", "NEXT"],
+                                    [[row[key] for key in (*keys, "message", "next")] for row in result["steps"]])
+        display = headline + table(headers, [[row[key] for key in keys] for row in result["steps"]])
+        from shutil import get_terminal_size
+        from textwrap import fill
+        width = max(40, get_terminal_size().columns)
+        for row in result["steps"]:
+            if row["status"] == "fail":
+                display += "\n\n" + fill(safe_text(row["message"]), width=width)
+                if row["next"]:
+                    display += "\nNext: " + safe_text(row["next"])
+        return display
     if action == "disconnect":
         local = ("Local Slack credentials were removed." if result["local_credentials_removed"] else
                  "No local Slack credentials were present.")
@@ -517,6 +576,8 @@ def _slack_progress(args):
 
 
 def _run_slack(args):
+    if args.action in ("map", "check"):
+        return _run_slack_source(args)
     from .slack_auth import connect_slack, disconnect_slack, slack_status
     progress = _slack_progress(args)
     if args.action == "connect":
@@ -527,6 +588,107 @@ def _run_slack(args):
     if args.action == "status":
         return slack_status(args.connection_dir, check=args.check, progress=progress)
     return disconnect_slack(args.connection_dir, revoke=args.revoke, progress=progress)
+
+
+def _slack_source_progress(args):
+    steps = {"preparing_state": "Preparing the selected sources and private state.",
+             "resolving_account": "Resolving the account through an audited CRM read.",
+             "saving_selection": "Saving the private Slack thread selection.",
+             "private_state": "Checking the existing private source state.",
+             "mapping": "Checking the saved thread selection.",
+             "credential_binding": "Checking the selected Slack authentication.",
+             "thread_read": "Reading the selected Slack thread through the audited tool.",
+             "receipt": "Checking the committed tool receipt."}
+    allowed = ({"preparing_state", "resolving_account", "saving_selection"} if args.action == "map" else
+               {"private_state", "mapping", "credential_binding", "thread_read", "receipt"})
+
+    def report(step, status):
+        if (not isinstance(step, str) or step not in allowed or not isinstance(status, str)
+                or status not in ("running", "pass", "fail", "not_run")):
+            return
+        if args.json:
+            print(json.dumps({"progress": {"command": f"slack {args.action}", "step": step, "status": status}}),
+                  file=sys.stderr, flush=True)
+        elif status == "running":
+            print(steps[step], file=sys.stderr, flush=True)
+    return report
+
+
+def _slack_map_arguments(args):
+    """Validate selectors without opening credentials, state, or a network client."""
+    import re
+    from urllib.parse import urlsplit
+    from .slack_mapping import SlackMappingError, parse_thread_selection
+    from .tool_definitions import valid_account_search
+    if ((args.sf_org is not None or args.sf_environment is not None) and args.crm_backend != "salesforce"
+            or args.account_number is not None and (args.crm_backend != "salesforce"
+                                                   or not valid_account_search("", args.account_number))):
+        raise SlackMappingError("slack_selection_invalid")
+    pattern = r"acc-sf-[A-Za-z0-9]{18}" if args.crm_backend == "salesforce" else r"acc-[0-9]{3}"
+    if args.account is not None and re.fullmatch(pattern, args.account) is None:
+        raise SlackMappingError("slack_selection_invalid")
+    args.sf_environment = args.sf_environment or "developer"
+    origin = None
+    if args.thread_url is not None:
+        try:
+            url = urlsplit(args.thread_url)
+            origin = f"{url.scheme}://{url.netloc}"
+        except ValueError:
+            raise SlackMappingError("slack_selection_invalid") from None
+    # The URL's origin is used only to validate syntax. It never selects a
+    # credential or request destination. The saved origin is checked below.
+    return parse_thread_selection(thread_url=args.thread_url, channel_id=args.channel,
+                                  thread_ts=args.thread_ts, workspace_origin=origin)
+
+
+def _run_slack_source(args):
+    import re
+    from datetime import datetime, timezone
+    from time import monotonic
+    from .slack_mapping import SlackMappingError, parse_thread_selection, save_slack_mapping, slack_identity_binding
+    progress = _slack_source_progress(args)
+    if args.action == "check":
+        if re.fullmatch(r"acc-(?:[0-9]{3}|sf-[A-Za-z0-9]{18})", args.account) is None:
+            raise SlackMappingError("slack_selection_invalid")
+        from .slack_workflow import run_slack_check
+        if not args.json:
+            print("Source: live Slack. This check reads only the selected mapped thread.", file=sys.stderr)
+        return run_slack_check(args.state_dir, connection_dir=args.connection_dir,
+                               account_id=args.account, progress=progress)
+    started = monotonic()
+    selection = _slack_map_arguments(args)
+    from .slack_auth import SlackAuthError, inspect_slack_connection
+    connection = inspect_slack_connection(args.connection_dir)
+    if connection.needs_login or connection.credential_state == "refresh_pending":
+        raise SlackAuthError("slack_reconnect_required")
+    if connection.credential_state != "ready":
+        raise SlackMappingError("slack_identity_unchecked")
+    if args.thread_url is not None:
+        selection = parse_thread_selection(thread_url=args.thread_url, workspace_origin=connection.workspace_origin)
+    progress("preparing_state", "running")
+    crm_reader = None
+    if args.crm_backend == "salesforce":
+        from .salesforce import SalesforceReadOnlyAdapter
+        crm_reader = (SalesforceReadOnlyAdapter.from_sf(args.sf_org, environment=args.sf_environment)
+                      if args.sf_org is not None else
+                      SalesforceReadOnlyAdapter.from_env(environment=args.sf_environment))
+    from .runtime import Runtime
+    from .slack_workflow import resolve_slack_account
+    with Runtime(args.state_dir, crm_reader=crm_reader, calls_backend=args.calls_backend,
+                 slack_backend="slack", slack_connection_dir=args.connection_dir,
+                 slack_expected_binding=slack_identity_binding(connection.identity)) as runtime:
+        if not args.json:
+            print(_live_slack_sources(args), file=sys.stderr)
+        progress("resolving_account", "running")
+        association = resolve_slack_account(runtime, account_id=args.account, account_number=args.account_number)
+        progress("saving_selection", "running")
+        saved = save_slack_mapping(runtime.slack_mapping_path, association=association,
+                                   slack_binding=runtime.slack_binding, selection=selection,
+                                   selected_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                                   replace=args.replace, reassign=args.reassign)
+    return {"schema_version": 1, "status": "saved" if saved["changed"] else "unchanged", "selection": "saved",
+            "thread_access": "unchecked", "counts": {"selected_threads": 1},
+            "duration_ms": round((monotonic() - started) * 1000, 3), "next": "gtm-connector slack check --help"}
 
 
 def _slack_failure(exc, args):
@@ -541,6 +703,36 @@ def _slack_failure(exc, args):
     elif detail in ("slack_connection_busy", "slack_storage_failed"):
         next_command = f"gtm-connector slack {args.action} --help"
     return _error(detail + ": " + SLACK_FAILURES[detail], code, next_command, as_json=args.json)
+
+
+def _slack_source_failure(exc, args):
+    from .slack_workflow import slack_failure_details
+    kind = type(exc).__name__
+    detail = getattr(exc, "code", "")
+    if kind == "SlackAuthError":
+        if args.command == "slack":
+            return _slack_failure(exc, args)
+        message = SLACK_FAILURES.get(detail, SLACK_FAILURES["slack_storage_failed"])
+        return _error(f"{detail}: {message}", exc.exit_code, "gtm-connector slack connect --help", as_json=args.json)
+    if kind in ("SlackMappingError", "SlackReadError"):
+        message, next_command = slack_failure_details(detail)
+        return _error(f"{detail}: {message}", exc.exit_code, next_command, as_json=args.json)
+    if detail == "source_identity_mismatch":
+        message = ("source_identity_mismatch: " + str(exc).split(". ", 1)[0].rstrip(".") +
+                   ". Restore the original CRM backend and connection, Slack connection, source modes, "
+                   "and existing state folder. Existing files are retained.")
+        return _error(message, 3, "gtm-connector slack map --help", as_json=args.json)
+    if kind == "StateInUseError":
+        return _error("The selected state is in use. Stop its server or finish the other command, then retry.",
+                      1, f"gtm-connector slack {args.action} --help", as_json=args.json)
+    if kind == "SalesforceReadError":
+        from .salesforce_check import _FAILURES
+        message = _FAILURES.get(detail, _FAILURES["check_failed"])[0]
+        code = 2 if detail == "salesforce_invalid_configuration" else (
+            3 if detail == "salesforce_environment_mismatch" else 5)
+        return _error(f"{detail}: {message}", code, "gtm-connector salesforce check --help", as_json=args.json)
+    message, next_command = slack_failure_details("slack_storage_failed")
+    return _error("slack_storage_failed: " + message, 1, next_command, as_json=args.json)
 
 
 def _print_event(event, as_json):
@@ -587,6 +779,33 @@ def _salesforce_sources(environment, *, mixed=False, calls_backend="fixture", in
         return (f"Sources: mixed. CRM uses Salesforce ({environment}); {fixtures} use demo fixtures. "
                 "Connection identity is verified.")
     return f"Sources: live. CRM uses Salesforce ({environment}). Connection identity is verified."
+
+
+def _live_slack_sources(args):
+    crm = f"Salesforce ({args.sf_environment})" if args.crm_backend == "salesforce" else "demo fixtures"
+    calls = "user-supplied transcript exports" if args.calls_backend == "imported" else "demo fixtures"
+    mode = "live" if args.crm_backend == "salesforce" and args.calls_backend == "imported" else "mixed"
+    return (f"Sources: {mode}. CRM uses {crm}; calls use {calls}; Slack uses the selected mapped thread. "
+            "Slack thread access is checked when it is read.")
+
+
+def _slack_source_arguments(args):
+    """Require deliberate live-source state before files, credentials, or initialization."""
+    if args.command in ("accounts", "account") and args.crm_backend == "sqlite" and (
+            args.slack_backend is not None or args.slack_connection_dir is not None):
+        raise ValueError("Slack source options require --crm-backend salesforce for account inspection.")
+    if args.slack_connection_dir is not None and args.slack_backend != "slack":
+        raise ValueError("--slack-connection-dir requires --slack-backend slack.")
+    if args.slack_backend == "slack":
+        if not getattr(args, "state_dir_explicit", False):
+            raise ValueError("--slack-backend slack requires an explicit --state-dir. "
+                             "Select the same private source state folder used by slack map.")
+        if args.command == "brief" and not args.with_slack:
+            raise ValueError("--slack-backend slack requires --with-slack for a brief.")
+        if getattr(args, "salesforce_demo_binding", None) is not None:
+            raise ValueError("--salesforce-demo-binding cannot be combined with --slack-backend slack.")
+    args.slack_backend = args.slack_backend or "fixture"
+    args.slack_connection_dir = args.slack_connection_dir or Path("var/slack-connection")
 
 
 def _calls_arguments(args):
@@ -678,7 +897,8 @@ def _run_calls(args, prepared, crm_reader):
     if args.action == "import":
         from .call_workflow import resolve_call_account
         parsed, excerpt, called_at = prepared
-        with Runtime(args.state_dir, crm_reader=crm_reader, calls_backend="imported") as runtime:
+        with Runtime(args.state_dir, crm_reader=crm_reader, calls_backend="imported",
+                     slack_backend=args.slack_backend, slack_connection_dir=args.slack_connection_dir) as runtime:
             _calls_progress(args.json, "resolving_account")
             association = resolve_call_account(runtime, account_id=args.account, account_number=args.account_number)
             _calls_progress(args.json, "saving_import")
@@ -695,6 +915,8 @@ def _run_calls(args, prepared, crm_reader):
             crm = f"Salesforce ({args.sf_environment})" if args.crm_backend == "salesforce" else "demo fixtures"
             label = (f"Sources: CRM uses {crm}; calls use user-supplied transcript exports. "
                      "Transcript provider identity and statements are unverified.")
+            if args.slack_backend == "slack":
+                label += " Slack uses the selected mapped thread when requested. Thread access remains unchecked."
         else:
             label = "Source: user-supplied transcript export. Provider identity and source statements are unverified."
         print(label, file=sys.stderr)
@@ -711,7 +933,8 @@ def _salesforce_account_read(args, reader):
 
     tool = "search_accounts" if args.command == "accounts" else "get_account"
     arguments = {"query": args.query} if args.command == "accounts" else {"account_id": args.account_id}
-    with Runtime(args.state_dir, crm_reader=reader, calls_backend=args.calls_backend) as runtime, \
+    with Runtime(args.state_dir, crm_reader=reader, calls_backend=args.calls_backend,
+                 slack_backend=args.slack_backend, slack_connection_dir=args.slack_connection_dir) as runtime, \
             LocalClient(runtime.config) as client:
         if not args.json:
             print(_salesforce_sources(args.sf_environment), file=sys.stderr)
@@ -771,6 +994,9 @@ def _run(args, argv):
     if args.command == "slack":
         return _run_slack(args)
     # Dependencies belong to the command that uses them, after help is handled.
+    if (args.command in ("serve", "brief", "accounts", "account")
+            or (args.command == "calls" and args.action == "import")):
+        _slack_source_arguments(args)
     prepared_calls = _calls_arguments(args) if args.command == "calls" else None
     crm_reader = None
     demo_binding = None
@@ -873,8 +1099,11 @@ def _run(args, argv):
         if as_of is None:
             as_of = date.today().isoformat() if crm_reader is not None else DEMO_AS_OF
         with Runtime(args.state_dir, crm_reader=crm_reader, demo_binding=demo_binding,
-                     calls_backend=args.calls_backend) as runtime:
-            if crm_reader is not None and not args.json:
+                     calls_backend=args.calls_backend, slack_backend=args.slack_backend,
+                     slack_connection_dir=args.slack_connection_dir) as runtime:
+            if args.slack_backend == "slack" and not args.json:
+                print(_live_slack_sources(args), file=sys.stderr)
+            elif crm_reader is not None and not args.json:
                 print(_salesforce_sources(args.sf_environment, mixed=True, calls_backend=args.calls_backend,
                                           include_slack=args.with_slack),
                       file=sys.stderr)
@@ -907,13 +1136,14 @@ def _run(args, argv):
                 message = "Event output closed. The server continues until Ctrl-C."
                 _server_notice(message, args.json)
         with Runtime(args.state_dir, crm_reader=crm_reader, on_call=events.put, demo_binding=demo_binding,
-                     calls_backend=args.calls_backend) as runtime:
+                     calls_backend=args.calls_backend, slack_backend=args.slack_backend,
+                     slack_connection_dir=args.slack_connection_dir) as runtime:
             ready = {"type": "ready", "resource": runtime.config["resource"], "issuer": runtime.config["issuer"],
                      "crm_backend": runtime.crm_backend, "owner_config": str(runtime.directory / "owner.json"),
                      "state_dir": str(runtime.directory), "granted_scopes": [],
                      "sources": {"crm": "salesforce" if runtime.crm_backend == "salesforce" else "demo_fixture",
                                  "calls": "imported_transcript" if args.calls_backend == "imported" else "demo_fixture",
-                                 "slack": "demo_fixture"}}
+                                 "slack": "slack" if args.slack_backend == "slack" else "demo_fixture"}}
             if demo_binding is not None:
                 ready["demo_kit_id"] = demo_binding.kit_id
             if runtime.crm_backend == "salesforce":
@@ -921,7 +1151,8 @@ def _run(args, argv):
             if args.json:
                 print(json.dumps(ready), flush=True)
             else:
-                sources = (_salesforce_sources(args.sf_environment, mixed=True, calls_backend=args.calls_backend)
+                sources = (_live_slack_sources(args) if args.slack_backend == "slack" else
+                           _salesforce_sources(args.sf_environment, mixed=True, calls_backend=args.calls_backend)
                            if runtime.crm_backend == "salesforce" else
                            "Sources: mixed. Calls use user-supplied transcript exports; "
                            "CRM and Slack use demo fixtures."
@@ -968,7 +1199,12 @@ def _run(args, argv):
 
 def _failure(exc, args):
     if args.command == "slack":
-        return _slack_failure(exc, args)
+        return (_slack_source_failure(exc, args) if args.action in ("map", "check") else
+                _slack_failure(exc, args))
+    if (type(exc).__name__ in ("SlackMappingError", "SlackReadError", "SlackAuthError") or
+            (getattr(exc, "code", None) == "source_identity_mismatch"
+             and getattr(args, "slack_backend", None) == "slack")):
+        return _slack_source_failure(exc, args)
     from .citations import BriefRejected
     import sqlite3
     command = args.command
@@ -1091,7 +1327,7 @@ def _main(argv):
         if candidate == "slack":
             index = arguments.index("slack") + 1
             action = arguments[index] if index < len(arguments) else ""
-            child = " " + action if action in ("connect", "status", "disconnect") else ""
+            child = " " + action if action in ("connect", "status", "disconnect", "map", "check") else ""
             return _error("The Slack arguments do not match this action. Check its required arguments and options.",
                           2, "gtm-connector slack" + child + " --help", as_json=as_json)
         if candidate == "calls":
@@ -1121,6 +1357,9 @@ def _main(argv):
             return _error("Remote access-token revocation is unconfirmed. " + detail +
                           " Manage the whole grant in Slack settings.", 5,
                           "gtm-connector slack disconnect --help", as_json=args.json)
+        if args.command == "slack" and args.action == "check" and result["status"] != "passed":
+            return _error("Slack thread checks failed. Apply the next action beside each failed step.", 4,
+                          "gtm-connector slack check --help", as_json=args.json)
         if args.command == "doctor" and result["status"] != "passed":
             return _error("Setup checks failed. Apply the fix beside each failed check.", 4,
                           f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}", as_json=args.json)
@@ -1138,6 +1377,10 @@ def _main(argv):
         return 0
     except KeyboardInterrupt:
         if args.command == "slack":
+            if args.action in ("map", "check"):
+                return _error("The Slack source operation was interrupted. Existing state and committed receipts "
+                              "are retained. Check the selected state before retrying.", 130,
+                              f"gtm-connector slack {args.action} --help", as_json=args.json)
             return _error("Slack authorization was interrupted. Inspect saved status; completed remote approval "
                           "or local saves may remain.", 130, _slack_status_command(args.connection_dir),
                           as_json=args.json)
