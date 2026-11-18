@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import select
 import stat
 import subprocess
 import sys
@@ -121,7 +122,9 @@ class StdioBridgeTests(unittest.TestCase):
                     write = exc
                 return tools, prepared, write
 
-            tools, prepared, write = run(bridge(self.state, "crm:read", "calls:read", "slack:read"), scenario)
+            # Even a bridge holding crm:write cannot write to a selected server.
+            tools, prepared, write = run(bridge(self.state, "crm:read", "calls:read", "slack:read", "crm:write"),
+                                         scenario)
             self.assertIn("prepare_renewal_brief", {tool.name for tool in tools.tools})
             self.assertFalse(prepared.is_error, prepared)
             self.assertTrue(prepared.structured_content["brief"]["text"].startswith("- "))
@@ -142,10 +145,21 @@ class StdioBridgeTests(unittest.TestCase):
                 {"jsonrpc": "2.0", "method": "notifications/initialized"},
                 {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
             ]
-            stdout, stderr = process.communicate("".join(json.dumps(item) + "\n" for item in requests), timeout=120)
-            self.assertEqual(process.returncode, 0, stderr)
-            lines = [line for line in stdout.splitlines() if line.strip()]
-            self.assertEqual(len(lines), 2, stdout)
+            process.stdin.write("".join(json.dumps(item) + "\n" for item in requests))
+            process.stdin.flush()
+            lines = []
+            while len(lines) < 2:
+                ready, _, _ = select.select([process.stdout], [], [], 120)
+                self.assertTrue(ready, "the bridge did not answer")
+                line = process.stdout.readline()
+                self.assertTrue(line, "the bridge closed stdout early")
+                lines.append(line)
+            # End of input stops the bridge promptly, and nothing else reaches stdout.
+            process.stdin.close()
+            self.assertEqual(process.wait(timeout=60), 0)
+            self.assertEqual(process.stdout.read(), "")
+            process.stdout.close()
+            process.stderr.close()
             messages = [json.loads(line) for line in lines]
             self.assertTrue(all(message["jsonrpc"] == "2.0" for message in messages))
             self.assertEqual({tool["name"] for tool in messages[1]["result"]["tools"]}, DEFAULT_TOOLS)
