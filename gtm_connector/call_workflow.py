@@ -5,39 +5,51 @@ import hashlib
 import re
 import uuid
 
-from .calls_import import CallsImportError
+from .slack_mapping import valid_crm_binding
 from .tool_definitions import valid_account_search
 
 
-def resolve_call_account(runtime, *, account_id=None, account_number=None):
+class CRMResolutionError(RuntimeError):
+    """A fixed account-association failure without private selector values."""
+
+    def __init__(self, code):
+        allowed = {"crm_selector_required", "crm_account_number_invalid", "crm_account_id_invalid",
+                   "crm_source_mismatch", "crm_account_not_found", "crm_account_ambiguous",
+                   "crm_association_failed", "crm_association_invalid", "crm_source_unavailable"}
+        self.code = code if code in allowed else "crm_association_invalid"
+        super().__init__(self.code)
+
+
+def resolve_crm_account(runtime, *, account_id=None, account_number=None):
     """Resolve once under crm:read; later calls reads need no CRM authority."""
     from .client import LocalClient
     from .salesforce import SalesforceReadError, _ERROR_CODES
     import httpx2
 
     backend = runtime.crm_backend
-    if getattr(runtime, "calls_backend", None) != "imported":
-        raise CallsImportError("calls_source_mismatch")
+    binding = getattr(runtime, "crm_binding", None)
     if (account_id is None) == (account_number is None):
-        raise ValueError("Select exactly one --account or --account-number. Run gtm-connector calls --help.")
+        raise CRMResolutionError("crm_selector_required")
     if account_number is not None:
         if backend != "salesforce" or not valid_account_search("", account_number):
-            raise ValueError("Use a valid --account-number with Salesforce. Run gtm-connector calls --help.")
+            raise CRMResolutionError("crm_account_number_invalid")
         tool, arguments = "search_accounts", {"account_number": account_number}
     else:
         pattern = r"acc-sf-[A-Za-z0-9]{18}" if backend == "salesforce" else r"acc-[0-9]{3}"
         if not isinstance(account_id, str) or re.fullmatch(pattern, account_id) is None:
-            raise ValueError("Use a canonical --account ID from accounts. Run gtm-connector calls --help.")
+            raise CRMResolutionError("crm_account_id_invalid")
         tool, arguments = "get_account", {"account_id": account_id}
+    if not isinstance(binding, dict) or not valid_crm_binding(binding) or binding["crm_backend"] != backend:
+        raise CRMResolutionError("crm_source_mismatch")
     correlation = "import-" + uuid.uuid4().hex
     try:
         with LocalClient(runtime.config) as client:
             token = client.authorize(["crm:read"])
             response = client.call(token, tool, arguments, brief_id=correlation)
     except httpx2.HTTPError:
-        raise CallsImportError("calls_source_unavailable") from None
+        raise CRMResolutionError("crm_source_unavailable") from None
     if response.status_code != 200:
-        raise CallsImportError("calls_association_failed")
+        raise CRMResolutionError("crm_association_failed")
     try:
         result = response.json()["result"]
         if result.get("isError"):
@@ -49,11 +61,11 @@ def resolve_call_account(runtime, *, account_id=None, account_number=None):
                     for code in _ERROR_CODES:
                         if message == f"Error executing tool {tool}: {code}":
                             if code == "salesforce_account_number_ambiguous":
-                                raise CallsImportError("calls_account_ambiguous")
+                                raise CRMResolutionError("crm_account_ambiguous")
                             raise SalesforceReadError(code)
                 if message == "Error executing tool get_account: account not found":
-                    raise CallsImportError("calls_account_not_found")
-            raise CallsImportError("calls_association_failed")
+                    raise CRMResolutionError("crm_account_not_found")
+            raise CRMResolutionError("crm_association_failed")
         data = result["structuredContent"]
         if (result.get("resultType") != "complete" or data["source"] != "crm"
                 or data.get("untrusted_data") is not True):
@@ -97,15 +109,41 @@ def resolve_call_account(runtime, *, account_id=None, account_number=None):
             if any(row.get("account_number") != account_number for row in accounts) or len(accounts) > 2:
                 raise ValueError
             if len(accounts) == 2:
-                raise CallsImportError("calls_account_ambiguous")
+                raise CRMResolutionError("crm_account_ambiguous")
         elif len(accounts) != 1 or accounts[0]["id"] != account_id:
             raise ValueError
         if not accounts:
-            raise CallsImportError("calls_account_not_found")
-        return {"crm_binding": deepcopy(runtime.calls_binding), "account_id": accounts[0]["id"],
+            raise CRMResolutionError("crm_account_not_found")
+        return {"crm_binding": deepcopy(binding), "account_id": accounts[0]["id"],
                 "method": "account_number" if account_number is not None else "account_id",
                 "account_number": account_number, "resolution_receipt_id": receipt_id}
-    except CallsImportError:
+    except CRMResolutionError:
         raise
     except (KeyError, TypeError, ValueError, AttributeError, UnicodeError):
-        raise CallsImportError("calls_association_invalid") from None
+        raise CRMResolutionError("crm_association_invalid") from None
+
+
+def resolve_call_account(runtime, *, account_id=None, account_number=None):
+    """Preserve the imported-transcript selection and diagnostic contract."""
+    from .calls_import import CallsImportError
+
+    if getattr(runtime, "calls_backend", None) != "imported":
+        raise CallsImportError("calls_source_mismatch")
+    try:
+        return resolve_crm_account(runtime, account_id=account_id, account_number=account_number)
+    except CRMResolutionError as error:
+        usage = {
+            "crm_selector_required": "Select exactly one --account or --account-number. "
+                                     "Run gtm-connector calls --help.",
+            "crm_account_number_invalid": "Use a valid --account-number with Salesforce. "
+                                          "Run gtm-connector calls --help.",
+            "crm_account_id_invalid": "Use a canonical --account ID from accounts. Run gtm-connector calls --help.",
+        }
+        if error.code in usage:
+            raise ValueError(usage[error.code]) from None
+        codes = {"crm_source_mismatch": "calls_source_mismatch", "crm_account_not_found": "calls_account_not_found",
+                 "crm_account_ambiguous": "calls_account_ambiguous",
+                 "crm_association_failed": "calls_association_failed",
+                 "crm_association_invalid": "calls_association_invalid",
+                 "crm_source_unavailable": "calls_source_unavailable"}
+        raise CallsImportError(codes[error.code]) from None

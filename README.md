@@ -339,8 +339,9 @@ capability and state-switch tests use invented responses; paid orgs have not
 been exercised. [Connection choices and account reads](docs/salesforce.md#choose-the-expected-environment)
 
 Call notes default to local fixtures and can instead use an explicitly imported
-transcript. Slack remains a local fixture. The optional invented demo kit binds
-them to imported accounts through standard AccountNumber values; it does not
+transcript. Slack defaults to fixtures and can use an explicitly mapped live
+thread. The optional invented demo kit binds local fixtures
+to imported accounts through standard AccountNumber values; it does not
 connect a call-recording provider or Slack.
 
 Tests use invented HTTP responses and a fake CLI. No live org has been verified.
@@ -388,6 +389,19 @@ separate. These commands do not read messages or change the fixture workflow.
 Local tests use invented provider responses and real loopback sockets. No real
 Slack login or thread access has been verified.
 
+### Read a selected Slack thread
+
+After authentication, `slack map` associates one selected thread with an account
+through an audited CRM lookup. `slack check` reads only that mapped Slack source
+and produces a shareable report. Daily briefs use explicit live-source flags
+and a private state folder. The no-setup demo retains its invented data.
+[Commands and three-source setup](docs/slack-live.md)
+
+The [reader tests](tests/test_slack_reader.py) cover bounded paging, shared
+authentication limits, literal text, and offline snapshot checks with invented
+responses. [Brief tests](tests/test_live_slack_briefing.py) exercise cited local
+flows. These tests do not establish live Slack access. No message is sent.
+
 ## Limits worth reading
 
 The default drafter is a deterministic fixture, so its score measures that
@@ -419,7 +433,8 @@ assistant applications and interactive external login are unverified.
 [Protocol details](docs/protocol.md)
 
 The default runtime stays offline. The explicitly selected Salesforce reader,
-local transcript importer, and explicit Slack authentication are described above.
+local transcript importer, Slack authentication, and selected thread reader are
+described above.
 
 Custom Python adapters are not sandboxed or selectable through the CLI. No
 hosted model adapter, call-recording provider API, web interface,
@@ -432,6 +447,7 @@ or multi-tenant behavior is included.
 [Tools and fixture data](docs/tools.md) documents each tool and its required scope.
 [Imported transcripts](docs/calls.md) explains explicit account associations and cited excerpts.
 [Slack authentication](docs/slack-auth.md) explains existing-app login, checks, and disconnect.
+[Selected Slack threads](docs/slack-live.md) explains account mapping, bounded reads, and shareable checks.
 [Design decisions](DECISIONS.md) explains the choices;
 [Rules the coding agents worked under](AGENTS.md) records the constraints.
 

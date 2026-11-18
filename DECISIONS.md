@@ -1,5 +1,108 @@
 # Decisions
 
+## Explicit mapped Slack reads and source observations (2026-11-18)
+
+Keep authentication, account association, checking, and daily reads separate.
+`slack connect` manages an existing public app grant. `slack map` resolves one
+explicit CRM account through its existing audited tool and saves one selected
+thread. `slack check` reads that selected source; a daily brief combines it with
+its other explicitly selected sources. The default demo remains offline. This
+separation prevents login success from being mistaken for message access and
+makes each failure independently recoverable.
+
+Use the existing read_slack_messages tool and its independent slack:read scope.
+Do not add a channel search, arbitrary URL input, sending operation, or generic
+OAuth/source framework. A copied link is only selection syntax checked against
+the saved workspace origin. The fixed provider endpoint and pinned identity
+choose access. When origin metadata is unavailable, accept an explicit channel
+and parent timestamp instead of expanding authentication scopes to discover it.
+
+Extract the existing audited CRM account resolver behind a compatibility
+wrapper for transcript imports. Keep its exact selector, receipt, bounds, and
+failure behavior rather than duplicating lookup logic. Slack mapping copies
+only the canonical account, opaque CRM binding, and association receipt. Raw
+AccountNumber stays private to the owner-side lookup; a Slack-only token must
+not receive that CRM field or a low-entropy selector hash.
+
+Pin source modes and both connection identities before source initialization.
+Each account selects one thread, and each selected thread belongs to one account
+within that state. Repeating the same choice is unchanged. Explicit replacement
+and reassignment publish one atomic bounded document because deleting the old
+association first could leave incomplete state. Preserve historical snapshots
+when selections change. Permit either imported-calls-first or Slack-map-first
+initialization with both modes explicit, so the operator does not need to create
+fixture data before configuring the intended sources.
+
+Share one operation budget across the reader and credential provider: ten
+attempts, 1 MiB of accepted response bytes, and an absolute 20-second HTTP
+deadline. Count authentication, error responses, and retries as real work.
+Authentication retains its individual 64 KiB response limit. Keep 100 raw rows,
+16 KiB per message, 64 KiB total literal text, and 256 KiB of normalized envelope
+so source input remains bounded even when provider pages duplicate data or
+JSON escaping expands text. No new runtime dependency is needed; use the
+existing HTTP client, standard library, private lock, and atomic files.
+
+Retry only an exact token_expired once, independently of whether this process
+performed the refresh. Reread credentials under the lock and compare the exact
+rejected access plus stable identity. Reuse another process's verified newer
+token for that identity; otherwise permit at most one local refresh. This avoids
+reusing a single-use refresh token or refreshing into a different workspace.
+Known rejected current nonrotating credentials become unusable. Preserve PR9's
+rule that expired identity_unchecked state needs login rather than blind refresh.
+Allow one message 429 retry only with a valid integer delay no longer than five
+seconds and enough shared budget. Never retry the pending OAuth refresh itself.
+
+Require the chosen parent on the first page, exact thread membership, and
+cursor completion through one fixed creation cutoff. Count repeated rows before
+deduplication. Identical content can repeat; different content at the same
+message timestamp refuses rather than selecting an arbitrary version. A short
+page cannot establish completion. These checks describe an API observation,
+not a full archive or an atomic historical snapshot.
+
+Preserve literal text, including empty strings and apparent instructions.
+Accept a narrow documented set of message subtypes; reject hidden/event wrappers
+and missing text rather than silently dropping or synthesizing it. Count omitted
+files, blocks, and attachments without fetching their contents. App, participant,
+and unknown labels avoid inventing display-name authority. Preserve reported
+edit metadata and label absent metadata as unreported, because neither reveals
+the history of prior edits or deletions.
+
+Use workflow 5 only for live Slack briefs. Its strict snapshot includes the
+copied account/thread mapping, creation cutoff, observation times, exact counts,
+ordered normalized-content hashes, and one bound record ID per message. The
+extractive formatter quotes every returned message and requires edit, omission,
+and source-observation disclosures. It sends nothing and creates no activity.
+Saved checks validate this copied evidence and receipts offline. They do not
+assert provider signatures, source truth, or resistance to the trusted local
+owner rewriting all evidence. Keep prior evidence versions strict so changing
+a version number cannot disguise a live source as fixture data.
+
+Give the owner a sanitized Slack check rather than asking them to share a
+private brief. It prepares only the saved Slack mapping and audit state, serves
+only the Slack tool through temporary local HTTPS, and never loads CRM/call
+sources or Salesforce credentials. This allows a Slack-only access check even
+when CRM is unavailable. Preserve the established owner and TLS files; only
+new audit receipts belong in established state. Report all five fixed stages,
+actual work counts, and matching error receipts. Unknown work stays null and
+fails the check. The report states explicitly that current CRM and call access
+were not checked. A completed failed report exits 4; startup failures keep their
+ordinary category before a report exists.
+Wait for active local service threads before removing the check's temporary
+TLS files or releasing the state lock. A fixed ten-second join could return
+while a bounded twenty-second source read was still finishing. Cancellation
+therefore waits for read and receipt handling instead of claiming rollback or
+leaving a background check using removed state.
+
+Current primary Slack method and pagination references support the fixed GET
+and cursor behavior. Its generic tier does not establish an installation's
+rate policy: affected commercial non-Marketplace installations have a separate
+restriction, while internal customer-built apps are excluded from that change.
+Record those limits in the live-source guide without claiming automatic policy
+detection. Invented provider responses and local HTTPS prove implementation
+contracts only. Real app approval, login, thread access, rendering, and hosted
+assistant connections remain unverified. Native Windows private-state support
+remains its own platform slice.
+
 ## Separate Slack authentication from source selection (2026-11-18)
 
 Add `slack connect`, `slack status`, and `slack disconnect` as owner commands.

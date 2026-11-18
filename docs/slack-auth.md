@@ -3,6 +3,8 @@
 `slack connect` saves a user grant for an existing Slack app. It does not select
 channels, read messages, start the connector, or connect an assistant. The
 default demo and `--with-slack` still use invented local messages.
+After authentication, use the separate [thread selection and read guide](slack-live.md)
+for `slack map`, `slack check`, and daily live-source flags.
 
 The app must already be configured as a public PKCE client, with the exact
 `http://localhost:PORT/slack/callback` redirect registered and the requested
@@ -49,7 +51,8 @@ connection is a normal result. A corrupt file is an error.
 `--check` contacts Slack to verify authentication. It can rotate an expiring
 token once. It does not establish access to a particular thread. Transient
 failures return an actionable error; the command does not retry or sleep in a
-loop. A later bounded source read will establish actual message access.
+loop. `slack check` performs the separate bounded read that establishes access
+to an explicitly mapped thread.
 
 Credentials use `var/slack-connection` by default. Select another folder with
 `--connection-dir` before or after the action. This is separate from connector

@@ -12,7 +12,7 @@ import sys
 from urllib.parse import urlsplit
 
 
-_REQUIRED_FILES = ("owner.json", "tls.pem", "tls.key", "crm.sqlite3", "slack.sqlite3", "audit.sqlite3")
+_REQUIRED_FILES = ("owner.json", "tls.pem", "tls.key", "crm.sqlite3", "audit.sqlite3")
 _DEPENDENCIES = ("mcp", "httpx2", "cryptography", "uvicorn")
 
 
@@ -45,9 +45,11 @@ def _unique_owner(pairs):
 
 
 def _source_files(owner):
-    if owner.get("calls_backend", "fixture") == "fixture":
-        return ("calls.sqlite3",)
-    return ("imports.sqlite3", "calls-source.json") + (
+    calls_files = (("calls.sqlite3",) if owner.get("calls_backend", "fixture") == "fixture"
+                   else ("imports.sqlite3", "calls-source.json"))
+    slack_files = (("slack.sqlite3",) if owner.get("slack_backend", "fixture") == "fixture"
+                   else ("slack-source.json", "slack-mappings.json"))
+    return calls_files + slack_files + (
         ("crm-connection.json",) if owner.get("crm_backend", "sqlite") == "salesforce" else ())
 
 
@@ -82,7 +84,12 @@ def _read_owner(directory):
                 or owner["client_id"] != "gtm-demo-cli"
                 or owner["cert_path"] != str(directory / "tls.pem")
                 or owner.get("crm_backend", "sqlite") not in ("sqlite", "salesforce")
-                or owner.get("calls_backend", "fixture") not in ("fixture", "imported")):
+                or owner.get("calls_backend", "fixture") not in ("fixture", "imported")
+                or owner.get("slack_backend", "fixture") not in ("fixture", "slack")):
+            raise ValueError
+        if owner.get("slack_backend") == "slack" and (
+                not isinstance(owner.get("slack_connection_dir"), str) or not owner["slack_connection_dir"]
+                or not Path(owner["slack_connection_dir"]).is_absolute()):
             raise ValueError
     except (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError):
         raise ValueError("Owner configuration is invalid. Run gtm-connector doctor.") from None
@@ -90,6 +97,16 @@ def _read_owner(directory):
 
 
 def _validate_sources(directory, owner):
+    if owner.get("slack_backend", "fixture") == "slack":
+        from .runtime import inspect_slack_state
+        try:
+            state = inspect_slack_state(directory)
+            if state.crm_backend != owner.get("crm_backend", "sqlite"):
+                raise ValueError
+        except Exception:
+            raise ValueError("Slack source state is invalid. Run gtm-connector doctor.") from None
+    elif any(os.path.lexists(directory / name) for name in ("slack-source.json", "slack-mappings.json")):
+        raise ValueError("Slack source selection is invalid. Run gtm-connector doctor.")
     if owner.get("calls_backend", "fixture") == "imported":
         from .runtime import _inspect_import_state
         try:
@@ -172,6 +189,11 @@ def doctor(directory):
         restart_fix = "Stop the server to renew its certificate. " + start_fix
     elif owner.get("calls_backend") == "imported":
         start_fix = ("Rerun the original serve command for this folder with --calls-backend imported. "
+                     "Run gtm-connector serve --help to check the flags.")
+        restart_fix = "Stop the server to renew its certificate. " + start_fix
+    if owner.get("slack_backend") == "slack":
+        start_fix = ("Rerun the original serve command with the same CRM connection, source modes, "
+                     "private Slack connection folder, and existing state folder. "
                      "Run gtm-connector serve --help to check the flags.")
         restart_fix = "Stop the server to renew its certificate. " + start_fix
     if not dependencies_ok:

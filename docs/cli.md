@@ -46,6 +46,8 @@ Human text is intended for reading and can change independently.
 | `salesforce check` | Sanitized object with `schema_version: 1`, `status`, `as_of`, `steps`, request counts, and count definitions. [Salesforce checks](salesforce.md#run-the-shareable-setup-check) defines each field. |
 | `slack connect` / `slack status` | Versioned sanitized authentication state, selected scopes, expiry, and verification status. Local status creates nothing. See [Slack authentication](slack-auth.md). |
 | `slack disconnect` | Versioned local-deletion outcome and separate requested/confirmed access-token revocation outcome. Unconfirmed explicit revocation returns this result before exit `5`. |
+| `slack map` | Versioned `saved` or `unchanged` selection outcome, `thread_access: "unchecked"`, selected-thread count, duration, and fixed next command. It omits private selectors. |
+| `slack check` | Versioned sanitized five-step report with counts, timings, fixed reasons, and `crm_access_checked: false` / `calls_access_checked: false`. See [live Slack report fields](slack-live.md#share-the-check-report-keep-source-evidence-private). |
 | `calls import` | Versioned import metadata, its selected revision ID, account association, and `created`/`selected`/`reassigned` outcomes. It contains no transcript text. |
 | `calls list` | Versioned object with an `imports` array and nullable `next_after` cursor. Rows identify historical revisions and the active selection. |
 | `calls inspect` | Versioned selected import metadata and excerpt units. Explicit `--full` also returns all units and exact decoded `original_text`. |
@@ -62,7 +64,7 @@ stderr, with an empty stdout unless the command has already produced results:
 ```
 
 Treat `error.code` and the process exit as the machine contract. Read `message`
-for the cause and `next` for a suggested command. A failed evaluation, Salesforce, or doctor
+for the cause and `next` for a suggested command. A failed evaluation, Salesforce, Slack, or doctor
 check still prints its complete report on stdout before reporting failure on
 stderr. Evaluation also writes progress to stderr, so its error object can
 follow progress lines. Salesforce checks also report progress on stderr.
@@ -74,7 +76,7 @@ See [evaluation progress](evaluation.md#progress) and [Salesforce checks](salesf
 | 1 | A local file, database, or runtime operation failed. | `local_failure` |
 | 2 | Arguments or local configuration are missing or invalid. | `usage_error` |
 | 3 | The requested operation was refused. | `refused` |
-| 4 | The evidence checker, demo, verification, evaluation, doctor, or Salesforce check failed. | `check_failed` |
+| 4 | The evidence checker, demo, verification, evaluation, doctor, Salesforce check, or completed Slack check failed. | `check_failed` |
 | 5 | A source service or its transport failed. | `upstream_failure` |
 | 130 | Ctrl-C interrupted a command. Completed local writes remain. | `interrupted` |
 
@@ -107,8 +109,8 @@ opened, preserving the ordinary fixture defaults. SQLite's direct account `--db`
 behavior. [Transcript imports](calls.md) defines ranges, limits, identity,
 reassignment, and the distinction between an excerpt and a complete original.
 
-Imported briefs add `sources`, use evidence workflow version 4, and label the
-default formatter `extractive`. The source names are `demo_fixture` or
+Imported briefs add `sources`, use evidence workflow version 4 with fixture
+Slack, and label the default formatter `extractive`. The source names are `demo_fixture` or
 `salesforce` for CRM, `imported_transcript` for calls, and `demo_fixture` for
 Slack when requested. Import progress goes to stderr; with `--json`, each line
 has `progress.command: "calls import"` and a fixed `step`. Stdout remains the
@@ -122,6 +124,26 @@ progress line has `progress.command`, `step`, and `status`; stdout contains the
 single sanitized result. Ctrl-C exits `130` and points to saved connection
 status because a completed credential save can survive interruption. The
 [Slack guide](slack-auth.md) defines fields, fixed errors and recovery.
+
+`slack map` saves one thread for an explicitly selected account after an audited
+CRM lookup. `slack check` uses only the saved association and the Slack tool;
+it does not reopen CRM or calls. Both require `--state-dir` and accept the Slack
+credential folder as `--connection-dir`. Mapping supports a copied `--thread-url`
+or the native `--channel` plus `--thread-ts` pair. Conflicting selections require
+the relevant explicit `--replace` and `--reassign` flags.
+
+Daily `serve`, `brief`, Salesforce account inspection, and `calls import` accept
+`--slack-backend slack --slack-connection-dir PATH` with an explicit source
+`--state-dir`. A live Slack brief additionally requires `--with-slack`. The
+same flags must be reused for existing state; fixtures remain the default.
+Live Slack evidence uses workflow version 5 and source label `slack`. Its default
+formatter is `extractive` and uses zero model tokens. [Selection, check results,
+limits, and both initialization orders](slack-live.md) describe the complete flow.
+
+Map and check progress uses JSON lines on stderr with `progress.command`,
+`step`, and `status`. Stdout contains the single final result. A completed
+failed Slack check prints all five steps before exit 4. Invalid arguments and
+startup failures keep their ordinary categories instead of fabricating a report.
 
 ## Renewal demo
 
@@ -184,7 +206,8 @@ Startup on stderr identifies the address, CRM backend, sources, state folder,
 granted scopes, connection command, and Ctrl-C stop instruction. The source
 summary labels CRM as demo fixtures or Salesforce data with the selected
 environment. Call notes default to demo fixtures; imported mode labels them as
-user-supplied transcript exports. Slack still uses demo fixtures.
+user-supplied transcript exports. Slack defaults to demo fixtures; explicit live
+mode labels the selected mapped thread and states that access is checked on read.
 A bound Salesforce demo also names its public kit ID. Salesforce startup checks
 Organization metadata and the private connection identity; sandbox and
 production also check the required standard-object capabilities. This is an
@@ -208,7 +231,7 @@ and paths here are placeholders:
 `sources` describes the selected data sources, not connection verification.
 `sources.crm` is `"demo_fixture"` for SQLite or `"salesforce"` for Salesforce.
 `sources.calls` is `"demo_fixture"` or `"imported_transcript"` for the selected
-mode, and `sources.slack` is `"demo_fixture"`. Supplying
+mode, and `sources.slack` is `"demo_fixture"` or `"slack"`. Supplying
 `--salesforce-demo-binding` adds `demo_kit_id`, the public kit identifier, to the
 ready object. Salesforce additionally includes `sf_environment`
 (`"developer"`, `"sandbox"`, or `"production"`) and `crm_identity_verified: true`

@@ -106,7 +106,8 @@ class Guard:
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split(".")[0] in blocked or fullname in {
             "gtm_connector.runtime", "gtm_connector.gateway", "gtm_connector.auth",
-            "gtm_connector.slack_auth", "gtm_connector.slack_callback"
+            "gtm_connector.slack_auth", "gtm_connector.slack_callback", "gtm_connector.slack_mapping",
+            "gtm_connector.slack_reader", "gtm_connector.slack_workflow"
         }:
             raise AssertionError("forbidden startup import: " + fullname)
 sys.meta_path.insert(0, Guard())
@@ -115,7 +116,7 @@ runpy.run_module("gtm_connector", run_name="__main__")
 '''
         for arguments in (("--version",), ("--help",),
                           *(("calls", action, "--help") for action in ("import", "list", "inspect")),
-                          *(("slack", action, "--help") for action in ("connect", "status", "disconnect")),
+                          *(("slack", action, "--help") for action in ("connect", "status", "disconnect", "map", "check")),
                           *(("completion", shell) for shell in ("bash", "zsh", "fish")),
                           *((command, "--help") for command in COMMANDS)):
             with self.subTest(arguments=arguments):
