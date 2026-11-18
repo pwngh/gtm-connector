@@ -1,4 +1,4 @@
-"""Generated gateway sequences check committed receipts, including write retries."""
+"""Generated gateway sequences check committed receipts, including finalization retries."""
 
 from contextlib import closing, ExitStack
 import json
