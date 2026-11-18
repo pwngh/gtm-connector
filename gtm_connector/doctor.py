@@ -113,9 +113,16 @@ def doctor(directory):
         owner = load_local_owner(directory)
     except ValueError:
         check("configuration", False, "Owner settings must use the supported HTTPS loopback endpoints.",
-              "Stop the server and regenerate settings with " + serve + ".")
+              "Stop the server and keep this folder. Rerun your original serve command with a fresh --state-dir. "
+              "Run gtm-connector serve --help to check the flags.")
         return report()
     check("configuration", True, "Owner settings use the supported HTTPS loopback endpoints.", "")
+    restart_fix = "Stop and restart the server to generate a new certificate: " + serve + "."
+    start_fix = "Start the server in another terminal with " + serve + "."
+    if owner.get("crm_backend") == "salesforce":
+        start_fix = ("Rerun the original Salesforce serve command for this state folder with the same connection, "
+                     "environment, and demo binding, if used. Run gtm-connector serve --help to check the flags.")
+        restart_fix = "Stop the server to renew its certificate. " + start_fix
     if not dependencies_ok:
         return report()
     try:
@@ -126,7 +133,7 @@ def doctor(directory):
     except (OSError, ValueError):
         certificate_ok = False
     check("certificate", certificate_ok, "The local TLS certificate must be valid at the current time.",
-          "Stop and restart the server to generate a new certificate: " + serve + ".")
+          restart_fix)
     if not certificate_ok:
         return report()
     try:
@@ -144,5 +151,5 @@ def doctor(directory):
         # Diagnostic output is deliberately bounded: no HTTP exceptions or config values.
         services_ok = False
     check("services", services_ok, "Both local HTTPS services must return matching metadata.",
-          "Start the server in another terminal with " + serve + ".")
+          start_fix)
     return report()

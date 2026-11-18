@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 import httpx2
 
 from gtm_connector.cli import main
-from gtm_connector.salesforce import SalesforceReadOnlyAdapter
+from gtm_connector.salesforce import SalesforceReadError, SalesforceReadOnlyAdapter
 from gtm_connector.salesforce_check import run_check
 
 
@@ -78,6 +78,7 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.no_candidate = False
         self.refresh_search = False
         self.refreshed = False
+        self.refreshed_organization = {}
         self.fail_brief_read = None
         self.original_from_sf = SalesforceReadOnlyAdapter.from_sf
 
@@ -90,6 +91,8 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.assertEqual(request.url.host, "private-check-fixture.develop.my.salesforce.com")
         self.assertIn(request.headers["Authorization"], ("Bearer " + TOKEN, "Bearer " + FRESH_TOKEN))
         query = request.url.params.get("q", "")
+        if self.refresh_search and self.refreshed and request.headers["Authorization"] == "Bearer " + TOKEN:
+            return httpx2.Response(401, json=[{"message": SECRET}])
         if " FROM Organization" in query and self.fail_edition is not None:
             return httpx2.Response(self.fail_edition, json=[{"errorCode": "PRIVATE_CODE", "message": SECRET}])
         if request.url.path.endswith("/describe"):
@@ -100,7 +103,9 @@ print(json.dumps({{"status": 0, "result": result}}))
             return httpx2.Response(200, json={"name": object_name, "label": NAME,
                                              "fields": [{"name": name} for name in sorted(fields)]})
         if " FROM Organization" in query:
-            rows = [{"Id": ORGANIZATION, "OrganizationType": "Developer Edition", "Name": NAME}]
+            rows = [{"Id": ORGANIZATION, "OrganizationType": "Developer Edition", "IsSandbox": False, "Name": NAME}]
+            if request.headers["Authorization"] == "Bearer " + FRESH_TOKEN:
+                rows[0].update(self.refreshed_organization)
         elif " FROM Account" in query:
             account_reads = sum(" FROM Account WHERE Id" in r.url.params.get("q", "") for r in self.requests)
             if self.fail_brief_read is not None and " WHERE Id" in query and account_reads >= 2:
@@ -197,7 +202,7 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.assertTrue(all(row["code"] == "prerequisite_failed" for row in report["steps"][6:]))
         self.assertEqual(report["api_calls"], 5)
         queries = [request.url.params["q"] for request in self.requests if "q" in request.url.params]
-        self.assertEqual(queries, ["SELECT Id, OrganizationType FROM Organization LIMIT 1"])
+        self.assertEqual(queries, ["SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1"])
 
     def test_missing_candidate_reports_no_eligible_contract_and_blocks_dependent_reads(self):
         self.no_candidate = True
@@ -227,9 +232,87 @@ print(json.dumps({{"status": 0, "result": result}}))
         report = run_check(as_of=AS_OF, adapter_factory=self.adapter)
         self.assert_report(report)
         self.assertEqual(report["status"], "passed")
-        self.assertEqual((report["api_calls"], report["sf_cli_invocations"]), (16, 4))
+        self.assertEqual((report["api_calls"], report["sf_cli_invocations"]), (17, 4))
         search = report["steps"][6]
-        self.assertEqual((search["api_calls"], search["sf_cli_invocations"]), (2, 2))
+        self.assertEqual((search["api_calls"], search["sf_cli_invocations"]), (3, 2))
+
+    def test_initial_refresh_is_not_retained_until_the_first_org_response_validates(self):
+        responses = (
+            (httpx2.Response(200, content=b"invalid private JSON"), "salesforce_invalid_response"),
+            (httpx2.Response(403, json=[{"message": SECRET}]), "salesforce_forbidden"),
+            (httpx2.Response(401, json=[{"message": SECRET}]), "salesforce_auth_required"),
+            (httpx2.Response(200, json={"done": True, "totalSize": 1, "records": [
+                {"Id": ORGANIZATION, "OrganizationType": "Developer Edition", "IsSandbox": True}]}),
+             "salesforce_environment_mismatch"),
+        )
+        for rejected, code in responses:
+            with self.subTest(code=code):
+                self.requests.clear()
+                (self.directory / "count").unlink(missing_ok=True)
+
+                def respond(request):
+                    self.requests.append(request)
+                    self.assertEqual(request.method, "GET")
+                    self.assertEqual(request.url.params["q"],
+                                     "SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1")
+                    if request.headers["Authorization"] == "Bearer " + TOKEN:
+                        return httpx2.Response(401, json=[{"message": SECRET}])
+                    self.assertEqual(request.headers["Authorization"], "Bearer " + FRESH_TOKEN)
+                    return rejected
+
+                reader = self.original_from_sf(ALIAS, transport=httpx2.MockTransport(respond))
+                for _ in range(2):
+                    with self.assertRaises(SalesforceReadError) as failure:
+                        reader.prepare_connection()
+                    self.assertEqual(failure.exception.code, code)
+                    self.assertEqual(reader._access_token, TOKEN)
+                    self.assertIsNone(reader._organization_id)
+                    self.assertFalse(reader._edition_verified)
+                self.assertEqual(reader.http_requests, 4)
+                self.assertEqual(reader.sf_cli_invocations, 6)
+
+    def test_initial_refresh_is_retained_after_the_first_org_response_validates(self):
+        def respond(request):
+            if request.headers["Authorization"] == "Bearer " + TOKEN:
+                self.requests.append(request)
+                return httpx2.Response(401, json=[{"message": SECRET}])
+            return self.respond(request)
+
+        reader = self.original_from_sf(ALIAS, transport=httpx2.MockTransport(respond))
+        identity = reader.prepare_connection()
+        self.assertEqual(identity["organization_id"], ORGANIZATION)
+        self.assertEqual(reader._access_token, FRESH_TOKEN)
+        self.assertEqual(reader.http_requests, 2)
+        self.assertEqual(reader.sf_cli_invocations, 4)
+        self.assertEqual(len(reader.search_accounts()), 1)
+        self.assertEqual(reader.http_requests, 3)
+        self.assertEqual(reader.sf_cli_invocations, 4)
+
+    def test_same_origin_refresh_cannot_replace_the_pinned_org_or_environment(self):
+        for change in ({"Id": "00D000000000002AAA"}, {"IsSandbox": True},
+                       {"OrganizationType": "Enterprise Edition"}):
+            with self.subTest(change=change):
+                self.requests.clear()
+                (self.directory / "count").unlink(missing_ok=True)
+                self.refresh_search = False
+                self.refreshed = False
+                self.refreshed_organization = change
+                reader = self.adapter()
+                original = reader.prepare_connection()
+                self.refresh_search = True
+                for _ in range(2):
+                    with self.assertRaises(SalesforceReadError) as failure:
+                        reader.search_accounts()
+                    self.assertEqual(failure.exception.code, "salesforce_auth_required")
+                    self.assertEqual(reader.prepare_connection(), original)
+                # Only the expired credential may attempt a record read. The new
+                # credential must prove identity before it can retry that read.
+                fresh = [request for request in self.requests
+                         if request.headers["Authorization"] == "Bearer " + FRESH_TOKEN]
+                self.assertEqual(len(fresh), 2)
+                self.assertTrue(all(" FROM Organization" in request.url.params["q"] for request in fresh))
+                self.assertEqual(reader.http_requests, 5)
+                self.assertEqual(reader.sf_cli_invocations, 6)
 
     def test_failed_cli_attempts_are_preserved_without_returning_child_output(self):
         for mode, commands in (("fail", 1), ("token_failure", 2)):
@@ -288,11 +371,14 @@ print(json.dumps({{"status": 0, "result": result}}))
 
     def brief_cli(self):
         state = self.directory / "brief-state"
-        with patch.object(SalesforceReadOnlyAdapter, "from_sf", side_effect=lambda alias: self.adapter()) as factory, \
+        def adapter_factory(alias, **kwargs):
+            return self.adapter()
+
+        with patch.object(SalesforceReadOnlyAdapter, "from_sf", side_effect=adapter_factory) as factory, \
                 redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
             code = main(["brief", "acc-sf-" + ACCOUNT, "--crm-backend", "salesforce", "--sf-org", ALIAS,
                          "--as-of", AS_OF, "--state-dir", str(state), "--json"])
-        factory.assert_called_once_with(ALIAS)
+        factory.assert_called_once_with(ALIAS, environment="developer")
         return code, stdout.getvalue(), stderr.getvalue(), state
 
     def test_cli_brief_without_candidate_refuses_with_exit_three_before_drafting(self):

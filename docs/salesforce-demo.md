@@ -70,15 +70,17 @@ gtm-connector serve --crm-backend salesforce --sf-org gtm-de --salesforce-demo-b
 
 Use the [client setup commands](clients.md) for that state folder. The source
 permissions stay independent: `crm:read`, `calls:read`, and `slack:read`.
-The startup screen names the selected Salesforce backend and demo kit, and labels
-calls and Slack as demo fixtures. It reports the selection without claiming that
-Salesforce connectivity was verified before the first CRM read.
-Reading local notes or Slack fixtures does not issue a Salesforce request.
+The startup screen names the selected Salesforce environment and demo kit, and
+labels calls and Slack as demo fixtures. Startup checks the connected org's
+identity before opening sources. That metadata check does not establish access
+to every account. Reading local notes or Slack fixtures makes no additional
+Salesforce request after the owner's startup check.
 The binding is an explicit owner mapping. The CRM read checks AccountNumber
 against it without an extra GET.
 
-The private state folder records its source profile. Restarting with the same
-binding preserves the local sources. Switching bindings, opening bound state
+The private state folder records its source profile and connection identity.
+Restarting with the same binding and connection preserves the local sources.
+Older state without a connection marker needs a fresh folder. Switching bindings, opening bound state
 without its binding, or overlaying a binding on existing default fixtures fails
 before source changes. Choose another fresh `--state-dir` for a new import.
 

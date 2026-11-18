@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -86,6 +87,28 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual([row["name"] for row in failed], ["services"])
         self.assertIn("gtm-connector serve", failed[0]["fix"])
         self.assertNotIn("Connection refused", json.dumps(result))
+
+    def test_salesforce_restart_fixes_preserve_the_original_connection_without_disclosing_it(self):
+        identity = {"schema_version": 1, "backend": "salesforce",
+                    "instance_url": "https://private-invented.my.salesforce.com",
+                    "organization_id": "00D000000000001AAA", "environment": "production"}
+        reader = SimpleNamespace(name="salesforce", prepare_connection=lambda: dict(identity))
+        with Runtime(self.state, crm_reader=reader) as runtime:
+            secret = runtime.config["owner_secret"]
+        expired = Mock(not_valid_before_utc=datetime.now(timezone.utc) - timedelta(days=2),
+                       not_valid_after_utc=datetime.now(timezone.utc) - timedelta(days=1))
+        results = [doctor(self.state)]
+        with patch("cryptography.x509.load_pem_x509_certificate", return_value=expired):
+            results.append(doctor(self.state))
+        for result, name in zip(results, ("services", "certificate")):
+            self.assertEqual(result["checks"][-1]["name"], name)
+            fix = result["checks"][-1]["fix"]
+            self.assertIn("original Salesforce serve command", fix)
+            self.assertIn("same connection", fix)
+            self.assertIn("gtm-connector serve --help", fix)
+            self.assertNotIn("gtm-connector serve --state-dir", fix)
+            for private in (secret, identity["instance_url"], identity["organization_id"]):
+                self.assertNotIn(private, json.dumps(result))
 
     def test_hostile_owner_values_never_reach_network_or_diagnostic_output(self):
         with Runtime(self.state) as runtime:

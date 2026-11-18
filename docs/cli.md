@@ -30,7 +30,7 @@ Human text is intended for reading and can change independently.
 | `--version` | Object with `version` (string). |
 | `seed` | Object with `counts`, an object of integer counts by table. |
 | `accounts` | Array of account objects, or `[]`. |
-| `account` | Account object with `id`, `name`, `industry`, renewal fields, and a `contacts` array. |
+| `account` | Account object with a `contacts` array. SQLite includes fixture renewal fields; Salesforce includes `contracts`, `backend`, and `source_id` as defined in its [field mapping](salesforce.md#field-mapping). |
 | `brief` | Saved artifact with `schema_version: 1`, identifiers, `as_of`, `status`, `evidence`, `text`, and `model_usage`. Slack mode adds `proposed_follow_up`. |
 | `check-brief` | Object with `status: "valid"` and `brief_id`. |
 | `audit` | Array of receipts, ordered as stored. With `--follow`, each changed receipt is one JSON line. Fields and filters are documented in [audit](audit.md). |
@@ -44,6 +44,10 @@ Human text is intended for reading and can change independently.
 | `doctor` | Object with `status` and a `checks` array. Each check has `name`, `status`, `message`, and `fix`. |
 | `completion` | Object with `shell` and `script`. Without `--json`, stdout contains only the shell script. |
 | `salesforce check` | Sanitized object with `schema_version: 1`, `status`, `as_of`, `steps`, request counts, and count definitions. [Salesforce checks](salesforce.md#run-the-shareable-setup-check) defines each field. |
+
+Salesforce account inspection keeps the CLI array/object shape. Its row `id`
+values are namespaced; `source_id` is the native provider ID. The CLI projection
+omits the MCP envelope and `record_ref`; briefs retain full cited evidence.
 
 Help remains plain help text, even with `--json`. JSON errors are one object on
 stderr, with an empty stdout unless the command has already produced results:
@@ -74,8 +78,16 @@ closes output quietly. Help and version build no runtime and import neither
 SQLite, the MCP SDK, nor the HTTP client. The CLI contract tests hold that import
 boundary without depending on elapsed time.
 
-Use `serve` or `brief` with `--crm-backend salesforce --sf-org ALIAS` to read
-credentials from an existing Salesforce CLI login. SQLite stays the default.
+Use `serve`, `brief`, `accounts`, or `account` with
+`--crm-backend salesforce --sf-org ALIAS` to read credentials from an existing
+Salesforce CLI login. SQLite stays the default. Salesforce expects Developer
+Edition unless `--sf-environment sandbox` or `--sf-environment production` is
+explicit. For these four commands, any explicit `--sf-environment` also requires
+`--crm-backend salesforce`; it cannot silently select fixtures. A mismatched
+environment or unsafe connection-state reuse refuses
+with exit `3`. Salesforce account commands use `var/salesforce` by default;
+`--state-dir` selects their private state. `--db` remains a SQLite option, and
+conflicting selections fail before credentials are loaded.
 Salesforce briefs use today's local date unless `--as-of` is supplied; fixture
 briefs use `2027-01-15`. A missing eligible Contract refuses with
 `renewal_fields_unmapped` and exit `3`. The
@@ -140,12 +152,14 @@ gtm-connector serve --state-dir var/session
 
 Startup on stderr identifies the address, CRM backend, sources, state folder,
 granted scopes, connection command, and Ctrl-C stop instruction. The source
-summary labels CRM as demo fixtures or selected Salesforce data. Call notes and
-Slack are always demo fixtures in this version. A bound Salesforce demo also
-names its public kit ID. Selecting Salesforce does not verify its connection;
-startup makes no CRM request. No scope is granted at startup. A client needs an
-explicit grant from the local owner. Shutdown also goes to stderr and leaves
-local state in place.
+summary labels CRM as demo fixtures or Salesforce data with the selected
+environment. Call notes and Slack are always demo fixtures in this version.
+A bound Salesforce demo also names its public kit ID. Salesforce startup checks
+Organization metadata and the private connection identity; sandbox and
+production also check the required standard-object capabilities. This is an
+owner setup check, not a client record read or proof of access to every record.
+No scope is granted at startup. A client needs an explicit grant from the local
+owner. Shutdown also goes to stderr and leaves local state in place.
 
 While the server runs, stdout receives one line for each observed tool attempt:
 UTC completion time, tool, caller fingerprint, decision, duration in milliseconds,
@@ -164,8 +178,11 @@ and paths here are placeholders:
 `sources.crm` is `"demo_fixture"` for SQLite or `"salesforce"` for Salesforce.
 `sources.calls` and `sources.slack` are `"demo_fixture"`. Supplying
 `--salesforce-demo-binding` adds `demo_kit_id`, the public kit identifier, to the
-ready object. The source summary contains no Salesforce alias, address, or
-record IDs. The binding workflow is documented in [the Salesforce demo kit](salesforce-demo.md).
+ready object. Salesforce additionally includes `sf_environment`
+(`"developer"`, `"sandbox"`, or `"production"`) and `crm_identity_verified: true`
+after successful startup metadata and identity checks. These fields do not
+promise access to every record. The source summary contains no Salesforce alias,
+address, org ID, or record IDs. The binding workflow is documented in [the Salesforce demo kit](salesforce-demo.md).
 
 Subsequent lines have `type: "tool_call"`, `time` (UTC ISO 8601), `tool`,
 `caller` (a complete SHA-256 fingerprint or `"anonymous"`), `decision`

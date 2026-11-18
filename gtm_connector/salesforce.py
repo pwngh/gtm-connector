@@ -1,4 +1,4 @@
-"""Optional, bounded Salesforce Developer Edition reads. No external writes."""
+"""Optional, bounded reads from an explicitly selected Salesforce environment."""
 
 from contextlib import contextmanager
 from datetime import date
@@ -17,7 +17,7 @@ from .sf_credentials import SFCredentials, SFCredentialsError
 
 API_VERSION = "v68.0"
 _QUERY_PATH = f"/services/data/{API_VERSION}/query"
-_ORGANIZATION_QUERY = "SELECT Id, OrganizationType FROM Organization LIMIT 1"
+_ORGANIZATION_QUERY = "SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1"
 _ACCOUNT_FIELDS = "Id, Name, Industry, AccountNumber"
 _CONTRACT_FIELDS = "Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate"
 _CONTRACT_STATUSES = frozenset({"Draft", "InApproval", "Activated"})
@@ -25,6 +25,13 @@ _DESCRIBE_OBJECTS = frozenset({"Account", "Contact", "Opportunity", "Contract"})
 _FIELD_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,255}\Z")
 _CONTACT_FIELDS = "Id, AccountId, Name, Title, Email"
 _OPPORTUNITY_FIELDS = "Id, AccountId, Name, StageName, Amount, CloseDate, IsClosed, IsWon"
+REQUIRED_FIELDS = {
+    "Account": frozenset({"Id", "Name", "Industry", "AccountNumber"}),
+    "Contact": frozenset({"Id", "AccountId", "Name", "Title", "Email"}),
+    "Opportunity": frozenset({"Id", "AccountId", "Name", "StageName", "Amount", "CloseDate", "IsClosed", "IsWon"}),
+    "Contract": frozenset({"Id", "AccountId", "Status", "StatusCode", "StartDate", "ContractTerm", "EndDate"}),
+}
+_ENVIRONMENTS = frozenset({"developer", "sandbox", "production"})
 _NATIVE_ID = re.compile(r"[A-Za-z0-9]{18}\Z")
 _ACCOUNT_ID = re.compile(r"acc-sf-([A-Za-z0-9]{18})\Z")
 _HOST = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+my\.salesforce\.com\Z")
@@ -40,6 +47,7 @@ _ERROR_CODES = frozenset({
     "salesforce_rate_limited", "salesforce_forbidden", "salesforce_http_error",
     "salesforce_unavailable", "salesforce_timeout", "salesforce_invalid_response",
     "salesforce_result_limit", "salesforce_pagination_invalid",
+    "salesforce_environment_mismatch", "salesforce_api_disabled", "salesforce_schema_unavailable",
 })
 
 
@@ -68,6 +76,12 @@ def _reject_constant(_):
 def _native_id(value):
     if not isinstance(value, str) or not _NATIVE_ID.fullmatch(value):
         raise SalesforceReadError("salesforce_invalid_response")
+    return value
+
+
+def _environment(value):
+    if not isinstance(value, str) or value not in _ENVIRONMENTS:
+        raise SalesforceReadError("salesforce_invalid_configuration")
     return value
 
 
@@ -105,13 +119,15 @@ class SalesforceReadOnlyAdapter:
     """Three fixed read operations over one explicitly configured HTTPS origin.
 
     Construction validates local configuration only. The first operation verifies
-    Developer Edition. A successful result is cached for this pinned origin.
+    the selected environment and, outside Developer Edition, the required schema.
+    Successful metadata checks are cached for this pinned origin and lifetime.
     The optional transport supports invented HTTP fixtures, not live test data.
     """
 
     name = "salesforce"
 
-    def __init__(self, instance_url, access_token, *, transport=None):
+    def __init__(self, instance_url, access_token, *, environment="developer", transport=None):
+        self.environment = _environment(environment)
         try:
             if not isinstance(instance_url, str) or len(instance_url) > 512:
                 raise ValueError
@@ -135,22 +151,25 @@ class SalesforceReadOnlyAdapter:
         self._transport = transport
         self._credentials: SFCredentials | None = None
         self._edition_verified = False
+        self._organization_id: str | None = None
+        self._checked_objects: set[str] = set()
         self.http_requests = 0
 
     @classmethod
-    def from_env(cls):
+    def from_env(cls, *, environment="developer"):
         """Read only the explicitly named instance and credential variables."""
         return cls(os.environ.get("SALESFORCE_INSTANCE_URL"),
-                   os.environ.get("SALESFORCE_ACCESS_TOKEN"))
+                   os.environ.get("SALESFORCE_ACCESS_TOKEN"), environment=environment)
 
     @classmethod
-    def from_sf(cls, alias, *, transport=None):
+    def from_sf(cls, alias, *, environment="developer", transport=None):
         """Capture credentials from an existing CLI login inside this process."""
+        _environment(environment)
         credentials = None
         try:
             credentials = SFCredentials(alias)
             origin, token = credentials.read(time.monotonic() + _OPERATION_SECONDS)
-            adapter = cls(origin, token, transport=transport)
+            adapter = cls(origin, token, environment=environment, transport=transport)
         except (SFCredentialsError, SalesforceReadError):
             error = SalesforceReadError("salesforce_auth_required")
             error.sf_cli_invocations = credentials.invocations if credentials is not None else 0
@@ -162,23 +181,32 @@ class SalesforceReadOnlyAdapter:
     def sf_cli_invocations(self):
         return self._credentials.invocations if self._credentials is not None else 0
 
+    @staticmethod
+    def _new_budget():
+        return {"deadline": time.monotonic() + _OPERATION_SECONDS, "bytes": 0, "requests": 0}
+
+    def _metadata_check_budget(self):
+        """Check all startup metadata together without retaining partial capabilities."""
+        self._checked_objects.clear()
+        return {**self._new_budget(), "checked_objects": set()}
+
     def _refresh(self, client, budget):
         if self._credentials is None or budget.get("refreshed"):
             raise SalesforceReadError("salesforce_auth_required")
         budget["refreshed"] = True
         try:
             origin, token = self._credentials.read(budget["deadline"])
-            validated = type(self)(origin, token)
+            validated = type(self)(origin, token, environment=self.environment)
             if validated.instance_url != self.instance_url:
                 raise SalesforceReadError("salesforce_auth_required")
         except (SFCredentialsError, SalesforceReadError):
             raise SalesforceReadError("salesforce_auth_required") from None
-        self._access_token = validated._access_token
-        client.headers["Authorization"] = "Bearer " + self._access_token
+        client.headers["Authorization"] = "Bearer " + validated._access_token
+        return validated._access_token
 
     @contextmanager
-    def _operation(self):
-        budget = {"deadline": time.monotonic() + _OPERATION_SECONDS, "bytes": 0, "requests": 0}
+    def _operation(self, *, require_capabilities=True, _budget=None):
+        budget = self._new_budget() if _budget is None else _budget
         with httpx2.Client(
             verify=True, trust_env=False, follow_redirects=False, transport=self._transport,
             headers={"Authorization": "Bearer " + self._access_token, "Accept": "application/json",
@@ -187,11 +215,44 @@ class SalesforceReadOnlyAdapter:
         ) as client:
             if not self._edition_verified:
                 organization = self._query(client, _ORGANIZATION_QUERY, budget, max_rows=1)
-                if (len(organization) != 1
-                        or organization[0].get("OrganizationType") != "Developer Edition"):
-                    raise SalesforceReadError("salesforce_edition_required")
+                self._validate_environment(organization)
+                if "initial_refreshed_token" in budget:
+                    self._access_token = budget.pop("initial_refreshed_token")
                 self._edition_verified = True
+            if require_capabilities and self.environment != "developer":
+                self._check_capabilities(client, budget)
             yield client, budget
+
+    def _validate_environment(self, organization):
+        edition = organization[0].get("OrganizationType") if len(organization) == 1 else None
+        if self.environment == "developer" and edition != "Developer Edition":
+            raise SalesforceReadError("salesforce_edition_required")
+        if (len(organization) != 1 or not isinstance(edition, str) or not 1 <= len(edition) <= 128
+                or edition.strip() != edition or not edition.isprintable()):
+            raise SalesforceReadError("salesforce_invalid_response")
+        sandbox = organization[0].get("IsSandbox")
+        organization_id = _native_id(organization[0].get("Id"))
+        if type(sandbox) is not bool or not organization_id.startswith("00D"):
+            raise SalesforceReadError("salesforce_invalid_response")
+        if ((self.environment == "developer" and sandbox)
+                or (self.environment == "sandbox" and not sandbox)
+                or (self.environment == "production" and (sandbox or edition == "Developer Edition"))):
+            raise SalesforceReadError("salesforce_environment_mismatch")
+        if self._organization_id is not None and organization_id != self._organization_id:
+            raise SalesforceReadError("salesforce_auth_required")
+        self._organization_id = organization_id
+
+    def _check_capabilities(self, client, budget):
+        checked = set(self._checked_objects)
+        for object_name, required in REQUIRED_FIELDS.items():
+            if object_name in checked:
+                continue
+            fields = self._describe_fields(client, budget, object_name)
+            if not required <= fields:
+                raise SalesforceReadError("salesforce_schema_unavailable")
+            checked.add(object_name)
+        # Do not retain partial results from a failed preparation operation.
+        self._checked_objects = checked
 
     def _request(self, client, path, budget, *, query=None):
         try:
@@ -201,13 +262,30 @@ class SalesforceReadOnlyAdapter:
                 raise
         # The response is closed before invoking sf. Retry shares the original
         # deadline, request count and response-byte budget, including pagination.
-        self._refresh(client, budget)
+        refreshed_token = self._refresh(client, budget)
+        if self._edition_verified:
+            try:
+                organization = self._query(client, _ORGANIZATION_QUERY, budget, max_rows=1)
+                self._validate_environment(organization)
+            except SalesforceReadError as error:
+                if error.code in ("salesforce_edition_required", "salesforce_environment_mismatch",
+                                  "salesforce_invalid_response"):
+                    raise SalesforceReadError("salesforce_auth_required") from None
+                raise
+            # This credential has proved the existing identity.
+            self._access_token = refreshed_token
+        else:
+            # The initial Organization response still needs query and environment
+            # validation in _operation before this credential may be retained.
+            budget["initial_refreshed_token"] = refreshed_token
         return self._request_once(client, path, budget, query=query)
 
     def _request_once(self, client, path, budget, *, query=None):
         remaining = budget["deadline"] - time.monotonic()
         if remaining <= 0:
             raise SalesforceReadError("salesforce_timeout")
+        if budget["bytes"] > _MAX_BYTES:
+            raise SalesforceReadError("salesforce_result_limit")
         budget["requests"] += 1
         if budget["requests"] > _MAX_REQUESTS:
             raise SalesforceReadError("salesforce_result_limit")
@@ -244,10 +322,14 @@ class SalesforceReadOnlyAdapter:
                 if time.monotonic() >= budget["deadline"]:
                     raise SalesforceReadError("salesforce_timeout")
                 if status == 403:
-                    limited = isinstance(document, list) and any(
-                        isinstance(item, dict) and item.get("errorCode") == "REQUEST_LIMIT_EXCEEDED"
-                        for item in document)
-                    raise SalesforceReadError("salesforce_rate_limited" if limited else "salesforce_forbidden")
+                    codes = {item.get("errorCode") for item in document
+                             if isinstance(item, dict) and isinstance(item.get("errorCode"), str)} \
+                        if isinstance(document, list) else set()
+                    if "REQUEST_LIMIT_EXCEEDED" in codes:
+                        raise SalesforceReadError("salesforce_rate_limited")
+                    if "API_DISABLED_FOR_ORG" in codes:
+                        raise SalesforceReadError("salesforce_api_disabled")
+                    raise SalesforceReadError("salesforce_forbidden")
                 return document
         except httpx2.TimeoutException:
             raise SalesforceReadError("salesforce_timeout") from None
@@ -371,6 +453,13 @@ class SalesforceReadOnlyAdapter:
             rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account{where} ORDER BY Id LIMIT 101", budget)
             return [self._account(row) for row in rows]
 
+    def probe_accounts(self):
+        """Read at most one Account for an owner-selected setup check."""
+        with self._operation() as (client, budget):
+            rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account ORDER BY Id LIMIT 1",
+                               budget, max_rows=1)
+            return [self._account(row) for row in rows]
+
     def get_account(self, account_id):
         native_id = _account_id(account_id)
         with self._operation() as (client, budget):
@@ -400,25 +489,49 @@ class SalesforceReadOnlyAdapter:
                 client, f"SELECT {_OPPORTUNITY_FIELDS} FROM Opportunity{where} ORDER BY Id LIMIT 101", budget)
             return [self._opportunity(row, native_id) for row in rows]
 
-    def check_edition(self):
-        """Validate Developer Edition once for the configured origin."""
-        with self._operation():
+    def check_edition(self, *, _budget=None):
+        """Validate the selected environment, retaining the earlier method name."""
+        with self._operation(require_capabilities=False, _budget=_budget):
             pass
 
-    def describe_fields(self, object_name):
-        """Return field names for one fixed object without exposing its schema."""
-        if not isinstance(object_name, str) or object_name not in _DESCRIBE_OBJECTS:
-            raise SalesforceReadError("salesforce_invalid_arguments")
-        with self._operation() as (client, budget):
-            document = self._request(client, f"/services/data/{API_VERSION}/sobjects/{object_name}/describe", budget)
+    def prepare_connection(self):
+        """Return the private identity only after bounded metadata checks pass."""
+        with self._operation():
+            return {"schema_version": 1, "backend": "salesforce", "instance_url": self.instance_url,
+                    "organization_id": self._organization_id, "environment": self.environment}
+
+    def _describe_fields(self, client, budget, object_name):
+        document = self._request(client, f"/services/data/{API_VERSION}/sobjects/{object_name}/describe", budget)
         if not isinstance(document, dict) or not isinstance(document.get("fields"), list):
             raise SalesforceReadError("salesforce_invalid_response")
+        if self.environment != "developer":
+            if document.get("name") != object_name or type(document.get("queryable")) is not bool:
+                raise SalesforceReadError("salesforce_invalid_response")
+            if not document["queryable"]:
+                raise SalesforceReadError("salesforce_forbidden")
         names = set()
         for field in document["fields"]:
             name = field.get("name") if isinstance(field, dict) else None
             if not isinstance(name, str) or not _FIELD_NAME.fullmatch(name) or name in names:
                 raise SalesforceReadError("salesforce_invalid_response")
             names.add(name)
+        return names
+
+    def describe_fields(self, object_name, *, _budget=None):
+        """Return field names for one fixed object without exposing its schema."""
+        if not isinstance(object_name, str) or object_name not in _DESCRIBE_OBJECTS:
+            raise SalesforceReadError("salesforce_invalid_arguments")
+        self._checked_objects.discard(object_name)
+        with self._operation(require_capabilities=False, _budget=_budget) as (client, budget):
+            names = self._describe_fields(client, budget, object_name)
+        if self.environment != "developer" and REQUIRED_FIELDS[object_name] <= names:
+            if _budget is None:
+                self._checked_objects.add(object_name)
+            else:
+                checked = _budget["checked_objects"]
+                checked.add(object_name)
+                if REQUIRED_FIELDS.keys() <= checked:
+                    self._checked_objects.update(checked)
         return names
 
     def candidate_account(self, as_of):

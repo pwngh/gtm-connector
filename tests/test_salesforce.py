@@ -16,7 +16,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "salesforce"
 ORIGIN = "https://fixture-dev-ed.develop.my.salesforce.com"
 TOKEN = "fixture-only-salesforce-access-token"
 ACCOUNT_ID = "acc-sf-001000000000001AAA"
-ORG_QUERY = "SELECT Id, OrganizationType FROM Organization LIMIT 1"
+ORG_QUERY = "SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1"
 QUERY_PATH = "/services/data/v68.0/query"
 REAL_CLIENT = httpx2.Client
 

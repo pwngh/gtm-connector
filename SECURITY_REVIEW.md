@@ -11,7 +11,8 @@ It does not grant production approval.
 messages. Company names, people, and source text are invented; email addresses use
 reserved `.example` domains. The default runtime uses no real CRM, external
 identity, or recording service. An explicit Salesforce backend can read an
-operator's Developer Edition org; calls and Slack still use local fixtures.
+operator's existing org with an explicit environment expectation; calls and
+Slack still use local fixtures.
 
 | Scope | Allowed tools |
 | --- | --- |
@@ -150,8 +151,9 @@ CLI cannot load them.
 
 ## Optional Salesforce boundary
 
-`serve --crm-backend salesforce --sf-org ALIAS` and the matching `brief` option
-capture an existing Salesforce CLI login inside the connector process. The
+`serve --crm-backend salesforce --sf-org ALIAS` and the matching `brief`,
+`accounts`, and `account` options capture an existing Salesforce CLI login
+inside the connector process. The
 provider invokes only `sf org display` and `sf org auth show-access-token`, with
 an explicit alias and `--json`, using argument arrays and no shell. Stdin is
 closed; stdout and stderr are captured. CLI telemetry, automatic updates, and
@@ -165,19 +167,44 @@ Without `--sf-org`, the explicit backend uses `SALESFORCE_INSTANCE_URL` and
 `SALESFORCE_ACCESS_TOKEN`; an explicit alias takes precedence. There is no
 implicit selection of a default CLI org. Both paths validate one HTTPS My Domain origin and a
 bounded printable token. The constructor performs no adapter REST query.
-After the local grant checks and pending audit commit, the first CRM tool
-requires `Developer Edition`. Only that successful edition result is cached,
-for this adapter's pinned origin and lifetime. CRM records are not cached.
-The local owner can grant CRM access; this is not Salesforce user delegation.
-The upstream token may have broader permissions. The adapter implements GET only.
+Developer Edition remains the default environment expectation. Sandbox and
+production require explicit `--sf-environment` selection. Startup checks
+OrganizationType and the typed IsSandbox field before opening source stores.
+Sandbox and production additionally require queryable standard objects and the
+fixed required fields. Successful environment and capability metadata is cached
+only for the adapter lifetime. CRM records are not cached. Later provider
+permission failures still refuse.
+
+The owner startup check writes a mode-0600 `crm-connection.json` under the state
+lock. It pins the validated origin, org ID, and selected environment. Restart
+must match that identity; aliases are not stored as authority. Connected state
+cannot silently switch org, environment, or fixture mode. Older unpinned state
+with artifacts requires a fresh folder. Malformed, linked, or nonprivate markers
+refuse before source initialization. Marker replacement is atomic per file;
+there is no cross-file transaction or power-loss guarantee. The independent
+kit binding must also match before source data opens. Existing private owner
+metadata also prevents fixture fallback after accidental removal of only the
+connection marker. The trusted local owner can still edit or remove both files.
+The complete owner format written before Salesforce support can still reopen
+fixture state; incomplete or unknown metadata cannot select that legacy path.
+
+Metadata preflight is an explicit local-owner operation outside the MCP audit.
+Client CRM record reads still require a grant and committed receipt before any
+provider read. Denied tools and failed initial audit writes make no additional
+provider request after startup. The local owner can grant CRM access; this is
+not Salesforce user delegation. The upstream token may have broader permissions.
+The adapter implements GET only.
 
 Requests use fixed SOQL fields, escaped search text, and bounded results.
 TLS verification stays on; proxies and redirects are disabled. Pagination must
 stay on the same query endpoint. Each operation retains the 12-GET, 1-MiB,
 20-second bounds, with at most 10 pages and 100 rows per query. The first HTTP
 401 in an operation may reacquire credentials once through `sf` and retry the
-same GET. Credential lookup and retry share the original budget. A second 401,
-lookup failure, or changed origin returns `salesforce_auth_required`. Other
+same GET. If identity is already known, it rereads Organization first and
+requires the same org and selected environment, so a replaced sandbox cannot
+reuse old identity through the same origin. This adds one GET only after refresh
+and shares the original budget. A second 401, lookup failure, or changed origin
+or org identity returns `salesforce_auth_required`. Other
 errors are not retried. The environment-token path cannot refresh. This is
 separate from local MCP tokens, which still expire after five minutes.
 
@@ -204,7 +231,9 @@ Audit arguments can contain real search terms and IDs. Returned refs persist,
 but response bodies and the upstream token are not copied to the audit. A
 saved brief does contain source evidence and receipt copies in private state.
 No Salesforce credential enters owner.json, Inspector config, brief evidence,
-or model input. Existing private permissions and manual retention apply.
+or model input. The connection marker does contain private org identity and
+must not be shared or committed. Startup labels and shareable diagnostics omit
+that identity. Existing private permissions and manual retention apply.
 
 `salesforce check` is an explicit local-owner diagnostic. It probes credentials,
 edition, a fixed allowlist of describe fields, and bounded reads directly, then
@@ -221,7 +250,9 @@ Progress on stderr contains fixed step names, status, and counts only. In JSON
 mode it uses JSON lines while stdout contains one final report.
 
 [Credential tests](tests/test_sf_credentials.py) use only a fake CLI on PATH;
-[adapter tests](tests/test_salesforce.py) use invented HTTP responses. The
+[adapter tests](tests/test_salesforce.py) use invented HTTP responses. Sandbox
+and production behavior has only invented-response proof; no paid or production
+org has been exercised. The
 [gateway tests](tests/test_salesforce_gateway.py) exercise scope denial, audit
 failure, disabled writes, and accepted reads through local HTTPS. The separate
 lead-agent live demo observation is recorded below; an owner-provided check

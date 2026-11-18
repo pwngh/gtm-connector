@@ -1,4 +1,4 @@
-# Read a Salesforce Developer Edition org
+# Read an existing Salesforce org
 
 The optional Salesforce backend reads standard Account, Contact, Opportunity,
 and Contract records through REST v68.0. It can produce a cited renewal-planning
@@ -48,13 +48,79 @@ select Salesforce. Without `--crm-backend salesforce`, `serve` and `brief` use S
 The adapter accepts an HTTPS My Domain origin ending in `.my.salesforce.com`,
 with no path, query, credentials, or nonstandard port. A login URL such as
 `login.salesforce.com` is not an instance address. No credential file loads
-automatically. Startup obtains credentials but performs no adapter REST query.
-The first authorized CRM call checks `OrganizationType` for exactly
-`Developer Edition`. Only a successful check is cached for that adapter's lifetime.
+automatically. The constructor obtains credentials without an adapter REST query. Starting a
+Salesforce runtime then checks Organization metadata before opening source
+stores and pins the selected connection to private state. Only successful
+checks are cached for that adapter's lifetime.
+
+## Choose the expected environment
+
+Without `--sf-environment`, the connector still requires Developer Edition.
+Choose an existing sandbox or production org explicitly:
+
+```sh
+gtm-connector salesforce check --sf-org EXISTING_ALIAS --sf-environment sandbox --json
+gtm-connector serve --crm-backend salesforce --sf-org EXISTING_ALIAS --sf-environment sandbox --state-dir var/salesforce-sandbox
+```
+
+Replace `EXISTING_ALIAS` with your existing signed-in alias. Use `production`
+only when that is the environment you intend to read. No command creates an org,
+changes permissions, or writes provider records. The default fixture commands
+never choose a CLI org.
+
+| Selection | Metadata required |
+| --- | --- |
+| `developer` | OrganizationType is Developer Edition and IsSandbox is false. |
+| `sandbox` | IsSandbox is true and OrganizationType is a valid nonempty label. |
+| `production` | IsSandbox is false and OrganizationType is a valid non-Developer Edition label. |
+
+Missing or malformed environment metadata refuses. The typed IsSandbox field is
+authoritative; there is no inferred environment based on an alias or hostname.
+Sandbox and production modes also check that the four standard objects are
+queryable and expose the required fixed fields. These successful checks are
+cached for the adapter lifetime. Provider permission failures on later reads
+still refuse. API-disabled orgs have a separate diagnostic from denied user
+access. These checks do not promise support for every Salesforce edition or
+custom schema. [Salesforce API requirements](https://developer.salesforce.com/docs/platform/api-rest/guide/intro-rest-compatible-editions.html)
+
+Startup writes the validated origin, org ID, and selected environment only to
+private `crm-connection.json` under the state lock. A restart must match all
+three. Changing an alias to another org cannot reuse that state; another alias
+for the same identity can. Fixture mode cannot open connected state. Earlier
+state without this marker requires a fresh folder because its source identity
+cannot be proved. Keep the original files; the refusal explains how to select
+an unused folder. A demo binding remains a separate required identity check.
+
+The startup source line confirms the environment and connection identity, not
+access to every record. Neither that line nor the shareable check prints the
+org ID, instance address, alias, or username. Ordinary account results, briefs,
+audit arguments, and the private connection marker can contain real data.
+Sandbox and production behavior is tested with invented HTTP responses and a
+fake CLI. No paid or production org has been exercised.
 
 ## Read records and create a brief
 
-In a second terminal, create the Inspector's explicit read grant:
+Search an existing account book with the installed CLI:
+
+```sh
+gtm-connector accounts --crm-backend salesforce --sf-org gtm-de --query SEARCH_TEXT
+```
+
+Replace `SEARCH_TEXT` with a literal part of the account name. Use a narrow
+query when the org contains more than the 100-row bound. Use a returned account
+ID with `gtm-connector account ACCOUNT_ID --crm-backend salesforce --sf-org gtm-de`.
+Add the same explicit `--sf-environment` for sandbox or production. These
+commands obtain a local `crm:read` grant and use the normal audited gateway;
+they do not bypass its scope or receipt checks. Their separate default state
+folder is `var/salesforce`. An explicit `--state-dir` selects another folder;
+`--db` belongs to SQLite and cannot be mixed with Salesforce.
+
+The account results go to stdout as readable tables or the documented JSON
+array/object. A human source label goes to stderr once. These are local commands
+that start and stop their own runtime. To use a concurrently running `serve`,
+use an MCP client rather than opening its locked state in another CLI runtime.
+
+In a second terminal for a running server, create the Inspector's explicit read grant:
 
 ```sh
 gtm-connector connect inspector --scope crm:read --state-dir var/salesforce
@@ -180,7 +246,8 @@ message sets preserve owner edits; partial or mismatched sets refuse.
 
 The authorized `get_account` result must match the selected bound AccountNumber
 in both directions. This check adds no GET. Call-only or Slack-only clients read
-their independently granted local source without querying Salesforce. An
+their independently granted local source without an additional Salesforce query
+after the owner's startup metadata check. An
 unrelated account has no demo notes or messages. The binding does not add a
 scope, grant a tool, or establish Salesforce user identity.
 
@@ -209,12 +276,23 @@ review any sharing yourself.
 gtm-connector salesforce check --sf-org gtm-de --json
 ```
 
-The check reports credentials, edition, required fields for all four objects,
-bounded account search, a renewal candidate, account/contact/contract reads,
+The check reports credentials, edition (or `environment` in sandbox/production
+mode), required fields for all four objects, an account-read probe, a renewal
+candidate, account/contact/contract reads,
 opportunities, and a brief through local HTTPS. It uses private temporary state
 for the brief and removes that state on normal completion. It prints no record
 names, IDs, emails, org address, username, token, raw describe metadata, or
 upstream error body. Missing fields are named from a fixed required-field list.
+Developer mode retains its bounded account search. Sandbox and production sample
+at most one account for this step, so a large healthy book does not fail solely
+because it has more than 100 accounts. The count describes the sample, not the
+size of the org. Ordinary `accounts` searches still enforce the 100-row bound.
+The remaining steps exercise one renewal candidate, not every account.
+In sandbox and production modes, Organization and all four descriptions share
+the same 12-request, 1-MiB, 20-second budget as a cold server startup. Descriptions
+that each fit but exceed that combined bound fail the check. Reducing an account
+search does not reduce schema metadata; this connection cannot start within
+these limits. Individual field failures still name the missing standard fields.
 A prerequisite failure marks dependent steps as failed with a next action.
 
 JSON has `schema_version: 1`, `status` (`passed` or `failed`), `as_of`, `steps`,
@@ -239,8 +317,9 @@ the work of the named step and do not establish a performance guarantee.
 
 Before a tool executes, the gateway commits a pending receipt, checks the bearer
 grant, and applies its local rate limit. Missing `crm:read` returns HTTP 403
-without an org request. Initial audit failure returns HTTP 503 without an org
-request. Successful reads and failed queries finalize the same receipt. The
+without an additional provider request. Initial audit failure returns HTTP 503
+without a provider read. The owner's earlier startup metadata check is separate
+from these client attempts. Successful reads and failed queries finalize the same receipt. The
 owner-only setup check also performs explicit adapter probes outside MCP; its
 brief step exercises the normal MCP boundary.
 
@@ -251,8 +330,11 @@ locators are accepted. The external backend lists five read tools, omits
 The connector never writes Salesforce records.
 
 For `--sf-org`, the first upstream HTTP 401 in an operation asks `sf` for
-credentials once and retries that same GET. A second 401, failed credential
-lookup, or changed instance origin fails with `salesforce_auth_required`.
+credentials once. If an org identity was already checked, it rereads Organization
+before retrying the original GET. This detects an org replacement behind an
+unchanged origin, such as a refreshed sandbox. The identity check shares the
+same request, byte, and deadline budget. A second 401, failed credential lookup,
+or changed instance or org identity fails with `salesforce_auth_required`.
 There is no retry for other upstream errors. The retry and credential lookup
 share the original operation's deadline and request budget; they do not reset it.
 
@@ -271,7 +353,11 @@ write, and pool timeouts remain 10 seconds.
 | --- | --- |
 | Missing or invalid environment configuration | `salesforce_invalid_configuration`. |
 | Missing CLI login, unusable CLI credentials, or failed refresh | `salesforce_auth_required`. |
-| Edition is not Developer Edition | `salesforce_edition_required`; no CRM query. |
+| Default developer mode sees another edition | `salesforce_edition_required`; no CRM record query. |
+| Selected environment does not match returned metadata | `salesforce_environment_mismatch`; no CRM record query. |
+| API access is disabled for the org | `salesforce_api_disabled`. |
+| Required standard schema is unavailable | `salesforce_schema_unavailable`; run the setup check for missing fields. |
+| Private state belongs to another connection or cannot establish identity | `source_identity_mismatch`; select a fresh state folder. |
 | Upstream HTTP 401 after the permitted refresh, or environment-token expiry | `salesforce_auth_required`. |
 | Upstream HTTP 429 or 403 with `REQUEST_LIMIT_EXCEEDED` | `salesforce_rate_limited`. |
 | Other upstream HTTP 403 | `salesforce_forbidden`. |
@@ -300,7 +386,17 @@ The previous `get_account` read Account and Contact only. The new call also
 reads Contract, so its warm total stays at three while removing the repeated
 edition query. A fresh Salesforce brief uses five GETs for edition, account,
 contacts, contracts, and opportunities. Pagination and a permitted 401 retry
-add requests within the existing bounds. No result or schema cache is added.
+add requests within the existing bounds. CRM records are not cached.
+
+With the explicit-environment extension, a Developer Edition runtime moves its
+single Organization GET to owner startup. Its later search, account, and
+opportunity tool reads use 1, 3, and 1 GETs respectively on single-page responses.
+A fresh sandbox or production runtime uses five metadata GETs: Organization
+plus four object descriptions. Its later tool counts are the same. Repeated
+successful metadata checks in the same adapter add no describe requests. A
+fresh brief therefore uses five GETs in developer mode and nine in sandbox or
+production mode, including owner startup. These bounds and counts are tested
+with invented responses, not measured live-org performance.
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -p 'test_salesforce*.py' -v
@@ -326,6 +422,14 @@ zero remaining imported records. These command counts are not total API quota
 usage. [Run details and timings](salesforce-demo.md) state the prerequisites and
 limits. No live call provider, Slack workspace, or hosted assistant was used,
 and no org-bearing artifact was committed. Owner verification remains pending.
+
+On November 18, 2026, an owner-authorized lead-agent check ran the new `accounts`
+CLI twice against the existing Developer Edition login with an invented no-match
+search. Both reads returned zero records and one successful audit receipt each.
+The second process reused the same private connection identity. No provider
+records were created or modified. This observes the Developer Edition command
+and restart path, not sandbox or production compatibility. Private source state
+and org identity were not committed.
 
 The local owner can grant CRM access, and the upstream token may allow more than
 reads. Audit arguments and record references can identify org records. Saved
