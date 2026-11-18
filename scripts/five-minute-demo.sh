@@ -49,5 +49,6 @@ print("Appending 'The renewal was approved.' was rejected with exit 4 and empty 
 print("The saved audit has six receipts: five successful reads and one scope refusal.")
 print("One brief was saved. No model tokens or activity writes were used.")
 print(f"Inspect {directory}/demo.json, usage.json, candidate.txt, and state/.")
-print("Run separate connector checks with: .venv/bin/python -m gtm_connector verify --with-slack")
+print("Run separate connector checks with: .venv/bin/python -m gtm_connector verify "
+      "--with-slack --state-dir var/verification")
 PY

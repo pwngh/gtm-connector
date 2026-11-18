@@ -2,19 +2,19 @@
 
 The report counts tool attempts from audit receipts and model tokens from saved briefs.
 
-These commands report usage from local state. The placeholder takes a generated
-brief ID:
+These commands report usage from the default renewal-demo folder. The
+placeholder takes the generated brief ID:
 
 ```sh
-gtm-connector usage
-gtm-connector usage --brief brief-REPLACE_WITH_ID
+gtm-connector usage --state-dir var/renewal-demo
+gtm-connector usage --brief brief-REPLACE_WITH_ID --state-dir var/renewal-demo
 ```
 
 The default output shows tool counts and model-token totals as tables. Add
 `--json` to read every group and saved-brief entry described below:
 
 ```sh
-gtm-connector usage --json
+gtm-connector usage --json --state-dir var/renewal-demo
 ```
 
 The `--state-dir PATH` option selects another state directory. The command reads

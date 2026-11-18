@@ -89,6 +89,15 @@ Slack by default; the existing `demo --with-slack` spelling has the same result.
 The quick and longer walkthroughs use this same story. `verify` runs the separate
 guarantee checks and intentionally creates one local activity for the retry test.
 
+The default state folder is `var/renewal-demo` for `demo` and `var/verification`
+for `verify`. Other state-based commands retain `var/v2`. These separate defaults
+leave an older demo in `var/v2` untouched. `--state-dir` still selects an explicit
+folder. If that folder contains an older or edited book that cannot demonstrate
+the story, the error identifies the mismatch and gives a concrete unused folder
+in its retry command. Existing source records are not replaced or upgraded.
+Demo source and draft checks run before publication. A failed check can retain
+a rejected evidence artifact, but it publishes no accepted brief or text.
+
 ```sh
 gtm-connector demo --state-dir var/renewal-demo --json
 gtm-connector verify --state-dir var/verification --json

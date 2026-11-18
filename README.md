@@ -204,7 +204,8 @@ The 30 invented accounts span several industries and use reserved `.example`
 addresses. The book includes conflicting signals, a dated October note, an
 unrecorded contact role, and missing sources. The quick demo follows just one
 account. It creates six receipts and one saved brief, changes no activity rows,
-and stops both services. State stays in the gitignored `var/v2` directory.
+and stops both services. State stays in the gitignored `var/renewal-demo`
+directory. Existing `var/v2` data is preserved.
 
 The longer walkthrough expands the same account's evidence and receipts:
 

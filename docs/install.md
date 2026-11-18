@@ -14,8 +14,12 @@ Python dependencies. The fixture demo uses local HTTPS services and invented
 data; it needs no model, Salesforce login, or external service at runtime.
 The story follows Morgan Reed preparing Juniper Crest Learning's renewal with
 cited CRM, call-note, and Slack evidence. All people and records are invented.
-It writes private state under `var/v2` in the current directory. Pass
-`--state-dir PATH` to choose another location.
+It writes private state under `var/renewal-demo` in the current directory. The
+separate `verify` command defaults to `var/verification`; daily commands retain
+`var/v2`. Pass `--state-dir PATH` to choose another location. This keeps an older
+demo in `var/v2` untouched when you run the new story. Existing books are not
+upgraded. If an explicitly selected folder contains an older or edited book,
+the error gives a concrete retry command using a fresh folder.
 
 Replace `main` in the URL with a reviewed commit to choose an exact source
 revision. The package keeps the runtime versions from `requirements.in`.

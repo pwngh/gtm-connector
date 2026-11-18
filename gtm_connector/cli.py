@@ -29,8 +29,8 @@ COMMANDS = {
     "seed": ("Create the local CRM fixture without replacing existing records.", "seed --db var/v2/crm.sqlite3"),
     "accounts": ("Search the local CRM by account name.", "accounts --query Cedarline"),
     "account": ("Read one local CRM account and its contacts.", "account acc-003"),
-    "audit": ("Read tool-call receipts from the local audit database.", "audit --state-dir var/v2"),
-    "usage": ("Summarize tool calls and saved model token counts.", "usage --state-dir var/v2"),
+    "audit": ("Read tool-call receipts from the local audit database.", "audit --state-dir var/renewal-demo"),
+    "usage": ("Summarize tool calls and saved model token counts.", "usage --state-dir var/renewal-demo"),
     "evaluate": ("Check briefs for twenty fixed accounts in temporary state.", "evaluate --with-slack --json"),
     "check-brief": ("Check candidate text against a saved evidence snapshot.",
                     "check-brief brief-REPLACE candidate.txt --state-dir var/v2"),
@@ -85,8 +85,9 @@ def build_parser():
             command.add_argument("--db", type=Path, default=Path("var/v2/crm.sqlite3"),
                                  help="Read or seed this local CRM database.")
         elif name not in ("evaluate", "completion", "salesforce"):
-            command.add_argument("--state-dir", type=Path, default=Path("var/v2"),
-                                 help="Use this private state folder (default: var/v2).")
+            state_dir = {"demo": "var/renewal-demo", "verify": "var/verification"}.get(name, "var/v2")
+            command.add_argument("--state-dir", type=Path, default=Path(state_dir),
+                                 help=f"Use this private state folder (default: {state_dir}).")
         if name == "accounts":
             command.add_argument("--query", default="", help="Match this literal part of an account name.")
         if name in ("account", "brief"):
@@ -421,6 +422,14 @@ def _failure(exc, args):
         next_command = f"gtm-connector audit --state-dir {shlex.quote(str(args.state_dir))}"
     elif isinstance(exc, sqlite3.Error):
         code = 1
+    if getattr(exc, "code", None) == "demo_state_mismatch":
+        code = 4
+        fresh = args.state_dir.parent / "renewal-demo-fresh"
+        suffix = 2
+        while os.path.lexists(fresh):
+            fresh = args.state_dir.parent / f"renewal-demo-fresh-{suffix}"
+            suffix += 1
+        next_command = shlex.join(["gtm-connector", "demo", "--state-dir", str(fresh)])
     if "audit database not found" in message:
         next_command = f"gtm-connector demo --state-dir {shlex.quote(str(args.state_dir))}"
     elif "database not found" in message:

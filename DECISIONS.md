@@ -20,6 +20,20 @@ that intentional test write. The quick and long walkthroughs follow the same
 person and account; the longer path inspects that brief's usage and citation
 checks. Keep the broader guarantees as separately run `verify` checks.
 
+Give the renewal demo its own default folder, `var/renewal-demo`, and verification
+its own `var/verification` folder. Other commands retain `var/v2` unless a folder
+is selected explicitly. This keeps previous fixture books and verification
+writes separate. An explicitly selected older or edited demo book is retained;
+the error supplies a concrete fresh-folder command. Check the demo's evidence
+and read-only invariants before accepting its saved brief, so a failed story
+cannot leave an accepted result behind.
+
+Keep saved fixture checks compatible with the earlier quoted empty contact role.
+Try the current vocabulary first and the complete legacy vocabulary second,
+only for fixture evidence. New drafts keep the clearer missing-role wording.
+Checking whole vocabularies separately prevents duplicate aliases from becoming
+two supported claims.
+
 Use a fixed invented book with mixed industries, reserved email domains,
 account-specific context, a missing contact role, and an October note beside a
 January Slack update. This implements the user's explicitly requested source

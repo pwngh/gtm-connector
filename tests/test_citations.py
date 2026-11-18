@@ -38,8 +38,12 @@ class CitationTests(unittest.TestCase):
     def test_empty_fixture_contact_role_is_reported_without_inventing_a_value(self):
         source = evidence()
         source["records"][1]["title"] = ""
-        self.assertIn('- Contact "Fixture contact con-001": role not provided; '
-                      'email "contact001@account001.example". [crm/contacts/con-001]', build_facts(source))
+        current = ('- Contact "Fixture contact con-001": role not provided; '
+                   'email "contact001@account001.example". [crm/contacts/con-001]')
+        self.assertIn(current, build_facts(source))
+        self.assertEqual(check_brief(current, source), current + "\n")
+        with self.assertRaises(BriefRejected):
+            check_brief(current.replace("role not provided;", 'role "";'), source)
         self.assertEqual(source["records"][1]["title"], "")
         source["records"][1]["title"] = None
         with self.assertRaises(BriefRejected):

@@ -3,7 +3,9 @@
 from contextlib import closing, redirect_stderr, redirect_stdout
 import io
 import json
+import os
 from pathlib import Path
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -13,7 +15,7 @@ from unittest.mock import patch
 
 from gtm_connector import calls, slack
 from gtm_connector.audit import read_audit
-from gtm_connector.briefing import check_saved_brief
+from gtm_connector.briefing import _save_artifact, check_saved_brief, create_brief
 from gtm_connector.cli import main
 from gtm_connector.client import LocalClient
 from gtm_connector.demo import run
@@ -161,28 +163,120 @@ class NarrativeDemoTests(unittest.TestCase):
             pass
         with closing(sqlite3.connect(self.state / "crm.sqlite3")) as connection, connection:
             connection.execute("UPDATE accounts SET name = ? WHERE id = 'acc-007'", ("Changed invented account",))
+        before = {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}
+        occupied = self.directory / "renewal-demo-fresh"
+        occupied.mkdir()
+        (occupied / "keep.txt").write_text("Preserve this existing folder.")
         completed = self.command("demo", "--json")
         self.assertEqual(completed.returncode, 4, completed.stderr)
         self.assertEqual(completed.stdout, "")
         error = json.loads(completed.stderr)["error"]
         self.assertEqual(error["code"], "check_failed")
-        self.assertIn("fresh --state-dir", error["message"])
-        self.assertEqual(error["next"], "gtm-connector demo --help")
+        self.assertIn("older or edited book", error["message"])
+        self.assertIn("Juniper Crest Learning", error["message"])
+        self.assertEqual(shlex.split(error["next"]),
+                         ["gtm-connector", "demo", "--state-dir", str(self.directory / "renewal-demo-fresh-2")])
+        self.assertFalse((self.directory / "renewal-demo-fresh-2").exists())
+        self.assertEqual((occupied / "keep.txt").read_text(), "Preserve this existing folder.")
+        self.assertEqual({path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}, before)
         self.assertFalse((self.state / "briefs").exists())
         self.assertEqual(self.activities(), 0)
 
     def test_changed_injection_does_not_claim_a_proof_that_did_not_run(self):
+        for database, table, identifier in (("calls", "call_notes", "note-007"), ("slack", "messages", "msg-007")):
+            with self.subTest(source=database):
+                self.state = self.directory / database
+                with Runtime(self.state):
+                    pass
+                with closing(sqlite3.connect(self.state / (database + ".sqlite3"))) as connection, connection:
+                    connection.execute(f"UPDATE {table} SET body = ? WHERE id = ?",
+                                       ("Invented ordinary note", identifier))
+                saved_statuses = []
+
+                def observe_save(path, artifact):
+                    saved_statuses.append(artifact["status"])
+                    _save_artifact(path, artifact)
+
+                with patch("gtm_connector.briefing._save_artifact", side_effect=observe_save), \
+                        redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
+                    code = main(["demo", "--json", "--state-dir", str(self.state)])
+                self.assertEqual(code, 4, stderr.getvalue())
+                self.assertEqual(stdout.getvalue(), "")
+                error = json.loads(stderr.getvalue())["error"]
+                self.assertEqual(error["code"], "check_failed")
+                self.assertIn("older or edited book", error["message"])
+                self.assertIn("quoted data", error["message"])
+                self.assertIn(identifier, error["message"])
+                self.assertEqual(shlex.split(error["next"]),
+                                 ["gtm-connector", "demo", "--state-dir", str(self.directory / "renewal-demo-fresh")])
+                self.assertEqual(saved_statuses, ["collected", "rejected"])
+                artifacts = list((self.state / "briefs").glob("*.json"))
+                self.assertEqual(len(artifacts), 1)
+                artifact = json.loads(artifacts[0].read_text())
+                self.assertEqual(artifact["status"], "rejected")
+                self.assertNotIn("text", artifact)
+                self.assertNotIn("proposed_follow_up", artifact)
+                usage = build_usage_report(self.state)
+                self.assertEqual([brief["status"] for brief in usage["briefs"]], ["rejected"])
+                self.assertEqual(usage["calls"], {"total": 6, "ok": 5, "error": 1, "pending": 0})
+                self.assertEqual(self.activities(), 0)
+
+    def test_account_change_between_lookup_and_draft_is_rejected_before_publication(self):
+        def change_account(runtime, *args, **kwargs):
+            with closing(sqlite3.connect(runtime.directory / "crm.sqlite3")) as connection, connection:
+                connection.execute("UPDATE accounts SET industry = 'Changed invented industry' WHERE id = 'acc-007'")
+            return create_brief(runtime, *args, **kwargs)
+
+        with patch("gtm_connector.demo.create_brief", side_effect=change_account), \
+                redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
+            code = main(["demo", "--json", "--state-dir", str(self.state)])
+        self.assertEqual(code, 4)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("account changed between lookup", json.loads(stderr.getvalue())["error"]["message"])
+        artifacts = list((self.state / "briefs").glob("*.json"))
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(json.loads(artifacts[0].read_text())["status"], "rejected")
+        self.assertEqual([brief["status"] for brief in build_usage_report(self.state)["briefs"]], ["rejected"])
+
+    def test_default_demo_and_verification_leave_older_v2_state_untouched(self):
+        legacy = self.directory / "var" / "v2"
+        with Runtime(legacy):
+            pass
+        with closing(sqlite3.connect(legacy / "crm.sqlite3")) as connection, connection:
+            connection.execute("UPDATE accounts SET name = 'Fixture account acc-007' WHERE id = 'acc-007'")
+        before = {path.name: path.read_bytes() for path in legacy.iterdir() if path.is_file()}
+        for command, folder in (("demo", "renewal-demo"), ("verify", "verification")):
+            completed = subprocess.run([sys.executable, "-m", "gtm_connector", command, "--json"],
+                                       cwd=self.directory, env={**os.environ, "PYTHONPATH": str(ROOT)},
+                                       capture_output=True, text=True, timeout=30)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual({path.name: path.read_bytes() for path in legacy.iterdir() if path.is_file()}, before)
+            self.assertTrue((self.directory / "var" / folder / "audit.sqlite3").is_file())
+        self.state = self.directory / "var" / "renewal-demo"
+        self.assertEqual(self.activities(), 0)
+        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 6)
+        self.state = self.directory / "var" / "verification"
+        self.assertEqual(self.activities(), 1)
+        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 23)
+
+    def test_existing_demo_preflight_refuses_a_symlink_before_opening_the_database(self):
         with Runtime(self.state):
             pass
-        with closing(sqlite3.connect(self.state / "calls.sqlite3")) as connection, connection:
-            connection.execute("UPDATE call_notes SET body = ? WHERE id = 'note-007'", ("Invented ordinary note",))
-        completed = self.command("demo", "--json")
-        self.assertEqual(completed.returncode, 4, completed.stderr)
-        self.assertEqual(completed.stdout, "")
-        error = json.loads(completed.stderr)["error"]
-        self.assertEqual(error["code"], "check_failed")
-        self.assertIn("quoted data", error["message"])
-        self.assertEqual(self.activities(), 0)
+        source = self.state / "crm.sqlite3"
+        outside = self.directory / "outside.sqlite3"
+        source.rename(outside)
+        source.symlink_to(outside)
+        before = outside.read_bytes()
+        owner_before = (self.state / "owner.json").read_bytes()
+        with patch("gtm_connector.demo.store.connect") as connect, \
+                redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
+            code = main(["demo", "--json", "--state-dir", str(self.state)])
+        self.assertEqual(code, 4)
+        connect.assert_not_called()
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("private regular local fixtures", json.loads(stderr.getvalue())["error"]["message"])
+        self.assertEqual(outside.read_bytes(), before)
+        self.assertEqual((self.state / "owner.json").read_bytes(), owner_before)
 
     def test_verification_invariant_failure_uses_the_failed_check_exit(self):
         with patch("gtm_connector.verification.run", side_effect=ValueError("demo invariant failed; inspect audit")), \

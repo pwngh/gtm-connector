@@ -67,7 +67,11 @@ brief if it lacks the flag; `check-brief` applies current rules to saved evidenc
 
 The fixture book also includes a missing contact role and an old call note.
 Dana Crest's empty role is rendered as `not provided` and remains empty in the
-stored record. Harborlight Field Services has an October call note alongside a
+stored record. Saved fixture briefs may retain the earlier `role ""` spelling
+for that same empty field. `check-brief` accepts either complete wording format
+against saved evidence, but rejects duplicate claims that mix the two. New
+drafts use `not provided`; incorrect roles and references still fail.
+Harborlight Field Services has an October call note alongside a
 January Slack update with different seat-count advice. The brief preserves their
 timestamps and quoted contents; it does not infer which advice is current.
 
