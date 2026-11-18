@@ -1,6 +1,8 @@
 # Project instructions
 
-This is a small portfolio demo using invented CRM data. Keep the implementation
+This is a local connector for one technical operator, such as a RevOps engineer,
+founder, or sales engineer. It began as a small portfolio demo and keeps that
+offline demo with invented CRM data as its default. Keep the implementation
 plain and finish one runnable PR slice at a time. Use Python and SQLite.
 
 - Do not use employer/client code, data, names, or documents. Real APIs belong
@@ -154,22 +156,112 @@ resources are explicitly authorized later; public deployment and Slack sending
 remain outside scope. Use existing provider registrations only. Do not claim
 real-host login or rendering from a fake provider or local protocol harness.
 
+## Build order from 2026-11-18
+
+The user asked for a product a person can use, not a coding exercise. This
+order replaces the remaining part of the sequence above. DECISIONS.md records
+the reasons, the deferred items with their triggers, and the dropped items.
+
+Judge every item by one test. Does it shorten the path from install to a brief
+someone would use before a real renewal call? Today a person still chooses the
+transcript excerpt and the Slack thread by hand, and no drafter summarizes.
+Close that gap before adding surfaces.
+
+Two checks come before the numbered slices:
+
+- The owner runs `salesforce check` and `slack check` against a real org and
+  workspace. This checks sign-in, visibility, and bounds only. Agents never run
+  it. Keep "No live org has been verified." until the owner supplies the report.
+- Run an extraction test outside the repository on five messy transcripts. A
+  model proposes claims that cite numbered lines or cues, and a script prints
+  the saved text for each cited range. The user reads the result as a rep
+  would. If it is thin or wrong, stop and report before starting slice 1.
+  Never commit a real transcript. Use a local model unless the user explicitly
+  chooses a hosted one for this test.
+
+Then finish one reviewed PR per slice, in this order:
+
+1. Selected sources and caller-safe briefs, as already designed.
+2. The local stdio MCP bridge. `connect --transport stdio` also writes the
+   client configuration, after saving a backup of the existing file.
+3. A Slack channel window. The operator pins one channel per account. The read
+   has hard caps on days, messages, and thread replies.
+4. Model-read claims. A model reads the whole selected transcript and channel
+   window and proposes claims. The checker accepts a claim only when its cited
+   units exist in the saved evidence. Repeat the five-transcript test with
+   channel context before calling this slice ready.
+5. Deal cards as terminal text and a local HTML preview. No Block Kit export
+   yet, because nothing sends it.
+6. Explicit `auth` and `configure` commands and saved daily profiles. Split
+   `cli.py` in this slice.
+7. The default chooser, as a numbered menu from the standard library. Add a
+   macOS CI runner. Test on Linux and macOS.
+8. Transcript folder intake. One subfolder per selected account, so exported
+   files need no renaming. Import runs on command. There is no watcher process.
+9. A renewals-due command that prepares briefs for selected accounts renewing
+   within a chosen number of days. The operator schedules it. It follows the
+   profile's model choice and writes its normal receipts.
+10. A PyPI release. The owner publishes it.
+
+Rules for model-read claims:
+
+- The default demo, evaluation, and CI stay offline and use no model.
+- The operator selects a model per profile. Local Ollama needs no key. A hosted
+  endpoint needs the operator's own key, read from an environment variable or a
+  private file. Never accept the key as a command-line flag. The key never
+  enters a selection, profile, receipt, log, or tool result.
+- Selecting a hosted endpoint sends selected source text off the machine. Say
+  so when it is selected, show the endpoint host and model in the source
+  labels, and record them with the brief.
+- The model receives only evidence that already passed the source selection and
+  the caller's scope checks. It receives no credential, tool definition, or
+  tool. Its output is untrusted until the checker accepts it.
+- The model cites numbered units. The connector prints the saved text for the
+  cited range. Do not accept a retyped quote by approximate matching. Numbers
+  and dates in a claim must appear in its cited units.
+- Keep the 182-claim and 223-claim fixed suites unchanged as the offline
+  baseline. Add a separate evaluation track for model-read claims.
+
+Rules for the Slack channel window:
+
+- The channel is pinned explicitly in the saved selection. Do not guess a
+  channel from its name.
+- Count excluded automated messages in the evidence instead of dropping them
+  silently. A window that hit a cap is incomplete, not empty.
+- Slack limits commercially distributed apps outside its Marketplace to 15
+  messages per request and one request per minute on `conversations.history`
+  and `conversations.replies`. Internal customer-built apps are exempt. Read
+  Slack's current policy before choosing bounds and state the requirement.
+
+Do not start these without the user's explicit request: MCP Apps and Slack
+rich-response contracts, native Windows support, CRM writes, a Slack bot,
+calendar triggers, provider transcript adapters, a second CRM, and the team
+deployment bundle of Postgres, single sign-on, per-user tokens, a container,
+a hash-chained audit log, and redaction. Do not add a `ROADMAP.md`; this
+section and DECISIONS.md hold the plan.
+
 ## Council
 
-The user explicitly instructed "Keep going without Gemini" on 2026-11-18 after
-Gemini's second and third renewal-demo reviews ended with capacity errors.
-Use these two full members for the remaining authorized PRs:
+The user chose the roster "Fable, Sol, Grok" on 2026-11-18 for the remaining
+authorized PRs. It replaces the two-member roster that followed the earlier
+instruction "Keep going without Gemini". PRs #26 through #29 were reviewed by
+Sol and Opus under that earlier roster. Use these three full members from the
+next PR onward:
 
 | Provider | Member | Effort |
 | --- | --- | --- |
+| Anthropic | Claude Fable 5.2, model ID `claude-fable-5-2`, through the `claude` CLI | High |
 | OpenAI | GPT Sol; record the exact available Sol model ID | High |
-| Anthropic | Claude Opus; record the exact available Opus model ID | High |
+| xAI | Grok 4.7, model ID `grok-4.7`, through the `grok` CLI, version 1.0.13 or later | High |
+
+Each review is a separate, independent run. The orchestrating session does not
+count as a member's review, even when it runs on a member's provider.
 
 Record actual model IDs, effort, round numbers, findings, and returned scores
 or `no score` in each PR description. Do not count a failed provider completion
 as approval, invent consensus, or silently substitute another provider.
 
-Give both members the same code, tests, and these attack questions. Put each
+Give all three members the same code, tests, and these attack questions. Put each
 member's answers and evidence in the PR table, not just a general verdict:
 
 - Can any tool return data outside the token's scopes?
@@ -179,6 +271,6 @@ member's answers and evidence in the PR table, not just a general verdict:
 
 Maximum three council rounds per PR. If agreement is absent after round three,
 report open findings and disagreements. Do not start a fourth round or imply
-approval. If either remaining selected member cannot be reached, stop on a
+approval. If any selected member cannot be reached, stop on a
 local branch and report the failure without substitution. Full stop ends each
 PR, then work continues through the authorized sequence. The user merges.
