@@ -12,3 +12,4 @@ inspector.json
 *.key
 .ruff_cache/
 .mypy_cache/
+.hypothesis/
