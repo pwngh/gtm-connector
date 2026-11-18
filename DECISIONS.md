@@ -1,5 +1,40 @@
 # Decisions
 
+## Running server and daily commands (2026-11-17)
+
+Emit one bounded event after each recognized tool attempt. Use a separate
+performance clock for its duration so logging does not alter request-check
+clock reads or rate-limit decisions. Include both audit writes in that duration.
+The caller is the audit credential fingerprint, not a verified person. Emit a
+null receipt ID when the initial audit write fails. A callback failure cannot
+change the response or audit outcome. Queue events to the CLI so terminal output
+does not run inside the gateway. No arguments or source records enter this stream.
+
+Keep audit and usage inspection read-only. Filters combine exact tool, caller,
+status, and brief matching with aware timestamp bounds, normalized to UTC.
+Follow emits changed rows or reports rather than treating the first pending row
+as final. Usage keeps its narrow query without loading audit arguments. With
+receipt filters, model totals count each matching saved brief once and describe
+that entire brief; they are not token allocations to a tool or time interval.
+
+Doctor checks private local files and matching HTTPS metadata without obtaining
+a grant or reading source records. Its errors describe checks, never raw
+configuration or transport exceptions. Connect prints setup without launching
+an assistant. Only explicit scopes provision a private supplied-token config.
+Reuse the existing owner authorization flow rather than adding login behavior.
+
+Read current official Inspector, Claude Code, Claude Desktop, and Cursor docs
+on 2026-11-17. The Inspector CLI supplied-token path is tested. Other apps stay
+untested. Document the fixed client and callback, private owner header, missing
+browser consent and registration, five-minute expiry, local certificate, and
+Desktop cloud-to-loopback incompatibility. Do not add a tunnel or deployment.
+
+Generate completion from argparse metadata with no new runtime dependency.
+Exercise command, flag, and choice completion in bash, zsh, and fish; CI installs
+fish and zsh only as test tools. Evaluation reports count/status progress without
+source text. JSON mode uses JSON lines on stderr, while its result stays a single
+stdout JSON object. Existing command names and unfiltered result shapes remain.
+
 ## Installed CLI and output contract (2026-11-17)
 
 Install the existing package as `gtm-connector` with the same `python -m`

@@ -28,6 +28,33 @@ supplies only the generated run and audit IDs.
 fixed Slack expectations, preserving the original 182 claims. See
 [the three-source fixture](slack.md).
 
+## Progress
+
+Evaluation writes progress to stderr before the first brief and after each of
+the twenty cases. Progress contains only completed and total counts and the
+case outcome, without account identifiers or source text. The default display
+is a line such as `Evaluating briefs: 1/20 (accepted)`.
+
+With `--json`, each stderr progress line has this shape:
+
+```json
+{"progress":{"command":"evaluate","completed":1,"total":20,"status":"accepted"}}
+```
+
+The initial line has `completed: 0` and `status: null`. Later status values are
+`accepted`, `rejected`, or `failed`. Stdout still contains one complete JSON
+report, so it can be redirected independently:
+
+```sh
+gtm-connector evaluate --json > evaluation.json
+```
+
+If evaluation fails, its final stderr error object can follow progress lines.
+A preflight failure can stop before any progress or report. Consumers of stderr
+must distinguish `progress` from `error`; stdout keeps the report shape below.
+[Progress tests](../tests/test_progress.py) check the initial and completed
+notifications and preserve the report when no callback is supplied.
+
 ## Recorded results
 
 The fixture adapter produced these results on 2026-11-17 with as-of date `2027-01-15`:

@@ -73,19 +73,38 @@ redirect without a browser or callback listener. This is not production consent.
 
 ## Keep the services running
 
-You can start the services from the repository root after setup and leave them running:
+You can start the installed command and leave the services running:
 
 ```sh
-.venv/bin/python -m gtm_connector serve
+gtm-connector serve
 ```
 
-The command prints the connector address, backend, state folder, connection
-command, and stop instruction on stderr. Its stdout stays available for data.
-For a script, `serve --json` writes one JSON startup object to stdout with
-`resource`, `issuer`, `crm_backend`, and `owner_config`. The object contains the
-configuration path, not the owner credential. Shutdown notices remain on stderr.
+The command prints the connector address, backend, state folder, granted scopes,
+connection command, and stop instruction on stderr. Startup grants no scopes.
+Stdout receives one line per observed tool attempt with time, tool, caller
+fingerprint, decision, duration, receipt ID, and any refusal reason. It excludes
+raw arguments, source text, and bearer credentials. Fingerprints do not identify
+people or establish a valid grant.
 
-In a second terminal, use the included client to request a CRM read:
+For a script, `serve --json` writes a `type: "ready"` startup line with
+`resource`, `issuer`, `crm_backend`, `owner_config`, `state_dir`, and
+`granted_scopes: []`, followed by `type: "tool_call"` lines. The startup object
+contains paths, not the owner credential. Shutdown notices remain on stderr.
+The complete [stream contract](cli.md#server-output) describes nullable fields
+and its best-effort delivery; durable receipts remain the audit record.
+
+In a second terminal, inspect setup and create an explicit Inspector grant:
+
+```sh
+gtm-connector doctor
+gtm-connector connect inspector --scope crm:read
+```
+
+The [client setup guide](clients.md) gives the exact commands, tested status,
+and missing interactive login requirements for each supported setup target.
+
+For Python development from a repository checkout, the included client can also
+request a CRM read:
 
 ```sh
 .venv/bin/python - <<'PY'

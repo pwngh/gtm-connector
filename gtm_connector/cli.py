@@ -10,12 +10,15 @@ import os
 from pathlib import Path
 import sys
 import shlex
-import time
 
 from . import __version__
 
 
 COMMANDS = {
+    "doctor": ("Check the local setup and show a fix for each failure.", "doctor --state-dir var/v2"),
+    "connect": ("Print client setup and its tested or untested limits.",
+                "connect inspector --scope crm:read --state-dir var/v2"),
+    "completion": ("Print shell completion without reading local state.", "completion bash"),
     "demo": ("Run the connector demonstration on invented records.", "demo --with-slack"),
     "brief": ("Create a cited renewal brief from authorized source reads.", "brief acc-003 --with-slack"),
     "serve": ("Start the local HTTPS connector and authorization server.", "serve --state-dir var/v2"),
@@ -77,7 +80,7 @@ def build_parser():
         if name in ("seed", "accounts", "account"):
             command.add_argument("--db", type=Path, default=Path("var/v2/crm.sqlite3"),
                                  help="Read or seed this local CRM database.")
-        elif name != "evaluate":
+        elif name not in ("evaluate", "completion"):
             command.add_argument("--state-dir", type=Path, default=Path("var/v2"),
                                  help="Use this private state folder (default: var/v2).")
         if name == "accounts":
@@ -94,12 +97,23 @@ def build_parser():
             command.add_argument("--adapter", choices=("fixture", "ollama"), default="fixture",
                                  help="Choose the fixture drafter or an already installed local model.")
             command.add_argument("--model", help="Name an already installed local Ollama model.")
-        if name == "inspector-config":
-            command.add_argument("--scope", action="append", required=True,
+        if name in ("inspector-config", "connect"):
+            command.add_argument("--scope", action="append", required=name == "inspector-config",
                                  choices=("crm:read", "calls:read", "crm:write", "slack:read"),
                                  help="Grant this scope. Repeat for each explicit grant.")
+        if name == "connect":
+            command.add_argument("app", choices=("inspector", "claude-code", "claude-desktop", "cursor"),
+                                 help="Choose the client whose setup to print.")
+        if name == "completion":
+            command.add_argument("shell", choices=("bash", "zsh", "fish"), help="Choose the shell to configure.")
         if name in ("audit", "usage"):
             command.add_argument("--brief", help="Select this brief or run correlation ID.")
+            command.add_argument("--tool", help="Select the exact tool name.")
+            command.add_argument("--caller", help="Select a full credential fingerprint or anonymous.")
+            command.add_argument("--status", choices=("ok", "error", "pending"), help="Select this receipt outcome.")
+            command.add_argument("--since", help="Include calls at or after this ISO timestamp with a UTC offset.")
+            command.add_argument("--until", help="Include calls before this ISO timestamp with a UTC offset.")
+            command.add_argument("--follow", action="store_true", help="Follow new or changed results until Ctrl-C.")
         if name == "brief":
             command.add_argument("--without-calls", action="store_true", help="Omit the calls:read grant.")
             command.add_argument("--as-of",
@@ -124,6 +138,15 @@ def table(headers, rows):
 
 
 def human_result(command, result):
+    if command == "completion":
+        return result["script"].rstrip("\n")
+    if command == "doctor":
+        return table(["CHECK", "STATUS", "DETAIL", "FIX"],
+                     [[row[key] for key in ("name", "status", "message", "fix")] for row in result["checks"]])
+    if command == "connect":
+        return (f"{result['app']}: {result['status']}\n\n" + "\n".join(result["setup"]) +
+                "\n\nLimits\n" + "\n".join(result["limits"]) +
+                "\n\nDocumentation\n" + "\n".join(result["documentation"]))
     if command == "brief":
         return f"Brief: {result['brief_id']}\nAs of: {result['as_of']}\n\n{result['text']}"
     if command == "seed":
@@ -168,11 +191,33 @@ def human_result(command, result):
     raise ValueError("No display is available for this command.")
 
 
-def _run(args, argv):
-    # Dependencies belong to the command that uses them, after help is handled.
-    from contextlib import closing
-    from . import store
+def _print_event(event, as_json):
+    if as_json:
+        print(json.dumps(event, ensure_ascii=True), flush=True)
+    else:
+        fields = [event["time"], event["tool"], f"caller={event['caller']}", event["decision"],
+                  f"{event['duration_ms']:.2f}ms", f"receipt={event['receipt_id'] or 'none'}"]
+        if event["reason"]:
+            fields.append(f"reason={event['reason']}")
+        print(" ".join(safe_text(field) for field in fields), flush=True)
 
+
+def _progress(as_json):
+    def report(completed, total, status):
+        if as_json:
+            print(json.dumps({"progress": {"command": "evaluate", "completed": completed,
+                                           "total": total, "status": status}}), file=sys.stderr, flush=True)
+        else:
+            print(f"Evaluating briefs: {completed}/{total}" + (f" ({status})" if status else ""),
+                  file=sys.stderr, flush=True)
+    return report
+
+
+def _run(args, argv):
+    if args.command == "completion":
+        from .completion import generate
+        return {"shell": args.shell, "script": generate(build_parser(), args.shell)}
+    # Dependencies belong to the command that uses them, after help is handled.
     if args.command == "brief" and args.crm_backend != "sqlite":
         raise PermissionError("renewal_fields_unmapped: Salesforce brief generation is unavailable")
     adapter = None
@@ -184,16 +229,34 @@ def _run(args, argv):
                 raise ValueError("--adapter ollama requires --model with an installed local model")
             from .ollama import OllamaAdapter
             adapter = OllamaAdapter(args.model)
+    if args.command == "doctor":
+        from .doctor import doctor
+        return doctor(args.state_dir)
+    if args.command == "connect":
+        from .connections import connect
+        return connect(args.state_dir, args.app, args.scope)
     if args.command == "inspector-config":
         from .inspector import write_inspector_config
         return write_inspector_config(args.state_dir, args.scope)
     if args.command == "evaluate":
         from .evaluation import run_evaluation
-        return run_evaluation(adapter=adapter, include_slack=args.with_slack,
+        return run_evaluation(adapter=adapter, include_slack=args.with_slack, progress=_progress(args.json),
                               command=sys.orig_argv if argv is None else [sys.executable, "-m", "gtm_connector", *argv])
-    if args.command == "usage":
+    if args.command in ("usage", "audit"):
+        filters = {key: getattr(args, key) for key in ("tool", "caller", "since", "until", "status")}
+        if args.follow:
+            from .inspection import follow_audit, follow_usage
+            stream = (follow_audit(args.state_dir / "audit.sqlite3", args.brief, **filters)
+                      if args.command == "audit" else follow_usage(args.state_dir, args.brief, **filters))
+            for result in stream:
+                print(json.dumps(result, ensure_ascii=False) if args.json else
+                      human_result(args.command, [result] if args.command == "audit" else result), flush=True)
+            return None
+        if args.command == "audit":
+            from .audit import read_audit
+            return read_audit(args.state_dir / "audit.sqlite3", args.brief, **filters)
         from .usage import build_usage_report
-        return build_usage_report(args.state_dir, args.brief)
+        return build_usage_report(args.state_dir, args.brief, **filters)
     if args.command == "brief":
         from .briefing import create_brief
         from .runtime import Runtime
@@ -209,32 +272,41 @@ def _run(args, argv):
     if args.command == "demo":
         from .demo import run
         return run(args.state_dir, include_slack=args.with_slack)
-    if args.command == "audit":
-        from .audit import read_audit
-        return read_audit(args.state_dir / "audit.sqlite3", args.brief)
     if args.command == "serve":
+        from queue import Empty, SimpleQueue
         from .runtime import Runtime
+        events: SimpleQueue = SimpleQueue()
         crm_reader = None
         if args.crm_backend == "salesforce":
             from .salesforce import SalesforceReadOnlyAdapter
             crm_reader = SalesforceReadOnlyAdapter.from_env()
-        with Runtime(args.state_dir, crm_reader=crm_reader) as runtime:
-            ready = {"resource": runtime.config["resource"], "issuer": runtime.config["issuer"],
-                     "crm_backend": runtime.crm_backend, "owner_config": str(runtime.directory / "owner.json")}
+        with Runtime(args.state_dir, crm_reader=crm_reader, on_call=events.put) as runtime:
+            ready = {"type": "ready", "resource": runtime.config["resource"], "issuer": runtime.config["issuer"],
+                     "crm_backend": runtime.crm_backend, "owner_config": str(runtime.directory / "owner.json"),
+                     "state_dir": str(runtime.directory), "granted_scopes": []}
             if args.json:
                 print(json.dumps(ready), flush=True)
             else:
                 print(f"Connector ready at {ready['resource']}\nBackend: {runtime.crm_backend}\n"
-                      f"State folder: {runtime.directory}\n"
-                      "Next: gtm-connector inspector-config --scope crm:read "
+                      f"State folder: {runtime.directory}\nGranted scopes: none. Each client needs an explicit grant.\n"
+                      "Connect: gtm-connector connect inspector --scope crm:read "
                       f"--state-dir {shlex.quote(str(runtime.directory))}\nStop with Ctrl-C.",
                       file=sys.stderr, flush=True)
             try:
                 while True:
-                    time.sleep(0.5)
+                    try:
+                        _print_event(events.get(timeout=0.5), args.json)
+                    except Empty:
+                        pass
             except KeyboardInterrupt:
-                print("Connector stopped. Local state is retained.", file=sys.stderr)
-                return None
+                pass
+        while not events.empty():
+            _print_event(events.get_nowait(), args.json)
+        stopped = "Connector stopped. Local state is retained."
+        print(json.dumps({"message": stopped}) if args.json else stopped, file=sys.stderr)
+        return None
+    from contextlib import closing
+    from . import store
     create = args.command == "seed"
     if not create and not args.db.is_file():
         raise ValueError("database not found; run the seed command first")
@@ -278,9 +350,11 @@ def _failure(exc, args):
         next_command = f"gtm-connector seed --db {shlex.quote(str(args.db))}"
     elif "account not found" in message:
         next_command = f"gtm-connector accounts --db {shlex.quote(str(args.db))}"
-    elif command == "inspector-config" and (
+    elif command in ("inspector-config", "connect") and (
             isinstance(exc, FileNotFoundError) or type(exc).__name__ == "InspectorConnectionError"):
         next_command = f"gtm-connector serve --state-dir {shlex.quote(str(args.state_dir))}"
+    if command == "connect" and code == 2:
+        next_command = f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}"
     return _error(message, code, next_command, as_json=args.json)
 
 
@@ -324,6 +398,9 @@ def _main(argv):
         result = _run(args, argv)
         if result is not None:
             print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else human_result(args.command, result))
+        if args.command == "doctor" and result["status"] != "passed":
+            return _error("Setup checks failed. Apply the fix beside each failed check.", 4,
+                          f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}", as_json=args.json)
         if args.command == "evaluate" and result["status"] != "passed":
             retry = ["gtm-connector", "evaluate", "--adapter", args.adapter]
             if args.model is not None:

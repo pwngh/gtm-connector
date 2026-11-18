@@ -13,3 +13,6 @@ inspector.json
 .ruff_cache/
 .mypy_cache/
 .hypothesis/
+claude-code.json
+cursor.json
+.cursor/mcp.json
