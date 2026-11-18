@@ -16,3 +16,5 @@ inspector.json
 claude-code.json
 cursor.json
 .cursor/mcp.json
+build/
+*.egg-info/
