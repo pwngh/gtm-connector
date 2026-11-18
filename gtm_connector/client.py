@@ -83,6 +83,10 @@ class LocalClient:
         return value
 
     def authorize(self, scopes: list[str]) -> str:
+        return self.authorize_with_lifetime(scopes)[0]
+
+    def authorize_with_lifetime(self, scopes: list[str]) -> tuple[str, int]:
+        """Run the local owner flow for exactly these scopes and return the token and its lifetime."""
         if (not isinstance(scopes, list) or not scopes
                 or any(not isinstance(scope, str) or scope not in SCOPES for scope in scopes)):
             raise ValueError("Request one or more supported scopes explicitly.")
@@ -142,10 +146,10 @@ class LocalClient:
                 or type(lifetime) is not int or not 1 <= lifetime <= 3600
                 or "refresh_token" in result):
             raise AuthorizationError("The token response did not match the requested grant.")
-        return token
+        return token, lifetime
 
     def rpc(self, token: str, method: str, params: dict | None = None,
-            brief_id: str | None = None) -> httpx2.Response:
+            brief_id: str | None = None, *, read_timeout: float | None = None) -> httpx2.Response:
         supplied = dict(params or {})
         meta = dict(supplied.get("_meta", {}))
         meta.update({
@@ -165,7 +169,9 @@ class LocalClient:
             headers["Mcp-Name"] = supplied["name"]
         self._request_id += 1
         timeout = self._http.timeout
-        if self._salesforce and method == "tools/call" and supplied["name"] in _CRM_TOOLS:
+        if read_timeout is not None:
+            timeout = httpx2.Timeout(10, read=read_timeout)
+        elif self._salesforce and method == "tools/call" and supplied["name"] in _CRM_TOOLS:
             # A CRM read can also wait for sf to refresh the login.
             timeout = httpx2.Timeout(10, read=CREDENTIAL_SECONDS + 25)
         return self._http.post(self.resource, headers=headers, timeout=timeout, json={
