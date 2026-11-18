@@ -73,6 +73,7 @@ class SelectedContext:
 class ChildRead:
     audit_id: str
     envelope: dict | None  # None when the caller's grant lacks this source's scope.
+    private: dict = field(default_factory=dict)  # Facts for the brief only, never for the caller.
 
 
 def _unique(pairs):
@@ -125,17 +126,6 @@ def _child(connector, invocation, tool, account_id, brief_id, ordinal) -> ChildR
         raise ToolError("brief_source_failed") from None
 
 
-def _slack_scopes(context: SelectedContext) -> list[str]:
-    """The scopes of the local Slack credential, read from metadata only."""
-    from .slack_auth import SlackAuthError, held_slack_connection
-    try:
-        with held_slack_connection(context.slack_connection_dir) as connection:
-            return sorted(connection.granted_scopes)
-    except SlackAuthError as exc:
-        raise ToolError("brief_source_busy" if exc.code == "slack_connection_busy"
-                        else "brief_source_changed") from None
-
-
 def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> dict:
     """Read, check, and save one brief. Only the caller's grant authorizes each read."""
     context: SelectedContext = connector.selected
@@ -152,15 +142,13 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
     for ordinal, (tool, source) in enumerate(plan, 1):
         if time.monotonic() >= invocation.deadline:
             raise ToolError("brief_deadline_exceeded")
-        live_slack = tool == "read_slack_messages" and context.slack_backend == "slack"
-        before = _slack_scopes(context) if live_slack else None
         child = _child(connector, invocation, tool, account_id, brief_id, ordinal)
         children.append(child.audit_id)
-        if live_slack and child.envelope is not None:
-            # A reconnect during the read would leave the brief's authority unclear.
-            if _slack_scopes(context) != before:
-                raise ToolError("brief_source_changed")
-            slack_scopes = before
+        if tool == "read_slack_messages" and context.slack_backend == "slack" and child.envelope is not None:
+            # The scopes of the credentials the audited read itself used.
+            slack_scopes = child.private.get("slack_scopes")
+            if not isinstance(slack_scopes, list):
+                raise ToolError("brief_evidence_invalid")
         if child.envelope is None:
             statuses["notes_status" if tool == "read_call_notes" else "slack_status"] = "denied"
             continue

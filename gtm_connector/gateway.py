@@ -11,7 +11,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from mcp.server import MCPServer
 from mcp.server.auth.provider import AccessToken
@@ -204,14 +204,16 @@ class Connector:
             if time.monotonic() >= invocation.deadline:
                 status, http_status, error = "error", 504, "request_failed"
                 raise ToolError("brief_deadline_exceeded")
+            private: dict[str, Any] = {}
             try:
-                envelope = self._source_reads[tool](account_id)
+                envelope = (self._source_reads[tool](account_id, private) if tool == "read_slack_messages"
+                            else self._source_reads[tool](account_id))
             except ToolError:
                 status, http_status, error = "error", 200, "request_failed"
                 raise
             rows = [row["record_ref"] for row in envelope["records"]]
             status, http_status, error = "ok", 200, None
-            return ChildRead(audit_id, envelope)
+            return ChildRead(audit_id, envelope, private)
         finally:
             self.audit.finish(audit_id, status=status, http_status=http_status,
                               rows=rows if status == "ok" else [],
@@ -305,7 +307,7 @@ class Connector:
             self._require_tool("read_call_notes")
             return notes_body(account_id)
 
-        def slack_body(account_id):
+        def slack_body(account_id, private=None):
             self._require_selected(account_id, slack=True)
             if self.slack_reader is not None:
                 from .slack_reader import SlackReadError
@@ -313,6 +315,9 @@ class Connector:
                     read = self.slack_reader.read_slack_messages(account_id)
                 except SlackReadError as error:
                     raise ToolError(error.code) from None
+                if private is not None:
+                    # Only a composite read asks; the scopes never enter the tool result.
+                    private["slack_scopes"] = sorted(getattr(read, "scopes", ()))
                 return {**_data("slack", _records("slack", "messages", read.records)),
                         "thread_snapshot": read.snapshot}
             with closing(slack.connect(self.slack_path, readonly=True)) as conn:
@@ -325,8 +330,9 @@ class Connector:
             return slack_body(account_id)
 
         # Composite reads use exactly these bodies, after their own receipt and checks.
-        self._source_reads = {"get_account": account_body, "list_opportunities": opportunities_body,
-                              "read_call_notes": notes_body, "read_slack_messages": slack_body}
+        self._source_reads: dict[str, Callable[..., dict[str, Any]]] = {
+            "get_account": account_body, "list_opportunities": opportunities_body,
+            "read_call_notes": notes_body, "read_slack_messages": slack_body}
 
         def prepare_renewal_brief(account_id: str, as_of: str | None = None) -> dict[str, Any]:
             """Prepare a cited renewal brief for one selected account under the caller's own grant.

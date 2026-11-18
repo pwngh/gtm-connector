@@ -382,6 +382,8 @@ def _output_size(records, snapshot):
 class ThreadRead:
     records: list[dict]
     snapshot: dict
+    # Every scope held by each credential used for this read. Private; never in tool output.
+    scopes: tuple[str, ...] = ()
 
 
 def _auth_error(error):
@@ -416,6 +418,7 @@ class SlackThreadReader:
         mapping_ok = credential_ok = complete = False
         pages = raw_rows = duplicates = 0
         manifests: dict[str, dict] = {}
+        used_scopes: set[str] = set()
         result = None
         code = "slack_unavailable"
 
@@ -435,6 +438,7 @@ class SlackThreadReader:
             if slack_identity_binding(access.identity) != self.slack_binding:
                 raise SlackReadError("slack_source_mismatch")
             budget.remaining()
+            used_scopes.update(access.scopes)
             credential_ok = True
             set_phase("thread_read")
             return access
@@ -534,7 +538,7 @@ class SlackThreadReader:
             if _output_size(records, snapshot) > MAX_OUTPUT_BYTES:
                 raise SlackReadError("slack_output_too_large")
             budget.remaining()
-            result = ThreadRead(records, snapshot)
+            result = ThreadRead(records, snapshot, tuple(sorted(used_scopes)))
             code = "ok"
             return result
         except SlackAuthError as exc:
