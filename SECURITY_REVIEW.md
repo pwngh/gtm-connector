@@ -57,7 +57,11 @@ operator diagnostics; the SQLite receipt remains the persisted audit record.
 An event callback failure cannot bypass a receipt failure or alter a response.
 
 Both services bind HTTPS to `127.0.0.1`. The client explicitly trusts the
-generated certificate. It validates the issuer, resource, redirect, and state.
+generated certificate. Each start generates a fresh P-256 key and a one-day
+certificate with the loopback address as its subject alternative name. The
+[runtime tests](tests/test_runtime.py) verify key rotation, certificate identity,
+private file permissions, and explicit trust. The client validates the issuer,
+resource, redirect, and state.
 Authorization uses a preregistered public client and S256 PKCE. Codes expire
 after 60 seconds and permit one exchange. Opaque tokens expire after five
 minutes. Invalid, expired, or wrong-resource tokens fail with HTTP 401.

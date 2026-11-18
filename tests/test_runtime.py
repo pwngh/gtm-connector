@@ -1,6 +1,7 @@
 """Use real loopback TLS sockets and the CLI OAuth client, without paid services."""
 
 from contextlib import closing
+import ipaddress
 import json
 from pathlib import Path
 import sqlite3
@@ -9,10 +10,13 @@ import tempfile
 import unittest
 
 import httpx2
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 from gtm_connector.audit import AuditLog
 from gtm_connector.client import LocalClient
-from gtm_connector.runtime import Runtime
+from gtm_connector.runtime import Runtime, certificate
 
 
 class RuntimeTests(unittest.TestCase):
@@ -86,6 +90,24 @@ class RuntimeTests(unittest.TestCase):
                 token = trusted.authorize(["crm:read"])
                 response = trusted.rpc(token, "server/discover")
                 self.assertEqual(response.status_code, 200, response.text)
+
+    def test_fresh_p256_certificates_keep_loopback_identity_and_private_files(self):
+        self.state.mkdir()
+        public_keys = []
+        for _ in range(2):
+            key_path, cert_path = certificate(self.state)
+            key = serialization.load_pem_private_key(key_path.read_bytes(), password=None)
+            cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+            self.assertIsInstance(key, ec.EllipticCurvePrivateKey)
+            self.assertIsInstance(key.curve, ec.SECP256R1)
+            self.assertEqual(key.public_key().public_numbers(), cert.public_key().public_numbers())
+            cert.verify_directly_issued_by(cert)
+            addresses = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+            self.assertEqual(addresses.get_values_for_type(x509.IPAddress), [ipaddress.ip_address("127.0.0.1")])
+            for path in (key_path, cert_path):
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            public_keys.append(key.public_key().public_numbers())
+        self.assertNotEqual(*public_keys)
 
     def test_private_state_lock_and_restart_preserve_source_records(self):
         with Runtime(self.state) as first:
