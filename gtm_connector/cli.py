@@ -15,6 +15,7 @@ from . import __version__
 
 
 COMMANDS = {
+    "slack": ("Manage one private Slack user connection without reading messages.", "slack status"),
     "calls": ("Import and inspect private transcript exports without contacting a call provider.",
               "calls import call.vtt --account acc-003"),
     "salesforce": ("Check Salesforce setup and a renewal brief without printing org records.",
@@ -59,6 +60,35 @@ CALL_FAILURES = {
     "calls_source_unavailable": "The local CRM connection could not be reached. Check the setup and repeat the import.",
     "calls_import_io": "The export or private store could not be read or written. Check permissions and retry.",
 }
+SLACK_FAILURES = {
+    "slack_invalid_configuration": "The Slack connection options are invalid. Use an existing public app and its "
+                                   "exact registered localhost redirect.",
+    "slack_connection_busy": "Another Slack connection command is running. Finish or cancel it, then retry.",
+    "slack_private_state_invalid": "The connection folder is not valid private Slack state. "
+                                   "Use the original private connection folder or an unused one.",
+    "slack_credentials_invalid": "The saved credentials failed validation. Retain the file privately and "
+                                 "reconnect in an unused connection folder.",
+    "slack_not_connected": "No usable Slack connection is saved. Connect with an existing registered public app.",
+    "slack_browser_unavailable": "The system browser could not open. Retry from a session with a working browser.",
+    "slack_callback_unavailable": "The registered localhost callback could not start. Free its port and retry.",
+    "slack_login_timeout": "Browser approval did not finish within ten minutes. Repeat the connect command.",
+    "slack_login_denied": "Slack authorization was declined. Retry only when you intend to approve the user scopes.",
+    "slack_oauth_rejected": "Slack rejected authorization. Check the existing app's PKCE, registered redirect, "
+                           "and workspace approval settings.",
+    "slack_scope_mismatch": "The grant does not match the selected history scopes. "
+                            "Use an existing grant with exactly those scopes.",
+    "slack_identity_mismatch": "The connection identity does not match. Restore the original identity or "
+                               "use another private connection folder.",
+    "slack_token_type_unsupported": "The grant is not a supported user token. Use a user-only PKCE desktop grant.",
+    "slack_reconnect_required": "Saved Slack authentication is no longer usable. Browser authorization is required.",
+    "slack_response_invalid": "Slack returned an invalid response. Inspect the saved state before retrying; "
+                              "an unsafe credential update requires reconnecting.",
+    "slack_rate_limited": "Slack limited this request. Wait before explicitly retrying the operation.",
+    "slack_timeout": "The Slack request exceeded its deadline. Check connectivity and explicitly retry.",
+    "slack_unavailable": "Slack could not complete the request. Check connectivity and explicitly retry.",
+    "slack_storage_failed": "The private Slack operation could not finish. Check private storage access. "
+                            "Completed remote authorization may remain active and can be removed in Slack settings.",
+}
 
 
 def safe_text(value):
@@ -92,6 +122,50 @@ class StateDirectory(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, values)
         namespace.state_dir_explicit = True
+
+
+def _slack_commands(command):
+    command.add_argument("--connection-dir", type=Path, default=Path("var/slack-connection"),
+                         help="Use this private Slack credential folder (default: var/slack-connection).")
+    actions = command.add_subparsers(dest="action", required=True, metavar="ACTION")
+    descriptions = {
+        "connect": "Authorize an existing public Slack app through the system browser.",
+        "status": "Inspect saved authentication, or explicitly verify it with Slack.",
+        "disconnect": "Remove local credentials, with an optional access-token revocation attempt.",
+    }
+    for action, description in descriptions.items():
+        example = ("slack connect --client-id EXISTING_PUBLIC_CLIENT_ID "
+                   "--redirect-uri http://localhost:8765/slack/callback" if action == "connect" else
+                   f"slack {action} --connection-dir var/slack-connection")
+        epilog = f"Example: gtm-connector {example}"
+        if action == "connect":
+            epilog += ("\nReplace EXISTING_PUBLIC_CLIENT_ID with your existing app's public client ID. "
+                       "PKCE and that exact localhost redirect must already be registered. "
+                       "Browser approval has a ten-minute deadline. No messages are read.")
+        elif action == "disconnect":
+            epilog += ("\nLocal removal does not revoke remote access. Even confirmed access-token revocation "
+                       "does not prove app removal or revocation of other credentials. "
+                       "Manage the whole grant in Slack.")
+        child = actions.add_parser(action, help=description, description=description, epilog=epilog,
+                                   formatter_class=argparse.RawDescriptionHelpFormatter)
+        child.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                           help="Write the documented JSON result for scripts.")
+        child.add_argument("--connection-dir", type=Path, default=argparse.SUPPRESS,
+                           help="Use this private Slack credential folder (default: var/slack-connection).")
+        if action == "connect":
+            child.add_argument("--client-id", required=True, help="Select an existing PKCE-enabled public Slack app.")
+            child.add_argument("--redirect-uri", required=True,
+                               help="Use the exact registered http://localhost:PORT/slack/callback redirect.")
+            child.add_argument("--user-scope", action="append", choices=("channels:history", "groups:history"),
+                               help="Request this user scope. Repeat for both; default: channels:history.")
+            child.add_argument("--team-id", help="Require this workspace identity without displaying it.")
+        elif action == "status":
+            child.add_argument("--check", action="store_true",
+                               help="Verify authentication with Slack, refreshing once if needed. "
+                                    "No messages are read.")
+        else:
+            child.add_argument("--revoke", action="store_true",
+                               help="Attempt access-token revocation before local removal, without refreshing.")
 
 
 def _calls_commands(command):
@@ -152,10 +226,16 @@ def build_parser():
         if name == "calls":
             command.epilog = ("Examples:\n  gtm-connector calls import call.vtt --account acc-003\n"
                               "  gtm-connector calls list\n  gtm-connector calls inspect IMPORT_ID --full")
+        elif name == "slack":
+            command.epilog = ("Examples:\n  gtm-connector slack connect --help\n"
+                              "  gtm-connector slack status\n  gtm-connector slack disconnect")
         command.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                              help="Write the documented JSON result for scripts.")
         if name == "calls":
             _calls_commands(command)
+            continue
+        if name == "slack":
+            _slack_commands(command)
             continue
         if name in ("seed", "accounts", "account"):
             command.add_argument("--db", type=Path, default=Path("var/v2/crm.sqlite3") if name == "seed" else None,
@@ -240,7 +320,9 @@ def table(headers, rows):
                                 for row in rows])
 
 
-def human_result(command, result, *, crm_backend="sqlite", state_dir=None):
+def human_result(command, result, *, crm_backend="sqlite", state_dir=None, action=None, connection_dir=None):
+    if command == "slack":
+        return _human_slack(result, action=action, connection_dir=connection_dir)
     if command == "calls":
         if "imports" in result:
             if sys.stdout.isatty():
@@ -364,6 +446,101 @@ def _call_range(metadata, field="cited_range", *, context=True):
     selected = metadata[field]
     return (f"{metadata['unit_kind']} {selected['first']}:{selected['last']}" +
             (" (includes adjacent context)" if context else ""))
+
+
+def _slack_status_command(connection_dir, *, check=False):
+    path = str(connection_dir or "var/slack-connection")
+    if any(not character.isprintable() for character in path):
+        return "gtm-connector slack status --help"
+    return shlex.join(["gtm-connector", "slack", "status", *(["--check"] if check else []),
+                       "--connection-dir", path])
+
+
+def _human_slack(result, *, action, connection_dir):
+    if action == "disconnect":
+        local = ("Local Slack credentials were removed." if result["local_credentials_removed"] else
+                 "No local Slack credentials were present.")
+        if not result["remote_revoke_requested"]:
+            return local + "\nRemote access was not revoked."
+        remote = ("Slack confirmed revocation of this access token." if result["remote_access_token_revoked"] else
+                  "Remote access-token revocation is unconfirmed.")
+        return local + "\n" + remote + "\nApp removal and other credentials are managed separately in Slack."
+    if not result["configured"]:
+        return ("No Slack connection is saved. An existing registered public app is required.\n"
+                "Next: gtm-connector slack connect --help")
+    next_command = None
+    if result["credential_state"] == "identity_unchecked":
+        headline = "Saved credentials require an authentication check."
+        next_command = _slack_status_command(connection_dir, check=True)
+    elif result["credential_state"] == "refresh_pending":
+        headline = ("A previous credential update or authentication check did not finish safely. "
+                    "Browser authorization is required.")
+        next_command = "gtm-connector slack connect --help"
+    elif result["needs_login"]:
+        headline = "Saved Slack authentication is no longer usable. Browser authorization is required."
+        next_command = "gtm-connector slack connect --help"
+    elif result["verification"] == "live":
+        headline = ("Slack authentication is saved and verified." if action == "connect" else
+                    "Slack authentication is verified.") + " No messages were read."
+    else:
+        headline = "Saved Slack authentication is available. This command did not contact Slack."
+        next_command = _slack_status_command(connection_dir, check=True)
+    rows = [["Granted user scopes", ", ".join(result["granted_scopes"])],
+            ["Token rotation", "yes" if result["rotation"] else "no"],
+            ["Access expires", result["access_expires_at"] or "No scheduled expiry; access can still be revoked."],
+            ["Last authentication check", result["last_verified_at"]]]
+    return headline + "\n" + table(["FIELD", "VALUE"], rows) + (
+        "\nNext: " + next_command if next_command else "")
+
+
+def _slack_progress(args):
+    messages = {
+        ("browser", "waiting"): "Waiting for Slack browser approval. Complete it within ten minutes.",
+        ("exchange", "running"): "Exchanging the approved Slack authorization.",
+        ("refresh", "running"): "Refreshing Slack authentication once.",
+        ("identity", "running"): "Checking Slack authentication.",
+        ("identity", "passed"): "Slack authentication matches the selected connection.",
+        ("save", "running"): "Saving private Slack credentials.",
+        ("save", "passed"): "Private Slack credentials are saved.",
+        ("revoke", "running"): "Requesting revocation of the saved Slack access token.",
+        ("revoke", "passed"): "Slack confirmed access-token revocation.",
+    }
+
+    def report(step, status):
+        if not isinstance(step, str) or not isinstance(status, str) or (step, status) not in messages:
+            return
+        if not args.json and (step == "save" or status == "passed"):
+            return
+        output = {"progress": {"command": f"slack {args.action}", "step": step, "status": status}}
+        print(json.dumps(output) if args.json else messages[step, status], file=sys.stderr, flush=True)
+    return report
+
+
+def _run_slack(args):
+    from .slack_auth import connect_slack, disconnect_slack, slack_status
+    progress = _slack_progress(args)
+    if args.action == "connect":
+        scopes = tuple(args.user_scope) if args.user_scope is not None else ("channels:history",)
+        return connect_slack(args.connection_dir, client_id=args.client_id, redirect_uri=args.redirect_uri,
+                             user_scopes=scopes,
+                             expected_team_id=args.team_id, progress=progress)
+    if args.action == "status":
+        return slack_status(args.connection_dir, check=args.check, progress=progress)
+    return disconnect_slack(args.connection_dir, revoke=args.revoke, progress=progress)
+
+
+def _slack_failure(exc, args):
+    from .slack_auth import SlackAuthError
+    if isinstance(exc, SlackAuthError) and exc.code in SLACK_FAILURES:
+        code, detail = exc.exit_code, exc.code
+    else:
+        code, detail = 1, "slack_storage_failed"
+    next_command = "gtm-connector slack connect --help"
+    if detail in ("slack_response_invalid", "slack_rate_limited", "slack_timeout", "slack_unavailable"):
+        next_command = _slack_status_command(args.connection_dir)
+    elif detail in ("slack_connection_busy", "slack_storage_failed"):
+        next_command = f"gtm-connector slack {args.action} --help"
+    return _error(detail + ": " + SLACK_FAILURES[detail], code, next_command, as_json=args.json)
 
 
 def _print_event(event, as_json):
@@ -591,6 +768,8 @@ def _run(args, argv):
     if args.command == "completion":
         from .completion import generate
         return {"shell": args.shell, "script": generate(build_parser(), args.shell)}
+    if args.command == "slack":
+        return _run_slack(args)
     # Dependencies belong to the command that uses them, after help is handled.
     prepared_calls = _calls_arguments(args) if args.command == "calls" else None
     crm_reader = None
@@ -788,6 +967,8 @@ def _run(args, argv):
 
 
 def _failure(exc, args):
+    if args.command == "slack":
+        return _slack_failure(exc, args)
     from .citations import BriefRejected
     import sqlite3
     command = args.command
@@ -907,6 +1088,12 @@ def _main(argv):
     except ParserError as exc:
         suggestion = "gtm-connector --help"
         candidate = next((argument for argument in arguments if not argument.startswith("-")), "")
+        if candidate == "slack":
+            index = arguments.index("slack") + 1
+            action = arguments[index] if index < len(arguments) else ""
+            child = " " + action if action in ("connect", "status", "disconnect") else ""
+            return _error("The Slack arguments do not match this action. Check its required arguments and options.",
+                          2, "gtm-connector slack" + child + " --help", as_json=as_json)
         if candidate == "calls":
             index = arguments.index("calls") + 1
             action = arguments[index] if index < len(arguments) else ""
@@ -925,7 +1112,15 @@ def _main(argv):
         if result is not None:
             print(json.dumps(result, indent=2, ensure_ascii=False) if args.json else
                   human_result(args.command, result, crm_backend=getattr(args, "crm_backend", "sqlite"),
-                               state_dir=getattr(args, "state_dir", None)))
+                               state_dir=getattr(args, "state_dir", None), action=getattr(args, "action", None),
+                               connection_dir=getattr(args, "connection_dir", None)))
+        if (args.command == "slack" and args.action == "disconnect" and result["remote_revoke_requested"]
+                and not result["remote_access_token_revoked"]):
+            reason = result["revocation_error"]
+            detail = SLACK_FAILURES.get(reason, SLACK_FAILURES["slack_unavailable"])
+            return _error("Remote access-token revocation is unconfirmed. " + detail +
+                          " Manage the whole grant in Slack settings.", 5,
+                          "gtm-connector slack disconnect --help", as_json=args.json)
         if args.command == "doctor" and result["status"] != "passed":
             return _error("Setup checks failed. Apply the fix beside each failed check.", 4,
                           f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}", as_json=args.json)
@@ -941,7 +1136,13 @@ def _main(argv):
             return _error("Evaluation failed. Inspect the result for failed cases.", 4,
                           shlex.join([*retry, "--json"]), as_json=args.json)
         return 0
-    except (KeyboardInterrupt, BrokenPipeError):
+    except KeyboardInterrupt:
+        if args.command == "slack":
+            return _error("Slack authorization was interrupted. Inspect saved status; completed remote approval "
+                          "or local saves may remain.", 130, _slack_status_command(args.connection_dir),
+                          as_json=args.json)
+        raise
+    except BrokenPipeError:
         raise
     except Exception as exc:
         return _failure(exc, args)

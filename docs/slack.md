@@ -1,7 +1,9 @@
 # Account-channel context
 
 This option adds the team's account-channel context to a renewal brief using
-invented Slack messages.
+invented Slack messages. The separate [Slack authentication commands](slack-auth.md)
+can save a grant for an existing app. They do not change this fixture source or
+read workspace messages.
 
 `read_slack_messages` requires an independent `slack:read` grant. Its
 `slack.sqlite3` store stays separate from CRM, calls, and audit. It uses no Slack

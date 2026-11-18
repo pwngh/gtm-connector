@@ -376,6 +376,18 @@ units. Unknown meeting time stays unknown; originals and older revisions remain
 private. No call provider, recording, transcription, or hosted model is started.
 [Import commands, export locations, and evidence limits](docs/calls.md)
 
+### Authenticate an existing Slack app
+
+`gtm-connector slack connect` opens browser authorization for an existing public
+PKCE app with a registered localhost callback. `slack status` inspects the saved
+connection offline; `slack status --check` verifies authentication; `slack
+disconnect` removes local credentials. Authentication and source selection are
+separate. These commands do not read messages or change the fixture workflow.
+[Existing-app prerequisites, commands, and proof limits](docs/slack-auth.md)
+
+Local tests use invented provider responses and real loopback sockets. No real
+Slack login or thread access has been verified.
+
 ## Limits worth reading
 
 The default drafter is a deterministic fixture, so its score measures that
@@ -406,8 +418,8 @@ Inspector CLI 2.15.0 are tested. Other
 assistant applications and interactive external login are unverified.
 [Protocol details](docs/protocol.md)
 
-The default runtime stays offline. The explicitly selected Salesforce reader
-and local transcript importer are described above.
+The default runtime stays offline. The explicitly selected Salesforce reader,
+local transcript importer, and explicit Slack authentication are described above.
 
 Custom Python adapters are not sandboxed or selectable through the CLI. No
 hosted model adapter, call-recording provider API, web interface,
@@ -419,6 +431,7 @@ or multi-tenant behavior is included.
 [Performance measurements](docs/performance.md) records startup and audited call timings with rerun commands.
 [Tools and fixture data](docs/tools.md) documents each tool and its required scope.
 [Imported transcripts](docs/calls.md) explains explicit account associations and cited excerpts.
+[Slack authentication](docs/slack-auth.md) explains existing-app login, checks, and disconnect.
 [Design decisions](DECISIONS.md) explains the choices;
 [Rules the coding agents worked under](AGENTS.md) records the constraints.
 
