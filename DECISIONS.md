@@ -1,5 +1,26 @@
 # Decisions
 
+## README navigation (2026-11-17)
+
+Compare the README with [Soulbeet](https://github.com/terry90/soulbeet/blob/dfd46b90ac49a9571a8d4d36d17604b92233b7e7/README.md),
+[Homelable](https://github.com/Pouzor/homelable/blob/645d1f719e9d6738e5a44ef0b042e656d6aea494/README.md),
+and [HomeButler](https://github.com/Higangssh/homebutler/blob/923a0feac625510d521b5e7b6367f0717cedfc79/README.md).
+These are examples of document structure, not evidence that a layout improves
+hiring or adoption. Do not copy their prose or infer performance from popularity.
+
+Use Homelable's section navigation to give readers a direct route to the example,
+run command, guarantees, limits, and references. Put the local demo and its
+walkthrough before Codespaces setup, following the separation of quick start
+from configuration in Soulbeet and HomeButler. Give optional features their own
+section so their requirements do not look like default prerequisites.
+
+Keep the product definition, captured brief, and request diagram. They already
+show the result and explain the sequence, as the report example in HomeButler
+and the process explanation in Soulbeet do. Keep the reference pages unchanged;
+they already separate purpose from implementation detail. Preserve all existing
+commands, output, tables, numbers, links, and limits. This change adds navigation
+and moves setup blocks. It does not change behavior or produce new benchmark data.
+
 ## Documentation for readers new to the project (2026-11-17)
 
 Start with the renewal brief a reader would use, then explain the connector
