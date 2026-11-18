@@ -737,8 +737,12 @@ def slack_status(connection_dir, *, check=False, progress=None, _provider=None, 
 
 
 def get_slack_access(connection_dir, *, required_scopes, _provider=None, _clock=None, _budget=None,
-                     _expired_access=None):
+                     _expired_access=None, expected_binding=None):
     """Return private usable access; no browser flow or source read occurs here."""
+    if expected_binding is not None:
+        from .slack_mapping import slack_identity_binding, valid_slack_binding
+        if not valid_slack_binding(expected_binding):
+            raise SlackAuthError("slack_invalid_configuration")
     try:
         required = () if required_scopes == () else _scopes(required_scopes)
     except ValueError:
@@ -750,6 +754,11 @@ def get_slack_access(connection_dir, *, required_scopes, _provider=None, _clock=
         _budget.remaining()
     with _connection_lock(connection_dir, create=False) as directory_fd:
         document = None if directory_fd is None else _read_credentials(directory_fd)
+        # Check the caller's pinned identity under the same lock as rotation.
+        # A replaced connection must not be verified or refreshed for that caller.
+        if (document is not None and expected_binding is not None
+                and slack_identity_binding(document["identity"]) != expected_binding):
+            raise SlackAuthError("slack_identity_mismatch")
         force_refresh = False
         if _expired_access is not None:
             if not isinstance(_expired_access, SlackAccess):
@@ -766,6 +775,18 @@ def get_slack_access(connection_dir, *, required_scopes, _provider=None, _clock=
         _deadline(clock, deadline)
         return SlackAccess(document["access_token"], dict(document["identity"]), tuple(document["granted_scopes"]),
                            document["access_expires_at"], document["workspace_origin"])
+
+
+def reject_slack_access(connection_dir, access):
+    """Quarantine an exactly rejected saved credential without a provider request."""
+    if not isinstance(access, SlackAccess):
+        raise SlackAuthError("slack_invalid_configuration")
+    with _connection_lock(connection_dir, create=False) as directory_fd:
+        document = None if directory_fd is None else _read_credentials(directory_fd)
+        if (document is not None and document["identity"] == access.identity
+                and document["access_token"] == access.access_token
+                and document["credential_state"] != "refresh_pending"):
+            _write_credentials(directory_fd, {**document, "credential_state": "refresh_pending"})
 
 
 def inspect_slack_connection(connection_dir, *, _clock=None):

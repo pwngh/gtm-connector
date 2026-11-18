@@ -24,6 +24,7 @@ REDIRECT = "http://localhost:8765/slack/callback"
 ACCESS, REFRESH = "invented-private-access-token", "invented-private-refresh-token"
 NEW_ACCESS, NEW_REFRESH = "invented-replacement-access-token", "invented-replacement-refresh-token"
 IDENTITY = {"app_id": APP, "team_id": TEAM, "user_id": USER, "enterprise_id": None}
+PROCESS_WAIT_SECONDS = 30
 
 
 class Clock:
@@ -109,13 +110,13 @@ def _refresh_process(directory, started, release, output, request_log):
             with open(request_log, "a") as log:
                 log.write("refresh\n")
             started.set()
-            if not release.wait(5):
+            if not release.wait(PROCESS_WAIT_SECONDS):
                 raise RuntimeError("test release did not arrive")
             return super().refresh(refresh_token, client_id, deadline)
 
     try:
         access = auth.get_slack_access(Path(directory), required_scopes=auth.DEFAULT_USER_SCOPES,
-                                       _provider=BlockingProvider())
+                                       _provider=BlockingProvider(), _clock=Clock())
         output.put(("first", access.access_token == NEW_ACCESS))
     except Exception as error:
         output.put(("first", type(error).__name__))
@@ -134,13 +135,14 @@ def _competing_process(directory, retry, output, request_log):
             return super().refresh(refresh_token, client_id, deadline)
 
     try:
-        auth.get_slack_access(Path(directory), required_scopes=auth.DEFAULT_USER_SCOPES, _provider=NeverProvider())
+        auth.get_slack_access(Path(directory), required_scopes=auth.DEFAULT_USER_SCOPES,
+                              _provider=NeverProvider(), _clock=Clock())
     except auth.SlackAuthError as error:
         output.put(("busy", error.code))
-    if retry.wait(5):
+    if retry.wait(PROCESS_WAIT_SECONDS):
         try:
             access = auth.get_slack_access(Path(directory), required_scopes=auth.DEFAULT_USER_SCOPES,
-                                           _provider=NeverProvider())
+                                           _provider=NeverProvider(), _clock=Clock())
             output.put(("retry", access.access_token == NEW_ACCESS))
         except Exception as error:
             output.put(("retry", type(error).__name__))
@@ -448,7 +450,9 @@ class StateTests(_StateCase):
         self.assertEqual(set(p.name for p in self.directory.iterdir()), {"connection.lock", "credentials.json"})
 
     def test_two_processes_refresh_once_and_retry_reads_latest_token(self):
-        seed(self.directory, saved_document(datetime.now(timezone.utc), expired=True))
+        # This tests cross-process locking, not import speed or an HTTP deadline.
+        # Fixed clocks isolate the lock handoff; IPC waits only catch deadlocks.
+        seed(self.directory, saved_document(Clock().now(), expired=True))
         context = multiprocessing.get_context("spawn")
         started, release, retry, output = context.Event(), context.Event(), context.Event(), context.Queue()
         request_log = str(Path(self.temp.name) / "requests.txt")
@@ -456,16 +460,16 @@ class StateTests(_StateCase):
         second = context.Process(target=_competing_process, args=(str(self.directory), retry, output, request_log))
         first.start()
         try:
-            self.assertTrue(started.wait(5))
+            self.assertTrue(started.wait(PROCESS_WAIT_SECONDS))
             second.start()
-            self.assertEqual(output.get(timeout=5), ("busy", "slack_connection_busy"))
+            self.assertEqual(output.get(timeout=PROCESS_WAIT_SECONDS), ("busy", "slack_connection_busy"))
             release.set()
-            self.assertEqual(output.get(timeout=5), ("first", True))
-            first.join(5)
+            self.assertEqual(output.get(timeout=PROCESS_WAIT_SECONDS), ("first", True))
+            first.join(PROCESS_WAIT_SECONDS)
             self.assertEqual(first.exitcode, 0)
             retry.set()
-            self.assertEqual(output.get(timeout=5), ("retry", True))
-            second.join(5)
+            self.assertEqual(output.get(timeout=PROCESS_WAIT_SECONDS), ("retry", True))
+            second.join(PROCESS_WAIT_SECONDS)
             self.assertEqual(second.exitcode, 0)
             self.assertEqual(Path(request_log).read_text(), "refresh\n")
         finally:
@@ -473,10 +477,10 @@ class StateTests(_StateCase):
             retry.set()
             for process in (first, second):
                 if process.pid is not None:
-                    process.join(5)
+                    process.join(PROCESS_WAIT_SECONDS)
                     if process.is_alive():
                         process.terminate()
-                        process.join(5)
+                        process.join(PROCESS_WAIT_SECONDS)
 
 
 class ValidationTests(unittest.TestCase):

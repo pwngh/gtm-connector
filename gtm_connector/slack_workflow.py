@@ -83,7 +83,8 @@ _DIAGNOSTICS = {
                                     _DOCTOR_HELP),
     "slack_metrics_unavailable": ("The check could not verify source-work counts. No successful check is reported.",
                                    _CHECK_HELP),
-    "slack_receipt_invalid": ("The tool attempt has no matching final receipt. No successful check is reported.",
+    "slack_receipt_invalid": ("The check could not match a final receipt to the validated result. "
+                              "No successful check is reported.",
                                _DOCTOR_HELP),
     "prerequisite_failed": ("This step could not finish because an earlier required step failed.", ""),
 }

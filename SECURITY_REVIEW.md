@@ -472,9 +472,17 @@ and structured wrappers can duplicate that envelope. Filesystem operations
 remain synchronous and have no hard preemption guarantee.
 
 Only exact token expiry permits one recovery retry. Credential recovery rereads
-under the connection lock and requires the same identity; another process's
+under the connection lock and checks the expected identity before verification
+or rotation, including initial acquisition. Mapping setup also carries the
+initially inspected identity forward, so a concurrent connection switch refuses
+before source pinning or CRM resolution. Another process's
 different verified token can be reused without a duplicate refresh. One local
-refresh is the maximum. One message rate-limit retry must have a valid delay
+refresh is the maximum. Terminal rejection quarantines only the exact saved
+token and identity; it preserves a concurrently saved replacement. Rotation
+requires room for both refresh and identity HTTP attempts before a pending
+marker is written. Insufficient request capacity leaves credentials unchanged
+and reports the resource limit instead of an unconsumed-token login failure.
+One message rate-limit retry must have a valid delay
 of at most five seconds within the remaining budget. An ambiguous refresh is
 not retried. Expired unchecked credentials require browser authorization.
 No tool starts that browser flow, sends a message, or broadens a grant.
@@ -484,6 +492,8 @@ valid timestamps, and completed cursor pagination through one creation cutoff.
 Identical duplicates consume bounds; conflicting duplicates refuse. Missing
 text, unsupported subtypes, hidden content, and event wrappers refuse the whole
 observation. Files, blocks, and attachments contribute omission counts only.
+Their inline content is received in the API response and omitted from evidence;
+no separate non-text resource requests are made.
 Literal text remains untrusted; author labels do not authenticate a person.
 Cursor completion does not establish a full archive, earlier edits/deletions,
 current source truth, or an atomic view while messages change.

@@ -169,6 +169,41 @@ class SlackSourceCLITests(unittest.TestCase):
         crm.assert_not_called()
         self.assertFalse(self.state.exists())
 
+    def test_map_connection_switch_after_link_validation_never_pins_or_resolves(self):
+        from gtm_connector import slack_auth as auth, runtime
+        from gtm_connector.slack_workflow import resolve_slack_account
+        inspect = auth.inspect_slack_connection
+        for copied_link in (False, True):
+            with self.subTest(copied_link=copied_link):
+                self.state = self.root / ("linked" if copied_link else "native")
+                self.seed_connection()
+                observations = []
+
+                def switch_after_selection(directory):
+                    selection = inspect(directory)
+                    observations.append(selection)
+                    if len(observations) == 1:
+                        with auth._connection_lock(directory, create=False) as descriptor:
+                            document = auth._read_credentials(descriptor)
+                            document["identity"]["team_id"] = "T99999999"
+                            document["workspace_origin"] = "https://another-invented.slack.com"
+                            auth._write_credentials(descriptor, document)
+                    return selection
+
+                selector = (["--thread-url", ORIGIN + "/archives/" + CHANNEL + "/p1790000000000001"]
+                            if copied_link else ["--channel", CHANNEL, "--thread-ts", STAMP])
+                with patch.object(auth, "inspect_slack_connection", side_effect=switch_after_selection), \
+                        patch.object(runtime, "_prepare_source_state", wraps=runtime._prepare_source_state) as source, \
+                        patch("gtm_connector.slack_workflow.resolve_slack_account",
+                              wraps=resolve_slack_account) as resolve:
+                    detail = self.failure(self.invoke("slack", "map", "--state-dir", str(self.state),
+                        "--connection-dir", str(self.connection), "--account", "acc-003", *selector), 3)
+                self.assertIn("slack_source_mismatch", detail["message"])
+                source.assert_not_called()
+                resolve.assert_not_called()
+                self.assertEqual(len(observations), 2)
+                self.assertEqual({path.name for path in self.state.iterdir()}, {"server.lock"})
+
     def test_actual_map_is_audited_idempotent_and_never_reads_slack(self):
         from gtm_connector.audit import read_audit
         self.seed_connection()

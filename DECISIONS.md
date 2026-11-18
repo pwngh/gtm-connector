@@ -32,6 +32,9 @@ association first could leave incomplete state. Preserve historical snapshots
 when selections change. Permit either imported-calls-first or Slack-map-first
 initialization with both modes explicit, so the operator does not need to create
 fixture data before configuring the intended sources.
+Carry the mapping command's initially inspected Slack identity into runtime
+preparation. Compare it before pinning state or resolving CRM, because a local
+reconnection between link validation and setup must not rebind that link.
 
 Share one operation budget across the reader and credential provider: ten
 attempts, 1 MiB of accepted response bytes, and an absolute 20-second HTTP
@@ -47,6 +50,14 @@ performed the refresh. Reread credentials under the lock and compare the exact
 rejected access plus stable identity. Reuse another process's verified newer
 token for that identity; otherwise permit at most one local refresh. This avoids
 reusing a single-use refresh token or refreshing into a different workspace.
+Check the expected identity under the credential lock before any verification
+or refresh, including the first acquisition. Terminal authentication rejection
+and a second exact expiry quarantine only the rejected saved token and identity;
+a concurrently saved replacement is preserved. Reserve capacity for refresh
+and its required identity check before marking rotation pending. If fewer than
+two request slots remain, return the resource-limit failure without modifying
+credentials or consuming the refresh token. A later operation gets a new budget
+and can retry recovery. This differs from a terminal reconnect-required result.
 Known rejected current nonrotating credentials become unusable. Preserve PR9's
 rule that expired identity_unchecked state needs login rather than blind refresh.
 Allow one message 429 retry only with a valid integer delay no longer than five
@@ -62,7 +73,8 @@ not a full archive or an atomic historical snapshot.
 Preserve literal text, including empty strings and apparent instructions.
 Accept a narrow documented set of message subtypes; reject hidden/event wrappers
 and missing text rather than silently dropping or synthesizing it. Count omitted
-files, blocks, and attachments without fetching their contents. App, participant,
+files, blocks, and attachments while omitting their inline content from evidence.
+Do not make separate requests for non-text resources. App, participant,
 and unknown labels avoid inventing display-name authority. Preserve reported
 edit metadata and label absent metadata as unreported, because neither reveals
 the history of prior edits or deletions.

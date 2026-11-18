@@ -240,13 +240,20 @@ revocation, or invalid grant does not start a login flow. One message 429 may
 retry when its valid integer delay is at most five seconds and fits the remaining
 budget. Other failures do not retry. OAuth refresh itself is never rate-retried.
 An expired unchecked credential requires browser authorization.
+Terminal authentication rejection marks only that exact saved credential as
+unusable. A newer credential saved concurrently is preserved. Refresh requires
+two remaining request slots for rotation and identity verification; otherwise
+the read reports its resource limit before changing credentials. A later read
+can retry with a fresh operation budget.
 
 The normalizer accepts plain message text and the supported `bot_message`,
 `me_message`, legacy `file_share`, and `thread_broadcast` forms. Empty text is
 preserved; missing or malformed text refuses the entire observation. Hidden
 messages, edit/delete event wrappers, and unsupported subtypes refuse. Supplied
-file, attachment, and block arrays contribute omission counts only. Their
-contents and URLs are not fetched. App, participant, and unknown author labels
+file, attachment, and block arrays contribute omission counts only. Inline
+non-text content arrives in the API response and is omitted from evidence.
+The connector makes no separate requests for files or other non-text resources.
+App, participant, and unknown author labels
 come from validated fields, not display-name lookup.
 
 A successful snapshot proves cursor completion through its fixed creation

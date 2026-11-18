@@ -1,6 +1,7 @@
 """Run two HTTPS loopback services with a private, local fixture owner."""
 
 from contextlib import ExitStack, closing, contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import fcntl
@@ -406,20 +407,27 @@ def _validate_saved_slack_crm(directory, marker):
         raise ValueError
 
 
-def _prepare_slack_selection(directory, backend, connection_dir):
+def _prepare_slack_selection(directory, backend, connection_dir, expected_binding=None):
     from .slack_mapping import SlackMappingError, slack_identity_binding
     try:
         marker = _read_marker(directory / "slack-source.json")
-        owner = _read_marker(directory / "owner.json", require_schema=False)
         if marker is not None and not _valid_slack_marker(marker):
             raise ValueError
         if marker is not None:
             _validate_saved_slack_crm(directory, marker)
-        prior = owner.get("slack_backend", "fixture") if owner is not None else None
-        if prior not in (None, "fixture", "slack"):
-            raise ValueError
     except (OSError, ValueError, UnicodeError, RecursionError):
         raise SlackMappingError("slack_mapping_invalid") from None
+    try:
+        owner = _read_marker(directory / "owner.json", require_schema=False)
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        if backend == "fixture" and marker is None and not os.path.lexists(directory / "slack-mappings.json"):
+            # Existing CRM/calls preparation rejects this owner before any source
+            # work. Preserve that established diagnostic when no live Slack is selected.
+            return None, None
+        raise SlackMappingError("slack_mapping_invalid") from None
+    prior = owner.get("slack_backend", "fixture") if owner is not None else None
+    if prior not in (None, "fixture", "slack"):
+        raise SlackMappingError("slack_mapping_invalid")
     if backend == "fixture":
         if marker is not None or prior == "slack" or os.path.lexists(directory / "slack-mappings.json"):
             raise SlackMappingError("slack_source_mismatch")
@@ -435,11 +443,13 @@ def _prepare_slack_selection(directory, backend, connection_dir):
         raise SlackMappingError("slack_mapping_invalid")
     from .slack_auth import SlackAuthError, inspect_slack_connection
     selection = inspect_slack_connection(connection_dir)
+    binding = slack_identity_binding(selection.identity)
+    if expected_binding is not None and binding != expected_binding:
+        raise SlackMappingError("slack_source_mismatch")
     if selection.needs_login:
         raise SlackAuthError("slack_reconnect_required")
     if selection.credential_state != "ready":
         raise SlackMappingError("slack_identity_unchecked")
-    binding = slack_identity_binding(selection.identity)
     if marker is not None and marker["slack_binding"] != binding:
         raise SlackMappingError("slack_source_mismatch")
     return marker, binding
@@ -627,7 +637,7 @@ class Runtime:
 
     def __init__(self, directory, *, rate_limit=60, crm_reader=None, on_call=None, demo_binding=None,
                  calls_backend="fixture", calls_reader=None, slack_backend="fixture", slack_connection_dir=None,
-                 slack_reader=None, on_source_read=None):
+                 slack_reader=None, on_source_read=None, slack_expected_binding=None):
         if calls_backend not in ("fixture", "imported"):
             raise ValueError("The calls backend must be fixture or imported.")
         if calls_reader is not None and (calls_backend != "imported" or calls_reader.name != "imported"):
@@ -638,6 +648,11 @@ class Runtime:
             raise SourceIdentityError("Live Slack requires its private connection folder and no demo binding.")
         if slack_reader is not None and (slack_backend != "slack" or slack_reader.name != "slack"):
             raise SourceIdentityError("The Slack reader does not match the selected source mode.")
+        if slack_expected_binding is not None:
+            from .slack_mapping import valid_slack_binding
+            if slack_backend != "slack" or not valid_slack_binding(slack_expected_binding):
+                raise SourceIdentityError("The expected Slack identity does not match the selected source mode.")
+        self.slack_expected_binding = deepcopy(slack_expected_binding)
         self.directory = _state_directory(directory)
         self.rate_limit = rate_limit
         self.crm_reader = crm_reader
@@ -683,7 +698,7 @@ class Runtime:
                 raise StateInUseError("this state directory already has a running connector; "
                                       "stop it with Ctrl-C or choose another --state-dir") from exc
             slack_marker, self.slack_binding = _prepare_slack_selection(
-                self.directory, self.slack_backend, self.slack_connection_dir)
+                self.directory, self.slack_backend, self.slack_connection_dir, self.slack_expected_binding)
             self.crm_connection_identity = _prepare_source_state(self.directory, self.crm_reader, self.demo_binding,
                                                                   calls_backend=self.calls_backend)
             self.crm_binding = _calls_binding(self.crm_connection_identity)

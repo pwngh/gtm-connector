@@ -11,7 +11,7 @@ import re
 import time
 from typing import Any
 
-from .slack_auth import SlackAuthError, get_slack_access, _decode
+from .slack_auth import SlackAuthError, get_slack_access, reject_slack_access, _decode
 
 
 OPERATION_SECONDS = 20
@@ -166,6 +166,10 @@ class SlackOperationBudget:
         self.remaining()
         if self.refresh_attempts >= 1:
             raise SlackReadError("slack_reconnect_required")
+        # Rotation must be followed by identity verification. Check both slots
+        # before the auth layer persists a potentially consumed refresh token.
+        if MAX_REQUESTS - self.http_attempts < 2:
+            raise SlackReadError("slack_resource_limit")
         self.refresh_attempts += 1
 
 
@@ -426,7 +430,8 @@ class SlackThreadReader:
             credential_ok = False
             set_phase("credential_binding")
             access = get_slack_access(self.connection_dir, required_scopes=(), _provider=self._auth_provider,
-                                      _clock=self._clock, _budget=budget, _expired_access=expired)
+                                      _clock=self._clock, _budget=budget, _expired_access=expired,
+                                      expected_binding=self.slack_binding)
             if slack_identity_binding(access.identity) != self.slack_binding:
                 raise SlackReadError("slack_source_mismatch")
             budget.remaining()
@@ -455,11 +460,14 @@ class SlackThreadReader:
                                                       limit=limit, budget=budget)
                 except _TokenExpired:
                     if budget.token_retried:
+                        reject_slack_access(self.connection_dir, access)
                         raise SlackReadError("slack_reconnect_required") from None
                     budget.token_retried = True
                     access = acquire(access)
                     continue
                 except SlackReadError as exc:
+                    if exc.code == "slack_reconnect_required":
+                        reject_slack_access(self.connection_dir, access)
                     delay = exc.retry_after_seconds
                     if (exc.code != "slack_rate_limited" or delay is None or delay > 5 or budget.rate_retried
                             or budget.http_attempts >= MAX_REQUESTS or budget.remaining() <= delay):

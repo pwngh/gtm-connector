@@ -645,7 +645,7 @@ def _run_slack_source(args):
     import re
     from datetime import datetime, timezone
     from time import monotonic
-    from .slack_mapping import SlackMappingError, parse_thread_selection, save_slack_mapping
+    from .slack_mapping import SlackMappingError, parse_thread_selection, save_slack_mapping, slack_identity_binding
     progress = _slack_source_progress(args)
     if args.action == "check":
         if re.fullmatch(r"acc-(?:[0-9]{3}|sf-[A-Za-z0-9]{18})", args.account) is None:
@@ -675,7 +675,8 @@ def _run_slack_source(args):
     from .runtime import Runtime
     from .slack_workflow import resolve_slack_account
     with Runtime(args.state_dir, crm_reader=crm_reader, calls_backend=args.calls_backend,
-                 slack_backend="slack", slack_connection_dir=args.connection_dir) as runtime:
+                 slack_backend="slack", slack_connection_dir=args.connection_dir,
+                 slack_expected_binding=slack_identity_binding(connection.identity)) as runtime:
         if not args.json:
             print(_live_slack_sources(args), file=sys.stderr)
         progress("resolving_account", "running")

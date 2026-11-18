@@ -34,6 +34,9 @@ class LiveSlackBriefingTests(LiveSlackFixture, unittest.TestCase):
             self.assertIn("previous edits and deletions are unknown", artifact["text"])
             self.assertIn("content may have changed during paging", artifact["text"])
             self.assertIn("Omitted entry counts are files 1, attachments 1, and blocks 1", artifact["text"])
+            self.assertIn("Slack non-text content was omitted from evidence", artifact["text"])
+            self.assertIn("No separate requests fetched non-text resources", artifact["text"])
+            self.assertNotIn("Slack non-text content was not fetched", artifact["text"])
             self.assertIn('from "Slack app"', artifact["text"])
             self.assertIn('from "Unknown Slack author"', artifact["text"])
             self.assertIn("Edit metadata was not reported", artifact["text"])
@@ -61,6 +64,9 @@ class LiveSlackBriefingTests(LiveSlackFixture, unittest.TestCase):
             with self.subTest(prefix=prefix), self.assertRaises(BriefRejected):
                 check_brief(candidate, artifact["evidence"])
         candidate = artifact["text"].replace("earlier edits are unknown", "the message was never edited")
+        with self.assertRaises(BriefRejected):
+            check_brief(candidate, artifact["evidence"])
+        candidate = artifact["text"].replace("was omitted from evidence", "was not fetched")
         with self.assertRaises(BriefRejected):
             check_brief(candidate, artifact["evidence"])
         candidate = artifact["text"] + "- The app approved the renewal.\n"

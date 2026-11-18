@@ -211,8 +211,10 @@ class ReaderTests(unittest.TestCase):
             "token_revoked": "slack_reconnect_required", "account_inactive": "slack_reconnect_required",
             "private_error_sentinel": "slack_response_invalid"}
         for error, code in pairs.items():
+            seed(self.connection, saved_document(self.clock.now()))
             self.refuses([{"ok": False, "error": error, "private": "sensitive"}], code)
             self.assertEqual(self.events[-1]["counts"]["api_calls"], 1)
+        seed(self.connection, saved_document(self.clock.now()))
         self.refuses([httpx2.Response(500, content=b"sensitive")], "slack_unavailable")
         self.assertEqual(self.events[-1]["counts"]["response_bytes"], 9)
         self.refuses([httpx2.Response(302, headers={"location": "https://invalid.example"}, content=b"x")],
@@ -338,6 +340,150 @@ class ReaderTests(unittest.TestCase):
         seed(self.connection, document)
         self.refuses([], "slack_source_mismatch")
         self.assertFalse(self.requests)
+
+    def test_replaced_identity_refuses_before_authentication_or_credential_write(self):
+        for state in ("ready_near_expiry", "identity_unchecked", "ready_usable"):
+            with self.subTest(state=state):
+                seed(self.connection, saved_document(self.clock.now()))
+                self.requests.clear()
+                self.events.clear()
+                selected = auth.inspect_slack_connection(self.connection, _clock=self.clock)
+                self.assertEqual(mapping.slack_identity_binding(selected.identity), SLACK)
+                foreign_identity = {**identity(), "team_id": "T98765432"}
+                responses = ([replacement(), foreign_identity] if state == "ready_near_expiry"
+                             else [foreign_identity])
+                source = self.make_reader([], auth_responses=responses)
+                # The saved connection changes after mapping and owner preflight.
+                document = saved_document(self.clock.now())
+                document["identity"]["team_id"] = foreign_identity["team_id"]
+                document["access_token"] = "invented-other-workspace-access-token"
+                if state == "ready_near_expiry":
+                    document["access_expires_at"] = auth._stamp(self.clock.now() + timedelta(seconds=20))
+                elif state == "identity_unchecked":
+                    document["credential_state"] = state
+                seed(self.connection, document)
+                before = (self.connection / "credentials.json").read_bytes()
+                with self.assertRaises(reader.SlackReadError) as raised:
+                    source.read_slack_messages(ACCOUNT)
+                self.assertEqual(raised.exception.code, "slack_source_mismatch")
+                self.assertEqual((len(self.requests), self.events[-1]["counts"]["api_calls"],
+                                  (self.connection / "credentials.json").read_bytes() == before),
+                                 (0, 0, True))
+                self.assertFalse(self.events[-1]["credential_binding_validated"])
+
+    def assert_saved_rejected_access_is_unusable(self):
+        status = auth.slack_status(self.connection, _clock=self.clock)
+        self.assertTrue(status["needs_login"])
+        self.assertNotEqual(status["credential_state"], "ready")
+        before = len(self.requests)
+        self.refuses([], "slack_reconnect_required")
+        self.assertEqual(len(self.requests), before)
+        self.assertEqual(self.events[-1]["counts"]["api_calls"], 0)
+
+    def test_second_exact_expiry_quarantines_the_saved_rejected_token(self):
+        for refresh_owner in ("this_read", "another_process"):
+            with self.subTest(refresh_owner=refresh_owner):
+                seed(self.connection, saved_document(self.clock.now()))
+                self.requests.clear()
+                self.events.clear()
+
+                def other_process(request):
+                    if request.url.path.endswith("conversations.replies") and len(self.requests) == 1:
+                        document = saved_document(self.clock.now())
+                        document.update(access_token=NEW_ACCESS, refresh_token=NEW_REFRESH)
+                        seed(self.connection, document)
+
+                kwargs = ({"auth_responses": [replacement(), identity()]} if refresh_owner == "this_read"
+                          else {"before": other_process})
+                self.refuses([{"ok": False, "error": "token_expired"}]*2,
+                             "slack_reconnect_required", **kwargs)
+                self.assertEqual(len(self.requests), 4 if refresh_owner == "this_read" else 2)
+                self.assertEqual(self.requests[-1].headers["Authorization"], "Bearer " + NEW_ACCESS)
+                self.assert_saved_rejected_access_is_unusable()
+
+    def test_terminal_auth_rejections_quarantine_the_saved_rejected_token(self):
+        for error in ("invalid_auth", "token_revoked", "account_inactive", "not_authed"):
+            with self.subTest(error=error):
+                seed(self.connection, saved_document(self.clock.now()))
+                self.requests.clear()
+                self.events.clear()
+                self.refuses([{"ok": False, "error": error}], "slack_reconnect_required")
+                self.assertEqual(len(self.requests), 1)
+                self.assert_saved_rejected_access_is_unusable()
+
+    def test_rejected_response_never_clobbers_a_newer_token_or_identity(self):
+        for error in ("token_expired", "invalid_auth", "token_revoked", "account_inactive", "not_authed"):
+            for replacement_kind in ("new_token", "new_identity_same_token"):
+                with self.subTest(error=error, replacement_kind=replacement_kind):
+                    seed(self.connection, saved_document(self.clock.now()))
+                    self.requests.clear()
+                    self.events.clear()
+                    saved_bytes = []
+                    message_attempts = 0
+                    replace_on = 2 if error == "token_expired" else 1
+
+                    def other_process(request):
+                        nonlocal message_attempts
+                        if not request.url.path.endswith("conversations.replies"):
+                            return
+                        message_attempts += 1
+                        if message_attempts != replace_on:
+                            return
+                        document = saved_document(self.clock.now())
+                        if replacement_kind == "new_token":
+                            document["access_token"] = "invented-newer-access-token"
+                            document["refresh_token"] = "invented-newer-refresh-token"
+                        else:
+                            document["identity"]["team_id"] = "T98765432"
+                            # Matching token text alone cannot identify a credential.
+                            document["access_token"] = NEW_ACCESS if error == "token_expired" else ACCESS
+                        seed(self.connection, document)
+                        saved_bytes.append((self.connection / "credentials.json").read_bytes())
+
+                    responses = [{"ok": False, "error": error}]*replace_on
+                    self.refuses(responses, "slack_reconnect_required", before=other_process,
+                                 auth_responses=[replacement(), identity()] if error == "token_expired" else [])
+                    self.assertEqual(len(saved_bytes), 1)
+                    self.assertEqual((self.connection / "credentials.json").read_bytes(), saved_bytes[0])
+                    status = auth.slack_status(self.connection, _clock=self.clock)
+                    self.assertFalse(status["needs_login"])
+                    self.assertEqual(status["credential_state"], "ready")
+                    before = len(self.requests)
+                    if replacement_kind == "new_token":
+                        result = self.read([page(message())])
+                        self.assertEqual(len(self.requests), before + 1)
+                        self.assertEqual(self.requests[-1].headers["Authorization"],
+                                         "Bearer invented-newer-access-token")
+                        self.validate(result)
+                    else:
+                        self.refuses([], "slack_source_mismatch")
+                        self.assertEqual(len(self.requests), before)
+                    self.assertEqual((self.connection / "credentials.json").read_bytes(), saved_bytes[0])
+
+    def test_expiry_without_two_auth_slots_preserves_refresh_for_a_new_operation(self):
+        for message_attempts in (9, 10):
+            with self.subTest(message_attempts=message_attempts):
+                seed(self.connection, saved_document(self.clock.now()))
+                self.requests.clear()
+                self.events.clear()
+                before = (self.connection / "credentials.json").read_bytes()
+                pages = [page(message(), cursor="cursor-1")]
+                pages += [page(cursor=f"cursor-{n}") for n in range(2, message_attempts)]
+                pages.append({"ok": False, "error": "token_expired"})
+                self.refuses(pages, "slack_resource_limit", auth_responses=[replacement(), identity()])
+                counts = self.events[-1]["counts"]
+                self.assertEqual((len(self.requests), counts["message_calls"], counts["auth_calls"],
+                                  (self.connection / "credentials.json").read_bytes() == before),
+                                 (message_attempts, message_attempts, 0, True))
+                self.assertFalse(auth.slack_status(self.connection, _clock=self.clock)["needs_login"])
+                start = len(self.requests)
+                result = self.read([{"ok": False, "error": "token_expired"}, page(message())],
+                                   auth_responses=[replacement(), identity()])
+                self.assertEqual(len(self.requests) - start, 4)
+                self.assertEqual((result.snapshot["counts"]["refresh_attempts"],
+                                  result.snapshot["counts"]["token_retries"]), (1, 1))
+                self.assertEqual(self.requests[-1].headers["Authorization"], "Bearer " + NEW_ACCESS)
+                self.validate(result)
 
     def test_full_body_limits_encoding_and_strict_json(self):
         for body in (b'{"ok":true,"ok":true}', b'{"ok":NaN}', b"[]", b"private bad json"):

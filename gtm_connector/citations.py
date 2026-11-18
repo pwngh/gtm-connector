@@ -85,8 +85,9 @@ def _live_slack_facts(evidence, messages, receipt_ref, add):
         "Paging completed for the selected API-visible thread text. This is not a complete archive; "
         "previous edits and deletions are unknown, and content may have changed during paging.", receipt_ref)}
     required.add(add(
-        f"Slack non-text content was not fetched. Omitted entry counts are files {counts['omitted_files']}, "
+        f"Slack non-text content was omitted from evidence. Omitted entry counts are files {counts['omitted_files']}, "
         f"attachments {counts['omitted_attachments']}, and blocks {counts['omitted_blocks']}. "
+        "No separate requests fetched non-text resources. "
         "Links and mentions remain literal source text.", receipt_ref))
     # The validated reader order is chronological; immutable hash IDs do not encode time.
     for message in messages:
