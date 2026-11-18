@@ -44,7 +44,9 @@ earlier sequence.
   building. Spending two security-heavy PRs first would test the cheapest
   assumption last. An agent proves the script on invented transcripts and the
   owner runs it on real ones, because an agent session is itself a hosted
-  model and the rule against employer or client material still applies.
+  model and the rule against employer or client material still applies. The
+  test keeps the pending-record rule instead of requiring a local model, so
+  the owner still chooses the model and every call leaves a record.
 - The Slack channel window comes before model-read claims. Otherwise the model
   reads a whole call but the person still hunts for the thread.
 - The model cites numbered units instead of retyping quotes. Transcripts are
@@ -168,10 +170,15 @@ reasons.
 - **Grok is non-blocking.** Its first two non-interactive runs were cancelled
   at a tool approval, and its first complete review took about twelve minutes.
   Its findings were as useful as the others', so it still runs every time.
+  It now runs at Low with the brief and the diff inside its prompt and no
+  tools. A Medium run of the same prompt took about twice as long and found
+  no more, and a High review with tools takes 7 to 14 minutes. That run gets
+  no exported copy, the one exception to identical material.
 - **Exported copies, not the live checkout.** `grok` and `agy` cannot ask for
   approval in a non-interactive run, so they run with automatic approval
   inside their sandboxes. The sandbox is the isolation. The private copy keeps
-  every member on identical material and out of the live checkout.
+  every member that reads files on identical material and out of the live
+  checkout.
 - **The guarantee tests stay in unittest.** A proposal to add a pytest marker
   suite that runs in under two seconds did not fit this repository. It has no
   pytest dependency, and the five test files behind the README's guarantees
@@ -193,10 +200,10 @@ by the operator's choice and with their own key.
 
 ## Entries in the decision log
 
-The later dated entries come first, newest first. The entries for the original
-slices follow in the order they were built. They are undated except the third,
-"Protocol research (2026-11-17)". Each title links to its entry in
-DECISION_LOG.md.
+The entries added after the original slices come first, newest first, and all
+are dated. The entries for the original slices follow in the order they were
+built. They are undated except the third, "Protocol research (2026-11-17)".
+Each title links to its entry in DECISION_LOG.md.
 
 - [Explicit mapped Slack reads and source observations (2026-11-18)](DECISION_LOG.md#explicit-mapped-slack-reads-and-source-observations-2026-11-18)
 - [Separate Slack authentication from source selection (2026-11-18)](DECISION_LOG.md#separate-slack-authentication-from-source-selection-2026-11-18)

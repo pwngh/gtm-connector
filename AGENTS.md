@@ -195,7 +195,7 @@ Two checks come before the numbered slices:
   as a rep would. If it is thin or wrong, stop and report before starting
   slice 1. The rules below on keys, hosted endpoints, pending records, and
   giving the model no tool apply to this test. The script commits its pending
-  records to a private local file, so a hosted call is never sent without one.
+  records to a private local file, so no model call is sent without one.
   The gateway and its receipts apply to product calls, not to this standalone
   script. The owner chooses the model for the real run and may choose a hosted
   one. Commit only invented transcripts.
@@ -205,14 +205,14 @@ Then finish one reviewed PR per slice, in this order:
 1. Selected sources and caller-safe briefs. The design notes are outside the
    repository, so this slice's PR records its design in DECISION_LOG.md. The
    requirements are fixed. A remote brief tool runs under the caller's own
-   token and never the owner's. Every live read is limited to the caller's
-   scopes, the saved selection, and what the provider shows. Each composite
-   call commits one outer receipt and one receipt per attempted read. Reading a
-   saved brief is not a live read, because it makes no provider call. It
-   releases the brief only if the caller's current scopes, the current
-   selection, and the current source bindings still cover everything the brief
-   contains. It cannot recheck what the provider shows now, and its result
-   says so.
+   token and never the owner's. Every read is limited to the caller's scopes
+   and the saved selection. A live read, one that calls a provider, is also
+   limited to what the provider shows. Each composite call commits one outer
+   receipt and one receipt per attempted read. Reading a saved brief makes no
+   provider call. It releases the brief only if the caller's current scopes,
+   the current selection, and the current source bindings still cover
+   everything the brief contains. It cannot recheck what the provider shows
+   now, and its result says so.
 2. The local stdio MCP bridge. Every request still goes through the existing
    gateway, with scopes named at launch, a receipt committed before execution,
    and the rate limit. At launch the bridge requests a grant for exactly the
