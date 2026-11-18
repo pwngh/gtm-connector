@@ -38,6 +38,7 @@ _MANIFEST_KEYS = {"schema_version", "source", "format", "parser_version", "conte
                   "raw_byte_count", "association", "association_generation", "called_at", "imported_at",
                   "selection_mode", "unit_kind", "requested_range", "cited_range", "total_units", "units"}
 _RECORD_KEYS = {"id", "account_id", "record_kind", "record_version", "called_at", "body", "manifest"}
+_PUBLIC_ASSOCIATION_KEYS = {"crm_binding", "account_id", "method", "resolution_receipt_id"}
 _CATEGORIES = {
     "calls_import_invalid": "usage", "calls_import_too_large": "usage", "calls_excerpt_too_large": "usage",
     "calls_import_not_found": "usage", "calls_account_not_found": "usage",
@@ -126,20 +127,30 @@ def _valid_account(account_id, binding):
     return isinstance(account_id, str) and re.fullmatch(pattern, account_id) is not None
 
 
-def _validate_association(association):
-    keys = {"crm_binding", "account_id", "method", "account_number", "resolution_receipt_id"}
-    if not isinstance(association, dict) or set(association) != keys:
+def _validate_public_association(association):
+    """Validate call provenance without accepting a private CRM selector."""
+    if not isinstance(association, dict) or set(association) != _PUBLIC_ASSOCIATION_KEYS:
         raise CallsImportError("calls_association_invalid")
     binding = association["crm_binding"]
     if not _valid_binding(binding) or not _valid_account(association["account_id"], binding):
         raise CallsImportError("calls_association_invalid")
     if not _text(association["resolution_receipt_id"], maximum=128, nonempty=True):
         raise CallsImportError("calls_association_invalid")
+    if (association["method"] not in ("account_id", "account_number")
+            or (association["method"] == "account_number" and binding["crm_backend"] != "salesforce")):
+        raise CallsImportError("calls_association_invalid")
+
+
+def _validate_association(association):
+    """Validate the owner-only resolution used for private number associations."""
+    if not isinstance(association, dict) or set(association) != _PUBLIC_ASSOCIATION_KEYS | {"account_number"}:
+        raise CallsImportError("calls_association_invalid")
+    _validate_public_association({key: association[key] for key in _PUBLIC_ASSOCIATION_KEYS})
     number = association["account_number"]
     if association["method"] == "account_id":
         valid = number is None
     elif association["method"] == "account_number":
-        valid = (binding["crm_backend"] == "salesforce" and _text(number, maximum=160, nonempty=True)
+        valid = (_text(number, maximum=160, nonempty=True)
                  and len(number) <= 40 and not any(char in number for char in "\r\n\t"))
     else:
         valid = False
@@ -213,7 +224,7 @@ def parse_transcript(raw: bytes, *, format: str) -> dict[str, Any]:
                 if "-->" in first or len(block) < 2:
                     raise CallsImportError("calls_import_invalid")
                 cue_id, timing, payload = first, _TIMING.fullmatch(block[1]), block[2:]
-                if cue_id in identifiers:
+                if not _text(cue_id, nonempty=True) or cue_id in identifiers:
                     raise CallsImportError("calls_import_invalid")
                 identifiers.add(cue_id)
             if timing is None or any("-->" in line for line in payload):
@@ -306,7 +317,7 @@ def validate_imported_record(record: dict, *, account_id: str, crm_binding: dict
                 or not _int(manifest["association_generation"], 1, 2**63 - 1)
                 or not _time(manifest["called_at"], nullable=True) or not _time(manifest["imported_at"])):
             raise ValueError
-        _validate_association(manifest["association"])
+        _validate_public_association(manifest["association"])
         if manifest["association"]["crm_binding"] != crm_binding or manifest["association"]["account_id"] != account_id:
             raise ValueError
         total = manifest["total_units"]
@@ -526,7 +537,8 @@ def _metadata(manifest, import_id):
 
 
 def _request_key(parsed, excerpt, association, called_at, generation):
-    stable_association = {key: value for key, value in association.items() if key != "resolution_receipt_id"}
+    stable_association = {key: value for key, value in association.items()
+                          if key not in ("resolution_receipt_id", "account_number")}
     return _digest({"content_sha256": parsed["content_sha256"], "format": parsed["format"],
                     "parser_version": PARSER_VERSION, "association": stable_association,
                     "called_at": called_at, "association_generation": generation,
@@ -591,7 +603,8 @@ def store_import(path: Path, parsed: dict, excerpt: dict, *, association: dict,
                 manifest = {"schema_version": 1, "source": "user_supplied_export", "format": parsed["format"],
                             "parser_version": PARSER_VERSION, "content_sha256": digest,
                             "raw_byte_count": len(parsed["raw"]),
-                            "association": deepcopy(association), "association_generation": generation,
+                            "association": {key: deepcopy(association[key]) for key in _PUBLIC_ASSOCIATION_KEYS},
+                            "association_generation": generation,
                             "called_at": called_at, "imported_at": imported_at,
                             **{name: deepcopy(excerpt[name]) for name in
                                ("selection_mode", "unit_kind", "requested_range", "cited_range",

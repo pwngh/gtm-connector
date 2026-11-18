@@ -314,6 +314,34 @@ class CallsCLITests(unittest.TestCase):
                 self.error(self.import_file(*options), 2)
             self.assertFalse(self.state.exists())
 
+    def test_account_number_controls_fail_before_credentials_runtime_or_resolution(self):
+        for character in ('\x7f', '\x80', '\x85', '\x9f', '\ud800'):
+            with self.subTest(character=repr(character)), \
+                    patch.object(SalesforceReadOnlyAdapter, 'from_env',
+                                 side_effect=AssertionError('No credential load')) as credentials, \
+                    patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No state')) as runtime, \
+                    patch('gtm_connector.call_workflow.resolve_call_account',
+                          side_effect=AssertionError('No CRM resolution')) as resolve:
+                error = self.error(self.invoke('calls', 'import', str(self.export), '--crm-backend', 'salesforce',
+                                               '--account-number', 'INVENTED' + character + '001'), 2)
+                self.assertIn('AccountNumber', error['message'])
+                credentials.assert_not_called()
+                runtime.assert_not_called()
+                resolve.assert_not_called()
+            self.assertFalse(self.state.exists())
+
+    def test_whitespace_vtt_identifier_fails_before_runtime_or_resolution(self):
+        self.export = self.root / 'whitespace-id.vtt'
+        self.export.write_bytes(b'WEBVTT\n\n \t\n00:00.000 --> 00:01.000\nInvented cue.\n')
+        with patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No state')) as runtime, \
+                patch('gtm_connector.call_workflow.resolve_call_account',
+                      side_effect=AssertionError('No CRM resolution')) as resolve:
+            error = self.error(self.import_file(), 2)
+            self.assertIn('calls_import_invalid', error['message'])
+            runtime.assert_not_called()
+            resolve.assert_not_called()
+        self.assertFalse(self.state.exists())
+
     def test_invalid_binary_timing_and_limits_fail_without_state(self):
         cases = [('bad.txt', b'private-text\x00'), ('bad.vtt', b'WEBVTT\n\n00:02.000 --> 00:01.000\nprivate\n'),
                  ('large.txt', b'x' * (2 * 1024 * 1024 + 1)), ('quote.txt', b'x' * (16 * 1024 + 1))]
@@ -341,8 +369,30 @@ class CallsCLITests(unittest.TestCase):
         self.assertFalse(self.state.exists())
 
     def test_missing_offline_state_never_initializes_it(self):
-        self.error(self.invoke('calls', 'list'), 3)
-        self.assertFalse(self.state.exists())
+        for action in [('list',), ('inspect', 'note-' + 'a' * 64)]:
+            with self.subTest(action=action):
+                error = self.error(self.invoke('calls', *action), 3)
+                self.assertIn('existing import state folder', error['message'])
+                self.assertNotIn('fresh', error['message'])
+                self.assertNotIn('Repeat this command with --state-dir', error['message'])
+                self.assertEqual(error['next'], 'gtm-connector calls import --help')
+                self.assertFalse(self.state.exists())
+
+    def test_imported_brief_on_fixture_state_recovers_to_existing_imports(self):
+        from gtm_connector.runtime import Runtime
+        with Runtime(self.state):
+            pass
+        before = {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}
+        error = self.error(self.invoke('brief', 'acc-003', '--calls-backend', 'imported'), 3)
+        self.assertIn('Imported transcripts cannot reuse fixture calls', error['message'])
+        self.assertIn('existing import state folder', error['message'])
+        self.assertNotIn('fresh', error['message'])
+        self.assertNotIn('Repeat this command with --state-dir', error['message'])
+        self.assertEqual(error['next'], 'gtm-connector calls import --help')
+        self.assertEqual(before, {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()})
+        # An explicit import can initialize a new folder before daily use.
+        import_error = self.error(self.import_file(), 3)
+        self.assertIn('Repeat this command with --state-dir', import_error['message'])
 
     def test_salesforce_account_number_resolves_once_through_audited_search(self):
         reader = self.reader()
@@ -382,6 +432,34 @@ class CallsCLITests(unittest.TestCase):
             self.assertEqual(out, '')
             self.assertIn('--calls-backend', err)
             self.assertFalse(self.state.exists())
+
+    def test_imported_daily_commands_require_explicit_state_before_credentials_or_runtime(self):
+        previous = Path.cwd()
+        try:
+            os.chdir(self.root)
+            for command in (['serve'], ['brief', ACCOUNT], ['accounts'], ['account', ACCOUNT]):
+                with self.subTest(command=command), \
+                        patch.object(SalesforceReadOnlyAdapter, 'from_env',
+                                     side_effect=AssertionError('No credential load')) as credentials, \
+                        patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No state')) as runtime, \
+                        redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+                    code = main([*command, '--crm-backend', 'salesforce', '--calls-backend', 'imported', '--json'])
+                    error = self.error((code, out.getvalue(), err.getvalue()), 2)
+                    self.assertIn('--state-dir', error['message'])
+                    self.assertIn('same import state folder', error['message'])
+                    credentials.assert_not_called()
+                    runtime.assert_not_called()
+                self.assertFalse((self.root / 'var').exists())
+        finally:
+            os.chdir(previous)
+
+    def test_abbreviated_explicit_state_uses_the_existing_import(self):
+        self.success(self.import_file())
+        with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            code = main(['brief', 'acc-003', '--calls-backend', 'imported',
+                         '--state-d', str(self.state), '--json'])
+        self.assertEqual(code, 0, err.getvalue())
+        self.assertEqual(json.loads(out.getvalue())['status'], 'accepted')
 
     def test_imported_serve_labels_sources_without_reading_transcripts(self):
         class InterruptQueue(SimpleQueue):

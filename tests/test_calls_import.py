@@ -89,6 +89,12 @@ class ParsingTests(unittest.TestCase):
         parsed = imports.parse_transcript(raw, format="vtt")
         self.assert_code("calls_excerpt_too_large", imports.select_excerpt, parsed)
 
+    def test_whitespace_only_vtt_identifier_refuses_during_parsing(self):
+        for identifier in (" ", "\t", " \t ", "\u00a0", "\u2003"):
+            with self.subTest(identifier=repr(identifier)):
+                raw = f"WEBVTT\n\n{identifier}\n00:00.000 --> 00:01.000\nInvented call text.\n".encode()
+                self.assert_code("calls_import_invalid", imports.parse_transcript, raw, format="vtt")
+
     def test_invalid_inputs_and_units_are_fixed_private_errors(self):
         for raw in (b"", b" \n\t", b"\xef\xbb\xbf", b"\xff", b"a\x00", b"a\x1b", "a\u0085b".encode()):
             with self.subTest(raw=raw):
@@ -220,6 +226,38 @@ class StoreTests(unittest.TestCase):
                                   number="INVENTED-1", reassign=True)
         self.assertTrue(reassigned["reassigned"])
         self.assertEqual(self.read(second, SF_BINDING)["account_id"], second)
+
+    def test_private_selector_changes_do_not_create_a_public_manifest_or_retry_key(self):
+        self.path.unlink()
+        imports.initialize_import_store(self.path, crm_binding=SF_BINDING)
+        account = "acc-sf-001000000000001AAA"
+        first_number, next_number = "PRIVATE-INVENTED-1", "PRIVATE-INVENTED-2"
+        first = self.publish(account=account, binding=SF_BINDING, number=first_number)
+        initial_record = self.read(account, SF_BINDING)
+        initial_record["record_ref"] = "calls/call_notes/" + initial_record["id"]
+        retry = self.publish(account=account, binding=SF_BINDING, number=next_number,
+                             now=LATER, receipt="invented-receipt-two")
+        self.assertEqual(retry["import_id"], first["import_id"])
+        self.assertFalse(retry["created"])
+        self.assertEqual(retry["imported_at"], NOW)
+        self.assertEqual(retry["resolution_receipt_id"], "invented-receipt-two")
+        manifest = self.read(account, SF_BINDING)["manifest"]
+        self.assertEqual(set(manifest["association"]),
+                         {"crm_binding", "account_id", "method", "resolution_receipt_id"})
+        for number in (first_number, next_number):
+            self.assertNotIn(number, json.dumps(manifest))
+            self.assertNotIn(hashlib.sha256(number.encode()).hexdigest(), json.dumps(manifest))
+        with closing(sqlite3.connect(self.path)) as connection:
+            self.assertEqual(connection.execute("SELECT * FROM number_associations ORDER BY account_number").fetchall(),
+                             [(first_number, account), (next_number, account)])
+            self.assertEqual(connection.execute("SELECT count(*) FROM revisions").fetchone()[0], 1)
+        # Public snapshots must reject even a self-consistent attempt to add the private selector.
+        changed = deepcopy(initial_record)
+        changed["manifest"]["association"]["account_number"] = first_number
+        changed["id"] = imports._manifest_id(changed["manifest"])
+        changed["record_ref"] = "calls/call_notes/" + changed["id"]
+        self.assert_code("calls_import_corrupt", imports.validate_imported_record, changed,
+                         account_id=account, crm_binding=SF_BINDING)
 
     def test_changed_stored_raw_fails_reads_but_saved_snapshot_check_is_independent(self):
         item = self.publish()

@@ -78,7 +78,22 @@ class ExactAccountNumberTests(unittest.TestCase):
             self.number = wrong
             with self.subTest(wrong=wrong), self.assertRaises(SalesforceReadError) as failure:
                 self.reader().search_accounts(account_number="INVENTED-001")
-            self.assertEqual(failure.exception.code, "salesforce_invalid_response")
+            self.assertEqual(failure.exception.code, "salesforce_invalid_response" if wrong is None
+                             else "salesforce_account_number_ambiguous")
+        self.count, self.number = 2, "INVENTED-001"
+
+        def case_variants(request):
+            response = self.respond(request)
+            if request.url.params["q"] != ORG_QUERY:
+                document = response.json()
+                document["records"][1]["AccountNumber"] = "invented-001"
+                return httpx2.Response(200, json=document)
+            return response
+
+        reader = SalesforceReadOnlyAdapter(ORIGIN, TOKEN, transport=httpx2.MockTransport(case_variants))
+        with self.assertRaises(SalesforceReadError) as failure:
+            reader.search_accounts(account_number="INVENTED-001")
+        self.assertEqual(failure.exception.code, "salesforce_account_number_ambiguous")
 
     def test_invalid_or_combined_selectors_make_no_request(self):
         for value in ("", " ", "x" * 41, "x\n", "x\x00", "x\x7f", "\ud800", 7, [], False):
@@ -114,6 +129,41 @@ class ExactAccountNumberTests(unittest.TestCase):
                 self.assertEqual([request.url.params["q"] for request in self.requests][0], ORG_QUERY)
                 self.assertTrue(all("Contact" not in request.url.params["q"] and
                                     "Contract" not in request.url.params["q"] for request in self.requests))
+
+    def test_calls_only_result_never_discloses_the_private_crm_account_number(self):
+        with tempfile.TemporaryDirectory() as directory:
+            reader = self.reader()
+            with Runtime(Path(directory) / "state", crm_reader=reader, calls_backend="imported") as runtime, \
+                    LocalClient(runtime.config) as client:
+                association = resolve_call_account(runtime, account_number=self.number)
+                parsed = parse_transcript(b"Invented authorized transcript excerpt.", format="txt")
+                store_import(runtime.imports_path, parsed, select_excerpt(parsed), association=association,
+                             called_at=None, imported_at="2027-01-15T12:00:00Z")
+                crm = client.authorize(["crm:read"])
+                lookup = client.call(crm, "search_accounts", {"account_number": self.number}).json()["result"]
+                self.assertEqual(lookup["structuredContent"]["records"][0]["account_number"], self.number)
+                self.assertEqual(reader.http_requests, 3)  # One preflight, two authorized exact lookups.
+                calls = client.authorize(["calls:read"])
+                denied = client.call(calls, "search_accounts", {"account_number": self.number})
+                self.assertEqual(denied.status_code, 403)
+                response = client.call(calls, "read_call_notes", {"account_id": ACCOUNT_ID})
+                self.assertEqual(response.status_code, 200)
+                result = response.json()["result"]
+                self.assertFalse(result.get("isError"), result)
+                self.assertEqual(reader.http_requests, 3)
+                self.assertNotIn(self.number, json.dumps(result["content"]))
+                self.assertNotIn(self.number, json.dumps(result["structuredContent"]))
+                record = result["structuredContent"]["records"][0]
+                self.assertEqual(set(record["manifest"]["association"]),
+                                 {"crm_binding", "account_id", "method", "resolution_receipt_id"})
+                self.assertEqual(record["manifest"]["association"]["method"], "account_number")
+                self.assertEqual(runtime.connector.audit.read()[-1]["rows"], [record["record_ref"]])
+                self.assertTrue(any(row["arguments"] == {"account_number": self.number}
+                                    for row in runtime.connector.audit.read()))
+                with closing(sqlite3.connect(runtime.imports_path)) as connection:
+                    self.assertEqual(connection.execute("SELECT * FROM number_associations").fetchall(),
+                                     [(self.number, ACCOUNT_ID)])
+                    self.assertNotIn(self.number, connection.execute("SELECT manifest FROM revisions").fetchone()[0])
 
 
 class ImportedGatewayTests(unittest.TestCase):

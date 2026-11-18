@@ -49,6 +49,7 @@ _ERROR_CODES = frozenset({
     "salesforce_unavailable", "salesforce_timeout", "salesforce_invalid_response",
     "salesforce_result_limit", "salesforce_pagination_invalid",
     "salesforce_environment_mismatch", "salesforce_api_disabled", "salesforce_schema_unavailable",
+    "salesforce_account_number_ambiguous",
 })
 
 
@@ -460,8 +461,11 @@ class SalesforceReadOnlyAdapter:
             rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account{where} ORDER BY Id LIMIT {limit}",
                                budget, max_rows=max_rows)
             accounts = [self._account(row) for row in rows]
-            if account_number is not None and any(row["account_number"] != account_number for row in accounts):
-                raise SalesforceReadError("salesforce_invalid_response")
+            if account_number is not None:
+                if any(row["account_number"] is None for row in accounts):
+                    raise SalesforceReadError("salesforce_invalid_response")
+                if any(row["account_number"] != account_number for row in accounts):
+                    raise SalesforceReadError("salesforce_account_number_ambiguous")
             return accounts
 
     def probe_accounts(self):

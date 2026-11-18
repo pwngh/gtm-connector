@@ -53,7 +53,7 @@ def valid_account_search(query, account_number):
         return True
     if (query != "" or not isinstance(account_number, str) or not account_number.strip()
             or len(account_number) > 40
-            or any(ord(character) < 32 or ord(character) == 127 for character in account_number)):
+            or any(ord(character) < 32 or 127 <= ord(character) <= 159 for character in account_number)):
         return False
     try:
         account_number.encode("utf-8")

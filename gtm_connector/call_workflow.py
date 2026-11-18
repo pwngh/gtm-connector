@@ -6,6 +6,7 @@ import re
 import uuid
 
 from .calls_import import CallsImportError
+from .tool_definitions import valid_account_search
 
 
 def resolve_call_account(runtime, *, account_id=None, account_number=None):
@@ -20,9 +21,7 @@ def resolve_call_account(runtime, *, account_id=None, account_number=None):
     if (account_id is None) == (account_number is None):
         raise ValueError("Select exactly one --account or --account-number. Run gtm-connector calls --help.")
     if account_number is not None:
-        if (backend != "salesforce" or not isinstance(account_number, str)
-                or not account_number.strip() or len(account_number) > 40
-                or any(ord(char) < 32 or ord(char) == 127 for char in account_number)):
+        if backend != "salesforce" or not valid_account_search("", account_number):
             raise ValueError("Use a valid --account-number with Salesforce. Run gtm-connector calls --help.")
         tool, arguments = "search_accounts", {"account_number": account_number}
     else:
@@ -49,6 +48,8 @@ def resolve_call_account(runtime, *, account_id=None, account_number=None):
                 if backend == "salesforce":
                     for code in _ERROR_CODES:
                         if message == f"Error executing tool {tool}: {code}":
+                            if code == "salesforce_account_number_ambiguous":
+                                raise CallsImportError("calls_account_ambiguous")
                             raise SalesforceReadError(code)
                 if message == "Error executing tool get_account: account not found":
                     raise CallsImportError("calls_account_not_found")

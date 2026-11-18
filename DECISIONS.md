@@ -15,6 +15,13 @@ and performs no CRM query. AccountNumber uses a fixed exact equality query with
 at most two matches; ambiguity cannot be resolved by company name or domain.
 The existing native account-detail read is the fallback when no usable number
 exists. Preserve its three-GET cost and existing child-record bounds.
+Salesforce equality can return case variants; refuse non-literal returned
+numbers and direct the owner to a canonical ID instead of treating them as a
+provider outage or inferring a unique match outside the two-row bound. Keep
+the raw selector only in private reassignment state and the owner CRM receipt.
+The returned transcript manifest omits it because `calls:read` must not reveal
+the CRM's AccountNumber. Retry identity uses the resolved account and selection,
+not the raw selector.
 
 Pin imported mode and its CRM identity in private `calls-source.json` under the
 state lock. Use separate `imports.sqlite3` with no seeded fixture notes. A source
@@ -22,6 +29,10 @@ mode change, changed org, malformed binding, or demo-kit binding conflict refuse
 before source initialization. Local list and inspect commands validate saved
 state without starting a server or contacting a provider. Their saved context
 is not a current connection check.
+Require an explicit state folder with imported mode on daily commands. A missing
+flag must not initialize the ordinary fixture folder as imported state. Local
+inspection directs recovery to existing import state; it cannot initialize a
+fresh folder by repeating an inspection command.
 
 Keep original bytes and immutable revision manifests in one SQLite transaction,
 with one active excerpt per account. A deterministic request key makes identical

@@ -271,6 +271,9 @@ the audited gateway before committing an association. The exact Salesforce
 AccountNumber lookup is fixed, escaped, and bounded to two matches. There is no
 name-based inference. A missing, ambiguous, changed, or unreceipted association
 cannot publish an import. No provider record is written.
+The raw AccountNumber selector stays in private reassignment state and owner
+CRM audit arguments. The public transcript manifest omits it, so a calls-only
+grant does not reveal that CRM field through import provenance.
 
 Imported mode pins the selected CRM identity and uses private `imports.sqlite3`
 under the existing state lock. It does not seed fixture call notes. Mode and
@@ -287,7 +290,8 @@ Ordinary tools, briefs, and inspection do not expose unselected content. Explici
 local `calls inspect --full` returns the complete original; it is not an MCP tool.
 
 Workflow 4 validates the selected manifest, canonical ID, account binding, and
-matching committed receipt. Saved checks do not reopen the original bytes, prove
+the brief's matching committed call-read receipt. The association receipt ID
+is carried as provenance. Saved checks do not reopen the original bytes, prove
 source truth, or authenticate a provider or speaker. An owner able to rewrite
 all snapshots and receipts can alter that evidence. Reassignment creates a new
 association revision and preserves accepted historical snapshots. Unknown call

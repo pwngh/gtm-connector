@@ -51,7 +51,8 @@ CALL_FAILURES = {
     "calls_reassign_required": "This content belongs to another account. Use --reassign only to move that association.",
     "calls_association_changed": "AccountNumber now resolves to another account. Review it before using --reassign.",
     "calls_source_mismatch": "The calls mode or CRM binding differs from this state. Use its original selection.",
-    "calls_account_ambiguous": "More than one account uses this AccountNumber. Select its canonical ID with --account.",
+    "calls_account_ambiguous": "AccountNumber did not resolve to one literal match. "
+                               "Select its canonical ID with --account.",
     "calls_import_corrupt": "The import failed integrity checks. Retain this state and reimport into a fresh folder.",
     "calls_association_invalid": "The CRM response and audit receipt did not agree. No transcript was imported.",
     "calls_association_failed": "The authorized CRM read did not complete. No transcript was imported.",
@@ -83,6 +84,14 @@ class ParserError(ValueError):
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         raise ParserError(message)
+
+
+class StateDirectory(argparse.Action):
+    """Distinguish an explicit folder option from the parser's default."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        namespace.state_dir_explicit = True
 
 
 def _calls_commands(command):
@@ -152,11 +161,11 @@ def build_parser():
             command.add_argument("--db", type=Path, default=Path("var/v2/crm.sqlite3") if name == "seed" else None,
                                  help="Read or seed this local CRM database (default: var/v2/crm.sqlite3).")
             if name != "seed":
-                command.add_argument("--state-dir", type=Path,
+                command.add_argument("--state-dir", type=Path, action=StateDirectory,
                                      help="Use this private Salesforce state folder (default: var/salesforce).")
         elif name not in ("evaluate", "completion", "salesforce"):
             state_dir = {"demo": "var/renewal-demo", "verify": "var/verification"}.get(name, "var/v2")
-            command.add_argument("--state-dir", type=Path, default=Path(state_dir),
+            command.add_argument("--state-dir", type=Path, default=Path(state_dir), action=StateDirectory,
                                  help=f"Use this private state folder (default: {state_dir}).")
         if name == "accounts":
             command.add_argument("--query", default="", help="Match this literal part of an account name.")
@@ -168,7 +177,8 @@ def build_parser():
                                  help="Select local fixtures or the read-only Salesforce CRM reader.")
         if name in ("serve", "brief", "accounts", "account"):
             command.add_argument("--calls-backend", choices=("fixture", "imported"),
-                                 help="Select demo notes or imported transcripts (default: fixture).")
+                                 help="Select demo notes or imported transcripts (default: fixture). "
+                                      "Imported transcripts require an explicit --state-dir.")
         if name in ("serve", "brief"):
             command.add_argument("--salesforce-demo-binding", type=Path,
                                  help="Load private imported account bindings for invented call and Slack fixtures.")
@@ -426,13 +436,10 @@ def _calls_arguments(args):
     if args.account_number is not None:
         if args.crm_backend != "salesforce":
             invalid("--account-number requires --crm-backend salesforce.")
-        if (not args.account_number.strip() or len(args.account_number) > 40
-                or any(ord(character) < 32 or ord(character) == 127 for character in args.account_number)):
-            invalid("AccountNumber must be nonblank, at most 40 characters, and contain no control characters.")
-        try:
-            args.account_number.encode("utf-8")
-        except UnicodeError:
-            invalid("AccountNumber must contain valid Unicode text.")
+        from .tool_definitions import valid_account_search
+        if not valid_account_search("", args.account_number):
+            invalid("AccountNumber must be nonblank valid Unicode, at most 40 characters, "
+                    "and contain no control characters.")
     if args.account is not None and args.account.startswith("acc-sf-") != (args.crm_backend == "salesforce"):
         invalid("The canonical account ID must match the selected CRM backend.")
     called_at = None
@@ -591,6 +598,9 @@ def _run(args, argv):
     if args.command in ("serve", "brief", "accounts", "account"):
         if args.command in ("accounts", "account") and args.crm_backend == "sqlite" and args.calls_backend is not None:
             raise ValueError("--calls-backend is available only with --crm-backend salesforce for account inspection.")
+        if args.calls_backend == "imported" and not getattr(args, "state_dir_explicit", False):
+            raise ValueError("--calls-backend imported requires an explicit --state-dir. "
+                             "Select the same import state folder, such as --state-dir var/imported-calls.")
         args.calls_backend = args.calls_backend or "fixture"
         if getattr(args, "salesforce_demo_binding", None) is not None and args.calls_backend == "imported":
             raise ValueError("--salesforce-demo-binding cannot be combined with --calls-backend imported.")
@@ -822,15 +832,25 @@ def _failure(exc, args):
             suffix += 1
         next_command = shlex.join(["gtm-connector", "demo", "--state-dir", str(fresh)])
     if getattr(exc, "code", None) == "source_identity_mismatch":
-        imported = command == "calls" or getattr(args, "calls_backend", None) == "imported"
-        folder = "imported-calls-fresh" if imported else "salesforce-fresh"
-        fresh = args.state_dir.parent / folder
-        suffix = 2
-        while os.path.lexists(fresh):
-            fresh = args.state_dir.parent / f"{folder}-{suffix}"
-            suffix += 1
-        message = (f"source_identity_mismatch: {message} "
-                   f"Repeat this command with --state-dir {shlex.quote(str(fresh))}. Existing files are retained.")
+        if ((command == "calls" and args.action in ("list", "inspect"))
+                or getattr(args, "calls_backend", None) == "imported"):
+            # Runtime's fixed first sentence explains the failure; its generic
+            # fresh-state advice applies to import, not existing-source use.
+            message = message.split(". ", 1)[0].rstrip(".") + "."
+            message = (f"source_identity_mismatch: {message} "
+                       "Select the original existing import state folder with --state-dir. "
+                       "To start importing, run calls import --help. Existing files are retained.")
+            next_command = "gtm-connector calls import --help"
+        else:
+            imported = command == "calls" or getattr(args, "calls_backend", None) == "imported"
+            folder = "imported-calls-fresh" if imported else "salesforce-fresh"
+            fresh = args.state_dir.parent / folder
+            suffix = 2
+            while os.path.lexists(fresh):
+                fresh = args.state_dir.parent / f"{folder}-{suffix}"
+                suffix += 1
+            message = (f"source_identity_mismatch: {message} "
+                       f"Repeat this command with --state-dir {shlex.quote(str(fresh))}. Existing files are retained.")
     if "audit database not found" in message:
         next_command = f"gtm-connector demo --state-dir {shlex.quote(str(args.state_dir))}"
     elif "database not found" in message:

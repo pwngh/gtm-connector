@@ -20,8 +20,11 @@ gtm-connector brief acc-007 --calls-backend imported --state-dir var/imported-ca
 
 Replace `meeting.vtt` with your file and `IMPORT_ID` with the returned import ID.
 `calls import` uses `var/imported-calls` by default. The daily commands retain
-their existing defaults, so give `brief` or `serve` that same state folder and
-`--calls-backend imported`. This separates importing data from using it.
+their existing defaults. Imported mode requires an explicit `--state-dir` for
+`brief`, `serve`, and Salesforce account inspection, so give them that same
+folder and `--calls-backend imported`. This prevents an incomplete imported
+command from converting the ordinary fixture state. Importing data and using
+it remain separate operations.
 
 The import command resolves the account through a local `crm:read` grant and
 audited MCP request, then commits the selected local revision. It writes no CRM
@@ -44,11 +47,19 @@ alias, and the canonical account ID returned by import. Select `developer` or
 
 AccountNumber is a standard Salesforce field, but it can be blank or duplicated.
 The exact lookup reads at most two matches and compares the returned number
-verbatim. Zero matches, ambiguity, and a changed association refuse clearly.
+verbatim. Salesforce text equality can ignore letter case, so a returned
+non-literal number refuses with a direction to use the canonical account ID.
+The two-row bound cannot prove a unique literal match among case variants.
+Zero matches, ambiguity, and a changed association refuse clearly.
 No company-name similarity or email-domain join is used. If AccountNumber is
 unavailable, pass `--account acc-sf-NATIVE_ID` using an ID from `accounts` instead.
 That fallback uses the existing account-detail read, including its Contact and
 Contract bounds; it costs three record GETs rather than the exact lookup's one.
+
+The raw AccountNumber selector stays in private reassignment state and the
+owner's CRM audit arguments. It is not copied into the transcript manifest
+returned under `calls:read`. See Salesforce's
+[comparison rules](https://developer.salesforce.com/docs/platform/salesforce-soql-sosl/guide/sforce-api-calls-soql-select-comparisonoperators.html).
 
 The imported state is tied to the validated CRM identity. Repointing an alias
 to another org cannot reuse it. Fixture and imported calls have separate modes;

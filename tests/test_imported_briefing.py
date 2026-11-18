@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sqlite3
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -40,6 +41,29 @@ class ImportedBriefingTests(unittest.TestCase):
         result = store_import(runtime.imports_path, parsed, excerpt, association=association,
                               called_at=None, imported_at=IMPORTED_AT, reassign=reassign)
         return result
+
+    def test_invalid_exact_selector_never_opens_the_association_client(self):
+        runtime = SimpleNamespace(crm_backend="salesforce", calls_backend="imported", config={})
+        for selector in ("A\u0080", "A\u009f", "\ud800"):
+            with self.subTest(selector=repr(selector)), \
+                    patch("gtm_connector.client.LocalClient", side_effect=AssertionError("No CRM client")) as client:
+                with self.assertRaises(ValueError):
+                    resolve_call_account(runtime, account_number=selector)
+                client.assert_not_called()
+
+    def test_case_insensitive_provider_match_requires_canonical_account_selection(self):
+        fixture = sf_fixtures.SalesforceEnvironmentTests()
+        fixture.setUp()
+        reader = fixture.adapter("production")
+        with Runtime(self.state, crm_reader=reader, calls_backend="imported") as runtime:
+            with self.assertRaises(CallsImportError) as failure:
+                resolve_call_account(runtime, account_number="invented-account-001")
+            self.assertEqual(failure.exception.code, "calls_account_ambiguous")
+            receipt, = runtime.connector.audit.read()
+            self.assertEqual((receipt["tool"], receipt["status"], receipt["rows"]),
+                             ("search_accounts", "error", []))
+            self.assertEqual(list_imports(runtime.imports_path, crm_binding=runtime.calls_binding)["imports"], [])
+            self.assertEqual(reader.http_requests, 6)
 
     def test_real_gateway_quotes_only_selected_units_and_preserves_unknown_call_time(self):
         with Runtime(self.state, calls_backend="imported") as runtime:

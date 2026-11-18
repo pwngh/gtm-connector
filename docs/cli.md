@@ -99,8 +99,9 @@ briefs use `2027-01-15`. A missing eligible Contract refuses with
 `calls import` reads a user-selected TXT or VTT export into separate private
 state. `calls list` and `calls inspect` inspect that saved state without a CRM
 connection. Daily `serve` and `brief` use `--calls-backend imported` with the same
-`--state-dir`; Salesforce account inspection also accepts that mode when using
-the imported state. SQLite's direct account `--db` reads retain their existing
+explicit `--state-dir`; Salesforce account inspection has the same requirement
+in imported mode. Omitting the folder refuses before credentials or state are
+opened, preserving the ordinary fixture defaults. SQLite's direct account `--db` reads retain their existing
 behavior. [Transcript imports](calls.md) defines ranges, limits, identity,
 reassignment, and the distinction between an excerpt and a complete original.
 
