@@ -92,6 +92,8 @@ def build_parser():
         if name in ("serve", "brief"):
             command.add_argument("--crm-backend", choices=("sqlite", "salesforce"), default="sqlite",
                                  help="Select local fixtures or the read-only Salesforce CRM reader.")
+            command.add_argument("--salesforce-demo-binding", type=Path,
+                                 help="Load private imported account bindings for invented call and Slack fixtures.")
         if name in ("serve", "brief", "salesforce"):
             command.add_argument("--sf-org", help="Read Salesforce credentials from this signed-in sf CLI alias.")
         if name == "salesforce":
@@ -242,9 +244,15 @@ def _run(args, argv):
         return {"shell": args.shell, "script": generate(build_parser(), args.shell)}
     # Dependencies belong to the command that uses them, after help is handled.
     crm_reader = None
+    demo_binding = None
     if args.command in ("serve", "brief"):
         if args.sf_org is not None and args.crm_backend != "salesforce":
             raise ValueError("--sf-org requires --crm-backend salesforce")
+        if args.salesforce_demo_binding is not None:
+            if args.crm_backend != "salesforce":
+                raise ValueError("--salesforce-demo-binding requires --crm-backend salesforce")
+            from .salesforce_demo import load_binding
+            demo_binding = load_binding(args.salesforce_demo_binding)
         if args.crm_backend == "salesforce":
             from .salesforce import SalesforceReadOnlyAdapter
             crm_reader = (SalesforceReadOnlyAdapter.from_sf(args.sf_org) if args.sf_org is not None
@@ -297,7 +305,7 @@ def _run(args, argv):
         as_of = args.as_of
         if as_of is None:
             as_of = date.today().isoformat() if crm_reader is not None else DEMO_AS_OF
-        with Runtime(args.state_dir, crm_reader=crm_reader) as runtime:
+        with Runtime(args.state_dir, crm_reader=crm_reader, demo_binding=demo_binding) as runtime:
             return create_brief(runtime, args.account_id, include_calls=not args.without_calls,
                                 as_of=as_of,
                                 adapter=adapter, include_slack=args.with_slack)
@@ -319,14 +327,24 @@ def _run(args, argv):
                 _discard_output(sys.stdout)
                 message = "Event output closed. The server continues until Ctrl-C."
                 _server_notice(message, args.json)
-        with Runtime(args.state_dir, crm_reader=crm_reader, on_call=events.put) as runtime:
+        with Runtime(args.state_dir, crm_reader=crm_reader, on_call=events.put, demo_binding=demo_binding) as runtime:
             ready = {"type": "ready", "resource": runtime.config["resource"], "issuer": runtime.config["issuer"],
                      "crm_backend": runtime.crm_backend, "owner_config": str(runtime.directory / "owner.json"),
-                     "state_dir": str(runtime.directory), "granted_scopes": []}
+                     "state_dir": str(runtime.directory), "granted_scopes": [],
+                     "sources": {"crm": "salesforce" if runtime.crm_backend == "salesforce" else "demo_fixture",
+                                 "calls": "demo_fixture", "slack": "demo_fixture"}}
+            if demo_binding is not None:
+                ready["demo_kit_id"] = demo_binding.kit_id
             if args.json:
                 print(json.dumps(ready), flush=True)
             else:
+                sources = ("CRM uses selected Salesforce data; call notes and Slack use demo fixtures."
+                           if runtime.crm_backend == "salesforce" else
+                           "CRM, call notes, and Slack use demo fixtures.")
+                if demo_binding is not None:
+                    sources += f" The bound demo kit is {demo_binding.kit_id}."
                 _server_notice(f"Connector ready at {ready['resource']}\nBackend: {runtime.crm_backend}\n"
+                               f"Sources: {sources}\n"
                                f"State folder: {runtime.directory}\n"
                                "Granted scopes: none. Each client needs an explicit grant.\n"
                                "Connect: gtm-connector connect inspector --scope crm:read "

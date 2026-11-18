@@ -63,7 +63,7 @@ def require_distinct_databases(paths):
 class Connector:
     def __init__(self, crm_path, calls_path, audit_path, authority,
                  rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None,
-                 crm_reader=None, on_call=None):
+                 crm_reader=None, on_call=None, demo_binding=None):
         if rate_limit < 1 or window_seconds <= 0:
             raise ValueError("rate limits must be positive")
         paths = [Path(p).resolve() for p in (crm_path, calls_path, audit_path)]
@@ -73,8 +73,11 @@ class Connector:
         self.crm_path, self.calls_path = paths[:2]
         self.slack_path = paths[3]
         self.crm_reader = crm_reader
+        self.demo_binding = demo_binding
         self.on_call = on_call
         self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
+        if demo_binding is not None and self.crm_backend != "salesforce":
+            raise ValueError("Salesforce demo bindings require the Salesforce CRM backend.")
         self.audit = AuditLog(paths[2])
         self.authority = authority
         self.rate_limit, self.window_seconds, self.clock = rate_limit, window_seconds, clock
@@ -147,6 +150,11 @@ class Connector:
                     account = store.get_account(conn, account_id)
             if account is None:
                 raise ToolError("account not found")
+            if self.demo_binding is not None:
+                try:
+                    self.demo_binding.validate_account(account)
+                except ValueError:
+                    raise ToolError("salesforce_demo_binding_mismatch") from None
             contacts = account.pop("contacts")
             contracts = account.pop("contracts", [])
             return _data("crm", _records("crm", "accounts", [account]) +

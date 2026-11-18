@@ -2,11 +2,15 @@
 
 The optional Salesforce backend reads standard Account, Contact, Opportunity,
 and Contract records through REST v68.0. It can produce a cited renewal-planning
-brief without custom fields. Call notes and Slack remain separate local fixtures;
-there is no mapping from an org account to those fixtures yet.
+brief without custom fields. Call notes and Slack remain separate local fixtures.
+The optional [demo kit](salesforce-demo.md) binds invented context to imported
+accounts through their standard AccountNumber values. It reads no call provider
+or live Slack workspace.
 
-The tests use invented HTTP responses and a fake `sf` executable. No live org
-has been verified. Default demos and evaluation still use invented local records.
+The tests use invented HTTP responses and a fake `sf` executable. A separate
+owner-authorized lead-agent run exercised the live demo kit, as described below.
+An owner-provided verification report remains pending. Default demos and
+evaluation still use invented local records.
 
 ## Use an existing CLI login
 
@@ -98,9 +102,10 @@ An account without a dated eligible Contract refuses with
 drafting. Run `gtm-connector salesforce check --sf-org gtm-de` for the missing
 setup or data. Required date and category disclosures cannot be omitted or
 rewritten in a checked candidate. `--with-slack` adds the existing independent
-Slack read; until an explicit fixture mapping exists, local call and Slack
-reads for these namespaced IDs are empty. Their audit receipts still distinguish
-empty results from denied grants.
+Slack read. Without an explicit demo binding, local call and Slack reads for
+these namespaced IDs are empty. A bound demo supplies invented local context;
+its audit receipts still distinguish returned records, empty results, and denied
+grants.
 
 Ctrl-C stops a running server. Local MCP grants have a separate five-minute
 expiry. Refreshing Salesforce credentials does not refresh a local MCP grant.
@@ -123,8 +128,8 @@ Contracts and contacts share the existing `get_account` tool receipt.
 
 The adapter validates IDs, account associations, canonical dates, known status
 categories, and a nullable signed 32-bit integer term. It preserves custom
-status labels and nullable values. `AccountNumber` is available for a future
-explicit fixture mapping; it does not create a join by itself.
+status labels and nullable values. `AccountNumber` supports the explicit demo
+binding below; returning the field alone does not create a join.
 
 `Account.AnnualRevenue` is not ARR, and opportunity `CloseDate` is not a renewal
 date. Briefs must state that ARR and CRM renewal risk are unmapped. The adapter
@@ -136,6 +141,67 @@ inside the existing `schema_version: 1` snapshot. Fixture evidence keeps its
 existing versions and evaluation claims. A saved brief contains source fields,
 record references, receipt copies, and the planning date. Keep that private
 state out of Git; the ordinary brief is not a shareable sanitized report.
+
+## Bind the invented demo book
+
+The [demo-kit guide](salesforce-demo.md) covers exporting the packaged assets,
+one `sf data import tree --plan` command, binding its JSON receipt, creating a
+brief, recording it privately, and one cleanup command. The book has three
+invented accounts and one Contact, Opportunity, and Draft Contract per account,
+for twelve imported records. Its local notes and Slack messages include a
+procurement disagreement, a stale note, and an injected instruction quoted as
+data. One account lacks an industry, one contact lacks a title, and one
+opportunity has no amount. These unknown values remain visible.
+
+The first Draft Contract supplies StartDate `2026-02-01` and ContractTerm `12`.
+No import record supplies EndDate. The owner-run brief helper uses the fixed
+planning date `2027-01-15`; it still reads the actual EndDate returned by
+Salesforce. Ordinary Salesforce `brief` continues to default to today unless
+`--as-of` is given.
+
+The binding validates a complete successful import receipt against the packaged
+manifest's references and expected object ID prefixes. The CLI's import-plan
+result can label nested records with the root Account type, so that label is
+not the authority for child identity. The private binding records all twelve
+imported IDs, three AccountNumber associations, and the manifest digest.
+It is an owner assertion, not proof of which org produced the receipt.
+
+Pass the binding explicitly to the read-only server or brief:
+
+```sh
+gtm-connector serve --crm-backend salesforce --sf-org gtm-de --salesforce-demo-binding var/salesforce-demo/binding.json --state-dir var/salesforce-demo/run
+```
+
+The first bound run needs an empty state folder. A private source-profile marker
+pins the kit, manifest digest, and binding digest while the server holds its
+state lock. A different binding, default fixture mode, or preexisting unmarked
+state refuses instead of mixing local source rows. Complete existing note and
+message sets preserve owner edits; partial or mismatched sets refuse.
+
+The authorized `get_account` result must match the selected bound AccountNumber
+in both directions. This check adds no GET. Call-only or Slack-only clients read
+their independently granted local source without querying Salesforce. An
+unrelated account has no demo notes or messages. The binding does not add a
+scope, grant a tool, or establish Salesforce user identity.
+
+The separate owner helper imports and deletes through `sf`; the installed
+connector still has no Salesforce write path. Cleanup selects only imported
+IDs, checks supplied fields and parent associations for all four object types,
+requires the kit contracts to remain Draft, and inspects described cascading
+and restricted child relationships before its first delete. It permits a fixed
+list of system history records and owner-generated sharing rows. Unexpected
+children or other share causes refuse cleanup. Deletes run children before
+accounts, then the helper checks that the imported IDs are absent.
+
+These reads and deletes are separate operations. Preflight cannot exclude
+concurrent edits, hidden relationships, or trigger effects, and a later failure
+can leave some records already removed. There is no transaction or race-safety
+guarantee. Use the intended Developer Edition org with sufficient read access,
+stop concurrent changes, and retain the receipt and binding until cleanup is
+complete. The helper never broadens a failed lookup to a name or prefix delete.
+Recordings, snapshots, receipts, and bindings can contain org identifiers even
+when the source names were invented; keep them in ignored private storage and
+review any sharing yourself.
 
 ## Run the shareable setup check
 
@@ -247,7 +313,19 @@ use a fake CLI on PATH to check capture, refresh, pinned origins, fixed errors,
 and original budgets. [Gateway tests](../tests/test_salesforce_gateway.py) and
 [briefing tests](../tests/test_salesforce_briefing.py) check local HTTPS scopes,
 receipts, standard Contract citations, and required disclosures. These results
-establish fake-response behavior, not production compatibility or a live org test.
+establish fake-response behavior, not production compatibility.
+
+An owner-authorized lead-agent run on November 17, 2026 imported the twelve-record
+book and bound all three accounts. Its accepted brief contained thirteen checked
+lines, four CRM records, one local call note, one local Slack message, and four
+audit receipts. It retained the Draft disclosure and Salesforce-returned
+EndDate `2027-01-31`. A private recording and provenance file completed with
+mode-0600 permissions. Cleanup preflight covered all four object types; the
+helper used 74 captured CLI commands, confirmed twelve deletes, and verified
+zero remaining imported records. These command counts are not total API quota
+usage. [Run details and timings](salesforce-demo.md) state the prerequisites and
+limits. No live call provider, Slack workspace, or hosted assistant was used,
+and no org-bearing artifact was committed. Owner verification remains pending.
 
 The local owner can grant CRM access, and the upstream token may allow more than
 reads. Audit arguments and record references can identify org records. Saved

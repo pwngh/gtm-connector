@@ -179,8 +179,9 @@ Account, contact, opportunity, and contract fields reach the authorized client
 as untrusted data. `source_id` and namespaced `crm/...` references preserve
 provenance. A Salesforce snapshot uses workflow version 3 inside schema version
 1; fixture workflows remain unchanged. No record text can request an additional
-tool or grant. AccountNumber is returned but creates no implicit fixture join.
-Calls and Slack still use isolated mocks and independent scopes.
+tool or grant. AccountNumber creates no implicit join; the demo kit requires an
+explicit private import binding. Calls and Slack still use isolated invented
+sources and independent scopes.
 
 Audit arguments can contain real search terms and IDs. Returned refs persist,
 but response bodies and the upstream token are not copied to the audit. A
@@ -205,8 +206,84 @@ mode it uses JSON lines while stdout contains one final report.
 [Credential tests](tests/test_sf_credentials.py) use only a fake CLI on PATH;
 [adapter tests](tests/test_salesforce.py) use invented HTTP responses. The
 [gateway tests](tests/test_salesforce_gateway.py) exercise scope denial, audit
-failure, disabled writes, and accepted reads through local HTTPS. No live org
-has been verified. See [setup, report shape, and limits](docs/salesforce.md).
+failure, disabled writes, and accepted reads through local HTTPS. The separate
+lead-agent live demo observation is recorded below; an owner-provided check
+report is still required for verification. See [setup, report shape, and
+limits](docs/salesforce.md).
+
+## Bound Salesforce demo kit
+
+The packaged demo plan contains three invented Accounts, each with one Contact,
+Opportunity, and Draft Contract, twelve records in total. Its local call and
+Slack fixtures use standard AccountNumber values as public fixture keys. A
+successful import receipt supplies the private Salesforce IDs. Binding requires
+exactly the declared references, distinct IDs with the expected object prefixes,
+and complete account associations. The import-plan type column can carry the
+root Account type for nested records, so it cannot determine a child's type.
+Asset hashes and the binding digest detect a different local kit or mapping;
+they do not authenticate an org or turn the owner-supplied receipt into a signed
+attestation.
+
+Binding files are bounded regular mode-0600 files owned by the local user.
+Writes replace a private file atomically. A source-profile marker under the
+state lock pins the kit and binding before source initialization. Bound mode
+requires fresh state initially and refuses a changed profile or default-fixture
+reuse. Each source validates its complete row identities and associations.
+These checks prevent accidental mixing; the local owner can still alter the
+files. They do not add multi-user isolation or cross-database crash atomicity.
+
+The gateway compares a bound AccountNumber with the already authorized
+get_account result and refuses a mismatch without an additional CRM query.
+Calls and Slack use their own local stores and grants, so reading only those
+fixtures does not require or imply CRM access. The bridge is to invented local
+context, not a live Slack workspace or call-recording service. All fixture text,
+including the injection note, remains untrusted data. The usual receipts and
+citation checks still apply.
+
+The owner-run helper under scripts is separate from the installed connector.
+Its import and removal commands use Salesforce CLI writes at the owner's request;
+the connector stays GET-only. Cleanup reads only the imported IDs, verifies the
+kit's supplied fields, three intentionally null fields, and parent associations across all four object types,
+and requires imported Contracts to remain Draft. It inspects described
+cascading and restricted relationships before starting deletes. The fixed
+AccountHistory, ContactHistory, OpportunityHistory, OpportunityFieldHistory,
+and ContractHistory objects are treated as system-derived history. AccountShare,
+ContactShare, and OpportunityShare rows are allowed only with RowCause Owner.
+Checked fields must be present in the response. Fields outside the kit are not
+compared. Ordinary children must have passed the direct inventory and field
+checks and be scheduled for deletion. Other related records or sharing causes
+refuse cleanup. No broad name, marker,
+or prefix query substitutes for a missing imported ID.
+
+Cleanup then deletes Contact, Opportunity, Contract, and Account records in
+that order and checks that the imported IDs are absent. Preflight and delete
+are separate calls. Changes between them, restricted visibility, and triggers
+can invalidate a prior check or cause effects outside its view. There is no
+transaction or concurrency guarantee. A failure after deletion starts can
+leave a partial cleanup; keep the private binding for reconciliation. The
+operator must use the intended Developer Edition org, sufficient read access,
+and a quiet demo book. The helper does not establish exclusive ownership of
+all server-side relationships.
+
+Import receipts, bindings, local evidence, and recordings can contain org IDs,
+record IDs, and source data. They stay under ignored private var storage and
+have manual retention. The recording script does not commit or publish a cast.
+The owner decides whether a reviewed recording may be shared. This kit adds no
+runtime dependency. [Kit and binding tests](tests/test_salesforce_demo.py) use
+invented IDs; [runtime tests](tests/test_salesforce_demo_runtime.py) use invented
+HTTP responses and local HTTPS.
+
+An owner-authorized lead-agent run on November 17, 2026 imported twelve records,
+bound three accounts, and produced thirteen checked brief lines with four audit
+receipts. Evidence contained four CRM records plus one invented local call note
+and one invented local Slack message. The Draft disclosure and returned
+EndDate 2027-01-31 remained in the brief. The private cast and provenance files
+completed with mode-0600 permissions. Cleanup preflight covered all four object
+types, then confirmed twelve deletes and zero remaining imported records using
+74 captured CLI commands. No org-bearing artifact was committed. This is one
+observed demo run, not production approval or an owner verification report.
+See the [owner-run guide](docs/salesforce-demo.md) for timings, prerequisites, and
+the cleanup visibility and concurrency limits.
 
 ## Required sign-off evidence
 
