@@ -350,6 +350,12 @@ class SelectedSourceTests(SelectedFixture, unittest.TestCase):
         link.symlink_to(path)
         with self.assertRaises(SelectionError):
             load_selection(link, crm_backend="sqlite")
+        fifo = self.root / "selection.fifo"
+        os.mkfifo(fifo, 0o600)
+        started = time.monotonic()
+        with self.assertRaises(SelectionError):
+            load_selection(fifo, crm_backend="sqlite")
+        self.assertLess(time.monotonic() - started, 5)
         with self.assertRaises(SelectionError):
             load_selection(self.root / "missing.json", crm_backend="sqlite")
         self.assertEqual(load_selection(path, crm_backend="sqlite").accounts, frozenset({"acc-007", "acc-012"}))
@@ -381,6 +387,33 @@ class SelectedLimitsTests(SelectedFixture, unittest.TestCase):
             connector._source_reads = reads
             self.assertEqual(self.artifacts(), [])
 
+            # A receipt write that outlasts the deadline stops the read before its source runs.
+            opened = []
+
+            def spy(name):
+                def read(account_id):
+                    opened.append(name)
+                    return reads[name](account_id)
+                return read
+
+            connector._source_reads = {name: spy(name) for name in reads}
+            start = connector.audit.start
+
+            def slow_child_start(**kwargs):
+                if isinstance(kwargs.get("request_id"), dict):
+                    time.sleep(0.5)
+                return start(**kwargs)
+
+            with mock.patch("gtm_connector.gateway.BRIEF_SECONDS", 0.3), \
+                    mock.patch.object(connector.audit, "start", side_effect=slow_child_start):
+                self.refused(owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"}),
+                             "brief_deadline_exceeded")
+            connector._source_reads = reads
+            self.assertEqual(opened, [])
+            late = connector.audit.read()[-1]
+            self.assertEqual((late["tool"], late["status"], late["http_status"]), ("get_account", "error", 504))
+            self.assertEqual(self.artifacts(), [])
+
             brief = self.ok(owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"}))["brief"]
             path = self.state / "selected-briefs" / (brief["brief_id"] + ".json")
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
@@ -389,6 +422,20 @@ class SelectedLimitsTests(SelectedFixture, unittest.TestCase):
                 self.refused(owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}),
                              "brief_source_changed")
             self.ok(owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}))
+
+    def test_default_mode_keeps_the_brief_tools_unknown(self):
+        with Runtime(self.state) as runtime, LocalClient(runtime.config) as owner:
+            calls_only = owner.authorize(["calls:read"])
+            listing = _result(owner.rpc(calls_only, "tools/list"))
+            self.assertEqual(len(listing["tools"]), 6)
+            for tool, arguments in (("prepare_renewal_brief", {"account_id": "acc-007"}),
+                                    ("read_renewal_brief", {"brief_id": 7})):
+                response = owner.call(calls_only, tool, arguments)
+                # Without selection these names get the SDK's unknown-tool answer, not a scope or argument refusal.
+                self.assertNotEqual(response.status_code, 403, response.text)
+                self.assertNotIn("insufficient_scope", response.text)
+                self.assertNotIn("invalid tool arguments", response.text)
+                self.assertIn("Unknown tool", response.text)
 
     def test_serve_reports_the_selection_and_checks_the_file_before_credentials(self):
         path = self.root / "selection.json"

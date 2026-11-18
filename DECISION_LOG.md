@@ -37,9 +37,10 @@ data is used. Receipts link to the outer call through the existing `request_id`
 column, so the audit schema is unchanged. Evidence keeps workflows 1 to 5, so the
 citation checker is unchanged; the reads' receipts are read back by exact ID. A
 missing calls or Slack scope gives the existing denial disclosure; any other
-failure stops the brief. The call has 45 seconds, checked before each read and
-before saving. A read already started keeps its own limit, 20 seconds for
-Salesforce and live Slack, and a late result is discarded.
+failure stops the brief. The call has 45 seconds, checked before each read,
+just before its source work, and after saving. A read already started keeps its
+own limit, 20 seconds for Salesforce and live Slack, and a late result is
+discarded.
 
 A prepared brief is saved under `selected-briefs/`. It counts only if its outer
 call finished successfully with rows naming the SHA-256 digest of the saved
@@ -48,7 +49,9 @@ claiming that one transaction spans a JSON file and SQLite. `read_renewal_brief`
 makes no source system call and releases the brief only while the account and
 any Slack thread it contains are selected, the caller's grant covers each source
 in it, the CRM, calls, and Slack bindings are unchanged, and imported calls and
-live Slack still use the same transcript revision and mapping. Comparing the
+live Slack still use the same transcript revision and mapping. For live Slack
+it also reads the local connection's identity, because the owner can disconnect
+Slack while the server runs. Comparing the
 brief's own contributions, not the whole selection, keeps a brief readable when
 an unrelated account is added.
 

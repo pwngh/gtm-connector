@@ -7,6 +7,7 @@ import unittest
 from gtm_connector.client import LocalClient
 from gtm_connector.runtime import SourceIdentityError
 from gtm_connector.selection import load_selection
+from gtm_connector.slack_auth import disconnect_slack
 from gtm_connector.slack_mapping import save_slack_mapping
 from gtm_connector.slack_workflow import resolve_slack_account
 from slack_live_fixtures import ACCOUNT, CHANNEL, LiveSlackFixture
@@ -54,6 +55,23 @@ class SelectedLiveSlackTests(LiveSlackFixture, unittest.TestCase):
             self.assertTrue(refused["isError"])
             self.assertTrue(refused["content"][0]["text"].endswith("brief_source_changed"))
             self.assertNotIn(brief["text"][:60], json.dumps(refused))
+            self.assertEqual(len(self.requests), 1)
+
+    def test_disconnecting_slack_withholds_saved_slack_text(self):
+        with self.runtime() as runtime:
+            self.map_account(runtime)
+        selection = self.selection([{"account_id": ACCOUNT, "slack": True}])
+        with self.runtime(selection=selection) as runtime, LocalClient(runtime.config) as owner:
+            token = owner.authorize(["crm:read", "calls:read", "slack:read"])
+            brief = owner.call(token, "prepare_renewal_brief",
+                               {"account_id": ACCOUNT}).json()["result"]["structuredContent"]["brief"]
+            self.assertFalse(owner.call(token, "read_renewal_brief",
+                                        {"brief_id": brief["brief_id"]}).json()["result"].get("isError"))
+            # Removing local credentials makes no provider request.
+            disconnect_slack(self.connection)
+            refused = owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}).json()["result"]
+            self.assertTrue(refused["isError"])
+            self.assertTrue(refused["content"][0]["text"].endswith("brief_source_changed"))
             self.assertEqual(len(self.requests), 1)
 
     def test_an_unmapped_selected_thread_refuses_startup(self):

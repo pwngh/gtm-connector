@@ -795,7 +795,8 @@ class Runtime:
             selection=self.selection, state_directory=self.directory, crm_binding=deepcopy(self.crm_binding),
             calls_backend=self.calls_backend, calls_binding=deepcopy(self.calls_binding),
             slack_backend=self.slack_backend, slack_binding=deepcopy(self.slack_binding),
-            slack_mapping_path=self.slack_mapping_path if self.slack_backend == "slack" else None)
+            slack_mapping_path=self.slack_mapping_path if self.slack_backend == "slack" else None,
+            slack_connection_dir=self.slack_connection_dir if self.slack_backend == "slack" else None)
 
     def __exit__(self, *_):
         if self._services is not None:

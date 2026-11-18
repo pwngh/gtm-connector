@@ -93,7 +93,7 @@ def load_selection(path, *, crm_backend: str) -> Selection:
     """Read one owner-written file that only its owner can change."""
     path = Path(path).expanduser()
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         raise SelectionError("The selection file was not found.") from None
     except OSError:

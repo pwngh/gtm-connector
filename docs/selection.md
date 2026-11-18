@@ -82,9 +82,10 @@ error code and saves nothing.
 
 The brief uses the fixed extractive drafter and the same citation checker as the
 `brief` command, so its claims and citations follow the same rules. The whole
-call has 45 seconds, checked before each read and before saving. A read that
-has already started keeps its own time limit, 20 seconds for Salesforce and live
-Slack, and its result is discarded if the deadline passed.
+call has 45 seconds, checked before each read, again just before its source
+work, and after saving. A read that has already started keeps its own time
+limit, 20 seconds for Salesforce and live Slack, and its result is discarded if
+the deadline passed.
 
 ## How a saved brief is read again
 
@@ -101,7 +102,8 @@ pending receipt, or a changed file makes it unreadable.
   call notes and `slack:read` if it contains Slack messages;
 - the CRM, calls, and Slack bindings equal the running server's; and
 - for imported calls and live Slack, the current transcript revision and Slack
-  mapping are the ones the brief used.
+  mapping are the ones the brief used, and the local Slack connection still has
+  the same identity. Disconnecting Slack withholds saved Slack text.
 
 Knowing a brief ID is not permission. Any caller that meets these checks may read
 the brief again. The result includes `provider_rechecked: false` and a notice,

@@ -35,6 +35,8 @@ from .tool_definitions import DEFAULT_TOOLS, SELECTED_TOOLS, TOOL_DEFINITIONS, v
 # arguments and request metadata can never supply or change it.
 _INVOCATION: ContextVar[Invocation | None] = ContextVar("gtm_connector_invocation", default=None)
 _COMPOSITE_TOOLS = ("prepare_renewal_brief", "read_renewal_brief")
+_DEFAULT_DEFINITIONS = {name: definition for name, definition in TOOL_DEFINITIONS.items()
+                        if name not in _COMPOSITE_TOOLS}
 
 
 def _json_object(pairs):
@@ -97,6 +99,7 @@ class Connector:
         self.slack_reader = slack_reader
         self._slack_only = _slack_only
         self.selected = selected
+        self._definitions = TOOL_DEFINITIONS if selected is not None else _DEFAULT_DEFINITIONS
         self.enabled_tools = ({"read_slack_messages"} if _slack_only else
                               set(SELECTED_TOOLS) if selected is not None else set(DEFAULT_TOOLS))
         self.demo_binding = demo_binding
@@ -136,7 +139,7 @@ class Connector:
         event = {
             "type": "tool_call",
             "time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "tool": tool if tool in TOOL_DEFINITIONS or tool in ("<unparsed>", "<invalid>") else "<unknown>",
+            "tool": tool if tool in self._definitions or tool in ("<unparsed>", "<invalid>") else "<unknown>",
             "caller": "anonymous" if token is None else hashlib.sha256(token.encode()).hexdigest(),
             "decision": decision,
             "duration_ms": (time.perf_counter() - started) * 1000,
@@ -198,6 +201,9 @@ class Connector:
             if TOOL_DEFINITIONS[tool].scope not in token.scopes:
                 status, http_status, error = "error", 403, "request_failed"
                 return ChildRead(audit_id, None)
+            if time.monotonic() >= invocation.deadline:
+                status, http_status, error = "error", 504, "request_failed"
+                raise ToolError("brief_deadline_exceeded")
             try:
                 envelope = self._source_reads[tool](account_id)
             except ToolError:
@@ -470,19 +476,19 @@ class Connector:
             )
             token: AccessToken | None | Missing = MISSING
             wall_time: float | Missing = MISSING
-            decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS)
+            decision = check_request(facts, policy, self.windows, self._definitions)
             if decision.needs == "token":
                 token = await self.authority.verify_token(raw_token)
-                decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS, token=token)
+                decision = check_request(facts, policy, self.windows, self._definitions, token=token)
             if decision.needs == "wall_time":
                 wall_time = time.time()
-                decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS,
+                decision = check_request(facts, policy, self.windows, self._definitions,
                                          token=token, wall_time=wall_time)
             if decision.needs == "rate_time":
                 # Composite reads update the same windows from worker threads.
                 with self._windows_lock:
                     rate_time = self.clock()
-                    decision = check_request(facts, policy, self.windows, TOOL_DEFINITIONS,
+                    decision = check_request(facts, policy, self.windows, self._definitions,
                                              token=token, wall_time=wall_time, rate_time=rate_time)
                     if decision.windows is not None:
                         self.windows = decision.windows

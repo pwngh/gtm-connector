@@ -61,6 +61,7 @@ class SelectedContext:
     slack_backend: str
     slack_binding: dict | None
     slack_mapping_path: Path | None
+    slack_connection_dir: Path | None = None
 
     def bindings(self, crm_backend: str) -> dict:
         return {"crm_backend": crm_backend, "crm": deepcopy(self.crm_binding),
@@ -199,6 +200,9 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
         # A partial file could never match a receipt digest; remove it anyway.
         path.unlink(missing_ok=True)
         raise ToolError("brief_storage_failed") from None
+    if time.monotonic() >= invocation.deadline:
+        path.unlink(missing_ok=True)
+        raise ToolError("brief_deadline_exceeded")
     if connector.authority.verify_token_now(invocation.raw_token) is None:
         raise ToolError("invalid_token")
     reference = f"briefs/{brief_id}/{digest}"
@@ -275,7 +279,13 @@ def read_brief(connector, token, brief_id) -> dict:
             if len(note_ids) != 1 or connector.calls_reader.active_import_id(account_id) != note_ids[0]:
                 raise ToolError("brief_source_changed")
         if slack and context.slack_backend == "slack":
-            from .slack_mapping import load_slack_mapping
+            # The owner can disconnect or reconnect Slack while the server runs. This reads
+            # local connection metadata only; it makes no provider call.
+            from .slack_auth import inspect_slack_connection
+            from .slack_mapping import load_slack_mapping, slack_identity_binding
+            connection = inspect_slack_connection(context.slack_connection_dir)
+            if connection.needs_login or slack_identity_binding(connection.identity) != context.slack_binding:
+                raise ToolError("brief_source_changed")
             mapping = load_slack_mapping(context.slack_mapping_path, account_id=account_id,
                                          crm_binding=context.crm_binding, slack_binding=context.slack_binding)
             if mapping["mapping_id"] != evidence["thread_snapshot"]["mapping"]["mapping_id"]:
