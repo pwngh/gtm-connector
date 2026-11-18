@@ -1,7 +1,6 @@
 """Print reviewed client setup without running an assistant or exposing its grant."""
 
 import json
-from pathlib import Path
 import shlex
 
 from .doctor import _directory, load_local_owner
@@ -55,18 +54,24 @@ def connect(directory, app, scopes=None):
                                  "--scope", "crm:read"]))
         result["limits"].insert(0, "No grant or config was created. Select each scope explicitly.")
     else:
-        from .inspector import write_inspector_config
+        import httpx2
+        from .client import LocalClient
+        from .inspector import InspectorConnectionError
         from .runtime import private_file
-        load_local_owner(directory)
-        grant = write_inspector_config(directory, scopes)
-        path = Path(grant["config"])
-        if app != "inspector":
-            server = json.loads(path.read_text())["mcpServers"]["gtm-connector"]
-            entry = {"url": server["url"], "headers": server["headers"]}
-            if app == "claude-code":
-                entry["type"] = "http"
-            path = directory / (app + ".json")
-            private_file(path, json.dumps({"mcpServers": {"gtm-connector": entry}}, indent=2).encode())
+        owner = load_local_owner(directory)
+        try:
+            with LocalClient(owner) as client:
+                token = client.authorize(scopes)
+        except httpx2.HTTPError:
+            raise InspectorConnectionError(
+                "Cannot reach the local authority; start serve in this state directory.") from None
+        entry = {"url": owner["resource"], "headers": {"Authorization": "Bearer " + token}}
+        if app == "inspector":
+            entry.update({"type": "streamable-http", "protocolEra": "modern"})
+        elif app == "claude-code":
+            entry["type"] = "http"
+        path = directory / (app + ".json")
+        private_file(path, json.dumps({"mcpServers": {"gtm-connector": entry}}, indent=2).encode())
         result["config"] = str(path)
     certificate = directory / "tls.pem"
     if app == "inspector":

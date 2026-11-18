@@ -104,6 +104,9 @@ write. The event observer is best effort; [durable receipts](audit.md) remain
 the record to inspect. Unparseable traffic without a `tools/call` marker and
 requests that disconnect before recognition are outside this stream. A marked
 attempt can still produce an event when its payload cannot be parsed.
+Tool names outside the registered catalog appear as `"<unknown>"`; malformed
+names use fixed markers. Closing the event pipe leaves the server running and
+discards further event output. The private audit still records each attempt.
 
 The JSON shutdown notice is a separate stderr line:
 `{"message":"Connector stopped. Local state is retained."}`. Ctrl-C stops

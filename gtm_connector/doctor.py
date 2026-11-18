@@ -20,7 +20,9 @@ _DEPENDENCIES = ("mcp", "httpx2", "cryptography", "uvicorn")
 def _directory(directory):
     # Normalize ancestor aliases such as macOS /var without accepting a state
     # folder that is itself a symlink. The final component is checked by lstat.
-    path = Path(os.path.abspath(os.fspath(directory)))
+    path = Path(directory).absolute()
+    if path.name == "..":
+        return path.resolve()
     return path.parent.resolve() / path.name
 
 

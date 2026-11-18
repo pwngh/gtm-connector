@@ -276,6 +276,14 @@ def _run(args, argv):
         from queue import Empty, SimpleQueue
         from .runtime import Runtime
         events: SimpleQueue = SimpleQueue()
+        def emit(event):
+            try:
+                _print_event(event, args.json)
+            except BrokenPipeError:
+                _discard_stdout()
+                message = "Event output closed. The server continues until Ctrl-C."
+                print(json.dumps({"message": message}) if args.json else message,
+                      file=sys.stderr, flush=True)
         crm_reader = None
         if args.crm_backend == "salesforce":
             from .salesforce import SalesforceReadOnlyAdapter
@@ -295,13 +303,13 @@ def _run(args, argv):
             try:
                 while True:
                     try:
-                        _print_event(events.get(timeout=0.5), args.json)
+                        emit(events.get(timeout=0.5))
                     except Empty:
                         pass
             except KeyboardInterrupt:
                 pass
         while not events.empty():
-            _print_event(events.get_nowait(), args.json)
+            emit(events.get_nowait())
         stopped = "Connector stopped. Local state is retained."
         print(json.dumps({"message": stopped}) if args.json else stopped, file=sys.stderr)
         return None
@@ -416,6 +424,14 @@ def _main(argv):
         return _failure(exc, args)
 
 
+def _discard_stdout():
+    descriptor = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(descriptor, sys.stdout.fileno())
+    finally:
+        os.close(descriptor)
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         code = _main(argv)
@@ -427,9 +443,5 @@ def main(argv: list[str] | None = None) -> int:
         return _error("Interrupted. Completed local writes are retained.", 130,
                       "gtm-connector audit --help", as_json=_json_requested(arguments))
     except BrokenPipeError:
-        descriptor = os.open(os.devnull, os.O_WRONLY)
-        try:
-            os.dup2(descriptor, sys.stdout.fileno())
-        finally:
-            os.close(descriptor)
+        _discard_stdout()
         return 0

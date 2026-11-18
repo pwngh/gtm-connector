@@ -103,7 +103,7 @@ class Connector:
         event = {
             "type": "tool_call",
             "time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "tool": tool,
+            "tool": tool if tool in TOOL_DEFINITIONS or tool in ("<unparsed>", "<invalid>") else "<unknown>",
             "caller": "anonymous" if token is None else hashlib.sha256(token.encode()).hexdigest(),
             "decision": decision,
             "duration_ms": (time.perf_counter() - started) * 1000,

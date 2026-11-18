@@ -146,7 +146,18 @@ class CallEventTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["result"]["isError"])
         event = self.assert_event("failed", "tool_error")
-        self.assertEqual(event["tool"], "invented_unknown_tool")
+        self.assertEqual(event["tool"], "<unknown>")
+        self.assertNotIn("invented_unknown_tool", json.dumps(event))
+
+    def test_unknown_header_tool_does_not_leak_into_stream(self):
+        response = self.client.post("/mcp", content=b"{", headers={
+            "Mcp-Method": "tools/call", "Mcp-Name": "invented-private-secret",
+            "Authorization": "Bearer " + TOKEN_VALUES["crm"],
+        })
+        self.assertEqual(response.status_code, 400)
+        event = self.assert_event("refused", "invalid_json")
+        self.assertEqual(event["tool"], "<unknown>")
+        self.assertNotIn("invented-private-secret", json.dumps(event))
 
     def test_audit_start_failure_emits_once_without_receipt_or_tool_execution(self):
         with patch.object(self.connector.audit, "start", side_effect=sqlite3.OperationalError("private failure")), \

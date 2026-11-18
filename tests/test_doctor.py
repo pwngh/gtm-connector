@@ -56,6 +56,27 @@ class DoctorTests(unittest.TestCase):
             self.assertEqual(runtime.connector.authority.tokens, {})
             self.assertEqual(runtime.connector.audit.read(), [])
 
+    def test_parent_traversal_after_symlink_matches_runtime_resolution(self):
+        from gtm_connector.connections import connect
+
+        real_parent = self.state.parent / "nested"
+        target = real_parent / "child"
+        target.mkdir(parents=True, mode=0o700)
+        alias = self.state.parent / "jump"
+        alias.symlink_to(target, target_is_directory=True)
+        supplied = alias / ".." / "state"
+        with Runtime(supplied) as runtime:
+            self.assertEqual(runtime.directory, real_parent / "state")
+            result = doctor(supplied)
+            self.assertEqual(result["status"], "passed", result)
+            config = connect(supplied, "inspector", ["crm:read"])
+            self.assertEqual(Path(config["config"]), runtime.directory / "inspector.json")
+            child = runtime.directory / "inside"
+            child.mkdir(mode=0o700)
+            result = doctor(child / "..")
+            self.assertEqual(result["status"], "passed", result)
+            self.assertEqual(runtime.connector.audit.read(), [])
+
     def test_stopped_services_report_restart_without_exception_details(self):
         with Runtime(self.state):
             pass

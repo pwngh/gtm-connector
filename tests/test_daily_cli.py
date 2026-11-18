@@ -77,6 +77,40 @@ class DailyCLITests(unittest.TestCase):
                 process.stdout.close()
                 process.stderr.close()
 
+    def test_closed_event_pipe_keeps_server_and_audit_running(self):
+        with tempfile.TemporaryDirectory() as directory:
+            process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "serve", "--json",
+                                        "--state-dir", directory], cwd=ROOT, stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                readable, _, _ = select.select([process.stdout], [], [], 15)
+                self.assertTrue(readable)
+                self.assertEqual(json.loads(process.stdout.readline())["type"], "ready")
+                process.stdout.close()
+                config = json.loads((Path(directory) / "owner.json").read_text())
+                with LocalClient(config) as client:
+                    token = client.authorize(["crm:read"])
+                    self.assertEqual(client.call(token, "get_account", {"account_id": "acc-001"}).status_code, 200)
+                    readable, _, _ = select.select([process.stderr], [], [], 10)
+                    self.assertTrue(readable, "server did not report the closed output")
+                    self.assertIn("server continues", json.loads(process.stderr.readline())["message"])
+                    self.assertIsNone(process.poll())
+                    self.assertEqual(client.call(token, "get_account", {"account_id": "acc-002"}).status_code, 200)
+                receipts = read_audit(Path(directory) / "audit.sqlite3")
+                self.assertEqual(len(receipts), 2)
+                self.assertTrue(all(row["status"] == "ok" for row in receipts))
+                process.send_signal(signal.SIGINT)
+                process.wait(timeout=15)
+                stderr = process.stderr.read()
+                self.assertEqual(process.returncode, 0, stderr)
+                self.assertNotIn("Traceback", stderr)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
+
     def test_doctor_reports_missing_setup_without_creating_it(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "missing"

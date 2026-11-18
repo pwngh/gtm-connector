@@ -20,9 +20,9 @@ class ConnectionTests(unittest.TestCase):
 
     def test_instructions_without_scopes_are_read_only_and_name_current_limits(self):
         for app in ("inspector", "claude-code", "cursor", "claude-desktop"):
-            with self.subTest(app=app), patch("gtm_connector.inspector.write_inspector_config") as write:
+            with self.subTest(app=app), patch("gtm_connector.client.LocalClient") as client:
                 result = connect(self.state, app)
-                write.assert_not_called()
+                client.assert_not_called()
                 self.assertEqual(result["status"], "tested" if app == "inspector" else "untested")
                 self.assertNotIn("config", result)
                 text = json.dumps(result)
@@ -66,6 +66,35 @@ class ConnectionTests(unittest.TestCase):
                         self.assertFalse((self.state / ".cursor").exists())
             self.assertEqual(runtime.connector.audit.read(), [])
 
+    def test_interleaved_app_connections_keep_their_own_scoped_credentials(self):
+        from gtm_connector.runtime import private_file
+
+        with Runtime(self.state) as runtime:
+            connect(self.state, "inspector", ["calls:read"])
+            inspector_before = (self.state / "inspector.json").read_bytes()
+            interleaved = False
+            second = None
+
+            def write_then_connect(path, content):
+                nonlocal interleaved, second
+                private_file(path, content)
+                if not interleaved:
+                    interleaved = True
+                    second = connect(self.state, "cursor", ["crm:write"])
+
+            # Interleave after the first config write, at the former shared-file
+            # boundary. A second app must never change the first app's grant.
+            with patch("gtm_connector.inspector.private_file", side_effect=write_then_connect), \
+                    patch("gtm_connector.runtime.private_file", side_effect=write_then_connect):
+                first = connect(self.state, "claude-code", ["crm:read"])
+            self.assertTrue(interleaved)
+            for result, scopes in ((first, ["crm:read"]), (second, ["crm:write"])):
+                server = json.loads(Path(result["config"]).read_text())["mcpServers"]["gtm-connector"]
+                token = server["headers"]["Authorization"].removeprefix("Bearer ")
+                grant = asyncio.run(runtime.connector.authority.verify_token(token))
+                self.assertEqual(grant.scopes, scopes)
+            self.assertEqual((self.state / "inspector.json").read_bytes(), inspector_before)
+
     def test_ancestor_alias_provisions_config_but_final_state_symlink_is_refused(self):
         real_parent = self.state.parent / "real-parent"
         real_parent.mkdir(mode=0o700)
@@ -100,10 +129,10 @@ class ConnectionTests(unittest.TestCase):
             self.assertEqual(target.read_text(), "keep")
             owner = self.state / "owner.json"
             owner.write_text(json.dumps({**runtime.config, "issuer": "https://external.example"}))
-            with patch("gtm_connector.inspector.write_inspector_config") as write:
+            with patch("gtm_connector.client.LocalClient") as client:
                 with self.assertRaisesRegex(ValueError, "Owner configuration is invalid"):
                     connect(self.state, "cursor", ["crm:read"])
-                write.assert_not_called()
+                client.assert_not_called()
 
 
 if __name__ == "__main__":

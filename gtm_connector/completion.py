@@ -16,11 +16,55 @@ def _words(words):
     return " ".join(shlex.quote(word) for word in words)
 
 
+def _value_options(commands):
+    return [name + ":" + flag for name, parser in commands.items()
+            for action in _options(parser) if action.nargs != 0 for flag in action.option_strings]
+
+
+def _fish_position(commands):
+    """Locate a positional without treating an option's value as one."""
+    return [
+        "function __gtm_connector_at_position",
+        '  set -l command_name ""',
+        "  set -l pending 0",
+        "  set -l positional 0",
+        "  set -l options_done 0",
+        "  set -l tokens (commandline -opc)",
+        "  for word in $tokens[2..-1]",
+        "    if test $pending = 1",
+        "      set pending 0; continue",
+        "    end",
+        '    if test "$word" = --',
+        "      set options_done 1; continue",
+        "    end",
+        "    if test $options_done = 0",
+        '      switch "$command_name:$word"',
+        "        case " + _words(_value_options(commands)),
+        "          set pending 1; continue",
+        "      end",
+        "      if string match -q -- '-*' $word",
+        "        continue",
+        "      end",
+        "    end",
+        '    if test -z "$command_name"',
+        "      switch $word",
+        "        case " + _words(commands),
+        '          set command_name "$word"',
+        "      end",
+        "      continue",
+        "    end",
+        "    set positional (math $positional + 1)",
+        "  end",
+        '  test "$command_name" = "$argv[1]"; and test $pending = 0; and test $positional = $argv[2]',
+        "end",
+    ]
+
+
 def generate(parser, shell):
     commands = _commands(parser)
     root = [*commands, *(flag for action in _options(parser) for flag in action.option_strings)]
     if shell == "fish":
-        lines = ["# Load with: gtm-connector completion fish | source"]
+        lines = ["# Load with: gtm-connector completion fish | source", *_fish_position(commands)]
         for command, subparser in commands.items():
             lines.append(f"complete -c gtm-connector -n '__fish_use_subcommand' -a {shlex.quote(command)} "
                          f"-d {shlex.quote(subparser.description)}")
@@ -35,9 +79,12 @@ def generate(parser, shell):
                 if action.choices:
                     line += " -f -a " + shlex.quote(" ".join(map(str, action.choices)))
                 lines.append(line + " -d " + shlex.quote(action.help or ""))
-            for action in subparser._actions:
-                if not action.option_strings and action.choices and not isinstance(action, argparse._SubParsersAction):
-                    lines.append(f"complete -c gtm-connector -n {shlex.quote(condition)} -f -a "
+            positionals = [action for action in subparser._actions if not action.option_strings
+                           and not isinstance(action, argparse._SubParsersAction)]
+            for index, action in enumerate(positionals):
+                if action.choices:
+                    at_position = f"__gtm_connector_at_position {name} {index}"
+                    lines.append(f"complete -c gtm-connector -n {shlex.quote(at_position)} -f -a "
                                  + shlex.quote(" ".join(map(str, action.choices))))
         return "\n".join(lines) + "\n"
     if shell not in ("bash", "zsh"):
@@ -46,19 +93,41 @@ def generate(parser, shell):
     function = "_gtm_connector_complete" if bash else "_gtm_connector"
     lines = [f"{function}() {{"]
     if bash:
-        lines += ['  local command="" word previous="${COMP_WORDS[COMP_CWORD-1]}"',
-                  '  local current="${COMP_WORDS[COMP_CWORD]}" candidates="" match=""',
-                  '  COMPREPLY=()', '  for word in "${COMP_WORDS[@]:1:COMP_CWORD-1}"; do']
+        lines += ['  local command="" word previous="" current="" candidates="" match="" prefix=""',
+                  '  local index last join_colon=0 positional=0 options_done=0',
+                  '  local -a tokens', '  tokens=()', '  COMPREPLY=()',
+                  # Bash splits scope values at ':' by default. Rebuild complete arguments,
+                  # then return only the suffix Readline is replacing after the final colon.
+                  '  for ((index=1; index<=COMP_CWORD; index++)); do',
+                  '    word="${COMP_WORDS[index]}"; last=$((${#tokens[@]}-1))',
+                  '    if [[ "$word" == : && $last -ge 0 ]]; then',
+                  '      tokens[last]="${tokens[last]}:"; join_colon=1',
+                  '    elif [[ $join_colon == 1 ]]; then',
+                  '      tokens[last]="${tokens[last]}$word"; join_colon=0',
+                  '    else', '      tokens+=("$word")', '    fi', '  done',
+                  '  last=$((${#tokens[@]}-1)); current="${tokens[last]}"',
+                  '  if [[ "$COMP_WORDBREAKS" == *:* && "$current" == *:* ]]; then',
+                  '    prefix="${current%:*}:"', '  fi',
+                  '  for ((index=0; index<last; index++)); do', '    word="${tokens[index]}"']
     else:
-        lines += ['  local command="" word previous="${words[CURRENT-1]}"',
-                  '  local current="${words[CURRENT]}" index',
+        lines += ['  local command="" word previous=""',
+                  '  local current="${words[CURRENT]}" index positional=0 options_done=0',
                   '  for ((index=2; index<CURRENT; index++)); do', '    word="${words[index]}"']
-    lines += [f"    case \"$word\" in {'|'.join(commands)}) command=\"$word\"; break;; esac", '  done']
+    lines += ['    if [[ -n "$previous" ]]; then previous=""; continue; fi',
+              '    if [[ "$word" == -- ]]; then options_done=1; continue; fi',
+              '    if [[ $options_done == 0 ]]; then',
+              '      case "$command:$word" in',
+              '        ' + '|'.join(map(shlex.quote, _value_options(commands)))
+              + ') previous="$word"; continue;;',
+              '      esac', '      case "$word" in -*) continue;; esac', '    fi',
+              '    if [[ -z "$command" ]]; then',
+              f"      case \"$word\" in {'|'.join(commands)}) command=\"$word\";; esac",
+              '      continue', '    fi', '    ((positional+=1))', '  done']
 
     def offer(values):
         if bash:
             return ["      candidates=" + shlex.quote(" ".join(values)),
-                    '      while IFS= read -r match; do COMPREPLY+=("$match"); done '
+                    '      while IFS= read -r match; do COMPREPLY+=("${match#"$prefix"}"); done '
                     '< <(compgen -W "$candidates" -- "$current"); return;;']
         return [f"      compadd -- {_words(values)}; return;;"]
 
@@ -77,11 +146,16 @@ def generate(parser, shell):
                           else ['      _files; return;;'])
             else:
                 lines.append('      return;;')
-        positional = [action for action in subparser._actions if not action.option_strings and action.choices]
-        if positional:
-            lines.append(f"    {shlex.quote(name + ':' + name)})")
-            lines += offer(list(map(str, positional[0].choices)))
     lines.append('  esac')
+    lines += ['  if [[ "$current" != -* || $options_done == 1 ]]; then',
+              '    case "$command:$positional" in']
+    for name, subparser in commands.items():
+        positionals = [action for action in subparser._actions if not action.option_strings]
+        for index, action in enumerate(positionals):
+            if action.choices:
+                lines.append(f"    {shlex.quote(name + ':' + str(index))})")
+                lines += offer(list(map(str, action.choices)))
+    lines += ['    esac', '  fi']
     lines.append('  case "$command" in')
     lines.append('    "")')
     lines += offer(root)
