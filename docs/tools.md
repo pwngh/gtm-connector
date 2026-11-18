@@ -68,7 +68,7 @@ It then starts two temporary HTTPS services on the loopback interface. The CLI
 looks up Juniper Crest Learning with a CRM-only grant, receives a call-note
 refusal, and obtains explicit CRM, calls, and Slack read grants for a cited
 renewal brief. Both services stop afterward, leaving state in the gitignored
-`var/v2` directory. To use another directory, run:
+`var/renewal-demo` directory. To use another directory, run:
 
 ```sh
 ./scripts/demo.sh --state-dir /tmp/gtm-fixture

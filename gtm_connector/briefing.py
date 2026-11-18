@@ -211,7 +211,8 @@ def check_saved_brief(directory, brief_id, candidate):
     try:
         return check_brief(candidate, evidence)
     except BriefRejected:
-        if evidence.get("workflow_version", 1) not in (1, 2):
+        if (evidence.get("workflow_version", 1) not in (1, 2)
+                or not isinstance(candidate, str) or 'role "";' not in candidate):
             raise
         # Older fixture briefs quoted an empty role as "". Check one whole
         # vocabulary at a time so aliases cannot admit duplicate claims.

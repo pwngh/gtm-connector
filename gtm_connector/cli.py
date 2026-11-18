@@ -33,7 +33,7 @@ COMMANDS = {
     "usage": ("Summarize tool calls and saved model token counts.", "usage --state-dir var/renewal-demo"),
     "evaluate": ("Check briefs for twenty fixed accounts in temporary state.", "evaluate --with-slack --json"),
     "check-brief": ("Check candidate text against a saved evidence snapshot.",
-                    "check-brief brief-REPLACE candidate.txt --state-dir var/v2"),
+                    "check-brief brief-REPLACE candidate.txt --state-dir var/renewal-demo"),
     "inspector-config": ("Write a private Inspector configuration with explicit scopes.",
                          "inspector-config --scope crm:read --scope calls:read"),
 }
