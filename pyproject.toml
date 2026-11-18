@@ -26,6 +26,7 @@ include-package-data = false
 "gtm_connector._evaluation_data" = "evaluation"
 
 [tool.setuptools.package-data]
+"gtm_connector" = ["demo_kit/*.json"]
 "gtm_connector._evaluation_data" = ["expected.json"]
 
 [tool.setuptools.dynamic]

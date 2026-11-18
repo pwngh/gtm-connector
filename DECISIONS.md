@@ -1,5 +1,66 @@
 # Decisions
 
+## An explicitly bound Salesforce demo book (2026-11-17)
+
+Package one canonical plan, Account tree, and manifest with the Python package
+so an installed command can load the same invented fixtures as a checkout.
+Three Accounts each have one Contact, Opportunity, and Draft Contract, twelve
+records across four object types and two levels. One tree request stays within
+the [documented sObject Tree limits](https://developer.salesforce.com/docs/platform/api-rest/guide/resources-composite-sobject-tree.html).
+Use standard fields and omit EndDate so Salesforce remains its source. The first
+contract starts on 2026-02-01 for twelve months; the owner-run brief helper uses
+2027-01-15 to keep the demo's planning date stable. This is a fixture choice,
+not a live timing or field-calculation result.
+
+Make AccountNumber the explicit bridge to invented local call notes and Slack
+messages because the standard field is available without custom schema. Include
+mixed industries, conflicting signals, a stale note, missing nullable fields,
+and an injected note that remains quoted data. The bridge does not connect a
+live call provider or Slack workspace. Calls and Slack retain separate stores
+and scopes, and neither read performs a CRM lookup.
+
+Create the private mapping only from a complete successful import receipt.
+Require every manifest reference once and distinct IDs with the expected object
+prefixes. The installed Salesforce CLI plan importer assigns its root type to
+nested result rows, so validate the reference and prefix instead of trusting
+that type column. Record the manifest digest and all imported IDs. The binding
+is an owner assertion, not an authenticated claim about an org. Compare both
+bound ID and AccountNumber against the existing authorized get_account result
+so a changed mapping refuses without another Salesforce request.
+
+Pin kit, manifest, and binding digests in a private source-profile marker under
+the existing state lock. Require fresh state for a first binding, and refuse a
+different profile or default-fixture reuse before seeding. Validate complete
+source identities and associations while preserving ordinary owner text edits.
+Do not claim crash atomicity across separate SQLite files. The local owner is
+still trusted and can edit the marker or stores.
+
+Keep import and cleanup writes in the owner-run script outside the installed
+connector. The connector remains GET-only and exposes no new write tool.
+Cleanup reads only the exact imported IDs, checks the kit's supplied fields and
+parent associations for all four types, and refuses activated or edited kit
+records. Inspect described cascading and restricted relationships before any
+delete. Permit only a fixed set of system history objects and sharing rows
+whose RowCause is Owner; refuse other linked records. Delete children before
+Accounts and verify the imported IDs are absent. Never fall back to deleting a
+name, marker prefix, or arbitrary query result.
+
+Preflight cannot lock the org. A concurrent change, unreadable relationship, or
+trigger can make the later deletion differ from what the reads established.
+Document those limits and partial-cleanup recovery instead of claiming a race
+or transaction guarantee. Keep import receipts and bindings until cleanup is
+confirmed. Store recordings and source-bearing state privately under ignored
+var; recording never commits or publishes them. The owner decides what to
+share. New fixture and binding checks use invented records, and installed-wheel
+loading was exercised outside the checkout. An owner-authorized lead-agent run
+on November 17, 2026 completed prepare, twelve-record import, binding, a checked
+three-source brief, private recording, and exact-ID cleanup. The brief retained
+the Draft disclosure and returned EndDate 2027-01-31. Cleanup confirmed twelve
+deletes and zero remaining imported records. [Recorded counts and command
+timings](docs/salesforce-demo.md) describe that run, including its prerequisites
+and visibility limits; they do not establish a general five-minute guarantee.
+No org-bearing artifacts enter committed source. Add no runtime dependency.
+
 ## Standard Salesforce renewal planning and CLI credentials (2026-11-17)
 
 Use standard Contract `EndDate` for renewal planning because it supplies a dated
@@ -27,7 +88,8 @@ Give Salesforce evidence workflow version 3 inside the existing schema version
 from fixture evidence. Keep fixture workflows and expected claims unchanged.
 The Salesforce CLI brief uses today's local date unless --as-of is given;
 fixture briefs retain 2027-01-15 for reproducible evaluation. Calls and Slack
-remain separate mocks with no external-account mapping in this slice.
+remain separate mocks with no external-account mapping in this initial slice.
+The later explicitly bound demo-book decision adds an opt-in fixture bridge.
 
 Prefer --sf-org over exported credentials. Current
 [Salesforce CLI authentication guidance](https://developer.salesforce.com/docs/platform/sfdx-dev/guide/sfdx-dev-auth-view-secrets.html)
@@ -68,7 +130,8 @@ The owner's later instruction explicitly authorized the lead agent to use the
 existing Salesforce login and browser for this org task. That supersedes the
 initial no-sf instruction for the lead agent only. Delegated implementation and
 tests use invented responses and a fake sf on PATH. Commit no org data or var
-files. Current claims rely on those tests; no live adapter run is claimed here.
+files. The initial adapter claims relied on those tests. The later demo-book
+decision records the owner-authorized lead-agent live run separately.
 The README's no-live-org-verification statement remains until an owner-provided
 check report. The connector creates no account, requests no keys, and deploys
 nothing. This decision supersedes the credential, refresh, edition-cache, and

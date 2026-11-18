@@ -1,0 +1,151 @@
+{
+  "records": [
+    {
+      "attributes": {
+        "type": "Account",
+        "referenceId": "AccountRef1"
+      },
+      "Name": "Alder Vale Packaging",
+      "AccountNumber": "GTM-DEMO-001",
+      "Industry": "Manufacturing",
+      "Contacts": {
+        "records": [
+          {
+            "attributes": {
+              "type": "Contact",
+              "referenceId": "ContactRef1"
+            },
+            "FirstName": "Mira",
+            "LastName": "Vale",
+            "Email": "mira@alder-vale.example",
+            "Title": "Operations director"
+          }
+        ]
+      },
+      "Opportunities": {
+        "records": [
+          {
+            "attributes": {
+              "type": "Opportunity",
+              "referenceId": "OpportunityRef1"
+            },
+            "Name": "Alder Vale Packaging 2027 renewal",
+            "StageName": "Closed Won",
+            "CloseDate": "2027-01-10",
+            "Amount": 24000
+          }
+        ]
+      },
+      "Contracts": {
+        "records": [
+          {
+            "attributes": {
+              "type": "Contract",
+              "referenceId": "ContractRef1"
+            },
+            "Status": "Draft",
+            "StartDate": "2026-02-01",
+            "ContractTerm": 12
+          }
+        ]
+      }
+    },
+    {
+      "attributes": {
+        "type": "Account",
+        "referenceId": "AccountRef2"
+      },
+      "Name": "Harborlight Field Services",
+      "AccountNumber": "GTM-DEMO-002",
+      "Industry": "Transportation",
+      "Contacts": {
+        "records": [
+          {
+            "attributes": {
+              "type": "Contact",
+              "referenceId": "ContactRef2"
+            },
+            "FirstName": "Ellis",
+            "LastName": "Rowan",
+            "Email": "ellis@harborlight-field.example",
+            "Title": "Field operations manager"
+          }
+        ]
+      },
+      "Opportunities": {
+        "records": [
+          {
+            "attributes": {
+              "type": "Opportunity",
+              "referenceId": "OpportunityRef2"
+            },
+            "Name": "Harborlight Field Services 2027 renewal",
+            "StageName": "Negotiation/Review",
+            "CloseDate": "2027-04-20",
+            "Amount": 18000
+          }
+        ]
+      },
+      "Contracts": {
+        "records": [
+          {
+            "attributes": {
+              "type": "Contract",
+              "referenceId": "ContractRef2"
+            },
+            "Status": "Draft",
+            "StartDate": "2026-05-01",
+            "ContractTerm": 12
+          }
+        ]
+      }
+    },
+    {
+      "attributes": {
+        "type": "Account",
+        "referenceId": "AccountRef3"
+      },
+      "Name": "Juniper Crest Learning",
+      "AccountNumber": "GTM-DEMO-003",
+      "Contacts": {
+        "records": [
+          {
+            "attributes": {
+              "type": "Contact",
+              "referenceId": "ContactRef3"
+            },
+            "FirstName": "Dana",
+            "LastName": "Crest",
+            "Email": "dana@juniper-crest.example"
+          }
+        ]
+      },
+      "Opportunities": {
+        "records": [
+          {
+            "attributes": {
+              "type": "Opportunity",
+              "referenceId": "OpportunityRef3"
+            },
+            "Name": "Juniper Crest Learning 2027 renewal",
+            "StageName": "Prospecting",
+            "CloseDate": "2027-07-20"
+          }
+        ]
+      },
+      "Contracts": {
+        "records": [
+          {
+            "attributes": {
+              "type": "Contract",
+              "referenceId": "ContractRef3"
+            },
+            "Status": "Draft",
+            "StartDate": "2026-08-01",
+            "ContractTerm": 12
+          }
+        ]
+      }
+    }
+  ]
+}

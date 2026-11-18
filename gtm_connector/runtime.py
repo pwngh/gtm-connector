@@ -1,6 +1,6 @@
 """Run two HTTPS loopback services with a private, local fixture owner."""
 
-from contextlib import closing
+from contextlib import ExitStack, closing
 from datetime import datetime, timedelta, timezone
 import fcntl
 import ipaddress
@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import stat
 import threading
 import time
 
@@ -51,15 +52,80 @@ class StateInUseError(ValueError):
     """Another connector owns the requested local state folder."""
 
 
+def _prepare_demo_state(directory, binding):
+    """Pin local source identity under the state lock before opening databases."""
+    path = directory / "source-profile.json"
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        info = None
+    if binding is None:
+        if info is not None:
+            raise ValueError("This state directory belongs to a Salesforce demo binding. "
+                             "Pass the same --salesforce-demo-binding or choose a fresh --state-dir.")
+        return
+    expected = {"schema_version": 1, "kit_id": binding.kit_id,
+                "manifest_sha256": binding.manifest_sha256, "binding_sha256": binding.binding_sha256}
+    if info is not None:
+        try:
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise ValueError
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor) as source:
+                opened = os.fstat(source.fileno())
+                if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid()
+                        or opened.st_mode & 0o077 or opened.st_size > 4096):
+                    raise ValueError
+                marker = json.loads(source.read(4097))
+            if not isinstance(marker, dict) or type(marker.get("schema_version")) is not int or marker != expected:
+                raise ValueError
+        except (OSError, ValueError, UnicodeError):
+            raise ValueError("The source profile does not match this private Salesforce demo binding. "
+                             "Use the original binding or choose a fresh --state-dir.") from None
+        return
+    if any(child.name != "server.lock" for child in directory.iterdir()):
+        raise ValueError("A Salesforce demo binding requires fresh state. Choose an empty --state-dir.")
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w") as output:
+        json.dump(expected, output, sort_keys=True)
+
+
+def _seed_demo_sources(directory, binding):
+    """Validate every seed before committing; a seed error rolls back all three."""
+    with ExitStack() as stack:
+        pending = []
+        for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
+            path = directory / f"{name}.sqlite3"
+            if path.is_symlink():
+                raise ValueError("source databases must not be symbolic links")
+            connection = stack.enter_context(closing(module.connect(path)))
+            path.chmod(0o600)
+            connection.execute("BEGIN")
+            module.initialize(connection)
+            if name == "calls":
+                binding.seed_calls(connection)
+            elif name == "slack":
+                binding.seed_slack(connection)
+            else:
+                module.seed(connection)
+            pending.append((path, connection))
+        for path, connection in pending:
+            connection.commit()
+            path.chmod(0o600)
+
+
 class Runtime:
     """One process, two ports, four databases; owns shutdown and a state lock."""
 
-    def __init__(self, directory, *, rate_limit=60, crm_reader=None, on_call=None):
+    def __init__(self, directory, *, rate_limit=60, crm_reader=None, on_call=None, demo_binding=None):
         self.directory = Path(directory).resolve()
         self.rate_limit = rate_limit
         self.crm_reader = crm_reader
         self.on_call = on_call
         self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
+        self.demo_binding = demo_binding
+        if demo_binding is not None and self.crm_backend != "salesforce":
+            raise ValueError("--salesforce-demo-binding requires --crm-backend salesforce")
         self.servers, self.threads, self.sockets = [], [], []
         self.lock = None
 
@@ -74,16 +140,20 @@ class Runtime:
             except BlockingIOError as exc:
                 raise StateInUseError("this state directory already has a running connector; "
                                       "stop it with Ctrl-C or choose another --state-dir") from exc
+            _prepare_demo_state(self.directory, self.demo_binding)
             require_distinct_databases([self.directory / f"{name}.sqlite3"
                                         for name in ("crm", "calls", "slack", "audit")])
-            for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
-                path = self.directory / f"{name}.sqlite3"
-                if path.is_symlink():
-                    raise ValueError("source databases must not be symbolic links")
-                with closing(module.connect(path)) as connection:
-                    module.initialize(connection)
-                    module.seed(connection)
-                path.chmod(0o600)
+            if self.demo_binding is not None:
+                _seed_demo_sources(self.directory, self.demo_binding)
+            else:
+                for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
+                    path = self.directory / f"{name}.sqlite3"
+                    if path.is_symlink():
+                        raise ValueError("source databases must not be symbolic links")
+                    with closing(module.connect(path)) as connection:
+                        module.initialize(connection)
+                        module.seed(connection)
+                    path.chmod(0o600)
             key, cert = certificate(self.directory)
             for _ in range(2):
                 sock = socket.socket()
@@ -99,7 +169,7 @@ class Runtime:
             self.connector = Connector(self.directory / "crm.sqlite3", self.directory / "calls.sqlite3",
                                        self.directory / "audit.sqlite3", authority, rate_limit=self.rate_limit,
                                        slack_path=self.directory / "slack.sqlite3", crm_reader=self.crm_reader,
-                                       on_call=self.on_call)
+                                       on_call=self.on_call, demo_binding=self.demo_binding)
             for app, sock in zip((create_auth_app(authority), self.connector), self.sockets):
                 server = uvicorn.Server(uvicorn.Config(app, ssl_keyfile=str(key), ssl_certfile=str(cert),
                     log_config=None, access_log=False, log_level="warning", lifespan="on"))

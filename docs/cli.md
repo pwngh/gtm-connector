@@ -86,10 +86,14 @@ Start the local services and leave this terminal open:
 gtm-connector serve --state-dir var/session
 ```
 
-Startup on stderr identifies the address, CRM backend, state folder, granted
-scopes, connection command, and Ctrl-C stop instruction. No scope is granted at
-startup. A client needs an explicit grant from the local owner. Shutdown also
-goes to stderr and leaves local state in place.
+Startup on stderr identifies the address, CRM backend, sources, state folder,
+granted scopes, connection command, and Ctrl-C stop instruction. The source
+summary labels CRM as demo fixtures or selected Salesforce data. Call notes and
+Slack are always demo fixtures in this version. A bound Salesforce demo also
+names its public kit ID. Selecting Salesforce does not verify its connection;
+startup makes no CRM request. No scope is granted at startup. A client needs an
+explicit grant from the local owner. Shutdown also goes to stderr and leaves
+local state in place.
 
 While the server runs, stdout receives one line for each observed tool attempt:
 UTC completion time, tool, caller fingerprint, decision, duration in milliseconds,
@@ -101,8 +105,15 @@ credential; it does not identify a person or establish a valid grant.
 and paths here are placeholders:
 
 ```json
-{"type":"ready","resource":"https://127.0.0.1:PORT/mcp","issuer":"https://127.0.0.1:PORT","crm_backend":"sqlite","owner_config":"/STATE/owner.json","state_dir":"/STATE","granted_scopes":[]}
+{"type":"ready","resource":"https://127.0.0.1:PORT/mcp","issuer":"https://127.0.0.1:PORT","crm_backend":"sqlite","owner_config":"/STATE/owner.json","state_dir":"/STATE","granted_scopes":[],"sources":{"crm":"demo_fixture","calls":"demo_fixture","slack":"demo_fixture"}}
 ```
+
+`sources` describes the selected data sources, not connection verification.
+`sources.crm` is `"demo_fixture"` for SQLite or `"salesforce"` for Salesforce.
+`sources.calls` and `sources.slack` are `"demo_fixture"`. Supplying
+`--salesforce-demo-binding` adds `demo_kit_id`, the public kit identifier, to the
+ready object. The source summary contains no Salesforce alias, address, or
+record IDs. The binding workflow is documented in [the Salesforce demo kit](salesforce-demo.md).
 
 Subsequent lines have `type: "tool_call"`, `time` (UTC ISO 8601), `tool`,
 `caller` (a complete SHA-256 fingerprint or `"anonymous"`), `decision`

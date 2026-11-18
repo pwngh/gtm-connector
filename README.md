@@ -355,13 +355,24 @@ is needed. The existing environment-variable path remains available. Standard
 Contract records supply the renewal-planning date. Draft and InApproval records
 must be labeled as planning candidates, and an account without an eligible
 EndDate refuses a brief. The adapter is GET-only and omits `log_activity`.
-Call notes and Slack remain separate mocks with no org-account mapping yet.
+Call notes and Slack remain local fixtures. The optional invented demo kit binds
+them to imported accounts through standard AccountNumber values; it does not
+connect a call-recording provider or Slack.
 
 Tests use invented HTTP responses and a fake CLI. No live org has been verified.
 The setup check emits pass/fail steps, counts, timings, and connector GET attempts
 without org records or credentials, so its JSON report can be shared. Ordinary
 briefs and audit files remain private.
 [Setup, field mapping, and limits](docs/salesforce.md)
+
+The [Salesforce demo kit](docs/salesforce-demo.md) contains three invented
+accounts with contacts, opportunities, and Draft contracts, twelve records in
+one import plan. An owner-run helper binds the import receipt, creates a cited
+brief with invented local notes and Slack messages, records privately, and
+removes the exact imported records after checking their fields and relationships.
+The connector stays GET-only. Keep import receipts, bindings, recordings, and
+source-bearing state private under `var/`; cleanup has the visibility and
+concurrency limits described in the guide.
 
 ## Limits worth reading
 
