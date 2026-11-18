@@ -1,5 +1,7 @@
 # GTM connector demo
 
+[![Test connector demo](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml?query=branch%3Amain)
+
 A renewal brief is an account summary a sales rep reads before a contract
 renewal. This project drafts one from a mock CRM (customer records) and call
 notes, with optional Slack account messages. Each statement cites its source or
@@ -358,6 +360,7 @@ or multi-tenant behavior is included.
 
 ## Reference
 
+[Development checks](docs/development.md) explains linting, type checks, and dependency locks.
 [Tools and fixture data](docs/tools.md) documents each tool and its required scope.
 [Design decisions](DECISIONS.md) explains the choices;
 [Rules the coding agents worked under](AGENTS.md) records the constraints.

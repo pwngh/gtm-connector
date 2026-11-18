@@ -73,6 +73,15 @@ Salesforce renewal-field mapping. Check main first and skip work already done.
 The first three are behavior-preserving, with existing tests unchanged.
 Stop after each open PR. The user decides when to continue.
 
+The shared tool definitions, pure request decisions, and documentation passes are
+merged. The tooling slice adds Ruff and mypy in pyproject.toml, hash-checked
+runtime and development locks, and CI on main. Preserve runtime versions and
+existing tests. Limit source edits to annotations, equivalent SDK field names,
+explicit re-exports, and line wrapping. Check application and script lines at
+120 characters. Keep test files outside static checks during this slice and
+state that limit in the development guide. Do not broaden this into formatting,
+new request policy, or additional adapters.
+
 After pure request decisions, finish the separately requested README and reference
 documentation pass before starting tooling. Lead with the reader's purpose, then
 explain how the parts work and where their guarantees end. Define unfamiliar
