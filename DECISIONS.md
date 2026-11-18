@@ -1,5 +1,83 @@
 # Decisions
 
+## Separate Slack authentication from source selection (2026-11-18)
+
+Add `slack connect`, `slack status`, and `slack disconnect` as owner commands.
+Authentication does not select a channel, change fixture defaults, start a
+server, read messages or connect an assistant. This keeps login, configuration
+and daily work independently recoverable. The existing top-level `connect`
+continues to describe MCP client setup.
+
+Use an existing Slack public client with PKCE and an exact registered localhost
+callback. Use the standard `oauth/v2/authorize` and `oauth.v2.access` pair because
+Slack's PKCE guide documents that pair for public clients. Do not combine it
+with the separate user-centric OAuth API or copy another application's token.
+The app registration and workspace approval remain owner prerequisites. We do
+not create an app, request a key, or treat a browser session as authorization.
+
+Request only user history scopes. Default to `channels:history`; explicit flags
+replace the default and can select `groups:history` or both. Require the granted
+set to equal the requested set, since an older broader installation must not
+silently widen authority. Reject bot or organization-wide grants. Verify the
+returned workspace/user against `auth.test` and pin app/workspace/user privately.
+Reauthentication preserves that identity. Optional workspace origin is validated
+selection metadata for future thread URLs, not an identity key or request URL.
+
+Use S256 PKCE, fresh in-memory state, and an exclusively bound localhost callback.
+Require the registered path, port, Host, state and bounded unambiguous query.
+Ignore invalid stray requests within a bounded attempt. Run the exchange and
+publication on the same calling thread so Ctrl-C cannot leave a background
+worker saving credentials later. Browser success follows private publication.
+Open the browser through a bounded helper with the authorization URL on stdin;
+never expose the URL through CLI output, helper arguments or error strings.
+The system browser's own launch mechanism remains outside that helper guarantee.
+An already opened browser tab may remain after local cancellation.
+
+Keep credentials in their own private directory. The source Runtime is not
+started by authentication. POSIX owner/mode/link checks, an exclusive nonblocking
+lock and descriptor-relative atomic replacement protect the single-operator
+state. The lock survives disconnect so two commands cannot lock different
+inodes. Do not repair an unrelated or unsafe directory by changing permissions.
+No new runtime dependency is required: use the standard library and existing
+HTTP client. Help, version and completion remain lazy.
+
+A single-use rotating refresh cannot be rolled back with a local file. Persist
+`refresh_pending` before the request. Preserve a valid replacement as
+`identity_unchecked` before checking identity, then publish `ready`. Ambiguous
+refresh outcomes require reconnect; a temporary identity-check failure retries
+only that check. A positive mismatch or definitive rejection of a saved grant
+marks it unusable with the same `refresh_pending` state, including nonrotating
+grants. This means an unsafe credential outcome, not an in-flight HTTP request.
+Complete old credentials survive failed initial reauthorization before replacement.
+An explicit check first persists `identity_unchecked`, including nonrotating
+credentials. If saving the later rejection marker fails, the old `ready` file
+must not survive and release a rejected token on restart. Failure to save the
+initial unchecked marker therefore makes no provider request; retry verifies
+identity again without inventing a refresh. Once an unchecked access token
+expires, require browser authorization. That state can also survive a failed
+rejection marker, so it cannot establish whether another refresh is safe.
+Ready credentials still refresh before or after access-token expiry while the
+refresh credential remains usable.
+
+Local status makes no request and creates no file. Explicit check verifies only
+authentication. The provider transport shares one cancellable 20-second HTTP
+deadline and a 64 KiB response bound, with no redirect, environment proxy or
+automatic retry. Synchronous filesystem synchronization has no hard deadline.
+No background token scheduler is needed. Keep a bounded access seam for the
+next read adapter; it does not itself expose source tools.
+
+Plain disconnect removes local credentials. Explicit `--revoke` attempts only
+revocation of the saved access token, then removes the local credential. It does
+not refresh to revoke or claim app uninstall, whole-grant revocation or deletion
+of source snapshots. An unconfirmed remote result is reported separately from
+a successful local removal.
+
+Local fake HTTP, actual loopback sockets, process-lock tests and failure
+injection establish the implemented contracts. A real app's registration,
+workspace approval, precise PKCE response and live message access remain
+unverified until the owner runs them. Windows private state and process
+portability are a later slice, with actual platform CI before broader claims.
+
 ## Imported call excerpts with explicit account associations (2026-11-18)
 
 Use existing UTF-8 TXT and WebVTT exports to complete the call-source path

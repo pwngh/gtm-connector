@@ -44,6 +44,8 @@ Human text is intended for reading and can change independently.
 | `doctor` | Object with `status` and a `checks` array. Each check has `name`, `status`, `message`, and `fix`. |
 | `completion` | Object with `shell` and `script`. Without `--json`, stdout contains only the shell script. |
 | `salesforce check` | Sanitized object with `schema_version: 1`, `status`, `as_of`, `steps`, request counts, and count definitions. [Salesforce checks](salesforce.md#run-the-shareable-setup-check) defines each field. |
+| `slack connect` / `slack status` | Versioned sanitized authentication state, selected scopes, expiry, and verification status. Local status creates nothing. See [Slack authentication](slack-auth.md). |
+| `slack disconnect` | Versioned local-deletion outcome and separate requested/confirmed access-token revocation outcome. Unconfirmed explicit revocation returns this result before exit `5`. |
 | `calls import` | Versioned import metadata, its selected revision ID, account association, and `created`/`selected`/`reassigned` outcomes. It contains no transcript text. |
 | `calls list` | Versioned object with an `imports` array and nullable `next_after` cursor. Rows identify historical revisions and the active selection. |
 | `calls inspect` | Versioned selected import metadata and excerpt units. Explicit `--full` also returns all units and exact decoded `original_text`. |
@@ -111,6 +113,15 @@ default formatter `extractive`. The source names are `demo_fixture` or
 Slack when requested. Import progress goes to stderr; with `--json`, each line
 has `progress.command: "calls import"` and a fixed `step`. Stdout remains the
 single final import result. Fixed import reasons use the existing exit categories.
+
+`slack connect`, `slack status`, and `slack disconnect` manage authentication
+separately from source selection. They use `--connection-dir` rather than server
+state. The existing top-level `connect` still prints MCP client configuration.
+Authentication progress is emitted immediately on stderr. With `--json`, each
+progress line has `progress.command`, `step`, and `status`; stdout contains the
+single sanitized result. Ctrl-C exits `130` and points to saved connection
+status because a completed credential save can survive interruption. The
+[Slack guide](slack-auth.md) defines fields, fixed errors and recovery.
 
 ## Renewal demo
 

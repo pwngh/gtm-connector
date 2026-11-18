@@ -18,7 +18,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = (
     "seed", "accounts", "account", "evaluate", "demo", "verify", "serve", "audit", "brief",
-    "check-brief", "usage", "inspector-config", "doctor", "connect", "completion", "salesforce", "calls",
+    "check-brief", "usage", "inspector-config", "doctor", "connect", "completion", "salesforce", "calls", "slack",
 )
 
 
@@ -64,6 +64,26 @@ class CLIContractTests(unittest.TestCase):
                 self.assertIn("--after", result.stdout)
                 self.assertNotIn("--full", result.stdout)
 
+    def test_slack_action_help_only_shows_valid_authentication_options(self):
+        for action in ("connect", "status", "disconnect"):
+            result = self.run_cli("slack", action, "--help")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(f"Example: gtm-connector slack {action}", result.stdout)
+            self.assertIn("--json", result.stdout)
+            self.assertIn("--connection-dir", result.stdout)
+            self.assertNotIn("--state-dir", result.stdout)
+            self.assertNotIn("--crm-backend", result.stdout)
+            if action == "connect":
+                self.assertIn("--redirect-uri", result.stdout)
+                self.assertIn("already be registered", result.stdout)
+                self.assertNotIn("--revoke", result.stdout)
+                self.assertNotIn("--check", result.stdout)
+            else:
+                for flag in ("--client-id", "--redirect-uri", "--team-id", "--user-scope"):
+                    self.assertNotIn(flag, result.stdout)
+                self.assertIn("--check" if action == "status" else "--revoke", result.stdout)
+                self.assertNotIn("--revoke" if action == "status" else "--check", result.stdout)
+
     def test_demo_and_verification_have_separate_defaults_without_changing_daily_commands(self):
         from gtm_connector.cli import build_parser
 
@@ -85,7 +105,8 @@ blocked = {"sqlite3", "_sqlite3", "mcp", "mcp_types", "httpx", "httpx2", "httpco
 class Guard:
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split(".")[0] in blocked or fullname in {
-            "gtm_connector.runtime", "gtm_connector.gateway", "gtm_connector.auth"
+            "gtm_connector.runtime", "gtm_connector.gateway", "gtm_connector.auth",
+            "gtm_connector.slack_auth", "gtm_connector.slack_callback"
         }:
             raise AssertionError("forbidden startup import: " + fullname)
 sys.meta_path.insert(0, Guard())
@@ -94,6 +115,8 @@ runpy.run_module("gtm_connector", run_name="__main__")
 '''
         for arguments in (("--version",), ("--help",),
                           *(("calls", action, "--help") for action in ("import", "list", "inspect")),
+                          *(("slack", action, "--help") for action in ("connect", "status", "disconnect")),
+                          *(("completion", shell) for shell in ("bash", "zsh", "fish")),
                           *((command, "--help") for command in COMMANDS)):
             with self.subTest(arguments=arguments):
                 result = subprocess.run(

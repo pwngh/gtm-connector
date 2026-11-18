@@ -13,7 +13,8 @@ reserved `.example` domains. The default runtime uses no real CRM, external
 identity, or recording service. An explicit Salesforce backend can read an
 operator's existing org with an explicit environment expectation. Calls default
 to fixtures and can instead use explicitly imported exports. Slack still uses
-local fixtures.
+local fixtures. Separate owner commands can authenticate an existing Slack app;
+authentication does not enable message reads.
 
 | Scope | Allowed tools |
 | --- | --- |
@@ -377,6 +378,58 @@ types, then confirmed twelve deletes and zero remaining imported records using
 observed demo run, not production approval or an owner verification report.
 See the [owner-run guide](docs/salesforce-demo.md) for timings, prerequisites, and
 the cleanup visibility and concurrency limits.
+
+## Optional Slack authentication boundary
+
+The owner explicitly invokes `slack connect` for an existing PKCE public app.
+It requests user history grants only, validates their exact set, and verifies
+the returned workspace and user. Credentials are pinned to app, workspace and
+user in a separate private folder. Authentication does not enable a source,
+change the demo or grant a caller `slack:read`. No message endpoint is called.
+The existing local MCP token, scope and audit boundaries are unchanged.
+
+The browser flow uses fresh state and S256 PKCE. Only the exact registered
+localhost Host, port, path and unambiguous callback are accepted. The listener
+owns supported localhost address families exclusively. The authorization code,
+state and verifier stay in memory and are absent from results, progress and
+fixed browser HTML. Publication runs synchronously before browser success.
+Cancellation closes the listener and reaps only the bounded browser-launch
+helper. It does not claim to close the user's browser or undo a completed grant.
+
+Saved tokens and identity remain in an owned private credential file. The
+connection lock serializes processes. No-follow descriptor-relative I/O rejects
+symlinks, hard links, unsafe modes and unrelated directories. Atomic replacement
+preserves complete state before publication; it cannot roll back a remote
+refresh. `refresh_pending` marks an ambiguous exchange, identity mismatch or
+definitively rejected saved credential unusable, including nonrotating grants.
+`identity_unchecked` retains a received replacement or an explicitly checked
+credential for a check-only retry, without exposing it to reads. The unchecked
+marker is saved before checking existing credentials, so a failed rejection
+save cannot leave an old ready file usable. A ready credential can be released
+only with its stored grants and expected identity.
+
+The provider uses four fixed Slack methods: exchange, refresh, identity and
+explicit revoke. It follows no redirects, uses no ambient proxy or credentials,
+and bounds response bytes and total HTTP time. Public errors discard provider
+messages and all unknown fields. Status, errors and browser output omit tokens,
+provider IDs, callback values and workspace details. Authentication is owner
+administration rather than an MCP tool, so it does not create tool receipts.
+
+Local disconnect makes no request. Explicit revoke reports only the access
+token outcome and local deletion; it never claims app or full-grant removal.
+Existing snapshots remain private local records under the existing retention
+policy. A local owner who can read credential files can use the saved grant.
+Other processes with that owner's authority are not isolated by this design.
+
+The [provider tests](tests/test_slack_auth.py),
+[callback tests](tests/test_slack_callback.py),
+[composed HTTP tests](tests/test_slack_auth_integration.py), and
+[CLI tests](tests/test_slack_cli.py) cover these boundaries with invented
+provider responses and credentials.
+No real Slack login, message read, app rendering or hosted assistant connection
+has been verified. Actual use requires an existing approved public app with the
+matching registered callback. Current credential filesystem proof is POSIX;
+native Windows support requires its separately authorized platform slice.
 
 ## Required sign-off evidence
 
