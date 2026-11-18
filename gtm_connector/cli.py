@@ -15,6 +15,8 @@ from . import __version__
 
 
 COMMANDS = {
+    "salesforce": ("Check Salesforce setup and a renewal brief without printing org records.",
+                   "salesforce check --sf-org gtm-de"),
     "doctor": ("Check the local setup and show a fix for each failure.", "doctor --state-dir var/v2"),
     "connect": ("Print client setup and its tested or untested limits.",
                 "connect inspector --scope crm:read --state-dir var/v2"),
@@ -80,7 +82,7 @@ def build_parser():
         if name in ("seed", "accounts", "account"):
             command.add_argument("--db", type=Path, default=Path("var/v2/crm.sqlite3"),
                                  help="Read or seed this local CRM database.")
-        elif name not in ("evaluate", "completion"):
+        elif name not in ("evaluate", "completion", "salesforce"):
             command.add_argument("--state-dir", type=Path, default=Path("var/v2"),
                                  help="Use this private state folder (default: var/v2).")
         if name == "accounts":
@@ -89,7 +91,14 @@ def build_parser():
             command.add_argument("account_id", help="Select an account, such as acc-003.")
         if name in ("serve", "brief"):
             command.add_argument("--crm-backend", choices=("sqlite", "salesforce"), default="sqlite",
-                                 help="Select the CRM reader. Salesforce renewal fields are not mapped yet.")
+                                 help="Select local fixtures or the read-only Salesforce CRM reader.")
+        if name in ("serve", "brief", "salesforce"):
+            command.add_argument("--sf-org", help="Read Salesforce credentials from this signed-in sf CLI alias.")
+        if name == "salesforce":
+            command.add_argument("action", choices=("check",), help="Run the private, read-only setup check.")
+        if name in ("brief", "salesforce"):
+            command.add_argument("--as-of", help="Use YYYY-MM-DD for renewal planning. Salesforce uses today; "
+                                 "fixtures use 2027-01-15.")
         if name in ("demo", "brief", "evaluate"):
             command.add_argument("--with-slack", action="store_true",
                                  help="Include Slack evidence and a checked follow-up proposal.")
@@ -116,8 +125,6 @@ def build_parser():
             command.add_argument("--follow", action="store_true", help="Follow new or changed results until Ctrl-C.")
         if name == "brief":
             command.add_argument("--without-calls", action="store_true", help="Omit the calls:read grant.")
-            command.add_argument("--as-of",
-                                 help="Calculate renewal days from YYYY-MM-DD (fixture default: 2027-01-15).")
         if name == "check-brief":
             command.add_argument("brief_id", help="Select the saved brief identifier.")
             command.add_argument("candidate", type=Path, help="Read candidate text from this file.")
@@ -138,6 +145,11 @@ def table(headers, rows):
 
 
 def human_result(command, result):
+    if command == "salesforce":
+        return table(["STEP", "STATUS", "COUNT", "MS", "API GETS", "SF COMMANDS", "DETAIL", "FIX"],
+                     [[row[key] for key in ("name", "status", "count", "duration_ms", "api_calls",
+                                            "sf_cli_invocations", "message", "fix")]
+                      for row in result["steps"]])
     if command == "completion":
         return result["script"].rstrip("\n")
     if command == "doctor":
@@ -213,13 +225,33 @@ def _progress(as_json):
     return report
 
 
+def _salesforce_progress(as_json):
+    def report(name, status, count):
+        if as_json:
+            print(json.dumps({"progress": {"command": "salesforce check", "step": name,
+                                           "status": status, "count": count}}), file=sys.stderr, flush=True)
+        else:
+            print(f"Salesforce {name.replace('_', ' ')}: {status}." +
+                  (f" Count: {count}." if count is not None else ""), file=sys.stderr, flush=True)
+    return report
+
+
 def _run(args, argv):
     if args.command == "completion":
         from .completion import generate
         return {"shell": args.shell, "script": generate(build_parser(), args.shell)}
     # Dependencies belong to the command that uses them, after help is handled.
-    if args.command == "brief" and args.crm_backend != "sqlite":
-        raise PermissionError("renewal_fields_unmapped: Salesforce brief generation is unavailable")
+    crm_reader = None
+    if args.command in ("serve", "brief"):
+        if args.sf_org is not None and args.crm_backend != "salesforce":
+            raise ValueError("--sf-org requires --crm-backend salesforce")
+        if args.crm_backend == "salesforce":
+            from .salesforce import SalesforceReadOnlyAdapter
+            crm_reader = (SalesforceReadOnlyAdapter.from_sf(args.sf_org) if args.sf_org is not None
+                          else SalesforceReadOnlyAdapter.from_env())
+    if args.command == "salesforce":
+        from .salesforce_check import run_check
+        return run_check(sf_org=args.sf_org, as_of=args.as_of, progress=_salesforce_progress(args.json))
     adapter = None
     if args.command in ("brief", "evaluate"):
         if args.adapter == "fixture" and args.model is not None:
@@ -258,12 +290,16 @@ def _run(args, argv):
         from .usage import build_usage_report
         return build_usage_report(args.state_dir, args.brief, **filters)
     if args.command == "brief":
+        from datetime import date
         from .briefing import create_brief
         from .runtime import Runtime
         from .seed import DEMO_AS_OF
-        with Runtime(args.state_dir) as runtime:
+        as_of = args.as_of
+        if as_of is None:
+            as_of = date.today().isoformat() if crm_reader is not None else DEMO_AS_OF
+        with Runtime(args.state_dir, crm_reader=crm_reader) as runtime:
             return create_brief(runtime, args.account_id, include_calls=not args.without_calls,
-                                as_of=DEMO_AS_OF if args.as_of is None else args.as_of,
+                                as_of=as_of,
                                 adapter=adapter, include_slack=args.with_slack)
     if args.command == "check-brief":
         from .briefing import check_saved_brief
@@ -283,10 +319,6 @@ def _run(args, argv):
                 _discard_output(sys.stdout)
                 message = "Event output closed. The server continues until Ctrl-C."
                 _server_notice(message, args.json)
-        crm_reader = None
-        if args.crm_backend == "salesforce":
-            from .salesforce import SalesforceReadOnlyAdapter
-            crm_reader = SalesforceReadOnlyAdapter.from_env()
         with Runtime(args.state_dir, crm_reader=crm_reader, on_call=events.put) as runtime:
             ready = {"type": "ready", "resource": runtime.config["resource"], "issuer": runtime.config["issuer"],
                      "crm_backend": runtime.crm_backend, "owner_config": str(runtime.directory / "owner.json"),
@@ -339,9 +371,10 @@ def _failure(exc, args):
     code = 2 if isinstance(exc, ValueError) else 1
     if isinstance(exc, BriefRejected) or (command == "demo" and message.startswith("demo ")):
         code = 4
-    elif isinstance(exc, PermissionError) and message.startswith("renewal_fields_unmapped"):
+    elif getattr(exc, "code", None) == "renewal_fields_unmapped":
         code = 3
-        next_command = "gtm-connector brief acc-003 --crm-backend sqlite --with-slack"
+        message = "renewal_fields_unmapped: " + message
+        next_command = "gtm-connector salesforce check --help"
     elif (type(exc).__name__ in ("SalesforceReadError", "BriefingError", "OllamaError",
                                    "InspectorConnectionError") or
           type(exc).__module__.startswith(("httpx", "httpcore"))):
@@ -362,6 +395,11 @@ def _failure(exc, args):
         next_command = f"gtm-connector serve --state-dir {shlex.quote(str(args.state_dir))}"
     if command == "connect" and code == 2:
         next_command = f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}"
+    if type(exc).__name__ == "SalesforceReadError":
+        from .salesforce_check import _FAILURES
+        detail = _FAILURES.get(exc.code, _FAILURES["check_failed"])[0]
+        message = f"{exc.code}: {detail}"
+        next_command = "gtm-connector salesforce check --help"
     return _error(message, code, next_command, as_json=args.json)
 
 
@@ -408,6 +446,9 @@ def _main(argv):
         if args.command == "doctor" and result["status"] != "passed":
             return _error("Setup checks failed. Apply the fix beside each failed check.", 4,
                           f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}", as_json=args.json)
+        if args.command == "salesforce" and result["status"] != "passed":
+            return _error("Salesforce checks failed. Apply the fix beside each failed step.", 4,
+                          "gtm-connector salesforce check --help", as_json=args.json)
         if args.command == "evaluate" and result["status"] != "passed":
             retry = ["gtm-connector", "evaluate", "--adapter", args.adapter]
             if args.model is not None:

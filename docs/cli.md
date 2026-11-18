@@ -40,6 +40,7 @@ Human text is intended for reading and can change independently.
 | `connect` | Object with `app`, `status`, `setup`, `limits`, and `documentation`. Creating a grant adds `config`, the private file's path. See [client setup](clients.md). |
 | `doctor` | Object with `status` and a `checks` array. Each check has `name`, `status`, `message`, and `fix`. |
 | `completion` | Object with `shell` and `script`. Without `--json`, stdout contains only the shell script. |
+| `salesforce check` | Sanitized object with `schema_version: 1`, `status`, `as_of`, `steps`, request counts, and count definitions. [Salesforce checks](salesforce.md#run-the-shareable-setup-check) defines each field. |
 
 Help remains plain help text, even with `--json`. JSON errors are one object on
 stderr, with an empty stdout unless the command has already produced results:
@@ -49,10 +50,11 @@ stderr, with an empty stdout unless the command has already produced results:
 ```
 
 Treat `error.code` and the process exit as the machine contract. Read `message`
-for the cause and `next` for a suggested command. A failed evaluation or doctor
+for the cause and `next` for a suggested command. A failed evaluation, Salesforce, or doctor
 check still prints its complete report on stdout before reporting failure on
 stderr. Evaluation also writes progress to stderr, so its error object can
-follow progress lines. See [evaluation progress](evaluation.md#progress).
+follow progress lines. Salesforce checks also report progress on stderr.
+See [evaluation progress](evaluation.md#progress) and [Salesforce checks](salesforce.md#run-the-shareable-setup-check).
 
 | Exit | Meaning | JSON error code |
 | --- | --- | --- |
@@ -60,7 +62,7 @@ follow progress lines. See [evaluation progress](evaluation.md#progress).
 | 1 | A local file, database, or runtime operation failed. | `local_failure` |
 | 2 | Arguments or local configuration are missing or invalid. | `usage_error` |
 | 3 | The requested operation was refused. | `refused` |
-| 4 | The evidence checker, demo check, evaluation, or doctor failed. | `check_failed` |
+| 4 | The evidence checker, demo, evaluation, doctor, or Salesforce check failed. | `check_failed` |
 | 5 | A source service or its transport failed. | `upstream_failure` |
 | 130 | Ctrl-C interrupted a command. Completed local writes remain. | `interrupted` |
 
@@ -68,6 +70,13 @@ A command typo suggests the nearest command without running it. A broken pipe
 closes output quietly. Help and version build no runtime and import neither
 SQLite, the MCP SDK, nor the HTTP client. The CLI contract tests hold that import
 boundary without depending on elapsed time.
+
+Use `serve` or `brief` with `--crm-backend salesforce --sf-org ALIAS` to read
+credentials from an existing Salesforce CLI login. SQLite stays the default.
+Salesforce briefs use today's local date unless `--as-of` is supplied; fixture
+briefs use `2027-01-15`. A missing eligible Contract refuses with
+`renewal_fields_unmapped` and exit `3`. The
+[Salesforce guide](salesforce.md) explains mapping, refresh, and private output.
 
 ## Server output
 

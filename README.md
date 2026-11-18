@@ -343,18 +343,25 @@ invented claims, 80 audit receipts, and zero activities.
 
 ### Read a Salesforce Developer Edition org
 
-The server requires `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` to be
-set privately before this command runs:
+Use an existing Salesforce CLI login to check and start the read-only backend:
 
 ```sh
-.venv/bin/python -m gtm_connector serve --crm-backend salesforce --state-dir var/salesforce
+gtm-connector salesforce check --sf-org gtm-de
+gtm-connector serve --crm-backend salesforce --sf-org gtm-de --state-dir var/salesforce
 ```
 
-The three CRM read tools now issue Salesforce REST queries, after checking that
-the org is Developer Edition. In this mode, `log_activity` is unavailable.
-Call notes and Slack remain separate mocks. Because renewal fields are not
-mapped, the adapter refuses brief generation. Tests use invented HTTP responses;
-no live org has been verified. [Setup, field mapping, and limits](docs/salesforce.md)
+The process captures the instance address and token from `sf`; no exported token
+is needed. The existing environment-variable path remains available. Standard
+Contract records supply the renewal-planning date. Draft and InApproval records
+must be labeled as planning candidates, and an account without an eligible
+EndDate refuses a brief. The adapter is GET-only and omits `log_activity`.
+Call notes and Slack remain separate mocks with no org-account mapping yet.
+
+Tests use invented HTTP responses and a fake CLI. No live org has been verified.
+The setup check emits pass/fail steps, counts, timings, and connector GET attempts
+without org records or credentials, so its JSON report can be shared. Ordinary
+briefs and audit files remain private.
+[Setup, field mapping, and limits](docs/salesforce.md)
 
 ## Limits worth reading
 

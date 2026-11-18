@@ -12,11 +12,17 @@ from urllib.parse import urlsplit
 
 import httpx2
 
+from .sf_credentials import SFCredentials, SFCredentialsError
+
 
 API_VERSION = "v68.0"
 _QUERY_PATH = f"/services/data/{API_VERSION}/query"
 _ORGANIZATION_QUERY = "SELECT Id, OrganizationType FROM Organization LIMIT 1"
-_ACCOUNT_FIELDS = "Id, Name, Industry"
+_ACCOUNT_FIELDS = "Id, Name, Industry, AccountNumber"
+_CONTRACT_FIELDS = "Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate"
+_CONTRACT_STATUSES = frozenset({"Draft", "InApproval", "Activated"})
+_DESCRIBE_OBJECTS = frozenset({"Account", "Contact", "Opportunity", "Contract"})
+_FIELD_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,255}\Z")
 _CONTACT_FIELDS = "Id, AccountId, Name, Title, Email"
 _OPPORTUNITY_FIELDS = "Id, AccountId, Name, StageName, Amount, CloseDate, IsClosed, IsWon"
 _NATIVE_ID = re.compile(r"[A-Za-z0-9]{18}\Z")
@@ -42,6 +48,7 @@ class SalesforceReadError(RuntimeError):
 
     def __init__(self, code):
         self.code = code if code in _ERROR_CODES else "salesforce_invalid_response"
+        self.sf_cli_invocations = 0
         super().__init__(self.code)
 
 
@@ -97,8 +104,8 @@ def _like_literal(value):
 class SalesforceReadOnlyAdapter:
     """Three fixed read operations over one explicitly configured HTTPS origin.
 
-    Construction validates local configuration only. Every operation verifies
-    Developer Edition again before reading Account, Contact, or Opportunity.
+    Construction validates local configuration only. The first operation verifies
+    Developer Edition. A successful result is cached for this pinned origin.
     The optional transport supports invented HTTP fixtures, not live test data.
     """
 
@@ -126,12 +133,48 @@ class SalesforceReadOnlyAdapter:
         self.instance_url = "https://" + host
         self._access_token = access_token
         self._transport = transport
+        self._credentials: SFCredentials | None = None
+        self._edition_verified = False
+        self.http_requests = 0
 
     @classmethod
     def from_env(cls):
         """Read only the explicitly named instance and credential variables."""
         return cls(os.environ.get("SALESFORCE_INSTANCE_URL"),
                    os.environ.get("SALESFORCE_ACCESS_TOKEN"))
+
+    @classmethod
+    def from_sf(cls, alias, *, transport=None):
+        """Capture credentials from an existing CLI login inside this process."""
+        credentials = None
+        try:
+            credentials = SFCredentials(alias)
+            origin, token = credentials.read(time.monotonic() + _OPERATION_SECONDS)
+            adapter = cls(origin, token, transport=transport)
+        except (SFCredentialsError, SalesforceReadError):
+            error = SalesforceReadError("salesforce_auth_required")
+            error.sf_cli_invocations = credentials.invocations if credentials is not None else 0
+            raise error from None
+        adapter._credentials = credentials
+        return adapter
+
+    @property
+    def sf_cli_invocations(self):
+        return self._credentials.invocations if self._credentials is not None else 0
+
+    def _refresh(self, client, budget):
+        if self._credentials is None or budget.get("refreshed"):
+            raise SalesforceReadError("salesforce_auth_required")
+        budget["refreshed"] = True
+        try:
+            origin, token = self._credentials.read(budget["deadline"])
+            validated = type(self)(origin, token)
+            if validated.instance_url != self.instance_url:
+                raise SalesforceReadError("salesforce_auth_required")
+        except (SFCredentialsError, SalesforceReadError):
+            raise SalesforceReadError("salesforce_auth_required") from None
+        self._access_token = validated._access_token
+        client.headers["Authorization"] = "Bearer " + self._access_token
 
     @contextmanager
     def _operation(self):
@@ -142,19 +185,33 @@ class SalesforceReadOnlyAdapter:
                      "Accept-Encoding": "identity"},
             timeout=httpx2.Timeout(5, connect=3, write=5, pool=3),
         ) as client:
-            organization = self._query(client, _ORGANIZATION_QUERY, budget, max_rows=1)
-            if (len(organization) != 1
-                    or organization[0].get("OrganizationType") != "Developer Edition"):
-                raise SalesforceReadError("salesforce_edition_required")
+            if not self._edition_verified:
+                organization = self._query(client, _ORGANIZATION_QUERY, budget, max_rows=1)
+                if (len(organization) != 1
+                        or organization[0].get("OrganizationType") != "Developer Edition"):
+                    raise SalesforceReadError("salesforce_edition_required")
+                self._edition_verified = True
             yield client, budget
 
     def _request(self, client, path, budget, *, query=None):
+        try:
+            return self._request_once(client, path, budget, query=query)
+        except SalesforceReadError as error:
+            if error.code != "salesforce_auth_required":
+                raise
+        # The response is closed before invoking sf. Retry shares the original
+        # deadline, request count and response-byte budget, including pagination.
+        self._refresh(client, budget)
+        return self._request_once(client, path, budget, query=query)
+
+    def _request_once(self, client, path, budget, *, query=None):
         remaining = budget["deadline"] - time.monotonic()
         if remaining <= 0:
             raise SalesforceReadError("salesforce_timeout")
         budget["requests"] += 1
         if budget["requests"] > _MAX_REQUESTS:
             raise SalesforceReadError("salesforce_result_limit")
+        self.http_requests += 1
         try:
             with client.stream("GET", self.instance_url + path,
                                params={"q": query} if query is not None else None,
@@ -237,7 +294,8 @@ class SalesforceReadOnlyAdapter:
     def _account(row):
         native_id = _native_id(row.get("Id"))
         return {"id": "acc-sf-" + native_id, "source_id": native_id, "backend": "salesforce",
-                "name": _text(row, "Name"), "industry": _text(row, "Industry", nullable=True)}
+                "name": _text(row, "Name"), "industry": _text(row, "Industry", nullable=True),
+                "account_number": _text(row, "AccountNumber", nullable=True)}
 
     @staticmethod
     def _contact(row, account_id):
@@ -247,6 +305,33 @@ class SalesforceReadOnlyAdapter:
         return {"id": "con-sf-" + native_id, "source_id": native_id, "backend": "salesforce",
                 "account_id": "acc-sf-" + account_id, "name": _text(row, "Name"),
                 "title": _text(row, "Title", nullable=True), "email": _text(row, "Email", nullable=True)}
+
+    @staticmethod
+    def _contract(row, account_id):
+        native_id = _native_id(row.get("Id"))
+        if _native_id(row.get("AccountId")) != account_id:
+            raise SalesforceReadError("salesforce_invalid_response")
+        status_code = _text(row, "StatusCode")
+        if status_code not in _CONTRACT_STATUSES:
+            raise SalesforceReadError("salesforce_invalid_response")
+        dates = {}
+        for field in ("StartDate", "EndDate"):
+            value = _text(row, field, nullable=True)
+            if value is not None:
+                try:
+                    if date.fromisoformat(value).isoformat() != value:
+                        raise ValueError
+                except ValueError:
+                    raise SalesforceReadError("salesforce_invalid_response") from None
+            dates[field] = value
+        term = row.get("ContractTerm")
+        if ("ContractTerm" not in row or (term is not None
+                and (type(term) is not int or not -(2 ** 31) <= term < 2 ** 31))):
+            raise SalesforceReadError("salesforce_invalid_response")
+        return {"id": "ctr-sf-" + native_id, "source_id": native_id, "backend": "salesforce",
+                "account_id": "acc-sf-" + account_id, "status": _text(row, "Status"),
+                "status_code": status_code, "start_date": dates["StartDate"], "end_date": dates["EndDate"],
+                "contract_term": term}
 
     @staticmethod
     def _opportunity(row, account_id):
@@ -301,6 +386,10 @@ class SalesforceReadOnlyAdapter:
                 client, f"SELECT {_CONTACT_FIELDS} FROM Contact WHERE AccountId = '{native_id}' ORDER BY Id LIMIT 101",
                 budget)
             account["contacts"] = [self._contact(row, native_id) for row in contacts]
+            contract_query = (f"SELECT {_CONTRACT_FIELDS} FROM Contract "
+                              f"WHERE AccountId = '{native_id}' ORDER BY Id LIMIT 101")
+            contracts = self._query(client, contract_query, budget)
+            account["contracts"] = [self._contract(row, native_id) for row in contracts]
             return account
 
     def list_opportunities(self, account_id=None):
@@ -310,3 +399,43 @@ class SalesforceReadOnlyAdapter:
             rows = self._query(
                 client, f"SELECT {_OPPORTUNITY_FIELDS} FROM Opportunity{where} ORDER BY Id LIMIT 101", budget)
             return [self._opportunity(row, native_id) for row in rows]
+
+    def check_edition(self):
+        """Validate Developer Edition once for the configured origin."""
+        with self._operation():
+            pass
+
+    def describe_fields(self, object_name):
+        """Return field names for one fixed object without exposing its schema."""
+        if not isinstance(object_name, str) or object_name not in _DESCRIBE_OBJECTS:
+            raise SalesforceReadError("salesforce_invalid_arguments")
+        with self._operation() as (client, budget):
+            document = self._request(client, f"/services/data/{API_VERSION}/sobjects/{object_name}/describe", budget)
+        if not isinstance(document, dict) or not isinstance(document.get("fields"), list):
+            raise SalesforceReadError("salesforce_invalid_response")
+        names = set()
+        for field in document["fields"]:
+            name = field.get("name") if isinstance(field, dict) else None
+            if not isinstance(name, str) or not _FIELD_NAME.fullmatch(name) or name in names:
+                raise SalesforceReadError("salesforce_invalid_response")
+            names.add(name)
+        return names
+
+    def candidate_account(self, as_of):
+        """Select the earliest standard Contract renewal candidate privately."""
+        try:
+            if not isinstance(as_of, str) or date.fromisoformat(as_of).isoformat() != as_of:
+                raise ValueError
+        except ValueError:
+            raise SalesforceReadError("salesforce_invalid_arguments") from None
+        query = (f"SELECT {_CONTRACT_FIELDS} FROM Contract WHERE EndDate >= {as_of} "
+                 "AND StatusCode IN ('Draft', 'InApproval', 'Activated') ORDER BY EndDate, Id LIMIT 1")
+        with self._operation() as (client, budget):
+            rows = self._query(client, query, budget, max_rows=1)
+        if not rows:
+            return None
+        account_id = _native_id(rows[0].get("AccountId"))
+        contract = self._contract(rows[0], account_id)
+        if contract["end_date"] is None or contract["end_date"] < as_of:
+            raise SalesforceReadError("salesforce_invalid_response")
+        return "acc-sf-" + account_id

@@ -107,13 +107,13 @@ class SalesforceTests(unittest.TestCase):
             rows = adapter.search_accounts()
         self.assertEqual(rows, [
             {"id": "acc-sf-001000000000001AAA", "source_id": "001000000000001AAA",
-             "backend": "salesforce", "name": "Fixture Salesforce account 001", "industry": "Software"},
+             "backend": "salesforce", "name": "Fixture Salesforce account 001", "industry": "Software", "account_number": "FIXTURE-001"},
             {"id": "acc-sf-001000000000002AAA", "source_id": "001000000000002AAA",
-             "backend": "salesforce", "name": "Fixture Salesforce account 002", "industry": None},
+             "backend": "salesforce", "name": "Fixture Salesforce account 002", "industry": None, "account_number": None},
         ])
         self.assertEqual(self.requests[0].url.params["q"], ORG_QUERY)
         self.assertEqual(self.requests[1].url.params["q"],
-                         "SELECT Id, Name, Industry FROM Account ORDER BY Id LIMIT 101")
+                         "SELECT Id, Name, Industry, AccountNumber FROM Account ORDER BY Id LIMIT 101")
         options = client.call_args.kwargs
         self.assertIs(options["verify"], True)
         self.assertIs(options["trust_env"], False)
@@ -122,7 +122,7 @@ class SalesforceTests(unittest.TestCase):
             self.assertTrue({"record_ref", "arr_cents", "renewal_date", "risk_status", "risk_reason"}.isdisjoint(row))
 
     def test_get_account_preserves_contact_nulls_and_source_associations(self):
-        account = self.adapter("organization_developer.json", "account.json", "contacts.json").get_account(ACCOUNT_ID)
+        account = self.adapter("organization_developer.json", "account.json", "contacts.json", "empty.json").get_account(ACCOUNT_ID)
         self.assertEqual(account["id"], ACCOUNT_ID)
         self.assertEqual(account["contacts"], [
             {"id": "con-sf-003000000000001AAA", "source_id": "003000000000001AAA", "backend": "salesforce",
@@ -132,7 +132,7 @@ class SalesforceTests(unittest.TestCase):
              "account_id": ACCOUNT_ID, "name": "Fixture Salesforce contact 002", "title": None, "email": None},
         ])
         self.assertEqual(self.requests[1].url.params["q"],
-                         "SELECT Id, Name, Industry FROM Account WHERE Id = '001000000000001AAA' ORDER BY Id LIMIT 101")
+                         "SELECT Id, Name, Industry, AccountNumber FROM Account WHERE Id = '001000000000001AAA' ORDER BY Id LIMIT 101")
         self.assertEqual(self.requests[2].url.params["q"],
                          "SELECT Id, AccountId, Name, Title, Email FROM Contact WHERE AccountId = '001000000000001AAA' ORDER BY Id LIMIT 101")
 
@@ -155,15 +155,28 @@ class SalesforceTests(unittest.TestCase):
         self.assertEqual(exact[0]["amount_decimal"], "0.10")
         self.assertIn("WHERE AccountId = '001000000000001AAA' ORDER BY Id LIMIT 101", self.requests[-1].url.params["q"])
 
-    def test_each_operation_rechecks_edition_before_any_crm_query(self):
-        adapter = self.adapter("organization_developer.json", "accounts.json",
-                               "organization_developer.json", "opportunities.json",
-                               "organization_enterprise.json")
+    def test_only_successful_edition_checks_are_cached_for_this_adapter(self):
+        adapter = self.adapter("organization_enterprise.json", "organization_developer.json", "accounts.json",
+                               "opportunities.json", "account.json", "contacts.json", "empty.json")
+        self.assert_error("salesforce_edition_required", adapter.check_edition)
         adapter.search_accounts()
         adapter.list_opportunities()
-        self.assert_error("salesforce_edition_required", lambda: adapter.get_account(ACCOUNT_ID))
-        self.assertEqual([request.url.params["q"] for request in self.requests[::2]], [ORG_QUERY] * 3)
-        self.assertEqual(len(self.requests), 5)
+        adapter.get_account(ACCOUNT_ID)
+        adapter.check_edition()
+        self.assertEqual([request.url.params["q"] for request in self.requests].count(ORG_QUERY), 2)
+        self.assertEqual(adapter.http_requests, 7)
+        self.assertEqual(adapter.sf_cli_invocations, 0)
+
+    def test_cold_and_warm_round_trip_counts_include_contracts(self):
+        cases = (("search_accounts", (), ("accounts.json",), 2, 1),
+                 ("list_opportunities", (), ("opportunities.json",), 2, 1),
+                 ("get_account", (ACCOUNT_ID,), ("account.json", "contacts.json", "empty.json"), 4, 3))
+        for name, arguments, responses, cold, warm in cases:
+            adapter = self.adapter("organization_developer.json", *responses, *responses)
+            getattr(adapter, name)(*arguments)
+            self.assertEqual(adapter.http_requests, cold)
+            getattr(adapter, name)(*arguments)
+            self.assertEqual(adapter.http_requests, cold + warm)
 
     def test_all_non_developer_and_missing_edition_values_fail_before_crm(self):
         for edition in ("Enterprise Edition", "Trial", "Unlimited Edition", "Developer",
@@ -187,7 +200,7 @@ class SalesforceTests(unittest.TestCase):
         query = "Fixture' OR Name LIKE '%' \\ 50%_ & é"
         adapter.search_accounts(query)
         self.assertEqual(self.requests[-1].url.params["q"],
-            "SELECT Id, Name, Industry FROM Account WHERE Name LIKE '%Fixture\\' OR Name LIKE \\'\\%\\' \\\\ 50\\%\\_ & é%' ORDER BY Id LIMIT 101")
+            "SELECT Id, Name, Industry, AccountNumber FROM Account WHERE Name LIKE '%Fixture\\' OR Name LIKE \\'\\%\\' \\\\ 50\\%\\_ & é%' ORDER BY Id LIMIT 101")
         self.assertNotIn(" & ", str(self.requests[-1].url))
 
     def test_invalid_arguments_fail_locally_without_any_request(self):
@@ -340,6 +353,77 @@ class SalesforceTests(unittest.TestCase):
         raw = (FIXTURES / "opportunity_decimal.json").read_bytes().replace(b'"Amount":0.10', b'"Amount":1e999999999')
         self.assert_error("salesforce_invalid_response",
                           self.adapter("organization_developer.json", httpx2.Response(200, content=raw)).list_opportunities)
+
+    def contract(self, **changes):
+        return {"Id": "800000000000001AAA", "AccountId": "001000000000001AAA",
+                "Status": "Draft", "StatusCode": "Draft", "StartDate": "2026-01-31",
+                "EndDate": "2027-01-30", "ContractTerm": 12, **changes}
+
+    def contracts(self, *rows):
+        return {"totalSize": len(rows), "done": True, "records": list(rows)}
+
+    def test_contracts_use_server_end_date_and_preserve_nullable_fields(self):
+        response = self.contracts(self.contract(), self.contract(
+            Id="800000000000002AAA", Status="A custom label", StatusCode="InApproval",
+            StartDate=None, EndDate=None, ContractTerm=None))
+        adapter = self.adapter("organization_developer.json", "account.json", "empty.json", response)
+        rows = adapter.get_account(ACCOUNT_ID)["contracts"]
+        self.assertEqual(rows[0], {"id": "ctr-sf-800000000000001AAA", "source_id": "800000000000001AAA",
+            "backend": "salesforce", "account_id": ACCOUNT_ID, "status": "Draft", "status_code": "Draft",
+            "start_date": "2026-01-31", "end_date": "2027-01-30", "contract_term": 12})
+        self.assertEqual(rows[1]["status"], "A custom label")
+        for field in ("start_date", "end_date", "contract_term"):
+            self.assertIsNone(rows[1][field])
+        self.assertEqual(self.requests[-1].url.params["q"],
+            "SELECT Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate FROM Contract "
+            "WHERE AccountId = '001000000000001AAA' ORDER BY Id LIMIT 101")
+
+    def test_contract_malformed_fields_and_cross_account_rows_fail(self):
+        for field, value in (("Id", "short"), ("AccountId", "001000000000002AAA"),
+                             ("StatusCode", "Terminated"), ("StatusCode", []), ("Status", None),
+                             ("StartDate", "20260131"), ("EndDate", "2027-02-30"),
+                             ("ContractTerm", True), ("ContractTerm", 1.5),
+                             ("ContractTerm", 2 ** 31), ("ContractTerm", -(2 ** 31) - 1)):
+            with self.subTest(field=field, value=value):
+                adapter = self.adapter("organization_developer.json", "account.json", "empty.json",
+                                       self.contracts(self.contract(**{field: value})))
+                self.assert_error("salesforce_invalid_response", lambda: adapter.get_account(ACCOUNT_ID))
+        for field in ("AccountNumber",):
+            account = fixture("account.json")
+            del account["records"][0][field]
+            self.assert_error("salesforce_invalid_response",
+                              self.adapter("organization_developer.json", account).search_accounts)
+        for field in ("StartDate", "EndDate", "ContractTerm"):
+            row = self.contract()
+            del row[field]
+            adapter = self.adapter("organization_developer.json", "account.json", "empty.json", self.contracts(row))
+            self.assert_error("salesforce_invalid_response", lambda: adapter.get_account(ACCOUNT_ID))
+
+    def test_describe_is_fixed_bounded_and_returns_only_field_names(self):
+        adapter = self.adapter("organization_developer.json", {"fields": [{"name": "Id"}, {"name": "EndDate"}]})
+        self.assertEqual(adapter.describe_fields("Contract"), {"Id", "EndDate"})
+        self.assertEqual(self.requests[-1].url.path, "/services/data/v68.0/sobjects/Contract/describe")
+        self.assertEqual(str(self.requests[-1].url.query), "b''")
+        for name in (None, [], "User", "../Account", "Contract?token=bad"):
+            self.assert_error("salesforce_invalid_arguments", lambda: self.adapter().describe_fields(name))
+        for response in ({}, {"fields": [None]}, {"fields": [{"name": "../Id"}]},
+                         {"fields": [{"name": "Id"}, {"name": "Id"}]}):
+            adapter = self.adapter("organization_developer.json", response)
+            self.assert_error("salesforce_invalid_response", lambda: adapter.describe_fields("Contract"))
+
+    def test_candidate_selection_uses_fixed_eligible_query_and_validates_returned_date(self):
+        adapter = self.adapter("organization_developer.json", self.contracts(self.contract()))
+        self.assertEqual(adapter.candidate_account("2027-01-30"), ACCOUNT_ID)
+        self.assertEqual(self.requests[-1].url.params["q"],
+            "SELECT Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate FROM Contract "
+            "WHERE EndDate >= 2027-01-30 AND StatusCode IN ('Draft', 'InApproval', 'Activated') "
+            "ORDER BY EndDate, Id LIMIT 1")
+        self.assertIsNone(self.adapter("organization_developer.json", "empty.json").candidate_account("2026-01-01"))
+        for value in (None, "20270101", "2027-02-30", "2027-01-01 OR Id != null"):
+            self.assert_error("salesforce_invalid_arguments", lambda: self.adapter().candidate_account(value))
+        for end in (None, "2025-01-01"):
+            adapter = self.adapter("organization_developer.json", self.contracts(self.contract(EndDate=end)))
+            self.assert_error("salesforce_invalid_response", lambda: adapter.candidate_account("2026-01-01"))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,79 @@
 # Decisions
 
+## Standard Salesforce renewal planning and CLI credentials (2026-11-17)
+
+Use standard Contract `EndDate` for renewal planning because it supplies a dated
+agreement without requiring custom fields. The
+[Contract reference](https://developer.salesforce.com/docs/platform/object-reference/references/standard-objects/object-contract.html)
+marks StatusCode filterable and lists Draft, InApproval, and Activated. Include
+all three categories so a rep can plan from a Draft before activation. Require
+the brief to say when a candidate has not been activated. Select the earliest
+non-null EndDate on or after the planning date, then Contract ID for ties.
+Refuse with `renewal_fields_unmapped` when there is no candidate. Use the returned
+EndDate only: Salesforce may calculate it from StartDate and ContractTerm, but
+the connector never substitutes its own calculation. Creating Draft records
+and later activating them remain operator writes, outside this GET-only adapter.
+
+Map AccountNumber as a nullable standard field for a later explicit fixture
+bridge. It creates no join by itself. Contacts and contracts remain part of the
+existing get_account tool and receipt, with separate crm/contracts references.
+Preserve raw labels, nullable fields, exact opportunity decimals, and unknown
+currency. Account AnnualRevenue does not become ARR, and opportunity CloseDate
+does not become a renewal date. Require the brief's unmapped ARR and CRM risk
+statements so absence cannot be mistaken for a known value.
+
+Give Salesforce evidence workflow version 3 inside the existing schema version
+1 snapshot because the contract references and required planning claims differ
+from fixture evidence. Keep fixture workflows and expected claims unchanged.
+The Salesforce CLI brief uses today's local date unless --as-of is given;
+fixture briefs retain 2027-01-15 for reproducible evaluation. Calls and Slack
+remain separate mocks with no external-account mapping in this slice.
+
+Prefer --sf-org over exported credentials. Current
+[Salesforce CLI authentication guidance](https://developer.salesforce.com/docs/platform/sfdx-dev/guide/sfdx-dev-auth-view-secrets.html)
+separates org display metadata from the explicit show-access-token command.
+Capture those two commands inside the connector using an existing login,
+closed stdin, no shell, bounded timeouts, and private in-memory results.
+Disable [telemetry](https://developer.salesforce.com/docs/platform/sfdx-setup/guide/sfdx-dev-cli-telemetry.html),
+[automatic updates](https://developer.salesforce.com/docs/platform/sfdx-setup/guide/sfdx-setup-disable-autoupdate.html),
+and CLI file logging. Preserve the two-variable fallback. Add no runtime
+dependency; subprocess handling uses the standard library.
+
+On the first upstream 401 per operation, reacquire CLI credentials once and
+retry the same GET because the CLI owns the existing login's refresh capability.
+Reject a changed normalized origin, failed refresh, or second 401 with the fixed
+authentication error. Preserve the original 20-second, 12-request, and 1-MiB
+budgets across lookup, retry, and pagination. Do not retry other errors or refresh
+the environment-token path. This does not change local MCP grant expiry.
+
+Cache only a successful Developer Edition check for the adapter's lifetime and
+pinned origin because repeating immutable org edition metadata adds a round trip
+to every read. Keep all record queries fresh. Single-page invented tests measured
+previous search/account/opportunity calls at 2/3/2 GETs. New cold counts are 2/4/2;
+new warm counts are 1/3/1. The added Contract query explains the account count,
+so it is not a like-for-like payload comparison. A fresh brief has five GETs.
+These counts are structural tests, not stopwatch claims or live measurements.
+
+Make salesforce check an explicit owner diagnostic with fixed step names,
+pass/fail, counts, timings, and fixes. Schema checks release only missing names
+from our fixed required-field list. Keep IDs, names, emails, org details,
+credentials, raw schemas, and child or upstream messages out of the report.
+Count connector REST GET attempts including retries, and count sf subprocess
+attempts separately. The CLI's internal HTTP traffic and other org activity are
+unknown, so these counts do not claim total API quota usage. Its temporary local
+HTTPS brief proves the same receipt and citation path as an ordinary brief;
+ordinary snapshots and audit files remain private source-bearing artifacts.
+
+The owner's later instruction explicitly authorized the lead agent to use the
+existing Salesforce login and browser for this org task. That supersedes the
+initial no-sf instruction for the lead agent only. Delegated implementation and
+tests use invented responses and a fake sf on PATH. Commit no org data or var
+files. Current claims rely on those tests; no live adapter run is claimed here.
+The README's no-live-org-verification statement remains until an owner-provided
+check report. The connector creates no account, requests no keys, and deploys
+nothing. This decision supersedes the credential, refresh, edition-cache, and
+brief-refusal choices in the initial Optional Salesforce reads decision below.
+
 ## Measure process startup and audited calls (2026-11-17)
 
 Use one fixture-only benchmark for fresh-process version, help, brief, server
@@ -360,6 +434,10 @@ A malformed saved brief or evidence container must produce a CLI error instead
 of an AttributeError traceback. The citation rules stay unchanged.
 
 ## Optional Salesforce reads (2026-11-17)
+
+This records the initial adapter. The standard Salesforce renewal planning and
+CLI credentials decision above supersedes its credential, refresh, edition-check,
+and blanket brief-refusal behavior.
 
 Select the external reader only with `serve --crm-backend salesforce`. Environment
 variables alone never change the backend. Keep the default demo, evaluation,

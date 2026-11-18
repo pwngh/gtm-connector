@@ -14,6 +14,10 @@ class BriefRejected(ValueError):
     """A candidate or its evidence cannot support a checked brief."""
 
 
+class NoRenewalCandidate(BriefRejected):
+    """Validated Salesforce evidence has no eligible future Contract end date."""
+
+
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
 _SOURCES = {
     "accounts": ("crm", "acc", "get_account"),
@@ -22,6 +26,7 @@ _SOURCES = {
     "call_notes": ("calls", "note", "read_call_notes"),
 }
 _SLACK_SOURCE = {"messages": ("slack", "msg", "read_slack_messages")}
+_CONTRACT_SOURCE = {"contracts": ("crm", "ctr", "get_account")}
 _PROCUREMENT_NOTE = "Procurement has not approved this renewal. The budget remains unsigned."
 _SECURITY_MESSAGE = "Security review is delayed. Procurement approval is still pending."
 
@@ -48,15 +53,22 @@ def _money(cents):
 
 def _catalog(evidence):
     version = evidence.get("workflow_version", 1)
-    if type(version) is not int or version not in (1, 2):
+    if type(version) is not int or version not in (1, 2, 3):
         raise BriefRejected("Unsupported evidence workflow version.")
     if version == 1 and "slack_status" in evidence:
         raise BriefRejected("Legacy evidence cannot contain a Slack outcome.")
-    sources = {**_SOURCES, **(_SLACK_SOURCE if version == 2 else {})}
+    salesforce = version == 3
+    include_slack = version == 2 or (salesforce and "slack_status" in evidence)
+    if salesforce and evidence.get("crm_backend") != "salesforce":
+        raise BriefRejected("Salesforce evidence must identify its CRM backend.")
+    sources = {**_SOURCES, **(_SLACK_SOURCE if include_slack else {}),
+               **(_CONTRACT_SOURCE if salesforce else {})}
     account_id, brief_id = evidence["account_id"], evidence["brief_id"]
     if not all(isinstance(value, str) and _ID.fullmatch(value)
                for value in (account_id, brief_id)):
         raise BriefRejected("Invalid account or brief identifier.")
+    if salesforce and not re.fullmatch(r"acc-sf-[A-Za-z0-9]{18}", account_id):
+        raise BriefRejected("Salesforce evidence requires a namespaced account identifier.")
     as_of = _day(evidence["as_of"])
     groups: dict[str, list[dict[str, Any]]] = {name: [] for name in sources}
     expected_rows: dict[str, list[str]] = {tool: [] for _, _, tool in sources.values()}
@@ -75,6 +87,12 @@ def _catalog(evidence):
         if (not _ID.fullmatch(identifier) or not identifier.startswith(prefix + "-")
                 or reference != f"{system}/{table}/{identifier}"):
             raise BriefRejected("Record reference does not identify its source.")
+        if salesforce and system == "crm":
+            native_id = record.get("source_id")
+            if (record.get("backend") != "salesforce" or not isinstance(native_id, str)
+                    or not re.fullmatch(r"[A-Za-z0-9]{18}", native_id)
+                    or identifier != f"{prefix}-sf-{native_id}"):
+                raise BriefRejected("Salesforce record identity does not match its source.")
         if (identifier if table == "accounts" else record["account_id"]) != account_id:
             raise BriefRejected("Evidence contains a record for a different account.")
         seen.add(reference)
@@ -85,7 +103,7 @@ def _catalog(evidence):
 
     if evidence["notes_status"] not in ("available", "denied"):
         raise BriefRejected("Unknown call-notes outcome.")
-    if version == 2 and evidence["slack_status"] not in ("available", "denied"):
+    if include_slack and evidence["slack_status"] not in ("available", "denied"):
         raise BriefRejected("Unknown Slack outcome.")
     receipts, receipt_ids = {}, set()
     for receipt in evidence["receipts"]:
@@ -124,32 +142,37 @@ def _catalog(evidence):
 
     account = groups["accounts"][0]
     ref = account["record_ref"]
-    add(f"Account: {_text(account['name'])}.", ref)
-    add(f"Industry: {_text(account['industry'])}.", ref)
-    add(f"Annual recurring revenue: {_money(account['arr_cents'])}.", ref)
-    renewal = _day(account["renewal_date"])
-    add(f"Renewal date: {renewal.isoformat()}.", ref)
-    days = (renewal - as_of).days
-    count = f"{abs(days)} {'day' if abs(days) == 1 else 'days'}"
-    timing = (f"Renewal is in {count} as of {as_of}." if days > 0 else
-              f"Renewal was {count} ago as of {as_of}." if days < 0 else
-              f"Renewal is due on {as_of}.")
-    add(timing, ref, f"run/{brief_id}")
-    add(f"CRM risk status: {_text(account['risk_status'])}.", ref)
-    reason = _text(account["risk_reason"])
-    if account["risk_reason"]:
-        add(f"CRM risk reason: {reason}.", ref)
-    for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
-        add(f"Contact {_text(contact['name'])}: role {_text(contact['title'])}; "
-            f"email {_text(contact['email'])}.", contact["record_ref"])
-    for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
-        add(f"CRM opportunity {opportunity['id']}: stage {_text(opportunity['stage'])}; "
-            f"amount {_money(opportunity['amount_cents'])}; "
-            f"close date {_day(opportunity['close_date'])}.", opportunity["record_ref"])
+    required = set()
+    if salesforce:
+        from .salesforce_facts import add_salesforce_facts
+        required, renewal_ref = add_salesforce_facts(groups, as_of, brief_id, add)
+    else:
+        renewal_ref = ref
+        add(f"Account: {_text(account['name'])}.", ref)
+        add(f"Industry: {_text(account['industry'])}.", ref)
+        add(f"Annual recurring revenue: {_money(account['arr_cents'])}.", ref)
+        renewal = _day(account["renewal_date"])
+        add(f"Renewal date: {renewal.isoformat()}.", ref)
+        days = (renewal - as_of).days
+        count = f"{abs(days)} {'day' if abs(days) == 1 else 'days'}"
+        timing = (f"Renewal is in {count} as of {as_of}." if days > 0 else
+                  f"Renewal was {count} ago as of {as_of}." if days < 0 else
+                  f"Renewal is due on {as_of}.")
+        add(timing, ref, f"run/{brief_id}")
+        add(f"CRM risk status: {_text(account['risk_status'])}.", ref)
+        reason = _text(account["risk_reason"])
+        if account["risk_reason"]:
+            add(f"CRM risk reason: {reason}.", ref)
+        for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
+            add(f"Contact {_text(contact['name'])}: role {_text(contact['title'])}; "
+                f"email {_text(contact['email'])}.", contact["record_ref"])
+        for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
+            add(f"CRM opportunity {opportunity['id']}: stage {_text(opportunity['stage'])}; "
+                f"amount {_money(opportunity['amount_cents'])}; "
+                f"close date {_day(opportunity['close_date'])}.", opportunity["record_ref"])
     if not groups["opportunities"]:
         add(f"No opportunities were returned for {account_id}.",
             f"audit/{receipts['list_opportunities']['audit_id']}")
-    required = set()
     procurement_conflicts = []
     notes_receipt = f"audit/{receipts['read_call_notes']['audit_id']}"
     if evidence["notes_status"] == "denied":
@@ -161,7 +184,7 @@ def _catalog(evidence):
             add(f"Untrusted call note {note['id']} at {_text(note['called_at'])} "
                 f"says {_text(note['body'])}.", note["record_ref"])
             # One explicit fixture rule, not inference over arbitrary note prose.
-            if note["body"] != _PROCUREMENT_NOTE:
+            if salesforce or note["body"] != _PROCUREMENT_NOTE:
                 continue
             for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
                 if opportunity["stage"] == "closed_won":
@@ -170,7 +193,7 @@ def _catalog(evidence):
                         f'Source conflict: CRM opportunity {opportunity["id"]} reports stage '
                         f'"closed_won", while call note {note["id"]} reports unapproved procurement.',
                         opportunity["record_ref"], note["record_ref"]))
-    if version == 2:
+    if include_slack:
         slack_receipt = f"audit/{receipts['read_slack_messages']['audit_id']}"
         conflict_refs: set[str] = set()
         if evidence["slack_status"] == "denied":
@@ -205,7 +228,7 @@ def _catalog(evidence):
                              *refs))
         else:
             required.add(add("Proposed follow-up: Ask the account owner to review the cited renewal context.",
-                             account["record_ref"]))
+                             renewal_ref))
     return lines, required
 
 
