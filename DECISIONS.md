@@ -56,7 +56,8 @@ initial unchecked marker therefore makes no provider request; retry verifies
 identity again without inventing a refresh. Once an unchecked access token
 expires, require browser authorization. That state can also survive a failed
 rejection marker, so it cannot establish whether another refresh is safe.
-Ready credentials still refresh normally before their access token expires.
+Ready credentials still refresh before or after access-token expiry while the
+refresh credential remains usable.
 
 Local status makes no request and creates no file. Explicit check verifies only
 authentication. The provider transport shares one cancellable 20-second HTTP
