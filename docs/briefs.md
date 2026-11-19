@@ -33,13 +33,19 @@ saved card that differs. The owner of the files can still edit both.
 
 ## Sentences
 
-A sentence ends at closing punctuation or a blank line. A single line break is a wrap, so a
-sentence written over two lines stays whole. Two transcript cues join into one run only when they
-have the same speaker label and the second starts within two seconds of the first, so speech from
-different moments is never joined. A sentence over 300 characters is counted and not shown, because
-a quotation is never cut. When a transcript excerpt starts inside a call, its first sentence is
-counted and not shown. When it ends inside a call, its last sentence is shown only if it ends in
-closing punctuation.
+A sentence ends at closing punctuation or a blank line. A single line break inside a message or a
+cue is a wrap, so a sentence written over two lines stays whole. A period after a title, a legal or
+state short form, a dotted initialism, or a list marker does not end a sentence, so "28 U.S.C. § 1332"
+and "Fed. R. Civ. P. 26(b)(3)" stay in one piece. Where the text does not settle it, two sentences
+stay joined: a fragment is never shown as a sentence.
+
+Two transcript cues join into one run only when they have the same speaker label and the second
+starts within two seconds of the first, or within ten when the first stops mid-sentence and the
+second goes on in lower case. Cues or lines with no label never join. In a transcript, a run that
+stops mid-sentence is counted and not shown, and so is the start of that speaker's next run, and
+the first sentence of an excerpt that starts inside a call. The end of a Slack message or a call
+note is an end. A sentence over 300 characters is counted and not shown, because a quotation is
+never cut.
 
 ## Sections
 

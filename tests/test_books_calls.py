@@ -131,11 +131,14 @@ def spans(cue, kind):
     name = cue["cue_id"] if cue["cue_id"] and not cue["cue_id"].isdigit() else None
     if kind != "vtt":
         return [(name, cue["text"])]
+    # Bold, italic, class and language spans and cue timestamps are markup, not speech.
+    text = re.sub(r"</?(?:[biuc]|ruby|rt|lang)(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>",
+                  "", cue["text"])
     found, at = [], 0
-    for tag in VOICE.finditer(cue["text"]):
-        found.append((name, cue["text"][at:tag.start()]))
+    for tag in VOICE.finditer(text):
+        found.append((name, text[at:tag.start()]))
         name, at = tag.group(1), tag.end()
-    found.append((name, cue["text"][at:]))
+    found.append((name, text[at:]))
     return [(who, text.replace("</v>", "")) for who, text in found if text.replace("</v>", "").strip()]
 
 
@@ -520,29 +523,26 @@ class BookCallsTests(unittest.TestCase):
             with self.assertRaises(BriefRejected, msg=other):
                 build({**evidence, "crm_binding": other})
 
-    def test_a_sentence_at_the_edge_of_an_excerpt_is_counted_and_not_shown(self):
+    def test_a_sentence_cut_by_a_line_or_by_the_edge_of_an_excerpt_is_counted_and_not_shown(self):
+        # A line of a text file names no speaker, so two lines are never read as one person's sentence.
         raw = (b"The committee met and has not\napproved the rider. We will wait.\nNext steps are clear.\n"
                b"The seller will send\nthe redline tomorrow.\n")
-        for name, selected, whole, partial, counted in (
-                # Lines 2 to 4: the first sentence lost its start and the last lost its end.
-                ("both", (3, 3), ["We will wait.", "Next steps are clear."],
-                 ["approved the rider.", "The seller will send"],
-                 "  Sentences: 2 at the edge of the excerpt may be incomplete and are not shown."),
-                # Lines 2 to 5 end with the file, so only the start is in doubt.
-                ("start", (3, 4),
-                 ["We will wait.", "Next steps are clear.", "The seller will send the redline tomorrow."],
-                 ["approved the rider."],
-                 "  Sentences: 1 at the edge of the excerpt may be incomplete and is not shown."),
-                # The whole file: nothing is at an edge.
-                ("none", (1, 5), ["The committee met and has not approved the rider.", "We will wait.",
-                                  "Next steps are clear.", "The seller will send the redline tomorrow."], [], None)):
+        whole = ["We will wait.", "Next steps are clear."]
+        for name, selected, partial in (
+                # Lines 2 to 4: the first sentence lost its start and the last has no end.
+                ("both", (3, 3), ["approved the rider.", "The seller will send"]),
+                # Lines 2 to 5: the last line may be the rest of the line before it, or another speaker.
+                ("start", (3, 4), ["approved the rider.", "The seller will send", "the redline tomorrow."]),
+                # The whole file: each broken sentence is two pieces, and neither piece is shown.
+                ("none", (1, 5), ["The committee met and has not", "approved the rider.", "The seller will send",
+                                  "the redline tomorrow."])):
             with self.subTest(case=name):
                 card, units_ = self.spoken(name, raw, "txt", selected=selected)
                 self.assertEqual([unit["text"] for unit in units_ if not unit["partial"]], whole)
                 self.assertEqual([unit["text"] for unit in units_ if unit["partial"]], partial)
                 self.assertEqual(sorted(quote[-1] for quote in varied.said(card)), sorted(whole))
-                edge = [line for line in card["NOT READ"] if "edge of the excerpt" in line]
-                self.assertEqual(edge, [counted] if counted else [])
+                self.assertIn(f"  Sentences: {len(partial)} cut off at a pause, a change of speaker, or the edge of "
+                              "the excerpt were read and are not shown.", card["NOT READ"])
 
 
 if __name__ == "__main__":

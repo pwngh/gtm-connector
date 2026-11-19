@@ -123,17 +123,51 @@ class NeutralizedText(unittest.TestCase):
             self.assertEqual(sentences(whole), [whole])
         self.assertEqual(sentences("We sign in Jan. Then we start. No. 4 is next."),
                          ["We sign in Jan. Then we start.", "No. 4 is next."])
-        # A sentence of one letter is a sentence, so a list of initials is not swallowed into its neighbours.
-        self.assertEqual(sentences("A. B. Then C."), ["A.", "B.", "Then C."])
+        # A single letter and a period is an initial, never an end. Joining is the safe failure.
+        self.assertEqual(sentences("A. B. Then C."), ["A. B. Then C."])
         # A word that only ends like an abbreviation still ends its sentence.
         self.assertEqual(sentences("We will plan. Then we scan. No? Yes."), ["We will plan.", "Then we scan.", "No?",
                                                                             "Yes."])
+
+    def test_legal_citations_lists_and_firm_names_never_end_a_sentence(self):
+        split = {
+            "See 28 U.S.C. 1332 for that. Next.": ["See 28 U.S.C. 1332 for that.", "Next."],
+            "Under 17 U.S.C. § 107 the use is fair. Next.": ["Under 17 U.S.C. § 107 the use is fair.", "Next."],
+            "Fed. R. Civ. P. 26(b)(3) applies. The court agreed.": ["Fed. R. Civ. P. 26(b)(3) applies.",
+                                                                     "The court agreed."],
+            "Smith v. Jones, 123 F. Supp. 2d 456 (S.D.N.Y. 2001). Id. at 5.": [
+                "Smith v. Jones, 123 F. Supp. 2d 456 (S.D.N.Y. 2001).", "Id. at 5."],
+            "N.Y. Comp. Codes R. & Regs. tit. 22, § 1200.0 governs. We comply.": [
+                "N.Y. Comp. Codes R. & Regs. tit. 22, § 1200.0 governs.", "We comply."],
+            "See ABA Formal Op. 512 on this. Agreed.": ["See ABA Formal Op. 512 on this.", "Agreed."],
+            "Rule 12(b)(6) applies. Mr. Holt agreed.": ["Rule 12(b)(6) applies.", "Mr. Holt agreed."],
+            "No. The client refused. See No. 14.": ["No.", "The client refused.", "See No. 14."],
+            "1. The rider is blocked. 2. Legal is reviewing.": ["1. The rider is blocked.", "2. Legal is reviewing."],
+            "See Wis. Stat. 100.18 and Mass. 456. Next.": ["See Wis. Stat. 100.18 and Mass. 456.", "Next."],
+            "Thornfield Wren LLP. We require zero retention.": ["Thornfield Wren LLP.", "We require zero retention."],
+            "So do I. It is late.": ["So do I.", "It is late."],
+            "We operate in the U.S.A. Our servers are domestic.": ["We operate in the U.S.A.",
+                                                                  "Our servers are domestic."],
+            # A name before a number, or a numbered point inside a note, ends its sentence as usual.
+            "Usage went to Trish. 31 of 45 seats logged in.": ["Usage went to Trish.", "31 of 45 seats logged in."],
+            "Closing that as lost. (3) Stefan asked about year 2.": ["Closing that as lost.",
+                                                                    "(3) Stefan asked about year 2."],
+        }
+        for text, want in split.items():
+            self.assertEqual(sentences(text), want)
+        # Where the text does not settle it, the sentences stay joined: a fragment is never shown as a sentence.
+        for whole in ("Consult Fed. R. Civ. P. 26(b)(3).", "Under Sec. 3.2 and Ex. B the fee applies.",
+                      "We met in St. Louis on invoice no. 5.", "It costs ca. 285 200,00 EUR in total.",
+                      "We reviewed several, e.g. The Holt matter.", "We met at 3 p.m. We left at 4.",
+                      "We met Acme Inc. General Counsel yesterday.", "Thornfield Wren LLP. Section 4 applies.",
+                      "USD 450,000.00 is the amount. v4.2 shipped.", "all lowercase. never split here."):
+            self.assertEqual(sentences(whole), [whole])
 
     def test_a_long_run_of_short_sentences_is_split_quickly(self):
         started = time.perf_counter()
         found = sentences("A. " * 40_000 + "Done. " * 20_000)
         self.assertLess(time.perf_counter() - started, 2)
-        self.assertEqual(found, ["A."] * 40_000 + ["Done."] * 20_000)
+        self.assertEqual(found[1:], ["Done."] * 19_999)
         self.assertEqual(" ".join(found), ("A. " * 40_000 + "Done. " * 20_000).strip())
 
     def test_a_megabyte_of_text_is_neutralized_quickly_whatever_it_holds(self):
@@ -152,6 +186,9 @@ class NeutralizedText(unittest.TestCase):
         # Text before the first tag keeps the cue's own label. A tag with no text after it says nothing.
         self.assertEqual(voices("Hello <v Dana Ito>there<v Sam Lee> </v>", "intro"),
                          [("intro", "Hello "), ("Dana Ito", "there")])
+        # Styling spans and cue timestamps are markup. Any other tag is text and stays.
+        self.assertEqual(voices("<v Dana Ito>We <b>will</b> <00:01:05.000>sign <script>.</v>"),
+                         [("Dana Ito", "We will sign <script>.")])
         self.assertEqual(voices("no tags here"), [(None, "no tags here")])
         self.assertEqual(voices("<v Dana Ito></v>"), [])
 

@@ -60,15 +60,17 @@ MAX_LABEL = 200
 # A time in this form is shown as given. Any other time is source text and is shown as a neutralized literal.
 _PLAIN_INSTANT = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})")
-# A sentence ends at . ! or ? and any closing quote or bracket, before a word that does not start in lower case.
-_SENTENCE_END = re.compile(r"""[.!?]["')\]]*(\s+)(?=["'(\[]?[^\sa-z])""")
-_ABBREVIATION = re.compile(
-    r"(?:^|[\s(\[\"'])(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|Inc|Ltd|Co|No|approx|est|e\.g|i\.e|[A-Za-z]"
-    r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.\Z")
 # A WebVTT voice tag, or the tag that closes one. A class holds no dot, so the pattern cannot backtrack.
 _VOICE = re.compile(r"<v(?:\.[^\s>.]*)*[ \t]+([^<>\n]+)>|</v>")
 # Cues by one speaker join into one run only when the next starts within this long of the last.
 _RUN_GAP_MS = 2000
+# One speaker's cues up to this far apart still join when the earlier one stops mid-sentence and the later one
+# goes on in lower case.
+_BRIDGE_GAP_MS = 10_000
+_GOES_ON = re.compile(r"\s*[a-z,;:\u2013\u2014]")
+# WebVTT markup that is not speech: bold, italic, underline, class, language and ruby spans, and cue timestamps.
+_CUE_MARKUP = re.compile(r"</?(?:[biuc]|ruby|rt|lang)(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>"
+                         r"|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>")
 _LINE_BREAKS = {0x0A, 0x0B, 0x0C, 0x85, 0x2028, 0x2029}
 # A bracketed integer is how a card cites a unit, so source text never keeps one.
 _CITATION = re.compile(r"\[(\d+)\]")
@@ -145,22 +147,77 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
     return _CITATION.sub(citation, "".join(visible)), counts
 
 
+# A sentence may end at closing punctuation followed by a token that does not start in lower case.
+_SENTENCE_END = re.compile(r"""([.!?]["')\]]*)(\s+)(?=["'(\[]?[^\sa-z])""")
+_BEFORE = r"(?:^|[\s(\[\"'])"
+_AFTER = r"\.[\"')\]]*\Z"
+# A period after one of these does not end a sentence: "28 U.S.C. 1332", "F.Supp.2d", "e.g."; titles, legal and
+# state short forms, months, and single letters; a list marker that opens a line.
+_DOTTED = re.compile(_BEFORE + r"(?:[A-Za-z]{1,6}\.){2,}(?:[0-9]+[a-z]*)?[\"')\]]*\Z")
+_ABBREVIATION = re.compile(
+    _BEFORE + r"(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|Hon|Rev|Sen|Rep|Gov|Pres|Gen|Col|Capt|Lt|Sgt"
+    r"|Assn|Bros|Dept|Div|Est|Mfg|Natl|Intl|Univ|St|Mt|Ft"
+    r"|v|vs|al|cf|ibid|id|supra|infra|approx|misc|ca|pp|vol|fig|nr|est|ext"
+    r"|Fed|Civ|Crim|Evid|App|Supp|Dist|Cir|Bankr|Admin|Stat|Reg|Code|Comp|Ann|Cons"
+    r"|Tit|Art|Sec|Ch|Subd|Subsec|Cl|Para|Pt|Ex|Sched|Amend|Op|Proc|Ord|Const"
+    r"|tit|art|sec|ch|subd|subsec|cl|para|pt|ex|sched|amend|op|proc"
+    r"|Fam|Bus|Com|Fin|Ins|Lab|Pen|Prob|Prop|Tax|Veh|Welf"
+    r"|Ala|Ariz|Ark|Cal|Colo|Conn|Del|Fla|Ga|Ill|Ind|Kan|Ky|La|Md|Mass|Mich|Minn|Miss|Mo|Mont|Neb|Nev|Okla|Or|Pa"
+    r"|Tenn|Tex|Va|Vt|Wash|Wis|Wyo"
+    r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|[A-Za-z])" + _AFTER)
+_LIST_MARKER = re.compile(r"\s*(?:\d+|[A-Za-z])\.[\"')\]]*\Z")
+# A firm suffix, the word "I", or a capitalized initialism ends a sentence only before a word that opens one.
+_MAY_END = re.compile(_BEFORE + r"(?:Inc|Ltd|Co|Corp|LLP|LLC|LP|PLC|PC|I)" + _AFTER)
+_OPENER = re.compile(r"(?:We|Our|They|Their|He|She|It|Its|I|You|My|Your|This|That|These|Those|The|A|An|In|On|At|For|If"
+                     r"|When|As|There|But|And|So|Then|However|Therefore)\b")
+# "No. 14" is a number. "No." before anything else is an answer.
+_NUMBER_SIGN = re.compile(_BEFORE + r"[Nn]os?\.\Z")
+_SECTION_SIGN = re.compile(r"""["'(\[]*[§¶]""")
+
+
+def _continues(line: str, start: int, end: int, after: str) -> bool:
+    """Whether the closing punctuation that ends at `end` leaves its sentence, begun at `start`, unfinished."""
+    if not line[start:end].rstrip("\"')]").endswith("."):
+        return False
+    if _LIST_MARKER.fullmatch(line, start, end):
+        return True
+    window = max(start - 1, end - 24, 0)
+    dotted = _DOTTED.search(line, window, end)
+    if _MAY_END.search(line, window, end) or dotted and dotted.group().lstrip(" ([\"'")[0].isupper():
+        return _OPENER.match(after) is None
+    return bool(dotted or _ABBREVIATION.search(line, window, end) or _SECTION_SIGN.match(after)
+                or after[:1].isdigit() and _NUMBER_SIGN.search(line, window, end))
+
+
+def _unfinished(text: str) -> bool:
+    """Whether transcript text stops mid-sentence: no closing punctuation, or a short form that expects more."""
+    text = text.rstrip()
+    if not _ENDED.search(text):
+        return True
+    if not text.rstrip("\"')]").endswith("."):
+        return False
+    window = max(len(text) - 24, 0)
+    short = _ABBREVIATION.search(text, window)
+    return bool(_DOTTED.search(text, window) or _NUMBER_SIGN.search(text, window)
+                or short and len(short.group().strip(" ([\"')].")) > 1)
+
+
 def sentences(safe: str) -> list[str]:
     """Split neutralized text into whole sentences. A quotation is always one of these, never a part.
 
     A line break inside a paragraph is a wrap, not an end. Only a blank line or closing punctuation ends
     a sentence.
     """
-    found = []
+    found: list[str] = []
     for paragraph in re.split(r"\n[ \t]*\n", safe):
-        line, start = " ".join(paragraph.split()), 0
+        line = " ".join(paragraph.split())
+        if not line:
+            continue
+        start = 0
         for match in _SENTENCE_END.finditer(line):
-            # Only the last word can be an abbreviation, so only the end of the sentence is searched.
-            end = match.start(1)
-            # The search starts at the space before the sentence, so an abbreviation that opens it is seen.
-            if not _ABBREVIATION.search(line, max(start - 1, end - 12, 0), end) or end - start < 3:
-                found.append(line[start:end])
-                start = match.end(1)
+            if not _continues(line, start, match.end(1), line[match.end(2):]):
+                found.append(line[start:match.end(1)])
+                start = match.end(2)
         if line[start:]:
             found.append(line[start:])
     return found
@@ -171,6 +228,7 @@ def voices(text: str, label=None) -> list[tuple]:
 
     Text outside a voice span belongs to the cue's own label, not to the voice before it.
     """
+    text = _CUE_MARKUP.sub("", text)
     spans, position, speaker = [], 0, label
     for match in _VOICE.finditer(text):
         spans.append((speaker, text[position:match.start()]))
@@ -375,26 +433,32 @@ class _Card:
                            "record_ref": row["record_ref"], "tool": _SOURCES[table][2]})
         return len(self.units)
 
-    def spoken(self, row, table, parts, *, at, role_of, open_start=False, open_end=False):
+    def spoken(self, row, table, parts, *, at, role_of, transcript=False, open_start=False):
         """Units for one record's speech. `parts` is (speaker label, text, start ms, end ms) in order.
 
-        Neighbouring parts by one speaker with no gap in time are one run, so a sentence wrapped across
-        cues stays whole. A record with no sentence still gets one unit, so every record resolves.
+        Neighbouring parts under one speaker label are one run, so a sentence wrapped across cues stays whole:
+        when they are at most two seconds apart, or at most ten when the earlier part stops mid-sentence and
+        the later one goes on in lower case. Parts with no label never join: no label is not one speaker.
+        In a transcript, a run that stops mid-sentence is not a quotation, and neither is the opening of that
+        speaker's next run. A record with no sentence still gets one unit, so every record resolves.
         """
         if at is not None and not (isinstance(at, str) and _PLAIN_INSTANT.fullmatch(at)):
             at = self.line(at) or None
         runs: list[list] = []
         for label, raw, start, end in parts:
             label = _label(label) or None
-            joined = runs and runs[-1][0] == label and (
-                start is None or runs[-1][2] is None or start - runs[-1][2] <= _RUN_GAP_MS)
-            if joined:
-                runs[-1][1:] = [runs[-1][1] + "\n" + raw, end]
+            last = runs[-1] if runs else None
+            gap = None if last is None or start is None or last[2] is None else start - last[2]
+            if last is not None and label is not None and last[0] == label and (
+                    gap is None or gap <= _RUN_GAP_MS
+                    or gap <= _BRIDGE_GAP_MS and _unfinished(last[1]) and _GOES_ON.match(raw)):
+                last[1:] = [last[1] + "\n" + raw, end]
             else:
                 runs.append([label, raw, end])
         before = len(self.units)
         # The digest is of the record's text as stored, so it can be checked against the source.
         digest = hashlib.sha256(row["body"].encode("utf-8", "surrogatepass")).hexdigest()
+        waiting: set = set()  # speakers whose last run stopped mid-sentence
         for index, (label, raw, _) in enumerate(runs):
             role, basis = role_of(label)
             # A speaker label is source text too. The role was derived from the label as given.
@@ -405,12 +469,13 @@ class _Card:
             for key, count in counts.items():
                 self.neutralized[key] += count
             found = sentences(safe)
+            cut_start = (open_start and index == 0) or label in waiting
+            cut_end = transcript and bool(found) and _unfinished(found[-1])
+            waiting.discard(label)
+            if cut_end:
+                waiting.add(label)
             for position, sentence in enumerate(found):
-                # At an open edge of an excerpt the first sentence may have lost its start and the
-                # last its end. Neither is shown unless the text itself closes it.
-                partial = ((open_start and index == 0 and position == 0)
-                           or (open_end and index == len(runs) - 1 and position == len(found) - 1
-                               and (not _ENDED.search(sentence) or _ABBREVIATION.search(sentence) is not None)))
+                partial = (cut_start and position == 0) or (cut_end and position == len(found) - 1)
                 self.partial += partial
                 self.units.append({"n": len(self.units) + 1, "kind": "sentence", "source": _SOURCES[table][0],
                                    "record_ref": row["record_ref"], "tool": _SOURCES[table][2], "at": at,
@@ -609,8 +674,8 @@ def _calls(card, as_of, contacts):
                 spans = voices(cue["text"], named) if manifest["format"] == "vtt" else [(named, cue["text"])]
                 parts += [(label, text, cue["start_ms"], cue["end_ms"]) for label, text in spans]
             first_unit[note["record_ref"]] = card.spoken(
-                note, "call_notes", parts, at=note["called_at"], role_of=role_of,
-                open_start=cited["first"] > 1, open_end=cited["last"] < manifest["total_units"])
+                note, "call_notes", parts, at=note["called_at"], role_of=role_of, transcript=True,
+                open_start=cited["first"] > 1)
             whole = cited["first"] == 1 and cited["last"] == manifest["total_units"]
             card.not_read.append(
                 f"Calls: one transcript excerpt was read, {manifest['unit_kind']} {cited['first']} to {cited['last']} "
@@ -696,8 +761,8 @@ def _said(card):
     hidden = len(ordered) - min(len(ordered), SHOWN_SENTENCES)
     long = sum(len(unit["text"]) > MAX_SENTENCE and not unit["partial"] for unit in spoken)
     if card.partial:
-        card.not_read.append(f"Sentences: {card.partial} at the edge of the excerpt "
-                             f"{'may be incomplete and is' if card.partial == 1 else 'may be incomplete and are'} "
+        card.not_read.append(f"Sentences: {card.partial} cut off at a pause, a change of speaker, or the edge of "
+                             f"the excerpt {'was read and is' if card.partial == 1 else 'were read and are'} "
                              "not shown.")
     if hidden:
         card.not_read.append(f"Sentences: {hidden} older "
