@@ -101,16 +101,20 @@ A gateway refusal carries `error.data.reason`.
 | `untrusted_origin_or_host` | 403 | 1003 |
 | `invalid_token` | 401 | 1001 |
 | `rate_limited` | 429 | 1002 |
+| `unsupported_media_type` | 415 | -32600 |
+| `call_id_required` | 400 | -32600 |
 | `insufficient_scope` | 403 | 1004 |
 | `crm_write_disabled` | 403 | 1005 |
 | `invalid_arguments` | 400 | -32602 |
 | `missing_protocol_version` | 400 | -32602 |
 | `protocol_version_mismatch` | 400 | -32020 |
 | `unsupported_protocol_version` | 400 | -32022 |
+| `method_not_found` | 404 | -32601 |
 
 - A missing, malformed, expired, or wrong-resource credential returns `invalid_token` without
   saying which check failed.
 - `insufficient_scope` names the scope in `WWW-Authenticate`. `rate_limited` sends `Retry-After`.
 - SDK rejections, OAuth errors, and tool errors keep their own formats.
+- `GET /mcp` returns HTTP 405. The connector opens no listening stream.
 - An audit or execution failure returns HTTP 503 with an error string and no reason. Read
   [audit](audit.md) before retrying a write.

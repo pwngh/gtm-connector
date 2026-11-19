@@ -170,6 +170,11 @@ def add_salesforce_facts(groups, as_of, brief_id, add, signal):
         required.add(add("Contract in approval is a planning candidate and has not been activated.", contract_ref))
     else:
         required.add(add("Activated contract supplies the renewal planning date.", contract_ref))
+    for other in sorted(groups["contracts"], key=lambda row: row["id"]):
+        if other is not contract:
+            ends = "no end date" if other["end_date"] is None else f"end date {other['end_date']}"
+            add(f"Other contract {other['id']}: status {_text(other['status'])}; "
+                f"category {_text(other['status_code'])}; {ends}.", other["record_ref"])
     for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
         add(f"Contact {_text(contact['name'])}: role {_nullable_text(contact['title'])}; "
             f"email {_nullable_text(contact['email'])}.", contact["record_ref"])
@@ -370,8 +375,8 @@ def _catalog(evidence):
             if contact["title"] == "":
                 signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
     if not groups["opportunities"]:
-        add(f"No opportunities were returned for {account_id}.",
-            f"audit/{receipts['list_opportunities']['audit_id']}")
+        required.add(add(f"No opportunities were returned for {account_id}.",
+                         f"audit/{receipts['list_opportunities']['audit_id']}"))
     procurement_conflicts = []
     notes_receipt = f"audit/{receipts['read_call_notes']['audit_id']}"
     if evidence["notes_status"] == "denied":
@@ -481,9 +486,9 @@ def diagnose_brief(candidate: str, evidence: dict) -> dict:
     supported, required = _validated_catalog(evidence)
     lines = [line.strip() for line in candidate.splitlines() if line.strip()]
     reasons = {key: 0 for key in ("uncited", "unsupported_or_miscited", "duplicate")}
-    seen = set()
+    seen, known = set(), set(supported)
     for line in lines:
-        if line not in supported:
+        if line not in known:
             reason = ("unsupported_or_miscited" if re.search(r" \[[^\[\]\r\n]+\]$", line)
                       else "uncited")
             reasons[reason] += 1
@@ -506,7 +511,7 @@ def check_brief(candidate: object, evidence: dict) -> str:
         raise BriefRejected("A brief must contain supported, cited statements.")
     supported, required = _validated_catalog(evidence)
     lines = [line.strip() for line in candidate.splitlines() if line.strip()]
-    if any(line not in supported for line in lines):
+    if not set(lines) <= set(supported):
         raise BriefRejected("Brief contains an uncited, unsupported, or misattributed statement.")
     if len(lines) != len(set(lines)):
         raise BriefRejected("Brief repeats a statement.")
@@ -518,4 +523,4 @@ def check_brief(candidate: object, evidence: dict) -> str:
         raise BriefRejected("Brief must disclose required source outcomes, source conflicts, and proposed follow-up.")
     # Signals are published first, in a fixed order, wherever the draft put them.
     signals = [line for line in supported if line.startswith("- Signal: ")]
-    return "\n".join(signals + [line for line in lines if line not in signals]) + "\n"
+    return "\n".join(signals + [line for line in lines if not line.startswith("- Signal: ")]) + "\n"

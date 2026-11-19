@@ -62,7 +62,8 @@ connector uses the `EndDate` that Salesforce returns and never calculates one. S
 `EndDate` from `StartDate` and `ContractTerm` only when the org's automatic calculation setting is
 on. Every brief states the contract's status, category, and end date, that a Draft or InApproval
 contract has not been activated, and that ARR and CRM renewal risk are not mapped from standard
-fields. Amounts are printed with `(currency unknown)`.
+fields. The built-in draft gives each other contract on the account one line with its status,
+category, and end date. Amounts are printed with `(currency unknown)`.
 
 ## Field mapping
 
@@ -78,7 +79,7 @@ fields. Amounts are printed with `(currency unknown)`.
 | Limit | Value |
 | --- | --- |
 | GET attempts per operation | 12, including retries. |
-| Decoded response data per operation | 1 MiB. Compressed responses are rejected. |
+| Decoded response data per operation | 1 MiB. Compressed responses are rejected, and so is a 200 response labelled as anything but `application/json`. |
 | Pages per query | 10. |
 | Rows per query | 100. Excess rows fail and no partial records are returned. |
 | AccountNumber lookup | 2 rows. |

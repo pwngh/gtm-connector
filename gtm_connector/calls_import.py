@@ -30,6 +30,9 @@ CONTEXT_UNITS = 1
 PARSER_VERSION = 1
 RECORD_VERSION = 1
 _PROVENANCE_RESERVE = 8192
+_VTT_HEADER = re.compile(r"Kind: (?:captions|subtitles|descriptions|chapters|metadata)"
+                         r"|Language: [A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*"
+                         r"|X-TIMESTAMP-MAP=(?:MPEGTS:[0-9]+,LOCAL:[0-9:.]+|LOCAL:[0-9:.]+,MPEGTS:[0-9]+)")
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _NOTE_ID = re.compile(r"note-[0-9a-f]{64}\Z")
 _CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
@@ -186,11 +189,15 @@ def parse_transcript(raw: bytes, *, format: str) -> dict[str, Any]:
         units = [{"index": index, "text": line, "cue_id": None, "start_ms": None, "end_ms": None}
                  for index, line in enumerate(lines, 1)]
     else:
-        if (len(lines) < 2 or re.fullmatch(r"WEBVTT(?:[ \t][^\r\n]*)?", lines[0]) is None
-                or "-->" in lines[0] or lines[1] != ""):
+        body = 1
+        # Exporters write these metadata lines under the signature. Any other text there could be speech.
+        while body < len(lines) and _VTT_HEADER.fullmatch(lines[body]):
+            body += 1
+        if (len(lines) <= body or re.fullmatch(r"WEBVTT(?:[ \t][^\r\n]*)?", lines[0]) is None
+                or "-->" in lines[0] or lines[body] != ""):
             raise CallsImportError("calls_import_invalid")
         blocks: list[list[str]] = []
-        for line in lines[2:]:
+        for line in lines[body + 1:]:
             if line == "":
                 if blocks and blocks[-1]:
                     blocks.append([])

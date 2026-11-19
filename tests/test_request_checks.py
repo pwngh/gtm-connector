@@ -18,9 +18,10 @@ class RequestCheckTests(unittest.TestCase):
         self.key = hashlib.sha256(self.raw.encode()).hexdigest()
         self.policy = RequestPolicy("https://127.0.0.1:8765/mcp", "https://127.0.0.1:8765/metadata", 2, 60, False)
         self.request = RequestFacts(
-            body_size=100, parsed={}, scheme="https",
-            headers={"host": "127.0.0.1:8765", "mcp-protocol-version": "2026-07-28"},
-            header_names=(b"host", b"authorization"), raw_token=self.raw, is_call=True,
+            body_size=100, parsed={"id": 1}, scheme="https",
+            headers={"host": "127.0.0.1:8765", "mcp-protocol-version": "2026-07-28",
+                     "content-type": "application/json"},
+            header_names=(b"host", b"authorization", b"content-type"), raw_token=self.raw, is_call=True,
             tool="get_account", arguments={"account_id": "acc-001"},
             meta={"io.modelcontextprotocol/protocolVersion": "2026-07-28"},
         )
@@ -33,6 +34,14 @@ class RequestCheckTests(unittest.TestCase):
         cases = (
             ("request_too_large", 413, -32600, {"request": replace(self.request, body_size=65537)}),
             ("invalid_json", 400, -32700, {"request": replace(self.request, parsed=None)}),
+            ("unsupported_media_type", 415, -32600, {
+                "request": replace(self.request, headers={**self.request.headers, "content-type": "text/plain"}),
+            }),
+            ("unsupported_media_type", 415, -32600, {
+                "request": replace(self.request, header_names=self.request.header_names + (b"Content-Type",)),
+            }),
+            ("call_id_required", 400, -32600, {"request": replace(self.request, parsed={})}),
+            ("call_id_required", 400, -32600, {"request": replace(self.request, parsed={"id": True})}),
             ("untrusted_origin_or_host", 403, 1003, {"request": replace(self.request, scheme="http")}),
             ("invalid_token", 401, 1001, {"token": None}),
             ("rate_limited", 429, 1002, {"windows": {self.key: (90.0, 2)}}),
@@ -44,12 +53,19 @@ class RequestCheckTests(unittest.TestCase):
             ("invalid_arguments", 400, -32602, {"request": replace(self.request, arguments={})}),
             ("missing_protocol_version", 400, -32602, {"request": replace(self.request, meta={})}),
             ("protocol_version_mismatch", 400, -32020, {
-                "request": replace(self.request, headers={"host": "127.0.0.1:8765"}),
+                "request": replace(self.request, headers={"host": "127.0.0.1:8765",
+                                                          "content-type": "application/json; charset=utf-8"}),
             }),
             ("unsupported_protocol_version", 400, -32022, {
                 "request": replace(self.request,
-                                   headers={"host": "127.0.0.1:8765", "mcp-protocol-version": "2099-01-01"},
+                                   headers={**self.request.headers, "mcp-protocol-version": "2099-01-01"},
                                    meta={"io.modelcontextprotocol/protocolVersion": "2099-01-01"}),
+            }),
+            ("method_not_found", 404, -32601, {
+                "request": replace(self.request, is_call=False, parsed={"id": 1, "method": "prompts/get"}),
+            }),
+            ("method_not_found", 404, -32601, {
+                "request": replace(self.request, is_call=False, parsed={"id": 1, "method": "resources/read"}),
             }),
         )
         for reason, status, code, overrides in cases:

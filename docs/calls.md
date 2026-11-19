@@ -38,8 +38,10 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
   refuses and is never truncated.
 - Repeating the same bytes, account, call time, and range reuses the revision. Any change creates
   a new active revision. Older revisions stay inspectable.
-- `.txt` or `.vtt` selects the parser. TXT units are lines and VTT units are timed cues. Control
-  characters other than tabs and line endings refuse. No provider download has been tested.
+- `.txt` or `.vtt` selects the parser. TXT units are lines and VTT units are timed cues. Well-formed
+  `Kind:`, `Language:`, and `X-TIMESTAMP-MAP=` lines under the `WEBVTT` line are skipped, and any
+  other text there refuses. Control characters other than tabs and line endings refuse. No provider
+  download has been tested.
 - With Salesforce, pass the same connection flags to `calls import` and `brief`. `--account-number`
   is exact, at most 40 characters, and refuses a non-literal or second match. On a refusal, pass
   `--account acc-sf-NATIVE_ID`. See [Salesforce](salesforce.md) and [live Slack](slack.md).
@@ -50,7 +52,7 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
 | Parsed lines or cues | 10,000 |
 | Quoted text, including context | 16 KiB of UTF-8 |
 | Returned units, including context | 256 |
-| Serialized selected record | 128 KiB of ASCII-escaped JSON |
+| Quoted text with its units | 120 KiB of ASCII-escaped JSON. The saved record stays under 128 KiB. |
 
 ## Errors
 

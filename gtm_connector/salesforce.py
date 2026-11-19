@@ -333,6 +333,10 @@ class SalesforceReadOnlyAdapter:
                     raise SalesforceReadError("salesforce_http_error")
                 if response.headers.get("content-encoding", "identity").lower() != "identity":
                     raise SalesforceReadError("salesforce_invalid_response")
+                media_type = response.headers.get("content-type", "application/json").split(";")[0].strip().lower()
+                if status == 200 and media_type != "application/json":
+                    # A page from a proxy or a sign-in wall is not a Salesforce answer, whatever its body parses to.
+                    raise SalesforceReadError("salesforce_invalid_response")
                 chunks = []
                 for chunk in response.iter_bytes():
                     budget["bytes"] += len(chunk)

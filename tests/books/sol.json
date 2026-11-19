@@ -1,0 +1,908 @@
+{
+ "author": "GPT-6",
+ "theme": "Twelve accounts show what five years of Salesforce edits leave behind: duplicate records, inherited opportunity names, stale forecast stages, and renewal decisions that still live in somebody’s call notes or Slack thread.",
+ "accounts": [
+  {
+   "name": "Veldrune  Freight Systems, LLC",
+   "industry": "intermodal /  Managed Freight",
+   "renewal_date": "2027-01-15",
+   "arr_cents": 286400000,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [
+    {
+     "name": "Ivena Drelwick",
+     "title": "VP, Network Operations",
+     "email": "ivena.drelwick@veldrune.example"
+    },
+    {
+     "name": "Ivena  Drelwick",
+     "title": "Director - Dispatch Transformation",
+     "email": "idrelwick@veldrune-freight.example"
+    },
+    {
+     "name": "Corrow Veskain",
+     "title": "Strategic Sourcing, interim",
+     "email": "corrow.veskain@veldrune.example"
+    },
+    {
+     "name": "Lenza Quillock",
+     "title": "AP Supervisor",
+     "email": "lenza.quillock@veldrune.example"
+    },
+    {
+     "name": "Maevric Solven",
+     "title": "Security Architecture",
+     "email": "maevric.solven@veldrune.example"
+    },
+    {
+     "name": "Tressa Norvant",
+     "title": "VP Finance (left per Dec call)",
+     "email": "tressa.norvant@veldrune.example"
+    },
+    {
+     "name": "Tressa Norvant",
+     "title": "CFO",
+     "email": "tressa.norvant@tarnwake.example"
+    },
+    {
+     "name": "Dovren Pellisk",
+     "title": "",
+     "email": "dovren.pellisk@veldrune.example"
+    },
+    {
+     "name": "Edria Malken",
+     "title": "Controller",
+     "email": "edria.malken@veldrune.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "VELDRUNE - FY27 Renewal [use this one]",
+     "stage": "closed_won",
+     "salesforce_stage": "Booked - Pending Paper",
+     "amount_cents": 286400000,
+     "close_date": "2027-01-15"
+    },
+    {
+     "name": "Veldrune FY27 RNWL - OLD do not delete",
+     "stage": "negotiation",
+     "salesforce_stage": "Legal / Redlines",
+     "amount_cents": 318900000,
+     "close_date": "2026-12-18"
+    },
+    {
+     "name": "dray yards add-on (was: Q3 pilot conversion)",
+     "stage": "proposal",
+     "salesforce_stage": "Commercial Pack Sent",
+     "amount_cents": 32500000,
+     "close_date": "2027-02-12"
+    },
+    {
+     "name": "VFS North dispatch rollout - reopened",
+     "stage": "evaluation",
+     "salesforce_stage": "Pilot / Exit Criteria",
+     "amount_cents": 0,
+     "close_date": "2026-07-31"
+    },
+    {
+     "name": "invoice entity cleanup",
+     "stage": "discovery",
+     "salesforce_stage": "Intake - No Forecast",
+     "amount_cents": 0,
+     "close_date": "2027-02-05"
+    },
+    {
+     "name": "Veldrune / West terminal license return",
+     "stage": "closed_lost",
+     "salesforce_stage": "Lost - Scope Removed",
+     "amount_cents": 18700000,
+     "close_date": "2027-04-30"
+    },
+    {
+     "name": "VELDRUNE - retention policy 90d to 365d",
+     "stage": "negotiation",
+     "salesforce_stage": "Desk Approval Hold",
+     "amount_cents": 7600000,
+     "close_date": "2027-01-08"
+    },
+    {
+     "name": "Veldrune west: bridge (clone of FY27 RENEWAL)",
+     "stage": "closed_won",
+     "salesforce_stage": "Booked - $0 Amendment",
+     "amount_cents": 0,
+     "close_date": "2027-01-14"
+    },
+    {
+     "name": "Veldrune 42 terminal sourcing event / ceiling",
+     "stage": "discovery",
+     "salesforce_stage": "Strategic Pipeline - Do Not Commit",
+     "amount_cents": 21345000000,
+     "close_date": "2028-09-29"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-01-16",
+     "end_date": "2027-01-15",
+     "term_months": 12
+    },
+    {
+     "status": "Activated",
+     "start_date": "2027-01-16",
+     "end_date": "2027-02-14",
+     "term_months": null
+    },
+    {
+     "status": "InApproval",
+     "start_date": "2027-02-15",
+     "end_date": "2028-02-14",
+     "term_months": 12
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-01-16",
+     "end_date": "2028-01-15",
+     "term_months": 12
+    },
+    {
+     "status": "Activated",
+     "start_date": "2025-06-01",
+     "end_date": "2026-05-31",
+     "term_months": 12
+    },
+    {
+     "status": "Activated",
+     "start_date": "2026-07-01",
+     "end_date": "2026-12-31",
+     "term_months": 6
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-04-01",
+     "end_date": null,
+     "term_months": null
+    },
+    {
+     "status": "Activated",
+     "start_date": "2026-10-01",
+     "end_date": null,
+     "term_months": null
+    },
+    {
+     "status": "Draft",
+     "start_date": "2028-01-01",
+     "end_date": "2028-12-31",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2025-09-22T10:00:00-05:00",
+     "body": "No-show."
+    },
+    {
+     "called_at": "2026-05-14T16:30:00Z",
+     "body": "North dispatch trial extended. Success measure is 95% of exceptions routed inside 15 min for two consecutive weeks. Use shift report, not login count. Dovren to send the baseline by 2026-05-19."
+    },
+    {
+     "called_at": "2026-10-21T11:45:00-05:00",
+     "body": "L. Quillock says they paid invoice VF-084 against Veldrune Freight (US), Inc. because that is the vendor record that cleared AP. She can validate a vendor record; she cannot authorize which entity signs the order."
+    },
+    {
+     "called_at": "2026-12-04T15:20:00Z",
+     "body": "Tressa on last 4 min to say she leaves Friday. Edria owns finance questions after that. Tressa's December approval on the old quote does not carry over if covered terminals change."
+    },
+    {
+     "called_at": "2026-12-18T11:01:00-06:00",
+     "body": "Pasted from Ivena's email after our 10:30:\n\nI can live with 22 yards for the year. Take the two dray-only yards out of base. If you need a placeholder on the order, make it an option we can buy later. Do not show the 24-yard table to sourcing again.\n\nIvena Drelwick\nVP, Network Operations | Veldrune\nivena.drelwick@veldrune.example\n\n> Corrow wrote:\n> Please confirm 24 and I can route the revised exhibit.\n> Same vendor profile as the December invoice?"
+    },
+    {
+     "called_at": "2027-01-06T18:00:00Z",
+     "body": "Pulled the working figures into the note while she was reading them back:\nScope | qty | annual USD\nBase | 22 yards | 2,864,000\nDray option | 2 yards | 325,000\nArchive extension | 1 policy | 76,000\n\nCorrow asked that the last two be on separate pages. 42-terminal sourcing file is a possible multi-year ceiling for a future competitive bid. Ivena does not have budget authority for that program."
+    },
+    {
+     "called_at": "2027-01-12T09:00:00-06:00",
+     "body": "Corrow says no one will sign a 12-month order until the billing entity is reconciled. Edria can approve a 30-day, $0 continuity rider. She wanted it in her inbox by noon 2027-01-14 and tentatively held a review for 2027-01-20. See recording. I left the annual forecast as commit after the call because I thought the rider and annual package were moving together. Need to confirm."
+    },
+    {
+     "called_at": "2027-01-14T15:18:00-06:00",
+     "body": "Spoke to AP for 4 min. They can receive a rider today under the LLC. They still want a vendor sheet and a separate purchase request for annual. Lenza asked me to stop forwarding the original 24-yard pricing chain."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "acct-veldrune",
+     "author": "Dannel Orwick",
+     "sent_at": "2026-10-21T17:10:00Z",
+     "body": "Two Veldrune records appeared in the invoice lookup. Please leave both visible while AP maps the old US Inc. vendor record."
+    },
+    {
+     "channel": "acct-veldrune",
+     "author": "Dannel Orwick",
+     "sent_at": "2026-12-04T16:14:00Z",
+     "body": "Lost our exec sponsor today. Please take Tressa off Monday's customer invite. Edria will cover finance, Ivena still owns rollout."
+    },
+    {
+     "channel": "dealdesk-renewals",
+     "author": "Neyra Kessant",
+     "sent_at": "2027-01-06T18:45:00Z",
+     "body": "Use quote rev6. rev5 has the 24-yard table. The archive extension is on its own order line and still needs margin approval."
+    },
+    {
+     "channel": "acct-veldrune",
+     "author": "Merrow Talwick",
+     "sent_at": "2027-01-12T17:51:00Z",
+     "body": "Heard $0 rider expressly. If Ivena changes her mind on the annual today can someone post the actual email? The call didn't get us there."
+    },
+    {
+     "channel": "dealdesk-renewals",
+     "author": "Neyra Kessant",
+     "sent_at": "2027-01-13T20:03:00Z",
+     "body": "Draft annual sitting in approval. Finance asked for the signed vendor sheet first. No annual envelope has gone out."
+    },
+    {
+     "channel": "bookings-intake",
+     "author": "Jorven Salkett",
+     "sent_at": "2027-01-14T22:31:00Z",
+     "body": "Rider countersigned as Veldrune  Freight Systems, LLC. Effective 2027-01-16 through 2027-02-14. $0, 22 yards. Attached to the original service line so support stays open."
+    },
+    {
+     "channel": "acct-veldrune",
+     "author": "Dannel Orwick",
+     "sent_at": "2027-01-15T14:10:00Z",
+     "body": "Uh, the booking sync flipped the parent opp to Booked - Pending Paper overnight. Booking packet is rider only. Annual $2.864m is unsigned, and the separate purchase request hasn't been issued."
+    },
+    {
+     "channel": "acct-veldrune",
+     "author": "Merrow Talwick",
+     "sent_at": "2027-01-15T16:26:00Z",
+     "body": "Update from Edria: 1/20 review released, 1/25 at 10 Central is hers now. Corrow to bring the vendor decision. I'll send just the 22-yard annual and put option prices in the cover email."
+    },
+    {
+     "channel": "acct-veldrune",
+     "author": "Jorven Salkett",
+     "sent_at": "2027-01-15T16:44:00Z",
+     "body": "Pinned rider packet https://files.fennrelay.example/veldrune/rider-22. AP copy has the signature on page 3."
+    }
+   ],
+   "transcript": {
+    "format": "vtt",
+    "text": "WEBVTT\n\n00:00:02.240 --> 00:00:07.960\n<v Dannel Orwick>I've got twenty-two yards in the header now. Can you see my screen?</v>\n\n00:00:08.320 --> 00:00:13.520\n<v Ivena Drelwick>Yes. Scroll to page two. That footer still says twenty-four.</v>\n\n00:00:14.040 --> 00:00:21.160\n<v Dannel Orwick>Okay, that's from the old exhibit. I'll pull the two dray yards and regenerate it.</v>\n\n00:00:21.810 --> 00:00:28.130\n<v Corrow Veskain>Before you do that, is this the annual or the thing to get us through February?</v>\n\n00:00:28.860 --> 00:00:34.840\n<v Dannel Orwick>This is the annual. I was hoping to have both out of here today.</v>\n\n00:00:35.220 --> 00:00:44.460\n<v Edria Malken>I can authorize up to thirty days at no fee. I can't approve two point eight six four million for an entity I can't match to our vendor file.</v>\n\n00:00:45.210 --> 00:00:51.830\n<v Ivena Drelwick>We need the dispatch queues up on Saturday. That is the only thing that has to happen this week.</v>\n\n00:00:52.410 --> 00:01:01.340\n<v Corrow Veskain>The December invoice came through US Inc. The agreement I'm looking at says Systems LLC. I have to talk to vendor master.</v>\n\n00:01:02.100 --> 00:01:07.630\n<v Dannel Orwick>Could I send the annual on the LLC today and you queue it?</v>\n\n00:01:08.010 --> 00:01:13.940\n<v Corrow Veskain>Don't send a signature request. A PDF to me is fine. I'll tell you which entity to use.</v>\n\n00:01:14.500 --> 00:01:21.870\n<v Edria Malken>Send me the rider by noon Thursday. If it's twenty-two at zero dollars, I can review it before the afternoon close.</v>\n\n00:01:22.610 --> 00:01:28.940\n<v Dannel Orwick>Does the rider run thirty days from the sixteenth? That gets us through February fourteenth.</v>\n\n00:01:29.130 --> 00:01:37.290\n<v Edria Malken>Yes. Let me hold January twentieth for annual review. I can't promise it until I see when AP can join.</v>\n\n00:01:37.920 --> 00:01:43.410\n<v Ivena Drelwick>And don't attach archive to the bridge. We haven't approved going past ninety days.</v>\n\n00:01:44.030 --> 00:01:50.170\n<v Dannel Orwick>Understood. Are the dray yards still something I should put in the year-one forecast?</v>\n\n00:01:50.690 --> 00:01:57.210\n<v Ivena Drelwick>Keep a price available. I have no purchase request for them this quarter.</v>\n\n00:01:58.000 --> 00:02:05.010\n<v Corrow Veskain>Send me the clean annual PDF and send Edria the rider separately. I'll check the entity before our next meeting.</v>\n"
+   }
+  },
+  {
+   "name": "veldrune freight (US), inc.",
+   "industry": "",
+   "renewal_date": "2027-01-15",
+   "arr_cents": 286400000,
+   "risk_status": "at_risk",
+   "risk_reason": "Imported from the invoice entity. Old alert says no active sponsor.",
+   "contacts": [],
+   "opportunities": [
+    {
+     "name": "VELDRUNE - FY27 Renewal [billing clone]",
+     "stage": "closed_won",
+     "salesforce_stage": "Migrated - Do Not Forecast",
+     "amount_cents": 286400000,
+     "close_date": "2026-12-31"
+    }
+   ],
+   "contracts": [],
+   "call_notes": [
+    {
+     "called_at": "2026-12-29T19:12:00Z",
+     "body": "Lenza called back re the invoice. US Inc. is the remitter on the December invoice. She says there is one dispatch subscription and asked why she received two renewal reminders. Don't add the amounts together. Leaving the billing record here until the vendor team replies."
+    }
+   ],
+   "slack_messages": [],
+   "transcript": null
+  },
+  {
+   "name": "Tarnwake  Cold Chain Holdings Ltd.",
+   "industry": "refrigerated warehousing",
+   "renewal_date": "2027-02-03",
+   "arr_cents": 91450000,
+   "risk_status": "at_risk",
+   "risk_reason": "Escalation opened after two depots missed overnight temperature alerts.",
+   "contacts": [
+    {
+     "name": "Tressa Norvant",
+     "title": "CFO",
+     "email": "tressa.norvant@tarnwake.example"
+    },
+    {
+     "name": "Halen Brovett",
+     "title": "Director, Cold Chain Operations",
+     "email": "halen.brovett@tarnwake.example"
+    },
+    {
+     "name": "Halyn Brovett",
+     "title": "Procurement Analyst",
+     "email": "halyn.brovett@tarnwake.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "TARNWAKE renewal 2027 (formerly all 14 depots)",
+     "stage": "proposal",
+     "salesforce_stage": "Offer Shared - Buyer Review",
+     "amount_cents": 91450000,
+     "close_date": "2027-02-03"
+    },
+    {
+     "name": "Tarnwake - 2 depot carveout / working",
+     "stage": "evaluation",
+     "salesforce_stage": "Commercial Scenario",
+     "amount_cents": 80200000,
+     "close_date": "2027-01-29"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-02-04",
+     "end_date": "2027-02-03",
+     "term_months": 12
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-02-04",
+     "end_date": "2028-02-03",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2027-01-08T14:30:00-06:00",
+     "body": "Tressa can take 12 depots forward at $802k if Halen won't certify the two. She asked for both scenarios in her 1/19 packet. Halen owns technical signoff. Halyn, with a y, is the person who sends clean quote PDFs to finance."
+    },
+    {
+     "called_at": "2027-01-13T20:10:00Z",
+     "body": "Halen says depot 07 passed, depot 11 didn't. Test was push delivery in <90s on both primary and fallback routes. Sales dashboard says 98.7% because it still excludes the backup phones."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "tarnwake-incident",
+     "author": "Melvek Cyrnell",
+     "sent_at": "2027-01-14T13:01:00Z",
+     "body": "Night shift retest: 07 pass, 11 pass on primary only. Carrier queue delay on fallback remains 104s. Leave depot 11 open."
+    },
+    {
+     "channel": "acct-tarnwake",
+     "author": "Senne Volrick",
+     "sent_at": "2027-01-15T14:53:00Z",
+     "body": "Tressa moved packet deadline to noon Monday 1/18. Halyn needs a usable 12-depot quote now. Keep the 14-depot quote handy in case Halen clears 11 before signature. Neither quote has been signed."
+    }
+   ],
+   "transcript": {
+    "format": "txt",
+    "text": "Tarnwake renewal working session\nJan 8, 2027, 2:30 PM Central\n\n[00:00] Senne Volrick: Tressa, I have you and both Brovetts. Did I get that right?\n[00:06] Halyn Brovett: Yep. I'm Halyn with a y, procurement. Halen runs the depots.\n[00:12] Halen Brovett: And I asked for this call because I've still got eleven open. Seven looks better.\n[00:19] Tressa Norvant: How much am I renewing if those two stay out?\n[00:25] Senne Volrick: The 12-depot version is eight hundred two thousand annually. All fourteen is nine fourteen five.\n[00:33] Tressa Norvant: Eight hundred two thousand I can take to committee. I'm not approving it on this call.\n[00:42] Halyn Brovett: The quote in my inbox says fourteen and the amount doesn't match that. Is there a new link?\n[00:48] Senne Volrick: That link is for the full footprint. I'll send both as separate PDFs, same effective date.\n[00:55] Halen Brovett: I need ninety seconds end to end on the phone we actually issue to the night lead.\n[01:03] Senne Volrick: The service dashboard shows ninety-eight point seven percent passing.\n[01:11] Halen Brovett: On the primary route. The second phone never made it into that report, and that's where the missed alert landed.\n[01:22] Tressa Norvant: Please don't write 'cleared' next to it in my packet. Can we give Halen through Wednesday to rerun it?\n[01:28] Halyn Brovett: Yes. I assemble the packet for the nineteenth. If you send it direct to me I can pull the right version.\n[01:36] Senne Volrick: So two clean PDFs, and if both clear we can put the fourteen-depot version first?\n[01:43] Tressa Norvant: Provided Halen signs off in writing. I want the twelve-depot one in there either way.\n[01:51] Halen Brovett: I'll have an overnight test log Wednesday. Don't promise a pass before then.\n"
+   }
+  },
+  {
+   "name": "Mirevask   municipal Services JV",
+   "industry": "municipal utilities outsourcer",
+   "renewal_date": "2026-12-31",
+   "arr_cents": 17400000,
+   "risk_status": "at_risk",
+   "risk_reason": "Term expired; renewal packet awaiting procurement authority.",
+   "contacts": [
+    {
+     "name": "Breva Nollwick",
+     "title": "Contracting officer",
+     "email": "breva.nollwick@mirevask.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Mirevask 2027 extend [was: emergency 90d]",
+     "stage": "negotiation",
+     "salesforce_stage": "Board Minute Pending",
+     "amount_cents": 17400000,
+     "close_date": "2026-12-31"
+    },
+    {
+     "name": "Mirevask bridge - calendar year patch",
+     "stage": "closed_lost",
+     "salesforce_stage": "Superseded by Amendment",
+     "amount_cents": 0,
+     "close_date": "2027-03-31"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-01-01",
+     "end_date": "2026-12-31",
+     "term_months": 12
+    },
+    {
+     "status": "InApproval",
+     "start_date": "2027-01-01",
+     "end_date": "2027-01-31",
+     "term_months": 1
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-02-01",
+     "end_date": "2028-01-31",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [],
+   "slack_messages": [
+    {
+     "channel": "proj-mirevask",
+     "author": "Kelm Orswick",
+     "sent_at": "2027-01-11T17:31:00Z",
+     "body": "Breva's follow-up says the clerk posted draft minutes with an incorrect vendor name. She can route paper after corrected minutes on 1/19. Nobody has authority to backdate a signature."
+    },
+    {
+     "channel": "proj-mirevask",
+     "author": "Yevra Pellock",
+     "sent_at": "2027-01-15T18:25:00Z",
+     "body": "Support confirmed the temporary exception runs through 1/22 at 18:00Z. That's the support cutoff. The proposed bridge still ends 1/31 and is sitting unsigned."
+    }
+   ],
+   "transcript": {
+    "format": "vtt",
+    "text": "WEBVTT\n\n1\n00:00:02.000 --> 00:00:06.100\nKelm Orswick: Are we the only renewal coming out of the December consent agenda?\n\n2\n00:00:06.700 --> 00:00:13.300\nBreva Nollwick: The board approved the amount for your line item. It didn't name the contracting party in the motion.\n\n3\n00:00:14.100 --> 00:00:19.000\nKelm Orswick: The CRM entry says board approved. Can I send the annual order for signature now?\n\n4\n00:00:19.700 --> 00:00:25.000\nBreva Nollwick: Send me a PDF. Our signer can't act until the clerk releases the minute extract.\n\n5\n00:00:26.100 --> 00:00:32.000\nYevra Pellock: What happens today? The current order ended December thirty-first. Dispatch got an expiry notice.\n\n6\n00:00:32.900 --> 00:00:40.300\nBreva Nollwick: Operations still needs access to download December work logs. That's the immediate request.\n\n7\n00:00:41.100 --> 00:00:47.000\nKelm Orswick: The January bridge is thirty-one days and zero dollars. Is that the version you're expecting?\n\n8\n00:00:47.700 --> 00:00:54.100\nBreva Nollwick: Yes, through January thirty-first. Finance wants any annual term to start February first.\n\n9\n00:00:55.000 --> 00:01:00.600\nYevra Pellock: The bridge lives in approval on our side. Do you need any changes besides dates?\n\n10\n00:01:01.200 --> 00:01:08.300\nBreva Nollwick: Spell out JV in the signature block and let me check the spelling against the clerk's extract.\n\n11\n00:01:09.100 --> 00:01:13.800\nKelm Orswick: How soon do you expect that from the clerk?\n\n12\n00:01:14.300 --> 00:01:19.800\nBreva Nollwick: They told me Monday. Call me after lunch if I haven't forwarded it.\n\n13\n00:01:20.600 --> 00:01:25.500\nYevra Pellock: I'll ask support for an exception so dispatch can pull its logs while this is pending.\n\n14\n00:01:26.100 --> 00:01:32.500\nBreva Nollwick: Please send whatever date that exception actually ends. My depot lead can plan the export around it.\n\n15\n00:01:33.200 --> 00:01:37.000\nKelm Orswick: I'll send two PDFs and keep the signature links off until you reply.\n"
+   }
+  },
+  {
+   "name": "Mirevask Municipal Services (Meters) Ltd ",
+   "industry": "meter calibration and field inspection",
+   "renewal_date": "2027-01-29",
+   "arr_cents": 0,
+   "risk_status": "healthy",
+   "risk_reason": "Zero-dollar partner entitlement. Billing flag is inherited from the old JV hierarchy.",
+   "contacts": [
+    {
+     "name": "Breva Nolwick",
+     "title": "Field Assurance Lead",
+     "email": "breva.nolwick@mirevask-meters.example"
+    },
+    {
+     "name": "Jessa Voldren",
+     "title": "Metering program administrator",
+     "email": "jessa.voldren@mirevask-meters.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Meters FY27 renewal [partner access]",
+     "stage": "closed_won",
+     "salesforce_stage": "Booked - $0 Entitlement",
+     "amount_cents": 0,
+     "close_date": "2027-06-30"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-06-01",
+     "end_date": null,
+     "term_months": null
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2027-01-14T09:00:00-06:00",
+     "body": "Breva Nolwick (one l before wick) owns the meter-file drop. 1/29 is the access review from the vendor calendar. The entitlement has no fixed term. Three inspectors leave rotation this month, five remain, Jessa sends the login list 1/22. Breva gets no invoice and cannot speak to the JV renewal."
+    }
+   ],
+   "slack_messages": [],
+   "transcript": {
+    "format": "txt",
+    "text": "2027-01-14 | 09:00 CT | Meters access review\nRecorder: Emlin Sorvett\n\n00:00 Emlin Sorvett — I have this down as the January renewal for Mirevask. Does the twenty-ninth still work?\n00:08 Breva Nolwick — For the access review, yes. If you're calling about invoices, I work for the meters company.\n00:17 Emlin Sorvett — It's possible I pulled the wrong record. Do you sit on the JV board review?\n00:23 Breva Nolwick — That's Breva Nollwick. Spell mine with one l before wick. We get each other's invites a lot.\n00:34 Jessa Voldren — We're the external inspectors on the meter files. We've never gotten an annual bill.\n00:42 Emlin Sorvett — Okay. Is there an end date on what your inspectors have now?\n00:51 Jessa Voldren — No. We certify the users once a year. Can I see the list you have?\n00:58 Emlin Sorvett — Eight logins, all active. I'll read them out after we stop recording.\n01:08 Breva Nolwick — Three roll off the route this month. The five others are staying.\n01:16 Jessa Voldren — I'll match the list to the badge roster by Friday next week. Two of the names changed emails.\n01:27 Emlin Sorvett — Friday the twenty-second? I can send you a spreadsheet this afternoon.\n01:34 Jessa Voldren — Yes, please include last seen. Easier to spot the cracked tablet's login that way.\n01:43 Breva Nolwick — Can we leave the three alone until I've checked all the December files are through?\n01:51 Emlin Sorvett — Sure. I'll wait for Jessa's confirmed list before opening the removal ticket.\n02:01 Jessa Voldren — And the twenty-ninth stays on the calendar so I can verify the five still get in.\n02:09 Emlin Sorvett — I'll rename it access review. You'll see the revised invite this afternoon.\n"
+   }
+  },
+  {
+   "name": "Ulnavetch & Daughters (Dormant)",
+   "industry": "",
+   "renewal_date": "2028-12-31",
+   "arr_cents": 0,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [],
+   "opportunities": [],
+   "contracts": [],
+   "call_notes": [],
+   "slack_messages": [],
+   "transcript": null
+  },
+  {
+   "name": "Cairnuvex  Ceramics plc",
+   "industry": "kiln refractories / specialty ceramics",
+   "renewal_date": "2027-01-17",
+   "arr_cents": 4860000,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [
+    {
+     "name": "Parlen Eshwick",
+     "title": "Maintenance scheduler",
+     "email": "parlen.eshwick@cairnuvex.example"
+    }
+   ],
+   "opportunities": [],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-01-18",
+     "end_date": "2027-01-17",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2027-01-07T11:20:00Z",
+     "body": "Parlen says the shutdown calendar depends on both kiln planners retaining access. He sent the PO to the old rep's mailbox in December. Asked him to forward with the attachment kept intact. He remembered a 30-day notice window but couldn't find the signed order."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "acct-cairnuvex",
+     "author": "Emlin Sorvett",
+     "sent_at": "2027-01-15T12:30:00Z",
+     "body": "Found the forwarded PO. It pays last year's calibration invoice only. Parlen sent a separate written cancellation on 12/14. Contracts confirmed timely notice this morning. Read-only export access requested through 1/22 and still waiting on support."
+    }
+   ],
+   "transcript": null
+  },
+  {
+   "name": "Orvesset Bankgroup S.A. - consolidated",
+   "industry": "Banking | multi-region treasury operations",
+   "renewal_date": "2028-08-31",
+   "arr_cents": 345000000,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [
+    {
+     "name": "Niva Torvell",
+     "title": "Director, Treasury Controls",
+     "email": "niva.torvell@orvesset.example"
+    },
+    {
+     "name": "Javel Hurnick",
+     "title": "Regional Vendor Manager",
+     "email": "javel.hurnick@orvesset.example"
+    },
+    {
+     "name": "Fenna Oltwick",
+     "title": "Chief Sourcing Officer",
+     "email": "fenna.oltwick@orvesset.example"
+    },
+    {
+     "name": "Javel  Hurnick",
+     "title": "Vendor analyst - archive",
+     "email": "jhurnick@orvesset-ops.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Orvesset group sourcing envelope (was 2026 consolidation)",
+     "stage": "discovery",
+     "salesforce_stage": "Unqualified - Sourcing Ceiling",
+     "amount_cents": 30800000000,
+     "close_date": "2028-07-31"
+    },
+    {
+     "name": "Orvesset treasury controls consolidation",
+     "stage": "closed_won",
+     "salesforce_stage": "Booked / Regional Annexes",
+     "amount_cents": 1035000000,
+     "close_date": "2025-08-27"
+    },
+    {
+     "name": "Suisse desks archive bundle / test clone 2",
+     "stage": "evaluation",
+     "salesforce_stage": "Pilot - Region Approval",
+     "amount_cents": 0,
+     "close_date": "2026-04-17"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2025-09-01",
+     "end_date": "2028-08-31",
+     "term_months": 36
+    },
+    {
+     "status": "Activated",
+     "start_date": "2026-02-01",
+     "end_date": "2027-01-31",
+     "term_months": 12
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-02-01",
+     "end_date": "2028-01-31",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [],
+   "slack_messages": [
+    {
+     "channel": "orvesset-deal-team",
+     "author": "Cevrik Mallent",
+     "sent_at": "2027-01-06T08:17:00Z",
+     "body": "The $308m is their published sourcing ceiling across six years and five suppliers. The working scope for us is treasury controls only. Don't put it in expansion forecast."
+    },
+    {
+     "channel": "orvesset-deal-team",
+     "author": "Alvena Rullock",
+     "sent_at": "2027-01-15T15:37:00Z",
+     "body": "Small annex ends Jan 31. Niva confirms local archive team wants one extra year. Javel to tell us by Jan 21 whether local sourcing can sign under the parent pricing schedule."
+    }
+   ],
+   "transcript": null
+  },
+  {
+   "name": "hushvane  Textile Recovery GmbH",
+   "industry": "post-industrial fiber reclamation",
+   "renewal_date": "2027-02-14",
+   "arr_cents": 23100000,
+   "risk_status": "at_risk",
+   "risk_reason": "Low usage alert based on seats from the mothballed third shift.",
+   "contacts": [
+    {
+     "name": "Enva Ristoll",
+     "title": "Factory Systems Lead",
+     "email": "enva.ristoll@hushvane.example"
+    },
+    {
+     "name": "Onrik Vennach",
+     "title": "Plant director",
+     "email": "onrik.vennach@hushvane.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "HUSHVANE renewal 2027 CHECK QTY",
+     "stage": "closed_lost",
+     "salesforce_stage": "Closed - Duplicate Shell",
+     "amount_cents": 23100000,
+     "close_date": "2027-02-14"
+    },
+    {
+     "name": "Hushvane rightsize (was onboarding credit)",
+     "stage": "negotiation",
+     "salesforce_stage": "Customer Selected - Order Pending",
+     "amount_cents": 19800000,
+     "close_date": "2027-01-27"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-02-15",
+     "end_date": "2027-02-14",
+     "term_months": 12
+    },
+    {
+     "status": "InApproval",
+     "start_date": "2027-02-15",
+     "end_date": "2028-02-14",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-11-20T13:45:00+01:00",
+     "body": "Third shift stopped 11/9. Enva estimates 61 active operators after station sharing. License report says 44 because old scanners now use a single station login."
+    },
+    {
+     "called_at": "2027-01-15T13:15:00+01:00",
+     "body": "Onrik chose 60 named operators at $198k and won't pay for the unused analytics module. He says procurement can release the order on 1/27 if we show scanner sharing separately. Enva sends scanner inventory on 1/19. CRM closed-lost shell was mine: I retired the duplicate when I moved the quote to rightsize."
+    }
+   ],
+   "slack_messages": [],
+   "transcript": null
+  },
+  {
+   "name": "Nerith Quay Dredging Co., Ltd.",
+   "industry": "port maintenance and sediment handling",
+   "renewal_date": "2028-05-31",
+   "arr_cents": 63200000,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [
+    {
+     "name": "Veyra Jastell",
+     "title": "Fleet superintendent",
+     "email": "veyra.jastell@nerithquay.example"
+    },
+    {
+     "name": "Dravik Orpell",
+     "title": "Deputy company secretary",
+     "email": "dravik.orpell@nerithquay.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "NQD renewal - 3yr (was 2yr source line)",
+     "stage": "closed_won",
+     "salesforce_stage": "Signed - Pending Activation",
+     "amount_cents": 189600000,
+     "close_date": "2025-06-01"
+    },
+    {
+     "name": "NQD option vessel 09 / carry through FY28",
+     "stage": "proposal",
+     "salesforce_stage": "Verbal - Capex Gate",
+     "amount_cents": 24750000,
+     "close_date": "2028-04-03"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2025-06-01",
+     "end_date": "2028-05-31",
+     "term_months": 36
+    },
+    {
+     "status": "Draft",
+     "start_date": "2028-04-01",
+     "end_date": null,
+     "term_months": null
+    },
+    {
+     "status": "Activated",
+     "start_date": "2026-05-01",
+     "end_date": "2027-04-30",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2025-06-02T10:30:00+08:00",
+     "body": "Dravik confirmed 36 months, paid annually. Opp total is full term. Shipyard access and vessel 09 are separately scoped."
+    },
+    {
+     "called_at": "2027-01-13T11:00:00+08:00",
+     "body": "Veyra says vessel 09 is delayed and the capex committee won't reconsider before 2028-04-03. She did ask for one shipyard viewer kept after 2027-04-30 because survey signoff may slip into May. Check if the viewer can be provisioned under the core fleet order."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "acct-nerith",
+     "author": "Senne Volrick",
+     "sent_at": "2027-01-14T09:20:00Z",
+     "body": "Dravik cleared one shipyard viewer under the core order for May. Veyra will send the surveyor's name when she has the rota. We can close the shipyard add-on at expiry once provisioning is confirmed."
+    }
+   ],
+   "transcript": null
+  },
+  {
+   "name": "Brindlevar  Paper AB (Estate)",
+   "industry": "paper converting",
+   "renewal_date": "2026-08-31",
+   "arr_cents": 11400000,
+   "risk_status": "at_risk",
+   "risk_reason": "Gross ARR carried on the estate record. Sale of converting line pending per August note.",
+   "contacts": [
+    {
+     "name": "Jorla Neskett",
+     "title": "Interim estate administrator",
+     "email": "jorla.neskett@brindlevar-estate.example"
+    },
+    {
+     "name": "Terven Lodwick",
+     "title": "Plant Controller",
+     "email": "terven.lodwick@brindlevar.example"
+    },
+    {
+     "name": "Terven Lodwick",
+     "title": "Integration Lead, Line 2",
+     "email": "terven.lodwick@vaskernmill.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Brindlevar restart - renewal after buyer docs",
+     "stage": "closed_lost",
+     "salesforce_stage": "Lost - Entity Dissolved",
+     "amount_cents": 11400000,
+     "close_date": "2026-11-30"
+    },
+    {
+     "name": "BRINDLEVAR plant 2 handoff *DO NOT CLONE*",
+     "stage": "discovery",
+     "salesforce_stage": "Unassigned - Acquirer Intake",
+     "amount_cents": 0,
+     "close_date": "2026-10-31"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2025-09-01",
+     "end_date": "2026-08-31",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-08-20T14:00:00+02:00",
+     "body": "Jorla said leave the service on through August while closing inventory. No renewal authority at the estate. We can discuss a new contract with the eventual asset buyer once she tells us who it is."
+    },
+    {
+     "called_at": "2027-01-14T15:25:00+01:00",
+     "body": "Terven called from the Vaskernmill side. Their new order covers line 2 under its own agreement effective 2027-01-01. The estate retains December records only and asked for one export by 1/26. Jorla is still the export approver. No estate users should be carried over."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "billing-cleanup",
+     "author": "Neyra Kessant",
+     "sent_at": "2027-01-15T13:11:00Z",
+     "body": "Confirmed estate service stopped in September. Import brought the old $114k ARR back when line 2 moved. Reporting ticket is open. Vaskernmill order and estate export are separate work."
+    }
+   ],
+   "transcript": null
+  },
+  {
+   "name": "Serravune Instruments, PBC ",
+   "industry": "optical inspection equipment",
+   "renewal_date": "2027-02-15",
+   "arr_cents": 5700000,
+   "risk_status": "at_risk",
+   "risk_reason": "Legacy report put committee review inside 45 days.",
+   "contacts": [
+    {
+     "name": "Ressa Telwick",
+     "title": "",
+     "email": "ressa.telwick@serravune.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "SErravune renewal FY27 -- auto flag",
+     "stage": "evaluation",
+     "salesforce_stage": "Renewal Watch - Auto Created",
+     "amount_cents": 5700000,
+     "close_date": "2027-02-15"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-02-16",
+     "end_date": "2027-02-15",
+     "term_months": 12
+    },
+    {
+     "status": "Activated",
+     "start_date": "2027-02-16",
+     "end_date": "2028-02-15",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2027-01-06T17:22:00Z",
+     "body": "Ressa couldn't find the countersignature in the shared inbox. She recalled signing the one-year term on 12/22 and didn't expect another committee meeting. Asked for a copy with the invoice schedule."
+    },
+    {
+     "called_at": "2027-01-14T16:50:00Z",
+     "body": "Ressa confirmed receipt of the countersigned order and invoice schedule. Annual prepay at $57k. First invoice due 2027-03-18. Credit request from the separate gauge trial is still open."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "billing-cleanup",
+     "author": "Jorven Salkett",
+     "sent_at": "2027-01-15T15:32:00Z",
+     "body": "For Monday cleanup: auto-created renewal opp still open on Serravune. Signed annual contract is activated with 2/16 effective date. Please link the contract before closing the shell so the account report picks up the new term."
+    }
+   ],
+   "transcript": null
+  }
+ ]
+}

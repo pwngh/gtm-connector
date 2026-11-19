@@ -20,6 +20,9 @@ class Refusal:
 REFUSALS = {
     "request_too_large": Refusal(413, -32600),
     "invalid_json": Refusal(400, -32700),
+    "unsupported_media_type": Refusal(415, -32600),
+    "call_id_required": Refusal(400, -32600),
+    "method_not_found": Refusal(404, -32601),
     "untrusted_origin_or_host": Refusal(403, 1003),
     "invalid_token": Refusal(401, 1001),
     "rate_limited": Refusal(429, 1002),
@@ -113,9 +116,19 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
         }))
     updated = None
     if request.is_call:
+        # Every call a credential makes counts against its window, refused or not.
         updated, limited = charge_rate(windows, raw, rate_time, policy)
         if limited is not None:
             return RequestDecision(windows=updated, error=limited)
+    if (sum(name.lower() == b"content-type" for name in request.header_names) != 1
+            or request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json"):
+        return RequestDecision(windows=updated, error=RequestError(
+            "unsupported_media_type", "Content-Type must be application/json"))
+    if request.is_call:
+        if type(request.parsed.get("id")) not in (int, str):
+            # Without an id the call is a notification: nothing would run and nothing would answer.
+            return RequestDecision(windows=updated, error=RequestError(
+                "call_id_required", "a tool call requires a string or integer id"))
         definition = definitions.get(request.tool)
         required = definition.scope if definition is not None else None
         if required and required not in token.scopes:
@@ -141,4 +154,7 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
         return RequestDecision(windows=updated, error=RequestError(
             "unsupported_protocol_version", "supported protocol version: 2026-07-28",
         ))
+    if request.parsed.get("method") in ("prompts/get", "resources/read"):
+        # The connector serves tools only, so no prompt or resource exists to return.
+        return RequestDecision(windows=updated, error=RequestError("method_not_found", "Method not found"))
     return RequestDecision(windows=updated)

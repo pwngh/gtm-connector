@@ -53,7 +53,8 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The suite starts a local server for each end-to-end case and takes about seven minutes here.
+    timeout-minutes: 15
     strategy:
       matrix:
         python-version: ['3.11', '3.14']
