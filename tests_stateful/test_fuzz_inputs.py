@@ -698,7 +698,10 @@ class TranscriptFuzz(unittest.TestCase):
             "unit_kind": "lines" if parsed["format"] == "txt" else "cues",
             "selection_mode": "default" if span is None else "explicit"})
         self.assertEqual(excerpt["units"], list(units[cited["first"] - 1:cited["last"]]))
-        self.assertEqual(excerpt["body"], "\n".join(unit["text"] for unit in excerpt["units"]))
+        # An identifier of at most 200 characters with a space in it names the speaker and is quoted above its cue.
+        self.assertEqual(excerpt["body"], "\n".join(
+            unit["text"] if not unit["cue_id"] or " " not in unit["cue_id"] or len(unit["cue_id"]) > 200
+            else unit["cue_id"] + "\n" + unit["text"] for unit in excerpt["units"]))
         self.assertLessEqual(len(excerpt["units"]), calls_import.MAX_RETURNED_UNITS)
         self.assertLessEqual(len(excerpt["body"].encode()), QUOTE)
         if store:
