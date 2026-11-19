@@ -41,7 +41,7 @@ proxies. TLS verification stays on.
   Run `connect` again after a restart.
 - The local authorization server registers only `gtm-demo-cli`, with callback
   `http://127.0.0.1:8767/callback`, and requires the local owner header. An assistant app cannot
-  complete its own interactive login. See [authorization](protocol.md).
+  complete its own interactive login. See [authorization](tools.md).
 - The configuration files hold bearer credentials. Keep `inspector.json`, `claude-code.json`,
   `cursor.json`, `.cursor/mcp.json`, and the state folder out of commits, transcripts, and model
   prompts, and readable only by their owner. This repository's `.gitignore` covers them. Add the

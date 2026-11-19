@@ -42,7 +42,7 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
   characters other than tabs and line endings refuse. No provider download has been tested.
 - With Salesforce, pass the same connection flags to `calls import` and `brief`. `--account-number`
   is exact, at most 40 characters, and refuses a non-literal or second match. On a refusal, pass
-  `--account acc-sf-NATIVE_ID`. See [Salesforce](salesforce.md) and [live Slack](slack-live.md).
+  `--account acc-sf-NATIVE_ID`. See [Salesforce](salesforce.md) and [live Slack](slack.md).
 
 | Limit | Value |
 | --- | ---: |

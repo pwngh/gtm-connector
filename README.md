@@ -40,8 +40,8 @@ Each source is selected explicitly. Nothing falls back to demo data.
 | --- | --- | --- |
 | Salesforce, read-only | `salesforce check --sf-org ALIAS`, `serve --crm-backend salesforce --sf-org ALIAS` | [Salesforce](docs/salesforce.md) |
 | Call transcripts (TXT, VTT) | `calls import meeting.vtt --account acc-007` | [Calls](docs/calls.md) |
-| Slack sign-in | `slack connect`, `slack status`, `slack disconnect` | [Slack sign-in](docs/slack-auth.md) |
-| One Slack thread per account | `slack map`, `slack check` | [Slack threads](docs/slack-live.md) |
+| Slack sign-in | `slack connect`, `slack status`, `slack disconnect` | [Slack sign-in](docs/slack.md) |
+| One Slack thread per account | `slack map`, `slack check` | [Slack threads](docs/slack.md) |
 | Selected accounts for a client | `serve --selection selection.json` | [Selection](docs/selection.md) |
 
 Salesforce uses an existing `sf` CLI login. Slack uses an existing public PKCE app. Tests use
@@ -80,12 +80,11 @@ flowchart LR
 - macOS and Linux. No web interface, hosted model, or multi-user mode.
 
 `evaluate` scores briefs for 20 invented accounts against fixed claims: 182 of 182 found and cited,
-223 of 223 with `--with-slack`, none invented. [Scoring](docs/evaluation.md)
+223 of 223 with `--with-slack`, none invented. [Scoring](docs/briefs.md)
 
-More: [tools and scopes](docs/tools.md), [briefs](docs/briefs.md), [audit](docs/audit.md),
-[usage](docs/usage.md), [protocol](docs/protocol.md), [install](docs/install.md),
-[Inspector](docs/inspector.md), [local model](docs/ollama.md), [demo kit](docs/salesforce-demo.md),
-[demo Slack store](docs/slack.md), [development](docs/development.md), [agent guide](AGENTS.md).
+More: [commands and output](docs/cli.md), [tools, scopes, and protocol](docs/tools.md),
+[briefs, evaluation, and local models](docs/briefs.md), [audit and usage](docs/audit.md),
+[clients and Inspector](docs/clients.md), [working on the code](AGENTS.md).
 
 MCP revision 2026-07-28, Python SDK 2.3.0. All checked-in companies, people, and records are
 invented. MIT licensed.

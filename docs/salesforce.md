@@ -2,8 +2,8 @@
 
 The Salesforce backend reads standard Account, Contact, Opportunity, and Contract records through
 REST v68.0 and never writes to Salesforce. Call-note and Slack reads for its accounts return no
-records unless you select [imported transcripts](calls.md), [live Slack](slack-live.md), or the
-[demo kit](salesforce-demo.md). Tests use invented HTTP responses and a fake `sf` executable.
+records unless you select [imported transcripts](calls.md), [live Slack](slack.md), or the
+demo book below. Tests use invented HTTP responses and a fake `sf` executable.
 No live org has been verified.
 
 ## Commands

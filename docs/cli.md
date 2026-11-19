@@ -41,21 +41,20 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 | `brief` | Saved artifact with `schema_version: 1`, identifiers, `as_of`, `status`, `evidence`, `text`, and `model_usage`. `--with-slack` adds `proposed_follow_up`. `as_of` is today's local date with Salesforce and `2027-01-15` with fixtures, unless `--as-of YYYY-MM-DD` is given. With imported calls the evidence workflow version is 4, and with live Slack it is 5. Both add a `sources` object and, with the default drafter, record the adapter `extractive` and zero model tokens. |
 | `check-brief` | Object with `status: "valid"` and `brief_id`. |
 | `audit` | Array of receipts in stored order. `--follow` prints one JSON line per changed receipt until Ctrl-C, which exits `130`. See [audit](audit.md). |
-| `usage`, `evaluate` | See [usage](usage.md) and [evaluation](evaluation.md). |
+| `usage`, `evaluate` | See [usage](audit.md) and [evaluation](briefs.md). |
 | `demo` | One renewal on invented data. Object with `schema_version: 1`, `status: "accepted"`, `workflow: "renewal-demo"`, `data_mode: "demo"`, `sources` (each `"demo_fixture"`), `rep`, `account`, `lookup` (`query`, `matches`, `receipt_id`), `denied_read` (`read_call_notes`, status `403`, required scope `calls:read`), `brief` (copied from the saved artifact), `injection` (`quoted: true`, `activities_created: 0`), `audit` (`run_id`, `rows: 6`), and `activities_created: 0`. Each run adds one saved brief and six receipts and creates no activity. An older or edited book in the folder exits `4`. |
 | `verify` | Object with the connector checks, `briefs`, receipt counts, and `injection_brief`. `--with-slack` adds `slack` and `workflow`. See [tools](tools.md). |
 | `serve` | One `ready` line, then one `tool_call` line per tool attempt. See the server output below. |
-| `inspector-config` | Object with `config`, `certificate`, and `scopes`. |
 | `connect` | Prints MCP client configuration. Object with `app`, `status`, `setup`, `limits`, and `documentation`. A grant adds `config`, the private file's path. See [client setup](clients.md). |
 | `doctor` | Checks Python, the dependencies, SQLite, the private state files, the owner configuration, the certificate dates, and the metadata of both local services. It changes nothing, grants nothing, and reads no CRM, call, or Slack record. Object with `status` (`"passed"` or `"failed"`) and `checks`, each with `name`, `status` (`"pass"` or `"fail"`), `message`, and `fix`. |
 | `completion` | Object with `shell` and `script`. |
 | `salesforce check` | Sanitized object with `schema_version: 1`, `status`, `as_of`, `steps`, and request counts. See [Salesforce](salesforce.md). |
-| `slack connect`, `slack status`, `slack disconnect` | See [Slack authentication](slack-auth.md). |
-| `slack map`, `slack check` | See [live Slack](slack-live.md). |
+| `slack connect`, `slack status`, `slack disconnect` | See [Slack authentication](slack.md). |
+| `slack map`, `slack check` | See [live Slack](slack.md). |
 | `calls import`, `calls list`, `calls inspect` | `import`: import metadata with the `created`, `selected`, and `reassigned` outcomes and no transcript text. `list`: object with an `imports` array and a nullable `next_after` cursor. `inspect`: import metadata and the excerpt units, and `--full` adds all units and the exact `original_text`. See [calls](calls.md). |
 
 `--state-dir` defaults: `var/renewal-demo` for `demo`, `var/verification` for `verify`, `var/v2` for
-`serve`, `brief`, `audit`, `usage`, `doctor`, `connect`, `check-brief`, and `inspector-config`.
+`serve`, `brief`, `audit`, `usage`, `doctor`, `connect`, and `check-brief`.
 
 ## Choose the sources
 
@@ -67,8 +66,8 @@ created for other sources, refuses with exit `3`.
 | --- | --- | --- |
 | `--crm-backend salesforce --sf-org ALIAS` | `serve`, `brief`, `accounts`, `account` | Uses an existing Salesforce CLI login. `--sf-environment sandbox` or `production` replaces the default, `developer`. See [Salesforce](salesforce.md). |
 | `--calls-backend imported` | `serve`, `brief`, and Salesforce `accounts` and `account` | Requires an explicit `--state-dir`, the folder used by `calls import`. See [calls](calls.md). |
-| `--slack-backend slack --slack-connection-dir PATH` | The same, and `calls import` | Requires an explicit `--state-dir`. `brief` also requires `--with-slack`. See [live Slack](slack-live.md). |
-| `--salesforce-demo-binding FILE` | `serve`, `brief` | Requires Salesforce. See [the demo kit](salesforce-demo.md). |
+| `--slack-backend slack --slack-connection-dir PATH` | The same, and `calls import` | Requires an explicit `--state-dir`. `brief` also requires `--with-slack`. See [live Slack](slack.md). |
+| `--salesforce-demo-binding FILE` | `serve`, `brief` | Requires Salesforce. See [the demo kit](salesforce.md). |
 | `--selection FILE` | `serve` | Serves only the selected accounts and threads and turns writes off. See [selection](selection.md). |
 
 ## Server output
