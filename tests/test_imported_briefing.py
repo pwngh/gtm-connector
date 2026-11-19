@@ -127,17 +127,125 @@ class ImportedBriefingTests(unittest.TestCase):
         self.assertIn("Calls: one transcript excerpt was read, cues 1 to 3 of 3. Every other call was not read.",
                       artifact["text"])
 
-    def test_cues_far_apart_in_time_are_never_joined_into_one_sentence(self):
-        raw = ("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nWe do not\n\n"
-               "00:04:00.000 --> 00:04:02.000\napprove the agreement.\n\n"
-               "00:04:02.500 --> 00:04:04.000\nIt needs\n\n"
-               "00:04:04.200 --> 00:04:06.000\nanother review.\n").encode()
+    def cues(self, *cues):
+        """The sentence units of a WebVTT call: each cue is (start seconds, end seconds, text)."""
+        def clock(seconds):
+            return f"00:{int(seconds) // 60:02d}:{seconds % 60:06.3f}"
+        raw = "WEBVTT\n\n" + "\n\n".join(f"{clock(start)} --> {clock(end)}\n{text}" for start, end, text in cues)
         with Runtime(self.state, calls_backend="imported") as runtime:
-            self.import_call(runtime, raw=raw, format="vtt")
+            self.import_call(runtime, raw=raw.encode(), format="vtt", requested_range=(1, len(cues)))
             artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
-        self.assertEqual([unit["text"] for unit in artifact["units"] if unit["kind"] == "sentence"],
-                         ["We do not", "approve the agreement.", "It needs another review."])
-        self.assertNotIn("We do not approve", artifact["text"])
+        return artifact, [(unit["text"], unit["partial"]) for unit in artifact["units"] if unit["kind"] == "sentence"]
+
+    def test_one_speakers_cues_join_across_a_short_gap_or_a_pause_that_the_words_themselves_bridge(self):
+        artifact, spoken = self.cues(
+            # 0.2 s apart: one sentence wrapped across two cues.
+            (1, 3, "<v Dana Crest>It needs"), (3.2, 5, "<v Dana Crest>another review."),
+            # 2.1 s apart: the first cue stops mid-sentence and the next goes on in lower case.
+            (10, 12, "<v Dana Crest>Their counsel has not"), (14.1, 16, "<v Dana Crest>approved the rider."),
+            # 9.9 s apart and a new capital: nobody is recorded saying these as one sentence.
+            (20, 22, "<v Dana Crest>We do not"), (31.9, 33, "<v Dana Crest>Approve the agreement."),
+            # Four minutes apart, lower case or not.
+            (40, 42, "<v Dana Crest>The board will"), (282, 284, "<v Dana Crest>sign in March."),
+            # A short form that expects more is no end. "I" is.
+            (300, 302, "<v Dana Crest>So do I. It is under 28 U.S.C."),
+            (320, 322, "<v Dana Crest>The vendor is Veldrune Systems, LLC."))
+        self.assertEqual([text for text, partial in spoken if not partial],
+                         ["It needs another review.", "Their counsel has not approved the rider.", "So do I."])
+        # What follows a cue that stopped mid-sentence may be its other half, so it is not shown either.
+        self.assertEqual([text for text, partial in spoken if partial],
+                         ["We do not", "Approve the agreement.", "The board will", "sign in March.",
+                          "It is under 28 U.S.C.", "The vendor is Veldrune Systems, LLC."])
+        self.assertNotIn("We do not Approve", artifact["text"])
+        self.assertIn("Sentences: 6 cut off at a pause, a change of speaker, or the edge of the excerpt were read and "
+                      "are not shown.", artifact["text"])
+
+    def test_the_two_gaps_are_two_seconds_and_ten(self):
+        _, spoken = self.cues(
+            (0, 1, "<v Dana Crest>It needs"), (3.0, 4, "<v Dana Crest>Another review."),
+            (10, 11, "<v Dana Crest>It needs"), (13.1, 14, "<v Dana Crest>Another look."),
+            (20, 21, "<v Dana Crest>The board will"), (31.0, 32, "<v Dana Crest>sign in March."),
+            (40, 41, "<v Dana Crest>The board may"), (51.1, 52, "<v Dana Crest>sign in April."),
+            # A comma does not carry a sentence across a pause: only a letter in lower case does.
+            (60, 61, "<v Dana Crest>We do not"), (69, 70, "<v Dana Crest>, Approve the agreement."))
+        self.assertEqual([text for text, partial in spoken if not partial],
+                         ["It needs Another review.", "The board will sign in March."])
+        self.assertEqual([text for text, partial in spoken if partial],
+                         ["It needs", "Another look.", "The board may", "sign in April.", "We do not",
+                          ", Approve the agreement."])
+
+    def test_an_answer_and_an_ordinary_last_word_are_ends(self):
+        artifact, spoken = self.cues(
+            (1, 2, "<v Morgan Reed>Will you sign by Friday?"), (3, 4, "<v Dana Crest>No."),
+            (5, 6, "<v Morgan Reed>Why not?"),
+            (7, 9, "<v Dana Crest>Our general counsel has not approved the rider. Call me Monday."),
+            (20, 22, "<v Dana Crest>We cannot sign before 5 p.m."), (23, 24, "<v Morgan Reed>Give me a sec."),
+            (40, 42, "<v Dana Crest>We sell only in the U.S."), (43, 45, "<v Dana Crest>And the answer is no."),
+            # A sentence that trails off is not an end, and one cut sentence is counted in the singular.
+            (60, 62, "<v Morgan Reed>We will sign if..."), (80, 82, "<v Dana Crest>Understood."))
+        self.assertEqual([text for text, partial in spoken if partial], ["We will sign if..."])
+        self.assertEqual(len(spoken), 11)
+        self.assertIn("Sentences: 1 cut off at a pause, a change of speaker, or the edge of the excerpt was read and "
+                      "is not shown.", artifact["text"])
+
+    def test_in_an_excerpt_that_starts_inside_a_call_each_speakers_first_words_are_in_doubt(self):
+        raw = ("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Dana Crest>We will not\n\n"
+               "00:00:03.000 --> 00:00:04.000\n<v Morgan Reed>Sorry?\n\n"
+               "00:00:05.000 --> 00:00:06.000\n<v Dana Crest>sign until Friday. That is final.\n\n"
+               "00:00:07.000 --> 00:00:08.000\n<v Morgan Reed>Fine.\n\n"
+               "00:00:09.000 --> 00:00:10.000\n<v Morgan Reed>Thanks.\n").encode()
+        with Runtime(self.state, calls_backend="imported") as runtime:
+            self.import_call(runtime, raw=raw, format="vtt", requested_range=(3, 4))
+            artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
+        self.assertEqual([(unit["text"], unit["partial"]) for unit in artifact["units"] if unit["kind"] == "sentence"],
+                         [("Sorry?", True), ("sign until Friday.", True), ("That is final.", False), ("Fine.", False),
+                          ("Thanks.", False)])
+
+    def test_cues_with_no_speaker_label_are_never_read_as_one_persons_sentence(self):
+        artifact, spoken = self.cues((1, 3, "we will not sign"), (3.2, 5, "Great, so you will sign Friday."),
+                                     (6, 8, "Fine."), (8.1, 10, "Thank you."))
+        # Two people may be speaking. The unfinished cue and the one after it are counted, not shown.
+        self.assertEqual(spoken, [("we will not sign", True), ("Great, so you will sign Friday.", True),
+                                  ("Fine.", False), ("Thank you.", False)])
+        self.assertNotIn("sign Great", artifact["text"])
+
+    def test_what_follows_a_cut_sentence_is_shown_only_when_it_cannot_be_its_other_half(self):
+        _, spoken = self.cues(
+            # "No." is an answer, a closing quotation mark closes, and so does a full stop of another script.
+            (1, 2, "<v Dana Crest>No."), (6, 8, "<v Dana Crest>We already signed."),
+            (20, 22, "<v Dana Crest>\u201cWe will sign.\u201d"), (26, 28, "<v Dana Crest>\u5951\u7d04\u3057\u307e\u3059\u3002"),
+            (32, 34, "<v Dana Crest>It is done."),
+            # A lower-case line by nobody in particular, right after a cut sentence, may be its other half. So
+            # may the same speaker's next words, whatever their case.
+            (60, 62, "<v Dana Crest>We cannot sign"), (62.5, 64, "until Legal approves."),
+            (64.5, 66, "<v Dana Crest>The contract is ready."), (70, 72, "<v Dana Crest>That is all."),
+            # A dash does not carry a sentence across a pause, and a cue that starts earlier is not a later one.
+            (100, 102, "<v Morgan Reed>We will not"), (110, 112, "<v Morgan Reed>\u2014 We approve."),
+            (130, 131, "<v Morgan Reed>It needs"), (120, 121, "<v Morgan Reed>another review."),
+            (140, 141, "<v Morgan Reed>Fine."),
+            # Lower case is lower case in any alphabet.
+            (200, 202, "<v Dana Crest>Die Position ist"), (205, 207, "<v Dana Crest>\u00e4u\u00dferst wichtig."))
+        self.assertEqual([text for text, partial in spoken if not partial], [
+            "No.", "We already signed.", "\u201cWe will sign.\u201d", "\u5951\u7d04\u3057\u307e\u3059\u3002", "It is done.",
+            "That is all.", "Fine.", "Die Position ist \u00e4u\u00dferst wichtig."])
+        self.assertEqual([text for text, partial in spoken if partial], [
+            "We cannot sign", "until Legal approves.", "The contract is ready.", "We will not", "\u2014 We approve.",
+            "It needs", "another review."])
+
+    def test_a_blank_line_inside_a_transcript_does_not_make_two_whole_sentences(self):
+        raw = b"We will not\n\nsign this renewal.\nGood.\n"
+        with Runtime(self.state, calls_backend="imported") as runtime:
+            self.import_call(runtime, raw=raw, requested_range=(1, 4))
+            artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
+        self.assertEqual([(unit["text"], unit["partial"]) for unit in artifact["units"] if unit["kind"] == "sentence"],
+                         [("We will not", True), ("sign this renewal.", True), ("Good.", False)])
+        _, spoken = self.cues((1, 4, "<v Dana Crest>We will not\n \nsign this renewal.\n \nGood."))
+        self.assertEqual(spoken, [("We will not", True), ("sign this renewal.", True), ("Good.", False)])
+
+    def test_cue_markup_is_not_part_of_a_quotation(self):
+        _, spoken = self.cues((1, 4, "<v Dana Crest><c.loud>We</c> <00:00:02.000><b.big>will</b> <i>sign</i> "
+                                     "<lang en>in March</lang>.</v>"))
+        self.assertEqual(spoken, [("We will sign in March.", False)])
 
     def test_demo_seller_names_do_not_apply_to_an_imported_transcript(self):
         raw = b"WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n<v Morgan Reed>We will ship it by March 6.\n"
@@ -165,8 +273,8 @@ class ImportedBriefingTests(unittest.TestCase):
         self.assertNotIn("The price is acceptable", artifact["text"])
         self.assertIn("Calls: one transcript excerpt was read, lines 2 to 5 of 6. The rest of that call and every "
                       "other call were not read.", artifact["text"])
-        self.assertIn("Sentences: 2 at the edge of the excerpt may be incomplete and are not shown.",
-                      artifact["text"])
+        self.assertIn("Sentences: 2 cut off at a pause, a change of speaker, or the edge of the excerpt were read "
+                      "and are not shown.", artifact["text"])
         cut = next(unit["n"] for unit in artifact["units"] if unit.get("partial"))
         self.assertEqual(trace_saved(self.state, artifact["brief_id"], cut)["text"],
                          "will not sign until the rider is approved.")

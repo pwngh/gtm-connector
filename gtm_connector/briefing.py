@@ -13,7 +13,7 @@ import httpx2
 
 from . import strict_json
 from .seed import DEMO_AS_OF
-from .units import BriefRejected, build, trace
+from .units import SANITIZER_VERSION, BriefRejected, build, trace
 
 
 class BriefingError(RuntimeError):
@@ -208,4 +208,11 @@ def trace_saved(directory, brief_id, number):
     from .audit import read_audit
     if read_audit(Path(directory) / "audit.sqlite3", brief_id) != artifact["evidence"].get("receipts"):
         raise ValueError("The saved card does not match the audit log of this state folder.")
+    saved = artifact.get("units")
+    if isinstance(saved, list) and any(isinstance(unit, dict) and unit.get("sanitizer_version", SANITIZER_VERSION)
+                                       != SANITIZER_VERSION for unit in saved):
+        raise ValueError("This card was saved under older rules for sentences, so its numbers may point "
+                         "elsewhere now. Make the card again.")
+    if saved != build(artifact["evidence"])[0]:
+        raise ValueError("The saved card's units do not match its saved evidence.")
     return {"brief_id": brief_id, "account_id": artifact["account_id"], **trace(artifact["evidence"], number)}
