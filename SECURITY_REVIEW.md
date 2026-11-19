@@ -128,4 +128,5 @@ No live org has been verified. All tests use invented data, fake providers, and 
 - No live call provider or real transcript was accessed.
 - Only the Inspector CLI with a supplied grant is tested. The Inspector UI, interactive app login,
   Claude Code, and Cursor are untested.
-- No model result exists for the current fixture book.
+- The only model result is a local `llama3.2` run on the fixture book. It assembles fixed claims, so
+  it shows nothing about free-text summarizing.

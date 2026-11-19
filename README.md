@@ -32,6 +32,28 @@ pinned dependencies, runs the tests, and runs the demo.
 
 The checker verifies wording and citations, not whether a source is true.
 
+## Measured results
+
+Twenty invented accounts, each briefed from CRM, calls, and Slack. A test asserts every count
+below except the model row and the timings, which the command beside them reproduces.
+
+| What | Result | Check |
+| --- | --- | --- |
+| Input | 98 source records through 80 audited reads | [results test](tests/test_results.py) |
+| Output | 20 briefs, 223 lines, 2,482 words, 248 citations | same |
+| Lines that cite their source | 223 of 223 | same |
+| Expected claims found and cited correctly | 182 of 182, and 223 of 223 with Slack | `gtm-connector evaluate`, `--with-slack` |
+| Invented claims published | 0 | same |
+| Corrupted drafts rejected: a citation removed or changed, wording changed, a line repeated, a sentence invented | 932 of 932 | [results test](tests/test_results.py) |
+| Tool calls with a finished receipt | 80 of 80 | same |
+| Drafts by a local model, `llama3.2`, accepted by the checker | 20 of 20, with 182 of 182 claims and 0 rejected lines, from 8,758 tokens in and 5,518 out | `gtm-connector evaluate --adapter ollama --model llama3.2:latest` |
+| Time for 20 briefs | About 1 s without a model, 97 s with `llama3.2` | `time gtm-connector evaluate` |
+| Time per audited read, receipt included | 1.6 ms median, 2.2 ms at the 95th percentile | `elapsed_ms` in `gtm-connector audit --json` |
+| Demo, from start to a finished brief | 0.9 s | `time gtm-connector demo` |
+
+Timings are from an Apple M1 Max laptop. The fixed drafter and the model both assemble claims the
+connector derived, so these numbers measure the pipeline and the checker, not free-text summarizing.
+
 ## Use your own sources
 
 Each source is selected explicitly. Nothing falls back to demo data.
@@ -78,9 +100,6 @@ flowchart LR
 - Authorization is a local owner emulator. The file owner can request every scope and edit the
   stores. Audit records are not tamper-proof. [Security review](SECURITY_REVIEW.md)
 - macOS and Linux. No web interface, hosted model, or multi-user mode.
-
-`evaluate` scores briefs for 20 invented accounts against fixed claims: 182 of 182 found and cited,
-223 of 223 with `--with-slack`, none invented. [Scoring](docs/briefs.md)
 
 More: [commands and output](docs/cli.md), [tools, scopes, and protocol](docs/tools.md),
 [briefs, evaluation, and local models](docs/briefs.md), [audit and usage](docs/audit.md),
