@@ -6,8 +6,8 @@ Renewal briefs from Salesforce, call transcripts, and Slack. Every line cites th
 from, and every read needs a named scope and leaves an audit receipt. People use the CLI.
 Assistants use the MCP tools.
 
-- **Catches 284% more bad lines** than checking that each line cites a real record: 956 of 956,
-  against 249.
+- **Catches 284% more bad lines** than checking that every line cites evidence that was read:
+  956 of 956, against 249.
 - **Writes 20 briefs in 99% less time** than a local model drafting the same lines: 0.95 s, against
   103 s with `llama3.2`.
 
