@@ -37,12 +37,12 @@ def _private(path, *, directory=False):
 
 
 def _source_files(owner):
-    calls_files = (("calls.sqlite3",) if owner.get("calls_backend", "fixture") == "fixture"
+    calls_files = (("calls.sqlite3",) if owner["calls_backend"] == "fixture"
                    else ("imports.sqlite3", "calls-source.json"))
-    slack_files = (("slack.sqlite3",) if owner.get("slack_backend", "fixture") == "fixture"
+    slack_files = (("slack.sqlite3",) if owner["slack_backend"] == "fixture"
                    else ("slack-source.json", "slack-mappings.json"))
     return calls_files + slack_files + (
-        ("crm-connection.json",) if owner.get("crm_backend", "sqlite") == "salesforce" else ())
+        ("crm-connection.json",) if owner["crm_backend"] == "salesforce" else ())
 
 
 def _read_owner(directory):
@@ -75,9 +75,9 @@ def _read_owner(directory):
         if (owner["redirect_uri"] != "http://127.0.0.1:8767/callback"
                 or owner["client_id"] != "gtm-demo-cli"
                 or owner["cert_path"] != str(directory / "tls.pem")
-                or owner.get("crm_backend", "sqlite") not in ("sqlite", "salesforce")
-                or owner.get("calls_backend", "fixture") not in ("fixture", "imported")
-                or owner.get("slack_backend", "fixture") not in ("fixture", "slack")):
+                or owner.get("crm_backend") not in ("sqlite", "salesforce")
+                or owner.get("calls_backend") not in ("fixture", "imported")
+                or owner.get("slack_backend") not in ("fixture", "slack")):
             raise ValueError
         if owner.get("slack_backend") == "slack" and (
                 not isinstance(owner.get("slack_connection_dir"), str) or not owner["slack_connection_dir"]
@@ -89,21 +89,21 @@ def _read_owner(directory):
 
 
 def _validate_sources(directory, owner):
-    if owner.get("slack_backend", "fixture") == "slack":
+    if owner["slack_backend"] == "slack":
         from .runtime import inspect_slack_state
         try:
             state = inspect_slack_state(directory)
-            if state.crm_backend != owner.get("crm_backend", "sqlite"):
+            if state.crm_backend != owner["crm_backend"]:
                 raise ValueError
         except Exception:
             raise ValueError("Slack source state is invalid. Run gtm-connector doctor.") from None
     elif any(os.path.lexists(directory / name) for name in ("slack-source.json", "slack-mappings.json")):
         raise ValueError("Slack source selection is invalid. Run gtm-connector doctor.")
-    if owner.get("calls_backend", "fixture") == "imported":
+    if owner["calls_backend"] == "imported":
         from .runtime import _inspect_import_state
         try:
             state = _inspect_import_state(directory)
-            if state.crm_backend != owner.get("crm_backend", "sqlite"):
+            if state.crm_backend != owner["crm_backend"]:
                 raise ValueError
         except Exception:
             raise ValueError("Imported calls state is invalid. Run gtm-connector doctor.") from None
