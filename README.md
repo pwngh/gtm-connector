@@ -23,6 +23,10 @@ RECORD VALUES, from CRM fields and connector arithmetic
   Contact: "Marian Holt"; role "Deputy general counsel"; email "marian@thornfield-wren.example" [2]
 
 SAID, whole sentences as recorded; not record values
+  [5] customer (label matches contact [2]); call 2027-01-12T15:00:00Z; speaker "Marian Holt"
+      "Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved."
+  [6] customer (label matches contact [2]); call 2027-01-12T15:00:00Z; speaker "Marian Holt"
+      "Please do not put a date on the order form."
   [7] seller (listed seller identity); Slack 2027-01-12T16:00:00Z; speaker "Avery Linden"
       "Heads up [mention channel]: their general counsel will not sign until the zero-retention and client-consent rider is approved."
   [8] seller (listed seller identity); Slack 2027-01-12T16:00:00Z; speaker "Avery Linden"
@@ -31,10 +35,6 @@ SAID, whole sentences as recorded; not record values
       "The redline is attached, see rider redline v4 [link files.thornfield-wren.example]."
   [4] seller (listed seller identity); call 2027-01-12T15:00:00Z; speaker "Morgan Reed"
       "We will have the order form countersigned by January 30."
-  [5] customer (label matches contact [2]); call 2027-01-12T15:00:00Z; speaker "Marian Holt"
-      "Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved."
-  [6] customer (label matches contact [2]); call 2027-01-12T15:00:00Z; speaker "Marian Holt"
-      "Please do not put a date on the order form."
 
 NOT READ
   Calls: 2 call records were read. Recordings and anything outside those records were not read.
@@ -144,7 +144,8 @@ The card shows what the records say, not whether a source is true.
 ## Limits
 
 - Nothing here was tried on a real deal. The cases test correctness on invented data, not usefulness.
-- The card lists sentences newest first. It does not rank them or relate one to another.
+- The card lists sentences by speaker role, and newest first within a role. It does not rank them or
+  relate one to another.
 - A seller is whoever `sellers.json` in the state folder lists. Slack authors are never shown as
   customers.
 - Authorization is a local owner emulator. The file owner can request every scope and edit the
