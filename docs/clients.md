@@ -1,157 +1,84 @@
 # Connect a client
 
-`connect` prints setup commands and the limits of each connection. It does not
-launch an application. Without `--scope`, it creates no grant or configuration.
-With explicit scopes, it requests a local grant and saves it in a private file
-without printing the bearer token. Repeat `--scope` for each source you want to
-allow: `crm:read`, `calls:read`, or `slack:read`.
-
-| Client | Status | What is established |
-| --- | --- | --- |
-| Inspector 2.15.0 CLI | Tested. | Supplied-grant discovery, source reads, denials, rate limits, and audit receipts. Its UI and interactive login are untested. |
-| Claude Code | Untested. | Configuration follows its current HTTP and protocol documentation. No hosted assistant was connected. |
-| Cursor | Untested. | Configuration follows its current URL and header documentation. Protocol and local certificate compatibility are unverified. |
-| Claude Desktop | Untested; no working setup provided. | The remote connection cannot reach the loopback server. The connector has no stdio transport for a local server entry. |
-
-The official app documentation linked below was checked on 2026-11-17. These
-instructions describe configuration, not proof of assistant compatibility.
-
-## Start and inspect the server
-
-With `gtm-connector` installed, keep the server running in one terminal:
+Keep the server running in one terminal:
 
 ```sh
 gtm-connector serve --state-dir var/clients
 ```
 
-Use a second terminal in the same directory:
+In a second terminal in the same directory:
 
 ```sh
 gtm-connector doctor --state-dir var/clients
-gtm-connector connect inspector --state-dir var/clients
-```
-
-The second command only previews setup. Each command below that includes
-`--scope` creates a grant. The printed commands contain absolute paths for the
-selected state directory. The examples use `$PWD/var/clients` for those paths;
-run them from the directory where you started the server.
-
-## Inspector
-
-```sh
 gtm-connector connect inspector --state-dir var/clients --scope crm:read
 ```
 
-This writes `var/clients/inspector.json` with mode 0600 and prints these commands
-with absolute paths:
+`connect APP` prints the setup commands and limits for one client. It does not
+launch an application. With `--scope`, it requests a local grant and saves it
+in `APP.json` in the state folder, mode 0600, without printing the bearer
+token. Without `--scope`, it previews the setup and creates nothing. Repeat
+`--scope` for each of `crm:read`, `calls:read`, `slack:read`, and `crm:write`.
 
-```sh
-npx --yes @modelcontextprotocol/inspector@2.15.0 --version
-NODE_EXTRA_CA_CERTS="$PWD/var/clients/tls.pem" \
-  NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}" \
-  no_proxy="127.0.0.1,localhost${no_proxy:+,$no_proxy}" \
-  NODE_TLS_REJECT_UNAUTHORIZED=1 \
-  npx --yes @modelcontextprotocol/inspector@2.15.0 --cli \
-  --config "$PWD/var/clients/inspector.json" --server gtm-connector \
-  --stored-auth-only --quiet --format json --method tools/list
-```
+| `APP` | Status | What is established |
+| --- | --- | --- |
+| `inspector` | Tested with the Inspector 2.15.0 CLI. | Supplied-grant discovery, source reads, denials, rate limits, and audit receipts. Its UI and interactive login are untested. |
+| `claude-code` | Untested. | The configuration follows Claude Code's HTTP and protocol documentation. No hosted assistant was connected. |
+| `cursor` | Untested. | The configuration follows Cursor's URL and header documentation. Protocol and local certificate compatibility are unverified. |
+| `claude-desktop` | Untested. No working setup exists. | The remote connection cannot reach the loopback server, and the connector has no stdio transport. |
 
-The first command downloads the pinned package before changing the certificate
-setting for the local request. Node trusts the server's certificate only for
-this process, and loopback bypasses inherited proxies. TLS verification stays
-enabled. `--stored-auth-only` avoids Inspector's interactive login and prevents
-it from requesting additional scopes. See the [Inspector walkthrough](inspector.md)
-for Node requirements, actual tool calls, and the automated proof, and the
-official [Inspector guide](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector)
-for the client interface.
+The linked client documentation was read on 2026-11-17. These instructions
+describe configuration. They do not prove that an assistant works with the
+connector.
 
-## Claude Code
+## Run the printed command
 
-```sh
-gtm-connector connect claude-code --state-dir var/clients --scope crm:read
-```
-
-The command creates a private `var/clients/claude-code.json` with an HTTP server
-entry and authorization header. It prints this launch command with absolute paths:
+The printed commands use absolute paths for the selected state folder. Each
+starts with the same environment, shown here with `$PWD/var/clients`:
 
 ```sh
 NODE_EXTRA_CA_CERTS="$PWD/var/clients/tls.pem" \
   NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}" \
   no_proxy="127.0.0.1,localhost${no_proxy:+,$no_proxy}" \
   NODE_TLS_REJECT_UNAUTHORIZED=1 \
-  MCP_SDK_GENERATION=v2 MCP_PROTOCOL_NEGOTIATION=auto \
-  claude --mcp-config "$PWD/var/clients/claude-code.json"
+  REST_OF_COMMAND
 ```
 
-Claude Code documents HTTP entries, `--mcp-config`, and the v2 runtime's
-protocol negotiation settings in its [MCP guide](https://code.claude.com/docs/en/mcp).
-Its [network guide](https://code.claude.com/docs/en/network-config) describes
-process certificate and proxy settings. This setup has not been run against
-Claude Code. Its documented options do not establish that the app accepts this
-server's protocol or completes a request.
+Node trusts the server's certificate for this process only. Loopback requests
+skip inherited proxies. TLS verification stays on.
 
-## Cursor
+| `APP` | `REST_OF_COMMAND` | Notes |
+| --- | --- | --- |
+| `inspector` | `npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config "$PWD/var/clients/inspector.json" --server gtm-connector --stored-auth-only --quiet --format json --method tools/list` | First run the printed `npx --yes @modelcontextprotocol/inspector@2.15.0 --version`, which downloads the pinned package before the certificate setting changes. `--stored-auth-only` skips the interactive login and requests no further scopes. See the [Inspector walkthrough](inspector.md) and the official [Inspector guide](https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector). |
+| `claude-code` | `MCP_SDK_GENERATION=v2 MCP_PROTOCOL_NEGOTIATION=auto claude --mcp-config "$PWD/var/clients/claude-code.json"` | The file holds an HTTP server entry with an authorization header. See Claude Code's [MCP guide](https://code.claude.com/docs/en/mcp) and [network guide](https://code.claude.com/docs/en/network-config). This setup has not been run against Claude Code. |
+| `cursor` | `cursor .` | First merge only the `gtm-connector` entry from `cursor.json` into your project's `.cursor/mcp.json`, keep the other entries, and quit Cursor completely. See Cursor's [MCP guide](https://cursor.com/docs/mcp). Cursor has not been connected. |
 
-```sh
-gtm-connector connect cursor --state-dir var/clients --scope crm:read
-```
-
-This creates private `var/clients/cursor.json`. Merge
-only the `gtm-connector` entry from `cursor.json` into your project's
-`.cursor/mcp.json`, preserving existing server entries. Keep that file private
-and ignored by Git. Quit Cursor completely, then run the printed launch command:
-
-```sh
-NODE_EXTRA_CA_CERTS="$PWD/var/clients/tls.pem" \
-  NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}" \
-  no_proxy="127.0.0.1,localhost${no_proxy:+,$no_proxy}" \
-  NODE_TLS_REJECT_UNAUTHORIZED=1 cursor .
-```
-
-Cursor's [MCP guide](https://cursor.com/docs/mcp) documents project configuration
-with a server URL and headers. The generated entry follows that format. Cursor
-has not been connected: its acceptance of MCP 2026-07-28 and the process's local
-certificate setting remain unverified.
-
-## Claude Desktop
-
-```sh
-gtm-connector connect claude-desktop --state-dir var/clients
-```
-
-This prints the missing requirements and an Inspector fallback. It does not
-create a Desktop configuration or a grant, even when passed `--scope`.
-
+`connect claude-desktop` prints the missing requirements and the Inspector
+command. It creates no configuration and no grant, even with `--scope`.
 Claude's [remote connector documentation](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
-says requests originate in Anthropic's cloud and require public HTTPS on port
-443. That route cannot reach this server on `127.0.0.1`. Desktop's separate
+says requests come from Anthropic's cloud and need public HTTPS on port 443, so
+they cannot reach `127.0.0.1`. Desktop's
 [local server configuration](https://modelcontextprotocol.io/docs/2026-07-28/develop/connect-local-servers)
-launches a local server process; this connector provides no stdio transport.
-No tunnel, deployment, or hosted assistant connection is part of this setup.
-Use the tested local client instead:
+launches a local process, and this connector has no stdio transport. The setup
+includes no tunnel and no deployment.
 
-```sh
-gtm-connector connect inspector --state-dir var/clients --scope crm:read
-```
+## Grants and private files
 
-## Grants, login, and private files
+- A grant expires after five minutes. Rerun the same `connect` command with
+  its scopes to replace the file. For Cursor, copy the entry again. For Claude
+  Code, restart with the updated file.
+- Restarting `serve` replaces its endpoints and certificate and invalidates
+  every earlier grant. Run `connect` again after a restart.
+- The local authorization server registers only `gtm-demo-cli`, with callback
+  `http://127.0.0.1:8767/callback`, and requires the local owner header. It
+  has no dynamic client registration, browser consent page, or token refresh,
+  and it rejects browser `Origin` headers. An assistant app therefore cannot
+  complete its own interactive login. A supplied grant skips that login. It
+  does not prove protocol compatibility.
+- The configuration files hold bearer credentials. Keep `inspector.json`,
+  `claude-code.json`, `cursor.json`, `.cursor/mcp.json`, and the state folder
+  out of commits, transcripts, and model prompts, and readable only by their
+  owner. This repository's `.gitignore` covers them. Add the same rules in
+  another project.
 
-The local authorization server registers only `gtm-demo-cli`, with callback
-`http://127.0.0.1:8767/callback`, and requires the local owner header. It has no
-dynamic client registration, browser consent page, or token refresh. It rejects
-browser `Origin` headers. Those missing pieces prevent a normal assistant app's
-interactive login with the current server. A supplied grant avoids that login
-step; it does not prove protocol compatibility.
-
-Grants expire after five minutes. Rerun the corresponding `connect` command
-with explicit scopes to replace its private configuration. For Cursor, copy
-the updated entry again; for Claude Code, restart with the updated file.
-Restarting `serve` replaces its endpoints and certificate and invalidates all
-previous grants, so regenerate configuration after a restart too.
-
-Configuration files contain bearer credentials. Keep `inspector.json`,
-`claude-code.json`, `cursor.json`, `.cursor/mcp.json`, and the state directory
-out of commits, transcripts, and model prompts. This repository ignores them;
-add equivalent ignore rules if using another project directory. Keep copied
-configuration readable only by its owner. See [authorization](protocol.md) for
-the local owner boundary and [CLI output](cli.md) for machine-readable setup.
+See [authorization](protocol.md) for the local owner boundary and
+[CLI output](cli.md) for the JSON form of `connect`.
