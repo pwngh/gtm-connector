@@ -768,9 +768,12 @@ def _sf_waiting(as_json):
     """
     if as_json:
         return None
-    due = [2.0]
+    due, last = [2.0], [0.0]
 
     def report(seconds):
+        if seconds < last[0]:
+            due[0] = 2.0  # a new login read started
+        last[0] = seconds
         if seconds < due[0]:
             return
         due[0] = seconds + 10
@@ -1097,7 +1100,8 @@ def _run(args, argv):
         from .sf_credentials import reporting
         with reporting(_sf_waiting(args.json)):
             return run_check(sf_org=args.sf_org, as_of=args.as_of, environment=args.sf_environment,
-                             progress=_salesforce_progress(args.json))
+                             progress=_salesforce_progress(args.json),
+                             on_refresh=None if args.json else _sf_refresh_notice(False))
     if args.command in ("accounts", "account") and crm_reader is not None:
         return _salesforce_account_read(args, crm_reader)
     adapter = None

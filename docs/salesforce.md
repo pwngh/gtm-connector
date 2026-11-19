@@ -83,7 +83,7 @@ fields. Amounts are printed with `(currency unknown)`.
 | AccountNumber lookup | 2 rows. |
 | Operation deadline | 20 seconds, checked around reads. It is not a hard cancellation. |
 | Network timeout per request | The remaining deadline, up to 5 seconds. |
-| Local CLI client | 205 seconds for a Salesforce MCP response, which covers a login refresh. |
+| Local CLI client | 25 seconds for a response, and 205 seconds for a CRM tool call, which can wait for a login refresh. |
 | Retries | With `--sf-org`, the first HTTP 401 in an operation asks `sf` for credentials once and confirms the org identity before retrying the GET, inside the same budget. No other upstream error is retried. |
 
 ## Errors

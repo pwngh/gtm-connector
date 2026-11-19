@@ -206,6 +206,26 @@ print(json.dumps({"status": 0, "result": value}))
                 patch("gtm_connector.sf_credentials._COMMAND_SECONDS", 0.3):
             self.assertEqual(self.assert_error("salesforce_cli_timeout", self.adapter).sf_cli_invocations, 1)
         self.assertLess(time.monotonic() - started, 10)
+        # A descendant that keeps sf's pipes open cannot hold up the timeout.
+        (self.directory / "sf").write_text(f"#!{sys.executable}\n" + """
+import subprocess, sys, time
+subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+time.sleep(30)
+""")
+        started = time.monotonic()
+        with patch("gtm_connector.sf_credentials._COMMAND_SECONDS", 0.3):
+            self.assert_error("salesforce_cli_timeout", self.adapter)
+        self.assertLess(time.monotonic() - started, 10)
+
+    def test_the_login_read_has_one_limit_and_a_failing_notice_changes_nothing(self):
+        from gtm_connector.sf_credentials import reporting
+
+        def broken(seconds):
+            raise RuntimeError("invented-alias must not appear")
+
+        with patch.dict(os.environ, {"FAKE_SF_DELAY": "0.7"}), reporting(broken):
+            self.assertEqual(self.adapter().instance_url, ORIGIN)
+        (self.directory / "count").unlink()
         # The whole login read has one limit across both commands.
         with patch.dict(os.environ, {"FAKE_SF_DELAY": "0.4"}), \
                 patch("gtm_connector.sf_credentials.CREDENTIAL_SECONDS", 0.6):
@@ -301,7 +321,8 @@ print(json.dumps({"status": 0, "result": value}))
                 adapter.search_accounts()
         self.assertEqual(caught.exception.code, "salesforce_result_limit")
         self.assertEqual(adapter.http_requests, 2)
-        self.assertEqual(adapter.sf_cli_invocations, 4)
+        # With no attempts left to confirm the org and retry, sf is not run again.
+        self.assertEqual(adapter.sf_cli_invocations, 2)
 
         adapter = self.adapter(ORG, httpx2.Response(401), ORG, EMPTY)
         with patch("gtm_connector.salesforce._MAX_BYTES", len(json.dumps(ORG).encode()) + 1):

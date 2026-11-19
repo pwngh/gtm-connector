@@ -206,6 +206,11 @@ class SalesforceReadOnlyAdapter:
     def _refresh(self, client, budget):
         if self._credentials is None or budget.get("refreshed"):
             raise SalesforceReadError("salesforce_auth_required")
+        if time.monotonic() >= budget["deadline"]:
+            raise SalesforceReadError("salesforce_timeout")
+        if budget["requests"] + 2 > _MAX_REQUESTS:
+            # No room left to confirm the org and retry, so sf is not run.
+            raise SalesforceReadError("salesforce_result_limit")
         budget["refreshed"] = True
         started = time.monotonic()
         self._notify("running", 0.0)

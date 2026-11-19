@@ -79,7 +79,8 @@ class NoCandidate(Exception):
     code = "renewal_fields_unmapped"
 
 
-def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_factory=None, progress=None):
+def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_factory=None, progress=None,
+              on_refresh=None):
     """Never return records, configuration, credentials, exception text, or identifiers."""
     as_of = date.today().isoformat() if as_of is None else as_of
     try:
@@ -142,6 +143,7 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
 
     def credentials():
         state["reader"] = factory()
+        state["reader"].on_refresh = on_refresh
         if state["reader"].environment != environment:
             raise ValueError("The reader does not match the selected environment.")
         return 2, "Instance and token were loaded in memory."

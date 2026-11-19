@@ -11,6 +11,9 @@ import httpx2
 
 from .auth import SCOPES
 from .sf_credentials import CREDENTIAL_SECONDS
+from .tool_definitions import TOOL_DEFINITIONS
+
+_CRM_TOOLS = frozenset(name for name, tool in TOOL_DEFINITIONS.items() if tool.scope == "crm:read")
 
 
 PROTOCOL_VERSION = "2026-07-28"
@@ -48,11 +51,10 @@ class LocalClient:
             path="/.well-known/oauth-protected-resource" + resource.path))
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.load_verify_locations(cafile=str(config["cert_path"]))
-        # A Slack read can take 20 seconds. A Salesforce read can also wait for sf to refresh
-        # the login. Let the gateway finish the read and its receipt before timing out.
-        read = (CREDENTIAL_SECONDS + 25 if config.get("crm_backend") == "salesforce"
-                else 25 if config.get("slack_backend") == "slack" else 10)
-        timeout = httpx2.Timeout(10, read=read)
+        # A Salesforce or Slack read can take 20 seconds. Let the gateway finish the read and
+        # its receipt before timing out.
+        self._salesforce = config.get("crm_backend") == "salesforce"
+        timeout = httpx2.Timeout(10, read=25 if self._salesforce or config.get("slack_backend") == "slack" else 10)
         self._http = httpx2.Client(verify=context, trust_env=False, follow_redirects=False,
                                    timeout=timeout, transport=transport)
         self._request_id = 0
@@ -160,7 +162,11 @@ class LocalClient:
         if method == "tools/call":
             headers["Mcp-Name"] = supplied["name"]
         self._request_id += 1
-        return self._http.post(self.resource, headers=headers, json={
+        timeout = self._http.timeout
+        if self._salesforce and method == "tools/call" and supplied["name"] in _CRM_TOOLS:
+            # A CRM read can also wait for sf to refresh the login.
+            timeout = httpx2.Timeout(10, read=CREDENTIAL_SECONDS + 25)
+        return self._http.post(self.resource, headers=headers, timeout=timeout, json={
             "jsonrpc": "2.0", "id": self._request_id, "method": method, "params": supplied})
 
     def call(self, token: str, tool: str, arguments: dict,

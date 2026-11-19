@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 import os
+import signal
 import subprocess
 import time
 
@@ -39,6 +40,41 @@ def reporting(progress: Callable[[float], None] | None) -> Iterator[None]:
         _PROGRESS.reset(token)
 
 
+def _stop(process):
+    """End sf and anything it started, without waiting on pipes a descendant may hold open."""
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        process.kill()
+    for stream in (process.stdout, process.stderr):
+        stream.close()
+    process.wait()
+
+
+def _wait(process, started, limit, progress):
+    """Return sf's output, calling progress about twice a second, or raise its timeout code."""
+    while True:
+        waiting = False
+        try:
+            stdout, _ = process.communicate(timeout=max(0.01, min(_PROGRESS_SECONDS, limit - time.monotonic())))
+        except subprocess.TimeoutExpired:
+            waiting = True
+        except (OSError, ValueError):
+            raise SFCredentialsError() from None
+        # Raised outside the handler, so no traceback carries sf's command line.
+        if time.monotonic() >= limit:
+            # sf did not answer in time. That says nothing about the saved login.
+            raise SFCredentialsError("salesforce_cli_timeout")
+        if not waiting:
+            return stdout
+        if progress is not None:
+            try:
+                progress(time.monotonic() - started)
+            except Exception:
+                # A failed notice must not change the login read's outcome.
+                pass
+
+
 class SFCredentials:
     """Capture two explicit commands using the owner's existing CLI login."""
 
@@ -60,27 +96,17 @@ class SFCredentials:
         progress = _PROGRESS.get()
         self.invocations += 1
         try:
+            # Its own process group, so a timeout can end sf and anything it started.
             process = subprocess.Popen(
-                ["sf", "org", *words, "--target-org", self._alias, "--json"],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
+                ["sf", "org", *words, "--target-org", self._alias, "--json"], stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment, start_new_session=True)
         except (OSError, subprocess.SubprocessError):
             raise SFCredentialsError() from None
         try:
-            while True:
-                try:
-                    wait = max(0.01, min(_PROGRESS_SECONDS, limit - time.monotonic()))
-                    stdout, _ = process.communicate(timeout=wait)
-                    break
-                except subprocess.TimeoutExpired:
-                    if time.monotonic() >= limit:
-                        # sf did not answer in time. That says nothing about the saved login.
-                        raise SFCredentialsError("salesforce_cli_timeout") from None
-                    if progress is not None:
-                        progress(time.monotonic() - started)
+            stdout = _wait(process, started, limit, progress)
         finally:
             if process.poll() is None:
-                process.kill()
-                process.communicate()
+                _stop(process)
         try:
             if process.returncode != 0 or len(stdout) > _MAX_OUTPUT_BYTES:
                 raise SFCredentialsError()
