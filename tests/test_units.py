@@ -145,12 +145,27 @@ class NeutralizedText(unittest.TestCase):
 
     def test_each_voice_tag_of_a_cue_labels_what_follows_it(self):
         self.assertEqual(voices("<v Dana Ito>Fine.</v>\n<v.loud Morgan Reed>They agreed.</v>"),
-                         [("Dana Ito", "Fine.\n"), ("Morgan Reed", "They agreed.")])
+                         [("Dana Ito", "Fine."), ("Morgan Reed", "They agreed.")])
+        # A closing tag ends the voice. What follows belongs to the cue's own label again.
+        self.assertEqual(voices("<v Dana Ito>Fine.</v> and so on <v Sam Lee>Yes.", "cue"),
+                         [("Dana Ito", "Fine."), ("cue", " and so on "), ("Sam Lee", "Yes.")])
         # Text before the first tag keeps the cue's own label. A tag with no text after it says nothing.
         self.assertEqual(voices("Hello <v Dana Ito>there<v Sam Lee> </v>", "intro"),
                          [("intro", "Hello "), ("Dana Ito", "there")])
         self.assertEqual(voices("no tags here"), [(None, "no tags here")])
         self.assertEqual(voices("<v Dana Ito></v>"), [])
+
+    def test_malformed_tags_and_links_are_read_in_linear_time(self):
+        started = time.monotonic()
+        voices("<v" + ".a" * 40 + "." * 40 + "x")
+        safe_text("[x](" + " " * 200_000)
+        self.assertLess(time.monotonic() - started, 1)
+
+    def test_punctuation_that_closes_a_sentence_is_not_part_of_a_link(self):
+        text, counts = safe_text("See www.x.example. Then ftp://y.example/a, and (http://z.example).")
+        self.assertEqual(text, "See [link x.example]. Then [link y.example], and ([link z.example]).")
+        self.assertEqual(counts["links"], 3)
+        self.assertEqual(sentences(text), ["See [link x.example].", "Then [link y.example], and ([link z.example])."])
 
 
 class SpeakerRoles(unittest.TestCase):

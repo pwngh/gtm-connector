@@ -26,7 +26,7 @@ opportunities by ID, then call text by time, then Slack messages by time. A CRM 
 Call and Slack text is one unit for each whole sentence, and a call or message with no sentence is
 one unit, so every record that was read has a number. Every number on a card is one of these, and
 `trace` resolves it to the source record, the receipt of the read that returned it, and, for a
-sentence, its neutralized text, its speaker, and the SHA-256 of the source text.
+sentence, its neutralized text, its speaker, and the SHA-256 of the record's text as stored.
 
 `trace` first compares the saved receipts with the audit log of the state folder and refuses a
 saved card that differs. The owner of the files can still edit both.
@@ -34,10 +34,12 @@ saved card that differs. The owner of the files can still edit both.
 ## Sentences
 
 A sentence ends at closing punctuation or a blank line. A single line break is a wrap, so a
-sentence written over two lines, or spoken over two transcript cues by one speaker, stays whole.
-A sentence over 300 characters is counted and not shown, because a quotation is never cut. When a
-transcript excerpt starts or ends inside a call, a first sentence that starts in lower case or a
-last sentence with no closing punctuation may be incomplete. It is counted and not shown.
+sentence written over two lines stays whole. Two transcript cues join into one run only when they
+have the same speaker label and the second starts within two seconds of the first, so speech from
+different moments is never joined. A sentence over 300 characters is counted and not shown, because
+a quotation is never cut. When a transcript excerpt starts inside a call, its first sentence is
+counted and not shown. When it ends inside a call, its last sentence is shown only if it ends in
+closing punctuation.
 
 ## Sections
 
@@ -65,13 +67,14 @@ A role comes from identity, never from what a sentence says about itself.
 
 | Role | When |
 | --- | --- |
-| `seller` | The speaker label or Slack author equals an entry in `sellers.json` in the state folder: `{"schema_version": 1, "sellers": ["a name or Slack ID"]}`. When CRM, calls, and Slack are all demo data, the demo's invented sellers are listed by default. |
+| `seller` | The speaker label or Slack author equals an entry in `sellers.json` in the state folder: `{"schema_version": 1, "sellers": ["a name or Slack ID"]}`. Demo calls and demo Slack also count the demo's own invented sellers. An imported transcript or live Slack never does. |
 | `customer` | A call's speaker label equals the name of exactly one contact of the account, and no listed seller. Slack authors are never customers. |
 | `unknown` | Everything else: no label, a label that matches nobody, two contacts with the name, or a name shared by a seller and a contact. |
 
 A report of what someone else said keeps the role of the person reporting it. In a WebVTT transcript
 the label is a voice tag, or a cue identifier that is not a number. A cue with two voice tags gives
-each span its own speaker. The tag is the label and is not part of the sentence.
+each span its own speaker, and text after a closing tag belongs to the cue again. The tag is the
+label and is not part of the sentence.
 
 ## Neutralized text
 
@@ -84,7 +87,7 @@ names, speaker labels, and times as well as call and Slack text.
 - A bracketed number such as `[3]` becomes `(3)`, because a card cites its units that way.
 
 Letters in any script are kept. A quotation is exact against this text, and `trace` gives the
-SHA-256 of the original. The account name in the heading is a quoted literal on one line.
+SHA-256 of the record's stored text. The account name in the heading is a quoted literal on one line.
 
 ## Saved result
 

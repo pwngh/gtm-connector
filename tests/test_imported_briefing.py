@@ -127,6 +127,18 @@ class ImportedBriefingTests(unittest.TestCase):
         self.assertIn("Calls: one transcript excerpt was read, cues 1 to 3 of 3. Every other call was not read.",
                       artifact["text"])
 
+    def test_cues_far_apart_in_time_are_never_joined_into_one_sentence(self):
+        raw = ("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nWe do not\n\n"
+               "00:04:00.000 --> 00:04:02.000\napprove the agreement.\n\n"
+               "00:04:02.500 --> 00:04:04.000\nIt needs\n\n"
+               "00:04:04.200 --> 00:04:06.000\nanother review.\n").encode()
+        with Runtime(self.state, calls_backend="imported") as runtime:
+            self.import_call(runtime, raw=raw, format="vtt")
+            artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
+        self.assertEqual([unit["text"] for unit in artifact["units"] if unit["kind"] == "sentence"],
+                         ["We do not", "approve the agreement.", "It needs another review."])
+        self.assertNotIn("We do not approve", artifact["text"])
+
     def test_demo_seller_names_do_not_apply_to_an_imported_transcript(self):
         raw = b"WEBVTT\n\n00:00:01.000 --> 00:00:04.000\n<v Morgan Reed>We will ship it by March 6.\n"
         with Runtime(self.state, calls_backend="imported") as runtime:

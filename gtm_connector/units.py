@@ -15,6 +15,9 @@ import unicodedata
 from urllib.parse import urlsplit
 
 
+from .seed import SELLERS
+
+
 class BriefRejected(ValueError):
     """The evidence cannot support a card."""
 
@@ -46,7 +49,7 @@ _SLACK_TOKEN = re.compile(r"<([!@#]?)([^<>|\n]*)(?:\|([^<>\n]*))?>")
 _OPEN_MENTION = re.compile(r"<([!@])([A-Za-z0-9^_-]*)()")
 # A link is any scheme, a scheme-relative //host, mailto:, or a bare www. address.
 _TARGET = r"(?:[a-z][a-z0-9+.-]*://|mailto:|www\.|//(?=[a-z0-9]))"
-_MARKDOWN_LINK = re.compile(r"\[([^\[\]\n]*)\]\(\s*([^\s()]*)\s*\)")
+_MARKDOWN_LINK = re.compile(r"\[([^\[\]\n]*)\]\(\s*([^\s()]+)\s*\)")
 # In running text a scheme or mailto: is a link wherever it starts. A bare www. or // is one only at the
 # start of a word, so a path such as a//b is left alone.
 _RAW_LINK = re.compile(r"(?:[a-z][a-z0-9+.-]{0,31}://|mailto:|(?<![a-z0-9])www\.|(?<![a-z0-9:/])//(?=[a-z0-9]))"
@@ -62,7 +65,10 @@ _SENTENCE_END = re.compile(r"""[.!?]["')\]]*(\s+)(?=["'(\[]?[^\sa-z])""")
 _ABBREVIATION = re.compile(
     r"(?:^|[\s(\[\"'])(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|Inc|Ltd|Co|No|approx|est|e\.g|i\.e|[A-Za-z]"
     r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.\Z")
-_VOICE = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+([^<>\n]+)>")
+# A WebVTT voice tag, or the tag that closes one. A class holds no dot, so the pattern cannot backtrack.
+_VOICE = re.compile(r"<v(?:\.[^\s>.]*)*[ \t]+([^<>\n]+)>|</v>")
+# Cues by one speaker join into one run only when the next starts within this long of the last.
+_RUN_GAP_MS = 2000
 _LINE_BREAKS = {0x0A, 0x0B, 0x0C, 0x85, 0x2028, 0x2029}
 # A bracketed integer is how a card cites a unit, so source text never keeps one.
 _CITATION = re.compile(r"\[(\d+)\]")
@@ -113,8 +119,10 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
         return f"{match.group(1)} [link {_host(match.group(2))}]"
 
     def raw_link(match):
+        # Punctuation that closes the sentence around a link is not part of the link.
+        link = match.group(0).rstrip(".,;:!?)]}'\"")
         counts["links"] += 1
-        return f"[link {_host(match.group(0))}]"
+        return f"[link {_host(link)}]" + match.group(0)[len(link):]
 
     def citation(match):
         counts["brackets"] += 1
@@ -159,13 +167,16 @@ def sentences(safe: str) -> list[str]:
 
 
 def voices(text: str, label=None) -> list[tuple]:
-    """Split one WebVTT cue at its voice tags into (speaker label, text). A tag is a label, not speech."""
-    spans, position = [], 0
+    """Split one WebVTT cue at its voice tags into (speaker label, text). A tag is a label, not speech.
+
+    Text outside a voice span belongs to the cue's own label, not to the voice before it.
+    """
+    spans, position, speaker = [], 0, label
     for match in _VOICE.finditer(text):
-        spans.append((label, text[position:match.start()]))
-        label, position = match.group(1), match.end()
-    spans.append((label, text[position:]))
-    return [(name, part.replace("</v>", "")) for name, part in spans if part.replace("</v>", "").strip()]
+        spans.append((speaker, text[position:match.start()]))
+        speaker, position = (label if match.group(1) is None else match.group(1)), match.end()
+    spans.append((speaker, text[position:]))
+    return [(name, part) for name, part in spans if part.strip()]
 
 
 def _label(value):
@@ -365,22 +376,26 @@ class _Card:
         return len(self.units)
 
     def spoken(self, row, table, parts, *, at, role_of, open_start=False, open_end=False):
-        """Units for one record's speech. `parts` is (speaker label, text) in order.
+        """Units for one record's speech. `parts` is (speaker label, text, start ms, end ms) in order.
 
-        Neighbouring parts by one speaker are one run, so a sentence wrapped across cues stays whole.
-        A record with no sentence still gets one unit, so every record resolves.
+        Neighbouring parts by one speaker with no gap in time are one run, so a sentence wrapped across
+        cues stays whole. A record with no sentence still gets one unit, so every record resolves.
         """
         if at is not None and not (isinstance(at, str) and _PLAIN_INSTANT.fullmatch(at)):
             at = self.line(at) or None
         runs: list[list] = []
-        for label, raw in parts:
+        for label, raw, start, end in parts:
             label = _label(label) or None
-            if runs and runs[-1][0] == label:
-                runs[-1][1] += "\n" + raw
+            joined = runs and runs[-1][0] == label and (
+                start is None or runs[-1][2] is None or start - runs[-1][2] <= _RUN_GAP_MS)
+            if joined:
+                runs[-1][1:] = [runs[-1][1] + "\n" + raw, end]
             else:
-                runs.append([label, raw])
+                runs.append([label, raw, end])
         before = len(self.units)
-        for index, (label, raw) in enumerate(runs):
+        # The digest is of the record's text as stored, so it can be checked against the source.
+        digest = hashlib.sha256(row["body"].encode("utf-8", "surrogatepass")).hexdigest()
+        for index, (label, raw, _) in enumerate(runs):
             role, basis = role_of(label)
             # A speaker label is source text too. The role was derived from the label as given.
             speaker = None if label is None else self.line(label) or None
@@ -389,13 +404,13 @@ class _Card:
             safe, counts = safe_text(raw)
             for key, count in counts.items():
                 self.neutralized[key] += count
-            digest = hashlib.sha256(raw.encode("utf-8", "surrogatepass")).hexdigest()
             found = sentences(safe)
             for position, sentence in enumerate(found):
-                # At the edge of an excerpt a sentence may have lost its start or its end.
-                partial = ((open_start and index == 0 and position == 0 and sentence[:1].islower())
+                # At an open edge of an excerpt the first sentence may have lost its start and the
+                # last its end. Neither is shown unless the text itself closes it.
+                partial = ((open_start and index == 0 and position == 0)
                            or (open_end and index == len(runs) - 1 and position == len(found) - 1
-                               and not _ENDED.search(sentence)))
+                               and (not _ENDED.search(sentence) or _ABBREVIATION.search(sentence) is not None)))
                 self.partial += partial
                 self.units.append({"n": len(self.units) + 1, "kind": "sentence", "source": _SOURCES[table][0],
                                    "record_ref": row["record_ref"], "tool": _SOURCES[table][2], "at": at,
@@ -563,8 +578,13 @@ def _crm(card, as_of):
     return named
 
 
+def _sellers(evidence, backend):
+    """The operator's list. Demo data adds its own invented sellers, for demo text only."""
+    return evidence["sellers"] + (list(SELLERS) if evidence[backend] == "fixture" else [])
+
+
 def _calls(card, as_of, contacts):
-    evidence, sellers = card.evidence, card.evidence["sellers"]
+    evidence, sellers = card.evidence, _sellers(card.evidence, "calls_backend")
     notes = card.groups["call_notes"]
     if evidence["notes_status"] == "denied":
         card.not_read.append("Calls: not read. The grant lacks calls:read.")
@@ -586,7 +606,8 @@ def _calls(card, as_of, contacts):
             for cue in manifest["units"]:
                 # A WebVTT voice tag names the speaker. A cue identifier does only when it is not a number.
                 named = None if cue["cue_id"] is None or cue["cue_id"].isdigit() else cue["cue_id"]
-                parts += voices(cue["text"], named) if manifest["format"] == "vtt" else [(named, cue["text"])]
+                spans = voices(cue["text"], named) if manifest["format"] == "vtt" else [(named, cue["text"])]
+                parts += [(label, text, cue["start_ms"], cue["end_ms"]) for label, text in spans]
             first_unit[note["record_ref"]] = card.spoken(
                 note, "call_notes", parts, at=note["called_at"], role_of=role_of,
                 open_start=cited["first"] > 1, open_end=cited["last"] < manifest["total_units"])
@@ -598,7 +619,8 @@ def _calls(card, as_of, contacts):
                    "The rest of that call and every other call were not read."))
         else:
             first_unit[note["record_ref"]] = card.spoken(
-                note, "call_notes", [(note.get("speaker"), note["body"])], at=note["called_at"], role_of=role_of)
+                note, "call_notes", [(note.get("speaker"), note["body"], None, None)], at=note["called_at"],
+                role_of=role_of)
     if not imported:
         card.not_read.append(f"Calls: {len(notes)} call {'record was' if len(notes) == 1 else 'records were'} read. "
                              "Recordings and anything outside those records were not read.")
@@ -611,7 +633,7 @@ def _calls(card, as_of, contacts):
 
 
 def _slack(card):
-    evidence, sellers = card.evidence, card.evidence["sellers"]
+    evidence, sellers = card.evidence, _sellers(card.evidence, "slack_backend")
     status = evidence["slack_status"]
     if status == "not_requested":
         card.not_read.append("Slack: not requested for this card.")
@@ -633,7 +655,7 @@ def _slack(card):
             if type(message["files"]) is not int or message["files"] < 0:
                 raise BriefRejected("A Slack file count must be a nonnegative integer.")
             files += message["files"]
-        first = card.spoken(message, "messages", [(speaker, message["body"])], at=message["sent_at"],
+        first = card.spoken(message, "messages", [(speaker, message["body"], None, None)], at=message["sent_at"],
                             role_of=lambda label: speaker_role(label, sellers, (), slack=True))
         if not live and message["files"]:
             attached_to.append(f"[{first}]")

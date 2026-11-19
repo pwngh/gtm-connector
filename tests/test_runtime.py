@@ -151,12 +151,12 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(rows[0]["rows"], ["slack/messages/msg-007"])
             self.assertTrue(all(row["rows"] == [] for row in rows[1:]))
 
-    def test_demo_sellers_are_the_default_only_when_every_source_is_demo_data(self):
+    def test_sellers_are_only_the_ones_the_operator_lists(self):
         from gtm_connector.runtime import SourceIdentityError
-        from gtm_connector.seed import SELLERS
         parent = self.state.parent
+        # Demo data brings its own invented sellers for demo text. The runtime's list is the operator's.
         with Runtime(self.state) as runtime:
-            self.assertEqual(runtime.sellers, SELLERS)
+            self.assertEqual(runtime.sellers, ())
         with Runtime(parent / "imported", calls_backend="imported") as runtime:
             self.assertEqual(runtime.sellers, ())
         listed = parent / "listed"
