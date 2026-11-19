@@ -66,7 +66,6 @@ A four-read fixture brief saves `workflow_version: 2`. A missing version or
 status. An unknown version fails. Checking a saved brief fetches nothing.
 
 `evaluate --with-slack` checks 20 accounts with 80 tool calls and no model. It
-scores exact wording and references, not semantic truth. The
-[recorded run](../evaluation/RESULTS_SLACK.json) accepted 20 of 20 briefs,
-found and correctly cited 223 of 223 claims, invented 0, and created 0
+scores exact wording and references, not semantic truth. It accepts 20 of 20
+briefs, finds and correctly cites 223 of 223 claims, invents 0, and creates 0
 activities. Without the flag, `evaluate` keeps its 182-claim baseline.

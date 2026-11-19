@@ -2,7 +2,7 @@
 
 The server implements [MCP revision 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
 and its [authorization section, revision 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization).
-Both were read on **2026-11-17**. The official Python SDK is pinned to **2.3.0**.
+The official Python SDK is pinned to **2.3.0**.
 
 ```sh
 gtm-connector serve

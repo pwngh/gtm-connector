@@ -14,22 +14,23 @@ the implementation plain. Use Python and SQLite. Do not add a web interface.
   never falls back to fixtures silently.
 - Keep authentication, source selection, and daily use separate. Label sources
   as fixtures or selected real data.
-- Back every README and SECURITY_REVIEW.md claim with a test or a recorded run.
-  Keep the sentence "No live org has been verified." until the owner supplies a
-  check report.
+- Back every README and SECURITY_REVIEW.md claim with a test. Keep the sentence
+  "No live org has been verified." until the owner supplies a check report.
+- The repository holds code, tests, and the docs a user needs. Do not commit
+  run logs, result files, review notes, dated observations, decision records,
+  or project history. Review evidence goes in the PR description. Working
+  notes stay outside the repository.
 - Finish one reviewed PR per slice. Push only to the task's own branch. Leave
   the PR open for the owner to merge, unless the owner said "full send" for the
   task. Never enable auto-merge, tag, publish, or change repository settings.
 - Check the tree and history for private material before every push and before
   sending source to a review provider. Keep org names, IDs, emails, URLs,
   credentials, and `var/` out of Git, reviews, and reports.
-- Record a design choice, its reason, the proof, and the review in the PR
-  description. There is no decision file.
 - Before a task, read this file, then the modules and docs the task touches and
   their callers and tests.
-- The server implements MCP and authorization revision 2026-07-28, read on
-  2026-11-17. Read the current specification before changing the protocol, and
-  keep the revision and reading date in the README.
+- The server implements MCP and authorization revision 2026-07-28. Read the
+  current specification before changing the protocol, and keep the revision in
+  the README.
 - Keep fixture IDs stable. Keep the fixture cases the tests rely on: a renewal
   within 30 days of the fixed date, an at-risk account, conflicting CRM and
   call-note facts, an account without notes, an instruction inside a note, a
@@ -146,8 +147,9 @@ whose fix is not obvious, and never more than three. Each review is a separate
 run on its own exported copy of the commit, read-only, with the same prompt and
 proof. The orchestrating session is not a member. If a blocking member cannot
 be reached, stop and report. Never substitute a model or count a failed run as
-approval. Record model IDs, effort, rounds, findings, and scores or `no score`
-in the PR description, and say when a fix was not re-reviewed.
+approval. In the PR description, give each member's model ID, effort, verdict,
+and score, the findings and what was done about them, and say when a fix was
+not re-reviewed. Keep it short.
 
 Ask every member:
 

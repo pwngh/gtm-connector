@@ -279,19 +279,11 @@ Tests: [selection](tests/test_selected_sources.py) and
 No live org has been verified.
 
 - Sandbox and production Salesforce behavior has only invented-response proof.
-- One development `slack check` passed on November 18, 2026 against the
-  owner's test workspace: one mapped message, one API call, all five steps. An
-  agent ran it with the owner's permission. It is one observed run, not an
-  owner verification report. No app rendering or hosted assistant connection
-  has been verified.
+- No Slack app rendering or hosted assistant connection has been verified.
 - No live call provider or real transcript was accessed.
 - Only the Inspector CLI with a supplied grant is tested. The Inspector UI,
   interactive app login, Claude Code, and Cursor are untested.
-- The recorded Ollama run used an earlier fixture corpus. It proves no model
-  result for the current book.
-- One owner-authorized demo-kit run on November 17, 2026 imported and then
-  deleted twelve invented records. It is one observed run, not an owner
-  verification report.
+- No model result exists for the current fixture book.
 
 A reviewer must inspect the scope-denial and invalid-token tests, the audit
 failure and committed-write retry tests, the injection and citation-rejection

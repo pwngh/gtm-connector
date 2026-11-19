@@ -102,6 +102,6 @@ one of the reasons below. Provider error text is never included.
 | `slack_response_invalid`, `slack_rate_limited`, `slack_timeout`, `slack_unavailable` | 5 | Run `slack status`, wait, then retry. |
 | `slack_storage_failed` | 1 | Fix access to the folder, then run `slack status`. |
 
-Slack references, read November 18, 2026:
+Slack references:
 [PKCE](https://docs.slack.dev/authentication/using-pkce/) and
 [token rotation](https://docs.slack.dev/authentication/using-token-rotation/).

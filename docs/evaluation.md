@@ -29,9 +29,9 @@ this shape. The first has `completed: 0` and `status: null`. Later values are
 {"progress":{"command":"evaluate","completed":1,"total":20,"status":"accepted"}}
 ```
 
-## Recorded results
+## Results
 
-Both fixture reports use the as-of date `2027-01-15`.
+The tests assert these counts. Both runs use the as-of date `2027-01-15`.
 
 | Metric | Default | `--with-slack` |
 | --- | --- | --- |
@@ -44,11 +44,8 @@ Both fixture reports use the as-of date `2027-01-15`.
 | Activities created | 0 | 0 |
 | Model input / output tokens | 0 / 0 | 0 / 0 |
 
-[RESULTS.json](../evaluation/RESULTS.json) and
-[RESULTS_SLACK.json](../evaluation/RESULTS_SLACK.json) record the invocation,
-UTC run times, and counts for each account. The
-[Ollama report](../evaluation/RESULTS_OLLAMA.json) was recorded on an earlier
-fixture corpus and has not been rerun against the current book.
+Run `gtm-connector evaluate --json` to reproduce them. No model result exists
+for the current fixture book.
 
 ## Scoring
 

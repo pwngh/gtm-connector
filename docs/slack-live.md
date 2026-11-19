@@ -3,10 +3,8 @@
 Map one Slack thread to one CRM account, check that it can be read, then use it
 in a brief. A failed live read never falls back to invented messages.
 
-The tests use invented responses. One development `slack check` passed against
-a test workspace on November 18, 2026, as recorded in the
-[security review](../SECURITY_REVIEW.md). A real app's registration, retention,
-and rate policy remain for the owner to check.
+The tests use invented responses. A real app's registration, retention, and
+rate policy remain for the owner to check.
 
 ## Map, check, and brief
 
@@ -139,7 +137,7 @@ cursors to the end. Pages, retries, refresh, and identity checks share one budge
   one request per minute and 15 messages per request on this method. The
   connector cannot tell which
   [policy](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps/)
-  applies (read November 18, 2026).
+  applies.
 - Ctrl-C exits 130 and can wait for the read in flight. Windows is not supported.
 
 ## Errors

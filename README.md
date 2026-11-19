@@ -97,10 +97,10 @@ drafter gets a copy of the evidence and no token or tool.
 The fixed evaluation compares briefs for 20 invented accounts with checked-in
 expected claims. No model runs, so it measures the workflow, not model quality.
 
-| Suite | Claims found and cited | Invented claims | Results |
-| --- | --- | --- | --- |
-| CRM and calls | 182 of 182 | 0 | [RESULTS.json](evaluation/RESULTS.json) |
-| With Slack | 223 of 223 | 0 | [RESULTS_SLACK.json](evaluation/RESULTS_SLACK.json) |
+| Suite | Claims found and cited | Invented claims |
+| --- | --- | --- |
+| CRM and calls (`evaluate`) | 182 of 182 | 0 |
+| With Slack (`evaluate --with-slack`) | 223 of 223 | 0 |
 
 [Scoring rules](docs/evaluation.md). An optional local Ollama model can
 assemble the same fixed claims. [Local model](docs/ollama.md)
@@ -124,6 +124,6 @@ assemble the same fixed claims. [Local model](docs/ollama.md)
 [Salesforce demo kit](docs/salesforce-demo.md), [demo Slack store](docs/slack.md),
 [development](docs/development.md), [rules for coding agents](AGENTS.md).
 
-The server implements MCP and its authorization revision 2026-07-28, read on
-2026-11-17, with Python SDK 2.3.0. The checked-in companies, people, and
+The server implements MCP and its authorization revision 2026-07-28 with
+Python SDK 2.3.0. The checked-in companies, people, and
 records are invented. MIT licensed.

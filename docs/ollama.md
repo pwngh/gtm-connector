@@ -42,11 +42,8 @@ or tool interface. Instructions quoted from a source stay data.
 
 ## Measurements and limits
 
-The [recorded model report](../evaluation/RESULTS_OLLAMA.json) is the run of
-November 17, 2026 with `llama3.2:latest`. It used the original fixture corpus,
-whose names were labels such as `Fixture account acc-001`. It has not been
-rerun against the current book or the three-source workflow, and the current
-fixture scores say nothing about model performance on either.
+No model run has been measured on the current fixture book, and the fixture
+scores say nothing about model performance.
 
 - Results can vary with model files, hardware, and service version. Keep the
   local tag unchanged during a run.

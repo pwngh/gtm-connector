@@ -26,8 +26,7 @@ token. Without `--scope`, it previews the setup and creates nothing. Repeat
 | `cursor` | Untested. | The configuration follows Cursor's URL and header documentation. Protocol and local certificate compatibility are unverified. |
 | `claude-desktop` | Untested. No working setup exists. | The remote connection cannot reach the loopback server, and the connector has no stdio transport. |
 
-The linked client documentation was read on 2026-11-17. These instructions
-describe configuration. They do not prove that an assistant works with the
+These instructions describe configuration. They do not prove that an assistant works with the
 connector.
 
 ## Run the printed command
