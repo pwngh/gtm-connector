@@ -647,14 +647,15 @@ class TranscriptFuzz(unittest.TestCase):
         stamp_ = r"(?:\d{2,9}:)?[0-5]\d:[0-5]\d\.\d{3}"
         timing = re.compile(rf"{stamp_}[ \t]+-->[ \t]+{stamp_}(?:[ \t].*)?")
 
-        def starts(at):
-            return (at >= len(rest) or not rest[at].strip(" \t") or timing.fullmatch(rest[at]) is not None
-                    or rest[at].startswith(("NOTE", "STYLE", "REGION"))
-                    or (at + 1 < len(rest) and timing.fullmatch(rest[at + 1]) is not None))
+        def cue(at):
+            return any(place < len(rest) and timing.fullmatch(rest[place]) for place in (at, at + 1))
 
-        # A block ends at an empty line, or at a line of spaces that a cue, a comment, or nothing follows.
-        filled_lines = [(line != "" and not (not line.strip(" \t") and starts(at + 1)), line)
-                        for at, line in enumerate(rest)]
+        # A block ends at an empty line, or at a run of lines of spaces that a cue, an empty line, or nothing follows.
+        ends = [False] * len(rest) + [True]
+        for at in reversed(range(len(rest))):
+            if not rest[at].strip(" \t"):
+                ends[at] = rest[at] == "" or ends[at + 1] or cue(at + 1)
+        filled_lines = [(not ends[at], line) for at, line in enumerate(rest)]
         for filled, group in itertools.groupby(filled_lines, lambda pair: pair[0]):
             block = [line for _, line in group]
             if filled and any("-->" in line for line in block):

@@ -39,10 +39,14 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
 - Repeating the same bytes, account, call time, and range reuses the revision. Any change creates
   a new active revision. Older revisions stay inspectable.
 - `.txt`, `.vtt`, or `.srt` selects the parser. TXT units are lines. VTT and SRT units are timed
-  cues, in file order. Cues may repeat or reorder start times, end where they start, repeat an
-  identifier, and be separated by a line of spaces. A cue that ends before it starts refuses.
-- An identifier with a space in it, as Webex writes a speaker's name, is quoted above its cue. Other
-  identifiers and inline tags such as `<v Name>` are kept as the file has them.
+  cues, in file order. Cues may repeat or reorder start times, end where they start, and be
+  separated by lines of spaces where a cue follows. A cue that ends before it starts refuses, and so
+  does anything after an end time other than WebVTT cue settings.
+- A WebVTT identifier may repeat. One of at most 200 characters with a space in it, as Webex writes
+  a speaker's name, is quoted above its cue. Inline tags such as `<v Name>` are kept as the file has
+  them. An SRT cue may be numbered and carries no other identifier.
+- An import saved by an earlier version of the parser reads as `calls_import_corrupt`. Import the
+  file again.
 - Well-formed `Kind:`, `Language:`, and `X-TIMESTAMP-MAP=` lines under the `WEBVTT` line are
   skipped, and any other text there refuses. Control characters other than tabs and line endings
   refuse. No provider download has been tested.

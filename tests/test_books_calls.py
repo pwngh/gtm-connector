@@ -45,12 +45,14 @@ PLAIN = {"name": "Size Case Co", "industry": "Software", "renewal_date": "2027-0
 
 
 def blank_lines(lines, timing):
-    """Which lines end a block: empty ones, and lines of spaces that a cue, a comment, or nothing follows."""
-    def starts(at):
-        return (at >= len(lines) or not lines[at].strip(" \t") or timing.fullmatch(lines[at]) is not None
-                or lines[at].startswith(("NOTE", "STYLE", "REGION"))
-                or (at + 1 < len(lines) and timing.fullmatch(lines[at + 1]) is not None))
-    return [line == "" or (not line.strip(" \t") and starts(at + 1)) for at, line in enumerate(lines)]
+    """Which lines end a block: empty ones, and runs of lines of spaces that a cue, an empty line, or nothing follows."""
+    def cue(at):
+        return any(place < len(lines) and timing.fullmatch(lines[place]) for place in (at, at + 1))
+    blank = [False] * len(lines) + [True]
+    for at in reversed(range(len(lines))):
+        if not lines[at].strip(" \t"):
+            blank[at] = lines[at] == "" or blank[at + 1] or cue(at + 1)
+    return blank[:-1]
 
 
 def milliseconds(hours, minutes, seconds, millis):

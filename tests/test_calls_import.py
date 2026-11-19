@@ -155,9 +155,39 @@ class ParsingTests(unittest.TestCase):
         spaced = "WEBVTT\n\n00:01.000 --> 00:02.000\none\n \nstill one\n \n00:02.000 --> 00:03.000\ntwo\n"
         units = imports.parse_transcript(spaced.encode(), format="vtt")["units"]
         self.assertEqual([unit["text"] for unit in units], ["one\n \nstill one", "two"])
-        # An SRT file still needs its timing lines, and no cue may end before it starts.
-        for bad in ("1\nDana: hello\n", "1\n00:00:04,000 --> 00:00:01,000\ntext\n", "WEBVTT\n\n1\n00:00:01,000 --> 00:00:02,000\nx\n"):
-            self.assert_code("calls_import_invalid", imports.parse_transcript, bad.encode(), format="srt")
+        # An SRT file still needs its timing lines, and no cue may end before it starts. Only a number may sit
+        # above a timing line, nothing may follow one, and a comment block is not skipped as WebVTT's is.
+        for bad in ("1\nDana: hello\n", "1\n00:00:04,000 --> 00:00:01,000\ntext\n",
+                    "WEBVTT\n\n1\n00:00:01,000 --> 00:00:02,000\nx\n", "Dana\n00:00:01,000 --> 00:00:02,000\nx\n",
+                    "1\n00:00:01,000 --> 00:00:02,000 we agreed on 40 seats\nx\n",
+                    "NOTE this matters\nand so does this\n\n1\n00:00:01,000 --> 00:00:02,000\nx\n",
+                    "1\n00:00:01,000 --> 00:00:02,000\nx\n2\n00:00:02,000 --> 00:00:03,000\nmerged\n"):
+            with self.subTest(bad=bad):
+                self.assert_code("calls_import_invalid", imports.parse_transcript, bad.encode(), format="srt")
+        arrow = imports.parse_transcript(b"1\n00:00:01,000 --> 00:00:02,000\nplan A --> plan B\n", format="srt")
+        self.assertEqual(arrow["units"][0]["text"], "plan A --> plan B")
+
+    def test_lines_of_spaces_never_cost_a_word(self):
+        cue = "00:01.000 --> 00:02.000\n"
+        # Text after a run of spaces stays in its cue, whatever it starts with, and a comment is only a block of its own.
+        for text, units in (
+                ("one\n \nNOTE this matters\nmore", ["one\n \nNOTE this matters\nmore"]),
+                ("one\n \n\t\nstill one", ["one\n \n\t\nstill one"]),
+                ("one\n \nNOTEWORTHY: forty seats", ["one\n \nNOTEWORTHY: forty seats"]),
+                ("one\n \n \n00:02.000 --> 00:03.000\ntwo", ["one", "two"]),
+                ("one\n \nid\n00:02.000 --> 00:03.000\ntwo", ["one", "two"]),
+                ("one\n\nNOTE a comment\n\n00:02.000 --> 00:03.000\ntwo", ["one", "two"])):
+            with self.subTest(text=text):
+                parsed = imports.parse_transcript(("WEBVTT\n\n" + cue + text + "\n").encode(), format="vtt")
+                self.assertEqual([unit["text"] for unit in parsed["units"]], units)
+        # What follows an end time is cue settings. Anything else there could be speech and refuses.
+        settings = "WEBVTT\n\n00:01.000 --> 00:02.000 align:start position:10%\none\n"
+        self.assertEqual(len(imports.parse_transcript(settings.encode(), format="vtt")["units"]), 1)
+        self.assert_code("calls_import_invalid", imports.parse_transcript,
+                         b"WEBVTT\n\n00:01.000 --> 00:02.000 we agreed on 40 seats\none\n", format="vtt")
+        # A long identifier is not a speaker's name and stays out of the quote.
+        long_id = "WEBVTT\n\n" + "word " * 60 + "\n" + cue + "one\n"
+        self.assertEqual(imports.select_excerpt(imports.parse_transcript(long_id.encode(), format="vtt"))["body"], "one")
 
     def test_malformed_vtt_cannot_silently_drop_spoken_content(self):
         self.assert_code("calls_import_invalid", imports.parse_transcript,

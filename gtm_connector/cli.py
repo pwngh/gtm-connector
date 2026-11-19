@@ -41,7 +41,7 @@ COMMANDS = {
 EXIT_NAMES = {1: "local_failure", 2: "usage_error", 3: "refused", 4: "check_failed", 5: "upstream_failure",
               130: "interrupted"}
 CALL_FAILURES = {
-    "calls_import_invalid": "The export or range is invalid. Use a valid UTF-8 TXT or VTT transcript and unit range.",
+    "calls_import_invalid": "The export or range is invalid. Use a valid UTF-8 TXT, VTT, or SRT transcript and range.",
     "calls_import_too_large": "The export exceeds 2 MiB or 10,000 units. Choose a smaller export.",
     "calls_excerpt_too_large": "The excerpt exceeds its text, unit, or metadata limit. Select fewer cues or lines.",
     "calls_import_not_found": "This import is not in the selected state folder. Run calls list to find its identifier.",
@@ -222,7 +222,7 @@ def _calls_commands(command):
                            help="Use this private import state folder (default: var/imported-calls).")
         if action == "import":
             _slack_source_options(child)
-            child.add_argument("value", type=Path, metavar="FILE", help="Read an existing UTF-8 TXT or VTT export.")
+            child.add_argument("value", type=Path, metavar="FILE", help="Read a UTF-8 TXT, VTT, or SRT export.")
             account = child.add_mutually_exclusive_group(required=True)
             account.add_argument("--account", help="Associate this canonical CRM account ID.")
             account.add_argument("--account-number", help="Resolve this exact Salesforce AccountNumber.")
@@ -233,7 +233,7 @@ def _calls_commands(command):
                                help="Require this Salesforce environment (default: developer).")
             child.add_argument("--called-at", help="Record the supplied meeting timestamp with its UTC offset.")
             excerpt = child.add_mutually_exclusive_group()
-            excerpt.add_argument("--cues", help="Select an inclusive one-based VTT cue range, such as 3:8.")
+            excerpt.add_argument("--cues", help="Select an inclusive one-based VTT or SRT cue range, such as 3:8.")
             excerpt.add_argument("--lines", help="Select an inclusive one-based TXT line range, such as 3:8.")
             child.add_argument("--reassign", action="store_true", help="Explicitly reassign imported content locally.")
         elif action == "list":
