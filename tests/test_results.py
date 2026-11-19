@@ -36,6 +36,37 @@ def corruptions(text):
 
 
 class ResultsTests(unittest.TestCase):
+    def test_the_readme_example_is_the_real_brief_for_acc_003(self):
+        with tempfile.TemporaryDirectory() as directory, Runtime(Path(directory) / "state") as runtime:
+            brief = create_brief(runtime, "acc-003", include_slack=True)
+            receipts = [row for row in runtime.connector.audit.read() if row["brief_id"] == brief["brief_id"]]
+        lines = brief["text"].splitlines()
+        self.assertEqual(len(lines), 13)
+        references = "[crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]"
+        for expected in (
+                "- Renewal is in 31 days as of 2027-01-15. [crm/accounts/acc-003] [run/" + brief["brief_id"] + "]",
+                '- CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. '
+                "[crm/opportunities/opp-003]",
+                '- Three-source conflict: CRM opportunity opp-003 reports stage "closed_won", call note note-003 '
+                "reports unapproved procurement, and Slack message msg-003 reports a delayed security review. "
+                + references,
+                "- Proposed follow-up: Ask the account owner to confirm procurement and security review status. "
+                + references):
+            self.assertIn(expected, lines)
+        records = {row["record_ref"]: row for row in brief["evidence"]["records"]}
+        self.assertEqual(len(records), 5)
+        self.assertEqual(records["calls/call_notes/note-003"]["body"],
+                         "Procurement has not approved this renewal. The budget remains unsigned.")
+        self.assertEqual(records["slack/messages/msg-003"]["body"],
+                         "Security review is delayed. Procurement approval is still pending.")
+        self.assertEqual([(row["tool"], row["status"], row["rows"]) for row in receipts], [
+            ("get_account", "ok", ["crm/accounts/acc-003", "crm/contacts/con-003"]),
+            ("list_opportunities", "ok", ["crm/opportunities/opp-003"]),
+            ("read_call_notes", "ok", ["calls/call_notes/note-003"]),
+            ("read_slack_messages", "ok", ["slack/messages/msg-003"])])
+        self.assertEqual((brief["status"], brief["as_of"], brief["model_usage"]),
+                         ("accepted", "2027-01-15", {"model": None, "input_tokens": 0, "output_tokens": 0}))
+
     def test_every_corrupted_draft_is_rejected_and_every_call_has_a_receipt(self):
         tried, rejected, size = Counter(), Counter(), Counter()
         with tempfile.TemporaryDirectory() as directory, Runtime(Path(directory) / "state") as runtime:

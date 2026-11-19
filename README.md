@@ -6,6 +6,92 @@ A local connector that builds cited renewal briefs from CRM records, call transc
 threads. People use its CLI. Assistants use its MCP tools. Every read needs a named scope and leaves
 an audit receipt, and every line of a brief cites the record it came from.
 
+## Sources in, a cited brief out
+
+```mermaid
+flowchart LR
+    CRM["Salesforce<br/>accounts · contacts · contracts · opportunities"] --> G
+    CALLS["Call transcripts<br/>TXT · VTT"] --> G
+    SLACK["Slack<br/>account threads"] --> G
+    G{{"gtm-connector<br/>4 scoped reads · 4 receipts"}} --> B(["Cited brief · 14 ms"])
+```
+
+One account from the built-in invented data, the same shape your own sources produce. The 14 ms is
+four audited reads, the draft, the citation check, and the save, on a running server on a laptop.
+
+**In.** Five records from three sources. Three of them disagree:
+
+| Source | Record | What it says |
+| --- | --- | --- |
+| CRM | `opp-003` | stage `closed_won`, USD 25,500.00, closed 2027-01-10 |
+| Call | `note-003` | "Procurement has not approved this renewal. The budget remains unsigned." |
+| Slack | `msg-003` | "Security review is delayed. Procurement approval is still pending." |
+
+**Out, 14 ms later.** Thirteen lines, every one cited. Four of them, wrapped to fit:
+
+```text
+- Renewal is in 31 days as of 2027-01-15. [crm/accounts/acc-003] [run/brief-…]
+
+- CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10.
+  [crm/opportunities/opp-003]
+
+- Three-source conflict: CRM opportunity opp-003 reports stage "closed_won", call note note-003
+  reports unapproved procurement, and Slack message msg-003 reports a delayed security review.
+  [crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]
+
+- Proposed follow-up: Ask the account owner to confirm procurement and security review status.
+  [crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]
+```
+
+**The receipts.** One per read, committed before the read ran:
+
+```text
+get_account          ok   crm/accounts/acc-003  crm/contacts/con-003   1.2 ms
+list_opportunities   ok   crm/opportunities/opp-003                    1.1 ms
+read_call_notes      ok   calls/call_notes/note-003                    1.0 ms
+read_slack_messages  ok   slack/messages/msg-003                       1.0 ms
+```
+
+**As data.** `brief acc-003 --with-slack --json`, condensed:
+
+```text
+{
+  "brief_id":   "brief-c9f33063…",
+  "account_id": "acc-003",
+  "as_of":      "2027-01-15",
+  "status":     "accepted",
+  "text":       "- Account: \"Cedarline Analytics\". [crm/accounts/acc-003]\n…",
+  "proposed_follow_up": "- Proposed follow-up: Ask the account owner to confirm procurement and …",
+  "model_usage": {"model": null, "input_tokens": 0, "output_tokens": 0},
+  "evidence": {
+    "records":  [ 5 source records, each with its record_ref ],
+    "receipts": [ 4 audit receipts, one per read ]
+  }
+}
+```
+
+## Measured results
+
+Twenty invented accounts, each briefed from CRM, calls, and Slack. A test asserts every count
+below except the model row and the timings, which the command beside them reproduces.
+
+| What | Result | Check |
+| --- | --- | --- |
+| Input | 98 source records through 80 audited reads | [results test](tests/test_results.py) |
+| Output | 20 briefs, 223 lines, 2,482 words, 248 citations | same |
+| Lines that cite their source | 223 of 223 | same |
+| Expected claims found and cited correctly | 182 of 182, and 223 of 223 with Slack | `gtm-connector evaluate`, `--with-slack` |
+| Invented claims published | 0 | same |
+| Corrupted drafts rejected: a citation removed or changed, wording changed, a line repeated, a sentence invented | 932 of 932 | [results test](tests/test_results.py) |
+| Tool calls with a finished receipt | 80 of 80 | same |
+| Drafts by a local model, `llama3.2`, accepted by the checker | 20 of 20, with 182 of 182 claims and 0 rejected lines, from 8,758 tokens in and 5,518 out | `gtm-connector evaluate --adapter ollama --model llama3.2:latest` |
+| Time for 20 briefs | About 1 s without a model, 97 s with `llama3.2` | `time gtm-connector evaluate` |
+| Time per audited read, receipt included | 1.6 ms median, 2.2 ms at the 95th percentile | `elapsed_ms` in `gtm-connector audit --json` |
+| Demo, from start to a finished brief | 0.9 s | `time gtm-connector demo` |
+
+Timings are from an Apple M1 Max laptop. The fixed drafter and the model both assemble claims the
+connector derived, so these numbers measure the pipeline and the checker, not free-text summarizing.
+
 ## Try it
 
 Python 3.11 or later and pipx. Invented data, no model, no external service.
@@ -31,28 +117,6 @@ pinned dependencies, runs the tests, and runs the demo.
 | With `serve --selection`, a client reads only the selected accounts, under its own grant. A source it lacks the scope for is disclosed as denied in the brief. | [selection](tests/test_selected_sources.py) |
 
 The checker verifies wording and citations, not whether a source is true.
-
-## Measured results
-
-Twenty invented accounts, each briefed from CRM, calls, and Slack. A test asserts every count
-below except the model row and the timings, which the command beside them reproduces.
-
-| What | Result | Check |
-| --- | --- | --- |
-| Input | 98 source records through 80 audited reads | [results test](tests/test_results.py) |
-| Output | 20 briefs, 223 lines, 2,482 words, 248 citations | same |
-| Lines that cite their source | 223 of 223 | same |
-| Expected claims found and cited correctly | 182 of 182, and 223 of 223 with Slack | `gtm-connector evaluate`, `--with-slack` |
-| Invented claims published | 0 | same |
-| Corrupted drafts rejected: a citation removed or changed, wording changed, a line repeated, a sentence invented | 932 of 932 | [results test](tests/test_results.py) |
-| Tool calls with a finished receipt | 80 of 80 | same |
-| Drafts by a local model, `llama3.2`, accepted by the checker | 20 of 20, with 182 of 182 claims and 0 rejected lines, from 8,758 tokens in and 5,518 out | `gtm-connector evaluate --adapter ollama --model llama3.2:latest` |
-| Time for 20 briefs | About 1 s without a model, 97 s with `llama3.2` | `time gtm-connector evaluate` |
-| Time per audited read, receipt included | 1.6 ms median, 2.2 ms at the 95th percentile | `elapsed_ms` in `gtm-connector audit --json` |
-| Demo, from start to a finished brief | 0.9 s | `time gtm-connector demo` |
-
-Timings are from an Apple M1 Max laptop. The fixed drafter and the model both assemble claims the
-connector derived, so these numbers measure the pipeline and the checker, not free-text summarizing.
 
 ## Use your own sources
 
@@ -81,18 +145,6 @@ gtm-connector doctor --state-dir var/v2
 
 `serve` prints one line per tool attempt with its decision and receipt ID. The Inspector CLI is the
 tested client. Other assistant apps are untested. [Clients](docs/clients.md)
-
-## How a request flows
-
-```mermaid
-flowchart LR
-    Client["CLI or MCP client"] -->|"PKCE"| Auth["Local authorization server"]
-    Auth -->|"Scoped token"| Client
-    Client -->|"Tool call"| Gateway["Gateway: receipt, token, scope, rate limit"]
-    Gateway --> Audit[("Audit")]
-    Gateway --> Sources[("CRM, calls, Slack")]
-    Client --> Draft["Drafter"] --> Check["Citation checker"] --> Brief["Brief"]
-```
 
 ## Limits
 
