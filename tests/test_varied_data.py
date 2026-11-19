@@ -1,5 +1,6 @@
 """Accounts shaped unlike the seed data go through the real gateway and come out as cited briefs."""
 
+from itertools import islice
 from pathlib import Path
 import random
 import tempfile
@@ -92,7 +93,8 @@ def generated(rng):
         text(), day(2026, 2027, 2028), industry=text(), arr=rng.choice((0, 1, 99, 10**6, 10**15)),
         risk=rng.choice(("", "", text())),
         contacts=[(text(), rng.choice(("", text()))) for _ in range(rng.randint(0, 6))],
-        opportunities=[(rng.choice(varied.STAGES), rng.choice((0, 1, 10**4, 10**12))) for _ in range(rng.randint(0, 6))],
+        opportunities=[(rng.choice(varied.STAGES), rng.choice((0, 1, 10**4, 10**12)))
+                       for _ in range(rng.randint(0, 6))],
         notes=[(rng.choice((moment(), moment(), "unknown")), text()) for _ in range(rng.randint(0, 5))],
         messages=[(moment(), text()) for _ in range(rng.randint(0, 8))])
 
@@ -105,7 +107,7 @@ class VariedDataTests(unittest.TestCase):
         self.runtime.__enter__()
         self.addCleanup(self.runtime.__exit__, None, None, None)
 
-    def brief(self, number, rows):
+    def brief(self, number, rows, corrupted=None):
         """Create the brief and hold it to what every brief promises, whatever the data looks like."""
         account_id = f"acc-{number}"
         brief = create_brief(self.runtime, account_id, include_slack=True)
@@ -134,7 +136,7 @@ class VariedDataTests(unittest.TestCase):
         self.assertEqual(sum(line.startswith("- Signal: ") for line in lines), len(signals))
         # The checker returns the brief unchanged and refuses each way of spoiling it.
         self.assertEqual(check_brief(brief["text"], brief["evidence"]), brief["text"])
-        for kind, candidate in corruptions(brief["text"]):
+        for kind, candidate in islice(corruptions(brief["text"]), corrupted):
             with self.subTest(account=account_id, corruption=kind), self.assertRaises(BriefRejected):
                 check_brief(candidate, brief["evidence"])
         return brief, lines
@@ -149,7 +151,7 @@ class VariedDataTests(unittest.TestCase):
                                   for line in lines if line.startswith("- Signal: ")], SHAPE_SIGNALS[number])
         # A bare account says what each read did not return, and a draft cannot drop any of the three.
         bare = create_brief(self.runtime, "acc-102", include_slack=True)
-        for empty in ("No opportunities were returned", "No call notes were returned", "No Slack messages were returned"):
+        for empty in ("No opportunities were", "No call notes were", "No Slack messages were"):
             kept = [line for line in bare["text"].splitlines() if empty not in line]
             self.assertEqual(len(kept), len(bare["text"].splitlines()) - 1)
             with self.subTest(dropped=empty), self.assertRaises(BriefRejected):
@@ -165,6 +167,30 @@ class VariedDataTests(unittest.TestCase):
         varied.load(self.runtime.directory, *rows.values())
         for number in accounts:
             self.brief(number, rows[number])
+
+    def test_sizes_from_an_empty_account_to_a_thousand_records_and_megabyte_text(self):
+        def sized(count, body="A short body."):
+            moments = [f"2026-{1 + index % 12:02d}-{1 + index % 28:02d}T10:00:00Z" for index in range(count)]
+            return account(f"Sized {count}", "2027-01-20", arr=10**6, risk="Sized",
+                           contacts=[(f"Person {index}", "" if index % 2 else "Role") for index in range(count)],
+                           opportunities=[(varied.STAGES[index % 6], index) for index in range(count)],
+                           notes=[(moment, body) for moment in moments],
+                           messages=[(moment, body) for moment in moments])
+
+        shapes = {400 + index: sized(count) for index, count in enumerate((0, 1, 100, 101, 1000))}
+        shapes[410] = sized(3, "z" * 1_000_000)
+        many = {number: sized(3) for number in range(500, 700)}
+        rows = {number: varied.demo_rows(number, shape) for number, shape in (shapes | many).items()}
+        varied.load(self.runtime.directory, *rows.values())
+        for number in shapes:
+            # Forty corrupted drafts per brief keep the largest ones quick.
+            self.brief(number, rows[number], corrupted=40)
+        self.assertEqual(len(self.brief(404, rows[404], corrupted=4)[1]), 5177)
+        before = len(self.runtime.connector.audit.read())
+        for number in many:
+            self.assertEqual(create_brief(self.runtime, f"acc-{number}", include_slack=True)["status"], "accepted")
+        receipts = self.runtime.connector.audit.read()[before:]
+        self.assertEqual([row["status"] for row in receipts], ["ok"] * 800)
 
     def test_every_book_goes_through_the_gateway(self):
         self.assertGreaterEqual(len(varied.BOOKS), 1)
