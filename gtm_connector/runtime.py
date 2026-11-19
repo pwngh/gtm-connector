@@ -31,8 +31,9 @@ from .gateway import Connector, require_distinct_databases
 
 _FIXTURE_CRM_IDENTITY = {"schema_version": 1, "backend": "sqlite", "fixture_book": "renewal-book-v2"}
 _DATABASE_NAMES = ("crm", "calls", "slack", "audit", "imports")
+# sellers.json is the operator's own list. It may be in a folder before any source is pinned to it.
 _INITIAL_METADATA = {"server.lock", "crm-connection.json", "calls-source.json", "slack-source.json",
-                     "slack-mappings.json"}
+                     "slack-mappings.json", "sellers.json"}
 
 
 def private_file(path, content):
@@ -211,7 +212,7 @@ def _prepare_demo_state(directory, binding):
             raise ValueError("The source profile does not match this private Salesforce demo binding. "
                              "Use the original binding or choose a fresh --state-dir.") from None
         return
-    if any(child.name not in ("server.lock", "crm-connection.json") for child in directory.iterdir()):
+    if any(child.name not in ("server.lock", "crm-connection.json", "sellers.json") for child in directory.iterdir()):
         raise ValueError("A Salesforce demo binding requires fresh state. Choose an empty --state-dir.")
     return expected
 
@@ -254,7 +255,7 @@ def _prepare_source_state(directory, reader, binding, *, calls_backend="fixture"
                 raise SourceIdentityError("The private calls source marker could not be saved. "
                                           "Check private folder permissions, then retry the same selection.") from None
         return None
-    if marker is None and any(child.name not in ("server.lock", "source-profile.json")
+    if marker is None and any(child.name not in ("server.lock", "source-profile.json", "sellers.json")
                               for child in directory.iterdir()):
         raise SourceIdentityError("This state folder has no pinned Salesforce connection. "
                                   "Use fresh state with a different --state-dir.")
@@ -277,6 +278,24 @@ def _prepare_source_state(directory, reader, binding, *, calls_backend="fixture"
         raise SourceIdentityError("The private source markers could not be saved. "
                                   "Check the state folder permissions, then retry with the same connection.") from None
     return identity
+
+
+def _sellers(directory, *, fixture):
+    """The identities the operator lists as sellers in sellers.json. Demo data lists its own invented people."""
+    from .seed import SELLERS
+    try:
+        document = strict_json.loads((directory / "sellers.json").read_bytes())
+    except FileNotFoundError:
+        return SELLERS if fixture else ()
+    except (OSError, ValueError, RecursionError):
+        document = None
+    if (not isinstance(document, dict) or set(document) != {"schema_version", "sellers"}
+            or document["schema_version"] != 1 or not isinstance(document["sellers"], list)
+            or len(document["sellers"]) > 200
+            or any(not isinstance(seller, str) or not 1 <= len(seller) <= 200 for seller in document["sellers"])):
+        raise SourceIdentityError('sellers.json must be {"schema_version": 1, "sellers": ["a name or Slack ID"]} '
+                                  "with at most 200 entries.")
+    return tuple(document["sellers"])
 
 
 def _state_directory(directory):
@@ -421,8 +440,8 @@ def _prepare_slack_selection(directory, backend, connection_dir, expected_bindin
     if prior == "fixture" or any(os.path.lexists(directory / name)
                                 for name in ("slack.sqlite3", "source-profile.json")):
         raise SlackMappingError("slack_source_mismatch")
-    if marker is None and any(child.name not in {"server.lock", "crm-connection.json", "calls-source.json"}
-                              for child in directory.iterdir()):
+    if marker is None and any(child.name not in {"server.lock", "crm-connection.json", "calls-source.json",
+                                                  "sellers.json"} for child in directory.iterdir()):
         raise SlackMappingError("slack_source_mismatch")
     if marker is not None and not os.path.lexists(directory / "slack-mappings.json") and any(
             child.name not in _INITIAL_METADATA - {"slack-mappings.json"} for child in directory.iterdir()):
@@ -665,6 +684,7 @@ class Runtime:
         self.slack_reader = slack_reader
         self.slack_binding = None
         self.slack_mapping_path = self.directory / "slack-mappings.json"
+        self.sellers: tuple = ()
         self.on_source_read = on_source_read
         self.imports_path = self.directory / "imports.sqlite3"
         if demo_binding is not None and self.crm_backend != "salesforce":
@@ -692,6 +712,7 @@ class Runtime:
             except BlockingIOError as exc:
                 raise StateInUseError("this state directory already has a running connector; "
                                       "stop it with Ctrl-C or choose another --state-dir") from exc
+            self.sellers = _sellers(self.directory, fixture=self.crm_reader is None)
             slack_marker, self.slack_binding = _prepare_slack_selection(
                 self.directory, self.slack_backend, self.slack_connection_dir, self.slack_expected_binding)
             self.crm_connection_identity = _prepare_source_state(self.directory, self.crm_reader, self.demo_binding,
@@ -781,7 +802,8 @@ class Runtime:
             calls_backend=self.calls_backend, calls_binding=deepcopy(self.calls_binding),
             slack_backend=self.slack_backend, slack_binding=deepcopy(self.slack_binding),
             slack_mapping_path=self.slack_mapping_path if self.slack_backend == "slack" else None,
-            slack_connection_dir=self.slack_connection_dir if self.slack_backend == "slack" else None)
+            slack_connection_dir=self.slack_connection_dir if self.slack_backend == "slack" else None,
+            sellers=self.sellers)
 
     def __exit__(self, *_):
         if self._services is not None:

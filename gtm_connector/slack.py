@@ -3,11 +3,15 @@
 from datetime import date, timedelta
 import sqlite3
 
-from .seed import ACCOUNT_COUNT, DEMO_AS_OF
+from .seed import ACCOUNT_COUNT, DEMO_AS_OF, SELLERS, SHOWCASE
 from .store import connect as connect
 
 
-CONFLICT_TEXT = "Security review is delayed. Procurement approval is still pending."
+# A seller's report with a channel mention, a link, a second-hand figure, and one attached file.
+SHOWCASE_TEXT = ("Heads up <!channel>: their general counsel will not sign until the zero-retention and "
+                 "client-consent rider is approved. Their procurement lead mentioned USD 300,000 for a smaller "
+                 "seat count. The redline is attached, see "
+                 "<https://files.thornfield-wren.example/rider-redline-v4.pdf|rider redline v4>.")
 CHAMPION_DEPARTURE_TEXT = (
     "The renewal champion has left the team. A replacement owner has not been assigned."
 )
@@ -18,17 +22,16 @@ INJECTION_TEXT = (
 )
 MESSAGE_NUMBERS = tuple(number for number in range(1, ACCOUNT_COUNT + 1) if number != 5)
 _CHANNELS = (
-    "alder-vale", "copper-finch", "cedarline", "willow-reach", "bracken-ridge", "harborlight-field",
+    "alder-vale", "copper-finch", "thornfield-wren", "willow-reach", "bracken-ridge", "harborlight-field",
     "juniper-crest", "mossbank", "granite-kite", "orchard-span", "birch-current", "silver-alder",
     "redfern-equipment", "meadow-arc", "lantern-bay", "pine-hollow", "amber-trail", "cobalt-fern",
     "maple-shore", "stonepath", "dovetail-grove", "baywillow", "sunridge-care", "blue-elm",
     "copperleaf-farm", "windward-finch", "northgrove-arts", "aspen-loom", "hearthline", "riverbend-civic",
 )
-_AUTHORS = ("Morgan Reed", "Quinn Moss", "Avery Linden")
 _MESSAGE_BODIES = (
     "The implementation timeline is drafted and needs the plant manager's review.",
     CHAMPION_DEPARTURE_TEXT,
-    CONFLICT_TEXT,
+    SHOWCASE_TEXT,
     "Who owns the clinic scheduling migration?",
     "",  # This account has no Slack message.
     "The January staffing review added two field teams. The seat count needs review.",
@@ -72,8 +75,11 @@ def initialize(connection: sqlite3.Connection) -> None:
         channel TEXT NOT NULL,
         author TEXT NOT NULL,
         sent_at TEXT NOT NULL,
-        body TEXT NOT NULL
+        body TEXT NOT NULL,
+        files INTEGER NOT NULL DEFAULT 0 CHECK (files >= 0)
     )""")
+    if "files" not in {row[1] for row in connection.execute("PRAGMA table_info(messages)")}:
+        raise ValueError("This Slack database has no files column; use a fresh database path.")
 
 
 def seed(connection: sqlite3.Connection) -> None:
@@ -86,7 +92,7 @@ def seed(connection: sqlite3.Connection) -> None:
         }
         expected = {f"msg-{number:03}": f"acc-{number:03}" for number in MESSAGE_NUMBERS}
         if existing:
-            if existing != expected:
+            if not expected.items() <= existing.items():
                 raise ValueError(
                     "Slack contains a partial or unknown fixture; use a fresh database path."
                 )
@@ -97,10 +103,10 @@ def seed(connection: sqlite3.Connection) -> None:
                     body += "\n\n" + INJECTION_TEXT
                 sent_at = date.fromisoformat(DEMO_AS_OF) - timedelta(days=number % 5)
                 connection.execute(
-                    "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (f"msg-{number:03}", f"acc-{number:03}", f"acct-{_CHANNELS[number - 1]}",
-                     _AUTHORS[(number - 1) % len(_AUTHORS)],
-                     sent_at.isoformat() + "T16:00:00Z", body),
+                     SELLERS[(number - 1) % len(SELLERS)],
+                     sent_at.isoformat() + "T16:00:00Z", body, int(number == SHOWCASE)),
                 )
         connection.execute("RELEASE SAVEPOINT seed_slack")
     except Exception:

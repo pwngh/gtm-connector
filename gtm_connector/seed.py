@@ -7,11 +7,16 @@ import sqlite3
 DEMO_AS_OF = "2027-01-15"
 ACCOUNT_COUNT = 30
 
+# The invented people who sell. A speaker or Slack author is a seller only when listed.
+SELLERS = ("Morgan Reed", "Quinn Moss", "Avery Linden")
+# The account the demo opens: a law firm whose CRM record looks healthy.
+SHOWCASE = 3
+
 # Company, industry, contact, role, and reserved email domain. All are invented.
 _BOOK = (
     ("Alder Vale Packaging", "Manufacturing", "Mira Vale", "Operations director", "alder-vale.example"),
     ("Copper Finch Distribution", "Distribution", "Rowan Bell", "Purchasing director", "copper-finch.example"),
-    ("Cedarline Analytics", "Software", "Ellis Rowe", "Revenue operations manager", "cedarline.example"),
+    ("Thornfield Wren LLP", "Legal services", "Marian Holt", "Deputy general counsel", "thornfield-wren.example"),
     ("Willow Reach Clinics", "Healthcare", "Jordan Hale", "Practice operations lead", "willow-reach.example"),
     ("Bracken Ridge Components", "Manufacturing", "Casey North", "Plant systems manager", "bracken-ridge.example"),
     ("Harborlight Field Services", "Transportation", "Ellis Rowan",
@@ -45,7 +50,7 @@ _BOOK = (
 
 
 def _existing_fixture(connection: sqlite3.Connection) -> bool:
-    """Recognize complete CRM rows by identity, preserving subsequent edits."""
+    """Recognize the complete book by identity. Later edits and added accounts are kept."""
     prefixes = {"accounts": "acc", "contacts": "con", "opportunities": "opp"}
     actual = {
         table: {row[0] for row in connection.execute(f"SELECT id FROM {table}")}
@@ -57,13 +62,13 @@ def _existing_fixture(connection: sqlite3.Connection) -> bool:
         return False
     for table, prefix in prefixes.items():
         expected = {f"{prefix}-{number:03}" for number in range(1, ACCOUNT_COUNT + 1)}
-        if actual[table] != expected:
+        if not expected <= actual[table]:
             raise ValueError(
                 "Database contains a partial or unknown fixture; use a fresh database path."
             )
         if table != "accounts":
             for row in connection.execute(f"SELECT id, account_id FROM {table}"):
-                if row[1] != "acc-" + row[0].rsplit("-", 1)[1]:
+                if row[0] in expected and row[1] != "acc-" + row[0].rsplit("-", 1)[1]:
                     raise ValueError("Fixture record has an unexpected account association.")
     if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
         raise ValueError("Database has invalid foreign-key references.")
@@ -84,15 +89,15 @@ def seed(connection: sqlite3.Connection) -> None:
                 name, industry, contact, role, domain = _BOOK[number - 1]
                 suffix = f"{number:03}"
                 account_id = f"acc-{suffix}"
-                renewal = (date(2027, 1, 29) if number == 7 else
+                renewal = (date(2027, 1, 29) if number == 7 else date(2027, 2, 8) if number == SHOWCASE else
                            date(2027, 2, 1) + timedelta(days=(number - 1) * 7))
-                arr = (18_000 + number * 2_500) * 100
+                arr = 450_000_00 if number == SHOWCASE else (18_000 + number * 2_500) * 100
                 risk_status = "at_risk" if number == 2 else "healthy"
                 risk_reason = "Renewal budget is not approved." if number == 2 else ""
                 connection.execute(
                     "INSERT INTO accounts "
-                    "(id, name, industry, renewal_date, arr_cents, risk_status, risk_reason) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(id, name, industry, renewal_date, arr_cents, currency, risk_status, risk_reason) "
+                    "VALUES (?, ?, ?, ?, ?, 'USD', ?, ?)",
                     (account_id, name, industry, renewal.isoformat(),
                      arr, risk_status, risk_reason),
                 )
@@ -101,12 +106,11 @@ def seed(connection: sqlite3.Connection) -> None:
                     (f"con-{suffix}", account_id, contact, role,
                      f"{contact.split()[0].lower()}@{domain}"),
                 )
-                stage = "closed_won" if number == 3 else stages[(number - 1) % len(stages)]
-                close_date = date(2027, 1, 10) if number == 3 else renewal - timedelta(days=7)
+                stage = "negotiation" if number == SHOWCASE else stages[(number - 1) % len(stages)]
                 connection.execute(
-                    "INSERT INTO opportunities VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO opportunities VALUES (?, ?, ?, ?, ?, 'USD', ?)",
                     (f"opp-{suffix}", account_id, f"{name} 2027 renewal",
-                     stage, arr, close_date.isoformat()),
+                     stage, arr, (renewal - timedelta(days=7)).isoformat()),
                 )
         connection.execute("RELEASE SAVEPOINT seed_fixture")
     except Exception:

@@ -22,11 +22,10 @@ import uuid
 from mcp.server.mcpserver.exceptions import ToolError
 
 from . import strict_json
-from .briefing import BriefingError, assemble_evidence
-from .citations import BriefRejected, check_brief
-from .drafting import FixtureDraftAdapter
+from .briefing import BriefingError, assemble_evidence, source_names
 from .seed import DEMO_AS_OF
 from .selection import Selection
+from .units import BriefRejected
 
 
 BRIEF_SECONDS = 45
@@ -36,8 +35,8 @@ NOTICE = ("This saved brief was not rechecked against what the source systems sh
           "Only the caller's current scopes, the current selection, and the current source bindings were checked.")
 _BRIEF_ID = re.compile(r"brief-[0-9a-f]{32}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_ARTIFACT_KEYS = {"kind", "schema_version", "brief_id", "account_id", "as_of", "adapter", "prepared_by",
-                  "bindings", "slack_scopes", "sources", "text", "proposed_follow_up", "evidence"}
+_ARTIFACT_KEYS = {"kind", "schema_version", "brief_id", "account_id", "as_of", "prepared_by",
+                  "bindings", "slack_scopes", "sources", "text", "evidence"}
 
 
 @dataclass(frozen=True)
@@ -63,6 +62,7 @@ class SelectedContext:
     slack_binding: dict | None
     slack_mapping_path: Path | None
     slack_connection_dir: Path | None = None
+    sellers: tuple = ()
 
     def bindings(self, crm_backend: str) -> dict:
         return {"crm_backend": crm_backend, "crm": deepcopy(self.crm_binding),
@@ -87,14 +87,6 @@ def _directory(context: SelectedContext) -> Path:
         raise ToolError("brief_storage_failed")
     path.chmod(0o700)
     return path
-
-
-def _sources(context: SelectedContext, crm_backend: str, include_slack: bool) -> dict:
-    sources = {"crm": "salesforce" if crm_backend == "salesforce" else "demo_fixture",
-               "calls": "imported_transcript" if context.calls_backend == "imported" else "demo_fixture"}
-    if include_slack:
-        sources["slack"] = "slack" if context.slack_backend == "slack" else "demo_fixture"
-    return sources
 
 
 def _as_of(value, crm_backend: str) -> str:
@@ -127,10 +119,8 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
     plan = [("get_account", "crm"), ("list_opportunities", "crm"), ("read_call_notes", "calls")]
     if include_slack:
         plan.append(("read_slack_messages", "slack"))
-    records, statuses, snapshot, children = [], {"notes_status": "available"}, None, []
-    slack_scopes = None
-    if include_slack:
-        statuses["slack_status"] = "available"
+    statuses = {"notes_status": "available", "slack_status": "available" if include_slack else "not_requested"}
+    records, snapshot, children, slack_scopes = [], None, [], None
     for ordinal, (tool, source) in enumerate(plan, 1):
         if time.monotonic() >= invocation.deadline:
             raise ToolError("brief_deadline_exceeded")
@@ -156,33 +146,26 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
             snapshot = deepcopy(envelope.get("thread_snapshot"))
         records.extend(deepcopy(envelope["records"]))
     try:
-        evidence = assemble_evidence(
+        evidence, _, text = assemble_evidence(
             brief_id, account_id, as_of, records, connector.audit.read_ids(children), statuses, snapshot,
-            include_slack=include_slack, crm_backend=connector.crm_backend, calls_backend=context.calls_backend,
+            crm_backend=connector.crm_backend, calls_backend=context.calls_backend,
             calls_binding=context.calls_binding, slack_backend=context.slack_backend,
-            crm_binding=context.crm_binding, slack_binding=context.slack_binding)
-        text = check_brief(FixtureDraftAdapter().draft(deepcopy(evidence)), evidence)
-        follow_up = None
-        if include_slack:
-            follow_ups = [line for line in text.splitlines() if line.startswith("- Proposed follow-up:")]
-            if len(follow_ups) != 1:
-                raise BriefRejected("The Slack workflow requires one checked proposed follow-up.")
-            follow_up = follow_ups[0]
+            crm_binding=context.crm_binding, slack_binding=context.slack_binding, sellers=context.sellers)
     except BriefRejected:
         raise ToolError("brief_rejected") from None
     except (BriefingError, KeyError, TypeError, ValueError):
         raise ToolError("brief_evidence_invalid") from None
     if time.monotonic() >= invocation.deadline:
         raise ToolError("brief_deadline_exceeded")
-    sources = _sources(context, connector.crm_backend, include_slack)
+    sources = source_names(connector.crm_backend, context.calls_backend, context.slack_backend, include_slack)
     artifact = {
-        "kind": "selected_brief", "schema_version": 1, "brief_id": brief_id, "account_id": account_id,
-        "as_of": as_of, "adapter": "extractive" if evidence.get("workflow_version") in (4, 5) else "fixture",
+        "kind": "selected_brief", "schema_version": 2, "brief_id": brief_id, "account_id": account_id,
+        "as_of": as_of,
         "prepared_by": {"outer_audit_id": invocation.audit_id,
                         "token_id": hashlib.sha256(invocation.raw_token.encode()).hexdigest()},
         "bindings": context.bindings(connector.crm_backend), "slack_scopes": slack_scopes,
         "sources": sources,
-        "text": text, "proposed_follow_up": follow_up, "evidence": evidence,
+        "text": text, "evidence": evidence,
     }
     payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2).encode()
     if len(payload) > MAX_ARTIFACT_BYTES:
@@ -211,7 +194,7 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
     reference = f"briefs/{brief_id}/{digest}"
     return {"source": "brief", "records": [{"id": brief_id, "record_ref": reference}], "untrusted_data": True,
             "brief": {"brief_id": brief_id, "account_id": account_id, "as_of": as_of, "text": text,
-                      "proposed_follow_up": follow_up, "sources": sources, **statuses}}
+                      "sources": sources, **statuses}}
 
 
 def _load(context: SelectedContext, brief_id) -> tuple[dict, str]:
@@ -237,7 +220,7 @@ def _load(context: SelectedContext, brief_id) -> tuple[dict, str]:
     except (ValueError, UnicodeError, RecursionError):
         raise ToolError("brief_invalid") from None
     if (not isinstance(artifact, dict) or set(artifact) != _ARTIFACT_KEYS
-            or artifact["kind"] != "selected_brief" or artifact["schema_version"] != 1
+            or artifact["kind"] != "selected_brief" or artifact["schema_version"] != 2
             or artifact["brief_id"] != brief_id or not isinstance(artifact["evidence"], dict)
             or artifact["evidence"].get("brief_id") != brief_id
             or artifact["evidence"].get("account_id") != artifact["account_id"]
@@ -315,5 +298,5 @@ def _release(connector, token, brief_id, artifact, reference) -> dict:
         raise ToolError("invalid_token")
     return {"source": "brief", "records": [{"id": brief_id, "record_ref": reference}], "untrusted_data": True,
             "brief": {"brief_id": brief_id, "account_id": artifact["account_id"], "as_of": artifact["as_of"],
-                      "text": artifact["text"], "proposed_follow_up": artifact["proposed_follow_up"],
-                      "sources": artifact["sources"], "provider_rechecked": False, "notice": NOTICE}}
+                      "text": artifact["text"], "sources": artifact["sources"], "provider_rechecked": False,
+                      "notice": NOTICE}}

@@ -1,4 +1,4 @@
-"""Read filters and change streams for private audit and usage inspection."""
+"""Read filters and a change stream for private audit inspection."""
 
 from datetime import datetime, timezone
 import json
@@ -79,21 +79,4 @@ def follow_audit(path, brief_id=None, *, interval=0.5, tool=None, caller=None, s
             if seen.get(row["audit_id"]) != signature:
                 seen[row["audit_id"]] = signature
                 yield row
-        time.sleep(interval)
-
-
-def follow_usage(directory, brief_id=None, *, interval=0.5,
-                 tool=None, caller=None, since=None, until=None, status=None):
-    """Yield the initial report and changed summaries, including artifact updates."""
-    from .usage import build_usage_report
-
-    _check_interval(interval)
-    previous = None
-    while True:
-        report = build_usage_report(directory, brief_id, tool=tool, caller=caller,
-                                    since=since, until=until, status=status)
-        signature = json.dumps(report, sort_keys=True, separators=(",", ":"))
-        if signature != previous:
-            previous = signature
-            yield report
         time.sleep(interval)

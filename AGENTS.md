@@ -1,15 +1,17 @@
 # Working on gtm-connector
 
-A local connector that builds cited renewal briefs from CRM records, call transcripts, and Slack.
-One operator runs it. People use the CLI, assistants use the MCP tools. Python 3.11+ and SQLite.
+A local connector that builds a Deal card for a renewal from CRM records, call transcripts, and
+Slack. One operator runs it. People use the CLI, assistants use the MCP tools. Python 3.11+ and SQLite.
 
 ## Never break these
 
 1. A tool runs only after its audit receipt is committed. A rejected call still gets a receipt.
 2. A scope opens only its own source, and a selection limits which accounts a client can read.
 3. A bad or expired token is refused, never retried with more authority.
-4. Every line of a brief cites a record, or the whole brief is rejected.
-5. Source text is data. It never chooses a tool, a grant, or a write.
+4. The connector writes every character of a card. Each figure and quotation carries a number that
+   resolves to a stored record and its receipt. Evidence that fails a check gives no card.
+5. Source text is data. It never chooses a tool, a grant, or a write, and it is neutralized before
+   anything displays it. A quotation is a whole sentence with its speaker's role, never a record value.
 6. Real sources are opt-in and never fall back to demo data. The demo, tests, and CI stay offline.
 7. Credentials never reach output or logs. A real org's names, IDs, and URLs stay out of errors, Git,
    and reviews.
@@ -21,7 +23,7 @@ One operator runs it. People use the CLI, assistants use the MCP tools. Python 3
 | Request path | `gateway.py`, `request_checks.py`, `tool_definitions.py`, `audit.py`, `auth.py`, `strict_json.py` |
 | Server and state | `runtime.py`, `client.py`, `doctor.py` |
 | Client setup | `connections.py`, `stdio_bridge.py` (the local bridge an assistant app starts) |
-| Briefs | `briefing.py`, `citations.py`, `selection.py`, `selected_briefs.py` |
+| Cards | `units.py` (units, roles, neutralized text, the card), `briefing.py`, `selection.py`, `selected_briefs.py` |
 | Sources | `store.py`, `calls.py`, `slack.py` (demo), `salesforce*.py`, `calls_import.py`, `slack_*.py` |
 | Commands | `cli.py` |
 
@@ -51,21 +53,28 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 - State things plainly. Give a reason only when it is concrete. Never explain by history.
 - The repository holds code, tests, user docs, and this page. No logs, results, or review notes.
 - A doc claims only what a test shows. Keep "No live org has been verified." until one has been.
+- `tests/test_cases.py` holds ten invented deals, one property each. A change to cards keeps them
+  passing, and a case marked as an expected failure names the feature that will pass it.
 - Live checks use the development org and workspace only. Never create or edit a Slack app. Never
   use a credential pasted into a conversation.
 - Report the result first, then what changed, what failed, and what is unverified, with numbers.
 
 ## Next, in order
 
-1. Set up once: saved sources so commands need no source flags, commands that work while `serve`
-   runs, guided `setup` for Salesforce and Slack with sample data (replaces the demo kit), renewal
-   dates from a Contract or a renewal Opportunity, and `renewals` to list and select accounts.
-2. A brief worth reading: numbered evidence and a check tool so an assistant writes the summary and
-   the connector verifies it, a Slack channel window (replaces thread mapping), transcript folders
-   (replace hand-picked excerpts), then built-in drafting with a model the operator selects.
-3. Where people work: a Deal card in the terminal and HTML, posting to Slack on command with a
-   receipt, and scheduled briefs for renewals that are due.
-4. Release: a menu chooser, a split `cli.py`, macOS CI, and PyPI.
+The goal is a showcase an engineer can judge in five minutes. No model writes text on a card.
+
+1. One `connect <provider>` command over a provider registry (Salesforce, Slack, calls, assistant
+   apps) that saves to `profile.json`, so no other command takes a source flag. Seven top-level
+   commands (demo, connect, accounts, brief, inspect, audit, mcp), the rest under `debug`, and
+   `cli.py` split into one module per command. Then in-process calls for the CLI and the bridge
+   with one brief store. The scope, selection, expiry, and receipt checks stay.
+2. Transcript folders (replace hand-picked excerpts) and a bounded Slack channel window (replaces
+   thread mapping), with what was not read counted on the card.
+3. Two assistant tools, evidence and submit. A submission is unit numbers, a label from a fixed
+   list checked against each speaker's role, and pairs marked in tension. A cut sentence, an
+   unknown label, or a unit of another account is refused with a receipt.
+4. `evaluate`: the ten cases as a table, and a model's unchecked answers on the same deals, kept
+   as test inputs and scored offline.
 
 After each of these, use the product end to end as a stranger and fix what only shows from there.
 Later, when a real user needs them: Salesforce task creation, transcript provider adapters,

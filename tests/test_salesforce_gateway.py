@@ -258,13 +258,13 @@ class SalesforceGatewayTests(unittest.TestCase):
         self.assertEqual(self.requests, self.startup_requests)
         self.assertEqual(self.runtime.connector.audit.read(), [])
 
-    def test_external_account_without_contract_is_briefed_and_says_so(self):
+    def test_external_account_without_contract_gets_a_card_that_says_so(self):
         self.open_runtime()
         self.contracts = []
         for include_slack in (False, True):
             brief = create_brief(self.runtime, ACCOUNT_ID, as_of="2027-01-15", include_slack=include_slack)
             self.assertEqual(brief["status"], "accepted")
-            self.assertIn("- Salesforce returned no contract with an end date on or after 2027-01-15.", brief["text"])
+            self.assertIn("  Contract end: Missing: no contract ends on or after 2027-01-15 [1]", brief["text"])
         self.assertEqual(len(self.runtime.connector.audit.read()), 7)
         self.assertTrue(all(request.method == "GET" for request in self.requests))
 

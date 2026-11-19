@@ -19,15 +19,11 @@ Documentation = "https://github.com/pwngh/gtm-connector#readme"
 Issues = "https://github.com/pwngh/gtm-connector/issues"
 
 [tool.setuptools]
-packages = ["gtm_connector", "gtm_connector._evaluation_data"]
+packages = ["gtm_connector"]
 include-package-data = false
-
-[tool.setuptools.package-dir]
-"gtm_connector._evaluation_data" = "evaluation"
 
 [tool.setuptools.package-data]
 "gtm_connector" = ["demo_kit/*.json"]
-"gtm_connector._evaluation_data" = ["expected.json"]
 
 [tool.setuptools.dynamic]
 version = {attr = "gtm_connector.__version__"}

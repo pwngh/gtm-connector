@@ -75,7 +75,13 @@ class StoreTests(unittest.TestCase):
         risk = get_account(self.connection, "acc-002")
         self.assertEqual(risk["risk_status"], "at_risk")
         self.assertTrue(risk["risk_reason"])
-        self.assertEqual(list_opportunities(self.connection, "acc-003")[0]["stage"], "closed_won")
+        deal = list_opportunities(self.connection, "acc-003")[0]
+        self.assertEqual((deal["stage"], deal["amount_cents"], deal["currency"], deal["close_date"]),
+                         ("negotiation", 45_000_000, "USD", "2027-02-01"))
+        firm = get_account(self.connection, "acc-003")
+        self.assertEqual((firm["name"], firm["renewal_date"], firm["arr_cents"], firm["currency"]),
+                         ("Thornfield Wren LLP", "2027-02-08", 45_000_000, "USD"))
+        self.assertEqual(firm["contacts"][0]["name"], "Marian Holt")
         story = get_account(self.connection, "acc-007")
         self.assertEqual(story["name"], "Juniper Crest Learning")
         self.assertEqual((date.fromisoformat(story["renewal_date"]) - date.fromisoformat(DEMO_AS_OF)).days, 14)
@@ -135,7 +141,7 @@ class StoreTests(unittest.TestCase):
             with self.connection:
                 self.connection.execute("DELETE FROM accounts")
                 self.connection.executemany(
-                    "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'healthy', '')", book)
+                    "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, NULL, 'healthy', '')", book)
             ordered = sorted(book, key=lambda row: (row[1], row[0]))
             with self.subTest(matching=matching):
                 rows, more = search_accounts(self.connection, "invented")
@@ -150,7 +156,7 @@ class StoreTests(unittest.TestCase):
     def test_search_order_ignores_ascii_case_as_the_match_does(self):
         with self.connection:
             self.connection.executemany(
-                "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'healthy', '')",
+                "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, NULL, 'healthy', '')",
                 [("acc-001", "invented beta"), ("acc-002", "Invented Alpha"), ("acc-003", "invented alpha"),
                  ("acc-004", "INVENTED ALPHA")])
         self.assertEqual([row["id"] for row in search_accounts(self.connection, "invented")[0]],
@@ -196,13 +202,46 @@ class StoreTests(unittest.TestCase):
     def test_seed_refuses_partial_fixture_without_mutating_it(self):
         with self.connection:
             self.connection.execute(
-                "INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("acc-001", "Partial fixture label", "Testing", "2027-01-01", 100, "healthy", ""),
+                "INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                ("acc-001", "Partial fixture label", "Testing", "2027-01-01", 100, "USD", "healthy", ""),
             )
         before = snapshot(self.connection)
         with self.assertRaises(ValueError):
             seed(self.connection)
         self.assertEqual(snapshot(self.connection), before)
+
+    def test_accounts_added_beside_the_complete_book_are_kept_and_a_moved_fixture_row_is_refused(self):
+        seed(self.connection)
+        with self.connection:
+            self.connection.execute("INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (
+                "acc-901", "Added invented account", "", "2027-03-01", 100, None, "healthy", ""))
+            self.connection.execute("INSERT INTO opportunities VALUES (?, ?, ?, ?, ?, ?, ?)", (
+                "opp-901-0", "acc-901", "Added renewal", "proposal", 100, None, "2027-02-20"))
+        before = snapshot(self.connection)
+        seed(self.connection)
+        self.assertEqual(snapshot(self.connection), before)
+        self.assertIsNone(get_account(self.connection, "acc-901")["currency"])
+        with self.connection:
+            self.connection.execute("UPDATE opportunities SET account_id = 'acc-901' WHERE id = 'opp-002'")
+        with self.assertRaisesRegex(ValueError, "unexpected account association"):
+            seed(self.connection)
+
+    def test_a_currency_is_three_capital_letters_or_absent(self):
+        seed(self.connection)
+        for value in ("usd", "US", "USDX", "U$D", ""):
+            with self.subTest(value=value), self.assertRaises(sqlite3.IntegrityError), self.connection:
+                self.connection.execute("UPDATE accounts SET currency = ? WHERE id = 'acc-001'", (value,))
+        with self.connection:
+            self.connection.execute("UPDATE opportunities SET currency = NULL WHERE id = 'opp-001'")
+        self.assertIsNone(list_opportunities(self.connection, "acc-001")[0]["currency"])
+
+    def test_a_crm_database_without_a_currency_column_is_refused(self):
+        legacy = connect(Path(self.directory.name) / "older.sqlite3")
+        self.addCleanup(legacy.close)
+        legacy.execute("CREATE TABLE opportunities (id TEXT PRIMARY KEY NOT NULL, amount_cents INTEGER NOT NULL)")
+        legacy.commit()
+        with self.assertRaisesRegex(ValueError, "no currency column; use a fresh database path"):
+            initialize(legacy)
 
     def test_legacy_combined_database_is_rejected_before_schema_writes(self):
         legacy = connect(Path(self.directory.name) / "legacy.sqlite3")

@@ -1,7 +1,8 @@
 """Data books: invented accounts, some written by other models, shaped for each source.
 
 A book is one JSON file in tests/books. `demo_rows` turns one of its accounts into rows for the three
-demo stores. `expected` restates, from those rows alone, what a brief must say about them.
+demo stores. `expected` restates, from those rows alone, what a card must say about the CRM record.
+`hold` checks what every card promises about its units and quotations, whatever the data looks like.
 """
 
 from contextlib import closing
@@ -9,9 +10,12 @@ from datetime import date, datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
+import unicodedata
 
 from gtm_connector import strict_json
+from gtm_connector.units import safe_text, trace
 
 
 AS_OF = date(2027, 1, 15)
@@ -20,9 +24,12 @@ _ONLY = set(filter(None, os.environ.get("GTM_BOOKS", "").split(",")))
 BOOKS = {path.stem: path for path in sorted((Path(__file__).parent / "books").glob("*.json"))
          if not _ONLY or path.stem in _ONLY}
 STAGES = ("discovery", "evaluation", "proposal", "negotiation", "closed_won", "closed_lost")
-# A line that no single row states: it is derived from several rows, a date, or an empty read.
-DERIVED = ("- Signal: ", "- Renewal is in ", "- Renewal was ", "- Renewal is due on ", "- No ",
-           "- Source conflict: ", "- Three-source conflict: ", "- Proposed follow-up: ")
+HEADINGS = ("ATTENTION, from record fields and dates", "RECORD VALUES, from CRM fields and connector arithmetic",
+            "SAID, whole sentences as recorded; not record values", "NOT READ")
+SHOWN = 5  # docs/briefs.md: at most five opportunities, contracts, and contacts are shown.
+_HEAD = re.compile(r"  \[(\d+)\] (seller|customer|unknown) \((.+?)\); (call|Slack) (.+); "
+                   r'(no speaker label|speaker (".*"))\Z')
+_CITED = re.compile(r" ((?:\[\d+\])+)\Z")
 
 
 def read(name):
@@ -34,16 +41,16 @@ def demo_rows(number, account):
     identifier = f"acc-{number}"
     return {
         "crm": [("accounts", (identifier, account["name"], account["industry"], account["renewal_date"],
-                              account["arr_cents"], account["risk_status"], account["risk_reason"]))]
+                              account["arr_cents"], "USD", account["risk_status"], account["risk_reason"]))]
                + [("contacts", (f"con-{number}-{index:03d}", identifier, row["name"], row["title"], row["email"]))
                   for index, row in enumerate(account["contacts"])]
                + [("opportunities", (f"opp-{number}-{index:03d}", identifier, row["name"], row["stage"],
-                                     row["amount_cents"], row["close_date"]))
+                                     row["amount_cents"], "USD", row["close_date"]))
                   for index, row in enumerate(account["opportunities"])],
-        "calls": [("call_notes", (f"note-{number}-{index:03d}", identifier, row["called_at"], row["body"]))
+        "calls": [("call_notes", (f"note-{number}-{index:03d}", identifier, row["called_at"], None, row["body"]))
                   for index, row in enumerate(account["call_notes"])],
         "slack": [("messages", (f"msg-{number}-{index:03d}", identifier, row["channel"], row["author"],
-                                row["sent_at"], row["body"]))
+                                row["sent_at"], row["body"], 0))
                   for index, row in enumerate(account["slack_messages"])],
     }
 
@@ -56,76 +63,177 @@ def load(state, *accounts):
                     connection.execute(f"INSERT INTO {table} VALUES ({', '.join('?' * len(row))})", row)
 
 
-def _money(cents):
-    return f"USD {cents // 100:,}.{cents % 100:02}"
+def quoted(value):
+    """One source text field as a card prints it: neutralized, on one line, as a literal. Empty is Missing."""
+    return "Missing" if value in (None, "") else json.dumps(" ".join(safe_text(value)[0].split()), ensure_ascii=False)
 
 
-def _days(count):
+def days(count):
     return f"{count} day" if count == 1 else f"{count} days"
 
 
-def _instant(text):
+def instant(text):
     try:
         moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
         return moment.astimezone(timezone.utc) if moment.tzinfo else None
-    except (ValueError, OverflowError):
+    except (AttributeError, ValueError, OverflowError):
         return None
 
 
+def sections(case, text):
+    """The lines under each heading of a card. Source text never starts a line, so only the connector's do."""
+    case.assertTrue(text.endswith("\n"))
+    lines = text[:-1].split("\n")
+    flush = [line for line in lines if line and not line.startswith("  ")]
+    case.assertTrue(flush[0].startswith("DEAL CARD: "), flush[0][:80])
+    case.assertIn(flush[1:], (list(HEADINGS), list(HEADINGS[1:])))
+    found = {heading.split(",")[0]: [] for heading in HEADINGS}
+    current = None
+    for line in lines[1:]:
+        if line in HEADINGS:
+            current = found[line.split(",")[0]]
+        elif line:
+            current.append(line)
+    return found
+
+
+def cited(line):
+    """The unit numbers a record-value or signal line ends in."""
+    return [int(number) for number in re.findall(r"\d+", _CITED.search(line).group(1))]
+
+
+def said(card):
+    """Each shown sentence as (number, role, basis, source, time, speaker literal or None, text)."""
+    lines = card["SAID"]
+    if lines == ["  No sentence was read."]:
+        return []
+    shown = []
+    for head, quote in zip(lines[::2], lines[1::2], strict=True):
+        number, role, basis, source, when, _, speaker = _HEAD.fullmatch(head).groups()
+        shown.append((int(number), role, basis, source, when, speaker, json.loads(quote[6:])))
+    return shown
+
+
+def stale_call(calls, brief):
+    """The signal for the newest dated call when it is more than 60 days old. `calls` is (record_ref, time)."""
+    timed = [(moment, reference) for reference, called_at in calls if (moment := instant(called_at)) is not None]
+    if not timed:
+        return []
+    moment, reference = max(timed)
+    first = next((unit["n"] for unit in brief["units"] if unit["record_ref"] == reference), None)
+    age = (AS_OF - moment.date()).days
+    # A call with no sentence has no unit to cite, and so raises no signal.
+    return [f"  The latest dated call that was read is {days(age)} old. [{first}]"] if age > 60 and first else []
+
+
 def expected(rows, brief):
-    """Return (lines every brief must contain, the signal lines in order), each with its citations."""
-    quote = lambda text: json.dumps(text, ensure_ascii=True)  # noqa: E731
-    run = f"[run/{brief['brief_id']}]"
-    receipt = {row["tool"]: f"[audit/{row['audit_id']}]" for row in brief["evidence"]["receipts"]}
-    (_, (account_id, name, industry, renewal, arr, risk, reason)), *others = rows["crm"]
-    ref = f"[crm/accounts/{account_id}]"
-    lines = [f"- Account: {quote(name)}. {ref}", f"- Industry: {quote(industry)}. {ref}",
-             f"- Annual recurring revenue: {_money(arr)}. {ref}", f"- Renewal date: {renewal}. {ref}",
-             f"- CRM risk status: {quote(risk)}. {ref}"]
-    if reason:
-        lines.append(f"- CRM risk reason: {quote(reason)}. {ref}")
-    days = (date.fromisoformat(renewal) - AS_OF).days
-    when = (f"renewal is in {_days(days)}" if days > 0 else
-            f"renewal was {_days(-days)} ago" if days < 0 else "renewal is due today")
-    renewals, roles = [], []
-    for table, row in others:
-        if table == "contacts":
-            identifier, _, person, title, email = row
-            role = quote(title) if title else "not provided"
-            lines.append(f"- Contact {quote(person)}: role {role}; email {quote(email)}. [crm/contacts/{identifier}]")
-            if not title:
-                roles.append(f"- Signal: contact {quote(person)} has no role recorded. [crm/contacts/{identifier}]")
+    """The demo CRM part of a card, restated from the rows: fixed value lines, one line per opportunity and per
+    contact, and the signals in order. Numbers follow docs/briefs.md: the account, then contacts and
+    opportunities by ID."""
+    (_, (_, name, industry, renewal, arr, currency, risk, reason)), *others = rows["crm"]
+    contacts = sorted(row for table, row in others if table == "contacts")
+    deals = sorted(row for table, row in others if table == "opportunities")
+    left = (date.fromisoformat(renewal) - AS_OF).days
+    timing = f"in {days(left)}" if left > 0 else f"{days(-left)} ago" if left < 0 else "today"
+    fixed = [f"  Renewal date: {renewal}, {timing} [1]",
+             f"  Annual recurring revenue: {currency} {arr // 100:,}.{arr % 100:02} [1]",
+             f"  CRM risk: {risk.replace('_', ' ')}{f'; reason {quoted(reason)}' if reason else ''} [1]",
+             f"  Account: {quoted(name)}; industry {quoted(industry)} [1]"]
+    signals = ["  CRM marks this account at risk. [1]"] if risk == "at_risk" else []
+    people, roles = [], []
+    for number, (_, _, person, title, email) in enumerate(contacts, 2):
+        people.append(f"  Contact: {quoted(person)}; role {quoted(title)}; email {quoted(email)} [{number}]")
+        if not title:
+            roles.append(f"  This contact has no role recorded. [{number}]")
+    offers, still_open = [], []
+    for number, (_, _, deal, stage, cents, code, close) in enumerate(deals, 2 + len(contacts)):
+        offers.append(f"  Opportunity: {quoted(deal)}; stage {quoted(stage)}; amount {code} {cents // 100:,}."
+                      f"{cents % 100:02}; close date {close} [{number}]")
+        if left <= 30 and not stage.startswith("closed_"):
+            still_open.append(f"  The renewal is {timing} and this opportunity is still open at stage "
+                              f"{quoted(stage)}. [1][{number}]")
+    if left < 0:
+        signals.append(f"  The renewal date passed {days(-left)} ago. [1]")
+    elif len(still_open) > SHOWN:
+        signals.append(f"  The renewal is {timing} and {len(still_open)} opportunities are still open. [1]")
+    else:
+        signals += still_open
+    signals += [f"  {len(roles)} contacts have no role recorded. [1]"] if len(roles) > SHOWN else roles
+    signals += stale_call([(f"calls/call_notes/{row[0]}", row[2]) for _, row in rows["calls"]], brief)
+    return {"fixed": fixed, "opportunities": offers, "contacts": people, "signals": signals}
+
+
+def hold_values(case, card, fixed, groups):
+    """The fixed lines open RECORD VALUES. Each group of (label, plural, lines) shows every line when there are
+    five or fewer. Past five it shows five of them and counts the rest under NOT READ."""
+    lines = card["RECORD VALUES"]
+    case.assertEqual(lines[:len(fixed)], fixed)
+    rest = lines[len(fixed):]
+    for label, plural, wanted in groups:
+        shown = [line for line in rest if line.startswith(f"  {label}: ")]
+        rest = [line for line in rest if line not in shown]
+        counted = [line for line in card["NOT READ"] if f" more {plural} were read and are not shown" in line]
+        if len(wanted) <= SHOWN:
+            case.assertEqual(sorted(shown), sorted(wanted))
+            case.assertEqual(counted, [])
         else:
-            identifier, _, deal, stage, cents, close = row
-            lines.append(f"- CRM opportunity {identifier} {quote(deal)}: stage {quote(stage)}; amount {_money(cents)}; "
-                         f"close date {close}. [crm/opportunities/{identifier}]")
-            if days <= 30 and not stage.startswith("closed_"):
-                renewals.append(f"- Signal: {when} and opportunity {identifier} {quote(deal)} is still open at stage "
-                                f"{quote(stage)}. {ref} [crm/opportunities/{identifier}] {run}")
-    # docs/briefs.md, Signals: more than five records raising one signal are counted in one line.
-    if len(renewals) > 5:
-        renewals = [f"- Signal: {when} and {len(renewals)} opportunities are still open. "
-                    f"{ref} {receipt['list_opportunities']} {run}"]
-    if len(roles) > 5:
-        roles = [f"- Signal: {len(roles)} contacts have no role recorded. {ref} {receipt['get_account']}"]
-    signals = renewals
-    if risk == "at_risk":
-        signals.append("- Signal: CRM marks this account at risk" + (f": {quote(reason)}. " if reason else ". ") + ref)
-    signals += roles
-    timed = []
-    for _, (identifier, _, called_at, body) in rows["calls"]:
-        lines.append(f"- Untrusted call note {identifier} at {quote(called_at)} says {quote(body)}. "
-                     f"[calls/call_notes/{identifier}]")
-        if (moment := _instant(called_at)) is not None:
-            timed.append((moment, identifier))
-    if timed:
-        moment, identifier = max(timed)
-        age = (AS_OF - moment.date()).days
-        if age > 60:
-            dated = "" if len(timed) == len(rows["calls"]) else "dated "
-            signals.append(f"- Signal: the latest {dated}call note {identifier} is {_days(age)} old as of {AS_OF}. "
-                           f"[calls/call_notes/{identifier}] {run}")
-    for _, (identifier, _, channel, author, sent_at, body) in rows["slack"]:
-        lines.append(f"- Untrusted Slack message {identifier} at {quote(sent_at)} in {quote(channel)} from "
-                     f"{quote(author)} says {quote(body)}. [slack/messages/{identifier}]")
-    return lines, signals
+            case.assertEqual(len(set(shown)), SHOWN)
+            case.assertLessEqual(set(shown), set(wanted))
+            case.assertEqual(counted, [f"  CRM: {len(wanted) - SHOWN} more {plural} were read and are not shown "
+                                       f"({len(wanted)} in all)."])
+    case.assertEqual(rest, [])
+
+
+def hold(case, brief):
+    """What every card promises: connector-written lines only, every record a unit, every sentence whole,
+    and every number resolving to its record and the receipt of the read that returned it."""
+    case.assertEqual(brief["status"], "accepted")
+    units, evidence, text = brief["units"], brief["evidence"], brief["text"]
+    case.assertEqual([unit["n"] for unit in units], list(range(1, len(units) + 1)))
+    card = sections(case, text)
+    # Nothing invisible or line-breaking from a source reaches a line, in the card or in a unit.
+    shown = text + "".join(str(unit.get(key)) for unit in units for key in ("text", "speaker", "at"))
+    case.assertEqual({character for character in set(shown) - {"\n"}
+                      if unicodedata.category(character) in ("Cc", "Cf", "Cs", "Zl", "Zp")}, set())
+    for live in ("<!", "<@", "http://", "https://"):
+        case.assertNotIn(live, shown)
+    # Every record that was read is one unit, or one unit for each whole sentence of its text and nothing more.
+    by_record: dict[str, list] = {}
+    for unit in units:
+        by_record.setdefault(unit["record_ref"], []).append(unit)
+    receipts = {receipt["tool"]: receipt for receipt in evidence["receipts"]}
+    for record in evidence["records"]:
+        own = by_record.pop(record["record_ref"], [])
+        for unit in own:
+            case.assertIn(record["record_ref"], receipts[unit["tool"]]["rows"])
+        if record["record_ref"].startswith("crm/"):
+            case.assertEqual([unit["kind"] for unit in own], ["record"])
+            continue
+        pieces = [cue["text"] for cue in record["manifest"]["units"]] if "manifest" in record else [record["body"]]
+        whole = " ".join(filter(None, (" ".join(safe_text(piece)[0].split()) for piece in pieces)))
+        case.assertEqual({unit["kind"] for unit in own} - {"sentence"}, set())
+        case.assertEqual(" ".join(unit["text"] for unit in own), whole)
+    case.assertEqual(by_record, {})
+    # A value or signal ends in the numbers of records. A quotation is exactly one sentence unit, with its
+    # role, basis, time, and speaker, newest first and never more than twelve.
+    for line in card["ATTENTION"] + card["RECORD VALUES"]:
+        for number in cited(line):
+            case.assertIn(units[number - 1]["kind"], ("record", "sentence"))
+    quotes = said(card)
+    case.assertLessEqual(len(quotes), 12)
+    for number, role, basis, source, when, speaker, sentence in quotes:
+        unit = units[number - 1]
+        case.assertEqual((unit["kind"], unit["text"], unit["role"], unit["basis"]), ("sentence", sentence, role, basis))
+        case.assertEqual({"calls": "call", "slack": "Slack"}[unit["source"]], source)
+        case.assertEqual(None if speaker is None else json.loads(speaker), unit["speaker"])
+        case.assertLessEqual(len(sentence), 300)
+    moments = [instant(units[number - 1]["at"]) for number, *_ in quotes]
+    dated = [moment for moment in moments if moment is not None]
+    case.assertEqual(dated, sorted(dated, reverse=True))
+    case.assertEqual(moments[:len(dated)], dated)
+    # A few numbers, traced from the saved evidence alone, name the same record and a finished receipt.
+    for number in sorted({1, len(units), *(quote[0] for quote in quotes[:2])}):
+        traced = trace(evidence, number)
+        case.assertEqual((traced["n"], traced["record_ref"]), (number, units[number - 1]["record_ref"]))
+        case.assertEqual(traced["receipt"]["audit_id"], receipts[units[number - 1]["tool"]]["audit_id"])
+    return card

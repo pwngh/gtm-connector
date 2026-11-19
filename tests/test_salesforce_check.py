@@ -183,7 +183,7 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.assert_progress(progress, report)
         self.assertEqual(report["status"], "passed")
         self.assertTrue(all(row["status"] == "pass" for row in report["steps"]))
-        self.assertEqual([row["count"] for row in report["steps"]], [2, 1, 4, 5, 8, 7, 1, 1, 3, 1, 12])
+        self.assertEqual([row["count"] for row in report["steps"]], [2, 1, 4, 5, 8, 7, 1, 1, 3, 1, 4])
         self.assertEqual([row["api_calls"] for row in report["steps"]], [0, 1, 1, 1, 1, 1, 1, 1, 3, 1, 4])
         self.assertEqual([row["sf_cli_invocations"] for row in report["steps"]], [2] + [0] * 10)
         self.assertEqual((report["api_calls"], report["sf_cli_invocations"]), (15, 2))
@@ -394,26 +394,26 @@ print(json.dumps({{"status": 0, "result": result}}))
         factory.assert_called_once_with(ALIAS, environment="developer")
         return code, stdout.getvalue(), stderr.getvalue(), state
 
-    def test_cli_brief_without_a_contract_ahead_still_returns_a_brief_that_says_so(self):
+    def test_cli_brief_without_a_contract_ahead_still_returns_a_card_that_says_so(self):
         self.no_candidate = True
         code, stdout, stderr, state = self.brief_cli()
         self.assertEqual((code, stderr), (0, ""))
         brief = json.loads(stdout)
         self.assertEqual(brief["status"], "accepted")
-        self.assertIn(f"- Salesforce returned no contract with an end date on or after {AS_OF}.", brief["text"])
+        self.assertIn(f"  Contract end: Missing: no contract ends on or after {AS_OF} [1]", brief["text"])
         self.assertEqual(len(list((state / "briefs").iterdir())), 1)
         self.assert_safe(stderr)
 
-    def test_cli_brief_with_contract_returns_the_cited_three_tool_artifact(self):
+    def test_cli_brief_with_contract_returns_the_numbered_three_tool_artifact(self):
         code, stdout, stderr, state = self.brief_cli()
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stderr, "")
         result = json.loads(stdout)
         self.assertEqual(result["status"], "accepted")
         self.assertEqual(result["account_id"], "acc-sf-" + ACCOUNT)
-        self.assertEqual(result["evidence"]["workflow_version"], 3)
-        self.assertIn("Contract end date: 2027-01-31.", result["text"])
-        self.assertIn("Draft contract is a planning candidate and has not been activated.", result["text"])
+        self.assertEqual(result["sources"], {"crm": "salesforce", "calls": "demo_fixture"})
+        self.assertIn("  Contract end: 2027-01-31, in 16 days; status ", result["text"])
+        self.assertIn("; a planning candidate, not activated [", result["text"])
         receipts = result["evidence"]["receipts"]
         self.assertEqual([row["tool"] for row in receipts],
                          ["get_account", "list_opportunities", "read_call_notes"])

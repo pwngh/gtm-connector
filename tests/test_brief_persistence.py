@@ -1,4 +1,4 @@
-"""A failed snapshot replacement must not destroy previously collected evidence."""
+"""A saved card is written whole or not at all, and only a valid one is traced."""
 
 import json
 from pathlib import Path
@@ -7,13 +7,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-from gtm_connector.briefing import _save_artifact, check_saved_brief, create_brief
-from gtm_connector.citations import BriefRejected, build_facts
-from gtm_connector.drafting import DraftResult
+from gtm_connector.briefing import _save_artifact, create_brief, trace_saved
 from gtm_connector.runtime import Runtime
-from gtm_connector.usage import build_usage_report
 
 
 class BriefPersistenceTests(unittest.TestCase):
@@ -22,51 +19,40 @@ class BriefPersistenceTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.state = Path(self.directory.name) / "state"
 
-    def test_a_saved_brief_accepts_only_the_current_empty_role_spelling(self):
+    def test_a_saved_card_is_private_and_traces_from_its_stored_evidence(self):
         with Runtime(self.state) as runtime:
-            current = create_brief(runtime, "acc-007", include_slack=True)
-        current_line = ('- Contact "Dana Crest": role not provided; '
-                        'email "dana@juniper-crest.example". [crm/contacts/con-007]')
-        self.assertIn(current_line, current["text"].splitlines())
-        self.assertEqual(check_saved_brief(self.state, current["brief_id"], current["text"]), current["text"])
-        quoted = current["text"].replace("role not provided;", 'role "";')
-        with self.assertRaises(BriefRejected):
-            check_saved_brief(self.state, current["brief_id"], quoted)
-
-    def test_current_saved_brief_keeps_missing_follow_up_and_duplicate_failure_reasons(self):
-        with Runtime(self.state) as runtime:
-            current = create_brief(runtime, "acc-007", include_slack=True)
-            contact = next(line for line in current["text"].splitlines() if line.startswith("- Contact "))
-            self.assertIn("role not provided;", contact)
-            path = self.state / "briefs" / (current["brief_id"] + ".json")
-            before = path.read_bytes()
+            brief = create_brief(runtime, "acc-007", include_slack=True)
             receipts = runtime.connector.audit.read()
-            candidates = (
-                (current["text"].replace(current["proposed_follow_up"] + "\n", ""),
-                 "Brief must disclose required source outcomes, source conflicts, and proposed follow-up."),
-                (current["text"] + contact + "\n", "Brief repeats a statement."),
-                (None, "A brief must contain supported, cited statements."),
-            )
-            for candidate, message in candidates:
-                with self.subTest(message=message):
-                    with self.assertRaises(BriefRejected) as failure:
-                        check_saved_brief(self.state, current["brief_id"], candidate)
-                    self.assertEqual(str(failure.exception), message)
-            self.assertEqual(path.read_bytes(), before)
-            self.assertEqual(runtime.connector.audit.read(), receipts)
+        path = self.state / "briefs" / (brief["brief_id"] + ".json")
+        self.assertEqual(json.loads(path.read_text()), brief)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
+        self.assertEqual((brief["schema_version"], brief["status"]), (2, "accepted"))
+        self.assertIn('role Missing', brief["text"])
+        before = path.read_bytes()
+        for unit in brief["units"]:
+            traced = trace_saved(self.state, brief["brief_id"], unit["n"])
+            self.assertEqual((traced["n"], traced["record_ref"]), (unit["n"], unit["record_ref"]))
+            self.assertIn(traced["receipt"]["audit_id"], {row["audit_id"] for row in receipts})
+        # A changed card text cannot change what a number resolves to.
+        edited = {**brief, "text": brief["text"].replace("Missing", '"Chief buyer"')}
+        path.write_text(json.dumps(edited))
+        self.assertEqual(trace_saved(self.state, brief["brief_id"], 2)["fields"]["title"], "")
+        path.write_bytes(before)
+        for number in (0, len(brief["units"]) + 1, "1", 1.0, True):
+            with self.subTest(number=number), self.assertRaisesRegex(ValueError, "This card has numbers 1 to"):
+                trace_saved(self.state, brief["brief_id"], number)
+        self.assertEqual(path.read_bytes(), before)
 
-    def test_failed_initial_save_never_invokes_the_drafter(self):
-        adapter = Mock()
+    def test_a_failed_save_leaves_no_card_and_keeps_the_receipts(self):
         with Runtime(self.state) as runtime:
             with patch("gtm_connector.briefing.os.replace", side_effect=OSError("fixture rename failure")):
                 with self.assertRaisesRegex(OSError, "rename failure"):
-                    create_brief(runtime, "acc-001", adapter=adapter)
-            adapter.draft.assert_not_called()
+                    create_brief(runtime, "acc-001")
             self.assertEqual(list((self.state / "briefs").iterdir()), [])
             self.assertEqual(len(runtime.connector.audit.read()), 3)
 
-    def test_failed_final_write_preserves_collected_evidence(self):
-        attempts = 0
+    def test_an_interrupted_write_leaves_no_partial_card(self):
         original = tempfile.NamedTemporaryFile
 
         class InterruptedWrite:
@@ -88,27 +74,13 @@ class BriefPersistenceTests(unittest.TestCase):
                 self.output.flush()
                 raise OSError("fixture disk-full failure")
 
-        def temporary_file(*args, **kwargs):
-            nonlocal attempts
-            attempts += 1
-            output = original(*args, **kwargs)
-            return InterruptedWrite(output) if attempts == 2 else output
-
         with Runtime(self.state) as runtime:
-            with patch("gtm_connector.briefing.NamedTemporaryFile", side_effect=temporary_file):
+            with patch("gtm_connector.briefing.NamedTemporaryFile",
+                       side_effect=lambda *args, **kwargs: InterruptedWrite(original(*args, **kwargs))):
                 with self.assertRaisesRegex(OSError, "disk-full"):
-                    create_brief(runtime, "acc-001")
-            saved = list((self.state / "briefs").iterdir())
-            self.assertEqual(len(saved), 1)
-            artifact = json.loads(saved[0].read_text())
-            self.assertEqual(artifact["status"], "collected")
-            self.assertNotIn("text", artifact)
-            self.assertEqual(len(runtime.connector.audit.read(artifact["brief_id"])), 3)
-            self.assertEqual(stat.S_IMODE(saved[0].stat().st_mode), 0o600)
-            self.assertEqual(stat.S_IMODE(saved[0].parent.stat().st_mode), 0o700)
-            candidate = "\n".join(build_facts(artifact["evidence"]))
-            self.assertEqual(check_saved_brief(self.state, artifact["brief_id"], candidate),
-                             candidate + "\n")
+                    create_brief(runtime, "acc-003", include_slack=True)
+            self.assertEqual(list((self.state / "briefs").iterdir()), [])
+            self.assertEqual(len(runtime.connector.audit.read()), 4)
 
     def test_failed_replace_preserves_old_bytes_and_cleans_temporary_file(self):
         self.state.mkdir()
@@ -134,44 +106,6 @@ class BriefPersistenceTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(list(self.state.iterdir()), [path])
 
-    def test_failed_model_save_keeps_slack_evidence_and_usage_unknown(self):
-        class FakeModel:
-            name = "ollama"
-
-            def draft(self, evidence):
-                return DraftResult("\n".join(build_facts(evidence)), model="fixture-model",
-                                   input_tokens=13, output_tokens=7)
-
-        from gtm_connector.briefing import os as save_os
-        replace = save_os.replace
-        attempts = 0
-
-        def fail_final_replace(source, destination):
-            nonlocal attempts
-            attempts += 1
-            if attempts == 2:
-                raise OSError("fixture final-save failure")
-            return replace(source, destination)
-
-        with Runtime(self.state) as runtime:
-            with patch("gtm_connector.briefing.os.replace", side_effect=fail_final_replace):
-                with self.assertRaisesRegex(OSError, "final-save failure"):
-                    create_brief(runtime, "acc-003", include_slack=True, adapter=FakeModel())
-            saved = list((self.state / "briefs").iterdir())
-            self.assertEqual(len(saved), 1)
-            artifact = json.loads(saved[0].read_text())
-            self.assertEqual(artifact["status"], "collected")
-            self.assertEqual(artifact["evidence"]["workflow_version"], 2)
-            self.assertNotIn("text", artifact)
-            self.assertNotIn("proposed_follow_up", artifact)
-            self.assertEqual(len(runtime.connector.audit.read(artifact["brief_id"])), 4)
-            candidate = "\n".join(build_facts(artifact["evidence"]))
-            self.assertEqual(check_saved_brief(self.state, artifact["brief_id"], candidate),
-                             candidate + "\n")
-            usage = build_usage_report(self.state)
-            self.assertEqual(usage["model_tokens"], {"saved_briefs": 1, "unknown_briefs": 1,
-                                                    "input_tokens": None, "output_tokens": None})
-
     def test_destination_symlink_is_not_replaced_or_followed(self):
         self.state.mkdir()
         target = self.state / "original.json"
@@ -193,29 +127,33 @@ class BriefPersistenceTests(unittest.TestCase):
                 create_brief(runtime, "acc-001")
         self.assertEqual(list(outside.iterdir()), [])
 
-    def test_saved_checker_rejects_non_object_artifacts_and_evidence(self):
+    def test_trace_rejects_non_object_artifacts_and_evidence(self):
         identifier = "brief-" + "a" * 32
         path = self.state / "briefs" / (identifier + ".json")
         path.parent.mkdir(parents=True)
         for value in ([], None, "not an artifact", 1,
-                      {"schema_version": 1, "brief_id": identifier, "evidence": []},
-                      {"schema_version": 1, "brief_id": identifier, "evidence": None}):
+                      {"schema_version": 2, "brief_id": identifier, "evidence": []},
+                      {"schema_version": 2, "brief_id": identifier, "evidence": None},
+                      {"schema_version": 1, "brief_id": identifier, "evidence": {"brief_id": identifier}},
+                      {"schema_version": 2, "brief_id": identifier, "evidence": {"brief_id": "brief-" + "b" * 32}}):
             with self.subTest(value=value):
                 path.write_text(json.dumps(value))
                 with self.assertRaisesRegex(ValueError, "invalid saved brief evidence"):
-                    check_saved_brief(self.state, identifier, "candidate")
+                    trace_saved(self.state, identifier, 1)
+        for unsafe in ("../audit", "brief-" + "A" * 32, "brief-short", None):
+            with self.subTest(unsafe=unsafe), self.assertRaisesRegex(ValueError, "invalid brief ID"):
+                trace_saved(self.state, unsafe, 1)
+        with self.assertRaisesRegex(ValueError, "No saved card has this brief ID"):
+            trace_saved(self.state, "brief-" + "c" * 32, 1)
 
     def test_cli_reports_invalid_saved_shape_without_a_traceback(self):
         identifier = "brief-" + "a" * 32
         path = self.state / "briefs" / (identifier + ".json")
         path.parent.mkdir(parents=True)
         path.write_text("[]")
-        candidate = Path(self.directory.name) / "candidate.txt"
-        candidate.write_text("Uncited candidate.\n")
         result = subprocess.run(
-            [sys.executable, "-m", "gtm_connector", "check-brief", identifier, str(candidate),
-             "--state-dir", str(self.state)], cwd=Path(__file__).resolve().parents[1],
-            capture_output=True, text=True, timeout=30,
+            [sys.executable, "-m", "gtm_connector", "trace", identifier, "1", "--state-dir", str(self.state)],
+            cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, "")

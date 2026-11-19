@@ -284,8 +284,10 @@ class SalesforceEnvironmentTests(unittest.TestCase):
                 with Runtime(Path(temporary) / "state", crm_reader=reader) as runtime:
                     brief = create_brief(runtime, ACCOUNT_ID, as_of=AS_OF)
                     self.assertEqual(brief["status"], "accepted")
-                    self.assertIn("Contract end date: 2027-01-31.", brief["text"])
-                    self.assertIn("Draft contract is a planning candidate and has not been activated.", brief["text"])
+                    self.assertIn('  Contract end: 2027-01-31, in 16 days; status "Draft"; a planning candidate, '
+                                  "not activated [3]", brief["text"])
+                    self.assertIn("  The contract end is in 16 days and this opportunity is still open at stage "
+                                  '"Review". [3][4]', brief["text"])
                     self.assertEqual([row["tool"] for row in brief["evidence"]["receipts"]],
                                      ["get_account", "list_opportunities", "read_call_notes"])
                     self.assertTrue(all(row["status"] == "ok" for row in runtime.connector.audit.read()))

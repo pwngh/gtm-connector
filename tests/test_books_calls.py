@@ -1,6 +1,5 @@
-"""Book transcripts take the real import path: parsed, selected, resolved, stored, then briefed."""
+"""Book transcripts take the real import path: parsed, selected, resolved, stored, then shown on a card."""
 
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -12,10 +11,9 @@ from gtm_connector.briefing import create_brief
 from gtm_connector.call_workflow import resolve_call_account
 from gtm_connector.calls_import import (CallsImportError, inspect_import, list_imports, parse_transcript,
                                         select_excerpt, store_import)
-from gtm_connector.citations import BriefRejected, check_brief
 from gtm_connector.runtime import Runtime
+from gtm_connector.units import safe_text
 from tests import varied
-from tests.test_results import citations, corruptions
 
 
 AS_OF = varied.AS_OF.isoformat()
@@ -29,15 +27,11 @@ STAMP = r"(?:(\d{2,}):)?([0-5]\d):([0-5]\d)\.(\d{3})"
 TIMING = re.compile(rf"{STAMP}[ \t]+-->[ \t]+{STAMP}(?:[ \t].*)?")
 SRT_STAMP = r"([0-9]{2,9}):([0-5][0-9]):([0-5][0-9])[,.]([0-9]{3})"
 SRT_TIMING = re.compile(rf"{SRT_STAMP}[ \t]+-->[ \t]+{SRT_STAMP}(?:[ \t].*)?")
-HEADER = re.compile(r"Kind: (?:captions|subtitles|descriptions|chapters|metadata)|Language: [A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*"
+HEADER = re.compile(r"Kind: (?:captions|subtitles|descriptions|chapters|metadata)"
+                    r"|Language: [A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*"
                     r"|X-TIMESTAMP-MAP=(?:MPEGTS:[0-9]+,LOCAL:[0-9:.]+|LOCAL:[0-9:.]+,MPEGTS:[0-9]+)")
-# How exports label a speaker: a WebVTT voice tag, "Name:" with a timestamp on either side, a time and then
-# "Name" before a long dash or between bars, and a name line that ends in a time.
-SPEAKER = (re.compile(r"<v(?:\.[^ >]+)? ([^>]+)>"),
-           re.compile(r"^(?:\[[\d:]+\] )?([^\d\[:][^\[:]*?)(?: \[[\d:]+\])?: ", re.M),
-           re.compile(r"^[\d:]+ (?:\| )?(.+?) [\u2014|] ", re.M),
-           re.compile(r"^(.+?) {2,}\d+:\d\d$", re.M),
-           re.compile(r"^\[([^\]\d][^\]]*)\]", re.M))
+# docs/briefs.md, Speaker roles: in a WebVTT transcript the label is the voice tag at the start of a cue.
+VOICE = re.compile(r"<v(?:\.[^ >]+)*[ \t]+([^<>\n]+)>")
 # A plain account for the cases built in code.
 PLAIN = {"name": "Size Case Co", "industry": "Software", "renewal_date": "2027-06-30", "arr_cents": 100,
          "risk_status": "healthy", "risk_reason": "", "contacts": [], "opportunities": [], "call_notes": [],
@@ -45,7 +39,7 @@ PLAIN = {"name": "Size Case Co", "industry": "Software", "renewal_date": "2027-0
 
 
 def blank_lines(lines, timing):
-    """Which lines end a block: empty ones, and runs of lines of spaces that a cue, an empty line, or nothing follows."""
+    """Which lines end a block: empty ones, and runs of lines of spaces before a cue, an empty line, or the end."""
     def cue(at):
         return any(place < len(lines) and timing.fullmatch(lines[place]) for place in (at, at + 1))
     blank = [False] * len(lines) + [True]
@@ -128,10 +122,6 @@ def said(units_):
                      else unit["cue_id"] + "\n" + unit["text"] for unit in units_)
 
 
-def speakers(text):
-    return {name.strip() for pattern in SPEAKER for name in pattern.findall(text)}
-
-
 def strings(value):
     """Every string inside a JSON value, keys included."""
     if isinstance(value, str):
@@ -197,7 +187,7 @@ class BookCallsTests(unittest.TestCase):
         self.assertEqual(self.imports(runtime), before)
 
     def brief(self, runtime, rows, imported, raw, kind, *, called_at=None, selected=None):
-        """Create the brief and hold it to the transcript as read here and to the rules for every brief."""
+        """Create the card and hold it to the transcript as read here and to what every card promises."""
         account_id, import_id = rows["crm"][0][1][0], imported["import_id"]
         found = units(raw.decode(), kind)
         first, last = selected or (1, default_last(found))
@@ -207,18 +197,10 @@ class BookCallsTests(unittest.TestCase):
         self.assertEqual((imported["total_units"], imported["requested_range"], imported["cited_range"]),
                          (len(found), {"first": first, "last": last}, {"first": cited[0], "last": cited[1]}))
         brief = create_brief(runtime, account_id, as_of=AS_OF)
-        self.assertEqual(brief["status"], "accepted")
         self.assertEqual(json.loads((runtime.directory / "briefs" / f"{brief['brief_id']}.json").read_text()), brief)
-        lines, evidence = brief["text"].splitlines(), brief["evidence"]
-        note, run = f"[calls/call_notes/{import_id}]", f"[run/{brief['brief_id']}]"
-        records = {f"[{record['record_ref']}]" for record in evidence["records"]}
-        known = records | {f"[audit/{row['audit_id']}]" for row in evidence["receipts"]} | {run}
-        for line in lines:
-            # Source text never breaks out of its line: one printable bullet that ends in known citations.
-            self.assertTrue(line.startswith("- ") and line.isascii() and line.isprintable())
-            self.assertTrue(citations(line))
-            self.assertLessEqual(set(citations(line)), known)
-        self.assertEqual(records, {f"[crm/{table}/{row[0]}]" for table, row in rows["crm"]} | {note})
+        card, evidence, note = varied.hold(self, brief), brief["evidence"], f"calls/call_notes/{import_id}"
+        self.assertEqual({record["record_ref"] for record in evidence["records"]},
+                         {f"crm/{table}/{row[0]}" for table, row in rows["crm"]} | {note})
         # The saved units are the transcript's own, whole and in place: nothing invented, altered, or merged.
         record = next(row for row in evidence["records"] if row["record_ref"].startswith("calls/"))
         self.assertEqual((record["manifest"]["units"], record["body"], record["manifest"]["total_units"]),
@@ -226,29 +208,31 @@ class BookCallsTests(unittest.TestCase):
         self.assertLessEqual(len(quoted), MAX_RETURNED)
         self.assertLessEqual(len(body.encode()), MAX_QUOTE)
         self.assertLessEqual(serialized(record), MAX_RECORD)
-        # The one excerpt line states the ranges, the counts, that it is no summary, and the literal text.
+        # Each cue or line gives its own whole sentences, in order, with the call time. The speaker is the voice
+        # tag that opens a WebVTT cue, or an identifier that is not a number, and never one over 200 characters.
+        spoken = [unit for unit in brief["units"] if unit["record_ref"] == note]
+        self.assertLessEqual({unit["at"] for unit in spoken}, {called_at})
+        for cue in quoted:
+            whole, own = " ".join(safe_text(cue["text"])[0].split()), []
+            while " ".join(unit["text"] for unit in own) != whole:
+                own.append(spoken.pop(0))
+            voice = VOICE.match(cue["text"]) if kind == "vtt" else None
+            name = voice.group(1) if voice else cue["cue_id"]
+            label = None if name is None or name.isdigit() else " ".join(safe_text(name)[0].split())
+            self.assertLessEqual({unit["speaker"] for unit in own}, {label if label and len(label) <= 200 else None})
+        self.assertEqual(spoken, [])
+        for _, _, _, source, when, _, _ in varied.said(card):
+            self.assertEqual((source, when), ("call", called_at or "time Missing"))
+        # The card says how much of the call was read, and that Slack was not asked for.
         word = "lines" if kind == "txt" else "cues"
-        when = "not provided" if called_at is None else json.dumps(called_at)
-        excerpt = (f"- User-supplied transcript excerpt {import_id}: call time {when}; imported at "
-                   f'"{IMPORTED_AT}"; requested {word} {first} through {last}; quoted {word} {cited[0]} through '
-                   f"{cited[1]} of {len(found)} including available adjacent context. This is an excerpt, not a "
-                   f"complete call summary. It says {json.dumps(body)}. {note}")
-        self.assertEqual([line for line in lines if note in line and not line.startswith("- Signal: ")], [excerpt])
-        # The CRM lines and signals are those of the rows. An old call adds the last signal, a missing time none.
-        stated, signals = varied.expected({**rows, "calls": [], "slack": []}, brief)
-        if called_at is not None:
-            age = (varied.AS_OF - datetime.fromisoformat(called_at.replace("Z", "+00:00"))
-                   .astimezone(timezone.utc).date()).days
-            if age > 60:
-                signals.append(f"- Signal: the selected call excerpt {import_id} is {age} days old as of {AS_OF}. "
-                               f"{note} {run}")
-        self.assertEqual(lines[:len(signals)], signals)
-        self.assertEqual(sum(line.startswith("- Signal: ") for line in lines), len(signals))
-        rest = lines[len(signals):]
-        self.assertEqual(sorted(line for line in rest if all(ref.startswith("[crm/") for ref in citations(line))),
-                         sorted(stated))
-        for line in set(rest) - set(stated) - {excerpt}:
-            self.assertTrue(line.startswith(varied.DERIVED), line[:80])
+        self.assertIn(f"  Calls: one transcript excerpt was read, {word} {cited[0]} to {cited[1]} of {len(found)}. "
+                      "The rest of that call and every other call were not read.", card["NOT READ"])
+        self.assertIn("  Slack: not requested for this card.", card["NOT READ"])
+        # The CRM values and signals are those of the rows. An old call adds the last signal, a missing time none.
+        wanted = varied.expected({**rows, "calls": [], "slack": []}, brief)
+        self.assertEqual(card["ATTENTION"], wanted["signals"] + varied.stale_call([(note, called_at)], brief))
+        varied.hold_values(self, card, wanted["fixed"], (("Opportunity", "opportunities", wanted["opportunities"]),
+                                                         ("Contact", "contacts", wanted["contacts"])))
         # What was not selected is nowhere in the saved result, as written or as an escaped literal.
         kept = "\0".join([body, *strings([list(row) for _, row in rows["crm"]])])
         saved = "\0".join(strings(brief))
@@ -257,12 +241,7 @@ class BookCallsTests(unittest.TestCase):
                   if len(unit["text"].strip()) >= 12 and unit["text"] not in kept]
         self.assertEqual([text for text in hidden if text in saved or escaped(text) in saved], [])
         self.assertNotIn("original_text", saved)
-        # The checker returns the brief unchanged and refuses each way of spoiling it.
-        self.assertEqual(check_brief(brief["text"], evidence), brief["text"])
-        for spoiled, candidate in corruptions(brief["text"]):
-            with self.subTest(account=account_id, corruption=spoiled), self.assertRaises(BriefRejected):
-                check_brief(candidate, evidence)
-        return brief, excerpt, hidden
+        return brief, hidden
 
     def test_every_book_transcript_is_briefed_or_refused_for_a_documented_reason(self):
         self.assertGreaterEqual(len(varied.BOOKS), 1)
@@ -299,15 +278,7 @@ class BookCallsTests(unittest.TestCase):
                                       f"{shape['transcript']['text'][:120]!r}")
                         self.assertEqual((imported["status"], imported["created"], imported["reassigned"]),
                                          ("imported", True, False))
-                        _, excerpt, hidden = self.brief(runtime, rows, imported, raw, kind, called_at=called_at)
-                        # Speaker names survive: each label of the quoted part is in the brief's literal.
-                        found = units(raw.decode(), kind)[:imported["cited_range"]["last"]]
-                        quoted = "\n".join(unit["text"] for unit in found)
-                        # An identifier with a space in it is a speaker's name, as Webex writes it.
-                        named = [unit["cue_id"] for unit in found if unit["cue_id"] and " " in unit["cue_id"]]
-                        for speaker in speakers(quoted) | set(named):
-                            self.assertIn(escaped(speaker), excerpt)
-                        searched += len(hidden)
+                        searched += len(self.brief(runtime, rows, imported, raw, kind, called_at=called_at)[1])
         # The search for unselected text had something to look for.
         self.assertGreater(searched, 0)
 
@@ -337,7 +308,7 @@ class BookCallsTests(unittest.TestCase):
                 other = self.import_call(runtime, "acc-300", second, two)
                 self.assertEqual({row["import_id"] for row in self.imports(runtime) if row["active"]},
                                  {other["import_id"]})
-                brief, _, _ = self.brief(runtime, here, other, second, two)
+                brief, _ = self.brief(runtime, here, other, second, two)
                 saved = "\0".join(strings(brief))
                 texts = {unit["text"] for unit in units(second.decode(), two)}
                 self.assertEqual([unit["text"] for unit in units(first.decode(), one) if len(unit["text"]) >= 12
@@ -418,22 +389,23 @@ class BookCallsTests(unittest.TestCase):
         cues = ("\ufeffWEBVTT\r\n\r\nintro\r\n00:01.000 --> 00:02.000\r\nDana: hello\r\nworld\r\n\r\n"
                 "00:02.000 --> 00:03.500\r\nLee: yes\r\n").encode()
         with self.runtime("endings") as runtime:
-            for number, kind, raw, expected, literal in (
+            for number, kind, raw, expected, sentences in (
                     (400, "txt", text, [(1, "Dana: Caf\u00e9 at nine.", None, None, None), (2, "", None, None, None),
                                         (3, "Lee: Agreed.", None, None, None)],
-                     r'It says "Dana: Caf\u00e9 at nine.\n\nLee: Agreed.".'),
+                     [("Dana: Caf\u00e9 at nine.", None), ("Lee: Agreed.", None)]),
                     (401, "vtt", cues, [(1, "Dana: hello\nworld", "intro", 1000, 2000),
                                         (2, "Lee: yes", None, 2000, 3500)],
-                     r'It says "Dana: hello\nworld\nLee: yes".')):
+                     [("Dana: hello", "intro"), ("world", "intro"), ("Lee: yes", None)])):
                 rows = varied.demo_rows(number, PLAIN)
                 load_crm(runtime.directory, rows)
                 with self.subTest(kind=kind):
                     imported = self.import_call(runtime, f"acc-{number}", raw, kind)
-                    brief, excerpt, _ = self.brief(runtime, rows, imported, raw, kind)
+                    brief, _ = self.brief(runtime, rows, imported, raw, kind)
                     record = next(row for row in brief["evidence"]["records"] if "manifest" in row)
                     self.assertEqual([tuple(unit[key] for key in ("index", "text", "cue_id", "start_ms", "end_ms"))
                                       for unit in record["manifest"]["units"]], expected)
-                    self.assertIn(literal, excerpt)
+                    self.assertEqual([(unit["text"], unit["speaker"]) for unit in brief["units"]
+                                      if unit["kind"] == "sentence"], sentences)
                     # The stored original is the file as given, mark and endings included.
                     full = inspect_import(runtime.imports_path, imported["import_id"],
                                           crm_binding=runtime.calls_binding, full=True)
@@ -448,7 +420,7 @@ class BookCallsTests(unittest.TestCase):
             rows = varied.demo_rows(number, PLAIN)
             load_crm(runtime.directory, rows)
             imported = self.import_call(runtime, f"acc-{number}", export(size), "vtt")
-            brief, _, _ = self.brief(runtime, rows, imported, export(size), "vtt")
+            brief, _ = self.brief(runtime, rows, imported, export(size), "vtt")
             record = next(row for row in brief["evidence"]["records"] if "manifest" in row)
             return serialized({"body": record["body"], "units": record["manifest"]["units"]}), serialized(record)
 

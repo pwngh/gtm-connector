@@ -23,8 +23,7 @@ class CLITests(unittest.TestCase):
         self.state = Path(self.directory.name).resolve() / "state"
 
     def run_cli(self, *arguments, database=None, state=None, json_output=True):
-        location = ([] if arguments[0] == "evaluate" else
-                    ["--db", str(database or self.database)]
+        location = (["--db", str(database or self.database)]
                     if arguments[0] in ("seed", "accounts", "account")
                     else ["--state-dir", str(state or self.state)])
         return subprocess.run(
@@ -62,42 +61,37 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(summary["notes_without_scope"]["status"], 403)
                 self.assertIn("calls:read", summary["notes_without_scope"]["message"])
                 self.assertEqual(summary["empty_notes"], [])
-                conflict = summary["conflicting_sources"]
-                self.assertEqual(conflict["opportunity"]["stage"], "closed_won")
-                self.assertIn("has not approved", conflict["note"]["body"])
+                self.assertFalse({"conflicting_sources", "contradiction_flags", "uncited_candidate_rejected"}
+                                 & set(summary))
                 self.assertEqual(summary["injection_note"], {
                     "record_ref": "calls/call_notes/note-007", "activities_created": 0
                 })
                 self.assertEqual(summary["idempotent_write"]["requests"], 2)
                 self.assertEqual(summary["idempotent_write"]["activities"], 1)
                 self.assertEqual(summary["rate_limit"]["status"], 429)
-                self.assertEqual(summary["audit_rows"], 14)
+                self.assertEqual(summary["audit_rows"], 12)
                 self.assertEqual(Path(summary["audit_path"]), self.state / "audit.sqlite3")
                 rows = self.json_result(self.run_cli("audit", "--brief", summary["brief_id"]))
-                self.assertEqual(len(rows), 14)
+                self.assertEqual(len(rows), 12)
                 self.assertEqual({row["brief_id"] for row in rows}, {summary["brief_id"]})
                 self.assertEqual(sum(row["http_status"] == 403 for row in rows), 1)
                 self.assertEqual(sum(row["http_status"] == 429 for row in rows), 1)
                 self.assertFalse(any(row["status"] == "pending" for row in rows))
                 self.assertEqual(summary["brief_audit_rows"], 9)
-                self.assertEqual(len(summary["contradiction_flags"]), 1)
-                self.assertIn("[crm/opportunities/opp-003] [calls/call_notes/note-003]",
-                              summary["contradiction_flags"][0])
                 full, restricted = summary["briefs"]
                 self.assertEqual(full["account_id"], "acc-003")
-                self.assertIn("closed_won", full["text"])
-                self.assertIn("Procurement has not approved this renewal.", full["text"])
-                self.assertIn("[calls/call_notes/note-003]", full["text"])
+                self.assertTrue(full["text"].startswith("DEAL CARD: Thornfield Wren LLP (acc-003) as of 2027-01-15\n"))
+                self.assertIn('      "We will have the order form countersigned by January 30."',
+                              full["text"].splitlines())
+                self.assertIn("  Slack: not requested for this card.", full["text"].splitlines())
                 self.assertEqual(restricted["account_id"], "acc-001")
-                self.assertIn("Call notes were unavailable because the token lacks calls:read.",
-                              restricted["text"])
+                self.assertIn("  Calls: not read. The grant lacks calls:read.", restricted["text"].splitlines())
                 self.assertEqual(summary["injection_brief"]["record_ref"], "calls/call_notes/note-007")
                 self.assertEqual(summary["injection_brief"]["activities_created"], 0)
-                self.assertTrue(summary["uncited_candidate_rejected"])
                 generated_briefs.extend([full["brief_id"], restricted["brief_id"],
                                          summary["injection_brief"]["brief_id"]])
         all_rows = self.json_result(self.run_cli("audit"))
-        self.assertEqual(len(all_rows), 46)
+        self.assertEqual(len(all_rows), 42)
         self.assertEqual(len(set(generated_briefs)), 6)
         for identifier in generated_briefs:
             rows = [row for row in all_rows if row["brief_id"] == identifier]
@@ -107,16 +101,12 @@ class CLITests(unittest.TestCase):
         self.assertEqual(self.json_result(self.run_cli("audit", "--brief", "unknown-brief")), [])
         owner = json.loads((self.state / "owner.json").read_text())
         self.assertNotIn(owner["owner_secret"], json.dumps([first, second, all_rows]))
-        usage = self.json_result(self.run_cli("usage"))
-        self.assertEqual(usage["calls"], {"total": 46, "ok": 40, "error": 6, "pending": 0})
-        self.assertEqual({row["tool"]: row["total"] for row in usage["by_tool"]},
-                         {"search_accounts": 2, "get_account": 18, "read_call_notes": 14,
-                          "list_opportunities": 8, "log_activity": 4})
-        self.assertEqual(usage["model_tokens"], {"saved_briefs": 6, "unknown_briefs": 0,
-                                                "input_tokens": 0, "output_tokens": 0})
-        scoped = self.json_result(self.run_cli("usage", "--brief", generated_briefs[0]))
-        self.assertEqual(scoped["calls"]["total"], 3)
-        self.assertEqual(len(scoped["briefs"]), 1)
+        by_tool = {}
+        for row in all_rows:
+            by_tool[row["tool"]] = by_tool.get(row["tool"], 0) + 1
+        self.assertEqual(by_tool, {"search_accounts": 2, "get_account": 18, "read_call_notes": 12,
+                                   "list_opportunities": 6, "log_activity": 4})
+        self.assertEqual(sum(row["status"] == "error" for row in all_rows), 6)
 
     def test_accounts_past_one_hundred_matches_show_the_first_hundred_and_say_so(self):
         self.json_result(self.run_cli("seed"))
@@ -124,7 +114,7 @@ class CLITests(unittest.TestCase):
         def add(rows):
             with closing(sqlite3.connect(self.database)) as connection, connection:
                 connection.executemany(
-                    "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'healthy', '')", rows)
+                    "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'USD', 'healthy', '')", rows)
 
         add([(f"acc-{number}", f"Invented account {300 - number}") for number in range(101, 171)])
         complete = self.run_cli("accounts")
@@ -163,34 +153,29 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("opportunities", account)
         self.assertNotIn("IGNORE PREVIOUS INSTRUCTIONS", json.dumps(account))
 
-    def test_optional_slack_verification_and_evaluation_keep_follow_up_grounded(self):
+    def test_optional_slack_verification_reads_slack_under_its_own_scope(self):
         summary = self.json_result(self.run_cli("verify", "--with-slack"))
         self.assertEqual(summary["workflow"], "crm-calls-slack")
-        self.assertEqual(summary["audit_rows"], 18)
+        self.assertEqual(summary["audit_rows"], 16)
         self.assertEqual(summary["brief_audit_rows"], 12)
         self.assertEqual(summary["slack"]["record"]["record_ref"], "slack/messages/msg-003")
         for direction in ("crm_without_slack", "slack_without_crm", "slack_without_calls"):
             self.assertEqual(summary["slack"][direction]["status"], 403)
-        self.assertEqual(len(summary["contradiction_flags"]), 2)
         self.assertEqual(summary["injection_brief"]["activities_created"], 0)
         for brief in summary["briefs"]:
-            self.assertIn(brief["proposed_follow_up"], brief["text"].splitlines())
+            self.assertNotIn("proposed_follow_up", brief)
             receipts = self.json_result(self.run_cli("audit", "--brief", brief["brief_id"]))
             self.assertEqual([row["tool"] for row in receipts], [
                 "get_account", "list_opportunities", "read_call_notes", "read_slack_messages"])
-        restricted = summary["briefs"][1]
-        self.assertIn("lacks slack:read", restricted["text"])
-        self.assertNotIn("slack/messages/", restricted["text"])
-        usage = self.json_result(self.run_cli("usage"))
-        self.assertEqual(usage["calls"], {"total": 30, "ok": 23, "error": 7, "pending": 0})
-        self.assertEqual(usage["model_tokens"]["input_tokens"], 0)
-        report = self.json_result(self.run_cli("evaluate", "--with-slack"))
-        self.assertEqual(report["status"], "passed")
-        self.assertEqual(report["workflow"], "crm-calls-slack")
-        self.assertGreater(report["expected_facts"], 188)
-        self.assertEqual(report["facts_cited_correctly"], report["expected_facts"])
-        self.assertEqual(report["audit_rows"], 80)
-        self.assertEqual(report["activities_created"], 0)
+        full, restricted = summary["briefs"]
+        # The message's mention, link, and figure reach the card as inert quoted text.
+        self.assertIn('      "Heads up [mention channel]: their general counsel will not sign until the zero-retention '
+                      'and client-consent rider is approved."', full["text"].splitlines())
+        self.assertNotIn("<!channel>", full["text"])
+        self.assertNotIn("300,000", full["text"].split("SAID", 1)[0])
+        self.assertIn("  Slack: not read. The grant lacks slack:read.", restricted["text"].splitlines())
+        rows = self.json_result(self.run_cli("audit"))
+        self.assertEqual((len(rows), sum(row["status"] == "error" for row in rows)), (28, 7))
 
     def test_missing_account_exits_two_without_json_on_stdout(self):
         self.json_result(self.run_cli("seed"))
@@ -219,77 +204,78 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("Traceback", result.stderr)
         self.assertFalse(missing.exists())
 
-    def test_usage_does_not_create_missing_state(self):
-        missing = Path(self.directory.name) / "missing-state"
-        result = self.run_cli("usage", state=missing)
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("audit database not found", result.stderr)
-        self.assertFalse(missing.exists())
-
-    def test_evaluate_reports_twenty_account_fixture_score(self):
-        result = self.json_result(self.run_cli("evaluate"))
-        self.assertEqual(result["status"], "passed")
-        self.assertEqual(result["accounts"], 20)
-        self.assertEqual(result["expected_facts"], 188)
-        self.assertEqual(result["facts_found"], 188)
-        self.assertEqual(result["facts_cited_correctly"], 188)
-        self.assertEqual(result["facts_invented"], 0)
-        self.assertEqual(result["audit_rows"], 60)
-        self.assertEqual(result["activities_created"], 0)
-        self.assertFalse(self.state.exists())
-
-    def test_brief_text_displays_the_checked_draft_and_requested_date(self):
+    def test_brief_text_displays_the_saved_card_and_requested_date(self):
         result = self.run_cli("brief", "acc-001", "--as-of", "2027-02-01", json_output=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
-        self.assertRegex(result.stdout, r"\ABrief: brief-[0-9a-f]{32}\nAs of: 2027-02-01\n\n")
-        identifier = result.stdout.splitlines()[0].removeprefix("Brief: ")
+        self.assertRegex(result.stdout, r"\nBrief: brief-[0-9a-f]{32}\nResolve any number: gtm-connector trace "
+                                        r"brief-[0-9a-f]{32} N --state-dir \S+\n\Z")
+        identifier = result.stdout.splitlines()[-2].removeprefix("Brief: ")
         artifact = json.loads((self.state / "briefs" / (identifier + ".json")).read_text())
-        self.assertEqual(result.stdout.split("\n\n", 1)[1].strip(), artifact["text"].strip())
-        self.assertIn("Renewal is due on 2027-02-01.", result.stdout)
+        self.assertEqual(result.stdout.split("\nBrief: ", 1)[0], artifact["text"])
+        self.assertIn("  Renewal date: 2027-02-01, today [1]", result.stdout.splitlines())
         rows = self.json_result(self.run_cli("audit", "--brief", identifier))
         self.assertEqual(len(rows), 3)
 
-    def test_json_brief_and_offline_checker_reject_uncited_and_misattributed_edits(self):
-        brief = self.json_result(self.run_cli("brief", "acc-001", "--without-calls", "--json"))
-        self.assertEqual(brief["status"], "accepted")
+    def test_json_brief_and_trace_resolve_each_number_from_saved_evidence(self):
+        brief = self.json_result(self.run_cli("brief", "acc-001", "--without-calls"))
+        self.assertEqual(set(brief), {"schema_version", "brief_id", "account_id", "as_of", "status", "sources",
+                                      "text", "units", "evidence"})
+        self.assertEqual((brief["schema_version"], brief["status"]), (2, "accepted"))
         self.assertEqual(brief["evidence"]["notes_status"], "denied")
-        self.assertEqual(brief["model_usage"], {"model": None, "input_tokens": 0, "output_tokens": 0})
-        self.assertIn("Call notes were unavailable", brief["text"])
+        self.assertIn("  Calls: not read. The grant lacks calls:read.", brief["text"].splitlines())
         saved = self.state / "briefs" / (brief["brief_id"] + ".json")
         original_artifact = saved.read_bytes()
-        candidate = Path(self.directory.name) / "candidate.txt"
-        candidate.write_text(brief["text"])
-        valid = self.json_result(self.run_cli("check-brief", brief["brief_id"], str(candidate)))
-        self.assertEqual(valid, {"status": "valid", "brief_id": brief["brief_id"]})
-        for changed in (brief["text"] + "The renewal was approved.\n",
-                        brief["text"].replace("[crm/accounts/acc-001]", "[crm/accounts/acc-030]")):
-            with self.subTest(candidate=changed):
-                candidate.write_text(changed)
-                rejected = self.run_cli("check-brief", brief["brief_id"], str(candidate))
-                self.assertEqual(rejected.returncode, 4)
+        traced = self.json_result(self.run_cli("trace", brief["brief_id"], "3"))
+        self.assertEqual(set(traced), {"brief_id", "account_id", "n", "kind", "source", "record_ref", "receipt",
+                                       "fields"})
+        self.assertEqual((traced["brief_id"], traced["account_id"], traced["n"], traced["kind"], traced["record_ref"]),
+                         (brief["brief_id"], "acc-001", 3, "record", "crm/opportunities/opp-001"))
+        self.assertEqual(traced["fields"]["amount_cents"], 2_050_000)
+        receipt = next(row for row in brief["evidence"]["receipts"] if row["tool"] == "list_opportunities")
+        self.assertEqual(traced["receipt"], {"audit_id": receipt["audit_id"], "tool": "list_opportunities",
+                                             "status": "ok", "http_status": 200})
+        human = self.run_cli("trace", brief["brief_id"], "1", json_output=False)
+        self.assertEqual(human.returncode, 0, human.stderr)
+        self.assertIn("Record\tcrm/accounts/acc-001\n", human.stdout)
+        self.assertIn("(get_account, ok)", human.stdout)
+        for number in ("0", "4", "-1"):
+            with self.subTest(number=number):
+                rejected = self.run_cli("trace", brief["brief_id"], number)
+                self.assertEqual(rejected.returncode, 2)
                 self.assertEqual(rejected.stdout, "")
-                self.assertIn("unsupported", rejected.stderr)
+                self.assertIn("This card has numbers 1 to 3.", rejected.stderr)
                 self.assertNotIn("Traceback", rejected.stderr)
-                self.assertEqual(saved.read_bytes(), original_artifact)
+        self.assertEqual(saved.read_bytes(), original_artifact)
+
+    def test_a_spoken_number_traces_to_its_sentence_speaker_and_source_digest(self):
+        brief = self.json_result(self.run_cli("brief", "acc-003", "--with-slack"))
+        traced = self.json_result(self.run_cli("trace", brief["brief_id"], "5"))
+        self.assertEqual({key: traced[key] for key in ("kind", "source", "record_ref", "speaker", "role", "basis",
+                                                       "at", "sanitizer_version")},
+                         {"kind": "sentence", "source": "calls", "record_ref": "calls/call_notes/note-003b",
+                          "speaker": "Marian Holt", "role": "customer", "basis": "label matches contact [2]",
+                          "at": "2027-01-12T15:00:00Z", "sanitizer_version": 1})
+        self.assertRegex(traced["raw_sha256"], r"\A[0-9a-f]{64}\Z")
+        self.assertIn(json.dumps(traced["text"]), brief["text"])
+        human = self.run_cli("trace", brief["brief_id"], "7", json_output=False)
+        self.assertIn("Role\tseller (listed seller identity)\n", human.stdout)
+        self.assertIn("[mention channel]", human.stdout)
+        self.assertNotIn("<!channel>", human.stdout)
 
     def test_invalid_brief_inputs_and_missing_saved_evidence_use_distinct_exits(self):
         for arguments, expected_exit in ((("brief", "acc-missing"), 2),
                                          (("brief", "acc-999"), 5),
-                                         (("brief", "acc-001", "--as-of", "2027-02-30"), 2)):
+                                         (("brief", "acc-001", "--as-of", "2027-02-30"), 2),
+                                         (("trace", "brief-" + "0" * 32, "1"), 2),
+                                         (("trace", "not-a-brief", "1"), 2),
+                                         (("trace", "brief-" + "0" * 32, "one"), 2)):
             with self.subTest(arguments=arguments):
                 rejected = self.run_cli(*arguments)
                 self.assertEqual(rejected.returncode, expected_exit)
                 self.assertEqual(rejected.stdout, "")
                 self.assertTrue(rejected.stderr.strip())
                 self.assertNotIn("Traceback", rejected.stderr)
-        candidate = Path(self.directory.name) / "candidate.txt"
-        candidate.write_text("An unsupported sentence.\n")
-        missing = self.run_cli("check-brief", "brief-" + "0" * 32, str(candidate))
-        self.assertEqual(missing.returncode, 1)
-        self.assertEqual(missing.stdout, "")
-        self.assertNotIn("Traceback", missing.stderr)
         self.assertFalse((self.state / "briefs").exists())
 
     def test_serve_prints_endpoints_and_shuts_down_on_interrupt(self):

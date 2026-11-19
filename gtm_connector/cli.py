@@ -26,19 +26,17 @@ COMMANDS = {
     "mcp": ("Run a local stdio MCP bridge to a running connector for an assistant app.",
             "mcp stdio --state-dir var/v2 --scope crm:read"),
     "completion": ("Print shell completion without reading local state.", "completion bash"),
-    "demo": ("Follow Morgan Reed through a renewal brief using invented demo data.", "demo"),
-    "verify": ("Check scopes, citations, injection handling, retries, and rate limits on invented data.",
+    "demo": ("Open one invented law-firm renewal as a Deal card.", "demo"),
+    "verify": ("Check scopes, injection handling, retries, and rate limits on invented data.",
                "verify --with-slack"),
-    "brief": ("Create a cited renewal brief from authorized source reads.", "brief acc-003 --with-slack"),
+    "brief": ("Print the Deal card for one account from authorized source reads.", "brief acc-003 --with-slack"),
+    "trace": ("Resolve one number on a saved card to its record and audit receipt.",
+              "trace brief-REPLACE 4 --state-dir var/renewal-demo"),
     "serve": ("Start the local HTTPS connector and authorization server.", "serve --state-dir var/v2"),
     "seed": ("Create the local CRM fixture without replacing existing records.", "seed --db var/v2/crm.sqlite3"),
-    "accounts": ("Search the selected CRM by account name.", "accounts --query Cedarline"),
+    "accounts": ("Search the selected CRM by account name.", "accounts --query Thornfield"),
     "account": ("Read one account, its contacts, and available contracts.", "account acc-003"),
     "audit": ("Read tool-call receipts from the local audit database.", "audit --state-dir var/renewal-demo"),
-    "usage": ("Summarize tool calls and saved model token counts.", "usage --state-dir var/renewal-demo"),
-    "evaluate": ("Check briefs for twenty fixed accounts in temporary state.", "evaluate --with-slack --json"),
-    "check-brief": ("Check candidate text against a saved evidence snapshot.",
-                    "check-brief brief-REPLACE candidate.txt --state-dir var/renewal-demo"),
 }
 EXIT_NAMES = {1: "local_failure", 2: "usage_error", 3: "refused", 4: "check_failed", 5: "upstream_failure",
               130: "interrupted"}
@@ -249,7 +247,7 @@ def _calls_commands(command):
 
 def build_parser():
     parser = Parser(prog="gtm-connector",
-                    description="Create cited renewal briefs from scoped CRM, calls, and Slack reads.",
+                    description="Build a Deal card for a renewal from scoped CRM, call, and Slack reads.",
                     epilog="Example: gtm-connector demo\n"
                            "Documentation: https://github.com/pwngh/gtm-connector#readme",
                     formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -281,7 +279,7 @@ def build_parser():
             if name != "seed":
                 command.add_argument("--state-dir", type=Path, action=StateDirectory,
                                      help="Use this private Salesforce state folder (default: var/salesforce).")
-        elif name not in ("evaluate", "completion", "salesforce"):
+        elif name not in ("completion", "salesforce"):
             state_dir = {"demo": "var/renewal-demo", "verify": "var/verification"}.get(name, "var/v2")
             command.add_argument("--state-dir", type=Path, default=Path(state_dir), action=StateDirectory,
                                  help=f"Use this private state folder (default: {state_dir}).")
@@ -315,13 +313,8 @@ def build_parser():
         if name in ("brief", "salesforce"):
             command.add_argument("--as-of", help="Use YYYY-MM-DD for renewal planning. Salesforce uses today; "
                                  "fixtures use 2027-01-15.")
-        if name in ("verify", "brief", "evaluate"):
-            command.add_argument("--with-slack", action="store_true",
-                                 help="Include Slack evidence and a checked follow-up proposal.")
-        if name in ("brief", "evaluate"):
-            command.add_argument("--adapter", choices=("fixture", "ollama"), default="fixture",
-                                 help="Choose the fixture drafter or an already installed local model.")
-            command.add_argument("--model", help="Name an already installed local Ollama model.")
+        if name in ("verify", "brief"):
+            command.add_argument("--with-slack", action="store_true", help="Include Slack messages.")
         if name == "mcp":
             command.add_argument("action", choices=("stdio",),
                                  help="Serve MCP on stdin and stdout. An assistant app starts this command.")
@@ -339,7 +332,7 @@ def build_parser():
                                       "configuration file. A backup is saved first.")
         if name == "completion":
             command.add_argument("shell", choices=("bash", "zsh", "fish"), help="Choose the shell to configure.")
-        if name in ("audit", "usage"):
+        if name == "audit":
             command.add_argument("--brief", help="Select this brief or run correlation ID.")
             command.add_argument("--tool", help="Select the exact tool name.")
             command.add_argument("--caller", help="Select a full credential fingerprint or anonymous.")
@@ -349,9 +342,9 @@ def build_parser():
             command.add_argument("--follow", action="store_true", help="Follow new or changed results until Ctrl-C.")
         if name == "brief":
             command.add_argument("--without-calls", action="store_true", help="Omit the calls:read grant.")
-        if name == "check-brief":
+        if name == "trace":
             command.add_argument("brief_id", help="Select the saved brief identifier.")
-            command.add_argument("candidate", type=Path, help="Read candidate text from this file.")
+            command.add_argument("number", type=int, help="Select a number printed on its card.")
     return parser
 
 
@@ -428,7 +421,22 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
                 "\n\nLimits\n" + "\n".join(result["limits"]) +
                 "\n\nDocumentation\n" + "\n".join(result["documentation"]))
     if command == "brief":
-        return f"Brief: {result['brief_id']}\nAs of: {result['as_of']}\n\n{result['text']}"
+        return (f"{result['text']}\nBrief: {result['brief_id']}\n"
+                f"Resolve any number: gtm-connector trace {result['brief_id']} N" +
+                (f" --state-dir {shlex.quote(str(state_dir))}" if state_dir is not None else ""))
+    if command == "trace":
+        receipt = result["receipt"]
+        rows = [["Number", result["n"]], ["Kind", result["kind"]], ["Record", result["record_ref"]],
+                ["Receipt", f"{receipt['audit_id']} ({receipt['tool']}, {receipt['status']})"]]
+        if result["kind"] == "sentence":
+            rows += [["Text", json.dumps(result["text"], ensure_ascii=False)],
+                     ["Speaker", result["speaker"] or "no speaker label"],
+                     ["Role", f"{result['role']} ({result['basis']})"], ["Time", result["at"] or "Missing"],
+                     ["Source text SHA-256", result["raw_sha256"]],
+                     ["Neutralizer version", result["sanitizer_version"]]]
+        else:
+            rows += [[key, "Missing" if value in (None, "") else value] for key, value in result["fields"].items()]
+        return table(["FIELD", "VALUE"], rows)
     if command == "seed":
         return table(["RECORDS", "COUNT"], list(result["counts"].items()))
     if command == "accounts":
@@ -454,36 +462,18 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
                      [[row["started_at"], row["tool"], row["token_id"], row["status"],
                        round(row["elapsed_ms"], 2) if row["elapsed_ms"] is not None else None,
                        row["audit_id"], row["error"] or ""] for row in result])
-    if command == "usage":
-        return (table(["TOOL", "TOTAL", "OK", "ERROR", "PENDING"],
-                      [[row[key] for key in ("tool", "total", "ok", "error", "pending")]
-                       for row in result["by_tool"]]) + "\n\n" + table(
-                           ["MODEL USAGE", "COUNT"], list(result["model_tokens"].items())))
-    if command == "check-brief":
-        return f"Valid: {result['brief_id']}. Every candidate statement is supported by its saved evidence."
-    if command == "evaluate":
-        return table(["MEASURE", "RESULT"], [
-            ["Status", result["status"]], ["Accounts", result["accounts"]],
-            ["Claims found", f"{result['facts_found']}/{result['expected_facts']}"],
-            ["Claims cited", f"{result['facts_cited_correctly']}/{result['expected_facts']}"],
-            ["Invented claims", result["facts_invented"]], ["Audit receipts", result["audit_rows"]],
-            ["Activities created", result["activities_created"]]])
     if command == "demo":
-        account = result["account"]
-        return (f"{safe_text(result['rep']['name'])} prepares {safe_text(account['name'])}'s renewal.\n"
-                "Sources: CRM, call notes, and Slack use invented demo fixtures.\n"
-                f"Found {safe_text(account['name'])}. Renewal: {safe_text(account['renewal_date'])}.\n"
-                f"Call-note access was refused (HTTP {result['denied_read']['status']}) "
-                "because the CRM-only grant lacks calls:read.\n"
-                "The local demo owner grants read access to CRM, calls, and Slack.\n\n"
-                f"Brief: {result['brief']['brief_id']}\nAs of: {result['brief']['as_of']}\n\n"
-                f"{result['brief']['text']}\n"
-                "No activities were created. The follow-up remains a proposal.")
+        brief = result["brief"]
+        return (f"Call-note access was refused (HTTP {result['denied_read']['status']}) for a grant without "
+                "calls:read.\nEvery source below is an invented demo fixture.\n\n"
+                f"{brief['text']}\nBrief: {brief['brief_id']}\n"
+                f"Resolve any number: gtm-connector trace {brief['brief_id']} N"
+                f" --state-dir {shlex.quote(str(state_dir))}")
     if command == "verify":
         return ("Connector checks on invented demo data\n\n" + result["briefs"][0]["text"] + "\n" +
                 table(["CHECK", "RESULT"], [["Read without calls:read", "Denied (HTTP 403)"],
                     ["Injected instruction", "Quoted as data; zero activities created"],
-                    ["Uncited claim", "Rejected"], ["Retried write", "One activity"],
+                    ["Retried write", "One activity"],
                     ["Rate limit", "HTTP 429"], ["Audit receipts", result["audit_rows"] + result["brief_audit_rows"]]]))
     raise ValueError("No display is available for this command.")
 
@@ -748,17 +738,6 @@ def _print_event(event, as_json):
         if event["reason"]:
             fields.append(f"reason={event['reason']}")
         print(" ".join(safe_text(field) for field in fields), flush=True)
-
-
-def _progress(as_json):
-    def report(completed, total, status):
-        if as_json:
-            print(json.dumps({"progress": {"command": "evaluate", "completed": completed,
-                                           "total": total, "status": status}}), file=sys.stderr, flush=True)
-        else:
-            print(f"Evaluating briefs: {completed}/{total}" + (f" ({status})" if status else ""),
-                  file=sys.stderr, flush=True)
-    return report
 
 
 def _salesforce_progress(as_json):
@@ -1126,15 +1105,6 @@ def _run(args, argv):
                              on_refresh=None if args.json else _sf_refresh_notice(False))
     if args.command in ("accounts", "account") and crm_reader is not None:
         return _salesforce_account_read(args, crm_reader)
-    adapter = None
-    if args.command in ("brief", "evaluate"):
-        if args.adapter == "fixture" and args.model is not None:
-            raise ValueError("--model requires --adapter ollama")
-        if args.adapter == "ollama":
-            if not args.model:
-                raise ValueError("--adapter ollama requires --model with an installed local model")
-            from .ollama import OllamaAdapter
-            adapter = OllamaAdapter(args.model)
     if args.command == "doctor":
         from .doctor import doctor
         return doctor(args.state_dir)
@@ -1142,25 +1112,16 @@ def _run(args, argv):
         from .connections import connect
         return connect(args.state_dir, args.app, args.scope, transport=args.transport,
                        config_file=args.config_file)
-    if args.command == "evaluate":
-        from .evaluation import run_evaluation
-        return run_evaluation(adapter=adapter, include_slack=args.with_slack, progress=_progress(args.json),
-                              command=sys.orig_argv if argv is None else [sys.executable, "-m", "gtm_connector", *argv])
-    if args.command in ("usage", "audit"):
+    if args.command == "audit":
+        from .audit import read_audit
+        from .inspection import follow_audit
         filters = {key: getattr(args, key) for key in ("tool", "caller", "since", "until", "status")}
         if args.follow:
-            from .inspection import follow_audit, follow_usage
-            stream = (follow_audit(args.state_dir / "audit.sqlite3", args.brief, **filters)
-                      if args.command == "audit" else follow_usage(args.state_dir, args.brief, **filters))
-            for result in stream:
-                print(json.dumps(result, ensure_ascii=False) if args.json else
-                      human_result(args.command, [result] if args.command == "audit" else result), flush=True)
+            for result in follow_audit(args.state_dir / "audit.sqlite3", args.brief, **filters):
+                print(json.dumps(result, ensure_ascii=False) if args.json else human_result("audit", [result]),
+                      flush=True)
             return None
-        if args.command == "audit":
-            from .audit import read_audit
-            return read_audit(args.state_dir / "audit.sqlite3", args.brief, **filters)
-        from .usage import build_usage_report
-        return build_usage_report(args.state_dir, args.brief, **filters)
+        return read_audit(args.state_dir / "audit.sqlite3", args.brief, **filters)
     if args.command == "brief":
         from datetime import date
         from .briefing import create_brief
@@ -1183,12 +1144,10 @@ def _run(args, argv):
                 print(f"Sources: mixed. Calls use user-supplied transcript exports; {fixtures} demo fixtures.",
                       file=sys.stderr)
             return create_brief(runtime, args.account_id, include_calls=not args.without_calls,
-                                as_of=as_of,
-                                adapter=adapter, include_slack=args.with_slack)
-    if args.command == "check-brief":
-        from .briefing import check_saved_brief
-        check_saved_brief(args.state_dir, args.brief_id, args.candidate.read_text())
-        return {"status": "valid", "brief_id": args.brief_id}
+                                as_of=as_of, include_slack=args.with_slack)
+    if args.command == "trace":
+        from .briefing import trace_saved
+        return trace_saved(args.state_dir, args.brief_id, args.number)
     if args.command == "demo":
         from .demo import run
         return run(args.state_dir)
@@ -1285,7 +1244,7 @@ def _failure(exc, args):
             (getattr(exc, "code", None) == "source_identity_mismatch"
              and getattr(args, "slack_backend", None) == "slack")):
         return _slack_source_failure(exc, args)
-    from .citations import BriefRejected
+    from .units import BriefRejected
     import sqlite3
     command = args.command
     next_command = f"gtm-connector {command} --help"
@@ -1304,8 +1263,7 @@ def _failure(exc, args):
         code = 4
     elif getattr(exc, "code", None) in ("salesforce_environment_mismatch", "source_identity_mismatch"):
         code = 3
-    elif (type(exc).__name__ in ("SalesforceReadError", "BriefingError", "OllamaError",
-                                   "InspectorConnectionError") or
+    elif (type(exc).__name__ in ("SalesforceReadError", "BriefingError", "InspectorConnectionError") or
           type(exc).__module__.startswith(("httpx", "httpcore"))):
         code = 2 if message.startswith("salesforce_invalid_configuration") else 5
     elif type(exc).__name__ == "StateInUseError":
@@ -1446,14 +1404,6 @@ def _main(argv):
         if args.command == "salesforce" and result["status"] != "passed":
             return _error("Salesforce checks failed. Apply the fix beside each failed step.", 4,
                           "gtm-connector salesforce check --help", as_json=args.json)
-        if args.command == "evaluate" and result["status"] != "passed":
-            retry = ["gtm-connector", "evaluate", "--adapter", args.adapter]
-            if args.model is not None:
-                retry += ["--model", args.model]
-            if args.with_slack:
-                retry += ["--with-slack"]
-            return _error("Evaluation failed. Inspect the result for failed cases.", 4,
-                          shlex.join([*retry, "--json"]), as_json=args.json)
         return 0
     except KeyboardInterrupt:
         if args.command == "slack":

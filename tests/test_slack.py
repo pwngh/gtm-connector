@@ -8,6 +8,7 @@ from pathlib import Path
 
 from gtm_connector import calls, slack, store
 from gtm_connector.audit import AuditLog
+from gtm_connector.seed import SELLERS
 
 
 def snapshot(connection):
@@ -47,16 +48,22 @@ class SlackTests(unittest.TestCase):
         for account in ("acc-005", "acc-missing", "acc-001' OR 1=1 --"):
             self.assertEqual(slack.read_slack_messages(self.connection, account), [])
 
-    def test_champion_departure_and_security_delay_remain_source_statements(self):
+    def test_the_showcase_message_keeps_its_raw_markup_figure_and_file_count(self):
         slack.seed(self.connection)
         self.assertEqual(slack.read_slack_messages(self.connection, "acc-002")[0]["body"],
                          "The renewal champion has left the team. A replacement owner has not been assigned.")
-        self.assertEqual(slack.read_slack_messages(self.connection, "acc-003")[0]["body"],
-                         "Security review is delayed. Procurement approval is still pending.")
+        [message] = slack.read_slack_messages(self.connection, "acc-003")
+        # The source keeps the text as written. Neutralizing it is the card's job.
+        self.assertEqual(message["body"], slack.SHOWCASE_TEXT)
+        for raw in ("<!channel>", "USD 300,000", "<https://files.thornfield-wren.example/rider-redline-v4.pdf|"):
+            self.assertIn(raw, message["body"])
+        self.assertEqual((message["files"], message["channel"]), (1, "acct-thornfield-wren"))
+        self.assertIn(message["author"], SELLERS)
+        self.assertEqual({row["files"] for row in snapshot(self.connection) if row["id"] != "msg-003"}, {0})
         with closing(store.connect(self.root / "crm.sqlite3")) as crm:
             store.initialize(crm)
             store.seed(crm)
-            self.assertEqual(store.list_opportunities(crm, "acc-003")[0]["stage"], "closed_won")
+            self.assertEqual(store.list_opportunities(crm, "acc-003")[0]["amount_cents"], 45_000_000)
             self.assertEqual(store.counts(crm)["activities"], 0)
 
     def test_fresh_seeds_match_and_reseeding_preserves_message_edits(self):

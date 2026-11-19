@@ -36,6 +36,9 @@ def initialize(connection: sqlite3.Connection) -> None:
         raise ValueError(
             "This is a legacy combined CRM/calls database; use a fresh database path."
         )
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(opportunities)")}
+    if columns and "currency" not in columns:
+        raise ValueError("This CRM database has no currency column; use a fresh database path.")
     statements = (
         """CREATE TABLE IF NOT EXISTS accounts (
             id TEXT PRIMARY KEY NOT NULL,
@@ -43,6 +46,7 @@ def initialize(connection: sqlite3.Connection) -> None:
             industry TEXT NOT NULL,
             renewal_date TEXT NOT NULL,
             arr_cents INTEGER NOT NULL CHECK (arr_cents >= 0),
+            currency TEXT CHECK (currency IS NULL OR currency GLOB '[A-Z][A-Z][A-Z]'),
             risk_status TEXT NOT NULL CHECK (risk_status IN ('healthy', 'at_risk')),
             risk_reason TEXT NOT NULL
         )""",
@@ -62,6 +66,7 @@ def initialize(connection: sqlite3.Connection) -> None:
                 'closed_won', 'closed_lost'
             )),
             amount_cents INTEGER NOT NULL CHECK (amount_cents >= 0),
+            currency TEXT CHECK (currency IS NULL OR currency GLOB '[A-Z][A-Z][A-Z]'),
             close_date TEXT NOT NULL
         )""",
         """CREATE TABLE IF NOT EXISTS activities (

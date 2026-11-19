@@ -1,6 +1,7 @@
 # Slack
 
-Sign in to a Slack app you already have, map one thread to one CRM account, then read it in a brief.
+Sign in to a Slack app you already have, map one thread to one CRM account, then read it onto a
+[Deal card](briefs.md).
 The connector creates no app, asks for no client secret, and accepts no pasted token. A failed live
 read never falls back to invented messages. The tests use invented responses.
 
@@ -82,11 +83,13 @@ gtm-connector brief acc-007 --with-slack --slack-backend slack \
 | Accepted messages | Plain messages, `bot_message`, `me_message`, `file_share`, `thread_broadcast`, and, as the selected parent only, the `tombstone` that Slack's system user leaves for a deleted message |
 | Refuse the whole read | Other hidden messages, edit or delete wrappers, other subtypes, and missing text |
 | Counted and left out | Files, attachments, and blocks |
-| Author labels | `Slack app`, `Slack participant`, `Unknown Slack author`, or `Deleted Slack message` |
+| Speaker on a card | The raw Slack user ID. A message from an app, a deleted message, or one with no user has no speaker label. |
+| Role on a card | `seller` when that user ID is listed in `sellers.json`, otherwise `unknown`. A Slack author is never a customer. |
 | Slack's rate policy | Slack limits some commercially distributed apps outside its Marketplace to one request per minute and 15 messages per request on this method. The connector cannot tell which [policy](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps/) applies. |
 
 - A read is not an archive. Earlier edits, deletions, and retention are unknown.
-- A live Slack brief saves `workflow_version: 5`, runs no model, and quotes every returned message.
+- Every returned message becomes whole-sentence units. The card shows the newest and counts the
+  rest, and its `NOT READ` section gives the files, attachments, and blocks that were left out.
 - Ctrl-C can wait for the read in flight. Windows is not supported.
 
 ## JSON results
@@ -151,40 +154,26 @@ A reason sets the exit code of a command, and is a step `code` in `slack check`.
 
 ## Invented messages in the demo
 
-`--with-slack` adds an account channel's invented Slack messages to a brief. It uses no Slack
+`--with-slack` adds an account channel's invented Slack messages to a card. It uses no Slack
 account, token, or network request.
 
 ```sh
 .venv/bin/python -m gtm_connector brief acc-003 --with-slack --json
-.venv/bin/python -m gtm_connector evaluate --with-slack
 .venv/bin/python -m gtm_connector verify --with-slack --state-dir var/slack-verification
 .venv/bin/python -m gtm_connector demo --state-dir var/renewal-demo   # always includes Slack
 ```
 
 - `read_slack_messages` requires `slack:read`. A Slack-only token cannot read CRM or call notes.
-- A Slack brief makes four audited reads and never requests `crm:write`. No model runs by default.
-- Messages live in `slack.sqlite3`. Their text is quoted as untrusted data.
-- There are 29 messages, `msg-001` through `msg-030` without `msg-005`. References look like
-  `slack/messages/msg-003`.
-- A four-read fixture brief saves `workflow_version: 2`. A missing version or `1` means three-read
-  evidence, which may hold no Slack records, receipts, or status. An unknown version fails.
-  Checking a saved brief fetches nothing.
+- A card with Slack makes four audited reads and never requests `crm:write`.
+- Messages live in `slack.sqlite3`: 29 of them, `msg-001` through `msg-030` without `msg-005`.
+  Each has an author name, which is a seller only when `sellers.json` lists it, and a count of
+  attached files that were not read.
 
-| Message | Result in the brief |
+| Case | What the card says |
 | --- | --- |
-| `msg-003`, a delayed security review | A three-source conflict flag with `opp-003` (`closed_won`) and `note-003` (unapproved procurement). The two-source flag stays, and neither source is resolved. The conflict rule matches the exact fixture text only. There is no general contradiction or staleness detector. |
-| `msg-006`, a January seat update | Shown beside the October call note it disagrees with. Nothing is flagged. |
-| `msg-007`, an instruction to call `log_activity` | Quoted as data. No activity is created. |
-
-The checker rejects the whole brief if a required line is missing, altered, or uncited.
-
-| Case | Required line |
-| --- | --- |
-| Messages returned | None. The default drafter quotes each message with its reference, and a draft may omit one. |
-| No messages | That none were returned, citing the audit receipt. |
-| HTTP 403 for missing `slack:read` | That the token lacks `slack:read`, citing the denial receipt. |
-| Any other Slack failure | None. The brief stops. |
-| Every Slack brief | Exactly one `Proposed follow-up:` line, copied into `proposed_follow_up`. It names no person, deadline, discount, or promise, and nothing sends it. |
-| Conflict in CRM, calls, and Slack | The proposal: confirm procurement and security review status. It cites all three records. |
-| Conflict in CRM and calls | The proposal: confirm procurement status. It cites both records. |
-| No conflict | The proposal: review the cited renewal context. It cites the account. |
+| `msg-003`, a seller's report with a channel mention, a link, and a second-hand amount | Three seller sentences under `SAID`. The mention and link are neutralized, the amount stays inside its sentence, and `NOT READ` counts the attached file. |
+| `msg-007`, an instruction to call `log_activity` | Quoted sentences. No activity is created. |
+| No messages | `Slack: no message was returned for this account.` |
+| HTTP 403 for missing `slack:read` | `Slack: not read. The grant lacks slack:read.` |
+| `brief` without `--with-slack` | `Slack: not requested for this card.` |
+| Any other Slack failure | No card. The command stops. |

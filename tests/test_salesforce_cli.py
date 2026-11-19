@@ -125,9 +125,8 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertIn("salesforce_invalid_configuration", result.stderr)
         self.assertFalse(self.state.exists())
 
-    def test_external_brief_requires_credentials_before_model_startup(self):
-        result = self.run_cli("brief", ACCOUNT, "--crm-backend", "salesforce",
-                              "--adapter", "ollama", "--model", "not-installed")
+    def test_external_brief_requires_credentials_before_creating_state(self):
+        result = self.run_cli("brief", ACCOUNT, "--crm-backend", "salesforce")
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, "")
         self.assertIn("salesforce_invalid_configuration", result.stderr)
