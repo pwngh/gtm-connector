@@ -115,5 +115,6 @@ A gateway refusal carries `error.data.reason`.
   saying which check failed.
 - `insufficient_scope` names the scope in `WWW-Authenticate`. `rate_limited` sends `Retry-After`.
 - SDK rejections, OAuth errors, and tool errors keep their own formats.
+- `GET /mcp` returns HTTP 405. The connector opens no listening stream.
 - An audit or execution failure returns HTTP 503 with an error string and no reason. Read
   [audit](audit.md) before retrying a write.

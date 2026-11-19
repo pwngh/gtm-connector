@@ -405,6 +405,12 @@ class Connector:
                 "authorization_servers": [self.authority.issuer],
                 "scopes_supported": ["slack:read"] if self._slack_only else ["crm:read"],
                 "bearer_methods_supported": ["header"]})(scope, receive, send)
+        if scope["path"] == "/mcp" and scope["method"] == "GET":
+            # A GET would open a listening stream that never ends and passes none of the checks below.
+            # The connector sends nothing on such a stream, so none is opened.
+            return await JSONResponse({"jsonrpc": "2.0", "id": None,
+                                       "error": {"code": -32600, "message": "Method Not Allowed"}},
+                                      405, headers={"Allow": "POST"})(scope, receive, send)
         if scope["path"] != "/mcp" or scope["method"] != "POST":
             return await self.sdk_app(scope, receive, send)
         headers = {key.decode().lower(): value.decode("latin-1") for key, value in scope["headers"]}

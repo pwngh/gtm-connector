@@ -618,6 +618,12 @@ class TestFoundByFuzzing(GatewayCase):
     def test_unknown_prompt_is_not_an_internal_error(self):
         self.gateway.exchange(Draft("prompts/get", {"name": "x"}, name="x").sent())
 
+    def test_a_get_is_refused_instead_of_opening_a_stream_that_never_ends(self):
+        headers = ((b"host", b"127.0.0.1:8765"), (b"authorization", b"Bearer fuzz-full"),
+                   (b"accept", b"application/json, text/event-stream"))
+        status, body, receipt = self.answer(Sent("GET", "/mcp", "https", headers, (b"",)))
+        self.assertEqual((status, body["error"]["code"], receipt), (405, -32600, None))
+
     def answer(self, sent):
         """Return (status, JSON body or None, the last receipt or None) for one request."""
         mark = self.gateway.audit.execute("SELECT coalesce(max(rowid), 0) FROM audit_log").fetchone()[0]
