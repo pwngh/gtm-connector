@@ -273,7 +273,9 @@ def _manifest_rules(value, *, parent, cutoff):
     stamp = _timestamp(value["ts"])
     if value["thread_ts"] != parent or not _timestamp(parent) <= stamp <= _timestamp(cutoff):
         raise SlackReadError("slack_thread_incomplete")
-    if value["subtype"] not in SUPPORTED_SUBTYPES or (value["subtype"] == "tombstone" and value["ts"] != parent):
+    # Only Slack's own system user writes the placeholder for a deleted parent. A participant cannot.
+    if value["subtype"] not in SUPPORTED_SUBTYPES or (value["subtype"] == "tombstone" and (
+            value["ts"] != parent or value["user_id"] != "USLACKBOT" or value["bot_id"] is not None)):
         raise SlackReadError("slack_response_invalid")
     if not isinstance(value["text"], str):
         raise SlackReadError("slack_response_invalid")

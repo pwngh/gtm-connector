@@ -1059,7 +1059,8 @@ def observed(row):
     """What docs/slack.md says one accepted row becomes. Anything it says to refuse raises."""
     stamp, subtype, body = row["ts"], row.get("subtype"), row["text"]
     # The placeholder Slack leaves for a deleted parent is kept, hidden or not. Nothing else may be hidden.
-    placeholder = subtype == "tombstone" and stamp == PARENT
+    placeholder = (subtype == "tombstone" and stamp == PARENT and row.get("user") == "USLACKBOT"
+                   and row.get("bot_id") is None)
     if (row["type"] != "message" or {"message", "previous_message", "deleted_ts"} & set(row)
             or (row.get("hidden", False) is not False and not (placeholder and row["hidden"] is True))
             or (subtype not in SUBTYPES and not placeholder) or not isinstance(body, str)

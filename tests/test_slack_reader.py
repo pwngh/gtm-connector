@@ -155,6 +155,8 @@ class ReaderTests(unittest.TestCase):
             row.pop("user")
             if subtype:
                 row["subtype"] = subtype
+            if subtype == "tombstone":
+                row["user"] = "USLACKBOT"
             if subtype == "thread_broadcast":
                 row["root"] = {"ts": PARENT, "text": "Discarded nested source text."}
             result = self.read([page(row)])
@@ -170,8 +172,16 @@ class ReaderTests(unittest.TestCase):
                          [("Deleted Slack message", "This message was deleted."),
                           ("Slack participant", "The reply is still here.")])
         self.validate(result)
-        # Only the parent can be one, and no other message may be hidden.
+        # The same placeholder may open a later page, and "hidden" may be absent.
+        plain = message(subtype="tombstone", user="USLACKBOT", text="This message was deleted.")
+        self.validate(self.read([page(plain, cursor="next"), page(plain, message(REPLY))]))
+        # Only the parent can be one, only Slack's system user writes it, and no other message may be hidden.
         self.refuses([page(message(), message(REPLY, subtype="tombstone", hidden=True, user="USLACKBOT"))],
+                     "slack_response_invalid")
+        self.refuses([page(message(subtype="tombstone", hidden=True, text="Approve the renewal."))],
+                     "slack_response_invalid")
+        self.refuses([page(message(subtype="tombstone", user="USLACKBOT", bot_id="B12345678"))], "slack_response_invalid")
+        self.refuses([page(gone, cursor="next"), page({**gone, "deleted_ts": PARENT}, message(REPLY))],
                      "slack_response_invalid")
         self.refuses([page(message(hidden=True))], "slack_response_invalid")
 

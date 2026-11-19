@@ -79,7 +79,7 @@ gtm-connector brief acc-007 --with-slack --slack-backend slack \
 | One cursor | 2,048 UTF-8 bytes |
 | Selections in one state folder | 100, one thread per account and one account per thread |
 | Retries | One after `token_expired`, with at most one refresh. One after HTTP 429 when its delay is at most five seconds. Nothing else retries, and a read never starts a login. |
-| Accepted messages | Plain messages, `bot_message`, `me_message`, `file_share`, `thread_broadcast`, and the `tombstone` Slack leaves for a deleted parent that still has replies |
+| Accepted messages | Plain messages, `bot_message`, `me_message`, `file_share`, `thread_broadcast`, and, as the selected parent only, the `tombstone` that Slack's system user leaves for a deleted message |
 | Refuse the whole read | Other hidden messages, edit or delete wrappers, other subtypes, and missing text |
 | Counted and left out | Files, attachments, and blocks |
 | Author labels | `Slack app`, `Slack participant`, `Unknown Slack author`, or `Deleted Slack message` |
