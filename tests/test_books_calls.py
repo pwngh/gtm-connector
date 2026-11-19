@@ -12,7 +12,7 @@ from gtm_connector.call_workflow import resolve_call_account
 from gtm_connector.calls_import import (CallsImportError, inspect_import, list_imports, parse_transcript,
                                         select_excerpt, store_import)
 from gtm_connector.runtime import Runtime
-from gtm_connector.units import safe_text
+from gtm_connector.units import BriefRejected, build, safe_text
 from tests import varied
 
 
@@ -30,8 +30,8 @@ SRT_TIMING = re.compile(rf"{SRT_STAMP}[ \t]+-->[ \t]+{SRT_STAMP}(?:[ \t].*)?")
 HEADER = re.compile(r"Kind: (?:captions|subtitles|descriptions|chapters|metadata)"
                     r"|Language: [A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*"
                     r"|X-TIMESTAMP-MAP=(?:MPEGTS:[0-9]+,LOCAL:[0-9:.]+|LOCAL:[0-9:.]+,MPEGTS:[0-9]+)")
-# docs/briefs.md, Speaker roles: in a WebVTT transcript the label is the voice tag at the start of a cue.
-VOICE = re.compile(r"<v(?:\.[^ >]+)*[ \t]+([^<>\n]+)>")
+# docs/briefs.md, Speaker roles: in a WebVTT transcript a voice tag labels what follows it in the cue.
+VOICE = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+([^<>\n]+)>")
 # A plain account for the cases built in code.
 PLAIN = {"name": "Size Case Co", "industry": "Software", "renewal_date": "2027-06-30", "arr_cents": 100,
          "risk_status": "healthy", "risk_reason": "", "contacts": [], "opportunities": [], "call_notes": [],
@@ -122,6 +122,36 @@ def said(units_):
                      else unit["cue_id"] + "\n" + unit["text"] for unit in units_)
 
 
+def spans(cue, kind):
+    """One cue or line as (speaker label, text) parts, read here without the connector.
+
+    An identifier that is not a number labels the unit. In WebVTT each voice tag labels what follows it,
+    and the tags themselves are not speech.
+    """
+    name = cue["cue_id"] if cue["cue_id"] and not cue["cue_id"].isdigit() else None
+    if kind != "vtt":
+        return [(name, cue["text"])]
+    found, at = [], 0
+    for tag in VOICE.finditer(cue["text"]):
+        found.append((name, cue["text"][at:tag.start()]))
+        name, at = tag.group(1), tag.end()
+    found.append((name, cue["text"][at:]))
+    return [(who, text.replace("</v>", "")) for who, text in found if text.replace("</v>", "").strip()]
+
+
+def runs(quoted, kind):
+    """Neighbouring parts by one speaker, joined: a sentence wrapped across cues is said once, by one speaker."""
+    joined = []
+    for cue in quoted:
+        for who, text in spans(cue, kind):
+            who = " ".join(who.split()) or None if who else None
+            if joined and joined[-1][0] == who:
+                joined[-1][1] += "\n" + text
+            else:
+                joined.append([who, text])
+    return joined
+
+
 def strings(value):
     """Every string inside a JSON value, keys included."""
     if isinstance(value, str):
@@ -208,25 +238,27 @@ class BookCallsTests(unittest.TestCase):
         self.assertLessEqual(len(quoted), MAX_RETURNED)
         self.assertLessEqual(len(body.encode()), MAX_QUOTE)
         self.assertLessEqual(serialized(record), MAX_RECORD)
-        # Each cue or line gives its own whole sentences, in order, with the call time. The speaker is the voice
-        # tag that opens a WebVTT cue, or an identifier that is not a number, and never one over 200 characters.
-        spoken = [unit for unit in brief["units"] if unit["record_ref"] == note]
+        # Each run of one speaker gives its own whole sentences, in order, with the call time. The speaker is
+        # the voice tag, or an identifier that is not a number, and never one over 200 characters.
+        spoken = [unit for unit in brief["units"] if unit["record_ref"] == note and unit["kind"] == "sentence"]
         self.assertLessEqual({unit["at"] for unit in spoken}, {called_at})
-        for cue in quoted:
-            whole, own = " ".join(safe_text(cue["text"])[0].split()), []
+        for who, text in runs(quoted, kind):
+            whole, own = " ".join(safe_text(text)[0].split()), []
             while " ".join(unit["text"] for unit in own) != whole:
                 own.append(spoken.pop(0))
-            voice = VOICE.match(cue["text"]) if kind == "vtt" else None
-            name = voice.group(1) if voice else cue["cue_id"]
-            label = None if name is None or name.isdigit() else " ".join(safe_text(name)[0].split())
+            label = None if who is None else " ".join(safe_text(who)[0].split())
             self.assertLessEqual({unit["speaker"] for unit in own}, {label if label and len(label) <= 200 else None})
+            for unit in own:
+                self.assertNotRegex(unit["text"], r"</?v[ .>]")
         self.assertEqual(spoken, [])
         for _, _, _, source, when, _, _ in varied.said(card):
             self.assertEqual((source, when), ("call", called_at or "time Missing"))
         # The card says how much of the call was read, and that Slack was not asked for.
         word = "lines" if kind == "txt" else "cues"
+        rest = ("Every other call was not read." if cited == (1, len(found))
+                else "The rest of that call and every other call were not read.")
         self.assertIn(f"  Calls: one transcript excerpt was read, {word} {cited[0]} to {cited[1]} of {len(found)}. "
-                      "The rest of that call and every other call were not read.", card["NOT READ"])
+                      + rest, card["NOT READ"])
         self.assertIn("  Slack: not requested for this card.", card["NOT READ"])
         # The CRM values and signals are those of the rows. An old call adds the last signal, a missing time none.
         wanted = varied.expected({**rows, "calls": [], "slack": []}, brief)
@@ -395,7 +427,8 @@ class BookCallsTests(unittest.TestCase):
                      [("Dana: Caf\u00e9 at nine.", None), ("Lee: Agreed.", None)]),
                     (401, "vtt", cues, [(1, "Dana: hello\nworld", "intro", 1000, 2000),
                                         (2, "Lee: yes", None, 2000, 3500)],
-                     [("Dana: hello", "intro"), ("world", "intro"), ("Lee: yes", None)])):
+                     # A line break inside a cue is a wrap, so its two lines are one sentence.
+                     [("Dana: hello world", "intro"), ("Lee: yes", None)])):
                 rows = varied.demo_rows(number, PLAIN)
                 load_crm(runtime.directory, rows)
                 with self.subTest(kind=kind):
@@ -434,6 +467,83 @@ class BookCallsTests(unittest.TestCase):
             rows = varied.demo_rows(402, PLAIN)
             load_crm(runtime.directory, rows)
             self.refused("calls_excerpt_too_large", runtime, "acc-402", export(largest + 1), "vtt")
+
+    def spoken(self, name, raw, kind, *, sellers=None, selected=None, contacts=(("Dana Ito", "Buyer"),)):
+        """One imported transcript on a plain account. Returns its held card and its sentence units."""
+        state = self.directory / name
+        if sellers is not None:
+            state.mkdir(mode=0o700)
+            (state / "sellers.json").write_text(json.dumps({"schema_version": 1, "sellers": sellers}))
+        shape = {**PLAIN, "contacts": [{"name": person, "title": title, "email": "person@invented.example"}
+                                       for person, title in contacts]}
+        with Runtime(state, calls_backend="imported") as runtime:
+            load_crm(runtime.directory, varied.demo_rows(400, shape))
+            self.import_call(runtime, "acc-400", raw, kind, selected=selected)
+            brief = create_brief(runtime, "acc-400", as_of=AS_OF)
+        return varied.hold(self, brief), [unit for unit in brief["units"] if unit["kind"] == "sentence"]
+
+    VOICES = (b"WEBVTT\n\n00:01.000 --> 00:02.000\n<v Dana Ito>Fine.</v>\n"
+              b"<v Morgan Reed>They agreed to sign on March 6.</v>\n\n"
+              b"00:02.000 --> 00:03.000\n<v Dana Ito>We will sign\n\n"
+              b"00:03.000 --> 00:04.000\n<v Dana Ito>only if the rider is approved.\n\n"
+              b"00:04.000 --> 00:05.000\n<v Morgan Reed>Noted [2].\n")
+
+    def test_each_voice_in_a_cue_has_its_own_role_and_a_sentence_across_cues_stays_whole(self):
+        card, units_ = self.spoken("voices", self.VOICES, "vtt", sellers=["Morgan Reed"])
+        # The second voice of the first cue is the seller's. The customer's condition is not cut from its promise.
+        self.assertEqual([(unit["role"], unit["speaker"], unit["text"]) for unit in units_], [
+            ("customer", "Dana Ito", "Fine."),
+            ("seller", "Morgan Reed", "They agreed to sign on March 6."),
+            ("customer", "Dana Ito", "We will sign only if the rider is approved."),
+            ("seller", "Morgan Reed", "Noted (2).")])
+        self.assertEqual(sorted(quote[-1] for quote in varied.said(card)), sorted(unit["text"] for unit in units_))
+        self.assertNotIn("<v", "\n".join(card["SAID"]))
+        self.assertIn("  Calls: one transcript excerpt was read, cues 1 to 4 of 4. Every other call was not read.",
+                      card["NOT READ"])
+        self.assertIn("  Neutralized in source text: 1 bracketed number.", card["NOT READ"])
+
+    def test_the_demo_sellers_are_not_sellers_beside_an_imported_transcript(self):
+        # With no sellers.json, a real transcript's speaker is never a seller because demo data lists the name.
+        _, units_ = self.spoken("unlisted", self.VOICES, "vtt")
+        self.assertEqual({unit["speaker"]: unit["role"] for unit in units_},
+                         {"Dana Ito": "customer", "Morgan Reed": "unknown"})
+
+    def test_an_imported_transcript_needs_the_same_crm_binding_as_the_crm_records(self):
+        with Runtime(self.directory / "binding", calls_backend="imported") as runtime:
+            load_crm(runtime.directory, varied.demo_rows(400, PLAIN))
+            self.import_call(runtime, "acc-400", b"Dana: Seats stay at forty.", "txt")
+            evidence = create_brief(runtime, "acc-400", as_of=AS_OF)["evidence"]
+        self.assertEqual(evidence["crm_binding"], evidence["calls_binding"])
+        build(evidence)
+        # The transcript's own binding still checks out, so only the comparison can refuse these.
+        for other in (None, {**evidence["crm_binding"], "identity_sha256": "0" * 64}):
+            with self.assertRaises(BriefRejected, msg=other):
+                build({**evidence, "crm_binding": other})
+
+    def test_a_sentence_at_the_edge_of_an_excerpt_is_counted_and_not_shown(self):
+        raw = (b"The committee met and has not\napproved the rider. We will wait.\nNext steps are clear.\n"
+               b"The seller will send\nthe redline tomorrow.\n")
+        for name, selected, whole, partial, counted in (
+                # Lines 2 to 4: the first sentence lost its start and the last lost its end.
+                ("both", (3, 3), ["We will wait.", "Next steps are clear."],
+                 ["approved the rider.", "The seller will send"],
+                 "  Sentences: 2 at the edge of the excerpt may be incomplete and are not shown."),
+                # Lines 2 to 5 end with the file, so only the start is in doubt.
+                ("start", (3, 4),
+                 ["We will wait.", "Next steps are clear.", "The seller will send the redline tomorrow."],
+                 ["approved the rider."],
+                 "  Sentences: 1 at the edge of the excerpt may be incomplete and is not shown."),
+                # The whole file: nothing is at an edge.
+                ("none", (1, 5), ["The committee met and has not approved the rider.", "We will wait.",
+                                  "Next steps are clear.", "The seller will send the redline tomorrow."], [], None)):
+            with self.subTest(case=name):
+                card, units_ = self.spoken(name, raw, "txt", selected=selected)
+                self.assertEqual([unit["text"] for unit in units_ if not unit["partial"]], whole)
+                self.assertEqual([unit["text"] for unit in units_ if unit["partial"]], partial)
+                self.assertEqual(sorted(quote[-1] for quote in varied.said(card)), sorted(whole))
+                edge = [line for line in card["NOT READ"] if "edge of the excerpt" in line]
+                self.assertEqual(edge, [counted] if counted else [])
+
 
 if __name__ == "__main__":
     unittest.main()

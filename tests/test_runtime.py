@@ -151,6 +151,28 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(rows[0]["rows"], ["slack/messages/msg-007"])
             self.assertTrue(all(row["rows"] == [] for row in rows[1:]))
 
+    def test_demo_sellers_are_the_default_only_when_every_source_is_demo_data(self):
+        from gtm_connector.runtime import SourceIdentityError
+        from gtm_connector.seed import SELLERS
+        parent = self.state.parent
+        with Runtime(self.state) as runtime:
+            self.assertEqual(runtime.sellers, SELLERS)
+        with Runtime(parent / "imported", calls_backend="imported") as runtime:
+            self.assertEqual(runtime.sellers, ())
+        listed = parent / "listed"
+        listed.mkdir(mode=0o700)
+        (listed / "sellers.json").write_text(json.dumps({"schema_version": 1, "sellers": ["Invented Seller"]}))
+        with Runtime(listed, calls_backend="imported") as runtime:
+            self.assertEqual(runtime.sellers, ("Invented Seller",))
+        for index, document in enumerate(('{"sellers": ["A"]}', '{"schema_version": 1, "sellers": "A"}',
+                                          '{"schema_version": 1, "sellers": [""]}', "not json")):
+            folder = parent / f"bad-{index}"
+            folder.mkdir(mode=0o700)
+            (folder / "sellers.json").write_text(document)
+            with self.subTest(document=document), self.assertRaisesRegex(SourceIdentityError, "sellers.json"):
+                with Runtime(folder):
+                    self.fail("Runtime accepted an invalid seller list")
+
     def test_runtime_rejects_a_symlink_slack_source(self):
         self.state.mkdir()
         target = self.state.parent / "outside.sqlite3"

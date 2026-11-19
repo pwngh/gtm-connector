@@ -41,6 +41,9 @@ class SelectedLiveSlackTests(LiveSlackFixture, unittest.TestCase):
             self.assertEqual((saved["schema_version"], saved["evidence"]["slack_backend"]), (2, "slack"))
             self.assertIn("  Slack: 3 messages were read from one selected thread, and paging completed.",
                           brief["text"])
+            self.assertEqual(saved["units"], brief["units"])
+            self.assertEqual({unit["speaker"] for unit in brief["units"] if unit["source"] == "slack"
+                              and unit["kind"] == "sentence"}, {"U12345678", None})
 
             reread = owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}).json()["result"]
             self.assertFalse(reread.get("isError"), reread)

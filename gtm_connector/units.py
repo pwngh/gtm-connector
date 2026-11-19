@@ -47,7 +47,10 @@ _OPEN_MENTION = re.compile(r"<([!@])([A-Za-z0-9^_-]*)()")
 # A link is any scheme, a scheme-relative //host, mailto:, or a bare www. address.
 _TARGET = r"(?:[a-z][a-z0-9+.-]*://|mailto:|www\.|//(?=[a-z0-9]))"
 _MARKDOWN_LINK = re.compile(r"\[([^\[\]\n]*)\]\(\s*([^\s()]*)\s*\)")
-_RAW_LINK = re.compile(r"(?<![a-z0-9:/])" + _TARGET + r"[^\s<>\"']*", re.IGNORECASE)
+# In running text a scheme or mailto: is a link wherever it starts. A bare www. or // is one only at the
+# start of a word, so a path such as a//b is left alone.
+_RAW_LINK = re.compile(r"(?:[a-z][a-z0-9+.-]{0,31}://|mailto:|(?<![a-z0-9])www\.|(?<![a-z0-9:/])//(?=[a-z0-9]))"
+                       r"[^\s<>\"']*", re.IGNORECASE)
 _IS_TARGET = re.compile(_TARGET, re.IGNORECASE)
 # The longest speaker label a card shows. A longer one is no label.
 MAX_LABEL = 200
@@ -62,7 +65,7 @@ _ABBREVIATION = re.compile(
 _VOICE = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+([^<>\n]+)>")
 _LINE_BREAKS = {0x0A, 0x0B, 0x0C, 0x85, 0x2028, 0x2029}
 # A bracketed integer is how a card cites a unit, so source text never keeps one.
-_CITATION = re.compile(r"\[([0-9]+)\]")
+_CITATION = re.compile(r"\[(\d+)\]")
 _ENDED = re.compile(r"""[.!?]["')\]]*\Z""")
 
 
@@ -73,7 +76,10 @@ def _host(target):
         host = (urlsplit(target if "//" in target[:40] else "//" + target).hostname or "").lower()
     except ValueError:
         host = ""
-    return host if re.fullmatch(r"[a-z0-9.-]{1,80}", host) else "unknown host"
+    # A host is shown without a leading www., which a client would turn back into a link.
+    while host.startswith("www."):
+        host = host[4:]
+    return host if re.fullmatch(r"[a-z0-9.-]{1,80}", host) and "www." not in host else "unknown host"
 
 
 def safe_text(raw: object) -> tuple[str, dict[str, int]]:
@@ -143,7 +149,8 @@ def sentences(safe: str) -> list[str]:
         for match in _SENTENCE_END.finditer(line):
             # Only the last word can be an abbreviation, so only the end of the sentence is searched.
             end = match.start(1)
-            if not _ABBREVIATION.search(line, max(start, end - 12), end) or end - start < 3:
+            # The search starts at the space before the sentence, so an abbreviation that opens it is seen.
+            if not _ABBREVIATION.search(line, max(start - 1, end - 12, 0), end) or end - start < 3:
                 found.append(line[start:end])
                 start = match.end(1)
         if line[start:]:

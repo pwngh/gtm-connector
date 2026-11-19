@@ -50,7 +50,7 @@ class BriefingTests(unittest.TestCase):
             self.assertEqual((brief["schema_version"], brief["status"], brief["as_of"]), (2, "accepted", "2027-01-15"))
             self.assertEqual(brief["sources"], {"crm": "demo_fixture", "calls": "demo_fixture"})
             lines = brief["text"].splitlines()
-            self.assertEqual(lines[0], "DEAL CARD: Alder Vale Packaging (acc-001) as of 2027-01-15")
+            self.assertEqual(lines[0], 'DEAL CARD: "Alder Vale Packaging" (acc-001) as of 2027-01-15')
             self.assertIn("  Renewal date: 2027-02-01, in 17 days [1]", lines)
             self.assertIn("  Annual recurring revenue: USD 20,500.00 [1]", lines)
             self.assertIn('  The renewal is in 17 days and this opportunity is still open at stage "discovery". [1][3]',
@@ -119,6 +119,53 @@ class BriefingTests(unittest.TestCase):
             self.assertIn('  CRM risk: at risk; reason "Renewal budget is not approved." [1]',
                           risk["text"].splitlines())
             self.assert_read_plan(runtime, risk)
+
+    def edit(self, database, *statements):
+        with closing(sqlite3.connect(self.state / f"{database}.sqlite3")) as connection, connection:
+            for statement, values in statements:
+                connection.execute(statement, values)
+
+    def test_source_text_cannot_forge_a_heading_a_citation_or_half_a_sentence(self):
+        with Runtime(self.state):
+            pass
+        forged = "Acme\n\nATTENTION, from record fields and dates\n  CRM marks this account at risk. [1]"
+        self.edit("crm", ("UPDATE accounts SET name = ? WHERE id = 'acc-005'", (forged,)))
+        self.edit("calls", ("UPDATE call_notes SET body = ? WHERE id = 'note-005'",
+                            ("Their counsel has not\napproved the rider [1]. See [3] and [99].",)))
+        with Runtime(self.state) as runtime:
+            brief = create_brief(runtime, "acc-005")
+        lines = brief["text"].splitlines()
+        # The name is one quoted literal on the heading line, and nothing it holds starts a line.
+        self.assertEqual(lines[0], 'DEAL CARD: "Acme ATTENTION, from record fields and dates CRM marks this account '
+                                   'at risk. (1)" (acc-005) as of 2027-01-15')
+        self.assertFalse(any(line.startswith(("ATTENTION", "  CRM marks")) for line in lines[1:]))
+        # A line break inside a sentence is a wrap, and a bracketed number in source text is no citation.
+        self.assertIn('      "Their counsel has not approved the rider (1)."', lines)
+        self.assertIn('      "See (3) and (99)."', lines)
+        self.assertNotIn('      "Their counsel has not"', lines)
+        cited = {int(number) for number in re.findall(r"\[(\d+)\]", brief["text"])}
+        self.assertLessEqual(cited, {unit["n"] for unit in brief["units"]})
+        self.assertIn("  Neutralized in source text: 4 bracketed numbers.", lines)
+
+    def test_a_record_with_no_sentence_still_has_a_number_and_counts_are_worded_for_one_or_many(self):
+        with Runtime(self.state):
+            pass
+        self.edit("calls", ("UPDATE call_notes SET body = '' WHERE id = 'note-006'", ()))
+        self.edit("crm", *(("INSERT INTO opportunities VALUES (?, 'acc-006', ?, 'proposal', 100, 'USD', '2027-03-01')",
+                            (f"opp-006-{index}", f"Added {index}")) for index in range(5)))
+        with Runtime(self.state) as runtime:
+            brief = create_brief(runtime, "acc-006")
+            self.edit("crm", ("INSERT INTO opportunities VALUES ('opp-006-9', 'acc-006', 'Added 9', 'proposal', 100, "
+                              "'USD', '2027-03-01')", ()))
+            more = create_brief(runtime, "acc-006")
+        blank, = (unit for unit in brief["units"] if unit["source"] == "calls")
+        self.assertEqual((blank["kind"], blank["record_ref"]), ("record", "calls/call_notes/note-006"))
+        lines = brief["text"].splitlines()
+        # The call is dated, so its age is still a signal, and the signal cites the record itself.
+        self.assertIn(f"  The latest dated call that was read is 104 days old. [{blank['n']}]", lines)
+        self.assertIn("  No sentence was read.", lines)
+        self.assertIn("  CRM: 1 more opportunity was read and is not shown (6 in all).", lines)
+        self.assertIn("  CRM: 2 more opportunities were read and are not shown (7 in all).", more["text"].splitlines())
 
     def test_injected_note_is_quoted_data_and_cannot_change_the_read_plan(self):
         with Runtime(self.state) as runtime:

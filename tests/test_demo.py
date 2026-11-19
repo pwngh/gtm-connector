@@ -67,7 +67,7 @@ class NarrativeDemoTests(unittest.TestCase):
         artifact = self.saved(brief["brief_id"])
         self.assertEqual(brief, {key: artifact[key] for key in brief})
         self.assertEqual((artifact["schema_version"], artifact["status"]), (2, "accepted"))
-        self.assertTrue(brief["text"].startswith("DEAL CARD: Thornfield Wren LLP (acc-003) as of 2027-01-15\n"))
+        self.assertTrue(brief["text"].startswith('DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15\n'))
         self.assertIn("  Renewal date: 2027-02-08, in 24 days [1]", brief["text"].splitlines())
         records = {row["record_ref"]: row for row in artifact["evidence"]["records"]}
         self.assertEqual({row.get("account_id", row["id"]) for row in records.values()}, {"acc-003"})

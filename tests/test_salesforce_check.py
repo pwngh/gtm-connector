@@ -414,11 +414,14 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.assertEqual(result["sources"], {"crm": "salesforce", "calls": "demo_fixture"})
         self.assertIn("  Contract end: 2027-01-31, in 16 days; status ", result["text"])
         self.assertIn("; a planning candidate, not activated [", result["text"])
-        receipts = result["evidence"]["receipts"]
+        # The printed result holds the card and its units. The records and receipts stay in the private file.
+        self.assertNotIn("evidence", result)
+        saved = json.loads((state / "briefs" / (result["brief_id"] + ".json")).read_text())
+        self.assertEqual({key: saved[key] for key in result}, result)
+        receipts = saved["evidence"]["receipts"]
         self.assertEqual([row["tool"] for row in receipts],
                          ["get_account", "list_opportunities", "read_call_notes"])
         self.assertIn("crm/contracts/ctr-sf-" + CONTRACT, receipts[0]["rows"])
-        self.assertEqual(json.loads((state / "briefs" / (result["brief_id"] + ".json")).read_text()), result)
         self.assertEqual(len(self.requests), 5)
         self.assertEqual((self.directory / "count").read_text(), "2")
         for private in (TOKEN, FRESH_TOKEN, ALIAS, ORIGIN, USERNAME, SECRET):

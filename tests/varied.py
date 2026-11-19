@@ -29,7 +29,9 @@ HEADINGS = ("ATTENTION, from record fields and dates", "RECORD VALUES, from CRM 
 SHOWN = 5  # docs/briefs.md: at most five opportunities, contracts, and contacts are shown.
 _HEAD = re.compile(r"  \[(\d+)\] (seller|customer|unknown) \((.+?)\); (call|Slack) (.+); "
                    r'(no speaker label|speaker (".*"))\Z')
-_CITED = re.compile(r" ((?:\[\d+\])+)\Z")
+_CITED = re.compile(r" ((?:\[\d+\])+)(?: and \d+ more)?\Z")
+# A WebVTT voice tag is a speaker label, and its closing tag is markup. Neither is part of what was said.
+_VOICE_TAG = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+[^<>\n]+>|</v>")
 
 
 def read(name):
@@ -85,7 +87,8 @@ def sections(case, text):
     case.assertTrue(text.endswith("\n"))
     lines = text[:-1].split("\n")
     flush = [line for line in lines if line and not line.startswith("  ")]
-    case.assertTrue(flush[0].startswith("DEAL CARD: "), flush[0][:80])
+    case.assertRegex(flush[0], r'\ADEAL CARD: ".*" \(acc-[A-Za-z0-9-]+\) as of \d{4}-\d\d-\d\d\Z')
+    json.loads(flush[0][len("DEAL CARD: "):flush[0].rindex(" (acc-")])
     case.assertIn(flush[1:], (list(HEADINGS), list(HEADINGS[1:])))
     found = {heading.split(",")[0]: [] for heading in HEADINGS}
     current = None
@@ -100,6 +103,11 @@ def sections(case, text):
 def cited(line):
     """The unit numbers a record-value or signal line ends in."""
     return [int(number) for number in re.findall(r"\d+", _CITED.search(line).group(1))]
+
+
+def uncited(line):
+    """A card line without the citations the connector put at its end."""
+    return _CITED.sub("", line)
 
 
 def said(card):
@@ -120,10 +128,10 @@ def stale_call(calls, brief):
     if not timed:
         return []
     moment, reference = max(timed)
-    first = next((unit["n"] for unit in brief["units"] if unit["record_ref"] == reference), None)
+    # Every call resolves: its first sentence, or the call itself when it holds none.
+    first = next(unit["n"] for unit in brief["units"] if unit["record_ref"] == reference)
     age = (AS_OF - moment.date()).days
-    # A call with no sentence has no unit to cite, and so raises no signal.
-    return [f"  The latest dated call that was read is {days(age)} old. [{first}]"] if age > 60 and first else []
+    return [f"  The latest dated call that was read is {days(age)} old. [{first}]"] if age > 60 else []
 
 
 def expected(rows, brief):
@@ -135,6 +143,7 @@ def expected(rows, brief):
     deals = sorted(row for table, row in others if table == "opportunities")
     left = (date.fromisoformat(renewal) - AS_OF).days
     timing = f"in {days(left)}" if left > 0 else f"{days(-left)} ago" if left < 0 else "today"
+    when = f"The renewal date passed {days(-left)} ago" if left < 0 else f"The renewal is {timing}"
     fixed = [f"  Renewal date: {renewal}, {timing} [1]",
              f"  Annual recurring revenue: {currency} {arr // 100:,}.{arr % 100:02} [1]",
              f"  CRM risk: {risk.replace('_', ' ')}{f'; reason {quoted(reason)}' if reason else ''} [1]",
@@ -144,23 +153,41 @@ def expected(rows, brief):
     for number, (_, _, person, title, email) in enumerate(contacts, 2):
         people.append(f"  Contact: {quoted(person)}; role {quoted(title)}; email {quoted(email)} [{number}]")
         if not title:
-            roles.append(f"  This contact has no role recorded. [{number}]")
+            roles.append(number)
     offers, still_open = [], []
     for number, (_, _, deal, stage, cents, code, close) in enumerate(deals, 2 + len(contacts)):
         offers.append(f"  Opportunity: {quoted(deal)}; stage {quoted(stage)}; amount {code} {cents // 100:,}."
                       f"{cents % 100:02}; close date {close} [{number}]")
         if left <= 30 and not stage.startswith("closed_"):
-            still_open.append(f"  The renewal is {timing} and this opportunity is still open at stage "
-                              f"{quoted(stage)}. [1][{number}]")
-    if left < 0:
-        signals.append(f"  The renewal date passed {days(-left)} ago. [1]")
+            still_open.append((number, stage))
+    # docs/briefs.md, Signals: more than five records raising one signal are counted in one line, which
+    # cites the first five of them.
+    if left < 0 and not still_open:
+        signals.append(f"  {when}. [1]")
     elif len(still_open) > SHOWN:
-        signals.append(f"  The renewal is {timing} and {len(still_open)} opportunities are still open. [1]")
+        signals.append(f"  {when} and {len(still_open)} opportunities are still open. [1]"
+                       + counted(number for number, _ in still_open))
     else:
-        signals += still_open
-    signals += [f"  {len(roles)} contacts have no role recorded. [1]"] if len(roles) > SHOWN else roles
+        signals += [f"  {when} and this opportunity is still open at stage {quoted(stage)}. [1][{number}]"
+                    for number, stage in still_open]
+    signals += ([f"  {len(roles)} contacts have no role recorded. " + counted(roles)] if len(roles) > SHOWN
+                else [f"  This contact has no role recorded. [{number}]" for number in roles])
     signals += stale_call([(f"calls/call_notes/{row[0]}", row[2]) for _, row in rows["calls"]], brief)
     return {"fixed": fixed, "opportunities": offers, "contacts": people, "signals": signals}
+
+
+def counted(numbers):
+    """The citations of a counted signal: its first five units, then how many more raised it."""
+    numbers = list(numbers)
+    return "".join(f"[{number}]" for number in numbers[:SHOWN]) + f" and {len(numbers) - SHOWN} more"
+
+
+def more(count, plural):
+    """The NOT READ line for records past the five shown, `count` in all."""
+    extra = count - SHOWN
+    one = plural[:-3] + "y" if plural.endswith("ies") else plural[:-1]
+    return (f"  CRM: {extra} more {plural if extra > 1 else one} "
+            f"{'were read and are' if extra > 1 else 'was read and is'} not shown ({count} in all).")
 
 
 def hold_values(case, card, fixed, groups):
@@ -172,15 +199,15 @@ def hold_values(case, card, fixed, groups):
     for label, plural, wanted in groups:
         shown = [line for line in rest if line.startswith(f"  {label}: ")]
         rest = [line for line in rest if line not in shown]
-        counted = [line for line in card["NOT READ"] if f" more {plural} were read and are not shown" in line]
+        one = plural[:-3] + "y" if plural.endswith("ies") else plural[:-1]
+        unshown = [line for line in card["NOT READ"] if re.match(rf"  CRM: \d+ more ({plural}|{one}) ", line)]
         if len(wanted) <= SHOWN:
             case.assertEqual(sorted(shown), sorted(wanted))
-            case.assertEqual(counted, [])
+            case.assertEqual(unshown, [])
         else:
             case.assertEqual(len(set(shown)), SHOWN)
             case.assertLessEqual(set(shown), set(wanted))
-            case.assertEqual(counted, [f"  CRM: {len(wanted) - SHOWN} more {plural} were read and are not shown "
-                                       f"({len(wanted)} in all)."])
+            case.assertEqual(unshown, [more(len(wanted), plural)])
     case.assertEqual(rest, [])
 
 
@@ -209,10 +236,22 @@ def hold(case, brief):
         if record["record_ref"].startswith("crm/"):
             case.assertEqual([unit["kind"] for unit in own], ["record"])
             continue
-        pieces = [cue["text"] for cue in record["manifest"]["units"]] if "manifest" in record else [record["body"]]
+        # What was said, in order, with nothing lost and nothing added. A text record with no sentence is
+        # still one unit, so it resolves.
+        if "manifest" in record:
+            vtt = record["manifest"]["format"] == "vtt"
+            pieces = [_VOICE_TAG.sub("", cue["text"]) if vtt else cue["text"] for cue in record["manifest"]["units"]]
+        else:
+            pieces = [record["body"]]
         whole = " ".join(filter(None, (" ".join(safe_text(piece)[0].split()) for piece in pieces)))
-        case.assertEqual({unit["kind"] for unit in own} - {"sentence"}, set())
+        if not whole:
+            case.assertEqual([unit["kind"] for unit in own], ["record"])
+            continue
+        case.assertEqual({unit["kind"] for unit in own}, {"sentence"})
         case.assertEqual(" ".join(unit["text"] for unit in own), whole)
+        for unit in own:
+            # A bracketed integer is the connector's citation form. No sentence holds one.
+            case.assertNotRegex(unit["text"], r"\[\d+\]")
     case.assertEqual(by_record, {})
     # A value or signal ends in the numbers of records. A quotation is exactly one sentence unit, with its
     # role, basis, time, and speaker, newest first and never more than twelve.
@@ -227,6 +266,7 @@ def hold(case, brief):
         case.assertEqual({"calls": "call", "slack": "Slack"}[unit["source"]], source)
         case.assertEqual(None if speaker is None else json.loads(speaker), unit["speaker"])
         case.assertLessEqual(len(sentence), 300)
+        case.assertFalse(unit["partial"])
     moments = [instant(units[number - 1]["at"]) for number, *_ in quotes]
     dated = [moment for moment in moments if moment is not None]
     case.assertEqual(dated, sorted(dated, reverse=True))
