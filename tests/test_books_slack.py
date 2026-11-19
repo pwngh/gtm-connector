@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import asyncio
 import hashlib
 import json
 import math
@@ -399,9 +400,12 @@ class BookSlackTests(unittest.TestCase):
                 self.stopped(code, runtime, upstream, "acc-400", requests=requests)
 
     def test_a_rate_limit_of_five_seconds_is_waited_out_and_six_is_not(self):
-        waits = []
+        waits, sleep = [], asyncio.sleep
 
-        async def wait(delay):
+        async def wait(delay, *args):
+            # asyncio.sleep is shared with the server's own loop, whose ticks stay real. Only the reader waits seconds.
+            if delay < 1:
+                return await sleep(delay, *args)
             waits.append(delay)
 
         for delay, pages in ((5, 2), (6, None)):
