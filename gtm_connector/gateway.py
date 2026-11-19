@@ -14,7 +14,6 @@ import uuid
 from typing import Any, Callable
 
 from mcp.server import MCPServer
-from mcp.server.auth.provider import AccessToken
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
@@ -26,7 +25,7 @@ from starlette.responses import JSONResponse
 from . import calls, slack, store
 from . import strict_json
 from .audit import AuditLog
-from .request_checks import MISSING, Missing, RequestFacts, RequestPolicy, charge_rate, check_request
+from .request_checks import RequestFacts, RequestPolicy, charge_rate, check_request
 from .salesforce import SalesforceReadError
 from .selected_briefs import BRIEF_SECONDS, ChildRead, Invocation
 from .tool_definitions import DEFAULT_TOOLS, SELECTED_TOOLS, TOOL_DEFINITIONS, valid_account_search
@@ -475,24 +474,13 @@ class Connector:
                 rate_limit=self.rate_limit, window_seconds=self.window_seconds,
                 writes_disabled=self.crm_reader is not None or self._slack_only or self.selected is not None,
             )
-            token: AccessToken | None | Missing = MISSING
-            wall_time: float | Missing = MISSING
-            decision = check_request(facts, policy, self.windows, self._definitions)
-            if decision.needs == "token":
-                token = await self.authority.verify_token(raw_token)
-                decision = check_request(facts, policy, self.windows, self._definitions, token=token)
-            if decision.needs == "wall_time":
-                wall_time = time.time()
+            token = await self.authority.verify_token(raw_token) if raw_token else None
+            # Composite reads update the same windows from worker threads.
+            with self._windows_lock:
                 decision = check_request(facts, policy, self.windows, self._definitions,
-                                         token=token, wall_time=wall_time)
-            if decision.needs == "rate_time":
-                # Composite reads update the same windows from worker threads.
-                with self._windows_lock:
-                    rate_time = self.clock()
-                    decision = check_request(facts, policy, self.windows, self._definitions,
-                                             token=token, wall_time=wall_time, rate_time=rate_time)
-                    if decision.windows is not None:
-                        self.windows = decision.windows
+                                         token=token, wall_time=time.time(), rate_time=self.clock())
+                if decision.windows is not None:
+                    self.windows = decision.windows
             if decision.error is not None:
                 error = decision.error
                 rejection = JSONResponse({"jsonrpc": "2.0", "id": request_id,

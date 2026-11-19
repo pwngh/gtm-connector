@@ -60,7 +60,8 @@ do next.
 ## Next, in order
 
 1. Salesforce CLI: its own time limit, background login refresh, visible waiting.
-2. Lean core: one state file, one evidence format, real data only through a selection.
+2. Lean core: one state file that remembers the chosen sources, so commands need no source flags
+   and work while `serve` runs. One evidence format. Real data only through a selection.
 3. Guided setup for Salesforce and Slack, with sample data for an empty org. Replaces the demo kit.
 4. A stdio MCP bridge for assistant apps.
 5. A Slack channel window per account. Replaces single-thread mapping.
