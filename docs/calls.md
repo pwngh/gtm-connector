@@ -1,171 +1,114 @@
 # Import a call transcript
 
 Import an existing UTF-8 TXT or WebVTT export and associate it with one account.
-The connector quotes a selected excerpt in the renewal brief. It does not start
-a recording, transcribe audio, connect to a call provider, or infer a summary.
-The original bytes stay in private local state. The source is labeled as a
-user-supplied transcript export, including when the CRM uses invented fixtures.
+The renewal brief then quotes a selected excerpt. The connector does not record,
+transcribe, connect to a call provider, or summarize. The original bytes stay in
+private local state.
 
-## Try the local flow
-
-Use an existing transcript file that you are allowed to read. These commands
-associate it with the invented Juniper Crest Learning account:
+## Commands
 
 ```sh
 gtm-connector calls import meeting.vtt --account acc-007
+gtm-connector calls import meeting.txt --account acc-007 --lines 12:20
+gtm-connector calls import meeting.vtt --account acc-007 --cues 8:14 --called-at 2027-01-14T15:00:00Z
 gtm-connector calls list
 gtm-connector calls inspect IMPORT_ID
+gtm-connector calls inspect IMPORT_ID --full --json
 gtm-connector brief acc-007 --calls-backend imported --state-dir var/imported-calls
 ```
 
-Replace `meeting.vtt` with your file and `IMPORT_ID` with the returned import ID.
-`calls import` uses `var/imported-calls` by default. The daily commands retain
-their existing defaults. Imported mode requires an explicit `--state-dir` for
-`brief`, `serve`, and Salesforce account inspection, so give them that same
-folder and `--calls-backend imported`. This prevents an incomplete imported
-command from converting the ordinary fixture state. Importing data and using
-it remain separate operations.
+| Option | Meaning |
+| --- | --- |
+| `--account ID`, `--account-number NUMBER` | `import` requires exactly one. `--account-number` needs Salesforce. `list` accepts `--account` as a filter. |
+| `--lines FIRST:LAST`, `--cues FIRST:LAST` | The excerpt, in TXT lines or VTT cues. Ranges start at one and include the end. |
+| `--called-at TIMESTAMP` | The meeting time with a UTC offset. Without it the call time stays unknown. |
+| `--reassign` | Moves known content, or a known AccountNumber, to another account. |
+| `--state-dir PATH` | The import state folder. `calls` commands default to `var/imported-calls`. |
+| `--after IMPORT_ID` | For `list`: continues after the returned `next_after`. A page holds 100 rows. |
+| `--full` | For `inspect`: prints every unit and the original text. This is not available as an MCP tool. |
 
-The import command resolves the account through a local `crm:read` grant and
-audited MCP request, then commits the selected local revision. It writes no CRM
-record. Later transcript reads require only `calls:read`; they do not perform a
-CRM lookup under that permission. If no transcript is selected for the account,
-the read refuses with `calls_not_imported`. It never substitutes fixture notes.
+`brief`, `serve`, and Salesforce `accounts` or `account` use imports only with
+`--calls-backend imported` and an explicit `--state-dir` naming the same folder.
+Fixture and imported calls never share a folder. Stop `serve` before running a
+`calls` command on its folder.
 
-## Associate an existing Salesforce account
+## Rules
 
-Use the same explicitly selected connection and environment for import and use:
+- `import` resolves the account through a local `crm:read` grant and an audited
+  MCP request. It writes no CRM record. Later reads need only `calls:read`.
+- Each account has one active excerpt. An account with none refuses with
+  `calls_not_imported`. Fixture notes are never substituted.
+- The default excerpt is the first 20 units, or fewer if they exceed a limit
+  below. Every excerpt adds one adjacent unit on each side where available. An
+  explicit range that exceeds a limit refuses and is never truncated.
+- The brief labels the quote as an excerpt, not a complete call summary, and
+  states the requested and quoted ranges. Source text stays quoted data.
+- Repeating the same bytes, account, call time, and range reuses the revision.
+  Any change creates a new active revision. Older revisions stay inspectable.
+- A brief with an imported transcript records `adapter: "extractive"`, no model,
+  and zero tokens. Its evidence uses `workflow_version` 4, or 5 with live Slack.
+
+| Limit | Value |
+| --- | ---: |
+| Original UTF-8 file | 2 MiB |
+| Parsed lines or cues | 10,000 |
+| Quoted text, including context | 16 KiB of UTF-8 |
+| Returned units, including context | 256 |
+| Serialized selected record | 128 KiB of ASCII-escaped JSON |
+
+## File formats
+
+The extension, `.txt` or `.vtt`, selects the parser. TXT units are physical
+lines. [WebVTT](https://www.w3.org/TR/2026/CRD-webvtt1-20260520/) units are
+timed cues. The VTT parser accepts cue IDs, multiline payloads, and valid cue
+timings, keeps markup literally, and refuses malformed timing or ambiguous
+blocks. Control characters other than tabs and line endings refuse.
+
+Export the transcript yourself from
+[Zoom](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0064927) (VTT),
+[Gong](https://help.gong.io/docs/view-a-call-transcript), or
+[Google Meet](https://support.google.com/meet/answer/12849897) (plain text). An
+AI notes document is not a transcript. No provider download has been tested.
+
+## Salesforce accounts
+
+Use the same connection and environment for import and for later use:
 
 ```sh
 gtm-connector calls import meeting.vtt --account-number ACCOUNT_NUMBER --crm-backend salesforce --sf-org EXISTING_ALIAS --sf-environment sandbox --state-dir var/connected-calls
 gtm-connector brief ACCOUNT_ID --crm-backend salesforce --sf-org EXISTING_ALIAS --sf-environment sandbox --calls-backend imported --state-dir var/connected-calls
 ```
 
-Replace the uppercase values with your account number, existing signed-in CLI
-alias, and the canonical account ID returned by import. Select `developer` or
-`production` instead when appropriate. See [Salesforce connection checks](salesforce.md).
+`ACCOUNT_ID` is the canonical ID that the import returns. See
+[Salesforce connection checks](salesforce.md).
 
-AccountNumber is a standard Salesforce field, but it can be blank or duplicated.
-The exact lookup reads at most two matches and compares the returned number
-verbatim. Salesforce text equality can ignore letter case, so a returned
-non-literal number refuses with a direction to use the canonical account ID.
-The two-row bound cannot prove a unique literal match among case variants.
-Zero matches, ambiguity, and a changed association refuse clearly.
-No company-name similarity or email-domain join is used. If AccountNumber is
-unavailable, pass `--account acc-sf-NATIVE_ID` using an ID from `accounts` instead.
-That fallback uses the existing account-detail read, including its Contact and
-Contract bounds; it costs three record GETs rather than the exact lookup's one.
+- The AccountNumber lookup is exact, reads at most two matches, and compares the
+  returned number verbatim. The number has at most 40 characters.
+- Salesforce equality can ignore letter case, so a non-literal or second match
+  refuses. Pass `--account acc-sf-NATIVE_ID` with an ID from `accounts` instead.
+- The AccountNumber is not copied into the manifest returned under `calls:read`.
+- The state is tied to the validated CRM identity. An alias repointed to another
+  org cannot reuse it. `calls list` and `calls inspect` do not contact Salesforce.
+- A demo-kit binding cannot be combined with imported calls.
 
-The raw AccountNumber selector stays in private reassignment state and the
-owner's CRM audit arguments. It is not copied into the transcript manifest
-returned under `calls:read`. See Salesforce's
-[comparison rules](https://developer.salesforce.com/docs/platform/salesforce-soql-sosl/guide/sforce-api-calls-soql-select-comparisonoperators.html).
+To add selected Slack, run `slack map` with `--calls-backend imported` and
+`calls import` with `--slack-backend slack --slack-connection-dir var/slack-connection`
+on one fresh folder, in either order. Briefs then pass the same folder and
+flags with `--with-slack`. See the [live Slack guide](slack-live.md).
 
-The imported state is tied to the validated CRM identity. Repointing an alias
-to another org cannot reuse it. Fixture and imported calls have separate modes;
-choose fresh state rather than converting a directory containing fixture notes.
-A Salesforce demo-kit binding cannot be combined with imported calls in this
-slice. Calls list and inspect use the saved private association without
-contacting Salesforce; they do not claim to verify the current CLI login.
+## Errors
 
-## Choose an excerpt
-
-TXT ranges use physical lines. WebVTT ranges use timed cues. Both start at one,
-include the end, and include one adjacent unit on either side where available:
-
-```sh
-gtm-connector calls import meeting.txt --account acc-007 --lines 12:20
-gtm-connector calls import meeting.vtt --account acc-007 --cues 8:14 --called-at 2027-01-14T15:00:00Z
-```
-
-The default selects the first 20 units plus available context. It uses fewer
-complete units if that prefix exceeds the quotation bound. Explicit oversized
-ranges refuse instead of truncating silently. The result identifies both the
-requested range and the actual cited range. A brief labels it as an excerpt,
-not a complete call summary. Unknown speakers remain literal source text.
-
-`--called-at` supplies an offset-aware meeting timestamp, normalized to UTC.
-Without it, the call time stays unknown. Import time is recorded separately;
-file modification time is never used as a meeting date. Source text, including
-voice tags or apparent instructions, remains quoted data.
-
-| Bound | Limit |
-| --- | ---: |
-| Original UTF-8 file | 2 MiB. |
-| Parsed lines or cues | 10,000. |
-| Quoted text, including context | 16 KiB of UTF-8. |
-| Returned units, including context | 256. |
-| Serialized selected record | 128 KiB of ASCII-escaped JSON, including its reference. |
-
-MCP adds its envelope and may repeat the selected record in text and structured
-content. The record bound is not an exact HTTP response-size promise. Ordinary
-MCP results, briefs, and inspection contain only the selected excerpt and its
-provenance. To inspect the complete private original explicitly, run:
-
-```sh
-gtm-connector calls inspect IMPORT_ID --full --json
-```
-
-This output can contain the entire transcript. It is a local owner operation,
-not an MCP tool. The source file's existing permissions are unchanged; the
-stored copy and imported database use owner-only permissions.
-
-## Revisions and checks
-
-Repeating identical bytes, account, date, and range reuses the same revision.
-Changed bytes or selection create a new immutable revision and make it active
-for that account. Older revisions remain inspectable. There is one active
-excerpt per account, which bounds a normal read independently of import history.
-Use the list's continuation cursor with `--after` to inspect more than 100 rows.
-
-A known transcript cannot move to another account accidentally. Repeat the
-import with the new account and explicit `--reassign` to create a new association
-revision. This does not rewrite previous revisions or accepted brief snapshots.
-The same rule applies when an AccountNumber now resolves to a different account.
-
-Before returning a source record, the reader hashes the stored bytes, reparses
-them, and checks the selected units against the saved manifest. Saved brief
-checks verify the excerpt, manifest ID, and receipt reference without rereading
-the original or the current selection. They do not independently prove that an
-excerpt came from unseen original bytes. Neither check authenticates a provider,
-a speaker, or the truth of the source. An owner who rewrites all evidence and
-receipts remains outside this integrity boundary.
-
-The default formatter records `adapter: "extractive"` for imported workflows,
-with no model and zero model tokens. Evidence with fixture Slack uses workflow
-version 4 and names the CRM backend, imported calls mode, and saved source binding. Fixture workflows
-keep their existing versions and output. Optional local-model limits still apply
-when the owner explicitly selects Ollama; the default requires no model.
-
-## Combine an import with selected Slack
-
-Choose both source modes when initializing a fresh folder. A first `slack map`
-can select `--calls-backend imported`, after which `calls import` uses the same
-folder with `--slack-backend slack --slack-connection-dir var/slack-connection`.
-Alternatively, the first import can include those Slack flags, and mapping can
-follow with imported calls selected. Neither operation silently migrates an
-existing fixture folder. Credentials remain in their separate connection folder.
-
-Daily briefs use that same `--state-dir`, `--calls-backend imported`,
-`--slack-backend slack`, `--slack-connection-dir`, and `--with-slack`. Live Slack
-uses workflow version 5 while preserving the exact imported excerpt and its
-manifest. `calls list` and `calls inspect` remain offline; they need no Slack
-credentials. The [live Slack guide](slack-live.md#combine-salesforce-a-transcript-and-slack)
-has complete examples for both orders with an existing Salesforce alias. A
-Slack-only check does not verify that a call export exists or is current.
-
-## Obtain an existing export
-
-| Existing service | Owner action |
-| --- | --- |
-| Zoom | Download the existing recording's transcript VTT. [Zoom transcript guide](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0064927). |
-| Gong | Open the call and download its transcript from the available call actions. [Gong transcript guide](https://help.gong.io/docs/view-a-call-transcript). |
-| Google Meet | Open the existing transcript document and download it as plain text. An AI meeting-notes document is not a verbatim transcript. [Meet transcript locations](https://support.google.com/meet/answer/12849897), [Docs downloads](https://support.google.com/docs/answer/49114). |
-
-These are commands and downloads for the owner to perform with existing access.
-No provider connection or live transcript download has been tested here. Parser
-and integration tests use invented TXT and VTT files. The importer supports the
-documented transcript subset of [WebVTT](https://www.w3.org/TR/2026/CRD-webvtt1-20260520/):
-UTF-8, common line endings, cue IDs, multiline payloads, and valid cue timings.
-It preserves display markup literally and refuses malformed timing or ambiguous
-blocks instead of silently discarding spoken content.
+| Code | Exit | Cause | Fix |
+| --- | ---: | --- | --- |
+| `calls_import_invalid` | 2 | The export or range is invalid. | Use a valid UTF-8 TXT or VTT file and range. |
+| `calls_import_too_large`, `calls_excerpt_too_large` | 2 | The export or excerpt exceeds a limit above. | Use a smaller export or fewer units. |
+| `calls_import_not_found` | 2 | The import is not in this state folder. | Run `calls list`. |
+| `calls_account_not_found` | 2 | No CRM account matched. | Check the ID or exact AccountNumber. |
+| `calls_not_imported` | 3 | The account has no selected transcript. | Import an export first. |
+| `calls_reassign_required`, `calls_association_changed` | 3 | The content or AccountNumber now belongs to another account. | Review it. Add `--reassign` only to move it. |
+| `calls_account_ambiguous` | 3 | The AccountNumber is not one literal match. | Use `--account` with the canonical ID. |
+| `calls_source_mismatch`, `source_identity_mismatch` | 3 | The calls mode, CRM connection, or folder differs from this state. | Use the original folder and connection, or a fresh folder. |
+| `calls_import_corrupt` | 4 | The stored bytes or excerpt no longer match the saved manifest. Every read checks this. | Keep this state and reimport into a fresh folder. |
+| `calls_association_invalid`, `calls_association_failed` | 4 | The CRM read failed or did not match its receipt. Nothing was imported. | Check the CRM connection and retry. |
+| `calls_source_unavailable` | 5 | The local CRM connection could not be reached. | Check the setup and retry. |
+| `calls_import_io` | 1 | The export or private store could not be read or written. | Check permissions and retry. |

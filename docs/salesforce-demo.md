@@ -1,165 +1,115 @@
 # Run the invented Salesforce demo book
 
-This kit puts three invented accounts into an existing Developer Edition org.
-The connector reads those live CRM records and combines them with invented local
-call notes and Slack messages. AccountNumber supplies the explicit link. This
-does not connect to a call provider or a Slack workspace.
+The kit imports three invented accounts into an existing Developer Edition org.
+The connector reads those CRM records and joins invented local call notes and
+Slack messages to them by AccountNumber. It connects to no call provider or
+Slack workspace. The connector stays GET-only. The import and removal use your
+Salesforce CLI permissions.
 
-The steps below are commands for you to run from the checkout root. They need
-the repository's Python environment and an existing Salesforce CLI login named
-`gtm-de`. Use the alias for your demo org if it differs. Follow the
-[Salesforce setup](salesforce.md) first if the CLI is not signed in. The import
-and removal use your Salesforce CLI permissions. The connector stays GET-only.
+The binding, refusals, and cleanup are tested with invented responses and a fake
+CLI. No live org has been verified.
 
 ## Import and read a brief
 
-Choose an empty Developer Edition demo org. Do not add customer data, automation,
-or unrelated records to this book. Keep the receipt and binding until removal
-finishes. AccountNumber is not unique across an org, so it cannot recover a lost
-receipt safely.
-
-Prepare private output and export the three packaged kit files:
+Run these from the checkout root with the repository's Python environment and an
+existing `sf` login. Replace `gtm-de` with your alias, or follow the
+[Salesforce setup](salesforce.md) first.
 
 ```sh
 umask 077
 .venv/bin/python scripts/salesforce-demo.py prepare --output var/salesforce-demo/kit
-```
-
-Import all twelve records with one command. Salesforce computes Contract EndDate
-from StartDate and ContractTerm; the file supplies neither EndDate nor an activation
-update. All three contracts remain Draft.
-
-```sh
 sf data import tree --target-org gtm-de --plan var/salesforce-demo/kit/plan.json --json > var/salesforce-demo/import.json
-```
-
-Bind the complete successful receipt, then read the first account:
-
-```sh
 .venv/bin/python scripts/salesforce-demo.py bind --receipt var/salesforce-demo/import.json --output var/salesforce-demo/binding.json
 .venv/bin/python scripts/salesforce-demo.py brief --sf-org gtm-de --binding var/salesforce-demo/binding.json
 ```
 
-The brief uses the kit's fixed planning date, January 15, 2027. Expect a Draft
-contract ending January 31, a Closed Won opportunity, a call quote saying
-procurement is unapproved, and a Slack quote saying security review is delayed.
-The quotes carry separate CRM, calls, and Slack citations. The follow-up remains
-a proposal. No message or activity is sent.
+- Use an empty Developer Edition demo org with no customer data or automation.
+- Keep the receipt and binding until removal finishes. AccountNumber is not
+  unique across an org, so it cannot recover a lost receipt.
+- The import creates twelve records: three Accounts, each with one Contact, one
+  Opportunity, and one Draft Contract. The file supplies no EndDate. Salesforce
+  computes it from StartDate and ContractTerm, and no contract is activated.
+- The local stores hold three call notes and three Slack messages.
 
-The same command accepts `--account-number GTM-DEMO-002` or `GTM-DEMO-003`:
+| Helper action | Options | Result |
+| --- | --- | --- |
+| `prepare` | `--output NEW_FOLDER` | Writes `plan.json`, `accounts.json`, and `manifest.json`. |
+| `bind` | `--receipt FILE --output FILE` | Checks the complete receipt against the packaged manifest and writes a private binding of the twelve IDs. |
+| `brief` | `--sf-org`, `--binding`, optional `--account-number` (default `GTM-DEMO-001`), `--state-dir` (default `var/salesforce-demo/run`), `--json` | Runs the ordinary `brief` with `--with-slack` and the kit's planning date, `2027-01-15`. |
+| `remove` | `--sf-org`, `--binding` | Deletes the imported records. |
+| `record` | `--sf-org`, `--binding`, `--output NEW_FILE` | Records the brief with `asciinema`. |
 
 | AccountNumber | Invented account | What to inspect |
 | --- | --- | --- |
-| GTM-DEMO-001 | Alder Vale Packaging | CRM, procurement, and security signals disagree. |
+| GTM-DEMO-001 | Alder Vale Packaging | A Draft contract ending 2027-01-31, a Closed Won opportunity, a call note about unapproved procurement, and a Slack message about a delayed security review. |
 | GTM-DEMO-002 | Harborlight Field Services | An October note predates the January staffing discussion. |
-| GTM-DEMO-003 | Juniper Crest Learning | Industry and contact title are missing; an injected note stays quoted. |
+| GTM-DEMO-003 | Juniper Crest Learning | Industry, contact title, and opportunity amount are missing. An instruction inside a note stays quoted data. |
 
-There are three Accounts, three Contacts, three Opportunities, and three Draft
-Contracts. The local fixture stores hold three notes and three Slack messages.
-All names, addresses, and source text in the packaged kit are invented.
+Each quote carries its own CRM, calls, or Slack citation. The follow-up is a
+proposal. No message or activity is sent.
 
-## Use the ordinary CLI and MCP server
-
-The helper resolves AccountNumber through the private import binding and calls
-the ordinary `brief` command with `--with-slack`. To use the same bound source
-stores in an MCP server, choose a separate fresh state folder:
+## Use the MCP server
 
 ```sh
 gtm-connector serve --crm-backend salesforce --sf-org gtm-de --salesforce-demo-binding var/salesforce-demo/binding.json --state-dir var/salesforce-demo/server
 ```
 
-Use the [client setup commands](clients.md) for that state folder. The source
-permissions stay independent: `crm:read`, `calls:read`, and `slack:read`.
-The startup screen names the selected Salesforce environment and demo kit, and
-labels calls and Slack as demo fixtures. Startup checks the connected org's
-identity before opening sources. That metadata check does not establish access
-to every account. Reading local notes or Slack fixtures makes no additional
-Salesforce request after the owner's startup check.
-The binding is an explicit owner mapping. The CRM read checks AccountNumber
-against it without an extra GET.
+Use the [client setup commands](clients.md) for that state folder. The
+`crm:read`, `calls:read`, and `slack:read` grants stay independent.
 
-The private state folder records its source profile and connection identity.
-Restarting with the same binding and connection preserves the local sources.
-Older state without a connection marker needs a fresh folder. Switching bindings, opening bound state
-without its binding, or overlaying a binding on existing default fixtures fails
-before source changes. Choose another fresh `--state-dir` for a new import.
+- The first bound run needs an empty state folder. The folder then records its
+  binding and connection, and a restart must use the same ones.
+- A different binding, bound state opened without its binding, or a binding on
+  existing fixture state fails before any source changes. Use a fresh
+  `--state-dir` for a new import.
+- `--salesforce-demo-binding` requires `--crm-backend salesforce`. It cannot be
+  combined with `--selection`, `--calls-backend imported`, or
+  `--slack-backend slack`.
+- `get_account` checks the returned AccountNumber against the binding without an
+  extra GET. Reading the local notes or Slack fixtures makes no Salesforce
+  request. An unbound account has no demo notes or messages.
+- The binding adds no scope and does not prove which org produced the receipt.
 
 ## Remove the imported book
 
-Stop the demo server and finish editing the book before removal. Run one command:
+Stop the demo server and stop editing the book, then run:
 
 ```sh
 .venv/bin/python scripts/salesforce-demo.py remove --sf-org gtm-de --binding var/salesforce-demo/binding.json
 ```
 
-The helper checks the selected edition, exact imported IDs, original kit field
-values, account associations, and Draft status. The third account's empty Industry,
-contact Title, and opportunity Amount must still be null. Every checked field
-must be present in the response. Fields outside the kit are not compared.
-It checks cascading and restricted child
-relationships on Accounts, Contacts, Opportunities, and Contracts before the
-first delete. It refuses changed kit fields, unrelated children, manual shares, or
-relationships it cannot inspect. A small fixed list permits system-created
-history and Owner sharing rows derived from the imported records.
-An ordinary related record must also have passed the direct inventory and field
-checks and be scheduled for deletion; a missing inventory row is not sufficient.
+Before the first delete, the helper checks all of the following. A failed check
+stops it before any delete.
 
-Contacts, Opportunities, and Contracts are removed before Accounts. The helper
-then verifies that all imported IDs are absent. Missing records are skipped on
-a retry. It never chooses records by a name prefix or searches AccountNumber
-to reconstruct a deletion list. If a command fails, keep the binding and receipt;
-the error reports attempted and confirmed deletes without record details.
+- The org is Developer Edition.
+- Only the exact imported IDs are selected, never a name prefix or AccountNumber.
+- Every kit field still has its original value, including the three null
+  fields, and the contracts are still Draft. Other fields are not compared.
+- Cascading and restricted child relationships of all four objects hold no
+  unexpected records. System history rows and Owner sharing rows are allowed.
+  Other children, manual shares, and relationships it cannot inspect refuse.
 
-The preflight sees records accessible to the selected user and is separate from
-the deletes. It cannot prevent another person adding a child during cleanup or
-custom automation changing other records. Use the isolated demo org and stop
-editing while cleanup runs. It is not a transactional cascade guarantee.
+Contacts, Opportunities, and Contracts are deleted before Accounts. The helper
+then verifies that all imported IDs are absent. A retry skips records that are
+already gone. If a command fails, keep the binding and receipt. A helper error
+exits `3` and reports attempted and confirmed deletes without record details.
+One removal stops after 80 `sf` commands or 240 seconds.
 
-Removal does not erase private local briefs, receipts, databases, or recordings.
-Review and remove those files yourself when finished. The repository ignores
-`var/`; none of its contents belong in this PR.
+The checks and deletes are separate operations, not a transaction. They cannot
+stop another person or custom automation changing records during cleanup, and a
+late failure can leave some records removed. Removal does not erase local
+briefs, receipts, databases, or recordings under `var/`. Remove those yourself.
 
-## Record your live demo
+## Record the brief
 
-Install the optional `asciinema` recording tool described in
-[the recording guide](recording.md). With the imported book still present, run:
+With `asciinema` installed and the imported book still present, run:
 
 ```sh
 .venv/bin/python scripts/salesforce-demo.py record --sf-org gtm-de --binding var/salesforce-demo/binding.json --output var/salesforce-demo/live.cast
 asciinema play var/salesforce-demo/live.cast
 ```
 
-The script records the actual brief command and identifies the source modes on
-screen. It captures no keyboard input, shell prompt, token, or credential command
-output. It writes a private cast and provenance file under ignored `var/`, and
-does not stage, commit, upload, or publish them. The recording contains live
-record names and IDs in the requested brief, so review it privately. The decision
-to retain or share it is yours. Do not commit org data.
-
-The source-data binding, refusal paths, and cleanup behavior are tested with
-invented responses and a fake CLI. A fake response test alone does not establish
-a live Salesforce, Slack, or assistant-app connection.
-
-An authorized Developer Edition run on November 17, 2026 completed the four
-prepare/import/bind/brief steps in 7.565 seconds of command time on an M1 Max
-development machine. Dependencies and CLI login were already available; that
-number excludes installation, login, and typing. The accepted brief had thirteen
-cited lines, four audit receipts, and evidence from live CRM plus the two local
-fixture sources. It retained the Draft disclosure and Salesforce's calculated
-January 31, 2027 end date.
-
-The private live recording also completed. Removal used 74 captured Salesforce
-CLI commands in 99.557 seconds, confirmed twelve deletes, and verified zero
-remaining imported records. The relationship preflight accounts for most of
-those commands. These are observations of one isolated demo run, not a timing
-guarantee. No live Slack workspace, call provider, or hosted assistant was used.
-All org-bearing receipts, snapshots, metadata, and recording output stayed
-private and outside committed source.
-
-## Implementation references
-
-The kit uses Salesforce's [tree import command](https://developer.salesforce.com/docs/platform/salesforce-cli-reference/guide/cli_reference_data_import_tree.html).
-Cleanup uses [object metadata](https://developer.salesforce.com/docs/platform/api-rest/guide/resources-sobject-describe.html)
-and [exact-record deletion](https://developer.salesforce.com/docs/platform/salesforce-cli-reference/guide/cli_reference_data_delete_record.html).
-The [Contract reference](https://developer.salesforce.com/docs/platform/object-reference/references/standard-objects/object-contract.html)
-defines the calculated end date and separate activation step.
+The output must be a new file under `var/`. The helper writes a private cast and
+a `.provenance.json` file beside it and captures no keyboard input. The cast
+contains live record names and IDs, and receipts and bindings contain org
+identifiers. Keep all of them private and out of Git.

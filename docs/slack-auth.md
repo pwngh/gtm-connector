@@ -1,8 +1,8 @@
 # Authenticate an existing Slack app
 
 `slack connect` saves a user grant for a Slack app you already have. It reads
-no messages. Afterwards, [select and read a thread](slack-live.md). No real
-Slack login has been verified; the tests use invented responses.
+no messages. Afterwards, [select and read a thread](slack-live.md). The tests
+use invented responses.
 
 The connector does not create an app, ask for a client secret, or accept a
 pasted token. The existing app needs:

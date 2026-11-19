@@ -3,9 +3,10 @@
 Map one Slack thread to one CRM account, check that it can be read, then use it
 in a brief. A failed live read never falls back to invented messages.
 
-No real Slack login or thread read has been verified; the tests use invented
-responses. A real app's registration, response format, retention, and rate
-policy remain for the owner to check.
+The tests use invented responses. One development `slack check` passed against
+a test workspace on November 18, 2026, as recorded in the
+[security review](../SECURITY_REVIEW.md). A real app's registration, retention,
+and rate policy remain for the owner to check.
 
 ## Map, check, and brief
 
