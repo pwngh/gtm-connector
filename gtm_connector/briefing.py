@@ -208,4 +208,6 @@ def trace_saved(directory, brief_id, number):
     from .audit import read_audit
     if read_audit(Path(directory) / "audit.sqlite3", brief_id) != artifact["evidence"].get("receipts"):
         raise ValueError("The saved card does not match the audit log of this state folder.")
+    if artifact.get("units") != build(artifact["evidence"])[0]:
+        raise ValueError("The saved card was made under other rules for sentences, or was changed. Make it again.")
     return {"brief_id": brief_id, "account_id": artifact["account_id"], **trace(artifact["evidence"], number)}

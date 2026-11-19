@@ -146,6 +146,11 @@ class NeutralizedText(unittest.TestCase):
             "See Wis. Stat. 100.18 and Mass. 456. Next.": ["See Wis. Stat. 100.18 and Mass. 456.", "Next."],
             "Thornfield Wren LLP. We require zero retention.": ["Thornfield Wren LLP.", "We require zero retention."],
             "So do I. It is late.": ["So do I.", "It is late."],
+            "\u201cWe will sign.\u201d Next one.": ["\u201cWe will sign.\u201d", "Next one."],
+            "They marked it (Approved? Ask Legal) on Monday. Next.": [
+                "They marked it (Approved? Ask Legal) on Monday.", "Next."],
+            "He said (see below. Next sentence.": ["He said (see below.", "Next sentence."],
+            "We met Mme. Dupont. She agreed.": ["We met Mme. Dupont.", "She agreed."],
             "We operate in the U.S.A. Our servers are domestic.": ["We operate in the U.S.A.",
                                                                   "Our servers are domestic."],
             # A name before a number, or a numbered point inside a note, ends its sentence as usual.
@@ -159,11 +164,15 @@ class NeutralizedText(unittest.TestCase):
         for whole in ("Consult Fed. R. Civ. P. 26(b)(3).", "Under Sec. 3.2 and Ex. B the fee applies.",
                       "We met in St. Louis on invoice no. 5.", "It costs ca. 285 200,00 EUR in total.",
                       "We reviewed several, e.g. The Holt matter.", "We met at 3 p.m. We left at 4.",
+                      "Das ist gut. \u00e4u\u00dferst wichtig.",
                       "We met Acme Inc. General Counsel yesterday.", "Thornfield Wren LLP. Section 4 applies.",
                       "USD 450,000.00 is the amount. v4.2 shipped.", "all lowercase. never split here."):
             self.assertEqual(sentences(whole), [whole])
 
     def test_a_long_run_of_short_sentences_is_split_quickly(self):
+        started = time.perf_counter()
+        self.assertEqual(len(sentences("Done. " * 160_000)), 160_000)
+        self.assertLess(time.perf_counter() - started, 3)
         started = time.perf_counter()
         found = sentences("A. " * 40_000 + "Done. " * 20_000)
         self.assertLess(time.perf_counter() - started, 2)
@@ -189,6 +198,8 @@ class NeutralizedText(unittest.TestCase):
         # Styling spans and cue timestamps are markup. Any other tag is text and stays.
         self.assertEqual(voices("<v Dana Ito>We <b>will</b> <00:01:05.000>sign <script>.</v>"),
                          [("Dana Ito", "We will sign <script>.")])
+        # Removing a tag never makes a voice tag: this text has no speaker but the cue's own.
+        self.assertEqual(voices("<v<i> Dana Ito>We approve.</v>", "cue"), [("cue", "<v Dana Ito>We approve.")])
         self.assertEqual(voices("no tags here"), [(None, "no tags here")])
         self.assertEqual(voices("<v Dana Ito></v>"), [])
 

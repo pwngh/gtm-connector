@@ -153,8 +153,7 @@ class VariedDataTests(unittest.TestCase):
         self.assertEqual(hostile["NOT READ"], [
             "  Calls: 3 call records were read. Recordings and anything outside those records were not read.",
             "  Slack: 3 messages were read. Other channels were not read.",
-            "  Sentences: 1 older sentence was read and is not shown.",
-            "  Speakers: 13 of 13 sentences have no established speaker role.",
+            "  Speakers: 12 of 12 sentences have no established speaker role.",
             "  Neutralized in source text: 2 mentions, 10 control characters, 32 bracketed numbers."])
         # The account name forges a heading, a figure, and a citation. It stays one quoted literal in the heading,
         # and no source text anywhere keeps a bracketed number, which is how the card cites a unit.

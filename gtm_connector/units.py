@@ -22,7 +22,7 @@ class BriefRejected(ValueError):
     """The evidence cannot support a card."""
 
 
-SANITIZER_VERSION = 1
+SANITIZER_VERSION = 2
 SHOWN_SENTENCES = 12
 SHOWN_RECORDS = 5
 MAX_SENTENCE = 300
@@ -67,14 +67,13 @@ _RUN_GAP_MS = 2000
 # One speaker's cues up to this far apart still join when the earlier one stops mid-sentence and the later one
 # goes on in lower case.
 _BRIDGE_GAP_MS = 10_000
-_GOES_ON = re.compile(r"\s*[a-z,;:\u2013\u2014]")
 # WebVTT markup that is not speech: bold, italic, underline, class, language and ruby spans, and cue timestamps.
 _CUE_MARKUP = re.compile(r"</?(?:[biuc]|ruby|rt|lang)(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>"
                          r"|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>")
 _LINE_BREAKS = {0x0A, 0x0B, 0x0C, 0x85, 0x2028, 0x2029}
 # A bracketed integer is how a card cites a unit, so source text never keeps one.
 _CITATION = re.compile(r"\[(\d+)\]")
-_ENDED = re.compile(r"""[.!?]["')\]]*\Z""")
+_ENDED = re.compile(r"""[.!?\u3002\uff01\uff1f]["')\]\u201d\u2019\u00bb\u300d\uff09]*\Z""")
 
 
 def _host(target):
@@ -148,14 +147,15 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
 
 
 # A sentence may end at closing punctuation followed by a token that does not start in lower case.
-_SENTENCE_END = re.compile(r"""([.!?]["')\]]*)(\s+)(?=["'(\[]?[^\sa-z])""")
-_BEFORE = r"(?:^|[\s(\[\"'])"
-_AFTER = r"\.[\"')\]]*\Z"
+_SENTENCE_END = re.compile(r"""([.!?]["')\]\u201d\u2019\u00bb]*)(\s+)(?=["'(\[\u201c\u2018\u00ab]?[^\sa-z])""")
+_BEFORE = r"(?:^|[\s(\[\"'\u201c\u2018\u00ab])"
+_AFTER = r"\.[\"')\]\u201d\u2019\u00bb]*\Z"
+_CLOSERS = "\"')]\u201d\u2019\u00bb"
 # A period after one of these does not end a sentence: "28 U.S.C. 1332", "F.Supp.2d", "e.g."; titles, legal and
 # state short forms, months, and single letters; a list marker that opens a line.
 _DOTTED = re.compile(_BEFORE + r"(?:[A-Za-z]{1,6}\.){2,}(?:[0-9]+[a-z]*)?[\"')\]]*\Z")
 _ABBREVIATION = re.compile(
-    _BEFORE + r"(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|Hon|Rev|Sen|Rep|Gov|Pres|Gen|Col|Capt|Lt|Sgt"
+    _BEFORE + r"(?:Mr|Mrs|Ms|Mx|Mme|Mlle|Messrs|Dr|Prof|Sr|Jr|Hon|Rev|Sen|Rep|Gov|Pres|Gen|Col|Capt|Lt|Sgt"
     r"|Assn|Bros|Dept|Div|Est|Mfg|Natl|Intl|Univ|St|Mt|Ft"
     r"|v|vs|al|cf|ibid|id|supra|infra|approx|misc|ca|pp|vol|fig|nr|est|ext"
     r"|Fed|Civ|Crim|Evid|App|Supp|Dist|Cir|Bankr|Admin|Stat|Reg|Code|Comp|Ann|Cons"
@@ -165,7 +165,7 @@ _ABBREVIATION = re.compile(
     r"|Ala|Ariz|Ark|Cal|Colo|Conn|Del|Fla|Ga|Ill|Ind|Kan|Ky|La|Md|Mass|Mich|Minn|Miss|Mo|Mont|Neb|Nev|Okla|Or|Pa"
     r"|Tenn|Tex|Va|Vt|Wash|Wis|Wyo"
     r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|[A-Za-z])" + _AFTER)
-_LIST_MARKER = re.compile(r"\s*(?:\d+|[A-Za-z])\.[\"')\]]*\Z")
+_LIST_MARKER = re.compile(r"\s*(?:\d+|[A-Za-z])\.[\"')\]]*")
 # A firm suffix, the word "I", or a capitalized initialism ends a sentence only before a word that opens one.
 _MAY_END = re.compile(_BEFORE + r"(?:Inc|Ltd|Co|Corp|LLP|LLC|LP|PLC|PC|I)" + _AFTER)
 _OPENER = re.compile(r"(?:We|Our|They|Their|He|She|It|Its|I|You|My|Your|This|That|These|Those|The|A|An|In|On|At|For|If"
@@ -175,31 +175,51 @@ _NUMBER_SIGN = re.compile(_BEFORE + r"[Nn]os?\.\Z")
 _SECTION_SIGN = re.compile(r"""["'(\[]*[§¶]""")
 
 
-def _continues(line: str, start: int, end: int, after: str) -> bool:
-    """Whether the closing punctuation that ends at `end` leaves its sentence, begun at `start`, unfinished."""
-    if not line[start:end].rstrip("\"')]").endswith("."):
+def _continues(line: str, start: int, end: int, after: int) -> bool:
+    """Whether the closing punctuation that ends at `end` leaves its sentence, begun at `start`, unfinished.
+
+    `after` is where the next token starts.
+    """
+    if line[after:after + 1].islower():
+        return True
+    # A bracket opened in this sentence and closed soon after holds its own punctuation: "(Approved? Ask Legal)".
+    near = max(start, end - 200)
+    for opened, closed in ("()", "[]"):
+        if line.count(opened, near, end) > line.count(closed, near, end) and line.find(closed, end, end + 200) > 0:
+            return True
+    if not line[max(start, end - 8):end].rstrip(_CLOSERS).endswith("."):
         return False
     if _LIST_MARKER.fullmatch(line, start, end):
         return True
     window = max(start - 1, end - 24, 0)
     dotted = _DOTTED.search(line, window, end)
-    if _MAY_END.search(line, window, end) or dotted and dotted.group().lstrip(" ([\"'")[0].isupper():
-        return _OPENER.match(after) is None
-    return bool(dotted or _ABBREVIATION.search(line, window, end) or _SECTION_SIGN.match(after)
-                or after[:1].isdigit() and _NUMBER_SIGN.search(line, window, end))
+    if _MAY_END.search(line, window, end) or dotted and dotted.group().lstrip(" ([\"'\u201c\u2018\u00ab")[0].isupper():
+        return _OPENER.match(line, after) is None
+    return bool(dotted or _ABBREVIATION.search(line, window, end) or _SECTION_SIGN.match(line, after)
+                or line[after:after + 1].isdigit() and _NUMBER_SIGN.search(line, window, end))
 
 
 def _unfinished(text: str) -> bool:
     """Whether transcript text stops mid-sentence: no closing punctuation, or a short form that expects more."""
-    text = text.rstrip()
+    text = text.strip()
     if not _ENDED.search(text):
         return True
-    if not text.rstrip("\"')]").endswith("."):
+    if not text.rstrip(_CLOSERS).endswith("."):
         return False
+    if _LIST_MARKER.fullmatch(text):
+        return True
     window = max(len(text) - 24, 0)
-    short = _ABBREVIATION.search(text, window)
-    return bool(_DOTTED.search(text, window) or _NUMBER_SIGN.search(text, window)
-                or short and len(short.group().strip(" ([\"')].")) > 1)
+    short = _ABBREVIATION.search(text, window) or _NUMBER_SIGN.search(text, window)
+    # "No." alone is an answer, and a single letter ends "plan B." Longer short forms expect more.
+    return bool(_DOTTED.search(text, window)
+                or short and short.start() > 0 and len(short.group().strip(" ([\"')]." + _CLOSERS)) > 1
+                or short and short.start() == 0 and not _NUMBER_SIGN.fullmatch(text))
+
+
+def _goes_on(text: str) -> bool:
+    """Whether text opens as the rest of a sentence: in lower case, or on a comma, semicolon or colon."""
+    opening = text.lstrip()[:1]
+    return opening.islower() or opening in tuple(",;:")
 
 
 def sentences(safe: str) -> list[str]:
@@ -215,7 +235,7 @@ def sentences(safe: str) -> list[str]:
             continue
         start = 0
         for match in _SENTENCE_END.finditer(line):
-            if not _continues(line, start, match.end(1), line[match.end(2):]):
+            if not _continues(line, start, match.end(1), match.end(2)):
                 found.append(line[start:match.end(1)])
                 start = match.end(2)
         if line[start:]:
@@ -228,13 +248,13 @@ def voices(text: str, label=None) -> list[tuple]:
 
     Text outside a voice span belongs to the cue's own label, not to the voice before it.
     """
-    text = _CUE_MARKUP.sub("", text)
     spans, position, speaker = [], 0, label
     for match in _VOICE.finditer(text):
         spans.append((speaker, text[position:match.start()]))
         speaker, position = (label if match.group(1) is None else match.group(1)), match.end()
     spans.append((speaker, text[position:]))
-    return [(name, part) for name, part in spans if part.strip()]
+    # Styling is removed after the voices are found, so removing a tag can never make a voice tag.
+    return [(name, part) for name, raw in spans if (part := _CUE_MARKUP.sub("", raw)).strip()]
 
 
 def _label(value):
@@ -450,8 +470,8 @@ class _Card:
             last = runs[-1] if runs else None
             gap = None if last is None or start is None or last[2] is None else start - last[2]
             if last is not None and label is not None and last[0] == label and (
-                    gap is None or gap <= _RUN_GAP_MS
-                    or gap <= _BRIDGE_GAP_MS and _unfinished(last[1]) and _GOES_ON.match(raw)):
+                    gap is None or abs(gap) <= _RUN_GAP_MS
+                    or 0 < gap <= _BRIDGE_GAP_MS and _unfinished(last[1]) and _goes_on(raw)):
                 last[1:] = [last[1] + "\n" + raw, end]
             else:
                 runs.append([label, raw, end])
@@ -459,6 +479,7 @@ class _Card:
         # The digest is of the record's text as stored, so it can be checked against the source.
         digest = hashlib.sha256(row["body"].encode("utf-8", "surrogatepass")).hexdigest()
         waiting: set = set()  # speakers whose last run stopped mid-sentence
+        cut = False  # whether the sentence before this one, by anyone, stopped mid-sentence
         for index, (label, raw, _) in enumerate(runs):
             role, basis = role_of(label)
             # A speaker label is source text too. The role was derived from the label as given.
@@ -469,19 +490,25 @@ class _Card:
             for key, count in counts.items():
                 self.neutralized[key] += count
             found = sentences(safe)
-            cut_start = (open_start and index == 0) or label in waiting
-            cut_end = transcript and bool(found) and _unfinished(found[-1])
-            waiting.discard(label)
-            if cut_end:
-                waiting.add(label)
+            # What follows a sentence that stopped may be its other half: the same speaker's next words, or
+            # anyone's when they go on in lower case.
+            follows = (open_start and index == 0) or label in waiting or cut and _goes_on(safe)
+            if found:
+                waiting.discard(label)
             for position, sentence in enumerate(found):
-                partial = (cut_start and position == 0) or (cut_end and position == len(found) - 1)
+                # Inside a run only a paragraph break can leave a sentence without its end. At the end of a
+                # run, a short form that expects more does too.
+                cut = transcript and (_unfinished(sentence) if position == len(found) - 1
+                                      else not _ENDED.search(sentence))
+                partial, follows = follows or cut, cut
                 self.partial += partial
                 self.units.append({"n": len(self.units) + 1, "kind": "sentence", "source": _SOURCES[table][0],
                                    "record_ref": row["record_ref"], "tool": _SOURCES[table][2], "at": at,
                                    "speaker": speaker, "role": role, "basis": basis, "text": sentence,
                                    "partial": bool(partial), "raw_sha256": digest,
                                    "sanitizer_version": SANITIZER_VERSION})
+            if found and cut:
+                waiting.add(label)
         if len(self.units) == before:
             self.record(row, table)
         return before + 1

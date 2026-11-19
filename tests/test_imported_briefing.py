@@ -168,6 +168,39 @@ class ImportedBriefingTests(unittest.TestCase):
                                   ("Fine.", False), ("Thank you.", False)])
         self.assertNotIn("sign Great", artifact["text"])
 
+    def test_what_follows_a_cut_sentence_is_shown_only_when_it_cannot_be_its_other_half(self):
+        _, spoken = self.cues(
+            # "No." is an answer, a closing quotation mark closes, and so does a full stop of another script.
+            (1, 2, "<v Dana Crest>No."), (6, 8, "<v Dana Crest>We already signed."),
+            (20, 22, "<v Dana Crest>\u201cWe will sign.\u201d"), (26, 28, "<v Dana Crest>\u5951\u7d04\u3057\u307e\u3059\u3002"),
+            (32, 34, "<v Dana Crest>It is done."),
+            # A lower-case line by nobody in particular, right after a cut sentence, may be its other half. So
+            # may the same speaker's next words, whatever their case.
+            (60, 62, "<v Dana Crest>We cannot sign"), (62.5, 64, "until Legal approves."),
+            (64.5, 66, "<v Dana Crest>The contract is ready."), (70, 72, "<v Dana Crest>That is all."),
+            # A dash does not carry a sentence across a pause, and a cue that starts earlier is not a later one.
+            (100, 102, "<v Morgan Reed>We will not"), (110, 112, "<v Morgan Reed>\u2014 We approve."),
+            (130, 131, "<v Morgan Reed>It needs"), (120, 121, "<v Morgan Reed>another review."),
+            (140, 141, "<v Morgan Reed>Fine."),
+            # Lower case is lower case in any alphabet.
+            (200, 202, "<v Dana Crest>Die Position ist"), (205, 207, "<v Dana Crest>\u00e4u\u00dferst wichtig."))
+        self.assertEqual([text for text, partial in spoken if not partial], [
+            "No.", "We already signed.", "\u201cWe will sign.\u201d", "\u5951\u7d04\u3057\u307e\u3059\u3002", "It is done.",
+            "That is all.", "Fine.", "Die Position ist \u00e4u\u00dferst wichtig."])
+        self.assertEqual([text for text, partial in spoken if partial], [
+            "We cannot sign", "until Legal approves.", "The contract is ready.", "We will not", "\u2014 We approve.",
+            "It needs", "another review."])
+
+    def test_a_blank_line_inside_a_transcript_does_not_make_two_whole_sentences(self):
+        raw = b"We will not\n\nsign this renewal.\nGood.\n"
+        with Runtime(self.state, calls_backend="imported") as runtime:
+            self.import_call(runtime, raw=raw, requested_range=(1, 4))
+            artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
+        self.assertEqual([(unit["text"], unit["partial"]) for unit in artifact["units"] if unit["kind"] == "sentence"],
+                         [("We will not", True), ("sign this renewal.", True), ("Good.", False)])
+        _, spoken = self.cues((1, 4, "<v Dana Crest>We will not\n \nsign this renewal.\n \nGood."))
+        self.assertEqual(spoken, [("We will not", True), ("sign this renewal.", True), ("Good.", False)])
+
     def test_cue_markup_is_not_part_of_a_quotation(self):
         _, spoken = self.cues((1, 4, "<v Dana Crest><c.loud>We</c> <00:00:02.000><b.big>will</b> <i>sign</i> "
                                      "<lang en>in March</lang>.</v>"))
