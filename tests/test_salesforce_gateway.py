@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 import httpx2
 from mcp.server.mcpserver.exceptions import ToolError
 
-from gtm_connector.briefing import RenewalFieldsUnmapped, create_brief
+from gtm_connector.briefing import create_brief
 from gtm_connector.client import LocalClient
 from gtm_connector.runtime import Runtime
 from gtm_connector.salesforce import SalesforceReadError, SalesforceReadOnlyAdapter
@@ -233,19 +233,15 @@ class SalesforceGatewayTests(unittest.TestCase):
         self.assertEqual(self.requests, self.startup_requests)
         self.assertEqual(self.runtime.connector.audit.read(), [])
 
-    def test_external_account_without_contract_is_refused_before_drafting(self):
+    def test_external_account_without_contract_is_briefed_and_says_so(self):
         self.open_runtime()
         self.contracts = []
-        adapter = Mock()
         for include_slack in (False, True):
-            with self.assertRaisesRegex(RenewalFieldsUnmapped, "No Draft, InApproval, or Activated Contract") as error:
-                create_brief(self.runtime, ACCOUNT_ID, adapter=adapter, as_of="2027-01-15",
-                             include_slack=include_slack)
-            self.assertEqual(error.exception.code, "renewal_fields_unmapped")
-        adapter.draft.assert_not_called()
+            brief = create_brief(self.runtime, ACCOUNT_ID, as_of="2027-01-15", include_slack=include_slack)
+            self.assertEqual(brief["status"], "accepted")
+            self.assertIn("- No contract has an end date on or after 2027-01-15.", brief["text"])
         self.assertEqual(len(self.runtime.connector.audit.read()), 7)
         self.assertTrue(all(request.method == "GET" for request in self.requests))
-        self.assertFalse((self.state / "briefs").exists())
 
     def test_default_runtime_keeps_closed_world_tools_and_local_writer(self):
         with Runtime(self.state) as runtime, LocalClient(runtime.config) as client:

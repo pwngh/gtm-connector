@@ -12,8 +12,8 @@ from unittest.mock import Mock
 
 import httpx2
 
-from gtm_connector.briefing import BriefingError, RenewalFieldsUnmapped, collect_evidence, create_brief
-from gtm_connector.citations import BriefRejected, NoRenewalCandidate, build_facts, check_brief
+from gtm_connector.briefing import BriefingError, collect_evidence, create_brief
+from gtm_connector.citations import BriefRejected, build_facts, check_brief
 from gtm_connector.client import LocalClient
 from gtm_connector.runtime import Runtime
 from gtm_connector.salesforce import SalesforceReadOnlyAdapter
@@ -131,10 +131,33 @@ class SalesforceFactTests(unittest.TestCase):
         source["records"][2]["amount_decimal"] = None
         self.assertIn("amount not provided (currency unknown)", "\n".join(build_facts(source)))
 
-    def test_no_candidate_is_a_distinct_evidence_failure(self):
-        for contracts in ([], [contract_record(end=None)], [contract_record(end="2027-01-14")]):
-            with self.subTest(contracts=contracts), self.assertRaises(NoRenewalCandidate):
-                build_facts(evidence(contracts))
+    def test_an_account_with_no_contract_ahead_is_still_briefed_and_a_lapsed_contract_is_a_signal(self):
+        run = "[run/brief-sf-fixture]"
+        nothing_ahead = f"- No contract has an end date on or after 2027-01-15. [crm/accounts/{ACCOUNT_ID}] {run}"
+        lapsed = "- Signal: contract ctr-sf-{0} ended {1} ago and no later contract is recorded. [crm/contracts/ctr-sf-{0}] "
+        first, second = "800000000000001AAA", "800000000000002AAA"
+        for contracts, signals in (
+                ([], []), ([contract_record(end=None)], []),
+                ([contract_record(end="2027-01-14")], [lapsed.format(first, "1 day") + run]),
+                # The latest contract that ended is the one named.
+                ([contract_record(1, end="2026-01-14"), contract_record(2, end="2026-12-16", status="Activated")],
+                 [lapsed.format(second, "30 days") + run])):
+            with self.subTest(contracts=contracts):
+                source = evidence(contracts)
+                lines = build_facts(source)
+                self.assertIn(nothing_ahead, lines)
+                self.assertEqual([line for line in lines if line.startswith("- Signal: contract ctr")], signals)
+                self.assertEqual(sum(line.startswith("- Other contract ") for line in lines), len(contracts))
+                self.assertFalse(any("planning candidate" in line or "Contract end" in line for line in lines))
+                text = "\n".join(lines) + "\n"
+                self.assertEqual(check_brief(text, source), text)
+                with self.assertRaises(BriefRejected):
+                    check_brief(text.replace(nothing_ahead + "\n", ""), source)
+        # A contract that is still ahead is planned from, whatever lapsed before it.
+        lines = build_facts(evidence([contract_record(1, end="2026-01-14"), contract_record(2, end="2027-01-15")]))
+        self.assertIn(f"- Contract ends on the as-of date 2027-01-15. [crm/contracts/ctr-sf-{second}] {run}", lines)
+        self.assertNotIn(nothing_ahead, lines)
+        self.assertFalse(any("no later contract" in line for line in lines))
 
     def test_contract_identity_association_receipts_and_profile_cannot_be_spoofed(self):
         mutations = (
@@ -260,16 +283,15 @@ class SalesforceBriefingTests(unittest.TestCase):
             self.assertEqual(len(tools), 5)
             self.assertNotIn("log_activity", [tool["name"] for tool in tools])
 
-    def test_no_future_contract_refuses_before_draft_or_artifact(self):
-        adapter = Mock()
-        for end in (None, "2027-01-14"):
+    def test_no_future_contract_still_gives_a_saved_brief_that_says_so(self):
+        for end, lapsed in ((None, False), ("2027-01-14", True)):
             self.contracts[0]["EndDate"] = end
-            with self.subTest(end=end), self.assertRaises(RenewalFieldsUnmapped) as error:
-                create_brief(self.runtime, ACCOUNT_ID, as_of=AS_OF, adapter=adapter)
-            self.assertEqual(error.exception.code, "renewal_fields_unmapped")
-            self.assertIn("salesforce check", str(error.exception))
-        adapter.draft.assert_not_called()
-        self.assertFalse((self.state / "briefs").exists())
+            with self.subTest(end=end):
+                brief = create_brief(self.runtime, ACCOUNT_ID, as_of=AS_OF)
+                self.assertEqual(brief["status"], "accepted")
+                self.assertIn("- No contract has an end date on or after 2027-01-15.", brief["text"])
+                self.assertEqual("ended 1 day ago and no later contract is recorded" in brief["text"], lapsed)
+                self.assertTrue((self.state / "briefs" / (brief["brief_id"] + ".json")).is_file())
 
     def test_optional_source_denials_remain_required_and_create_no_extra_upstream_reads(self):
         brief = create_brief(self.runtime, ACCOUNT_ID, as_of=AS_OF, include_calls=False,

@@ -65,6 +65,9 @@ contract has not been activated, and that ARR and CRM renewal risk are not mappe
 fields. The built-in draft gives each other contract on the account one line with its status,
 category, and end date. Amounts are printed with `(currency unknown)`.
 
+An account with no such contract is still briefed. The brief says that no contract has an end date
+on or after the planning date, and when one has ended, it opens with a signal naming the latest.
+
 ## Field mapping
 
 | Source | Returned fields |
@@ -90,9 +93,8 @@ category, and end date. Amounts are printed with `(currency unknown)`.
 
 ## Errors
 
-`salesforce_invalid_configuration` exits `2`. `salesforce_environment_mismatch`,
-`source_identity_mismatch`, and `renewal_fields_unmapped` exit `3`. Other `salesforce_*` codes exit
-`5`. Over MCP, an upstream failure is a tool error (`isError: true` over HTTP 200).
+`salesforce_invalid_configuration` exits `2`. `salesforce_environment_mismatch` and
+`source_identity_mismatch` exit `3`. Other `salesforce_*` codes exit `5`. Over MCP, an upstream failure is a tool error (`isError: true` over HTTP 200).
 
 | Code | Cause | Fix |
 | --- | --- | --- |
@@ -113,7 +115,7 @@ category, and end date. Amounts are printed with `(currency unknown)`.
 | `salesforce_invalid_arguments` | An account ID, search text, or date is invalid. | Use an `acc-sf-` ID, a shorter query, or a `YYYY-MM-DD` date. |
 | `salesforce_account_number_ambiguous` | An AccountNumber lookup returned a number that is not a literal match. `calls import` reports `calls_account_ambiguous`. | Select the account with `--account` and its canonical ID. |
 | `source_identity_mismatch` | The state folder belongs to another connection or cannot prove its identity. | Restore the original connection, or use an unused `--state-dir`. |
-| `renewal_fields_unmapped` | No eligible Contract has an `EndDate` on or after the planning date. | Run `salesforce check`. Verify the contract's `EndDate` and read access. |
+| `renewal_fields_unmapped` | `salesforce check` found no account with a Contract `EndDate` on or after the planning date. Briefs still work and say so. | Create a Draft Contract with `StartDate` and `ContractTerm`, or verify read access to `EndDate`. |
 | `crm_write_disabled` | A client attempted a write. | Do not retry. The Salesforce backend is read-only. |
 
 ## Demo book

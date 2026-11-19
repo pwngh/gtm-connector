@@ -30,7 +30,8 @@ and signals are published first wherever a draft puts them.
 | Signal | When |
 | --- | --- |
 | `renewal is in N days and opportunity X is still open at stage S` | Demo CRM: the opportunity is not closed and the renewal is 30 days away or less. It reads `renewal is due today` on the day and `renewal was N days ago` after it. |
-| `contract end is in N days and opportunity X is still open at stage S` | Salesforce: the selected contract ends in 30 days or less, or `is today`, and the opportunity is open. Every open opportunity on the account counts. A contract that has ended is never selected. |
+| `contract end is in N days and opportunity X is still open at stage S` | Salesforce: the selected contract ends in 30 days or less, or `is today`, and the opportunity is open. Every open opportunity on the account counts. |
+| `contract X ended N days ago and no later contract is recorded` | Salesforce: no contract ends on or after the date, and at least one has ended. The latest is named. |
 | `CRM marks this account at risk` | The demo CRM's risk status is `at_risk`. Its reason follows when present. |
 | `contact NAME has no role recorded` | The contact has no title. |
 | `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old, counted from its UTC date. It reads `latest dated` when another note has no usable time, and `the selected call excerpt` for an imported transcript. |
@@ -75,7 +76,7 @@ the `Brief:` and `As of:` display labels. Checking the original text exits `0` w
 | ---: | --- | --- | --- |
 | 1 | `local_failure` | A running connector holds the state folder, or the saved brief file is missing. | Stop the server or pass another `--state-dir`. Check the brief ID. |
 | 2 | `usage_error` | The account ID, date, or option combination is invalid. | Use an ID such as `acc-003` and a `YYYY-MM-DD` date. |
-| 3 | `refused` | A Salesforce account has no eligible Contract, an account has no imported transcript, or the state folder belongs to another source. | See [Salesforce](salesforce.md) and [transcript imports](calls.md). |
+| 3 | `refused` | An account has no imported transcript, or the state folder belongs to another source. | See [Salesforce](salesforce.md) and [transcript imports](calls.md). |
 | 4 | `check_failed` | A draft or candidate has an uncited, unsupported, misattributed, or repeated line, or omits a required one. | Use only lines from the saved `text`, or create a new brief. |
 | 5 | `upstream_failure` | A read failed, the account was not found, or the local model failed. | Check the account ID with `accounts`, then retry. |
 

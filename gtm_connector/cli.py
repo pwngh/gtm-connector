@@ -1279,10 +1279,6 @@ def _failure(exc, args):
         return _error(message, code, next_command, as_json=args.json)
     elif isinstance(exc, BriefRejected) or (command in ("demo", "verify") and message.startswith("demo ")):
         code = 4
-    elif getattr(exc, "code", None) == "renewal_fields_unmapped":
-        code = 3
-        message = "renewal_fields_unmapped: " + message
-        next_command = "gtm-connector salesforce check --help"
     elif getattr(exc, "code", None) in ("salesforce_environment_mismatch", "source_identity_mismatch"):
         code = 3
     elif (type(exc).__name__ in ("SalesforceReadError", "BriefingError", "OllamaError",

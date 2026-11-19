@@ -20,7 +20,7 @@ import uuid
 
 import httpx2
 
-from gtm_connector.briefing import RenewalFieldsUnmapped, create_brief
+from gtm_connector.briefing import create_brief
 from gtm_connector.citations import BriefRejected, check_brief
 from gtm_connector.runtime import Runtime
 from gtm_connector.salesforce import SalesforceReadError, SalesforceReadOnlyAdapter
@@ -180,10 +180,10 @@ def selected(contracts):
 
 
 def outcome(rows):
-    """The documented path for one account: a brief, or the code of the refusal."""
+    """The documented path for one account: a brief, or the limit code."""
     if any(len(rows[name]) > 100 for name in ("Contact", "Opportunity", "Contract")):
         return "salesforce_result_limit"
-    return "brief" if selected(rows["Contract"]) else "renewal_fields_unmapped"
+    return "brief"
 
 
 def read_records(rows, notes, messages):
@@ -214,18 +214,30 @@ def expected(rows, notes, messages, brief):
     account_id = "acc-sf-" + account["Id"]
     ref = f"[crm/accounts/{account_id}]"
     contract = selected(rows["Contract"])
-    contract_ref = f"[crm/contracts/ctr-sf-{contract['Id']}]"
-    days = (date.fromisoformat(contract["EndDate"]) - AS_OF).days
     lines = [f"- Account: {quote(account['Name'])}. {ref}", f"- Industry: {quote(account['Industry'])}. {ref}",
              f"- Annual recurring revenue is not mapped from standard Salesforce fields. {ref}",
-             f"- CRM renewal risk is not mapped from standard Salesforce fields. {ref}",
-             f"- Renewal planning candidate: Contract ctr-sf-{contract['Id']}; status {quote(contract['Status'])}; "
-             f"category {quote(contract['StatusCode'])}. {contract_ref}",
-             f"- Contract end date: {contract['EndDate']}. {contract_ref}",
-             (f"- Contract end is in {count(days)} as of {AS_OF}. " if days else
-              f"- Contract ends on the as-of date {AS_OF}. ") + f"{contract_ref} {run}",
-             f"- {ACTIVATION[contract['StatusCode']]} {contract_ref}",
-             f"- Proposed follow-up: Ask the account owner to review the cited renewal context. {contract_ref}"]
+             f"- CRM renewal risk is not mapped from standard Salesforce fields. {ref}"]
+    lapsed, days = [], None
+    if contract:
+        contract_ref = f"[crm/contracts/ctr-sf-{contract['Id']}]"
+        days = (date.fromisoformat(contract["EndDate"]) - AS_OF).days
+        lines += [f"- Renewal planning candidate: Contract ctr-sf-{contract['Id']}; status {quote(contract['Status'])}; "
+                  f"category {quote(contract['StatusCode'])}. {contract_ref}",
+                  f"- Contract end date: {contract['EndDate']}. {contract_ref}",
+                  (f"- Contract end is in {count(days)} as of {AS_OF}. " if days else
+                   f"- Contract ends on the as-of date {AS_OF}. ") + f"{contract_ref} {run}",
+                  f"- {ACTIVATION[contract['StatusCode']]} {contract_ref}"]
+    else:
+        # No contract is ahead: the brief says so, and the latest one that ended is a signal.
+        contract_ref = ref
+        lines.append(f"- No contract has an end date on or after {AS_OF}. {ref} {run}")
+        ended = [row for row in rows["Contract"] if row["EndDate"]]
+        if ended:
+            last = max(ended, key=lambda row: (row["EndDate"], row["Id"]))
+            age = (AS_OF - date.fromisoformat(last["EndDate"])).days
+            lapsed = [f"- Signal: contract ctr-sf-{last['Id']} ended {count(age)} ago and no later contract is "
+                      f"recorded. [crm/contracts/ctr-sf-{last['Id']}] {run}"]
+    lines.append(f"- Proposed follow-up: Ask the account owner to review the cited renewal context. {contract_ref}")
     for row in rows["Contract"]:
         if row is not contract:
             ends = "no end date" if row["EndDate"] is None else f"end date {row['EndDate']}"
@@ -238,7 +250,7 @@ def expected(rows, notes, messages, brief):
         lines.append(f"- CRM opportunity {identifier}: stage {quote(row['StageName'])}; amount {amount} "
                      f"(currency unknown); close date {row['CloseDate']}; closed {str(row['IsClosed']).lower()}; "
                      f"won {str(row['IsWon']).lower()}. [crm/opportunities/{identifier}]")
-        if days <= 30 and not row["IsClosed"]:
+        if days is not None and days <= 30 and not row["IsClosed"]:
             ending.append(f"- Signal: contract end {f'is in {count(days)}' if days else 'is today'} and opportunity "
                           f"{identifier} is still open at stage {quote(row['StageName'])}. "
                           f"{contract_ref} [crm/opportunities/{identifier}] {run}")
@@ -266,7 +278,7 @@ def expected(rows, notes, messages, brief):
     if not messages:
         lines.append(f"- No Slack messages were returned for {account_id}. {receipt['read_slack_messages']}")
     # docs/briefs.md, Signals: the contract end, then contacts with no role, then the stale call note.
-    return ending + roles + stale, lines
+    return lapsed + ending + roles + stale, lines
 
 
 class SalesforcePath(unittest.TestCase):
@@ -346,7 +358,7 @@ class SalesforcePath(unittest.TestCase):
     def held(self, rows, notes=(), messages=(), *, to):
         if to == "brief":
             return self.brief(rows, notes, messages)
-        self.refused(rows, RenewalFieldsUnmapped if to == "renewal_fields_unmapped" else SalesforceReadError, to)
+        self.refused(rows, SalesforceReadError, to)
 
     def tearDown(self):
         self.assertEqual(self.org.unexpected, [])
@@ -370,8 +382,8 @@ class BookTests(SalesforcePath):
             # One failure a book, not one an account: the cause is the same wherever it shows.
             with self.subTest(book=name, check="every record that was read is cited"):
                 self.assertEqual({account: records for account, records in uncited.items() if records}, {})
-        # The books reach a brief and the refusal for an account with no contract left to renew.
-        self.assertLessEqual({"brief", "renewal_fields_unmapped"}, set(paths))
+        # Every book account is briefed, including the ones with no contract left to renew.
+        self.assertEqual(set(paths), {"brief"})
 
     def test_two_contracts_are_both_read_and_both_cited(self):
         # A contract that was not selected is still stated and cited.
@@ -395,8 +407,7 @@ class BuiltTests(SalesforcePath):
     def test_row_counts_up_to_the_limit_give_a_brief_and_one_more_gives_the_limit_code(self):
         for record in ("contacts", "opportunities", "contracts"):
             for size in (0, 1, 99, 100, 101):
-                to = ("salesforce_result_limit" if size == 101 else
-                      "renewal_fields_unmapped" if record == "contracts" and size == 0 else "brief")
+                to = "salesforce_result_limit" if size == 101 else "brief"
                 self.sized((record, size), shape(**{"contracts": 1, record: size}), to=to)
 
     def test_text_of_one_character_and_of_200_000_characters(self):

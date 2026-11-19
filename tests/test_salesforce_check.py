@@ -381,21 +381,15 @@ print(json.dumps({{"status": 0, "result": result}}))
         factory.assert_called_once_with(ALIAS, environment="developer")
         return code, stdout.getvalue(), stderr.getvalue(), state
 
-    def test_cli_brief_without_candidate_refuses_with_exit_three_before_drafting(self):
+    def test_cli_brief_without_a_contract_ahead_still_returns_a_brief_that_says_so(self):
         self.no_candidate = True
-        with patch("gtm_connector.briefing.FixtureDraftAdapter.draft", autospec=True) as draft:
-            code, stdout, stderr, state = self.brief_cli()
-        self.assertEqual(code, 3)
-        self.assertEqual(stdout, "")
-        error = json.loads(stderr)["error"]
-        self.assertEqual(error["code"], "refused")
-        self.assertIn("renewal_fields_unmapped", error["message"])
-        self.assertEqual(error["next"], "gtm-connector salesforce check --help")
+        code, stdout, stderr, state = self.brief_cli()
+        self.assertEqual((code, stderr), (0, ""))
+        brief = json.loads(stdout)
+        self.assertEqual(brief["status"], "accepted")
+        self.assertIn(f"- No contract has an end date on or after {AS_OF}.", brief["text"])
+        self.assertEqual(len(list((state / "briefs").iterdir())), 1)
         self.assert_safe(stderr)
-        draft.assert_not_called()
-        self.assertFalse((state / "briefs").exists())
-        self.assertEqual(len(self.requests), 5)
-        self.assertEqual((self.directory / "count").read_text(), "2")
 
     def test_cli_brief_with_contract_returns_the_cited_three_tool_artifact(self):
         code, stdout, stderr, state = self.brief_cli()
