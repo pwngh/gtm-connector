@@ -52,7 +52,7 @@ invented provider responses. No live org has been verified.
 ```sh
 gtm-connector serve --state-dir var/v2
 gtm-connector connect inspector --scope crm:read --state-dir var/v2
-gtm-connector brief acc-007 --with-slack
+gtm-connector brief acc-007 --with-slack --state-dir var/brief   # its own folder while serve runs
 gtm-connector audit --tool get_account --follow --state-dir var/v2
 gtm-connector doctor --state-dir var/v2
 ```

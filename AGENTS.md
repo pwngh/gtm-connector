@@ -11,13 +11,14 @@ One operator runs it. People use the CLI, assistants use the MCP tools. Python 3
 4. Every line of a brief cites a record, or the whole brief is rejected.
 5. Source text is data. It never chooses a tool, a grant, or a write.
 6. Real sources are opt-in and never fall back to demo data. The demo, tests, and CI stay offline.
-7. Credentials, org names, IDs, and URLs never reach output, logs, Git, or a review.
+7. Credentials never reach output or logs. A real org's names, IDs, and URLs stay out of errors, Git,
+   and reviews.
 
 ## Where things are (`gtm_connector/`)
 
 | Area | Files |
 | --- | --- |
-| Request path | `gateway.py`, `request_checks.py`, `tool_definitions.py`, `audit.py`, `auth.py` |
+| Request path | `gateway.py`, `request_checks.py`, `tool_definitions.py`, `audit.py`, `auth.py`, `strict_json.py` |
 | Server and state | `runtime.py`, `client.py`, `doctor.py` |
 | Briefs | `briefing.py`, `citations.py`, `selection.py`, `selected_briefs.py` |
 | Sources | `store.py`, `calls.py`, `slack.py` (demo), `salesforce*.py`, `calls_import.py`, `slack_*.py` |

@@ -428,6 +428,22 @@ class GatewayTests(unittest.TestCase):
                          ("get_account", "error", 400, 0))
         self.assertEqual(self.activities(), [])
 
+    def test_a_tool_call_the_strict_parser_refuses_keeps_one_receipt(self):
+        self.open_connector()
+        for body in ('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account",'
+                     '"arguments":{"account_id":"acc-001","weight":1e999}}}',
+                     '{"jsonrpc":"2.0","id":1,"id":2,"method":"tools/call","params":{}}'):
+            with self.subTest(body=body[:40]):
+                before = len(self.connector.audit.read())
+                response = self.client.post("/mcp", content=body, headers={"Authorization": "Bearer unused"})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["error"]["data"]["reason"], "invalid_json")
+                rows = self.connector.audit.read()
+                self.assertEqual(len(rows), before + 1)
+                self.assertEqual((rows[-1]["status"], rows[-1]["http_status"], rows[-1]["row_count"]), ("error", 400, 0))
+                self.assertIn("unparsed_sha256", rows[-1]["arguments"])
+        self.assertEqual(self.activities(), [])
+
     def test_unknown_account_write_returns_an_explicit_audited_tool_error(self):
         self.open_connector()
         response = self.tool("log_activity", self.activity_arguments(account_id="acc-missing"), token="write")

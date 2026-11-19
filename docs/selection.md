@@ -39,9 +39,9 @@ it writes its own receipt, linked to the outer call by
 `{"kind": "brief_child", "parent_audit_id": ..., "ordinal": N}`. A successful brief has one outer
 receipt and three read receipts, or four with Slack. The reads write no `serve` event lines.
 
-- Preparing a brief has 45 seconds. The final receipt and the response follow that limit. A read
-  already in progress keeps its own limit, 20 seconds for
-  Salesforce and live Slack, and a late result is discarded.
+- Preparing a brief has 45 seconds. Writing the final receipt and sending the response come after
+  that check. A read already in progress keeps its own limit, 20 seconds for Salesforce and live
+  Slack, and a late result is discarded.
 - The brief is saved as `selected-briefs/BRIEF_ID.json` in the state folder, mode 0600, at most
   4 MiB. `check-brief` and the usage report do not read it.
 - `read_renewal_brief` releases a saved brief to any caller that passes the rule in the

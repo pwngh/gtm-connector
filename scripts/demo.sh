@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+[ $# -eq 0 ] || { echo "This script takes no arguments. For options, run: gtm-connector demo --help" >&2; exit 2; }
 cd "$(dirname "$0")/.."
 umask 077
 demo_dir=$(mktemp -d "${TMPDIR:-/tmp}/gtm-demo.XXXXXX")

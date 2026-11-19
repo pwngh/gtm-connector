@@ -180,7 +180,7 @@ The checker rejects the whole brief if a required line is missing, altered, or u
 
 | Case | Required line |
 | --- | --- |
-| Messages returned | Each message, quoted with its reference. |
+| Messages returned | None. The default drafter quotes each message with its reference, and a draft may omit one. |
 | No messages | That none were returned, citing the audit receipt. |
 | HTTP 403 for missing `slack:read` | That the token lacks `slack:read`, citing the denial receipt. |
 | Any other Slack failure | None. The brief stops. |

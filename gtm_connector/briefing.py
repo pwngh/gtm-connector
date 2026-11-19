@@ -11,6 +11,7 @@ import uuid
 
 import httpx2
 
+from . import strict_json
 from .citations import BriefRejected, NoRenewalCandidate, build_facts, check_brief, diagnose_brief
 from .drafting import DraftResult, FixtureDraftAdapter
 from .seed import DEMO_AS_OF
@@ -257,7 +258,7 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, a
 def check_saved_brief(directory, brief_id, candidate):
     """Check candidate text against the stored MCP snapshot, never its own citations alone."""
     path = _artifact_path(directory, brief_id)
-    artifact = json.loads(path.read_text())
+    artifact = strict_json.loads(path.read_text())
     if (not isinstance(artifact, dict) or artifact.get("schema_version") != 1
             or artifact.get("brief_id") != brief_id
             or not isinstance(artifact.get("evidence"), dict)

@@ -47,11 +47,11 @@ text is untrusted data and cannot request a tool, a grant, or a write.
 
 | Area | Behavior |
 | --- | --- |
-| Local authority | Authorization needs the owner credential and an explicit scope list, for one preregistered public client. [docs/protocol.md](docs/tools.md) has the code and token lifetimes. |
+| Local authority | Authorization needs the owner credential and an explicit scope list, for one preregistered public client. [docs/tools.md](docs/tools.md) has the code and token lifetimes. |
 | Client grants | `connect` writes a bearer grant for only the named scopes to a mode-0600 file in the state directory. The client receives that grant, never the owner credential, and its calls pass through the same gateway, audit log, and rate limit. Keep these files out of Git. |
 | Audit receipts | `audit.sqlite3` stores, for each tool attempt, a SHA-256 token fingerprint, the tool, its arguments, a UTC timestamp, request and brief IDs, the outcome, and returned record references. Arguments can include activity text, search terms, and IDs. Bearer tokens and response bodies are not logged. A fingerprint establishes neither identity nor a valid grant. [docs/audit.md](docs/audit.md) has the HTTP 503 cases, the requests that get no receipt, and the rate limit. |
 | Retention | Runtime directories use mode 0700 and files use mode 0600. Nothing expires automatically. Saved briefs include source evidence and receipt copies. |
-| Drafting | The fixture drafter runs no model, and default demos and CI use no inference service. The optional Ollama adapter sends only a supported-claim catalog to a fixed loopback endpoint, with no credentials, tool interface, proxy, or redirects. See [docs/ollama.md](docs/briefs.md). |
+| Drafting | The fixture drafter runs no model, and default demos and CI use no inference service. The optional Ollama adapter sends only a supported-claim catalog to a fixed loopback endpoint, with no credentials, tool interface, proxy, or redirects. See [docs/briefs.md](docs/briefs.md). |
 | Imported transcripts | `calls import` is a local operator command. It parses a selected TXT or VTT export, obtains only `crm:read`, and resolves the account through the audited gateway before committing an association. A missing, ambiguous, changed, or unreceipted association publishes nothing. A missing import refuses instead of returning demo content. Local `calls inspect --full` returns the complete original and is not an MCP tool. See [docs/calls.md](docs/calls.md). |
 
 ## Salesforce (optional, read-only)
@@ -105,6 +105,7 @@ A command has at most 10 seconds within the original 20-second credential deadli
 
 ## Known limits
 
+- A custom Python drafter runs in-process as trusted, unsandboxed application code.
 - An operator who rewrites snapshots and receipts can alter all evidence. Local records are neither
   tamper-proof nor billing data.
 - Other processes with the operator's authority are not isolated. Anyone who can read the Slack

@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from gtm_connector.runtime import Runtime, SourceIdentityError
+from gtm_connector.slack_mapping import SlackMappingError
 from gtm_connector.salesforce_demo import bind_import, load_binding, write_binding
 
 
@@ -155,13 +156,16 @@ class SourceStateTests(unittest.TestCase):
 
     def test_an_owner_file_without_a_backend_does_not_select_fixtures(self):
         with Runtime(self.state) as runtime:
-            unknown = {key: value for key, value in runtime.config.items() if key != "crm_backend"}
-        (self.state / "owner.json").write_text(json.dumps(unknown))
-        before = self.snapshot()
-        with self.assertRaisesRegex(SourceIdentityError, "prior local backend"):
-            with Runtime(self.state):
-                self.fail("An owner file without a backend selected fixtures")
-        self.assertEqual(self.snapshot(), before)
+            complete = dict(runtime.config)
+        for missing in ("crm_backend", "calls_backend", "slack_backend"):
+            with self.subTest(missing=missing):
+                (self.state / "owner.json").write_text(
+                    json.dumps({key: value for key, value in complete.items() if key != missing}))
+                before = self.snapshot()
+                with self.assertRaises((SourceIdentityError, SlackMappingError)):
+                    with Runtime(self.state):
+                        self.fail("An owner file without a backend selected fixtures")
+                self.assertEqual(self.snapshot(), before)
 
     def test_corrupt_private_markers_are_rejected_without_rewriting_them(self):
         with Runtime(self.state, crm_reader=InventedReader()):

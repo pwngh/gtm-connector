@@ -132,7 +132,7 @@ sf data import tree --target-org gtm-de --plan var/salesforce-demo/kit/plan.json
 - Keep the receipt and binding until removal finishes. AccountNumber is not unique across an org,
   so it cannot recover a lost receipt.
 - The import creates twelve records: three Accounts, each with one Contact, one Opportunity, and
-  one Draft Contract. The file supplies no EndDate. Salesforce computes it from StartDate and
+  one Draft Contract. The file supplies no EndDate. With its automatic calculation setting on, Salesforce computes it from StartDate and
   ContractTerm, and no contract is activated.
 
 | Helper action | Options | Result |

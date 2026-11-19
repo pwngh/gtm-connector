@@ -3,11 +3,11 @@
 from collections import Counter
 from contextlib import closing
 from datetime import datetime, timezone
-import json
 from pathlib import Path
 import re
 import sqlite3
 
+from . import strict_json
 from .inspection import ReceiptFilters
 
 
@@ -42,7 +42,7 @@ def _saved_briefs(directory, brief_id, call_counts, matching_briefs=None):
         try:
             if artifact_path.is_symlink() or not artifact_path.is_file():
                 raise ValueError("not a regular file")
-            artifact = json.loads(artifact_path.read_text())
+            artifact = strict_json.loads(artifact_path.read_text())
             identifier = artifact["brief_id"]
             if (not isinstance(identifier, str) or not re.fullmatch(r"brief-[0-9a-f]{32}", identifier)
                     or identifier != artifact_path.stem or artifact["schema_version"] != 1

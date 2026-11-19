@@ -416,14 +416,21 @@ class Connector:
             body += event.get("body", b"")
             if len(body) > 65536 or not event.get("more_body"):
                 break
+        marked = headers.get("mcp-method") == "tools/call"
         try:
             request = strict_json.loads(body)
         except (ValueError, UnicodeError, RecursionError):
             request = None
+            try:
+                # A refused body that still names a tool call keeps its receipt.
+                refused = json.loads(body)
+                marked = marked or (isinstance(refused, dict) and refused.get("method") == "tools/call")
+            except (ValueError, UnicodeError, RecursionError):
+                pass
         params = request.get("params", {}) if isinstance(request, dict) else {}
         params = params if isinstance(params, dict) else {}
         method = request.get("method") if isinstance(request, dict) else None
-        is_call = method == "tools/call" or headers.get("mcp-method") == "tools/call"
+        is_call = method == "tools/call" or marked
         raw_auth = headers.get("authorization", "")
         parts = raw_auth.split(" ")
         raw_token = parts[1] if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1] else None

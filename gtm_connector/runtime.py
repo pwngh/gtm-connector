@@ -149,8 +149,10 @@ def _prepare_calls_selection(directory, backend, demo_binding):
                                   "Use the original private state or a fresh --state-dir.") from None
     try:
         owner = _read_marker(directory / "owner.json", require_schema=False)
-        prior_backend = owner.get("calls_backend", "fixture") if owner is not None else None
-        if prior_backend not in (None, "fixture", "imported"):
+        prior_backend = owner.get("calls_backend") if owner is not None else None
+        if owner is not None and (prior_backend not in ("fixture", "imported")
+                                  or owner.get("crm_backend") not in ("sqlite", "salesforce")
+                                  or owner.get("slack_backend") not in ("fixture", "slack")):
             raise ValueError
     except (OSError, ValueError, UnicodeError, RecursionError):
         raise SourceIdentityError("The prior local backend cannot be verified from private owner metadata. "
@@ -404,14 +406,14 @@ def _prepare_slack_selection(directory, backend, connection_dir, expected_bindin
         raise SlackMappingError("slack_mapping_invalid") from None
     try:
         owner = _read_marker(directory / "owner.json", require_schema=False)
+        prior = owner.get("slack_backend") if owner is not None else None
+        if owner is not None and prior not in ("fixture", "slack"):
+            raise ValueError
     except (OSError, ValueError, UnicodeError, RecursionError):
         if backend == "fixture" and marker is None and not os.path.lexists(directory / "slack-mappings.json"):
-            # CRM and calls preparation reports this unreadable owner file with its own error.
+            # CRM and calls preparation reports this unusable owner file with its own error.
             return None, None
         raise SlackMappingError("slack_mapping_invalid") from None
-    prior = owner.get("slack_backend", "fixture") if owner is not None else None
-    if prior not in (None, "fixture", "slack"):
-        raise SlackMappingError("slack_mapping_invalid")
     if backend == "fixture":
         if marker is not None or prior == "slack" or os.path.lexists(directory / "slack-mappings.json"):
             raise SlackMappingError("slack_source_mismatch")
