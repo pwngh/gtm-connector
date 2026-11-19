@@ -186,7 +186,8 @@ def add_salesforce_facts(groups, as_of, brief_id, add, signal):
         if days is not None and days <= _SOON_DAYS and not opportunity["is_closed"]:
             when = f"is in {_days(days)}" if days else "is today"
             signal(f"contract end {when} and opportunity {opportunity['id']} {_text(opportunity['name'])} "
-                   f"is still open at stage {_text(opportunity['stage'])}.", renewal_ref, opportunity["record_ref"], run)
+                   f"is still open at stage {_text(opportunity['stage'])}.",
+                   renewal_ref, opportunity["record_ref"], run)
         add(f"CRM opportunity {opportunity['id']} {_text(opportunity['name'])}: stage {_text(opportunity['stage'])}; "
             f"amount {_amount(opportunity)}; close date {_day(opportunity['close_date'])}; "
             f"closed {str(opportunity['is_closed']).lower()}; won {str(opportunity['is_won']).lower()}.",

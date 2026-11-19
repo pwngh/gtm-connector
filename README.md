@@ -9,7 +9,7 @@ Assistants use the MCP tools.
 - **Catches 284% more bad lines** than checking that every line cites evidence that was read:
   956 of 956, against 249.
 - **Writes 20 briefs in 99% less time** than a local model drafting the same lines: 0.95 s, against
-  103 s with `llama3.2`.
+  112 s with `llama3.2`.
 
 Twenty invented accounts on an Apple M1 Max laptop. [The results test](tests/test_results.py) adds
 each bad line to a complete brief: a citation removed or changed, wording changed, a line repeated,

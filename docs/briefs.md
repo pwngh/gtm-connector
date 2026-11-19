@@ -135,7 +135,7 @@ gtm-connector evaluate --adapter ollama --model llama3.2:latest --json > ollama-
 
 With `--adapter ollama`, a local model assembles the renewal brief, and the citation checker must
 accept the draft before it is published. On the fixture book, `llama3.2` drafted 20 of 20 accepted
-briefs with 188 of 188 claims, from 9,067 tokens in and 5,829 out.
+briefs with 188 of 188 claims, from 9,280 tokens in and 6,061 out.
 
 - You need a running Ollama 0.30.0 or newer and a model that `ollama list` already shows.
 - The adapter calls only `http://127.0.0.1:11434`. It does not download a model, fall back to
