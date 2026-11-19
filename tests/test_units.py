@@ -387,9 +387,10 @@ class Evidence(unittest.TestCase):
             "See <https://files.example/redline|the redline> [7]. Sent to Trish. 31 of 45 seats logged in.")]
         units_, _ = build(evidence(notes=notes, slack_status="available", messages=[
             ("Morgan Reed", "GC will not sign without ZDR\nProcurement asked for $300k")]))
-        numbered = [[unit["n"], unit["kind"], unit.get("text"), unit.get("partial")] for unit in units_]
-        digest = hashlib.sha256(json.dumps(numbered, ensure_ascii=False).encode()).hexdigest()
-        self.assertEqual((SANITIZER_VERSION, digest), (2, "46353d1b1ff0df0a1e95d6aafe59b07cf42e16561ab45f4fd571e327534ebd2a"),
+        # Every key of every unit but the rules number itself.
+        numbered = [{key: value for key, value in unit.items() if key != "sanitizer_version"} for unit in units_]
+        digest = hashlib.sha256(json.dumps(numbered, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        self.assertEqual((SANITIZER_VERSION, digest), (2, "6710bb6dae2c8722bfae043eb400a65ce19be672f7fa348e51ab03e7af46316c"),
                          "The same evidence now gives other units. Raise SANITIZER_VERSION and pin the new digest, "
                          "so a card sealed under the old rules keeps its numbers and is not rebuilt under the new.")
 

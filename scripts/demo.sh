@@ -25,7 +25,7 @@ brief = demo["brief"]
 saved = json.loads((state / "briefs" / (brief["brief_id"] + ".json")).read_text())
 assert {key: saved[key] for key in brief} == brief
 assert demo["status"] == "accepted" and demo["account"]["id"] == brief["account_id"] == "acc-003"
-assert demo["denied_read"]["status"] == 403 and demo["audit"]["rows"] == 6
+assert demo["denied_read"]["status"] == 403 and demo["audit"]["rows"] == 7
 assert demo["activities_created"] == 0
 # Every number printed on the card resolves to a record and a finished receipt.
 for number in sorted({int(value) for value in re.findall(r"\[(\d+)\]", brief["text"])}):

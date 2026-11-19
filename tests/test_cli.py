@@ -346,7 +346,7 @@ class CLITests(unittest.TestCase):
                 path.write_text(edited(change))
                 refused = self.run_cli("trace", brief["brief_id"], "1")
                 self.assertEqual((refused.returncode, refused.stdout), (2, ""))
-                self.assertIn("sealed", refused.stderr)
+                self.assertIn("not the card that was sealed", refused.stderr)
         # The same bytes back, and the card traces again.
         path.write_text(saved)
         self.assertEqual(self.run_cli("trace", brief["brief_id"], "5").returncode, 0)

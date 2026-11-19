@@ -186,25 +186,32 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, i
     # card with no finished seal is never traced.
     audit, started = runtime.connector.audit, time.monotonic()
     seal = audit.start(token=token, tool=SEAL_TOOL, arguments={"account_id": account_id})
-    artifact = {"schema_version": 3, "brief_id": brief_id, "account_id": account_id, "as_of": as_of,
-                "status": "accepted", "rules_version": SANITIZER_VERSION, "sealed_by": seal,
-                "sources": source_names(runtime.crm_backend, runtime.calls_backend, runtime.slack_backend,
-                                        include_slack),
-                "text": text, "units": units, "evidence": evidence}
-    payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, indent=2).encode()
     path = _artifact_path(runtime.directory, brief_id)
     try:
+        artifact = {"schema_version": 3, "brief_id": brief_id, "account_id": account_id, "as_of": as_of,
+                    "status": "accepted", "rules_version": SANITIZER_VERSION, "sealed_by": seal,
+                    "sources": source_names(runtime.crm_backend, runtime.calls_backend, runtime.slack_backend,
+                                            include_slack),
+                    "text": text, "units": units, "evidence": evidence}
+        payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, indent=2).encode()
         if path.parent.is_symlink():
             raise ValueError("briefs directory must not be a symbolic link")
         path.parent.mkdir(mode=0o700, exist_ok=True)
         path.parent.chmod(0o700)
         _save_artifact(path, payload)
     except BaseException:
-        audit.finish(seal, status="error", http_status=500, rows=[], error="brief_save_failed",
-                     elapsed_ms=(time.monotonic() - started) * 1000)
+        try:
+            audit.finish(seal, status="error", http_status=500, rows=[], error="brief_save_failed",
+                         elapsed_ms=(time.monotonic() - started) * 1000)
+        except Exception:  # The save already failed; its own error is the one to report.
+            pass
         raise
-    audit.finish(seal, status="ok", http_status=200, elapsed_ms=(time.monotonic() - started) * 1000,
-                 rows=[f"briefs/{brief_id}/{hashlib.sha256(payload).hexdigest()}"])
+    try:
+        audit.finish(seal, status="ok", http_status=200, elapsed_ms=(time.monotonic() - started) * 1000,
+                     rows=[f"briefs/{brief_id}/{hashlib.sha256(payload).hexdigest()}"])
+    except BaseException:
+        path.unlink(missing_ok=True)  # A file whose seal did not finish is not a card.
+        raise
     return artifact
 
 
@@ -228,12 +235,16 @@ def _sealed(directory, brief_id):
             or evidence.get("brief_id") != brief_id or artifact.get("account_id") != evidence.get("account_id")
             or not isinstance(artifact.get("units"), list) or not isinstance(artifact.get("text"), str)):
         raise ValueError("invalid saved brief evidence")
-    from .audit import read_audit
+    from .audit import read_audit, read_ids
     log = Path(directory) / "audit.sqlite3"
     reference = f"briefs/{brief_id}/{hashlib.sha256(payload).hexdigest()}"
-    seal = next((row for row in read_audit(log, tool=SEAL_TOOL) if row["audit_id"] == artifact.get("sealed_by")),
-                None)
-    if (seal is None or (seal["status"], seal["http_status"], seal["brief_id"]) != ("ok", 200, None)
+    try:
+        [seal] = read_ids(log, [str(artifact.get("sealed_by"))])
+    except ValueError:
+        seal = {"tool": None, "status": None}
+    if (seal["tool"], seal["status"]) == (SEAL_TOOL, "pending"):
+        raise ValueError("This card's seal was never finished: saving it was interrupted. Make the card again.")
+    if ((seal["tool"], seal["status"]) != (SEAL_TOOL, "ok") or (seal["http_status"], seal["brief_id"]) != (200, None)
             or seal["rows"] != [reference] or seal["arguments"] != {"account_id": artifact["account_id"]}):
         raise ValueError("This file is not the card that was sealed: the card or its seal receipt was changed.")
     if read_audit(log, brief_id) != evidence.get("receipts"):
@@ -245,11 +256,10 @@ def trace_saved(directory, brief_id, number):
     """Resolve one number on a saved card from its sealed units and evidence, never from the card's text.
 
     A card keeps the numbers it was sealed with. Under the same sentence rules its units must also equal a
-    rebuild from its own evidence.
+    rebuild from its own evidence. The wording of a card may change between releases; its units may not.
     """
     artifact = _sealed(directory, brief_id)
-    if (artifact.get("rules_version") == SANITIZER_VERSION
-            and (artifact["units"], artifact["text"]) != build(artifact["evidence"])):
-        raise ValueError("The sealed card does not match a rebuild from its own evidence.")
+    if artifact.get("rules_version") == SANITIZER_VERSION and artifact["units"] != build(artifact["evidence"])[0]:
+        raise ValueError("The sealed card's units do not match a rebuild from its own evidence.")
     return {"brief_id": brief_id, "account_id": artifact["account_id"],
             **trace(artifact["evidence"], number, artifact["units"])}

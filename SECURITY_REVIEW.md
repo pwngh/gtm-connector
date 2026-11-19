@@ -44,7 +44,7 @@ untrusted data and cannot request a tool, a grant, or a write.
 | Keys rotate per start, the certificate names loopback, and state files are private. | [test_runtime.py](tests/test_runtime.py) |
 | Server events carry no bearer token, argument, or source body. | [test_call_events.py](tests/test_call_events.py) |
 | Snapshot saves replace atomically. Audit inspection is read-only. | [test_brief_persistence.py](tests/test_brief_persistence.py), [test_audit_reader.py](tests/test_audit_reader.py) |
-| `demo` records six receipts, five successful reads and one refusal, and creates no activity. | [test_demo.py](tests/test_demo.py) |
+| `demo` records seven receipts, five successful reads, one refusal and the seal of the saved card, and creates no activity. | [test_demo.py](tests/test_demo.py) |
 
 ## Local authority, audit receipts, cards, and transcripts
 

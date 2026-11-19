@@ -80,9 +80,54 @@ class BriefPersistenceTests(unittest.TestCase):
         # Under the same rules a sealed card must also equal a rebuild from its own evidence.
         with Runtime(self.state) as runtime:
             current = create_brief(runtime, "acc-003", include_slack=True)
-        with patch("gtm_connector.briefing.build", return_value=([], "")):
-            with self.assertRaisesRegex(ValueError, "does not match a rebuild"):
+        with patch("gtm_connector.briefing.build", return_value=([], current["text"])):
+            with self.assertRaisesRegex(ValueError, "do not match a rebuild"):
                 trace_saved(self.state, current["brief_id"], 1)
+        # The wording of a card may change in a later release. Its units decide, so the card still traces.
+        with patch("gtm_connector.briefing.build", return_value=(current["units"], "DEAL CARD, reworded")):
+            self.assertEqual(trace_saved(self.state, current["brief_id"], 1)["n"], 1)
+
+    def test_a_save_that_cannot_finish_leaves_no_card_and_no_open_receipt(self):
+        with Runtime(self.state) as runtime:
+            # The card cannot be put together: the seal is finished as failed, and no file is left.
+            with patch("gtm_connector.briefing.source_names", side_effect=ValueError("fixture assembly failure")):
+                with self.assertRaisesRegex(ValueError, "assembly failure"):
+                    create_brief(runtime, "acc-001")
+            self.assertEqual([(row["tool"], row["status"]) for row in runtime.connector.audit.read()][-1],
+                             ("save_brief", "error"))
+            # The file is whole and the seal cannot be finished: a file with no finished seal is not kept.
+            finish = runtime.connector.audit.finish
+
+            def refuse_the_seal(audit_id, **fields):
+                if fields["status"] == "ok" and fields["rows"][0].startswith("briefs/"):
+                    raise ValueError("fixture audit failure")
+                return finish(audit_id, **fields)
+
+            with patch.object(runtime.connector.audit, "finish", side_effect=refuse_the_seal):
+                with self.assertRaisesRegex(ValueError, "audit failure"):
+                    create_brief(runtime, "acc-001")
+            self.assertEqual(list((self.state / "briefs").iterdir()), [])
+            # A stop between the file and the finished seal is the one way to a pending seal. Trace says so.
+            brief = create_brief(runtime, "acc-001")
+        with closing(sqlite3.connect(self.state / "audit.sqlite3")) as connection, connection:
+            connection.execute("UPDATE audit_log SET status = 'pending' WHERE audit_id = ?", (brief["sealed_by"],))
+        with self.assertRaisesRegex(ValueError, "seal was never finished"):
+            trace_saved(self.state, brief["brief_id"], 1)
+
+    def test_one_broken_receipt_elsewhere_does_not_stop_a_healthy_card(self):
+        with Runtime(self.state) as runtime:
+            healthy = create_brief(runtime, "acc-001")
+            other = create_brief(runtime, "acc-003")
+        with closing(sqlite3.connect(self.state / "audit.sqlite3")) as connection, connection:
+            connection.execute("UPDATE audit_log SET rows = 'not json' WHERE audit_id = ?", (other["sealed_by"],))
+        self.assertEqual(trace_saved(self.state, healthy["brief_id"], 1)["n"], 1)
+        with self.assertRaisesRegex(ValueError, "not the card that was sealed"):
+            trace_saved(self.state, other["brief_id"], 1)
+        # One card's seal does not seal another card's file.
+        path = self.state / "briefs" / (healthy["brief_id"] + ".json")
+        path.write_text(path.read_text().replace(healthy["sealed_by"], other["sealed_by"]))
+        with self.assertRaisesRegex(ValueError, "not the card that was sealed"):
+            trace_saved(self.state, healthy["brief_id"], 1)
 
     def test_a_failed_save_leaves_no_card_and_keeps_the_receipts(self):
         with Runtime(self.state) as runtime:
