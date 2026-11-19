@@ -33,13 +33,13 @@ class ImportedBriefingTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.state = Path(directory.name) / "state"
 
-    def import_call(self, runtime, *, account_id="acc-007", account_number=None, reassign=False):
+    def import_call(self, runtime, *, account_id="acc-007", account_number=None, reassign=False, called_at=None):
         parsed = parse_transcript(RAW, format="txt")
         excerpt = select_excerpt(parsed)
         association = resolve_call_account(
             runtime, account_id=None if account_number is not None else account_id, account_number=account_number)
         result = store_import(runtime.imports_path, parsed, excerpt, association=association,
-                              called_at=None, imported_at=IMPORTED_AT, reassign=reassign)
+                              called_at=called_at, imported_at=IMPORTED_AT, reassign=reassign)
         return result
 
     def test_invalid_exact_selector_never_opens_the_association_client(self):
@@ -89,6 +89,14 @@ class ImportedBriefingTests(unittest.TestCase):
                 self.assertEqual(connection.execute("SELECT count(*) FROM activities").fetchone()[0], 0)
         with patch("sqlite3.connect", side_effect=AssertionError("Saved checks must use their immutable snapshot")):
             self.assertEqual(check_saved_brief(self.state, artifact["brief_id"], artifact["text"]), artifact["text"])
+
+    def test_an_old_imported_call_is_signalled_as_the_selected_excerpt(self):
+        with Runtime(self.state, calls_backend="imported") as runtime:
+            imported = self.import_call(runtime, called_at="2026-10-03T15:00:00Z")
+            artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
+        self.assertIn(f"- Signal: the selected call excerpt {imported['import_id']} is 104 days old as of {AS_OF}. "
+                      f"[calls/call_notes/{imported['import_id']}] [run/{artifact['brief_id']}]",
+                      artifact["text"].splitlines())
 
     def test_changed_snapshot_units_ranges_or_binding_fail_before_publication(self):
         with Runtime(self.state, calls_backend="imported") as runtime:

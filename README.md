@@ -43,6 +43,18 @@ four audited reads, the draft, the citation check, and the save, on a running se
   [crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]
 ```
 
+**When something needs attention, the brief opens with it.** Another account, `acc-002`:
+
+```text
+- Signal: renewal is in 24 days and opportunity opp-002 is still open at stage "evaluation".
+  [crm/accounts/acc-002] [crm/opportunities/opp-002] [run/brief-…]
+
+- Signal: CRM marks this account at risk: "Renewal budget is not approved.". [crm/accounts/acc-002]
+```
+
+Signals come from structured fields and dates, never from reading source text, and a draft that
+omits one is rejected.
+
 **The receipts.** One per read, committed before the read ran:
 
 ```text
@@ -72,21 +84,22 @@ read_slack_messages  ok   slack/messages/msg-003                       1.0 ms
 
 ## Measured results
 
-Twenty invented accounts. The CRM and calls variant has 182 expected claims. The variant with Slack
-has 223 and is the one the input, output, corruption, and receipt rows use. A test asserts every
+Twenty invented accounts. The CRM and calls variant has 188 expected claims. The variant with Slack
+has 229 and is the one the input, output, corruption, and receipt rows use. A test asserts every
 count. The model row and the timings are observations from one run on an Apple M1 Max laptop.
 
 | What | Result | Check |
 | --- | --- | --- |
 | Input | 98 source records through 80 audited reads | [results test](tests/test_results.py) |
-| Output | 20 briefs, 223 lines, 2,482 words, 248 references | same |
-| Lines with an evidence reference | 223 of 223 | same |
-| Expected claims found and cited correctly | 182 of 182, and 223 of 223 with Slack | `gtm-connector evaluate --json`, and with `--with-slack` |
+| Output | 20 briefs, 229 lines, 2,579 words, 261 references | same |
+| Signals raised | 6, on 4 accounts, each required and cited | [signal tests](tests/test_signals.py) |
+| Lines with an evidence reference | 229 of 229 | [results test](tests/test_results.py) |
+| Expected claims found and cited correctly | 188 of 188, and 229 of 229 with Slack | `gtm-connector evaluate --json`, and with `--with-slack` |
 | Invented claims published | 0 | same |
-| Bad lines rejected when added to a complete brief: citations removed, a citation changed, wording changed, a line repeated, an uncited sentence, a cited invention | 932 of 932 | [results test](tests/test_results.py) |
+| Bad lines rejected when added to a complete brief: citations removed, a citation changed, wording changed, a line repeated, an uncited sentence, a cited invention | 956 of 956 | [results test](tests/test_results.py) |
 | Reads with a finished receipt | 80 of 80 | same |
-| Drafts by a local model, `llama3.2`, accepted by the checker | 20 of 20, with 182 of 182 claims and 0 rejected lines, from 8,758 tokens in and 5,518 out | `gtm-connector evaluate --adapter ollama --model llama3.2:latest --json` |
-| Time for 20 briefs | About 1 s without a model, 97 s with `llama3.2` | `time gtm-connector evaluate`, and with the model options above |
+| Drafts by a local model, `llama3.2`, accepted by the checker | 20 of 20, with 188 of 188 claims and 0 rejected lines, from 9,067 tokens in and 5,829 out | `gtm-connector evaluate --adapter ollama --model llama3.2:latest --json` |
+| Time for 20 briefs | About 1 s without a model, 104 s with `llama3.2` | `time gtm-connector evaluate`, and with the model options above |
 | Gateway time per read, as each receipt records it | 1.6 ms median, 2.2 ms at the 95th percentile | `elapsed_ms` in `gtm-connector audit --json` after a `brief` |
 | Demo, from start to a finished brief | 0.9 s | `time gtm-connector demo` |
 

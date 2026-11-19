@@ -76,6 +76,7 @@ class ResultsTests(unittest.TestCase):
                 lines = brief["text"].splitlines()
                 size.update(records=len(brief["evidence"]["records"]), lines=len(lines),
                             words=len(brief["text"].split()),
+                            signals=sum(line.startswith("- Signal: ") for line in lines),
                             cited_lines=sum(bool(REFERENCE.search(line)) for line in lines),
                             citations=sum(len(REFERENCE.findall(line)) for line in lines))
                 for kind, candidate in corruptions(brief["text"]):
@@ -86,12 +87,12 @@ class ResultsTests(unittest.TestCase):
                         rejected[kind] += 1
             receipts = runtime.connector.audit.read()
         self.assertEqual(rejected, tried)
-        self.assertEqual(dict(tried), {"citations removed": 223, "citation changed": 223, "wording changed": 223,
-                                       "line repeated": 223, "uncited sentence added": 20,
+        self.assertEqual(dict(tried), {"citations removed": 229, "citation changed": 229, "wording changed": 229,
+                                       "line repeated": 229, "uncited sentence added": 20,
                                        "cited invention added": 20})
         # What goes in and what comes out, across the twenty briefs.
-        self.assertEqual(dict(size), {"records": 98, "lines": 223, "words": 2482, "cited_lines": 223,
-                                      "citations": 248})
+        self.assertEqual(dict(size), {"records": 98, "lines": 229, "words": 2579, "signals": 6,
+                                      "cited_lines": 229, "citations": 261})
         # Twenty briefs make eighty tool calls. Each has one finished receipt.
         self.assertEqual([row["status"] for row in receipts], ["ok"] * 80)
         # Observed at a 1.6 ms median on a laptop. This bound only guards the order of magnitude.

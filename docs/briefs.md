@@ -21,6 +21,20 @@ Each `brief` starts local services, calls `get_account`, `list_opportunities`, a
 `read_call_notes` in that order, then stops the services. It requests `crm:read` and `calls:read`,
 never `crm:write`. The default draft uses fixed wording and no model.
 
+## Signals
+
+A brief opens with what needs attention. Each signal is one derived fact from structured fields and
+dates, never from reading source text. It cites its records. A draft that omits one is rejected,
+and signals are published first wherever a draft puts them.
+
+| Signal | When |
+| --- | --- |
+| `renewal is in N days and opportunity X is still open at stage S` | Demo CRM: the opportunity is not closed and the renewal is 30 days away or less. It reads `renewal is due today` on the day and `renewal was N days ago` after it. |
+| `contract end is in N days and opportunity X is still open at stage S` | Salesforce: the selected contract ends in 30 days or less, or `is today`, and the opportunity is open. Every open opportunity on the account counts. A contract that has ended is never selected. |
+| `CRM marks this account at risk` | The demo CRM's risk status is `at_risk`. Its reason follows when present. |
+| `contact NAME has no role recorded` | The contact has no title. |
+| `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old, counted from its UTC date. It reads `latest dated` when another note has no usable time, and `the selected call excerpt` for an imported transcript. |
+
 ## Citation rules
 
 - A fact cites its source record. A renewal-day count also cites the saved run.
@@ -51,8 +65,9 @@ the `Brief:` and `As of:` display labels. Checking the original text exits `0` w
 
 - The checker accepts only the fixed supported lines with their exact references. It cannot
   assess paraphrases.
-- A passing brief can omit supported facts, which the evaluation below measures. Lines
-  for unavailable or empty sources, recognized conflicts, and the Slack follow-up cannot be omitted.
+- A passing brief can omit supported facts, which the evaluation below measures. Signals,
+  lines for unavailable or empty sources, recognized conflicts, and the Slack follow-up cannot be
+  omitted.
 
 ## Errors
 
@@ -81,9 +96,9 @@ preflight exits `5` with no report. The tests assert these counts:
 | Metric | Default | `--with-slack` |
 | --- | --- | --- |
 | Accounts with accepted briefs | 20 / 20 | 20 / 20 |
-| Facts found | 182 / 182 (100%) | 223 / 223 (100%) |
-| Facts cited correctly | 182 / 182 (100%) | 223 / 223 (100%) |
-| Facts invented | 0 / 182 emitted claims (0%) | 0 / 223 emitted claims (0%) |
+| Facts found | 188 / 188 (100%) | 229 / 229 (100%) |
+| Facts cited correctly | 188 / 188 (100%) | 229 / 229 (100%) |
+| Facts invented | 0 / 188 emitted claims (0%) | 0 / 229 emitted claims (0%) |
 | Rejected or failed briefs | 0 | 0 |
 | Audit receipts | 60 | 80 |
 | Activities created | 0 | 0 |
@@ -119,7 +134,7 @@ gtm-connector evaluate --adapter ollama --model llama3.2:latest --json > ollama-
 
 With `--adapter ollama`, a local model assembles the renewal brief, and the citation checker must
 accept the draft before it is published. On the fixture book, `llama3.2` drafted 20 of 20 accepted
-briefs with 182 of 182 claims, from 8,758 tokens in and 5,518 out.
+briefs with 188 of 188 claims, from 9,067 tokens in and 5,829 out.
 
 - You need a running Ollama 0.30.0 or newer and a model that `ollama list` already shows.
 - The adapter calls only `http://127.0.0.1:11434`. It does not download a model, fall back to
@@ -136,7 +151,7 @@ briefs with 182 of 182 claims, from 8,758 tokens in and 5,518 out.
 - The model receives the supported claims derived from authorized evidence and must return them
   with their exact wording and references in a JSON `lines` array. The prompt holds no owner
   credential, bearer token, audit fingerprint, or tool interface.
-- An unsupported line, a duplicate, or an omitted required disclosure rejects the whole brief. A
+- An unsupported line, a duplicate, or an omitted signal or required disclosure rejects the whole brief. A
   supported subset can pass. The adapter does not repair or replace model output.
 - Each request adds Ollama's `:local` selector, so the server rejects a tag that now points to a
   remote model. The adapter also rejects cloud suffixes and remote metadata, disables environment

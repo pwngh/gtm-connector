@@ -1,4 +1,4 @@
-"""Measure the optional fourth read without changing the 182-claim baseline."""
+"""Measure the optional fourth read without changing the 188-claim baseline."""
 
 import hashlib
 import json
@@ -15,10 +15,10 @@ class SlackEvaluationTests(unittest.TestCase):
         base = load_expectations()
         original = [case["claims"] for case in base["cases"]]
         digest = hashlib.sha256(json.dumps(original, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        self.assertEqual(digest, "171cd6b60df934ca3c8f0e15a82acaed1027125663e655971683b25d5e1f430e")
-        self.assertEqual(sum(map(len, original)), 182)
+        self.assertEqual(digest, "469b6c5b6fdb4aebaf36ca487589fcfa02ab07de7faa4db6de60b2eccefb4340")
+        self.assertEqual(sum(map(len, original)), 188)
         extended = load_expectations(include_slack=True)
-        self.assertEqual(sum(len(case["claims"]) for case in extended["cases"]), 223)
+        self.assertEqual(sum(len(case["claims"]) for case in extended["cases"]), 229)
         for old, new in zip(base["cases"], extended["cases"]):
             self.assertEqual(new["account_id"], old["account_id"])
             self.assertEqual(new["claims"][:len(old["claims"])], old["claims"])
@@ -37,9 +37,9 @@ class SlackEvaluationTests(unittest.TestCase):
         self.assertEqual((report["workflow"], report["workflow_version"]), ("crm-calls-slack", 2))
         self.assertEqual(report["evaluation"], "fixture-20-slack")
         self.assertEqual(report["accepted_briefs"], 20)
-        self.assertEqual(report["expected_facts"], 223)
-        self.assertEqual(report["facts_found"], 223)
-        self.assertEqual(report["facts_cited_correctly"], 223)
+        self.assertEqual(report["expected_facts"], 229)
+        self.assertEqual(report["facts_found"], 229)
+        self.assertEqual(report["facts_cited_correctly"], 229)
         self.assertEqual(report["facts_invented"], 0)
         self.assertEqual(report["audit_rows"], 80)
         self.assertEqual(report["activities_created"], 0)
@@ -50,7 +50,7 @@ class SlackEvaluationTests(unittest.TestCase):
                    side_effect=[BriefRejected("private candidate")] * 10 + [RuntimeError("private failure")] * 10):
             report = run_evaluation(include_slack=True)
         self.assertEqual(report["status"], "failed")
-        self.assertEqual(report["expected_facts"], 223)
+        self.assertEqual(report["expected_facts"], 229)
         self.assertEqual((report["rejected_briefs"], report["failed_briefs"]), (10, 10))
         self.assertEqual(report["facts_found"], 0)
         self.assertIsNone(report["invention_rate"])
@@ -71,7 +71,7 @@ class SlackEvaluationTests(unittest.TestCase):
         self.assertEqual(report["accepted_briefs"], 0)
         self.assertEqual(report["claims_emitted"], 0)
         self.assertIsNone(report["invention_rate"])
-        self.assertEqual(report["candidate"]["claims_emitted"], 203)
+        self.assertEqual(report["candidate"]["claims_emitted"], 209)
         self.assertEqual(report["candidate"]["missing_required_claims"], 20)
         self.assertEqual(report["candidate"]["reason_counts"]["missing_required"], 20)
         self.assertEqual(report["candidate"]["facts_invented"], 0)

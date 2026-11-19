@@ -39,7 +39,7 @@ class ModelEvaluationTests(unittest.TestCase):
 
         report = run_evaluation(adapter=AdverseAdapter(), command=["test-invocation"])
         self.assertEqual(report["accounts"], 20)
-        self.assertEqual(report["expected_facts"], 182)
+        self.assertEqual(report["expected_facts"], 188)
         self.assertEqual(report["accepted_briefs"], 13)
         self.assertEqual(report["rejected_briefs"], 7)
         self.assertEqual(report["failed_briefs"], 0)
@@ -80,8 +80,9 @@ class ModelEvaluationTests(unittest.TestCase):
         class WrongCitation:
             def draft(self, evidence):
                 lines = build_facts(evidence)
-                lines[0] = lines[0].replace("crm/accounts/" + evidence["account_id"],
-                                            "crm/accounts/acc-030")
+                index = next(i for i, line in enumerate(lines) if line.startswith("- Account: "))
+                lines[index] = lines[index].replace("crm/accounts/" + evidence["account_id"],
+                                                    "crm/accounts/acc-030")
                 return DraftResult("\n".join(lines), "test-local-model", 10, 5)
 
         # Simulate a publication-checker regression. The separate scorer must
@@ -89,8 +90,8 @@ class ModelEvaluationTests(unittest.TestCase):
         with patch("gtm_connector.briefing.check_brief", side_effect=lambda text, evidence: text):
             report = run_evaluation(adapter=WrongCitation())
         self.assertEqual(report["accepted_briefs"], 20)
-        self.assertEqual(report["facts_found"], 182)
-        self.assertEqual(report["facts_cited_correctly"], 162)
+        self.assertEqual(report["facts_found"], 188)
+        self.assertEqual(report["facts_cited_correctly"], 168)
         self.assertFalse(report["publication_gate_passed"])
 
     def test_cli_requires_explicit_local_model_and_reports_preflight_failure(self):

@@ -88,7 +88,9 @@ class OllamaTests(unittest.TestCase):
         before = deepcopy(self.evidence)
         # A genuine subset and changed order must survive the adapter untouched.
         lines = build_facts(self.evidence)
-        chosen = [lines[-1], lines[0]]
+        signals = [line for line in lines if line.startswith("- Signal: ")]
+        facts = [line for line in lines if line not in signals]
+        chosen = signals + [facts[-1], facts[0]]
         self.reply["message"]["content"] = json.dumps({"lines": chosen})
         result = self.adapter().draft(self.evidence)
         self.assertEqual(result.text, "\n".join(chosen) + "\n")

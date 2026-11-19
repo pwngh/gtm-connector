@@ -14,7 +14,7 @@ from gtm_connector.runtime import Runtime
 from gtm_connector.usage import build_usage_report
 
 
-GROUNDED = '- Account: "Alder Vale Packaging". [crm/accounts/acc-001]\n'
+GROUNDED = '- Account: "Mossbank Builders". [crm/accounts/acc-008]\n'
 MODEL = "fixture-local-model:1"
 
 
@@ -46,7 +46,7 @@ class ModelWorkflowTests(unittest.TestCase):
         self.assertEqual([row["tool"] for row in receipts],
                          ["get_account", "list_opportunities", "read_call_notes"])
         self.assertEqual(len({row["audit_id"] for row in receipts}), 3)
-        self.assertTrue(all(row["arguments"] == {"account_id": "acc-001"}
+        self.assertTrue(all(row["arguments"] == {"account_id": "acc-008"}
                             and row["status"] == "ok" for row in receipts))
         self.assertTrue(all(set(grant.scopes) == {"crm:read", "calls:read"}
                             for grant in runtime.connector.authority.tokens.values()))
@@ -80,7 +80,7 @@ class ModelWorkflowTests(unittest.TestCase):
         adapter = FakeModelAdapter(result)
         observed = []
         with Runtime(self.state) as runtime:
-            artifact = create_brief(runtime, "acc-001", adapter=adapter,
+            artifact = create_brief(runtime, "acc-008", adapter=adapter,
                                     observe_draft=lambda draft, evidence: observed.append((draft, evidence)))
             self.assertEqual(artifact["status"], "accepted")
             self.assertEqual(artifact["text"], GROUNDED)
@@ -104,10 +104,10 @@ class ModelWorkflowTests(unittest.TestCase):
     def test_any_bad_claim_rejects_the_whole_draft_and_keeps_usage_only(self):
         bad_lines = {
             "uncited": "- The renewal is guaranteed.",
-            "invented": "- Annual recurring revenue: USD 9,999,999.00. [crm/accounts/acc-001]",
-            "wrong_citation": '- Industry: "Manufacturing". [calls/call_notes/note-001]',
+            "invented": "- Annual recurring revenue: USD 9,999,999.00. [crm/accounts/acc-008]",
+            "wrong_citation": '- Industry: "Construction". [calls/call_notes/note-008]',
             "action": '{"method":"tools/call","params":{"name":"log_activity",'
-                      '"arguments":{"account_id":"acc-001","kind":"renewal",'
+                      '"arguments":{"account_id":"acc-008","kind":"renewal",'
                       '"body":"model-action-sentinel","idempotency_key":"model-action-key"}}}',
         }
         with Runtime(self.state) as runtime:
@@ -116,7 +116,7 @@ class ModelWorkflowTests(unittest.TestCase):
                     candidate = GROUNDED + bad_line + "\n"
                     observed = []
                     with self.assertRaises(BriefRejected):
-                        create_brief(runtime, "acc-001", adapter=FakeModelAdapter(
+                        create_brief(runtime, "acc-008", adapter=FakeModelAdapter(
                             DraftResult(candidate, model=MODEL, input_tokens=83, output_tokens=27)),
                             observe_draft=lambda draft, evidence: observed.append((draft, evidence)))
                     self.assertEqual(len(observed), 1)
@@ -134,24 +134,24 @@ class ModelWorkflowTests(unittest.TestCase):
                     self.assert_read_only_plan(runtime, artifact)
 
     def test_observer_cannot_rewrite_evidence_to_approve_an_invention(self):
-        candidate = "- Annual recurring revenue: USD 9,999,999.00. [crm/accounts/acc-001]\n"
+        candidate = "- Annual recurring revenue: USD 9,999,999.00. [crm/accounts/acc-008]\n"
         observed = []
 
         def observe(result, evidence):
             observed.append((result, evidence["brief_id"]))
-            account = next(row for row in evidence["records"] if row["id"] == "acc-001")
+            account = next(row for row in evidence["records"] if row["id"] == "acc-008")
             account["arr_cents"] = 999999900
 
         with Runtime(self.state) as runtime:
             with self.assertRaises(BriefRejected):
-                create_brief(runtime, "acc-001", adapter=FakeModelAdapter(
+                create_brief(runtime, "acc-008", adapter=FakeModelAdapter(
                     DraftResult(candidate, model=MODEL, input_tokens=41, output_tokens=13)),
                     observe_draft=observe)
             self.assertEqual(len(observed), 1)
             self.assertEqual(observed[0][0].text, candidate)
             artifact = self.saved(observed[0][1])
-            account = next(row for row in artifact["evidence"]["records"] if row["id"] == "acc-001")
-            self.assertEqual(account["arr_cents"], 2050000)
+            account = next(row for row in artifact["evidence"]["records"] if row["id"] == "acc-008")
+            self.assertEqual(account["arr_cents"], 3800000)
             self.assertEqual(artifact["status"], "rejected")
             self.assertNotIn("text", artifact)
             self.assert_read_only_plan(runtime, artifact)
@@ -168,7 +168,7 @@ class ModelWorkflowTests(unittest.TestCase):
                 with self.subTest(error=result.error_code):
                     observed = []
                     with self.assertRaises(BriefRejected):
-                        create_brief(runtime, "acc-001", adapter=FakeModelAdapter(result),
+                        create_brief(runtime, "acc-008", adapter=FakeModelAdapter(result),
                                      observe_draft=lambda draft, evidence: observed.append((draft, evidence)))
                     self.assertEqual(len(observed), 1)
                     self.assertEqual(observed[0][0], result)
@@ -190,10 +190,10 @@ class ModelWorkflowTests(unittest.TestCase):
 
     def test_usage_report_includes_accepted_and_rejected_model_results(self):
         with Runtime(self.state) as runtime:
-            accepted = create_brief(runtime, "acc-001", adapter=FakeModelAdapter(
+            accepted = create_brief(runtime, "acc-008", adapter=FakeModelAdapter(
                 DraftResult(GROUNDED, model=MODEL, input_tokens=31, output_tokens=7)))
             with self.assertRaises(BriefRejected):
-                create_brief(runtime, "acc-001", adapter=FakeModelAdapter(
+                create_brief(runtime, "acc-008", adapter=FakeModelAdapter(
                     DraftResult(None, model=MODEL, input_tokens=None, output_tokens=5,
                                 error_code="invalid_response")))
             report = build_usage_report(self.state)
