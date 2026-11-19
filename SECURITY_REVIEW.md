@@ -61,7 +61,9 @@ connector process. The provider invokes only `sf org display` and `sf org auth s
 with an explicit alias and `--json`, using argument arrays and no shell. Stdin is closed; stdout
 and stderr are captured. CLI telemetry, automatic updates, and file logging are disabled for these
 child commands. Errors expose a fixed code, never the alias, child output, arguments, or token.
-A command has at most 10 seconds within the original 20-second credential deadline.
+A command has at most 120 seconds, and both share a 180-second login deadline that is separate from
+each read's budget. An `sf` that outlasts its limit is stopped and reported as
+`salesforce_cli_timeout`.
 
 | Area | Behavior |
 | --- | --- |
@@ -69,7 +71,7 @@ A command has at most 10 seconds within the original 20-second credential deadli
 | Without `--sf-org` | The backend reads `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN`, and that path cannot refresh. There is no implicit default CLI org. Both paths validate one HTTPS My Domain origin and a bounded printable token. |
 | Environment and identity pin | Developer Edition is the default. Sandbox and production need an explicit `--sf-environment`. Startup checks OrganizationType and IsSandbox before opening source stores. Sandbox and production also check that the required standard objects and fields are readable. A mode-0600 `crm-connection.json` pins the validated origin, org ID, and environment. A restart must match it. It holds private org identity and must not be shared or committed. |
 | Requests | GET only, with fixed SOQL fields, escaped search text, and no arbitrary query or URL input. TLS verification stays on. Proxies and redirects are disabled. Each operation has 12 GETs, 1 MiB, and 20 seconds, with at most 10 pages and 100 rows per query. The write tool is omitted. A write attempt returns HTTP 403. |
-| HTTP 401 | The first 401 in an operation may reacquire credentials once through `sf`, read the Organization again to confirm the same org, and retry the same GET within the original budget. A second 401, a lookup failure, or a changed origin or org returns `salesforce_auth_required`. Other errors are not retried. |
+| HTTP 401 | The first 401 in an operation may reacquire credentials once through `sf`, read the Organization again to confirm the same org, and retry the same GET. Time spent waiting for `sf` is added back to the read's deadline. An `sf` that does not answer in time returns `salesforce_cli_timeout`. A second 401, a lookup failure, or a changed origin or org returns `salesforce_auth_required`. Other errors are not retried. |
 | `salesforce check` | A local diagnostic the operator runs. Its report holds fixed step names, outcomes, counts, timings, fixed errors, and missing required field names. It returns no source record, ID, org detail, or credential. |
 | Demo kit | The operator-run helper `scripts/salesforce-demo.py` imports and removes twelve invented records with Salesforce CLI writes. It is separate from the connector, which stays GET-only. Cleanup deletes only the imported IDs and has no transaction, so a failure can leave a partial cleanup. |
 | Tests and guide | [test_sf_credentials.py](tests/test_sf_credentials.py), with a fake CLI on PATH. [docs/salesforce.md](docs/salesforce.md). |

@@ -28,6 +28,9 @@ _FAILURES = {
     "salesforce_auth_required": (
         "The sf CLI login or token refresh did not provide usable credentials.",
         "Install Salesforce CLI if missing. Run sf org login web --alias gtm-de, then repeat with --sf-org gtm-de."),
+    "salesforce_cli_timeout": (
+        "The Salesforce CLI (sf) did not answer within its time limit, so no login was read.",
+        "The computer may be busy. Repeat the command. To time sf alone, run sf org display with the same alias."),
     "salesforce_forbidden": (
         "Salesforce denied this read.",
         "Grant the selected user read access to the required standard objects and fields."),
@@ -76,7 +79,8 @@ class NoCandidate(Exception):
     code = "renewal_fields_unmapped"
 
 
-def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_factory=None, progress=None):
+def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_factory=None, progress=None,
+              on_refresh=None):
     """Never return records, configuration, credentials, exception text, or identifiers."""
     as_of = date.today().isoformat() if as_of is None else as_of
     try:
@@ -139,6 +143,7 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
 
     def credentials():
         state["reader"] = factory()
+        state["reader"].on_refresh = on_refresh
         if state["reader"].environment != environment:
             raise ValueError("The reader does not match the selected environment.")
         return 2, "Instance and token were loaded in memory."

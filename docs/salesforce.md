@@ -42,9 +42,14 @@ folder that holds fixture state also refuses. One process holds a state folder a
 ## Credentials
 
 `--sf-org` captures `sf org display` for the instance address and `sf org auth show-access-token`
-for the token. Each command has a timeout of at most 10 seconds within one 20-second credential
-deadline. The connector keeps the token in memory and does not launch a login flow. Without
-`--sf-org`, the backend reads `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` from its
+for the token. Each command may take 120 seconds, and both share a 180-second login deadline that
+is separate from each read's 20 seconds. Without `--json`, a command that waits on `sf` at startup
+says so on stderr after 2 seconds and then every 10. If a token expires during a read that still
+has time and requests left, the read runs `sf` again and then continues. stderr says when `sf`
+starts and when it answers, and `serve` says so with `--json` too. An `sf` that outlasts its limit
+is stopped with anything it started, and so is one still running when the connector exits. The
+connector keeps the token in memory and does not launch a login flow. Without `--sf-org`, the
+backend reads `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` from its
 environment. This fallback cannot refresh an expired token, so replace the variables and restart. No
 default CLI org is ever selected. The instance address must be an HTTPS My Domain origin ending in
 `.my.salesforce.com`, with no path, query, credentials, or nonstandard port.
@@ -77,10 +82,10 @@ fields. Amounts are printed with `(currency unknown)`.
 | Pages per query | 10. |
 | Rows per query | 100. Excess rows fail and no partial records are returned. |
 | AccountNumber lookup | 2 rows. |
-| Operation deadline | 20 seconds, checked around reads. It is not a hard cancellation. |
+| Operation deadline | 20 seconds of read time, checked around reads. A wait on `sf` for a login refresh is not counted. It is not a hard cancellation. |
 | Network timeout per request | The remaining deadline, up to 5 seconds. |
-| Local CLI client | 25 seconds for a Salesforce MCP response. |
-| Retries | With `--sf-org`, the first HTTP 401 in an operation asks `sf` for credentials once and confirms the org identity before retrying the GET, inside the same budget. No other upstream error is retried. |
+| Local CLI client | 25 seconds for a response, and 205 seconds for a tool call that reads the CRM, which can wait for a login refresh. |
+| Retries | With `--sf-org`, the first HTTP 401 in an operation asks `sf` for credentials once and confirms the org identity before retrying the GET, inside the same request and size limits. The `sf` wait has its own 180-second limit. No other upstream error is retried. |
 
 ## Errors
 
@@ -100,6 +105,7 @@ fields. Amounts are printed with `(currency unknown)`.
 | `salesforce_rate_limited` | HTTP 429, or HTTP 403 with `REQUEST_LIMIT_EXCEEDED`. | Wait for API capacity and retry. |
 | `salesforce_result_limit` | A read exceeded the request, page, row, or size limit. | Use a narrower search or a smaller account book. |
 | `salesforce_pagination_invalid` | Salesforce returned an unsupported page locator. | Retry with a narrower search. |
+| `salesforce_cli_timeout` | `sf` did not answer within its time limit. | Repeat the command. To time `sf` alone, run `time sf org display --target-org ALIAS --json > /dev/null 2>&1`. |
 | `salesforce_timeout`, `salesforce_unavailable` | The deadline passed, or the endpoint could not be reached. | Check connectivity and the `sf` login, then retry. |
 | `salesforce_http_error` | Another upstream HTTP status. | Check that the object is available and readable in this org. |
 | `salesforce_invalid_response` | The response was outside the supported shape. | Check access to the mapped fields, then retry. |
