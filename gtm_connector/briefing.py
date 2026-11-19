@@ -12,19 +12,13 @@ import uuid
 import httpx2
 
 from . import strict_json
-from .citations import BriefRejected, NoRenewalCandidate, build_facts, check_brief, diagnose_brief
+from .citations import BriefRejected, build_facts, check_brief, diagnose_brief
 from .drafting import DraftResult, FixtureDraftAdapter
 from .seed import DEMO_AS_OF
 
 
 class BriefingError(RuntimeError):
     """Required evidence could not be collected; no brief can be published."""
-
-
-class RenewalFieldsUnmapped(BriefingError):
-    """The account has no standard Contract date suitable for renewal planning."""
-
-    code = "renewal_fields_unmapped"
 
 
 def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_OF,
@@ -134,10 +128,7 @@ def assemble_evidence(brief_id, account_id, as_of, records, receipts, statuses, 
     elif include_slack:
         evidence["workflow_version"] = 2
     # This also verifies account associations and one matching receipt per read.
-    try:
-        build_facts(evidence)
-    except NoRenewalCandidate as exc:
-        raise RenewalFieldsUnmapped(str(exc)) from None
+    build_facts(evidence)
     return evidence
 
 

@@ -208,7 +208,11 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
         with TemporaryDirectory(prefix="gtm-salesforce-check-") as temporary:
             with Runtime(Path(temporary) / "state", crm_reader=state["reader"]) as runtime:
                 result = create_brief(runtime, state["account_id"], as_of=as_of)
-                count = len([line for line in result["text"].splitlines() if line.startswith("- ")])
+                lines = [line for line in result["text"].splitlines() if line.startswith("- ")]
+                if not any(line.startswith("- Renewal planning candidate: ") for line in lines):
+                    # The candidate's contract was gone by the time the brief read it.
+                    raise NoCandidate
+                count = len(lines)
         return count, "A cited brief passed its evidence check. Private temporary evidence was removed."
 
     step("brief", brief, ready=account_ok and opportunity_ok)

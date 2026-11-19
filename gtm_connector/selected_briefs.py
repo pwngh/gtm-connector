@@ -22,7 +22,7 @@ import uuid
 from mcp.server.mcpserver.exceptions import ToolError
 
 from . import strict_json
-from .briefing import BriefingError, RenewalFieldsUnmapped, assemble_evidence
+from .briefing import BriefingError, assemble_evidence
 from .citations import BriefRejected, check_brief
 from .drafting import FixtureDraftAdapter
 from .seed import DEMO_AS_OF
@@ -168,8 +168,6 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
             if len(follow_ups) != 1:
                 raise BriefRejected("The Slack workflow requires one checked proposed follow-up.")
             follow_up = follow_ups[0]
-    except RenewalFieldsUnmapped:
-        raise ToolError("renewal_fields_unmapped") from None
     except BriefRejected:
         raise ToolError("brief_rejected") from None
     except (BriefingError, KeyError, TypeError, ValueError):

@@ -60,10 +60,13 @@ A brief selects the Contract with the earliest non-null `EndDate` on or after th
 breaking ties by Contract ID. Its status category must be `Draft`, `InApproval`, or `Activated`. The
 connector uses the `EndDate` that Salesforce returns and never calculates one. Salesforce fills
 `EndDate` from `StartDate` and `ContractTerm` only when the org's automatic calculation setting is
-on. Every brief states the contract's status, category, and end date, that a Draft or InApproval
-contract has not been activated, and that ARR and CRM renewal risk are not mapped from standard
-fields. The built-in draft gives each other contract on the account one line with its status,
-category, and end date. Amounts are printed with `(currency unknown)`.
+on. With such a contract, the brief states its status, category, and end date, and that a Draft or
+InApproval contract has not been activated. Without one, the account is still briefed: the brief
+says that Salesforce returned no contract with an end date on or after the planning date, and when
+an earlier end date exists, it opens with a signal naming the latest and its category. Every brief
+says that ARR and CRM renewal risk are not mapped from standard fields. The built-in draft gives
+each other contract on the account one line with its status, category, and end date. Amounts are
+printed with `(currency unknown)`.
 
 ## Field mapping
 
@@ -90,9 +93,8 @@ category, and end date. Amounts are printed with `(currency unknown)`.
 
 ## Errors
 
-`salesforce_invalid_configuration` exits `2`. `salesforce_environment_mismatch`,
-`source_identity_mismatch`, and `renewal_fields_unmapped` exit `3`. Other `salesforce_*` codes exit
-`5`. Over MCP, an upstream failure is a tool error (`isError: true` over HTTP 200).
+`salesforce_invalid_configuration` exits `2`. `salesforce_environment_mismatch` and
+`source_identity_mismatch` exit `3`. Other `salesforce_*` codes exit `5`. Over MCP, an upstream failure is a tool error (`isError: true` over HTTP 200).
 
 | Code | Cause | Fix |
 | --- | --- | --- |
@@ -113,7 +115,7 @@ category, and end date. Amounts are printed with `(currency unknown)`.
 | `salesforce_invalid_arguments` | An account ID, search text, or date is invalid. | Use an `acc-sf-` ID, a shorter query, or a `YYYY-MM-DD` date. |
 | `salesforce_account_number_ambiguous` | An AccountNumber lookup returned a number that is not a literal match. `calls import` reports `calls_account_ambiguous`. | Select the account with `--account` and its canonical ID. |
 | `source_identity_mismatch` | The state folder belongs to another connection or cannot prove its identity. | Restore the original connection, or use an unused `--state-dir`. |
-| `renewal_fields_unmapped` | No eligible Contract has an `EndDate` on or after the planning date. | Run `salesforce check`. Verify the contract's `EndDate` and read access. |
+| `renewal_fields_unmapped` | `salesforce check` found no account with a Contract `EndDate` on or after the planning date. Briefs still work and say so. | Create a Draft Contract with `StartDate` and `ContractTerm`, or verify read access to `EndDate`. |
 | `crm_write_disabled` | A client attempted a write. | Do not retry. The Salesforce backend is read-only. |
 
 ## Demo book

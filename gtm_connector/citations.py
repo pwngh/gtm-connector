@@ -14,10 +14,6 @@ class BriefRejected(ValueError):
     """A candidate or its evidence cannot support a checked brief."""
 
 
-class NoRenewalCandidate(BriefRejected):
-    """Validated Salesforce evidence has no eligible future Contract end date."""
-
-
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
 _SOURCES = {
     "accounts": ("crm", "acc", "get_account"),
@@ -137,39 +133,45 @@ def _amount(opportunity):
 
 
 def add_salesforce_facts(groups, as_of, brief_id, add, signal):
-    """Select an actual EndDate; Draft and InApproval remain planning candidates."""
-    eligible = []
+    """Plan from an actual EndDate when one is still ahead. Draft and InApproval remain planning candidates."""
+    ahead: list[tuple] = []
+    ended: list[tuple] = []
     for contract in groups["contracts"]:
         if contract["status_code"] not in ("Draft", "InApproval", "Activated"):
             raise BriefRejected("Unknown Salesforce Contract status category.")
         _text(contract["status"])
         end = None if contract["end_date"] is None else _day(contract["end_date"])
-        if end is not None and end >= as_of:
-            eligible.append((end, contract["id"], contract))
-    if not eligible:
-        raise NoRenewalCandidate("No Draft, InApproval, or Activated Contract has an EndDate "
-                                 "on or after the as-of date. Run gtm-connector salesforce check.")
-    end, _, contract = min(eligible, key=lambda candidate: (candidate[0], candidate[1]))
+        if end is not None:
+            (ahead if end >= as_of else ended).append((end, contract["id"], contract))
     account = groups["accounts"][0]
-    account_ref, contract_ref = account["record_ref"], contract["record_ref"]
+    account_ref, run = account["record_ref"], f"run/{brief_id}"
     required = set()
     add(f"Account: {_text(account['name'])}.", account_ref)
     add(f"Industry: {_nullable_text(account['industry'])}.", account_ref)
     required.add(add("Annual recurring revenue is not mapped from standard Salesforce fields.", account_ref))
     required.add(add("CRM renewal risk is not mapped from standard Salesforce fields.", account_ref))
-    required.add(add(f"Renewal planning candidate: Contract {contract['id']}; "
-                     f"status {_text(contract['status'])}; category {_text(contract['status_code'])}.", contract_ref))
-    required.add(add(f"Contract end date: {end.isoformat()}.", contract_ref))
-    days = (end - as_of).days
-    timing = (f"Contract end is in {days} {'day' if days == 1 else 'days'} as of {as_of}." if days else
-              f"Contract ends on the as-of date {as_of}.")
-    required.add(add(timing, contract_ref, f"run/{brief_id}"))
-    if contract["status_code"] == "Draft":
-        required.add(add("Draft contract is a planning candidate and has not been activated.", contract_ref))
-    elif contract["status_code"] == "InApproval":
-        required.add(add("Contract in approval is a planning candidate and has not been activated.", contract_ref))
+    contract, days, renewal_ref = None, None, account_ref
+    if ahead:
+        end, _, contract = min(ahead, key=lambda candidate: candidate[:2])
+        renewal_ref, days = contract["record_ref"], (end - as_of).days
+        required.add(add(f"Renewal planning candidate: Contract {contract['id']}; status {_text(contract['status'])}; "
+                         f"category {_text(contract['status_code'])}.", renewal_ref))
+        required.add(add(f"Contract end date: {end.isoformat()}.", renewal_ref))
+        timing = (f"Contract end is in {_days(days)} as of {as_of}." if days else
+                  f"Contract ends on the as-of date {as_of}.")
+        required.add(add(timing, renewal_ref, run))
+        required.add(add({"Draft": "Draft contract is a planning candidate and has not been activated.",
+                          "InApproval": "Contract in approval is a planning candidate and has not been activated.",
+                          "Activated": "Activated contract supplies the renewal planning date."}
+                         [contract["status_code"]], renewal_ref))
     else:
-        required.add(add("Activated contract supplies the renewal planning date.", contract_ref))
+        # The account is still briefed. A lapsed contract is the case that most needs a reader.
+        required.add(add(f"Salesforce returned no contract with an end date on or after {as_of}.", account_ref, run))
+        if ended:
+            # Only what the returned dates show: a contract with no end date may still be running.
+            end, _, last = max(ended, key=lambda candidate: candidate[:2])
+            signal(f"the latest contract end date, {end} on contract {last['id']} with category "
+                   f"{_text(last['status_code'])}, was {_days((as_of - end).days)} ago.", last["record_ref"], run)
     for other in sorted(groups["contracts"], key=lambda row: row["id"]):
         if other is not contract:
             ends = "no end date" if other["end_date"] is None else f"end date {other['end_date']}"
@@ -181,10 +183,10 @@ def add_salesforce_facts(groups, as_of, brief_id, add, signal):
     for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
         if type(opportunity["is_closed"]) is not bool or type(opportunity["is_won"]) is not bool:
             raise BriefRejected("Salesforce opportunity outcomes must be booleans.")
-        if days <= _SOON_DAYS and not opportunity["is_closed"]:
+        if days is not None and days <= _SOON_DAYS and not opportunity["is_closed"]:
             when = f"is in {_days(days)}" if days else "is today"
             signal(f"contract end {when} and opportunity {opportunity['id']} is still open at stage "
-                   f"{_text(opportunity['stage'])}.", contract_ref, opportunity["record_ref"], f"run/{brief_id}")
+                   f"{_text(opportunity['stage'])}.", renewal_ref, opportunity["record_ref"], run)
         add(f"CRM opportunity {opportunity['id']}: stage {_text(opportunity['stage'])}; "
             f"amount {_amount(opportunity)}; close date {_day(opportunity['close_date'])}; "
             f"closed {str(opportunity['is_closed']).lower()}; won {str(opportunity['is_won']).lower()}.",
@@ -192,7 +194,7 @@ def add_salesforce_facts(groups, as_of, brief_id, add, signal):
     for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
         if contact["title"] is None:
             signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
-    return required, contract_ref
+    return required, renewal_ref
 
 
 def _catalog(evidence):

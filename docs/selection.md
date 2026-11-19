@@ -60,7 +60,6 @@ return these codes as tool errors, or a failed source's own code, such as `calls
 | `invalid_as_of` | `as_of` is not a `YYYY-MM-DD` date. | Correct the date. |
 | `rate_limited`, `brief_deadline_exceeded`, `brief_source_busy` | The rate limit was reached, the 45 seconds passed, or another Slack operation holds the connection. | Retry. |
 | `invalid_token`, `brief_scope_not_covered` | The grant expired, or it lacks a scope the brief needs. | Obtain a grant with those scopes. |
-| `renewal_fields_unmapped` | The Salesforce account has no eligible Contract. | Run `salesforce check`. |
 | `brief_source_failed`, `brief_evidence_invalid`, `brief_rejected` | A read failed, or the evidence or draft did not pass its checks. | Read the receipts with `audit`, then retry. |
 | `brief_too_large`, `brief_storage_failed` | The brief would exceed 4 MiB, or it could not be written. | Check the state folder's permissions. |
 | `brief_not_found`, `brief_invalid`, `brief_not_accepted`, `brief_source_changed` | No valid, successfully prepared brief has this ID, its file changed, or a binding, the transcript revision, the Slack mapping, or the Slack connection changed. | Prepare a new brief. |
