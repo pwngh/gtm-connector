@@ -24,6 +24,7 @@ from cryptography.x509.oid import NameOID
 import uvicorn
 
 from . import calls, slack, store
+from . import strict_json
 from .auth import LocalAuthority, create_auth_app
 from .gateway import Connector, require_distinct_databases
 
@@ -69,15 +70,6 @@ class SourceIdentityError(ValueError):
     code = "source_identity_mismatch"
 
 
-def _unique_marker(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError
-        result[key] = value
-    return result
-
-
 def _read_marker(path, *, require_schema=True):
     """Read bounded private metadata without following links or changing it."""
     try:
@@ -93,7 +85,7 @@ def _read_marker(path, *, require_schema=True):
                 or opened.st_mode & 0o077 or opened.st_size > 4096 or opened.st_nlink != 1
                 or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)):
             raise ValueError
-        marker = json.loads(source.read(4097), object_pairs_hook=_unique_marker)
+        marker = strict_json.loads(source.read(4097))
     if not isinstance(marker, dict) or (require_schema and type(marker.get("schema_version")) is not int):
         raise ValueError
     return marker

@@ -15,6 +15,8 @@ import stat
 import time
 from urllib.parse import urlencode, urlsplit
 
+from . import strict_json
+
 
 ALLOWED_USER_SCOPES = ("channels:history", "groups:history")
 DEFAULT_USER_SCOPES = ("channels:history",)
@@ -86,21 +88,8 @@ class _Clock:
         return datetime.now(timezone.utc)
 
 
-def _unique(pairs):
-    value = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError
-        value[key] = item
-    return value
-
-
-def _reject_constant(_):
-    raise ValueError
-
-
 def _decode(raw):
-    value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_reject_constant)
+    value = strict_json.loads(raw.decode("utf-8"))
     if not isinstance(value, dict):
         raise ValueError
     return value

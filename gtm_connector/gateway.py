@@ -24,6 +24,7 @@ from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 
 from . import calls, slack, store
+from . import strict_json
 from .audit import AuditLog
 from .request_checks import MISSING, Missing, RequestFacts, RequestPolicy, charge_rate, check_request
 from .salesforce import SalesforceReadError
@@ -37,15 +38,6 @@ _INVOCATION: ContextVar[Invocation | None] = ContextVar("gtm_connector_invocatio
 _COMPOSITE_TOOLS = ("prepare_renewal_brief", "read_renewal_brief")
 _DEFAULT_DEFINITIONS = {name: definition for name, definition in TOOL_DEFINITIONS.items()
                         if name not in _COMPOSITE_TOOLS}
-
-
-def _json_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
 
 
 def _records(source, table, rows):
@@ -426,9 +418,7 @@ class Connector:
             if len(body) > 65536 or not event.get("more_body"):
                 break
         try:
-            def reject_constant(_):
-                raise ValueError("non-finite JSON number")
-            request = json.loads(body, object_pairs_hook=_json_object, parse_constant=reject_constant)
+            request = strict_json.loads(body)
         except (ValueError, UnicodeError, RecursionError):
             request = None
         params = request.get("params", {}) if isinstance(request, dict) else {}

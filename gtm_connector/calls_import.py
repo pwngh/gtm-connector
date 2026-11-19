@@ -17,6 +17,8 @@ import sqlite3
 import stat
 from typing import Any
 
+from . import strict_json
+
 
 MAX_RAW_BYTES = 2 * 1024 * 1024
 MAX_UNITS = 10_000
@@ -72,18 +74,9 @@ def _digest(value):
     return hashlib.sha256(_canonical(value)).hexdigest()
 
 
-def _unique(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise CallsImportError("calls_import_corrupt")
-        result[key] = value
-    return result
-
-
 def _json(value):
     try:
-        return json.loads(value, object_pairs_hook=_unique)
+        return strict_json.loads(value)
     except (TypeError, ValueError, UnicodeError, RecursionError):
         raise CallsImportError("calls_import_corrupt") from None
 

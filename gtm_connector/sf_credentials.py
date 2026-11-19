@@ -1,9 +1,10 @@
 """Read an existing Salesforce CLI login without printing or storing secrets."""
 
-import json
 import os
 import subprocess
 import time
+
+from . import strict_json
 
 
 _COMMAND_SECONDS = 10
@@ -15,15 +16,6 @@ class SFCredentialsError(RuntimeError):
 
     def __init__(self):
         super().__init__("salesforce_auth_required")
-
-
-def _unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError
-        result[key] = value
-    return result
 
 
 class SFCredentials:
@@ -53,7 +45,7 @@ class SFCredentials:
             if (result.returncode != 0 or len(result.stdout) > _MAX_OUTPUT_BYTES
                     or time.monotonic() >= deadline):
                 raise SFCredentialsError()
-            document = json.loads(result.stdout, object_pairs_hook=_unique_object)
+            document = strict_json.loads(result.stdout)
             if (not isinstance(document, dict) or type(document.get("status")) is not int
                     or document["status"] != 0 or not isinstance(document.get("result"), dict)):
                 raise SFCredentialsError()

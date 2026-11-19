@@ -3,13 +3,14 @@
 from contextlib import closing
 from datetime import datetime, timezone
 import importlib.util
-import json
 import os
 from pathlib import Path
 import shlex
 import stat
 import sys
 from urllib.parse import urlsplit
+
+from . import strict_json
 
 
 _REQUIRED_FILES = ("owner.json", "tls.pem", "tls.key", "crm.sqlite3", "audit.sqlite3")
@@ -35,15 +36,6 @@ def _private(path, *, directory=False):
     return correct_type and info.st_uid == os.getuid() and info.st_mode & 0o077 == 0
 
 
-def _unique_owner(pairs):
-    value = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError
-        value[key] = item
-    return value
-
-
 def _source_files(owner):
     calls_files = (("calls.sqlite3",) if owner.get("calls_backend", "fixture") == "fixture"
                    else ("imports.sqlite3", "calls-source.json"))
@@ -67,7 +59,7 @@ def _read_owner(directory):
             content = source.read(65537)
         if len(content) > 65536:
             raise ValueError
-        owner = json.loads(content, object_pairs_hook=_unique_owner)
+        owner = strict_json.loads(content)
         required = {"issuer", "resource", "redirect_uri", "client_id", "owner_secret", "cert_path"}
         if not isinstance(owner, dict) or not required <= owner.keys():
             raise ValueError

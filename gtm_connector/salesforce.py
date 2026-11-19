@@ -3,7 +3,6 @@
 from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal, DecimalException
-import json
 import os
 import re
 import time
@@ -12,6 +11,7 @@ from urllib.parse import urlsplit
 
 import httpx2
 
+from . import strict_json
 from .sf_credentials import SFCredentials, SFCredentialsError
 from .tool_definitions import valid_account_search
 
@@ -60,19 +60,6 @@ class SalesforceReadError(RuntimeError):
         self.code = code if code in _ERROR_CODES else "salesforce_invalid_response"
         self.sf_cli_invocations = 0
         super().__init__(self.code)
-
-
-def _unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate_json_key")
-        result[key] = value
-    return result
-
-
-def _reject_constant(_):
-    raise ValueError("nonfinite_json_number")
 
 
 def _native_id(value):
@@ -326,9 +313,7 @@ class SalesforceReadOnlyAdapter:
                         raise SalesforceReadError("salesforce_timeout")
                     chunks.append(chunk)
                 try:
-                    document = json.loads(b"".join(chunks), parse_float=Decimal,
-                                          parse_constant=_reject_constant,
-                                          object_pairs_hook=_unique_object)
+                    document = strict_json.loads(b"".join(chunks), parse_float=Decimal)
                 except (ValueError, UnicodeError, RecursionError, DecimalException):
                     code = "salesforce_forbidden" if status == 403 else "salesforce_invalid_response"
                     raise SalesforceReadError(code) from None
