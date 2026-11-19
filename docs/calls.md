@@ -50,7 +50,7 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
 | Parsed lines or cues | 10,000 |
 | Quoted text, including context | 16 KiB of UTF-8 |
 | Returned units, including context | 256 |
-| Serialized selected record | 128 KiB of ASCII-escaped JSON |
+| Quoted text with its units | 120 KiB of ASCII-escaped JSON. The saved record stays under 128 KiB. |
 
 ## Errors
 
