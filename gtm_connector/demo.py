@@ -88,6 +88,7 @@ def run(directory):
             "denied_read": {"tool": "read_call_notes", "status": denied.status_code,
                             "required_scope": "calls:read", "receipt_id": receipts[1]["audit_id"]},
             "brief": {key: brief[key] for key in ("brief_id", "account_id", "as_of", "text", "units")},
-            "audit": {"run_id": run_id, "rows": len(receipts) + len(brief["evidence"]["receipts"])},
+            # The two calls of this run, the card's reads, and the receipt that seals the saved card.
+            "audit": {"run_id": run_id, "rows": len(receipts) + len(brief["evidence"]["receipts"]) + 1},
             "activities_created": created,
         }

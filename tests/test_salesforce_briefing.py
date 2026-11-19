@@ -277,7 +277,7 @@ class SalesforceBriefingTests(unittest.TestCase):
         self.assertEqual(brief["evidence"]["slack_status"], "denied")
         self.assertIn("  Calls: not read. The grant lacks calls:read.", brief["text"])
         self.assertIn("  Slack: not read. The grant lacks slack:read.", brief["text"])
-        self.assertEqual([row["http_status"] for row in self.runtime.connector.audit.read()], [200, 200, 403, 403])
+        self.assertEqual([row["http_status"] for row in self.runtime.connector.audit.read()], [200, 200, 403, 403, 200])
         self.assertEqual(len(self.requests), 5)
 
     def test_invented_local_sources_become_inert_sentences_without_crm_reads(self):

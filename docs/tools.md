@@ -63,7 +63,7 @@ view leaves out opportunities and call notes. With `--crm-backend salesforce`, `
 | `notes_without_scope.status`, `rate_limit.status` | HTTP `403` and HTTP `429` |
 | `empty_notes` | `[]` for `acc-004` |
 | `idempotent_write` | `requests: 2`, `activities: 1` |
-| `audit_rows`, `brief_audit_rows` | `12` connector receipts, and `9` reads across the three cards |
+| `audit_rows`, `brief_audit_rows`, `seal_audit_rows` | `12` connector receipts, `9` reads across the three cards, and `3` receipts that seal the saved cards |
 | `briefs` | Two [Deal cards](briefs.md): `acc-003` with calls access, `acc-001` without it |
 | `injection_note.activities_created`, `injection_brief.activities_created` | `0`, the second across all three cards, including `acc-007` |
 

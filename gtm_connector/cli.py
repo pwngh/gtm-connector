@@ -474,7 +474,9 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
                 table(["CHECK", "RESULT"], [["Read without calls:read", "Denied (HTTP 403)"],
                     ["Injected instruction", "Quoted as data; zero activities created"],
                     ["Retried write", "One activity"],
-                    ["Rate limit", "HTTP 429"], ["Audit receipts", result["audit_rows"] + result["brief_audit_rows"]]]))
+                    ["Rate limit", "HTTP 429"],
+                    ["Audit receipts", sum(result[key] for key in ("audit_rows", "brief_audit_rows",
+                                                                    "seal_audit_rows"))]]))
     raise ValueError("No display is available for this command.")
 
 

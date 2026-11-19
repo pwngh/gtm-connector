@@ -28,8 +28,13 @@ one unit, so every record that was read has a number. Every number on a card is 
 `trace` resolves it to the source record, the receipt of the read that returned it, and, for a
 sentence, its neutralized text, its speaker, and the SHA-256 of the record's text as stored.
 
-`trace` first compares the saved receipts with the audit log of the state folder and refuses a
-saved card that differs. The owner of the files can still edit both.
+A saved card is sealed. Saving it commits one more receipt, `save_brief`, that holds the SHA-256 of
+the saved file: the evidence, the units, the card text, the seller list, and the date. `trace`
+reads the file, and refuses it unless that receipt is finished and names the digest of the file as
+it is now, and the receipts of the card's reads are the ones in the audit log. A changed amount,
+sentence, speaker, seller, date, or card text does not trace. A card keeps the numbers it was sealed
+with; a card saved before sealing says so and has to be made again. The owner of the state folder
+can still rewrite the file and the audit log together: the log is not tamper-proof.
 
 ## Sentences
 

@@ -77,7 +77,7 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(sum(row["http_status"] == 403 for row in rows), 1)
                 self.assertEqual(sum(row["http_status"] == 429 for row in rows), 1)
                 self.assertFalse(any(row["status"] == "pending" for row in rows))
-                self.assertEqual(summary["brief_audit_rows"], 9)
+                self.assertEqual((summary["brief_audit_rows"], summary["seal_audit_rows"]), (9, 3))
                 full, restricted = summary["briefs"]
                 self.assertEqual(full["account_id"], "acc-003")
                 self.assertTrue(full["text"].startswith(
@@ -92,7 +92,7 @@ class CLITests(unittest.TestCase):
                 generated_briefs.extend([full["brief_id"], restricted["brief_id"],
                                          summary["injection_brief"]["brief_id"]])
         all_rows = self.json_result(self.run_cli("audit"))
-        self.assertEqual(len(all_rows), 42)
+        self.assertEqual(len(all_rows), 48)
         self.assertEqual(len(set(generated_briefs)), 6)
         for identifier in generated_briefs:
             rows = [row for row in all_rows if row["brief_id"] == identifier]
@@ -106,7 +106,7 @@ class CLITests(unittest.TestCase):
         for row in all_rows:
             by_tool[row["tool"]] = by_tool.get(row["tool"], 0) + 1
         self.assertEqual(by_tool, {"search_accounts": 2, "get_account": 18, "read_call_notes": 12,
-                                   "list_opportunities": 6, "log_activity": 4})
+                                   "list_opportunities": 6, "log_activity": 4, "save_brief": 6})
         self.assertEqual(sum(row["status"] == "error" for row in all_rows), 6)
 
     def test_accounts_past_one_hundred_matches_show_the_first_hundred_and_say_so(self):
@@ -176,7 +176,7 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("300,000", full["text"].split("SAID", 1)[0])
         self.assertIn("  Slack: not read. The grant lacks slack:read.", restricted["text"].splitlines())
         rows = self.json_result(self.run_cli("audit"))
-        self.assertEqual((len(rows), sum(row["status"] == "error" for row in rows)), (28, 7))
+        self.assertEqual((len(rows), sum(row["status"] == "error" for row in rows)), (31, 7))
 
     def test_missing_account_exits_two_without_json_on_stdout(self):
         self.json_result(self.run_cli("seed"))
@@ -220,9 +220,9 @@ class CLITests(unittest.TestCase):
 
     def test_json_brief_and_trace_resolve_each_number_from_saved_evidence(self):
         brief = self.json_result(self.run_cli("brief", "acc-001", "--without-calls"))
-        self.assertEqual(set(brief), {"schema_version", "brief_id", "account_id", "as_of", "status", "sources",
-                                      "text", "units"})
-        self.assertEqual((brief["schema_version"], brief["status"]), (2, "accepted"))
+        self.assertEqual(set(brief), {"schema_version", "brief_id", "account_id", "as_of", "status", "rules_version",
+                                      "sealed_by", "sources", "text", "units"})
+        self.assertEqual((brief["schema_version"], brief["status"]), (3, "accepted"))
         self.assertIn("  Calls: not read. The grant lacks calls:read.", brief["text"].splitlines())
         saved = self.state / "briefs" / (brief["brief_id"] + ".json")
         original_artifact = saved.read_bytes()
@@ -274,7 +274,8 @@ class CLITests(unittest.TestCase):
     def test_trace_refuses_a_saved_card_that_no_longer_matches_the_audit_log(self):
         brief = self.json_result(self.run_cli("brief", "acc-003"))
         saved = self.state / "briefs" / (brief["brief_id"] + ".json")
-        original = json.loads(saved.read_text())
+        sealed = saved.read_bytes()
+        original = json.loads(sealed)
 
         def edited(change):
             artifact = json.loads(json.dumps(original))
@@ -291,11 +292,14 @@ class CLITests(unittest.TestCase):
             with self.subTest(name=name):
                 refused = edited(change)
                 self.assertEqual((refused.returncode, refused.stdout), (2, ""))
-                self.assertIn("The saved card does not match the audit log of this state folder.", refused.stderr)
+                self.assertIn("This file is not the card that was sealed", refused.stderr)
         refused = edited(lambda artifact: artifact.update(account_id="acc-004"))
         self.assertEqual((refused.returncode, refused.stdout), (2, ""))
         self.assertIn("invalid saved brief evidence", refused.stderr)
+        # The same content spelled another way is still not the sealed file. The sealed bytes trace.
         saved.write_text(json.dumps(original))
+        self.assertEqual(self.run_cli("trace", brief["brief_id"], "1").returncode, 2)
+        saved.write_bytes(sealed)
         self.assertEqual(self.json_result(self.run_cli("trace", brief["brief_id"], "1"))["n"], 1)
 
     def test_a_spoken_number_traces_to_its_sentence_speaker_and_source_digest(self):
@@ -312,6 +316,40 @@ class CLITests(unittest.TestCase):
         self.assertIn("Role\tseller (listed seller identity)\n", human.stdout)
         self.assertIn("[mention channel]", human.stdout)
         self.assertNotIn("<!channel>", human.stdout)
+
+    def test_an_edited_saved_card_does_not_trace(self):
+        brief = self.json_result(self.run_cli("brief", "acc-003", "--with-slack"))
+        path = self.state / "briefs" / (brief["brief_id"] + ".json")
+        saved = path.read_text()
+        self.assertEqual(self.run_cli("trace", brief["brief_id"], "1").returncode, 0)
+
+        def edited(change):
+            artifact = json.loads(saved)
+            change(artifact)
+            return json.dumps(artifact, ensure_ascii=False, indent=2)
+
+        def record(artifact, kind):
+            return next(row for row in artifact["evidence"]["records"] if row["record_ref"].startswith(kind))
+
+        edits = {
+            "a CRM amount": lambda a: record(a, "crm/accounts/").update(arr_cents=1),
+            "the customer's sentence": lambda a: record(a, "calls/call_notes/note-003b").update(body="We will sign."),
+            "the speaker of a sentence": lambda a: record(a, "calls/call_notes/note-003").update(speaker="Marian Holt"),
+            "the card text": lambda a: a.update(text=a["text"].replace("450,000", "1")),
+            "the seller list": lambda a: a["evidence"].update(sellers=["Marian Holt"]),
+            "the date": lambda a: (a.update(as_of="2026-06-01"), a["evidence"].update(as_of="2026-06-01")),
+            "a unit": lambda a: a["units"][4].update(text="We will sign."),
+            "one space": lambda a: a.update(text=a["text"] + " "),
+        }
+        for name, change in edits.items():
+            with self.subTest(edit=name):
+                path.write_text(edited(change))
+                refused = self.run_cli("trace", brief["brief_id"], "1")
+                self.assertEqual((refused.returncode, refused.stdout), (2, ""))
+                self.assertIn("sealed", refused.stderr)
+        # The same bytes back, and the card traces again.
+        path.write_text(saved)
+        self.assertEqual(self.run_cli("trace", brief["brief_id"], "5").returncode, 0)
 
     def test_invalid_brief_inputs_and_missing_saved_evidence_use_distinct_exits(self):
         for arguments, expected_exit in ((("brief", "acc-missing"), 2),

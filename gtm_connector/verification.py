@@ -88,7 +88,9 @@ def run(directory, *, include_slack=False):
                 "injection_brief": {"brief_id": injected["brief_id"],
                                     "record_ref": "calls/call_notes/note-007",
                                     "activities_created": after_briefs - before_briefs},
-                "brief_audit_rows": len(brief_receipts)}
+                "brief_audit_rows": len(brief_receipts),
+                # One receipt seals each of the three saved cards.
+                "seal_audit_rows": len((full, restricted, injected))}
         if include_slack:
             result.update(slack=slack_proof, workflow="crm-calls-slack")
             result["injection_brief"]["slack_record_ref"] = "slack/messages/msg-007"

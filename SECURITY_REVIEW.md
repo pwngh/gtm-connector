@@ -118,8 +118,9 @@ each read's budget. An `sf` that outlasts its limit is stopped and reported as
 - The rate limit is not a distributed quota. Credential filesystem proof is POSIX only.
 - A card does not relate one record to another, so it flags no contradiction. A number attributes
   a source, not its truth.
-- `trace` refuses a saved card whose receipts differ from the audit log. The owner of the state
-  folder can edit both files, so this catches a changed card, not a determined owner.
+- `trace` refuses a saved card unless a finished receipt in the audit log names the SHA-256 of the
+  saved file. The owner of the state folder can rewrite the file and the log together, so this
+  catches a changed card, not a determined owner.
 - A speaker label is taken as the source gives it. The connector cannot tell that a transcript
   mislabelled a speaker. Sentences are split at punctuation, which can join or divide them wrongly.
 - The selection chooses accounts and Slack threads, not fields. Without `--selection`, a connected

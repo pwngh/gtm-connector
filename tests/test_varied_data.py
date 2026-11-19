@@ -219,7 +219,8 @@ class VariedDataTests(unittest.TestCase):
         for number in many:
             self.assertEqual(create_brief(self.runtime, f"acc-{number}", include_slack=True)["status"], "accepted")
         receipts = self.runtime.connector.audit.read()[before:]
-        self.assertEqual([row["status"] for row in receipts], ["ok"] * 800)
+        # Four reads and one seal for each of the two hundred cards.
+        self.assertEqual([row["status"] for row in receipts], ["ok"] * 1000)
 
     def test_every_book_goes_through_the_gateway(self):
         self.assertGreaterEqual(len(varied.BOOKS), 1)

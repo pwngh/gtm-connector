@@ -1,7 +1,10 @@
 """A saved card is written whole or not at all, and only a valid one is traced."""
 
+from contextlib import closing
+import hashlib
 import json
 from pathlib import Path
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -27,29 +30,59 @@ class BriefPersistenceTests(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text()), brief)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
-        self.assertEqual((brief["schema_version"], brief["status"]), (2, "accepted"))
+        self.assertEqual((brief["schema_version"], brief["status"], brief["rules_version"]), (3, "accepted", 2))
+        # The seal is one finished receipt that belongs to no brief and names the digest of the saved bytes.
+        [seal] = [row for row in receipts if row["audit_id"] == brief["sealed_by"]]
+        self.assertEqual((seal["tool"], seal["status"], seal["brief_id"], seal["arguments"]),
+                         ("save_brief", "ok", None, {"account_id": "acc-007"}))
+        self.assertEqual(seal["rows"], [f"briefs/{brief['brief_id']}/{hashlib.sha256(path.read_bytes()).hexdigest()}"])
         self.assertIn('role Missing', brief["text"])
         before = path.read_bytes()
         for unit in brief["units"]:
             traced = trace_saved(self.state, brief["brief_id"], unit["n"])
             self.assertEqual((traced["n"], traced["record_ref"]), (unit["n"], unit["record_ref"]))
             self.assertIn(traced["receipt"]["audit_id"], {row["audit_id"] for row in receipts})
-        # A changed card text cannot change what a number resolves to.
-        edited = {**brief, "text": brief["text"].replace("Missing", '"Chief buyer"')}
-        path.write_text(json.dumps(edited))
-        self.assertEqual(trace_saved(self.state, brief["brief_id"], 2)["fields"]["title"], "")
-        # A card saved under other sentence rules, or with a unit changed, is refused: its numbers may differ.
-        for changed, message in (({"text": "other"}, "do not match its saved evidence"),
-                                 ({"sanitizer_version": 1}, "older rules for sentences")):
-            units = [dict(unit, **changed) if unit["n"] == len(brief["units"]) else unit for unit in brief["units"]]
-            path.write_text(json.dumps({**brief, "units": units}))
-            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, message):
+        # A changed file is not the card that was sealed, whatever was changed and however it is spelled.
+        for changed in ({**brief, "text": brief["text"].replace("Missing", '"Chief buyer"')},
+                        {**brief, "units": brief["units"][:-1]}, brief):
+            path.write_text(json.dumps(changed))
+            with self.subTest(changed=sorted(changed)), self.assertRaisesRegex(ValueError, "not the card that was sealed"):
                 trace_saved(self.state, brief["brief_id"], 1)
+        # A card from before sealing says so.
+        path.write_text(json.dumps({**brief, "schema_version": 2}))
+        with self.assertRaisesRegex(ValueError, "saved before cards were sealed"):
+            trace_saved(self.state, brief["brief_id"], 1)
         path.write_bytes(before)
+        # The log is checked too: without the seal receipt, or one read receipt, the card does not trace.
+        log = self.state / "audit.sqlite3"
+        kept = log.read_bytes()
+        for tool, message in (("save_brief", "not the card that was sealed"), ("get_account", "read receipts")):
+            with closing(sqlite3.connect(log)) as connection, connection:
+                connection.execute("DELETE FROM audit_log WHERE tool = ?", (tool,))
+            with self.subTest(deleted=tool), self.assertRaisesRegex(ValueError, message):
+                trace_saved(self.state, brief["brief_id"], 1)
+            log.write_bytes(kept)
         for number in (0, len(brief["units"]) + 1, "1", 1.0, True):
             with self.subTest(number=number), self.assertRaisesRegex(ValueError, "This card has numbers 1 to"):
                 trace_saved(self.state, brief["brief_id"], number)
         self.assertEqual(path.read_bytes(), before)
+
+    def test_a_card_sealed_under_older_sentence_rules_keeps_its_own_numbers(self):
+        with Runtime(self.state) as runtime, patch("gtm_connector.briefing.SANITIZER_VERSION", 1):
+            brief = create_brief(runtime, "acc-003", include_slack=True)
+        self.assertEqual(brief["rules_version"], 1)
+        # Today's rules would number this card afresh. The sealed units answer, and nothing is rebuilt.
+        with patch("gtm_connector.briefing.build", side_effect=AssertionError("rebuilt")):
+            for unit in brief["units"]:
+                traced = trace_saved(self.state, brief["brief_id"], unit["n"])
+                self.assertEqual((traced["n"], traced["record_ref"], traced.get("text")),
+                                 (unit["n"], unit["record_ref"], unit.get("text")))
+        # Under the same rules a sealed card must also equal a rebuild from its own evidence.
+        with Runtime(self.state) as runtime:
+            current = create_brief(runtime, "acc-003", include_slack=True)
+        with patch("gtm_connector.briefing.build", return_value=([], "")):
+            with self.assertRaisesRegex(ValueError, "does not match a rebuild"):
+                trace_saved(self.state, current["brief_id"], 1)
 
     def test_a_failed_save_leaves_no_card_and_keeps_the_receipts(self):
         with Runtime(self.state) as runtime:
@@ -57,7 +90,11 @@ class BriefPersistenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, "rename failure"):
                     create_brief(runtime, "acc-001")
             self.assertEqual(list((self.state / "briefs").iterdir()), [])
-            self.assertEqual(len(runtime.connector.audit.read()), 3)
+            # The three reads keep their receipts, and the seal is finished as failed, never left open.
+            receipts = runtime.connector.audit.read()
+            self.assertEqual([(row["tool"], row["status"], row["error"]) for row in receipts[3:]],
+                             [("save_brief", "error", "brief_save_failed")])
+            self.assertEqual(len(receipts), 4)
 
     def test_an_interrupted_write_leaves_no_partial_card(self):
         original = tempfile.NamedTemporaryFile
@@ -87,16 +124,16 @@ class BriefPersistenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(OSError, "disk-full"):
                     create_brief(runtime, "acc-003", include_slack=True)
             self.assertEqual(list((self.state / "briefs").iterdir()), [])
-            self.assertEqual(len(runtime.connector.audit.read()), 4)
+            self.assertEqual([row["status"] for row in runtime.connector.audit.read()], ["ok"] * 4 + ["error"])
 
     def test_failed_replace_preserves_old_bytes_and_cleans_temporary_file(self):
         self.state.mkdir()
         path = self.state / "snapshot.json"
-        _save_artifact(path, {"status": "collected"})
+        _save_artifact(path, b'{"status": "collected"}')
         before = path.read_bytes()
         with patch("gtm_connector.briefing.os.replace", side_effect=OSError("fixture rename failure")):
             with self.assertRaisesRegex(OSError, "rename failure"):
-                _save_artifact(path, {"status": "accepted", "text": "candidate"})
+                _save_artifact(path, b'{"status": "accepted", "text": "candidate"}')
         self.assertEqual(path.read_bytes(), before)
         self.assertEqual(list(self.state.iterdir()), [path])
 
@@ -105,9 +142,9 @@ class BriefPersistenceTests(unittest.TestCase):
         path = self.state / "snapshot.json"
         old = {"status": "collected", "evidence": {"fixture": "original"}}
         new = {**old, "status": "accepted", "text": "checked fixture text"}
-        _save_artifact(path, old)
+        _save_artifact(path, json.dumps(old).encode())
         with path.open("rb") as reader:
-            _save_artifact(path, new)
+            _save_artifact(path, json.dumps(new).encode())
             self.assertEqual(json.loads(reader.read()), old)
         self.assertEqual(json.loads(path.read_text()), new)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
@@ -120,7 +157,7 @@ class BriefPersistenceTests(unittest.TestCase):
         link = self.state / "snapshot.json"
         link.symlink_to(target)
         with self.assertRaisesRegex(ValueError, "symbolic link"):
-            _save_artifact(link, {"status": "collected"})
+            _save_artifact(link, b'{"status": "collected"}')
         self.assertTrue(link.is_symlink())
         self.assertEqual(target.read_text(), "original bytes")
         self.assertEqual(set(self.state.iterdir()), {target, link})
@@ -139,10 +176,11 @@ class BriefPersistenceTests(unittest.TestCase):
         path = self.state / "briefs" / (identifier + ".json")
         path.parent.mkdir(parents=True)
         for value in ([], None, "not an artifact", 1,
-                      {"schema_version": 2, "brief_id": identifier, "evidence": []},
-                      {"schema_version": 2, "brief_id": identifier, "evidence": None},
+                      {"schema_version": 3, "brief_id": identifier, "evidence": []},
+                      {"schema_version": 3, "brief_id": identifier, "evidence": None},
                       {"schema_version": 1, "brief_id": identifier, "evidence": {"brief_id": identifier}},
-                      {"schema_version": 2, "brief_id": identifier, "evidence": {"brief_id": "brief-" + "b" * 32}}):
+                      {"schema_version": 3, "brief_id": identifier, "evidence": {"brief_id": "brief-" + "b" * 32}},
+                      {"schema_version": 3, "brief_id": identifier, "evidence": {"brief_id": identifier}}):
             with self.subTest(value=value):
                 path.write_text(json.dumps(value))
                 with self.assertRaisesRegex(ValueError, "invalid saved brief evidence"):

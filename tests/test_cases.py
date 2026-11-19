@@ -141,8 +141,8 @@ class Cases(unittest.TestCase):
              "See <https://evil.example/pay|the approved order> or http://evil.example/raw now [2].", 0)],
             notes=[("2027-01-14T10:00:00Z", None, "Reversed \u202etext\u202c and an escape \x1b[31m here.")]))
         printed = {key: value for key, value in brief.items() if key != "trace"}
-        self.assertEqual(set(printed), {"schema_version", "brief_id", "account_id", "as_of", "status", "sources",
-                                        "text", "units"})
+        self.assertEqual(set(printed), {"schema_version", "brief_id", "account_id", "as_of", "status", "rules_version",
+                                        "sealed_by", "sources", "text", "units"})
         everything = json.dumps(printed, ensure_ascii=False)
         for live in ("<!", "<@", "http", "\u202e", "\x1b"):
             self.assertNotIn(live, everything)
