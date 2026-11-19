@@ -44,8 +44,11 @@ _SOURCES = {
 _SLACK_TOKEN = re.compile(r"<([!@#]?)([^<>|\n]*)(?:\|([^<>\n]*))?>")
 # A mention that was never closed is still neutralized, so no output holds the start of one.
 _OPEN_MENTION = re.compile(r"<([!@])([A-Za-z0-9^_-]*)()")
-_MARKDOWN_LINK = re.compile(r"\[([^\[\]\n]*)\]\(\s*(?:https?://|mailto:)[^\s)]*\s*\)", re.IGNORECASE)
-_RAW_LINK = re.compile(r"(?:https?://|mailto:)[^\s<>\"']*", re.IGNORECASE)
+# A link is any scheme, a scheme-relative //host, mailto:, or a bare www. address.
+_TARGET = r"(?:[a-z][a-z0-9+.-]*://|mailto:|www\.|//(?=[a-z0-9]))"
+_MARKDOWN_LINK = re.compile(r"\[([^\[\]\n]*)\]\(\s*([^\s()]*)\s*\)")
+_RAW_LINK = re.compile(r"(?<![a-z0-9:/])" + _TARGET + r"[^\s<>\"']*", re.IGNORECASE)
+_IS_TARGET = re.compile(_TARGET, re.IGNORECASE)
 # The longest speaker label a card shows. A longer one is no label.
 MAX_LABEL = 200
 # A time in this form is shown as given. Any other time is source text and is shown as a neutralized literal.
@@ -54,16 +57,20 @@ _PLAIN_INSTANT = re.compile(
 # A sentence ends at . ! or ? and any closing quote or bracket, before a word that does not start in lower case.
 _SENTENCE_END = re.compile(r"""[.!?]["')\]]*(\s+)(?=["'(\[]?[^\sa-z])""")
 _ABBREVIATION = re.compile(
-    r"(?:^|[\s(\[\"'])(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|Inc|Ltd|Co|No|e\.g|i\.e|[A-Za-z])\.\Z")
+    r"(?:^|[\s(\[\"'])(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|Inc|Ltd|Co|No|approx|est|e\.g|i\.e|[A-Za-z]"
+    r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.\Z")
 _VOICE = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+([^<>\n]+)>")
 _LINE_BREAKS = {0x0A, 0x0B, 0x0C, 0x85, 0x2028, 0x2029}
+# A bracketed integer is how a card cites a unit, so source text never keeps one.
+_CITATION = re.compile(r"\[([0-9]+)\]")
+_ENDED = re.compile(r"""[.!?]["')\]]*\Z""")
 
 
 def _host(target):
     if target.lower().startswith("mailto:"):
         return "mail"
     try:
-        host = (urlsplit(target).hostname or "").lower()
+        host = (urlsplit(target if "//" in target[:40] else "//" + target).hostname or "").lower()
     except ValueError:
         host = ""
     return host if re.fullmatch(r"[a-z0-9.-]{1,80}", host) else "unknown host"
@@ -73,7 +80,7 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
     """Neutralize one source text. Returns the text every output uses and what was replaced."""
     if not isinstance(raw, str):
         raise BriefRejected("Evidence text fields must be strings.")
-    counts = {"mentions": 0, "links": 0, "controls": 0}
+    counts = {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}
 
     def token(match):
         kind, target, label = match.group(1), match.group(2).strip(), (match.group(3) or "").strip()
@@ -87,19 +94,25 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
         if kind == "#":
             counts["mentions"] += 1
             return f"[channel {target}]" if _ID.fullmatch(target) else "[channel]"
-        if target.lower().startswith(("http://", "https://", "mailto:")):
+        if _IS_TARGET.match(target) or match.group(3) is not None:
+            # Slack renders any target|label pair as a link, whatever the target is.
             counts["links"] += 1
             return f"{label} [link {_host(target)}]" if label else f"[link {_host(target)}]"
         return match.group(0)
 
     def markdown(match):
+        if not _IS_TARGET.match(match.group(2)):
+            return match.group(0)
         counts["links"] += 1
-        target = match.group(0)[match.group(0).index("](") + 2:-1].strip()
-        return f"{match.group(1)} [link {_host(target)}]"
+        return f"{match.group(1)} [link {_host(match.group(2))}]"
 
     def raw_link(match):
         counts["links"] += 1
         return f"[link {_host(match.group(0))}]"
+
+    def citation(match):
+        counts["brackets"] += 1
+        return f"({match.group(1)})"
 
     text = _OPEN_MENTION.sub(token, _SLACK_TOKEN.sub(token, unicodedata.normalize("NFC", raw)))
     text = _RAW_LINK.sub(raw_link, _MARKDOWN_LINK.sub(markdown, text))
@@ -115,21 +128,37 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
             visible.append(f"[U+{code:04X}]")
         else:
             visible.append(character)
-    return "".join(visible), counts
+    return _CITATION.sub(citation, "".join(visible)), counts
 
 
 def sentences(safe: str) -> list[str]:
-    """Split neutralized text into whole sentences. A quotation is always one of these, never a part."""
+    """Split neutralized text into whole sentences. A quotation is always one of these, never a part.
+
+    A line break inside a paragraph is a wrap, not an end. Only a blank line or closing punctuation ends
+    a sentence.
+    """
     found = []
-    for line in safe.split("\n"):
-        line, start = " ".join(line.split()), 0
+    for paragraph in re.split(r"\n[ \t]*\n", safe):
+        line, start = " ".join(paragraph.split()), 0
         for match in _SENTENCE_END.finditer(line):
-            if not _ABBREVIATION.search(line[start:match.start(1)]):
-                found.append(line[start:match.start(1)])
+            # Only the last word can be an abbreviation, so only the end of the sentence is searched.
+            end = match.start(1)
+            if not _ABBREVIATION.search(line, max(start, end - 12), end) or end - start < 3:
+                found.append(line[start:end])
                 start = match.end(1)
         if line[start:]:
             found.append(line[start:])
     return found
+
+
+def voices(text: str, label=None) -> list[tuple]:
+    """Split one WebVTT cue at its voice tags into (speaker label, text). A tag is a label, not speech."""
+    spans, position = [], 0
+    for match in _VOICE.finditer(text):
+        spans.append((label, text[position:match.start()]))
+        label, position = match.group(1), match.end()
+    spans.append((label, text[position:]))
+    return [(name, part.replace("</v>", "")) for name, part in spans if part.replace("</v>", "").strip()]
 
 
 def _label(value):
@@ -195,8 +224,9 @@ def _validated(evidence):
     salesforce, imported = crm == "salesforce", calls == "imported"
     with_slack = evidence["slack_status"] != "not_requested"
     live_slack = with_slack and slack == "slack"
-    if imported and not _valid_binding(evidence["calls_binding"], key="crm_backend", backend=crm):
-        raise BriefRejected("Imported evidence requires a supported source binding.")
+    if imported and (not _valid_binding(evidence["calls_binding"], key="crm_backend", backend=crm)
+                     or evidence["crm_binding"] != evidence["calls_binding"]):
+        raise BriefRejected("Imported evidence requires one supported CRM binding for both sources.")
     if live_slack and (not _valid_binding(evidence["crm_binding"], key="crm_backend", backend=crm)
                        or not _valid_binding(evidence["slack_binding"], key="provider", backend="slack")
                        or (imported and evidence["calls_binding"] != evidence["crm_binding"])):
@@ -297,11 +327,11 @@ def _validated(evidence):
 class _Card:
     """Collects units in a fixed order and the card lines that cite them."""
 
-    def __init__(self, evidence, groups, receipts):
-        self.evidence, self.groups, self.receipts = evidence, groups, receipts
+    def __init__(self, evidence, groups):
+        self.evidence, self.groups = evidence, groups
         self.units: list[dict[str, Any]] = []
-        self.neutralized = {"mentions": 0, "links": 0, "controls": 0}
-        self.missing = 0
+        self.neutralized = {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}
+        self.missing = self.partial = 0
         self.values: list[str] = []
         self.signals: list[str] = []
         self.not_read: list[str] = []
@@ -313,76 +343,100 @@ class _Card:
             self.neutralized[key] += count
         return " ".join(safe.split())
 
-    def text(self, value):
+    def quoted(self, value):
         """One field as a quoted literal on one line, or Missing when the record has none."""
-        if value is None or value == "":
-            self.missing += 1
-            return "Missing"
-        return json.dumps(self.line(value), ensure_ascii=False)
+        return "Missing" if value in (None, "") else json.dumps(self.line(value), ensure_ascii=False)
+
+    def text(self, value):
+        """A displayed field. An empty one is counted once, where it is shown."""
+        self.missing += value in (None, "")
+        return self.quoted(value)
 
     def record(self, row, table):
         self.units.append({"n": len(self.units) + 1, "kind": "record", "source": _SOURCES[table][0],
                            "record_ref": row["record_ref"], "tool": _SOURCES[table][2]})
         return len(self.units)
 
-    def spoken(self, row, table, raw, *, at, speaker, role, basis):
-        # A speaker label and a time are source text too. A role was derived from the label as given.
-        speaker = None if speaker is None else self.line(speaker) or None
-        if speaker is not None and len(speaker) > MAX_LABEL:
-            speaker, role, basis = None, "unknown", f"speaker label over {MAX_LABEL} characters"
+    def spoken(self, row, table, parts, *, at, role_of, open_start=False, open_end=False):
+        """Units for one record's speech. `parts` is (speaker label, text) in order.
+
+        Neighbouring parts by one speaker are one run, so a sentence wrapped across cues stays whole.
+        A record with no sentence still gets one unit, so every record resolves.
+        """
         if at is not None and not (isinstance(at, str) and _PLAIN_INSTANT.fullmatch(at)):
             at = self.line(at) or None
-        safe, counts = safe_text(raw)
-        for key, count in counts.items():
-            self.neutralized[key] += count
-        digest = hashlib.sha256(raw.encode("utf-8", "surrogatepass")).hexdigest()
-        for sentence in sentences(safe):
-            self.units.append({"n": len(self.units) + 1, "kind": "sentence", "source": _SOURCES[table][0],
-                               "record_ref": row["record_ref"], "tool": _SOURCES[table][2], "at": at,
-                               "speaker": speaker, "role": role, "basis": basis, "text": sentence,
-                               "raw_sha256": digest, "sanitizer_version": SANITIZER_VERSION})
+        runs: list[list] = []
+        for label, raw in parts:
+            label = _label(label) or None
+            if runs and runs[-1][0] == label:
+                runs[-1][1] += "\n" + raw
+            else:
+                runs.append([label, raw])
+        before = len(self.units)
+        for index, (label, raw) in enumerate(runs):
+            role, basis = role_of(label)
+            # A speaker label is source text too. The role was derived from the label as given.
+            speaker = None if label is None else self.line(label) or None
+            if speaker is not None and len(speaker) > MAX_LABEL:
+                speaker, role, basis = None, "unknown", f"speaker label over {MAX_LABEL} characters"
+            safe, counts = safe_text(raw)
+            for key, count in counts.items():
+                self.neutralized[key] += count
+            digest = hashlib.sha256(raw.encode("utf-8", "surrogatepass")).hexdigest()
+            found = sentences(safe)
+            for position, sentence in enumerate(found):
+                # At the edge of an excerpt a sentence may have lost its start or its end.
+                partial = ((open_start and index == 0 and position == 0 and sentence[:1].islower())
+                           or (open_end and index == len(runs) - 1 and position == len(found) - 1
+                               and not _ENDED.search(sentence)))
+                self.partial += partial
+                self.units.append({"n": len(self.units) + 1, "kind": "sentence", "source": _SOURCES[table][0],
+                                   "record_ref": row["record_ref"], "tool": _SOURCES[table][2], "at": at,
+                                   "speaker": speaker, "role": role, "basis": basis, "text": sentence,
+                                   "partial": bool(partial), "raw_sha256": digest,
+                                   "sanitizer_version": SANITIZER_VERSION})
+        if len(self.units) == before:
+            self.record(row, table)
+        return before + 1
 
     def value(self, label, value, *numbers):
         self.values.append(f"  {label}: {value} " + "".join(f"[{number}]" for number in numbers))
 
-    def signal(self, sentence, *numbers):
-        self.signals.append(f"  {sentence} " + "".join(f"[{number}]" for number in numbers))
+    def signal(self, sentence, *numbers, more=0):
+        """One derived line. When many records raise it, it cites the first few and counts the rest."""
+        self.signals.append(f"  {sentence} " + "".join(f"[{number}]" for number in numbers)
+                            + (f" and {more} more" if more else ""))
 
 
 def _money(amount, currency):
     return f"{currency} {amount}" if currency is not None else f"{amount} (currency Missing)"
 
 
-def _currency(card, row):
+def _amount(row, salesforce, field="amount_cents"):
+    """An amount as printed and how many of its fields are empty. Every record is checked, shown or not."""
     currency = row["currency"]
-    if currency is None:
-        card.missing += 1
-    elif not isinstance(currency, str) or not _CURRENCY.fullmatch(currency):
+    if currency is not None and (not isinstance(currency, str) or not _CURRENCY.fullmatch(currency)):
         raise BriefRejected("A currency must be a three-letter code or absent.")
-    return currency
+    if salesforce:
+        value = row["amount_decimal"]
+        if value is None:
+            return "Missing", 1
+        if not isinstance(value, str) or len(value) > 128 or not re.fullmatch(r"-?[0-9]+(?:\.[0-9]+)?", value):
+            raise BriefRejected("Salesforce amounts must be finite decimal strings or null.")
+    else:
+        cents = row[field]
+        if type(cents) is not int or cents < 0:
+            raise BriefRejected("Evidence amounts must be nonnegative integer cents.")
+        value = f"{cents // 100:,}.{cents % 100:02}"
+    return _money(value, currency), int(currency is None)
 
 
-def _cents(card, row, field):
-    cents = row[field]
-    if type(cents) is not int or cents < 0:
-        raise BriefRejected("Evidence amounts must be nonnegative integer cents.")
-    return _money(f"{cents // 100:,}.{cents % 100:02}", _currency(card, row))
-
-
-def _decimal(card, row):
-    value = row["amount_decimal"]
-    if value is None:
-        card.missing += 1
-        return "Missing"
-    if not isinstance(value, str) or len(value) > 128 or not re.fullmatch(r"-?[0-9]+(?:\.[0-9]+)?", value):
-        raise BriefRejected("Salesforce amounts must be finite decimal strings or null.")
-    return _money(value, _currency(card, row))
-
-
-def _shown(card, rows, what):
+def _shown(card, rows, one, many):
     """The first few records in their fixed order. The rest are counted, never dropped silently."""
-    if len(rows) > SHOWN_RECORDS:
-        card.not_read.append(f"CRM: {len(rows) - SHOWN_RECORDS} more {what} were read and are not shown "
+    more = len(rows) - SHOWN_RECORDS
+    if more > 0:
+        card.not_read.append(f"CRM: {more} more {many if more > 1 else one} "
+                             f"{'were read and are' if more > 1 else 'was read and is'} not shown "
                              f"({len(rows)} in all).")
     return rows[:SHOWN_RECORDS]
 
@@ -430,7 +484,9 @@ def _crm(card, as_of):
         days = (renewal - as_of).days
         timing = f"in {_days(days)}" if days > 0 else f"{_days(-days)} ago" if days < 0 else "today"
         card.value("Renewal date", f"{renewal}, {timing}", first)
-        card.value("Annual recurring revenue", _cents(card, account, "arr_cents"), first)
+        recurring, empty = _amount(account, False, "arr_cents")
+        card.missing += empty
+        card.value("Annual recurring revenue", recurring, first)
         if account["risk_status"] not in ("healthy", "at_risk"):
             raise BriefRejected("Unknown CRM risk status.")
         reason = f"; reason {card.text(account['risk_reason'])}" if account["risk_reason"] else ""
@@ -438,8 +494,9 @@ def _crm(card, as_of):
         if account["risk_status"] == "at_risk":
             card.signal("CRM marks this account at risk.", first)
     card.value("Account", f"{card.text(account['name'])}; industry {card.text(account['industry'])}", first)
-    still_open, open_ids = [], set()
+    still_open, open_ids, amounts = [], set(), {}
     for row in opportunities:
+        amounts[row["id"]] = _amount(row, salesforce)
         if salesforce:
             if type(row["is_closed"]) is not bool or type(row["is_won"]) is not bool:
                 raise BriefRejected("Salesforce opportunity outcomes must be booleans.")
@@ -456,35 +513,43 @@ def _crm(card, as_of):
                       key=lambda row: (row["close_date"], row["id"]))
                + sorted((row for row in opportunities if row["id"] not in open_ids),
                         key=lambda row: (row["close_date"], row["id"]), reverse=True))
-    for row in _shown(card, ordered, "opportunities"):
-        amount = _decimal(card, row) if salesforce else _cents(card, row, "amount_cents")
+    for row in _shown(card, ordered, "opportunity", "opportunities"):
+        amount, empty = amounts[row["id"]]
+        card.missing += empty
         outcome = (f"; closed {str(row['is_closed']).lower()}; won {str(row['is_won']).lower()}"
                    if salesforce else "")
         card.value("Opportunity", f"{card.text(row['name'])}; stage {card.text(row['stage'])}; amount {amount}; "
                    f"close date {row['close_date']}{outcome}", opportunity_numbers[row["id"]])
     if not opportunities:
         card.not_read.append("CRM: no opportunity was returned for this account.")
-    for row in _shown(card, contracts, "contracts"):
-        if contract_numbers[row["id"]] not in renewal_numbers:
-            ends = "no end date" if row["end_date"] is None else f"ends {_day(row['end_date'])}"
-            card.value("Contract", f"status {card.text(row['status'])}; {ends}", contract_numbers[row["id"]])
-    for row in _shown(card, contacts, "contacts"):
+    for row in contracts:
+        if row["end_date"] is not None:
+            _day(row["end_date"])
+    for row in _shown(card, [row for row in contracts if contract_numbers[row["id"]] not in renewal_numbers],
+                      "contract", "contracts"):
+        ends = "no end date" if row["end_date"] is None else f"ends {row['end_date']}"
+        card.value("Contract", f"status {card.text(row['status'])}; {ends}", contract_numbers[row["id"]])
+    for row in _shown(card, contacts, "contact", "contacts"):
         card.value("Contact", f"{card.text(row['name'])}; role {card.text(row['title'])}; "
                    f"email {card.text(row['email'])}", contact_numbers[row["id"]])
-    when = "today" if days == 0 else f"in {_days(days)}" if days and days > 0 else None
-    if days is not None and days < 0:
-        card.signal(f"The renewal date passed {_days(-days)} ago.", *renewal_numbers)
+    what = "contract end" if salesforce else "renewal"
+    when = ("" if days is None else f"The {what} is today" if days == 0 else
+            f"The {what} is in {_days(days)}" if days > 0 else f"The {what} date passed {_days(-days)} ago")
+    if days is not None and days < 0 and not still_open:
+        card.signal(when + ".", *renewal_numbers)
     elif still_open and len(still_open) > SHOWN_RECORDS:
-        card.signal(f"The {'contract end' if salesforce else 'renewal'} is {when} and {len(still_open)} "
-                    "opportunities are still open.", *renewal_numbers)
+        card.signal(f"{when} and {len(still_open)} opportunities are still open.", *renewal_numbers,
+                    *(opportunity_numbers[row["id"]] for row in still_open[:SHOWN_RECORDS]),
+                    more=len(still_open) - SHOWN_RECORDS)
     else:
         for row in still_open:
-            card.signal(f"The {'contract end' if salesforce else 'renewal'} is {when} and this opportunity is "
-                        f"still open at stage {card.text(row['stage'])}.",
+            card.signal(f"{when} and this opportunity is still open at stage {card.quoted(row['stage'])}.",
                         *renewal_numbers, opportunity_numbers[row["id"]])
     no_role = [row for row in contacts if row["title"] in (None, "")]
     if len(no_role) > SHOWN_RECORDS:
-        card.signal(f"{len(no_role)} contacts have no role recorded.", first)
+        card.signal(f"{len(no_role)} contacts have no role recorded.",
+                    *(contact_numbers[row["id"]] for row in no_role[:SHOWN_RECORDS]),
+                    more=len(no_role) - SHOWN_RECORDS)
     else:
         for row in no_role:
             card.signal("This contact has no role recorded.", contact_numbers[row["id"]])
@@ -501,26 +566,32 @@ def _calls(card, as_of, contacts):
         card.not_read.append("Calls: no call record was returned for this account.")
         return
     imported = evidence["calls_backend"] == "imported"
-    before = len(card.units)
+
+    def role_of(label):
+        return speaker_role(label, sellers, contacts)
+
+    first_unit = {}
     for note in sorted(notes, key=lambda row: (str(row["called_at"]), row["id"])):
         if imported:
             manifest = note["manifest"]
+            cited = manifest["cited_range"]
+            parts: list[tuple] = []
             for cue in manifest["units"]:
                 # A WebVTT voice tag names the speaker. A cue identifier does only when it is not a number.
-                voice = _VOICE.match(cue["text"]) if manifest["format"] == "vtt" else None
-                speaker = voice.group(1) if voice else cue["cue_id"]
-                speaker = None if speaker is None or speaker.isdigit() else _label(speaker)
-                role, basis = speaker_role(speaker, sellers, contacts)
-                card.spoken(note, "call_notes", cue["text"], at=note["called_at"], speaker=speaker or None,
-                            role=role, basis=basis)
-            cited = manifest["cited_range"]
+                named = None if cue["cue_id"] is None or cue["cue_id"].isdigit() else cue["cue_id"]
+                parts += voices(cue["text"], named) if manifest["format"] == "vtt" else [(named, cue["text"])]
+            first_unit[note["record_ref"]] = card.spoken(
+                note, "call_notes", parts, at=note["called_at"], role_of=role_of,
+                open_start=cited["first"] > 1, open_end=cited["last"] < manifest["total_units"])
+            whole = cited["first"] == 1 and cited["last"] == manifest["total_units"]
             card.not_read.append(
                 f"Calls: one transcript excerpt was read, {manifest['unit_kind']} {cited['first']} to {cited['last']} "
-                f"of {manifest['total_units']}. The rest of that call and every other call were not read.")
+                f"of {manifest['total_units']}. "
+                + ("Every other call was not read." if whole else
+                   "The rest of that call and every other call were not read."))
         else:
-            role, basis = speaker_role(note.get("speaker"), sellers, contacts)
-            card.spoken(note, "call_notes", note["body"], at=note["called_at"],
-                        speaker=_label(note.get("speaker")) or None, role=role, basis=basis)
+            first_unit[note["record_ref"]] = card.spoken(
+                note, "call_notes", [(note.get("speaker"), note["body"])], at=note["called_at"], role_of=role_of)
     if not imported:
         card.not_read.append(f"Calls: {len(notes)} call {'record was' if len(notes) == 1 else 'records were'} read. "
                              "Recordings and anything outside those records were not read.")
@@ -528,9 +599,8 @@ def _calls(card, as_of, contacts):
     if timed:
         moment, reference = max(timed)
         age = (as_of - moment.date()).days
-        cited = [unit["n"] for unit in card.units[before:] if unit["record_ref"] == reference][:1]
-        if age > _STALE_DAYS and cited:
-            card.signal(f"The latest dated call that was read is {_days(age)} old.", *cited)
+        if age > _STALE_DAYS:
+            card.signal(f"The latest dated call that was read is {_days(age)} old.", first_unit[reference])
 
 
 def _slack(card):
@@ -556,11 +626,9 @@ def _slack(card):
             if type(message["files"]) is not int or message["files"] < 0:
                 raise BriefRejected("A Slack file count must be a nonnegative integer.")
             files += message["files"]
-        role, basis = speaker_role(speaker, sellers, (), slack=True)
-        first = len(card.units) + 1
-        card.spoken(message, "messages", message["body"], at=message["sent_at"], speaker=_label(speaker) or None,
-                    role=role, basis=basis)
-        if not live and message["files"] and len(card.units) >= first:
+        first = card.spoken(message, "messages", [(speaker, message["body"])], at=message["sent_at"],
+                            role_of=lambda label: speaker_role(label, sellers, (), slack=True))
+        if not live and message["files"]:
             attached_to.append(f"[{first}]")
     count = f"{len(messages)} {'message was' if len(messages) == 1 else 'messages were'} read"
     if live:
@@ -581,7 +649,7 @@ def _slack(card):
 def _said(card):
     """Whole sentences, newest record first. Sentences keep their order inside one moment."""
     spoken = [unit for unit in card.units if unit["kind"] == "sentence"]
-    fits = [unit for unit in spoken if len(unit["text"]) <= MAX_SENTENCE]
+    fits = [unit for unit in spoken if len(unit["text"]) <= MAX_SENTENCE and not unit["partial"]]
     def recency(unit):
         moment = _instant(unit["at"])
         return (moment is not None, moment.timestamp() if moment else 0.0)
@@ -596,7 +664,12 @@ def _said(card):
                 else "time " + json.dumps(unit["at"], ensure_ascii=False))
         lines.append(f"  [{unit['n']}] {unit['role']} ({unit['basis']}); {where} {when}; {who}")
         lines.append("      " + json.dumps(unit["text"], ensure_ascii=False))
-    hidden, long = len(ordered) - min(len(ordered), SHOWN_SENTENCES), len(spoken) - len(fits)
+    hidden = len(ordered) - min(len(ordered), SHOWN_SENTENCES)
+    long = sum(len(unit["text"]) > MAX_SENTENCE and not unit["partial"] for unit in spoken)
+    if card.partial:
+        card.not_read.append(f"Sentences: {card.partial} at the edge of the excerpt "
+                             f"{'may be incomplete and is' if card.partial == 1 else 'may be incomplete and are'} "
+                             "not shown.")
     if hidden:
         card.not_read.append(f"Sentences: {hidden} older "
                              f"{'sentence was read and is' if hidden == 1 else 'sentences were read and are'} "
@@ -607,14 +680,16 @@ def _said(card):
                              "quotation is never cut.")
     unknown = sum(unit["role"] == "unknown" for unit in spoken)
     if unknown:
-        card.not_read.append(f"Speakers: {unknown} of {len(spoken)} sentences have no established speaker role.")
+        card.not_read.append(f"Speakers: {unknown} of {len(spoken)} "
+                             f"{'sentence has' if len(spoken) == 1 else 'sentences have'} no established speaker "
+                             "role.")
     return lines
 
 
 def _build(evidence):
-    groups, receipts = _validated(evidence)
+    groups, _ = _validated(evidence)
     as_of = _day(evidence["as_of"])
-    card = _Card(evidence, groups, receipts)
+    card = _Card(evidence, groups)
     contacts = _crm(card, as_of)
     _calls(card, as_of, contacts)
     _slack(card)
@@ -622,13 +697,14 @@ def _build(evidence):
     if card.missing:
         card.not_read.insert(0, "CRM: 1 field is empty on the record and prints as Missing." if card.missing == 1
                              else f"CRM: {card.missing} fields are empty on the record and print as Missing.")
-    words = {"mentions": "mention", "links": "link", "controls": "control character"}
+    words = {"mentions": "mention", "links": "link", "controls": "control character",
+             "brackets": "bracketed number"}
     replaced = [f"{count} {words[name]}{'' if count == 1 else 's'}"
                 for name, count in card.neutralized.items() if count]
     if replaced:
         card.not_read.append("Neutralized in source text: " + ", ".join(replaced) + ".")
     account = groups["accounts"][0]
-    name = " ".join(safe_text(account["name"])[0].split())
+    name = json.dumps(" ".join(safe_text(account["name"])[0].split()), ensure_ascii=False)
     lines = [f"DEAL CARD: {name} ({evidence['account_id']}) as of {evidence['as_of']}", ""]
     if card.signals:
         lines += ["ATTENTION, from record fields and dates", *card.signals, ""]

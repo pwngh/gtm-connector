@@ -1143,8 +1143,10 @@ def _run(args, argv):
                 fixtures = "CRM and Slack use" if args.with_slack else "CRM uses"
                 print(f"Sources: mixed. Calls use user-supplied transcript exports; {fixtures} demo fixtures.",
                       file=sys.stderr)
-            return create_brief(runtime, args.account_id, include_calls=not args.without_calls,
-                                as_of=as_of, include_slack=args.with_slack)
+            brief = create_brief(runtime, args.account_id, include_calls=not args.without_calls,
+                                 as_of=as_of, include_slack=args.with_slack)
+            # The raw records stay in the private saved file. Output holds neutralized text only.
+            return {key: value for key, value in brief.items() if key != "evidence"}
     if args.command == "trace":
         from .briefing import trace_saved
         return trace_saved(args.state_dir, args.brief_id, args.number)

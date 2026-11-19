@@ -203,7 +203,7 @@ import sys
 sys.path.insert(0, sys.argv.pop(1))
 class Guard:
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'sqlite3','_sqlite3','mcp','mcp_types','httpx','httpx2','httpcore','httpcore2','uvicorn'} or fullname in {'gtm_connector.runtime','gtm_connector.citations','gtm_connector.gateway'}:
+        if fullname.split('.')[0] in {'sqlite3','_sqlite3','mcp','mcp_types','httpx','httpx2','httpcore','httpcore2','uvicorn'} or fullname in {'gtm_connector.runtime','gtm_connector.units','gtm_connector.gateway'}:
             raise AssertionError('Source runtime must not load')
 sys.meta_path.insert(0,Guard())
 from gtm_connector.cli import main

@@ -281,7 +281,10 @@ def _prepare_source_state(directory, reader, binding, *, calls_backend="fixture"
 
 
 def _sellers(directory, *, fixture):
-    """The identities the operator lists as sellers in sellers.json. Demo data lists its own invented people."""
+    """The identities the operator lists as sellers in sellers.json.
+
+    Demo data lists its own invented people, and only when every source is demo data.
+    """
     from .seed import SELLERS
     try:
         document = strict_json.loads((directory / "sellers.json").read_bytes())
@@ -712,7 +715,8 @@ class Runtime:
             except BlockingIOError as exc:
                 raise StateInUseError("this state directory already has a running connector; "
                                       "stop it with Ctrl-C or choose another --state-dir") from exc
-            self.sellers = _sellers(self.directory, fixture=self.crm_reader is None)
+            self.sellers = _sellers(self.directory, fixture=(
+                self.crm_reader is None and self.calls_backend == "fixture" and self.slack_backend == "fixture"))
             slack_marker, self.slack_binding = _prepare_slack_selection(
                 self.directory, self.slack_backend, self.slack_connection_dir, self.slack_expected_binding)
             self.crm_connection_identity = _prepare_source_state(self.directory, self.crm_reader, self.demo_binding,
