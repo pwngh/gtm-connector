@@ -791,7 +791,7 @@ def _sf_refresh_notice(as_json):
         if status == "running":
             message = "Salesforce login refresh: sf is running."
         elif status == "ready":
-            message = f"Salesforce login refresh: finished in {round(seconds)} s."
+            message = f"Salesforce login refresh: sf answered in {round(seconds)} s."
         else:
             message = f"Salesforce login refresh: {status} after {round(seconds)} s."
         _server_notice(message, as_json)

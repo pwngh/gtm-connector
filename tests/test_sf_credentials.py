@@ -119,7 +119,7 @@ print(json.dumps({"status": 0, "result": value}))
             options = arguments.kwargs
             self.assertIs(options["stdin"], subprocess.DEVNULL)
             self.assertIs(options["stdout"], subprocess.PIPE)
-            self.assertIs(options["stderr"], subprocess.PIPE)
+            self.assertIs(options["stderr"], subprocess.DEVNULL)
             self.assertNotIn("shell", options)
         self.assertEqual(sorted(path.name for path in self.directory.iterdir()), ["count", "sf"])
 
@@ -216,6 +216,54 @@ time.sleep(30)
         with patch("gtm_connector.sf_credentials._COMMAND_SECONDS", 0.3):
             self.assert_error("salesforce_cli_timeout", self.adapter)
         self.assertLess(time.monotonic() - started, 10)
+        # The descendant is stopped even when sf itself has already exited.
+        (self.directory / "sf").write_text(f"#!{sys.executable}\n" + """
+import pathlib, subprocess, sys
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+(pathlib.Path(__file__).parent / "child").write_text(str(child.pid))
+""")
+        with patch("gtm_connector.sf_credentials._COMMAND_SECONDS", 1.5):
+            self.assert_error("salesforce_cli_timeout", self.adapter)
+        child = int((self.directory / "child").read_text())
+        for _ in range(50):
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            self.fail("The descendant of an exited sf was left running.")
+
+    def test_output_written_before_a_slow_exit_is_kept_and_an_exiting_connector_stops_sf(self):
+        (self.directory / "sf").write_text(f"#!{sys.executable}\n" + f"""
+import json, sys, time
+key = "accessToken" if "auth" in sys.argv else "instanceUrl"
+value = {TOKEN!r} if "auth" in sys.argv else {ORIGIN!r}
+print(json.dumps({{"status": 0, "result": {{key: value}}}}), flush=True)
+time.sleep(1.2)
+""")
+        self.assertEqual(self.adapter().instance_url, ORIGIN)
+        # A connector that exits while sf runs takes sf with it.
+        (self.directory / "sf").write_text(f"#!{sys.executable}\n" + """
+import os, pathlib, time
+(pathlib.Path(__file__).parent / "pid").write_text(str(os.getpid()))
+time.sleep(30)
+""")
+        program = ("import threading, time, pathlib, sys\n"
+                   "from gtm_connector.sf_credentials import SFCredentials\n"
+                   "threading.Thread(target=SFCredentials('invented-alias').read, daemon=True).start()\n"
+                   "pid = pathlib.Path(sys.argv[1])\n"
+                   "while not pid.exists() or not pid.read_text(): time.sleep(0.05)\n")
+        subprocess.run([sys.executable, "-c", program, str(self.directory / "pid")], check=True, timeout=20,
+                       env={**os.environ, "PATH": f"{self.directory}{os.pathsep}{os.environ['PATH']}"})
+        child = int((self.directory / "pid").read_text())
+        for _ in range(50):
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.1)
+        self.fail("sf outlived the connector.")
 
     def test_the_login_read_has_one_limit_and_a_failing_notice_changes_nothing(self):
         from gtm_connector.sf_credentials import reporting
@@ -274,7 +322,7 @@ time.sleep(30)
                     reader.on_refresh("salesforce_cli_timeout", 180.2)
                 lines = stderr.getvalue().splitlines()
                 expected = ["Salesforce login refresh: sf is running.",
-                            "Salesforce login refresh: finished in 31 s.",
+                            "Salesforce login refresh: sf answered in 31 s.",
                             "Salesforce login refresh: salesforce_cli_timeout after 180 s."]
                 if as_json:
                     # JSON stderr gets no waiting lines; serve notices keep their JSON form.

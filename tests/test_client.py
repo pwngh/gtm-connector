@@ -179,6 +179,20 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(len(self.requests), 2)
         self.assertEqual(json.loads(self.requests[-1].content)["id"], payload["id"] + 1)
 
+    def test_only_a_salesforce_crm_read_waits_long_enough_for_a_login_refresh(self):
+        def waits(client, method, **params):
+            client.rpc("t" * 43, method, params or None)
+            return self.requests[-1].extensions["timeout"]["read"]
+
+        salesforce = self.enterContext(LocalClient({**self.config, "crm_backend": "salesforce"},
+                                                   transport=httpx2.MockTransport(self.respond)))
+        for tool in ("get_account", "list_opportunities", "search_accounts", "prepare_renewal_brief"):
+            self.assertEqual(waits(salesforce, "tools/call", name=tool, arguments={}), 205)
+        for tool in ("read_renewal_brief", "read_call_notes", "read_slack_messages", "log_activity"):
+            self.assertEqual(waits(salesforce, "tools/call", name=tool, arguments={}), 25)
+        self.assertEqual(waits(salesforce, "tools/list"), 25)
+        self.assertEqual(waits(self.client, "tools/call", name="get_account", arguments={}), 10)
+
     def test_tls_uses_explicit_trust_and_never_follows_redirects_or_environment_proxies(self):
         with patch("gtm_connector.client.httpx2.Client") as factory:
             with LocalClient(self.config):

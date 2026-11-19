@@ -1,5 +1,6 @@
 """Read an existing Salesforce CLI login without printing or storing secrets."""
 
+import atexit
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -20,6 +21,7 @@ _MAX_OUTPUT_BYTES = 1024 * 1024
 _PROGRESS_SECONDS = 0.5
 _CODES = frozenset({"salesforce_auth_required", "salesforce_cli_timeout"})
 _PROGRESS: ContextVar[Callable[[float], None] | None] = ContextVar("sf_progress", default=None)
+_RUNNING: set[subprocess.Popen] = set()
 
 
 class SFCredentialsError(RuntimeError):
@@ -46,9 +48,15 @@ def _stop(process):
         os.killpg(process.pid, signal.SIGKILL)
     except OSError:
         process.kill()
-    for stream in (process.stdout, process.stderr):
-        stream.close()
+    process.stdout.close()
     process.wait()
+
+
+@atexit.register
+def _stop_running():
+    # The connector can exit while a read still waits on sf, which runs in its own session.
+    for process in list(_RUNNING):
+        _stop(process)
 
 
 def _wait(process, started, limit, progress):
@@ -99,13 +107,17 @@ class SFCredentials:
             # Its own process group, so a timeout can end sf and anything it started.
             process = subprocess.Popen(
                 ["sf", "org", *words, "--target-org", self._alias, "--json"], stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment, start_new_session=True)
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=environment, start_new_session=True)
         except (OSError, subprocess.SubprocessError):
             raise SFCredentialsError() from None
+        _RUNNING.add(process)
+        stdout = None
         try:
             stdout = _wait(process, started, limit, progress)
         finally:
-            if process.poll() is None:
+            _RUNNING.discard(process)
+            if stdout is None:
+                # sf may have exited and left a descendant holding its pipe, so the group goes either way.
                 _stop(process)
         try:
             if process.returncode != 0 or len(stdout) > _MAX_OUTPUT_BYTES:

@@ -13,7 +13,9 @@ from .auth import SCOPES
 from .sf_credentials import CREDENTIAL_SECONDS
 from .tool_definitions import TOOL_DEFINITIONS
 
-_CRM_TOOLS = frozenset(name for name, tool in TOOL_DEFINITIONS.items() if tool.scope == "crm:read")
+# The tools that read the CRM. read_renewal_brief only returns a saved brief.
+_CRM_TOOLS = frozenset(name for name, tool in TOOL_DEFINITIONS.items()
+                       if tool.scope == "crm:read") - {"read_renewal_brief"}
 
 
 PROTOCOL_VERSION = "2026-07-28"
