@@ -52,7 +52,7 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 | `salesforce check` | Sanitized object with `schema_version: 1`, `status`, `as_of`, `steps`, and request counts. See [Salesforce](salesforce.md). |
 | `slack connect`, `slack status`, `slack disconnect` | See [Slack authentication](slack.md). |
 | `slack map`, `slack check` | See [live Slack](slack.md). |
-| `calls import`, `calls list`, `calls inspect` | `import`: import metadata with the `created`, `selected`, and `reassigned` outcomes and no transcript text. `list`: object with an `imports` array and a nullable `next_after` cursor. `inspect`: import metadata and the excerpt units, and `--full` adds all units and the exact `original_text`. See [calls](calls.md). |
+| `calls import`, `calls list`, `calls inspect` | `import`: import metadata, including `speaker_names` (whether the import declared them), with the `created`, `selected`, and `reassigned` outcomes and no transcript text. `list`: object with an `imports` array and a nullable `next_after` cursor. `inspect`: import metadata and the excerpt units, and `--full` adds all units and the exact `original_text`. See [calls](calls.md). |
 
 `--state-dir` defaults: `var/renewal-demo` for `demo`, `var/verification` for `verify`, `var/v2` for
 `serve`, `brief`, `trace`, `audit`, `doctor`, `connect`, and `mcp`.

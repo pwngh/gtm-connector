@@ -10,6 +10,7 @@ local state.
 ```sh
 gtm-connector calls import meeting.vtt --account acc-007
 gtm-connector calls import meeting.vtt --account acc-007 --cues 8:14 --called-at 2027-01-14T15:00:00Z
+gtm-connector calls import meeting.txt --account acc-007 --speaker-names
 gtm-connector calls list
 gtm-connector calls inspect IMPORT_ID --full --json
 gtm-connector brief acc-007 --calls-backend imported --state-dir var/imported-calls
@@ -20,6 +21,7 @@ gtm-connector brief acc-007 --calls-backend imported --state-dir var/imported-ca
 | `--account ID`, `--account-number NUMBER` | `import` requires exactly one. `--account-number` needs Salesforce. `list` accepts `--account` as a filter. |
 | `--lines FIRST:LAST`, `--cues FIRST:LAST` | The excerpt, in TXT lines or in VTT or SRT cues. Ranges start at one and include the end. |
 | `--called-at TIMESTAMP` | The meeting time with a UTC offset. Without it the call time stays unknown. |
+| `--speaker-names` | States that every line or cue of the file is one line that opens with its speaker's name and a colon ("Dana Crest: We will sign."). Each name is then the speaker's label. A file with one line or cue that is not laid out that way refuses. |
 | `--reassign` | Moves known content, or a known AccountNumber, to another account. |
 | `--state-dir PATH` | The import state folder. `calls` commands default to `var/imported-calls`. |
 | `--after IMPORT_ID` | For `list`: continues after the returned `next_after`. A page holds 100 rows. |
@@ -48,12 +50,28 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
 - On a card, each whole sentence is one numbered unit. A WebVTT voice tag names the speaker of the
   text after it and is not part of the sentence, and a cue with two tags has two speakers. A cue
   with no tag takes its identifier as the label when that is not a number. TXT lines and SRT cues
-  have no label, so their role is `unknown`. WebVTT styling tags (`<b>`, `<i>`, `<u>`, `<c>`,
+  have no label, so their role is `unknown`, unless the import states speaker names (below).
+  WebVTT styling tags (`<b>`, `<i>`, `<u>`, `<c>`,
   `<lang>`, `<ruby>`), the reading inside `<rt>`, and cue timestamps are not part of a sentence.
+- The connector never guesses that a file names its speakers at the start of each line. With
+  `--speaker-names` you state it, the whole file is checked, and the statement is saved with the
+  import, so a name is read the same whichever lines are cited. The name is the label and is not
+  part of the sentence, and a cue identifier is not a label in such an import. The file refuses
+  unless all of this holds for every line or cue with text:
+  - It is one line. On a second line of a cue nothing says whose words they are.
+  - It opens with a name, a colon, a space, and words.
+  - The name starts with a letter that is not lower case, is at most 100 characters, and holds no
+    colon, question or exclamation mark, angle bracket, or sentence end. "Dr. J. Vance" is a name.
+    "We have signed. Dana Crest" and "final word on the matter" are not.
+- A stated layout says how the file is read. It does not show who spoke: anyone who can start a
+  line of the file can write a name there, and a wrapped line that happens to open like a name
+  reads as one. State it only of an export whose lines the recorder wrote. `calls list` and
+  `calls inspect` show which imports state it.
 - Neighbouring cues under one speaker label are read together, so a sentence that runs across them
   stays whole: when they are at most two seconds apart, or at most ten when the earlier cue stops
   mid-sentence and the later one goes on in lower case. Cues or lines with no label are never
-  joined, because two people may be speaking.
+  joined, because two people may be speaking. Lines of a TXT file have no times and are never
+  joined either.
 - A sentence is shown only whole. Text that stops without closing punctuation, or on a short form
   that expects more ("28 U.S.C."), is counted in `NOT READ` and not shown. So is what the same
   speaker says next, what anyone says next in lower case, and each speaker's first words when the
@@ -83,6 +101,7 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
 | --- | ---: | --- | --- |
 | `calls_import_invalid` | 2 | The export or range is invalid. | Use a valid UTF-8 TXT, VTT, or SRT file and range. |
 | `calls_import_too_large`, `calls_excerpt_too_large` | 2 | The export or excerpt exceeds a limit above. | Use a smaller export or fewer units. |
+| `calls_speaker_names_missing` | 2 | `--speaker-names` was given and a line or cue does not open with a name and a colon. | Import the file without `--speaker-names`. |
 | `calls_import_not_found` | 2 | The import is not in this state folder. | Run `calls list`. |
 | `calls_account_not_found` | 2 | No CRM account matched. | Check the ID or exact AccountNumber. |
 | `calls_not_imported` | 3 | The account has no selected transcript. | Import an export first. |

@@ -269,6 +269,26 @@ def voices(text: str, label=None) -> list[tuple]:
     return [(name, part) for name, raw in spans if (part := _CUE_MARKUP.sub("", raw)).strip()]
 
 
+# "Name: " at the start of a line, in a transcript whose import declared that layout: a letter, then at most
+# 100 characters with no colon, question or exclamation mark, angle bracket, or full stop of a script that
+# writes it as one character.
+_NAMED = re.compile(r"[ \t]*([^\W\d_][^:!?<>\n\u3002\uff01\uff1f\u0964\u061f\u06d4]{0,99}?)[ \t]*:[ \t]+(?=\S)")
+
+
+def named(text: str) -> tuple[str, str] | None:
+    """One line or cue of a transcript that declares speaker names, as (name, words). None when it is not one.
+
+    A cue is one line: on a second line nothing says whose words they are. A name does not start in lower
+    case, which is how a wrapped sentence goes on ("deal: we sign Friday"), and holds no sentence end
+    ("We have signed. Dana Crest: ..."), so words never leave a quotation to become a label.
+    """
+    lines = [line for line in text.split("\n") if line.strip()]
+    opened = _NAMED.match(lines[0]) if len(lines) == 1 else None
+    if opened is None or opened.group(1)[0].islower() or len(sentences(opened.group(1))) != 1:
+        return None
+    return opened.group(1), lines[0][opened.end():]
+
+
 def _label(value):
     return " ".join(value.split()) if isinstance(value, str) else ""
 
@@ -470,7 +490,8 @@ class _Card:
 
         Neighbouring parts under one speaker label are one run, so a sentence wrapped across cues stays whole:
         when they are at most two seconds apart, or at most ten when the earlier part stops mid-sentence and
-        the later one goes on in lower case. Parts with no label never join: no label is not one speaker.
+        the later one goes on in lower case. Parts with no label or no times never join: no label is not one
+        speaker, and lines with no times may be minutes apart.
         In a transcript, a run that stops mid-sentence is not a quotation, and neither is the opening of that
         speaker's next run. A record with no sentence still gets one unit, so every record resolves.
         """
@@ -481,8 +502,8 @@ class _Card:
             label = _label(label) or None
             last = runs[-1] if runs else None
             gap = None if last is None or start is None or last[2] is None else start - last[2]
-            if last is not None and label is not None and last[0] == label and (
-                    gap is None or abs(gap) <= _RUN_GAP_MS
+            if last is not None and label is not None and last[0] == label and gap is not None and (
+                    abs(gap) <= _RUN_GAP_MS
                     or 0 < gap <= _BRIDGE_GAP_MS and _unfinished(last[1]) and _goes_on(raw)):
                 last[1:] = [last[1] + "\n" + raw, end]
             else:
@@ -710,9 +731,13 @@ def _calls(card, as_of, contacts):
             cited = manifest["cited_range"]
             parts: list[tuple] = []
             for cue in manifest["units"]:
-                # A WebVTT voice tag names the speaker. A cue identifier does only when it is not a number.
-                named = None if cue["cue_id"] is None or cue["cue_id"].isdigit() else cue["cue_id"]
-                spans = voices(cue["text"], named) if manifest["format"] == "vtt" else [(named, cue["text"])]
+                # A WebVTT voice tag names the speaker. A cue identifier does only when it is not a number. In
+                # an import that declares it, the name that opens the cue does instead, and is not part of what
+                # was said.
+                cue_name = None if cue["cue_id"] is None or cue["cue_id"].isdigit() else cue["cue_id"]
+                label, text = (named(cue["text"]) or (None, cue["text"]) if "speaker_names" in manifest
+                               else (cue_name, cue["text"]))
+                spans = voices(text, label) if manifest["format"] == "vtt" else [(label, text)]
                 parts += [(label, text, cue["start_ms"], cue["end_ms"]) for label, text in spans]
             first_unit[note["record_ref"]] = card.spoken(
                 note, "call_notes", parts, at=note["called_at"], role_of=role_of, transcript=True,

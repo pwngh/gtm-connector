@@ -15,7 +15,7 @@ import sqlite3
 import unicodedata
 
 from gtm_connector import strict_json
-from gtm_connector.units import safe_text, trace
+from gtm_connector.units import safe_text, sentences, trace
 
 
 AS_OF = date(2027, 1, 15)
@@ -32,6 +32,23 @@ _HEAD = re.compile(r"  \[(\d+)\] (seller|customer|unknown) \((.+?)\); (call|Slac
 _CITED = re.compile(r" ((?:\[\d+\])+)(?: and \d+ more)?\Z")
 # A WebVTT voice tag is a speaker label, and its closing tag is markup. Neither is part of what was said.
 _VOICE_TAG = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+[^<>\n]+>|</v>")
+def named(text):
+    """One line or cue of a transcript that declares speaker names as (name, words), read here apart from the connector.
+
+    It is one line. What stands before its first colon is the name: a letter first and not a lower-case one, at
+    most 100 characters, no question or exclamation mark, angle bracket, or full stop of another script, and one
+    sentence. A space and then words follow the colon. None otherwise.
+    """
+    lines = [line for line in text.split("\n") if line.strip()]
+    name, colon, words = lines[0].partition(":") if len(lines) == 1 else ("", "", "")
+    name = name.strip(" \t")
+    if (not colon or not name or not name[0].isalpha() or name[0].islower() or len(name) > 100
+            or any(mark in name for mark in "!?<>\u3002\uff01\uff1f\u0964\u061f\u06d4") or len(sentences(name)) != 1
+            or words[:1] not in (" ", "\t") or not words.strip()):
+        return None
+    return name, words.lstrip(" \t")
+
+
 # Styling spans, a ruby reading, and cue timestamps of a WebVTT cue: markup, like a voice tag, and not speech.
 CUE_MARKUP = re.compile(r"<rt(?:\.[^\s<>.]*)*>[^<>]*</rt>|</?(?:[biuc]|ruby|rt)(?:\.[^\s<>.]*)*>"
                         r"|</?lang(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>")
@@ -246,8 +263,12 @@ def hold(case, brief):
         # still one unit, so it resolves.
         if "manifest" in record:
             vtt = record["manifest"]["format"] == "vtt"
-            pieces = [CUE_MARKUP.sub("", _VOICE_TAG.sub("\0", cue["text"])).replace("\0", "") if vtt else cue["text"]
-                      for cue in record["manifest"]["units"]]
+            # In an import that declares speaker names, the name that opens a line is not part of what was said.
+            texts = [cue["text"] for cue in record["manifest"]["units"]]
+            if "speaker_names" in record["manifest"]:
+                texts = [named(text)[1] if text.strip() else text for text in texts]
+            pieces = [CUE_MARKUP.sub("", _VOICE_TAG.sub("\0", text)).replace("\0", "") if vtt else text
+                      for text in texts]
         else:
             pieces = [record["body"]]
         whole = " ".join(filter(None, (" ".join(safe_text(piece)[0].split()) for piece in pieces)))
