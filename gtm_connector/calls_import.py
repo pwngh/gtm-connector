@@ -629,7 +629,7 @@ def store_import(path: Path, parsed: dict, excerpt: dict, *, association: dict,
 
 def list_imports(path: Path, *, crm_binding: dict, account_id: str | None = None,
                  limit: int = 100, after: str | None = None) -> dict[str, Any]:
-    """List bounded historical metadata without opening transcript content BLOBs."""
+    """List import metadata without opening transcript content."""
     if (not _valid_binding(crm_binding) or not _int(limit, 1, 100)
             or (account_id is not None and not _valid_account(account_id, crm_binding))
             or (after is not None and (not isinstance(after, str) or not _NOTE_ID.fullmatch(after)))):

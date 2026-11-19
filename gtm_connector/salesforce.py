@@ -512,7 +512,7 @@ class SalesforceReadOnlyAdapter:
             return opportunities
 
     def check_edition(self, *, _budget=None):
-        """Validate the selected environment, retaining the earlier method name."""
+        """Validate the selected environment without the capability checks."""
         with self._operation(require_capabilities=False, _budget=_budget):
             pass
 

@@ -1267,8 +1267,7 @@ def _failure(exc, args):
     if getattr(exc, "code", None) == "source_identity_mismatch":
         if ((command == "calls" and args.action in ("list", "inspect"))
                 or getattr(args, "calls_backend", None) == "imported"):
-            # Runtime's fixed first sentence explains the failure; its generic
-            # fresh-state advice applies to import, not existing-source use.
+            # Keep the first sentence. The fresh-state advice after it applies only to import.
             message = message.split(". ", 1)[0].rstrip(".") + "."
             recovery = ("Select the original existing import state folder with --state-dir. " if command == "calls"
                         else "Restore the original CRM connection and select its existing import state folder "

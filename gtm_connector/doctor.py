@@ -213,7 +213,7 @@ def doctor(directory):
                            and resource.get("resource") == owner["resource"]
                            and resource.get("authorization_servers") == [owner["issuer"]])
     except Exception:
-        # Diagnostic output is deliberately bounded: no HTTP exceptions or config values.
+        # Report no HTTP exception text or configuration values.
         services_ok = False
     check("services", services_ok, "Both local HTTPS services must return matching metadata.",
           start_fix)

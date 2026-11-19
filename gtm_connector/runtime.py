@@ -406,8 +406,7 @@ def _prepare_slack_selection(directory, backend, connection_dir, expected_bindin
         owner = _read_marker(directory / "owner.json", require_schema=False)
     except (OSError, ValueError, UnicodeError, RecursionError):
         if backend == "fixture" and marker is None and not os.path.lexists(directory / "slack-mappings.json"):
-            # Existing CRM/calls preparation rejects this owner before any source
-            # work. Preserve that established diagnostic when no live Slack is selected.
+            # CRM and calls preparation reports this unreadable owner file with its own error.
             return None, None
         raise SlackMappingError("slack_mapping_invalid") from None
     prior = owner.get("slack_backend", "fixture") if owner is not None else None
@@ -544,8 +543,7 @@ class _LocalHTTPS:
             server.should_exit = True
         for thread in self.threads:
             if thread.ident is not None:
-                # A bounded source read can outlast the old ten-second join.
-                # Keep its state lock and TLS files until its server has finished.
+                # A source read may still be running. Keep the state lock and TLS files until it ends.
                 thread.join()
         for sock in self.sockets:
             sock.close()
