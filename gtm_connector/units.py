@@ -279,12 +279,13 @@ def named(text: str) -> tuple[str, str] | None:
     """One line or cue of a transcript that declares speaker names, as (name, words). None when it is not one.
 
     A cue is one line: on a second line nothing says whose words they are. A name does not start in lower
-    case, which is how a wrapped sentence goes on ("deal: we sign Friday"), and holds no sentence end
-    ("We have signed. Dana Crest: ..."), so words never leave a quotation to become a label.
+    case, which is how a wrapped sentence goes on ("deal: we sign Friday"). This is how a stored import is
+    read, so it never changes with the sentence rules. That a name holds no sentence end is checked once,
+    when a file is imported.
     """
     lines = [line for line in text.split("\n") if line.strip()]
     opened = _NAMED.match(lines[0]) if len(lines) == 1 else None
-    if opened is None or opened.group(1)[0].islower() or len(sentences(opened.group(1))) != 1:
+    if opened is None or opened.group(1)[0].islower():
         return None
     return opened.group(1), lines[0][opened.end():]
 

@@ -241,8 +241,20 @@ class ImportedBriefingTests(unittest.TestCase):
             ("Morgan Reed", "seller", "Will you sign?")])
         # A name may be 100 characters, and may hold a title or an initial.
         long = "A" + "b" * 99
-        self.assertEqual([row[0] for row in self.said(f"{long}: Fine.\nMr. A. B. Smith Jr.: Agreed.\n", "txt")],
-                         [long, "Mr. A. B. Smith Jr."])
+        self.assertEqual([row[0] for row in self.said(f"{long}: Fine.\nRev. A. B. Smith Jr.: Agreed.\n", "txt")],
+                         [long, "Rev. A. B. Smith Jr."])
+        # The sentence rules change one day and would now divide that name. The import that was accepted is
+        # still read, with the same names. The same file imported after the change is refused.
+        changed = lambda text, **options: [part for part in text.replace(". ", ".\0").split("\0") if part]  # noqa: E731
+        with patch("gtm_connector.units.sentences", changed), patch("gtm_connector.calls_import.sentences", changed):
+            with Runtime(self.state, calls_backend="imported") as runtime:
+                artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
+            self.assertEqual({unit["speaker"] for unit in artifact["units"] if unit["kind"] == "sentence"},
+                             {long, "Rev. A. B. Smith Jr."})
+            with self.assertRaises(CallsImportError) as refused:
+                parse_transcript(f"{long}: Fine.\nRev. A. B. Smith Jr.: Agreed.\n".encode(), format="txt",
+                                 speaker_names=True)
+            self.assertEqual(refused.exception.code, "calls_speaker_names_missing")
         # The statement holds for the file, so a name is read the same whichever lines are cited.
         notes = "Dana Crest: We will sign on Friday.\n" + "Morgan Reed: Noted.\n" * 8
         for requested in ((1, 1), (1, 9), None):
@@ -271,8 +283,12 @@ class ImportedBriefingTests(unittest.TestCase):
                 # A name starts with a letter and holds no markup.
                 ("txt", "3 Buyers: Fine.\nDana Crest: Fine.\n"),
                 ("txt", "Dana <b>Crest</b>: Fine.\nDana Crest: Fine.\n"),
-                # A sentence before the colon is not a name. A title or an initial is.
+                # A sentence before the colon is not a name, with a closing quote or a figure at its end or not.
+                # A title or an initial is.
                 ("txt", "We have signed. Dana Crest: We are ready.\nDana Crest: Fine.\n"),
+                ("txt", "We have signed.\u201d Dana Crest: We are ready.\nDana Crest: Fine.\n"),
+                ("txt", "We signed 400. Dana Crest: We are ready.\nDana Crest: Fine.\n"),
+                ("txt", "No. Dana Crest: We are ready.\nDana Crest: Fine.\n"),
                 # A cue is one line. On a second line nothing says whose words they are: another speaker's, in
                 # a form no rule reads, or the first speaker's own.
                 ("srt", "1\n00:00:01,000 --> 00:00:02,000\nDana Crest: We will not\nDana Crest: We approved it.\n"),
