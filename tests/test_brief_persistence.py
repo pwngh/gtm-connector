@@ -39,10 +39,11 @@ class BriefPersistenceTests(unittest.TestCase):
         path.write_text(json.dumps(edited))
         self.assertEqual(trace_saved(self.state, brief["brief_id"], 2)["fields"]["title"], "")
         # A card saved under other sentence rules, or with a unit changed, is refused: its numbers may differ.
-        for changed in ({"text": "other"}, {"sanitizer_version": 1}):
+        for changed, message in (({"text": "other"}, "do not match its saved evidence"),
+                                 ({"sanitizer_version": 1}, "older rules for sentences")):
             units = [dict(unit, **changed) if unit["n"] == len(brief["units"]) else unit for unit in brief["units"]]
             path.write_text(json.dumps({**brief, "units": units}))
-            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "Make it again"):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, message):
                 trace_saved(self.state, brief["brief_id"], 1)
         path.write_bytes(before)
         for number in (0, len(brief["units"]) + 1, "1", 1.0, True):

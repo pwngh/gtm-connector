@@ -305,7 +305,7 @@ class CLITests(unittest.TestCase):
                                                        "at", "sanitizer_version")},
                          {"kind": "sentence", "source": "calls", "record_ref": "calls/call_notes/note-003b",
                           "speaker": "Marian Holt", "role": "customer", "basis": "label matches contact [2]",
-                          "at": "2027-01-12T15:00:00Z", "sanitizer_version": 1})
+                          "at": "2027-01-12T15:00:00Z", "sanitizer_version": 2})
         self.assertRegex(traced["raw_sha256"], r"\A[0-9a-f]{64}\Z")
         self.assertIn(json.dumps(traced["text"]), brief["text"])
         human = self.run_cli("trace", brief["brief_id"], "7", json_output=False)

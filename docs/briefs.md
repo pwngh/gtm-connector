@@ -33,8 +33,9 @@ saved card that differs. The owner of the files can still edit both.
 
 ## Sentences
 
-A sentence ends at closing punctuation or a blank line. A single line break inside a message or a
-cue is a wrap, so a sentence written over two lines stays whole. A period after a title, a legal or
+A sentence ends at closing punctuation or a blank line. A single line break inside a call note or
+a cue is a wrap, so a sentence written over two lines stays whole. In a Slack message each line is
+the author's own, so a line break ends a sentence there. A period after a title, a legal or
 state short form, a dotted initialism, or a list marker does not end a sentence, so "28 U.S.C. § 1332"
 and "Fed. R. Civ. P. 26(b)(3)" stay in one piece. Where the text does not settle it, two sentences
 stay joined: a fragment is never shown as a sentence.

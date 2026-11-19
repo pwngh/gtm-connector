@@ -129,7 +129,9 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
         counts["brackets"] += 1
         return f"({match.group(1)})"
 
-    text = _OPEN_MENTION.sub(token, _SLACK_TOKEN.sub(token, unicodedata.normalize("NFC", raw)))
+    # A Windows line ending is a line break, not a control character to show.
+    plain = unicodedata.normalize("NFC", raw).replace("\r\n", "\n")
+    text = _OPEN_MENTION.sub(token, _SLACK_TOKEN.sub(token, plain))
     text = _RAW_LINK.sub(raw_link, _MARKDOWN_LINK.sub(markdown, text))
     visible = []
     for character in text:
@@ -195,8 +197,11 @@ def _continues(line: str, start: int, end: int, after: int) -> bool:
     dotted = _DOTTED.search(line, window, end)
     if _MAY_END.search(line, window, end) or dotted and dotted.group().lstrip(" ([\"'\u201c\u2018\u00ab")[0].isupper():
         return _OPENER.match(line, after) is None
-    return bool(dotted or _ABBREVIATION.search(line, window, end) or _SECTION_SIGN.match(line, after)
-                or line[after:after + 1].isdigit() and _NUMBER_SIGN.search(line, window, end))
+    if dotted or _ABBREVIATION.search(line, window, end) or _SECTION_SIGN.match(line, after):
+        return True
+    # "Docket No. A-17" and "No. 14" go on. "No." as the whole sentence is an answer, unless a number follows.
+    number = _NUMBER_SIGN.search(line, window, end)
+    return number is not None and (number.end() - start > 5 or line[after:after + 1].isdigit())
 
 
 def _unfinished(text: str) -> bool:
@@ -222,14 +227,14 @@ def _goes_on(text: str) -> bool:
     return opening.islower() or opening in tuple(",;:")
 
 
-def sentences(safe: str) -> list[str]:
+def sentences(safe: str, *, lines: bool = False) -> list[str]:
     """Split neutralized text into whole sentences. A quotation is always one of these, never a part.
 
     A line break inside a paragraph is a wrap, not an end. Only a blank line or closing punctuation ends
-    a sentence.
+    a sentence. With `lines`, every line break is an end: in a chat message each line is the author's own.
     """
     found: list[str] = []
-    for paragraph in re.split(r"\n[ \t]*\n", safe):
+    for paragraph in re.split(r"\n" if lines else r"\n[ \t]*\n", safe):
         line = " ".join(paragraph.split())
         if not line:
             continue
@@ -489,7 +494,7 @@ class _Card:
             safe, counts = safe_text(raw)
             for key, count in counts.items():
                 self.neutralized[key] += count
-            found = sentences(safe)
+            found = sentences(safe, lines=table == "messages")
             # What follows a sentence that stopped may be its other half: the same speaker's next words, or
             # anyone's when they go on in lower case.
             follows = (open_start and index == 0) or label in waiting or cut and _goes_on(safe)

@@ -146,6 +146,8 @@ class NeutralizedText(unittest.TestCase):
             "See Wis. Stat. 100.18 and Mass. 456. Next.": ["See Wis. Stat. 100.18 and Mass. 456.", "Next."],
             "Thornfield Wren LLP. We require zero retention.": ["Thornfield Wren LLP.", "We require zero retention."],
             "So do I. It is late.": ["So do I.", "It is late."],
+            "See Docket No. A-17 for the order. Next.": ["See Docket No. A-17 for the order.", "Next."],
+            "Case No. CV-2027-0113 is open. No. 14 is closed.": ["Case No. CV-2027-0113 is open.", "No. 14 is closed."],
             "\u201cWe will sign.\u201d Next one.": ["\u201cWe will sign.\u201d", "Next one."],
             "They marked it (Approved? Ask Legal) on Monday. Next.": [
                 "They marked it (Approved? Ask Legal) on Monday.", "Next."],
@@ -305,6 +307,17 @@ class Evidence(unittest.TestCase):
         self.assertIn("  The latest dated call that was read is 104 days old. [5]", text)
         self.assertIn("  Speakers: 1 of 1 sentence has no established speaker role.",
                       build(evidence(notes=[(None, "Unlabelled.")]))[1])
+
+    def test_a_line_break_ends_a_sentence_in_a_chat_message_and_wraps_one_in_a_note(self):
+        units_, _ = build(evidence(slack_status="available", messages=[
+            ("Morgan Reed", "GC will not sign without ZDR\nProcurement asked for $300k")]))
+        self.assertEqual([unit["text"] for unit in units_ if unit["source"] == "slack"],
+                         ["GC will not sign without ZDR", "Procurement asked for $300k"])
+        # A note written with Windows line endings wraps the same way, and the ending is not shown as a control.
+        units_, text = build(evidence(notes=[("Dana Ito", "We will sign\r\nonly if the rider is approved.")]))
+        self.assertEqual([unit["text"] for unit in units_ if unit["kind"] == "sentence"],
+                         ["We will sign only if the rider is approved."])
+        self.assertNotIn("control character", text)
 
     def test_a_denied_source_is_stated_and_never_filled_in(self):
         _, text = build(evidence(notes_status="denied", slack_status="denied"))
