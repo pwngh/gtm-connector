@@ -28,6 +28,10 @@ _SOURCES = {
 _SLACK_SOURCE = {"messages": ("slack", "msg", "read_slack_messages")}
 _CONTRACT_SOURCE = {"contracts": ("crm", "ctr", "get_account")}
 _PROCUREMENT_NOTE = "Procurement has not approved this renewal. The budget remains unsigned."
+# A signal is one derived fact that needs attention before the call. It comes from structured
+# fields and dates only, never from reading source text, and a draft may not omit it.
+_SOON_DAYS = 30
+_STALE_DAYS = 60
 _SECURITY_MESSAGE = "Security review is delayed. Procurement approval is still pending."
 
 
@@ -43,6 +47,19 @@ def _day(value):
     if not isinstance(value, str) or date.fromisoformat(value).isoformat() != value:
         raise BriefRejected("Evidence dates must use YYYY-MM-DD.")
     return date.fromisoformat(value)
+
+
+def _days(count):
+    return f"{count} {'day' if count == 1 else 'days'}"
+
+
+def _note_age(note, as_of):
+    """Whole days since a call, or None when its time is unknown."""
+    called = note.get("called_at")
+    try:
+        return (as_of - date.fromisoformat(called[:10])).days
+    except (TypeError, ValueError):
+        return None
 
 
 def _money(cents):
@@ -118,7 +135,7 @@ def _amount(opportunity):
     return value + " (currency unknown)"
 
 
-def add_salesforce_facts(groups, as_of, brief_id, add):
+def add_salesforce_facts(groups, as_of, brief_id, add, signal):
     """Select an actual EndDate; Draft and InApproval remain planning candidates."""
     eligible = []
     for contract in groups["contracts"]:
@@ -155,9 +172,15 @@ def add_salesforce_facts(groups, as_of, brief_id, add):
     for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
         add(f"Contact {_text(contact['name'])}: role {_nullable_text(contact['title'])}; "
             f"email {_nullable_text(contact['email'])}.", contact["record_ref"])
+        if contact["title"] is None:
+            signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
     for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
         if type(opportunity["is_closed"]) is not bool or type(opportunity["is_won"]) is not bool:
             raise BriefRejected("Salesforce opportunity outcomes must be booleans.")
+        if days <= _SOON_DAYS and not opportunity["is_closed"]:
+            when = f"is in {_days(days)}" if days else "is today"
+            signal(f"contract end {when} and opportunity {opportunity['id']} is still open at stage "
+                   f"{_text(opportunity['stage'])}.", contract_ref, opportunity["record_ref"], f"run/{brief_id}")
         add(f"CRM opportunity {opportunity['id']}: stage {_text(opportunity['stage'])}; "
             f"amount {_amount(opportunity)}; close date {_day(opportunity['close_date'])}; "
             f"closed {str(opportunity['is_closed']).lower()}; won {str(opportunity['is_won']).lower()}.",
@@ -295,18 +318,21 @@ def _catalog(evidence):
     if set(receipts) != set(expected_rows):
         raise BriefRejected("Evidence is missing a briefing tool receipt.")
 
-    lines = []
+    lines, signals = [], []
 
     def add(sentence, *refs):
         line = "- " + sentence + " " + " ".join(f"[{ref}]" for ref in refs)
         lines.append(line)
         return line
 
+    def signal(sentence, *refs):
+        signals.append("- Signal: " + sentence + " " + " ".join(f"[{ref}]" for ref in refs))
+
     account = groups["accounts"][0]
     ref = account["record_ref"]
     required = set()
     if salesforce:
-        required, renewal_ref = add_salesforce_facts(groups, as_of, brief_id, add)
+        required, renewal_ref = add_salesforce_facts(groups, as_of, brief_id, add, signal)
     else:
         renewal_ref = ref
         add(f"Account: {_text(account['name'])}.", ref)
@@ -324,14 +350,23 @@ def _catalog(evidence):
         reason = _text(account["risk_reason"])
         if account["risk_reason"]:
             add(f"CRM risk reason: {reason}.", ref)
-        for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
-            role = "not provided" if contact["title"] == "" else _text(contact["title"])
-            add(f"Contact {_text(contact['name'])}: role {role}; "
-                f"email {_text(contact['email'])}.", contact["record_ref"])
+        when = (f"renewal is in {_days(days)}" if days > 0 else
+                f"renewal was {_days(-days)} ago" if days < 0 else "renewal is due today")
         for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
             add(f"CRM opportunity {opportunity['id']}: stage {_text(opportunity['stage'])}; "
                 f"amount {_money(opportunity['amount_cents'])}; "
                 f"close date {_day(opportunity['close_date'])}.", opportunity["record_ref"])
+            if days <= _SOON_DAYS and opportunity["stage"] not in ("closed_won", "closed_lost"):
+                signal(f"{when} and opportunity {opportunity['id']} is still open at stage "
+                       f"{_text(opportunity['stage'])}.", ref, opportunity["record_ref"], f"run/{brief_id}")
+        if account["risk_status"] == "at_risk":
+            signal("CRM marks this account at risk" + (f": {reason}." if account["risk_reason"] else "."), ref)
+        for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
+            role = "not provided" if contact["title"] == "" else _text(contact["title"])
+            add(f"Contact {_text(contact['name'])}: role {role}; "
+                f"email {_text(contact['email'])}.", contact["record_ref"])
+            if contact["title"] == "":
+                signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
     if not groups["opportunities"]:
         add(f"No opportunities were returned for {account_id}.",
             f"audit/{receipts['list_opportunities']['audit_id']}")
@@ -342,6 +377,12 @@ def _catalog(evidence):
     elif not groups["call_notes"]:
         required.add(add(f"No call notes were returned for {account_id}.", notes_receipt))
     else:
+        aged = [(age, note["id"], note["record_ref"]) for note in groups["call_notes"]
+                if (age := _note_age(note, as_of)) is not None]
+        if aged and min(aged)[0] > _STALE_DAYS:
+            age, note_id, note_ref = min(aged)
+            signal(f"the latest call note {note_id} is {_days(age)} old as of {as_of}.",
+                   note_ref, f"run/{brief_id}")
         for note in sorted(groups["call_notes"], key=lambda row: row["id"]):
             if imported:
                 manifest = note["manifest"]
@@ -406,7 +447,7 @@ def _catalog(evidence):
         else:
             required.add(add("Proposed follow-up: Ask the account owner to review the cited renewal context.",
                              renewal_ref))
-    return lines, required
+    return signals + lines, required | set(signals)
 
 
 def _validated_catalog(evidence):

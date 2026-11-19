@@ -8,6 +8,7 @@
     {
       "account_id": "acc-001",
       "claims": [
+        {"text": "Signal: renewal is in 17 days and opportunity opp-001 is still open at stage \"discovery\".", "references": ["crm/accounts/acc-001", "crm/opportunities/opp-001", "run/{brief_id}"]},
         {"text": "Account: \"Alder Vale Packaging\".", "references": ["crm/accounts/acc-001"]},
         {"text": "Industry: \"Manufacturing\".", "references": ["crm/accounts/acc-001"]},
         {"text": "Annual recurring revenue: USD 20,500.00.", "references": ["crm/accounts/acc-001"]},
@@ -22,6 +23,8 @@
     {
       "account_id": "acc-002",
       "claims": [
+        {"text": "Signal: renewal is in 24 days and opportunity opp-002 is still open at stage \"evaluation\".", "references": ["crm/accounts/acc-002", "crm/opportunities/opp-002", "run/{brief_id}"]},
+        {"text": "Signal: CRM marks this account at risk: \"Renewal budget is not approved.\".", "references": ["crm/accounts/acc-002"]},
         {"text": "Account: \"Copper Finch Distribution\".", "references": ["crm/accounts/acc-002"]},
         {"text": "Industry: \"Distribution\".", "references": ["crm/accounts/acc-002"]},
         {"text": "Annual recurring revenue: USD 23,000.00.", "references": ["crm/accounts/acc-002"]},
@@ -80,6 +83,7 @@
     {
       "account_id": "acc-006",
       "claims": [
+        {"text": "Signal: the latest call note note-006 is 104 days old as of 2027-01-15.", "references": ["calls/call_notes/note-006", "run/{brief_id}"]},
         {"text": "Account: \"Harborlight Field Services\".", "references": ["crm/accounts/acc-006"]},
         {"text": "Industry: \"Transportation\".", "references": ["crm/accounts/acc-006"]},
         {"text": "Annual recurring revenue: USD 33,000.00.", "references": ["crm/accounts/acc-006"]},
@@ -94,6 +98,8 @@
     {
       "account_id": "acc-007",
       "claims": [
+        {"text": "Signal: renewal is in 14 days and opportunity opp-007 is still open at stage \"proposal\".", "references": ["crm/accounts/acc-007", "crm/opportunities/opp-007", "run/{brief_id}"]},
+        {"text": "Signal: contact \"Dana Crest\" has no role recorded.", "references": ["crm/contacts/con-007"]},
         {"text": "Account: \"Juniper Crest Learning\".", "references": ["crm/accounts/acc-007"]},
         {"text": "Industry: \"Education\".", "references": ["crm/accounts/acc-007"]},
         {"text": "Annual recurring revenue: USD 35,500.00.", "references": ["crm/accounts/acc-007"]},

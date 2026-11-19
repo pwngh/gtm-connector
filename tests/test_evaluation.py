@@ -73,7 +73,7 @@ class EvaluationScoringTests(unittest.TestCase):
         self.assertEqual(manifest['as_of'], '2027-01-15')
         self.assertEqual([case['account_id'] for case in manifest['cases']],
                          [f'acc-{number:03}' for number in range(1, 21)])
-        self.assertEqual(sum(len(case['claims']) for case in manifest['cases']), 182)
+        self.assertEqual(sum(len(case['claims']) for case in manifest['cases']), 188)
         texts = {case['account_id']: [claim['text'] for claim in case['claims']]
                  for case in manifest['cases']}
         self.assertIn('Renewal is in 17 days as of 2027-01-15.', texts['acc-001'])
@@ -98,9 +98,9 @@ class EvaluationWorkflowTests(unittest.TestCase):
         self.assertEqual(report['accepted_briefs'], 20)
         self.assertEqual(report['failed_briefs'], 0)
         self.assertEqual(report['rejected_briefs'], 0)
-        self.assertEqual(report['expected_facts'], 182)
-        self.assertEqual(report['facts_found'], 182)
-        self.assertEqual(report['facts_cited_correctly'], 182)
+        self.assertEqual(report['expected_facts'], 188)
+        self.assertEqual(report['facts_found'], 188)
+        self.assertEqual(report['facts_cited_correctly'], 188)
         self.assertEqual(report['facts_invented'], 0)
         self.assertEqual(report['duplicate_claims'], 0)
         self.assertEqual(report['fact_recall'], 1.0)
@@ -116,7 +116,7 @@ class EvaluationWorkflowTests(unittest.TestCase):
         with patch('gtm_connector.briefing.create_brief', side_effect=errors):
             report = run_evaluation()
         self.assertEqual(report['status'], 'failed')
-        self.assertEqual(report['expected_facts'], 182)
+        self.assertEqual(report['expected_facts'], 188)
         self.assertEqual(report['accounts'], 20)
         self.assertEqual(report['accepted_briefs'], 0)
         self.assertEqual(report['rejected_briefs'], 10)

@@ -11,7 +11,7 @@ def evidence(notes_status="available", note_body="Procurement has not approved t
     records = [
         {"id": "acc-001", "record_ref": "crm/accounts/acc-001", "name": "Fixture account acc-001",
          "industry": "Manufacturing", "arr_cents": 2050000, "renewal_date": "2027-02-01",
-         "risk_status": "at_risk", "risk_reason": "Renewal budget is not approved."},
+         "risk_status": "healthy", "risk_reason": ""},
         {"id": "con-001", "record_ref": "crm/contacts/con-001", "account_id": "acc-001",
          "name": "Fixture contact con-001", "title": "Operations contact",
          "email": "contact001@account001.example"},
@@ -40,10 +40,13 @@ class CitationTests(unittest.TestCase):
         source["records"][1]["title"] = ""
         current = ('- Contact "Fixture contact con-001": role not provided; '
                    'email "contact001@account001.example". [crm/contacts/con-001]')
+        signal = '- Signal: contact "Fixture contact con-001" has no role recorded. [crm/contacts/con-001]'
         self.assertIn(current, build_facts(source))
-        self.assertEqual(check_brief(current, source), current + "\n")
+        self.assertEqual(check_brief(signal + "\n" + current, source), signal + "\n" + current + "\n")
+        with self.assertRaisesRegex(BriefRejected, "disclose"):
+            check_brief(current, source)
         with self.assertRaises(BriefRejected):
-            check_brief(current.replace("role not provided;", 'role "";'), source)
+            check_brief(signal + "\n" + current.replace("role not provided;", 'role "";'), source)
         self.assertEqual(source["records"][1]["title"], "")
         source["records"][1]["title"] = None
         with self.assertRaises(BriefRejected):
@@ -57,7 +60,7 @@ class CitationTests(unittest.TestCase):
         self.assertIn('- Renewal date: 2027-02-01. [crm/accounts/acc-001]', lines)
         self.assertIn('- Renewal is in 17 days as of 2027-01-15. '
                       '[crm/accounts/acc-001] [run/brief-fixture-001]', lines)
-        self.assertIn('- CRM risk status: "at_risk". [crm/accounts/acc-001]', lines)
+        self.assertIn('- CRM risk status: "healthy". [crm/accounts/acc-001]', lines)
         self.assertIn('- CRM opportunity opp-001: stage "closed_won"; amount USD 20,500.00; '
                       'close date 2027-01-10. [crm/opportunities/opp-001]', lines)
         self.assertIn('- Untrusted call note note-001 at "2027-01-12T15:00:00Z" '

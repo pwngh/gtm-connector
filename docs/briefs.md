@@ -21,6 +21,18 @@ Each `brief` starts local services, calls `get_account`, `list_opportunities`, a
 `read_call_notes` in that order, then stops the services. It requests `crm:read` and `calls:read`,
 never `crm:write`. The default draft uses fixed wording and no model.
 
+## Signals
+
+A brief opens with what needs attention. Each signal is one derived fact from structured fields and
+dates, never from reading source text. It cites its records, and a draft that omits one is rejected.
+
+| Signal | When |
+| --- | --- |
+| `renewal is in N days and opportunity X is still open at stage S` | The renewal, or the Salesforce contract end, is 30 days away or less and the opportunity is not closed. |
+| `CRM marks this account at risk` | The demo CRM's risk status is `at_risk`. Its reason follows when present. |
+| `contact NAME has no role recorded` | The contact has no title. |
+| `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old. |
+
 ## Citation rules
 
 - A fact cites its source record. A renewal-day count also cites the saved run.
@@ -81,9 +93,9 @@ preflight exits `5` with no report. The tests assert these counts:
 | Metric | Default | `--with-slack` |
 | --- | --- | --- |
 | Accounts with accepted briefs | 20 / 20 | 20 / 20 |
-| Facts found | 182 / 182 (100%) | 223 / 223 (100%) |
-| Facts cited correctly | 182 / 182 (100%) | 223 / 223 (100%) |
-| Facts invented | 0 / 182 emitted claims (0%) | 0 / 223 emitted claims (0%) |
+| Facts found | 188 / 188 (100%) | 229 / 229 (100%) |
+| Facts cited correctly | 188 / 188 (100%) | 229 / 229 (100%) |
+| Facts invented | 0 / 188 emitted claims (0%) | 0 / 229 emitted claims (0%) |
 | Rejected or failed briefs | 0 | 0 |
 | Audit receipts | 60 | 80 |
 | Activities created | 0 | 0 |
@@ -119,7 +131,7 @@ gtm-connector evaluate --adapter ollama --model llama3.2:latest --json > ollama-
 
 With `--adapter ollama`, a local model assembles the renewal brief, and the citation checker must
 accept the draft before it is published. On the fixture book, `llama3.2` drafted 20 of 20 accepted
-briefs with 182 of 182 claims, from 8,758 tokens in and 5,518 out.
+briefs with 188 of 188 claims, from 9,067 tokens in and 5,829 out.
 
 - You need a running Ollama 0.30.0 or newer and a model that `ollama list` already shows.
 - The adapter calls only `http://127.0.0.1:11434`. It does not download a model, fall back to

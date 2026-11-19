@@ -12,7 +12,7 @@ class EvaluationProgressTests(unittest.TestCase):
         events = []
         report = run_evaluation(progress=lambda *event: events.append(event))
         self.assertEqual(report["status"], "passed")
-        self.assertEqual(report["facts_cited_correctly"], 182)
+        self.assertEqual(report["facts_cited_correctly"], 188)
         self.assertEqual(events, [(0, 20, None)] + [(number, 20, "accepted") for number in range(1, 21)])
 
     def test_failed_cases_still_advance_progress_without_leaking_source_or_error_text(self):
