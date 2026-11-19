@@ -98,6 +98,8 @@ A gateway refusal carries `error.data.reason`.
 | --- | --- | --- |
 | `request_too_large` | 413 | -32600 |
 | `invalid_json` | 400 | -32700 |
+| `unsupported_media_type` | 415 | -32600 |
+| `call_id_required` | 400 | -32600 |
 | `untrusted_origin_or_host` | 403 | 1003 |
 | `invalid_token` | 401 | 1001 |
 | `rate_limited` | 429 | 1002 |
@@ -107,6 +109,7 @@ A gateway refusal carries `error.data.reason`.
 | `missing_protocol_version` | 400 | -32602 |
 | `protocol_version_mismatch` | 400 | -32020 |
 | `unsupported_protocol_version` | 400 | -32022 |
+| `method_not_found` | 404 | -32601 |
 
 - A missing, malformed, expired, or wrong-resource credential returns `invalid_token` without
   saying which check failed.

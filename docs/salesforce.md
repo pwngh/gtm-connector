@@ -79,7 +79,7 @@ Amounts are printed with `(currency unknown)`.
 | Limit | Value |
 | --- | --- |
 | GET attempts per operation | 12, including retries. |
-| Decoded response data per operation | 1 MiB. Compressed responses are rejected. |
+| Decoded response data per operation | 1 MiB. Compressed responses are rejected, and so is a 200 response labelled as anything but `application/json`. |
 | Pages per query | 10. |
 | Rows per query | 100. Excess rows fail and no partial records are returned. |
 | AccountNumber lookup | 2 rows. |

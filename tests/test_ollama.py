@@ -238,7 +238,7 @@ class OllamaTests(unittest.TestCase):
         adapter = self.adapter()
         for content in ("private unstructured reply", "null", "[]", '{"lines": "wrong"}',
                         '{"lines": []}', '{"lines": [12]}', '{"lines": ["one\\ntwo"]}',
-                        '{"lines": ["one"], "extra": "private"}', '{"lines": ["\\ud800"]}', "\ud800"):
+                        '{"lines": ["one"], "extra": "private"}', '{"lines": ["\\ud800"]}'):
             with self.subTest(content=repr(content)):
                 self.reply["message"]["content"] = content
                 result = adapter.draft(self.evidence)
@@ -246,6 +246,10 @@ class OllamaTests(unittest.TestCase):
                 self.assertEqual(result.error_code, "invalid_candidate_format")
                 self.assertEqual((result.model, result.input_tokens, result.output_tokens), (MODEL, 137, 83))
                 self.assertNotIn("private", repr(result))
+        # A lone surrogate in the reply itself makes the whole reply unreadable, usage numbers included.
+        self.reply["message"]["content"] = "\ud800"
+        result = adapter.draft(self.evidence)
+        self.assertEqual((result.text, result.error_code), (None, "invalid_response"))
 
     def test_duplicate_candidate_keys_cannot_hide_rejected_lines(self):
         bad = ['- The renewal is guaranteed. [crm/accounts/acc-001]']

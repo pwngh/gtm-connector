@@ -1,4 +1,4 @@
-"""JSON parsing that refuses duplicate keys and non-finite numbers."""
+"""JSON parsing that refuses duplicate keys, non-finite numbers, and lone surrogates."""
 
 import json
 from typing import Any
@@ -25,6 +25,22 @@ def _float(text):
 
 
 def loads(document: str | bytes, **options: Any) -> Any:
-    """Parse one document. Raises ValueError, which covers bad UTF-8, or RecursionError."""
+    """Parse one UTF-8 document. Raises ValueError, which covers bad UTF-8, or RecursionError."""
     options.setdefault("parse_float", _float)
-    return json.loads(document, object_pairs_hook=_unique, parse_constant=_finite, **options)
+    # json decodes bytes leniently and lets surrogate bytes through, so decode strictly first.
+    text = document if isinstance(document, str) else bytes(document).decode("utf-8-sig")
+    text.encode()
+    result = json.loads(text, object_pairs_hook=_unique, parse_constant=_finite, **options)
+    if "\\u" in text:
+        # An escaped lone surrogate parses to text that cannot be stored or sent as UTF-8.
+        pending = [result]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, str):
+                value.encode()
+            elif isinstance(value, dict):
+                pending.extend(value)
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+    return result

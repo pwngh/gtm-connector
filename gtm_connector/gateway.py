@@ -507,8 +507,14 @@ class Connector:
             response_start = next(m for m in messages if m["type"] == "http.response.start")
             status = response_start["status"]
             payload = b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body")
-            response = json.loads(payload) if payload else {}
+            try:
+                response = json.loads(payload) if payload else {}
+            except ValueError:
+                response = None
+            # A reply that is not a JSON object carries no result, and it is passed on as it is.
+            response = response if isinstance(response, dict) else {"error": None}
             result = response.get("result", {})
+            result = result if isinstance(result, dict) else {}
             structured = result.get("structuredContent", {})
             rows = [row["record_ref"] for row in structured.get("records", [])] if isinstance(structured, dict) else []
             failed = status >= 400 or bool(result.get("isError")) or "error" in response
