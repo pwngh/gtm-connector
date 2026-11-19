@@ -5,8 +5,9 @@ import tempfile
 import unittest
 
 from gtm_connector.briefing import create_brief
-from gtm_connector.citations import BriefRejected, check_brief
+from gtm_connector.citations import BriefRejected, build_facts, check_brief
 from gtm_connector.runtime import Runtime
+from tests.test_citations import evidence
 
 
 class SignalTests(unittest.TestCase):
@@ -62,6 +63,66 @@ class SignalTests(unittest.TestCase):
             with self.subTest(candidate=name), self.assertRaises(BriefRejected):
                 check_brief(candidate, brief["evidence"])
         self.assertEqual(check_brief(brief["text"], brief["evidence"]), brief["text"])
+        with self.assertRaisesRegex(BriefRejected, "every signal"):
+            check_brief(candidates["dropped"], brief["evidence"])
+
+    def test_signals_are_published_first_wherever_a_draft_puts_them(self):
+        brief = self.brief("acc-002")
+        signals = self.signals(brief)
+        rest = [line for line in brief["text"].splitlines() if line not in signals]
+        reordered = "\n".join(rest + signals[::-1]) + "\n"
+        self.assertEqual(check_brief(reordered, brief["evidence"]), brief["text"])
+
+
+class SignalRuleTests(unittest.TestCase):
+    """The rules at their boundaries, on a small synthetic account."""
+
+    def signals(self, source):
+        return [line.split(" [")[0] for line in build_facts(source) if line.startswith("- Signal: ")]
+
+    def open_renewal(self, renewal_date):
+        source = evidence()
+        source["records"][0]["renewal_date"] = renewal_date
+        source["records"][2]["stage"] = "negotiation"
+        return self.signals(source)
+
+    def test_an_open_opportunity_signals_from_thirty_days_out_and_after_the_date_passes(self):
+        stage = ' and opportunity opp-001 is still open at stage "negotiation".'
+        for renewal_date, expected in (("2027-02-15", []),                                   # 31 days
+                                       ("2027-02-14", ["- Signal: renewal is in 30 days" + stage]),
+                                       ("2027-01-16", ["- Signal: renewal is in 1 day" + stage]),
+                                       ("2027-01-15", ["- Signal: renewal is due today" + stage]),
+                                       ("2027-01-14", ["- Signal: renewal was 1 day ago" + stage])):
+            with self.subTest(renewal_date=renewal_date):
+                self.assertEqual(self.open_renewal(renewal_date), expected)
+        for stage_name in ("closed_won", "closed_lost"):
+            source = evidence()
+            source["records"][2]["stage"] = stage_name
+            self.assertEqual(self.signals(source), [])
+
+    def test_the_newest_call_note_decides_staleness_by_its_instant(self):
+        def notes(*times):
+            source = evidence()
+            source["records"] = source["records"][:3] + [
+                {"id": f"note-00{number}", "record_ref": f"calls/call_notes/note-00{number}",
+                 "account_id": "acc-001", "called_at": called_at, "body": "A note."}
+                for number, called_at in enumerate(times, 1)]
+            receipt = source["receipts"][2]
+            receipt["rows"] = [row["record_ref"] for row in source["records"][3:]]
+            receipt["row_count"] = len(receipt["rows"])
+            return self.signals(source)
+
+        old = "- Signal: the latest call note {} is {} days old as of 2027-01-15."
+        self.assertEqual(notes("2026-11-16T15:00:00Z"), [])                                   # 60 days
+        self.assertEqual(notes("2026-11-15T15:00:00Z"), [old.format("note-001", 61)])
+        # The later instant on the same day wins, and one recent note clears the signal.
+        self.assertEqual(notes("2026-10-03T09:00:00Z", "2026-10-03T17:00:00Z"), [old.format("note-002", 104)])
+        self.assertEqual(notes("2026-10-03T15:00:00Z", "2027-01-14T15:00:00Z"), [])
+        # An offset is applied before the day is taken.
+        self.assertEqual(notes("2026-11-15T23:30:00-05:00"), [])
+        # A time that is malformed or has no offset raises no signal.
+        for unknown in ("2026-10-03", "2026-10-03T15:00:00", "2026-10-03Tnonsense"):
+            self.assertEqual(notes(unknown), [])
 
 
 if __name__ == "__main__":

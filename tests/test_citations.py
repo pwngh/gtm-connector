@@ -43,7 +43,7 @@ class CitationTests(unittest.TestCase):
         signal = '- Signal: contact "Fixture contact con-001" has no role recorded. [crm/contacts/con-001]'
         self.assertIn(current, build_facts(source))
         self.assertEqual(check_brief(signal + "\n" + current, source), signal + "\n" + current + "\n")
-        with self.assertRaisesRegex(BriefRejected, "disclose"):
+        with self.assertRaisesRegex(BriefRejected, "every signal"):
             check_brief(current, source)
         with self.assertRaises(BriefRejected):
             check_brief(signal + "\n" + current.replace("role not provided;", 'role "";'), source)

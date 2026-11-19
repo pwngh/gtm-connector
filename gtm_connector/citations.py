@@ -4,7 +4,7 @@ This checks exact supported statements, not natural-language entailment. Source
 text is quoted as data; the checker never treats it as a command or as truth.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 import json
 import re
 from typing import Any
@@ -53,13 +53,14 @@ def _days(count):
     return f"{count} {'day' if count == 1 else 'days'}"
 
 
-def _note_age(note, as_of):
-    """Whole days since a call, or None when its time is unknown."""
-    called = note.get("called_at")
+def _called_at(note):
+    """The instant of a call in UTC, or None when it is unknown or has no offset."""
+    value = note.get("called_at")
     try:
-        return (as_of - date.fromisoformat(called[:10])).days
-    except (TypeError, ValueError):
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
         return None
+    return moment.astimezone(timezone.utc) if moment.tzinfo is not None else None
 
 
 def _money(cents):
@@ -377,12 +378,15 @@ def _catalog(evidence):
     elif not groups["call_notes"]:
         required.add(add(f"No call notes were returned for {account_id}.", notes_receipt))
     else:
-        aged = [(age, note["id"], note["record_ref"]) for note in groups["call_notes"]
-                if (age := _note_age(note, as_of)) is not None]
-        if aged and min(aged)[0] > _STALE_DAYS:
-            age, note_id, note_ref = min(aged)
-            signal(f"the latest call note {note_id} is {_days(age)} old as of {as_of}.",
-                   note_ref, f"run/{brief_id}")
+        timed = [(moment, note["id"], note["record_ref"]) for note in groups["call_notes"]
+                 if (moment := _called_at(note)) is not None]
+        if timed:
+            moment, note_id, note_ref = max(timed)
+            age = (as_of - moment.date()).days
+            if age > _STALE_DAYS:
+                # An imported excerpt is the selected one, not necessarily the newest call.
+                which = f"the selected call excerpt {note_id}" if imported else f"the latest call note {note_id}"
+                signal(f"{which} is {_days(age)} old as of {as_of}.", note_ref, f"run/{brief_id}")
         for note in sorted(groups["call_notes"], key=lambda row: row["id"]):
             if imported:
                 manifest = note["manifest"]
@@ -503,8 +507,12 @@ def check_brief(candidate: object, evidence: dict) -> str:
         raise BriefRejected("Brief contains an uncited, unsupported, or misattributed statement.")
     if len(lines) != len(set(lines)):
         raise BriefRejected("Brief repeats a statement.")
+    if any(line.startswith("- Signal: ") for line in required - set(lines)):
+        raise BriefRejected("Brief must include every signal.")
     if not required <= set(lines):
         if evidence.get("workflow_version", 1) == 1:
             raise BriefRejected("Brief must disclose required call-notes outcomes and source conflicts.")
         raise BriefRejected("Brief must disclose required source outcomes, source conflicts, and proposed follow-up.")
-    return "\n".join(lines) + "\n"
+    # Signals are published first, in a fixed order, wherever the draft put them.
+    signals = [line for line in supported if line.startswith("- Signal: ")]
+    return "\n".join(signals + [line for line in lines if line not in signals]) + "\n"

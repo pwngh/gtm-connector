@@ -24,14 +24,15 @@ never `crm:write`. The default draft uses fixed wording and no model.
 ## Signals
 
 A brief opens with what needs attention. Each signal is one derived fact from structured fields and
-dates, never from reading source text. It cites its records, and a draft that omits one is rejected.
+dates, never from reading source text. It cites its records. A draft that omits one is rejected, and signals are published first
+wherever a draft puts them.
 
 | Signal | When |
 | --- | --- |
-| `renewal is in N days and opportunity X is still open at stage S` | The renewal, or the Salesforce contract end, is 30 days away or less and the opportunity is not closed. |
+| `renewal is in N days and opportunity X is still open at stage S` | The renewal, or the Salesforce contract end, is 30 days away or less, or has passed, and the opportunity is not closed. |
 | `CRM marks this account at risk` | The demo CRM's risk status is `at_risk`. Its reason follows when present. |
 | `contact NAME has no role recorded` | The contact has no title. |
-| `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old. |
+| `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old. An imported transcript is named as the selected excerpt. |
 
 ## Citation rules
 
