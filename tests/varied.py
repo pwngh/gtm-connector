@@ -72,10 +72,11 @@ def _instant(text):
         return None
 
 
-def expected(rows, brief_id):
+def expected(rows, brief):
     """Return (lines every brief must contain, the signal lines in order), each with its citations."""
     quote = lambda text: json.dumps(text, ensure_ascii=True)  # noqa: E731
-    run = f"[run/{brief_id}]"
+    run = f"[run/{brief['brief_id']}]"
+    receipt = {row["tool"]: f"[audit/{row['audit_id']}]" for row in brief["evidence"]["receipts"]}
     (_, (account_id, name, industry, renewal, arr, risk, reason)), *others = rows["crm"]
     ref = f"[crm/accounts/{account_id}]"
     lines = [f"- Account: {quote(name)}. {ref}", f"- Industry: {quote(industry)}. {ref}",
@@ -101,6 +102,12 @@ def expected(rows, brief_id):
             if days <= 30 and not stage.startswith("closed_"):
                 renewals.append(f"- Signal: {when} and opportunity {identifier} {quote(deal)} is still open at stage "
                                 f"{quote(stage)}. {ref} [crm/opportunities/{identifier}] {run}")
+    # docs/briefs.md, Signals: more than five records raising one signal are counted in one line.
+    if len(renewals) > 5:
+        renewals = [f"- Signal: {when} and {len(renewals)} opportunities are still open. "
+                    f"{ref} {receipt['list_opportunities']} {run}"]
+    if len(roles) > 5:
+        roles = [f"- Signal: {len(roles)} contacts have no role recorded. {ref} {receipt['get_account']}"]
     signals = renewals
     if risk == "at_risk":
         signals.append("- Signal: CRM marks this account at risk" + (f": {quote(reason)}. " if reason else ". ") + ref)

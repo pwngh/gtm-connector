@@ -168,7 +168,7 @@ def changes(top, fields, *special):
         st.tuples(st.just("row"), row, pick | st.sampled_from(sorted(fields)), values),
         st.tuples(st.just("unrow"), row, pick | st.sampled_from(sorted(fields))),
         st.tuples(st.just("swap"), row, values), st.tuples(st.sampled_from(("copy", "clash")), row, row),
-        st.tuples(st.just("cut"), row), st.tuples(st.just("more"), st.sampled_from((1, 9, 99, 101))),
+        st.tuples(st.just("cut"), row), st.tuples(st.just("more"), st.sampled_from((1, 9, 99, 101, 1001))),
         st.just(("reverse",)), st.tuples(st.just("whole"), values), *special,
     )
 
@@ -461,8 +461,9 @@ def salesforce_plans(draw, mode="any"):
         "sf": None if mode == "valid" else draw(st.sampled_from(
             (None, None, "fresh", "fresh", "other_org", "salesforce_auth_required", "salesforce_cli_timeout"))),
         "templates": {name: draw(st.lists(rows, min_size=1, max_size=2)) for name, rows in ROWS.items()},
-        "count": draw(st.sampled_from((0, 1, 2, 3, 5) if small else (0, 1, 1, 2, 3, 5, 10, 11, 40, 99, 100, 101, 130))),
-        "page": draw(st.sampled_from((None, None, 2, 3) if small else (None, None, None, 1, 2, 3, 10, 50))),
+        "count": draw(st.sampled_from((0, 1, 2, 3, 5) if small else
+                                      (0, 1, 1, 2, 3, 5, 10, 11, 40, 99, 100, 101, 130, 1000, 1001))),
+        "page": draw(st.sampled_from((None, None, 2, 3) if small else (None, None, None, 1, 2, 3, 10, 50, 200))),
         "operations": draw(st.lists(row_reads if mode == "valid" else operations, min_size=1,
                                     max_size=1 if small else 3)),
         "specs": specs(draw, salesforce_mutations, mode),
@@ -550,9 +551,10 @@ class Org:
         selected = re.findall(r"'([A-Za-z0-9]{18})'", text)
         lookup, dated = " WHERE AccountNumber = '" in text, re.search(r"EndDate >= (\S+)", text)
         by_id = name == "Account" and " WHERE Id = '" in text
-        limit = 2 if lookup else 1 if by_id or text.endswith(" LIMIT 1") else 100
+        owned = name != "Account" and " WHERE AccountId = '" in text
+        limit = 2 if lookup else 1 if by_id or text.endswith(" LIMIT 1") else 1000 if owned else 100
         # A lookup may answer with one row too many. Queries for one row never do.
-        count = min(plan["count"], {1: 1, 2: 3, 100: 999}[limit])
+        count = min(plan["count"], {1: 1, 2: 3, 100: 999, 1000: 9999}[limit])
         if name == "Account" and selected:
             count = min(count, len(selected))
         rows, templates = [], plan["templates"][name]
@@ -570,7 +572,7 @@ class Org:
                 row["EndDate"] = dated[1]
             rows.append(row)
         size = plan["page"] or count or 1
-        # The documented bounds: 100 rows, 2 for a number lookup, and 10 pages.
+        # The documented bounds: 1,000 rows of one account, 100 of a search, 2 for a number lookup, and 10 pages.
         self.chain = {"object": name, "rows": rows, "offsets": {}, "issued": set(), "sent": 0,
                       "over": count > limit > 1 or -(-count // size) > 10}
         return "query", name, self.page(0)
@@ -694,7 +696,8 @@ class SalesforceFuzz(unittest.TestCase):
             if not any(exchange["spec"] for exchange in trace):
                 # Every answer was valid, so only a documented bound can refuse the read.
                 self.assertEqual(code, "salesforce_result_limit")
-                self.assertTrue(any(exchange["over"] for exchange in trace) or len(trace) == 12)
+                self.assertTrue(any(exchange["over"] for exchange in trace) or len(trace) == 12
+                                or sum(len(exchange["body"]) for exchange in trace) > MIB)
         else:
             trace, code = org.exchanges[start:], None
             self.accepted(org, name, arguments, result, trace, org.now - started)
@@ -760,11 +763,11 @@ class SalesforceFuzz(unittest.TestCase):
                 if found:
                     self.assertEqual(found[0]["Id"], asked)
                     expected = {**account(found[0]),
-                                "contacts": [contact(row, asked) for row in self.rows(queries[1][1])],
-                                "contracts": [contract(row, asked) for row in self.rows(queries[2][1])]}
+                                "contacts": [contact(row, asked) for row in self.rows(queries[1][1], 1000)],
+                                "contracts": [contract(row, asked) for row in self.rows(queries[2][1], 1000)]}
             elif name == "list_opportunities":
                 ((_, pages),) = queries
-                found = self.rows(pages)
+                found = self.rows(pages, 1000 if asked else 100)
                 self.assertEqual(len(result), len(found))
                 expected = [opportunity(row, got["amount_decimal"]) for row, got in zip(found, result)]
                 self.assertTrue(all(not asked or row["AccountId"] == asked for row in found))
@@ -825,7 +828,8 @@ class SalesforceFuzz(unittest.TestCase):
                         self.run_plan({**plan, "specs": [{}] * place + [spec]})
 
     @fuzz(100, 0.05)
-    @given(salesforce_plans("valid"), st.sampled_from(((101, None), (130, 50), (300, 100), (11, 1), (22, 2), (33, 3))))
+    @given(salesforce_plans("valid"), st.sampled_from(((101, None), (130, 50), (300, 100), (1001, None), (1300, 500),
+                                                       (11, 1), (22, 2), (33, 3))))
     def test_too_many_rows_or_pages_refuse_the_whole_read(self, plan, size):
         org = self.run_plan({**plan, "count": size[0], "page": size[1]})
         if any(exchange["over"] for exchange in org.exchanges):

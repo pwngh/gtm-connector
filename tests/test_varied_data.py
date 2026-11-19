@@ -66,6 +66,11 @@ SHAPES = {
         contacts=[("Jörg Weiß", "Geschäftsführer")], opportunities=[("closed_won", 4_200_000), ("closed_lost", 1)],
         notes=[("yesterday", "Kurzes Gespräch."), ("2027-01-10T10:00:00+01:00", "Alles in Ordnung.")],
         messages=[("2027-01-11T07:00:00Z", "Danke!")]),
+    # Many: six open deals five days after the renewal and six contacts with no role, beside one of each that is not.
+    106: account(
+        "Many Of Each", "2027-01-10",
+        contacts=[(f"Person {index}", "Buyer" if index == 3 else "") for index in range(7)],
+        opportunities=[("closed_won" if index == 2 else "evaluation", index) for index in range(7)]),
 }
 # The signals of each shape, written out by hand. Every other account is held to tests.varied.expected.
 SHAPE_SIGNALS = {
@@ -81,6 +86,7 @@ SHAPE_SIGNALS = {
     104: ['renewal is due today and opportunity opp-104-000 "Deal 0" is still open at stage "discovery".',
           "the latest call note note-104-000 is 400 days old as of 2027-01-15."],
     105: [],
+    106: ["renewal was 5 days ago and 6 opportunities are still open.", "6 contacts have no role recorded."],
 }
 
 
@@ -128,7 +134,7 @@ class VariedDataTests(unittest.TestCase):
         self.assertEqual(records, loaded)
         self.assertLessEqual(records, cited)
         # Every row is stated exactly, the signals are exact and first, and nothing else is of an unknown kind.
-        stated, signals = varied.expected(rows, brief["brief_id"])
+        stated, signals = varied.expected(rows, brief)
         self.assertEqual(lines[:len(signals)], signals)
         self.assertEqual(sorted(set(stated) - set(lines)), [])
         for line in set(lines) - set(stated):
@@ -141,7 +147,7 @@ class VariedDataTests(unittest.TestCase):
                 check_brief(candidate, brief["evidence"])
         return brief, lines
 
-    def test_five_unusual_accounts_give_the_signals_written_out_by_hand(self):
+    def test_six_unusual_accounts_give_the_signals_written_out_by_hand(self):
         rows = {number: varied.demo_rows(number, shape) for number, shape in SHAPES.items()}
         varied.load(self.runtime.directory, *rows.values())
         for number in SHAPES:
@@ -185,7 +191,8 @@ class VariedDataTests(unittest.TestCase):
         for number in shapes:
             # Forty corrupted drafts per brief keep the largest ones quick.
             self.brief(number, rows[number], corrupted=40)
-        self.assertEqual(len(self.brief(404, rows[404], corrupted=4)[1]), 5177)
+        # A thousand of each record: three signals, eight account lines, and one line a record.
+        self.assertEqual(len(self.brief(404, rows[404], corrupted=4)[1]), 3 + 8 + 4000)
         before = len(self.runtime.connector.audit.read())
         for number in many:
             self.assertEqual(create_brief(self.runtime, f"acc-{number}", include_slack=True)["status"], "accepted")

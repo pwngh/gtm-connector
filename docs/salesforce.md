@@ -84,7 +84,8 @@ printed with `(currency unknown)`.
 | GET attempts per operation | 12, including retries. |
 | Decoded response data per operation | 1 MiB. Compressed responses are rejected, and so is a 200 response labelled as anything but `application/json`. |
 | Pages per query | 10. |
-| Rows per query | 100. Excess rows fail and no partial records are returned. |
+| Contacts, opportunities, and contracts of one account | 1,000 each. One more fails with `salesforce_result_limit`, and so do rows that exceed the 1 MiB above. No partial records are returned. |
+| Rows of an account search, or of an opportunity list across accounts | 100. Excess rows fail the same way. |
 | AccountNumber lookup | 2 rows. |
 | Operation deadline | 20 seconds of read time, checked around reads. A wait on `sf` for a login refresh is not counted. It is not a hard cancellation. |
 | Network timeout per request | The remaining deadline, up to 5 seconds. |
