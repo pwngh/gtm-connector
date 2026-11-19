@@ -24,15 +24,16 @@ never `crm:write`. The default draft uses fixed wording and no model.
 ## Signals
 
 A brief opens with what needs attention. Each signal is one derived fact from structured fields and
-dates, never from reading source text. It cites its records. A draft that omits one is rejected, and signals are published first
-wherever a draft puts them.
+dates, never from reading source text. It cites its records. A draft that omits one is rejected,
+and signals are published first wherever a draft puts them.
 
 | Signal | When |
 | --- | --- |
-| `renewal is in N days and opportunity X is still open at stage S` | The opportunity is not closed and the renewal is 30 days away or less. In the demo CRM a renewal date that has passed counts too. Salesforce uses the contract end, which is never in the past. |
+| `renewal is in N days and opportunity X is still open at stage S` | Demo CRM: the opportunity is not closed and the renewal is 30 days away or less. It reads `renewal is due today` on the day and `renewal was N days ago` after it. |
+| `contract end is in N days and opportunity X is still open at stage S` | Salesforce: the selected contract ends in 30 days or less, or `is today`, and the opportunity is open. Every open opportunity on the account counts. A contract that has ended is never selected. |
 | `CRM marks this account at risk` | The demo CRM's risk status is `at_risk`. Its reason follows when present. |
 | `contact NAME has no role recorded` | The contact has no title. |
-| `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old. It reads `latest dated` when another note has no usable time, and an imported transcript is named as the selected excerpt. |
+| `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old, counted from its UTC date. It reads `latest dated` when another note has no usable time, and `the selected call excerpt` for an imported transcript. |
 
 ## Citation rules
 
@@ -64,8 +65,9 @@ the `Brief:` and `As of:` display labels. Checking the original text exits `0` w
 
 - The checker accepts only the fixed supported lines with their exact references. It cannot
   assess paraphrases.
-- A passing brief can omit supported facts, which the evaluation below measures. Lines
-  for unavailable or empty sources, recognized conflicts, and the Slack follow-up cannot be omitted.
+- A passing brief can omit supported facts, which the evaluation below measures. Signals,
+  lines for unavailable or empty sources, recognized conflicts, and the Slack follow-up cannot be
+  omitted.
 
 ## Errors
 
@@ -149,7 +151,7 @@ briefs with 188 of 188 claims, from 9,067 tokens in and 5,829 out.
 - The model receives the supported claims derived from authorized evidence and must return them
   with their exact wording and references in a JSON `lines` array. The prompt holds no owner
   credential, bearer token, audit fingerprint, or tool interface.
-- An unsupported line, a duplicate, or an omitted required disclosure rejects the whole brief. A
+- An unsupported line, a duplicate, or an omitted signal or required disclosure rejects the whole brief. A
   supported subset can pass. The adapter does not repair or replace model output.
 - Each request adds Ollama's `:local` selector, so the server rejects a tag that now points to a
   remote model. The adapter also rejects cloud suffixes and remote metadata, disables environment

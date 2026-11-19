@@ -8,6 +8,7 @@ from gtm_connector.briefing import create_brief
 from gtm_connector.citations import BriefRejected, build_facts, check_brief
 from gtm_connector.runtime import Runtime
 from tests.test_citations import evidence
+from tests.test_salesforce_briefing import CONTRACT_REF, contract_record, evidence as salesforce_evidence
 
 
 class SignalTests(unittest.TestCase):
@@ -126,6 +127,23 @@ class SignalRuleTests(unittest.TestCase):
         # A note that cannot be ordered beside a stale one is not counted as older.
         self.assertEqual(notes("2026-10-03T15:00:00Z", "2026-10-03"),
                          ["- Signal: the latest dated call note note-001 is 104 days old as of 2027-01-15."])
+
+    def test_salesforce_signals_count_from_the_contract_end_and_put_the_open_opportunity_first(self):
+        def signals(end, is_closed=False):
+            source = salesforce_evidence([contract_record(end=end)])
+            source["records"][2].update(stage="Negotiation", is_closed=is_closed, is_won=False)
+            return [line for line in build_facts(source) if line.startswith("- Signal: ")]
+
+        opportunity = "opp-sf-006000000000001AAA"
+        still_open = (f' and opportunity {opportunity} is still open at stage "Negotiation". '
+                      f"[{CONTRACT_REF}] [crm/opportunities/{opportunity}] [run/brief-sf-fixture]")
+        no_role = '- Signal: contact "Invented contact" has no role recorded. [crm/contacts/con-sf-003000000000001AAA]'
+        for end, when in (("2027-02-15", None), ("2027-02-14", "is in 30 days"),
+                          ("2027-01-16", "is in 1 day"), ("2027-01-15", "is today")):
+            with self.subTest(end=end):
+                renewal = ["- Signal: contract end " + when + still_open] if when else []
+                self.assertEqual(signals(end), renewal + [no_role])
+        self.assertEqual(signals("2027-01-16", is_closed=True), [no_role])
 
 
 if __name__ == "__main__":

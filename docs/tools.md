@@ -32,7 +32,7 @@ holds 29 messages. The fixed demo date is `2027-01-15`.
 | `acc-001`, `acc-002` | `acc-001` renews in 17 days. `acc-002` is at risk. |
 | `opp-003`, `note-003`, `msg-003` | `closed_won` against unapproved procurement and a delayed security review. |
 | `acc-004`, `acc-005` | `acc-004` has no call notes. `acc-005` has no Slack messages. |
-| `acc-006` | An October call note and a January Slack message disagree on seats. Nothing is flagged. |
+| `acc-006` | An October call note and a January Slack message disagree on seats. Only the note's age is flagged. |
 | `acc-007` | Juniper Crest Learning, the demo account. It renews on `2027-01-29`. Its contact has no role. |
 | `note-007`, `msg-007` | Each asks for a write. Both stay quoted data, and no activity is created. |
 

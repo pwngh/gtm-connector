@@ -173,8 +173,6 @@ def add_salesforce_facts(groups, as_of, brief_id, add, signal):
     for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
         add(f"Contact {_text(contact['name'])}: role {_nullable_text(contact['title'])}; "
             f"email {_nullable_text(contact['email'])}.", contact["record_ref"])
-        if contact["title"] is None:
-            signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
     for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
         if type(opportunity["is_closed"]) is not bool or type(opportunity["is_won"]) is not bool:
             raise BriefRejected("Salesforce opportunity outcomes must be booleans.")
@@ -186,6 +184,9 @@ def add_salesforce_facts(groups, as_of, brief_id, add, signal):
             f"amount {_amount(opportunity)}; close date {_day(opportunity['close_date'])}; "
             f"closed {str(opportunity['is_closed']).lower()}; won {str(opportunity['is_won']).lower()}.",
             opportunity["record_ref"])
+    for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
+        if contact["title"] is None:
+            signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
     return required, contract_ref
 
 
@@ -499,7 +500,7 @@ def check_brief(candidate: object, evidence: dict) -> str:
     """Reject uncited, altered, misattributed, or extra prose before publication.
 
     A valid subset is allowed: grounding and coverage are different checks.
-    Required source outcomes, recognized conflicts, and v2 follow-up must remain visible.
+    Signals, required source outcomes, recognized conflicts, and v2 follow-up must remain visible.
     """
     if not isinstance(candidate, str) or not candidate.strip():
         raise BriefRejected("A brief must contain supported, cited statements.")
