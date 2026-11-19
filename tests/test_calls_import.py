@@ -109,6 +109,19 @@ class ParsingTests(unittest.TestCase):
         for bounds in ((0, 1), (2, 1), (1, 3), (True, 1), (1.0, 2), [1, 2]):
             self.assert_code("calls_import_invalid", imports.select_excerpt, parsed, requested_range=bounds)
 
+    def test_vtt_header_metadata_is_skipped_and_other_header_text_refuses(self):
+        cue = "\n\n00:00.000 --> 00:01.000\nDana: hello\n"
+        for header in ("WEBVTT\nKind: captions\nLanguage: en", "WEBVTT - meeting\nLanguage: pt-BR",
+                       "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000"):
+            with self.subTest(header=header):
+                parsed = imports.parse_transcript((header + cue).encode(), format="vtt")
+                self.assertEqual([unit["text"] for unit in parsed["units"]], ["Dana: hello"])
+        # A line that could be speech is never dropped as a header.
+        for header in ("WEBVTT\nDana: this was said", "WEBVTT\nKind: captions\nspoken text"):
+            with self.subTest(header=header):
+                self.assert_code("calls_import_invalid", imports.parse_transcript, (header + cue).encode(),
+                                 format="vtt")
+
     def test_malformed_vtt_cannot_silently_drop_spoken_content(self):
         self.assert_code("calls_import_invalid", imports.parse_transcript,
                          (FIXTURES / "invalid-timing.vtt").read_bytes(), format="vtt")

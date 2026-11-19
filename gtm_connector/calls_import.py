@@ -186,11 +186,15 @@ def parse_transcript(raw: bytes, *, format: str) -> dict[str, Any]:
         units = [{"index": index, "text": line, "cue_id": None, "start_ms": None, "end_ms": None}
                  for index, line in enumerate(lines, 1)]
     else:
-        if (len(lines) < 2 or re.fullmatch(r"WEBVTT(?:[ \t][^\r\n]*)?", lines[0]) is None
-                or "-->" in lines[0] or lines[1] != ""):
+        body = 1
+        # Exporters write these metadata lines under the signature. Any other text there could be speech.
+        while body < len(lines) and re.fullmatch(r"(?:Kind|Language): [^\r\n]*|X-TIMESTAMP-MAP=[^\r\n]*", lines[body]):
+            body += 1
+        if (len(lines) <= body or re.fullmatch(r"WEBVTT(?:[ \t][^\r\n]*)?", lines[0]) is None
+                or "-->" in lines[0] or lines[body] != ""):
             raise CallsImportError("calls_import_invalid")
         blocks: list[list[str]] = []
-        for line in lines[2:]:
+        for line in lines[body + 1:]:
             if line == "":
                 if blocks and blocks[-1]:
                     blocks.append([])
