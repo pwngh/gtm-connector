@@ -128,7 +128,7 @@ class RuntimeTests(unittest.TestCase):
         with Runtime(self.state):
             self.assertEqual(self.source_snapshot(), before)
         self.assertEqual(len(before["accounts"]), 30)
-        self.assertEqual(len(before["call_notes"]), 29)
+        self.assertEqual(len(before["call_notes"]), 30)
         self.assertEqual(len(before["messages"]), 29)
 
     def test_slack_scope_over_https_does_not_grant_crm_calls_or_writes(self):

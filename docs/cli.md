@@ -2,7 +2,8 @@
 
 ```sh
 gtm-connector demo                         # invented data
-gtm-connector brief acc-007 --with-slack   # invented data
+gtm-connector brief acc-003 --with-slack   # invented data
+gtm-connector trace BRIEF_ID 5             # one number on that card
 gtm-connector COMMAND --help
 python -m gtm_connector COMMAND            # accepts the same arguments
 ```
@@ -16,9 +17,9 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 - Every command accepts `--json`, before or after its name. Keys can be added. Existing keys keep
   their meaning and type within version 0.1. Help stays plain text.
 - A JSON error is one stderr object: `error.code`, `error.message`, and `error.next`, a command.
-- `evaluate`, `salesforce check`, `calls import`, and the `slack` commands write progress. With
-  `--json`, a progress line is an object with one `progress` key.
-- A failed `evaluate`, `doctor`, `salesforce check`, or `slack check` prints its report on stdout.
+- `salesforce check`, `calls import`, and the `slack` commands write progress. With `--json`, a
+  progress line is an object with one `progress` key.
+- A failed `doctor`, `salesforce check`, or `slack check` prints its report on stdout.
 
 | Exit | Meaning | JSON error code |
 | --- | --- | --- |
@@ -26,7 +27,7 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 | 1 | A local file, database, or runtime operation failed. | `local_failure` |
 | 2 | Arguments or local configuration are missing or invalid. | `usage_error` |
 | 3 | The requested operation was refused. | `refused` |
-| 4 | The evidence checker, demo, verification, evaluation, doctor, Salesforce check, or completed Slack check failed. | `check_failed` |
+| 4 | The evidence check, demo, verification, doctor, Salesforce check, or completed Slack check failed. | `check_failed` |
 | 5 | A source service or its transport failed. | `upstream_failure` |
 | 130 | Ctrl-C interrupted a command. Completed local writes remain. | `interrupted` |
 
@@ -38,11 +39,10 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 | `seed` | Object with `counts`, integer counts by table. |
 | `accounts` | Array of account objects ordered by name and then ID, or `[]`. When more than 100 match: object with `accounts`, the first 100, and `has_more: true`. Text output then adds one line on stderr that says so. |
 | `account` | Account object with a `contacts` array. Salesforce adds `contracts`, `backend`, and `source_id`. See [Salesforce](salesforce.md). |
-| `brief` | Saved artifact with `schema_version: 1`, identifiers, `as_of`, `status`, `evidence`, `text`, and `model_usage`. `--with-slack` adds `proposed_follow_up`. `as_of` is today's local date with Salesforce and `2027-01-15` with fixtures, unless `--as-of YYYY-MM-DD` is given. With imported calls the evidence workflow version is 4, and with live Slack it is 5. Both add a `sources` object and, with the default drafter, record the adapter `extractive` and zero model tokens. |
-| `check-brief` | Object with `status: "valid"` and `brief_id`. |
+| `brief` | The saved [Deal card](briefs.md): object with `schema_version: 2`, `brief_id`, `account_id`, `as_of`, `status: "accepted"`, `sources`, `text` (the card), `units`, and `evidence`. `as_of` is today's local date with Salesforce and `2027-01-15` with fixtures, unless `--as-of YYYY-MM-DD` is given. `sources.crm` is `"demo_fixture"` or `"salesforce"`, `sources.calls` is `"demo_fixture"` or `"imported_transcript"`, and `--with-slack` adds `sources.slack`. Text output prints the card, then `Brief:` and the `trace` command. |
+| `trace BRIEF_ID NUMBER` | One number on a saved card, resolved from its stored evidence: object with `brief_id`, `account_id`, `n`, `kind` (`"record"` or `"sentence"`), `source`, `record_ref`, and `receipt` (`audit_id`, `tool`, `status`, `http_status`). A record adds `fields`. A sentence adds `text`, `speaker`, `role`, `basis`, `at`, `raw_sha256`, and `sanitizer_version`. An unknown brief or a number that is not on the card exits `2`. |
 | `audit` | Array of receipts in stored order. `--follow` prints one JSON line per changed receipt until Ctrl-C, which exits `130`. See [audit](audit.md). |
-| `usage`, `evaluate` | See [usage](audit.md) and [evaluation](briefs.md). |
-| `demo` | One renewal on invented data. Object with `schema_version: 1`, `status: "accepted"`, `workflow: "renewal-demo"`, `data_mode: "demo"`, `sources` (each `"demo_fixture"`), `rep`, `account`, `lookup` (`query`, `matches`, `receipt_id`), `denied_read` (`read_call_notes`, status `403`, required scope `calls:read`), `brief` (copied from the saved artifact), `injection` (`quoted: true`, `activities_created: 0`), `audit` (`run_id`, `rows: 6`), and `activities_created: 0`. Each run adds one saved brief and six receipts and creates no activity. An older or edited book in the folder exits `4`. |
+| `demo` | One law-firm renewal on invented data. Object with `schema_version: 2`, `status: "accepted"`, `workflow: "renewal-demo"`, `data_mode: "demo"`, `sources` (each `"demo_fixture"`), `account`, `lookup` (`query`, `matches`, `receipt_id`), `denied_read` (`read_call_notes`, status `403`, required scope `calls:read`), `brief` (`brief_id`, `account_id`, `as_of`, `text`, and `units`, copied from the saved artifact), `audit` (`run_id`, `rows: 6`), and `activities_created: 0`. Each run adds one saved card and six receipts and creates no activity. An older or edited book in the folder exits `4`. |
 | `verify` | Object with the connector checks, `briefs`, receipt counts, and `injection_brief`. `--with-slack` adds `slack` and `workflow`. See [tools](tools.md). |
 | `serve` | One `ready` line, then one `tool_call` line per tool attempt. See the server output below. |
 | `connect` | Prints MCP client configuration. Object with `app`, `status`, `setup`, `limits`, and `documentation`. A grant adds `config`, the private file's path. `--transport stdio` adds `transport`, `config`, and `backup`. See [client setup](clients.md). |
@@ -55,7 +55,7 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 | `calls import`, `calls list`, `calls inspect` | `import`: import metadata with the `created`, `selected`, and `reassigned` outcomes and no transcript text. `list`: object with an `imports` array and a nullable `next_after` cursor. `inspect`: import metadata and the excerpt units, and `--full` adds all units and the exact `original_text`. See [calls](calls.md). |
 
 `--state-dir` defaults: `var/renewal-demo` for `demo`, `var/verification` for `verify`, `var/v2` for
-`serve`, `brief`, `audit`, `usage`, `doctor`, `connect`, `mcp`, and `check-brief`.
+`serve`, `brief`, `trace`, `audit`, `doctor`, `connect`, and `mcp`.
 
 ## Choose the sources
 

@@ -13,8 +13,8 @@ from urllib.parse import parse_qs, urlsplit
 import httpx2
 
 from gtm_connector import slack_auth, slack_reader
-from gtm_connector.briefing import check_saved_brief, create_brief
-from gtm_connector.citations import BriefRejected, check_brief
+from gtm_connector.briefing import create_brief, trace_saved
+from gtm_connector.units import BriefRejected, build
 from slack_live_fixtures import ACCOUNT, CHANNEL, PARENT, ROWS, REAL_READER, LiveSlackFixture
 from test_slack_auth import ACCESS, CLIENT, NEW_ACCESS, REFRESH, identity, replacement, saved_document, seed
 from test_slack_auth_integration import FakeServer, RoutedStream
@@ -222,11 +222,12 @@ class LiveSlackHTTPTests(LiveSlackFixture, unittest.TestCase):
             self.assertEqual(metric["message_response_bytes"], len(self.response_bodies[0]) + len(self.response_bodies[3]))
         self.reply["messages"][0]["text"] = "Later upstream text is not historical evidence."
         with patch.object(slack_reader.SlackRepliesProvider, "replies", side_effect=AssertionError("No network")):
-            self.assertEqual(check_saved_brief(self.state, artifact["brief_id"], artifact["text"]), artifact["text"])
+            first = next(unit for unit in artifact["units"] if unit["source"] == "slack")
+            self.assertEqual(trace_saved(self.state, artifact["brief_id"], first["n"])["text"], ROWS[0]["text"])
         changed = deepcopy(artifact["evidence"])
         next(row for row in changed["records"] if row["record_ref"].startswith("slack/"))["body"] = "Altered"
         with self.assertRaises(BriefRejected):
-            check_brief(artifact["text"], changed)
+            build(changed)
 
     def test_real_tcp_rate_retry_then_cursor_pages_share_counts_and_cutoff(self):
         self.response("GET", "/api/conversations.replies", {"ok": False, "error": "ratelimited"},

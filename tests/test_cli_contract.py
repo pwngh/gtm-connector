@@ -17,8 +17,8 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = (
-    "seed", "accounts", "account", "evaluate", "demo", "verify", "serve", "audit", "brief",
-    "check-brief", "usage", "doctor", "connect", "completion", "salesforce", "calls", "slack",
+    "seed", "accounts", "account", "demo", "verify", "serve", "audit", "brief", "trace",
+    "doctor", "connect", "mcp", "completion", "salesforce", "calls", "slack",
 )
 
 
@@ -90,7 +90,7 @@ class CLIContractTests(unittest.TestCase):
         parser = build_parser()
         self.assertEqual(parser.parse_args(["demo"]).state_dir, Path("var/renewal-demo"))
         self.assertEqual(parser.parse_args(["verify"]).state_dir, Path("var/verification"))
-        for arguments in (["brief", "acc-007"], ["serve"], ["doctor"], ["audit"], ["usage"]):
+        for arguments in (["brief", "acc-007"], ["serve"], ["doctor"], ["audit"], ["trace", "brief-x", "1"]):
             self.assertEqual(parser.parse_args(arguments).state_dir, Path("var/v2"))
         for command in ("demo", "verify"):
             self.assertEqual(parser.parse_args([command, "--state-dir", "var/chosen"]).state_dir, Path("var/chosen"))
@@ -215,13 +215,22 @@ runpy.run_module("gtm_connector", run_name="__main__")
                 self.assertEqual(process.returncode, 0, process.stderr)
                 self.assertEqual(process.stderr, "")
 
+    def test_removed_commands_and_options_are_usage_errors(self):
+        for arguments in (("evaluate",), ("usage",), ("check-brief", "brief-x", "candidate.txt"),
+                          ("brief", "acc-001", "--adapter", "ollama"), ("brief", "acc-001", "--model", "local")):
+            with self.subTest(arguments=arguments):
+                result = self.run_cli(*arguments)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("Traceback", result.stderr)
+
     def test_empty_as_of_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             result = self.run_cli("brief", "acc-001", "--as-of", "", "--state-dir", directory)
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertEqual(result.stdout, "")
 
-    def test_busy_state_and_failed_evaluation_keep_recovery_context(self):
+    def test_busy_state_and_failed_checks_keep_recovery_context(self):
         from contextlib import redirect_stderr, redirect_stdout
         import io
         from unittest.mock import patch
@@ -233,12 +242,10 @@ runpy.run_module("gtm_connector", run_name="__main__")
             self.assertIn(directory, json.loads(result.stderr)["error"]["next"])
         with patch("gtm_connector.cli._run", return_value={"status": "failed"}), \
                 redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as errors:
-            self.assertEqual(main(["evaluate", "--adapter", "ollama", "--model", "local model",
-                                   "--with-slack", "--json"]), 4)
+            self.assertEqual(main(["doctor", "--state-dir", "var/my state", "--json"]), 4)
         import shlex
         self.assertEqual(shlex.split(json.loads(errors.getvalue())["error"]["next"]),
-                         ["gtm-connector", "evaluate", "--adapter", "ollama", "--model", "local model",
-                          "--with-slack", "--json"])
+                         ["gtm-connector", "doctor", "--state-dir", "var/my state"])
 
     def terminal_output(self, *arguments):
         master, slave = os.openpty()

@@ -127,7 +127,8 @@ class StdioBridgeTests(unittest.TestCase):
                                          scenario)
             self.assertIn("prepare_renewal_brief", {tool.name for tool in tools.tools})
             self.assertFalse(prepared.is_error, prepared)
-            self.assertTrue(prepared.structured_content["brief"]["text"].startswith("- "))
+            self.assertTrue(prepared.structured_content["brief"]["text"].startswith(
+                "DEAL CARD: Juniper Crest Learning (acc-007) as of 2027-01-15\n"))
             self.assertEqual(write.error.data["reason"], "crm_write_disabled")
             outer = [row for row in runtime.connector.audit.read() if row["tool"] == "prepare_renewal_brief"]
             self.assertEqual([(row["status"], row["http_status"]) for row in outer], [("ok", 200)])

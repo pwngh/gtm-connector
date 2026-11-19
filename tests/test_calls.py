@@ -23,26 +23,33 @@ class CallsTests(unittest.TestCase):
 
     def test_source_has_only_notes_with_stable_readable_ids(self):
         calls.seed(self.connection)
-        self.assertEqual(calls.counts(self.connection), 29)
+        self.assertEqual(calls.counts(self.connection), 30)
         tables = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         self.assertEqual(tables, {"call_notes"})
-        expected = [f"note-{i:03}" for i in range(1, 31) if i != 4]
+        expected = sorted([f"note-{i:03}" for i in range(1, 31) if i != 4] + ["note-003b"])
         self.assertEqual([row["id"] for row in notes_snapshot(self.connection)], expected)
         self.assertEqual(calls.read_call_notes(self.connection, "acc-004"), [])
         self.assertEqual(calls.read_call_notes(self.connection, "acc-missing"), [])
         self.assertEqual(calls.read_call_notes(self.connection, "acc-001' OR 1=1 --"), [])
 
-    def test_contradiction_is_retained_in_both_sources(self):
+    def test_the_showcase_call_names_a_seller_and_a_customer_and_no_other_note_names_anyone(self):
         calls.seed(self.connection)
         crm = store.connect(Path(self.directory.name) / "crm.sqlite3")
         self.addCleanup(crm.close)
         store.initialize(crm)
         store.seed(crm)
         opportunity = store.list_opportunities(crm, "acc-003")[0]
-        note = calls.read_call_notes(self.connection, "acc-003")[0]
-        self.assertEqual(opportunity["stage"], "closed_won")
-        self.assertIn("has not approved", note["body"])
-        self.assertIn("budget remains unsigned", note["body"])
+        contact = store.get_account(crm, "acc-003")["contacts"][0]
+        seller, customer = calls.read_call_notes(self.connection, "acc-003")
+        self.assertEqual((opportunity["stage"], opportunity["amount_cents"], opportunity["currency"]),
+                         ("negotiation", 45_000_000, "USD"))
+        self.assertEqual((seller["id"], seller["speaker"]), ("note-003", "Morgan Reed"))
+        self.assertIn("countersigned by January 30", seller["body"])
+        self.assertEqual((customer["id"], customer["speaker"]), ("note-003b", contact["name"]))
+        self.assertEqual(customer["body"], calls.CUSTOMER_REPLY)
+        self.assertEqual(seller["called_at"], customer["called_at"])
+        self.assertEqual({row["speaker"] for row in notes_snapshot(self.connection)
+                          if row["account_id"] != "acc-003"}, {None})
         self.assertEqual(store.counts(crm)["activities"], 0)
 
     def test_injection_is_raw_data_and_does_not_modify_crm(self):
@@ -93,7 +100,7 @@ class CallsTests(unittest.TestCase):
         self.assertEqual(calls.read_call_notes(reader, "acc-001")[0]["id"], "note-001")
         with self.assertRaises(sqlite3.OperationalError):
             reader.execute("DELETE FROM call_notes")
-        self.assertEqual(calls.counts(self.connection), 29)
+        self.assertEqual(calls.counts(self.connection), 30)
 
     def test_seed_failure_is_atomic(self):
         self.connection.execute(
@@ -119,6 +126,24 @@ class CallsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             calls.seed(self.connection)
         self.assertEqual(notes_snapshot(self.connection), before)
+
+    def test_a_note_added_beside_the_complete_book_is_kept(self):
+        calls.seed(self.connection)
+        with self.connection:
+            self.connection.execute("INSERT INTO call_notes VALUES (?, ?, ?, ?, ?)", (
+                "note-901", "acc-901", "2027-01-14T10:00:00Z", "Invented Speaker", "An added note."))
+        before = notes_snapshot(self.connection)
+        calls.seed(self.connection)
+        self.assertEqual(notes_snapshot(self.connection), before)
+        self.assertEqual(calls.counts(self.connection), 31)
+
+    def test_a_calls_database_without_a_speaker_column_is_refused(self):
+        legacy = calls.connect(Path(self.directory.name) / "legacy.sqlite3")
+        self.addCleanup(legacy.close)
+        legacy.execute("CREATE TABLE call_notes (id TEXT PRIMARY KEY NOT NULL, account_id TEXT NOT NULL, "
+                       "called_at TEXT NOT NULL, body TEXT NOT NULL)")
+        with self.assertRaisesRegex(ValueError, "no speaker column; use a fresh database path"):
+            calls.initialize(legacy)
 
     def test_crm_database_cannot_be_used_for_calls(self):
         crm = store.connect(Path(self.directory.name) / "crm.sqlite3")

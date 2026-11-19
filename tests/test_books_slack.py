@@ -15,14 +15,12 @@ import httpx2
 
 from gtm_connector import slack_auth, slack_reader
 from gtm_connector.briefing import create_brief
-from gtm_connector.citations import BriefRejected, check_brief
 from gtm_connector.runtime import Runtime
 from gtm_connector.slack_mapping import save_slack_mapping
 from gtm_connector.slack_reader import SlackReadError
 from gtm_connector.slack_workflow import resolve_slack_account
 from test_slack_auth import Clock, saved_document, seed
 from tests import varied
-from tests.test_results import citations, corruptions
 
 
 AS_OF = varied.AS_OF.isoformat()
@@ -203,25 +201,13 @@ class BookSlackTests(unittest.TestCase):
         if requests is not None:
             self.assertEqual(len(upstream.requests) - before, requests)
 
-    def brief(self, runtime, upstream, rows, channel, served, *, pages, others=(), spoil=True):
-        """Create the brief and hold it to the thread as it was served and to the rules for every brief."""
+    def brief(self, runtime, upstream, rows, channel, served, *, pages, others=()):
+        """Create the card and hold it to the thread as it was served and to what every card promises."""
         account_id = rows["crm"][0][1][0]
         asked = len(upstream.requests)
         brief = create_brief(runtime, account_id, as_of=AS_OF, include_slack=True)
-        self.assertEqual(brief["status"], "accepted")
         self.assertEqual(json.loads((runtime.directory / "briefs" / f"{brief['brief_id']}.json").read_text()), brief)
-        lines, evidence = brief["text"].splitlines(), brief["evidence"]
-        records = {f"[{record['record_ref']}]" for record in evidence["records"]}
-        known = records | {f"[audit/{row['audit_id']}]" for row in evidence["receipts"]}
-        known.add(f"[run/{brief['brief_id']}]")
-        cited = set()
-        for line in lines:
-            # Source text never breaks out of its line: one printable bullet that ends in known citations.
-            self.assertTrue(line.startswith("- ") and line.isascii() and line.isprintable())
-            self.assertTrue(citations(line))
-            self.assertLessEqual(set(citations(line)), known)
-            cited.update(citations(line))
-        self.assertLessEqual(records, cited)
+        card, evidence, units = varied.hold(self, brief), brief["evidence"], brief["units"]
         # Only this thread was asked for, with the saved credential, one request per page or retry.
         for request in upstream.requests[asked:]:
             self.assertEqual((request.method, request.url.path, request.url.params["channel"], request.url.params["ts"],
@@ -231,6 +217,7 @@ class BookSlackTests(unittest.TestCase):
         self.assertEqual((counts["pages"], counts["messages"], counts["http_attempts"]),
                          (pages, len(served), len(upstream.requests) - asked))
         # Every message is one record: literal text, thread order, and the time and author label the reader gives.
+        records = {record["record_ref"] for record in evidence["records"]}
         messages = [record for record in evidence["records"] if record["record_ref"].startswith("slack/")]
         label = lambda row: ("Deleted Slack message" if row.get("subtype") == "tombstone"  # noqa: E731
                              else "Slack app" if "bot_id" in row or row.get("subtype") == "bot_message"
@@ -239,48 +226,36 @@ class BookSlackTests(unittest.TestCase):
             "+00:00", "Z")
         self.assertEqual([(row["body"], row["sent_at"], row["author"], row["channel"]) for row in messages],
                          [(row["text"], sent(row), label(row), channel) for row in served])
-        self.assertEqual(records - {f"[{row['record_ref']}]" for row in messages},
-                         {f"[{store}/{table}/{row[0]}]" for store in ("crm", "calls") for table, row in rows[store]})
-        # The brief ends with the observation, the omission counts, each message once in order, and the proposal.
-        receipt = f"[audit/{evidence['receipts'][-1]['audit_id']}]"
-        self.assertEqual(evidence["receipts"][-1]["tool"], "read_slack_messages")
+        self.assertEqual(records - {row["record_ref"] for row in messages},
+                         {f"{store}/{table}/{row[0]}" for store in ("crm", "calls") for table, row in rows[store]})
+        # The sentences of the thread close the units in thread order. Each carries the message's time and the raw
+        # user ID as its speaker, and no Slack author is a customer.
+        spoken = [unit for unit in units if unit["source"] == "slack"]
+        self.assertEqual(units[len(units) - len(spoken):], spoken)
+        order = [record["record_ref"] for record in messages]
+        self.assertEqual([order.index(unit["record_ref"]) for unit in spoken],
+                         sorted(order.index(unit["record_ref"]) for unit in spoken))
+        by_ref = {record["record_ref"]: row for row, record in zip(served, messages)}
+        for unit in spoken:
+            row = by_ref[unit["record_ref"]]
+            self.assertEqual((unit["at"], unit["speaker"], unit["role"]), (sent(row), row.get("user"), "unknown"))
+        # The card says what the read covered and what it left out: the omission counts and other threads.
         omitted = [sum(len(row.get(key, [])) for row in served) for key in ("files", "attachments", "blocks")]
-        quotes = [
-            f'- Untrusted Slack message at "{sent(row)}" from "{label(row)}" says {json.dumps(row["text"])}. '
-            + ("Edit metadata was not reported; earlier edits are unknown." if "edited" not in row else
-               f'Slack reports an edit at "{row["edited"]["ts"]}"; earlier text is unknown.')
-            + (f' Message kind: "{row["subtype"]}".' if "subtype" in row else "") + f" [{record['record_ref']}]"
-            for row, record in zip(served, messages)]
-        tail = [
-            f"- Slack observation: {len(served)} {'message' if len(served) == 1 else 'messages'} returned across "
-            f"{pages} {'page' if pages == 1 else 'pages'}; creation cutoff \"{self.cutoff}\"; fetched at "
-            f"\"{self.clock.now().isoformat().replace('+00:00', 'Z')}\". Paging completed for the selected "
-            "API-visible thread text. This is not a complete archive; previous edits and deletions are unknown, "
-            f"and content may have changed during paging. {receipt}",
-            f"- Slack non-text content was omitted from evidence. Omitted entry counts are files {omitted[0]}, "
-            f"attachments {omitted[1]}, and blocks {omitted[2]}. No separate requests fetched non-text resources. "
-            f"Links and mentions remain literal source text. {receipt}",
-            *quotes,
-            "- Proposed follow-up: Ask the account owner to review the cited renewal context. "
-            f"[crm/accounts/{account_id}]"]
-        self.assertEqual(lines[-len(tail):], tail)
-        # Before them come the CRM and call note lines of the rows, signals first, and nothing of another kind.
-        stated, signals = varied.expected({**rows, "slack": []}, brief)
-        self.assertEqual(lines[:len(signals)], signals)
-        self.assertEqual(sum(line.startswith("- Signal: ") for line in lines), len(signals))
-        rest = lines[len(signals):-len(tail)]
-        self.assertEqual(sorted(set(stated) - set(rest)), [])
-        for line in set(rest) - set(stated):
-            self.assertTrue(line.startswith(varied.DERIVED), line[:80])
+        self.assertIn(
+            f"  Slack: {len(served)} {'message was' if len(served) == 1 else 'messages were'} read from one selected "
+            f"thread, and paging completed. Not read: files ({omitted[0]}), attachments ({omitted[1]}), "
+            f"blocks ({omitted[2]}), earlier versions of edited messages, and every other thread.", card["NOT READ"])
+        times = {sent(row) for row in served}
+        self.assertLessEqual({when for _, _, _, source, when, _, _ in varied.said(card) if source == "Slack"}, times)
+        # The CRM values and the signals are those of the rows.
+        wanted = varied.expected({**rows, "slack": []}, brief)
+        self.assertEqual(card["ATTENTION"], wanted["signals"])
+        varied.hold_values(self, card, wanted["fixed"], (("Opportunity", "opportunities", wanted["opportunities"]),
+                                                         ("Contact", "contacts", wanted["contacts"])))
         # Nothing from another thread, and nothing that is not message text, is in the saved result.
         saved = "\0".join(strings(brief))
         self.assertEqual([text for text in others if text in saved or escaped(text) in saved], [])
         self.assertNotIn(HIDDEN, saved)
-        # The checker returns the brief unchanged and refuses each way of spoiling it.
-        self.assertEqual(check_brief(brief["text"], evidence), brief["text"])
-        for spoiled, candidate in corruptions(brief["text"]) if spoil else ():
-            with self.subTest(account=account_id, corruption=spoiled), self.assertRaises(BriefRejected):
-                check_brief(candidate, evidence)
         return brief
 
     def test_every_book_thread_is_quoted_whole_and_in_order(self):
@@ -337,7 +312,7 @@ class BookSlackTests(unittest.TestCase):
                     load(runtime.directory, account)
                     size = len(thread_["pages"][0]["messages"])
                     channel = self.serve(runtime, upstream, "acc-400", rows, page=size)
-                    self.brief(runtime, upstream, account, channel, rows, pages=-(-len(rows) // size), spoil=False)
+                    self.brief(runtime, upstream, account, channel, rows, pages=-(-len(rows) // size))
                     read += 1
         self.assertEqual(read, 36)
 
@@ -350,8 +325,7 @@ class BookSlackTests(unittest.TestCase):
         receipt = brief["evidence"]["receipts"][-1]
         self.assertEqual((brief["status"], receipt["tool"], receipt["http_status"], upstream.requests),
                          ("accepted", "read_slack_messages", 403, []))
-        self.assertIn("- Slack messages were unavailable because the token lacks slack:read. "
-                      f"[audit/{receipt['audit_id']}]", brief["text"].splitlines())
+        self.assertIn("  Slack: not read. The grant lacks slack:read.", varied.hold(self, brief)["NOT READ"])
         self.assertFalse(any(record["record_ref"].startswith("slack/") for record in brief["evidence"]["records"]))
 
     def test_size_cases_have_exact_outcomes(self):
@@ -412,7 +386,7 @@ class BookSlackTests(unittest.TestCase):
                 load(runtime.directory, rows)
                 self.assertIsNone(refusal(served, self.cutoff))
                 channel = self.serve(runtime, upstream, "acc-400", served, **options)
-                brief = self.brief(runtime, upstream, rows, channel, served, pages=pages, spoil=len(served) < 50)
+                brief = self.brief(runtime, upstream, rows, channel, served, pages=pages)
                 counts = brief["evidence"]["thread_snapshot"]["counts"]
                 retries = sum(map(len, dict(options.get("first", ())).values()))
                 repeats = (pages - 1) * bool(options.get("repeat_parent"))
@@ -487,8 +461,7 @@ class BookSlackTests(unittest.TestCase):
                 rows = varied.demo_rows(400, PLAIN)
                 load(runtime.directory, rows)
                 channel = self.serve(runtime, upstream, "acc-400", served(padding))
-                evidence = self.brief(runtime, upstream, rows, channel, served(padding), pages=1,
-                                      spoil=False)["evidence"]
+                evidence = self.brief(runtime, upstream, rows, channel, served(padding), pages=1)["evidence"]
             # The result of the read: its records and its snapshot, as ASCII JSON.
             records = [row for row in evidence["records"] if row["record_ref"].startswith("slack/")]
             return len(json.dumps({"source": "slack", "untrusted_data": True, "records": records,

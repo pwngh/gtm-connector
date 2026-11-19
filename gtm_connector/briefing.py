@@ -1,4 +1,4 @@
-"""A fixed read-only MCP workflow with an untrusted draft and a citation gate."""
+"""Read one account through the audited tools and render its Deal card."""
 
 from copy import deepcopy
 from datetime import date
@@ -12,9 +12,8 @@ import uuid
 import httpx2
 
 from . import strict_json
-from .citations import BriefRejected, build_facts, check_brief, diagnose_brief
-from .drafting import DraftResult, FixtureDraftAdapter
 from .seed import DEMO_AS_OF
+from .units import BriefRejected, build, trace
 
 
 class BriefingError(RuntimeError):
@@ -23,8 +22,11 @@ class BriefingError(RuntimeError):
 
 def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_OF,
                      *, include_slack=False, crm_backend="sqlite", calls_backend="fixture", calls_binding=None,
-                     slack_backend="fixture", crm_binding=None, slack_binding=None):
-    """Read through MCP; recognized calls/Slack scope denials may remain visible."""
+                     slack_backend="fixture", crm_binding=None, slack_binding=None, sellers=()):
+    """Read through MCP and return the checked evidence, its units, and the card.
+
+    A calls or Slack scope denial is kept as an outcome the card states.
+    """
     if crm_backend not in ("sqlite", "salesforce"):
         raise ValueError("unsupported CRM backend")
     if calls_backend not in ("fixture", "imported"):
@@ -37,7 +39,7 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
                          if crm_backend == "salesforce" else "account ID must have the form acc-001")
     if not isinstance(as_of, str) or date.fromisoformat(as_of).isoformat() != as_of:
         raise ValueError("as-of date must use YYYY-MM-DD")
-    records, statuses = [], {"notes_status": "available"}
+    records, statuses = [], {"notes_status": "available", "slack_status": "not_requested"}
     thread_snapshot = None
     read_plan = [("get_account", "crm"), ("list_opportunities", "crm"),
                  ("read_call_notes", "calls")]
@@ -103,33 +105,22 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise BriefingError(f"{tool}: invalid or failed tool result; no brief generated") from exc
     return assemble_evidence(brief_id, account_id, as_of, records, audit.read(brief_id), statuses,
-                             thread_snapshot, include_slack=include_slack, crm_backend=crm_backend,
-                             calls_backend=calls_backend, calls_binding=calls_binding,
-                             slack_backend=slack_backend, crm_binding=crm_binding, slack_binding=slack_binding)
+                             thread_snapshot, crm_backend=crm_backend, calls_backend=calls_backend,
+                             calls_binding=calls_binding, slack_backend=slack_backend, crm_binding=crm_binding,
+                             slack_binding=slack_binding, sellers=sellers)
 
 
 def assemble_evidence(brief_id, account_id, as_of, records, receipts, statuses, thread_snapshot, *,
-                      include_slack, crm_backend, calls_backend, calls_binding, slack_backend,
-                      crm_binding, slack_binding):
-    """Build one workflow's evidence and check it, including one matching receipt per read."""
+                      crm_backend, calls_backend, calls_binding, slack_backend, crm_binding, slack_binding, sellers):
+    """Build one evidence snapshot and check it, including one matching receipt per read."""
     evidence = {"brief_id": brief_id, "account_id": account_id, "as_of": as_of,
-                "records": records, "receipts": receipts, **statuses}
-    if include_slack and slack_backend == "slack":
-        evidence.update(workflow_version=5, crm_backend=crm_backend, crm_binding=deepcopy(crm_binding),
-                        calls_backend=calls_backend, slack_backend="slack", slack_binding=deepcopy(slack_binding),
-                        thread_snapshot=thread_snapshot)
-        if calls_backend == "imported":
-            evidence["calls_binding"] = deepcopy(calls_binding)
-    elif calls_backend == "imported":
-        evidence.update(workflow_version=4, crm_backend=crm_backend, calls_backend="imported",
-                        calls_binding=deepcopy(calls_binding))
-    elif crm_backend == "salesforce":
-        evidence.update(workflow_version=3, crm_backend="salesforce")
-    elif include_slack:
-        evidence["workflow_version"] = 2
-    # This also verifies account associations and one matching receipt per read.
-    build_facts(evidence)
-    return evidence
+                "records": records, "receipts": receipts, **statuses,
+                "crm_backend": crm_backend, "crm_binding": deepcopy(crm_binding),
+                "calls_backend": calls_backend, "calls_binding": deepcopy(calls_binding),
+                "slack_backend": slack_backend, "slack_binding": deepcopy(slack_binding),
+                "thread_snapshot": thread_snapshot, "sellers": list(sellers)}
+    units, text = build(evidence)
+    return evidence, units, text
 
 
 def _artifact_path(directory, brief_id):
@@ -156,11 +147,17 @@ def _save_artifact(path, artifact):
             temporary.unlink(missing_ok=True)
 
 
-def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, adapter=None,
-                 observe_draft=None, include_slack=False, grant_slack=True):
-    """Collect, draft, check, then publish; the draft adapter receives data only."""
-    crm_backend = getattr(runtime, "crm_backend", "sqlite")
-    # Offline citation checks do not need to import the MCP server or TLS runtime.
+def source_names(crm_backend, calls_backend, slack_backend, include_slack):
+    """Which kind of source supplied each part of a card."""
+    return {"crm": "salesforce" if crm_backend == "salesforce" else "demo_fixture",
+            "calls": "imported_transcript" if calls_backend == "imported" else "demo_fixture",
+            **({"slack": "slack" if slack_backend == "slack" else "demo_fixture"} if include_slack else {})}
+
+
+def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, include_slack=False,
+                 grant_slack=True):
+    """Collect, check, render, and save one card. No model takes part."""
+    # Offline checks do not need to import the MCP server or TLS runtime.
     from .client import LocalClient
 
     brief_id = "brief-" + uuid.uuid4().hex
@@ -170,89 +167,37 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, a
     try:
         with LocalClient(runtime.config) as client:
             token = client.authorize(scopes)
-            evidence = collect_evidence(client, token, runtime.connector.audit, account_id, brief_id,
-                                        as_of, include_slack=include_slack, crm_backend=crm_backend,
-                                        calls_backend=getattr(runtime, "calls_backend", "fixture"),
-                                        calls_binding=getattr(runtime, "calls_binding", None),
-                                        slack_backend=getattr(runtime, "slack_backend", "fixture"),
-                                        crm_binding=getattr(runtime, "crm_binding", None),
-                                        slack_binding=getattr(runtime, "slack_binding", None))
+            evidence, units, text = collect_evidence(
+                client, token, runtime.connector.audit, account_id, brief_id, as_of, include_slack=include_slack,
+                crm_backend=runtime.crm_backend, calls_backend=runtime.calls_backend,
+                calls_binding=runtime.calls_binding, slack_backend=runtime.slack_backend,
+                crm_binding=runtime.crm_binding, slack_binding=runtime.slack_binding, sellers=runtime.sellers)
     except httpx2.HTTPError as exc:
         raise BriefingError("authorization transport failed; no brief generated") from exc
-    adapter = FixtureDraftAdapter() if adapter is None else adapter
-    fixture = type(adapter) is FixtureDraftAdapter
-    artifact = {"schema_version": 1, "brief_id": brief_id, "account_id": account_id, "as_of": as_of,
-                "adapter": ("extractive" if evidence.get("workflow_version") in (4, 5) else "fixture") if fixture else
-                           "ollama" if getattr(adapter, "name", None) == "ollama" else "custom",
-                "model_usage": {"model": None, "input_tokens": 0 if fixture else None,
-                                "output_tokens": 0 if fixture else None},
-                "status": "collected", "evidence": evidence}
-    if evidence.get("workflow_version") in (4, 5):
-        artifact["sources"] = {"crm": "salesforce" if crm_backend == "salesforce" else "demo_fixture",
-                               "calls": ("imported_transcript" if evidence["calls_backend"] == "imported"
-                                         else "demo_fixture"),
-                               **({"slack": ("slack" if evidence.get("slack_backend") == "slack"
-                                             else "demo_fixture")} if include_slack else {})}
+    except BriefRejected as exc:
+        raise BriefRejected(f"brief {brief_id} rejected; no card published") from exc
+    artifact = {"schema_version": 2, "brief_id": brief_id, "account_id": account_id, "as_of": as_of,
+                "status": "accepted",
+                "sources": source_names(runtime.crm_backend, runtime.calls_backend, runtime.slack_backend,
+                                        include_slack),
+                "text": text, "units": units, "evidence": evidence}
     path = _artifact_path(runtime.directory, brief_id)
     if path.parent.is_symlink():
         raise ValueError("briefs directory must not be a symbolic link")
     path.parent.mkdir(mode=0o700, exist_ok=True)
     path.parent.chmod(0o700)
-
-    def save():
-        _save_artifact(path, artifact)
-
-    save()
-    try:
-        # Candidate text and mutations to this copy cannot change the trusted snapshot.
-        candidate = adapter.draft(deepcopy(evidence))
-        result = candidate if isinstance(candidate, DraftResult) else DraftResult(
-            candidate, input_tokens=0 if fixture else None, output_tokens=0 if fixture else None)
-        if (result.model is not None and not isinstance(result.model, str)) or any(
-                value is not None and (type(value) is not int or value < 0)
-                for value in (result.input_tokens, result.output_tokens)):
-            raise BriefRejected("Draft adapter returned invalid usage.")
-        artifact["model_usage"] = {"model": result.model, "input_tokens": result.input_tokens,
-                                   "output_tokens": result.output_tokens}
-        if isinstance(candidate, DraftResult):
-            artifact["model_metadata"] = result.metadata
-            artifact["draft_diagnostics"] = (
-                diagnose_brief(result.text, evidence) if isinstance(result.text, str) else
-                {"candidate_lines": None, "rejected_lines": None,
-                 "missing_required_claims": None, "reason_counts": {}})
-            if result.error_code:
-                artifact["draft_diagnostics"]["error_code"] = result.error_code
-        if observe_draft is not None:
-            # Trusted evaluation code may inspect the raw candidate in memory.
-            # Its copy cannot replace evidence used by the publication gate.
-            observe_draft(result, deepcopy(evidence))
-        if result.error_code:
-            raise BriefRejected("Draft adapter did not return a complete candidate.")
-        candidate = result.text
-        checked = check_brief(candidate, evidence)
-        if include_slack:
-            follow_ups = [line for line in checked.splitlines()
-                          if line.startswith("- Proposed follow-up:")]
-            if len(follow_ups) != 1:
-                raise BriefRejected("The Slack workflow requires one checked proposed follow-up.")
-    except Exception as exc:
-        artifact["status"] = "rejected"
-        save()
-        raise BriefRejected(f"brief {brief_id} rejected; no draft published") from exc
-    artifact.update(status="accepted", text=checked)
-    if include_slack:
-        artifact["proposed_follow_up"] = follow_ups[0]
-    save()
+    _save_artifact(path, artifact)
     return artifact
 
 
-def check_saved_brief(directory, brief_id, candidate):
-    """Check candidate text against the stored MCP snapshot, never its own citations alone."""
-    path = _artifact_path(directory, brief_id)
-    artifact = strict_json.loads(path.read_text())
-    if (not isinstance(artifact, dict) or artifact.get("schema_version") != 1
-            or artifact.get("brief_id") != brief_id
-            or not isinstance(artifact.get("evidence"), dict)
+def trace_saved(directory, brief_id, number):
+    """Resolve one number on a saved card from its stored evidence, never from the card's own text."""
+    try:
+        artifact = strict_json.loads(_artifact_path(directory, brief_id).read_text())
+    except FileNotFoundError:
+        raise ValueError("No saved card has this brief ID in this state folder.") from None
+    if (not isinstance(artifact, dict) or artifact.get("schema_version") != 2
+            or artifact.get("brief_id") != brief_id or not isinstance(artifact.get("evidence"), dict)
             or artifact["evidence"].get("brief_id") != brief_id):
         raise ValueError("invalid saved brief evidence")
-    return check_brief(candidate, artifact["evidence"])
+    return {"brief_id": brief_id, "account_id": artifact["account_id"], **trace(artifact["evidence"], number)}

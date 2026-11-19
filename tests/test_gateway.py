@@ -267,7 +267,7 @@ class GatewayTests(unittest.TestCase):
         added = [(f"acc-{number}", f"Invented account {300 - number}") for number in range(101, 201)]
         with closing(sqlite3.connect(self.crm_path)) as connection, connection:
             connection.executemany(
-                "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'healthy', '')", added)
+                "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'USD', 'healthy', '')", added)
             book = connection.execute("SELECT id, name FROM accounts").fetchall()
         self.open_connector()
         listed = self.rpc("tools/list", token="crm").json()["result"]["tools"]

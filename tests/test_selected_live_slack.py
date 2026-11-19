@@ -38,7 +38,9 @@ class SelectedLiveSlackTests(LiveSlackFixture, unittest.TestCase):
             self.assertEqual(brief["slack_status"], "available")
             self.assertEqual(len(self.requests), 1)
             saved = json.loads((self.state / "selected-briefs" / (brief["brief_id"] + ".json")).read_text())
-            self.assertEqual(saved["evidence"]["workflow_version"], 5)
+            self.assertEqual((saved["schema_version"], saved["evidence"]["slack_backend"]), (2, "slack"))
+            self.assertIn("  Slack: 3 messages were read from one selected thread, and paging completed.",
+                          brief["text"])
 
             reread = owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}).json()["result"]
             self.assertFalse(reread.get("isError"), reread)
@@ -144,7 +146,7 @@ class SelectedLiveSlackTests(LiveSlackFixture, unittest.TestCase):
                 self.assertFalse(result.get("isError"), result)
                 brief = result["structuredContent"]["brief"]
                 self.assertEqual(brief["slack_status"], "denied")
-                self.assertIn("Slack messages were unavailable because the token lacks slack:read.", brief["text"])
+                self.assertIn("  Slack: not read. The grant lacks slack:read.", brief["text"])
                 slack_reads = [row for row in receipts
                                if row["brief_id"] == brief["brief_id"] and row["tool"] == "read_slack_messages"]
                 self.assertEqual([(row["status"], row["http_status"]) for row in slack_reads], [("error", 403)])

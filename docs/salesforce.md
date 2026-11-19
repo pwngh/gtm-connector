@@ -32,7 +32,7 @@ ID and says when more match. To connect a client, see [client setup](clients.md)
 named accounts, see [selection](selection.md).
 
 `salesforce check` tests the credentials, the edition or environment, the four objects' fields, an
-account search, and one renewal candidate's account, opportunities, and brief. A failed step fails
+account search, and one renewal candidate's account, opportunities, and card. A failed step fails
 the steps that depend on it with `prerequisite_failed`. A failed report exits `4`.
 
 Startup writes the instance origin, org ID, and environment to private `crm-connection.json` in the
@@ -55,19 +55,24 @@ environment. This fallback cannot refresh an expired token, so replace the varia
 default CLI org is ever selected. The instance address must be an HTTPS My Domain origin ending in
 `.my.salesforce.com`, with no path, query, credentials, or nonstandard port.
 
-## Briefs
+## Cards
 
-A brief selects the Contract with the earliest non-null `EndDate` on or after the planning date,
-breaking ties by Contract ID. Its status category must be `Draft`, `InApproval`, or `Activated`. The
-connector uses the `EndDate` that Salesforce returns and never calculates one. Salesforce fills
-`EndDate` from `StartDate` and `ContractTerm` only when the org's automatic calculation setting is
-on. With such a contract, the brief states its status, category, and end date, and that a Draft or
-InApproval contract has not been activated. Without one, the account is still briefed: the brief
-says that Salesforce returned no contract with an end date on or after the planning date, and when
-an earlier end date exists, it opens with a signal naming the latest and its category. Every brief
-says that ARR and CRM renewal risk are not mapped from standard fields. The built-in draft gives
-each other contract on the account one line with its status, category, and end date. Amounts are
-printed with `(currency unknown)`.
+A [Deal card](briefs.md) for a Salesforce account plans from the Contract with the earliest non-null
+`EndDate` on or after the planning date, breaking ties by Contract ID. Its status category must be
+`Draft`, `InApproval`, or `Activated`. The connector uses the `EndDate` that Salesforce returns and
+never calculates one. Salesforce fills `EndDate` from `StartDate` and `ContractTerm` only when the
+org's automatic calculation setting is on.
+
+| The org returns | The card prints |
+| --- | --- |
+| A contract ending on or after the date | `Contract end` with the date, the days until it, and the status. A Draft or InApproval contract is called a planning candidate, not activated. |
+| No such contract | `Contract end: Missing`, and a signal naming the latest earlier end date when there is one. |
+| Other contracts | One `Contract` line each with status and end date, five at most. |
+| An opportunity | Name, raw stage, amount, close date, closed, and won. The amount prints `(currency Missing)`, because the reader returns no currency. |
+| A null industry, title, email, or amount | `Missing` |
+
+Every card says under `NOT READ` that annual recurring revenue and renewal risk are not mapped from
+standard fields.
 
 ## Field mapping
 
@@ -118,7 +123,7 @@ printed with `(currency unknown)`.
 | `salesforce_invalid_arguments` | An account ID, search text, or date is invalid. | Use an `acc-sf-` ID, a shorter query, or a `YYYY-MM-DD` date. |
 | `salesforce_account_number_ambiguous` | An AccountNumber lookup returned a number that is not a literal match. `calls import` reports `calls_account_ambiguous`. | Select the account with `--account` and its canonical ID. |
 | `source_identity_mismatch` | The state folder belongs to another connection or cannot prove its identity. | Restore the original connection, or use an unused `--state-dir`. |
-| `renewal_fields_unmapped` | `salesforce check` found no account with a Contract `EndDate` on or after the planning date. Briefs still work and say so. | Create a Draft Contract with `StartDate` and `ContractTerm`, or verify read access to `EndDate`. |
+| `renewal_fields_unmapped` | `salesforce check` found no account with a Contract `EndDate` on or after the planning date. Cards still work and say so. | Create a Draft Contract with `StartDate` and `ContractTerm`, or verify read access to `EndDate`. |
 | `crm_write_disabled` | A client attempted a write. | Do not retry. The Salesforce backend is read-only. |
 
 ## Demo book

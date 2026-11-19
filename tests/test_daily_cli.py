@@ -149,14 +149,6 @@ class DailyCLITests(unittest.TestCase):
             self.assertTrue(all(row["fix"] for row in report["checks"] if row["status"] == "fail"))
             self.assertFalse(state.exists())
 
-    def test_json_evaluation_has_separate_progress(self):
-        result = self.run_cli("evaluate", "--json")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["status"], "passed")
-        messages = [json.loads(line)["progress"] for line in result.stderr.splitlines()]
-        self.assertEqual([message["completed"] for message in messages], list(range(21)))
-        self.assertTrue(all(message["total"] == 20 for message in messages))
-
     def test_follow_receipts_prints_json_lines_and_interrupts_cleanly(self):
         with tempfile.TemporaryDirectory() as directory, Runtime(directory) as runtime:
             with LocalClient(runtime.config) as client:

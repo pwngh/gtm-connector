@@ -13,14 +13,12 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from gtm_connector import calls, slack
 from gtm_connector.audit import read_audit
-from gtm_connector.briefing import _save_artifact, check_saved_brief, create_brief
+from gtm_connector.briefing import trace_saved
 from gtm_connector.cli import main
 from gtm_connector.client import LocalClient
 from gtm_connector.demo import run
 from gtm_connector.runtime import Runtime
-from gtm_connector.usage import build_usage_report
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,44 +44,38 @@ class NarrativeDemoTests(unittest.TestCase):
             return connection.execute("SELECT count(*) FROM activities").fetchone()[0]
 
     def assert_story(self, result):
-        self.assertEqual(result["schema_version"], 1)
+        self.assertEqual(set(result), {"schema_version", "status", "workflow", "data_mode", "sources", "account",
+                                       "lookup", "denied_read", "brief", "audit", "activities_created"})
+        self.assertEqual(result["schema_version"], 2)
         self.assertEqual(result["status"], "accepted")
         self.assertEqual(result["workflow"], "renewal-demo")
         self.assertEqual(result["data_mode"], "demo")
         self.assertEqual(result["sources"], {"crm": "demo_fixture", "calls": "demo_fixture", "slack": "demo_fixture"})
-        self.assertEqual(result["rep"], {"name": "Morgan Reed", "role": "Account executive"})
         self.assertEqual(result["account"], {
-            "id": "acc-007", "name": "Juniper Crest Learning", "record_ref": "crm/accounts/acc-007",
-            "renewal_date": "2027-01-29"})
+            "id": "acc-003", "name": "Thornfield Wren LLP", "record_ref": "crm/accounts/acc-003",
+            "renewal_date": "2027-02-08"})
         self.assertEqual(result["lookup"]["query"], result["account"]["name"])
         self.assertEqual(result["lookup"]["matches"], 1)
         self.assertEqual(result["denied_read"]["tool"], "read_call_notes")
         self.assertEqual(result["denied_read"]["status"], 403)
         self.assertEqual(result["denied_read"]["required_scope"], "calls:read")
         self.assertEqual(result["activities_created"], 0)
-        self.assertEqual(result["injection"], {
-            "record_ref": "calls/call_notes/note-007", "slack_record_ref": "slack/messages/msg-007",
-            "quoted": True, "activities_created": 0})
         brief = result["brief"]
-        self.assertEqual(brief["account_id"], "acc-007")
+        self.assertEqual(set(brief), {"brief_id", "account_id", "as_of", "text", "units"})
+        self.assertEqual(brief["account_id"], "acc-003")
         self.assertEqual(brief["as_of"], "2027-01-15")
         artifact = self.saved(brief["brief_id"])
         self.assertEqual(brief, {key: artifact[key] for key in brief})
-        self.assertEqual(artifact["status"], "accepted")
-        self.assertEqual(artifact["adapter"], "fixture")
-        self.assertEqual(artifact["model_usage"], {"model": None, "input_tokens": 0, "output_tokens": 0})
-        self.assertIn("Renewal is in 14 days", brief["text"])
-        self.assertIn(brief["proposed_follow_up"], brief["text"].splitlines())
-        self.assertEqual(brief["text"].count("Proposed follow-up:"), 1)
+        self.assertEqual((artifact["schema_version"], artifact["status"]), (2, "accepted"))
+        self.assertTrue(brief["text"].startswith("DEAL CARD: Thornfield Wren LLP (acc-003) as of 2027-01-15\n"))
+        self.assertIn("  Renewal date: 2027-02-08, in 24 days [1]", brief["text"].splitlines())
         records = {row["record_ref"]: row for row in artifact["evidence"]["records"]}
-        for reference, instruction in (("calls/call_notes/note-007", calls.INJECTION_TEXT),
-                                       ("slack/messages/msg-007", slack.INJECTION_TEXT)):
-            self.assertIn(instruction, records[reference]["body"])
-            self.assertIn(json.dumps(records[reference]["body"], ensure_ascii=True), brief["text"])
-            self.assertIn("[" + reference + "]", brief["text"])
-        self.assertIn("[crm/accounts/acc-007]", brief["text"])
-        self.assertEqual({row.get("account_id", row["id"]) for row in records.values()}, {"acc-007"})
-        check_saved_brief(self.state, brief["brief_id"], brief["text"])
+        self.assertEqual({row.get("account_id", row["id"]) for row in records.values()}, {"acc-003"})
+        # Every number on the card traces to a record of this account and a finished receipt.
+        for unit in brief["units"]:
+            traced = trace_saved(self.state, brief["brief_id"], unit["n"])
+            self.assertIn(traced["record_ref"], records)
+            self.assertEqual(traced["receipt"]["status"], "ok")
         receipts = read_audit(self.state / "audit.sqlite3", result["audit"]["run_id"])
         brief_receipts = read_audit(self.state / "audit.sqlite3", brief["brief_id"])
         self.assertEqual([(row["tool"], row["http_status"]) for row in receipts],
@@ -120,12 +112,10 @@ class NarrativeDemoTests(unittest.TestCase):
         self.assertNotEqual(first["brief"]["brief_id"], second["brief"]["brief_id"])
         self.assertEqual(first["account"], second["account"])
         self.assertEqual(grants, [["crm:read"], ["crm:read", "calls:read", "slack:read"]] * 2)
-        usage = build_usage_report(self.state)
-        self.assertEqual(usage["calls"], {"total": 12, "ok": 10, "error": 2, "pending": 0})
-        self.assertEqual(usage["model_tokens"], {"saved_briefs": 2, "unknown_briefs": 0,
-                                               "input_tokens": 0, "output_tokens": 0})
+        self.assertEqual([row["status"] for row in read_audit(self.state / "audit.sqlite3")].count("ok"), 10)
+        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 12)
         owner = json.loads((self.state / "owner.json").read_text())
-        rendered = json.dumps([first, second, usage])
+        rendered = json.dumps([first, second])
         for secret in [owner["owner_secret"], *tokens]:
             self.assertNotIn(secret, rendered)
 
@@ -142,14 +132,12 @@ class NarrativeDemoTests(unittest.TestCase):
         artifacts = list((self.state / "briefs").glob("*.json"))
         self.assertEqual(len(artifacts), 1)
         artifact = json.loads(artifacts[0].read_text())
-        self.assertTrue(completed.stdout.startswith("Morgan Reed prepares Juniper Crest Learning's renewal.\n"))
-        self.assertIn("Sources: CRM, call notes, and Slack use invented demo fixtures.", completed.stdout)
-        self.assertEqual(completed.stdout.count("Sources:"), 1)
-        self.assertIn("Call-note access was refused", completed.stdout)
-        self.assertIn(f"Brief: {artifact['brief_id']}\nAs of: {artifact['as_of']}\n\n" + artifact["text"],
-                      completed.stdout)
-        self.assertEqual(completed.stdout.count("Proposed follow-up:"), 1)
-        self.assertTrue(completed.stdout.endswith("No activities were created. The follow-up remains a proposal.\n"))
+        self.assertTrue(completed.stdout.startswith(
+            "Call-note access was refused (HTTP 403) for a grant without calls:read.\n"
+            "Every source below is an invented demo fixture.\n\n" + artifact["text"]))
+        self.assertTrue(completed.stdout.endswith(
+            f"Brief: {artifact['brief_id']}\nResolve any number: gtm-connector trace {artifact['brief_id']} N "
+            f"--state-dir {shlex.quote(str(self.state))}\n"))
         self.assertNotIn("Idempotent write", completed.stdout)
         self.assertNotIn("Rate limit", completed.stdout)
         self.assertNotIn("\x1b", completed.stdout)
@@ -160,7 +148,7 @@ class NarrativeDemoTests(unittest.TestCase):
         with Runtime(self.state):
             pass
         with closing(sqlite3.connect(self.state / "crm.sqlite3")) as connection, connection:
-            connection.execute("UPDATE accounts SET name = ? WHERE id = 'acc-007'", ("Changed invented account",))
+            connection.execute("UPDATE accounts SET name = ? WHERE id = 'acc-003'", ("Changed invented account",))
         before = {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}
         occupied = self.directory / "renewal-demo-fresh"
         occupied.mkdir()
@@ -171,7 +159,7 @@ class NarrativeDemoTests(unittest.TestCase):
         error = json.loads(completed.stderr)["error"]
         self.assertEqual(error["code"], "check_failed")
         self.assertIn("older or edited book", error["message"])
-        self.assertIn("Juniper Crest Learning", error["message"])
+        self.assertIn("Thornfield Wren LLP (acc-003)", error["message"])
         self.assertEqual(shlex.split(error["next"]),
                          ["gtm-connector", "demo", "--state-dir", str(self.directory / "renewal-demo-fresh-2")])
         self.assertFalse((self.directory / "renewal-demo-fresh-2").exists())
@@ -180,68 +168,12 @@ class NarrativeDemoTests(unittest.TestCase):
         self.assertFalse((self.state / "briefs").exists())
         self.assertEqual(self.activities(), 0)
 
-    def test_changed_injection_does_not_claim_a_proof_that_did_not_run(self):
-        for database, table, identifier in (("calls", "call_notes", "note-007"), ("slack", "messages", "msg-007")):
-            with self.subTest(source=database):
-                self.state = self.directory / database
-                with Runtime(self.state):
-                    pass
-                with closing(sqlite3.connect(self.state / (database + ".sqlite3"))) as connection, connection:
-                    connection.execute(f"UPDATE {table} SET body = ? WHERE id = ?",
-                                       ("Invented ordinary note", identifier))
-                saved_statuses = []
-
-                def observe_save(path, artifact):
-                    saved_statuses.append(artifact["status"])
-                    _save_artifact(path, artifact)
-
-                with patch("gtm_connector.briefing._save_artifact", side_effect=observe_save), \
-                        redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
-                    code = main(["demo", "--json", "--state-dir", str(self.state)])
-                self.assertEqual(code, 4, stderr.getvalue())
-                self.assertEqual(stdout.getvalue(), "")
-                error = json.loads(stderr.getvalue())["error"]
-                self.assertEqual(error["code"], "check_failed")
-                self.assertIn("older or edited book", error["message"])
-                self.assertIn("quoted data", error["message"])
-                self.assertIn(identifier, error["message"])
-                self.assertEqual(shlex.split(error["next"]),
-                                 ["gtm-connector", "demo", "--state-dir", str(self.directory / "renewal-demo-fresh")])
-                self.assertEqual(saved_statuses, ["collected", "rejected"])
-                artifacts = list((self.state / "briefs").glob("*.json"))
-                self.assertEqual(len(artifacts), 1)
-                artifact = json.loads(artifacts[0].read_text())
-                self.assertEqual(artifact["status"], "rejected")
-                self.assertNotIn("text", artifact)
-                self.assertNotIn("proposed_follow_up", artifact)
-                usage = build_usage_report(self.state)
-                self.assertEqual([brief["status"] for brief in usage["briefs"]], ["rejected"])
-                self.assertEqual(usage["calls"], {"total": 6, "ok": 5, "error": 1, "pending": 0})
-                self.assertEqual(self.activities(), 0)
-
-    def test_account_change_between_lookup_and_draft_is_rejected_before_publication(self):
-        def change_account(runtime, *args, **kwargs):
-            with closing(sqlite3.connect(runtime.directory / "crm.sqlite3")) as connection, connection:
-                connection.execute("UPDATE accounts SET industry = 'Changed invented industry' WHERE id = 'acc-007'")
-            return create_brief(runtime, *args, **kwargs)
-
-        with patch("gtm_connector.demo.create_brief", side_effect=change_account), \
-                redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
-            code = main(["demo", "--json", "--state-dir", str(self.state)])
-        self.assertEqual(code, 4)
-        self.assertEqual(stdout.getvalue(), "")
-        self.assertIn("account changed between lookup", json.loads(stderr.getvalue())["error"]["message"])
-        artifacts = list((self.state / "briefs").glob("*.json"))
-        self.assertEqual(len(artifacts), 1)
-        self.assertEqual(json.loads(artifacts[0].read_text())["status"], "rejected")
-        self.assertEqual([brief["status"] for brief in build_usage_report(self.state)["briefs"]], ["rejected"])
-
     def test_default_demo_and_verification_leave_older_v2_state_untouched(self):
         legacy = self.directory / "var" / "v2"
         with Runtime(legacy):
             pass
         with closing(sqlite3.connect(legacy / "crm.sqlite3")) as connection, connection:
-            connection.execute("UPDATE accounts SET name = 'Fixture account acc-007' WHERE id = 'acc-007'")
+            connection.execute("UPDATE accounts SET name = 'Fixture account acc-003' WHERE id = 'acc-003'")
         before = {path.name: path.read_bytes() for path in legacy.iterdir() if path.is_file()}
         for command, folder in (("demo", "renewal-demo"), ("verify", "verification")):
             completed = subprocess.run([sys.executable, "-m", "gtm_connector", command, "--json"],
@@ -255,7 +187,7 @@ class NarrativeDemoTests(unittest.TestCase):
         self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 6)
         self.state = self.directory / "var" / "verification"
         self.assertEqual(self.activities(), 1)
-        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 23)
+        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 21)
 
     def test_existing_demo_preflight_refuses_a_symlink_before_opening_the_database(self):
         with Runtime(self.state):

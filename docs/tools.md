@@ -20,30 +20,31 @@ SQLite store of invented records.
   `has_more: true` beside `records`. Otherwise the field is absent. The receipt lists the records
   returned.
 - `serve --selection FILE` limits reads to the selected accounts and replaces `log_activity` with
-  `prepare_renewal_brief` and `read_renewal_brief`. See [selection](selection.md).
+  `prepare_renewal_brief` and `read_renewal_brief`, which return a [Deal card](briefs.md). See
+  [selection](selection.md).
 - `serve --crm-backend salesforce` reads CRM from Salesforce and omits `log_activity`. See
   [Salesforce](salesforce.md).
 
 ## Fixtures
 
 Every company, person, and message is invented, with `.example` email domains. `crm.sqlite3` holds
-30 accounts, 30 contacts, and 30 opportunities. `calls.sqlite3` holds 29 notes, and `slack.sqlite3`
-holds 29 messages. The fixed demo date is `2027-01-15`.
+30 accounts, 30 contacts, and 30 opportunities, each amount with a currency. `calls.sqlite3` holds
+30 notes, and `slack.sqlite3` holds 29 messages. The fixed demo date is `2027-01-15`.
 
 | Record | Case |
 | --- | --- |
 | `acc-001`, `acc-002` | `acc-001` renews in 17 days. `acc-002` is at risk. |
-| `opp-003`, `note-003`, `msg-003` | `closed_won` against unapproved procurement and a delayed security review. |
+| `acc-003` | Thornfield Wren LLP, the demo account. Its opportunity is in negotiation for USD 450,000.00. On one call (`note-003`, `note-003b`) a named seller promises a date and a named contact sets a condition. `msg-003` is a seller's report with a channel mention, a link, a second-hand figure, and one attached file that is not read. |
 | `acc-004`, `acc-005` | `acc-004` has no call notes. `acc-005` has no Slack messages. |
-| `acc-006` | An October call note and a January Slack message disagree on seats. Only the note's age is flagged. |
-| `acc-007` | Juniper Crest Learning, the demo account. It renews on `2027-01-29`. Its contact has no role. |
+| `acc-006` | An October call note and a January Slack message disagree on seats. Both are quoted, and only the note's age is a signal. |
+| `acc-007` | Juniper Crest Learning renews on `2027-01-29`. Its contact has no role. |
 | `note-007`, `msg-007` | Each asks for a write. Both stay quoted data, and no activity is created. |
 
-Reseeding keeps record IDs, edits, and activities. An incomplete or unknown fixture set is
-rejected, and so is a combined CRM and calls database. Nothing is migrated, so use a fresh
-`--state-dir`.
+Reseeding keeps record IDs, edits, activities, and accounts added beside the book. An incomplete
+fixture set is rejected, and so are a combined CRM and calls database and a database without the
+currency, speaker, or file-count column. Nothing is migrated, so use a fresh `--state-dir`.
 
-`seed`, `accounts --query 'Alder Vale'`, and `account acc-007` read the SQLite file directly,
+`seed`, `accounts --query 'Alder Vale'`, and `account acc-003` read the SQLite file directly,
 outside MCP authorization. `--db PATH` selects the file, and only `seed` creates it. The account
 view leaves out opportunities and call notes. With `--crm-backend salesforce`, `accounts` and
 `account` read through the scoped, audited gateway instead.
@@ -61,15 +62,13 @@ view leaves out opportunities and call notes. With `--crm-backend salesforce`, `
 | `accounts` | `30` |
 | `notes_without_scope.status`, `rate_limit.status` | HTTP `403` and HTTP `429` |
 | `empty_notes` | `[]` for `acc-004` |
-| `conflicting_sources`, `contradiction_flags` | `opp-003` says `closed_won`; `note-003` reports unapproved procurement. One flag cites both. |
 | `idempotent_write` | `requests: 2`, `activities: 1` |
-| `audit_rows`, `brief_audit_rows` | `14` connector receipts, and `9` reads across the three briefs |
-| `briefs` | Two briefs: `acc-003` with calls access, `acc-001` without it |
-| `injection_note.activities_created`, `injection_brief.activities_created` | `0`, the second across all three briefs, including `acc-007` |
-| `uncited_candidate_rejected` | `true` |
+| `audit_rows`, `brief_audit_rows` | `12` connector receipts, and `9` reads across the three cards |
+| `briefs` | Two [Deal cards](briefs.md): `acc-003` with calls access, `acc-001` without it |
+| `injection_note.activities_created`, `injection_brief.activities_created` | `0`, the second across all three cards, including `acc-007` |
 
-`verify --with-slack` adds a Slack read to each brief and checks the CRM-to-Slack, Slack-to-CRM,
-and Slack-to-calls denials. `audit_rows` becomes `18` and `brief_audit_rows` becomes `12`. See
+`verify --with-slack` adds a Slack read to each card and checks the CRM-to-Slack, Slack-to-CRM,
+and Slack-to-calls denials. `audit_rows` becomes `16` and `brief_audit_rows` becomes `12`. See
 [Slack context](slack.md).
 
 ## Protocol and authorization

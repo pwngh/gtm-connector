@@ -104,7 +104,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
         self.assertTrue(result["structuredContent"]["untrusted_data"])
         return result["structuredContent"]["records"]
 
-    def test_bound_brief_cites_all_three_sources_and_has_no_default_source_overlay(self):
+    def test_bound_card_numbers_all_three_sources_and_has_no_default_source_overlay(self):
         with self.runtime() as runtime:
             self.assert_connection_check_only()
             notes = self.rows("calls", "call_notes")
@@ -115,10 +115,10 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
             self.assertEqual({row["account_id"] for row in messages}, set(self.binding.accounts.values()))
             brief = create_brief(runtime, self.account_id, as_of=self.binding.as_of, include_slack=True)
             self.assertEqual(brief["status"], "accepted")
-            for reference in ("crm/accounts/" + self.account_id, "crm/contracts/ctr-sf-800000000000001AAA",
-                              "calls/call_notes/note-demo-001", "slack/messages/msg-demo-001"):
-                self.assertIn("[" + reference + "]", brief["text"])
-            self.assertIn("Proposed follow-up:", brief["text"])
+            cited = {int(number) for number in re.findall(r"\[(\d+)\]", brief["text"])}
+            self.assertLessEqual({"crm/accounts/" + self.account_id, "crm/contracts/ctr-sf-800000000000001AAA",
+                                  "calls/call_notes/note-demo-001", "slack/messages/msg-demo-001"},
+                                 {unit["record_ref"] for unit in brief["units"] if unit["n"] in cited})
             self.assertEqual(len(self.requests), 5)
             receipts = runtime.connector.audit.read(brief["brief_id"])
             self.assertEqual([row["tool"] for row in receipts],
@@ -172,10 +172,10 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
     def test_unbound_account_keeps_empty_sources_and_never_borrows_a_kit_note(self):
         with self.runtime() as runtime:
             brief = create_brief(runtime, UNKNOWN_ACCOUNT, as_of=self.binding.as_of, include_slack=True)
-            self.assertIn("No call notes were returned", brief["text"])
-            self.assertIn("No Slack messages were returned", brief["text"])
-            self.assertNotIn("note-demo-", brief["text"])
-            self.assertNotIn("msg-demo-", brief["text"])
+            self.assertIn("  Calls: no call record was returned for this account.", brief["text"])
+            self.assertIn("  Slack: no message was returned for this account.", brief["text"])
+            self.assertIn("  No sentence was read.", brief["text"])
+            self.assertEqual({unit["source"] for unit in brief["units"]}, {"crm"})
             self.assertEqual(len(self.requests), 5)
 
     def test_same_binding_restart_preserves_source_edits(self):
@@ -301,8 +301,8 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
         credentials.assert_called_once_with("invented", environment="developer")
         result = json.loads(stdout.getvalue())
         self.assertEqual(result["status"], "accepted")
-        self.assertIn("[calls/call_notes/note-demo-001]", result["text"])
-        self.assertIn("[slack/messages/msg-demo-001]", result["text"])
+        self.assertLessEqual({"calls/call_notes/note-demo-001", "slack/messages/msg-demo-001"},
+                             {unit["record_ref"] for unit in result["units"]})
         self.assertEqual(len(self.requests), 5)
         self.assertNotIn(TOKEN, stdout.getvalue())
 
@@ -368,7 +368,7 @@ class SalesforceDemoRuntimeTests(unittest.TestCase):
                         self.assertEqual(stderr.getvalue().count("Sources:"), 1)
                         self.assertEqual("The bound demo kit is " + self.binding.kit_id in stderr.getvalue(), bound)
                         self.assertEqual("Connection identity is verified." in stderr.getvalue(), backend == "salesforce")
-                    self.assertEqual(len(self.rows("calls", "call_notes")), 3 if bound else 29)
+                    self.assertEqual(len(self.rows("calls", "call_notes")), 3 if bound else 30)
                     self.assertEqual(len(self.rows("slack", "messages")), 3 if bound else 29)
                     self.assertEqual((self.state / "source-profile.json").is_file(), bound)
                     if backend == "salesforce":

@@ -1,8 +1,9 @@
 # Import a call transcript
 
-Import a UTF-8 TXT, WebVTT, or SRT export and associate it with one account. The renewal brief then
-quotes a selected excerpt. The connector does not record, transcribe, connect to a call provider,
-or summarize. The original bytes stay in private local state.
+Import a UTF-8 TXT, WebVTT, or SRT export and associate it with one account. The
+[Deal card](briefs.md) then shows a selected excerpt as whole sentences. The connector does not
+record, transcribe, connect to a call provider, or summarize. The original bytes stay in private
+local state.
 
 ## Commands
 
@@ -42,9 +43,12 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
   cues, in file order. Cues may repeat or reorder start times, end where they start, and be
   separated by lines of spaces where a cue follows. A cue that ends before it starts refuses, and so
   does anything after an end time other than WebVTT cue settings.
-- A WebVTT identifier may repeat. One of at most 200 characters with a space in it, as Webex writes
-  a speaker's name, is quoted above its cue. Inline tags such as `<v Name>` are kept as the file has
-  them. An SRT cue may be numbered and carries no other identifier.
+- A WebVTT identifier may repeat. Inline tags such as `<v Name>` are kept as the file has them. An
+  SRT cue may be numbered and carries no other identifier.
+- On a card, each sentence of a cue or line is one numbered unit. Its speaker label is the voice
+  tag that starts a WebVTT cue, or else a cue identifier that is not a number. TXT lines and SRT
+  cues have no label, so their role is `unknown`. `NOT READ` says which lines or cues of how many
+  were read, and that the rest of the call and every other call were not.
 - An import saved by an earlier version of the parser reads as `calls_import_corrupt`. Import the
   file again.
 - Well-formed `Kind:`, `Language:`, and `X-TIMESTAMP-MAP=` lines under the `WEBVTT` line are
