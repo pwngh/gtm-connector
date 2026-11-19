@@ -54,7 +54,7 @@ class LiveSlackBriefingTests(LiveSlackFixture, unittest.TestCase):
             self.assertEqual([row["tool"] for row in evidence["receipts"]],
                              ["get_account", "list_opportunities", "read_call_notes", "read_slack_messages"])
             self.assertTrue(all(row["status"] == "ok" for row in evidence["receipts"]))
-            self.assertEqual(len(runtime.connector.audit.read()), 6)
+            self.assertEqual(len(runtime.connector.audit.read()), 7)
             with closing(sqlite3.connect(self.state / "crm.sqlite3")) as connection:
                 self.assertEqual(connection.execute("SELECT count(*) FROM activities").fetchone()[0], 0)
         connect = sqlite3.connect

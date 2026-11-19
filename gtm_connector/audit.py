@@ -43,6 +43,33 @@ def read_audit(path: str | Path, brief_id: str | None = None, *,
     return records
 
 
+def read_ids(path: str | Path, audit_ids: list[str]) -> list[dict]:
+    """Return exactly these receipts, in the given order, or raise if any is missing."""
+    if (not isinstance(audit_ids, list) or not 1 <= len(audit_ids) <= 16
+            or len(set(audit_ids)) != len(audit_ids)
+            or any(not isinstance(value, str) or len(value) > 64 for value in audit_ids)):
+        raise ValueError("Select 1 to 16 distinct receipt IDs.")
+    query = ("SELECT audit_id, started_at, token_id, tool, arguments, request_id, brief_id, status, "
+             "http_status, row_count, rows, elapsed_ms, error FROM audit_log WHERE audit_id IN ("
+             + ", ".join("?" for _ in audit_ids) + ")")
+    database = Path(path).expanduser().absolute()
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=10)) as connection:
+        connection.row_factory = sqlite3.Row
+        found = {row["audit_id"]: dict(row) for row in connection.execute(query, audit_ids)}
+    if set(found) != set(audit_ids):
+        raise ValueError("Audit receipt not found.")
+    records = []
+    for audit_id in audit_ids:
+        record = found[audit_id]
+        try:
+            for field in ("arguments", "request_id", "rows"):
+                record[field] = json.loads(record[field])
+        except (ValueError, TypeError, RecursionError):
+            raise ValueError("Audit receipt contains invalid JSON.") from None
+        records.append(record)
+    return records
+
+
 class AuditLog:
     def __init__(self, path: str | Path):
         self.path = Path(path).expanduser().absolute()
@@ -122,25 +149,4 @@ class AuditLog:
 
     def read_ids(self, audit_ids: list[str]) -> list[dict]:
         """Return exactly these receipts, in the given order, or raise if any is missing."""
-        if (not isinstance(audit_ids, list) or not 1 <= len(audit_ids) <= 16
-                or len(set(audit_ids)) != len(audit_ids)
-                or any(not isinstance(value, str) or len(value) > 64 for value in audit_ids)):
-            raise ValueError("Select 1 to 16 distinct receipt IDs.")
-        query = ("SELECT audit_id, started_at, token_id, tool, arguments, request_id, brief_id, status, "
-                 "http_status, row_count, rows, elapsed_ms, error FROM audit_log WHERE audit_id IN ("
-                 + ", ".join("?" for _ in audit_ids) + ")")
-        with closing(sqlite3.connect(self.path.as_uri() + "?mode=ro", uri=True, timeout=10)) as connection:
-            connection.row_factory = sqlite3.Row
-            found = {row["audit_id"]: dict(row) for row in connection.execute(query, audit_ids)}
-        if set(found) != set(audit_ids):
-            raise ValueError("Audit receipt not found.")
-        records = []
-        for audit_id in audit_ids:
-            record = found[audit_id]
-            try:
-                for field in ("arguments", "request_id", "rows"):
-                    record[field] = json.loads(record[field])
-            except (ValueError, TypeError, RecursionError):
-                raise ValueError("Audit receipt contains invalid JSON.") from None
-            records.append(record)
-        return records
+        return read_ids(self.path, audit_ids)

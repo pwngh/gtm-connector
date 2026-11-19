@@ -265,7 +265,7 @@ class SalesforceGatewayTests(unittest.TestCase):
             brief = create_brief(self.runtime, ACCOUNT_ID, as_of="2027-01-15", include_slack=include_slack)
             self.assertEqual(brief["status"], "accepted")
             self.assertIn("  Contract end: Missing: no contract ends on or after 2027-01-15 [1]", brief["text"])
-        self.assertEqual(len(self.runtime.connector.audit.read()), 7)
+        self.assertEqual(len(self.runtime.connector.audit.read()), 9)
         self.assertTrue(all(request.method == "GET" for request in self.requests))
 
     def test_default_runtime_keeps_closed_world_tools_and_local_writer(self):

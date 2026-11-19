@@ -6,6 +6,11 @@ An audit receipt is a saved row for one tool attempt and its outcome. It has `au
 presented bearer token, even a rejected one, or `anonymous`. `rows` holds record references.
 `trace` shows the receipt behind any number on a [Deal card](briefs.md).
 
+Saving a card adds one receipt that is not a tool attempt: `save_brief`, the card's seal. Its
+`arguments` name the account and the card, its `rows` hold `briefs/<brief_id>/<SHA-256 of the saved
+file>`, and its `brief_id` is empty, so `--brief ID` lists the card's reads only. `--tool save_brief`
+lists the seals.
+
 ```sh
 gtm-connector audit --brief brief-REPLACE_WITH_ID --state-dir var/renewal-demo
 gtm-connector audit --state-dir var/session --caller anonymous --follow --json

@@ -25,7 +25,7 @@ brief = demo["brief"]
 saved = json.loads((state / "briefs" / (brief["brief_id"] + ".json")).read_text())
 assert {key: saved[key] for key in brief} == brief
 assert demo["status"] == "accepted" and demo["account"]["id"] == brief["account_id"] == "acc-003"
-assert demo["denied_read"]["status"] == 403 and demo["audit"]["rows"] == 6
+assert demo["denied_read"]["status"] == 403 and demo["audit"]["rows"] == 7
 assert demo["activities_created"] == 0
 # Every number printed on the card resolves to a record and a finished receipt.
 for number in sorted({int(value) for value in re.findall(r"\[(\d+)\]", brief["text"])}):
@@ -35,7 +35,7 @@ for number in sorted({int(value) for value in re.findall(r"\[(\d+)\]", brief["te
     assert traced["n"] == number and traced["receipt"]["status"] == "ok"
 print(human_result("demo", demo, state_dir=state))
 print("\nEvery number on the card resolved to its record and audit receipt.")
-print("The saved audit has six receipts: five successful reads and one scope refusal.")
+print("The saved audit has seven receipts: five successful reads, one scope refusal, and the card's seal.")
 print(f"Inspect {directory}/demo.json and state/.")
 print("Run separate connector checks with: .venv/bin/python -m gtm_connector verify "
       "--with-slack --state-dir var/verification")

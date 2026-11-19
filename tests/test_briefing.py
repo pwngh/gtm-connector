@@ -47,7 +47,7 @@ class BriefingTests(unittest.TestCase):
     def test_full_card_numbers_its_values_and_persists_private_evidence_without_credentials(self):
         with Runtime(self.state) as runtime:
             brief = create_brief(runtime, "acc-001")
-            self.assertEqual((brief["schema_version"], brief["status"], brief["as_of"]), (2, "accepted", "2027-01-15"))
+            self.assertEqual((brief["schema_version"], brief["status"], brief["as_of"]), (3, "accepted", "2027-01-15"))
             self.assertEqual(brief["sources"], {"crm": "demo_fixture", "calls": "demo_fixture"})
             lines = brief["text"].splitlines()
             self.assertEqual(lines[0], 'DEAL CARD: "Alder Vale Packaging" (acc-001) as of 2027-01-15')

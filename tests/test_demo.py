@@ -66,7 +66,7 @@ class NarrativeDemoTests(unittest.TestCase):
         self.assertEqual(brief["as_of"], "2027-01-15")
         artifact = self.saved(brief["brief_id"])
         self.assertEqual(brief, {key: artifact[key] for key in brief})
-        self.assertEqual((artifact["schema_version"], artifact["status"]), (2, "accepted"))
+        self.assertEqual((artifact["schema_version"], artifact["status"]), (3, "accepted"))
         self.assertTrue(brief["text"].startswith('DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15\n'))
         self.assertIn("  Renewal date: 2027-02-08, in 24 days [1]", brief["text"].splitlines())
         records = {row["record_ref"]: row for row in artifact["evidence"]["records"]}
@@ -88,8 +88,10 @@ class NarrativeDemoTests(unittest.TestCase):
                          ["get_account", "list_opportunities", "read_call_notes", "read_slack_messages"])
         self.assertEqual([row["status"] for row in receipts + brief_receipts],
                          ["ok", "error", "ok", "ok", "ok", "ok"])
-        self.assertEqual(result["audit"]["rows"], len(receipts + brief_receipts))
+        self.assertEqual(result["audit"]["rows"], len(receipts + brief_receipts) + 1)
         self.assertEqual(len(receipts + brief_receipts), 6)
+        sealed = read_audit(self.state / "audit.sqlite3", tool="save_brief")
+        self.assertIn(("ok", artifact["sealed_by"]), [(row["status"], row["audit_id"]) for row in sealed])
         self.assertFalse(any(row["tool"] == "log_activity" for row in receipts + brief_receipts))
         self.assertEqual(self.activities(), 0)
 
@@ -112,8 +114,8 @@ class NarrativeDemoTests(unittest.TestCase):
         self.assertNotEqual(first["brief"]["brief_id"], second["brief"]["brief_id"])
         self.assertEqual(first["account"], second["account"])
         self.assertEqual(grants, [["crm:read"], ["crm:read", "calls:read", "slack:read"]] * 2)
-        self.assertEqual([row["status"] for row in read_audit(self.state / "audit.sqlite3")].count("ok"), 10)
-        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 12)
+        self.assertEqual([row["status"] for row in read_audit(self.state / "audit.sqlite3")].count("ok"), 12)
+        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 14)
         owner = json.loads((self.state / "owner.json").read_text())
         rendered = json.dumps([first, second])
         for secret in [owner["owner_secret"], *tokens]:
@@ -141,7 +143,7 @@ class NarrativeDemoTests(unittest.TestCase):
         self.assertNotIn("Idempotent write", completed.stdout)
         self.assertNotIn("Rate limit", completed.stdout)
         self.assertNotIn("\x1b", completed.stdout)
-        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 6)
+        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 7)
         self.assertEqual(self.activities(), 0)
 
     def test_changed_account_does_not_fall_back_to_another_story_or_publish_a_brief(self):
@@ -184,10 +186,10 @@ class NarrativeDemoTests(unittest.TestCase):
             self.assertTrue((self.directory / "var" / folder / "audit.sqlite3").is_file())
         self.state = self.directory / "var" / "renewal-demo"
         self.assertEqual(self.activities(), 0)
-        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 6)
+        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 7)
         self.state = self.directory / "var" / "verification"
         self.assertEqual(self.activities(), 1)
-        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 21)
+        self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 24)
 
     def test_existing_demo_preflight_refuses_a_symlink_before_opening_the_database(self):
         with Runtime(self.state):

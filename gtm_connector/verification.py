@@ -4,7 +4,7 @@ from contextlib import closing
 import uuid
 
 from . import store
-from .briefing import create_brief
+from .briefing import SEAL_TOOL, create_brief
 from .client import LocalClient
 from .runtime import Runtime
 
@@ -69,11 +69,14 @@ def run(directory, *, include_slack=False):
                 "SELECT count(*) FROM activities WHERE idempotency_key = 'seed-injection'").fetchone()[0]
             after_briefs = connection.execute("SELECT count(*) FROM activities").fetchone()[0]
         receipts = runtime.connector.audit.read(brief_id)
+        # Each saved card has one finished receipt that seals it.
+        seals = runtime.connector.audit.read_ids([brief["sealed_by"] for brief in (full, restricted, injected)])
         if (len(accounts) != 30 or empty or first != second or activity_count != 1
                 or injected_writes or len(receipts) != (16 if include_slack else 12)
                 or any(r["status"] == "pending" for r in receipts)
                 or before_briefs != after_briefs or len(brief_receipts) != (12 if include_slack else 9)
-                or any(row["tool"] == "log_activity" for row in brief_receipts)):
+                or any(row["tool"] == "log_activity" for row in brief_receipts)
+                or any((row["tool"], row["status"]) != (SEAL_TOOL, "ok") for row in seals)):
             raise ValueError("demo invariant failed; inspect the audit log")
         result = {"status": "connector", "brief_id": brief_id, "accounts": len(accounts),
                 "renewal_record": account[0], "tools": [t["name"] for t in tools.json()["result"]["tools"]],
@@ -88,7 +91,7 @@ def run(directory, *, include_slack=False):
                 "injection_brief": {"brief_id": injected["brief_id"],
                                     "record_ref": "calls/call_notes/note-007",
                                     "activities_created": after_briefs - before_briefs},
-                "brief_audit_rows": len(brief_receipts)}
+                "brief_audit_rows": len(brief_receipts), "seal_audit_rows": len(seals)}
         if include_slack:
             result.update(slack=slack_proof, workflow="crm-calls-slack")
             result["injection_brief"]["slack_record_ref"] = "slack/messages/msg-007"

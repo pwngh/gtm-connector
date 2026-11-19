@@ -2,11 +2,13 @@
 
 from copy import deepcopy
 from datetime import date
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
+import time
 import uuid
 
 import httpx2
@@ -129,9 +131,13 @@ def _artifact_path(directory, brief_id):
     return Path(directory) / "briefs" / (brief_id + ".json")
 
 
-def _save_artifact(path, artifact):
+# The receipt that seals a saved card. It names the digest of the saved bytes and belongs to no brief, so the
+# receipts of the card's own reads stay exactly the ones in its evidence.
+SEAL_TOOL = "save_brief"
+
+
+def _save_artifact(path, payload):
     """Replace a complete snapshot atomically, without a power-loss guarantee."""
-    payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, indent=2).encode()
     if path.is_symlink():
         raise ValueError("brief artifact must not be a symbolic link")
     temporary = None
@@ -176,43 +182,87 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, i
         raise BriefingError("authorization transport failed; no brief generated") from exc
     except BriefRejected as exc:
         raise BriefRejected(f"brief {brief_id} rejected; no card published") from exc
-    artifact = {"schema_version": 2, "brief_id": brief_id, "account_id": account_id, "as_of": as_of,
-                "status": "accepted",
-                "sources": source_names(runtime.crm_backend, runtime.calls_backend, runtime.slack_backend,
-                                        include_slack),
-                "text": text, "units": units, "evidence": evidence}
+    # The seal receipt is committed before the file exists and finished only after the file is whole, so a
+    # card with no finished seal is never traced. A receipt left pending by a hard stop names its card.
+    audit, started = runtime.connector.audit, time.monotonic()
+    seal = audit.start(token=token, tool=SEAL_TOOL, arguments={"account_id": account_id, "brief_id": brief_id})
     path = _artifact_path(runtime.directory, brief_id)
-    if path.parent.is_symlink():
-        raise ValueError("briefs directory must not be a symbolic link")
-    path.parent.mkdir(mode=0o700, exist_ok=True)
-    path.parent.chmod(0o700)
-    _save_artifact(path, artifact)
+    try:
+        artifact = {"schema_version": 3, "brief_id": brief_id, "account_id": account_id, "as_of": as_of,
+                    "status": "accepted", "rules_version": SANITIZER_VERSION, "sealed_by": seal,
+                    "sources": source_names(runtime.crm_backend, runtime.calls_backend, runtime.slack_backend,
+                                            include_slack),
+                    "text": text, "units": units, "evidence": evidence}
+        payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, indent=2).encode()
+        if path.parent.is_symlink():
+            raise ValueError("briefs directory must not be a symbolic link")
+        path.parent.mkdir(mode=0o700, exist_ok=True)
+        path.parent.chmod(0o700)
+        _save_artifact(path, payload)
+        audit.finish(seal, status="ok", http_status=200, elapsed_ms=(time.monotonic() - started) * 1000,
+                     rows=[f"briefs/{brief_id}/{hashlib.sha256(payload).hexdigest()}"])
+    except BaseException:
+        try:
+            path.unlink(missing_ok=True)  # A file whose seal did not finish is not a card.
+            audit.finish(seal, status="error", http_status=500, rows=[], error="brief_save_failed",
+                         elapsed_ms=(time.monotonic() - started) * 1000)
+        except Exception:  # The save already failed; its own error is the one to report.
+            pass
+        raise
+    return artifact
+
+
+def _sealed(directory, brief_id):
+    """A saved card, only when its bytes are the ones its seal receipt names.
+
+    The receipt holds the digest of the whole file: the evidence, the units, the card text, the sellers, and
+    the date. The owner of the folder can still rewrite the file and the audit log together; the log is not
+    tamper-proof.
+    """
+    try:
+        payload = _artifact_path(directory, brief_id).read_bytes()
+    except FileNotFoundError:
+        raise ValueError("No saved card has this brief ID in this state folder.") from None
+    artifact = strict_json.loads(payload)
+    evidence = artifact.get("evidence") if isinstance(artifact, dict) else None
+    if isinstance(artifact, dict) and artifact.get("schema_version") == 2:
+        raise ValueError("This card was saved before cards were sealed. Make the card again.")
+    if (not isinstance(artifact, dict) or artifact.get("schema_version") != 3
+            or artifact.get("brief_id") != brief_id or not isinstance(evidence, dict)
+            or evidence.get("brief_id") != brief_id or artifact.get("account_id") != evidence.get("account_id")
+            or not isinstance(artifact.get("units"), list) or not isinstance(artifact.get("text"), str)):
+        raise ValueError("invalid saved brief evidence")
+    from .audit import read_ids
+    log = Path(directory) / "audit.sqlite3"
+    reference = f"briefs/{brief_id}/{hashlib.sha256(payload).hexdigest()}"
+    try:
+        [seal] = read_ids(log, [str(artifact.get("sealed_by"))])
+    except ValueError:
+        seal = {"tool": None, "status": None, "rows": None}
+    if (seal["tool"], seal["status"]) == (SEAL_TOOL, "pending"):
+        raise ValueError("This card's seal was never finished: saving it was interrupted. Make the card again.")
+    if (seal["tool"], seal["status"], seal["rows"]) != (SEAL_TOOL, "ok", [reference]):
+        raise ValueError("This file is not the card that was sealed: the card or its seal receipt was changed.")
+    # The file is the sealed one, so its receipts are well formed. The log must still hold each of them. A
+    # receipt that names this brief ID later is not one of the card's and does not stop it tracing.
+    try:
+        reads = read_ids(log, [row["audit_id"] for row in evidence["receipts"]])
+    except ValueError:
+        reads = None
+    if reads != evidence["receipts"]:
+        raise ValueError("The sealed card's read receipts are not the ones in the audit log of this state folder.")
     return artifact
 
 
 def trace_saved(directory, brief_id, number):
-    """Resolve one number on a saved card from its stored evidence, never from the card's own text.
+    """Resolve one number on a saved card from its sealed units and evidence, never from the card's text.
 
-    The saved receipts must equal the ones committed to the audit log for this brief, so an edited
-    file does not trace. The file's owner can still edit both; the audit log is not tamper-proof.
+    A card keeps the numbers it was sealed with. Under the same rules number its units must also equal a
+    rebuild from its own evidence. The wording of a card may change between releases; its units may not.
     """
-    try:
-        artifact = strict_json.loads(_artifact_path(directory, brief_id).read_text())
-    except FileNotFoundError:
-        raise ValueError("No saved card has this brief ID in this state folder.") from None
-    if (not isinstance(artifact, dict) or artifact.get("schema_version") != 2
-            or artifact.get("brief_id") != brief_id or not isinstance(artifact.get("evidence"), dict)
-            or artifact["evidence"].get("brief_id") != brief_id
-            or artifact.get("account_id") != artifact["evidence"].get("account_id")):
-        raise ValueError("invalid saved brief evidence")
-    from .audit import read_audit
-    if read_audit(Path(directory) / "audit.sqlite3", brief_id) != artifact["evidence"].get("receipts"):
-        raise ValueError("The saved card does not match the audit log of this state folder.")
-    saved = artifact.get("units")
-    if isinstance(saved, list) and any(isinstance(unit, dict) and unit.get("sanitizer_version", SANITIZER_VERSION)
-                                       != SANITIZER_VERSION for unit in saved):
-        raise ValueError("This card was saved under older rules for sentences, so its numbers may point "
-                         "elsewhere now. Make the card again.")
-    if saved != build(artifact["evidence"])[0]:
-        raise ValueError("The saved card's units do not match its saved evidence.")
-    return {"brief_id": brief_id, "account_id": artifact["account_id"], **trace(artifact["evidence"], number)}
+    artifact = _sealed(directory, brief_id)
+    if artifact.get("rules_version") == SANITIZER_VERSION and artifact["units"] != build(artifact["evidence"])[0]:
+        raise ValueError("This connector builds other units from the card's evidence than the ones sealed, under "
+                         "the same rules number. Make the card again.")
+    return {"brief_id": brief_id, "account_id": artifact["account_id"],
+            **trace(artifact["evidence"], number, artifact["units"])}

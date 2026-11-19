@@ -880,9 +880,13 @@ def build(evidence: dict) -> tuple[list[dict], str]:
         raise BriefRejected("Evidence contains missing or invalid fields.") from None
 
 
-def trace(evidence: dict, number: int) -> dict:
-    """Resolve one number on a card to its source record, its neutralized text, and its audit receipt."""
-    units, _ = build(evidence)
+def trace(evidence: dict, number: int, units: list[dict] | None = None) -> dict:
+    """Resolve one number on a card to its source record, its neutralized text, and its audit receipt.
+
+    `units` are a sealed card's own; without them the card is built from the evidence.
+    """
+    if units is None:
+        units, _ = build(evidence)
     if type(number) is not int or not 1 <= number <= len(units):
         raise ValueError(f"This card has numbers 1 to {len(units)}.")
     unit = dict(units[number - 1])
@@ -894,4 +898,6 @@ def trace(evidence: dict, number: int) -> dict:
         unit["fields"] = {key: (" ".join(safe_text(value)[0].split()) if isinstance(value, str) else value)
                           for key, value in sorted(record.items())
                           if key != "record_ref" and (value is None or isinstance(value, (str, int, bool)))}
+    else:  # Neutralized again, so a card sealed under older rules shows nothing today's would have replaced.
+        unit.update({key: safe_text(unit[key])[0] for key in ("text", "speaker") if isinstance(unit[key], str)})
     return unit

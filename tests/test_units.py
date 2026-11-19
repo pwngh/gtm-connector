@@ -1,10 +1,13 @@
 """Units, neutralized text, speaker roles, and the evidence checks behind a card."""
 
 from copy import deepcopy
+import hashlib
+import json
 import time
 import unittest
 
-from gtm_connector.units import BriefRejected, build, safe_text, sentences, speaker_role, trace, voices
+from gtm_connector.units import (SANITIZER_VERSION, BriefRejected, build, safe_text, sentences, speaker_role, trace,
+                                 voices)
 
 
 def evidence(*, notes_status="available", slack_status="not_requested", notes=None, messages=()):
@@ -372,6 +375,24 @@ class Evidence(unittest.TestCase):
             self.assertIn("  " + line, text.splitlines())
             self.assertNotIn("No sentence was read.", text)
         self.assertIn("  No sentence was read.", build(evidence(notes=[]))[1].splitlines())
+
+    def test_the_rules_number_is_raised_whenever_the_same_evidence_would_be_numbered_differently(self):
+        notes = [("Dana Ito", text) for text in (
+            "See 28 U.S.C. § 1332 for that. We will not sign this quarter.",
+            "No. The client refused. See Docket No. A-17 for the order.",
+            "1. The rider is blocked. 2. Legal is reviewing.",
+            "Thornfield Wren LLP. We require zero retention. Thornfield Wren LLP. Section 4 applies.",
+            "They marked it (Approved? Ask Legal) on Monday. So do I. It is late.",
+            "We will sign\r\nonly if the rider is approved.\n\nThen we talk",
+            "See <https://files.example/redline|the redline> [7]. Sent to Trish. 31 of 45 seats logged in.")]
+        units_, _ = build(evidence(notes=notes, slack_status="available", messages=[
+            ("Morgan Reed", "GC will not sign without ZDR\nProcurement asked for $300k")]))
+        # Every key of every unit but the rules number itself.
+        numbered = [{key: value for key, value in unit.items() if key != "sanitizer_version"} for unit in units_]
+        digest = hashlib.sha256(json.dumps(numbered, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        self.assertEqual((SANITIZER_VERSION, digest), (2, "6710bb6dae2c8722bfae043eb400a65ce19be672f7fa348e51ab03e7af46316c"),
+                         "The same evidence now gives other units. Raise SANITIZER_VERSION and pin the new digest, "
+                         "so a card sealed under the old rules keeps its numbers and is not rebuilt under the new.")
 
     def test_a_denied_source_is_stated_and_never_filled_in(self):
         _, text = build(evidence(notes_status="denied", slack_status="denied"))
