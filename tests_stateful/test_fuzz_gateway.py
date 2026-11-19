@@ -17,6 +17,7 @@ import string
 from tempfile import TemporaryDirectory
 from typing import NamedTuple
 import unittest
+from unittest.mock import patch
 
 import anyio
 from hypothesis import given, HealthCheck, settings, strategies as st
@@ -616,6 +617,60 @@ class TestFoundByFuzzing(GatewayCase):
 
     def test_unknown_prompt_is_not_an_internal_error(self):
         self.gateway.exchange(Draft("prompts/get", {"name": "x"}, name="x").sent())
+
+    def answer(self, sent):
+        """Return (status, JSON body or None, the last receipt or None) for one request."""
+        mark = self.gateway.audit.execute("SELECT coalesce(max(rowid), 0) FROM audit_log").fetchone()[0]
+        messages = self.gateway.client.portal.call(_deliver, self.gateway.connector, sent)
+        payload = b"".join(message.get("body", b"") for message in messages[1:])
+        try:
+            body = json.loads(payload)
+        except ValueError:
+            body = None
+        receipts = [dict(row) for row in self.gateway.audit.execute("SELECT * FROM audit_log WHERE rowid > ?", (mark,))]
+        self.assertLessEqual(len(receipts), 1)
+        return messages[0]["status"], body, receipts[0] if receipts else None
+
+    def test_each_new_refusal_has_its_status_code_and_reason_and_one_finished_receipt(self):
+        no_type = call("get_account", {"account_id": "acc-001"})
+        no_type.headers.remove((b"content-type", b"application/json"))
+        no_id = call("get_account", {"account_id": "acc-001"})
+        del no_id.message["id"]
+        odd_id = call("get_account", {"account_id": "acc-001"})
+        odd_id.message["id"] = {"private": "echo"}
+        for draft, refusal in ((no_type, (415, -32600, "unsupported_media_type")),
+                               (no_id, (400, -32600, "call_id_required")),
+                               (odd_id, (400, -32600, "call_id_required"))):
+            status, body, receipt = self.answer(draft.sent())
+            self.assertEqual((status, body["error"]["code"], body["error"]["data"]["reason"]), refusal)
+            # An id that is not a string or integer is never echoed back.
+            self.assertEqual(body["id"], 1 if draft is no_type else None)
+            self.assertEqual((receipt["status"], receipt["http_status"]), ("error", status))
+        status, body, receipt = self.answer(Draft("prompts/get", {"name": "x"}, name="x").sent())
+        self.assertEqual((status, body["error"]["code"], body["error"]["data"]["reason"], receipt),
+                         (404, -32601, "method_not_found", None))
+
+    def test_only_a_tool_result_is_recorded_as_ok(self):
+        def sdk(body):
+            async def app(scope, receive, send):
+                await send({"type": "http.response.start", "status": 200, "headers": [
+                    (b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+            return patch.object(self.gateway.connector, "sdk_app", app)
+
+        sent = call("get_account", {"account_id": "acc-001"}).sent()
+        for body in (b"", b"[]", b"5", b"not json", b'{"result": 5}', b'{"result": null}', b'{"result": []}',
+                     b'{"result": {"isError": true}}', b'{"result": {}, "error": {}}'):
+            with self.subTest(body=body), sdk(body):
+                status, _, receipt = self.answer(sent)
+                self.assertEqual((status, receipt["status"], json.loads(receipt["rows"])), (200, "error", []))
+        # A result whose own metadata is malformed is still answered, with the receipt it names.
+        records = b'{"records": [{"record_ref": "crm/accounts/acc-001"}]}'
+        with sdk(b'{"result": {"_meta": 5, "structuredContent": ' + records + b"}}"):
+            status, body, receipt = self.answer(sent)
+        self.assertEqual((status, receipt["status"], json.loads(receipt["rows"])),
+                         (200, "ok", ["crm/accounts/acc-001"]))
+        self.assertEqual(body["result"]["_meta"], {"gtm.demo/auditId": receipt["audit_id"]})
 
 
 if __name__ == "__main__":

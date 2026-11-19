@@ -30,6 +30,9 @@ CONTEXT_UNITS = 1
 PARSER_VERSION = 1
 RECORD_VERSION = 1
 _PROVENANCE_RESERVE = 8192
+_VTT_HEADER = re.compile(r"Kind: (?:captions|subtitles|descriptions|chapters|metadata)"
+                         r"|Language: [A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*"
+                         r"|X-TIMESTAMP-MAP=(?:MPEGTS:[0-9]+,LOCAL:[0-9:.]+|LOCAL:[0-9:.]+,MPEGTS:[0-9]+)")
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
 _NOTE_ID = re.compile(r"note-[0-9a-f]{64}\Z")
 _CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
@@ -188,7 +191,7 @@ def parse_transcript(raw: bytes, *, format: str) -> dict[str, Any]:
     else:
         body = 1
         # Exporters write these metadata lines under the signature. Any other text there could be speech.
-        while body < len(lines) and re.fullmatch(r"(?:Kind|Language): [^\r\n]*|X-TIMESTAMP-MAP=[^\r\n]*", lines[body]):
+        while body < len(lines) and _VTT_HEADER.fullmatch(lines[body]):
             body += 1
         if (len(lines) <= body or re.fullmatch(r"WEBVTT(?:[ \t][^\r\n]*)?", lines[0]) is None
                 or "-->" in lines[0] or lines[body] != ""):

@@ -490,7 +490,9 @@ class Connector:
                     self.windows = decision.windows
             if decision.error is not None:
                 error = decision.error
-                rejection = JSONResponse({"jsonrpc": "2.0", "id": request_id,
+                # An id that is not a string or integer is not echoed back.
+                echoed = request_id if type(request_id) in (int, str) else None
+                rejection = JSONResponse({"jsonrpc": "2.0", "id": echoed,
                     "error": {"code": error.code, "message": error.message, "data": {"reason": error.reason}}},
                     error.status, headers=error.headers)
                 await rejection(scope, replay, capture)
@@ -508,28 +510,34 @@ class Connector:
             status = response_start["status"]
             payload = b"".join(m.get("body", b"") for m in messages if m["type"] == "http.response.body")
             try:
-                response = json.loads(payload) if payload else {}
+                response = json.loads(payload) if payload else None
             except ValueError:
                 response = None
-            # A reply that is not a JSON object carries no result, and it is passed on as it is.
-            response = response if isinstance(response, dict) else {"error": None}
-            result = response.get("result", {})
-            result = result if isinstance(result, dict) else {}
-            structured = result.get("structuredContent", {})
-            rows = [row["record_ref"] for row in structured.get("records", [])] if isinstance(structured, dict) else []
-            failed = status >= 400 or bool(result.get("isError")) or "error" in response
+            # Only a tool result counts as released. Any other reply is passed on as it is and recorded as failed.
+            response = response if isinstance(response, dict) else {}
+            result = response.get("result")
+            released = (status < 400 and isinstance(result, dict) and not result.get("isError")
+                        and "error" not in response)
             if audit_id:
-                self.audit.finish(audit_id, status="error" if failed else "ok", http_status=status,
-                    rows=[] if failed else rows, elapsed_ms=(self.clock() - started) * 1000,
-                    error="request_failed" if failed else None)
-                if isinstance(result, dict) and "result" in response:
-                    result.setdefault("_meta", {})["gtm.demo/auditId"] = audit_id
+                rows = []
+                if released and isinstance(result, dict):
+                    structured = result.get("structuredContent")
+                    records = structured.get("records", []) if isinstance(structured, dict) else []
+                    rows = [row["record_ref"] for row in records]
+                if isinstance(result, dict):
+                    # The reply is complete before the receipt is finished, so a receipt never says more than it.
+                    if not isinstance(result.get("_meta"), dict):
+                        result["_meta"] = {}
+                    result["_meta"]["gtm.demo/auditId"] = audit_id
                     payload = json.dumps(response).encode()
                     response_start["headers"] = [
                         (k, v) for k, v in response_start["headers"] if k.lower() != b"content-length"
                     ]
                     response_start["headers"].append((b"content-length", str(len(payload)).encode()))
                     messages = [response_start, {"type": "http.response.body", "body": payload}]
+                self.audit.finish(audit_id, status="ok" if released else "error", http_status=status, rows=rows,
+                    elapsed_ms=(self.clock() - started) * 1000, error=None if released else "request_failed")
+            failed = not released
         except BaseException as exc:
             if audit_id:
                 try:

@@ -104,12 +104,6 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
         return RequestDecision(error=RequestError("request_too_large", "request body exceeds 65536 bytes"))
     if not isinstance(request.parsed, dict):
         return RequestDecision(error=RequestError("invalid_json", "expected one valid JSON-RPC object"))
-    if (sum(name.lower() == b"content-type" for name in request.header_names) != 1
-            or request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json"):
-        return RequestDecision(error=RequestError("unsupported_media_type", "Content-Type must be application/json"))
-    if request.is_call and type(request.parsed.get("id")) not in (int, str):
-        # Without an id the call is a notification: nothing would run and nothing would answer.
-        return RequestDecision(error=RequestError("call_id_required", "a tool call requires a string or integer id"))
     if (request.scheme != "https" or "origin" in request.headers
             or sum(name.lower() == b"host" for name in request.header_names) != 1
             or request.headers.get("host") != urlsplit(policy.resource).netloc):
@@ -122,9 +116,19 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
         }))
     updated = None
     if request.is_call:
+        # Every call a credential makes counts against its window, refused or not.
         updated, limited = charge_rate(windows, raw, rate_time, policy)
         if limited is not None:
             return RequestDecision(windows=updated, error=limited)
+    if (sum(name.lower() == b"content-type" for name in request.header_names) != 1
+            or request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json"):
+        return RequestDecision(windows=updated, error=RequestError(
+            "unsupported_media_type", "Content-Type must be application/json"))
+    if request.is_call:
+        if type(request.parsed.get("id")) not in (int, str):
+            # Without an id the call is a notification: nothing would run and nothing would answer.
+            return RequestDecision(windows=updated, error=RequestError(
+                "call_id_required", "a tool call requires a string or integer id"))
         definition = definitions.get(request.tool)
         required = definition.scope if definition is not None else None
         if required and required not in token.scopes:

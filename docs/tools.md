@@ -98,11 +98,11 @@ A gateway refusal carries `error.data.reason`.
 | --- | --- | --- |
 | `request_too_large` | 413 | -32600 |
 | `invalid_json` | 400 | -32700 |
-| `unsupported_media_type` | 415 | -32600 |
-| `call_id_required` | 400 | -32600 |
 | `untrusted_origin_or_host` | 403 | 1003 |
 | `invalid_token` | 401 | 1001 |
 | `rate_limited` | 429 | 1002 |
+| `unsupported_media_type` | 415 | -32600 |
+| `call_id_required` | 400 | -32600 |
 | `insufficient_scope` | 403 | 1004 |
 | `crm_write_disabled` | 403 | 1005 |
 | `invalid_arguments` | 400 | -32602 |

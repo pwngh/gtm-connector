@@ -117,7 +117,9 @@ class ParsingTests(unittest.TestCase):
                 parsed = imports.parse_transcript((header + cue).encode(), format="vtt")
                 self.assertEqual([unit["text"] for unit in parsed["units"]], ["Dana: hello"])
         # A line that could be speech is never dropped as a header.
-        for header in ("WEBVTT\nDana: this was said", "WEBVTT\nKind: captions\nspoken text"):
+        for header in ("WEBVTT\nDana: this was said", "WEBVTT\nKind: captions\nspoken text",
+                       "WEBVTT\nKind: We must wait for procurement.", "WEBVTT\nLanguage: we never agreed",
+                       "WEBVTT\nX-TIMESTAMP-MAP=the budget is frozen"):
             with self.subTest(header=header):
                 self.assert_code("calls_import_invalid", imports.parse_transcript, (header + cue).encode(),
                                  format="vtt")

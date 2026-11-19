@@ -62,8 +62,8 @@ connector uses the `EndDate` that Salesforce returns and never calculates one. S
 `EndDate` from `StartDate` and `ContractTerm` only when the org's automatic calculation setting is
 on. Every brief states the contract's status, category, and end date, that a Draft or InApproval
 contract has not been activated, and that ARR and CRM renewal risk are not mapped from standard
-fields. Each other contract on the account gets one line with its status, category, and end date.
-Amounts are printed with `(currency unknown)`.
+fields. The built-in draft gives each other contract on the account one line with its status,
+category, and end date. Amounts are printed with `(currency unknown)`.
 
 ## Field mapping
 
