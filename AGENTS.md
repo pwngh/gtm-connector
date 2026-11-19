@@ -20,6 +20,7 @@ One operator runs it. People use the CLI, assistants use the MCP tools. Python 3
 | --- | --- |
 | Request path | `gateway.py`, `request_checks.py`, `tool_definitions.py`, `audit.py`, `auth.py`, `strict_json.py` |
 | Server and state | `runtime.py`, `client.py`, `doctor.py` |
+| Client setup | `connections.py`, `stdio_bridge.py` (the local bridge an assistant app starts) |
 | Briefs | `briefing.py`, `citations.py`, `selection.py`, `selected_briefs.py` |
 | Sources | `store.py`, `calls.py`, `slack.py` (demo), `salesforce*.py`, `calls_import.py`, `slack_*.py` |
 | Commands | `cli.py` |
@@ -56,16 +57,15 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 
 ## Next, in order
 
-1. Salesforce CLI timing, then the stdio bridge so assistant apps can connect.
-2. Set up once: saved sources so commands need no source flags, commands that work while `serve`
+1. Set up once: saved sources so commands need no source flags, commands that work while `serve`
    runs, guided `setup` for Salesforce and Slack with sample data (replaces the demo kit), renewal
    dates from a Contract or a renewal Opportunity, and `renewals` to list and select accounts.
-3. A brief worth reading: numbered evidence and a check tool so an assistant writes the summary and
+2. A brief worth reading: numbered evidence and a check tool so an assistant writes the summary and
    the connector verifies it, a Slack channel window (replaces thread mapping), transcript folders
    (replace hand-picked excerpts), then built-in drafting with a model the operator selects.
-4. Where people work: a Deal card in the terminal and HTML, posting to Slack on command with a
+3. Where people work: a Deal card in the terminal and HTML, posting to Slack on command with a
    receipt, and scheduled briefs for renewals that are due.
-5. Release: a menu chooser, a split `cli.py`, macOS CI, and PyPI.
+4. Release: a menu chooser, a split `cli.py`, macOS CI, and PyPI.
 
 After each of these, use the product end to end as a stranger and fix what only shows from there.
 Later, when a real user needs them: Salesforce task creation, transcript provider adapters,
