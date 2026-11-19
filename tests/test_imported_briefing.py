@@ -232,11 +232,11 @@ class ImportedBriefingTests(unittest.TestCase):
         self.assertEqual(self.said("Dana Crest: We will not\nDana Crest: Approve the agreement.\nMorgan Reed: Fine.\n", "txt"), [
             ("Dana Crest", "customer", "We will not", True), ("Dana Crest", "customer", "Approve the agreement.", True),
             ("Morgan Reed", "seller", "Fine.", False)])
-        # A later line of a cue that opens with a name is that speaker's, not the first one's.
-        vtt = ("WEBVTT\n\n00:01.000 --> 00:03.000\nDana Crest: We will sign.\nMorgan Reed: They agreed to forty seats.\n\n"
+        # A cue is one speaker's turn: its later lines are that speaker's, and styling is still not speech.
+        vtt = ("WEBVTT\n\n00:01.000 --> 00:03.000\nMorgan Reed: Will you sign?\n\n"
                "00:04.000 --> 00:06.000\nDana Crest: <i>Fine.</i>\nThat is all.\n")
         self.assertEqual([row[:3] for row in self.said(vtt, "vtt")], [
-            ("Dana Crest", "customer", "We will sign."), ("Morgan Reed", "seller", "They agreed to forty seats."),
+            ("Morgan Reed", "seller", "Will you sign?"),
             ("Dana Crest", "customer", "Fine."), ("Dana Crest", "customer", "That is all.")])
         # The statement holds for the file, so a name is read the same whichever lines are cited.
         notes = "Dana Crest: We will sign on Friday.\n" + "Morgan Reed: Noted.\n" * 8
@@ -253,6 +253,7 @@ class ImportedBriefingTests(unittest.TestCase):
                 ("txt", "10:30 works for us.\nDana Crest: Fine.\n"),
                 ("txt", "https://files.example/a: the link.\nDana Crest: Fine.\n"),
                 ("txt", "Will you sign? Dana Crest: Fine.\nDana Crest: Fine.\n"),
+                ("txt", "Really?: Fine.\nDana Crest: Fine.\n"),
                 ("txt", "\u540c\u610f\u3057\u307e\u3057\u305f\u3002\u4fa1\u683c: \u56db\u5341\u5e2d\u3067\u3059\u3002\nDana Crest: Fine.\n"),
                 # A name is at most 100 characters, and a colon with nothing after it names nobody.
                 ("txt", "A" + " very" * 20 + " long name: Fine.\nDana Crest: Fine.\n"),
@@ -261,6 +262,14 @@ class ImportedBriefingTests(unittest.TestCase):
                 # A name starts with a letter and holds no markup.
                 ("txt", "3 Buyers: Fine.\nDana Crest: Fine.\n"),
                 ("txt", "Dana <b>Crest</b>: Fine.\nDana Crest: Fine.\n"),
+                # A sentence before the colon is not a name. A title or an initial is.
+                ("txt", "We have signed. Dana Crest: We are ready.\nDana Crest: Fine.\n"),
+                # A cue is one speaker's turn. A second line that opens with a name is a second turn, whoever's
+                # name it is, and markup opened on one line and closed on the next would cross the two.
+                ("srt", "1\n00:00:01,000 --> 00:00:02,000\nDana Crest: We will not\nDana Crest: We approved it.\n"),
+                ("vtt", "WEBVTT\n\n00:01.000 --> 00:03.000\nDana Crest: We will sign.\nMorgan Reed: They agreed.\n"),
+                ("vtt", "WEBVTT\n\n00:01.000 --> 00:03.000\nDana Crest: <ruby>\u4e09<rt>\n"
+                        "Morgan Reed: Three</rt></ruby> seats are available.\n"),
                 # A voice tag or styling before the name: the file already names its speakers another way.
                 ("vtt", "WEBVTT\n\n00:01.000 --> 00:03.000\n<v Dana Crest>Pricing: forty seats.\n"),
                 ("vtt", "WEBVTT\n\n00:01.000 --> 00:03.000\n<i>Dana Crest: Fine.</i>\n")):

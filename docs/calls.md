@@ -21,7 +21,7 @@ gtm-connector brief acc-007 --calls-backend imported --state-dir var/imported-ca
 | `--account ID`, `--account-number NUMBER` | `import` requires exactly one. `--account-number` needs Salesforce. `list` accepts `--account` as a filter. |
 | `--lines FIRST:LAST`, `--cues FIRST:LAST` | The excerpt, in TXT lines or in VTT or SRT cues. Ranges start at one and include the end. |
 | `--called-at TIMESTAMP` | The meeting time with a UTC offset. Without it the call time stays unknown. |
-| `--speaker-names` | States that every line or cue of the file opens with its speaker's name and a colon ("Dana Crest: We will sign."). Each name is then the speaker's label. A file with one line or cue that does not open that way refuses. |
+| `--speaker-names` | States that every line or cue of the file opens with its speaker's name and a colon ("Dana Crest: We will sign.") and is that speaker's turn. Each name is then the speaker's label. A file with one line or cue that is not laid out that way refuses. |
 | `--reassign` | Moves known content, or a known AccountNumber, to another account. |
 | `--state-dir PATH` | The import state folder. `calls` commands default to `var/imported-calls`. |
 | `--after IMPORT_ID` | For `list`: continues after the returned `next_after`. A page holds 100 rows. |
@@ -55,10 +55,12 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
 - The connector never guesses that a file names its speakers at the start of each line. With
   `--speaker-names` you state it, the whole file is checked, and the statement is saved with the
   import, so a name is read the same whichever lines are cited. A name starts with a letter, is at
-  most 100 characters, and holds no colon, question or exclamation mark, or angle bracket. It is
-  the label and is not part of the sentence. Inside a cue, a later line that opens the same way
-  starts that speaker's words. Anyone who can start a line of the file can write a name there, so
-  state it only of an export whose lines the recorder wrote.
+  most 100 characters, and holds no colon, question or exclamation mark, angle bracket, or
+  sentence end ("Dr. J. Vance" is a name; "We have signed. Dana Crest" is not). It is the label and
+  is not part of the sentence. A cue is one speaker's turn: a cue with a second line that opens
+  with a name refuses the file. Anyone who can start a line of the file can write a name there, so
+  state it only of an export whose lines the recorder wrote. `calls list` and `calls inspect` show
+  which imports state it.
 - Neighbouring cues under one speaker label are read together, so a sentence that runs across them
   stays whole: when they are at most two seconds apart, or at most ten when the earlier cue stops
   mid-sentence and the later one goes on in lower case. Cues or lines with no label are never

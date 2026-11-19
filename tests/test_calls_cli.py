@@ -237,7 +237,7 @@ class CallsCLITests(unittest.TestCase):
         with patch('sys.stdout.isatty', return_value=False):
             piped = human_result('calls', listed)
         self.assertEqual(piped, '\t'.join([row['import_id'], row['account_id'], 'True', 'unknown',
-                                           row['imported_at'], 'lines 2:5 (includes adjacent context)']))
+                                           row['imported_at'], 'lines 2:5 (includes adjacent context)', 'False']))
         listed['next_after'] = row['import_id']
         with patch('sys.stdout.isatty', return_value=True), patch.dict(os.environ, {'NO_COLOR': '1'}):
             paginated = human_result('calls', listed, state_dir=Path('var/private-calls'))
@@ -268,6 +268,11 @@ class CallsCLITests(unittest.TestCase):
         with patch('sys.stdout.isatty', return_value=False):
             self.assertIn('Speaker names\tthe name that opens each line', human_result('calls', named))
             self.assertIn('Speaker names\tnot declared', human_result('calls', plain))
+            # Two revisions of one file differ only in this, so the list shows it on each row.
+            listed = self.success(self.invoke('calls', 'list'))
+            self.assertEqual(human_result('calls', listed).count('\tTrue'), 2)  # one active row, one declared row
+        with patch('sys.stdout.isatty', return_value=True):
+            self.assertEqual(human_result('calls', listed).count('Speaker names: the name that opens each line.'), 1)
         self.assertNotEqual(plain['import_id'], named['import_id'])
         code, out, err = self.invoke('brief', 'acc-003', '--calls-backend', 'imported')
         self.assertEqual(code, 0, err)

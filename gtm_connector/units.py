@@ -15,7 +15,6 @@ import unicodedata
 from urllib.parse import urlsplit
 
 
-from .calls_import import named_lines
 from .seed import SELLERS
 
 
@@ -268,6 +267,33 @@ def voices(text: str, label=None) -> list[tuple]:
     spans.append((speaker, text[position:]))
     # Styling is removed after the voices are found, so removing a tag can never make a voice tag.
     return [(name, part) for name, raw in spans if (part := _CUE_MARKUP.sub("", raw)).strip()]
+
+
+# "Name: " at the start of a line, in a transcript whose import declared that layout: a letter, then at most
+# 100 characters with no colon, question or exclamation mark, angle bracket, or full stop of a script that
+# writes it as one character.
+_NAMED = re.compile(r"[ \t]*([^\W\d_][^:!?<>\n\u3002\uff01\uff1f\u0964\u061f\u06d4]{0,99}?)[ \t]*:[ \t]+(?=\S)")
+
+
+def _opens(line):
+    """The match for a line that opens with a name. A name holds no sentence end: "We signed. Dana: ..." has none."""
+    opened = _NAMED.match(line)
+    return opened if opened and len(sentences(opened.group(1))) == 1 else None
+
+
+def named(text: str) -> tuple[str, str] | None:
+    """One line or cue of a transcript that declares speaker names, as (name, words).
+
+    The first line opens "Name: " and no later line does, because a cue is one speaker's turn. Anything else
+    is not that layout, and the answer is None.
+    """
+    lines = text.split("\n")
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    opened = _opens(lines[0]) if lines else None
+    if opened is None or any(_opens(line) for line in lines[1:]):
+        return None
+    return opened.group(1), "\n".join([lines[0][opened.end():], *lines[1:]])
 
 
 def _label(value):
@@ -714,10 +740,10 @@ def _calls(card, as_of, contacts):
             for cue in manifest["units"]:
                 # A WebVTT voice tag names the speaker. A cue identifier does only when it is not a number. In
                 # an import that declares it, the name that opens a line does, and is not part of what was said.
-                named = None if cue["cue_id"] is None or cue["cue_id"].isdigit() else cue["cue_id"]
-                spans = named_lines(cue["text"]) if "speaker_names" in manifest else [(named, cue["text"])]
-                if manifest["format"] == "vtt":
-                    spans = [span for label, text in spans for span in voices(text, label)]
+                cue_name = None if cue["cue_id"] is None or cue["cue_id"].isdigit() else cue["cue_id"]
+                label, text = (named(cue["text"]) or (None, cue["text"]) if "speaker_names" in manifest
+                               else (cue_name, cue["text"]))
+                spans = voices(text, label) if manifest["format"] == "vtt" else [(label, text)]
                 parts += [(label, text, cue["start_ms"], cue["end_ms"]) for label, text in spans]
             first_unit[note["record_ref"]] = card.spoken(
                 note, "call_notes", parts, at=note["called_at"], role_of=role_of, transcript=True,

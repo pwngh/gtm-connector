@@ -18,6 +18,7 @@ import stat
 from typing import Any
 
 from . import strict_json
+from .units import named
 
 
 MAX_RAW_BYTES = 2 * 1024 * 1024
@@ -42,10 +43,6 @@ _VTT_SETTING = re.compile(r"(?:vertical|line|position|size|align|region):\S+")
 _SRT_STAMP = r"[0-9]{2,9}:[0-5][0-9]:[0-5][0-9][,.][0-9]{3}"
 _SRT_TIMING = re.compile(rf"^({_SRT_STAMP})[ \t]+-->[ \t]+({_SRT_STAMP})(?:[ \t]+([^\r\n]*))?$")
 FORMATS = ("txt", "vtt", "srt")
-# "Name: " at the start of a line, in an import the operator declared to be laid out that way: a letter, then
-# at most 100 characters with no colon, question or exclamation mark, angle bracket, or full stop of a script
-# that writes it as one character.
-_SPEAKER = re.compile(r"[ \t]*([^\W\d_][^:!?<>\n\u3002\uff01\uff1f\u0964\u061f\u06d4]{0,99}?)[ \t]*:[ \t]+(?=\S)")
 _UNITS_KEYS = {"index", "text", "cue_id", "start_ms", "end_ms"}
 _MANIFEST_KEYS = {"schema_version", "source", "format", "parser_version", "content_sha256",
                   "raw_byte_count", "association", "association_generation", "called_at", "imported_at",
@@ -177,25 +174,12 @@ def _milliseconds(value):
     return ((hours * 60 + int(fields[-2])) * 60 + int(seconds)) * 1000 + int(millis)
 
 
-def named_lines(text: str) -> list[tuple[str, str]]:
-    """One line or cue as (speaker name, words). A line that opens "Name: " starts that speaker's words."""
-    spans: list[list[str]] = []
-    for line in text.split("\n"):
-        opened = _SPEAKER.match(line)
-        if opened:
-            spans.append([opened.group(1), line[opened.end():]])
-        elif spans:
-            spans[-1][1] += "\n" + line
-        elif line.strip():
-            return []
-    return [(name, words) for name, words in spans]
-
-
 def parse_transcript(raw: bytes, *, format: str, speaker_names: bool = False) -> dict[str, Any]:
     """Parse a strict transcript subset, preserving the exact original bytes.
 
     `speaker_names` is the operator's statement that every line or cue opens with its speaker's name and a
-    colon. It is checked against the whole file, so no excerpt can be read as that layout by chance.
+    colon, and is one speaker's turn. It is checked against the whole file, so no excerpt can be read as
+    that layout by chance.
     """
     if not isinstance(raw, bytes) or format not in FORMATS or type(speaker_names) is not bool:
         raise CallsImportError("calls_import_invalid")
@@ -272,7 +256,7 @@ def parse_transcript(raw: bytes, *, format: str, speaker_names: bool = False) ->
                 raise CallsImportError("calls_import_too_large")
     if not units or not any(unit["text"].strip() for unit in units):
         raise CallsImportError("calls_import_invalid")
-    if speaker_names and not all(named_lines(unit["text"]) for unit in units if unit["text"].strip()):
+    if speaker_names and not all(named(unit["text"]) for unit in units if unit["text"].strip()):
         raise CallsImportError("calls_speaker_names_missing")
     return {"raw": raw, "format": format, "parser_version": PARSER_VERSION, "speaker_names": speaker_names,
             "content_sha256": hashlib.sha256(raw).hexdigest(), "units": tuple(units)}
@@ -399,7 +383,7 @@ def validate_imported_record(record: dict, *, account_id: str, crm_binding: dict
             if (not isinstance(unit, dict) or set(unit) != _UNITS_KEYS or type(unit["index"]) is not int
                     or unit["index"] != index or not _text(unit["text"])):
                 raise ValueError
-            if "speaker_names" in manifest and unit["text"].strip() and not named_lines(unit["text"]):
+            if "speaker_names" in manifest and unit["text"].strip() and not named(unit["text"]):
                 raise ValueError
             cue_id = unit["cue_id"]
             if manifest["format"] == "txt":

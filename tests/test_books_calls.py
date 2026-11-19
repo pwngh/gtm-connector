@@ -130,7 +130,7 @@ def spans(cue, kind, declared=False):
     line labels it instead.
     """
     name = cue["cue_id"] if cue["cue_id"] and not cue["cue_id"].isdigit() else None
-    lines = varied.named(cue["text"]) if declared else [(name, cue["text"])]
+    lines = [varied.named(cue["text"]) or (None, cue["text"]) if declared else (name, cue["text"])]
     if kind != "vtt":
         return lines
     found = []

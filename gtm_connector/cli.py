@@ -376,14 +376,16 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
                     row["import_id"], f"  Account: {row['account_id']}. Active: {'yes' if row['active'] else 'no'}.",
                     f"  Called: {row['called_at'] or 'unknown'}. Imported: {row['imported_at']}.",
                     f"  Requested: {_call_range(row, 'requested_range', context=False)}. "
-                    f"Cited: {_call_range(row, context=False)}."])
+                    f"Cited: {_call_range(row, context=False)}.",
+                    *(["  Speaker names: the name that opens each line."] if row["speaker_names"] else [])])
                     for row in result["imports"])
                 if display:
                     display += "\nOne adjacent unit on each available side is included in the cited range."
             else:
-                display = table(["IMPORT", "ACCOUNT", "ACTIVE", "CALLED AT", "IMPORTED AT", "RANGE"],
+                display = table(["IMPORT", "ACCOUNT", "ACTIVE", "CALLED AT", "IMPORTED AT", "RANGE", "SPEAKER NAMES"],
                                 [[row["import_id"], row["account_id"], row["active"], row["called_at"],
-                                  row["imported_at"], _call_range(row)] for row in result["imports"]])
+                                  row["imported_at"], _call_range(row), row["speaker_names"]]
+                                 for row in result["imports"]])
             if result["next_after"] is not None:
                 if sys.stdout.isatty():
                     resume = "gtm-connector calls list --after " + result["next_after"]

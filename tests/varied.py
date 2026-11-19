@@ -15,7 +15,7 @@ import sqlite3
 import unicodedata
 
 from gtm_connector import strict_json
-from gtm_connector.units import safe_text, trace
+from gtm_connector.units import safe_text, sentences, trace
 
 
 AS_OF = date(2027, 1, 15)
@@ -37,20 +37,17 @@ _NAME = re.compile(r"[ \t]*([^\W\d_][^:!?<>\n\u3002\uff01\uff1f\u0964\u061f\u06d
 
 
 def named(text):
-    """One line or cue as (name, words) for each line that opens "Name: ", read here without the connector.
+    """One line or cue of a transcript that declares speaker names as (name, words), read here apart from the connector.
 
-    Lines that follow a name are that speaker's. Nothing is returned when the text does not open with a name.
+    Its first line opens "Name: ", the name holds no sentence end, and no later line opens with a name. None otherwise.
     """
-    spans = []
-    for line in text.split("\n"):
-        opened = _NAME.match(line)
-        if opened:
-            spans.append([opened.group(1), line[opened.end():]])
-        elif spans:
-            spans[-1][1] += "\n" + line
-        elif line.strip():
-            return []
-    return [tuple(span) for span in spans]
+    lines = [line for line in text.split("\n")]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    opened = [match if match and len(sentences(match.group(1))) == 1 else None for match in map(_NAME.match, lines)]
+    if not opened or opened[0] is None or any(opened[1:]):
+        return None
+    return opened[0].group(1), "\n".join([lines[0][opened[0].end():], *lines[1:]])
 
 
 # Styling spans, a ruby reading, and cue timestamps of a WebVTT cue: markup, like a voice tag, and not speech.
@@ -270,7 +267,7 @@ def hold(case, brief):
             # In an import that declares speaker names, the name that opens a line is not part of what was said.
             texts = [cue["text"] for cue in record["manifest"]["units"]]
             if "speaker_names" in record["manifest"]:
-                texts = [words for text in texts for _, words in named(text)]
+                texts = [named(text)[1] if text.strip() else text for text in texts]
             pieces = [CUE_MARKUP.sub("", _VOICE_TAG.sub("\0", text)).replace("\0", "") if vtt else text
                       for text in texts]
         else:
