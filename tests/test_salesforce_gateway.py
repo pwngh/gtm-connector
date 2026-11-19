@@ -239,7 +239,7 @@ class SalesforceGatewayTests(unittest.TestCase):
         for include_slack in (False, True):
             brief = create_brief(self.runtime, ACCOUNT_ID, as_of="2027-01-15", include_slack=include_slack)
             self.assertEqual(brief["status"], "accepted")
-            self.assertIn("- No contract has an end date on or after 2027-01-15.", brief["text"])
+            self.assertIn("- Salesforce returned no contract with an end date on or after 2027-01-15.", brief["text"])
         self.assertEqual(len(self.runtime.connector.audit.read()), 7)
         self.assertTrue(all(request.method == "GET" for request in self.requests))
 

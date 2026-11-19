@@ -60,13 +60,13 @@ A brief selects the Contract with the earliest non-null `EndDate` on or after th
 breaking ties by Contract ID. Its status category must be `Draft`, `InApproval`, or `Activated`. The
 connector uses the `EndDate` that Salesforce returns and never calculates one. Salesforce fills
 `EndDate` from `StartDate` and `ContractTerm` only when the org's automatic calculation setting is
-on. Every brief states the contract's status, category, and end date, that a Draft or InApproval
-contract has not been activated, and that ARR and CRM renewal risk are not mapped from standard
-fields. The built-in draft gives each other contract on the account one line with its status,
-category, and end date. Amounts are printed with `(currency unknown)`.
-
-An account with no such contract is still briefed. The brief says that no contract has an end date
-on or after the planning date, and when one has ended, it opens with a signal naming the latest.
+on. With such a contract, the brief states its status, category, and end date, and that a Draft or
+InApproval contract has not been activated. Without one, the account is still briefed: the brief
+says that Salesforce returned no contract with an end date on or after the planning date, and when
+an earlier end date exists, it opens with a signal naming the latest and its category. Every brief
+says that ARR and CRM renewal risk are not mapped from standard fields. The built-in draft gives
+each other contract on the account one line with its status, category, and end date. Amounts are
+printed with `(currency unknown)`.
 
 ## Field mapping
 

@@ -166,11 +166,12 @@ def add_salesforce_facts(groups, as_of, brief_id, add, signal):
                          [contract["status_code"]], renewal_ref))
     else:
         # The account is still briefed. A lapsed contract is the case that most needs a reader.
-        required.add(add(f"No contract has an end date on or after {as_of}.", account_ref, run))
+        required.add(add(f"Salesforce returned no contract with an end date on or after {as_of}.", account_ref, run))
         if ended:
+            # Only what the returned dates show: a contract with no end date may still be running.
             end, _, last = max(ended, key=lambda candidate: candidate[:2])
-            signal(f"contract {last['id']} ended {_days((as_of - end).days)} ago and no later contract is recorded.",
-                   last["record_ref"], run)
+            signal(f"the latest contract end date, {end} on contract {last['id']} with category "
+                   f"{_text(last['status_code'])}, was {_days((as_of - end).days)} ago.", last["record_ref"], run)
     for other in sorted(groups["contracts"], key=lambda row: row["id"]):
         if other is not contract:
             ends = "no end date" if other["end_date"] is None else f"end date {other['end_date']}"

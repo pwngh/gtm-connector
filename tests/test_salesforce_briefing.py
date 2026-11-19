@@ -133,20 +133,23 @@ class SalesforceFactTests(unittest.TestCase):
 
     def test_an_account_with_no_contract_ahead_is_still_briefed_and_a_lapsed_contract_is_a_signal(self):
         run = "[run/brief-sf-fixture]"
-        nothing_ahead = f"- No contract has an end date on or after 2027-01-15. [crm/accounts/{ACCOUNT_ID}] {run}"
-        lapsed = "- Signal: contract ctr-sf-{0} ended {1} ago and no later contract is recorded. [crm/contracts/ctr-sf-{0}] "
+        nothing_ahead = ("- Salesforce returned no contract with an end date on or after 2027-01-15. "
+                         f"[crm/accounts/{ACCOUNT_ID}] {run}")
+        lapsed = ('- Signal: the latest contract end date, {2} on contract ctr-sf-{0} with category "{3}", was {1} ago. '
+                  "[crm/contracts/ctr-sf-{0}] ")
         first, second = "800000000000001AAA", "800000000000002AAA"
         for contracts, signals in (
                 ([], []), ([contract_record(end=None)], []),
-                ([contract_record(end="2027-01-14")], [lapsed.format(first, "1 day") + run]),
-                # The latest contract that ended is the one named.
-                ([contract_record(1, end="2026-01-14"), contract_record(2, end="2026-12-16", status="Activated")],
-                 [lapsed.format(second, "30 days") + run])):
+                ([contract_record(end="2027-01-14")], [lapsed.format(first, "1 day", "2027-01-14", "Draft") + run]),
+                # The latest end date is the one named, with its category, beside a contract that has no end date.
+                ([contract_record(1, end="2026-01-14"), contract_record(2, end="2026-12-16", status="Activated"),
+                  contract_record(3, end=None)],
+                 [lapsed.format(second, "30 days", "2026-12-16", "Activated") + run])):
             with self.subTest(contracts=contracts):
                 source = evidence(contracts)
                 lines = build_facts(source)
                 self.assertIn(nothing_ahead, lines)
-                self.assertEqual([line for line in lines if line.startswith("- Signal: contract ctr")], signals)
+                self.assertEqual([line for line in lines if line.startswith("- Signal: the latest contract")], signals)
                 self.assertEqual(sum(line.startswith("- Other contract ") for line in lines), len(contracts))
                 self.assertFalse(any("planning candidate" in line or "Contract end" in line for line in lines))
                 text = "\n".join(lines) + "\n"
@@ -157,7 +160,7 @@ class SalesforceFactTests(unittest.TestCase):
         lines = build_facts(evidence([contract_record(1, end="2026-01-14"), contract_record(2, end="2027-01-15")]))
         self.assertIn(f"- Contract ends on the as-of date 2027-01-15. [crm/contracts/ctr-sf-{second}] {run}", lines)
         self.assertNotIn(nothing_ahead, lines)
-        self.assertFalse(any("no later contract" in line for line in lines))
+        self.assertFalse(any("latest contract end date" in line for line in lines))
 
     def test_contract_identity_association_receipts_and_profile_cannot_be_spoofed(self):
         mutations = (
@@ -289,8 +292,9 @@ class SalesforceBriefingTests(unittest.TestCase):
             with self.subTest(end=end):
                 brief = create_brief(self.runtime, ACCOUNT_ID, as_of=AS_OF)
                 self.assertEqual(brief["status"], "accepted")
-                self.assertIn("- No contract has an end date on or after 2027-01-15.", brief["text"])
-                self.assertEqual("ended 1 day ago and no later contract is recorded" in brief["text"], lapsed)
+                self.assertIn("- Salesforce returned no contract with an end date on or after 2027-01-15.",
+                              brief["text"])
+                self.assertEqual("- Signal: the latest contract end date, 2027-01-14" in brief["text"], lapsed)
                 self.assertTrue((self.state / "briefs" / (brief["brief_id"] + ".json")).is_file())
 
     def test_optional_source_denials_remain_required_and_create_no_extra_upstream_reads(self):

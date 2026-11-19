@@ -230,13 +230,14 @@ def expected(rows, notes, messages, brief):
     else:
         # No contract is ahead: the brief says so, and the latest one that ended is a signal.
         contract_ref = ref
-        lines.append(f"- No contract has an end date on or after {AS_OF}. {ref} {run}")
+        lines.append(f"- Salesforce returned no contract with an end date on or after {AS_OF}. {ref} {run}")
         ended = [row for row in rows["Contract"] if row["EndDate"]]
         if ended:
             last = max(ended, key=lambda row: (row["EndDate"], row["Id"]))
             age = (AS_OF - date.fromisoformat(last["EndDate"])).days
-            lapsed = [f"- Signal: contract ctr-sf-{last['Id']} ended {count(age)} ago and no later contract is "
-                      f"recorded. [crm/contracts/ctr-sf-{last['Id']}] {run}"]
+            lapsed = [f"- Signal: the latest contract end date, {last['EndDate']} on contract ctr-sf-{last['Id']} with "
+                      f"category {quote(last['StatusCode'])}, was {count(age)} ago. "
+                      f"[crm/contracts/ctr-sf-{last['Id']}] {run}"]
     lines.append(f"- Proposed follow-up: Ask the account owner to review the cited renewal context. {contract_ref}")
     for row in rows["Contract"]:
         if row is not contract:

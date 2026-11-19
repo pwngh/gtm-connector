@@ -31,7 +31,7 @@ and signals are published first wherever a draft puts them.
 | --- | --- |
 | `renewal is in N days and opportunity X is still open at stage S` | Demo CRM: the opportunity is not closed and the renewal is 30 days away or less. It reads `renewal is due today` on the day and `renewal was N days ago` after it. |
 | `contract end is in N days and opportunity X is still open at stage S` | Salesforce: the selected contract ends in 30 days or less, or `is today`, and the opportunity is open. Every open opportunity on the account counts. |
-| `contract X ended N days ago and no later contract is recorded` | Salesforce: no contract ends on or after the date, and at least one has ended. The latest is named. |
+| `the latest contract end date, DATE on contract X with category C, was N days ago` | Salesforce returned no contract ending on or after the date, and at least one earlier end date. |
 | `CRM marks this account at risk` | The demo CRM's risk status is `at_risk`. Its reason follows when present. |
 | `contact NAME has no role recorded` | The contact has no title. |
 | `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old, counted from its UTC date. It reads `latest dated` when another note has no usable time, and `the selected call excerpt` for an imported transcript. |

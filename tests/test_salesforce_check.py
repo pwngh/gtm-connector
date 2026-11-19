@@ -117,7 +117,9 @@ print(json.dumps({{"status": 0, "result": result}}))
         elif " FROM Contact" in query:
             rows = [{"Id": CONTACT, "AccountId": ACCOUNT, "Name": NAME, "Title": None, "Email": EMAIL}]
         elif " FROM Contract" in query:
-            rows = ([] if self.no_candidate else
+            self.contract_reads = getattr(self, "contract_reads", 0) + 1
+            gone = self.no_candidate or self.contract_reads > getattr(self, "contract_gone_after", 99)
+            rows = ([] if gone else
                     [{"Id": CONTRACT, "AccountId": ACCOUNT, "Status": "Draft", "StatusCode": "Draft",
                       "StartDate": "2026-02-01", "ContractTerm": 12, "EndDate": "2027-01-31"}])
         elif " FROM Opportunity" in query:
@@ -203,6 +205,17 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.assertEqual(report["api_calls"], 5)
         queries = [request.url.params["q"] for request in self.requests if "q" in request.url.params]
         self.assertEqual(queries, ["SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1"])
+
+    def test_a_candidate_whose_contract_is_gone_when_the_brief_reads_it_fails_the_brief_step(self):
+        probe = run_check(as_of=AS_OF, adapter_factory=self.adapter)
+        self.assertEqual(probe["status"], "passed")
+        # The same run with the contract deleted before its last read, the one the brief makes.
+        self.contract_gone_after, reads = self.contract_reads - 1, self.contract_reads
+        self.contract_reads = 0
+        report = run_check(as_of=AS_OF, adapter_factory=self.adapter)
+        self.assertEqual(self.contract_reads, reads)
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual((report["steps"][-1]["name"], report["steps"][-1]["code"]), ("brief", "renewal_fields_unmapped"))
 
     def test_missing_candidate_reports_no_eligible_contract_and_blocks_dependent_reads(self):
         self.no_candidate = True
@@ -387,7 +400,7 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.assertEqual((code, stderr), (0, ""))
         brief = json.loads(stdout)
         self.assertEqual(brief["status"], "accepted")
-        self.assertIn(f"- No contract has an end date on or after {AS_OF}.", brief["text"])
+        self.assertIn(f"- Salesforce returned no contract with an end date on or after {AS_OF}.", brief["text"])
         self.assertEqual(len(list((state / "briefs").iterdir())), 1)
         self.assert_safe(stderr)
 
