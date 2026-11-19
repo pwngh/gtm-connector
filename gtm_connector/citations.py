@@ -103,7 +103,7 @@ def _live_slack_facts(evidence, messages, receipt_ref, add):
     return required
 
 
-def _catalog(evidence, *, legacy_empty_roles=False):
+def _catalog(evidence):
     version = evidence.get("workflow_version", 1)
     if type(version) is not int or version not in (1, 2, 3, 4, 5):
         raise BriefRejected("Unsupported evidence workflow version.")
@@ -264,8 +264,7 @@ def _catalog(evidence, *, legacy_empty_roles=False):
         if account["risk_reason"]:
             add(f"CRM risk reason: {reason}.", ref)
         for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
-            role = ("not provided" if contact["title"] == "" and not legacy_empty_roles
-                    else _text(contact["title"]))
+            role = "not provided" if contact["title"] == "" else _text(contact["title"])
             add(f"Contact {_text(contact['name'])}: role {role}; "
                 f"email {_text(contact['email'])}.", contact["record_ref"])
         for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
@@ -349,9 +348,9 @@ def _catalog(evidence, *, legacy_empty_roles=False):
     return lines, required
 
 
-def _validated_catalog(evidence, *, legacy_empty_roles=False):
+def _validated_catalog(evidence):
     try:
-        return _catalog(evidence, legacy_empty_roles=legacy_empty_roles)
+        return _catalog(evidence)
     except BriefRejected:
         raise
     except (KeyError, TypeError, ValueError, AttributeError):
@@ -388,7 +387,7 @@ def diagnose_brief(candidate: str, evidence: dict) -> dict:
             "reason_counts": {**reasons, "missing_required": missing, "empty": int(not lines)}}
 
 
-def check_brief(candidate: object, evidence: dict, *, _legacy_empty_roles=False) -> str:
+def check_brief(candidate: object, evidence: dict) -> str:
     """Reject uncited, altered, misattributed, or extra prose before publication.
 
     A valid subset is allowed: grounding and coverage are different checks.
@@ -396,7 +395,7 @@ def check_brief(candidate: object, evidence: dict, *, _legacy_empty_roles=False)
     """
     if not isinstance(candidate, str) or not candidate.strip():
         raise BriefRejected("A brief must contain supported, cited statements.")
-    supported, required = _validated_catalog(evidence, legacy_empty_roles=_legacy_empty_roles)
+    supported, required = _validated_catalog(evidence)
     lines = [line.strip() for line in candidate.splitlines() if line.strip()]
     if any(line not in supported for line in lines):
         raise BriefRejected("Brief contains an uncited, unsupported, or misattributed statement.")

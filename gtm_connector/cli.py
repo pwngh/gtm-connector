@@ -315,9 +315,6 @@ def build_parser():
         if name in ("brief", "salesforce"):
             command.add_argument("--as-of", help="Use YYYY-MM-DD for renewal planning. Salesforce uses today; "
                                  "fixtures use 2027-01-15.")
-        if name == "demo":
-            command.add_argument("--with-slack", action="store_true",
-                                 help="Keep this compatible spelling. The demo always includes Slack.")
         if name in ("verify", "brief", "evaluate"):
             command.add_argument("--with-slack", action="store_true",
                                  help="Include Slack evidence and a checked follow-up proposal.")

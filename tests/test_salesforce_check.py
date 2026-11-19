@@ -346,11 +346,11 @@ print(json.dumps({{"status": 0, "result": result}}))
             self.requests.clear()
             (self.directory / "count").unlink(missing_ok=True)
             with self.subTest(status=status), patch.object(
-                    SalesforceReadOnlyAdapter, "from_sf", side_effect=lambda alias: self.adapter()) as factory, \
+                    SalesforceReadOnlyAdapter, "from_sf", side_effect=lambda alias, **options: self.adapter()) as factory, \
                     redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
                 code = main(["salesforce", "check", "--sf-org", ALIAS, "--as-of", AS_OF, "--json"])
             self.assertEqual(code, expected_code)
-            factory.assert_called_once_with(ALIAS)
+            factory.assert_called_once_with(ALIAS, environment="developer")
             report = json.loads(stdout.getvalue())
             self.assert_report(report)
             self.assertEqual(report["status"], outcome)

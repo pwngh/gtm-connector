@@ -153,19 +153,15 @@ class SourceStateTests(unittest.TestCase):
                 self.assertNotIn("invented-private-secret", str(failure.exception))
                 self.assertEqual(self.snapshot(), before)
 
-    def test_complete_pre_salesforce_owner_shape_preserves_fixture_state(self):
+    def test_an_owner_file_without_a_backend_does_not_select_fixtures(self):
         with Runtime(self.state) as runtime:
-            legacy = {key: value for key, value in runtime.config.items()
-                      if key not in ("crm_backend", "calls_backend", "slack_backend")}
-        # This is the complete owner shape written before cdab7ba introduced Salesforce.
-        self.assertEqual(set(legacy), {"issuer", "resource", "cert_path", "client_id",
-                                       "redirect_uri", "owner_secret"})
-        (self.state / "owner.json").write_text(json.dumps(legacy))
-        before = (self.state / "calls.sqlite3").read_bytes()
-        with Runtime(self.state) as runtime:
-            self.assertEqual(runtime.crm_backend, "sqlite")
-            self.assertFalse(self.marker.exists())
-        self.assertEqual((self.state / "calls.sqlite3").read_bytes(), before)
+            unknown = {key: value for key, value in runtime.config.items() if key != "crm_backend"}
+        (self.state / "owner.json").write_text(json.dumps(unknown))
+        before = self.snapshot()
+        with self.assertRaisesRegex(SourceIdentityError, "prior local backend"):
+            with Runtime(self.state):
+                self.fail("An owner file without a backend selected fixtures")
+        self.assertEqual(self.snapshot(), before)
 
     def test_corrupt_private_markers_are_rejected_without_rewriting_them(self):
         with Runtime(self.state, crm_reader=InventedReader()):
