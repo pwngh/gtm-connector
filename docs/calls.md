@@ -1,18 +1,15 @@
 # Import a call transcript
 
-Import an existing UTF-8 TXT or WebVTT export and associate it with one account.
-The renewal brief then quotes a selected excerpt. The connector does not record,
-transcribe, connect to a call provider, or summarize. The original bytes stay in
-private local state.
+Import a UTF-8 TXT or WebVTT export and associate it with one account. The renewal brief then
+quotes a selected excerpt. The connector does not record, transcribe, connect to a call provider,
+or summarize. The original bytes stay in private local state.
 
 ## Commands
 
 ```sh
 gtm-connector calls import meeting.vtt --account acc-007
-gtm-connector calls import meeting.txt --account acc-007 --lines 12:20
 gtm-connector calls import meeting.vtt --account acc-007 --cues 8:14 --called-at 2027-01-14T15:00:00Z
 gtm-connector calls list
-gtm-connector calls inspect IMPORT_ID
 gtm-connector calls inspect IMPORT_ID --full --json
 gtm-connector brief acc-007 --calls-backend imported --state-dir var/imported-calls
 ```
@@ -28,25 +25,24 @@ gtm-connector brief acc-007 --calls-backend imported --state-dir var/imported-ca
 | `--full` | For `inspect`: prints every unit and the original text. This is not available as an MCP tool. |
 
 `brief`, `serve`, and Salesforce `accounts` or `account` use imports only with
-`--calls-backend imported` and an explicit `--state-dir` naming the same folder.
-Fixture and imported calls never share a folder. Stop `serve` before running a
-`calls` command on its folder.
+`--calls-backend imported` and an explicit `--state-dir` naming the same folder. Fixture and
+imported calls never share a folder. Stop `serve` before running a `calls` command on its folder.
 
 ## Rules
 
-- `import` resolves the account through a local `crm:read` grant and an audited
-  MCP request. It writes no CRM record. Later reads need only `calls:read`.
-- Each account has one active excerpt. An account with none refuses with
-  `calls_not_imported`. Fixture notes are never substituted.
-- The default excerpt is the first 20 units, or fewer if they exceed a limit
-  below. Every excerpt adds one adjacent unit on each side where available. An
-  explicit range that exceeds a limit refuses and is never truncated.
-- The brief labels the quote as an excerpt, not a complete call summary, and
-  states the requested and quoted ranges. Source text stays quoted data.
-- Repeating the same bytes, account, call time, and range reuses the revision.
-  Any change creates a new active revision. Older revisions stay inspectable.
-- A brief with an imported transcript records `adapter: "extractive"`, no model,
-  and zero tokens. Its evidence uses `workflow_version` 4, or 5 with live Slack.
+- `import` resolves the account through a local `crm:read` grant and an audited MCP request. It
+  writes no CRM record. Later reads need only `calls:read`.
+- Each account has one active excerpt. Fixture notes are never substituted for a missing one.
+- The default excerpt is the first 20 units, or fewer if they exceed a limit below. Every excerpt
+  adds one adjacent unit on each side where available. An explicit range that exceeds a limit
+  refuses and is never truncated.
+- Repeating the same bytes, account, call time, and range reuses the revision. Any change creates
+  a new active revision. Older revisions stay inspectable.
+- `.txt` or `.vtt` selects the parser. TXT units are lines and VTT units are timed cues. Control
+  characters other than tabs and line endings refuse. No provider download has been tested.
+- With Salesforce, pass the same connection flags to `calls import` and `brief`. `--account-number`
+  is exact, at most 40 characters, and refuses a non-literal or second match. On a refusal, pass
+  `--account acc-sf-NATIVE_ID`. See [Salesforce](salesforce.md) and [live Slack](slack-live.md).
 
 | Limit | Value |
 | --- | ---: |
@@ -55,46 +51,6 @@ Fixture and imported calls never share a folder. Stop `serve` before running a
 | Quoted text, including context | 16 KiB of UTF-8 |
 | Returned units, including context | 256 |
 | Serialized selected record | 128 KiB of ASCII-escaped JSON |
-
-## File formats
-
-The extension, `.txt` or `.vtt`, selects the parser. TXT units are physical
-lines. [WebVTT](https://www.w3.org/TR/2026/CRD-webvtt1-20260520/) units are
-timed cues. The VTT parser accepts cue IDs, multiline payloads, and valid cue
-timings, keeps markup literally, and refuses malformed timing or ambiguous
-blocks. Control characters other than tabs and line endings refuse.
-
-Export the transcript yourself from
-[Zoom](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0064927) (VTT),
-[Gong](https://help.gong.io/docs/view-a-call-transcript), or
-[Google Meet](https://support.google.com/meet/answer/12849897) (plain text). An
-AI notes document is not a transcript. No provider download has been tested.
-
-## Salesforce accounts
-
-Use the same connection and environment for import and for later use:
-
-```sh
-gtm-connector calls import meeting.vtt --account-number ACCOUNT_NUMBER --crm-backend salesforce --sf-org EXISTING_ALIAS --sf-environment sandbox --state-dir var/connected-calls
-gtm-connector brief ACCOUNT_ID --crm-backend salesforce --sf-org EXISTING_ALIAS --sf-environment sandbox --calls-backend imported --state-dir var/connected-calls
-```
-
-`ACCOUNT_ID` is the canonical ID that the import returns. See
-[Salesforce connection checks](salesforce.md).
-
-- The AccountNumber lookup is exact, reads at most two matches, and compares the
-  returned number verbatim. The number has at most 40 characters.
-- Salesforce equality can ignore letter case, so a non-literal or second match
-  refuses. Pass `--account acc-sf-NATIVE_ID` with an ID from `accounts` instead.
-- The AccountNumber is not copied into the manifest returned under `calls:read`.
-- The state is tied to the validated CRM identity. An alias repointed to another
-  org cannot reuse it. `calls list` and `calls inspect` do not contact Salesforce.
-- A demo-kit binding cannot be combined with imported calls.
-
-To add selected Slack, run `slack map` with `--calls-backend imported` and
-`calls import` with `--slack-backend slack --slack-connection-dir var/slack-connection`
-on one fresh folder, in either order. Briefs then pass the same folder and
-flags with `--with-slack`. See the [live Slack guide](slack-live.md).
 
 ## Errors
 

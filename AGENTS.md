@@ -24,10 +24,13 @@ One operator runs it. People use the CLI, assistants use the MCP tools. Python 3
 | Commands | `cli.py` |
 
 ```sh
+python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r requirements-dev.lock
 .venv/bin/python -m gtm_connector demo             # the product on invented data
-.venv/bin/python -m unittest discover -s tests     # about 3 minutes
+.venv/bin/python -m unittest discover -s tests     # about 3 minutes; tests_stateful is separate
 .venv/bin/python -m ruff check . && .venv/bin/python -m mypy
 ```
+
+To change a dependency, edit the `.in` file and regenerate its lock with the command in its header.
 
 ## How to behave
 

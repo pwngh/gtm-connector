@@ -14,7 +14,9 @@ Python 3.11 or later and pipx. Invented data, no model, no external service.
 pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo
 ```
 
-One rep prepares one renewal from CRM records, a call note, and a Slack message.
+One rep prepares one renewal from CRM records, a call note, and a Slack message. `pipx install` with
+the same source keeps the command on your PATH. From a checkout, `./scripts/demo.sh` installs the
+pinned dependencies, runs the tests, and runs the demo.
 `gtm-connector --help` lists every command, and `--json` gives [stable output](docs/cli.md).
 
 ## What it guarantees
