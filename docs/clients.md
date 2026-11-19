@@ -17,7 +17,7 @@ creates nothing. Repeat `--scope` for each of `crm:read`, `calls:read`, `slack:r
 | `inspector` | Tested with the Inspector 2.15.0 CLI: supplied-grant discovery, source reads, denials, rate limits, and audit receipts. Its UI and interactive login are untested. | `npx --yes @modelcontextprotocol/inspector@2.15.0 --cli --config "$PWD/var/clients/inspector.json" --server gtm-connector --stored-auth-only --quiet --format json --method tools/list`. See Inspector below. |
 | `claude-code` | Untested. The configuration follows Claude Code's [MCP guide](https://code.claude.com/docs/en/mcp) and [network guide](https://code.claude.com/docs/en/network-config). | `MCP_SDK_GENERATION=v2 MCP_PROTOCOL_NEGOTIATION=auto claude --mcp-config "$PWD/var/clients/claude-code.json"`. The file holds an HTTP server entry with an authorization header. |
 | `cursor` | Untested. The configuration follows Cursor's [MCP guide](https://cursor.com/docs/mcp). Protocol and local certificate compatibility are unverified. | `cursor .` First merge only the `gtm-connector` entry from `cursor.json` into your project's `.cursor/mcp.json`, keep the other entries, and quit Cursor completely. |
-| `claude-desktop` | No working setup exists. Its [remote connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) need public HTTPS on port 443 and cannot reach `127.0.0.1`. Its [local servers](https://modelcontextprotocol.io/docs/2026-07-28/develop/connect-local-servers) are launched processes, and the connector has no stdio transport. | None. `connect claude-desktop` prints the missing requirements and the Inspector command. It creates no configuration and no grant, even with `--scope`. |
+| `claude-desktop` | Untested in the app. It starts local servers as processes, so it uses the [local bridge](#a-local-bridge-for-assistant-apps). Its [remote connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) need public HTTPS on port 443 and cannot reach `127.0.0.1`. | None over HTTP. With `--transport stdio`, restart the app after `connect` writes its entry. |
 
 The printed commands use absolute paths for the state folder. Each starts with the same
 environment, shown here with `$PWD/var/clients`:
@@ -33,7 +33,39 @@ NODE_EXTRA_CA_CERTS="$PWD/var/clients/tls.pem" \
 Node trusts the server's certificate for this process only. Loopback requests skip inherited
 proxies. TLS verification stays on.
 
+## A local bridge for assistant apps
+
+Some apps start a local MCP server as a process and speak to it on stdin and stdout. For those,
+`connect` writes an entry that starts the connector's bridge:
+
+```sh
+gtm-connector serve --state-dir var/clients     # keep it running
+gtm-connector connect claude-desktop --transport stdio --scope crm:read --scope calls:read \
+  --state-dir var/clients --config-file "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+```
+
+- `--transport stdio` works for `claude-desktop`, `claude-code`, and `cursor`, and needs `--scope`
+  and `--config-file`. It merges only the `gtm-connector` entry into that file and saves the
+  previous file beside it first, with the same mode. Both are written under temporary names and
+  renamed into place. It refuses a symbolic link, a file with a second name, a file that is not one
+  strict JSON object, a result over 4 MiB, and a file that changed since it was read. Quit the app
+  first: a save it makes in the same instant can be lost.
+- The entry holds the Python path, `mcp stdio`, the state folder, and the scopes. It holds no token.
+  Python starts isolated (`-I`), so a folder the app runs in cannot stand in for the connector.
+- A call the bridge would refuse for its shape is still sent to the gateway, which records it and
+  refuses it.
+- The app starts `gtm-connector mcp stdio --state-dir DIR --scope ...`. The bridge attaches to the
+  `serve` already running in that folder, obtains a grant for exactly those scopes, keeps it in
+  memory, and renews only those scopes. Every call still goes through the HTTPS gateway, with its
+  scope check, rate limit, and audit receipt. A call outside the scopes is refused.
+- Start `serve` first. Without it the bridge exits with a message on stderr. After `serve` restarts,
+  restart the app.
+- Tested with the MCP SDK's own stdio client. No assistant app has been tested.
+
 ## Grants and private files
+
+These apply to the HTTP grants `connect` saves. The bridge keeps its own grant in memory and renews
+it.
 
 - A grant expires after five minutes. Rerun the same `connect` command with its scopes to replace
   the file. For Cursor, copy the entry again. For Claude Code, restart with the updated file.

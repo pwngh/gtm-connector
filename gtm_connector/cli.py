@@ -23,6 +23,8 @@ COMMANDS = {
     "doctor": ("Check the local setup and show a fix for each failure.", "doctor --state-dir var/v2"),
     "connect": ("Print client setup and its tested or untested limits.",
                 "connect inspector --scope crm:read --state-dir var/v2"),
+    "mcp": ("Run a local stdio MCP bridge to a running connector for an assistant app.",
+            "mcp stdio --state-dir var/v2 --scope crm:read"),
     "completion": ("Print shell completion without reading local state.", "completion bash"),
     "demo": ("Follow Morgan Reed through a renewal brief using invented demo data.", "demo"),
     "verify": ("Check scopes, citations, injection handling, retries, and rate limits on invented data.",
@@ -320,13 +322,21 @@ def build_parser():
             command.add_argument("--adapter", choices=("fixture", "ollama"), default="fixture",
                                  help="Choose the fixture drafter or an already installed local model.")
             command.add_argument("--model", help="Name an already installed local Ollama model.")
-        if name == "connect":
-            command.add_argument("--scope", action="append",
+        if name == "mcp":
+            command.add_argument("action", choices=("stdio",),
+                                 help="Serve MCP on stdin and stdout. An assistant app starts this command.")
+        if name in ("connect", "mcp"):
+            command.add_argument("--scope", action="append", required=name == "mcp",
                                  choices=("crm:read", "calls:read", "crm:write", "slack:read"),
                                  help="Grant this scope. Repeat for each explicit grant.")
         if name == "connect":
             command.add_argument("app", choices=("inspector", "claude-code", "claude-desktop", "cursor"),
                                  help="Choose the client whose setup to print.")
+            command.add_argument("--transport", choices=("http", "stdio"), default="http",
+                                 help="Use a supplied HTTP grant (default) or a local stdio bridge.")
+            command.add_argument("--config-file", type=Path,
+                                 help="With --transport stdio, merge the connector's entry into this client "
+                                      "configuration file. A backup is saved first.")
         if name == "completion":
             command.add_argument("shell", choices=("bash", "zsh", "fish"), help="Choose the shell to configure.")
         if name in ("audit", "usage"):
@@ -1045,6 +1055,11 @@ def _run(args, argv):
         return {"shell": args.shell, "script": generate(build_parser(), args.shell)}
     if args.command == "slack":
         return _run_slack(args)
+    if args.command == "mcp":
+        # stdout carries only MCP messages from here on; diagnostics go to stderr.
+        from .stdio_bridge import run_bridge
+        run_bridge(args.state_dir, args.scope)
+        return None
     # Dependencies belong to the command that uses them, after help is handled.
     if (args.command in ("serve", "brief", "accounts", "account")
             or (args.command == "calls" and args.action == "import")):
@@ -1125,7 +1140,8 @@ def _run(args, argv):
         return doctor(args.state_dir)
     if args.command == "connect":
         from .connections import connect
-        return connect(args.state_dir, args.app, args.scope)
+        return connect(args.state_dir, args.app, args.scope, transport=args.transport,
+                       config_file=args.config_file)
     if args.command == "evaluate":
         from .evaluation import run_evaluation
         return run_evaluation(adapter=adapter, include_slack=args.with_slack, progress=_progress(args.json),

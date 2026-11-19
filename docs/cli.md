@@ -45,7 +45,8 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 | `demo` | One renewal on invented data. Object with `schema_version: 1`, `status: "accepted"`, `workflow: "renewal-demo"`, `data_mode: "demo"`, `sources` (each `"demo_fixture"`), `rep`, `account`, `lookup` (`query`, `matches`, `receipt_id`), `denied_read` (`read_call_notes`, status `403`, required scope `calls:read`), `brief` (copied from the saved artifact), `injection` (`quoted: true`, `activities_created: 0`), `audit` (`run_id`, `rows: 6`), and `activities_created: 0`. Each run adds one saved brief and six receipts and creates no activity. An older or edited book in the folder exits `4`. |
 | `verify` | Object with the connector checks, `briefs`, receipt counts, and `injection_brief`. `--with-slack` adds `slack` and `workflow`. See [tools](tools.md). |
 | `serve` | One `ready` line, then one `tool_call` line per tool attempt. See the server output below. |
-| `connect` | Prints MCP client configuration. Object with `app`, `status`, `setup`, `limits`, and `documentation`. A grant adds `config`, the private file's path. See [client setup](clients.md). |
+| `connect` | Prints MCP client configuration. Object with `app`, `status`, `setup`, `limits`, and `documentation`. A grant adds `config`, the private file's path. `--transport stdio` adds `transport`, `config`, and `backup`. See [client setup](clients.md). |
+| `mcp stdio` | The local bridge an assistant app starts. stdout carries only MCP messages. `--json` changes only how a startup error is written to stderr. See [client setup](clients.md). |
 | `doctor` | Checks Python, the dependencies, SQLite, the private state files, the owner configuration, the certificate dates, and the metadata of both local services. It changes nothing, grants nothing, and reads no CRM, call, or Slack record. Object with `status` (`"passed"` or `"failed"`) and `checks`, each with `name`, `status` (`"pass"` or `"fail"`), `message`, and `fix`. |
 | `completion` | Object with `shell` and `script`. |
 | `salesforce check` | Sanitized object with `schema_version: 1`, `status`, `as_of`, `steps`, and request counts. See [Salesforce](salesforce.md). |
@@ -54,7 +55,7 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 | `calls import`, `calls list`, `calls inspect` | `import`: import metadata with the `created`, `selected`, and `reassigned` outcomes and no transcript text. `list`: object with an `imports` array and a nullable `next_after` cursor. `inspect`: import metadata and the excerpt units, and `--full` adds all units and the exact `original_text`. See [calls](calls.md). |
 
 `--state-dir` defaults: `var/renewal-demo` for `demo`, `var/verification` for `verify`, `var/v2` for
-`serve`, `brief`, `audit`, `usage`, `doctor`, `connect`, and `check-brief`.
+`serve`, `brief`, `audit`, `usage`, `doctor`, `connect`, `mcp`, and `check-brief`.
 
 ## Choose the sources
 

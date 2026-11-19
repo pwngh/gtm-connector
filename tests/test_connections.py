@@ -109,14 +109,16 @@ class ConnectionTests(unittest.TestCase):
                 connect(state_alias, "inspector", ["crm:read"])
             self.assertEqual(len(runtime.connector.authority.tokens), 1)
 
-    def test_desktop_stays_blocked_without_minting_an_unusable_grant(self):
+    def test_desktop_over_http_mints_no_grant_and_points_to_the_local_bridge(self):
         with Runtime(self.state) as runtime:
             result = connect(self.state, "claude-desktop", ["crm:read"])
             self.assertEqual(runtime.connector.authority.tokens, {})
             self.assertEqual(result["status"], "untested")
             self.assertNotIn("config", result)
             self.assertIn("public HTTPS on port 443", " ".join(result["limits"]))
-            self.assertIn("no stdio transport", " ".join(result["limits"]))
+            # The way in is the local bridge, and the setup names its command.
+            self.assertIn("--transport stdio", " ".join(result["setup"]))
+            self.assertIn("Use --transport stdio", " ".join(result["limits"]))
 
     def test_bad_config_and_output_symlinks_are_not_followed(self):
         with Runtime(self.state) as runtime:
