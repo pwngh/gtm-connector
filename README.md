@@ -122,7 +122,7 @@ assemble the same fixed claims. [Local model](docs/ollama.md)
 [CLI](docs/cli.md), [tools and scopes](docs/tools.md), [briefs](docs/briefs.md),
 [usage report](docs/usage.md), [protocol](docs/protocol.md),
 [Salesforce demo kit](docs/salesforce-demo.md), [demo Slack store](docs/slack.md),
-[development](docs/development.md), [rules for coding agents](AGENTS.md).
+[development](docs/development.md).
 
 The server implements MCP and its authorization revision 2026-07-28 with
 Python SDK 2.3.0. The checked-in companies, people, and
