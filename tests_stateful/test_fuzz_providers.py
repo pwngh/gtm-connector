@@ -1062,8 +1062,12 @@ def micros(value):
 def observed(row):
     """What docs/slack.md says one accepted row becomes. Anything it says to refuse raises."""
     stamp, subtype, body = row["ts"], row.get("subtype"), row["text"]
+    # The placeholder Slack leaves for a deleted parent is kept, hidden or not. Nothing else may be hidden.
+    placeholder = (subtype == "tombstone" and stamp == PARENT and row.get("user") == "USLACKBOT"
+                   and row.get("bot_id") is None)
     if (row["type"] != "message" or {"message", "previous_message", "deleted_ts"} & set(row)
-            or row.get("hidden", False) is not False or subtype not in SUBTYPES or not isinstance(body, str)
+            or (row.get("hidden", False) is not False and not (placeholder and row["hidden"] is True))
+            or (subtype not in SUBTYPES and not placeholder) or not isinstance(body, str)
             or len(body.encode("utf-8")) > 16384 or not micros(PARENT) <= micros(stamp) <= micros(CUTOFF)
             or row.get("thread_ts", PARENT if stamp == PARENT else None) != PARENT
             or row.get("channel", CHANNEL) != CHANNEL):
@@ -1075,8 +1079,8 @@ def observed(row):
         omissions[key] = len(row.get(key, []))
     app = subtype == "bot_message" or row.get("bot_id") is not None
     return {"ts": stamp, "body": body, "subtype": subtype, "user_id": row.get("user"), "bot_id": row.get("bot_id"),
-            "author": "Slack app" if app else "Slack participant" if row.get("user") is not None
-            else "Unknown Slack author",
+            "author": "Deleted Slack message" if placeholder else "Slack app" if app
+            else "Slack participant" if row.get("user") is not None else "Unknown Slack author",
             "edited": {"ts": row["edited"]["ts"], "user_id": row["edited"]["user"]} if "edited" in row else None,
             "omissions": omissions}
 

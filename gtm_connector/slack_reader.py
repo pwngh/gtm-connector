@@ -22,7 +22,7 @@ MAX_TEXT_BYTES = 16_384
 MAX_TOTAL_TEXT_BYTES = 65_536
 MAX_OUTPUT_BYTES = 262_144
 _REPLIES_URL = "https://slack.com/api/conversations.replies"
-SUPPORTED_SUBTYPES = (None, "bot_message", "me_message", "file_share", "thread_broadcast")
+SUPPORTED_SUBTYPES = (None, "bot_message", "me_message", "file_share", "thread_broadcast", "tombstone")
 _ERRORS = {
     "slack_selection_invalid": 2, "slack_mapping_missing": 3, "slack_mapping_conflict": 3,
     "slack_source_mismatch": 3, "slack_mapping_invalid": 4, "slack_snapshot_invalid": 4,
@@ -273,7 +273,9 @@ def _manifest_rules(value, *, parent, cutoff):
     stamp = _timestamp(value["ts"])
     if value["thread_ts"] != parent or not _timestamp(parent) <= stamp <= _timestamp(cutoff):
         raise SlackReadError("slack_thread_incomplete")
-    if value["subtype"] not in SUPPORTED_SUBTYPES:
+    # Only Slack's own system user writes the placeholder for a deleted parent. A participant cannot.
+    if value["subtype"] not in SUPPORTED_SUBTYPES or (value["subtype"] == "tombstone" and (
+            value["ts"] != parent or value["user_id"] != "USLACKBOT" or value["bot_id"] is not None)):
         raise SlackReadError("slack_response_invalid")
     if not isinstance(value["text"], str):
         raise SlackReadError("slack_response_invalid")
@@ -301,13 +303,17 @@ def _manifest_rules(value, *, parent, cutoff):
 
 
 def _normalize(row, *, mapping, cutoff):
+    parent = mapping["thread_ts"]
+    stamp = row.get("ts") if isinstance(row, dict) else None
+    # Slack leaves a hidden placeholder in place of a deleted parent that still has replies. It is kept,
+    # so the replies can be read. No other message may be a placeholder or hidden.
+    placeholder = isinstance(row, dict) and row.get("subtype") == "tombstone"
     if (not isinstance(row, dict) or row.get("type") != "message" or "text" not in row
             or any(key in row for key in ("message", "previous_message", "deleted_ts"))
-            or ("hidden" in row and row["hidden"] is not False)
+            or (placeholder and stamp != parent)
+            or ("hidden" in row and row["hidden"] is not False and not (placeholder and row["hidden"] is True))
             or ("subtype" in row and row["subtype"] not in SUPPORTED_SUBTYPES[1:])):
         raise SlackReadError("slack_response_invalid")
-    parent = mapping["thread_ts"]
-    stamp = row.get("ts")
     if ("channel" in row and row["channel"] != mapping["channel_id"]
             or row.get("thread_ts", parent if stamp == parent else None) != parent):
         raise SlackReadError("slack_thread_incomplete")
@@ -357,6 +363,8 @@ def _cursor(document, requested):
 
 
 def _author(manifest):
+    if manifest["subtype"] == "tombstone":
+        return "Deleted Slack message"
     if manifest["subtype"] == "bot_message" or manifest["bot_id"] is not None:
         return "Slack app"
     return "Slack participant" if manifest["user_id"] is not None else "Unknown Slack author"
