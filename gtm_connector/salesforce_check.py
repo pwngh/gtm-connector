@@ -175,7 +175,7 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
         if environment != "developer":
             rows = state["reader"].probe_accounts()
             return len(rows), "The one-account read probe completed. Its count is a sample, not the account book size."
-        rows = state["reader"].search_accounts("")
+        rows, _ = state["reader"].search_accounts("")
         return len(rows), "The bounded Account search completed."
 
     step("account_search", search, ready=schema_ok)

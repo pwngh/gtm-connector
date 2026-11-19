@@ -104,7 +104,8 @@ class SalesforceTests(unittest.TestCase):
     def test_search_maps_nullable_fields_without_inventing_renewal_or_arr(self):
         adapter = self.adapter("organization_developer.json", "accounts.json")
         with patch("gtm_connector.salesforce.httpx2.Client", wraps=REAL_CLIENT) as client:
-            rows = adapter.search_accounts()
+            rows, more = adapter.search_accounts()
+        self.assertIs(more, False)
         self.assertEqual(rows, [
             {"id": "acc-sf-001000000000001AAA", "source_id": "001000000000001AAA",
              "backend": "salesforce", "name": "Fixture Salesforce account 001", "industry": "Software", "account_number": "FIXTURE-001"},
@@ -113,13 +114,33 @@ class SalesforceTests(unittest.TestCase):
         ])
         self.assertEqual(self.requests[0].url.params["q"], ORG_QUERY)
         self.assertEqual(self.requests[1].url.params["q"],
-                         "SELECT Id, Name, Industry, AccountNumber FROM Account ORDER BY Id LIMIT 101")
+                         "SELECT Id, Name, Industry, AccountNumber FROM Account ORDER BY Name, Id LIMIT 101")
         options = client.call_args.kwargs
         self.assertIs(options["verify"], True)
         self.assertIs(options["trust_env"], False)
         self.assertIs(options["follow_redirects"], False)
         for row in rows:
             self.assertTrue({"record_ref", "arr_cents", "renewal_date", "risk_status", "risk_reason"}.isdisjoint(row))
+
+    def test_search_returns_the_first_hundred_by_name_and_says_when_more_match(self):
+        for matching in (100, 101, 250):
+            # Names run against the IDs and pairs of rows share a name, so the order shows both keys.
+            book = sorted(({"Id": f"001{number:012d}AAA", "Name": f"Invented account {(matching - number) // 2:03d}",
+                            "Industry": None, "AccountNumber": None} for number in range(matching)),
+                          key=lambda row: (row["Name"], row["Id"]))
+
+            def answer(request, book=book):
+                rows = book[:int(request.url.params["q"].rsplit(" LIMIT ", 1)[1])]
+                return httpx2.Response(200, json={"totalSize": len(rows), "done": True, "records": rows})
+
+            with self.subTest(matching=matching):
+                rows, more = self.adapter("organization_developer.json", answer).search_accounts()
+                self.assertEqual(self.requests[-1].url.params["q"],
+                                 "SELECT Id, Name, Industry, AccountNumber FROM Account ORDER BY Name, Id LIMIT 101")
+                self.assertEqual(rows, [
+                    {"id": "acc-sf-" + row["Id"], "source_id": row["Id"], "backend": "salesforce",
+                     "name": row["Name"], "industry": None, "account_number": None} for row in book[:100]])
+                self.assertIs(more, matching > 100)
 
     def test_get_account_preserves_contact_nulls_and_source_associations(self):
         account = self.adapter("organization_developer.json", "account.json", "contacts.json", "empty.json").get_account(ACCOUNT_ID)
@@ -202,7 +223,7 @@ class SalesforceTests(unittest.TestCase):
         query = "Fixture' OR Name LIKE '%' \\ 50%_ & é"
         adapter.search_accounts(query)
         self.assertEqual(self.requests[-1].url.params["q"],
-            "SELECT Id, Name, Industry, AccountNumber FROM Account WHERE Name LIKE '%Fixture\\' OR Name LIKE \\'\\%\\' \\\\ 50\\%\\_ & é%' ORDER BY Id LIMIT 101")
+            "SELECT Id, Name, Industry, AccountNumber FROM Account WHERE Name LIKE '%Fixture\\' OR Name LIKE \\'\\%\\' \\\\ 50\\%\\_ & é%' ORDER BY Name, Id LIMIT 101")
         self.assertNotIn(" & ", str(self.requests[-1].url))
 
     def test_invalid_arguments_fail_locally_without_any_request(self):
@@ -216,7 +237,8 @@ class SalesforceTests(unittest.TestCase):
         self.assertEqual(self.requests, [])
 
     def test_pagination_uses_only_the_valid_relative_query_locator(self):
-        rows = self.adapter("organization_developer.json", "accounts_page1.json", "accounts_page2.json").search_accounts()
+        adapter = self.adapter("organization_developer.json", "accounts_page1.json", "accounts_page2.json")
+        rows, _ = adapter.search_accounts()
         self.assertEqual([row["source_id"] for row in rows], ["001000000000001AAA", "001000000000002AAA"])
         self.assertEqual(self.requests[-1].url.path, "/services/data/v68.0/query/01g000000000001AAA-1")
         self.assertEqual(str(self.requests[-1].url.query), "b''")
@@ -257,7 +279,8 @@ class SalesforceTests(unittest.TestCase):
 
     def test_result_page_request_and_byte_limits_fail_explicitly(self):
         too_many = fixture("accounts_page1.json")
-        too_many["totalSize"] = 101
+        # A search asks for 101 rows. An answer that counts more is refused, not cut.
+        too_many["totalSize"] = 102
         self.assert_error("salesforce_result_limit", self.adapter("organization_developer.json", too_many).search_accounts)
         with patch("gtm_connector.salesforce._MAX_PAGES", 1):
             self.assert_error("salesforce_result_limit",

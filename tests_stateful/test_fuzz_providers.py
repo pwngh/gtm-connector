@@ -553,8 +553,12 @@ class Org:
         by_id = name == "Account" and " WHERE Id = '" in text
         owned = name != "Account" and " WHERE AccountId = '" in text
         limit = 2 if lookup else 1 if by_id or text.endswith(" LIMIT 1") else 1000 if owned else 100
-        # A lookup may answer with one row too many. Queries for one row never do.
-        count = min(plan["count"], {1: 1, 2: 3, 100: 999, 1000: 9999}[limit])
+        search = name == "Account" and limit == 100
+        if search and not text.endswith(" ORDER BY Name, Id LIMIT 101"):
+            self.violations.append("A name search did not ask for name order and one row past its bound.")
+        # A name search answers with at most the 101 rows it asks for. A lookup may answer with one row too many.
+        # Queries for one row never do.
+        count = min(plan["count"], {1: 1, 2: 3, 100: 101 if search else 999, 1000: 9999}[limit])
         if name == "Account" and selected:
             count = min(count, len(selected))
         rows, templates = [], plan["templates"][name]
@@ -572,9 +576,10 @@ class Org:
                 row["EndDate"] = dated[1]
             rows.append(row)
         size = plan["page"] or count or 1
-        # The documented bounds: 1,000 rows of one account, 100 of a search, 2 for a number lookup, and 10 pages.
+        # The documented bounds: 1,000 rows of one account, 100 of an opportunity list across accounts, 2 for a
+        # number lookup, and 10 pages. A name search past 100 rows is cut, not refused.
         self.chain = {"object": name, "rows": rows, "offsets": {}, "issued": set(), "sent": 0,
-                      "over": count > limit > 1 or -(-count // size) > 10}
+                      "over": (count > limit > 1 and not search) or -(-count // size) > 10}
         return "query", name, self.page(0)
 
     def page(self, start):
@@ -750,11 +755,15 @@ class SalesforceFuzz(unittest.TestCase):
             asked, ids = arguments.get("account_id", "")[7:], arguments.get("account_ids")
             if name in ("search_accounts", "probe_accounts"):
                 ((_, pages),) = queries
-                found = self.rows(pages, 2 if "account_number" in arguments else 1 if name == "probe_accounts" else 100)
+                found = self.rows(pages, 2 if "account_number" in arguments else 1 if name == "probe_accounts" else 101)
                 expected = [account(row) for row in found]
                 self.assertTrue(all(ids is None or row["id"] in ids for row in expected))
                 self.assertTrue(all(row["AccountNumber"] == arguments.get("account_number", row["AccountNumber"])
                                     for row in found))
+                if name == "search_accounts":
+                    # The first 100 rows, and whether a 101st matched. A selection of at most 100 never has one.
+                    expected = (expected[:100], len(expected) > 100)
+                    self.assertFalse(ids is not None and expected[1])
             elif name == "get_account":
                 found = self.rows(queries[0][1], 1)
                 self.assertEqual([kind for kind, _ in queries],
@@ -834,6 +843,9 @@ class SalesforceFuzz(unittest.TestCase):
         org = self.run_plan({**plan, "count": size[0], "page": size[1]})
         if any(exchange["over"] for exchange in org.exchanges):
             self.assertEqual(org.codes, ["salesforce_result_limit"])
+        elif plan["operations"][0][0] == "search_accounts":
+            # Within the page limit, a name search past 100 rows is answered with its first 100.
+            self.assertEqual(org.codes, [None])
 
     def run_plan(self, plan):
         org = Org(plan)

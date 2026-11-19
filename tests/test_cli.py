@@ -1,8 +1,10 @@
 """Exercise the documented CLI as a process against disposable databases."""
 
+from contextlib import closing
 import json
 import select
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -116,11 +118,41 @@ class CLITests(unittest.TestCase):
         self.assertEqual(scoped["calls"]["total"], 3)
         self.assertEqual(len(scoped["briefs"]), 1)
 
+    def test_accounts_past_one_hundred_matches_show_the_first_hundred_and_say_so(self):
+        self.json_result(self.run_cli("seed"))
+
+        def add(rows):
+            with closing(sqlite3.connect(self.database)) as connection, connection:
+                connection.executemany(
+                    "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'healthy', '')", rows)
+
+        add([(f"acc-{number}", f"Invented account {300 - number}") for number in range(101, 171)])
+        complete = self.run_cli("accounts")
+        hundred = self.json_result(complete)
+        self.assertEqual(len(hundred), 100)
+        self.assertEqual([(row["name"], row["id"]) for row in hundred],
+                         sorted((row["name"], row["id"]) for row in hundred))
+        self.assertEqual(complete.stderr, "")
+        plain = self.run_cli("accounts", json_output=False)
+        self.assertEqual((len(plain.stdout.splitlines()), plain.stderr), (100, ""))
+
+        # One more match, sorted last, leaves the rows as they were and adds only the statement.
+        add([("acc-171", "Zeta invented account")])
+        more = self.run_cli("accounts")
+        self.assertEqual(self.json_result(more), {"accounts": hundred, "has_more": True})
+        self.assertEqual(more.stderr, "")
+        told = self.run_cli("accounts", json_output=False)
+        self.assertEqual(told.returncode, 0, told.stderr)
+        self.assertEqual(told.stdout, plain.stdout)
+        self.assertEqual(told.stderr, "Showing the first 100 accounts. More match; narrow the search with --query.\n")
+        narrowed = self.run_cli("accounts", "--query", "zeta")
+        self.assertEqual([row["id"] for row in self.json_result(narrowed)], ["acc-171"])
+
     def test_seed_then_list_search_and_inspect_records(self):
         self.json_result(self.run_cli("seed"))
         accounts = self.json_result(self.run_cli("accounts"))
         self.assertEqual(len(accounts), 30)
-        self.assertEqual([row["id"] for row in accounts], sorted(row["id"] for row in accounts))
+        self.assertEqual([row["name"] for row in accounts], sorted(row["name"] for row in accounts))
         found = self.json_result(self.run_cli("accounts", "--query", accounts[0]["name"].upper()))
         self.assertIn(accounts[0]["id"], [row["id"] for row in found])
         self.assertEqual(self.json_result(self.run_cli("accounts", "--query", "not-an-account-xyz")), [])

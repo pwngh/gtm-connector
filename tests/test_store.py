@@ -37,11 +37,13 @@ class StoreTests(unittest.TestCase):
             counts(self.connection),
             {"accounts": 30, "contacts": 30, "opportunities": 30, "activities": 0},
         )
-        accounts = search_accounts(self.connection)
-        self.assertEqual([row["id"] for row in accounts], [f"acc-{i:03}" for i in range(1, 31)])
+        accounts, more = search_accounts(self.connection)
+        self.assertIs(more, False)
+        self.assertEqual(sorted(row["id"] for row in accounts), [f"acc-{i:03}" for i in range(1, 31)])
         self.assertEqual(len({row["name"] for row in accounts}), 30)
+        self.assertEqual([row["name"] for row in accounts], sorted(row["name"] for row in accounts))
         self.assertEqual(accounts[0]["name"], "Alder Vale Packaging")
-        self.assertEqual(accounts[-1]["name"], "Riverbend Civic Services")
+        self.assertEqual(accounts[-1]["name"], "Windward Finch Travel")
         industries = set()
         for row in accounts:
             account = get_account(self.connection, row["id"])
@@ -87,7 +89,7 @@ class StoreTests(unittest.TestCase):
         tables = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         self.assertNotIn("call_notes", tables)
         self.assertEqual(tables, set(TABLES))
-        for row in search_accounts(self.connection):
+        for row in search_accounts(self.connection)[0]:
             self.assertNotIn("call_notes", row)
         self.assertNotIn("call_notes", get_account(self.connection, "acc-007"))
         self.assertNotIn("body", list_opportunities(self.connection, "acc-007")[0])
@@ -121,9 +123,38 @@ class StoreTests(unittest.TestCase):
         with self.connection:
             self.connection.execute("UPDATE accounts SET name = ? WHERE id = ?", ("Odd %_ quote' fixture", "acc-001"))
         for query in ("oDd", "%", "_", "QUOTE'"):
-            self.assertEqual([row["id"] for row in search_accounts(self.connection, query)], ["acc-001"])
-        self.assertEqual(search_accounts(self.connection, "' OR 1=1 --"), [])
+            self.assertEqual([row["id"] for row in search_accounts(self.connection, query)[0]], ["acc-001"])
+        self.assertEqual(search_accounts(self.connection, "' OR 1=1 --"), ([], False))
         self.assertEqual(counts(self.connection)["accounts"], 30)
+
+    def test_search_returns_the_first_hundred_by_name_then_id_and_says_when_more_match(self):
+        for matching in (100, 101, 250):
+            # Names run against the IDs and pairs of rows share a name, so the order shows both keys.
+            book = [(f"acc-{number:03}", f"Invented account {(matching - number) // 2:03}")
+                    for number in range(1, matching + 1)]
+            with self.connection:
+                self.connection.execute("DELETE FROM accounts")
+                self.connection.executemany(
+                    "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'healthy', '')", book)
+            ordered = sorted(book, key=lambda row: (row[1], row[0]))
+            with self.subTest(matching=matching):
+                rows, more = search_accounts(self.connection, "invented")
+                self.assertEqual([(row["id"], row["name"]) for row in rows], ordered[:100])
+                self.assertIs(more, matching > 100)
+        # A selection is part of the query, so accounts outside it never count as more.
+        selected = [account_id for account_id, _ in book[:100]]
+        rows, more = search_accounts(self.connection, "invented", account_ids=selected)
+        self.assertEqual(sorted(row["id"] for row in rows), selected)
+        self.assertIs(more, False)
+
+    def test_search_order_ignores_ascii_case_as_the_match_does(self):
+        with self.connection:
+            self.connection.executemany(
+                "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'healthy', '')",
+                [("acc-001", "invented beta"), ("acc-002", "Invented Alpha"), ("acc-003", "invented alpha"),
+                 ("acc-004", "INVENTED ALPHA")])
+        self.assertEqual([row["id"] for row in search_accounts(self.connection, "invented")[0]],
+                         ["acc-002", "acc-003", "acc-004", "acc-001"])
 
     def test_account_and_opportunity_lookups_are_parameterized(self):
         seed(self.connection)

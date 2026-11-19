@@ -297,7 +297,7 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.assertEqual(reader._access_token, FRESH_TOKEN)
         self.assertEqual(reader.http_requests, 2)
         self.assertEqual(reader.sf_cli_invocations, 4)
-        self.assertEqual(len(reader.search_accounts()), 1)
+        self.assertEqual(len(reader.search_accounts()[0]), 1)
         self.assertEqual(reader.http_requests, 3)
         self.assertEqual(reader.sf_cli_invocations, 4)
 

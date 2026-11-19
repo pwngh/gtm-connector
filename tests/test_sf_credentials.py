@@ -125,8 +125,8 @@ print(json.dumps({"status": 0, "result": value}))
 
     def test_first_401_refreshes_once_and_retries_same_get_with_new_token(self):
         adapter = self.adapter(ORG, httpx2.Response(401), ORG, EMPTY, EMPTY)
-        self.assertEqual(adapter.search_accounts(), [])
-        self.assertEqual(adapter.search_accounts(), [])
+        self.assertEqual(adapter.search_accounts(), ([], False))
+        self.assertEqual(adapter.search_accounts(), ([], False))
         self.assertEqual(adapter.sf_cli_invocations, 4)
         self.assertEqual(adapter.http_requests, 5)
         self.assertEqual(self.requests[1].url, self.requests[3].url)
@@ -156,7 +156,7 @@ print(json.dumps({"status": 0, "result": value}))
                 identity = adapter.prepare_connection()
                 self.assertEqual(identity["environment"], environment)
                 self.assertEqual(adapter.http_requests, 5)
-                self.assertEqual(adapter.search_accounts(), [])
+                self.assertEqual(adapter.search_accounts(), ([], False))
                 self.assertEqual(adapter.prepare_connection(), identity)
                 self.assertEqual(adapter.sf_cli_invocations, 4)
                 self.assertEqual(adapter.http_requests, 8)
@@ -284,9 +284,9 @@ time.sleep(30)
         with patch.dict(os.environ, {"FAKE_SF_DELAY": "0.6"}), \
                 patch("gtm_connector.salesforce._OPERATION_SECONDS", 1):
             adapter = self.adapter(ORG, EMPTY, httpx2.Response(401), ORG, EMPTY)
-            self.assertEqual(adapter.search_accounts(), [])
+            self.assertEqual(adapter.search_accounts(), ([], False))
             # A refresh as slow as the budget still leaves the retried read its own time.
-            self.assertEqual(adapter.search_accounts(), [])
+            self.assertEqual(adapter.search_accounts(), ([], False))
         self.assertEqual(adapter.sf_cli_invocations, 4)
         self.assertEqual([request.headers["Authorization"] for request in self.requests],
                          ["Bearer " + TOKEN] * 3 + ["Bearer " + FRESH_TOKEN] * 2)
@@ -297,7 +297,7 @@ time.sleep(30)
                 patch("gtm_connector.salesforce._OPERATION_SECONDS", 1):
             adapter = self.adapter(ORG, httpx2.Response(401), ORG, EMPTY)
             adapter.on_refresh = lambda status, seconds: notices.append(status)
-            self.assertEqual(adapter.search_accounts(), [])
+            self.assertEqual(adapter.search_accounts(), ([], False))
         self.assertEqual(notices, ["running", "ready"])
         self.assertEqual(adapter.sf_cli_invocations, 4)
         # A refresh that fails reports its own code.
@@ -388,7 +388,7 @@ time.sleep(30)
 
         with patch("gtm_connector.salesforce.time.monotonic", side_effect=lambda: clock[0]):
             with patch.object(adapter._credentials, "read", side_effect=refreshed):
-                self.assertEqual(adapter.search_accounts(), [])
+                self.assertEqual(adapter.search_accounts(), ([], False))
         self.assertEqual(adapter.http_requests, 4)
 
 

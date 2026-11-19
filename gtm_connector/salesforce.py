@@ -480,20 +480,23 @@ class SalesforceReadOnlyAdapter:
                 "amount_decimal": format(amount, "f") if amount is not None else None, "currency": None}
 
     def search_accounts(self, query="", account_number=None, *, account_ids=None):
+        """Return the accounts and whether more matched. A name search returns its first 100 by name, then ID."""
         if not valid_account_search(query, account_number):
             raise SalesforceReadError("salesforce_invalid_arguments")
         selected = _selected_ids(account_ids, "Id")
         if account_number is not None:
             escaped = account_number.replace("\\", "\\\\").replace("'", "\\'")
-            where, limit, max_rows = f" WHERE AccountNumber = '{escaped}'", 2, 2
+            where, order, limit = f" WHERE AccountNumber = '{escaped}'", "Id", 2
         else:
             escaped = _like_literal(query)
-            where, limit, max_rows = (f" WHERE Name LIKE '%{escaped}%'" if query else ""), 101, _MAX_ROWS
+            # The row past the bound is read only to learn that it exists.
+            where, order, limit = (f" WHERE Name LIKE '%{escaped}%'" if query else ""), "Name, Id", _MAX_ROWS + 1
         if selected:
             where += (" AND " if where else " WHERE ") + selected
         with self._operation() as (client, budget):
-            rows = self._query(client, f"SELECT {_ACCOUNT_FIELDS} FROM Account{where} ORDER BY Id LIMIT {limit}",
-                               budget, max_rows=max_rows)
+            rows = self._query(
+                client, f"SELECT {_ACCOUNT_FIELDS} FROM Account{where} ORDER BY {order} LIMIT {limit}",
+                budget, max_rows=limit)
             accounts = [self._account(row) for row in rows]
             if account_ids is not None and any(row["id"] not in account_ids for row in accounts):
                 raise SalesforceReadError("salesforce_invalid_response")
@@ -502,7 +505,7 @@ class SalesforceReadOnlyAdapter:
                     raise SalesforceReadError("salesforce_invalid_response")
                 if any(row["account_number"] != account_number for row in accounts):
                     raise SalesforceReadError("salesforce_account_number_ambiguous")
-            return accounts
+            return accounts[:_MAX_ROWS], len(accounts) > _MAX_ROWS
 
     def probe_accounts(self):
         """Read at most one Account for an owner-selected setup check."""

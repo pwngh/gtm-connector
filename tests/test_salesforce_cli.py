@@ -51,7 +51,8 @@ class SalesforceCLITests(unittest.TestCase):
             cwd=ROOT, env=self.env, capture_output=True, text=True, timeout=30, check=False,
         )
 
-    def response(self, request, *, environment="developer", missing=False, failure=None, organization=ORG_ID):
+    def response(self, request, *, environment="developer", missing=False, failure=None, organization=ORG_ID,
+                 book=None):
         self.requests.append(request)
         self.assertEqual(request.method, "GET")
         self.assertEqual(request.url.host, "invented-cli.my.salesforce.com")
@@ -65,6 +66,8 @@ class SalesforceCLITests(unittest.TestCase):
             data = {"name": name, "queryable": True, "fields": [{"name": key} for key in REQUIRED_FIELDS[name]]}
         elif failure:
             return httpx2.Response(failure, json=[{"errorCode": "FORBIDDEN", "message": TOKEN + ORIGIN + ALIAS}])
+        elif " FROM Account " in query and book is not None:
+            data = records(book[:int(query.rsplit(" LIMIT ", 1)[1])])
         elif " FROM Account " in query:
             data = records([] if missing else [{"Id": ACCOUNT_ID, "Name": "Invented Redwood Workshop",
                                                "Industry": None, "AccountNumber": "INVENTED-001"}])
@@ -193,6 +196,28 @@ class SalesforceCLITests(unittest.TestCase):
                          ("search_accounts", "ok", ["crm/accounts/" + ACCOUNT]))
         self.assertEqual(len(self.requests), 2)
         self.assertIn("LIKE '%Redwood%'", self.requests[-1].url.params["q"])
+
+    def test_accounts_past_one_hundred_matches_show_the_first_hundred_and_say_so(self):
+        notice = "Showing the first 100 accounts. More match; narrow the search with --query."
+        arguments = ["accounts", "--crm-backend", "salesforce"]
+        for matching in (100, 101, 250):
+            book = [{"Id": f"001{number:012d}AAA", "Name": f"Invented account {number:03d}", "Industry": None,
+                     "AccountNumber": None} for number in range(matching)]
+            first = [{"id": "acc-sf-" + row["Id"], "source_id": row["Id"], "backend": "salesforce",
+                      "name": row["Name"], "industry": None, "account_number": None} for row in book[:100]]
+            with self.subTest(matching=matching):
+                self.state = self.root / f"state-{matching}"
+                code, out, err, _ = self.invoke([*arguments, "--json"], reader=self.reader(book=book))
+                self.assertEqual((code, err), (0, ""))
+                listed = {"accounts": first, "has_more": True} if matching > 100 else first
+                self.assertEqual(out, json.dumps(listed, indent=2, ensure_ascii=False) + "\n")
+                code, out, err, _ = self.invoke(arguments, reader=self.reader(book=book))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(out, "".join(f"{row['id']}\t{row['name']}\tunknown\tunknown\n" for row in first))
+                # The source label is the only other line on stderr.
+                self.assertEqual(err.splitlines()[1:], [notice] if matching > 100 else [])
+                receipts = read_audit(self.state / "audit.sqlite3")
+                self.assertEqual([receipt["row_count"] for receipt in receipts], [100, 100])
 
     def test_account_json_groups_contacts_and_contracts_without_new_tool(self):
         code, out, err, _ = self.invoke(["account", ACCOUNT, "--crm-backend", "salesforce", "--json"])

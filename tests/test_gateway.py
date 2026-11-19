@@ -263,6 +263,31 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual((receipts[0]["http_status"], receipts[0]["rows"]), (401, []))
         self.assertEqual(self.activities(), [])
 
+    def test_search_past_one_hundred_matches_returns_the_first_hundred_and_says_more_exist(self):
+        added = [(f"acc-{number}", f"Invented account {300 - number}") for number in range(101, 201)]
+        with closing(sqlite3.connect(self.crm_path)) as connection, connection:
+            connection.executemany(
+                "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'healthy', '')", added)
+            book = connection.execute("SELECT id, name FROM accounts").fetchall()
+        self.open_connector()
+        listed = self.rpc("tools/list", token="crm").json()["result"]["tools"]
+        described = next(tool["description"] for tool in listed if tool["name"] == "search_accounts")
+        self.assertIn("first 100 accounts by name and then ID. `has_more: true` means", described)
+        # 100 added accounts match the name, and all 130 match the empty query.
+        for query, matching in (("Invented account", added), ("", book)):
+            with self.subTest(query=query):
+                response = self.tool("search_accounts", {"query": query}, token="crm")
+                records = self.records(response, "crm")
+                ordered = sorted(matching, key=lambda row: (row[1], row[0]))[:100]
+                self.assertEqual([(row["id"], row["name"]) for row in records], ordered)
+                # A complete result has the same three keys as before.
+                self.assertEqual(response.json()["result"]["structuredContent"],
+                                 {"source": "crm", "records": records, "untrusted_data": True,
+                                  **({"has_more": True} if len(matching) > 100 else {})})
+                receipt = self.connector.audit.read()[-1]
+                self.assertEqual((receipt["status"], receipt["row_count"], receipt["rows"]),
+                                 ("ok", 100, [f"crm/accounts/{account_id}" for account_id, _ in ordered]))
+
     def test_every_tool_attempt_has_one_complete_audit_row(self):
         self.open_connector()
         attempts = [
