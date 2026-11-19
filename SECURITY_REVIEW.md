@@ -122,7 +122,8 @@ each read's budget. An `sf` that outlasts its limit is stopped and reported as
   saved file. The owner of the state folder can rewrite the file and the log together, so this
   catches a changed card, not a determined owner.
 - A speaker label is taken as the source gives it. The connector cannot tell that a transcript
-  mislabelled a speaker. Sentences are split at punctuation, which can join or divide them wrongly.
+  mislabelled a speaker. In a transcript imported with `--speaker-names`, the label is the name
+  that opens a line, and whoever can start a line of that file can write a contact's name there. Sentences are split at punctuation, which can join or divide them wrongly.
 - The selection chooses accounts and Slack threads, not fields. Without `--selection`, a connected
   server exposes its whole source to any `crm:read` grant.
 - A call is authorized before it runs. A grant that expires while a tool runs still receives that

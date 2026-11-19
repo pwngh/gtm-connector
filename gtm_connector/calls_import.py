@@ -42,6 +42,10 @@ _VTT_SETTING = re.compile(r"(?:vertical|line|position|size|align|region):\S+")
 _SRT_STAMP = r"[0-9]{2,9}:[0-5][0-9]:[0-5][0-9][,.][0-9]{3}"
 _SRT_TIMING = re.compile(rf"^({_SRT_STAMP})[ \t]+-->[ \t]+({_SRT_STAMP})(?:[ \t]+([^\r\n]*))?$")
 FORMATS = ("txt", "vtt", "srt")
+# "Name: " at the start of a line, in an import the operator declared to be laid out that way: a letter, then
+# at most 100 characters with no colon, question or exclamation mark, angle bracket, or full stop of a script
+# that writes it as one character.
+_SPEAKER = re.compile(r"[ \t]*([^\W\d_][^:!?<>\n\u3002\uff01\uff1f\u0964\u061f\u06d4]{0,99}?)[ \t]*:[ \t]+(?=\S)")
 _UNITS_KEYS = {"index", "text", "cue_id", "start_ms", "end_ms"}
 _MANIFEST_KEYS = {"schema_version", "source", "format", "parser_version", "content_sha256",
                   "raw_byte_count", "association", "association_generation", "called_at", "imported_at",
@@ -50,6 +54,7 @@ _RECORD_KEYS = {"id", "account_id", "record_kind", "record_version", "called_at"
 _PUBLIC_ASSOCIATION_KEYS = {"crm_binding", "account_id", "method", "resolution_receipt_id"}
 _CATEGORIES = {
     "calls_import_invalid": "usage", "calls_import_too_large": "usage", "calls_excerpt_too_large": "usage",
+    "calls_speaker_names_missing": "usage",
     "calls_import_not_found": "usage", "calls_account_not_found": "usage",
     "calls_not_imported": "refusal", "calls_reassign_required": "refusal",
     "calls_association_changed": "refusal", "calls_source_mismatch": "refusal",
@@ -172,9 +177,27 @@ def _milliseconds(value):
     return ((hours * 60 + int(fields[-2])) * 60 + int(seconds)) * 1000 + int(millis)
 
 
-def parse_transcript(raw: bytes, *, format: str) -> dict[str, Any]:
-    """Parse a strict transcript subset, preserving the exact original bytes."""
-    if not isinstance(raw, bytes) or format not in FORMATS:
+def named_lines(text: str) -> list[tuple[str, str]]:
+    """One line or cue as (speaker name, words). A line that opens "Name: " starts that speaker's words."""
+    spans: list[list[str]] = []
+    for line in text.split("\n"):
+        opened = _SPEAKER.match(line)
+        if opened:
+            spans.append([opened.group(1), line[opened.end():]])
+        elif spans:
+            spans[-1][1] += "\n" + line
+        elif line.strip():
+            return []
+    return [(name, words) for name, words in spans]
+
+
+def parse_transcript(raw: bytes, *, format: str, speaker_names: bool = False) -> dict[str, Any]:
+    """Parse a strict transcript subset, preserving the exact original bytes.
+
+    `speaker_names` is the operator's statement that every line or cue opens with its speaker's name and a
+    colon. It is checked against the whole file, so no excerpt can be read as that layout by chance.
+    """
+    if not isinstance(raw, bytes) or format not in FORMATS or type(speaker_names) is not bool:
         raise CallsImportError("calls_import_invalid")
     if len(raw) > MAX_RAW_BYTES:
         raise CallsImportError("calls_import_too_large")
@@ -249,7 +272,9 @@ def parse_transcript(raw: bytes, *, format: str) -> dict[str, Any]:
                 raise CallsImportError("calls_import_too_large")
     if not units or not any(unit["text"].strip() for unit in units):
         raise CallsImportError("calls_import_invalid")
-    return {"raw": raw, "format": format, "parser_version": PARSER_VERSION,
+    if speaker_names and not all(named_lines(unit["text"]) for unit in units if unit["text"].strip()):
+        raise CallsImportError("calls_speaker_names_missing")
+    return {"raw": raw, "format": format, "parser_version": PARSER_VERSION, "speaker_names": speaker_names,
             "content_sha256": hashlib.sha256(raw).hexdigest(), "units": tuple(units)}
 
 
@@ -335,7 +360,9 @@ def validate_imported_record(record: dict, *, account_id: str, crm_binding: dict
         if not _valid_binding(crm_binding) or not _valid_account(account_id, crm_binding):
             raise ValueError
         manifest = record["manifest"]
-        if not isinstance(manifest, dict) or set(manifest) != _MANIFEST_KEYS:
+        # A manifest says so only when its import declared speaker names, so every other import is unchanged.
+        if (not isinstance(manifest, dict) or set(manifest) - {"speaker_names"} != _MANIFEST_KEYS
+                or manifest.get("speaker_names", True) is not True):
             raise ValueError
         if (type(manifest["schema_version"]) is not int or manifest["schema_version"] != 1
                 or type(manifest["parser_version"]) is not int or manifest["parser_version"] != PARSER_VERSION
@@ -371,6 +398,8 @@ def validate_imported_record(record: dict, *, account_id: str, crm_binding: dict
         for index, unit in enumerate(units, cited["first"]):
             if (not isinstance(unit, dict) or set(unit) != _UNITS_KEYS or type(unit["index"]) is not int
                     or unit["index"] != index or not _text(unit["text"])):
+                raise ValueError
+            if "speaker_names" in manifest and unit["text"].strip() and not named_lines(unit["text"]):
                 raise ValueError
             cue_id = unit["cue_id"]
             if manifest["format"] == "txt":
@@ -542,7 +571,7 @@ def _load_record(connection, import_id, binding):
         if content is None or not _int(content[0], 1, MAX_RAW_BYTES):
             raise CallsImportError("calls_import_corrupt")
         raw = connection.execute("SELECT raw FROM contents WHERE content_sha256 = ?", (row[0],)).fetchone()[0]
-        parsed = parse_transcript(raw, format=manifest["format"])
+        parsed = parse_transcript(raw, format=manifest["format"], speaker_names="speaker_names" in manifest)
         selection = (None if manifest["selection_mode"] == "default" else
                      (manifest["requested_range"]["first"], manifest["requested_range"]["last"]))
         excerpt = select_excerpt(parsed, requested_range=selection)
@@ -559,7 +588,7 @@ def _metadata(manifest, import_id):
     fields = ("format", "called_at", "imported_at", "content_sha256", "requested_range", "cited_range",
               "total_units", "unit_kind", "selection_mode")
     return {"import_id": import_id, "account_id": manifest["association"]["account_id"],
-            **{key: deepcopy(manifest[key]) for key in fields}}
+            **{key: deepcopy(manifest[key]) for key in fields}, "speaker_names": "speaker_names" in manifest}
 
 
 def _request_key(parsed, excerpt, association, called_at, generation):
@@ -568,6 +597,7 @@ def _request_key(parsed, excerpt, association, called_at, generation):
     return _digest({"content_sha256": parsed["content_sha256"], "format": parsed["format"],
                     "parser_version": PARSER_VERSION, "association": stable_association,
                     "called_at": called_at, "association_generation": generation,
+                    **({"speaker_names": True} if parsed.get("speaker_names") else {}),
                     **{key: excerpt[key] for key in ("selection_mode", "requested_range", "cited_range")}})
 
 
@@ -578,7 +608,7 @@ def store_import(path: Path, parsed: dict, excerpt: dict, *, association: dict,
     if not _time(called_at, nullable=True) or not _time(imported_at) or type(reassign) is not bool:
         raise CallsImportError("calls_import_invalid")
     try:
-        reparsed = parse_transcript(parsed["raw"], format=parsed["format"])
+        reparsed = parse_transcript(parsed["raw"], format=parsed["format"], speaker_names=parsed["speaker_names"])
         if reparsed != parsed:
             raise CallsImportError("calls_import_invalid")
         span = excerpt["requested_range"]
@@ -632,6 +662,7 @@ def store_import(path: Path, parsed: dict, excerpt: dict, *, association: dict,
                             "association": {key: deepcopy(association[key]) for key in _PUBLIC_ASSOCIATION_KEYS},
                             "association_generation": generation,
                             "called_at": called_at, "imported_at": imported_at,
+                            **({"speaker_names": True} if parsed["speaker_names"] else {}),
                             **{name: deepcopy(excerpt[name]) for name in
                                ("selection_mode", "unit_kind", "requested_range", "cited_range",
                                 "total_units", "units")}}

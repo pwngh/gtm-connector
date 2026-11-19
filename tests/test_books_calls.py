@@ -122,30 +122,34 @@ def said(units_):
                      else unit["cue_id"] + "\n" + unit["text"] for unit in units_)
 
 
-def spans(cue, kind):
+def spans(cue, kind, declared=False):
     """One cue or line as (speaker label, text) parts, read here without the connector.
 
     An identifier that is not a number labels the unit. In WebVTT each voice tag labels what follows it,
-    and the tags themselves are not speech.
+    and the tags themselves are not speech. In an import that declares speaker names, the name that opens a
+    line labels it instead.
     """
     name = cue["cue_id"] if cue["cue_id"] and not cue["cue_id"].isdigit() else None
+    lines = varied.named(cue["text"]) if declared else [(name, cue["text"])]
     if kind != "vtt":
-        return [(name, cue["text"])]
-    found, at, text = [], 0, cue["text"]
-    for tag in VOICE.finditer(text):
-        found.append((name, text[at:tag.start()]))
-        name, at = tag.group(1), tag.end()
-    found.append((name, text[at:]))
+        return lines
+    found = []
+    for name, text in lines:
+        at = 0
+        for tag in VOICE.finditer(text):
+            found.append((name, text[at:tag.start()]))
+            name, at = tag.group(1), tag.end()
+        found.append((name, text[at:]))
     # Styling spans and cue timestamps are markup, not speech. They go after the voices are found.
     found = [(who, varied.CUE_MARKUP.sub("", part.replace("</v>", ""))) for who, part in found]
     return [(who, part) for who, part in found if part.strip()]
 
 
-def runs(quoted, kind):
+def runs(quoted, kind, declared=False):
     """Neighbouring parts by one speaker, joined: a sentence wrapped across cues is said once, by one speaker."""
     joined = []
     for cue in quoted:
-        for who, text in spans(cue, kind):
+        for who, text in spans(cue, kind, declared):
             who = " ".join(who.split()) or None if who else None
             if joined and joined[-1][0] == who:
                 joined[-1][1] += "\n" + text
@@ -198,9 +202,10 @@ class BookCallsTests(unittest.TestCase):
     def runtime(self, name):
         return Runtime(self.directory / name, calls_backend="imported")
 
-    def import_call(self, runtime, account_id, raw, kind, *, called_at=None, selected=None, reassign=False):
+    def import_call(self, runtime, account_id, raw, kind, *, called_at=None, selected=None, reassign=False,
+                    speaker_names=False):
         """The steps of `calls import`, in its order: parse, select, resolve the account, store."""
-        parsed = parse_transcript(raw, format=kind)
+        parsed = parse_transcript(raw, format=kind, speaker_names=speaker_names)
         excerpt = select_excerpt(parsed, requested_range=selected)
         association = resolve_call_account(runtime, account_id=account_id)
         return store_import(runtime.imports_path, parsed, excerpt, association=association, called_at=called_at,
@@ -218,7 +223,7 @@ class BookCallsTests(unittest.TestCase):
                          (code, 3 if code == "calls_reassign_required" else 2))
         self.assertEqual(self.imports(runtime), before)
 
-    def brief(self, runtime, rows, imported, raw, kind, *, called_at=None, selected=None):
+    def brief(self, runtime, rows, imported, raw, kind, *, called_at=None, selected=None, declared=False):
         """Create the card and hold it to the transcript as read here and to what every card promises."""
         account_id, import_id = rows["crm"][0][1][0], imported["import_id"]
         found = units(raw.decode(), kind)
@@ -244,7 +249,7 @@ class BookCallsTests(unittest.TestCase):
         # the voice tag, or an identifier that is not a number, and never one over 200 characters.
         spoken = [unit for unit in brief["units"] if unit["record_ref"] == note and unit["kind"] == "sentence"]
         self.assertLessEqual({unit["at"] for unit in spoken}, {called_at})
-        for who, text in runs(quoted, kind):
+        for who, text in runs(quoted, kind, declared):
             whole, own = " ".join(safe_text(text)[0].split()), []
             while " ".join(unit["text"] for unit in own) != whole:
                 own.append(spoken.pop(0))
@@ -279,7 +284,7 @@ class BookCallsTests(unittest.TestCase):
 
     def test_every_book_transcript_is_briefed_or_refused_for_a_documented_reason(self):
         self.assertGreaterEqual(len(varied.BOOKS), 1)
-        searched = 0
+        searched = named = 0
         for name in varied.BOOKS:
             shapes = dict(enumerate(varied.read(name), 300))
             carriers = [number for number, shape in shapes.items() if shape.get("transcript")]
@@ -313,8 +318,21 @@ class BookCallsTests(unittest.TestCase):
                         self.assertEqual((imported["status"], imported["created"], imported["reassigned"]),
                                          ("imported", True, False))
                         searched += len(self.brief(runtime, rows, imported, raw, kind, called_at=called_at)[1])
-        # The search for unselected text had something to look for.
+                        # An export whose every line or cue opens with a name is imported again with that
+                        # stated, and held to the same promises with each name as the speaker. Any other
+                        # export is refused whole when that is stated of it.
+                        if all(varied.named(unit["text"]) for unit in units(raw.decode(), kind) if unit["text"].strip()):
+                            again = self.import_call(runtime, f"acc-{number}", raw, kind, called_at=called_at,
+                                                     speaker_names=True)
+                            self.assertNotEqual(again["import_id"], imported["import_id"])
+                            brief, _ = self.brief(runtime, rows, again, raw, kind, called_at=called_at, declared=True)
+                            named += sum(unit.get("speaker") is not None for unit in brief["units"])
+                        else:
+                            self.refused("calls_speaker_names_missing", runtime, f"acc-{number}", raw, kind,
+                                         called_at=called_at, speaker_names=True)
+        # The search for unselected text had something to look for, and some export named its speakers that way.
         self.assertGreater(searched, 0)
+        self.assertGreater(named, 0)
 
     def test_repeats_replacements_and_reassignment_follow_the_documented_rules(self):
         for name in varied.BOOKS:

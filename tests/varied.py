@@ -32,6 +32,27 @@ _HEAD = re.compile(r"  \[(\d+)\] (seller|customer|unknown) \((.+?)\); (call|Slac
 _CITED = re.compile(r" ((?:\[\d+\])+)(?: and \d+ more)?\Z")
 # A WebVTT voice tag is a speaker label, and its closing tag is markup. Neither is part of what was said.
 _VOICE_TAG = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+[^<>\n]+>|</v>")
+# "Name: " at the start of a line, in an import that declares speaker names.
+_NAME = re.compile(r"[ \t]*([^\W\d_][^:!?<>\n\u3002\uff01\uff1f\u0964\u061f\u06d4]{0,99}?)[ \t]*:[ \t]+(?=\S)")
+
+
+def named(text):
+    """One line or cue as (name, words) for each line that opens "Name: ", read here without the connector.
+
+    Lines that follow a name are that speaker's. Nothing is returned when the text does not open with a name.
+    """
+    spans = []
+    for line in text.split("\n"):
+        opened = _NAME.match(line)
+        if opened:
+            spans.append([opened.group(1), line[opened.end():]])
+        elif spans:
+            spans[-1][1] += "\n" + line
+        elif line.strip():
+            return []
+    return [tuple(span) for span in spans]
+
+
 # Styling spans, a ruby reading, and cue timestamps of a WebVTT cue: markup, like a voice tag, and not speech.
 CUE_MARKUP = re.compile(r"<rt(?:\.[^\s<>.]*)*>[^<>]*</rt>|</?(?:[biuc]|ruby|rt)(?:\.[^\s<>.]*)*>"
                         r"|</?lang(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>")
@@ -246,8 +267,12 @@ def hold(case, brief):
         # still one unit, so it resolves.
         if "manifest" in record:
             vtt = record["manifest"]["format"] == "vtt"
-            pieces = [CUE_MARKUP.sub("", _VOICE_TAG.sub("\0", cue["text"])).replace("\0", "") if vtt else cue["text"]
-                      for cue in record["manifest"]["units"]]
+            # In an import that declares speaker names, the name that opens a line is not part of what was said.
+            texts = [cue["text"] for cue in record["manifest"]["units"]]
+            if "speaker_names" in record["manifest"]:
+                texts = [words for text in texts for _, words in named(text)]
+            pieces = [CUE_MARKUP.sub("", _VOICE_TAG.sub("\0", text)).replace("\0", "") if vtt else text
+                      for text in texts]
         else:
             pieces = [record["body"]]
         whole = " ".join(filter(None, (" ".join(safe_text(piece)[0].split()) for piece in pieces)))

@@ -44,6 +44,8 @@ CALL_FAILURES = {
     "calls_import_invalid": "The export or range is invalid. Use a valid UTF-8 TXT, VTT, or SRT transcript and range.",
     "calls_import_too_large": "The export exceeds 2 MiB or 10,000 units. Choose a smaller export.",
     "calls_excerpt_too_large": "The excerpt exceeds its text, unit, or metadata limit. Select fewer cues or lines.",
+    "calls_speaker_names_missing": "Not every line or cue of the file opens with a name and a colon. "
+                                   "Import it without --speaker-names.",
     "calls_import_not_found": "This import is not in the selected state folder. Run calls list to find its identifier.",
     "calls_account_not_found": "No CRM account matched the selection. Check its ID or exact AccountNumber.",
     "calls_not_imported": "This account has no selected transcript. Import an export before reading its calls.",
@@ -232,6 +234,9 @@ def _calls_commands(command):
             child.add_argument("--sf-environment", choices=("developer", "sandbox", "production"),
                                help="Require this Salesforce environment (default: developer).")
             child.add_argument("--called-at", help="Record the supplied meeting timestamp with its UTC offset.")
+            child.add_argument("--speaker-names", action="store_true",
+                               help='State that every line or cue opens with its speaker\'s name and a colon '
+                                    '("Dana Crest: We will sign."). Each name is then read as the speaker.')
             excerpt = child.add_mutually_exclusive_group()
             excerpt.add_argument("--cues", help="Select an inclusive one-based VTT or SRT cue range, such as 3:8.")
             excerpt.add_argument("--lines", help="Select an inclusive one-based TXT line range, such as 3:8.")
@@ -396,7 +401,8 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
             ["Requested excerpt", _call_range(metadata, "requested_range", context=False)],
             ["Cited excerpt", _call_range(metadata, context=False)],
             ["Context", "One adjacent unit on each available side is included in the cited range."],
-            ["Total units", metadata["total_units"]]])
+            ["Total units", metadata["total_units"]],
+            ["Speaker names", "the name that opens each line" if metadata["speaker_names"] else "not declared"]])
         if "import" not in result:
             return f"Transcript {result['status']}. The excerpt is selected for this account.\n" + display
         display += "\n\nExact excerpt units" if "original_text" not in result else "\n\nAll imported units"
@@ -913,7 +919,7 @@ def _calls_arguments(args):
             raw = source.read(MAX_RAW_BYTES + 1)
     except OSError:
         raise CallsImportError("calls_import_io") from None
-    parsed = parse_transcript(raw, format=format_name)
+    parsed = parse_transcript(raw, format=format_name, speaker_names=args.speaker_names)
     excerpt = select_excerpt(parsed, requested_range=selected_range)
     return parsed, excerpt, called_at
 

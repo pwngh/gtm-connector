@@ -374,6 +374,14 @@ class StoreTests(unittest.TestCase):
         other_binding = {**BINDING, "identity_sha256": "c" * 64}
         self.assert_code("calls_import_corrupt", imports.validate_imported_record, original,
                          account_id="acc-007", crm_binding=other_binding)
+        # A record that says its import declared speaker names, remade whole so its ID is its own: its cues
+        # do not open with a name, so it is refused. The statement is true or absent, never false.
+        for stated in (True, False):
+            manifest = {**deepcopy(original["manifest"]), "speaker_names": stated}
+            remade = imports._make_record(manifest)
+            self.assert_code("calls_import_corrupt", imports.validate_imported_record,
+                             {**remade, "record_ref": "calls/call_notes/" + remade["id"]},
+                             account_id="acc-007", crm_binding=BINDING)
 
     def test_isolated_retry_key_or_active_head_corruption_cannot_select_other_evidence(self):
         first = self.publish(b"First.")

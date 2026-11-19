@@ -34,8 +34,8 @@ class ImportedBriefingTests(unittest.TestCase):
         self.state = Path(directory.name) / "state"
 
     def import_call(self, runtime, *, account_id="acc-007", account_number=None, reassign=False, called_at=None,
-                    raw=RAW, format="txt", requested_range=None):
-        parsed = parse_transcript(raw, format=format)
+                    raw=RAW, format="txt", requested_range=None, speaker_names=False):
+        parsed = parse_transcript(raw, format=format, speaker_names=speaker_names)
         excerpt = select_excerpt(parsed, requested_range=requested_range)
         association = resolve_call_account(
             runtime, account_id=None if account_number is not None else account_id, account_number=account_number)
@@ -200,6 +200,84 @@ class ImportedBriefingTests(unittest.TestCase):
         self.assertEqual([(unit["text"], unit["partial"]) for unit in artifact["units"] if unit["kind"] == "sentence"],
                          [("Sorry?", True), ("sign until Friday.", True), ("That is final.", False), ("Fine.", False),
                           ("Thanks.", False)])
+
+    def said(self, raw, format, *, speaker_names=True, requested_range=None):
+        """(speaker, role, text, partial) for each sentence of one import of acc-007: Dana Crest is its contact."""
+        self.state = Path(tempfile.mkdtemp(dir=self.state.parent)) / "state"
+        self.state.mkdir(mode=0o700)
+        (self.state / "sellers.json").write_text(json.dumps({"schema_version": 1, "sellers": ["Morgan Reed"]}))
+        with Runtime(self.state, calls_backend="imported") as runtime:
+            self.import_call(runtime, raw=raw.encode(), format=format, speaker_names=speaker_names,
+                             requested_range=requested_range)
+            artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
+        return [(unit["speaker"], unit["role"], unit["text"], unit["partial"])
+                for unit in artifact["units"] if unit["kind"] == "sentence"]
+
+    def test_an_import_that_declares_speaker_names_reads_the_name_that_opens_each_line(self):
+        # The layout most meeting exports use. The operator states it; the connector never guesses it.
+        srt = ("1\n00:00:01,000 --> 00:00:03,000\nMorgan Reed: Will you sign by Friday?\n\n"
+               "2\n00:00:04,000 --> 00:00:06,000\nDana Crest: We will not sign until\n\n"
+               "3\n00:00:06,500 --> 00:00:09,000\nDana Crest: the rider is approved. Note: this is final.\n\n"
+               "4\n00:00:10,000 --> 00:00:12,000\nDr. J. Vance (Outside Counsel): Agreed.\n")
+        self.assertEqual(self.said(srt, "srt"), [
+            ("Morgan Reed", "seller", "Will you sign by Friday?", False),
+            ("Dana Crest", "customer", "We will not sign until the rider is approved.", False),
+            ("Dana Crest", "customer", "Note: this is final.", False),
+            ("Dr. J. Vance (Outside Counsel)", "unknown", "Agreed.", False)])
+        # The same file without the statement: nobody is named, and every word stays in its sentence.
+        self.assertEqual([(speaker, role, text) for speaker, role, text, _ in self.said(srt, "srt", speaker_names=False)][:2],
+                         [(None, "unknown", "Morgan Reed: Will you sign by Friday?"),
+                          (None, "unknown", "Dana Crest: We will not sign until")])
+        # Lines of a text file carry no times, so two of them are never read as one sentence.
+        self.assertEqual(self.said("Dana Crest: We will not\nDana Crest: Approve the agreement.\nMorgan Reed: Fine.\n", "txt"), [
+            ("Dana Crest", "customer", "We will not", True), ("Dana Crest", "customer", "Approve the agreement.", True),
+            ("Morgan Reed", "seller", "Fine.", False)])
+        # A later line of a cue that opens with a name is that speaker's, not the first one's.
+        vtt = ("WEBVTT\n\n00:01.000 --> 00:03.000\nDana Crest: We will sign.\nMorgan Reed: They agreed to forty seats.\n\n"
+               "00:04.000 --> 00:06.000\nDana Crest: <i>Fine.</i>\nThat is all.\n")
+        self.assertEqual([row[:3] for row in self.said(vtt, "vtt")], [
+            ("Dana Crest", "customer", "We will sign."), ("Morgan Reed", "seller", "They agreed to forty seats."),
+            ("Dana Crest", "customer", "Fine."), ("Dana Crest", "customer", "That is all.")])
+        # The statement holds for the file, so a name is read the same whichever lines are cited.
+        notes = "Dana Crest: We will sign on Friday.\n" + "Morgan Reed: Noted.\n" * 8
+        for requested in ((1, 1), (1, 9), None):
+            with self.subTest(requested=requested):
+                self.assertEqual(self.said(notes, "txt", requested_range=requested)[0],
+                                 ("Dana Crest", "customer", "We will sign on Friday.", False))
+
+    def test_a_file_that_is_not_laid_out_as_declared_is_refused_whole(self):
+        for format, raw in (
+                # One line with no name, anywhere in the file, even outside the lines that would be cited.
+                ("txt", "Dana Crest: We will sign.\nMorgan Reed: Noted.\nThank you all.\n" + "Morgan Reed: Bye.\n" * 30),
+                # What stands before the colon is not a name: a number, a link, a question, a full stop of another script.
+                ("txt", "10:30 works for us.\nDana Crest: Fine.\n"),
+                ("txt", "https://files.example/a: the link.\nDana Crest: Fine.\n"),
+                ("txt", "Will you sign? Dana Crest: Fine.\nDana Crest: Fine.\n"),
+                ("txt", "\u540c\u610f\u3057\u307e\u3057\u305f\u3002\u4fa1\u683c: \u56db\u5341\u5e2d\u3067\u3059\u3002\nDana Crest: Fine.\n"),
+                # A name is at most 100 characters, and a colon with nothing after it names nobody.
+                ("txt", "A" + " very" * 20 + " long name: Fine.\nDana Crest: Fine.\n"),
+                ("txt", "Dana Crest:\nDana Crest: Fine.\n"),
+                ("txt", "Dana Crest: \nDana Crest: Fine.\n"),
+                # A name starts with a letter and holds no markup.
+                ("txt", "3 Buyers: Fine.\nDana Crest: Fine.\n"),
+                ("txt", "Dana <b>Crest</b>: Fine.\nDana Crest: Fine.\n"),
+                # A voice tag or styling before the name: the file already names its speakers another way.
+                ("vtt", "WEBVTT\n\n00:01.000 --> 00:03.000\n<v Dana Crest>Pricing: forty seats.\n"),
+                ("vtt", "WEBVTT\n\n00:01.000 --> 00:03.000\n<i>Dana Crest: Fine.</i>\n")):
+            with self.subTest(raw=raw[:40]), self.assertRaises(CallsImportError) as refused:
+                parse_transcript(raw.encode(), format=format, speaker_names=True)
+            self.assertEqual(refused.exception.code, "calls_speaker_names_missing")
+            parse_transcript(raw.encode(), format=format)
+        # A stored import cannot be turned into a declared one: the manifest is part of its identity.
+        with Runtime(self.state, calls_backend="imported") as runtime:
+            self.import_call(runtime, raw=b"Dana Crest: We will sign.\nMorgan Reed: Noted.\n")
+            with closing(sqlite3.connect(runtime.imports_path)) as connection, connection:
+                manifest = json.loads(connection.execute("SELECT manifest FROM revisions").fetchone()[0])
+                connection.execute("UPDATE revisions SET manifest = ?",
+                                   (json.dumps({**manifest, "speaker_names": True}, sort_keys=True, separators=(",", ":")),))
+            with self.assertRaises(CallsImportError) as corrupt:
+                create_brief(runtime, "acc-007", as_of=AS_OF)
+            self.assertEqual(corrupt.exception.code, "calls_import_corrupt")
 
     def test_cues_with_no_speaker_label_are_never_read_as_one_persons_sentence(self):
         artifact, spoken = self.cues((1, 3, "we will not sign"), (3.2, 5, "Great, so you will sign Friday."),

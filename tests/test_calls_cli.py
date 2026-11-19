@@ -256,6 +256,25 @@ class CallsCLITests(unittest.TestCase):
             self.assertIn('Cited excerpt\tlines 2:5', rendered)
             self.assertIn('One adjacent unit on each available side is included in the cited range.', rendered)
 
+    def test_speaker_names_are_read_only_when_declared_and_only_from_a_file_laid_out_that_way(self):
+        # The fixture's lines open with no name, so the statement is refused before any state is opened.
+        self.error(self.import_file('--speaker-names'), 2)
+        self.assertFalse(self.state.exists())
+        self.export.write_text('Jordan Lee: We will sign on Friday.\nMorgan Reed: Noted.\n')
+        plain = self.success(self.import_file())
+        named = self.success(self.import_file('--speaker-names'))
+        self.assertEqual((plain['speaker_names'], named['speaker_names']), (False, True))
+        from gtm_connector.cli import human_result
+        with patch('sys.stdout.isatty', return_value=False):
+            self.assertIn('Speaker names\tthe name that opens each line', human_result('calls', named))
+            self.assertIn('Speaker names\tnot declared', human_result('calls', plain))
+        self.assertNotEqual(plain['import_id'], named['import_id'])
+        code, out, err = self.invoke('brief', 'acc-003', '--calls-backend', 'imported')
+        self.assertEqual(code, 0, err)
+        self.assertEqual([(unit['speaker'], unit['text']) for unit in json.loads(out)['units']
+                          if unit['kind'] == 'sentence'],
+                         [('Jordan Lee', 'We will sign on Friday.'), ('Morgan Reed', 'Noted.')])
+
     def test_imported_brief_banner_names_slack_only_when_requested(self):
         self.success(self.import_file())
         for include_slack in (False, True):

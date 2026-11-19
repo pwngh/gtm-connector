@@ -15,6 +15,7 @@ import unicodedata
 from urllib.parse import urlsplit
 
 
+from .calls_import import named_lines
 from .seed import SELLERS
 
 
@@ -470,7 +471,8 @@ class _Card:
 
         Neighbouring parts under one speaker label are one run, so a sentence wrapped across cues stays whole:
         when they are at most two seconds apart, or at most ten when the earlier part stops mid-sentence and
-        the later one goes on in lower case. Parts with no label never join: no label is not one speaker.
+        the later one goes on in lower case. Parts with no label or no times never join: no label is not one
+        speaker, and lines with no times may be minutes apart.
         In a transcript, a run that stops mid-sentence is not a quotation, and neither is the opening of that
         speaker's next run. A record with no sentence still gets one unit, so every record resolves.
         """
@@ -481,8 +483,8 @@ class _Card:
             label = _label(label) or None
             last = runs[-1] if runs else None
             gap = None if last is None or start is None or last[2] is None else start - last[2]
-            if last is not None and label is not None and last[0] == label and (
-                    gap is None or abs(gap) <= _RUN_GAP_MS
+            if last is not None and label is not None and last[0] == label and gap is not None and (
+                    abs(gap) <= _RUN_GAP_MS
                     or 0 < gap <= _BRIDGE_GAP_MS and _unfinished(last[1]) and _goes_on(raw)):
                 last[1:] = [last[1] + "\n" + raw, end]
             else:
@@ -710,9 +712,12 @@ def _calls(card, as_of, contacts):
             cited = manifest["cited_range"]
             parts: list[tuple] = []
             for cue in manifest["units"]:
-                # A WebVTT voice tag names the speaker. A cue identifier does only when it is not a number.
+                # A WebVTT voice tag names the speaker. A cue identifier does only when it is not a number. In
+                # an import that declares it, the name that opens a line does, and is not part of what was said.
                 named = None if cue["cue_id"] is None or cue["cue_id"].isdigit() else cue["cue_id"]
-                spans = voices(cue["text"], named) if manifest["format"] == "vtt" else [(named, cue["text"])]
+                spans = named_lines(cue["text"]) if "speaker_names" in manifest else [(named, cue["text"])]
+                if manifest["format"] == "vtt":
+                    spans = [span for label, text in spans for span in voices(text, label)]
                 parts += [(label, text, cue["start_ms"], cue["end_ms"]) for label, text in spans]
             first_unit[note["record_ref"]] = card.spoken(
                 note, "call_notes", parts, at=note["called_at"], role_of=role_of, transcript=True,
