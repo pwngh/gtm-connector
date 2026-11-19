@@ -91,11 +91,11 @@ def expected(rows, brief_id):
             if not title:
                 roles.append(f"- Signal: contact {quote(person)} has no role recorded. [crm/contacts/{identifier}]")
         else:
-            identifier, _, _, stage, cents, close = row
-            lines.append(f"- CRM opportunity {identifier}: stage {quote(stage)}; amount {_money(cents)}; "
+            identifier, _, deal, stage, cents, close = row
+            lines.append(f"- CRM opportunity {identifier} {quote(deal)}: stage {quote(stage)}; amount {_money(cents)}; "
                          f"close date {close}. [crm/opportunities/{identifier}]")
             if days <= 30 and not stage.startswith("closed_"):
-                renewals.append(f"- Signal: {when} and opportunity {identifier} is still open at stage "
+                renewals.append(f"- Signal: {when} and opportunity {identifier} {quote(deal)} is still open at stage "
                                 f"{quote(stage)}. {ref} [crm/opportunities/{identifier}] {run}")
     signals = renewals
     if risk == "at_risk":

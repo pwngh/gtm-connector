@@ -28,15 +28,18 @@ class SignalTests(unittest.TestCase):
     def test_each_signal_states_one_derived_fact_with_its_sources(self):
         run = "[run/{}]"
         expected = {
-            "acc-001": ['- Signal: renewal is in 17 days and opportunity opp-001 is still open at stage "discovery". '
+            "acc-001": ['- Signal: renewal is in 17 days and opportunity opp-001 "Alder Vale Packaging 2027 renewal" '
+                        'is still open at stage "discovery". '
                         "[crm/accounts/acc-001] [crm/opportunities/opp-001] " + run],
-            "acc-002": ['- Signal: renewal is in 24 days and opportunity opp-002 is still open at stage "evaluation". '
+            "acc-002": ['- Signal: renewal is in 24 days and opportunity opp-002 '
+                        '"Copper Finch Distribution 2027 renewal" is still open at stage "evaluation". '
                         "[crm/accounts/acc-002] [crm/opportunities/opp-002] " + run,
                         '- Signal: CRM marks this account at risk: "Renewal budget is not approved.". '
                         "[crm/accounts/acc-002]"],
             "acc-006": ["- Signal: the latest call note note-006 is 104 days old as of 2027-01-15. "
                         "[calls/call_notes/note-006] " + run],
-            "acc-007": ['- Signal: renewal is in 14 days and opportunity opp-007 is still open at stage "proposal". '
+            "acc-007": ['- Signal: renewal is in 14 days and opportunity opp-007 "Juniper Crest Learning 2027 renewal" '
+                        'is still open at stage "proposal". '
                         "[crm/accounts/acc-007] [crm/opportunities/opp-007] " + run,
                         '- Signal: contact "Dana Crest" has no role recorded. [crm/contacts/con-007]'],
             # 31 days out and closed won: nothing needs attention on these fields.
@@ -88,7 +91,7 @@ class SignalRuleTests(unittest.TestCase):
         return self.signals(source)
 
     def test_an_open_opportunity_signals_from_thirty_days_out_and_after_the_date_passes(self):
-        stage = ' and opportunity opp-001 is still open at stage "negotiation".'
+        stage = ' and opportunity opp-001 "Fixture renewal" is still open at stage "negotiation".'
         for renewal_date, expected in (("2027-02-15", []),                                   # 31 days
                                        ("2027-02-14", ["- Signal: renewal is in 30 days" + stage]),
                                        ("2027-01-16", ["- Signal: renewal is in 1 day" + stage]),
@@ -135,7 +138,7 @@ class SignalRuleTests(unittest.TestCase):
             return [line for line in build_facts(source) if line.startswith("- Signal: ")]
 
         opportunity = "opp-sf-006000000000001AAA"
-        still_open = (f' and opportunity {opportunity} is still open at stage "Negotiation". '
+        still_open = (f' and opportunity {opportunity} "Invented opportunity" is still open at stage "Negotiation". '
                       f"[{CONTRACT_REF}] [crm/opportunities/{opportunity}] [run/brief-sf-fixture]")
         no_role = '- Signal: contact "Invented contact" has no role recorded. [crm/contacts/con-sf-003000000000001AAA]'
         for end, when in (("2027-02-15", None), ("2027-02-14", "is in 30 days"),

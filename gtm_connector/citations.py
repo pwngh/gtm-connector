@@ -185,9 +185,9 @@ def add_salesforce_facts(groups, as_of, brief_id, add, signal):
             raise BriefRejected("Salesforce opportunity outcomes must be booleans.")
         if days is not None and days <= _SOON_DAYS and not opportunity["is_closed"]:
             when = f"is in {_days(days)}" if days else "is today"
-            signal(f"contract end {when} and opportunity {opportunity['id']} is still open at stage "
-                   f"{_text(opportunity['stage'])}.", renewal_ref, opportunity["record_ref"], run)
-        add(f"CRM opportunity {opportunity['id']}: stage {_text(opportunity['stage'])}; "
+            signal(f"contract end {when} and opportunity {opportunity['id']} {_text(opportunity['name'])} "
+                   f"is still open at stage {_text(opportunity['stage'])}.", renewal_ref, opportunity["record_ref"], run)
+        add(f"CRM opportunity {opportunity['id']} {_text(opportunity['name'])}: stage {_text(opportunity['stage'])}; "
             f"amount {_amount(opportunity)}; close date {_day(opportunity['close_date'])}; "
             f"closed {str(opportunity['is_closed']).lower()}; won {str(opportunity['is_won']).lower()}.",
             opportunity["record_ref"])
@@ -362,12 +362,12 @@ def _catalog(evidence):
         when = (f"renewal is in {_days(days)}" if days > 0 else
                 f"renewal was {_days(-days)} ago" if days < 0 else "renewal is due today")
         for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
-            add(f"CRM opportunity {opportunity['id']}: stage {_text(opportunity['stage'])}; "
-                f"amount {_money(opportunity['amount_cents'])}; "
+            add(f"CRM opportunity {opportunity['id']} {_text(opportunity['name'])}: "
+                f"stage {_text(opportunity['stage'])}; amount {_money(opportunity['amount_cents'])}; "
                 f"close date {_day(opportunity['close_date'])}.", opportunity["record_ref"])
             if days <= _SOON_DAYS and opportunity["stage"] not in ("closed_won", "closed_lost"):
-                signal(f"{when} and opportunity {opportunity['id']} is still open at stage "
-                       f"{_text(opportunity['stage'])}.", ref, opportunity["record_ref"], f"run/{brief_id}")
+                signal(f"{when} and opportunity {opportunity['id']} {_text(opportunity['name'])} is still open "
+                       f"at stage {_text(opportunity['stage'])}.", ref, opportunity["record_ref"], f"run/{brief_id}")
         if account["risk_status"] == "at_risk":
             signal("CRM marks this account at risk" + (f": {reason}." if account["risk_reason"] else "."), ref)
         for contact in sorted(groups["contacts"], key=lambda row: row["id"]):

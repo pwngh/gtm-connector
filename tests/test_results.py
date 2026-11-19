@@ -59,7 +59,7 @@ class ResultsTests(unittest.TestCase):
         references = "[crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]"
         for expected in (
                 "- Renewal is in 31 days as of 2027-01-15. [crm/accounts/acc-003] [run/" + brief["brief_id"] + "]",
-                '- CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. '
+                '- CRM opportunity opp-003 "Cedarline Analytics 2027 renewal": stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. '
                 "[crm/opportunities/opp-003]",
                 '- Three-source conflict: CRM opportunity opp-003 reports stage "closed_won", call note note-003 '
                 "reports unapproved procurement, and Slack message msg-003 reports a delayed security review. "
@@ -112,7 +112,7 @@ class ResultsTests(unittest.TestCase):
         self.assertEqual(sum(tried.values()), 956)
         self.assertEqual(+caught_by_reference_check, Counter({"citations removed": 229, "uncited sentence added": 20}))
         # What goes in and what comes out, across the twenty briefs.
-        self.assertEqual(dict(size), {"records": 98, "lines": 229, "words": 2579, "signals": 6,
+        self.assertEqual(dict(size), {"records": 98, "lines": 229, "words": 2691, "signals": 6,
                                       "cited_lines": 229, "citations": 261})
         # Twenty briefs make eighty tool calls. Each has one finished receipt.
         self.assertEqual([row["status"] for row in receipts], ["ok"] * 80)

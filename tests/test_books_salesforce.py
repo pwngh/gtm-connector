@@ -248,12 +248,12 @@ def expected(rows, notes, messages, brief):
     for row in sorted(rows["Opportunity"], key=lambda row: row["Id"]):
         identifier = "opp-sf-" + row["Id"]
         amount = "not provided" if row["Amount"] is None else str(row["Amount"])
-        lines.append(f"- CRM opportunity {identifier}: stage {quote(row['StageName'])}; amount {amount} "
+        lines.append(f"- CRM opportunity {identifier} {quote(row['Name'])}: stage {quote(row['StageName'])}; amount {amount} "
                      f"(currency unknown); close date {row['CloseDate']}; closed {str(row['IsClosed']).lower()}; "
                      f"won {str(row['IsWon']).lower()}. [crm/opportunities/{identifier}]")
         if days is not None and days <= 30 and not row["IsClosed"]:
             ending.append(f"- Signal: contract end {f'is in {count(days)}' if days else 'is today'} and opportunity "
-                          f"{identifier} is still open at stage {quote(row['StageName'])}. "
+                          f"{identifier} {quote(row['Name'])} is still open at stage {quote(row['StageName'])}. "
                           f"{contract_ref} [crm/opportunities/{identifier}] {run}")
     if not rows["Opportunity"]:
         lines.append(f"- No opportunities were returned for {account_id}. {receipt['list_opportunities']}")
@@ -475,8 +475,10 @@ class BuiltTests(SalesforcePath):
         tied = sorted(row["Id"] for row in rows["Contract"] if row["EndDate"] == "2027-01-15")
         self.assertEqual(selected(rows["Contract"])["Id"], tied[0])
         brief = self.brief(rows)[0]
-        self.assertIn(f"- Signal: contract end is today and opportunity opp-sf-{rows['Opportunity'][0]['Id']} is still "
-                      f'open at stage "Proposal". [crm/contracts/ctr-sf-{tied[0]}]', brief["text"].splitlines()[0])
+        deal = rows["Opportunity"][0]
+        self.assertIn(f"- Signal: contract end is today and opportunity opp-sf-{deal['Id']} {quote(deal['Name'])} "
+                      f'is still open at stage "Proposal". [crm/contracts/ctr-sf-{tied[0]}]',
+                      brief["text"].splitlines()[0])
 
     def test_signals_at_their_boundaries_written_out_by_hand(self):
         # 30 days to the contract end and a call 61 days old by its UTC date give signals. 31 and 60 give none.
@@ -493,8 +495,8 @@ class BuiltTests(SalesforcePath):
             role = 'contact "Zo\\u00eb" has no role recorded.'
             self.assertEqual([line[len("- Signal: "):-len(" " + " ".join(citations(line)))] for line in lines
                               if line.startswith("- Signal: ")], [role] if not due else [
-                f"contract end is in 30 days and opportunity opp-sf-{rows['Opportunity'][0]['Id']} is still open at "
-                'stage "Legal / Redlines".', role,
+                f"contract end is in 30 days and opportunity opp-sf-{rows['Opportunity'][0]['Id']} "
+                f'{quote(rows["Opportunity"][0]["Name"])} is still open at stage "Legal / Redlines".', role,
                 f"the latest dated call note {notes[0][0]} is 61 days old as of 2027-01-15."])
 
 

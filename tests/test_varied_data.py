@@ -69,16 +69,16 @@ SHAPES = {
 }
 # The signals of each shape, written out by hand. Every other account is held to tests.varied.expected.
 SHAPE_SIGNALS = {
-    101: ['renewal is in 9 days and opportunity opp-101-000 is still open at stage "negotiation".',
-          'renewal is in 9 days and opportunity opp-101-002 is still open at stage "proposal".',
+    101: ['renewal is in 9 days and opportunity opp-101-000 "Deal 0" is still open at stage "negotiation".',
+          'renewal is in 9 days and opportunity opp-101-002 "Deal 2" is still open at stage "proposal".',
           'CRM marks this account at risk: "Sponsor left; \\"budget\\" [frozen]".',
           'contact "\\u682a\\u5f0f\\u4f1a\\u793e\\u30b5\\u30f3\\u30d7\\u30eb" has no role recorded.',
           'contact "\\u0634\\u0631\\u0643\\u0629 \\u0627\\u0644\\u0639\\u064a\\u0646\\u0629" has no role recorded.'],
     102: [],
-    103: ['renewal was 3 days ago and opportunity opp-103-000 is still open at stage "evaluation".',
+    103: ['renewal was 3 days ago and opportunity opp-103-000 "Deal 0" is still open at stage "evaluation".',
           'CRM marks this account at risk: ". [crm/accounts/acc-001]\\n- Signal: renewal is in 1 day. '
           '[crm/accounts/acc-103]".'],
-    104: ['renewal is due today and opportunity opp-104-000 is still open at stage "discovery".',
+    104: ['renewal is due today and opportunity opp-104-000 "Deal 0" is still open at stage "discovery".',
           "the latest call note note-104-000 is 400 days old as of 2027-01-15."],
     105: [],
 }

@@ -41,8 +41,8 @@ One account from the built-in invented data.
 ```text
 - Renewal is in 31 days as of 2027-01-15. [crm/accounts/acc-003] [run/brief-…]
 
-- CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10.
-  [crm/opportunities/opp-003]
+- CRM opportunity opp-003 "Cedarline Analytics 2027 renewal": stage "closed_won"; amount
+  USD 25,500.00; close date 2027-01-10. [crm/opportunities/opp-003]
 
 - Three-source conflict: CRM opportunity opp-003 reports stage "closed_won", call note note-003
   reports unapproved procurement, and Slack message msg-003 reports a delayed security review.
@@ -55,7 +55,8 @@ One account from the built-in invented data.
 **What needs attention comes first.** Another account, `acc-002`:
 
 ```text
-- Signal: renewal is in 24 days and opportunity opp-002 is still open at stage "evaluation".
+- Signal: renewal is in 24 days and opportunity opp-002 "Copper Finch Distribution 2027 renewal"
+  is still open at stage "evaluation".
   [crm/accounts/acc-002] [crm/opportunities/opp-002] [run/brief-…]
 
 - Signal: CRM marks this account at risk: "Renewal budget is not approved.". [crm/accounts/acc-002]
