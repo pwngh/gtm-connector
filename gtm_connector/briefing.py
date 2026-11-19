@@ -14,7 +14,7 @@ import uuid
 import httpx2
 
 from . import strict_json
-from .seed import DEMO_AS_OF
+from .seed import DEMO_AS_OF, SELLERS
 from .units import SANITIZER_VERSION, BriefRejected, build, trace
 
 
@@ -25,7 +25,7 @@ class BriefingError(RuntimeError):
 def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_OF,
                      *, include_slack=False, crm_backend="sqlite", calls_backend="fixture", calls_binding=None,
                      slack_backend="fixture", crm_binding=None, slack_binding=None, sellers=()):
-    """Read through MCP and return the checked evidence, its units, and the card.
+    """Read through MCP and return the checked evidence, its units, the card, and what it did not read or show.
 
     A calls or Slack scope denial is kept as an outcome the card states.
     """
@@ -120,9 +120,11 @@ def assemble_evidence(brief_id, account_id, as_of, records, receipts, statuses, 
                 "crm_backend": crm_backend, "crm_binding": deepcopy(crm_binding),
                 "calls_backend": calls_backend, "calls_binding": deepcopy(calls_binding),
                 "slack_backend": slack_backend, "slack_binding": deepcopy(slack_binding),
-                "thread_snapshot": thread_snapshot, "sellers": list(sellers)}
-    units, text = build(evidence)
-    return evidence, units, text
+                "thread_snapshot": thread_snapshot, "sellers": list(sellers),
+                # Demo text names its own invented sellers. They are an input to roles, so the evidence holds them.
+                "demo_sellers": list(SELLERS) if "fixture" in (calls_backend, slack_backend) else []}
+    units, text, gaps = build(evidence)
+    return evidence, units, text, gaps
 
 
 def _artifact_path(directory, brief_id):
@@ -173,7 +175,7 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, i
     try:
         with LocalClient(runtime.config) as client:
             token = client.authorize(scopes)
-            evidence, units, text = collect_evidence(
+            evidence, units, text, gaps = collect_evidence(
                 client, token, runtime.connector.audit, account_id, brief_id, as_of, include_slack=include_slack,
                 crm_backend=runtime.crm_backend, calls_backend=runtime.calls_backend,
                 calls_binding=runtime.calls_binding, slack_backend=runtime.slack_backend,
@@ -192,7 +194,7 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, i
                     "status": "accepted", "rules_version": SANITIZER_VERSION, "sealed_by": seal,
                     "sources": source_names(runtime.crm_backend, runtime.calls_backend, runtime.slack_backend,
                                             include_slack),
-                    "text": text, "units": units, "evidence": evidence}
+                    "text": text, "units": units, "gaps": gaps, "evidence": evidence}
         payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, indent=2).encode()
         if path.parent.is_symlink():
             raise ValueError("briefs directory must not be a symbolic link")
@@ -238,7 +240,8 @@ def _sealed(directory, brief_id):
     try:
         [seal] = read_ids(log, [str(artifact.get("sealed_by"))])
     except ValueError:
-        seal = {"tool": None, "status": None, "rows": None}
+        raise ValueError("This card's seal receipt cannot be read from the audit log of this state folder. "
+                         "A card traces only in the folder that made it.") from None
     if (seal["tool"], seal["status"]) == (SEAL_TOOL, "pending"):
         raise ValueError("This card's seal was never finished: saving it was interrupted. Make the card again.")
     if (seal["tool"], seal["status"], seal["rows"]) != (SEAL_TOOL, "ok", [reference]):
@@ -257,12 +260,9 @@ def _sealed(directory, brief_id):
 def trace_saved(directory, brief_id, number):
     """Resolve one number on a saved card from its sealed units and evidence, never from the card's text.
 
-    A card keeps the numbers it was sealed with. Under the same rules number its units must also equal a
-    rebuild from its own evidence. The wording of a card may change between releases; its units may not.
+    A card keeps the numbers it was sealed with. Nothing is rebuilt: a later rule fix, another Python, or a
+    changed seller list would give other units for the same evidence, and the sealed ones are the card.
     """
     artifact = _sealed(directory, brief_id)
-    if artifact.get("rules_version") == SANITIZER_VERSION and artifact["units"] != build(artifact["evidence"])[0]:
-        raise ValueError("This connector builds other units from the card's evidence than the ones sealed, under "
-                         "the same rules number. Make the card again.")
     return {"brief_id": brief_id, "account_id": artifact["account_id"],
             **trace(artifact["evidence"], number, artifact["units"])}

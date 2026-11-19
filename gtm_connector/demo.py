@@ -87,7 +87,7 @@ def run(directory):
             "lookup": {"query": ACCOUNT_NAME, "matches": len(records), "receipt_id": receipts[0]["audit_id"]},
             "denied_read": {"tool": "read_call_notes", "status": denied.status_code,
                             "required_scope": "calls:read", "receipt_id": receipts[1]["audit_id"]},
-            "brief": {key: brief[key] for key in ("brief_id", "account_id", "as_of", "text", "units")},
+            "brief": {key: brief[key] for key in ("brief_id", "account_id", "as_of", "text", "units", "gaps")},
             # The two calls of this run, the card's reads, and the receipt that seals the saved card.
             "audit": {"run_id": run_id, "rows": len(receipts) + len(brief["evidence"]["receipts"]) + 1},
             "activities_created": created,

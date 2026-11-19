@@ -125,7 +125,7 @@ class VariedDataTests(unittest.TestCase):
         # Every row that was loaded is in the evidence, and the saved card is what that evidence gives again.
         loaded = {f"{database}/{table}/{row[0]}" for database, tables in rows.items() for table, row in tables}
         self.assertEqual({record["record_ref"] for record in brief["evidence"]["records"]}, loaded)
-        self.assertEqual(build(brief["evidence"]), (brief["units"], brief["text"]))
+        self.assertEqual(build(brief["evidence"]), (brief["units"], brief["text"], brief["gaps"]))
         # The CRM values and the signals are exactly those of the rows.
         wanted = varied.expected(rows, brief)
         self.assertEqual(card["ATTENTION"], wanted["signals"])

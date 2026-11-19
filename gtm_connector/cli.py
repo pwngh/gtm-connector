@@ -440,6 +440,10 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
             rows += [["Text", json.dumps(result["text"], ensure_ascii=False)],
                      ["Speaker", result["speaker"] or "no speaker label"],
                      ["Role", f"{result['role']} ({result['basis']})"], ["Time", result["at"] or "Missing"],
+                     ["On the card", {"yes": "yes", "cut": "no: cut off", "long": "no: too long to show",
+                                      "more": "no: the card shows 12"}.get(result.get("shown"), "not recorded")],
+                     *([["Cues or lines", f"{span['first']} to {span['last']}"]]
+                       if (span := result.get("span")) else []),
                      ["Source text SHA-256", result["raw_sha256"]],
                      ["Neutralizer version", result["sanitizer_version"]]]
         else:

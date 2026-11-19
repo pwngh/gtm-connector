@@ -45,7 +45,8 @@ def evidence(*, notes_status="available", slack_status="not_requested", notes=No
     return {"brief_id": "brief-fixture", "account_id": "acc-001", "as_of": "2027-01-15", "records": records,
             "receipts": receipts, "notes_status": notes_status, "slack_status": slack_status,
             "crm_backend": "sqlite", "crm_binding": None, "calls_backend": "fixture", "calls_binding": None,
-            "slack_backend": "fixture", "slack_binding": None, "thread_snapshot": None, "sellers": ["Morgan Reed"]}
+            "slack_backend": "fixture", "slack_binding": None, "thread_snapshot": None, "sellers": ["Morgan Reed"],
+            "demo_sellers": []}
 
 
 class NeutralizedText(unittest.TestCase):
@@ -250,7 +251,7 @@ class SpeakerRoles(unittest.TestCase):
 
 class Evidence(unittest.TestCase):
     def test_a_card_cites_every_value_and_sentence_by_number(self):
-        units, text = build(evidence(slack_status="available", messages=[("Morgan Reed", "They agreed.")]))
+        units, text, _ = build(evidence(slack_status="available", messages=[("Morgan Reed", "They agreed.")]))
         self.assertEqual([unit["kind"] for unit in units], ["record"] * 3 + ["sentence"] * 2)
         for line in text.split("RECORD VALUES", 1)[1].split("\n\n")[0].splitlines()[1:]:
             self.assertRegex(line, r" \[\d+\]$")
@@ -283,7 +284,7 @@ class Evidence(unittest.TestCase):
             source["receipts"][1].update(rows=[row["record_ref"] for row in deals], row_count=6)
             return source
 
-        _, text = build(six())
+        _, text, _ = build(six())
         self.assertEqual(text.count("\n  Opportunity: "), 5)
         self.assertIn("  CRM: 1 more opportunity was read and is not shown (6 in all).", text)
         for bad in ({"amount_cents": -5}, {"currency": "dollars"}, {"amount_cents": "100"}, {"close_date": "soon"}):
@@ -294,7 +295,7 @@ class Evidence(unittest.TestCase):
         source = evidence()
         source["records"][0]["renewal_date"] = "2027-01-10"
         source["records"][2]["stage"] = ""
-        _, text = build(source)
+        _, text, _ = build(source)
         # The empty stage shows in the record value and in the signal. It is one empty field.
         self.assertIn("  The renewal date passed 5 days ago and this opportunity is still open at stage Missing. "
                       "[1][3]", text)
@@ -306,7 +307,7 @@ class Evidence(unittest.TestCase):
                           messages=[("Morgan Reed", "")])
         for record in source["records"][3:5]:
             record["called_at"] = "2026-10-03T15:00:00Z"
-        units, text = build(source)
+        units, text, _ = build(source)
         self.assertEqual([(unit["kind"], unit["record_ref"]) for unit in units[3:]],
                          [("record", "calls/call_notes/note-0"), ("sentence", "calls/call_notes/note-1"),
                           ("record", "slack/messages/msg-0")])
@@ -318,19 +319,19 @@ class Evidence(unittest.TestCase):
         self.assertEqual(trace(source, 6)["receipt"]["tool"], "read_slack_messages")
         # When the call with no sentence is the latest, it is cited as the record it is.
         source["records"][4]["called_at"] = "2026-09-01T15:00:00Z"
-        units, text = build(source)
+        units, text, _ = build(source)
         self.assertEqual((units[4]["kind"], units[4]["record_ref"]), ("record", "calls/call_notes/note-0"))
         self.assertIn("  The latest dated call that was read is 104 days old. [5]", text)
         self.assertIn("  Speakers: 1 of 1 sentence has no established speaker role.",
                       build(evidence(notes=[(None, "Unlabelled.")]))[1])
 
     def test_a_line_break_ends_a_sentence_in_a_chat_message_and_wraps_one_in_a_note(self):
-        units_, _ = build(evidence(slack_status="available", messages=[
+        units_, _, _ = build(evidence(slack_status="available", messages=[
             ("Morgan Reed", "GC will not sign without ZDR\nProcurement asked for $300k")]))
         self.assertEqual([unit["text"] for unit in units_ if unit["source"] == "slack"],
                          ["GC will not sign without ZDR", "Procurement asked for $300k"])
         # A note written with Windows line endings wraps the same way, and the ending is not shown as a control.
-        units_, text = build(evidence(notes=[("Dana Ito", "We will sign\r\nonly if the rider is approved.")]))
+        units_, text, _ = build(evidence(notes=[("Dana Ito", "We will sign\r\nonly if the rider is approved.")]))
         self.assertEqual([unit["text"] for unit in units_ if unit["kind"] == "sentence"],
                          ["We will sign only if the rider is approved."])
         self.assertNotIn("control character", text)
@@ -376,26 +377,8 @@ class Evidence(unittest.TestCase):
             self.assertNotIn("No sentence was read.", text)
         self.assertIn("  No sentence was read.", build(evidence(notes=[]))[1].splitlines())
 
-    def test_the_rules_number_is_raised_whenever_the_same_evidence_would_be_numbered_differently(self):
-        notes = [("Dana Ito", text) for text in (
-            "See 28 U.S.C. § 1332 for that. We will not sign this quarter.",
-            "No. The client refused. See Docket No. A-17 for the order.",
-            "1. The rider is blocked. 2. Legal is reviewing.",
-            "Thornfield Wren LLP. We require zero retention. Thornfield Wren LLP. Section 4 applies.",
-            "They marked it (Approved? Ask Legal) on Monday. So do I. It is late.",
-            "We will sign\r\nonly if the rider is approved.\n\nThen we talk",
-            "See <https://files.example/redline|the redline> [7]. Sent to Trish. 31 of 45 seats logged in.")]
-        units_, _ = build(evidence(notes=notes, slack_status="available", messages=[
-            ("Morgan Reed", "GC will not sign without ZDR\nProcurement asked for $300k")]))
-        # Every key of every unit but the rules number itself.
-        numbered = [{key: value for key, value in unit.items() if key != "sanitizer_version"} for unit in units_]
-        digest = hashlib.sha256(json.dumps(numbered, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-        self.assertEqual((SANITIZER_VERSION, digest), (2, "6710bb6dae2c8722bfae043eb400a65ce19be672f7fa348e51ab03e7af46316c"),
-                         "The same evidence now gives other units. Raise SANITIZER_VERSION and pin the new digest, "
-                         "so a card sealed under the old rules keeps its numbers and is not rebuilt under the new.")
-
     def test_a_denied_source_is_stated_and_never_filled_in(self):
-        _, text = build(evidence(notes_status="denied", slack_status="denied"))
+        _, text, _ = build(evidence(notes_status="denied", slack_status="denied"))
         self.assertIn("Calls: not read. The grant lacks calls:read.", text)
         self.assertIn("Slack: not read. The grant lacks slack:read.", text)
         self.assertIn("No sentence was read.", text)

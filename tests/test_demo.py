@@ -61,7 +61,7 @@ class NarrativeDemoTests(unittest.TestCase):
         self.assertEqual(result["denied_read"]["required_scope"], "calls:read")
         self.assertEqual(result["activities_created"], 0)
         brief = result["brief"]
-        self.assertEqual(set(brief), {"brief_id", "account_id", "as_of", "text", "units"})
+        self.assertEqual(set(brief), {"brief_id", "account_id", "as_of", "text", "units", "gaps"})
         self.assertEqual(brief["account_id"], "acc-003")
         self.assertEqual(brief["as_of"], "2027-01-15")
         artifact = self.saved(brief["brief_id"])

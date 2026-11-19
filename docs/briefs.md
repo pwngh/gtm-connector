@@ -13,7 +13,7 @@ connector writes every character of it. No model takes part.
 | `--without-calls` | Omits the `calls:read` grant. The card says calls were not read. |
 | `--with-slack` | Adds a fourth read under `slack:read`. See [Slack context](slack.md). |
 | `--as-of YYYY-MM-DD` | Sets the planning date. Fixtures default to `2027-01-15`. |
-| `--json` | Prints the card as `text` with its `units`. The raw records stay in the saved file. |
+| `--json` | Prints the card as `text` with its `units` and `gaps`. The raw records stay in the saved file. |
 
 Each `brief` starts local services, calls `get_account`, `list_opportunities`, and
 `read_call_notes` in that order, then stops the services. It requests `crm:read` and `calls:read`,
@@ -33,11 +33,24 @@ the saved file: the evidence, the units, the card text, the seller list, and the
 reads the file, and refuses it unless that receipt is finished and names the digest of the file as
 it is now, and the receipts of the card's reads are the ones in the audit log. A changed amount,
 sentence, speaker, seller, date, or card text does not trace. A card keeps the numbers it was sealed
-with, and `trace` neutralizes a sentence again under today's rules before showing it. A card saved
+with: `trace` answers from the sealed units and rebuilds nothing, so a later change to the rules
+cannot move or refuse them. It neutralizes a sentence again under today's rules before showing it. A card saved
 before sealing says so and has to be made again. A save that does not finish leaves no file, and
 its receipt ends as an error; after a hard stop the receipt stays `pending` and names the card in
 `arguments`. The owner of the state folder can still rewrite the file and the audit log together:
 the log is not tamper-proof.
+
+A record unit has `n`, `kind`, `source`, `record_ref`, and `tool`. A sentence unit adds `at`,
+`speaker`, `role`, `basis`, `text`, `partial`, `raw_sha256`, `sanitizer_version`, and three more.
+`contact` is the number of the one contact a customer's label equals, or `null`. `shown` says
+whether the sentence is under `SAID`: `yes`, or why not: `cut` (not a whole sentence), `long` (over
+300 characters), `more` (whole, and past the 12 places). `span` is `null` except in an imported
+transcript, where it names the first and last cue or line the sentence lies in and their times.
+`gaps` holds one entry for each line under `NOT READ`, in order: a `code` from a fixed list, a
+`disposition` (`not_read`, `read_not_shown`, or `note`), the `count` the line states or `null`,
+`by_role` (that count by speaker role, for a line that counts sentences), and the line itself as
+`text`. A gap has no number. Read a unit's `kind` before any other key, and name a gap by its
+`code`, never by its text.
 
 ## Sentences
 
@@ -112,7 +125,7 @@ SHA-256 of the record's stored text. The account name in the heading is a quoted
 
 Each card and its evidence are saved in `var/v2/briefs/<brief_id>.json`, with `schema_version`
 (`3`), `brief_id`, `account_id`, `as_of`, `status`, `rules_version`, `sealed_by`, `sources`, `text`,
-`units`, and `evidence`.
+`units`, `gaps`, and `evidence`.
 `brief --json` prints every key but `evidence`, which holds the raw records and one receipt per
 read. The snapshot preserves the records read, not later CRM changes. Evidence that fails a check
 gives no card and saves nothing.

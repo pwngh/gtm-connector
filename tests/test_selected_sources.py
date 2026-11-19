@@ -159,9 +159,9 @@ class SelectedSourceTests(SelectedFixture, unittest.TestCase):
             self.assertRegex(lines[injected[0] - 1], r"^  \[\d+\] seller \(listed seller identity\); Slack ")
             self.assertRegex(lines[injected[1] - 1], r"^  \[\d+\] unknown \(no speaker label\); call ")
             saved = json.loads((runtime.directory / "selected-briefs" / (brief_id + ".json")).read_text())
-            self.assertEqual((saved["schema_version"], saved["text"]), (2, prepared["text"]))
+            self.assertEqual((saved["schema_version"], saved["text"]), (3, prepared["text"]))
             self.assertEqual(set(saved), {"kind", "schema_version", "brief_id", "account_id", "as_of", "prepared_by",
-                                          "bindings", "slack_scopes", "sources", "text", "units", "evidence"})
+                                          "bindings", "slack_scopes", "sources", "text", "units", "gaps", "evidence"})
             # The caller gets the units, so every number on the card resolves without the owner's CLI.
             units = prepared["units"]
             self.assertEqual(saved["units"], units)

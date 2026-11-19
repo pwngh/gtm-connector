@@ -67,7 +67,8 @@ def evidence(contracts=None, *, with_slack=False):
             "receipts": receipts, "notes_status": "available",
             "slack_status": "available" if with_slack else "not_requested",
             "crm_backend": "salesforce", "crm_binding": None, "calls_backend": "fixture", "calls_binding": None,
-            "slack_backend": "fixture", "slack_binding": None, "thread_snapshot": None, "sellers": []}
+            "slack_backend": "fixture", "slack_binding": None, "thread_snapshot": None, "sellers": [],
+            "demo_sellers": []}
 
 
 def card(source):
@@ -106,7 +107,7 @@ class SalesforceFactTests(unittest.TestCase):
                            contract_record(3, end="2027-02-01"),
                            contract_record(2, end=AS_OF, status="Activated"),
                            contract_record(1, end=AS_OF, status="InApproval")])
-        units, text = build(source)
+        units, text, _ = build(source)
         lines = text.splitlines()
         self.assertIn('  Contract end: 2027-01-15, today; status "InApproval"; a planning candidate, not activated [3]',
                       lines)

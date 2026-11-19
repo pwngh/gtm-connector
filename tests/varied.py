@@ -15,7 +15,7 @@ import sqlite3
 import unicodedata
 
 from gtm_connector import strict_json
-from gtm_connector.units import safe_text, sentences, trace
+from gtm_connector.units import GAP_CODES, safe_text, sentences, trace
 
 
 AS_OF = date(2027, 1, 15)
@@ -308,6 +308,30 @@ def hold(case, brief):
                      and len(unit["text"]) <= 300 for unit in units) for role in ("customer", "seller", "unknown")}
     for role, count in fit.items():
         case.assertGreaterEqual(roles.count(role), min(count, 12 // sum(map(bool, fit.values())) if count else 0))
+    # What a tool reads says what the card prints: the sentences marked shown are the ones under SAID, each of
+    # the others says why it is not, and NOT READ is the text of each gap, in order, under a code of the list.
+    spoken = [unit for unit in units if unit["kind"] == "sentence"]
+    case.assertEqual(sorted(unit["n"] for unit in spoken if unit["shown"] == "yes"), sorted(q[0] for q in quotes))
+    for unit in spoken:
+        case.assertEqual(unit["shown"] in ("yes", "more"), not unit["partial"] and len(unit["text"]) <= 300)
+        case.assertEqual(unit["shown"] == "cut", unit["partial"])
+        # A customer's sentence names its contact as data: the number of a contact record, the one in its basis.
+        case.assertEqual(unit["contact"] is not None, unit["role"] == "customer")
+        if unit["contact"] is not None:
+            case.assertEqual((units[unit["contact"] - 1]["record_ref"].split("/")[:2], unit["basis"]),
+                             (["crm", "contacts"], f"label matches contact [{unit['contact']}]"))
+    case.assertEqual(card["NOT READ"], ["  " + gap["text"] for gap in brief["gaps"]])
+    for gap in brief["gaps"]:
+        case.assertEqual((set(gap), gap["disposition"]),
+                         ({"code", "disposition", "count", "by_role", "text"}, GAP_CODES[gap["code"]]))
+        # A line that counts sentences says whose they are, and the roles add up to the count.
+        case.assertEqual(gap["by_role"] is not None, gap["code"].startswith("sentences_"))
+        if gap["by_role"] is not None:
+            case.assertEqual((list(gap["by_role"]), sum(gap["by_role"].values())),
+                             (["customer", "seller", "unknown"], gap["count"]))
+    for why in ("cut", "more", "long"):
+        counted = [gap["count"] for gap in brief["gaps"] if gap["code"] == "sentences_" + why]
+        case.assertEqual(counted, [count] if (count := sum(unit["shown"] == why for unit in spoken)) else [])
     # A few numbers, traced from the saved evidence alone, name the same record and a finished receipt.
     for number in sorted({1, len(units), *(quote[0] for quote in quotes[:2])}):
         traced = trace(evidence, number)

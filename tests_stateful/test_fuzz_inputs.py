@@ -367,10 +367,11 @@ class UnitsFuzz(unittest.TestCase):
     def held(self, source, data=None):
         """Evidence gives no card, or a card that keeps every promise. Any error but a refusal fails the test."""
         try:
-            units, text = build(source)
+            units, text, gaps = build(source)
         except BriefRejected:
             return None
-        varied.hold(self, {"status": "accepted", "evidence": source, "units": units, "text": text})
+        varied.hold(self, {"status": "accepted", "evidence": source, "units": units, "text": text,
+                           "gaps": gaps})
         self.assertIsNone(LIVE.search(text + json.dumps(units, ensure_ascii=False)))
         # Every bracketed number on the card is a unit of this card. Source text cannot add one.
         self.assertLessEqual({int(number) for number in CITATION.findall(text)}, set(range(1, len(units) + 1)))

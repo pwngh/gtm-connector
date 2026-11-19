@@ -32,7 +32,7 @@ class BriefPersistenceTests(unittest.TestCase):
         self.assertEqual(json.loads(path.read_text()), brief)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
-        self.assertEqual((brief["schema_version"], brief["status"], brief["rules_version"]), (3, "accepted", 2))
+        self.assertEqual((brief["schema_version"], brief["status"], brief["rules_version"]), (3, "accepted", 3))
         # The seal is one finished receipt that belongs to no brief and names the digest of the saved bytes.
         [seal] = [row for row in receipts if row["audit_id"] == brief["sealed_by"]]
         self.assertEqual((seal["tool"], seal["status"], seal["brief_id"], seal["arguments"]),
@@ -59,7 +59,7 @@ class BriefPersistenceTests(unittest.TestCase):
         # card names must be there unchanged.
         log = self.state / "audit.sqlite3"
         kept = log.read_bytes()
-        for change, message in (("DELETE FROM audit_log WHERE tool = 'save_brief'", "not the card that was sealed"),
+        for change, message in (("DELETE FROM audit_log WHERE tool = 'save_brief'", "seal receipt cannot be read"),
                                 ("UPDATE audit_log SET tool = 'log_activity' WHERE tool = 'save_brief'",
                                  "not the card that was sealed"),
                                 ("UPDATE audit_log SET status = 'error' WHERE tool = 'save_brief'",
@@ -84,25 +84,24 @@ class BriefPersistenceTests(unittest.TestCase):
             connection.execute("UPDATE audit_log SET rows = ? WHERE audit_id = ?", (json.dumps(
                 [f"briefs/{brief['brief_id']}/{hashlib.sha256(payload).hexdigest()}"]), brief["sealed_by"]))
 
-    def test_a_card_sealed_under_older_rules_keeps_its_own_numbers(self):
+    def test_a_sealed_card_answers_from_its_own_units_whatever_rules_are_installed(self):
         with Runtime(self.state) as runtime:
             brief = create_brief(runtime, "acc-003", include_slack=True)
-        # Older rules cut this sentence elsewhere and let a mention through. Today's would number the card afresh.
+        # A rule fix, another Python, or a changed seller list would build other units from the same evidence.
+        # The sealed ones are the card, so nothing is rebuilt and every number still answers.
+        with patch("gtm_connector.briefing.build", side_effect=AssertionError("rebuilt")), \
+                patch("gtm_connector.units.build", side_effect=AssertionError("rebuilt")):
+            for unit in brief["units"]:
+                traced = trace_saved(self.state, brief["brief_id"], unit["n"])
+                self.assertEqual((traced["n"], traced["record_ref"], traced.get("text")),
+                                 (unit["n"], unit["record_ref"], unit.get("text")))
+        # Older rules let a mention through. The sealed unit answers, and today's rules neutralize what it shows.
         last = brief["units"][-1]
         self.assertEqual(last["kind"], "sentence")
-        older = brief["units"][:-1] + [{**last, "text": "<!channel> " + last["text"]}]
-        self.reseal(brief, rules_version=1, units=older)
+        self.reseal(brief, rules_version=1, units=brief["units"][:-1] + [{**last, "text": "<!channel> " + last["text"]}])
         traced = trace_saved(self.state, brief["brief_id"], last["n"])
-        # The sealed unit answers, and today's rules neutralize what it shows.
         self.assertEqual((traced["n"], traced["record_ref"], traced["text"]),
                          (last["n"], last["record_ref"], "[mention channel] " + last["text"]))
-        # Under the same rules number, units that a rebuild does not give are refused.
-        self.reseal(brief, units=older)
-        with self.assertRaisesRegex(ValueError, "builds other units"):
-            trace_saved(self.state, brief["brief_id"], last["n"])
-        # The wording of a card may change in a later release. Its units decide, so the card still traces.
-        self.reseal(brief, text="DEAL CARD, reworded")
-        self.assertEqual(trace_saved(self.state, brief["brief_id"], last["n"])["text"], last["text"])
 
     def test_a_later_call_that_names_a_saved_card_does_not_stop_it_tracing(self):
         with Runtime(self.state) as runtime:
@@ -162,13 +161,23 @@ class BriefPersistenceTests(unittest.TestCase):
         with closing(sqlite3.connect(self.state / "audit.sqlite3")) as connection, connection:
             connection.execute("UPDATE audit_log SET rows = 'not json' WHERE audit_id = ?", (other["sealed_by"],))
         self.assertEqual(trace_saved(self.state, healthy["brief_id"], 1)["n"], 1)
-        with self.assertRaisesRegex(ValueError, "not the card that was sealed"):
+        with self.assertRaisesRegex(ValueError, "seal receipt cannot be read"):
             trace_saved(self.state, other["brief_id"], 1)
         # One card's seal does not seal another card's file.
+        with Runtime(self.state) as runtime:
+            third = create_brief(runtime, "acc-002")
         path = self.state / "briefs" / (healthy["brief_id"] + ".json")
-        path.write_text(path.read_text().replace(healthy["sealed_by"], other["sealed_by"]))
+        sealed = path.read_bytes()
+        path.write_text(path.read_text().replace(healthy["sealed_by"], third["sealed_by"]))
         with self.assertRaisesRegex(ValueError, "not the card that was sealed"):
             trace_saved(self.state, healthy["brief_id"], 1)
+        # An untouched card copied to another state folder was not changed. Its seal is simply not there.
+        elsewhere = self.state.parent / "elsewhere"
+        with Runtime(elsewhere) as runtime:
+            create_brief(runtime, "acc-001")
+        (elsewhere / "briefs" / path.name).write_bytes(sealed)
+        with self.assertRaisesRegex(ValueError, "seal receipt cannot be read from the audit log of this state folder"):
+            trace_saved(elsewhere, healthy["brief_id"], 1)
 
     def test_a_failed_save_leaves_no_card_and_keeps_the_receipts(self):
         with Runtime(self.state) as runtime:

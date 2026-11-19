@@ -49,7 +49,7 @@ class SlackBriefingTests(unittest.TestCase):
             self.assertEqual([(unit["source"], unit["role"]) for unit in brief["units"] if unit["kind"] == "sentence"],
                              [("calls", "seller"), ("calls", "customer"), ("calls", "customer"),
                               ("slack", "seller"), ("slack", "seller"), ("slack", "seller")])
-            self.assertEqual(build(brief["evidence"]), (brief["units"], brief["text"]))
+            self.assertEqual(build(brief["evidence"]), (brief["units"], brief["text"], brief["gaps"]))
             saved = json.loads((self.state / "briefs" / (brief["brief_id"] + ".json")).read_text())
             self.assertEqual(saved, brief)
             self.assert_plan(runtime, brief, {"crm:read", "calls:read", "slack:read"})
