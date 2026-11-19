@@ -21,7 +21,7 @@ an uncited sentence, a cited invention. The times are `time gtm-connector evalua
 ```mermaid
 flowchart LR
     CRM["Salesforce<br/>accounts · contacts · contracts · opportunities"] --> G
-    CALLS["Call transcripts<br/>TXT · VTT"] --> G
+    CALLS["Call transcripts<br/>TXT · VTT · SRT"] --> G
     SLACK["Slack<br/>account threads"] --> G
     G{{"gtm-connector<br/>scoped reads · receipts · citation check"}} --> B(["Cited brief"])
 ```
@@ -124,7 +124,7 @@ Each source is selected explicitly. Nothing falls back to demo data.
 | Source | Commands | Guide |
 | --- | --- | --- |
 | Salesforce, read-only | `salesforce check --sf-org ALIAS`, `serve --crm-backend salesforce --sf-org ALIAS` | [Salesforce](docs/salesforce.md) |
-| Call transcripts (TXT, VTT) | `calls import meeting.vtt --account acc-007` | [Calls](docs/calls.md) |
+| Call transcripts (TXT, VTT, SRT) | `calls import meeting.vtt --account acc-007` | [Calls](docs/calls.md) |
 | Slack sign-in | `slack connect`, `slack status`, `slack disconnect` | [Slack sign-in](docs/slack.md) |
 | One Slack thread per account | `slack map`, `slack check` | [Slack threads](docs/slack.md) |
 | Selected accounts for a client | `serve --selection selection.json` | [Selection](docs/selection.md) |

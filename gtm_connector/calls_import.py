@@ -27,8 +27,8 @@ MAX_RETURNED_UNITS = 256
 MAX_RECORD_BYTES = 128 * 1024
 DEFAULT_UNITS = 20
 CONTEXT_UNITS = 1
-PARSER_VERSION = 1
-RECORD_VERSION = 1
+PARSER_VERSION = 2
+RECORD_VERSION = 2
 _PROVENANCE_RESERVE = 8192
 _VTT_HEADER = re.compile(r"Kind: (?:captions|subtitles|descriptions|chapters|metadata)"
                          r"|Language: [A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*"
@@ -38,6 +38,10 @@ _NOTE_ID = re.compile(r"note-[0-9a-f]{64}\Z")
 _CONTROLS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _STAMP = r"(?:(?:[0-9]{2,9}):)?[0-5][0-9]:[0-5][0-9]\.[0-9]{3}"
 _TIMING = re.compile(rf"^({_STAMP})[ \t]+-->[ \t]+({_STAMP})(?:[ \t]+([^\r\n]*))?$")
+_VTT_SETTING = re.compile(r"(?:vertical|line|position|size|align|region):\S+")
+_SRT_STAMP = r"[0-9]{2,9}:[0-5][0-9]:[0-5][0-9][,.][0-9]{3}"
+_SRT_TIMING = re.compile(rf"^({_SRT_STAMP})[ \t]+-->[ \t]+({_SRT_STAMP})(?:[ \t]+([^\r\n]*))?$")
+FORMATS = ("txt", "vtt", "srt")
 _UNITS_KEYS = {"index", "text", "cue_id", "start_ms", "end_ms"}
 _MANIFEST_KEYS = {"schema_version", "source", "format", "parser_version", "content_sha256",
                   "raw_byte_count", "association", "association_generation", "called_at", "imported_at",
@@ -163,14 +167,14 @@ def _lines(text):
 
 def _milliseconds(value):
     fields = value.split(":")
-    seconds, millis = fields[-1].split(".")
+    seconds, millis = fields[-1].replace(",", ".").split(".")
     hours = int(fields[0]) if len(fields) == 3 else 0
     return ((hours * 60 + int(fields[-2])) * 60 + int(seconds)) * 1000 + int(millis)
 
 
 def parse_transcript(raw: bytes, *, format: str) -> dict[str, Any]:
     """Parse a strict transcript subset, preserving the exact original bytes."""
-    if not isinstance(raw, bytes) or format not in ("txt", "vtt"):
+    if not isinstance(raw, bytes) or format not in FORMATS:
         raise CallsImportError("calls_import_invalid")
     if len(raw) > MAX_RAW_BYTES:
         raise CallsImportError("calls_import_too_large")
@@ -189,50 +193,56 @@ def parse_transcript(raw: bytes, *, format: str) -> dict[str, Any]:
         units = [{"index": index, "text": line, "cue_id": None, "start_ms": None, "end_ms": None}
                  for index, line in enumerate(lines, 1)]
     else:
-        body = 1
+        vtt = format == "vtt"
+        timing_line, body = (_TIMING, 1) if vtt else (_SRT_TIMING, -1)
         # Exporters write these metadata lines under the signature. Any other text there could be speech.
-        while body < len(lines) and _VTT_HEADER.fullmatch(lines[body]):
+        while vtt and body < len(lines) and _VTT_HEADER.fullmatch(lines[body]):
             body += 1
-        if (len(lines) <= body or re.fullmatch(r"WEBVTT(?:[ \t][^\r\n]*)?", lines[0]) is None
-                or "-->" in lines[0] or lines[body] != ""):
+        if vtt and (len(lines) <= body or re.fullmatch(r"WEBVTT(?:[ \t][^\r\n]*)?", lines[0]) is None
+                    or "-->" in lines[0] or lines[body] != ""):
             raise CallsImportError("calls_import_invalid")
-        blocks: list[list[str]] = []
-        for line in lines[body + 1:]:
-            if line == "":
-                if blocks and blocks[-1]:
-                    blocks.append([])
-            else:
-                if not blocks:
-                    blocks.append([])
+        rest = lines[body + 1:]
+
+        def cue_starts(at):
+            # A cue starts with its timing line, or with one identifier line above it.
+            return any(place < len(rest) and timing_line.fullmatch(rest[place]) is not None for place in (at, at + 1))
+
+        # An empty line ends a block. A run of lines of spaces does too, but only where a cue, an empty line,
+        # or the end of the file follows it. Anywhere else the run is part of a cue's text.
+        separates = [False] * len(rest) + [True]
+        for at in range(len(rest) - 1, -1, -1):
+            if rest[at].strip(" \t") == "":
+                separates[at] = rest[at] == "" or separates[at + 1] or cue_starts(at + 1)
+        blocks: list[list[str]] = [[]]
+        for at, line in enumerate(rest):
+            if not separates[at]:
                 blocks[-1].append(line)
-        identifiers = set()
-        previous_start = -1
-        for block in blocks:
-            if not block:
-                continue
+            elif blocks[-1]:
+                blocks.append([])
+        for block in filter(None, blocks):
             first = block[0]
-            comment = first == "NOTE" or first.startswith(("NOTE ", "NOTE\t"))
-            display = first.rstrip(" \t") in ("STYLE", "REGION")
+            comment = vtt and (first == "NOTE" or first.startswith(("NOTE ", "NOTE\t")))
+            display = vtt and first.rstrip(" \t") in ("STYLE", "REGION")
             if comment or display:
                 if any("-->" in line for line in block) or (display and units):
                     raise CallsImportError("calls_import_invalid")
                 continue
             cue_id = None
-            timing = _TIMING.fullmatch(first)
+            timing = timing_line.fullmatch(first)
             payload = block[1:]
             if timing is None:
                 if "-->" in first or len(block) < 2:
                     raise CallsImportError("calls_import_invalid")
-                cue_id, timing, payload = first, _TIMING.fullmatch(block[1]), block[2:]
-                if not _text(cue_id, nonempty=True) or cue_id in identifiers:
+                # Some exports put the speaker's name here, so an identifier may repeat. SRT only numbers its cues.
+                cue_id, timing, payload = first, timing_line.fullmatch(block[1]), block[2:]
+                if not _text(cue_id, nonempty=True) or not (vtt or (cue_id.isascii() and cue_id.isdigit())):
                     raise CallsImportError("calls_import_invalid")
-                identifiers.add(cue_id)
-            if timing is None or any("-->" in line for line in payload):
+            if timing is None or not _cue_text(payload, format) or not _placing(timing[3], format):
                 raise CallsImportError("calls_import_invalid")
             start, end = _milliseconds(timing[1]), _milliseconds(timing[2])
-            if start < previous_start or end <= start or (timing[3] is not None and "-->" in timing[3]):
+            # Auto-captions repeat and reorder start times and end a cue where it starts. None of that loses text.
+            if end < start:
                 raise CallsImportError("calls_import_invalid")
-            previous_start = start
             units.append({"index": len(units) + 1, "text": "\n".join(payload), "cue_id": cue_id,
                           "start_ms": start, "end_ms": end})
             if len(units) > MAX_UNITS:
@@ -241,6 +251,25 @@ def parse_transcript(raw: bytes, *, format: str) -> dict[str, Any]:
         raise CallsImportError("calls_import_invalid")
     return {"raw": raw, "format": format, "parser_version": PARSER_VERSION,
             "content_sha256": hashlib.sha256(raw).hexdigest(), "units": tuple(units)}
+
+
+def _cue_text(lines, format):
+    """No line of a cue's text may be a timing line: a missing blank line would merge two cues into one."""
+    if format == "vtt":
+        return not any("-->" in line for line in lines)
+    return not any(_SRT_TIMING.fullmatch(line) for line in lines)
+
+
+def _placing(settings, format):
+    """What follows the end time is WebVTT cue settings or nothing. Anything else could be speech."""
+    words = (settings or "").split()
+    return all(_VTT_SETTING.fullmatch(word) for word in words) if format == "vtt" else not words
+
+
+def _quoted(units):
+    """The units' text as quoted. A short identifier with a space in it names the speaker, so it stays above its cue."""
+    return "\n".join(unit["text"] if unit["cue_id"] is None or " " not in unit["cue_id"] or len(unit["cue_id"]) > 200
+                     else f"{unit['cue_id']}\n{unit['text']}" for unit in units)
 
 
 def _range(first, last):
@@ -253,7 +282,7 @@ def _excerpt(parsed, first, last, mode):
     selected = deepcopy(list(parsed["units"][cited_first - 1:cited_last]))
     return {"unit_kind": "lines" if parsed["format"] == "txt" else "cues", "selection_mode": mode,
             "requested_range": _range(first, last), "cited_range": _range(cited_first, cited_last),
-            "total_units": total, "units": selected, "body": "\n".join(unit["text"] for unit in selected)}
+            "total_units": total, "units": selected, "body": _quoted(selected)}
 
 
 def _excerpt_fits(excerpt):
@@ -267,7 +296,7 @@ def select_excerpt(parsed: dict, *, requested_range: tuple[int, int] | None = No
     """Select complete units with one adjacent context unit on each side."""
     try:
         total = len(parsed["units"])
-        if parsed["format"] not in ("txt", "vtt") or not _int(total, 1, MAX_UNITS):
+        if parsed["format"] not in FORMATS or not _int(total, 1, MAX_UNITS):
             raise CallsImportError("calls_import_invalid")
         if requested_range is not None:
             if (not isinstance(requested_range, tuple) or len(requested_range) != 2
@@ -294,7 +323,7 @@ def _manifest_id(manifest):
 def _make_record(manifest):
     return {"id": _manifest_id(manifest), "account_id": manifest["association"]["account_id"],
             "record_kind": "imported_transcript", "record_version": RECORD_VERSION,
-            "called_at": manifest["called_at"], "body": "\n".join(unit["text"] for unit in manifest["units"]),
+            "called_at": manifest["called_at"], "body": _quoted(manifest["units"]),
             "manifest": deepcopy(manifest)}
 
 
@@ -310,7 +339,7 @@ def validate_imported_record(record: dict, *, account_id: str, crm_binding: dict
             raise ValueError
         if (type(manifest["schema_version"]) is not int or manifest["schema_version"] != 1
                 or type(manifest["parser_version"]) is not int or manifest["parser_version"] != PARSER_VERSION
-                or manifest["source"] != "user_supplied_export" or manifest["format"] not in ("txt", "vtt")
+                or manifest["source"] != "user_supplied_export" or manifest["format"] not in FORMATS
                 or not isinstance(manifest["content_sha256"], str)
                 or not _HEX.fullmatch(manifest["content_sha256"])
                 or not _int(manifest["raw_byte_count"], 1, MAX_RAW_BYTES)
@@ -339,7 +368,6 @@ def validate_imported_record(record: dict, *, account_id: str, crm_binding: dict
         if (not isinstance(units, list) or not 1 <= len(units) <= MAX_RETURNED_UNITS
                 or len(units) != cited["last"] - cited["first"] + 1):
             raise ValueError
-        previous_start, identifiers = -1, set()
         for index, unit in enumerate(units, cited["first"]):
             if (not isinstance(unit, dict) or set(unit) != _UNITS_KEYS or type(unit["index"]) is not int
                     or unit["index"] != index or not _text(unit["text"])):
@@ -352,16 +380,14 @@ def validate_imported_record(record: dict, *, account_id: str, crm_binding: dict
                     raise ValueError
             else:
                 if (not _int(unit["start_ms"], 0, 3_600_000_000_000_000)
-                        or not _int(unit["end_ms"], 1, 3_600_000_000_000_000)
-                        or unit["end_ms"] <= unit["start_ms"] or unit["start_ms"] < previous_start
-                        or "-->" in unit["text"] or "\r" in unit["text"]):
+                        or not _int(unit["end_ms"], 0, 3_600_000_000_000_000)
+                        or unit["end_ms"] < unit["start_ms"] or "\r" in unit["text"]
+                        or not _cue_text(unit["text"].split("\n"), manifest["format"])):
                     raise ValueError
-                previous_start = unit["start_ms"]
-                if cue_id is not None:
-                    if (not _text(cue_id, nonempty=True) or any(part in cue_id for part in ("\r", "\n", "-->"))
-                            or cue_id in identifiers):
-                        raise ValueError
-                    identifiers.add(cue_id)
+                if cue_id is not None and (not _text(cue_id, nonempty=True)
+                                           or any(part in cue_id for part in ("\r", "\n", "-->"))
+                                           or (manifest["format"] == "srt" and not cue_id.isdigit())):
+                    raise ValueError
         expected = _make_record(manifest)
         if any(record[key] != value or type(record[key]) is not type(value) for key, value in expected.items()):
             raise ValueError

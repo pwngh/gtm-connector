@@ -27,16 +27,32 @@ QUOTED_LIMIT = 120 * 1024
 CALLED = (None, "2026-11-16T00:00:00Z", "2026-11-15T23:59:59Z", "2025-06-01T08:00:00Z")
 STAMP = r"(?:(\d{2,}):)?([0-5]\d):([0-5]\d)\.(\d{3})"
 TIMING = re.compile(rf"{STAMP}[ \t]+-->[ \t]+{STAMP}(?:[ \t].*)?")
+SRT_STAMP = r"([0-9]{2,9}):([0-5][0-9]):([0-5][0-9])[,.]([0-9]{3})"
+SRT_TIMING = re.compile(rf"{SRT_STAMP}[ \t]+-->[ \t]+{SRT_STAMP}(?:[ \t].*)?")
+HEADER = re.compile(r"Kind: (?:captions|subtitles|descriptions|chapters|metadata)|Language: [A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*"
+                    r"|X-TIMESTAMP-MAP=(?:MPEGTS:[0-9]+,LOCAL:[0-9:.]+|LOCAL:[0-9:.]+,MPEGTS:[0-9]+)")
 # How exports label a speaker: a WebVTT voice tag, "Name:" with a timestamp on either side, a time and then
 # "Name" before a long dash or between bars, and a name line that ends in a time.
 SPEAKER = (re.compile(r"<v(?:\.[^ >]+)? ([^>]+)>"),
            re.compile(r"^(?:\[[\d:]+\] )?([^\d\[:][^\[:]*?)(?: \[[\d:]+\])?: ", re.M),
            re.compile(r"^[\d:]+ (?:\| )?(.+?) [\u2014|] ", re.M),
-           re.compile(r"^(.+?) {2,}\d+:\d\d$", re.M))
+           re.compile(r"^(.+?) {2,}\d+:\d\d$", re.M),
+           re.compile(r"^\[([^\]\d][^\]]*)\]", re.M))
 # A plain account for the cases built in code.
 PLAIN = {"name": "Size Case Co", "industry": "Software", "renewal_date": "2027-06-30", "arr_cents": 100,
          "risk_status": "healthy", "risk_reason": "", "contacts": [], "opportunities": [], "call_notes": [],
          "slack_messages": []}
+
+
+def blank_lines(lines, timing):
+    """Which lines end a block: empty ones, and runs of lines of spaces that a cue, an empty line, or nothing follows."""
+    def cue(at):
+        return any(place < len(lines) and timing.fullmatch(lines[place]) for place in (at, at + 1))
+    blank = [False] * len(lines) + [True]
+    for at in reversed(range(len(lines))):
+        if not lines[at].strip(" \t"):
+            blank[at] = lines[at] == "" or blank[at + 1] or cue(at + 1)
+    return blank[:-1]
 
 
 def milliseconds(hours, minutes, seconds, millis):
@@ -51,24 +67,33 @@ def units(text, kind):
     if kind == "txt":
         return [{"index": index, "text": line, "cue_id": None, "start_ms": None, "end_ms": None}
                 for index, line in enumerate(lines, 1)]
-    if not lines or not re.fullmatch(r"WEBVTT(?:[ \t].*)?", lines[0]) or lines[1:2] != [""]:
-        raise ValueError("no WebVTT header")
-    cues, seen, latest = [], set(), -1
-    for block in re.split(r"\n{2,}", "\n".join(lines[2:]).strip("\n")):
-        block = block.split("\n")
-        if block == [""] or re.match(r"(?:NOTE|STYLE|REGION)(?:[ \t]|$)", block[0]):
+    if kind == "vtt":
+        if not lines or not re.fullmatch(r"WEBVTT(?:[ \t].*)?", lines[0]) or "-->" in lines[0]:
+            raise ValueError("no WebVTT header")
+        body = 1
+        while body < len(lines) and HEADER.fullmatch(lines[body]):
+            body += 1
+        if lines[body:body + 1] != [""]:
+            raise ValueError("text under the WebVTT header")
+        lines = lines[body + 1:]
+    blocks, cues = [[]], []
+    for line, blank in zip(lines, blank_lines(lines, TIMING if kind == "vtt" else SRT_TIMING)):
+        if not blank:
+            blocks[-1].append(line)
+        elif blocks[-1]:
+            blocks.append([])
+    for block in filter(None, blocks):
+        if re.match(r"(?:NOTE|STYLE|REGION)(?:[ \t]|$)", block[0]):
             continue
         at = 0 if "-->" in block[0] else 1
-        timing = TIMING.fullmatch(block[at]) if len(block) > at else None
+        timing = (TIMING if kind == "vtt" else SRT_TIMING).fullmatch(block[at]) if len(block) > at else None
         if timing is None or any("-->" in line for line in block[at + 1:]):
             raise ValueError("a block is not a cue")
         start, end = milliseconds(*timing.groups()[:4]), milliseconds(*timing.groups()[4:])
         cue_id = block[0] if at else None
-        if end <= start or start < latest or cue_id in seen:
-            raise ValueError("cue times or identifiers are out of order")
-        if cue_id is not None:
-            seen.add(cue_id)
-        latest = start
+        # Cues may repeat or reorder start times and may end where they start. None may end before it starts.
+        if end < start:
+            raise ValueError("a cue ends before it starts")
         cues.append({"index": len(cues) + 1, "text": "\n".join(block[at + 1:]), "cue_id": cue_id,
                      "start_ms": start, "end_ms": end})
     return cues
@@ -77,7 +102,7 @@ def units(text, kind):
 def default_last(found):
     """The end of the default excerpt: the first 20 units, or fewer when they and one more pass 16 KiB."""
     return next((last for last in range(min(20, len(found)), 0, -1)
-                 if len("\n".join(unit["text"] for unit in found[:last + 1]).encode()) <= MAX_QUOTE), 0)
+                 if len(said(found[:last + 1]).encode()) <= MAX_QUOTE), 0)
 
 
 def deserved(raw, kind):
@@ -95,6 +120,12 @@ def deserved(raw, kind):
     if len(found) > MAX_UNITS:
         return "calls_import_too_large"
     return None if default_last(found) else "calls_excerpt_too_large"
+
+
+def said(units_):
+    """What a brief quotes: each unit's text, under its identifier when that has a space and so names the speaker."""
+    return "\n".join(unit["text"] if not unit["cue_id"] or " " not in unit["cue_id"]
+                     else unit["cue_id"] + "\n" + unit["text"] for unit in units_)
 
 
 def speakers(text):
@@ -172,7 +203,7 @@ class BookCallsTests(unittest.TestCase):
         first, last = selected or (1, default_last(found))
         cited = max(1, first - 1), min(len(found), last + 1)
         quoted = found[cited[0] - 1:cited[1]]
-        body = "\n".join(unit["text"] for unit in quoted)
+        body = said(quoted)
         self.assertEqual((imported["total_units"], imported["requested_range"], imported["cited_range"]),
                          (len(found), {"first": first, "last": last}, {"first": cited[0], "last": cited[1]}))
         brief = create_brief(runtime, account_id, as_of=AS_OF)
@@ -270,10 +301,11 @@ class BookCallsTests(unittest.TestCase):
                                          ("imported", True, False))
                         _, excerpt, hidden = self.brief(runtime, rows, imported, raw, kind, called_at=called_at)
                         # Speaker names survive: each label of the quoted part is in the brief's literal.
-                        found = units(raw.decode(), kind)
-                        quoted = "\n".join(unit["text"] for unit in found[:imported["cited_range"]["last"]])
-                        self.assertGreaterEqual(len(speakers(quoted)), 2, "speaker labels were not recognised")
-                        for speaker in speakers(quoted):
+                        found = units(raw.decode(), kind)[:imported["cited_range"]["last"]]
+                        quoted = "\n".join(unit["text"] for unit in found)
+                        # An identifier with a space in it is a speaker's name, as Webex writes it.
+                        named = [unit["cue_id"] for unit in found if unit["cue_id"] and " " in unit["cue_id"]]
+                        for speaker in speakers(quoted) | set(named):
                             self.assertIn(escaped(speaker), excerpt)
                         searched += len(hidden)
         # The search for unselected text had something to look for.

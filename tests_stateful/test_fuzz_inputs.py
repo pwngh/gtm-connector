@@ -523,6 +523,9 @@ def vtt_documents(draw):
         hours, placing = draw(st.booleans()), draw(st.sampled_from(("", "", " align:start position:10%", " ")))
         lines += [name] * (name is not None) + [f"{stamp(start, hours)} --> {stamp(end, hours)}{placing}", *words]
         lines += [""] * draw(st.integers(1, 2))
+        # A line of spaces at the end of a cue is read as the separator before the next one.
+        while words and not words[-1].strip(" \t"):
+            words = words[:-1]
         cues.append({"index": number + 1, "text": "\n".join(words), "cue_id": name, "start_ms": start, "end_ms": end})
     return lines, cues
 
@@ -640,15 +643,26 @@ class TranscriptFuzz(unittest.TestCase):
         while lines[body:body + 1] and lines[body].startswith(("Kind: ", "Language: ", "X-TIMESTAMP-MAP=")):
             body += 1
         self.assertTrue(lines[0].startswith("WEBVTT") and lines[body:body + 1] == [""])
-        cues = []
-        for filled, group in itertools.groupby(lines[body + 1:], bool):
-            block = list(group)
+        cues, rest = [], lines[body + 1:]
+        stamp_ = r"(?:\d{2,9}:)?[0-5]\d:[0-5]\d\.\d{3}"
+        timing = re.compile(rf"{stamp_}[ \t]+-->[ \t]+{stamp_}(?:[ \t].*)?")
+
+        def cue(at):
+            return any(place < len(rest) and timing.fullmatch(rest[place]) for place in (at, at + 1))
+
+        # A block ends at an empty line, or at a run of lines of spaces that a cue, an empty line, or nothing follows.
+        ends = [False] * len(rest) + [True]
+        for at in reversed(range(len(rest))):
+            if not rest[at].strip(" \t"):
+                ends[at] = rest[at] == "" or ends[at + 1] or cue(at + 1)
+        filled_lines = [(not ends[at], line) for at, line in enumerate(rest)]
+        for filled, group in itertools.groupby(filled_lines, lambda pair: pair[0]):
+            block = [line for _, line in group]
             if filled and any("-->" in line for line in block):
                 cues.append(block)
             elif filled:
                 self.assertTrue(block[0].startswith(("NOTE", "STYLE", "REGION")), "text outside a cue was dropped")
         self.assertEqual(len(units), len(cues))
-        previous = 0
         for unit, block in zip(units, cues):
             timed = 0 if "-->" in block[0] else 1
             times = re.match(r"(\S+)[ \t]+-->[ \t]+(\S+)", block[timed])
@@ -656,8 +670,8 @@ class TranscriptFuzz(unittest.TestCase):
             self.assertEqual((unit["cue_id"], unit["text"], unit["start_ms"], unit["end_ms"]),
                              (block[0] if timed else None, "\n".join(block[timed + 1:]),
                               milliseconds(times[1]), milliseconds(times[2])))
-            self.assertTrue(previous <= unit["start_ms"] < unit["end_ms"])
-            previous = unit["start_ms"]
+            # Cues may repeat or reorder their start times and may end where they start.
+            self.assertLessEqual(unit["start_ms"], unit["end_ms"])
         return parsed
 
     def excerpt(self, parsed, span, store=True):
