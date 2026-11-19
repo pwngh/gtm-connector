@@ -6,6 +6,10 @@ import shlex
 from .doctor import _directory, load_local_owner
 
 
+class InspectorConnectionError(RuntimeError):
+    """The local authorization service could not be reached."""
+
+
 _DOCUMENTATION = {
     "inspector": ["https://modelcontextprotocol.io/docs/2026-07-28/tools/inspector"],
     "claude-code": ["https://code.claude.com/docs/en/mcp", "https://code.claude.com/docs/en/network-config"],
@@ -56,7 +60,6 @@ def connect(directory, app, scopes=None):
     else:
         import httpx2
         from .client import LocalClient
-        from .inspector import InspectorConnectionError
         from .runtime import private_file
         owner = load_local_owner(directory)
         try:
