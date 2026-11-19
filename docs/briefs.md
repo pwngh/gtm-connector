@@ -51,12 +51,12 @@ stay joined: a fragment is never shown as a sentence.
 
 Two transcript cues join into one run only when they have the same speaker label and the second
 starts within two seconds of the first, or within ten when the first stops mid-sentence and the
-second goes on in lower case. Cues or lines with no label, or with no times, never join. In a transcript, a run that
-stops mid-sentence is counted and not shown. So is what may be its other half: the start of that
-speaker's next run, the next words of anyone when they go on in lower case, and each speaker's
-first words in an excerpt that starts inside a call. The end of a Slack message or a call
-note is an end. A sentence over 300 characters is counted and not shown, because a quotation is
-never cut.
+second goes on in lower case. Cues or lines with no label, or with no times, never join. In a
+transcript, a run that stops mid-sentence is counted and not shown. So is what may be its other
+half: the start of that speaker's next run, the next words of anyone when they go on in lower
+case, and each speaker's first words in an excerpt that starts inside a call. The end of a Slack
+message or a call note is an end. A sentence over 300 characters is counted and not shown, because
+a quotation is never cut.
 
 ## Sections
 
@@ -92,7 +92,8 @@ A report of what someone else said keeps the role of the person reporting it. In
 the label is a voice tag, or a cue identifier that is not a number. A cue with two voice tags gives
 each span its own speaker, and text after a closing tag belongs to the cue again. The tag is the
 label and is not part of the sentence. In a transcript imported with
-[`--speaker-names`](calls.md), the label is the name that opens each line.
+[`--speaker-names`](calls.md), the label is the name that opens each line, and a cue identifier
+is not a label.
 
 ## Neutralized text
 

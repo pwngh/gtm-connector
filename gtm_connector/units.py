@@ -275,25 +275,18 @@ def voices(text: str, label=None) -> list[tuple]:
 _NAMED = re.compile(r"[ \t]*([^\W\d_][^:!?<>\n\u3002\uff01\uff1f\u0964\u061f\u06d4]{0,99}?)[ \t]*:[ \t]+(?=\S)")
 
 
-def _opens(line):
-    """The match for a line that opens with a name. A name holds no sentence end: "We signed. Dana: ..." has none."""
-    opened = _NAMED.match(line)
-    return opened if opened and len(sentences(opened.group(1))) == 1 else None
-
-
 def named(text: str) -> tuple[str, str] | None:
-    """One line or cue of a transcript that declares speaker names, as (name, words).
+    """One line or cue of a transcript that declares speaker names, as (name, words). None when it is not one.
 
-    The first line opens "Name: " and no later line does, because a cue is one speaker's turn. Anything else
-    is not that layout, and the answer is None.
+    A cue is one line: on a second line nothing says whose words they are. A name does not start in lower
+    case, which is how a wrapped sentence goes on ("deal: we sign Friday"), and holds no sentence end
+    ("We have signed. Dana Crest: ..."), so words never leave a quotation to become a label.
     """
-    lines = text.split("\n")
-    while lines and not lines[0].strip():
-        lines.pop(0)
-    opened = _opens(lines[0]) if lines else None
-    if opened is None or any(_opens(line) for line in lines[1:]):
+    lines = [line for line in text.split("\n") if line.strip()]
+    opened = _NAMED.match(lines[0]) if len(lines) == 1 else None
+    if opened is None or opened.group(1)[0].islower() or len(sentences(opened.group(1))) != 1:
         return None
-    return opened.group(1), "\n".join([lines[0][opened.end():], *lines[1:]])
+    return opened.group(1), lines[0][opened.end():]
 
 
 def _label(value):
@@ -739,7 +732,8 @@ def _calls(card, as_of, contacts):
             parts: list[tuple] = []
             for cue in manifest["units"]:
                 # A WebVTT voice tag names the speaker. A cue identifier does only when it is not a number. In
-                # an import that declares it, the name that opens a line does, and is not part of what was said.
+                # an import that declares it, the name that opens the cue does instead, and is not part of what
+                # was said.
                 cue_name = None if cue["cue_id"] is None or cue["cue_id"].isdigit() else cue["cue_id"]
                 label, text = (named(cue["text"]) or (None, cue["text"]) if "speaker_names" in manifest
                                else (cue_name, cue["text"]))

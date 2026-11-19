@@ -12,7 +12,8 @@ from unittest.mock import patch
 
 from gtm_connector.briefing import create_brief, trace_saved
 from gtm_connector.call_workflow import resolve_call_account
-from gtm_connector.calls_import import CallsImportError, list_imports, parse_transcript, select_excerpt, store_import
+from gtm_connector.calls_import import (CallsImportError, _make_record, list_imports, parse_transcript,
+                                        select_excerpt, store_import, validate_imported_record)
 from gtm_connector.runtime import Runtime
 from gtm_connector.units import BriefRejected, build
 import test_salesforce_environments as sf_fixtures
@@ -232,12 +233,16 @@ class ImportedBriefingTests(unittest.TestCase):
         self.assertEqual(self.said("Dana Crest: We will not\nDana Crest: Approve the agreement.\nMorgan Reed: Fine.\n", "txt"), [
             ("Dana Crest", "customer", "We will not", True), ("Dana Crest", "customer", "Approve the agreement.", True),
             ("Morgan Reed", "seller", "Fine.", False)])
-        # A cue is one speaker's turn: its later lines are that speaker's, and styling is still not speech.
-        vtt = ("WEBVTT\n\n00:01.000 --> 00:03.000\nMorgan Reed: Will you sign?\n\n"
-               "00:04.000 --> 00:06.000\nDana Crest: <i>Fine.</i>\nThat is all.\n")
+        # In WebVTT, styling after the name is still not speech, and a cue identifier is not a label here.
+        vtt = ("WEBVTT\n\nMorgan Reed\n00:01.000 --> 00:03.000\nDana Crest: <i>Fine.</i> That is all.\n\n"
+               "00:04.000 --> 00:06.000\nMorgan Reed: Will you sign?\n")
         self.assertEqual([row[:3] for row in self.said(vtt, "vtt")], [
-            ("Morgan Reed", "seller", "Will you sign?"),
-            ("Dana Crest", "customer", "Fine."), ("Dana Crest", "customer", "That is all.")])
+            ("Dana Crest", "customer", "Fine."), ("Dana Crest", "customer", "That is all."),
+            ("Morgan Reed", "seller", "Will you sign?")])
+        # A name may be 100 characters, and may hold a title or an initial.
+        long = "A" + "b" * 99
+        self.assertEqual([row[0] for row in self.said(f"{long}: Fine.\nMr. A. B. Smith Jr.: Agreed.\n", "txt")],
+                         [long, "Mr. A. B. Smith Jr."])
         # The statement holds for the file, so a name is read the same whichever lines are cited.
         notes = "Dana Crest: We will sign on Friday.\n" + "Morgan Reed: Noted.\n" * 8
         for requested in ((1, 1), (1, 9), None):
@@ -248,26 +253,35 @@ class ImportedBriefingTests(unittest.TestCase):
     def test_a_file_that_is_not_laid_out_as_declared_is_refused_whole(self):
         for format, raw in (
                 # One line with no name, anywhere in the file, even outside the lines that would be cited.
-                ("txt", "Dana Crest: We will sign.\nMorgan Reed: Noted.\nThank you all.\n" + "Morgan Reed: Bye.\n" * 30),
+                ("txt", "Dana Crest: We will sign.\n" + "Morgan Reed: Noted.\n" * 40 + "Thank you all.\n"),
                 # What stands before the colon is not a name: a number, a link, a question, a full stop of another script.
                 ("txt", "10:30 works for us.\nDana Crest: Fine.\n"),
                 ("txt", "https://files.example/a: the link.\nDana Crest: Fine.\n"),
                 ("txt", "Will you sign? Dana Crest: Fine.\nDana Crest: Fine.\n"),
                 ("txt", "Really?: Fine.\nDana Crest: Fine.\n"),
                 ("txt", "\u540c\u610f\u3057\u307e\u3057\u305f\u3002\u4fa1\u683c: \u56db\u5341\u5e2d\u3067\u3059\u3002\nDana Crest: Fine.\n"),
+                *(("txt", f"Agreed{mark}Dana: Fine.\nDana Crest: Fine.\n") for mark in "\uff01\uff1f\u0964\u061f\u06d4"),
+                # A wrapped sentence goes on in lower case. A name does not start that way.
+                ("txt", "Dana Crest: We will not sign, and here is my\nfinal word on the matter: We will sign nothing.\n"),
                 # A name is at most 100 characters, and a colon with nothing after it names nobody.
-                ("txt", "A" + " very" * 20 + " long name: Fine.\nDana Crest: Fine.\n"),
+                ("txt", "A" + "b" * 100 + ": Fine.\nDana Crest: Fine.\n"),
                 ("txt", "Dana Crest:\nDana Crest: Fine.\n"),
                 ("txt", "Dana Crest: \nDana Crest: Fine.\n"),
+                ("txt", "Dana Crest:Fine.\nDana Crest: Fine.\n"),
                 # A name starts with a letter and holds no markup.
                 ("txt", "3 Buyers: Fine.\nDana Crest: Fine.\n"),
                 ("txt", "Dana <b>Crest</b>: Fine.\nDana Crest: Fine.\n"),
                 # A sentence before the colon is not a name. A title or an initial is.
                 ("txt", "We have signed. Dana Crest: We are ready.\nDana Crest: Fine.\n"),
-                # A cue is one speaker's turn. A second line that opens with a name is a second turn, whoever's
-                # name it is, and markup opened on one line and closed on the next would cross the two.
+                # A cue is one line. On a second line nothing says whose words they are: another speaker's, in
+                # a form no rule reads, or the first speaker's own.
                 ("srt", "1\n00:00:01,000 --> 00:00:02,000\nDana Crest: We will not\nDana Crest: We approved it.\n"),
                 ("vtt", "WEBVTT\n\n00:01.000 --> 00:03.000\nDana Crest: We will sign.\nMorgan Reed: They agreed.\n"),
+                ("vtt", "WEBVTT\n\n00:01.000 --> 00:03.000\nDana Crest: We will sign.\n<i>Morgan Reed: They agreed.</i>\n"),
+                ("srt", "1\n00:00:01,000 --> 00:00:03,000\nDana Crest: We will sign.\n- Morgan Reed: They agreed.\n"),
+                ("srt", "1\n00:00:01,000 --> 00:00:03,000\nMorgan Reed: Good morning. As I said to\n"
+                        "Dana Crest: We will renew at the higher price.\n"),
+                ("srt", "1\n00:00:01,000 --> 00:00:03,000\nDana Crest: Fine.\nThat is all.\n"),
                 ("vtt", "WEBVTT\n\n00:01.000 --> 00:03.000\nDana Crest: <ruby>\u4e09<rt>\n"
                         "Morgan Reed: Three</rt></ruby> seats are available.\n"),
                 # A voice tag or styling before the name: the file already names its speakers another way.
@@ -277,6 +291,10 @@ class ImportedBriefingTests(unittest.TestCase):
                 parse_transcript(raw.encode(), format=format, speaker_names=True)
             self.assertEqual(refused.exception.code, "calls_speaker_names_missing")
             parse_transcript(raw.encode(), format=format)
+        # The statement is true or false, nothing else.
+        with self.assertRaises(CallsImportError) as invalid:
+            parse_transcript(b"Dana Crest: Fine.\n", format="txt", speaker_names=1)
+        self.assertEqual(invalid.exception.code, "calls_import_invalid")
         # A stored import cannot be turned into a declared one: the manifest is part of its identity.
         with Runtime(self.state, calls_backend="imported") as runtime:
             self.import_call(runtime, raw=b"Dana Crest: We will sign.\nMorgan Reed: Noted.\n")
@@ -287,6 +305,18 @@ class ImportedBriefingTests(unittest.TestCase):
             with self.assertRaises(CallsImportError) as corrupt:
                 create_brief(runtime, "acc-007", as_of=AS_OF)
             self.assertEqual(corrupt.exception.code, "calls_import_corrupt")
+        # A record is read as declared only when it says exactly true. Remade whole with false over the same
+        # named lines, it is refused.
+        with Runtime(Path(tempfile.mkdtemp(dir=self.state.parent)) / "state", calls_backend="imported") as runtime:
+            self.import_call(runtime, raw=b"Dana Crest: We will sign.\nMorgan Reed: Noted.\n", speaker_names=True)
+            record = next(row for row in create_brief(runtime, "acc-007", as_of=AS_OF)["evidence"]["records"]
+                          if "manifest" in row)
+            self.assertIs(record["manifest"]["speaker_names"], True)
+            for stated in (False, 1, "true", None):
+                remade = _make_record({**record["manifest"], "speaker_names": stated})
+                with self.subTest(stated=stated), self.assertRaises(CallsImportError):
+                    validate_imported_record({**remade, "record_ref": "calls/call_notes/" + remade["id"]},
+                                             account_id="acc-007", crm_binding=runtime.calls_binding)
 
     def test_cues_with_no_speaker_label_are_never_read_as_one_persons_sentence(self):
         artifact, spoken = self.cues((1, 3, "we will not sign"), (3.2, 5, "Great, so you will sign Friday."),

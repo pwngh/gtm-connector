@@ -32,22 +32,21 @@ _HEAD = re.compile(r"  \[(\d+)\] (seller|customer|unknown) \((.+?)\); (call|Slac
 _CITED = re.compile(r" ((?:\[\d+\])+)(?: and \d+ more)?\Z")
 # A WebVTT voice tag is a speaker label, and its closing tag is markup. Neither is part of what was said.
 _VOICE_TAG = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+[^<>\n]+>|</v>")
-# "Name: " at the start of a line, in an import that declares speaker names.
-_NAME = re.compile(r"[ \t]*([^\W\d_][^:!?<>\n\u3002\uff01\uff1f\u0964\u061f\u06d4]{0,99}?)[ \t]*:[ \t]+(?=\S)")
-
-
 def named(text):
     """One line or cue of a transcript that declares speaker names as (name, words), read here apart from the connector.
 
-    Its first line opens "Name: ", the name holds no sentence end, and no later line opens with a name. None otherwise.
+    It is one line. What stands before its first colon is the name: a letter first and not a lower-case one, at
+    most 100 characters, no question or exclamation mark, angle bracket, or full stop of another script, and one
+    sentence. A space and then words follow the colon. None otherwise.
     """
-    lines = [line for line in text.split("\n")]
-    while lines and not lines[0].strip():
-        lines.pop(0)
-    opened = [match if match and len(sentences(match.group(1))) == 1 else None for match in map(_NAME.match, lines)]
-    if not opened or opened[0] is None or any(opened[1:]):
+    lines = [line for line in text.split("\n") if line.strip()]
+    name, colon, words = lines[0].partition(":") if len(lines) == 1 else ("", "", "")
+    name = name.strip(" \t")
+    if (not colon or not name or not name[0].isalpha() or name[0].islower() or len(name) > 100
+            or any(mark in name for mark in "!?<>\u3002\uff01\uff1f\u0964\u061f\u06d4") or len(sentences(name)) != 1
+            or words[:1] not in (" ", "\t") or not words.strip()):
         return None
-    return opened[0].group(1), "\n".join([lines[0][opened[0].end():], *lines[1:]])
+    return name, words.lstrip(" \t")
 
 
 # Styling spans, a ruby reading, and cue timestamps of a WebVTT cue: markup, like a voice tag, and not speech.

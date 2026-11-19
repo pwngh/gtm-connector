@@ -177,9 +177,9 @@ def _milliseconds(value):
 def parse_transcript(raw: bytes, *, format: str, speaker_names: bool = False) -> dict[str, Any]:
     """Parse a strict transcript subset, preserving the exact original bytes.
 
-    `speaker_names` is the operator's statement that every line or cue opens with its speaker's name and a
-    colon, and is one speaker's turn. It is checked against the whole file, so no excerpt can be read as
-    that layout by chance.
+    `speaker_names` is the operator's statement that every line or cue is one line that opens with its
+    speaker's name and a colon. It is checked against the whole file, so no excerpt can be read as that
+    layout by chance.
     """
     if not isinstance(raw, bytes) or format not in FORMATS or type(speaker_names) is not bool:
         raise CallsImportError("calls_import_invalid")
