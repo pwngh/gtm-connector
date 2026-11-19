@@ -370,8 +370,8 @@ def _catalog(evidence):
             if contact["title"] == "":
                 signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
     if not groups["opportunities"]:
-        add(f"No opportunities were returned for {account_id}.",
-            f"audit/{receipts['list_opportunities']['audit_id']}")
+        required.add(add(f"No opportunities were returned for {account_id}.",
+                         f"audit/{receipts['list_opportunities']['audit_id']}"))
     procurement_conflicts = []
     notes_receipt = f"audit/{receipts['read_call_notes']['audit_id']}"
     if evidence["notes_status"] == "denied":

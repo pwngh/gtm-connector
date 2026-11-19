@@ -12,35 +12,41 @@ from gtm_connector.citations import BriefRejected, check_brief
 from gtm_connector.runtime import Runtime
 
 
-REFERENCE = re.compile(r"\[([^\]]+)\]")
+CITATIONS = re.compile(r"(?: \[[^\]\s]+\])+\Z")
+
+
+def citations(line):
+    """The references that end a line. Brackets inside quoted source text are not citations."""
+    found = CITATIONS.search(line)
+    return found.group().split() if found else []
 
 
 def corruptions(text):
     """One bad line added to an otherwise complete brief, so only that line can cause the rejection."""
     lines = text.splitlines()
-    references = sorted({ref for line in lines for ref in REFERENCE.findall(line)})
+    references = sorted({reference for line in lines for reference in citations(line)})
 
     def added(index, line):
         return "\n".join(lines[:index + 1] + [line] + lines[index + 1:]) + "\n"
 
     for index, line in enumerate(lines):
-        own = REFERENCE.findall(line)
-        other = next(ref for ref in references if ref not in own)
-        head, separator, tail = line.partition(". [")
-        yield "citations removed", added(index, re.sub(r" \[[^\]]+\]", "", line))
-        yield "citation changed", added(index, line.replace(f"[{own[0]}]", f"[{other}]", 1))
-        yield "wording changed", added(index, head + " and approved" + separator + tail)
+        own = citations(line)
+        claim = line[:CITATIONS.search(line).start()]
+        other = next(reference for reference in references if reference not in own)
+        yield "citations removed", added(index, claim)
+        yield "citation changed", added(index, " ".join([claim, other, *own[1:]]))
+        yield "wording changed", added(index, " ".join([claim.removesuffix(".") + " and approved.", *own]))
         yield "line repeated", added(index, line)
     yield "uncited sentence added", text + "- The renewal was approved.\n"
-    yield "cited invention added", text + f"- The renewal was approved. [{references[0]}]\n"
+    yield "cited invention added", text + f"- The renewal was approved. {references[0]}\n"
 
 
-def cites_real_records(candidate, brief):
-    """The comparison check: every line has a reference, and each reference names something that was read."""
+def cites_what_was_read(candidate, brief):
+    """The comparison check: every line ends in citations, and each names a record, a receipt, or the run."""
     evidence = brief["evidence"]
-    known = {row["record_ref"] for row in evidence["records"]}
-    known |= {f"audit/{row['audit_id']}" for row in evidence["receipts"]} | {f"run/{brief['brief_id']}"}
-    return all((cited := REFERENCE.findall(line)) and set(cited) <= known for line in candidate.splitlines())
+    known = {f"[{row['record_ref']}]" for row in evidence["records"]}
+    known |= {f"[audit/{row['audit_id']}]" for row in evidence["receipts"]} | {f"[run/{brief['brief_id']}]"}
+    return all((cited := citations(line)) and set(cited) <= known for line in candidate.splitlines())
 
 
 class ResultsTests(unittest.TestCase):
@@ -83,15 +89,16 @@ class ResultsTests(unittest.TestCase):
             for number in range(1, 21):
                 brief = create_brief(runtime, f"acc-{number:03d}", include_slack=True)
                 self.assertEqual(check_brief(brief["text"], brief["evidence"]), brief["text"])
+                self.assertTrue(cites_what_was_read(brief["text"], brief))
                 lines = brief["text"].splitlines()
                 size.update(records=len(brief["evidence"]["records"]), lines=len(lines),
                             words=len(brief["text"].split()),
                             signals=sum(line.startswith("- Signal: ") for line in lines),
-                            cited_lines=sum(bool(REFERENCE.search(line)) for line in lines),
-                            citations=sum(len(REFERENCE.findall(line)) for line in lines))
+                            cited_lines=sum(bool(citations(line)) for line in lines),
+                            citations=sum(len(citations(line)) for line in lines))
                 for kind, candidate in corruptions(brief["text"]):
                     tried[kind] += 1
-                    caught_by_reference_check[kind] += not cites_real_records(candidate, brief)
+                    caught_by_reference_check[kind] += not cites_what_was_read(candidate, brief)
                     try:
                         check_brief(candidate, brief["evidence"])
                     except BriefRejected:
@@ -101,7 +108,7 @@ class ResultsTests(unittest.TestCase):
         self.assertEqual(dict(tried), {"citations removed": 229, "citation changed": 229, "wording changed": 229,
                                        "line repeated": 229, "uncited sentence added": 20,
                                        "cited invention added": 20})
-        # The README comparison: 956 caught here, 249 by checking only that each line cites a real record.
+        # The README comparison: 956 caught here, 249 by checking only that each line cites what was read.
         self.assertEqual(sum(tried.values()), 956)
         self.assertEqual(+caught_by_reference_check, Counter({"citations removed": 229, "uncited sentence added": 20}))
         # What goes in and what comes out, across the twenty briefs.
