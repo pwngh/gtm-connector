@@ -120,9 +120,12 @@ class SignalRuleTests(unittest.TestCase):
         self.assertEqual(notes("2026-10-03T15:00:00Z", "2027-01-14T15:00:00Z"), [])
         # An offset is applied before the day is taken.
         self.assertEqual(notes("2026-11-15T23:30:00-05:00"), [])
-        # A time that is malformed or has no offset raises no signal.
-        for unknown in ("2026-10-03", "2026-10-03T15:00:00", "2026-10-03Tnonsense"):
+        # A time that is malformed, out of range, or without an offset raises no signal.
+        for unknown in ("2026-10-03", "2026-10-03T15:00:00", "2026-10-03Tnonsense", "0001-01-01T00:00:00+01:00"):
             self.assertEqual(notes(unknown), [])
+        # A note that cannot be ordered beside a stale one is not counted as older.
+        self.assertEqual(notes("2026-10-03T15:00:00Z", "2026-10-03"),
+                         ["- Signal: the latest dated call note note-001 is 104 days old as of 2027-01-15."])
 
 
 if __name__ == "__main__":

@@ -58,9 +58,9 @@ def _called_at(note):
     value = note.get("called_at")
     try:
         moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (AttributeError, TypeError, ValueError):
+        return moment.astimezone(timezone.utc) if moment.tzinfo is not None else None
+    except (AttributeError, TypeError, ValueError, OverflowError):
         return None
-    return moment.astimezone(timezone.utc) if moment.tzinfo is not None else None
 
 
 def _money(cents):
@@ -385,7 +385,9 @@ def _catalog(evidence):
             age = (as_of - moment.date()).days
             if age > _STALE_DAYS:
                 # An imported excerpt is the selected one, not necessarily the newest call.
-                which = f"the selected call excerpt {note_id}" if imported else f"the latest call note {note_id}"
+                dated = "" if len(timed) == len(groups["call_notes"]) else "dated "
+                which = (f"the selected call excerpt {note_id}" if imported
+                         else f"the latest {dated}call note {note_id}")
                 signal(f"{which} is {_days(age)} old as of {as_of}.", note_ref, f"run/{brief_id}")
         for note in sorted(groups["call_notes"], key=lambda row: row["id"]):
             if imported:

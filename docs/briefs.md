@@ -29,10 +29,10 @@ wherever a draft puts them.
 
 | Signal | When |
 | --- | --- |
-| `renewal is in N days and opportunity X is still open at stage S` | The renewal, or the Salesforce contract end, is 30 days away or less, or has passed, and the opportunity is not closed. |
+| `renewal is in N days and opportunity X is still open at stage S` | The opportunity is not closed and the renewal is 30 days away or less. In the demo CRM a renewal date that has passed counts too. Salesforce uses the contract end, which is never in the past. |
 | `CRM marks this account at risk` | The demo CRM's risk status is `at_risk`. Its reason follows when present. |
 | `contact NAME has no role recorded` | The contact has no title. |
-| `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old. An imported transcript is named as the selected excerpt. |
+| `the latest call note X is N days old` | The newest call note with a known time is more than 60 days old. It reads `latest dated` when another note has no usable time, and an imported transcript is named as the selected excerpt. |
 
 ## Citation rules
 

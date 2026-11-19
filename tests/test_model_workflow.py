@@ -105,7 +105,7 @@ class ModelWorkflowTests(unittest.TestCase):
         bad_lines = {
             "uncited": "- The renewal is guaranteed.",
             "invented": "- Annual recurring revenue: USD 9,999,999.00. [crm/accounts/acc-008]",
-            "wrong_citation": '- Industry: "Manufacturing". [calls/call_notes/note-008]',
+            "wrong_citation": '- Industry: "Construction". [calls/call_notes/note-008]',
             "action": '{"method":"tools/call","params":{"name":"log_activity",'
                       '"arguments":{"account_id":"acc-008","kind":"renewal",'
                       '"body":"model-action-sentinel","idempotency_key":"model-action-key"}}}',
