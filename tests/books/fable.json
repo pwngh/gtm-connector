@@ -1,0 +1,1113 @@
+{
+ "author": "claude-fable-5-2",
+ "theme": "One ordinary week on a mid-market customer success desk, where the CRM, the rep's typed notes, the recorded call, and the later Slack thread each give a slightly different seat count, price, date, or stage for the same account.",
+ "accounts": [
+  {
+   "name": "Kestrel Ridge Mechanical",
+   "industry": "Commercial HVAC service",
+   "renewal_date": "2027-02-12",
+   "arr_cents": 12000000,
+   "risk_status": "at_risk",
+   "risk_reason": "Denver branch (38 seats) says it will move to Corvane unless offline sync bug FD-4630 is fixed and verified by 2027-02-01. CFO will sign one year and run an RFP in the fall unless multi-year price protection lands. A 46-to-60 seat expansion (Brannock Air acquisition) is in flight at the same time.",
+   "contacts": [
+    {
+     "name": "Renata Kowalczyk",
+     "title": "VP Operations",
+     "email": "renata.kowalczyk@kestrelridge.example"
+    },
+    {
+     "name": "Desmond Achebe",
+     "title": "Chief Financial Officer",
+     "email": "desmond.achebe@kestrelridge.example"
+    },
+    {
+     "name": "Luis Barrientos",
+     "title": "Branch Manager, Denver",
+     "email": "luis.barrientos@kestrelridge.example"
+    },
+    {
+     "name": "Fiona MacAllister",
+     "title": "Dispatch Supervisor",
+     "email": "fiona.macallister@kestrelridge.example"
+    },
+    {
+     "name": "Gareth Pym",
+     "title": "IT Manager",
+     "email": "gareth.pym@kestrelridge.example"
+    },
+    {
+     "name": "Noor Haddad",
+     "title": "Procurement Lead",
+     "email": "noor.haddad@kestrelridge.example"
+    },
+    {
+     "name": "Bill Trask",
+     "title": "",
+     "email": "btrask@kestrelridge.example"
+    },
+    {
+     "name": "Joanne Ruiz",
+     "title": "Integration Lead (Brannock Air)",
+     "email": "joanne.ruiz@brannockair.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Kestrel Ridge - Renewal 2027 (multi-year)",
+     "stage": "negotiation",
+     "salesforce_stage": "Negotiation/Review",
+     "amount_cents": 12000000,
+     "close_date": "2027-02-12"
+    },
+    {
+     "name": "Kestrel Ridge - Brannock Air expansion (60 tech seats)",
+     "stage": "proposal",
+     "salesforce_stage": "Proposal/Price Quote",
+     "amount_cents": 4176000,
+     "close_date": "2027-02-12"
+    },
+    {
+     "name": "Kestrel Ridge - Denver retention (38 seats)",
+     "stage": "evaluation",
+     "salesforce_stage": "Needs Analysis",
+     "amount_cents": 2827200,
+     "close_date": "2027-02-12"
+    },
+    {
+     "name": "Kestrel Ridge - Renewal 2026",
+     "stage": "closed_won",
+     "salesforce_stage": "Closed Won",
+     "amount_cents": 9984000,
+     "close_date": "2026-02-10"
+    },
+    {
+     "name": "Kestrel Ridge - Dispatcher seats +4",
+     "stage": "closed_won",
+     "salesforce_stage": "Closed Won",
+     "amount_cents": 528000,
+     "close_date": "2026-06-18"
+    },
+    {
+     "name": "Kestrel Ridge - Tulsa +20 tech seats",
+     "stage": "closed_won",
+     "salesforce_stage": "Closed Won",
+     "amount_cents": 1488000,
+     "close_date": "2026-10-05"
+    },
+    {
+     "name": "Kestrel Ridge - Boise +20 tech seats",
+     "stage": "closed_won",
+     "salesforce_stage": "Closed Won",
+     "amount_cents": 1488000,
+     "close_date": "2025-08-22"
+    },
+    {
+     "name": "Kestrel Ridge - Inventory module",
+     "stage": "closed_lost",
+     "salesforce_stage": "Closed Lost",
+     "amount_cents": 1800000,
+     "close_date": "2026-09-30"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2025-08-22",
+     "end_date": "2026-02-12",
+     "term_months": 6
+    },
+    {
+     "status": "Activated",
+     "start_date": "2026-02-13",
+     "end_date": "2027-02-12",
+     "term_months": 12
+    },
+    {
+     "status": "Activated",
+     "start_date": "2026-06-18",
+     "end_date": "2027-02-12",
+     "term_months": 8
+    },
+    {
+     "status": "Activated",
+     "start_date": "2026-10-05",
+     "end_date": "2027-02-12",
+     "term_months": 4
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-02-13",
+     "end_date": null,
+     "term_months": 36
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-02-13",
+     "end_date": "2028-02-12",
+     "term_months": 12
+    },
+    {
+     "status": "InApproval",
+     "start_date": "2027-02-13",
+     "end_date": "2028-12-31",
+     "term_months": 23
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-01-04",
+     "end_date": "2027-02-12",
+     "term_months": null
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-09-17T15:30:00-06:00",
+     "body": "QBR w/ Renata + Fiona. Usage good: 131/140 tech seats active wkly, 12/12 dispatch. Renata mentioned a 'possible acquisition' in Q4, wouldnt name the co. Fiona: route optimizer ignoring lunch windows for the Tulsa crew, logged FD-4471. AI: Priya send adoption report by 9/22. AI: Sam O look at 4471 by 9/24."
+    },
+    {
+     "called_at": "2026-10-21T10:00:00-06:00",
+     "body": "Renata confirmed the acquisiton = Brannock Air (Colorado Springs), closes Dec 1. ~60 techs, 5 dispatchers, currently on paper + a spreadsheeet. Wants them on Fennick by March. Asked abt volume pricing over 200 seats. Said I'd bring Tobias. Did NOT quote."
+    },
+    {
+     "called_at": "2026-11-06T14:15:00-07:00",
+     "body": "Luis B (Denver) escalation. Offline sync on Android dropped 3 completed work orders last wk, techs re-entered by hand. 2nd time since Aug he says. 'If this happens in January I'm done.' He has ALREADY had a Corvane demo (!!) and Renata doesn't know. Ticket FD-4630, P2. AI: Priya get eng ETA by 11/10. AI: Priya tell Renata? asking Lena first."
+    },
+    {
+     "called_at": "2026-11-19T09:00:00-07:00",
+     "body": "Voicemail."
+    },
+    {
+     "called_at": "2026-12-03T11:00:00-07:00",
+     "body": "Renewal kickoff, Renata + Noor (procurement) + Tobias. Noor: any deal >$100k/yr needs 3 quotes OR a multi-year w/ price protection, CFO's rule since Oct. Desmond wants 3 yrs, flat price, 8% off. Tobias floated 3yr @ $58/tech seat w/ 4% cap on yr 2/3 uplift. Noor: 'a cap is not flat.' Dispatcher price not discussed at all. AI: Tobias written proposal by 12/10. AI: Noor send vendor form by 12/8 (not received as of 12/15)."
+    },
+    {
+     "called_at": "2026-12-16T13:30:00-07:00",
+     "body": "Gareth (IT). SSO cutover to their new IdP planned for the Jan 23-24 weekend. Needs SCIM for the Brannock users, we only have SCIM on Enterprise tier. He assumed it was included. It is not in Tobias's proposal. Flagged to Tobias. Also Gareth says Brannock headcount is 'more like 45 real employees, the rest are subs' which conflicts w/ the 60 in the opp."
+    },
+    {
+     "called_at": "2027-01-12T10:00:00-07:00",
+     "body": "Renewal call (recorded). Desmond pushed hard: 3 yrs flat or he signs 1 yr and runs an RFP in the fall. Luis on for 10 min, Denver stays ONLY if 4630 is fixed and he's seen it work by 2/1. Brannock seats stated as 60 on the call. Tobias verbally offered $58 flat yr 1-2, +3% yr 3. Desmond: 'send it, I'll look.' No commitment.\nAI: Tobias revised order form by Thu 1/14.\nAI: Priya eng written commit on FD-4630 by 1/15.\nAI: Renata final Brannock seat list by Fri 1/15."
+    },
+    {
+     "called_at": "2027-01-14T16:40:00-07:00",
+     "body": "Quick call w Renata, 8 min. Seat list coming tmrw, she thinks 46 not 60. Desmond 'cooled off' after seeing $58 in writing, but she says he'll go after dispatcher seats next, those were never discounted ($110). She will NOT be on the 1/20 call (jury duty), Fiona covering. Fiona has no signing authority."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "acct-kestrel-ridge",
+     "author": "Priya Nandakumar",
+     "sent_at": "2026-11-06T22:05:00Z",
+     "body": "Luis at Kestrel Denver has already sat through a Corvane demo. Renata doesn't know. 38 seats in that branch, ~$28k. Do I tell her?"
+    },
+    {
+     "channel": "acct-kestrel-ridge",
+     "author": "Lena Brzezinski",
+     "sent_at": "2026-11-06T22:19:00Z",
+     "body": "Yes, but tell Luis first that you're going to. Don't blindside him, he's the one living with the sync bug."
+    },
+    {
+     "channel": "acct-kestrel-ridge",
+     "author": "Tobias Wren",
+     "sent_at": "2026-12-10T18:02:00Z",
+     "body": "Proposal out to Noor + Desmond. 3yr, 200 tech seats @ $58, 4% cap on years 2 and 3. TCV $417,600."
+    },
+    {
+     "channel": "deal-desk",
+     "author": "Anneke Vos",
+     "sent_at": "2026-12-10T18:31:00Z",
+     "body": "@Tobias $58 on 200 seats isn't approved. Floor at that volume on a 3yr is $59.50. $58 needs Lena plus VP sign-off and I have neither on file. Also your TCV leaves out the 12 dispatcher seats, so the number is wrong twice."
+    },
+    {
+     "channel": "deal-desk",
+     "author": "Tobias Wren",
+     "sent_at": "2026-12-10T18:40:00Z",
+     "body": "Dispatcher seats sit in the base renewal opp, not the expansion, so the TCV is right for what it covers. Fair on the floor. I'll get the sign-off."
+    },
+    {
+     "channel": "acct-kestrel-ridge",
+     "author": "Priya Nandakumar",
+     "sent_at": "2027-01-12T18:10:00Z",
+     "body": "Call done. Desmond wants flat for 3 years. Brannock = 60 seats. Denver conditional on FD-4630 by 2/1. Notes in SF."
+    },
+    {
+     "channel": "acct-kestrel-ridge",
+     "author": "Priya Nandakumar",
+     "sent_at": "2027-01-14T23:55:00Z",
+     "body": "Correction to my 1/12 message: Brannock is 46 seats, not 60. 14 are subcontractors who won't get logins. Renata confirmed today. Expansion opp is overstated by 14 seats, about $9.7k/yr at $58."
+    },
+    {
+     "channel": "acct-kestrel-ridge",
+     "author": "Hugo Tran",
+     "sent_at": "2027-01-15T00:20:00Z",
+     "body": "So total tech seats = 186, under the 200 tier. $58 was priced on 200. Someone has to tell Desmond the per-seat goes UP when the count goes down. Not it."
+    },
+    {
+     "channel": "acct-kestrel-ridge",
+     "author": "Sam Oyelaran",
+     "sent_at": "2027-01-15T14:12:00Z",
+     "body": "FD-4630: fix is in mobile 8.14, store review pending. Eng will NOT commit in writing to 2/1. Best they'll say is 'targeting the week of 1/25'. Sorry Priya."
+    },
+    {
+     "channel": "acct-kestrel-ridge",
+     "author": "Lena Brzezinski",
+     "sent_at": "2027-01-15T14:15:00Z",
+     "body": "ack"
+    }
+   ],
+   "transcript": {
+    "format": "vtt",
+    "text": "WEBVTT\n\n1\n00:00:01.200 --> 00:00:05.640\nTobias Wren: Okay, recording's on. Um, Desmond, thanks for making the time.\n\n2\n00:00:06.010 --> 00:00:10.320\nDesmond Achebe: Sure. I've got a hard stop at half past, so let's just get into it.\n\n3\n00:00:10.900 --> 00:00:17.450\nTobias Wren: Yep. So, uh, the proposal from December tenth. Three years, fifty-eight a seat on the technician side, and then the—\n\n4\n00:00:17.100 --> 00:00:21.800\nDesmond Achebe: With a four percent cap. Which is not what I asked for. I asked for flat.\n\n5\n00:00:22.050 --> 00:00:26.300\nTobias Wren: Right, and I, I hear that. The cap is a ceiling, it's not a—\n\n6\n00:00:25.700 --> 00:00:29.900\nDesmond Achebe: It's a ceiling you will hit. Every vendor hits the ceiling.\n\n7\n00:00:30.400 --> 00:00:41.150\nRenata Kowalczyk: Can I, sorry, can I jump in? Desmond, the per-seat today is sixty-two. So fifty-eight is already, what, six, six and a half percent down.\n\n8\n00:00:41.600 --> 00:00:42.900\nDesmond Achebe: I asked for eight.\n\n9\n00:00:43.800 --> 00:00:52.200\nPriya Nandakumar: And the, um, the volume is part of how we got there. That's with Brannock, the sixty seats, getting you to two hundred.\n\n10\n00:00:52.600 --> 00:00:56.000\nRenata Kowalczyk: Sixty-ish. I still owe you the real list.\n\n11\n00:00:57.300 --> 00:01:02.100\nLuis Barrientos: Hey, sorry, I'm late, I was on a roof. Can you all hear me?\n\n12\n00:01:02.500 --> 00:01:04.200\nPriya Nandakumar: We can hear you, Luis. Hi.\n\n13\n00:01:04.900 --> 00:01:19.700\nLuis Barrientos: So I'll be quick 'cause I gotta get back up there. Denver. We lost work orders again in November. Three of them. My guys don't trust the app offline anymore, they're taking pictures of paper again.\n\n14\n00:01:20.300 --> 00:01:27.050\nPriya Nandakumar: Yeah. And that's, that's FD-4630, engineering has a fix going into the next mobile release, so—\n\n15\n00:01:26.400 --> 00:01:27.100\nLuis Barrientos: When?\n\n16\n00:01:27.900 --> 00:01:34.600\nPriya Nandakumar: I'm getting a written date this week. I don't want to give you a date I made up.\n\n17\n00:01:35.200 --> 00:01:49.800\nLuis Barrientos: Okay. I appreciate that. But here's mine. February first. If it's not fixed, and I haven't seen it work on my own guys' phones by February first, I'm asking Renata to let Denver go to the other thing.\n\n18\n00:01:50.300 --> 00:01:51.500\nDesmond Achebe: What other thing?\n\n19\n00:01:52.400 --> 00:02:01.000\nRenata Kowalczyk: Corvane. Luis had a demo. I found out in November. From Priya, actually.\n\n20\n00:02:01.700 --> 00:02:09.300\nDesmond Achebe: So we'd be running two systems. No. No, that's, that's not happening. Luis, we'll talk offline.\n\n21\n00:02:09.800 --> 00:02:12.400\nLuis Barrientos: Fine by me. I gotta drop. Thanks, all.\n\n22\n00:02:14.000 --> 00:02:29.500\nTobias Wren: So, um, Desmond, on the flat piece. What I can do, and I'd need to confirm it internally, is fifty-eight flat for years one and two, and three percent in year three. Not a cap. Just three.\n\n23\n00:02:30.100 --> 00:02:31.900\nDesmond Achebe: And if I say one year?\n\n24\n00:02:32.600 --> 00:02:39.800\nTobias Wren: One year is, uh, it's sixty-two, same as today. There's no volume break without the term.\n\n25\n00:02:40.300 --> 00:02:53.100\nDesmond Achebe: Then I sign one year and I run an RFP in the fall. I'm not threatening you, that's just the policy. Over a hundred K it's three quotes or a multi-year with protection.\n\n26\n00:02:53.000 --> 00:02:54.600\nRenata Kowalczyk: Which is why we're—\n\n27\n00:02:54.200 --> 00:03:02.700\nDesmond Achebe: I know why we're here. Send it. Fifty-eight, fifty-eight, plus three. I'll look. I'm not saying yes.\n\n28\n00:03:03.300 --> 00:03:05.900\nTobias Wren: Understood. You'll have it Thursday.\n\n29\n00:03:06.400 --> 00:03:09.800\nRenata Kowalczyk: And I'll get Priya the Brannock list by Friday.\n\n30\n00:03:10.200 --> 00:03:12.500\nDesmond Achebe: Okay. I have to go. Thank you.\n"
+   }
+  },
+  {
+   "name": "Pelham & Oster Plumbing",
+   "industry": "Residential plumbing",
+   "renewal_date": "2026-12-31",
+   "arr_cents": 3510000,
+   "risk_status": "at_risk",
+   "risk_reason": "Champion Carla Menendez left on 2026-11-20. The GM now deciding had never seen the invoice. Contract lapsed 2026-12-31; tenant is in grace until 2027-01-30, then read-only. 31 of 45 seats active.",
+   "contacts": [
+    {
+     "name": "Carla Menendez",
+     "title": "Operations Director (left 2026-11-20, email bounces)",
+     "email": "carla.menendez@pelhamoster.example"
+    },
+    {
+     "name": "Wendell Oster",
+     "title": "General Manager",
+     "email": "wendell@pelhamoster.example"
+    },
+    {
+     "name": "Trish Nakamura",
+     "title": "Office Manager",
+     "email": "trish.nakamura@pelhamoster.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Pelham & Oster - Renewal 2027",
+     "stage": "negotiation",
+     "salesforce_stage": "Verbal Commit",
+     "amount_cents": 3510000,
+     "close_date": "2026-12-31"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-01-01",
+     "end_date": "2026-12-31",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-10-28T11:00:00-05:00",
+     "body": "Carla: renewal is 'a formality', same 45 seats, wants the PO done by Thanksgiving. Moved opp to Verbal Commit."
+    },
+    {
+     "called_at": "2026-12-02T10:20:00-06:00",
+     "body": "Carla's cell is disconnected. Email bounced 12/1. Trish (office mgr) picked up the main line: Carla's last day was 11/20, 'went to a competitor of ours, not yours.' Wendell decides everything now. Trish doesn't know what Fennick costs or who signs. AI: Dale intro email to Wendell today."
+    },
+    {
+     "called_at": "2027-01-07T14:02:00-06:00",
+     "body": "Call w/ Wendell + Trish (Otter recording attached). Not hostile, just doesn't know why he's paying $35k. Thinks they have 30 plumbers not 45. Wants usage by person. Asked for month to month, we dont have that. Told him grace ends 1/30 then read-only. AI: Dale usage export by Fri 1/8 (he said the ninth on the call, Friday is the 8th). AI: Wendell answer by 1/22."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "cs-renewals",
+     "author": "Dale Okafor",
+     "sent_at": "2026-12-02T17:40:00Z",
+     "body": "Pelham & Oster: Carla Menendez is gone as of 11/20. Opp says Verbal Commit. That commit left the building with her. Marking at_risk."
+    },
+    {
+     "channel": "cs-renewals",
+     "author": "Hugo Tran",
+     "sent_at": "2026-12-02T17:52:00Z",
+     "body": "Stage is still Verbal Commit in SF and forecast call is tomorrow. Are you fixing it or am I?"
+    },
+    {
+     "channel": "cs-renewals",
+     "author": "Dale Okafor",
+     "sent_at": "2026-12-02T17:53:00Z",
+     "body": "you"
+    },
+    {
+     "channel": "cs-renewals",
+     "author": "Dale Okafor",
+     "sent_at": "2027-01-08T20:11:00Z",
+     "body": "Usage export sent to Wendell and Trish. 31 of 45 seats logged in during the last 90 days. He guessed 30. So he's right, and the renewal at 45 is dead. Realistic is 31 to 33 seats, $24,180 to $25,740. Also the stage STILL says Verbal Commit."
+    },
+    {
+     "channel": "cs-renewals",
+     "author": "Lena Brzezinski",
+     "sent_at": "2027-01-08T20:30:00Z",
+     "body": "Offer 33 at $65 with a true-up clause. Don't discount the seat price on top of a seat cut."
+    }
+   ],
+   "transcript": {
+    "format": "txt",
+    "text": "Pelham Oster renewal check-in\nThu, Jan 7, 2027 2:02 PM - 24:51\n\nDale Okafor  0:03\nHi Wendell, hi Trish. Thanks for, uh, thanks for hopping on.\n\nWendell Oster  0:08\nYeah. So I'll be honest with you, I didn't know this call was about a renewal until Trish told me this morning.\n\nDale Okafor  0:15\nThat's fair. So Carla and I had been, um, working on it since October, and then—\n\nWendell Oster  0:21\nAnd then Carla left.\n\nDale Okafor  0:23\nRight.\n\nWendell Oster  0:25\nSo what did Carla tell you? Because I'm seeing thirty-five thousand dollars on something and I don't, I don't know what I'm getting for that.\n\nDale Okafor  0:36\nShe'd said same as last year. Forty-five seats, twelve months. That's thirty-five one hundred. Thirty-five thousand one hundred.\n\nTrish Nakamura  0:45\nThat's the invoice I have. It's dated December first.\n\nWendell Oster  0:49\nWe don't have forty-five plumbers. We have thirty, maybe. Trish?\n\nTrish Nakamura  0:54\nThirty-one on payroll. Plus the two apprentices, but they ride along, they don't—\n\nWendell Oster  0:59\nThey don't need a login.\n\nUnknown Speaker  1:01\n[inaudible] the truck's back.\n\nWendell Oster  1:04\nSorry, hang on. Tell him bay two. Okay. Go ahead.\n\nDale Okafor  1:10\nSo, um, I can pull exactly who's logged in. By person, last ninety days. I'd rather you see the real number than, than either of us guess.\n\nWendell Oster  1:20\nDo that. And can we just go month to month while I figure this out?\n\nDale Okafor  1:25\nWe don't, so, we don't have a month-to-month plan. What you do have is a grace period. The contract ended December thirty-first and the system stays on through January thirtieth.\n\nWendell Oster  1:38\nAnd then it shuts off?\n\nDale Okafor  1:40\nThen it goes read-only. Your dispatchers could see the board but not—\n\nTrish Nakamura  1:44\nNot assign. Oh, that would be bad. That would be really bad, Wendell, the whole morning runs off that board.\n\nWendell Oster  1:51\nI'm not saying we're leaving. I'm saying I'm not paying for fourteen people who don't exist.\n\nDale Okafor  1:57\nUnderstood. And you shouldn't.\n\nWendell Oster  2:00\nOkay. So send me the list. When?\n\nDale Okafor  2:03\nBy Friday. The ninth.\n\nWendell Oster  2:05\nAnd I'll give you an answer by, what's two weeks, the twenty-second.\n\nDale Okafor  2:10\nJanuary twenty-second. I'll put it in writing so we both have it.\n\nTrish Nakamura  2:14\nSend it to me too, he doesn't read email.\n\nWendell Oster  2:17\nI read email.\n\nTrish Nakamura  2:18\nHe doesn't.\n"
+   }
+  },
+  {
+   "name": "Marlowe County Water Authority",
+   "industry": "Public utility",
+   "renewal_date": "2027-01-15",
+   "arr_cents": 5760000,
+   "risk_status": "at_risk",
+   "risk_reason": "County procurement freeze since 2026-12-14: no purchase order can be issued for anything but payroll and emergency repair. Customer wants to renew. Contract ends today; a no-cost bridge to 2027-04-15 was signed this morning.",
+   "contacts": [
+    {
+     "name": "Ingrid Vasquez-Bell",
+     "title": "Field Operations Superintendent",
+     "email": "ivasquezbell@marlowewater.example"
+    },
+    {
+     "name": "Howard Lim",
+     "title": "Purchasing Agent II",
+     "email": "howard.lim@marlowecounty.example"
+    },
+    {
+     "name": "Samuel Adeyemi-Clarke",
+     "title": "",
+     "email": "sadeyemiclarke@marlowewater.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "MCWA - FY27 Renewal (80 seats)",
+     "stage": "proposal",
+     "salesforce_stage": "Awaiting PO",
+     "amount_cents": 5760000,
+     "close_date": "2027-01-15"
+    },
+    {
+     "name": "MCWA - GIS valve-map connector",
+     "stage": "discovery",
+     "salesforce_stage": "Qualification",
+     "amount_cents": 900000,
+     "close_date": "2027-06-30"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-01-16",
+     "end_date": "2027-01-15",
+     "term_months": 12
+    },
+    {
+     "status": "Activated",
+     "start_date": "2027-01-16",
+     "end_date": "2027-04-15",
+     "term_months": 3
+    },
+    {
+     "status": "InApproval",
+     "start_date": "2027-01-16",
+     "end_date": "2028-01-15",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-12-15T09:10:00-06:00",
+     "body": "Howard (purchasing): county board froze all non-payroll POs on 12/14 pending an audit of the general fund. No end date. 'Could be Feb, could be the new fiscal yr in July.' Our renewal PO was 2 signatures from done. Ingrid furious, not at us."
+    },
+    {
+     "called_at": "2027-01-11T13:00:00-06:00",
+     "body": "Teams call Ingrid + Howard + Tobias (recorded). Options we brought: (a) no-cost extension, (b) invoice now on net-120, (c) let it lapse. Howard can't take (b): an invoice w/o a PO is an 'unauthorized commitment' and he personally gets written up. Ingrid wants (a). Tobias said 60 days, would try for 90. AI: Tobias extension letter by Wed 1/13. AI: Howard send the freeze memo by 1/12 (received 1/12, in the opp)."
+    },
+    {
+     "called_at": "2027-01-14T15:45:00-06:00",
+     "body": "Howard called ME, which never happens. Board meets 1/26, there is now an exemption list w/ 'critical operations software' on it and we are item 14 of 31. If exempted, PO roughly 10 business days later, so earliest ~2/9. He wants the extension letter dated before 1/15 so the auditors see no gap in coverage."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "deal-desk",
+     "author": "Tobias Wren",
+     "sent_at": "2027-01-11T19:30:00Z",
+     "body": "MCWA needs a no-cost bridge, county PO freeze. I told them 60 days on the call."
+    },
+    {
+     "channel": "deal-desk",
+     "author": "Anneke Vos",
+     "sent_at": "2027-01-11T19:44:00Z",
+     "body": "60 is fine. For what it's worth policy lets me approve up to 90 for public sector when there's a freeze memo on file. Get the memo."
+    },
+    {
+     "channel": "deal-desk",
+     "author": "Tobias Wren",
+     "sent_at": "2027-01-13T16:02:00Z",
+     "body": "Memo's attached to the opp. Going with 90 not 60 since Anneke can approve it, new end date 4/15. Ingrid already told her crew chiefs 60 so somebody please correct that with her."
+    },
+    {
+     "channel": "cs-renewals",
+     "author": "Marit Solheim",
+     "sent_at": "2027-01-15T15:05:00Z",
+     "body": "MCWA extension letter countersigned 9:02 this morning, dated 1/14. Opp close date still says today, moving it to 2/26. Hugo please don't flag this as slipped, it's a freeze, not a slip."
+    }
+   ],
+   "transcript": {
+    "format": "vtt",
+    "text": "WEBVTT\n\n00:00:03.120 --> 00:00:08.450\n<v Marit Solheim>Hi Ingrid, hi Howard. Tobias is joining, he's, um, he's just getting off another call.</v>\n\n00:00:08.900 --> 00:00:11.200\n<v Ingrid Vasquez-Bell>That's fine. Howard, you're on mute.</v>\n\n00:00:14.050 --> 00:00:16.700\n<v Howard Lim>Sorry. Yes. Can you hear me now?</v>\n\n00:00:16.900 --> 00:00:18.100\n<v Marit Solheim>Yep, we've got you.</v>\n\n00:00:21.300 --> 00:00:24.600\n<v Tobias Wren>Hey, sorry, sorry everyone. Tobias here.</v>\n\n00:00:25.100 --> 00:00:38.900\n<v Ingrid Vasquez-Bell>So I'll start. We want to renew. Nothing has changed about that. I have eighty people in the field on this every day and I am not going back to radios and clipboards.</v>\n\n00:00:39.400 --> 00:00:51.200\n<v Howard Lim>And I have a memo from the county administrator dated December fourteenth that says I cannot issue a purchase order for anything that isn't payroll or an emergency repair.</v>\n\n00:00:51.800 --> 00:00:57.300\n<v Tobias Wren>Understood. So, um, we talked internally and there's a few ways we could—</v>\n\n00:00:56.700 --> 00:01:00.900\n<v Howard Lim>Before you list them. I can't accept an invoice either.</v>\n\n00:01:01.400 --> 00:01:06.800\n<v Tobias Wren>Even at, like, net one-twenty? So it wouldn't actually be due until—</v>\n\n00:01:07.100 --> 00:01:16.500\n<v Howard Lim>It's not about when it's due. An invoice without a P.O. is an unauthorized commitment. That's my name on it. I'd get written up.</v>\n\n00:01:16.900 --> 00:01:19.800\n<v Ingrid Vasquez-Bell>He would. It happened to someone in Parks.</v>\n\n00:01:20.600 --> 00:01:36.200\n<v Tobias Wren>Okay. Okay, that's, that's helpful. So that takes B off the table. Then it's really an extension. We keep you live, no charge, for a set period, and the renewal term starts when the P.O. lands.</v>\n\n00:01:36.700 --> 00:01:37.600\n<v Ingrid Vasquez-Bell>How long?</v>\n\n00:01:38.200 --> 00:01:42.900\n<v Tobias Wren>I can do sixty days today. Ninety I'd have to—</v>\n\n00:01:42.300 --> 00:01:47.800\n<v Marit Solheim>Sorry, Tobias, I think for public sector there's a, isn't there a longer—</v>\n\n00:01:47.200 --> 00:01:56.400\n<v Tobias Wren>There might be. I don't want to promise ninety on this call and then walk it back. Sixty I can say yes to right now.</v>\n\n00:01:57.000 --> 00:02:03.500\n<v Ingrid Vasquez-Bell>Sixty gets me to mid-March. Howard, is the freeze over by mid-March?</v>\n\n00:02:04.100 --> 00:02:14.700\n<v Howard Lim>I don't know. Nobody knows. The audit's on the general fund. Could be February. Could be July, with the new fiscal year.</v>\n\n00:02:15.300 --> 00:02:16.000\n<v Ingrid Vasquez-Bell>July.</v>\n\n00:02:16.600 --> 00:02:18.400\n<v Howard Lim>I'm telling you what I know.</v>\n\n00:02:19.500 --> 00:02:25.100\n<v Marit Solheim>Howard, is there, um, an exemption process? Some counties keep a list.</v>\n\n00:02:25.800 --> 00:02:35.300\n<v Howard Lim>There's talk of one. The board meets on the twenty-sixth. I can ask whether software for field crews would count.</v>\n\n00:02:35.900 --> 00:02:39.200\n<v Ingrid Vasquez-Bell>It's how we find the valves, Howard. It counts.</v>\n\n00:02:40.100 --> 00:02:56.800\n<v Tobias Wren>So here's what I'll do. Extension letter, sixty days minimum, I'll try for ninety, to you by Wednesday the thirteenth. And Howard, could you send over the freeze memo? Our finance people will want it on file.</v>\n\n00:02:57.300 --> 00:03:01.000\n<v Howard Lim>I can send it tomorrow. It's a public document.</v>\n\n00:03:01.600 --> 00:03:04.200\n<v Ingrid Vasquez-Bell>And the price doesn't move while we wait.</v>\n\n00:03:04.800 --> 00:03:09.500\n<v Tobias Wren>Price doesn't move. Eighty seats at sixty, same as the quote.</v>\n\n00:03:10.100 --> 00:03:15.700\n<v Ingrid Vasquez-Bell>Good. Then we're fine. I mean, we're not fine, but we're fine with you.</v>\n"
+   }
+  },
+  {
+   "name": "Dunmore Elevator Services",
+   "industry": "Elevator maintenance and inspection",
+   "renewal_date": "2027-03-31",
+   "arr_cents": 7296000,
+   "risk_status": "at_risk",
+   "risk_reason": "Formal evaluation of Corvane since November; decision at their board on 2027-02-19. Started as a compliance-reporting gap, became a price comparison once the controller joined ($54 base at Corvane vs our $64).",
+   "contacts": [
+    {
+     "name": "Aoife Brennan",
+     "title": "Director of Service Operations",
+     "email": "aoife.brennan@dunmoreelevator.example"
+    },
+    {
+     "name": "Marcus Thibodeaux",
+     "title": "Compliance Manager",
+     "email": "marcus.thibodeaux@dunmoreelevator.example"
+    },
+    {
+     "name": "Yusuf Demir",
+     "title": "Controller",
+     "email": "yusuf.demir@dunmoreelevator.example"
+    },
+    {
+     "name": "Pat Lindqvist",
+     "title": "",
+     "email": "pat@dunmoreelevator.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Dunmore - Renewal FY27 (95 seats)",
+     "stage": "evaluation",
+     "salesforce_stage": "Id. Decision Makers",
+     "amount_cents": 7296000,
+     "close_date": "2027-03-31"
+    },
+    {
+     "name": "Dunmore - Compliance reporting pack",
+     "stage": "proposal",
+     "salesforce_stage": "Proposal/Price Quote",
+     "amount_cents": 1140000,
+     "close_date": "2027-02-19"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-04-01",
+     "end_date": "2027-03-31",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-12-09T14:00:00-05:00",
+     "body": "Aoife told me straight: they're evaluating Corvane, started in Nov. Not a secret, 'I'd rather you hear it from me.' Driver = Marcus's state inspection reporting. He exports to CSV and rebuilds the certificate log in Excel every month, ~2 days of his time. Corvane showed him a built-in inspection log. Price not raised once. AI: Marit get Sam to scope whether our compliance pack covers state form EL-7 by 12/16."
+    },
+    {
+     "called_at": "2026-12-18T11:30:00-05:00",
+     "body": "Sam demoed the compliance pack to Marcus. Covers certificate log + overdue alerts. Does NOT produce the EL-7 PDF, Marcus still fills the form, but from one screen instead of an export. Marcus: 'that's 80% of it.' He asked price. I said about $10/seat/mo, NOT confirmed. Aoife wasn't on."
+    },
+    {
+     "called_at": "2027-01-13T15:00:00-05:00",
+     "body": "Eval check-in, Aoife + Marcus + Yusuf. No recording (their policy), my live typed notes are saved as the transcript. Short version: Corvane quoted $54/seat. Yusuf now cares about price even tho Aoife says she doesn't. They want the pack included free to stay. Decision 2/19. AI: Marit answer on pack pricing by 1/20. AI: Marcus check if the $54 includes the inspection module."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "churn-watch",
+     "author": "Marit Solheim",
+     "sent_at": "2026-12-09T21:15:00Z",
+     "body": "Dunmore is in a real Corvane eval. Not price driven. It's the inspection log. If we give Marcus his 2 days a month back, we keep it."
+    },
+    {
+     "channel": "churn-watch",
+     "author": "Marit Solheim",
+     "sent_at": "2027-01-13T22:40:00Z",
+     "body": "Update, and I have to walk back 'not price driven'. Corvane put $54/seat in front of their controller. We're at $64. Aoife still says it's about compliance, but Yusuf is in the room now and Yusuf can count."
+    },
+    {
+     "channel": "churn-watch",
+     "author": "Tobias Wren",
+     "sent_at": "2027-01-13T22:58:00Z",
+     "body": "Is $54 with or without their inspection module? Corvane quotes base and adds modules after."
+    },
+    {
+     "channel": "churn-watch",
+     "author": "Marit Solheim",
+     "sent_at": "2027-01-14T15:20:00Z",
+     "body": "Marcus checked the quote. $54 is base, inspection module is +$9. So they're $63 all in. We're $64 + $10 = $74 if we charge for the pack, or $64 vs $63 if we include it, and they don't have to migrate 6 years of unit history for a dollar."
+    },
+    {
+     "channel": "churn-watch",
+     "author": "Lena Brzezinski",
+     "sent_at": "2027-01-14T15:41:00Z",
+     "body": "Include it. Write it as a 12-month promo line so we aren't giving it away forever. I'll approve. Close out the $11,400 pack opp or it'll sit in pipeline as money we just agreed not to charge."
+    }
+   ],
+   "transcript": {
+    "format": "txt",
+    "text": "DUNMORE ELEVATOR - eval check-in - 13 Jan 2027, 3:00pm ET\nNotes typed live by M. Solheim. Near verbatim, not cleaned up. No recording per customer policy.\nPresent: Aoife Brennan (AB), Marcus Thibodeaux (MT), Yusuf Demir (YD), Marit Solheim (MS)\n\nMS: Thanks all. Where are things with the evaluation?\nAB: Honest answer, further along than I expected. Marcus has been in their sandbox for two weeks.\nMT: Ten days. I've loaded about 400 units. The inspection log is, look, it's good. It does the thing.\nMS: Does it produce the EL-7?\nMT: No. Nobody does, the state won't publish the layout. But it tracks cert expiry per unit and that's the part that eats my two days.\nMS: And you saw ours on the 18th with Sam.\nMT: I did, and I said eighty percent, and I stand by it. Yours is fine. Theirs is a little better on alerts. Yours already has my six years of history in it.\nYD: Can I ask the money question since nobody else will\nAB: Yusuf.\nYD: They quoted fifty-four a seat. You're at sixty-four. Ten dollars times ninety-five times twelve. I did it. Eleven thousand four hundred a year.\nMS: Is the fifty-four with the inspection module?\nYD: I assume so\nMT: I don't think it is, actually. [YD and MT both talking - missed this bit]\nAB: One at a time.\nMT: I think the module's a separate line. I'll check the quote.\nYD: Even so. And yours is extra too, right? Marit said ten a seat.\nMS: I said about ten and that it wasn't confirmed. I'd rather that number didn't travel.\nYD: It's travelled.\nAB: Here's where I am. I don't want to migrate. I have 2,300 units with history. But I can't walk into the owner's office with your price higher AND the compliance thing costing extra. Include the pack and I can defend staying.\nMS: I can't say yes to that today. I can take it back and have an answer by the 20th.\nAB: Our decision is February 19th. That's a board date, it doesn't move.\nYD: And we'd want it in the contract, not a promise\nMS: Understood. In the order form.\nMT: For what it's worth I'd rather stay. I don't want to learn another one of these.\nAB: Noted, Marcus. Don't say that on the Corvane call.\n\n(ended 3:47pm. MS to confirm pack pricing by 1/20. MT to check whether the $54 includes the module.)\n"
+   }
+  },
+  {
+   "name": "Sablewood Pest Control",
+   "industry": "Pest control",
+   "renewal_date": "2027-02-01",
+   "arr_cents": 1716000,
+   "risk_status": "at_risk",
+   "risk_reason": "No reply from the owner since 2026-08-19. 19 of 22 seats still active weekly. Auto-renew notice window closed 2027-01-02 with no notice, so it renews 2027-02-01 with a 5% uplift nobody there has acknowledged.",
+   "contacts": [
+    {
+     "name": "Gordon Fitch",
+     "title": "Owner",
+     "email": "gordon@sablewoodpest.example"
+    },
+    {
+     "name": "Bev",
+     "title": "",
+     "email": "office@sablewoodpest.example"
+    }
+   ],
+   "opportunities": [],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-02-02",
+     "end_date": "2027-02-01",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-08-19T16:05:00Z",
+     "body": "Gordon, 6 min. All good, busy season, 'call me in the fall.'"
+    },
+    {
+     "called_at": "2026-10-06T15:30:00Z",
+     "body": "No answer."
+    },
+    {
+     "called_at": "2026-11-10T16:00:00Z",
+     "body": "LVM #3. Emailed too. Nothing."
+    },
+    {
+     "called_at": "2026-12-15T17:20:00Z",
+     "body": "Bev at the front desk picked up. Gordon is 'out till after the holidays', wouldnt say more than that. She uses the dispatch board every day, 'please dont turn it off.' Not a decision maker. Asked her to pass on that the auto renew notice window closes 1/2."
+    },
+    {
+     "called_at": "2027-01-05T15:10:00Z",
+     "body": "Notice window passed 1/2 with no notice, so it auto-renews 2/1 at 22 seats w/ the 5% uplift in clause 8.2 = $68.25/seat. As far as I can tell nobody at Sablewood knows about the uplift. Do we just... send the invoice?"
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "cs-team",
+     "author": "Priya Nandakumar",
+     "sent_at": "2027-01-05T17:20:00Z",
+     "body": "Sablewood: 5 months of silence from the owner, 19/22 seats active every week, auto-renew kicks in 2/1 with a 5% uplift nobody has acknowledged. Technically healthy. Feels bad."
+    },
+    {
+     "channel": "cs-team",
+     "author": "Lena Brzezinski",
+     "sent_at": "2027-01-05T17:48:00Z",
+     "body": "Send a plain email to Gordon AND the office address this week with the new annual amount in the subject line. If he disputes it in March I want a timestamp showing we told him."
+    },
+    {
+     "channel": "cs-team",
+     "author": "Priya Nandakumar",
+     "sent_at": "2027-01-06T16:03:00Z",
+     "body": "Sent to both. New annual is $18,018."
+    },
+    {
+     "channel": "cs-renewals",
+     "author": "Hugo Tran",
+     "sent_at": "2027-01-12T15:00:00Z",
+     "body": "There is no renewal opp for Sablewood at all. Auto-create skips accounts where auto-renew is true, which is a bug, not a feature. I'll add one by hand."
+    }
+   ],
+   "transcript": null
+  },
+  {
+   "name": "Oxbow Garage Doors",
+   "industry": "Garage door installation and repair",
+   "renewal_date": "2028-06-30",
+   "arr_cents": 1092000,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [],
+   "opportunities": [
+    {
+     "name": "Oxbow - 2yr via Northgate Trade Systems (reseller)",
+     "stage": "closed_won",
+     "salesforce_stage": "Closed Won",
+     "amount_cents": 2184000,
+     "close_date": "2026-06-24"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-07-01",
+     "end_date": "2028-06-30",
+     "term_months": 24
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-07-14T10:00:00-05:00",
+     "body": "Onboarding was run by Northgate, not us. We have no named person at Oxbow. Reseller agreement says all comms go through Northgate (Ray). Ray is on the partner record, not on this account. 14 seats."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "cs-team",
+     "author": "Dale Okafor",
+     "sent_at": "2026-11-03T19:02:00Z",
+     "body": "Does anyone have a human at Oxbow Garage Doors? The NPS survey went to nobody."
+    },
+    {
+     "channel": "cs-team",
+     "author": "Hugo Tran",
+     "sent_at": "2026-11-03T19:10:00Z",
+     "body": "By design. Reseller account. Contacts live on the Northgate partner record."
+    }
+   ],
+   "transcript": null
+  },
+  {
+   "name": "Fairlight Solar Installers",
+   "industry": "Residential solar installation",
+   "renewal_date": "2027-07-31",
+   "arr_cents": 4536000,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [
+    {
+     "name": "Imani Okonkwo",
+     "title": "Chief Operating Officer",
+     "email": "imani@fairlightsolar.example"
+    },
+    {
+     "name": "Theo Lambrecht",
+     "title": "Scheduling Lead",
+     "email": "theo.lambrecht@fairlightsolar.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Fairlight - Add 25 seats (Reno crew)",
+     "stage": "negotiation",
+     "salesforce_stage": "Negotiation/Review",
+     "amount_cents": 1890000,
+     "close_date": "2027-01-22"
+    },
+    {
+     "name": "Fairlight - Renewal 2027",
+     "stage": "discovery",
+     "salesforce_stage": "Prospecting",
+     "amount_cents": 4536000,
+     "close_date": "2027-07-31"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-08-01",
+     "end_date": "2027-07-31",
+     "term_months": 12
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-02-01",
+     "end_date": "2027-07-31",
+     "term_months": 6
+    }
+   ],
+   "call_notes": [],
+   "slack_messages": [
+    {
+     "channel": "ext-fairlight-fennick",
+     "author": "Imani Okonkwo",
+     "sent_at": "2027-01-06T18:12:00Z",
+     "body": "We're opening Reno on Feb 1. Need 25 more seats, same price. Can you turn that around this week?"
+    },
+    {
+     "channel": "ext-fairlight-fennick",
+     "author": "Priya Nandakumar",
+     "sent_at": "2027-01-06T18:20:00Z",
+     "body": "Yes! 25 seats co-termed to 7/31 at the same $63. Tobias will send the order form."
+    },
+    {
+     "channel": "ext-fairlight-fennick",
+     "author": "Theo Lambrecht",
+     "sent_at": "2027-01-08T21:45:00Z",
+     "body": "Small change, Reno is hiring slower than planned. 18 on Feb 1, the other 7 'by spring'. Can we do 18 now?"
+    },
+    {
+     "channel": "ext-fairlight-fennick",
+     "author": "Imani Okonkwo",
+     "sent_at": "2027-01-08T22:01:00Z",
+     "body": "Theo's right on headcount but I'd still rather sign 25 once than do paperwork twice. What does it cost me to hold 7 empty seats till April?"
+    },
+    {
+     "channel": "ext-fairlight-fennick",
+     "author": "Priya Nandakumar",
+     "sent_at": "2027-01-08T22:30:00Z",
+     "body": "7 x $63 x 2 months = $882. Or we write 18 now with a pre-priced option for 7 more at $63 any time before 7/31, and exercising it is a one-line email, no new paperwork."
+    },
+    {
+     "channel": "ext-fairlight-fennick",
+     "author": "Imani Okonkwo",
+     "sent_at": "2027-01-11T16:15:00Z",
+     "body": "Option version. 18."
+    },
+    {
+     "channel": "cs-renewals",
+     "author": "Priya Nandakumar",
+     "sent_at": "2027-01-11T16:40:00Z",
+     "body": "Fairlight add-on is 18 seats, not 25. Opp still says 25 / $18,900 which was an annualized number anyway. Real value through 7/31 is 18 x $63 x 6 = $6,804. @Tobias the order form you sent Friday has 25 on it, please don't let her sign that one."
+    },
+    {
+     "channel": "cs-renewals",
+     "author": "Tobias Wren",
+     "sent_at": "2027-01-11T17:02:00Z",
+     "body": "Voided and resent at 18."
+    }
+   ],
+   "transcript": null
+  },
+  {
+   "name": "Grange & Hollis Electrical",
+   "industry": "Electrical contracting",
+   "renewal_date": "2027-11-30",
+   "arr_cents": 8052000,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [
+    {
+     "name": "Miriam Hollis",
+     "title": "Co-owner",
+     "email": "miriam@grangehollis.example"
+    },
+    {
+     "name": "Stefan Grange",
+     "title": "Co-owner",
+     "email": "stefan@grangehollis.example"
+    },
+    {
+     "name": "Dev Raghunathan",
+     "title": "Service Manager",
+     "email": "dev.raghunathan@grangehollis.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Grange & Hollis - 2yr renewal (110 seats)",
+     "stage": "closed_won",
+     "salesforce_stage": "Closed Won",
+     "amount_cents": 16104000,
+     "close_date": "2025-11-21"
+    },
+    {
+     "name": "Grange & Hollis - Premium support",
+     "stage": "closed_lost",
+     "salesforce_stage": "Closed Lost - No Budget",
+     "amount_cents": 600000,
+     "close_date": "2026-06-12"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2025-12-01",
+     "end_date": "2027-11-30",
+     "term_months": 24
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-06-11T13:00:00-04:00",
+     "body": "QBR 6/11, Miriam + Dev, on site at their shop (I drove out). Stefan joined for the last ten minutes.\n\nNumbers: 108 of 110 seats active. Avg jobs per tech per day up from 4.1 to 4.6 since they turned on route batching in March. Dev credits batching, Miriam credits firing two people. Probably both.\n\nAsks:\n(1) A permit-number field on the work order, required before a job can close. They were fined $1,200 by the city in April for a panel swap closed without one. Custom required fields already exist; showed Dev where, he built it during the meeting.\n(2) Premium support. Miriam asked the price ($6k/yr) and said 'no, we never call you anyway.' Closing that opp as lost.\n(3) Stefan wanted to know if the price holds in year 2. It does, 2-yr at $61 flat, pointed him at section 4 of the order form.\n\nNothing owed by us. AI: Dev to roll the permit field out to all crews by 6/30."
+    },
+    {
+     "called_at": "2026-12-08T10:30:00-05:00",
+     "body": "Dev: nothing to report. Asked if we have EV charger install templates. We dont. He shrugged."
+    }
+   ],
+   "slack_messages": [],
+   "transcript": null
+  },
+  {
+   "name": "Wexcombe Locksmiths",
+   "industry": "",
+   "renewal_date": "2026-09-30",
+   "arr_cents": 0,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [],
+   "opportunities": [],
+   "contracts": [],
+   "call_notes": [],
+   "slack_messages": [],
+   "transcript": null
+  },
+  {
+   "name": "Ironbark Fleet Glass",
+   "industry": "Mobile windshield repair",
+   "renewal_date": "2027-01-29",
+   "arr_cents": 2808000,
+   "risk_status": "healthy",
+   "risk_reason": "Was at_risk 2026-11-02 to 2026-12-10 for a 41% usage drop. Cleared: the drop is seasonal and matched last November. The CRM health score is still red because it trails 90 days.",
+   "contacts": [
+    {
+     "name": "Rosalind Achterberg",
+     "title": "Operations Manager",
+     "email": "rosalind@ironbarkglass.example"
+    },
+    {
+     "name": "Accounts Payable",
+     "title": "",
+     "email": "ap@ironbarkglass.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Ironbark - Renewal 2027 (36 seats)",
+     "stage": "negotiation",
+     "salesforce_stage": "Contract Sent",
+     "amount_cents": 2808000,
+     "close_date": "2027-01-29"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-01-30",
+     "end_date": "2027-01-29",
+     "term_months": 12
+    },
+    {
+     "status": "InApproval",
+     "start_date": "2027-01-30",
+     "end_date": "2028-01-29",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-11-04T09:45:00-07:00",
+     "body": "Usage down 41% vs Sept, health score flipped red and flagged the account. Rosalind laughed: 'it's November, nobody's windshield cracks from gravel trucks when the gravel trucks arent running.' Checked: Nov 2025 was down 38%. Not a risk. Leaving the flag until Lena agrees."
+    },
+    {
+     "called_at": "2027-01-08T11:15:00-07:00",
+     "body": "Rosalind has the order form. 36 seats, flat $65, no changes. Only ask is net-45 instead of net-30. Thats it. AI: Dale ask Anneke by 1/11."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "deal-desk",
+     "author": "Dale Okafor",
+     "sent_at": "2027-01-08T18:30:00Z",
+     "body": "Ironbark wants net-45 on a $28k renewal. Ok?"
+    },
+    {
+     "channel": "deal-desk",
+     "author": "Anneke Vos",
+     "sent_at": "2027-01-08T18:36:00Z",
+     "body": "Fine. Net-45 is inside policy under $50k, you didn't need to ask."
+    },
+    {
+     "channel": "deal-desk",
+     "author": "Dale Okafor",
+     "sent_at": "2027-01-08T18:37:00Z",
+     "body": ":+1:"
+    }
+   ],
+   "transcript": null
+  },
+  {
+   "name": "Tolliver Home Comfort",
+   "industry": "Residential heating and cooling",
+   "renewal_date": "2026-11-30",
+   "arr_cents": 5460000,
+   "risk_status": "at_risk",
+   "risk_reason": "Churned to Corvane effective 2026-11-30 on price ($48/seat). ARR field never zeroed. Account kept open because the Wichita branch asked on 2027-01-09 to come back (12 seats); the president has not agreed.",
+   "contacts": [
+    {
+     "name": "Darnell Tolliver",
+     "title": "President",
+     "email": "darnell@tolliverhomecomfort.example"
+    },
+    {
+     "name": "Kasia Wojcik",
+     "title": "Service Coordinator, Wichita",
+     "email": "kasia.wojcik@tolliverhomecomfort.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Tolliver - Renewal 2026 (70 seats)",
+     "stage": "closed_lost",
+     "salesforce_stage": "Closed Lost - Competitor",
+     "amount_cents": 5460000,
+     "close_date": "2026-11-30"
+    },
+    {
+     "name": "Tolliver - Wichita winback (12 seats)",
+     "stage": "discovery",
+     "salesforce_stage": "Qualification",
+     "amount_cents": 936000,
+     "close_date": "2027-02-26"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2025-12-01",
+     "end_date": "2026-11-30",
+     "term_months": 12
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-11-12T14:00:00-06:00",
+     "body": "Darnell: decision's made, going to Corvane 12/1. Reason given: $48/seat. Offered $57. He said too late, already signed. Asked for a full data export, sent 11/20."
+    },
+    {
+     "called_at": "2027-01-09T13:40:00-06:00",
+     "body": "Kasia (Wichita) called me. Corvane's mobile app has no offline mode and half her service area is rural w/ no signal. She's been writing jobs on paper for 5 wks. Wants to know if Wichita alone, 12 techs, can come back. Darnell 'knows she's calling', which is not the same as Darnell agreeing. AI: Marit confirm whether their old tenant data can still be restored, by 1/12."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "churn-watch",
+     "author": "Marit Solheim",
+     "sent_at": "2027-01-09T20:10:00Z",
+     "body": "Tolliver Wichita wants back in. 12 seats. Their tenant from November should still be restorable for 90 days, so until 2/28."
+    },
+    {
+     "channel": "churn-watch",
+     "author": "Hugo Tran",
+     "sent_at": "2027-01-09T20:25:00Z",
+     "body": "Retention on churned tenants is 60 days, not 90. So 1/29."
+    },
+    {
+     "channel": "churn-watch",
+     "author": "Marit Solheim",
+     "sent_at": "2027-01-09T20:27:00Z",
+     "body": "oh no"
+    },
+    {
+     "channel": "churn-watch",
+     "author": "Sam Oyelaran",
+     "sent_at": "2027-01-09T21:14:00Z",
+     "body": "It's 90 for anyone who churned after the October policy change. Tolliver ended 11/30, so 90 applies and 2/28 stands. Hugo, you're reading the old runbook."
+    }
+   ],
+   "transcript": null
+  },
+  {
+   "name": "Halvorsen Refrigeration Group",
+   "industry": "Commercial refrigeration",
+   "renewal_date": "2028-12-31",
+   "arr_cents": 17472000,
+   "risk_status": "healthy",
+   "risk_reason": "",
+   "contacts": [
+    {
+     "name": "Elsa Halvorsen-Reid",
+     "title": "Chief Executive Officer",
+     "email": "elsa@halvorsenrefrigeration.example"
+    },
+    {
+     "name": "Chidi Nwosu",
+     "title": "VP Field Service",
+     "email": "chidi.nwosu@halvorsenrefrigeration.example"
+    },
+    {
+     "name": "Tamsin Burke",
+     "title": "Systems Administrator",
+     "email": "tamsin.burke@halvorsenrefrigeration.example"
+    },
+    {
+     "name": "Luc Tremblay",
+     "title": "Directeur des operations, Halvorsen Froid",
+     "email": "luc.tremblay@halvorsenfroid.example"
+    }
+   ],
+   "opportunities": [
+    {
+     "name": "Halvorsen - 3yr agreement (260 seats)",
+     "stage": "closed_won",
+     "salesforce_stage": "Closed Won",
+     "amount_cents": 52416000,
+     "close_date": "2025-12-19"
+    },
+    {
+     "name": "Halvorsen - Canada entity (40 seats)",
+     "stage": "evaluation",
+     "salesforce_stage": "Value Proposition",
+     "amount_cents": 2688000,
+     "close_date": "2027-03-15"
+    }
+   ],
+   "contracts": [
+    {
+     "status": "Activated",
+     "start_date": "2026-01-01",
+     "end_date": "2028-12-31",
+     "term_months": 36
+    },
+    {
+     "status": "Draft",
+     "start_date": "2027-03-01",
+     "end_date": null,
+     "term_months": null
+    }
+   ],
+   "call_notes": [
+    {
+     "called_at": "2026-12-01T10:00:00-06:00",
+     "body": "Chidi: the Canadian sub (Halvorsen Froid, Winnipeg) wants on. 40 techs. Needs CAD invoicing and French UI for ~15 of them. French UI we have. CAD billing is a finance question. Price lock in the MSA says $56 thru 2028 for 'Customer and its affiliates', so no room to reprice the 40. AI: Marit ask Anneke abt CAD by 12/5."
+    },
+    {
+     "called_at": "2027-01-06T09:30:00-06:00",
+     "body": "Tamsin wants the sandbox refreshed before she tests the Canada config. Done same day."
+    }
+   ],
+   "slack_messages": [
+    {
+     "channel": "deal-desk",
+     "author": "Marit Solheim",
+     "sent_at": "2026-12-02T16:20:00Z",
+     "body": "Can we invoice Halvorsen's Canadian entity in CAD?"
+    },
+    {
+     "channel": "deal-desk",
+     "author": "Anneke Vos",
+     "sent_at": "2026-12-02T16:55:00Z",
+     "body": "Not today. USD only. Earliest for CAD is Q3 per finance. They can pay a USD invoice from a Canadian account, plenty of customers do."
+    },
+    {
+     "channel": "deal-desk",
+     "author": "Marit Solheim",
+     "sent_at": "2026-12-04T18:05:00Z",
+     "body": "Chidi is fine with USD. Elsa isn't, she wants a fixed CAD figure written into the amendment. Parking the draft until those two agree with each other."
+    }
+   ],
+   "transcript": null
+  }
+ ]
+}
