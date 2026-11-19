@@ -29,8 +29,8 @@ and signals are published first wherever a draft puts them.
 
 | Signal | When |
 | --- | --- |
-| `renewal is in N days and opportunity X is still open at stage S` | Demo CRM: the opportunity is not closed and the renewal is 30 days away or less. It reads `renewal is due today` on the day and `renewal was N days ago` after it. |
-| `contract end is in N days and opportunity X is still open at stage S` | Salesforce: the selected contract ends in 30 days or less, or `is today`, and the opportunity is open. Every open opportunity on the account counts. |
+| `renewal is in N days and opportunity X "NAME" is still open at stage S` | Demo CRM: the opportunity is not closed and the renewal is 30 days away or less. It reads `renewal is due today` on the day and `renewal was N days ago` after it. |
+| `contract end is in N days and opportunity X "NAME" is still open at stage S` | Salesforce: the selected contract ends in 30 days or less, or `is today`, and the opportunity is open. Every open opportunity on the account counts. |
 | `the latest contract end date, DATE on contract X with category C, was N days ago` | Salesforce returned no contract ending on or after the date, and at least one earlier end date. |
 | `CRM marks this account at risk` | The demo CRM's risk status is `at_risk`. Its reason follows when present. |
 | `contact NAME has no role recorded` | The contact has no title. |
@@ -135,7 +135,7 @@ gtm-connector evaluate --adapter ollama --model llama3.2:latest --json > ollama-
 
 With `--adapter ollama`, a local model assembles the renewal brief, and the citation checker must
 accept the draft before it is published. On the fixture book, `llama3.2` drafted 20 of 20 accepted
-briefs with 188 of 188 claims, from 9,067 tokens in and 5,829 out.
+briefs with 188 of 188 claims, from 9,280 tokens in and 6,061 out.
 
 - You need a running Ollama 0.30.0 or newer and a model that `ollama list` already shows.
 - The adapter calls only `http://127.0.0.1:11434`. It does not download a model, fall back to

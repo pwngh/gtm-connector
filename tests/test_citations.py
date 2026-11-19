@@ -16,7 +16,7 @@ def evidence(notes_status="available", note_body="Procurement has not approved t
          "name": "Fixture contact con-001", "title": "Operations contact",
          "email": "contact001@account001.example"},
         {"id": "opp-001", "record_ref": "crm/opportunities/opp-001", "account_id": "acc-001",
-         "stage": "closed_won", "amount_cents": 2050000, "close_date": "2027-01-10"},
+         "name": "Fixture renewal", "stage": "closed_won", "amount_cents": 2050000, "close_date": "2027-01-10"},
     ]
     if notes_status == "available" and note_body is not None:
         records.append({"id": "note-001", "record_ref": "calls/call_notes/note-001",
@@ -61,7 +61,7 @@ class CitationTests(unittest.TestCase):
         self.assertIn('- Renewal is in 17 days as of 2027-01-15. '
                       '[crm/accounts/acc-001] [run/brief-fixture-001]', lines)
         self.assertIn('- CRM risk status: "healthy". [crm/accounts/acc-001]', lines)
-        self.assertIn('- CRM opportunity opp-001: stage "closed_won"; amount USD 20,500.00; '
+        self.assertIn('- CRM opportunity opp-001 "Fixture renewal": stage "closed_won"; amount USD 20,500.00; '
                       'close date 2027-01-10. [crm/opportunities/opp-001]', lines)
         self.assertIn('- Untrusted call note note-001 at "2027-01-12T15:00:00Z" '
                       'says "Procurement has not approved the renewal.". [calls/call_notes/note-001]', lines)
