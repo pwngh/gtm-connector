@@ -72,25 +72,26 @@ read_slack_messages  ok   slack/messages/msg-003                       1.0 ms
 
 ## Measured results
 
-Twenty invented accounts, each briefed from CRM, calls, and Slack. A test asserts every count
-below except the model row and the timings, which the command beside them reproduces.
+Twenty invented accounts. The CRM and calls variant has 182 expected claims. The variant with Slack
+has 223 and is the one the input, output, corruption, and receipt rows use. A test asserts every
+count. The model row and the timings are observations from one run on an Apple M1 Max laptop.
 
 | What | Result | Check |
 | --- | --- | --- |
 | Input | 98 source records through 80 audited reads | [results test](tests/test_results.py) |
-| Output | 20 briefs, 223 lines, 2,482 words, 248 citations | same |
-| Lines that cite their source | 223 of 223 | same |
-| Expected claims found and cited correctly | 182 of 182, and 223 of 223 with Slack | `gtm-connector evaluate`, `--with-slack` |
+| Output | 20 briefs, 223 lines, 2,482 words, 248 references | same |
+| Lines with an evidence reference | 223 of 223 | same |
+| Expected claims found and cited correctly | 182 of 182, and 223 of 223 with Slack | `gtm-connector evaluate --json`, and with `--with-slack` |
 | Invented claims published | 0 | same |
-| Corrupted drafts rejected: a citation removed or changed, wording changed, a line repeated, a sentence invented | 932 of 932 | [results test](tests/test_results.py) |
-| Tool calls with a finished receipt | 80 of 80 | same |
-| Drafts by a local model, `llama3.2`, accepted by the checker | 20 of 20, with 182 of 182 claims and 0 rejected lines, from 8,758 tokens in and 5,518 out | `gtm-connector evaluate --adapter ollama --model llama3.2:latest` |
-| Time for 20 briefs | About 1 s without a model, 97 s with `llama3.2` | `time gtm-connector evaluate` |
-| Time per audited read, receipt included | 1.6 ms median, 2.2 ms at the 95th percentile | `elapsed_ms` in `gtm-connector audit --json` |
+| Bad lines rejected when added to a complete brief: citations removed, a citation changed, wording changed, a line repeated, an uncited sentence, a cited invention | 932 of 932 | [results test](tests/test_results.py) |
+| Reads with a finished receipt | 80 of 80 | same |
+| Drafts by a local model, `llama3.2`, accepted by the checker | 20 of 20, with 182 of 182 claims and 0 rejected lines, from 8,758 tokens in and 5,518 out | `gtm-connector evaluate --adapter ollama --model llama3.2:latest --json` |
+| Time for 20 briefs | About 1 s without a model, 97 s with `llama3.2` | `time gtm-connector evaluate`, and with the model options above |
+| Gateway time per read, as each receipt records it | 1.6 ms median, 2.2 ms at the 95th percentile | `elapsed_ms` in `gtm-connector audit --json` after a `brief` |
 | Demo, from start to a finished brief | 0.9 s | `time gtm-connector demo` |
 
-Timings are from an Apple M1 Max laptop. The fixed drafter and the model both assemble claims the
-connector derived, so these numbers measure the pipeline and the checker, not free-text summarizing.
+The fixed drafter and the model both assemble claims the connector derived, so these numbers measure
+the pipeline and the checker, not free-text summarizing.
 
 ## Try it
 
