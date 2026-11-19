@@ -581,7 +581,11 @@ class _Card:
                     abs(gap) <= _RUN_GAP_MS
                     or 0 < gap <= _BRIDGE_GAP_MS and _unfinished(last[1]) and _goes_on(raw)):
                 last[1:3] = [last[1] + "\n" + raw, end]
-                last[3].append((raw, cue, start, end))
+                # One piece per cue: a link or a mention written across two voices of a cue is still one.
+                if last[3][-1][1] == cue:
+                    last[3][-1] = (last[3][-1][0] + "\n" + raw, cue, last[3][-1][2], end)
+                else:
+                    last[3].append((raw, cue, start, end))
             else:
                 runs.append([label, raw, end, [(raw, cue, start, end)]])
         before = len(self.units)
@@ -596,7 +600,7 @@ class _Card:
             speaker = None if label is None else self.line(label) or None
             if speaker is not None and len(speaker) > MAX_LABEL:
                 speaker, role, basis, contact = None, "unknown", f"speaker label over {MAX_LABEL} characters", None
-            # Each part is neutralized on its own, so a sentence can be placed among the parts by counting.
+            # Each cue is neutralized on its own, so a sentence can be placed among the cues by counting.
             texts = [self.lines(piece[0]) for piece in pieces]
             safe = "\n".join(texts)
             found = sentences(safe, lines=table == "messages")
@@ -616,7 +620,7 @@ class _Card:
                                       else not _ENDED.search(sentence))
                 partial, follows = follows or cut, cut
                 reached, size = reached + size, sum(map(len, sentence.split()))
-                opens, closes = pieces[bisect_right(ends, reached)], pieces[bisect_left(ends, reached + size)]
+                lies = pieces[bisect_right(ends, reached):bisect_left(ends, reached + size) + 1]
                 self.units.append({"n": len(self.units) + 1, "kind": "sentence",
                                    "source": cast(Literal["calls", "slack"], _SOURCES[table][0]),
                                    "record_ref": row["record_ref"], "tool": _SOURCES[table][2], "at": at,
@@ -624,8 +628,11 @@ class _Card:
                                    "text": sentence,
                                    "partial": bool(partial),
                                    "shown": "cut" if partial else "long" if len(sentence) > MAX_SENTENCE else "more",
-                                   "span": None if opens[1] is None else {
-                                       "first": opens[1], "last": closes[1], "start_ms": opens[2], "end_ms": closes[3]},
+                                   # Joined cues may be out of time order: the times cover every cue it lies in.
+                                   "span": None if lies[0][1] is None else {
+                                       "first": lies[0][1], "last": lies[-1][1],
+                                       "start_ms": None if lies[0][2] is None else min(piece[2] for piece in lies),
+                                       "end_ms": None if lies[0][3] is None else max(piece[3] for piece in lies)},
                                    "raw_sha256": digest,
                                    "sanitizer_version": SANITIZER_VERSION})
             if found and cut:
@@ -953,7 +960,8 @@ def _said(card):
     if unknown:
         card.gap("speakers_unknown",
                  f"Speakers: {unknown} of {len(spoken)} "
-                 f"{'sentence has' if len(spoken) == 1 else 'sentences have'} no established speaker role.", unknown)
+                 f"{'sentence has' if len(spoken) == 1 else 'sentences have'} no established speaker role.", unknown,
+                 by_role={"customer": 0, "seller": 0, "unknown": unknown})
     return lines
 
 
@@ -1024,10 +1032,14 @@ def trace(evidence: dict, number: int, units: list[Unit] | None = None) -> dict:
         raise ValueError(f"This card has numbers 1 to {len(units)}.")
     unit = dict(units[number - 1])
     tool = unit.pop("tool")
-    receipt = next(row for row in evidence["receipts"] if row["tool"] == tool)
+    receipt = next((row for row in evidence["receipts"] if row["tool"] == tool), None)
+    record = next((row for row in evidence["records"] if row["record_ref"] == unit["record_ref"]), None)
+    # A unit answers only as its own number, for a record of this evidence that its read's receipt returned.
+    if unit["n"] != number or receipt is None or record is None or unit["record_ref"] not in receipt["rows"]:
+        raise ValueError("This number does not resolve to a record and a receipt of its own card.")
     unit["receipt"] = {key: receipt[key] for key in ("audit_id", "tool", "status", "http_status")}
     if unit["kind"] == "record":
-        unit["fields"] = fields(next(row for row in evidence["records"] if row["record_ref"] == unit["record_ref"]))
+        unit["fields"] = fields(record)
     else:  # Neutralized again, so a card sealed under older rules shows nothing today's would have replaced.
         unit.update({key: safe_text(unit[key])[0] for key in ("text", "speaker") if isinstance(unit[key], str)})
     return unit

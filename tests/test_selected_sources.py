@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+import hashlib
 import json
 import os
 import re
@@ -330,6 +331,40 @@ class SelectedSourceTests(SelectedFixture, unittest.TestCase):
             with closing(sqlite3.connect(runtime.directory / "audit.sqlite3")) as connection, connection:
                 connection.execute("UPDATE audit_log SET status = 'error' WHERE audit_id = ?", (outer["audit_id"],))
             self.refused(owner.call(token, "read_renewal_brief", {"brief_id": brief_id}), "brief_not_accepted")
+
+    def test_a_brief_saved_before_gaps_still_reads_and_a_long_call_still_fits(self):
+        selection = self.selection([{"account_id": "acc-007", "slack": False}])
+        with Runtime(self.state, selection=selection) as runtime, LocalClient(runtime.config) as owner:
+            token = owner.authorize(["crm:read", "calls:read"])
+            prepared = self.ok(owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"}))["brief"]
+            self.assertIn("slack_not_requested", [gap["code"] for gap in prepared["gaps"]])
+            # The earlier build saved no gaps. Its file, under the digest its receipt names, still reads.
+            path = self.state / "selected-briefs" / (prepared["brief_id"] + ".json")
+            older = json.loads(path.read_text())
+            del older["gaps"]
+            payload = json.dumps(older, ensure_ascii=False, sort_keys=True, indent=2).encode()
+            path.write_bytes(payload)
+            with closing(sqlite3.connect(runtime.directory / "audit.sqlite3")) as connection, connection:
+                connection.execute(
+                    "UPDATE audit_log SET rows = ? WHERE tool = 'prepare_renewal_brief'",
+                    (json.dumps([f"briefs/{prepared['brief_id']}/{hashlib.sha256(payload).hexdigest()}"]),))
+            released = self.ok(owner.call(token, "read_renewal_brief", {"brief_id": prepared["brief_id"]}))["brief"]
+            self.assertEqual((released["gaps"], released["units"]), (None, prepared["units"]))
+        # Four thousand short sentences under one long label, the most a 16 KiB excerpt holds: with the keys each
+        # unit now carries, the saved brief still has room under its 4 MiB limit.
+        self.state = self.root.resolve() / "imported-state"
+        with Runtime(self.state, calls_backend="imported", selection=selection) as runtime, \
+                LocalClient(runtime.config) as owner:
+            raw = ("WEBVTT\n\n00:01.000 --> 00:09.000\n<v " + "L" * 200 + ">" + "No. " * 4000 + "\n").encode()
+            parsed = parse_transcript(raw, format="vtt")
+            store_import(runtime.imports_path, parsed, select_excerpt(parsed),
+                         association=resolve_call_account(runtime, account_id="acc-007"), called_at=None,
+                         imported_at="2027-01-15T12:00:00Z")
+            token = owner.authorize(["crm:read", "calls:read"])
+            long = self.ok(owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"}))["brief"]
+            self.assertEqual(sum(unit["kind"] == "sentence" for unit in long["units"]), 4000)
+            saved = self.state / "selected-briefs" / (long["brief_id"] + ".json")
+            self.assertLess(saved.stat().st_size, 3 * 1024 * 1024)
 
     def test_a_replaced_transcript_denies_the_old_brief(self):
         def import_excerpt(runtime, line):

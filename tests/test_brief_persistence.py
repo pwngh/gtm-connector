@@ -102,6 +102,13 @@ class BriefPersistenceTests(unittest.TestCase):
         traced = trace_saved(self.state, brief["brief_id"], last["n"])
         self.assertEqual((traced["n"], traced["record_ref"], traced["text"]),
                          (last["n"], last["record_ref"], "[mention channel] " + last["text"]))
+        # Nothing is rebuilt, and a unit still answers only as itself: under its own number, for a record of
+        # this card that the receipt of its read returned. Only the folder's owner can write a file like these.
+        for wrong in ({**last, "n": 1}, {**last, "record_ref": "calls/call_notes/note-999"},
+                      {**last, "record_ref": brief["units"][0]["record_ref"]}, {**last, "tool": "log_activity"}):
+            self.reseal(brief, units=brief["units"][:-1] + [wrong])
+            with self.subTest(wrong=wrong), self.assertRaisesRegex(ValueError, "does not resolve to a record"):
+                trace_saved(self.state, brief["brief_id"], last["n"])
 
     def test_a_later_call_that_names_a_saved_card_does_not_stop_it_tracing(self):
         with Runtime(self.state) as runtime:
@@ -178,6 +185,11 @@ class BriefPersistenceTests(unittest.TestCase):
         (elsewhere / "briefs" / path.name).write_bytes(sealed)
         with self.assertRaisesRegex(ValueError, "seal receipt cannot be read from the audit log of this state folder"):
             trace_saved(elsewhere, healthy["brief_id"], 1)
+        # The same in a folder that has no audit log at all.
+        (self.state.parent / "empty" / "briefs").mkdir(parents=True)
+        (self.state.parent / "empty" / "briefs" / path.name).write_bytes(sealed)
+        with self.assertRaisesRegex(ValueError, "seal receipt cannot be read"):
+            trace_saved(self.state.parent / "empty", healthy["brief_id"], 1)
 
     def test_a_failed_save_leaves_no_card_and_keeps_the_receipts(self):
         with Runtime(self.state) as runtime:

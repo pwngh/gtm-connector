@@ -167,7 +167,7 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
         "sources": sources,
         "text": text, "units": units, "gaps": gaps, "evidence": evidence,
     }
-    payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2).encode()
+    payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")).encode()
     if len(payload) > MAX_ARTIFACT_BYTES:
         raise ToolError("brief_too_large")
     digest = hashlib.sha256(payload).hexdigest()
@@ -219,7 +219,8 @@ def _load(context: SelectedContext, brief_id) -> tuple[dict, str]:
         artifact = strict_json.loads(payload)
     except (ValueError, UnicodeError, RecursionError):
         raise ToolError("brief_invalid") from None
-    if (not isinstance(artifact, dict) or set(artifact) != _ARTIFACT_KEYS
+    # A brief prepared before gaps were saved has none. It still reads, under the digest it was saved with.
+    if (not isinstance(artifact, dict) or set(artifact) | {"gaps"} != _ARTIFACT_KEYS
             or artifact["kind"] != "selected_brief" or artifact["schema_version"] != 3
             or artifact["brief_id"] != brief_id or not isinstance(artifact["evidence"], dict)
             or artifact["evidence"].get("brief_id") != brief_id
@@ -227,7 +228,7 @@ def _load(context: SelectedContext, brief_id) -> tuple[dict, str]:
             or not isinstance(artifact["prepared_by"], dict)
             or not isinstance(artifact["prepared_by"].get("outer_audit_id"), str)
             or not isinstance(artifact["text"], str) or not isinstance(artifact["units"], list)
-            or not isinstance(artifact["gaps"], list)):
+            or not isinstance(artifact.get("gaps", []), list)):
         raise ToolError("brief_invalid")
     return artifact, hashlib.sha256(payload).hexdigest()
 
@@ -299,7 +300,7 @@ def _release(connector, token, brief_id, artifact, reference) -> dict:
         raise ToolError("invalid_token")
     return {"source": "brief", "records": [{"id": brief_id, "record_ref": reference}], "untrusted_data": True,
             "brief": {"brief_id": brief_id, "account_id": artifact["account_id"], "as_of": artifact["as_of"],
-                      "text": artifact["text"], "units": artifact["units"], "gaps": artifact["gaps"],
+                      "text": artifact["text"], "units": artifact["units"], "gaps": artifact.get("gaps"),
                       "sources": artifact["sources"],
                       "provider_rechecked": False,
                       "notice": NOTICE}}

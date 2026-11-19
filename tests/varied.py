@@ -325,10 +325,28 @@ def hold(case, brief):
         case.assertEqual((set(gap), gap["disposition"]),
                          ({"code", "disposition", "count", "by_role", "text"}, GAP_CODES[gap["code"]]))
         # A line that counts sentences says whose they are, and the roles add up to the count.
-        case.assertEqual(gap["by_role"] is not None, gap["code"].startswith("sentences_"))
+        case.assertEqual(gap["by_role"] is not None, gap["code"].startswith(("sentences_", "speakers_")))
         if gap["by_role"] is not None:
             case.assertEqual((list(gap["by_role"]), sum(gap["by_role"].values())),
                              (["customer", "seller", "unknown"], gap["count"]))
+    # A sentence of an imported transcript says which cues or lines it lies in, inside the cited range, with
+    # times that cover them. No other sentence has a place.
+    manifests = {record["record_ref"]: record["manifest"] for record in evidence["records"] if "manifest" in record}
+    for unit in spoken:
+        manifest, span = manifests.get(unit["record_ref"]), unit["span"]
+        case.assertEqual(span is None, manifest is None)
+        if manifest is not None:
+            cues = {cue["index"]: cue for cue in manifest["units"]}
+            case.assertLessEqual(manifest["cited_range"]["first"], span["first"])
+            case.assertLessEqual(span["first"], span["last"])
+            case.assertLessEqual(span["last"], manifest["cited_range"]["last"])
+            lies = [cues[index] for index in range(span["first"], span["last"] + 1)]
+            if manifest["format"] == "txt":
+                case.assertEqual((span["start_ms"], span["end_ms"]), (None, None))
+            else:
+                case.assertLessEqual(min(cue["start_ms"] for cue in lies), span["start_ms"])
+                case.assertLessEqual(span["start_ms"], span["end_ms"])
+                case.assertLessEqual(span["end_ms"], max(cue["end_ms"] for cue in lies))
     for why in ("cut", "more", "long"):
         counted = [gap["count"] for gap in brief["gaps"] if gap["code"] == "sentences_" + why]
         case.assertEqual(counted, [count] if (count := sum(unit["shown"] == why for unit in spoken)) else [])

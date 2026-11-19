@@ -334,6 +334,20 @@ class ImportedBriefingTests(unittest.TestCase):
                     validate_imported_record({**remade, "record_ref": "calls/call_notes/" + remade["id"]},
                                              account_id="acc-007", crm_binding=runtime.calls_binding)
 
+    def test_a_sentence_says_which_cues_it_lies_in_and_a_cue_is_neutralized_whole(self):
+        artifact, _ = self.cues(
+            # One sentence across two cues, and the export wrote the later cue first.
+            (2.0, 2.5, "<v Dana Crest>We will sign"), (0.8, 1.0, "<v Dana Crest>on Friday."),
+            # Two sentences in one cue, and a link written across two voice spans of the next.
+            (10, 12, "<v Dana Crest>Fine. Agreed."),
+            (20, 22, "<v Dana Crest>See [the notes](<v Dana Crest>https://notes.example/a)."))
+        spoken = [(unit["text"], unit["span"]) for unit in artifact["units"] if unit["kind"] == "sentence"]
+        self.assertEqual(spoken, [
+            ("We will sign on Friday.", {"first": 1, "last": 2, "start_ms": 800, "end_ms": 2500}),
+            ("Fine.", {"first": 3, "last": 3, "start_ms": 10000, "end_ms": 12000}),
+            ("Agreed.", {"first": 3, "last": 3, "start_ms": 10000, "end_ms": 12000}),
+            ("See the notes [link notes.example].", {"first": 4, "last": 4, "start_ms": 20000, "end_ms": 22000})])
+
     def test_cues_with_no_speaker_label_are_never_read_as_one_persons_sentence(self):
         artifact, spoken = self.cues((1, 3, "we will not sign"), (3.2, 5, "Great, so you will sign Friday."),
                                      (6, 8, "Fine."), (8.1, 10, "Thank you."))

@@ -46,11 +46,15 @@ A record unit has `n`, `kind`, `source`, `record_ref`, and `tool`. A sentence un
 whether the sentence is under `SAID`: `yes`, or why not: `cut` (not a whole sentence), `long` (over
 300 characters), `more` (whole, and past the 12 places). `span` is `null` except in an imported
 transcript, where it names the first and last cue or line the sentence lies in and their times.
+The times of a `span` cover every cue the sentence lies in, whatever order the file wrote them in.
 `gaps` holds one entry for each line under `NOT READ`, in order: a `code` from a fixed list, a
-`disposition` (`not_read`, `read_not_shown`, or `note`), the `count` the line states or `null`,
-`by_role` (that count by speaker role, for a line that counts sentences), and the line itself as
-`text`. A gap has no number. Read a unit's `kind` before any other key, and name a gap by its
-`code`, never by its text.
+`disposition` (`not_read`, `read_not_shown`, or `note`), a `count`, `by_role`, and the line itself
+as `text`. `count` is how many records or sentences the line says were read and are not shown, or
+that its note is about; it is `null` when the line gives no such number, as for a source that was
+not read. `by_role` is that count by speaker role, for a line that counts sentences. A gap has no
+number. Read a unit's `kind` before any other key, and name a gap by its `code`, never by its
+text. A card sealed by an earlier version keeps the keys it was sealed with: `trace` shows it
+without `contact`, `shown`, or `span`.
 
 ## Sentences
 

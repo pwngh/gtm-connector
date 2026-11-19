@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 from tempfile import NamedTemporaryFile
 import time
 import uuid
@@ -239,7 +240,7 @@ def _sealed(directory, brief_id):
     reference = f"briefs/{brief_id}/{hashlib.sha256(payload).hexdigest()}"
     try:
         [seal] = read_ids(log, [str(artifact.get("sealed_by"))])
-    except ValueError:
+    except (ValueError, sqlite3.Error):
         raise ValueError("This card's seal receipt cannot be read from the audit log of this state folder. "
                          "A card traces only in the folder that made it.") from None
     if (seal["tool"], seal["status"]) == (SEAL_TOOL, "pending"):
