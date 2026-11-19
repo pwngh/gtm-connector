@@ -134,7 +134,7 @@ class SalesforceTests(unittest.TestCase):
         self.assertEqual(self.requests[1].url.params["q"],
                          "SELECT Id, Name, Industry, AccountNumber FROM Account WHERE Id = '001000000000001AAA' ORDER BY Id LIMIT 101")
         self.assertEqual(self.requests[2].url.params["q"],
-                         "SELECT Id, AccountId, Name, Title, Email FROM Contact WHERE AccountId = '001000000000001AAA' ORDER BY Id LIMIT 101")
+                         "SELECT Id, AccountId, Name, Title, Email FROM Contact WHERE AccountId = '001000000000001AAA' ORDER BY Id LIMIT 1001")
 
     def test_missing_account_does_not_query_contacts(self):
         self.assertIsNone(self.adapter("organization_developer.json", "empty.json").get_account(ACCOUNT_ID))
@@ -146,6 +146,8 @@ class SalesforceTests(unittest.TestCase):
             "backend": "salesforce", "account_id": ACCOUNT_ID, "name": "Fixture Salesforce opportunity 001",
             "stage": "Fixture review pending", "close_date": "2027-02-01", "is_closed": False,
             "is_won": False, "amount_decimal": "12345.67", "currency": None})
+        # A list across accounts keeps the search bound. One account's list has the per-account bound.
+        self.assertTrue(self.requests[-1].url.params["q"].endswith(" FROM Opportunity ORDER BY Id LIMIT 101"))
         self.assertIsNone(rows[1]["amount_decimal"])
         self.assertIsNone(rows[1]["account_id"])
         self.assertEqual(rows[1]["stage"], "Closed Won")
@@ -153,7 +155,7 @@ class SalesforceTests(unittest.TestCase):
         self.assertNotIn("amount_cents", rows[0])
         exact = self.adapter("organization_developer.json", "opportunity_decimal.json").list_opportunities(ACCOUNT_ID)
         self.assertEqual(exact[0]["amount_decimal"], "0.10")
-        self.assertIn("WHERE AccountId = '001000000000001AAA' ORDER BY Id LIMIT 101", self.requests[-1].url.params["q"])
+        self.assertIn("WHERE AccountId = '001000000000001AAA' ORDER BY Id LIMIT 1001", self.requests[-1].url.params["q"])
 
     def test_only_successful_edition_checks_are_cached_for_this_adapter(self):
         adapter = self.adapter("organization_enterprise.json", "organization_developer.json", "accounts.json",
@@ -376,7 +378,7 @@ class SalesforceTests(unittest.TestCase):
             self.assertIsNone(rows[1][field])
         self.assertEqual(self.requests[-1].url.params["q"],
             "SELECT Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate FROM Contract "
-            "WHERE AccountId = '001000000000001AAA' ORDER BY Id LIMIT 101")
+            "WHERE AccountId = '001000000000001AAA' ORDER BY Id LIMIT 1001")
 
     def test_contract_malformed_fields_and_cross_account_rows_fail(self):
         for field, value in (("Id", "short"), ("AccountId", "001000000000002AAA"),

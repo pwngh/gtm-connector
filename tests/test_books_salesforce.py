@@ -10,6 +10,7 @@ from contextlib import closing
 from datetime import date, datetime, timezone
 from decimal import Decimal
 import hashlib
+from itertools import islice
 import json
 from pathlib import Path
 import re
@@ -39,7 +40,7 @@ FIELDS = {
     "Contract": ["Id", "AccountId", "Status", "StatusCode", "StartDate", "ContractTerm", "EndDate"],
 }
 SOQL = re.compile(r"SELECT ([A-Za-z, ]+) FROM (Account|Contact|Opportunity|Contract) "
-                  r"WHERE (Id|AccountId) = '([A-Za-z0-9]{18})' ORDER BY Id LIMIT 101")
+                  r"WHERE (Id|AccountId) = '([A-Za-z0-9]{18})' ORDER BY Id LIMIT (101|1001)")
 # docs/salesforce.md, Field mapping: object -> (evidence table, id prefix, evidence field -> upstream field).
 MAPPING = {
     "Account": ("accounts", "acc", {"name": "Name", "industry": "Industry", "account_number": "AccountNumber"}),
@@ -132,11 +133,11 @@ class Org:
         else:
             query = SOQL.fullmatch(request.url.params["q"])
             if (query is None or query[1].split(", ") != FIELDS[query[2]]
-                    or (query[3] == "Id") != (query[2] == "Account")):
+                    or (query[3] == "Id") != (query[2] == "Account") or (query[5] == "101") != (query[2] == "Account")):
                 return self.refuse(request)
             name, native, start = query[2], query[4], 0
-            # ORDER BY Id LIMIT 101, and totalSize counts what the limit let through.
-            rows = sorted(self.rows[name].get(native, []), key=lambda row: row["Id"])[:101]
+            # ORDER BY Id LIMIT 1001 for an account's records, and totalSize counts what the limit let through.
+            rows = sorted(self.rows[name].get(native, []), key=lambda row: row["Id"])[:int(query[5])]
         self.gets[name, native] += 1
         end = start + self.page_size.get((name, native), 2000)
         records = [{"attributes": {"type": name, "url": f"/services/data/v68.0/sobjects/{name}/{row['Id']}"}, **row}
@@ -181,7 +182,7 @@ def selected(contracts):
 
 def outcome(rows):
     """The documented path for one account: a brief, or the limit code."""
-    if any(len(rows[name]) > 100 for name in ("Contact", "Opportunity", "Contract")):
+    if any(len(rows[name]) > 1000 for name in ("Contact", "Opportunity", "Contract")):
         return "salesforce_result_limit"
     return "brief"
 
@@ -255,6 +256,10 @@ def expected(rows, notes, messages, brief):
             ending.append(f"- Signal: contract end {f'is in {count(days)}' if days else 'is today'} and opportunity "
                           f"{identifier} {quote(row['Name'])} is still open at stage {quote(row['StageName'])}. "
                           f"{contract_ref} [crm/opportunities/{identifier}] {run}")
+    if len(ending) > 5:
+        # docs/briefs.md, Signals: more than five open opportunities are counted in one line that cites their read.
+        ending = [f"- Signal: contract end {f'is in {count(days)}' if days else 'is today'} and {len(ending)} "
+                  f"opportunities are still open. {contract_ref} {receipt['list_opportunities']} {run}"]
     if not rows["Opportunity"]:
         lines.append(f"- No opportunities were returned for {account_id}. {receipt['list_opportunities']}")
     for row in sorted(rows["Contact"], key=lambda row: row["Id"]):
@@ -263,6 +268,8 @@ def expected(rows, notes, messages, brief):
         if row["Title"] is None:
             roles.append(f"- Signal: contact {quote(row['Name'])} has no role recorded. "
                          f"[crm/contacts/con-sf-{row['Id']}]")
+    if len(roles) > 5:
+        roles = [f"- Signal: {len(roles)} contacts have no role recorded. {ref} {receipt['get_account']}"]
     for identifier, _, called_at, body in notes:
         lines.append(f"- Untrusted call note {identifier} at {quote(called_at)} says {quote(body)}. "
                      f"[calls/call_notes/{identifier}]")
@@ -312,7 +319,7 @@ class SalesforcePath(unittest.TestCase):
     def saved(self):
         return sorted(path.name for path in (self.state / "briefs").glob("*"))
 
-    def brief(self, rows, notes=(), messages=()):
+    def brief(self, rows, notes=(), messages=(), corrupted=None):
         """Create the brief and hold it to everything the served rows imply. Return it and the uncited records."""
         account_id = "acc-sf-" + rows["Account"][0]["Id"]
         brief = create_brief(self.runtime, account_id, as_of=AS_OF.isoformat(), include_slack=True)
@@ -339,7 +346,7 @@ class SalesforcePath(unittest.TestCase):
         self.assertEqual(sorted(lines[len(signals):]), sorted(others))
         # The checker returns the brief unchanged and refuses each way of spoiling it.
         self.assertEqual(check_brief(brief["text"], evidence), brief["text"])
-        for kind, candidate in corruptions(brief["text"]):
+        for kind, candidate in islice(corruptions(brief["text"]), corrupted):
             with self.assertRaises(BriefRejected, msg=kind):
                 check_brief(candidate, evidence)
         return brief, sorted(set(read) - cited)
@@ -358,7 +365,8 @@ class SalesforcePath(unittest.TestCase):
 
     def held(self, rows, notes=(), messages=(), *, to):
         if to == "brief":
-            return self.brief(rows, notes, messages)
+            # Forty corrupted drafts per brief keep the largest ones quick.
+            return self.brief(rows, notes, messages, corrupted=40 if max(map(len, rows.values())) > 100 else None)
         self.refused(rows, SalesforceReadError, to)
 
     def tearDown(self):
@@ -407,9 +415,49 @@ class BuiltTests(SalesforcePath):
 
     def test_row_counts_up_to_the_limit_give_a_brief_and_one_more_gives_the_limit_code(self):
         for record in ("contacts", "opportunities", "contracts"):
-            for size in (0, 1, 99, 100, 101):
-                to = "salesforce_result_limit" if size == 101 else "brief"
+            for size in (0, 1, 100, 101, 1000, 1001):
+                to = "salesforce_result_limit" if size == 1001 else "brief"
                 self.sized((record, size), shape(**{"contracts": 1, record: size}), to=to)
+        # 1,000 of each at once: get_account reads about 0.6 MB of contacts and contracts.
+        self.sized("full", shape(contacts=1000, opportunities=1000, contracts=1000), to="brief")
+
+    def test_a_thousand_rows_over_one_mebibyte_give_the_limit_code(self):
+        account = shape(contacts=1000)
+        for contact in account["contacts"]:
+            contact["title"] = "t" * 900
+        self.sized("wide", account, to="salesforce_result_limit")
+
+    def test_a_thousand_rows_in_five_and_ten_pages_give_a_brief(self):
+        for record, name in (("contacts", "Contact"), ("opportunities", "Opportunity"), ("contracts", "Contract")):
+            for page in (200, 100):
+                native = self.sized((record, "per page", page), shape(**{"contracts": 1, record: 1000}), to="brief",
+                                    **{name: page})
+                self.assertEqual(self.org.gets[name, native], 1000 // page)
+
+    def test_six_open_opportunities_and_six_contacts_with_no_role_give_one_signal_each_written_out_by_hand(self):
+        for size, grouped in ((5, False), (6, True)):
+            account = shape(contacts=size + 1, opportunities=size + 1)
+            account["contracts"][0]["end_date"] = "2027-01-24"
+            for contact in account["contacts"][:size]:
+                contact["title"] = ""
+            for deal in account["opportunities"][:size]:
+                deal.update(stage="proposal", salesforce_stage="Proposal")
+            rows = org_rows(("grouped", size), account)
+            self.serve(rows)
+            brief = self.brief(rows)[0]
+            receipt = {row["tool"]: f"[audit/{row['audit_id']}]" for row in brief["evidence"]["receipts"]}
+            signals = [line for line in brief["text"].splitlines() if line.startswith("- Signal: ")]
+            if grouped:
+                native = rows["Account"][0]["Id"]
+                self.assertEqual(signals, [
+                    f"- Signal: contract end is in 9 days and 6 opportunities are still open. [crm/contracts/ctr-sf-"
+                    f"{rows['Contract'][0]['Id']}] {receipt['list_opportunities']} [run/{brief['brief_id']}]",
+                    f"- Signal: 6 contacts have no role recorded. [crm/accounts/acc-sf-{native}] "
+                    f"{receipt['get_account']}"])
+            else:
+                self.assertEqual([" and opportunity opp-sf-" in line for line in signals], [True] * 5 + [False] * 5)
+                self.assertEqual([line.startswith('- Signal: contact "Person ') for line in signals],
+                                 [False] * 5 + [True] * 5)
 
     def test_text_of_one_character_and_of_200_000_characters(self):
         fields = [("Account", "Name"), ("Account", "Industry"), ("Contact", "Name"), ("Contact", "Title"),

@@ -264,7 +264,7 @@ class BookSlackTests(unittest.TestCase):
             f"[crm/accounts/{account_id}]"]
         self.assertEqual(lines[-len(tail):], tail)
         # Before them come the CRM and call note lines of the rows, signals first, and nothing of another kind.
-        stated, signals = varied.expected({**rows, "slack": []}, brief["brief_id"])
+        stated, signals = varied.expected({**rows, "slack": []}, brief)
         self.assertEqual(lines[:len(signals)], signals)
         self.assertEqual(sum(line.startswith("- Signal: ") for line in lines), len(signals))
         rest = lines[len(signals):-len(tail)]

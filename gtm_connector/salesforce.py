@@ -39,6 +39,8 @@ _ACCOUNT_ID = re.compile(r"acc-sf-([A-Za-z0-9]{18})\Z")
 _HOST = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+my\.salesforce\.com\Z")
 _LOCATOR = re.compile(re.escape(_QUERY_PATH) + r"/[A-Za-z0-9_-]{1,128}\Z")
 _MAX_ROWS = 100
+# One account's contacts, opportunities, or contracts. Enterprise accounts hold hundreds of contacts.
+_ACCOUNT_ROWS = 1000
 _MAX_PAGES = 10
 _MAX_REQUESTS = 12
 _MAX_BYTES = 1024 * 1024
@@ -520,24 +522,26 @@ class SalesforceReadOnlyAdapter:
             if rows[0]["Id"] != native_id:
                 raise SalesforceReadError("salesforce_invalid_response")
             account = self._account(rows[0])
-            contacts = self._query(
-                client, f"SELECT {_CONTACT_FIELDS} FROM Contact WHERE AccountId = '{native_id}' ORDER BY Id LIMIT 101",
-                budget)
+            owned = f"WHERE AccountId = '{native_id}' ORDER BY Id LIMIT {_ACCOUNT_ROWS + 1}"
+            contacts = self._query(client, f"SELECT {_CONTACT_FIELDS} FROM Contact {owned}", budget,
+                                   max_rows=_ACCOUNT_ROWS)
             account["contacts"] = [self._contact(row, native_id) for row in contacts]
-            contract_query = (f"SELECT {_CONTRACT_FIELDS} FROM Contract "
-                              f"WHERE AccountId = '{native_id}' ORDER BY Id LIMIT 101")
-            contracts = self._query(client, contract_query, budget)
+            contracts = self._query(client, f"SELECT {_CONTRACT_FIELDS} FROM Contract {owned}", budget,
+                                    max_rows=_ACCOUNT_ROWS)
             account["contracts"] = [self._contract(row, native_id) for row in contracts]
             return account
 
     def list_opportunities(self, account_id=None, *, account_ids=None):
         native_id = _account_id(account_id) if account_id is not None else None
-        where = f" WHERE AccountId = '{native_id}'" if native_id is not None else ""
-        if native_id is None and account_ids is not None:
+        where, max_rows = "", _MAX_ROWS
+        if native_id is not None:
+            where, max_rows = f" WHERE AccountId = '{native_id}'", _ACCOUNT_ROWS
+        elif account_ids is not None:
             where = " WHERE " + _selected_ids(account_ids, "AccountId")
         with self._operation() as (client, budget):
             rows = self._query(
-                client, f"SELECT {_OPPORTUNITY_FIELDS} FROM Opportunity{where} ORDER BY Id LIMIT 101", budget)
+                client, f"SELECT {_OPPORTUNITY_FIELDS} FROM Opportunity{where} ORDER BY Id LIMIT {max_rows + 1}",
+                budget, max_rows=max_rows)
             opportunities = [self._opportunity(row, native_id) for row in rows]
             if (native_id is None and account_ids is not None
                     and any(row["account_id"] not in account_ids for row in opportunities)):

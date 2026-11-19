@@ -235,7 +235,7 @@ class BookCallsTests(unittest.TestCase):
                    f"complete call summary. It says {json.dumps(body)}. {note}")
         self.assertEqual([line for line in lines if note in line and not line.startswith("- Signal: ")], [excerpt])
         # The CRM lines and signals are those of the rows. An old call adds the last signal, a missing time none.
-        stated, signals = varied.expected({**rows, "calls": [], "slack": []}, brief["brief_id"])
+        stated, signals = varied.expected({**rows, "calls": [], "slack": []}, brief)
         if called_at is not None:
             age = (varied.AS_OF - datetime.fromisoformat(called_at.replace("Z", "+00:00"))
                    .astimezone(timezone.utc).date()).days

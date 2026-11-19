@@ -28,6 +28,9 @@ _PROCUREMENT_NOTE = "Procurement has not approved this renewal. The budget remai
 # fields and dates only, never from reading source text, and a draft may not omit it.
 _SOON_DAYS = 30
 _STALE_DAYS = 60
+# More records than this raising one signal are counted in one line, so a large account's brief opens with
+# a few signals and not hundreds.
+_SIGNAL_EACH = 5
 _SECURITY_MESSAGE = "Security review is delayed. Procurement approval is still pending."
 
 
@@ -132,7 +135,26 @@ def _amount(opportunity):
     return value + " (currency unknown)"
 
 
-def add_salesforce_facts(groups, as_of, brief_id, add, signal):
+def _open_signals(signal, when, opportunities, renewal_ref, receipt_ref, run):
+    """Each open opportunity near the renewal, or their count citing the receipt of the read that returned them."""
+    if len(opportunities) > _SIGNAL_EACH:
+        signal(f"{when} and {len(opportunities)} opportunities are still open.", renewal_ref, receipt_ref, run)
+        return
+    for opportunity in opportunities:
+        signal(f"{when} and opportunity {opportunity['id']} {_text(opportunity['name'])} is still open "
+               f"at stage {_text(opportunity['stage'])}.", renewal_ref, opportunity["record_ref"], run)
+
+
+def _role_signals(signal, contacts, account_ref, receipt_ref):
+    """Each contact with no role, or their count citing the receipt of the read that returned them."""
+    if len(contacts) > _SIGNAL_EACH:
+        signal(f"{len(contacts)} contacts have no role recorded.", account_ref, receipt_ref)
+        return
+    for contact in contacts:
+        signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
+
+
+def add_salesforce_facts(groups, as_of, brief_id, audit, add, signal):
     """Plan from an actual EndDate when one is still ahead. Draft and InApproval remain planning candidates."""
     ahead: list[tuple] = []
     ended: list[tuple] = []
@@ -177,24 +199,24 @@ def add_salesforce_facts(groups, as_of, brief_id, add, signal):
             ends = "no end date" if other["end_date"] is None else f"end date {other['end_date']}"
             add(f"Other contract {other['id']}: status {_text(other['status'])}; "
                 f"category {_text(other['status_code'])}; {ends}.", other["record_ref"])
-    for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
+    contacts = sorted(groups["contacts"], key=lambda row: row["id"])
+    for contact in contacts:
         add(f"Contact {_text(contact['name'])}: role {_nullable_text(contact['title'])}; "
             f"email {_nullable_text(contact['email'])}.", contact["record_ref"])
+    still_open = []
     for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
         if type(opportunity["is_closed"]) is not bool or type(opportunity["is_won"]) is not bool:
             raise BriefRejected("Salesforce opportunity outcomes must be booleans.")
         if days is not None and days <= _SOON_DAYS and not opportunity["is_closed"]:
-            when = f"is in {_days(days)}" if days else "is today"
-            signal(f"contract end {when} and opportunity {opportunity['id']} {_text(opportunity['name'])} "
-                   f"is still open at stage {_text(opportunity['stage'])}.",
-                   renewal_ref, opportunity["record_ref"], run)
+            still_open.append(opportunity)
         add(f"CRM opportunity {opportunity['id']} {_text(opportunity['name'])}: stage {_text(opportunity['stage'])}; "
             f"amount {_amount(opportunity)}; close date {_day(opportunity['close_date'])}; "
             f"closed {str(opportunity['is_closed']).lower()}; won {str(opportunity['is_won']).lower()}.",
             opportunity["record_ref"])
-    for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
-        if contact["title"] is None:
-            signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
+    _open_signals(signal, f"contract end is in {_days(days)}" if days else "contract end is today", still_open,
+                  renewal_ref, audit["list_opportunities"], run)
+    _role_signals(signal, [contact for contact in contacts if contact["title"] is None], account_ref,
+                  audit["get_account"])
     return required, renewal_ref
 
 
@@ -340,9 +362,10 @@ def _catalog(evidence):
 
     account = groups["accounts"][0]
     ref = account["record_ref"]
+    audit = {tool: f"audit/{receipt['audit_id']}" for tool, receipt in receipts.items()}
     required = set()
     if salesforce:
-        required, renewal_ref = add_salesforce_facts(groups, as_of, brief_id, add, signal)
+        required, renewal_ref = add_salesforce_facts(groups, as_of, brief_id, audit, add, signal)
     else:
         renewal_ref = ref
         add(f"Account: {_text(account['name'])}.", ref)
@@ -362,26 +385,28 @@ def _catalog(evidence):
             add(f"CRM risk reason: {reason}.", ref)
         when = (f"renewal is in {_days(days)}" if days > 0 else
                 f"renewal was {_days(-days)} ago" if days < 0 else "renewal is due today")
+        still_open = []
         for opportunity in sorted(groups["opportunities"], key=lambda row: row["id"]):
             add(f"CRM opportunity {opportunity['id']} {_text(opportunity['name'])}: "
                 f"stage {_text(opportunity['stage'])}; amount {_money(opportunity['amount_cents'])}; "
                 f"close date {_day(opportunity['close_date'])}.", opportunity["record_ref"])
             if days <= _SOON_DAYS and opportunity["stage"] not in ("closed_won", "closed_lost"):
-                signal(f"{when} and opportunity {opportunity['id']} {_text(opportunity['name'])} is still open "
-                       f"at stage {_text(opportunity['stage'])}.", ref, opportunity["record_ref"], f"run/{brief_id}")
+                still_open.append(opportunity)
+        _open_signals(signal, when, still_open, ref, audit["list_opportunities"], f"run/{brief_id}")
         if account["risk_status"] == "at_risk":
             signal("CRM marks this account at risk" + (f": {reason}." if account["risk_reason"] else "."), ref)
+        no_role = []
         for contact in sorted(groups["contacts"], key=lambda row: row["id"]):
             role = "not provided" if contact["title"] == "" else _text(contact["title"])
             add(f"Contact {_text(contact['name'])}: role {role}; "
                 f"email {_text(contact['email'])}.", contact["record_ref"])
             if contact["title"] == "":
-                signal(f"contact {_text(contact['name'])} has no role recorded.", contact["record_ref"])
+                no_role.append(contact)
+        _role_signals(signal, no_role, ref, audit["get_account"])
     if not groups["opportunities"]:
-        required.add(add(f"No opportunities were returned for {account_id}.",
-                         f"audit/{receipts['list_opportunities']['audit_id']}"))
+        required.add(add(f"No opportunities were returned for {account_id}.", audit["list_opportunities"]))
     procurement_conflicts = []
-    notes_receipt = f"audit/{receipts['read_call_notes']['audit_id']}"
+    notes_receipt = audit["read_call_notes"]
     if evidence["notes_status"] == "denied":
         required.add(add("Call notes were unavailable because the token lacks calls:read.", notes_receipt))
     elif not groups["call_notes"]:
@@ -425,7 +450,7 @@ def _catalog(evidence):
                         f'"closed_won", while call note {note["id"]} reports unapproved procurement.',
                         opportunity["record_ref"], note["record_ref"]))
     if include_slack:
-        slack_receipt = f"audit/{receipts['read_slack_messages']['audit_id']}"
+        slack_receipt = audit["read_slack_messages"]
         conflict_refs: set[str] = set()
         if evidence["slack_status"] == "denied":
             required.add(add("Slack messages were unavailable because the token lacks slack:read.",
