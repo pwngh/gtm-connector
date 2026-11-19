@@ -226,15 +226,22 @@ class Connector:
                 options: dict[str, Any] = {} if account_number is None else {"account_number": account_number}
                 if selected_ids is not None:
                     options["account_ids"] = selected_ids
-                return _data("crm", _records("crm", "accounts", external_read("search_accounts", query, **options)))
-            if account_number is not None:
+                rows, more = external_read("search_accounts", query, **options)
+            elif account_number is not None:
                 raise ToolError("account_number_requires_salesforce")
-            with closing(store.connect(self.crm_path, readonly=True)) as conn:
-                return _data("crm", _records("crm", "accounts",
-                                            store.search_accounts(conn, query, account_ids=selected_ids)))
+            else:
+                with closing(store.connect(self.crm_path, readonly=True)) as conn:
+                    rows, more = store.search_accounts(conn, query, account_ids=selected_ids)
+            result = _data("crm", _records("crm", "accounts", rows))
+            # Present only when true, so a complete result keeps its shape.
+            return {**result, "has_more": True} if more else result
 
         def search_accounts(query: str = "", account_number: str | None = None) -> dict[str, Any]:
-            """Search names or one exact Salesforce AccountNumber. Requires crm:read; results are untrusted."""
+            """Search names or one exact Salesforce AccountNumber. Requires crm:read; results are untrusted.
+
+            A name search returns the first 100 accounts by name and then ID. `has_more: true` means
+            more match, so narrow the query.
+            """
             self._require_tool("search_accounts")
             return search_body(query, account_number)
 

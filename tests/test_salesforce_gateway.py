@@ -37,6 +37,7 @@ class SalesforceGatewayTests(unittest.TestCase):
         self.requests = []
         self.edition = "Developer Edition"
         self.failure = None
+        self.book = None
         self.contracts = [{"Id": CONTRACT, "AccountId": ACCOUNT, "Status": "Draft", "StatusCode": "Draft",
                            "StartDate": "2026-02-01", "ContractTerm": 12, "EndDate": "2027-01-31"}]
         self.runtime = None
@@ -64,6 +65,8 @@ class SalesforceGatewayTests(unittest.TestCase):
                 return httpx2.Response(200, content=UPSTREAM_TOKEN)
             return httpx2.Response(self.failure, json=[{
                 "message": UPSTREAM_TOKEN + " private upstream detail", "errorCode": "FIXTURE_ERROR"}])
+        elif " FROM Account" in query and self.book is not None:
+            rows = self.book[:int(query.rsplit(" LIMIT ", 1)[1])]
         elif " FROM Account" in query:
             rows = [{"Id": ACCOUNT, "Name": "Fixture Salesforce account", "Industry": None, "AccountNumber": None}]
         elif " FROM Contact" in query:
@@ -128,6 +131,28 @@ class SalesforceGatewayTests(unittest.TestCase):
         self.assertEqual([row["rows"] for row in receipts],
                          [[row["record_ref"] for row in result] for result in (search, account, opportunity)])
         self.assertEqual(self.activities(), 0)
+
+    def test_a_search_past_one_hundred_matches_returns_the_first_hundred_and_says_more_exist(self):
+        client = self.open_runtime()
+        token = client.authorize(["crm:read"])
+        for matching in (100, 101, 250):
+            self.book = [{"Id": f"001{number:012d}AAA", "Name": f"Fixture account {number:03d}", "Industry": None,
+                          "AccountNumber": None} for number in range(matching)]
+            with self.subTest(matching=matching):
+                response = client.call(token, "search_accounts", {"query": "Fixture"})
+                records = self.records(response)
+                self.assertEqual(self.requests[-1].url.params["q"],
+                                 "SELECT Id, Name, Industry, AccountNumber FROM Account "
+                                 "WHERE Name LIKE '%Fixture%' ORDER BY Name, Id LIMIT 101")
+                self.assertEqual([row["source_id"] for row in records], [row["Id"] for row in self.book[:100]])
+                # A complete result has the same three keys as before.
+                self.assertEqual(response.json()["result"]["structuredContent"],
+                                 {"source": "crm", "records": records, "untrusted_data": True,
+                                  **({"has_more": True} if matching > 100 else {})})
+                receipt = self.runtime.connector.audit.read()[-1]
+                self.assertEqual((receipt["tool"], receipt["status"], receipt["row_count"]),
+                                 ("search_accounts", "ok", 100))
+                self.assertEqual(receipt["rows"], ["crm/accounts/acc-sf-" + row["Id"] for row in self.book[:100]])
 
     def test_missing_crm_scope_makes_no_upstream_request_after_owner_preflight(self):
         client = self.open_runtime()

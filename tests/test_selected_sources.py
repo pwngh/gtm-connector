@@ -127,6 +127,22 @@ class SelectedSourceTests(SelectedFixture, unittest.TestCase):
                 self.assertNotIn("Mira Vale", text)
             self.assertEqual(runtime.connector.audit.read()[-1]["tool"], "log_activity")
 
+    def test_a_full_selection_inside_a_larger_book_never_says_more_accounts_exist(self):
+        selected = [f"acc-{number:03}" for number in range(1, 101)]
+        selection = self.selection([{"account_id": account, "slack": False} for account in selected])
+        with Runtime(self.state, selection=selection) as runtime, LocalClient(runtime.config) as owner:
+            with closing(sqlite3.connect(self.state / "crm.sqlite3")) as connection, connection:
+                connection.executemany(
+                    "INSERT INTO accounts VALUES (?, ?, 'Software', '2027-02-01', 0, 'healthy', '')",
+                    [(f"acc-{number:03}", f"Invented account {number:03}") for number in range(31, 251)])
+            token = owner.authorize(["crm:read"])
+            for query in ("", "Invented account"):
+                found = self.ok(owner.call(token, "search_accounts", {"query": query}))
+                self.assertEqual(sorted(row["id"] for row in found["records"]),
+                                 selected if query == "" else selected[30:])
+                # 250 accounts match "", and 220 match the name. Only a selected account may count as a match.
+                self.assertEqual(set(found), {"source", "records", "untrusted_data"})
+
     def test_a_saved_brief_needs_current_scopes_selection_and_bindings(self):
         both = self.selection([{"account_id": "acc-007", "slack": True}])
         with Runtime(self.state, selection=both) as runtime, LocalClient(runtime.config) as owner:
@@ -529,6 +545,7 @@ class SelectedSalesforceTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         self.queries = []
+        self.book = None
         self.reader = SalesforceReadOnlyAdapter(SF_INSTANCE, SF_TOKEN, transport=httpx2.MockTransport(self.respond))
 
     def respond(self, request):
@@ -536,6 +553,8 @@ class SelectedSalesforceTests(unittest.TestCase):
         self.queries.append(query)
         if query == SF_ORGANIZATION:
             rows = [{"Id": "00D000000000001AAA", "OrganizationType": "Developer Edition", "IsSandbox": False}]
+        elif " FROM Account" in query and self.book is not None:
+            rows = self.book
         elif " FROM Account" in query:
             rows = [{"Id": SF_ACCOUNT, "Name": "Selected invented account", "Industry": None,
                      "AccountNumber": None}]
@@ -565,7 +584,8 @@ class SelectedSalesforceTests(unittest.TestCase):
             owner.call(token, "search_accounts", {"query": "invented"})
             owner.call(token, "list_opportunities", {})
             search, listing = self.queries[-2:]
-            self.assertIn(f"WHERE Name LIKE '%invented%' AND Id IN ('{SF_ACCOUNT}')", search)
+            self.assertTrue(search.endswith(
+                f" WHERE Name LIKE '%invented%' AND Id IN ('{SF_ACCOUNT}') ORDER BY Name, Id LIMIT 101"), search)
             self.assertIn(f"WHERE AccountId IN ('{SF_ACCOUNT}')", listing)
             before = len(self.queries)
             response = owner.call(token, "get_account", {"account_id": "acc-sf-" + SF_OTHER})
@@ -581,6 +601,34 @@ class SelectedSalesforceTests(unittest.TestCase):
             self.assertFalse(reread.get("isError"), reread)
             self.assertEqual(reread["structuredContent"]["brief"]["text"], brief["text"])
             self.assertEqual(len(self.queries), before)
+
+    def test_a_row_past_a_full_selection_refuses_the_search_instead_of_saying_more_exist(self):
+        selected = [f"001{number:012d}AAA" for number in range(100)]
+        path = self.root / "selection.json"
+        path.write_text(json.dumps({"schema_version": 1, "accounts": [
+            {"account_id": "acc-sf-" + native, "slack": False} for native in selected]}))
+        os.chmod(path, 0o600)
+        selection = load_selection(path, crm_backend="salesforce")
+        book = [{"Id": native, "Name": "Selected invented account", "Industry": None, "AccountNumber": None}
+                for native in selected]
+        outside = {**book[0], "Id": "001999999999999AAA", "Name": "Unselected invented account"}
+        with Runtime(self.root / "state", crm_reader=self.reader, selection=selection) as runtime, \
+                LocalClient(runtime.config) as owner:
+            token = owner.authorize(["crm:read"])
+            self.book = book
+            found = _result(owner.call(token, "search_accounts", {"query": ""}))["structuredContent"]
+            self.assertEqual([row["source_id"] for row in found["records"]], selected)
+            self.assertNotIn("has_more", found)
+            self.assertIn(" WHERE Id IN ('" + "', '".join(selected) + "') ORDER BY Name, Id LIMIT 101",
+                          self.queries[-1])
+            # When the org answers with a 101st, unselected account, the caller gets no result and no flag.
+            self.book = book + [outside]
+            refused = owner.call(token, "search_accounts", {"query": ""})
+            self.assertTrue(_result(refused)["isError"])
+            self.assertIn("salesforce_invalid_response", refused.text)
+            self.assertNotIn("has_more", refused.text)
+            self.assertNotIn("Unselected", refused.text)
+            self.assertEqual(runtime.connector.audit.read()[-1]["rows"], [])
 
 
 if __name__ == "__main__":

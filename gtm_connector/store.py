@@ -7,6 +7,7 @@ from .seed import seed as seed
 
 
 TABLES = ("accounts", "contacts", "opportunities", "activities")
+_SEARCH_ROWS = 100
 
 
 def connect(path: str | Path, *, readonly: bool = False) -> sqlite3.Connection:
@@ -95,18 +96,21 @@ def _selected(account_ids):
 
 def search_accounts(
     connection: sqlite3.Connection, query: str = "", *, account_ids=None
-) -> list[dict]:
+) -> tuple[list[dict], bool]:
     """Find account names containing the literal query, ignoring ASCII case.
 
+    Returns the first 100 matches by name, then ID, and whether more matched.
     ``account_ids`` limits the search inside the query, before ordering.
     """
     placeholders, selected = _selected(account_ids)
     condition = f" AND id IN {placeholders}" if placeholders else ""
+    # The order ignores ASCII case as the match does. The row past the bound only shows that it exists.
     rows = connection.execute(
-        f"SELECT * FROM accounts WHERE instr(lower(name), lower(?)) > 0{condition} ORDER BY id",
-        (query, *selected),
-    )
-    return [dict(row) for row in rows]
+        f"SELECT * FROM accounts WHERE instr(lower(name), lower(?)) > 0{condition} "
+        "ORDER BY name COLLATE NOCASE, id LIMIT ?",
+        (query, *selected, _SEARCH_ROWS + 1),
+    ).fetchall()
+    return [dict(row) for row in rows[:_SEARCH_ROWS]], len(rows) > _SEARCH_ROWS
 
 
 def get_account(connection: sqlite3.Connection, account_id: str) -> dict | None:

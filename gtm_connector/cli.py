@@ -422,8 +422,9 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
     if command == "seed":
         return table(["RECORDS", "COUNT"], list(result["counts"].items()))
     if command == "accounts":
+        rows = result["accounts"] if isinstance(result, dict) else result
         return table(["ID", "ACCOUNT", "INDUSTRY", "RENEWAL"],
-                     [[row.get(key) for key in ("id", "name", "industry", "renewal_date")] for row in result])
+                     [[row.get(key) for key in ("id", "name", "industry", "renewal_date")] for row in rows])
     if command == "account":
         keys = ("id", "name", "industry", "account_number") if crm_backend == "salesforce" else result
         fields = [[key.replace("_", " ").capitalize(), result.get(key)] for key in keys
@@ -968,6 +969,11 @@ def _run_calls(args, prepared, crm_reader):
     return result
 
 
+def _account_list(rows, more):
+    """A complete list stays a plain array. A cut one is an object that says so."""
+    return {"accounts": rows, "has_more": True} if more else rows
+
+
 def _salesforce_account_read(args, reader):
     """Inspect through the same scoped, audited HTTPS tools as a brief."""
     import uuid
@@ -1015,9 +1021,10 @@ def _salesforce_account_read(args, reader):
                     raise ValueError
                 groups[group].append({key: value for key, value in row.items() if key != "record_ref"})
             if args.command == "accounts":
-                if groups["contacts"] or groups["contracts"]:
+                more = data.get("has_more", False)
+                if groups["contacts"] or groups["contracts"] or type(more) is not bool:
                     raise ValueError
-                return groups["accounts"]
+                return _account_list(groups["accounts"], more)
             accounts = groups["accounts"]
             if len(accounts) != 1 or accounts[0].get("id") != args.account_id:
                 raise ValueError
@@ -1247,7 +1254,7 @@ def _run(args, argv):
             store.seed(connection)
             return {"counts": store.counts(connection)}
         if args.command == "accounts":
-            return store.search_accounts(connection, args.query)
+            return _account_list(*store.search_accounts(connection, args.query))
         result = store.get_account(connection, args.account_id)
         if result is None:
             raise ValueError(f"account not found: {args.account_id}")
@@ -1402,6 +1409,11 @@ def _main(argv):
                   human_result(args.command, result, crm_backend=getattr(args, "crm_backend", "sqlite"),
                                state_dir=getattr(args, "state_dir", None), action=getattr(args, "action", None),
                                connection_dir=getattr(args, "connection_dir", None)))
+        if args.command == "accounts" and isinstance(result, dict) and not args.json:
+            # On stderr, so piped rows stay rows. The flush keeps it the closing line when both share a stream.
+            sys.stdout.flush()
+            print(f"Showing the first {len(result['accounts'])} accounts. More match; narrow the search "
+                  "with --query.", file=sys.stderr)
         if (args.command == "slack" and args.action == "disconnect" and result["remote_revoke_requested"]
                 and not result["remote_access_token_revoked"]):
             reason = result["revocation_error"]

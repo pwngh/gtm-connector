@@ -5,7 +5,7 @@ SQLite store of invented records.
 
 | Tool | Scope | Returns |
 | --- | --- | --- |
-| `search_accounts` | `crm:read` | Accounts whose name contains the literal query, or at most two exact Salesforce AccountNumber matches. |
+| `search_accounts` | `crm:read` | The first 100 accounts whose name contains the literal query, ordered by name and then ID, or at most two exact Salesforce AccountNumber matches. Salesforce orders names by the user's locale, and the demo CRM ignores ASCII case. |
 | `get_account` | `crm:read` | One account, its contacts, and with Salesforce its standard Contracts. |
 | `list_opportunities` | `crm:read` | Opportunities, for one account when given. |
 | `read_call_notes` | `calls:read` | Fixture notes, or the selected excerpt of an [imported transcript](calls.md). |
@@ -16,6 +16,9 @@ SQLite store of invented records.
   HTTP 403.
 - Every record carries a reference such as `crm/accounts/acc-001`, `calls/call_notes/note-007`, or
   `slack/messages/msg-007`. Results are marked as untrusted data.
+- When more than 100 accounts match a name search, `search_accounts` returns the first 100 and adds
+  `has_more: true` beside `records`. Otherwise the field is absent. The receipt lists the records
+  returned.
 - `serve --selection FILE` limits reads to the selected accounts and replaces `log_activity` with
   `prepare_renewal_brief` and `read_renewal_brief`. See [selection](selection.md).
 - `serve --crm-backend salesforce` reads CRM from Salesforce and omits `log_activity`. See

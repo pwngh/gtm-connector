@@ -26,7 +26,7 @@ gtm-connector serve --state-dir var/selected --selection selection.json
 
 | Tool | Requires | Behavior |
 | --- | --- | --- |
-| `search_accounts`, `list_opportunities` | `crm:read` | The selected IDs are part of the query, before ordering and the result limit. |
+| `search_accounts`, `list_opportunities` | `crm:read` | The selected IDs are part of the query, before ordering and the result limit, so a search never reports more matches than the selection holds. |
 | `get_account`, `list_opportunities` with an account | `crm:read` | An unselected account is refused and not looked up. |
 | `read_call_notes`, `read_slack_messages` | `calls:read`, `slack:read` | They read selected accounts only, and Slack only where `slack` is `true`. To withhold call notes, grant no `calls:read`. |
 | `prepare_renewal_brief(account_id, as_of)` | `crm:read` | Reads the account, its opportunities, its call notes, and its Slack thread when selected. Each read checks its own scope. A grant without `calls:read` or `slack:read` gets a brief that states the source was unavailable. `as_of` is optional and uses `YYYY-MM-DD`. The fixture CRM defaults to 2027-01-15 and Salesforce defaults to today. |

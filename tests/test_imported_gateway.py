@@ -56,7 +56,8 @@ class ExactAccountNumberTests(unittest.TestCase):
                 self.requests.clear()
                 self.number = supplied
                 reader = self.reader()
-                rows = reader.search_accounts(account_number=supplied)
+                rows, more = reader.search_accounts(account_number=supplied)
+                self.assertIs(more, False)
                 self.assertEqual(rows[0]["account_number"], supplied)
                 self.assertEqual(reader.http_requests, 2)
                 self.assertEqual(self.requests[-1].url.params["q"],
@@ -68,7 +69,7 @@ class ExactAccountNumberTests(unittest.TestCase):
     def test_zero_and_duplicate_matches_are_bounded_data_and_mismatches_refuse(self):
         for count in (0, 1, 2):
             self.count = count
-            self.assertEqual(len(self.reader().search_accounts(account_number=self.number)), count)
+            self.assertEqual(len(self.reader().search_accounts(account_number=self.number)[0]), count)
         self.count = 3
         with self.assertRaises(SalesforceReadError) as failure:
             self.reader().search_accounts(account_number=self.number)

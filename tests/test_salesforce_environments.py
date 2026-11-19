@@ -147,7 +147,7 @@ class SalesforceEnvironmentTests(unittest.TestCase):
                     self.assertEqual(reader.http_requests, 8)
                     self.assertEqual(len(reader.list_opportunities(ACCOUNT_ID)), 1)
                     self.assertEqual(reader.http_requests, 9)
-                    self.assertEqual(len(reader.search_accounts("Invented")), 1)
+                    self.assertEqual(len(reader.search_accounts("Invented")[0]), 1)
                     self.assertEqual(reader.http_requests, 10)
                     self.assertEqual(sum(r.url.path.endswith("/describe") for r in self.requests), 4)
                     self.assertEqual(sum(r.url.params.get("q") == ORG_QUERY for r in self.requests), 1)
@@ -370,13 +370,13 @@ class SalesforceEnvironmentTests(unittest.TestCase):
                 run_check(environment=value, adapter_factory=factory)
         factory.assert_not_called()
 
-    def test_large_account_book_keeps_search_bounds_but_allows_a_single_account_setup_probe(self):
+    def test_large_account_book_search_returns_its_first_hundred_and_setup_probes_a_single_account(self):
         large_book = [{"Id": f"001{index:012d}AAA", "Name": f"Invented account {index}",
                        "Industry": None, "AccountNumber": None} for index in range(101)]
 
         def unfiltered_book(request):
             query = request.url.params.get("q", "")
-            if query == "SELECT Id, Name, Industry, AccountNumber FROM Account ORDER BY Id LIMIT 101":
+            if query == "SELECT Id, Name, Industry, AccountNumber FROM Account ORDER BY Name, Id LIMIT 101":
                 return httpx2.Response(200, json={"done": True, "totalSize": len(large_book), "records": large_book})
             return None
 
@@ -384,7 +384,9 @@ class SalesforceEnvironmentTests(unittest.TestCase):
         for environment in ("sandbox", "production"):
             with self.subTest(environment=environment):
                 self.organization["IsSandbox"] = environment == "sandbox"
-                self.assert_error("salesforce_result_limit", self.adapter(environment).search_accounts)
+                rows, more = self.adapter(environment).search_accounts()
+                self.assertEqual([row["source_id"] for row in rows], [row["Id"] for row in large_book[:100]])
+                self.assertIs(more, True)
                 self.requests.clear()
                 report = run_check(environment=environment, as_of=AS_OF,
                                    adapter_factory=lambda: self.adapter(environment))
@@ -398,7 +400,7 @@ class SalesforceEnvironmentTests(unittest.TestCase):
                                    if " FROM Account " in request.url.params.get("q", "")]
                 self.assertIn("SELECT Id, Name, Industry, AccountNumber FROM Account ORDER BY Id LIMIT 1",
                               account_queries)
-                self.assertNotIn("SELECT Id, Name, Industry, AccountNumber FROM Account ORDER BY Id LIMIT 101",
+                self.assertNotIn("SELECT Id, Name, Industry, AccountNumber FROM Account ORDER BY Name, Id LIMIT 101",
                                  account_queries)
                 for private in (ORIGIN, TOKEN, ORGANIZATION, ACCOUNT, "Invented account", "contact@invented.example"):
                     self.assertNotIn(private, json.dumps(report))

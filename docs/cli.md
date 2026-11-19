@@ -36,7 +36,7 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 | --- | --- |
 | No command, `--version` | Object with `description`, `try` (string array), and `help`. Object with `version`. |
 | `seed` | Object with `counts`, integer counts by table. |
-| `accounts` | Array of account objects, or `[]`. |
+| `accounts` | Array of account objects ordered by name and then ID, or `[]`. When more than 100 match: object with `accounts`, the first 100, and `has_more: true`. Text output then adds one line on stderr that says so. |
 | `account` | Account object with a `contacts` array. Salesforce adds `contracts`, `backend`, and `source_id`. See [Salesforce](salesforce.md). |
 | `brief` | Saved artifact with `schema_version: 1`, identifiers, `as_of`, `status`, `evidence`, `text`, and `model_usage`. `--with-slack` adds `proposed_follow_up`. `as_of` is today's local date with Salesforce and `2027-01-15` with fixtures, unless `--as-of YYYY-MM-DD` is given. With imported calls the evidence workflow version is 4, and with live Slack it is 5. Both add a `sources` object and, with the default drafter, record the adapter `extractive` and zero model tokens. |
 | `check-brief` | Object with `status: "valid"` and `brief_id`. |
