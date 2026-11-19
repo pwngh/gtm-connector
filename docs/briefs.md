@@ -33,8 +33,11 @@ the saved file: the evidence, the units, the card text, the seller list, and the
 reads the file, and refuses it unless that receipt is finished and names the digest of the file as
 it is now, and the receipts of the card's reads are the ones in the audit log. A changed amount,
 sentence, speaker, seller, date, or card text does not trace. A card keeps the numbers it was sealed
-with; a card saved before sealing says so and has to be made again. The owner of the state folder
-can still rewrite the file and the audit log together: the log is not tamper-proof.
+with, and `trace` neutralizes a sentence again under today's rules before showing it. A card saved
+before sealing says so and has to be made again. A save that does not finish leaves no file, and
+its receipt ends as an error; after a hard stop the receipt stays `pending` and names the card in
+`arguments`. The owner of the state folder can still rewrite the file and the audit log together:
+the log is not tamper-proof.
 
 ## Sentences
 
@@ -106,7 +109,8 @@ SHA-256 of the record's stored text. The account name in the heading is a quoted
 ## Saved result
 
 Each card and its evidence are saved in `var/v2/briefs/<brief_id>.json`, with `schema_version`
-(`2`), `brief_id`, `account_id`, `as_of`, `status`, `sources`, `text`, `units`, and `evidence`.
+(`3`), `brief_id`, `account_id`, `as_of`, `status`, `rules_version`, `sealed_by`, `sources`, `text`,
+`units`, and `evidence`.
 `brief --json` prints every key but `evidence`, which holds the raw records and one receipt per
 read. The snapshot preserves the records read, not later CRM changes. Evidence that fails a check
 gives no card and saves nothing.

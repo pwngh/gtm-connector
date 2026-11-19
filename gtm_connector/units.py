@@ -898,4 +898,6 @@ def trace(evidence: dict, number: int, units: list[dict] | None = None) -> dict:
         unit["fields"] = {key: (" ".join(safe_text(value)[0].split()) if isinstance(value, str) else value)
                           for key, value in sorted(record.items())
                           if key != "record_ref" and (value is None or isinstance(value, (str, int, bool)))}
+    else:  # Neutralized again, so a card sealed under older rules shows nothing today's would have replaced.
+        unit.update({key: safe_text(unit[key])[0] for key in ("text", "speaker") if isinstance(unit[key], str)})
     return unit

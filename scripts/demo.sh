@@ -35,7 +35,7 @@ for number in sorted({int(value) for value in re.findall(r"\[(\d+)\]", brief["te
     assert traced["n"] == number and traced["receipt"]["status"] == "ok"
 print(human_result("demo", demo, state_dir=state))
 print("\nEvery number on the card resolved to its record and audit receipt.")
-print("The saved audit has six receipts: five successful reads and one scope refusal.")
+print("The saved audit has seven receipts: five successful reads, one scope refusal, and the card's seal.")
 print(f"Inspect {directory}/demo.json and state/.")
 print("Run separate connector checks with: .venv/bin/python -m gtm_connector verify "
       "--with-slack --state-dir var/verification")
