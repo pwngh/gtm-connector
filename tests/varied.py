@@ -32,9 +32,9 @@ _HEAD = re.compile(r"  \[(\d+)\] (seller|customer|unknown) \((.+?)\); (call|Slac
 _CITED = re.compile(r" ((?:\[\d+\])+)(?: and \d+ more)?\Z")
 # A WebVTT voice tag is a speaker label, and its closing tag is markup. Neither is part of what was said.
 _VOICE_TAG = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+[^<>\n]+>|</v>")
-# Styling spans and cue timestamps of a WebVTT cue: markup, like a voice tag, and not speech.
-_CUE_MARKUP = re.compile(r"</?(?:[biuc]|ruby|rt|lang)(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>"
-                         r"|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>")
+# Styling spans, a ruby reading, and cue timestamps of a WebVTT cue: markup, like a voice tag, and not speech.
+CUE_MARKUP = re.compile(r"<rt(?:\.[^\s<>.]*)*>[^<>]*</rt>|</?(?:[biuc]|ruby|rt)(?:\.[^\s<>.]*)*>"
+                        r"|</?lang(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>")
 
 
 def read(name):
@@ -243,7 +243,7 @@ def hold(case, brief):
         # still one unit, so it resolves.
         if "manifest" in record:
             vtt = record["manifest"]["format"] == "vtt"
-            pieces = [_VOICE_TAG.sub("", _CUE_MARKUP.sub("", cue["text"])) if vtt else cue["text"]
+            pieces = [CUE_MARKUP.sub("", _VOICE_TAG.sub("\0", cue["text"])).replace("\0", "") if vtt else cue["text"]
                       for cue in record["manifest"]["units"]]
         else:
             pieces = [record["body"]]

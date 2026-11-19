@@ -67,13 +67,14 @@ _RUN_GAP_MS = 2000
 # One speaker's cues up to this far apart still join when the earlier one stops mid-sentence and the later one
 # goes on in lower case.
 _BRIDGE_GAP_MS = 10_000
-# WebVTT markup that is not speech: bold, italic, underline, class, language and ruby spans, and cue timestamps.
-_CUE_MARKUP = re.compile(r"</?(?:[biuc]|ruby|rt|lang)(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>"
-                         r"|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>")
+# WebVTT markup that is not speech: bold, italic, underline, class, language and ruby spans, the reading a ruby
+# span carries, and cue timestamps. Only a language span takes an annotation, so "<b not>" stays as text.
+_CUE_MARKUP = re.compile(r"<rt(?:\.[^\s<>.]*)*>[^<>]*</rt>|</?(?:[biuc]|ruby|rt)(?:\.[^\s<>.]*)*>"
+                         r"|</?lang(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>")
 _LINE_BREAKS = {0x0A, 0x0B, 0x0C, 0x85, 0x2028, 0x2029}
 # A bracketed integer is how a card cites a unit, so source text never keeps one.
 _CITATION = re.compile(r"\[(\d+)\]")
-_ENDED = re.compile(r"""[.!?\u3002\uff01\uff1f]["')\]\u201d\u2019\u00bb\u300d\uff09]*\Z""")
+_ENDED = re.compile(r"""[.!?\u3002\uff01\uff1f\u0964\u061f\u06d4]["')\]\u201d\u2019\u00bb\u300d\uff09]*\Z""")
 
 
 def _host(target):
@@ -154,24 +155,33 @@ _BEFORE = r"(?:^|[\s(\[\"'\u201c\u2018\u00ab])"
 _AFTER = r"\.[\"')\]\u201d\u2019\u00bb]*\Z"
 _CLOSERS = "\"')]\u201d\u2019\u00bb"
 # A period after one of these does not end a sentence: "28 U.S.C. 1332", "F.Supp.2d", "e.g."; titles, legal and
-# state short forms, months, and single letters; a list marker that opens a line.
-_DOTTED = re.compile(_BEFORE + r"(?:[A-Za-z]{1,6}\.){2,}(?:[0-9]+[a-z]*)?[\"')\]]*\Z")
-_ABBREVIATION = re.compile(
-    _BEFORE + r"(?:Mr|Mrs|Ms|Mx|Mme|Mlle|Messrs|Dr|Prof|Sr|Jr|Hon|Rev|Sen|Rep|Gov|Pres|Gen|Col|Capt|Lt|Sgt"
+# state short forms, days, months, and single letters; a list marker that opens a line.
+_DOTTED = re.compile(_BEFORE + r"(?:[A-Za-z]{1,6}\.){2,}[\"')\]]*\Z")
+_FORMS = (
+    r"(?:Mr|Mrs|Ms|Mx|Mme|Mlle|Messrs|Sra|Dr|Prof|Esq|Sr|Jr|Hon|Rev|Sen|Rep|Gov|Pres|Gen|Col|Capt|Lt|Sgt"
     r"|Assn|Bros|Dept|Div|Est|Mfg|Natl|Intl|Univ|St|Mt|Ft"
-    r"|v|vs|al|cf|ibid|id|supra|infra|approx|misc|ca|pp|vol|fig|nr|est|ext"
+    r"|v|vs|al|cf|etc|ibid|id|supra|infra|approx|Approx|misc|ca|pp|vol|fig|nr|Nr|est|ext"
     r"|Fed|Civ|Crim|Evid|App|Supp|Dist|Cir|Bankr|Admin|Stat|Reg|Code|Comp|Ann|Cons"
     r"|Tit|Art|Sec|Ch|Subd|Subsec|Cl|Para|Pt|Ex|Sched|Amend|Op|Proc|Ord|Const"
     r"|tit|art|sec|ch|subd|subsec|cl|para|pt|ex|sched|amend|op|proc"
     r"|Fam|Bus|Com|Fin|Ins|Lab|Pen|Prob|Prop|Tax|Veh|Welf"
     r"|Ala|Ariz|Ark|Cal|Colo|Conn|Del|Fla|Ga|Ill|Ind|Kan|Ky|La|Md|Mass|Mich|Minn|Miss|Mo|Mont|Neb|Nev|Okla|Or|Pa"
     r"|Tenn|Tex|Va|Vt|Wash|Wis|Wyo"
-    r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|[A-Za-z])" + _AFTER)
+    r"|Mon|Tue|Tues|Wed|Thu|Thur|Thurs|Fri|Sat|Sun"
+    r"|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|[A-Za-z])")
+_ABBREVIATION = re.compile(_BEFORE + _FORMS + _AFTER)
+# A short capitalized word before a number or before another short form is a short form too: "Fig. 2",
+# "127 S. Ct. 1955", "Pub. L. No. 117-58", "Haw. Rev. Stat.", "Treas. Reg.".
+_SHORT = re.compile(_BEFORE + r"([A-Z][A-Za-z]{1,4})" + _AFTER)
+_SHORT_NEXT = re.compile(_FORMS + r"\.")
+# What cannot be the last word of a sentence, so a transcript run that ends on it stopped mid-sentence.
+_NEVER_LAST = re.compile(_BEFORE + r"(?:Mr|Mrs|Ms|Mx|Mme|Mlle|Messrs|Dr|Prof|Hon|v|vs|cf|Fed|No|Nos|U\.S\.C|C\.F\.R"
+                         r"|e\.g|i\.e)" + _AFTER)
 _LIST_MARKER = re.compile(r"\s*(?:\d+|[A-Za-z])\.[\"')\]]*")
 # A firm suffix, the word "I", or a capitalized initialism ends a sentence only before a word that opens one.
 _MAY_END = re.compile(_BEFORE + r"(?:Inc|Ltd|Co|Corp|LLP|LLC|LP|PLC|PC|I)" + _AFTER)
 _OPENER = re.compile(r"(?:We|Our|They|Their|He|She|It|Its|I|You|My|Your|This|That|These|Those|The|A|An|In|On|At|For|If"
-                     r"|When|As|There|But|And|So|Then|However|Therefore)\b")
+                     r"|When|As|There|But|And|So|Then|However|Therefore)(?![\w.-])")
 # "No. 14" is a number. "No." before anything else is an answer.
 _NUMBER_SIGN = re.compile(_BEFORE + r"[Nn]os?\.\Z")
 _SECTION_SIGN = re.compile(r"""["'(\[]*[§¶]""")
@@ -195,9 +205,12 @@ def _continues(line: str, start: int, end: int, after: int) -> bool:
         return True
     window = max(start - 1, end - 24, 0)
     dotted = _DOTTED.search(line, window, end)
-    if _MAY_END.search(line, window, end) or dotted and dotted.group().lstrip(" ([\"'\u201c\u2018\u00ab")[0].isupper():
+    if _MAY_END.search(line, window, end) or dotted and dotted.group().isupper():
         return _OPENER.match(line, after) is None
     if dotted or _ABBREVIATION.search(line, window, end) or _SECTION_SIGN.match(line, after):
+        return True
+    short = _SHORT.search(line, window, end)
+    if short and (_SHORT_NEXT.match(line, after) or len(short.group(1)) < 5 and line[after:after + 1].isdigit()):
         return True
     # "Docket No. A-17" and "No. 14" go on. "No." as the whole sentence is an answer, unless a number follows.
     number = _NUMBER_SIGN.search(line, window, end)
@@ -205,26 +218,18 @@ def _continues(line: str, start: int, end: int, after: int) -> bool:
 
 
 def _unfinished(text: str) -> bool:
-    """Whether transcript text stops mid-sentence: no closing punctuation, or a short form that expects more."""
+    """Whether transcript text stops mid-sentence: no closing punctuation, a trailing "...", a bare list
+    marker, or a last word that cannot end a sentence ("Mr.", "v.", "28 U.S.C."). "No." alone is an answer."""
     text = text.strip()
-    if not _ENDED.search(text):
+    if not _ENDED.search(text) or text.rstrip(_CLOSERS).endswith("..") or _LIST_MARKER.fullmatch(text):
         return True
-    if not text.rstrip(_CLOSERS).endswith("."):
-        return False
-    if _LIST_MARKER.fullmatch(text):
-        return True
-    window = max(len(text) - 24, 0)
-    short = _ABBREVIATION.search(text, window) or _NUMBER_SIGN.search(text, window)
-    # "No." alone is an answer, and a single letter ends "plan B." Longer short forms expect more.
-    return bool(_DOTTED.search(text, window)
-                or short and short.start() > 0 and len(short.group().strip(" ([\"')]." + _CLOSERS)) > 1
-                or short and short.start() == 0 and not _NUMBER_SIGN.fullmatch(text))
+    last = _NEVER_LAST.search(text, max(len(text) - 24, 0))
+    return last is not None and not _NUMBER_SIGN.fullmatch(text)
 
 
 def _goes_on(text: str) -> bool:
-    """Whether text opens as the rest of a sentence: in lower case, or on a comma, semicolon or colon."""
-    opening = text.lstrip()[:1]
-    return opening.islower() or opening in tuple(",;:")
+    """Whether text opens as the rest of a sentence: with a letter in lower case."""
+    return text.lstrip()[:1].islower()
 
 
 def sentences(safe: str, *, lines: bool = False) -> list[str]:
@@ -484,6 +489,7 @@ class _Card:
         # The digest is of the record's text as stored, so it can be checked against the source.
         digest = hashlib.sha256(row["body"].encode("utf-8", "surrogatepass")).hexdigest()
         waiting: set = set()  # speakers whose last run stopped mid-sentence
+        heard: set = set()  # speakers who have spoken in this excerpt
         cut = False  # whether the sentence before this one, by anyone, stopped mid-sentence
         for index, (label, raw, _) in enumerate(runs):
             role, basis = role_of(label)
@@ -496,10 +502,12 @@ class _Card:
                 self.neutralized[key] += count
             found = sentences(safe, lines=table == "messages")
             # What follows a sentence that stopped may be its other half: the same speaker's next words, or
-            # anyone's when they go on in lower case.
-            follows = (open_start and index == 0) or label in waiting or cut and _goes_on(safe)
+            # anyone's when they go on in lower case. In an excerpt that starts inside a call, each speaker's
+            # first words may finish a sentence begun before it.
+            follows = (open_start and label not in heard) or label in waiting or cut and _goes_on(safe)
             if found:
                 waiting.discard(label)
+                heard.add(label)
             for position, sentence in enumerate(found):
                 # Inside a run only a paragraph break can leave a sentence without its end. At the end of a
                 # run, a short form that expects more does too.

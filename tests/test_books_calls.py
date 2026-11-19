@@ -131,15 +131,14 @@ def spans(cue, kind):
     name = cue["cue_id"] if cue["cue_id"] and not cue["cue_id"].isdigit() else None
     if kind != "vtt":
         return [(name, cue["text"])]
-    # Bold, italic, class and language spans and cue timestamps are markup, not speech.
-    text = re.sub(r"</?(?:[biuc]|ruby|rt|lang)(?:\.[^\s<>.]*)*(?:[ \t][^<>\n]*)?>|<(?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}>",
-                  "", cue["text"])
-    found, at = [], 0
+    found, at, text = [], 0, cue["text"]
     for tag in VOICE.finditer(text):
         found.append((name, text[at:tag.start()]))
         name, at = tag.group(1), tag.end()
     found.append((name, text[at:]))
-    return [(who, text.replace("</v>", "")) for who, text in found if text.replace("</v>", "").strip()]
+    # Styling spans and cue timestamps are markup, not speech. They go after the voices are found.
+    found = [(who, varied.CUE_MARKUP.sub("", part.replace("</v>", ""))) for who, part in found]
+    return [(who, part) for who, part in found if part.strip()]
 
 
 def runs(quoted, kind):

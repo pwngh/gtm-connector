@@ -160,6 +160,47 @@ class ImportedBriefingTests(unittest.TestCase):
         self.assertIn("Sentences: 6 cut off at a pause, a change of speaker, or the edge of the excerpt were read and "
                       "are not shown.", artifact["text"])
 
+    def test_the_two_gaps_are_two_seconds_and_ten(self):
+        _, spoken = self.cues(
+            (0, 1, "<v Dana Crest>It needs"), (3.0, 4, "<v Dana Crest>Another review."),
+            (10, 11, "<v Dana Crest>It needs"), (13.1, 14, "<v Dana Crest>Another look."),
+            (20, 21, "<v Dana Crest>The board will"), (31.0, 32, "<v Dana Crest>sign in March."),
+            (40, 41, "<v Dana Crest>The board may"), (51.1, 52, "<v Dana Crest>sign in April."),
+            # A comma does not carry a sentence across a pause: only a letter in lower case does.
+            (60, 61, "<v Dana Crest>We do not"), (69, 70, "<v Dana Crest>, Approve the agreement."))
+        self.assertEqual([text for text, partial in spoken if not partial],
+                         ["It needs Another review.", "The board will sign in March."])
+        self.assertEqual([text for text, partial in spoken if partial],
+                         ["It needs", "Another look.", "The board may", "sign in April.", "We do not",
+                          ", Approve the agreement."])
+
+    def test_an_answer_and_an_ordinary_last_word_are_ends(self):
+        artifact, spoken = self.cues(
+            (1, 2, "<v Morgan Reed>Will you sign by Friday?"), (3, 4, "<v Dana Crest>No."),
+            (5, 6, "<v Morgan Reed>Why not?"),
+            (7, 9, "<v Dana Crest>Our general counsel has not approved the rider. Call me Monday."),
+            (20, 22, "<v Dana Crest>We cannot sign before 5 p.m."), (23, 24, "<v Morgan Reed>Give me a sec."),
+            (40, 42, "<v Dana Crest>We sell only in the U.S."), (43, 45, "<v Dana Crest>And the answer is no."),
+            # A sentence that trails off is not an end, and one cut sentence is counted in the singular.
+            (60, 62, "<v Morgan Reed>We will sign if..."), (80, 82, "<v Dana Crest>Understood."))
+        self.assertEqual([text for text, partial in spoken if partial], ["We will sign if..."])
+        self.assertEqual(len(spoken), 11)
+        self.assertIn("Sentences: 1 cut off at a pause, a change of speaker, or the edge of the excerpt was read and "
+                      "is not shown.", artifact["text"])
+
+    def test_in_an_excerpt_that_starts_inside_a_call_each_speakers_first_words_are_in_doubt(self):
+        raw = ("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Dana Crest>We will not\n\n"
+               "00:00:03.000 --> 00:00:04.000\n<v Morgan Reed>Sorry?\n\n"
+               "00:00:05.000 --> 00:00:06.000\n<v Dana Crest>sign until Friday. That is final.\n\n"
+               "00:00:07.000 --> 00:00:08.000\n<v Morgan Reed>Fine.\n\n"
+               "00:00:09.000 --> 00:00:10.000\n<v Morgan Reed>Thanks.\n").encode()
+        with Runtime(self.state, calls_backend="imported") as runtime:
+            self.import_call(runtime, raw=raw, format="vtt", requested_range=(3, 4))
+            artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
+        self.assertEqual([(unit["text"], unit["partial"]) for unit in artifact["units"] if unit["kind"] == "sentence"],
+                         [("Sorry?", True), ("sign until Friday.", True), ("That is final.", False), ("Fine.", False),
+                          ("Thanks.", False)])
+
     def test_cues_with_no_speaker_label_are_never_read_as_one_persons_sentence(self):
         artifact, spoken = self.cues((1, 3, "we will not sign"), (3.2, 5, "Great, so you will sign Friday."),
                                      (6, 8, "Fine."), (8.1, 10, "Thank you."))

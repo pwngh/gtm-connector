@@ -129,7 +129,7 @@ class NeutralizedText(unittest.TestCase):
         self.assertEqual(sentences("We will plan. Then we scan. No? Yes."), ["We will plan.", "Then we scan.", "No?",
                                                                             "Yes."])
 
-    def test_legal_citations_lists_and_firm_names_never_end_a_sentence(self):
+    def test_a_sentence_ends_where_the_text_settles_it_and_citations_stay_whole(self):
         split = {
             "See 28 U.S.C. 1332 for that. Next.": ["See 28 U.S.C. 1332 for that.", "Next."],
             "Under 17 U.S.C. § 107 the use is fair. Next.": ["Under 17 U.S.C. § 107 the use is fair.", "Next."],
@@ -146,6 +146,7 @@ class NeutralizedText(unittest.TestCase):
             "See Wis. Stat. 100.18 and Mass. 456. Next.": ["See Wis. Stat. 100.18 and Mass. 456.", "Next."],
             "Thornfield Wren LLP. We require zero retention.": ["Thornfield Wren LLP.", "We require zero retention."],
             "So do I. It is late.": ["So do I.", "It is late."],
+            "Ok. Ok. Fine. Done. Done.": ["Ok.", "Ok.", "Fine.", "Done.", "Done."],
             "See Docket No. A-17 for the order. Next.": ["See Docket No. A-17 for the order.", "Next."],
             "Case No. CV-2027-0113 is open. No. 14 is closed.": ["Case No. CV-2027-0113 is open.", "No. 14 is closed."],
             "\u201cWe will sign.\u201d Next one.": ["\u201cWe will sign.\u201d", "Next one."],
@@ -166,6 +167,13 @@ class NeutralizedText(unittest.TestCase):
         for whole in ("Consult Fed. R. Civ. P. 26(b)(3).", "Under Sec. 3.2 and Ex. B the fee applies.",
                       "We met in St. Louis on invoice no. 5.", "It costs ca. 285 200,00 EUR in total.",
                       "We reviewed several, e.g. The Holt matter.", "We met at 3 p.m. We left at 4.",
+                      "E.g. The Holt matter is one.", "We sent the MSA, DPA, etc. Friday and they signed.",
+                      "Marian Holt, Esq. General Counsel, will sign.", "See Fig. 2 for the numbers.",
+                      "Twombly, 550 U.S. 544, 127 S. Ct. 1955 (2007), controls.", "See Pub. L. No. 117-58 for that.",
+                      "See Treas. Reg. \u00a7 1.61-1 on that.", "Haw. Rev. Stat. \u00a7 480-2 applies.",
+                      "See 167 L. Ed. 2d 929, 45 Cal. Rptr. 3d 12, and 100 Harv. L. Rev. 1 for it.",
+                      "We asked Acme Inc. In-house counsel to review it.", "We file under U.S. I.R.S. rules.",
+                      "The call is Fri. Jan. 8 at noon.",
                       "Das ist gut. \u00e4u\u00dferst wichtig.",
                       "We met Acme Inc. General Counsel yesterday.", "Thornfield Wren LLP. Section 4 applies.",
                       "USD 450,000.00 is the amount. v4.2 shipped.", "all lowercase. never split here."):
@@ -202,6 +210,11 @@ class NeutralizedText(unittest.TestCase):
                          [("Dana Ito", "We will sign <script>.")])
         # Removing a tag never makes a voice tag: this text has no speaker but the cue's own.
         self.assertEqual(voices("<v<i> Dana Ito>We approve.</v>", "cue"), [("cue", "<v Dana Ito>We approve.")])
+        self.assertEqual(voices("<<b>v Sam Lee>We refund.", "cue"), [("cue", "<v Sam Lee>We refund.")])
+        # Only a language span carries an annotation, so a word inside a tag is never dropped. A ruby reading is.
+        self.assertEqual(voices("<v Dana Ito>We will <b not> sign <c 2 million> <u>now</u> <lang en-GB>ok</lang>: "
+                                "<ruby>WWW<rt>World Wide Web</rt></ruby> is down.</v>"),
+                         [("Dana Ito", "We will <b not> sign <c 2 million> now ok: WWW is down.")])
         self.assertEqual(voices("no tags here"), [(None, "no tags here")])
         self.assertEqual(voices("<v Dana Ito></v>"), [])
 

@@ -36,15 +36,17 @@ saved card that differs. The owner of the files can still edit both.
 A sentence ends at closing punctuation or a blank line. A single line break inside a call note or
 a cue is a wrap, so a sentence written over two lines stays whole. In a Slack message each line is
 the author's own, so a line break ends a sentence there. A period after a title, a legal or
-state short form, a dotted initialism, or a list marker does not end a sentence, so "28 U.S.C. § 1332"
-and "Fed. R. Civ. P. 26(b)(3)" stay in one piece. Where the text does not settle it, two sentences
+state short form, a list marker, or a dotted short form such as "e.g." does not end a sentence, so
+"28 U.S.C. § 1332" and "Fed. R. Civ. P. 26(b)(3)" stay in one piece. A firm suffix or a capitalized
+initialism ("LLP.", "U.S.A.") ends one only before a word that opens a sentence. Where the text does not settle it, two sentences
 stay joined: a fragment is never shown as a sentence.
 
 Two transcript cues join into one run only when they have the same speaker label and the second
 starts within two seconds of the first, or within ten when the first stops mid-sentence and the
 second goes on in lower case. Cues or lines with no label never join. In a transcript, a run that
-stops mid-sentence is counted and not shown, and so is the start of that speaker's next run, and
-the first sentence of an excerpt that starts inside a call. The end of a Slack message or a call
+stops mid-sentence is counted and not shown. So is what may be its other half: the start of that
+speaker's next run, the next words of anyone when they go on in lower case, and each speaker's
+first words in an excerpt that starts inside a call. The end of a Slack message or a call
 note is an end. A sentence over 300 characters is counted and not shown, because a quotation is
 never cut.
 

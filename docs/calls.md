@@ -49,14 +49,15 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
   text after it and is not part of the sentence, and a cue with two tags has two speakers. A cue
   with no tag takes its identifier as the label when that is not a number. TXT lines and SRT cues
   have no label, so their role is `unknown`. WebVTT styling tags (`<b>`, `<i>`, `<u>`, `<c>`,
-  `<lang>`, `<ruby>`) and cue timestamps are not part of a sentence.
+  `<lang>`, `<ruby>`), the reading inside `<rt>`, and cue timestamps are not part of a sentence.
 - Neighbouring cues under one speaker label are read together, so a sentence that runs across them
   stays whole: when they are at most two seconds apart, or at most ten when the earlier cue stops
   mid-sentence and the later one goes on in lower case. Cues or lines with no label are never
   joined, because two people may be speaking.
 - A sentence is shown only whole. Text that stops without closing punctuation, or on a short form
   that expects more ("28 U.S.C."), is counted in `NOT READ` and not shown. So is what the same
-  speaker says next, and a first sentence when the excerpt starts inside the call. In a TXT file,
+  speaker says next, what anyone says next in lower case, and each speaker's first words when the
+  excerpt starts inside the call. In a TXT file,
   keep each sentence on one line.
 - `NOT READ` says which lines or cues of how many were read.
 - An import saved by an earlier version of the parser reads as `calls_import_corrupt`. Import the
