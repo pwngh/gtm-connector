@@ -30,48 +30,42 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 .venv/bin/python -m ruff check . && .venv/bin/python -m mypy
 ```
 
-To change a dependency, edit the `.in` file and regenerate its lock with the command in its header.
+## How to work
 
-## How to behave
+1. State the PR as "after this, a user can ...". If you cannot, it is a cleanup and must shrink the
+   source. Report source lines before and after.
+2. Replace, do not add: the old way goes in the same PR as the better one. Never remove a useful
+   feature without its replacement.
+3. If the change touches a rule above, write the failing test first. Test through the CLI and the
+   gateway, not internals.
+4. Build it, run it as a user, then clean it before review: no duplicate helpers, leftover flags,
+   or filler in code, messages, and docs. Run the tests, ruff, and mypy.
+5. For the request path, briefs, credentials, or `SECURITY_REVIEW.md`, get a review by other models
+   against the seven rules: `gpt-6.2-sol`, then one round of `claude-fable-5-2`, `gpt-6.2-sol`, and
+   `gemini-4-argon-high`, with `grok-4.7` advisory. Fix simple findings without another round.
+6. Open a PR that says what changed, why, and how it was proven. Do not merge unless asked.
 
-- Have a view and argue for it. If the request leads somewhere worse, say so and show the better way.
-- Less source wins. Cut filler in code, messages, and docs every time you touch them.
-- Replace, do not add: the old version goes in the same PR as the better one. Never remove a useful
-  feature without its replacement.
+- Have a view and argue for it. If a request leads somewhere worse, say so and show the better way.
 - State things plainly. Give a reason only when it is concrete. Never explain by history.
 - The repository holds code, tests, user docs, and this page. No logs, results, or review notes.
 - A doc claims only what a test shows. Keep "No live org has been verified." until one has been.
 - Live checks use the development org and workspace only. Never create or edit a Slack app. Never
   use a credential pasted into a conversation.
-
-## How to work
-
-1. Read this page and the files you will touch. Check what is on `main` first.
-2. If the change touches a rule above, write the failing test first.
-3. Make one change, on its own branch. Run the tests, ruff, and mypy.
-4. For the request path, briefs, credentials, or `SECURITY_REVIEW.md`, get a review by other models
-   against the seven rules: `gpt-6.2-sol`, then one round of `claude-fable-5-2`, `gpt-6.2-sol`, and
-   `gemini-4-argon-high`, with `grok-4.7` advisory. Fix simple findings without another round.
-5. Open a PR that says what changed, why, and how it was proven. Do not merge unless asked.
-
-## How to report
-
-Lead with the result. Then what changed, what failed, and what is unverified, with numbers. No
-account of the steps you took. Ask at most one question, and only when the answer changes what you
-do next.
+- Report the result first, then what changed, what failed, and what is unverified, with numbers.
 
 ## Next, in order
 
-1. Salesforce CLI: its own time limit, background login refresh, visible waiting.
-2. Lean core: one state file that remembers the chosen sources, so commands need no source flags
-   and work while `serve` runs. One evidence format. Real data only through a selection.
-3. Guided setup for Salesforce and Slack, with sample data for an empty org. Replaces the demo kit.
-4. A stdio MCP bridge for assistant apps.
-5. A Slack channel window per account. Replaces single-thread mapping.
-6. Model-read claims: a model summarizes the evidence and cites numbered units, with no tool or
-   credential. A failed claim is never published. Replaces the fixed-claim drafter.
-7. Deal cards: terminal, static HTML, and posting to Slack on command with a receipt.
-8. `auth` and `configure` commands, saved profiles, a split `cli.py`, and a numbered-menu chooser.
-9. Transcript folder intake, a schedulable renewals-due command, then a PyPI release.
+1. Salesforce CLI timing, then the stdio bridge so assistant apps can connect.
+2. Set up once: saved sources so commands need no source flags, commands that work while `serve`
+   runs, guided `setup` for Salesforce and Slack with sample data (replaces the demo kit), renewal
+   dates from a Contract or a renewal Opportunity, and `renewals` to list and select accounts.
+3. A brief worth reading: numbered evidence and a check tool so an assistant writes the summary and
+   the connector verifies it, a Slack channel window (replaces thread mapping), transcript folders
+   (replace hand-picked excerpts), then built-in drafting with a model the operator selects.
+4. Where people work: a Deal card in the terminal and HTML, posting to Slack on command with a
+   receipt, and scheduled briefs for renewals that are due.
+5. Release: a menu chooser, a split `cli.py`, macOS CI, and PyPI.
 
-Not planned: MCP Apps, Windows, CRM writes, a Slack bot, a second CRM, team deployment.
+After each of these, use the product end to end as a stranger and fix what only shows from there.
+Later, when a real user needs them: Salesforce task creation, transcript provider adapters,
+Windows, MCP Apps, a second CRM, team deployment.
