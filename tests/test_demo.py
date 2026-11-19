@@ -129,13 +129,11 @@ class NarrativeDemoTests(unittest.TestCase):
         for secret in [owner["owner_secret"], *tokens]:
             self.assertNotIn(secret, rendered)
 
-    def test_json_command_and_legacy_slack_spelling_keep_the_same_narrative_contract(self):
-        for flags in ((), ("--with-slack",)):
-            with self.subTest(flags=flags):
-                completed = self.command("demo", *flags, "--json")
-                self.assertEqual(completed.returncode, 0, completed.stderr)
-                self.assertEqual(completed.stderr, "")
-                self.assert_story(json.loads(completed.stdout))
+    def test_json_command_keeps_the_narrative_contract(self):
+        completed = self.command("demo", "--json")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        self.assert_story(json.loads(completed.stdout))
 
     def test_human_command_prints_the_saved_checked_text_with_one_source_disclosure(self):
         completed = self.command("demo")

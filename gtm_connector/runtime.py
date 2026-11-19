@@ -24,6 +24,7 @@ from cryptography.x509.oid import NameOID
 import uvicorn
 
 from . import calls, slack, store
+from . import strict_json
 from .auth import LocalAuthority, create_auth_app
 from .gateway import Connector, require_distinct_databases
 
@@ -69,15 +70,6 @@ class SourceIdentityError(ValueError):
     code = "source_identity_mismatch"
 
 
-def _unique_marker(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError
-        result[key] = value
-    return result
-
-
 def _read_marker(path, *, require_schema=True):
     """Read bounded private metadata without following links or changing it."""
     try:
@@ -93,7 +85,7 @@ def _read_marker(path, *, require_schema=True):
                 or opened.st_mode & 0o077 or opened.st_size > 4096 or opened.st_nlink != 1
                 or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)):
             raise ValueError
-        marker = json.loads(source.read(4097), object_pairs_hook=_unique_marker)
+        marker = strict_json.loads(source.read(4097))
     if not isinstance(marker, dict) or (require_schema and type(marker.get("schema_version")) is not int):
         raise ValueError
     return marker
@@ -157,8 +149,10 @@ def _prepare_calls_selection(directory, backend, demo_binding):
                                   "Use the original private state or a fresh --state-dir.") from None
     try:
         owner = _read_marker(directory / "owner.json", require_schema=False)
-        prior_backend = owner.get("calls_backend", "fixture") if owner is not None else None
-        if prior_backend not in (None, "fixture", "imported"):
+        prior_backend = owner.get("calls_backend") if owner is not None else None
+        if owner is not None and (prior_backend not in ("fixture", "imported")
+                                  or owner.get("crm_backend") not in ("sqlite", "salesforce")
+                                  or owner.get("slack_backend") not in ("fixture", "slack")):
             raise ValueError
     except (OSError, ValueError, UnicodeError, RecursionError):
         raise SourceIdentityError("The prior local backend cannot be verified from private owner metadata. "
@@ -241,16 +235,9 @@ def _prepare_source_state(directory, reader, binding, *, calls_backend="fixture"
             try:
                 owner = _read_marker(directory / "owner.json", require_schema=False)
                 if owner is not None:
-                    if "crm_backend" not in owner:
-                        # Before Salesforce support, this complete owner shape
-                        # represented SQLite. An incomplete document proves no mode.
-                        legacy_keys = {"issuer", "resource", "cert_path", "client_id", "redirect_uri", "owner_secret"}
-                        if set(owner) != legacy_keys or any(not isinstance(value, str) or not value
-                                                            for value in owner.values()):
-                            raise ValueError
-                    elif owner["crm_backend"] not in ("sqlite", "salesforce"):
+                    if owner.get("crm_backend") not in ("sqlite", "salesforce"):
                         raise ValueError
-                    connected_state = owner.get("crm_backend", "sqlite") == "salesforce"
+                    connected_state = owner["crm_backend"] == "salesforce"
             except (OSError, ValueError, UnicodeError, RecursionError):
                 raise SourceIdentityError("The prior local backend cannot be verified from private owner metadata. "
                                           "Use a fresh --state-dir.") from None
@@ -419,15 +406,14 @@ def _prepare_slack_selection(directory, backend, connection_dir, expected_bindin
         raise SlackMappingError("slack_mapping_invalid") from None
     try:
         owner = _read_marker(directory / "owner.json", require_schema=False)
+        prior = owner.get("slack_backend") if owner is not None else None
+        if owner is not None and prior not in ("fixture", "slack"):
+            raise ValueError
     except (OSError, ValueError, UnicodeError, RecursionError):
         if backend == "fixture" and marker is None and not os.path.lexists(directory / "slack-mappings.json"):
-            # Existing CRM/calls preparation rejects this owner before any source
-            # work. Preserve that established diagnostic when no live Slack is selected.
+            # CRM and calls preparation reports this unusable owner file with its own error.
             return None, None
         raise SlackMappingError("slack_mapping_invalid") from None
-    prior = owner.get("slack_backend", "fixture") if owner is not None else None
-    if prior not in (None, "fixture", "slack"):
-        raise SlackMappingError("slack_mapping_invalid")
     if backend == "fixture":
         if marker is not None or prior == "slack" or os.path.lexists(directory / "slack-mappings.json"):
             raise SlackMappingError("slack_source_mismatch")
@@ -559,8 +545,7 @@ class _LocalHTTPS:
             server.should_exit = True
         for thread in self.threads:
             if thread.ident is not None:
-                # A bounded source read can outlast the old ten-second join.
-                # Keep its state lock and TLS files until its server has finished.
+                # A source read may still be running. Keep the state lock and TLS files until it ends.
                 thread.join()
         for sock in self.sockets:
             sock.close()

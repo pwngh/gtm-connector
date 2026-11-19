@@ -21,6 +21,7 @@ import uuid
 
 from mcp.server.mcpserver.exceptions import ToolError
 
+from . import strict_json
 from .briefing import BriefingError, RenewalFieldsUnmapped, assemble_evidence
 from .citations import BriefRejected, check_brief
 from .drafting import FixtureDraftAdapter
@@ -74,15 +75,6 @@ class ChildRead:
     audit_id: str
     envelope: dict | None  # None when the caller's grant lacks this source's scope.
     private: dict = field(default_factory=dict)  # Facts for the brief only, never for the caller.
-
-
-def _unique(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
 
 
 def _directory(context: SelectedContext) -> Path:
@@ -243,7 +235,7 @@ def _load(context: SelectedContext, brief_id) -> tuple[dict, str]:
     if len(payload) > MAX_ARTIFACT_BYTES:
         raise ToolError("brief_invalid")
     try:
-        artifact = json.loads(payload, object_pairs_hook=_unique)
+        artifact = strict_json.loads(payload)
     except (ValueError, UnicodeError, RecursionError):
         raise ToolError("brief_invalid") from None
     if (not isinstance(artifact, dict) or set(artifact) != _ARTIFACT_KEYS

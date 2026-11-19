@@ -55,8 +55,7 @@ TOOL_DEFINITIONS = {
     ),
 }
 
-# The default demo keeps its historical six tools. A selection replaces the write
-# with the two caller-run brief tools.
+# The default server offers six tools. A selection replaces the write with the two brief tools.
 DEFAULT_TOOLS = frozenset({"search_accounts", "get_account", "list_opportunities", "read_call_notes",
                            "read_slack_messages", "log_activity"})
 SELECTED_TOOLS = frozenset({"search_accounts", "get_account", "list_opportunities", "read_call_notes",

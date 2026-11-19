@@ -1,0 +1,22 @@
+"""One parser for every document the connector reads."""
+
+from decimal import Decimal
+import unittest
+
+from gtm_connector import strict_json
+
+
+class StrictJSONTests(unittest.TestCase):
+    def test_accepts_ordinary_documents_and_a_caller_float_parser(self):
+        self.assertEqual(strict_json.loads(b'{"a": [1, 2.5, "x", null, true]}'), {"a": [1, 2.5, "x", None, True]})
+        self.assertEqual(strict_json.loads('{"a": 1.10}', parse_float=Decimal), {"a": Decimal("1.10")})
+
+    def test_refuses_duplicate_keys_non_finite_numbers_and_bad_utf8(self):
+        for document in ('{"a": 1, "a": 2}', '{"a": {"b": 1, "b": 1}}', '{"a": NaN}', '{"a": Infinity}',
+                         '{"a": -Infinity}', '{"a": 1e999}', '{"a": -1e999}', b'{"a": "\xff"}', "{"):
+            with self.subTest(document=document), self.assertRaises(ValueError):
+                strict_json.loads(document)
+
+
+if __name__ == "__main__":
+    unittest.main()

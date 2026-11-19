@@ -12,6 +12,8 @@ import stat
 from urllib.parse import parse_qsl, urlsplit
 import uuid
 
+from . import strict_json
+
 
 MAX_MAPPING_BYTES = 131072
 MAX_MAPPINGS = 100
@@ -162,15 +164,6 @@ def validate_slack_mapping(mapping, *, account_id, crm_binding, slack_binding):
         raise SlackMappingError("slack_mapping_invalid") from None
 
 
-def _unique(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError
-        result[key] = value
-    return result
-
-
 @contextmanager
 def _directory(path):
     path = Path(path)
@@ -235,8 +228,7 @@ def _read(descriptor, name, *, crm_binding, slack_binding):
     try:
         if len(raw) > MAX_MAPPING_BYTES:
             raise ValueError
-        document = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique,
-                              parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        document = strict_json.loads(raw.decode("utf-8"))
     except (ValueError, UnicodeError, RecursionError):
         raise SlackMappingError("slack_mapping_invalid") from None
     return _validate_document(document, crm_binding=crm_binding, slack_binding=slack_binding)

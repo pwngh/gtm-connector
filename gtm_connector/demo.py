@@ -43,8 +43,7 @@ def _activities(directory):
 
 def run(directory):
     """Look up an account, observe a refusal, and prepare one read-only brief."""
-    # Recognize old or renamed books before Runtime replaces private owner/TLS files.
-    # This owner-only local inspection never calls a source service or writes state.
+    # Refuse a CRM file that is not the demo book before Runtime replaces owner and TLS files.
     crm_path = Path(directory) / "crm.sqlite3"
     if crm_path.exists() or crm_path.is_symlink():
         _require_fixture(_private(Path(directory).resolve(), directory=True) and _private(crm_path),

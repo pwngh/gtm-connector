@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
-"""Owner-run demo import binding, private recording, and exact-record cleanup."""
+"""Demo import binding and exact-record cleanup, run by the operator."""
 
 import argparse
-from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import shlex
 import subprocess
 import sys
 import time
@@ -237,46 +234,14 @@ def brief_arguments(args, binding):
             "--state-dir", str(args.state_dir.resolve()), *(["--json"] if args.json else [])]
 
 
-def record(args, binding):
-    output = args.output.absolute()
-    private_root = ROOT / "var"
-    if output.exists() or output.is_symlink() or not output.resolve().is_relative_to(private_root.resolve()):
-        raise KitError("Choose a new recording filename under the repository's ignored var folder.")
-    output.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-    output.parent.chmod(0o700)
-    command = [sys.executable, str(Path(__file__).resolve()), "brief", "--sf-org", args.sf_org,
-               "--binding", str(args.binding.resolve()), "--account-number", args.account_number,
-               "--state-dir", str(args.state_dir.resolve())]
-    configuration = output.parent / (output.stem + "-config")
-    configuration.mkdir(mode=0o700)
-    (configuration / "config.toml").write_text('[session]\ncapture_input = false\ncapture_env = "TERM"\n')
-    environment = dict(os.environ, ASCIINEMA_CONFIG_HOME=str(configuration), TERM="xterm-256color")
-    result = subprocess.run(["asciinema", "rec", "--headless", "--quiet", "--return", "--output-format",
-                             "asciicast-v2", "--window-size", "112x32", "--capture-env", "TERM", "--title",
-                             "Private Salesforce demo: live CRM and invented local notes", "--command",
-                             shlex.join(command), str(output)], env=environment, check=False)
-    if output.exists():
-        output.chmod(0o600)
-    if result.returncode:
-        raise KitError("The live recording did not complete. Its partial output remains private under var.")
-    provenance = {"recorded_at_utc": datetime.now(timezone.utc).isoformat(),
-                  "sources": {"crm": "salesforce", "calls": "invented local fixtures",
-                              "slack": "invented local fixtures"},
-                  "as_of": binding.as_of, "cast_sha256": hashlib.sha256(output.read_bytes()).hexdigest()}
-    receipt = output.with_suffix(".provenance.json")
-    with receipt.open("x") as stream:
-        stream.write(json.dumps(provenance, indent=2) + "\n")
-    return {"status": "recorded", "recording": str(output), "private": True}
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Prepare the Salesforce kit and remove imported records.",
                                      epilog="Example: python scripts/salesforce-demo.py bind --receipt var/import.json "
                                             "--output var/binding.json")
-    parser.add_argument("action", choices=("prepare", "bind", "brief", "remove", "record"))
+    parser.add_argument("action", choices=("prepare", "bind", "brief", "remove"))
     parser.add_argument("--receipt", type=Path, help="Read the saved successful sf import JSON.")
     parser.add_argument("--output", type=Path,
-                        help="Write exported kit files, a private binding, or a private recording.")
+                        help="Write exported kit files or a private binding.")
     parser.add_argument("--binding", type=Path, help="Read the private binding made from the import receipt.")
     parser.add_argument("--sf-org", help="Use this existing Salesforce CLI alias explicitly.")
     parser.add_argument("--account-number", default="GTM-DEMO-001", help="Choose an invented manifest AccountNumber.")
@@ -288,7 +253,7 @@ def main(argv=None):
     sf = None
     try:
         from gtm_connector.salesforce_demo import bind_import, kit_files, load_binding, write_binding
-        if args.action in ("prepare", "bind", "record") and args.output is None:
+        if args.action in ("prepare", "bind") and args.output is None:
             raise KitError("This action requires --output. Run this script with --help.")
         if args.action == "prepare":
             if args.output.exists():
@@ -311,9 +276,6 @@ def main(argv=None):
                 from gtm_connector.cli import main as connector_main
                 print("Sources: live Salesforce CRM; invented local call notes and Slack messages.", file=sys.stderr)
                 return connector_main(brief_arguments(args, binding))
-            if args.action == "record":
-                brief_arguments(args, binding)
-                result = record(args, binding)
             else:
                 sf = SalesforceCLI(args.sf_org)
                 def progress(event):

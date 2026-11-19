@@ -1,8 +1,0 @@
-{
-  "name": "GTM connector demo",
-  "image": "mcr.microsoft.com/devcontainers/python@sha256:614286ffa213317a22791848de8621fd729849f8764c3bc29ffa1a01d56796a3",
-  "remoteUser": "vscode",
-  "otherPortsAttributes": {
-    "onAutoForward": "ignore"
-  }
-}

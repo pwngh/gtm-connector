@@ -10,7 +10,7 @@ import tempfile
 import unittest
 
 from gtm_connector.client import LocalClient
-from gtm_connector.inspector import write_inspector_config
+from gtm_connector.connections import connect
 from gtm_connector.runtime import Runtime
 
 
@@ -23,15 +23,13 @@ class InspectorConfigurationTests(unittest.TestCase):
     def test_cli_exports_only_the_explicit_grant_in_a_private_config(self):
         with Runtime(self.state) as runtime:
             result = subprocess.run(
-                [sys.executable, "-m", "gtm_connector", "inspector-config", "--json",
+                [sys.executable, "-m", "gtm_connector", "connect", "inspector", "--json",
                  "--state-dir", str(self.state), "--scope", "crm:read"],
                 capture_output=True, text=True, timeout=30,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             summary = json.loads(result.stdout)
             path = Path(summary["config"])
-            self.assertEqual(summary["scopes"], ["crm:read"])
-            self.assertEqual(summary["certificate"], runtime.config["cert_path"])
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
             content = path.read_text()
             server = json.loads(content)["mcpServers"]["gtm-connector"]
@@ -48,7 +46,7 @@ class InspectorConfigurationTests(unittest.TestCase):
 
     def test_explicit_calls_grant_and_config_symlink_rejection(self):
         with Runtime(self.state) as runtime:
-            write_inspector_config(self.state, ["crm:read", "calls:read"])
+            connect(self.state, "inspector", ["crm:read", "calls:read"])
             path = self.state / "inspector.json"
             config = json.loads(path.read_text())
             token = config["mcpServers"]["gtm-connector"]["headers"]["Authorization"][7:]
@@ -59,23 +57,14 @@ class InspectorConfigurationTests(unittest.TestCase):
             target.write_text("keep")
             path.symlink_to(target)
             with self.assertRaises(OSError):
-                write_inspector_config(self.state, ["crm:read"])
+                connect(self.state, "inspector", ["crm:read"])
             self.assertEqual(target.read_text(), "keep")
-
-    def test_missing_scope_is_a_cli_error_without_creating_state(self):
-        result = subprocess.run(
-            [sys.executable, "-m", "gtm_connector", "inspector-config", "--state-dir", str(self.state)],
-            capture_output=True, text=True, timeout=30,
-        )
-        self.assertEqual(result.returncode, 2)
-        self.assertIn("--scope", result.stderr)
-        self.assertFalse(self.state.exists())
 
     def test_stopped_authority_returns_a_clear_error(self):
         with Runtime(self.state):
             pass
         result = subprocess.run(
-            [sys.executable, "-m", "gtm_connector", "inspector-config",
+            [sys.executable, "-m", "gtm_connector", "connect", "inspector",
              "--state-dir", str(self.state), "--scope", "crm:read"],
             capture_output=True, text=True, timeout=30,
         )

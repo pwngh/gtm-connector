@@ -17,6 +17,8 @@ import sqlite3
 import stat
 from typing import Any
 
+from . import strict_json
+
 
 MAX_RAW_BYTES = 2 * 1024 * 1024
 MAX_UNITS = 10_000
@@ -72,18 +74,9 @@ def _digest(value):
     return hashlib.sha256(_canonical(value)).hexdigest()
 
 
-def _unique(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise CallsImportError("calls_import_corrupt")
-        result[key] = value
-    return result
-
-
 def _json(value):
     try:
-        return json.loads(value, object_pairs_hook=_unique)
+        return strict_json.loads(value)
     except (TypeError, ValueError, UnicodeError, RecursionError):
         raise CallsImportError("calls_import_corrupt") from None
 
@@ -636,7 +629,7 @@ def store_import(path: Path, parsed: dict, excerpt: dict, *, association: dict,
 
 def list_imports(path: Path, *, crm_binding: dict, account_id: str | None = None,
                  limit: int = 100, after: str | None = None) -> dict[str, Any]:
-    """List bounded historical metadata without opening transcript content BLOBs."""
+    """List import metadata without opening transcript content."""
     if (not _valid_binding(crm_binding) or not _int(limit, 1, 100)
             or (account_id is not None and not _valid_account(account_id, crm_binding))
             or (after is not None and (not isinstance(after, str) or not _NOTE_ID.fullmatch(after)))):

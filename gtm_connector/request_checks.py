@@ -1,23 +1,37 @@
 """Pure request decisions. Verification, clocks, and state writes stay in the gateway."""
 
 from dataclasses import dataclass
-from enum import Enum
 import hashlib
 import math
-from typing import Literal, Mapping, cast
+from typing import Mapping
 from urllib.parse import urlsplit
 
 from mcp.server.auth.provider import AccessToken
 
-from .refusals import REFUSALS
 from .tool_definitions import ToolDefinition, valid_arguments
 
 
-class Missing(Enum):
-    VALUE = "not supplied"
+@dataclass(frozen=True)
+class Refusal:
+    status: int
+    code: int
 
 
-MISSING = Missing.VALUE
+REFUSALS = {
+    "request_too_large": Refusal(413, -32600),
+    "invalid_json": Refusal(400, -32700),
+    "untrusted_origin_or_host": Refusal(403, 1003),
+    "invalid_token": Refusal(401, 1001),
+    "rate_limited": Refusal(429, 1002),
+    "insufficient_scope": Refusal(403, 1004),
+    "crm_write_disabled": Refusal(403, 1005),
+    "invalid_arguments": Refusal(400, -32602),
+    "missing_protocol_version": Refusal(400, -32602),
+    "protocol_version_mismatch": Refusal(400, -32020),
+    "unsupported_protocol_version": Refusal(400, -32022),
+}
+
+
 Windows = Mapping[str, tuple[float, int]]
 
 
@@ -61,7 +75,6 @@ class RequestError:
 
 @dataclass(frozen=True)
 class RequestDecision:
-    needs: Literal["token", "wall_time", "rate_time"] | None = None
     error: RequestError | None = None
     windows: dict[str, tuple[float, int]] | None = None
 
@@ -82,10 +95,8 @@ def charge_rate(windows: Windows, raw_token: str, rate_time: float,
 
 def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows,
                   definitions: Mapping[str, ToolDefinition], *,
-                  token: AccessToken | None | Missing = MISSING,
-                  wall_time: float | Missing = MISSING,
-                  rate_time: float | Missing = MISSING) -> RequestDecision:
-    """Request missing inputs in order, then return a decision without changing inputs."""
+                  token: AccessToken | None, wall_time: float, rate_time: float) -> RequestDecision:
+    """Return the first refusal in a fixed order, or none. Inputs are never changed."""
     if request.body_size > 65536:
         return RequestDecision(error=RequestError("request_too_large", "request body exceeds 65536 bytes"))
     if not isinstance(request.parsed, dict):
@@ -95,24 +106,14 @@ def check_request(request: RequestFacts, policy: RequestPolicy, windows: Windows
             or request.headers.get("host") != urlsplit(policy.resource).netloc):
         return RequestDecision(error=RequestError("untrusted_origin_or_host", "untrusted origin or host"))
     raw = request.raw_token if sum(name.lower() == b"authorization" for name in request.header_names) == 1 else None
-    if not raw:
-        token = None
-    elif token is MISSING:
-        return RequestDecision(needs="token")
-    if token is not None and token.expires_at is not None and wall_time is MISSING:
-        return RequestDecision(needs="wall_time")
-    # A supplied token expiry requested wall_time above; no clock value is read here.
-    if (token is None or token.expires_at is None or token.expires_at <= cast(float, wall_time)
+    if (not raw or token is None or token.expires_at is None or token.expires_at <= wall_time
             or token.resource != policy.resource):
         return RequestDecision(error=RequestError("invalid_token", "invalid or expired access token", {
             "WWW-Authenticate": f'Bearer error="invalid_token", resource_metadata="{policy.metadata_url}"',
         }))
     updated = None
     if request.is_call:
-        if rate_time is MISSING:
-            return RequestDecision(needs="rate_time")
-        # Missing credentials already returned the invalid-token decision.
-        updated, limited = charge_rate(windows, cast(str, raw), rate_time, policy)
+        updated, limited = charge_rate(windows, raw, rate_time, policy)
         if limited is not None:
             return RequestDecision(windows=updated, error=limited)
         definition = definitions.get(request.tool)

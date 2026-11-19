@@ -84,8 +84,7 @@ class ConnectionTests(unittest.TestCase):
 
             # Interleave after the first config write, at the former shared-file
             # boundary. A second app must never change the first app's grant.
-            with patch("gtm_connector.inspector.private_file", side_effect=write_then_connect), \
-                    patch("gtm_connector.runtime.private_file", side_effect=write_then_connect):
+            with patch("gtm_connector.runtime.private_file", side_effect=write_then_connect):
                 first = connect(self.state, "claude-code", ["crm:read"])
             self.assertTrue(interleaved)
             for result, scopes in ((first, ["crm:read"]), (second, ["crm:write"])):

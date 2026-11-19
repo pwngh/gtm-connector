@@ -1,186 +1,116 @@
 # Tools and source data
 
-Six tools read selected CRM, calls, and Slack sources or log a fixture activity,
-a note about an account interaction. The default sources use independent local
-SQLite stores. Run these commands from the repository root.
+The connector serves six tools over CRM, calls, and Slack. By default each source is its own local
+SQLite store of invented records.
 
-| Tool | Required scope | Records returned |
+| Tool | Scope | Returns |
 | --- | --- | --- |
-| `search_accounts` | `crm:read` | Accounts matching a literal name substring, or at most two exact Salesforce AccountNumber matches |
-| `get_account` | `crm:read` | One account, its contacts, and standard Contracts when using Salesforce |
-| `list_opportunities` | `crm:read` | Opportunities, optionally filtered by account |
-| `read_call_notes` | `calls:read` | Fixture notes or one explicitly selected imported transcript excerpt |
-| `read_slack_messages` | `slack:read` | Messages from the separate Slack database |
-| `log_activity` | `crm:write` | An activity created or reused by idempotency key |
+| `search_accounts` | `crm:read` | Accounts whose name contains the literal query, or at most two exact Salesforce AccountNumber matches. |
+| `get_account` | `crm:read` | One account, its contacts, and with Salesforce its standard Contracts. |
+| `list_opportunities` | `crm:read` | Opportunities, for one account when given. |
+| `read_call_notes` | `calls:read` | Fixture notes, or the selected excerpt of an [imported transcript](calls.md). |
+| `read_slack_messages` | `slack:read` | Fixture messages, or the mapped [live thread](slack.md). |
+| `log_activity` | `crm:write` | The activity created, or the existing one for that idempotency key. |
 
-CRM, calls, and Slack grants do not imply one another. Each tool declares its
-scope in `gtm.demo/requiredScope` metadata. The gateway and handler enforce it;
-a denial returns HTTP 403.
-
-Each returned record has a reference that names its source, such as
-`crm/accounts/acc-001`, `calls/call_notes/note-007`, or `slack/messages/msg-007`.
-The content is marked as untrusted data.
-
-Imported transcripts keep the same calls tool and permission. Their immutable
-`note-` reference identifies a selected revision whose manifest names exact cue
-or line ranges. The tool never returns the complete original export. See
-[transcript import, inspection, and limits](calls.md).
-
-`serve --selection FILE` limits these reads to the selected accounts, replaces
-`log_activity` with `prepare_renewal_brief` and `read_renewal_brief`, and turns
-writes off. See [the selection guide](selection.md).
+- Each tool declares its scope in `gtm.demo/requiredScope` metadata, and a call without it gets
+  HTTP 403.
+- Every record carries a reference such as `crm/accounts/acc-001`, `calls/call_notes/note-007`, or
+  `slack/messages/msg-007`. Results are marked as untrusted data.
+- `serve --selection FILE` limits reads to the selected accounts and replaces `log_activity` with
+  `prepare_renewal_brief` and `read_renewal_brief`. See [selection](selection.md).
+- `serve --crm-backend salesforce` reads CRM from Salesforce and omits `log_activity`. See
+  [Salesforce](salesforce.md).
 
 ## Fixtures
 
-The fixed book uses invented company and person names, mixed industries, and
-reserved `.example` email domains. No fixture comes from a live org or employer.
-`crm.sqlite3` holds 30 accounts with their contacts, opportunities, and activities.
-Call notes live separately in `calls.sqlite3`, which holds 29 notes. Account
-`acc-004` has none.
+Every company, person, and message is invented, with `.example` email domains. `crm.sqlite3` holds
+30 accounts, 30 contacts, and 30 opportunities. `calls.sqlite3` holds 29 notes, and `slack.sqlite3`
+holds 29 messages. The fixed demo date is `2027-01-15`.
 
-`slack.sqlite3` holds 29 messages in account-specific channels. Account
-`acc-005` has none. `msg-003` reports delayed security review and pending
-procurement, while `msg-007` contains an instruction to invoke a write.
-Both remain quoted source data.
+| Record | Case |
+| --- | --- |
+| `acc-001`, `acc-002` | `acc-001` renews in 17 days. `acc-002` is at risk. |
+| `opp-003`, `note-003`, `msg-003` | `closed_won` against unapproved procurement and a delayed security review. |
+| `acc-004`, `acc-005` | `acc-004` has no call notes. `acc-005` has no Slack messages. |
+| `acc-006` | An October call note and a January Slack message disagree on seats. Nothing is flagged. |
+| `acc-007` | Juniper Crest Learning, the demo account. It renews on `2027-01-29`. Its contact has no role. |
+| `note-007`, `msg-007` | Each asks for a write. Both stay quoted data, and no activity is created. |
 
-On the fixed demo date `2027-01-15`, `acc-001` renews in 17 days and `acc-002`
-is at risk. `opp-003` reports `closed_won`, while `note-003` says procurement
-has not approved the renewal.
+Reseeding keeps record IDs, edits, and activities. An incomplete or unknown fixture set is
+rejected, and so is a combined CRM and calls database. Nothing is migrated, so use a fresh
+`--state-dir`.
 
-`note-007` asks for a write. The workflow keeps it as quoted data and creates
-zero activities.
-
-The renewal story follows Morgan Reed, an invented account rep, and Juniper
-Crest Learning (`acc-007`). It renews on `2027-01-29`, fourteen days after the
-fixed demo date. Its contact Dana Crest has no recorded role. Harborlight Field
-Services (`acc-006`) has an October call note whose seat-count advice disagrees
-with a January Slack update. Those dates and source statements remain visible;
-the checker does not infer arbitrary contradictions or classify stale notes.
-
-A reseed preserves record IDs, edits, and activities. Incomplete or unexpected
-fixtures are rejected. The legacy combined CRM/calls database cannot be used
-with separate stores; choose `var/v2` or a fresh path.
-Existing complete fixtures retain their old names and content. Use a fresh
-`--state-dir` for the new story. There is no automatic migration or deletion.
-
-## Run the connector demo
-
-The demo requires macOS or Linux with Python 3.11+, SQLite, and venv support. The first
-dependency install needs internet. No external database service, account,
-model, or API key is needed.
-
-```sh
-./scripts/demo.sh
-```
-
-The script creates `.venv`, installs `requirements.lock`, and runs the tests.
-It then starts two temporary HTTPS services on the loopback interface. The CLI
-looks up Juniper Crest Learning with a CRM-only grant, receives a call-note
-refusal, and obtains explicit CRM, calls, and Slack read grants for a cited
-renewal brief. Both services stop afterward, leaving state in the gitignored
-`var/renewal-demo` directory. To use another directory, run:
-
-```sh
-./scripts/demo.sh --state-dir /tmp/gtm-fixture
-```
-
-The demo prints the rep's workflow and checked brief by default. The injected
-note stays quoted, no activity is created, and the follow-up remains a proposal.
-Slack is part of the story; `demo --with-slack` remains an accepted spelling.
-To inspect the complete result as JSON, run:
-
-```sh
-./scripts/demo.sh --json
-```
-
-The narrative run makes six tool attempts: the lookup, the denied call-note
-read, and four authorized briefing reads. It saves one accepted brief, records
-five successful receipts and one error receipt, and creates zero activities.
-[The CLI contract](cli.md) describes its JSON result. Repeated runs retain
-existing state and add one brief and six receipts each.
-
-The full walkthrough runs with `./scripts/five-minute-demo.sh`. It follows the
-same invented rep and account, inspects that brief's usage, and demonstrates
-acceptance of its saved text followed by rejection of an appended unsupported
-sentence. It prints the private directory where it saves its output and the
-command for separate guarantee checks. See [DEMO.md](../DEMO.md). First-install
-download time varies.
+`seed`, `accounts --query 'Alder Vale'`, and `account acc-007` read the SQLite file directly,
+outside MCP authorization. `--db PATH` selects the file, and only `seed` creates it. The account
+view leaves out opportunities and call notes. With `--crm-backend salesforce`, `accounts` and
+`account` read through the scoped, audited gateway instead.
 
 ## Run the guarantee checks
 
-`verify` retains the earlier demo's checks and JSON shape. Its explicit local
-write checks create one fixture activity to prove idempotent retries. Keep its
-state separate from the read-only story:
+`verify` creates one fixture activity, so keep its state apart from the demo's.
 
 ```sh
 .venv/bin/python -m gtm_connector verify --state-dir var/verification --json
 ```
 
-That command returns these fields and results:
-
 | Field | Result |
 | --- | --- |
 | `accounts` | `30` |
-| `notes_without_scope.status` | HTTP `403` |
+| `notes_without_scope.status`, `rate_limit.status` | HTTP `403` and HTTP `429` |
 | `empty_notes` | `[]` for `acc-004` |
-| `conflicting_sources` | `opp-003` says `closed_won`; `note-003` reports unapproved procurement |
-| `injection_note.activities_created` | `0` |
+| `conflicting_sources`, `contradiction_flags` | `opp-003` says `closed_won`; `note-003` reports unapproved procurement. One flag cites both. |
 | `idempotent_write` | `requests: 2`, `activities: 1` |
-| `rate_limit.status` | HTTP `429` |
-| `audit_rows` | `14` connector receipts |
+| `audit_rows`, `brief_audit_rows` | `14` connector receipts, and `9` reads across the three briefs |
 | `briefs` | Two briefs: `acc-003` with calls access, `acc-001` without it |
-| `injection_brief.activities_created` | `0` across all three briefs, including `acc-007` |
-| `brief_audit_rows` | `9` reads across the three briefs |
+| `injection_note.activities_created`, `injection_brief.activities_created` | `0`, the second across all three briefs, including `acc-007` |
 | `uncited_candidate_rejected` | `true` |
-| `contradiction_flags` | One flag citing `opp-003` and `note-003` |
 
-The run produces 23 receipts: 14 connector attempts and nine briefing reads.
-None of the briefs creates an activity, even when a note requests a write.
-The `conflicting_sources` result displays both records; its flag follows
-the specific rule described in [Briefs and citations](briefs.md).
+`verify --with-slack` adds a Slack read to each brief and checks the CRM-to-Slack, Slack-to-CRM,
+and Slack-to-calls denials. `audit_rows` becomes `18` and `brief_audit_rows` becomes `12`. See
+[Slack context](slack.md).
 
-The `verify --with-slack` option includes all three sources, so each of the three briefs
-uses four reads. The full brief includes a three-source conflict and a cited
-follow-up proposal. The restricted brief reports both denied grants. This mode
-also demonstrates CRM-to-Slack, Slack-to-CRM, and Slack-to-calls denials.
-[Slack context](slack.md) describes those cases.
+## Protocol and authorization
 
-## Inspect the local CRM
+The server implements
+[MCP revision 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28) and its
+[authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
+section. The official Python SDK is pinned to **2.3.0**.
 
-```sh
-python3 -m gtm_connector seed
-python3 -m gtm_connector accounts --query 'Alder Vale'
-python3 -m gtm_connector account acc-007
-```
+- The transport is stateless Streamable HTTP with per-request protocol metadata and
+  `server/discover`. Only revision 2026-07-28 is accepted. Subscriptions and legacy initialization
+  sessions are not supported.
+- Requests with an `Origin` header or a body over 65,536 bytes are refused.
+- Authorization is a local owner emulator, not production login or consent. `serve` grants no
+  scopes at startup. See the [security review](../SECURITY_REVIEW.md).
+- S256 PKCE, state, and issuer are checked. A code lasts 60 seconds and works once. A token is
+  opaque, bound to the resource, and lasts five minutes.
+- A restart invalidates every code and token. There are no refresh tokens and no dynamic client
+  registration.
+- Keep `owner.json` and bearer tokens out of model inputs.
+- Inspector CLI 2.15.0 is tested with `protocolEra: modern` and an explicit bearer grant. See
+  [clients](clients.md).
 
-These commands inspect the local CRM file directly, outside MCP authorization.
-Each accepts `--db PATH` to select a file; read commands do not create one if it
-is missing. The account view excludes opportunities and call notes. Output is
-readable text by default. Add `--json` for counts, an account array, or the full
-account object, respectively. See [the CLI contract](cli.md).
+### Request refusals
 
-## Run the tests
+A gateway refusal carries `error.data.reason`.
 
-```sh
-.venv/bin/python -m unittest discover -s tests -v
-```
+| Reason | HTTP status | JSON-RPC code |
+| --- | --- | --- |
+| `request_too_large` | 413 | -32600 |
+| `invalid_json` | 400 | -32700 |
+| `untrusted_origin_or_host` | 403 | 1003 |
+| `invalid_token` | 401 | 1001 |
+| `rate_limited` | 429 | 1002 |
+| `insufficient_scope` | 403 | 1004 |
+| `crm_write_disabled` | 403 | 1005 |
+| `invalid_arguments` | 400 | -32602 |
+| `missing_protocol_version` | 400 | -32602 |
+| `protocol_version_mismatch` | 400 | -32020 |
+| `unsupported_protocol_version` | 400 | -32022 |
 
-Tests run the real HTTPS CLI flow with temporary data. They cover stable fixtures
-and edge cases, independent scopes, invalid tokens, and PKCE. They also check
-resources, issuers, and protocol headers.
-
-Gateway tests cover one receipt per tool attempt, audit failures, rate limits,
-and idempotency. Brief tests distinguish denied and empty notes, preserve
-conflicts, and check evidence-copy changes. They reject unsupported citations
-and keep instructions as data. CI runs the full five-minute walkthrough on
-Python 3.11 and 3.14.
-
-## Optional external CRM reads
-
-The command `serve --crm-backend salesforce` replaces the three `crm:read`
-handlers. External mode omits `log_activity` and rejects direct write requests,
-while Slack remains a local fixture. Calls use fixtures by default or the
-explicitly selected imported transcripts. `seed` operates on SQLite only.
-`accounts` and `account` use SQLite by default; with `--crm-backend salesforce`,
-they read through the scoped, audited gateway. See
-[Salesforce account reads](salesforce.md#read-records-and-create-a-brief).
+- A missing, malformed, expired, or wrong-resource credential returns `invalid_token` without
+  saying which check failed.
+- `insufficient_scope` names the scope in `WWW-Authenticate`. `rate_limited` sends `Retry-After`.
+- SDK rejections, OAuth errors, and tool errors keep their own formats.
+- An audit or execution failure returns HTTP 503 with an error string and no reason. Read
+  [audit](audit.md) before retrying a write.

@@ -1,120 +1,190 @@
-# Invented account-channel context
+# Slack
 
-This option adds the team's account-channel context to a renewal brief using
-invented Slack messages. To select an existing workspace thread instead, follow
-the separate [live Slack guide](slack-live.md): authenticate, map, check, then
-use the explicit source flags. Authentication alone does not change this fixture
-source. The examples and evaluation below remain entirely invented.
+Sign in to a Slack app you already have, map one thread to one CRM account, then read it in a brief.
+The connector creates no app, asks for no client secret, and accepts no pasted token. A failed live
+read never falls back to invented messages. The tests use invented responses.
 
-`read_slack_messages` requires an independent `slack:read` grant. Its
-`slack.sqlite3` store stays separate from CRM, calls, and audit. It uses no Slack
-account, API token, or network request, and sends no messages.
+## Sign in
 
-## Run
+The app needs:
 
-These commands run from the repository root after setup:
+- [PKCE](https://docs.slack.dev/authentication/using-pkce/) enabled as a public client.
+- The exact redirect `http://localhost:PORT/slack/callback` registered, `PORT` from 1024 to 65535.
+- The user scope `channels:history`, `groups:history`, or both, approved for the workspace.
+
+| Command | What it does | Slack requests |
+| --- | --- | ---: |
+| `slack connect --client-id PUBLIC_CLIENT_ID --redirect-uri http://localhost:REGISTERED_PORT/slack/callback` | Opens the browser, waits up to ten minutes for approval, exchanges the code with PKCE, checks the identity, and saves the credentials. | At most 2 |
+| `slack status` | Reads the saved file. A missing connection exits 0. A corrupt file is an error. | 0 |
+| `slack status --check` | Verifies authentication and refreshes an expiring token once. It does not show that a thread is readable. | 1 or 2 |
+| `slack disconnect` | Removes local credentials. Repeating it succeeds. | 0 |
+| `slack disconnect --revoke` | Asks Slack to revoke the saved access token, then removes local credentials. If Slack does not confirm, it exits 5. Remove the app itself in Slack settings. | At most 1 |
+
+| Flag | Meaning |
+| --- | --- |
+| `--client-id`, `--redirect-uri` | `connect` only, required. The existing app's public client ID and exact registered redirect. |
+| `--user-scope` | `connect` only. `channels:history` (the default) or `groups:history` for private channels. Repeat it for both. Passing it replaces the default. |
+| `--team-id` | `connect` only. Require this workspace. It is never printed. |
+| `--connection-dir` | Every `slack` action. The credential folder, default `var/slack-connection`. |
+
+- No other scope is requested, and a grant that returns other scopes is refused.
+- Slack requests in one command share a 20-second deadline. Each response is limited to 64 KiB.
+- Ctrl-C exits 130. An approval or save that already finished is not undone, so run `slack status`.
+- A refresh token is single use and usable for 30 days.
+- Bot grants, organization-wide installs, GovSlack, confidential clients, and Slack's separate
+  user-centric OAuth endpoints are not supported.
+- Keep the credential folder apart from source state and audit folders, and never commit it.
+
+## Map, check, and brief
+
+Choose an unused `--state-dir`.
+
+```sh
+gtm-connector slack map --state-dir var/slack-selected --account acc-007 \
+  --thread-url 'COPIED_THREAD_LINK'
+gtm-connector slack check --state-dir var/slack-selected --account acc-007
+gtm-connector brief acc-007 --with-slack --slack-backend slack \
+  --slack-connection-dir var/slack-connection --state-dir var/slack-selected
+```
+
+| Command or flag | Rule |
+| --- | --- |
+| `slack map` | Requires a `ready` connection, makes one audited CRM lookup, and saves the selection. It fetches no messages. |
+| `slack check` | Reads the mapped thread through `read_slack_messages` and validates its receipt. It reads no CRM or calls data. |
+| `--thread-url` | The saved workspace's HTTPS origin and the path `/archives/CHANNEL/pTIMESTAMP`. A reply link names its parent through `thread_ts`. An optional `cid` must match. Other query fields, fragments, and other workspaces are refused. |
+| `--channel` with `--thread-ts` | Needed when the saved connection has no workspace origin. The timestamp is whole seconds, a dot, and exactly six digits. |
+| `--account`, `--account-number` | The CRM account ID: `acc-007`, or the `acc-sf-` form with Salesforce. Or, Salesforce only, a number that matches exactly one account. |
+| `--replace`, `--reassign` | Needed when the account already has another thread, and when the thread belongs to another account. |
+
+- `slack` actions take `--connection-dir`. Other commands take `--slack-connection-dir`.
+- Reuse the same state folder and source flags every time. Stop a `serve` running on it first.
+- Select the parent message. A reply selected as the parent fails the check.
+- With Salesforce or an imported transcript, `slack map`, `calls import`, and `brief` must each name
+  all three sources on one unused folder. See [calls](calls.md). `--salesforce-demo-binding` cannot
+  be combined with live Slack or imported calls.
+
+## Limits
+
+| Bound | Limit |
+| --- | --- |
+| Slack request | GET `https://slack.com/api/conversations.replies` only, following cursors to the end. Pages, retries, refresh, and identity checks share the budget below. |
+| HTTP attempts, including authentication and failures | 10 |
+| Response bytes across those attempts | 1 MiB |
+| One authentication response | 64 KiB |
+| Deadline for the whole operation | 20 seconds |
+| Message rows, including duplicates | 100 |
+| One message's text | 16 KiB of UTF-8 |
+| All unique message text | 64 KiB of UTF-8 |
+| Normalized result | 256 KiB of ASCII JSON |
+| One cursor | 2,048 UTF-8 bytes |
+| Selections in one state folder | 100, one thread per account and one account per thread |
+| Retries | One after `token_expired`, with at most one refresh. One after HTTP 429 when its delay is at most five seconds. Nothing else retries, and a read never starts a login. |
+| Accepted messages | Plain messages, `bot_message`, `me_message`, `file_share`, and `thread_broadcast` |
+| Refuse the whole read | Hidden messages, edit or delete wrappers, other subtypes, and missing text |
+| Counted and left out | Files, attachments, and blocks |
+| Author labels | `Slack app`, `Slack participant`, or `Unknown Slack author` |
+| Slack's rate policy | Slack limits some commercially distributed apps outside its Marketplace to one request per minute and 15 messages per request on this method. The connector cannot tell which [policy](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps/) applies. |
+
+- A read is not an archive. Earlier edits, deletions, and retention are unknown.
+- A live Slack brief saves `workflow_version: 5`, runs no model, and quotes every returned message.
+- Ctrl-C can wait for the read in flight. Windows is not supported.
+
+## JSON results
+
+`disconnect` returns `schema_version`, `status: "disconnected"`, `local_credentials_removed`,
+`remote_revoke_requested`, `remote_access_token_revoked`, and `revocation_error` (a fixed code or
+`null`). An error message starts with one of the reasons under Errors, and provider error text
+is never included. `connect` and `status` return:
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version`, `configured` | Integer `1`, and whether a saved credential file exists. |
+| `credential_state` | `missing`, `ready`, `identity_unchecked` (run `status --check`), or `refresh_pending` (run `connect`; it does not mean a refresh is running). |
+| `verification`, `verified_component` | `saved` for local inspection, or `live` when this command checked with Slack. Always `authentication`, never message access. |
+| `requested_scopes`, `granted_scopes` | Arrays in a fixed order. |
+| `rotation`, `access_expires_at`, `last_verified_at` | Whether the grant has a refresh token ([token rotation](https://docs.slack.dev/authentication/using-token-rotation/)), or `null`. UTC timestamps or `null`. |
+| `needs_login` | Whether `connect` is needed. An expired `ready` credential with a usable refresh token can be checked instead. |
+
+| Result | Fields |
+| --- | --- |
+| `slack map` | `schema_version`, `status` (`saved` or `unchanged`), `selection`, `thread_access: "unchecked"`, `counts`, `duration_ms`, and `next`. |
+| `slack check` | `schema_version: 1`, `status` (`passed` or `failed`), `crm_access_checked: false`, `calls_access_checked: false`, `duration_ms`, `api_calls`, `response_bytes`, `counts`, `steps`, and `next`, the first failed step's recovery command. Request and byte counts are `null` when unknown. |
+| `counts` | `auth_calls`, `message_calls`, `pages`, `raw_rows`, `messages`, `duplicates`, `refresh_attempts`, `token_retries`, `rate_retries`. |
+| `steps` | `private_state`, `mapping`, `credential_binding`, `thread_read`, `receipt`. Each has `name`, `status` (`pass`, `fail`, `not_run`), `count`, `duration_ms`, `api_calls`, `response_bytes`, `code`, `message`, `next`. |
+
+The check report holds no IDs, names, timestamps, message text, URLs, tokens, or paths. Tool results
+and saved briefs hold message text, Slack message IDs, and the mapping, so keep them and the state
+folder private. A `slack:read` grant can read every mapped account the server serves.
+
+## Errors
+
+A reason sets the exit code of a command, and is a step `code` in `slack check`.
+
+| Reason | Exit | Fix |
+| --- | ---: | --- |
+| `slack_invalid_configuration` | 2 | Correct the flags. |
+| `slack_connection_busy` | 1 | Finish or cancel the other command, then retry. |
+| `slack_private_state_invalid` | 3 | Use the original connection folder or an unused one. |
+| `slack_credentials_invalid` | 4 | Keep the file private and reconnect in an unused folder. |
+| `slack_not_connected`, `slack_reconnect_required` | 3 | Run `slack connect`. |
+| `slack_browser_unavailable` | 1 | Retry where a system browser works. |
+| `slack_callback_unavailable` | 1 | Free the registered localhost port. |
+| `slack_login_timeout` | 1 | Retry and approve within ten minutes. |
+| `slack_login_denied` | 3 | Retry only if you intend to approve. |
+| `slack_oauth_rejected` | 3 | Check the app's PKCE setting, redirect, and workspace approval. |
+| `slack_scope_mismatch` | 3 | Use a grant with exactly the selected scopes. |
+| `slack_identity_mismatch` | 3 | Restore the original identity or use another folder. |
+| `slack_token_type_unsupported` | 3 | Use a user grant from a public PKCE client. |
+| `slack_selection_invalid`, `slack_crm_configuration_invalid`, `slack_account_not_found` | 2 | Correct the account, link, channel, timestamp, or CRM flags. Find the account ID with `accounts`. |
+| `slack_account_ambiguous` | 3 | Pass the account ID with `--account`. |
+| `slack_association_failed`, `slack_association_invalid` | 4 | The CRM lookup failed. Nothing was saved. Check the CRM connection. |
+| `slack_crm_unavailable` | 5 | Check CRM access, then retry. |
+| `slack_mapping_missing`, `slack_mapping_conflict` | 3 | Run `slack map` for the account. For a conflict, review `--replace` and `--reassign`. |
+| `slack_source_mismatch` | 3 | Restore the original source flags, folders, and Slack identity. |
+| `slack_identity_unchecked` | 3 | Run `slack status --check`. |
+| `slack_thread_unavailable`, `slack_forbidden`, `slack_thread_changed`, `slack_thread_incomplete` | 3 | Check the selected parent, the history scope, and channel access. For a changed or incomplete thread, retry when it is stable. |
+| `slack_resource_limit`, `slack_output_too_large` | 3 | Select a smaller thread. |
+| `slack_clock_invalid` | 3 | Correct the local clock. |
+| `slack_mapping_invalid`, `slack_snapshot_invalid` | 4 | Keep the private files and inspect the setup before recreating it. |
+| `slack_response_invalid`, `slack_rate_limited`, `slack_timeout`, `slack_unavailable` | 5 | Run `slack status`, wait, then retry. |
+| `slack_storage_failed` | 1 | Fix access to the private folders, then run `slack status`. |
+
+## Invented messages in the demo
+
+`--with-slack` adds an account channel's invented Slack messages to a brief. It uses no Slack
+account, token, or network request.
 
 ```sh
 .venv/bin/python -m gtm_connector brief acc-003 --with-slack --json
 .venv/bin/python -m gtm_connector evaluate --with-slack
-.venv/bin/python -m gtm_connector demo --state-dir var/renewal-demo
 .venv/bin/python -m gtm_connector verify --with-slack --state-dir var/slack-verification
+.venv/bin/python -m gtm_connector demo --state-dir var/renewal-demo   # always includes Slack
 ```
 
-The brief command above returns JSON. Evaluation, demo, and verification print
-readable summaries; add `--json` to inspect their full result objects.
+- `read_slack_messages` requires `slack:read`. A Slack-only token cannot read CRM or call notes.
+- A Slack brief makes four audited reads and never requests `crm:write`. No model runs by default.
+- Messages live in `slack.sqlite3`. Their text is quoted as untrusted data.
+- There are 29 messages, `msg-001` through `msg-030` without `msg-005`. References look like
+  `slack/messages/msg-003`.
+- A four-read fixture brief saves `workflow_version: 2`. A missing version or `1` means three-read
+  evidence, which may hold no Slack records, receipts, or status. An unknown version fails.
+  Checking a saved brief fetches nothing.
 
-The full brief requests `crm:read`, `calls:read`, and `slack:read`. After the
-default three reads, it calls `read_slack_messages`, never requesting
-`crm:write`. The separate `verify --with-slack` run proves CRM grants cannot read
-Slack and a Slack-only token cannot read CRM or call notes. Every attempt is audited.
-
-The demo includes Slack by default and accepts `--with-slack` for compatibility.
-It follows Morgan Reed preparing Juniper Crest Learning's renewal, with a checked
-brief, quoted injected note, and proposed follow-up. The longer walkthrough uses
-the same invented person, account, and sources while inspecting that brief's
-usage and citation checks. Neither walkthrough connects to Slack.
-
-Default `brief` and `evaluate` commands retain their two-source workflow and
-182-claim baseline. Their Slack option selects four-read briefs and extended
-expectations; fixture drafting still runs without a model. Ollama accepts
-`--with-slack`, but its historical benchmark covers only the original two-source
-fixture corpus. No model score is claimed for the current book or Slack workflow.
-
-## Source data and claims
-
-The 29 invented messages belong to account channels such as
-`acct-juniper-crest`. Stable IDs run from
-`msg-001` through `msg-030`, excluding `msg-005`; references use
-`slack/messages/msg-003`. `msg-002` reports a departed champion. `msg-003` says:
-
-```text
-Security review is delayed. Procurement approval is still pending.
-```
-
-For that account, `opp-003` reports `closed_won`, while `note-003` reports
-unapproved procurement. Those exact contents trigger an additional conflict
-flag citing all three records. The existing two-source flag remains; neither
-source is resolved. Other wording does not trigger a detected conflict.
-
-These lines were captured from the documented `acc-003` command:
-
-```text
-- Three-source conflict: CRM opportunity opp-003 reports stage "closed_won", call note note-003 reports unapproved procurement, and Slack message msg-003 reports a delayed security review. [crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]
-- Proposed follow-up: Ask the account owner to confirm procurement and security review status. [crm/opportunities/opp-003] [calls/call_notes/note-003] [slack/messages/msg-003]
-```
-
-`msg-007` starts with the learning team's need for a training owner and a final
-seat count, then contains an instruction to invoke `log_activity`. The workflow
-quotes it as data, performs its fixed reads, and creates no activity. The model
-receives no tool interface. This test checks the boundary, not the truth of
-arbitrary source text. The October call note and January Slack update for
-`acc-006` disagree about seat needs; their dates and wording stay visible without
-a general contradiction or staleness detector.
-
-An empty successful read produces a statement that no messages were returned,
-citing its audit receipt. A matching HTTP 403 instead cites the denial receipt
-and reports missing `slack:read`. The checker requires the matching disclosure.
-Other failures stop the brief.
-
-## Follow-up proposal
-
-The extended brief requires exactly one supported `Proposed follow-up:` line,
-a suggested next step. For the recognized conflict, it asks to
-confirm procurement and security review status, citing all three records. If
-only the CRM/calls conflict is known, it covers procurement and cites those two
-records. Otherwise it asks for review of renewal context and cites the account.
-It invents no owner, deadline, discount, or promise.
-
-After the entire brief passes, the artifact copies that complete cited line
-into `proposed_follow_up`. An uncited or altered proposal rejects the whole
-brief. No separate unchecked model field or sending tool exists.
-
-## Snapshots and evaluation
-
-Four-read evidence uses `workflow_version: 2`. Missing version or explicit
-version `1` means existing three-read evidence. The checker fetches no new sources
-when checking a saved snapshot. Version 1 rejects Slack records, receipts, or status; unknown versions
-fail. Rejected and legacy artifacts gain no follow-up field.
-
-The expected manifest contains 182 base claim objects. Static Slack
-expectations add messages, conflicts, and follow-ups for the same 20 accounts.
-Extended evaluation uses 80 tool calls, scoring supported wording and exact
-references rather than semantic truth. Local-owner access and manual retention
-retain their limits. Atomic snapshot replacement does not guarantee power-loss
-durability.
-
-The fixture report records these results for
-`.venv/bin/python -m gtm_connector evaluate --with-slack --json`, using no model:
-
-| Measure | Result |
+| Message | Result in the brief |
 | --- | --- |
-| Accepted briefs | 20 / 20 |
-| Claims found and correctly cited | 223 / 223 |
-| Invented claims | 0 |
-| Audit receipts | 80 |
-| Activities created | 0 |
-| Input / output model tokens | 0 / 0 |
+| `msg-003`, a delayed security review | A three-source conflict flag with `opp-003` (`closed_won`) and `note-003` (unapproved procurement). The two-source flag stays, and neither source is resolved. The conflict rule matches the exact fixture text only. There is no general contradiction or staleness detector. |
+| `msg-006`, a January seat update | Shown beside the October call note it disagrees with. Nothing is flagged. |
+| `msg-007`, an instruction to call `log_activity` | Quoted as data. No activity is created. |
 
-The [recorded output and exact invocation](../evaluation/RESULTS_SLACK.json) file
-preserves UTC run times and per-account counts for the current invented book.
+The checker rejects the whole brief if a required line is missing, altered, or uncited.
+
+| Case | Required line |
+| --- | --- |
+| Messages returned | None. The default drafter quotes each message with its reference, and a draft may omit one. |
+| No messages | That none were returned, citing the audit receipt. |
+| HTTP 403 for missing `slack:read` | That the token lacks `slack:read`, citing the denial receipt. |
+| Any other Slack failure | None. The brief stops. |
+| Every Slack brief | Exactly one `Proposed follow-up:` line, copied into `proposed_follow_up`. It names no person, deadline, discount, or promise, and nothing sends it. |
+| Conflict in CRM, calls, and Slack | The proposal: confirm procurement and security review status. It cites all three records. |
+| Conflict in CRM and calls | The proposal: confirm procurement status. It cites both records. |
+| No conflict | The proposal: review the cited renewal context. It cites the account. |

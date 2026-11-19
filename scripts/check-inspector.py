@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from gtm_connector import store
 from gtm_connector.gateway import Connector
-from gtm_connector.inspector import write_inspector_config
+from gtm_connector.connections import connect
 from gtm_connector.runtime import Runtime, private_file
 
 INSPECTOR = "2.15.0"
@@ -92,9 +92,9 @@ def check():
         version = invoke(["--version"], environment, timeout=240)
         assert version[0] == 0 and version[1].strip() == INSPECTOR, "Inspector version mismatch"
         with patch.object(Connector, "__call__", observe), Runtime(directory / "state", rate_limit=2) as runtime:
-            summary = write_inspector_config(runtime.directory, ["crm:read"])
+            summary = connect(runtime.directory, "inspector", ["crm:read"])
             config_path = Path(summary["config"])
-            environment["NODE_EXTRA_CA_CERTS"] = summary["certificate"]
+            environment["NODE_EXTRA_CA_CERTS"] = str(runtime.directory / "tls.pem")
             base = ["--config", str(config_path), "--server", "gtm-connector", "--format", "json",
                     "--stored-auth-only", "--quiet"]
 
@@ -134,18 +134,18 @@ def check():
             denied_calls = run("tools/call", "read_call_notes", 403)
             assert "calls:read" in denied_calls["error"]["message"]
             run("tools/call", "get_account", 429)
-            write_inspector_config(runtime.directory, ["calls:read"])
+            connect(runtime.directory, "inspector", ["calls:read"])
             notes = run("tools/call", "read_call_notes")
             denied_crm = run("tools/call", "get_account", 403)
             assert "crm:read" in denied_crm["error"]["message"]
-            write_inspector_config(runtime.directory, ["crm:read"])
+            connect(runtime.directory, "inspector", ["crm:read"])
             assert "slack:read" in run("tools/call", "read_slack_messages", 403)["error"]["message"]
-            write_inspector_config(runtime.directory, ["calls:read"])
+            connect(runtime.directory, "inspector", ["calls:read"])
             assert "slack:read" in run("tools/call", "read_slack_messages", 403)["error"]["message"]
-            write_inspector_config(runtime.directory, ["slack:read"])
+            connect(runtime.directory, "inspector", ["slack:read"])
             messages = run("tools/call", "read_slack_messages")
             assert "crm:read" in run("tools/call", "get_account", 403)["error"]["message"]
-            write_inspector_config(runtime.directory, ["slack:read"])
+            connect(runtime.directory, "inspector", ["slack:read"])
             assert "calls:read" in run("tools/call", "read_call_notes", 403)["error"]["message"]
             for result, source, refs in (
                 (account, "crm", ["crm/accounts/acc-003", "crm/contacts/con-003"]),

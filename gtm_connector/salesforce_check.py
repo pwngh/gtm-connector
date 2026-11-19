@@ -88,10 +88,8 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
         raise ValueError("The Salesforce environment must be developer, sandbox, or production.")
 
     def configured_adapter():
-        # Preserve the earlier default factory call for existing Python callers.
-        options = {} if environment == "developer" else {"environment": environment}
-        return (SalesforceReadOnlyAdapter.from_sf(sf_org, **options) if sf_org is not None
-                else SalesforceReadOnlyAdapter.from_env(**options))
+        return (SalesforceReadOnlyAdapter.from_sf(sf_org, environment=environment) if sf_org is not None
+                else SalesforceReadOnlyAdapter.from_env(environment=environment))
 
     factory = adapter_factory or configured_adapter
     state: dict[str, Any] = {}

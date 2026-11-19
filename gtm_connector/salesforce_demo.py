@@ -13,6 +13,8 @@ import stat
 from tempfile import NamedTemporaryFile
 from typing import Any
 
+from . import strict_json
+
 
 _FILES = ("plan.json", "accounts.json", "manifest.json")
 _PREFIXES = {"Account": "001", "Contact": "003", "Opportunity": "006", "Contract": "800"}
@@ -31,20 +33,11 @@ def _fail():
     raise DemoBindingError("The demo binding or import receipt is invalid. Export the kit and bind a complete import.")
 
 
-def _unique(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            _fail()
-        result[key] = value
-    return result
-
-
 def _parse(raw):
     if not isinstance(raw, bytes) or len(raw) > _MAX_BYTES:
         _fail()
     try:
-        return json.loads(raw, object_pairs_hook=_unique, parse_constant=lambda _: _fail())
+        return strict_json.loads(raw)
     except (ValueError, UnicodeError, RecursionError):
         _fail()
 

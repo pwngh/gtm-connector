@@ -37,8 +37,6 @@ COMMANDS = {
     "evaluate": ("Check briefs for twenty fixed accounts in temporary state.", "evaluate --with-slack --json"),
     "check-brief": ("Check candidate text against a saved evidence snapshot.",
                     "check-brief brief-REPLACE candidate.txt --state-dir var/renewal-demo"),
-    "inspector-config": ("Write a private Inspector configuration with explicit scopes.",
-                         "inspector-config --scope crm:read --scope calls:read"),
 }
 EXIT_NAMES = {1: "local_failure", 2: "usage_error", 3: "refused", 4: "check_failed", 5: "upstream_failure",
               130: "interrupted"}
@@ -315,9 +313,6 @@ def build_parser():
         if name in ("brief", "salesforce"):
             command.add_argument("--as-of", help="Use YYYY-MM-DD for renewal planning. Salesforce uses today; "
                                  "fixtures use 2027-01-15.")
-        if name == "demo":
-            command.add_argument("--with-slack", action="store_true",
-                                 help="Keep this compatible spelling. The demo always includes Slack.")
         if name in ("verify", "brief", "evaluate"):
             command.add_argument("--with-slack", action="store_true",
                                  help="Include Slack evidence and a checked follow-up proposal.")
@@ -325,8 +320,8 @@ def build_parser():
             command.add_argument("--adapter", choices=("fixture", "ollama"), default="fixture",
                                  help="Choose the fixture drafter or an already installed local model.")
             command.add_argument("--model", help="Name an already installed local Ollama model.")
-        if name in ("inspector-config", "connect"):
-            command.add_argument("--scope", action="append", required=name == "inspector-config",
+        if name == "connect":
+            command.add_argument("--scope", action="append",
                                  choices=("crm:read", "calls:read", "crm:write", "slack:read"),
                                  help="Grant this scope. Repeat for each explicit grant.")
         if name == "connect":
@@ -462,9 +457,6 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
             ["Claims cited", f"{result['facts_cited_correctly']}/{result['expected_facts']}"],
             ["Invented claims", result["facts_invented"]], ["Audit receipts", result["audit_rows"]],
             ["Activities created", result["activities_created"]]])
-    if command == "inspector-config":
-        return (f"Inspector configuration: {result['config']}\nCertificate: {result['certificate']}\n"
-                f"Granted scopes: {', '.join(result['scopes'])}")
     if command == "demo":
         account = result["account"]
         return (f"{safe_text(result['rep']['name'])} prepares {safe_text(account['name'])}'s renewal.\n"
@@ -1078,9 +1070,6 @@ def _run(args, argv):
     if args.command == "connect":
         from .connections import connect
         return connect(args.state_dir, args.app, args.scope)
-    if args.command == "inspector-config":
-        from .inspector import write_inspector_config
-        return write_inspector_config(args.state_dir, args.scope)
     if args.command == "evaluate":
         from .evaluation import run_evaluation
         return run_evaluation(adapter=adapter, include_slack=args.with_slack, progress=_progress(args.json),
@@ -1270,8 +1259,7 @@ def _failure(exc, args):
     if getattr(exc, "code", None) == "source_identity_mismatch":
         if ((command == "calls" and args.action in ("list", "inspect"))
                 or getattr(args, "calls_backend", None) == "imported"):
-            # Runtime's fixed first sentence explains the failure; its generic
-            # fresh-state advice applies to import, not existing-source use.
+            # Keep the first sentence. The fresh-state advice after it applies only to import.
             message = message.split(". ", 1)[0].rstrip(".") + "."
             recovery = ("Select the original existing import state folder with --state-dir. " if command == "calls"
                         else "Restore the original CRM connection and select its existing import state folder "
@@ -1301,7 +1289,7 @@ def _failure(exc, args):
         next_command = ("gtm-connector accounts --help" if command == "calls" or
                         getattr(args, "crm_backend", None) == "salesforce" else
                         f"gtm-connector accounts --db {shlex.quote(str(args.db))}")
-    elif command in ("inspector-config", "connect") and (
+    elif command == "connect" and (
             isinstance(exc, FileNotFoundError) or type(exc).__name__ == "InspectorConnectionError"):
         next_command = f"gtm-connector serve --state-dir {shlex.quote(str(args.state_dir))}"
     if command == "connect" and code == 2:

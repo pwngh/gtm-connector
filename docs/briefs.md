@@ -1,161 +1,146 @@
 # Briefs and citations
 
-A renewal brief summarizes an account before a contract renewal conversation.
-Its claims cite saved evidence and must pass the checker before publication.
-Citations identify sources; they do not prove those sources are true.
-
-These brief commands run from the repository root after setup:
+A renewal brief summarizes an account before a renewal conversation. Every line cites saved
+evidence and must pass the checker before it is printed.
 
 ```sh
 .venv/bin/python -m gtm_connector brief acc-003
-.venv/bin/python -m gtm_connector brief acc-001 --without-calls
-.venv/bin/python -m gtm_connector brief acc-004
-```
-
-Each command starts local services, calls `get_account`, `list_opportunities`,
-and `read_call_notes` in order, then stops the services. The default workflow
-requests `crm:read` and, unless `--without-calls` is set, `calls:read`. It never
-requests `crm:write`. Draft text cannot change the sequence or trigger another call.
-
-The default draft uses fixed wording from the invented data.
-[Optional Ollama drafting](ollama.md) must pass the same check before publication.
-
-Only a recognized call-note scope denial allows partial success by default.
-Slack mode also permits its matching `slack:read` scope denial. Other HTTP
-errors, transport failures, failed tools, or incomplete evidence stop the brief;
-they cannot be presented as an unavailable source.
-
-The `--as-of YYYY-MM-DD` option replaces the fixed demo date. `--json` prints
-the full saved result, and `--state-dir PATH` selects another state directory.
-
-The `--with-slack` option adds a fourth read under `slack:read`, a three-source
-conflict flag, and a cited `proposed_follow_up`. This suggested next step is
-checked but never sent. The default three-read workflow stays unchanged.
-See [Slack context](slack.md).
-
-`gtm-connector demo` uses that four-read workflow for Juniper Crest Learning
-(`acc-007`) after its account lookup and scope refusal. Its rep narration is
-outside the checked brief. The saved text and proposed follow-up use the same
-four-read workflow as `brief acc-007 --with-slack`. The quick and longer
-walkthroughs both use this invented book; neither reads live CRM, calls, or Slack.
-
-## What the citations mean
-
-Claims cite source records. Without `calls:read`, the brief says notes were
-unavailable; empty notes or opportunities produce a statement that none were
-returned. These outcomes cite the audit receipt because there is no record to
-cite. Renewal-day calculations also cite the saved run date.
-
-Conflicting CRM fields and notes remain separate claims with their own sources.
-Note text is quoted as untrusted data, including any instructions, and newlines
-stay visibly escaped. The injected note does not cause the workflow to create
-an activity.
-
-These lines are from the `text` field returned by `brief acc-003 --json`:
-
-```text
-- CRM opportunity opp-003: stage "closed_won"; amount USD 25,500.00; close date 2027-01-10. [crm/opportunities/opp-003]
-- Untrusted call note note-003 at "2027-01-12T15:00:00Z" says "Procurement has not approved this renewal. The budget remains unsigned.". [calls/call_notes/note-003]
-- Source conflict: CRM opportunity opp-003 reports stage "closed_won", while call note note-003 reports unapproved procurement. [crm/opportunities/opp-003] [calls/call_notes/note-003]
-```
-
-The flag is required when `closed_won` appears with that exact note body for the
-same account. Both records must be cited; their disagreement stays unresolved.
-The rule does not infer conflicts from other wording or notes the caller cannot
-read. It is not a general contradiction detector. Regenerate an older `acc-003`
-brief if it lacks the flag; `check-brief` applies current rules to saved evidence.
-
-The fixture book also includes a missing contact role and an old call note.
-Dana Crest's empty role is rendered as `not provided` and remains empty in the
-stored record. Saved fixture briefs may retain the earlier `role ""` spelling
-for that same empty field. `check-brief` accepts either complete wording format
-against saved evidence, but rejects duplicate claims that mix the two. New
-drafts use `not provided`; incorrect roles and references still fail.
-Harborlight Field Services has an October call note alongside a
-January Slack update with different seat-count advice. The brief preserves their
-timestamps and quoted contents; it does not infer which advice is current.
-
-## Inspect the saved result
-
-```sh
-.venv/bin/python -m gtm_connector brief acc-003 --json
-```
-
-The JSON contains `schema_version`, `brief_id`, `account_id`, `as_of`, `adapter`,
-`model_usage`, `status`, `evidence`, and `text`.
-This fixture run returns:
-
-| Field | Value |
-| --- | --- |
-| `schema_version` | `1` |
-| `account_id` | `"acc-003"` |
-| `as_of` | `"2027-01-15"` |
-| `adapter` | `"fixture"` |
-| `status` | `"accepted"` |
-| `model_usage.model` | `null` |
-| `model_usage.input_tokens` | `0` |
-| `model_usage.output_tokens` | `0` |
-
-`evidence.receipts` holds the three read receipts; `text` holds the checked brief.
-Brief and audit IDs change each run, while fixture record IDs stay stable.
-
-## Check another draft
-
-The workflow saves accepted briefs and their evidence in
-`var/v2/briefs/<brief_id>.json`. Replace `brief-REPLACE_WITH_ID` with the generated
-brief ID to inspect its receipts or check a text file against the same evidence:
-
-```sh
-.venv/bin/python -m gtm_connector audit --brief brief-REPLACE_WITH_ID
+.venv/bin/python -m gtm_connector brief acc-007 --with-slack
 .venv/bin/python -m gtm_connector check-brief brief-REPLACE_WITH_ID candidate.txt --json
 ```
 
-The cited bullet lines from the JSON `text` field belong in `candidate.txt`. Leave
-out the CLI's `Brief:` and `As of:` display labels. Checking the original text
-exits `0` and returns JSON with `status: "valid"` and the submitted `brief_id`.
-Append `The renewal was approved.` and the same check exits `4`, prints nothing
-to stdout, and writes this JSON error to stderr:
+| Option | Meaning |
+| --- | --- |
+| `--without-calls` | Omits the `calls:read` grant. The brief states that notes were unavailable. |
+| `--with-slack` | Adds a fourth read under `slack:read` and one cited `Proposed follow-up` line, which is checked but never sent. See [Slack context](slack.md). |
+| `--as-of YYYY-MM-DD` | Sets the planning date. Fixtures default to `2027-01-15`. |
+| `--json` | Prints the full saved result. |
+| `--adapter ollama --model NAME` | Drafts with a local model. See Local model drafting below. |
 
-```json
-{"error":{"code":"check_failed","message":"Brief contains an uncited, unsupported, or misattributed statement.","next":"gtm-connector check-brief --help"}}
+Each `brief` starts local services, calls `get_account`, `list_opportunities`, and
+`read_call_notes` in that order, then stops the services. It requests `crm:read` and `calls:read`,
+never `crm:write`. The default draft uses fixed wording and no model.
+
+## Citation rules
+
+- A fact cites its source record. A renewal-day count also cites the saved run.
+- A source that was denied for a missing scope, or that returned nothing, is stated in a line that
+  cites the audit receipt of that read.
+- Only a `calls:read` or `slack:read` scope denial allows a partial brief. Any other failed read
+  or incomplete evidence stops the brief.
+- Note and message text is quoted as untrusted data with newlines escaped.
+- Conflicting records stay separate lines with their own sources and timestamps. The brief does
+  not decide which is current.
+- An empty contact role is printed as `not provided`.
+
+A `Source conflict` line citing both records is required when a `closed_won` opportunity appears
+with the exact fixture note body about unapproved procurement for the same account. The rule does
+not infer conflicts from other wording. With `--with-slack`, `msg-003` adds a three-source line.
+
+## Saved result and checking
+
+Each brief and its evidence are saved in `var/v2/briefs/<brief_id>.json`, with `schema_version`
+(`1`), `brief_id`, `account_id`, `as_of`, `adapter`, `model_usage`, `status`, `evidence`, and
+`text`. `--with-slack` adds `proposed_follow_up`. `evidence.receipts` holds one receipt per read.
+`status` is `collected`, `accepted`, or `rejected`. Rejected text is neither printed nor saved. A
+snapshot preserves the records read, not later CRM changes.
+
+To check a draft, put the cited bullet lines from the JSON `text` field in `candidate.txt`, without
+the `Brief:` and `As of:` display labels. Checking the original text exits `0` with
+`status: "valid"` and the `brief_id`. Append `The renewal was approved.` and the check exits `4`.
+
+- The checker accepts only the fixed supported lines with their exact references. It cannot
+  assess paraphrases.
+- A passing brief can omit supported facts, which the evaluation below measures. Lines
+  for unavailable or empty sources, recognized conflicts, and the Slack follow-up cannot be omitted.
+
+## Errors
+
+| [Exit](cli.md) | `code` | Cause | Fix |
+| ---: | --- | --- | --- |
+| 1 | `local_failure` | A running connector holds the state folder, or the saved brief file is missing. | Stop the server or pass another `--state-dir`. Check the brief ID. |
+| 2 | `usage_error` | The account ID, date, or option combination is invalid. | Use an ID such as `acc-003` and a `YYYY-MM-DD` date. |
+| 3 | `refused` | A Salesforce account has no eligible Contract, an account has no imported transcript, or the state folder belongs to another source. | See [Salesforce](salesforce.md) and [transcript imports](calls.md). |
+| 4 | `check_failed` | A draft or candidate has an uncited, unsupported, misattributed, or repeated line, or omits a required one. | Use only lines from the saved `text`, or create a new brief. |
+| 5 | `upstream_failure` | A read failed, the account was not found, or the local model failed. | Check the account ID with `accounts`, then retry. |
+
+## Evaluation
+
+```sh
+gtm-connector evaluate
+gtm-connector evaluate --json > evaluation.json
+gtm-connector evaluate --with-slack --json
 ```
 
-Without `--json`, a successful check prints a readable confirmation. A failed
-check prints the error and a next command on stderr. See [CLI output and exit
-codes](cli.md) for the other failure categories.
+The evaluation briefs `acc-001` through `acc-020` in fresh temporary state, as of `2027-01-15`,
+and checks which claims in [expected.json](../evaluation/expected.json) appear with the right
+citations. The default runs no model. `--json` prints the complete report with per-account
+`cases`. A failed case or check exits `4` and still prints the report. A failed model service
+preflight exits `5` with no report. The tests assert these counts:
 
-The checker accepts fixed supported claims with exact record references. It
-rejects uncited sentences, invented values, wrong citations, appended claims,
-and direct tool requests. The checker cannot assess arbitrary paraphrases or
-establish semantic entailment.
+| Metric | Default | `--with-slack` |
+| --- | --- | --- |
+| Accounts with accepted briefs | 20 / 20 | 20 / 20 |
+| Facts found | 182 / 182 (100%) | 223 / 223 (100%) |
+| Facts cited correctly | 182 / 182 (100%) | 223 / 223 (100%) |
+| Facts invented | 0 / 182 emitted claims (0%) | 0 / 223 emitted claims (0%) |
+| Rejected or failed briefs | 0 | 0 |
+| Audit receipts | 60 | 80 |
+| Activities created | 0 | 0 |
+| Model input / output tokens | 0 / 0 | 0 / 0 |
 
-A passing brief can still omit supported facts; the
-[evaluation](evaluation.md) measures that coverage separately. Unavailable or
-empty notes and recognized conflicts must always remain visible.
+### Scoring
 
-## Evidence and storage limits
+- A fact is one displayed claim line. A compound contact or opportunity statement counts once.
+- Found: its expected text appears, even with a missing or wrong citation.
+- Cited correctly: its text appears with the exact reference set.
+- Invented: the emitted text is not among the expected claims.
+- A duplicate fails the evaluation and adds no coverage.
+- A failed or rejected brief keeps its expected claims in the denominator.
+- The score compares fixed wording. It cannot judge paraphrase or tell whether a source is true.
 
-The checker keeps the original evidence snapshot. The drafting adapter gets a
-copy without owner credentials or reusable bearer tokens. Rejected text is
-neither printed nor saved. Owner-only files record `collected`, `accepted`, or
-`rejected` status.
+### Local model fields
 
-Snapshots preserve the records read, not later CRM changes, and are not
-tamper-proof. Saves write a private temporary file and replace the snapshot
-atomically. A failed replacement leaves the previous complete snapshot, possibly
-with `collected` status. An initial save failure prevents drafting; a failed
-final save can leave model usage unknown.
+`evaluate --adapter ollama --model NAME --json` adds these fields. See Local model drafting below.
 
-There is no power-loss durability guarantee. A killed process can leave a private
-temporary file. Retention is manual, as described in
-[Audit, rate limits, and writes](audit.md). [Persistence tests](../tests/test_brief_persistence.py)
-cover interrupted writes and replacement failures.
+| Field | Meaning |
+| --- | --- |
+| Top-level scores | Published text only. A rejected brief publishes none of its lines. `invention_rate` is `null` when nothing was published. |
+| `candidate` | Scores of the returned lines before the publication check. Its `scored_briefs` and `unscored_briefs` show missing or malformed candidates. Rejected text is neither saved nor reported. |
+| `publication_gate_passed` | The publication and read-only checks passed. `status` also requires full coverage. |
+| `model_usage`, `model_metadata` | Summed token counts, including rejected generations, and the model digest and service version. A missing count makes its total `null`. |
 
-The fixture records zero model tokens. Ollama records the service's reported
-input and output counts even when a generation is rejected. Missing counts
-stay unknown. A custom adapter returning only a string also leaves usage unknown;
-a `DraftResult` can carry reported counts.
+## Local model drafting
 
-Custom Python adapters are not sandboxed, and the CLI cannot load one. There is
-no hosted model adapter. Fixture checks do not establish how an untested model
-would handle injected instructions.
+```sh
+gtm-connector brief acc-003 --adapter ollama --model llama3.2:latest --json
+gtm-connector evaluate --adapter ollama --model llama3.2:latest --json > ollama-evaluation.json
+```
+
+With `--adapter ollama`, a local model assembles the renewal brief, and the citation checker must
+accept the draft before it is published. No model run has been measured on the current fixture
+book.
+
+- You need a running Ollama 0.30.0 or newer and a model that `ollama list` already shows.
+- The adapter calls only `http://127.0.0.1:11434`. It does not download a model, fall back to
+  fixture output, or call a hosted model.
+- `--model` is required with `--adapter ollama` and is an error without it.
+- An unavailable service, a missing model, or rejected model metadata exits `5` before any brief
+  state is created.
+- A rejected draft exits `4`. `brief` prints no candidate text. The counts and fixed error codes
+  stay in the private saved artifact under `draft_diagnostics` and `model_usage`. `evaluate` still
+  writes its report. See Evaluation above.
+
+### What the model does
+
+- The model receives the supported claims derived from authorized evidence and must return them
+  with their exact wording and references in a JSON `lines` array. The prompt holds no owner
+  credential, bearer token, audit fingerprint, or tool interface.
+- An unsupported line, a duplicate, or an omitted required disclosure rejects the whole brief. A
+  supported subset can pass. The adapter does not repair or replace model output.
+- Each request adds Ollama's `:local` selector, so the server rejects a tag that now points to a
+  remote model. The adapter also rejects cloud suffixes and remote metadata, disables environment
+  proxies, and follows no redirects. It cannot sandbox a malicious replacement service.
+- The request uses temperature `0`, seed `0`, an 8192-token context, and a 4096-token generation
+  limit. Generation has a 180-second read timeout and no retries.
+- Token counts include rejected generations and are not billing measurements.

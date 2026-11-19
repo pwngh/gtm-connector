@@ -6,6 +6,7 @@ from typing import Any, cast
 
 import httpx2
 
+from . import strict_json
 from .citations import build_facts
 from .drafting import DraftResult
 
@@ -67,15 +68,6 @@ def _remote(document):
 def _count(document, name):
     value = document.get(name)
     return value if type(value) is int and value >= 0 else None
-
-
-def _unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate_json_key")
-        result[key] = value
-    return result
 
 
 def _supports_local_selector(version):
@@ -163,7 +155,7 @@ class OllamaAdapter:
                     if size > _MAX_RESPONSE_BYTES:
                         raise _RequestFailure("response_too_large")
                     chunks.append(chunk)
-                result = json.loads(b"".join(chunks), object_pairs_hook=_unique_object)
+                result = strict_json.loads(b"".join(chunks))
         except httpx2.HTTPError:
             raise _RequestFailure("ollama_unavailable") from None
         except (ValueError, UnicodeError, RecursionError):
@@ -225,7 +217,7 @@ class OllamaAdapter:
             return rejected("invalid_candidate_format")
         try:
             # valid_content already established a bounded, UTF-8-encodable string.
-            candidate = json.loads(cast(str, content), object_pairs_hook=_unique_object)
+            candidate = strict_json.loads(cast(str, content))
         except (ValueError, RecursionError):
             return rejected("invalid_candidate_format")
         if not isinstance(candidate, dict) or set(candidate) != {"lines"}:

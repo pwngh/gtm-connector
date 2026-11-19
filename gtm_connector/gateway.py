@@ -14,7 +14,6 @@ import uuid
 from typing import Any, Callable
 
 from mcp.server import MCPServer
-from mcp.server.auth.provider import AccessToken
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings
@@ -24,8 +23,9 @@ from pydantic import AnyHttpUrl
 from starlette.responses import JSONResponse
 
 from . import calls, slack, store
+from . import strict_json
 from .audit import AuditLog
-from .request_checks import MISSING, Missing, RequestFacts, RequestPolicy, charge_rate, check_request
+from .request_checks import RequestFacts, RequestPolicy, charge_rate, check_request
 from .salesforce import SalesforceReadError
 from .selected_briefs import BRIEF_SECONDS, ChildRead, Invocation
 from .tool_definitions import DEFAULT_TOOLS, SELECTED_TOOLS, TOOL_DEFINITIONS, valid_account_search
@@ -37,15 +37,6 @@ _INVOCATION: ContextVar[Invocation | None] = ContextVar("gtm_connector_invocatio
 _COMPOSITE_TOOLS = ("prepare_renewal_brief", "read_renewal_brief")
 _DEFAULT_DEFINITIONS = {name: definition for name, definition in TOOL_DEFINITIONS.items()
                         if name not in _COMPOSITE_TOOLS}
-
-
-def _json_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
 
 
 def _records(source, table, rows):
@@ -425,16 +416,21 @@ class Connector:
             body += event.get("body", b"")
             if len(body) > 65536 or not event.get("more_body"):
                 break
+        marked = headers.get("mcp-method") == "tools/call"
         try:
-            def reject_constant(_):
-                raise ValueError("non-finite JSON number")
-            request = json.loads(body, object_pairs_hook=_json_object, parse_constant=reject_constant)
+            request = strict_json.loads(body)
         except (ValueError, UnicodeError, RecursionError):
             request = None
+            try:
+                # A refused body that still names a tool call keeps its receipt.
+                refused = json.loads(body)
+                marked = marked or (isinstance(refused, dict) and refused.get("method") == "tools/call")
+            except (ValueError, UnicodeError, RecursionError):
+                pass
         params = request.get("params", {}) if isinstance(request, dict) else {}
         params = params if isinstance(params, dict) else {}
         method = request.get("method") if isinstance(request, dict) else None
-        is_call = method == "tools/call" or headers.get("mcp-method") == "tools/call"
+        is_call = method == "tools/call" or marked
         raw_auth = headers.get("authorization", "")
         parts = raw_auth.split(" ")
         raw_token = parts[1] if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1] else None
@@ -485,24 +481,13 @@ class Connector:
                 rate_limit=self.rate_limit, window_seconds=self.window_seconds,
                 writes_disabled=self.crm_reader is not None or self._slack_only or self.selected is not None,
             )
-            token: AccessToken | None | Missing = MISSING
-            wall_time: float | Missing = MISSING
-            decision = check_request(facts, policy, self.windows, self._definitions)
-            if decision.needs == "token":
-                token = await self.authority.verify_token(raw_token)
-                decision = check_request(facts, policy, self.windows, self._definitions, token=token)
-            if decision.needs == "wall_time":
-                wall_time = time.time()
+            token = await self.authority.verify_token(raw_token) if raw_token else None
+            # Composite reads update the same windows from worker threads.
+            with self._windows_lock:
                 decision = check_request(facts, policy, self.windows, self._definitions,
-                                         token=token, wall_time=wall_time)
-            if decision.needs == "rate_time":
-                # Composite reads update the same windows from worker threads.
-                with self._windows_lock:
-                    rate_time = self.clock()
-                    decision = check_request(facts, policy, self.windows, self._definitions,
-                                             token=token, wall_time=wall_time, rate_time=rate_time)
-                    if decision.windows is not None:
-                        self.windows = decision.windows
+                                         token=token, wall_time=time.time(), rate_time=self.clock())
+                if decision.windows is not None:
+                    self.windows = decision.windows
             if decision.error is not None:
                 error = decision.error
                 rejection = JSONResponse({"jsonrpc": "2.0", "id": request_id,

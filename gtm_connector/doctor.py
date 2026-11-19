@@ -3,13 +3,14 @@
 from contextlib import closing
 from datetime import datetime, timezone
 import importlib.util
-import json
 import os
 from pathlib import Path
 import shlex
 import stat
 import sys
 from urllib.parse import urlsplit
+
+from . import strict_json
 
 
 _REQUIRED_FILES = ("owner.json", "tls.pem", "tls.key", "crm.sqlite3", "audit.sqlite3")
@@ -35,22 +36,13 @@ def _private(path, *, directory=False):
     return correct_type and info.st_uid == os.getuid() and info.st_mode & 0o077 == 0
 
 
-def _unique_owner(pairs):
-    value = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError
-        value[key] = item
-    return value
-
-
 def _source_files(owner):
-    calls_files = (("calls.sqlite3",) if owner.get("calls_backend", "fixture") == "fixture"
+    calls_files = (("calls.sqlite3",) if owner["calls_backend"] == "fixture"
                    else ("imports.sqlite3", "calls-source.json"))
-    slack_files = (("slack.sqlite3",) if owner.get("slack_backend", "fixture") == "fixture"
+    slack_files = (("slack.sqlite3",) if owner["slack_backend"] == "fixture"
                    else ("slack-source.json", "slack-mappings.json"))
     return calls_files + slack_files + (
-        ("crm-connection.json",) if owner.get("crm_backend", "sqlite") == "salesforce" else ())
+        ("crm-connection.json",) if owner["crm_backend"] == "salesforce" else ())
 
 
 def _read_owner(directory):
@@ -67,7 +59,7 @@ def _read_owner(directory):
             content = source.read(65537)
         if len(content) > 65536:
             raise ValueError
-        owner = json.loads(content, object_pairs_hook=_unique_owner)
+        owner = strict_json.loads(content)
         required = {"issuer", "resource", "redirect_uri", "client_id", "owner_secret", "cert_path"}
         if not isinstance(owner, dict) or not required <= owner.keys():
             raise ValueError
@@ -83,9 +75,9 @@ def _read_owner(directory):
         if (owner["redirect_uri"] != "http://127.0.0.1:8767/callback"
                 or owner["client_id"] != "gtm-demo-cli"
                 or owner["cert_path"] != str(directory / "tls.pem")
-                or owner.get("crm_backend", "sqlite") not in ("sqlite", "salesforce")
-                or owner.get("calls_backend", "fixture") not in ("fixture", "imported")
-                or owner.get("slack_backend", "fixture") not in ("fixture", "slack")):
+                or owner.get("crm_backend") not in ("sqlite", "salesforce")
+                or owner.get("calls_backend") not in ("fixture", "imported")
+                or owner.get("slack_backend") not in ("fixture", "slack")):
             raise ValueError
         if owner.get("slack_backend") == "slack" and (
                 not isinstance(owner.get("slack_connection_dir"), str) or not owner["slack_connection_dir"]
@@ -97,21 +89,21 @@ def _read_owner(directory):
 
 
 def _validate_sources(directory, owner):
-    if owner.get("slack_backend", "fixture") == "slack":
+    if owner["slack_backend"] == "slack":
         from .runtime import inspect_slack_state
         try:
             state = inspect_slack_state(directory)
-            if state.crm_backend != owner.get("crm_backend", "sqlite"):
+            if state.crm_backend != owner["crm_backend"]:
                 raise ValueError
         except Exception:
             raise ValueError("Slack source state is invalid. Run gtm-connector doctor.") from None
     elif any(os.path.lexists(directory / name) for name in ("slack-source.json", "slack-mappings.json")):
         raise ValueError("Slack source selection is invalid. Run gtm-connector doctor.")
-    if owner.get("calls_backend", "fixture") == "imported":
+    if owner["calls_backend"] == "imported":
         from .runtime import _inspect_import_state
         try:
             state = _inspect_import_state(directory)
-            if state.crm_backend != owner.get("crm_backend", "sqlite"):
+            if state.crm_backend != owner["crm_backend"]:
                 raise ValueError
         except Exception:
             raise ValueError("Imported calls state is invalid. Run gtm-connector doctor.") from None
@@ -221,7 +213,7 @@ def doctor(directory):
                            and resource.get("resource") == owner["resource"]
                            and resource.get("authorization_servers") == [owner["issuer"]])
     except Exception:
-        # Diagnostic output is deliberately bounded: no HTTP exceptions or config values.
+        # Report no HTTP exception text or configuration values.
         services_ok = False
     check("services", services_ok, "Both local HTTPS services must return matching metadata.",
           start_fix)

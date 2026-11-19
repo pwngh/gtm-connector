@@ -1,11 +1,12 @@
 """An owner-written selection of the accounts and Slack threads a remote caller may read."""
 
 from dataclasses import dataclass
-import json
 import os
 from pathlib import Path
 import re
 import stat
+
+from . import strict_json
 
 
 MAX_SELECTION_BYTES = 65536
@@ -41,19 +42,6 @@ class Selection:
         return tuple(sorted(self.accounts))
 
 
-def _unique(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise SelectionError("The selection file repeats a JSON key. " + _SHAPE)
-        result[key] = value
-    return result
-
-
-def _reject_constant(_):
-    raise SelectionError("The selection file contains a non-finite number. " + _SHAPE)
-
-
 def parse_selection(document: bytes, *, crm_backend: str) -> Selection:
     """Validate the exact documented shape. Nothing here opens a source or credential."""
     if crm_backend not in _ACCOUNT_PATTERNS:
@@ -61,11 +49,9 @@ def parse_selection(document: bytes, *, crm_backend: str) -> Selection:
     if len(document) > MAX_SELECTION_BYTES:
         raise SelectionError(f"The selection file is larger than {MAX_SELECTION_BYTES} bytes.")
     try:
-        value = json.loads(document.decode("utf-8"), object_pairs_hook=_unique, parse_constant=_reject_constant)
-    except SelectionError:
-        raise
-    except (UnicodeError, ValueError, RecursionError):
-        raise SelectionError("The selection file is not valid UTF-8 JSON. " + _SHAPE) from None
+        value = strict_json.loads(document.decode("utf-8"))
+    except (ValueError, RecursionError):
+        raise SelectionError("The selection file is not valid UTF-8 JSON with unique keys. " + _SHAPE) from None
     if (not isinstance(value, dict) or set(value) != {"schema_version", "accounts"}
             or type(value["schema_version"]) is not int or value["schema_version"] != 1
             or not isinstance(value["accounts"], list)

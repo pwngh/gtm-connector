@@ -59,22 +59,16 @@ class RequestCheckTests(unittest.TestCase):
                     overrides.get("windows", {}), TOOL_DEFINITIONS,
                     token=overrides.get("token", self.token), wall_time=1000, rate_time=100.0,
                 )
-                self.assertIsNone(decision.needs)
                 self.assertEqual((decision.error.reason, decision.error.status, decision.error.code),
                                  (reason, status, code))
 
-    def test_inputs_are_requested_in_order_without_changing_windows(self):
+    def test_a_missing_or_expired_token_is_refused_without_charging_the_window(self):
         windows = MappingProxyType({self.key: (90.0, 1)})
-        self.assertEqual(check_request(self.request, self.policy, windows, TOOL_DEFINITIONS).needs, "token")
-        self.assertEqual(check_request(self.request, self.policy, windows, TOOL_DEFINITIONS,
-                                       token=self.token).needs, "wall_time")
-        self.assertEqual(check_request(self.request, self.policy, windows, TOOL_DEFINITIONS,
-                                       token=self.token, wall_time=1000).needs, "rate_time")
-        missing = check_request(self.request, self.policy, windows, TOOL_DEFINITIONS, token=None)
+        missing = check_request(self.request, self.policy, windows, TOOL_DEFINITIONS,
+                                token=None, wall_time=1000, rate_time=100.0)
         expired = check_request(self.request, self.policy, windows, TOOL_DEFINITIONS,
-                                token=self.token, wall_time=2000)
+                                token=self.token, wall_time=2000, rate_time=100.0)
         for decision in (missing, expired):
-            self.assertIsNone(decision.needs)
             self.assertEqual(decision.error.status, 401)
             self.assertIsNone(decision.windows)
         self.assertEqual(dict(windows), {self.key: (90.0, 1)})
