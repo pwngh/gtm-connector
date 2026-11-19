@@ -1,5 +1,6 @@
 """Synchronous CLI client for this connector's pinned local OAuth and MCP endpoints."""
 
+import itertools
 import base64
 import hashlib
 import re
@@ -59,7 +60,8 @@ class LocalClient:
         timeout = httpx2.Timeout(10, read=25 if self._salesforce or config.get("slack_backend") == "slack" else 10)
         self._http = httpx2.Client(verify=context, trust_env=False, follow_redirects=False,
                                    timeout=timeout, transport=transport)
-        self._request_id = 0
+        # The bridge sends from several threads, and next() on a counter never hands out one id twice.
+        self._request_ids = itertools.count(1)
 
     def close(self):
         self._http.close()
@@ -165,17 +167,18 @@ class LocalClient:
         headers = {"Authorization": "Bearer " + token,
                    "Accept": "application/json, text/event-stream",
                    "MCP-Protocol-Version": PROTOCOL_VERSION, "Mcp-Method": method}
+        name = supplied.get("name") if method == "tools/call" else None
         if method == "tools/call":
-            headers["Mcp-Name"] = supplied["name"]
-        self._request_id += 1
+            # A name a header cannot carry is sent as written in the body only, so the gateway still
+            # records the call before refusing it.
+            headers["Mcp-Name"] = name if isinstance(name, str) and name.isascii() and name.isprintable() else "-"
+        # A CRM read can also wait for sf to refresh the login.
+        refresh = CREDENTIAL_SECONDS if self._salesforce and name in _CRM_TOOLS else 0
         timeout = self._http.timeout
-        if read_timeout is not None:
-            timeout = httpx2.Timeout(10, read=read_timeout)
-        elif self._salesforce and method == "tools/call" and supplied["name"] in _CRM_TOOLS:
-            # A CRM read can also wait for sf to refresh the login.
-            timeout = httpx2.Timeout(10, read=CREDENTIAL_SECONDS + 25)
+        if read_timeout is not None or refresh:
+            timeout = httpx2.Timeout(10, read=(25 if read_timeout is None else read_timeout) + refresh)
         return self._http.post(self.resource, headers=headers, timeout=timeout, json={
-            "jsonrpc": "2.0", "id": self._request_id, "method": method, "params": supplied})
+            "jsonrpc": "2.0", "id": next(self._request_ids), "method": method, "params": supplied})
 
     def call(self, token: str, tool: str, arguments: dict,
              brief_id: str | None = None) -> httpx2.Response:

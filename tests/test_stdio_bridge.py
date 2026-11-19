@@ -164,6 +164,41 @@ class StdioBridgeTests(unittest.TestCase):
             self.assertTrue(all(message["jsonrpc"] == "2.0" for message in messages))
             self.assertEqual({tool["name"] for tool in messages[1]["result"]["tools"]}, DEFAULT_TOOLS)
 
+    def test_a_call_the_bridge_itself_refuses_still_leaves_a_receipt(self):
+        # The SDK refuses these two for their shape before any handler runs, and a header cannot carry the
+        # third name. Each still reaches the gateway, which records it and refuses it.
+        calls = [{"name": "get_account", "arguments": ["acc-001"]}, {"name": 7, "arguments": {}},
+                 {"name": "get_acc\u00f8unt", "arguments": {"account_id": "acc-001"}}]
+        with Runtime(self.state) as runtime:
+            process = subprocess.Popen(
+                [sys.executable, "-m", "gtm_connector", "mcp", "stdio", "--state-dir", str(self.state),
+                 "--scope", "crm:read"], cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, text=True)
+            requests = [
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                    "protocolVersion": "2025-06-18", "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1"}}},
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                *({"jsonrpc": "2.0", "id": number, "method": "tools/call", "params": params}
+                  for number, params in enumerate(calls, 2)),
+            ]
+            process.stdin.write("".join(json.dumps(item) + "\n" for item in requests))
+            process.stdin.flush()
+            answers = []
+            while len(answers) < 4:
+                ready, _, _ = select.select([process.stdout], [], [], 120)
+                self.assertTrue(ready, "the bridge did not answer")
+                answers.append(json.loads(process.stdout.readline()))
+            process.stdin.close()
+            self.assertEqual(process.wait(timeout=60), 0)
+            process.stdout.close()
+            process.stderr.close()
+            receipts = runtime.connector.audit.read()
+        # No call returned a record, and each has one finished receipt that is not ok.
+        self.assertTrue(all("error" in answer or answer["result"].get("isError") for answer in answers[1:]))
+        self.assertEqual([row["status"] for row in receipts], ["error"] * 3)
+        self.assertEqual([row["rows"] for row in receipts], [[]] * 3)
+
     def test_without_a_running_connector_the_bridge_exits_with_a_message(self):
         result = subprocess.run(
             [sys.executable, "-m", "gtm_connector", "mcp", "stdio", "--state-dir", str(self.root / "missing"),
@@ -181,6 +216,26 @@ class StdioBridgeTests(unittest.TestCase):
         self.assertNotEqual(stopped.returncode, 0)
         self.assertEqual(stopped.stdout, "")
         self.assertIn("Start serve again", stopped.stderr)
+
+
+class GrantTests(unittest.TestCase):
+    def test_a_refused_token_that_another_call_already_replaced_is_not_renewed_again(self):
+        from gtm_connector.stdio_bridge import Grant
+
+        class Authority:
+            issued = 0
+
+            def authorize_with_lifetime(self, scopes):
+                self.issued += 1
+                return f"token-{self.issued}", 300
+
+        authority = Authority()
+        grant = Grant(authority, ["crm:read"])
+        first = grant.renew()
+        # Two calls were refused with the first token. One renews; the other reuses that renewal.
+        second = grant.renew(refused=first)
+        self.assertEqual((grant.renew(refused=first), authority.issued), (second, 2))
+        self.assertEqual((grant.current(), authority.issued), (second, 2))
 
 
 class ClientConfigurationTests(unittest.TestCase):
@@ -201,8 +256,11 @@ class ClientConfigurationTests(unittest.TestCase):
         self.assertEqual(document["theme"], "dark")
         self.assertEqual(document["mcpServers"]["other"], {"command": "keep"})
         entry = document["mcpServers"]["gtm-connector"]
-        self.assertEqual(entry["args"], ["-m", "gtm_connector", "mcp", "stdio", "--state-dir", str(self.state),
-                                         "--scope", "calls:read", "--scope", "crm:read"])
+        # Python starts isolated, so the app's working folder cannot stand in for the package.
+        self.assertEqual(entry["args"][0], "-I")
+        self.assertEqual(entry["args"][-8:], ["mcp", "stdio", "--state-dir", str(self.state),
+                                              "--scope", "calls:read", "--scope", "crm:read"])
+        self.assertNotIn("env", entry)
         self.assertTrue(Path(entry["command"]).is_absolute())
         self.assertEqual(stat.S_IMODE(self.config.stat().st_mode), 0o640)
         backup = Path(result["backup"])
@@ -246,6 +304,36 @@ class ClientConfigurationTests(unittest.TestCase):
             merge_client_config(self.config, {"command": "x", "args": []},
                                 _after_read=lambda: self.config.write_text('{"edited": true}'))
         self.assertEqual(self.config.read_text(), '{"edited": true}')
+        self.assertEqual(list(self.root.glob(".client.json.*")), [])
+        # A conflict leaves the earlier backup as it was.
+        self.config.write_text('{"mcpServers": {}}')
+        backup.write_text("the earlier backup")
+        with self.assertRaises(ValueError):
+            merge_client_config(self.config, {"command": "x", "args": []},
+                                _after_read=lambda: self.config.write_text('{"edited": true}'))
+        self.assertEqual(backup.read_text(), "the earlier backup")
+        # A file with a second name is refused. A backup that shares its file with another name is replaced,
+        # never written through.
+        self.config.write_text('{"mcpServers": {}}')
+        twin = self.root / "twin.json"
+        os.link(self.config, twin)
+        with self.assertRaises(ValueError):
+            connect(self.state, "cursor", ["crm:read"], transport="stdio", config_file=self.config)
+        twin.unlink()
+        backup.unlink()
+        shared = self.root / "shared.txt"
+        shared.write_text("keep me")
+        os.link(shared, backup)
+        connect(self.state, "cursor", ["crm:read"], transport="stdio", config_file=self.config)
+        self.assertEqual((shared.read_text(), backup.read_text()), ("keep me", '{"mcpServers": {}}'))
+        # Numbers that are not finite refuse, and so does a file the merge would push past 4 MiB.
+        for bad in ('{"mcpServers": {}, "x": NaN}', '{"mcpServers": {}, "x": 1e999}',
+                    '{"mcpServers": {}, "x": [' + "0," * 1_390_000 + "0]}"):
+            self.config.write_text(bad)
+            with self.subTest(bad=bad[:30]), self.assertRaises(ValueError):
+                connect(self.state, "cursor", ["crm:read"], transport="stdio", config_file=self.config)
+            self.assertEqual(self.config.read_text(), bad)
+        self.assertEqual(list(self.root.glob(".client.json.*")), [])
         for args in (("inspector", ["crm:read"]), ("cursor", [])):
             with self.subTest(args=args), self.assertRaises(ValueError):
                 connect(self.state, args[0], args[1], transport="stdio", config_file=self.config)
@@ -254,11 +342,14 @@ class ClientConfigurationTests(unittest.TestCase):
 
     def test_the_generated_command_launches_from_another_folder_with_a_minimal_path(self):
         elsewhere = self.root / "elsewhere"
-        elsewhere.mkdir()
+        # A package of the same name in the app's working folder must not be the one that runs.
+        (elsewhere / "gtm_connector").mkdir(parents=True)
+        (elsewhere / "gtm_connector" / "__init__.py").write_text("raise SystemExit('shadowed')\n")
+        (elsewhere / "gtm_connector" / "__main__.py").write_text("raise SystemExit('shadowed')\n")
         with Runtime(self.state):
             entry = stdio_entry(self.state, "cursor", ["crm:read"])
             parameters = StdioServerParameters(command=entry["command"], args=entry["args"], cwd=str(elsewhere),
-                                               env={**entry.get("env", {}), "PATH": "/usr/bin:/bin"})
+                                               env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(elsewhere)})
 
             async def scenario(client):
                 return await client.list_tools()

@@ -8,6 +8,8 @@ import stat
 import sys
 import tempfile
 
+from . import strict_json
+from .auth import SCOPES
 from .doctor import _directory, load_local_owner
 
 
@@ -56,27 +58,23 @@ _MAX_CONFIG_BYTES = 4 * 1024 * 1024
 SERVER_NAME = "gtm-connector"
 
 
-def _unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
-
-
 def stdio_entry(directory, app, scopes):
     """The client entry: an absolute interpreter, fixed arguments, and paths. Never a credential."""
     import gtm_connector
     root = Path(gtm_connector.__file__).resolve().parent.parent
-    arguments = ["-m", "gtm_connector", "mcp", "stdio", "--state-dir", str(_directory(directory))]
+    # -I keeps the app's working folder, PYTHONPATH, and the user site off the import path, so nothing
+    # there can stand in for this package while it holds the owner's grant.
+    if {"site-packages", "dist-packages"} & set(root.parts):
+        launch = ["-I", "-m", "gtm_connector"]
+    else:
+        # A source checkout is named outright, since an isolated interpreter does not search for it.
+        launch = ["-I", "-c", f"import sys; sys.path.insert(0, {str(root)!r}); "
+                              "from gtm_connector.cli import main; sys.exit(main(sys.argv[1:]))"]
+    arguments = [*launch, "mcp", "stdio", "--state-dir", str(_directory(directory))]
     for scope in sorted(set(scopes)):
         arguments += ["--scope", scope]
     # Keep the venv interpreter path as invoked; resolving its symlink would leave the venv.
     entry: dict = {"command": str(Path(sys.executable).absolute()), "args": arguments}
-    if not {"site-packages", "dist-packages"} & set(root.parts):
-        # A source checkout is not on the interpreter's path when the app starts in another folder.
-        entry["env"] = {"PYTHONPATH": str(root)}
     return {"type": "stdio", **entry} if app == "claude-code" else entry
 
 
@@ -84,8 +82,9 @@ def _read_regular(path):
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_CONFIG_BYTES:
-            raise ValueError(f"{path.name} must be a regular file of at most 4 MiB; nothing was written.")
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > _MAX_CONFIG_BYTES:
+            raise ValueError(f"{path.name} must be a regular file with one name and at most 4 MiB; "
+                             "nothing was written.")
         with os.fdopen(descriptor, "rb", closefd=False) as source:
             data = source.read(_MAX_CONFIG_BYTES + 1)
     finally:
@@ -95,12 +94,19 @@ def _read_regular(path):
     return data, stat.S_IMODE(info.st_mode)
 
 
-def _write_synced(descriptor, data, mode):
-    with os.fdopen(descriptor, "wb") as output:
-        os.fchmod(output.fileno(), mode)
-        output.write(data)
-        output.flush()
-        os.fsync(output.fileno())
+def _staged(path, data, mode):
+    """Write data to a synced temporary file beside path and return its name. Nothing is replaced yet."""
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            os.fchmod(output.fileno(), mode)
+            output.write(data)
+            output.flush()
+            os.fsync(output.fileno())
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+    return temporary
 
 
 def merge_client_config(path, entry, *, _after_read=None):
@@ -113,8 +119,8 @@ def merge_client_config(path, entry, *, _after_read=None):
     if os.path.lexists(path):
         original, mode = _read_regular(path)
         try:
-            document = json.loads(original.decode("utf-8"), object_pairs_hook=_unique_object)
-        except (UnicodeError, ValueError, RecursionError):
+            document = strict_json.loads(original)
+        except (ValueError, RecursionError):
             raise ValueError(f"{path.name} is not valid JSON; nothing was written.") from None
         servers = document.get("mcpServers", {}) if isinstance(document, dict) else None
         if not isinstance(servers, dict):
@@ -125,29 +131,36 @@ def merge_client_config(path, entry, *, _after_read=None):
         original, mode, document, servers = None, 0o600, {}, {}
     updated = dict(document)
     updated["mcpServers"] = {**servers, SERVER_NAME: entry}
-    payload = (json.dumps(updated, indent=2, ensure_ascii=False) + "\n").encode()
+    payload = (json.dumps(updated, indent=2, ensure_ascii=False, allow_nan=False) + "\n").encode()
+    if len(payload) > _MAX_CONFIG_BYTES:
+        raise ValueError(f"{path.name} would grow past 4 MiB; nothing was written.")
     if _after_read is not None:
         _after_read()
-    if original is not None:
-        _write_synced(os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, mode), original, mode)
-    current = _read_regular(path)[0] if os.path.lexists(path) else None
-    if current != original:
-        raise ValueError(f"{path.name} changed after it was read; nothing was written. Run connect again.")
-    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    # Both files are written and synced under temporary names first. The app's file is then read
+    # again, and only if it is still what was merged do the two renames happen, backup first. A rename
+    # replaces a name and never writes through a link. An app that saves in the instant between the
+    # last read and the rename can still lose that save, so quit the app before running connect.
+    staged = [_staged(path, payload, mode)]
     try:
-        _write_synced(descriptor, payload, mode)
-        os.replace(temporary, path)
-    except BaseException:
-        Path(temporary).unlink(missing_ok=True)
-        raise
+        if original is not None:
+            staged.append(_staged(backup, original, mode))
+        current = _read_regular(path)[0] if os.path.lexists(path) else None
+        if current != original:
+            raise ValueError(f"{path.name} changed after it was read; nothing was written. Run connect again.")
+        if original is not None:
+            os.replace(staged.pop(), backup)
+        os.replace(staged.pop(0), path)
+    finally:
+        for temporary in staged:
+            Path(temporary).unlink(missing_ok=True)
     return {"config": str(path), "backup": str(backup) if original is not None else None}
 
 
 def _connect_stdio(directory, app, scopes, config_file):
     if app not in _STDIO_DOCUMENTATION:
         raise ValueError("Choose claude-code, claude-desktop, or cursor with --transport stdio.")
-    if not scopes:
-        raise ValueError("Select each scope explicitly with --scope.")
+    if not scopes or any(scope not in SCOPES for scope in scopes):
+        raise ValueError("Select each supported scope explicitly with --scope.")
     if config_file is None:
         raise ValueError("--transport stdio needs --config-file naming the app's configuration file.")
     directory = _directory(directory)
@@ -174,14 +187,14 @@ def connect(directory, app, scopes=None, *, transport="http", config_file=None):
               "setup": [], "limits": list(_AUTH_LIMITS), "documentation": _DOCUMENTATION[app]}
     setup = result["setup"]
     if app == "claude-desktop":
-        setup.append(shlex.join(["gtm-connector", "connect", "inspector", "--state-dir", str(directory),
-                                 "--scope", "crm:read"]))
+        setup.append(shlex.join(["gtm-connector", "connect", "claude-desktop", "--transport", "stdio",
+                                 "--state-dir", str(directory), "--scope", "crm:read", "--config-file",
+                                 "CLAUDE_DESKTOP_CONFIG_FILE"]))
         result["limits"] = [
-            "No working Claude Desktop connection is available with this connector.",
             "Desktop remote connectors originate in Anthropic's cloud and require public HTTPS on port 443; "
             "they cannot reach this server on 127.0.0.1.",
-            "Desktop's separate local configuration uses stdio. This connector supplies no stdio transport.",
-            "Use the tested Inspector CLI path above. No tunnel or deployment is created.",
+            "Desktop starts local servers as processes. Use --transport stdio as above; it is untested in the app.",
+            "No tunnel or deployment is created.",
         ] + result["limits"]
         return result
     if not scopes:

@@ -46,9 +46,14 @@ gtm-connector connect claude-desktop --transport stdio --scope crm:read --scope 
 
 - `--transport stdio` works for `claude-desktop`, `claude-code`, and `cursor`, and needs `--scope`
   and `--config-file`. It merges only the `gtm-connector` entry into that file and saves the
-  previous file beside it first, with the same mode. It refuses a link, a file that is not one JSON
-  object, and a file that changes while it is being written.
+  previous file beside it first, with the same mode. Both are written under temporary names and
+  renamed into place. It refuses a symbolic link, a file with a second name, a file that is not one
+  strict JSON object, a result over 4 MiB, and a file that changed since it was read. Quit the app
+  first: a save it makes in the same instant can be lost.
 - The entry holds the Python path, `mcp stdio`, the state folder, and the scopes. It holds no token.
+  Python starts isolated (`-I`), so a folder the app runs in cannot stand in for the connector.
+- A call the bridge would refuse for its shape is still sent to the gateway, which records it and
+  refuses it.
 - The app starts `gtm-connector mcp stdio --state-dir DIR --scope ...`. The bridge attaches to the
   `serve` already running in that folder, obtains a grant for exactly those scopes, keeps it in
   memory, and renews only those scopes. Every call still goes through the HTTPS gateway, with its
@@ -58,6 +63,9 @@ gtm-connector connect claude-desktop --transport stdio --scope crm:read --scope 
 - Tested with the MCP SDK's own stdio client. No assistant app has been tested.
 
 ## Grants and private files
+
+These apply to the HTTP grants `connect` saves. The bridge keeps its own grant in memory and renews
+it.
 
 - A grant expires after five minutes. Rerun the same `connect` command with its scopes to replace
   the file. For Cursor, copy the entry again. For Claude Code, restart with the updated file.

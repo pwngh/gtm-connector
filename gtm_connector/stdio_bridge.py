@@ -48,22 +48,28 @@ class Grant:
         self._renew_at = 0.0
         self.issued = 0
 
-    def renew(self) -> str:
+    def _issue(self) -> str:
+        try:
+            token, lifetime = self._client.authorize_with_lifetime(list(self.scopes))
+        except (AuthorizationError, httpx2.HTTPError, OSError, ValueError):
+            raise BridgeError(_UNREACHABLE) from None
+        self._token = token
+        self._renew_at = self._clock() + lifetime - min(RENEW_BEFORE_SECONDS, lifetime / 4)
+        self.issued += 1
+        return token
+
+    def renew(self, refused: str | None = None) -> str:
+        """Replace the grant. A call whose refused token another call has already replaced reuses that one."""
         with self._lock:
-            try:
-                token, lifetime = self._client.authorize_with_lifetime(list(self.scopes))
-            except (AuthorizationError, httpx2.HTTPError, OSError, ValueError):
-                raise BridgeError(_UNREACHABLE) from None
-            self._token = token
-            self._renew_at = self._clock() + lifetime - min(RENEW_BEFORE_SECONDS, lifetime / 4)
-            self.issued += 1
-            return token
+            if refused is not None and self._token is not None and self._token != refused:
+                return self._token
+            return self._issue()
 
     def current(self) -> str:
         with self._lock:
             if self._token is not None and self._clock() < self._renew_at:
                 return self._token
-        return self.renew()
+            return self._issue()
 
 
 def _decode(response) -> dict[str, Any]:
@@ -110,7 +116,7 @@ class Bridge:
                 # The gateway refused the grant before running anything. Renew the same
                 # scopes once; a request is never retried with more authority.
                 try:
-                    self.grant.renew()
+                    self.grant.renew(refused=token)
                 except BridgeError as exc:
                     raise MCPError(_INTERNAL_ERROR, str(exc)) from None
                 continue
@@ -137,6 +143,25 @@ def build_server(bridge: Bridge) -> Server:
     return Server("gtm-connector", version="0.2.0", on_list_tools=list_tools, on_call_tool=call_tool)
 
 
+async def _record_malformed_calls(bridge: Bridge, source, target) -> None:
+    """Pass every message on. A tool call the SDK will refuse for its shape is first sent to the gateway,
+    which records it and refuses it, so no attempted call is missing from the audit log."""
+    async with source, target:
+        async for item in source:
+            request = getattr(item, "message", None)
+            params = getattr(request, "params", None)
+            if getattr(request, "method", None) == "tools/call":
+                name = params.get("name") if isinstance(params, dict) else None
+                arguments = params.get("arguments") if isinstance(params, dict) else None
+                if not isinstance(name, str) or not isinstance(arguments, (dict, type(None))):
+                    payload = {"name": name if isinstance(name, str) else "<invalid>", "arguments": arguments}
+                    try:
+                        await anyio.to_thread.run_sync(lambda: bridge.forward("tools/call", payload))
+                    except MCPError:
+                        pass  # The gateway refused it, as intended. The SDK answers the client next.
+            await target.send(item)
+
+
 def run_bridge(directory, scopes) -> None:
     """Serve MCP on stdin and stdout until the client closes stdin. Diagnostics go to stderr."""
     from .doctor import load_local_owner
@@ -149,8 +174,11 @@ def run_bridge(directory, scopes) -> None:
     server = build_server(bridge)
 
     async def serve():
-        async with stdio_server() as (read_stream, write_stream):
-            await server.run(read_stream, write_stream, server.create_initialization_options())
+        async with stdio_server() as (read_stream, write_stream), anyio.create_task_group() as tasks:
+            incoming, checked = anyio.create_memory_object_stream[Any](0)
+            tasks.start_soon(_record_malformed_calls, bridge, read_stream, incoming)
+            await server.run(checked, write_stream, server.create_initialization_options())
+            tasks.cancel_scope.cancel()
 
     try:
         anyio.run(serve)
