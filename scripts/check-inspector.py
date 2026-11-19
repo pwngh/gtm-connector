@@ -115,8 +115,8 @@ def check():
                 error = json.loads(stderr)
                 assert set(error) == {"error"} and "message" in error["error"], "Missing CLI error envelope"
                 assert not any(text in stderr for text in (
-                    "Cedarline Analytics", "ellis@cedarline.example", "Procurement has not approved", "record_ref",
-                    "Security review is delayed", "Avery Linden"
+                    "Thornfield Wren", "marian@thornfield-wren.example", "countersigned", "record_ref",
+                    "general counsel will not sign", "Avery Linden"
                 )), "Denied command leaked source data"
                 return error
 
@@ -149,7 +149,7 @@ def check():
             assert "calls:read" in run("tools/call", "read_call_notes", 403)["error"]["message"]
             for result, source, refs in (
                 (account, "crm", ["crm/accounts/acc-003", "crm/contacts/con-003"]),
-                (notes, "calls", ["calls/call_notes/note-003"]),
+                (notes, "calls", ["calls/call_notes/note-003", "calls/call_notes/note-003b"]),
                 (messages, "slack", ["slack/messages/msg-003"]),
             ):
                 data = result["structuredContent"]
@@ -162,7 +162,7 @@ def check():
             receipts = runtime.connector.audit.read()
             assert len(receipts) == 10 and len({row["audit_id"] for row in receipts}) == 10
             assert [row["http_status"] for row in receipts] == [200, 403, 429, 200, 403, 403, 403, 200, 403, 403]
-            assert [row["row_count"] for row in receipts] == [2, 0, 0, 1, 0, 0, 0, 1, 0, 0]
+            assert [row["row_count"] for row in receipts] == [2, 0, 0, 2, 0, 0, 0, 1, 0, 0]
             assert all(row["status"] != "pending" for row in receipts)
             assert [row["audit_id"] for row in receipts if row["status"] == "ok"] == [
                 account["_meta"]["gtm.demo/auditId"], notes["_meta"]["gtm.demo/auditId"],

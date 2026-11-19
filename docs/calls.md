@@ -43,12 +43,15 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
   cues, in file order. Cues may repeat or reorder start times, end where they start, and be
   separated by lines of spaces where a cue follows. A cue that ends before it starts refuses, and so
   does anything after an end time other than WebVTT cue settings.
-- A WebVTT identifier may repeat. Inline tags such as `<v Name>` are kept as the file has them. An
+- A WebVTT identifier may repeat. Inline tags such as `<v Name>` are stored as the file has them. An
   SRT cue may be numbered and carries no other identifier.
-- On a card, each sentence of a cue or line is one numbered unit. Its speaker label is the voice
-  tag that starts a WebVTT cue, or else a cue identifier that is not a number. TXT lines and SRT
-  cues have no label, so their role is `unknown`. `NOT READ` says which lines or cues of how many
-  were read, and that the rest of the call and every other call were not.
+- On a card, each whole sentence is one numbered unit. Neighbouring cues or lines by one speaker
+  are read together, so a sentence that runs across them stays whole. A WebVTT voice tag names the
+  speaker of the text after it and is not part of the sentence, and a cue with two tags has two
+  speakers. A cue with no tag takes its identifier as the label when that is not a number. TXT
+  lines and SRT cues have no label, so their role is `unknown`.
+- `NOT READ` says which lines or cues of how many were read. When the excerpt starts or ends inside
+  the call, a first or last sentence that may be incomplete is counted and not shown.
 - An import saved by an earlier version of the parser reads as `calls_import_corrupt`. Import the
   file again.
 - Well-formed `Kind:`, `Language:`, and `X-TIMESTAMP-MAP=` lines under the `WEBVTT` line are

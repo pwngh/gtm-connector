@@ -228,8 +228,8 @@ class BookSlackTests(unittest.TestCase):
                          [(row["text"], sent(row), label(row), channel) for row in served])
         self.assertEqual(records - {row["record_ref"] for row in messages},
                          {f"{store}/{table}/{row[0]}" for store in ("crm", "calls") for table, row in rows[store]})
-        # The sentences of the thread close the units in thread order. Each carries the message's time and the raw
-        # user ID as its speaker, and no Slack author is a customer.
+        # The messages of the thread close the units in thread order. Each sentence carries the message's time and
+        # the raw user ID as its speaker, and no Slack author is a customer.
         spoken = [unit for unit in units if unit["source"] == "slack"]
         self.assertEqual(units[len(units) - len(spoken):], spoken)
         order = [record["record_ref"] for record in messages]
@@ -238,6 +238,10 @@ class BookSlackTests(unittest.TestCase):
         by_ref = {record["record_ref"]: row for row, record in zip(served, messages)}
         for unit in spoken:
             row = by_ref[unit["record_ref"]]
+            if unit["kind"] == "record":
+                # A message with no text is still one unit, so it resolves.
+                self.assertEqual(row["text"].strip(), "")
+                continue
             self.assertEqual((unit["at"], unit["speaker"], unit["role"]), (sent(row), row.get("user"), "unknown"))
         # The card says what the read covered and what it left out: the omission counts and other threads.
         omitted = [sum(len(row.get(key, [])) for row in served) for key in ("files", "attachments", "blocks")]

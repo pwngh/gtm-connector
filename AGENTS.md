@@ -54,7 +54,7 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 - The repository holds code, tests, user docs, and this page. No logs, results, or review notes.
 - A doc claims only what a test shows. Keep "No live org has been verified." until one has been.
 - `tests/test_cases.py` holds ten invented deals, one property each. A change to cards keeps them
-  passing, and a case marked as an expected failure names the feature that will pass it.
+  passing. A case that waits for a feature says which assertion does not hold yet and why.
 - Live checks use the development org and workspace only. Never create or edit a Slack app. Never
   use a credential pasted into a conversation.
 - Report the result first, then what changed, what failed, and what is unverified, with numbers.

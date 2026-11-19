@@ -9,7 +9,7 @@ on what basis, and it says what it did not read. No model writes any of it.
 `gtm-connector demo`, on an invented law firm whose CRM record looks healthy:
 
 ```text
-DEAL CARD: Thornfield Wren LLP (acc-003) as of 2027-01-15
+DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15
 
 ATTENTION, from record fields and dates
   The renewal is in 24 days and this opportunity is still open at stage "negotiation". [1][3]
@@ -54,7 +54,6 @@ NOT READ
 flowchart LR
     S["Salesforce · transcripts · Slack"] -->|"scoped read, receipt first"| U["Numbered units<br/>typed fields · whole sentences · speaker roles"]
     U --> C(["Deal card<br/>every character written by the connector"])
-    U -.->|"numbers only"| A["Assistant"]
 ```
 
 Every number on a card resolves to its record and the receipt of the read that returned it:

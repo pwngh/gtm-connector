@@ -225,25 +225,29 @@ def expected(rows, notes, messages, brief):
                       f"close date {row['CloseDate']}; closed {str(row['IsClosed']).lower()}; "
                       f"won {str(row['IsWon']).lower()} [{number[row['Id']]}]")
         if left is not None and left <= 30 and not row["IsClosed"]:
-            still_open.append(f"  The contract end is {when} and this opportunity is still open at stage "
-                              f"{quoted(row['StageName'])}. [{number[contract['Id']]}][{number[row['Id']]}]")
+            still_open.append(row)
+    # More than five records raising one signal are counted in one line that cites the first five of them.
     if len(still_open) > varied.SHOWN:
         still_open = [f"  The contract end is {when} and {len(still_open)} opportunities are still open. "
-                      f"[{number[contract['Id']]}]"]
-    # The first five contracts by ID are shown, each on its own line except the one that sets the contract end.
+                      f"[{number[contract['Id']]}]" + varied.counted(number[row["Id"]] for row in still_open)]
+    else:
+        still_open = [f"  The contract end is {when} and this opportunity is still open at stage "
+                      f"{quoted(row['StageName'])}. [{number[contract['Id']]}][{number[row['Id']]}]"
+                      for row in still_open]
+    # The contract that sets the contract end has its own line. Of the others, the first five by ID are shown.
+    unselected = [row for row in by_id("Contract") if row is not contract]
     others = [f"  Contract: status {quoted(row['Status'])}; "
               f"{'no end date' if row['EndDate'] is None else 'ends ' + row['EndDate']} [{number[row['Id']]}]"
-              for row in by_id("Contract")[:varied.SHOWN] if row is not contract]
+              for row in unselected[:varied.SHOWN]]
     people, roles = [], []
     for row in by_id("Contact"):
         people.append(f"  Contact: {quoted(row['Name'])}; role {quoted(row['Title'])}; email {quoted(row['Email'])} "
                       f"[{number[row['Id']]}]")
         if row["Title"] is None:
-            roles.append(f"  This contact has no role recorded. [{number[row['Id']]}]")
-    if len(roles) > varied.SHOWN:
-        roles = [f"  {len(roles)} contacts have no role recorded. [1]"]
+            roles.append(number[row["Id"]])
+    roles = ([f"  {len(roles)} contacts have no role recorded. " + varied.counted(roles)] if len(roles) > varied.SHOWN
+             else [f"  This contact has no role recorded. [{unit}]" for unit in roles])
     stale = varied.stale_call([(f"calls/call_notes/{row[0]}", row[2]) for row in notes], brief)
-    count = len(rows["Contract"])
     not_read = ["  CRM: annual recurring revenue and renewal risk are not mapped from standard Salesforce fields.",
                 "  Calls: no call record was returned for this account." if not notes else
                 f"  Calls: {len(notes)} call {'record was' if len(notes) == 1 else 'records were'} read. "
@@ -253,8 +257,8 @@ def expected(rows, notes, messages, brief):
                 "Other channels were not read."]
     if not rows["Opportunity"]:
         not_read.append("  CRM: no opportunity was returned for this account.")
-    if count > varied.SHOWN:
-        not_read.append(f"  CRM: {count - varied.SHOWN} more contracts were read and are not shown ({count} in all).")
+    if len(unselected) > varied.SHOWN:
+        not_read.append(varied.more(len(unselected), "contracts"))
     # docs/briefs.md, Signals: the contract end, then contacts with no role, then the stale call.
     return {"fixed": fixed, "opportunities": offers, "contracts": others, "contacts": people,
             "signals": signals + still_open + roles + stale, "not_read": not_read}
@@ -311,7 +315,8 @@ class SalesforcePath(unittest.TestCase):
                                                          ("Contact", "contacts", wanted["contacts"])))
         self.assertLessEqual(set(wanted["not_read"]), set(card["NOT READ"]))
         self.assertEqual([line for line in card["NOT READ"]
-                          if " contracts were read " in line or "no opportunity" in line], wanted["not_read"][3:])
+                          if re.search(r" more contracts? w", line) or "no opportunity" in line],
+                         wanted["not_read"][3:])
         return brief
 
     def refused(self, rows, error, code):
@@ -367,6 +372,22 @@ class BookTests(SalesforcePath):
 class BuiltTests(SalesforcePath):
     """Accounts built in code. Each is held to its outcome and its exact card."""
 
+    def test_the_contract_that_sets_the_end_is_not_one_of_the_five_other_contracts_shown(self):
+        rows = org_rows("seven contracts", shape(contracts=7))
+        # The last contract by ID ends first, so it sets the contract end from outside the first five.
+        last = max(rows["Contract"], key=lambda row: row["Id"])
+        for row in rows["Contract"]:
+            row["EndDate"] = "2027-06-01" if row is last else "2028-06-01"
+        self.serve(rows)
+        card = varied.sections(self, self.brief(rows)["text"])
+        unit = numbers(rows)
+        self.assertEqual(card["RECORD VALUES"][0],
+                         f'  Contract end: 2027-06-01, in 137 days; status "Activated" [{unit[last["Id"]]}]')
+        others = [varied.cited(line)[0] for line in card["RECORD VALUES"] if line.startswith("  Contract: ")]
+        self.assertEqual(others, sorted(unit[row["Id"]] for row in rows["Contract"] if row is not last)[:5])
+        # Six other contracts, five shown, one counted: the selected one is in neither number.
+        self.assertIn("  CRM: 1 more contract was read and is not shown (6 in all).", card["NOT READ"])
+
     def sized(self, key, account, *, to, **page_size):
         rows = org_rows(key, account)
         self.serve(rows, **page_size)
@@ -407,10 +428,18 @@ class BuiltTests(SalesforcePath):
             self.serve(rows)
             signals = varied.sections(self, self.brief(rows)["text"])["ATTENTION"]
             if grouped:
+                # Units: the account, seven contacts, the contract, seven opportunities. Each counted signal
+                # cites five of the six records that raise it, which here are five of the first six by ID or not.
+                unit = numbers(rows)
+                deals = sorted(unit[row["Id"]] for row in rows["Opportunity"] if not row["IsClosed"])
+                people = sorted(unit[row["Id"]] for row in rows["Contact"] if row["Title"] is None)
+                self.assertEqual((len(deals), len(people)), (6, 6))
                 self.assertEqual(signals, [
-                    f"  The contract end is in 9 days and 6 opportunities are still open. "
-                    f"[{numbers(rows)[rows['Contract'][0]['Id']]}]",
-                    "  6 contacts have no role recorded. [1]"])
+                    "  The contract end is in 9 days and 6 opportunities are still open. "
+                    f"[{unit[rows['Contract'][0]['Id']]}]" + "".join(f"[{deal}]" for deal in deals[:5])
+                    + " and 1 more",
+                    "  6 contacts have no role recorded. " + "".join(f"[{person}]" for person in people[:5])
+                    + " and 1 more"])
             else:
                 self.assertEqual(["The contract end is in 9 days and this opportunity is still open" in line
                                   for line in signals], [True] * 5 + [False] * 5)

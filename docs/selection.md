@@ -34,7 +34,9 @@ gtm-connector serve --state-dir var/selected --selection selection.json
 
 ## Prepared briefs
 
-`prepare_renewal_brief` returns the same card as the `brief` command, as `text`. Each read inside
+`prepare_renewal_brief` returns the same card as the `brief` command, as `text`, with its `units`:
+each number on the card with its record reference and, for a sentence, its neutralized text,
+speaker, and role. Each read inside
 it writes its own receipt, linked to the outer call by
 `{"kind": "brief_child", "parent_audit_id": ..., "ordinal": N}`. A successful brief has one outer
 receipt and three read receipts, or four with Slack. The reads write no `serve` event lines.
@@ -43,10 +45,11 @@ receipt and three read receipts, or four with Slack. The reads write no `serve` 
   that check. A read already in progress keeps its own limit, 20 seconds for Salesforce and live
   Slack, and a late result is discarded.
 - The brief is saved as `selected-briefs/BRIEF_ID.json` in the state folder, mode 0600, at most
-  4 MiB. `trace` reads the cards the `brief` command saves, not these.
-- `read_renewal_brief` releases a saved brief to any caller that passes the rule in the
-  [security review](../SECURITY_REVIEW.md). Its result includes `provider_rechecked: false` and a
-  notice. Logging out of the `sf` CLI does not withhold saved Salesforce content.
+  4 MiB. `trace` reads the cards the `brief` command saves, not these, so a caller resolves a
+  number from `units`.
+- `read_renewal_brief` releases a saved brief, with the same `text` and `units`, to any caller that
+  passes the rule in the [security review](../SECURITY_REVIEW.md). Its result includes
+  `provider_rechecked: false` and a notice. Logging out of the `sf` CLI does not withhold saved Salesforce content.
 
 ## Errors
 

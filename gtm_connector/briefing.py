@@ -191,13 +191,21 @@ def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, i
 
 
 def trace_saved(directory, brief_id, number):
-    """Resolve one number on a saved card from its stored evidence, never from the card's own text."""
+    """Resolve one number on a saved card from its stored evidence, never from the card's own text.
+
+    The saved receipts must equal the ones committed to the audit log for this brief, so an edited
+    file does not trace. The file's owner can still edit both; the audit log is not tamper-proof.
+    """
     try:
         artifact = strict_json.loads(_artifact_path(directory, brief_id).read_text())
     except FileNotFoundError:
         raise ValueError("No saved card has this brief ID in this state folder.") from None
     if (not isinstance(artifact, dict) or artifact.get("schema_version") != 2
             or artifact.get("brief_id") != brief_id or not isinstance(artifact.get("evidence"), dict)
-            or artifact["evidence"].get("brief_id") != brief_id):
+            or artifact["evidence"].get("brief_id") != brief_id
+            or artifact.get("account_id") != artifact["evidence"].get("account_id")):
         raise ValueError("invalid saved brief evidence")
+    from .audit import read_audit
+    if read_audit(Path(directory) / "audit.sqlite3", brief_id) != artifact["evidence"].get("receipts"):
+        raise ValueError("The saved card does not match the audit log of this state folder.")
     return {"brief_id": brief_id, "account_id": artifact["account_id"], **trace(artifact["evidence"], number)}

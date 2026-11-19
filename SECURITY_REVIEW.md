@@ -39,7 +39,7 @@ untrusted data and cannot request a tool, a grant, or a write.
 | The rate limit returns HTTP 429 with `rate_limited` and `Retry-After`. | [test_gateway.py](tests/test_gateway.py), [test_request_checks.py](tests/test_request_checks.py) |
 | The connector writes every character of a card. Each value and quotation carries a number that resolves to a stored record and the receipt of the read that returned it. | [test_units.py](tests/test_units.py), [test_cases.py](tests/test_cases.py) |
 | Evidence with a record of another account, a missing or mismatched receipt, a changed transcript or Slack snapshot, or an unknown shape gives no card. | [test_units.py](tests/test_units.py), [test_imported_briefing.py](tests/test_imported_briefing.py), [test_live_slack_briefing.py](tests/test_live_slack_briefing.py) |
-| Source text is neutralized before anything displays it: Slack mentions, links, and control characters become inert words. A quotation is one whole sentence, and a figure inside it never becomes a record value. | [test_units.py](tests/test_units.py), [test_cases.py](tests/test_cases.py) |
+| Source text is neutralized before anything displays it, in the card and in printed JSON: Slack mentions, links, control characters, and bracketed numbers become inert words. The raw records stay in the saved file. A quotation is one whole sentence, and a figure inside it never becomes a record value. | [test_units.py](tests/test_units.py), [test_cases.py](tests/test_cases.py), [test_briefing.py](tests/test_briefing.py), [test_cli.py](tests/test_cli.py) |
 | A speaker's role comes from identity, never from wording: a seller the operator listed, or a call label equal to exactly one contact of the account. Anything else is unknown, and a Slack author is never a customer. | [test_units.py](tests/test_units.py), [test_cases.py](tests/test_cases.py) |
 | Keys rotate per start, the certificate names loopback, and state files are private. | [test_runtime.py](tests/test_runtime.py) |
 | Server events carry no bearer token, argument, or source body. | [test_call_events.py](tests/test_call_events.py) |
@@ -54,7 +54,7 @@ untrusted data and cannot request a tool, a grant, or a write.
 | Client grants | `connect` writes a bearer grant for only the named scopes to a mode-0600 file in the state directory. The client receives that grant, never the owner credential, and its calls pass through the same gateway, audit log, and rate limit. Keep these files out of Git. |
 | Audit receipts | `audit.sqlite3` stores, for each tool attempt, a SHA-256 token fingerprint, the tool, its arguments, a UTC timestamp, request and brief IDs, the outcome, and returned record references. Arguments can include activity text, search terms, and IDs. Bearer tokens and response bodies are not logged. A fingerprint establishes neither identity nor a valid grant. [docs/audit.md](docs/audit.md) has the HTTP 503 cases, the requests that get no receipt, and the rate limit. |
 | Retention | Runtime directories use mode 0700 and files use mode 0600. Nothing expires automatically. Saved briefs include source evidence and receipt copies. |
-| Cards | `units.py` builds a card from checked evidence alone. No model runs and no inference service is called. A seller is whoever the operator lists in `sellers.json`, and that list is the operator's own claim. See [docs/briefs.md](docs/briefs.md). |
+| Cards | `units.py` builds a card from checked evidence alone. No model runs and no inference service is called. A seller is whoever the operator lists in `sellers.json`, and that list is the operator's own claim. The demo's invented sellers are the default only when every source is demo data. See [docs/briefs.md](docs/briefs.md). |
 | Imported transcripts | `calls import` is a local operator command. It parses a selected TXT, VTT, or SRT export, obtains only `crm:read`, and resolves the account through the audited gateway before committing an association. A missing, ambiguous, changed, or unreceipted association publishes nothing. A missing import refuses instead of returning demo content. Local `calls inspect --full` returns the complete original and is not an MCP tool. See [docs/calls.md](docs/calls.md). |
 
 ## Salesforce (optional, read-only)
@@ -118,6 +118,8 @@ each read's budget. An `sf` that outlasts its limit is stopped and reported as
 - The rate limit is not a distributed quota. Credential filesystem proof is POSIX only.
 - A card does not relate one record to another, so it flags no contradiction. A number attributes
   a source, not its truth.
+- `trace` refuses a saved card whose receipts differ from the audit log. The owner of the state
+  folder can edit both files, so this catches a changed card, not a determined owner.
 - A speaker label is taken as the source gives it. The connector cannot tell that a transcript
   mislabelled a speaker. Sentences are split at punctuation, which can join or divide them wrongly.
 - The selection chooses accounts and Slack threads, not fields. Without `--selection`, a connected

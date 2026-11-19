@@ -122,13 +122,14 @@ class SignalRuleTests(unittest.TestCase):
     def signals(self, source):
         return [line.strip() for line in self.card(source)["ATTENTION"]]
 
-    def test_an_open_opportunity_signals_from_thirty_days_out_and_a_passed_date_is_its_own_signal(self):
+    def test_an_open_opportunity_signals_from_thirty_days_out_and_stays_one_after_the_date_passes(self):
         stage = ' and this opportunity is still open at stage "negotiation". [1][3]'
         for renewal_date, expected in (("2027-02-15", []),                                   # 31 days
                                        ("2027-02-14", ["The renewal is in 30 days" + stage]),
                                        ("2027-01-16", ["The renewal is in 1 day" + stage]),
                                        ("2027-01-15", ["The renewal is today" + stage]),
-                                       ("2027-01-14", ["The renewal date passed 1 day ago. [1]"])):
+                                       ("2027-01-14", ["The renewal date passed 1 day ago" + stage]),
+                                       ("2026-06-01", ["The renewal date passed 228 days ago" + stage])):
             with self.subTest(renewal_date=renewal_date):
                 self.assertEqual(self.signals(demo(stage="negotiation", renewal_date=renewal_date)), expected)
         for stage_name in ("closed_won", "closed_lost"):
@@ -161,8 +162,9 @@ class SignalRuleTests(unittest.TestCase):
             self.assertEqual(notes(unknown), [])
         # A call that cannot be ordered beside a stale one is not counted as newer. Units follow the time text.
         self.assertEqual(notes("2026-10-03T15:00:00Z", "2026-10-03"), [old.format(104, 5)])
-        # A call with no sentence has no unit to cite, and so raises no signal.
-        self.assertEqual(notes("2026-10-03T15:00:00Z", body=""), [])
+        # A call with no sentence is one unit of its own, so its age still raises the signal and resolves.
+        for empty in ("", " \n\t "):
+            self.assertEqual(notes("2026-10-03T15:00:00Z", body=empty), [old.format(104, 4)])
 
     def test_salesforce_signals_count_from_the_contract_end_and_put_the_open_opportunity_first(self):
         still_open = ' and this opportunity is still open at stage "Negotiation". [3][4]'
@@ -188,8 +190,12 @@ class SignalRuleTests(unittest.TestCase):
                 self.assertEqual(self.signals(repeated(source(), "contacts", 5, title=title)),
                                  [NO_ROLE.format(number) for number in range(2, 7)])
                 crowded = self.card(repeated(source(), "contacts", 6, title=title))
-                self.assertEqual(crowded["ATTENTION"], ["  6 contacts have no role recorded. [1]"])
-                self.assertIn("  CRM: 1 more contacts were read and are not shown (6 in all).", crowded["NOT READ"])
+                # One line counts them. It cites the first five of them and says how many more there are.
+                self.assertEqual(crowded["ATTENTION"],
+                                 ["  6 contacts have no role recorded. [2][3][4][5][6] and 1 more"])
+                self.assertIn("  CRM: 1 more contact was read and is not shown (6 in all).", crowded["NOT READ"])
+                self.assertIn("  CRM: 3 more contacts were read and are not shown (8 in all).",
+                              self.card(repeated(source(), "contacts", 8, title=title))["NOT READ"])
                 # Only the contacts with no role are counted.
                 mixed = repeated(source(), "contacts", 7, title=title)
                 for record in mixed["records"][1:3]:
@@ -205,16 +211,22 @@ class SignalRuleTests(unittest.TestCase):
             for number in range(3, 8)])
         for renewal_date, when in (("2027-01-24", "in 9 days"), ("2027-01-16", "in 1 day"), ("2027-01-15", "today")):
             with self.subTest(renewal_date=renewal_date):
-                self.assertEqual(self.signals(source(6, renewal_date)),
-                                 [f"The renewal is {when} and 6 opportunities are still open. [1]"])
-        self.assertEqual(self.signals(source(6, "2027-01-12")), ["The renewal date passed 3 days ago. [1]"])
+                self.assertEqual(self.signals(source(6, renewal_date)), [
+                    f"The renewal is {when} and 6 opportunities are still open. [1][3][4][5][6][7] and 1 more"])
+        self.assertEqual(self.signals(source(6, "2027-01-12")), [
+            "The renewal date passed 3 days ago and 6 opportunities are still open. [1][3][4][5][6][7] and 1 more"])
         self.assertEqual(self.signals(source(6, "2027-02-15")), [])                             # 31 days
         # Only the open opportunities are counted.
         mixed = source(7)
         mixed["records"][2]["stage"], mixed["records"][3]["stage"] = "closed_won", "closed_lost"
         self.assertEqual(len(self.signals(mixed)), 5)
-        self.assertEqual(self.signals(source(12)),
-                         ["The renewal is in 9 days and 12 opportunities are still open. [1]"])
+        self.assertEqual(self.signals(source(12)), [
+            "The renewal is in 9 days and 12 opportunities are still open. [1][3][4][5][6][7] and 7 more"])
+        # The cited five are open ones, in unit order, whichever five the record values show.
+        mixed = source(8)
+        mixed["records"][2]["stage"] = "closed_won"
+        self.assertEqual(self.signals(mixed), [
+            "The renewal is in 9 days and 7 opportunities are still open. [1][4][5][6][7][8] and 2 more"])
 
     def test_six_open_opportunities_give_one_signal_and_five_give_one_each_on_salesforce(self):
         def source(count, end="2027-01-24"):
@@ -225,8 +237,8 @@ class SignalRuleTests(unittest.TestCase):
             for number in range(4, 9)])
         for end, when in (("2027-01-24", "in 9 days"), ("2027-01-16", "in 1 day"), ("2027-01-15", "today")):
             with self.subTest(end=end):
-                self.assertEqual(self.signals(source(6, end)),
-                                 [f"The contract end is {when} and 6 opportunities are still open. [3]"])
+                self.assertEqual(self.signals(source(6, end)), [
+                    f"The contract end is {when} and 6 opportunities are still open. [3][4][5][6][7][8] and 1 more"])
         self.assertEqual(self.signals(source(6, "2027-02-15")), [])                             # 31 days
         mixed = source(7)
         for record in mixed["records"][2:4]:
@@ -240,14 +252,17 @@ class SignalRuleTests(unittest.TestCase):
         card = varied.sections(self, text)
         self.assertEqual(card["ATTENTION"], [
             "  CRM marks this account at risk. [1]",
-            "  The renewal is in 9 days and 6 opportunities are still open. [1]",
-            "  6 contacts have no role recorded. [1]"])
-        # A counted signal cites the account. Each record is still its own unit, and what is not shown is counted.
+            "  The renewal is in 9 days and 6 opportunities are still open. [1][8][9][10][11][12] and 1 more",
+            "  6 contacts have no role recorded. [2][3][4][5][6] and 1 more"])
+        for line, table in zip(card["ATTENTION"][1:], ("opportunities", "contacts")):
+            self.assertEqual({units[number - 1]["record_ref"].split("/")[1] for number in varied.cited(line)[-5:]},
+                             {table})
+        # Each record is still its own unit, and what is not shown is counted.
         self.assertEqual([unit["record_ref"] for unit in units if unit["kind"] == "record"],
                          ["crm/accounts/acc-001", *(f"crm/contacts/con-00{number}" for number in range(1, 7)),
                           *(f"crm/opportunities/opp-00{number}" for number in range(1, 7))])
-        self.assertLessEqual({"  CRM: 1 more opportunities were read and are not shown (6 in all).",
-                              "  CRM: 1 more contacts were read and are not shown (6 in all)."}, set(card["NOT READ"]))
+        self.assertLessEqual({"  CRM: 1 more opportunity was read and is not shown (6 in all).",
+                              "  CRM: 1 more contact was read and is not shown (6 in all)."}, set(card["NOT READ"]))
 
 
 if __name__ == "__main__":

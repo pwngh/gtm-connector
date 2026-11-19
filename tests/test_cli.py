@@ -80,7 +80,8 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(summary["brief_audit_rows"], 9)
                 full, restricted = summary["briefs"]
                 self.assertEqual(full["account_id"], "acc-003")
-                self.assertTrue(full["text"].startswith("DEAL CARD: Thornfield Wren LLP (acc-003) as of 2027-01-15\n"))
+                self.assertTrue(full["text"].startswith(
+                    'DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15\n'))
                 self.assertIn('      "We will have the order form countersigned by January 30."',
                               full["text"].splitlines())
                 self.assertIn("  Slack: not requested for this card.", full["text"].splitlines())
@@ -220,19 +221,23 @@ class CLITests(unittest.TestCase):
     def test_json_brief_and_trace_resolve_each_number_from_saved_evidence(self):
         brief = self.json_result(self.run_cli("brief", "acc-001", "--without-calls"))
         self.assertEqual(set(brief), {"schema_version", "brief_id", "account_id", "as_of", "status", "sources",
-                                      "text", "units", "evidence"})
+                                      "text", "units"})
         self.assertEqual((brief["schema_version"], brief["status"]), (2, "accepted"))
-        self.assertEqual(brief["evidence"]["notes_status"], "denied")
         self.assertIn("  Calls: not read. The grant lacks calls:read.", brief["text"].splitlines())
         saved = self.state / "briefs" / (brief["brief_id"] + ".json")
         original_artifact = saved.read_bytes()
+        artifact = json.loads(original_artifact)
+        # The private file holds what was printed, and the evidence that was not.
+        self.assertEqual({key: artifact[key] for key in brief}, brief)
+        self.assertEqual(set(artifact) - set(brief), {"evidence"})
+        self.assertEqual(artifact["evidence"]["notes_status"], "denied")
         traced = self.json_result(self.run_cli("trace", brief["brief_id"], "3"))
         self.assertEqual(set(traced), {"brief_id", "account_id", "n", "kind", "source", "record_ref", "receipt",
                                        "fields"})
         self.assertEqual((traced["brief_id"], traced["account_id"], traced["n"], traced["kind"], traced["record_ref"]),
                          (brief["brief_id"], "acc-001", 3, "record", "crm/opportunities/opp-001"))
         self.assertEqual(traced["fields"]["amount_cents"], 2_050_000)
-        receipt = next(row for row in brief["evidence"]["receipts"] if row["tool"] == "list_opportunities")
+        receipt = next(row for row in artifact["evidence"]["receipts"] if row["tool"] == "list_opportunities")
         self.assertEqual(traced["receipt"], {"audit_id": receipt["audit_id"], "tool": "list_opportunities",
                                              "status": "ok", "http_status": 200})
         human = self.run_cli("trace", brief["brief_id"], "1", json_output=False)
@@ -247,6 +252,51 @@ class CLITests(unittest.TestCase):
                 self.assertIn("This card has numbers 1 to 3.", rejected.stderr)
                 self.assertNotIn("Traceback", rejected.stderr)
         self.assertEqual(saved.read_bytes(), original_artifact)
+
+    def test_printed_json_holds_neutralized_text_and_the_raw_records_stay_in_the_private_file(self):
+        brief = self.run_cli("brief", "acc-003", "--with-slack")
+        printed = self.json_result(brief)
+        saved = (self.state / "briefs" / (printed["brief_id"] + ".json")).read_text()
+        for raw in ("<!channel>", "https://files.thornfield-wren.example", "rider-redline-v4.pdf"):
+            with self.subTest(raw=raw):
+                self.assertIn(raw, saved)
+                self.assertNotIn(raw, brief.stdout)
+        self.assertNotRegex(brief.stdout, r"<[!@]|https?://")
+        self.assertIn("[mention channel]", printed["text"])
+        self.assertIn("[link files.thornfield-wren.example]", printed["text"])
+        for command in (("demo",), ("trace", printed["brief_id"], "7")):
+            with self.subTest(command=command[0]):
+                state = self.state if command[0] == "trace" else Path(self.directory.name) / "demo"
+                output = self.run_cli(*command, state=state)
+                self.assertEqual(output.returncode, 0, output.stderr)
+                self.assertNotRegex(output.stdout, r"<[!@]|https?://")
+
+    def test_trace_refuses_a_saved_card_that_no_longer_matches_the_audit_log(self):
+        brief = self.json_result(self.run_cli("brief", "acc-003"))
+        saved = self.state / "briefs" / (brief["brief_id"] + ".json")
+        original = json.loads(saved.read_text())
+
+        def edited(change):
+            artifact = json.loads(json.dumps(original))
+            change(artifact)
+            saved.write_text(json.dumps(artifact))
+            return self.run_cli("trace", brief["brief_id"], "1")
+
+        cases = {
+            "receipt outcome": lambda artifact: artifact["evidence"]["receipts"][0].update(row_count=9),
+            "receipt identity": lambda artifact: artifact["evidence"]["receipts"][1].update(audit_id="forged"),
+            "receipt dropped": lambda artifact: artifact["evidence"]["receipts"].pop(),
+        }
+        for name, change in cases.items():
+            with self.subTest(name=name):
+                refused = edited(change)
+                self.assertEqual((refused.returncode, refused.stdout), (2, ""))
+                self.assertIn("The saved card does not match the audit log of this state folder.", refused.stderr)
+        refused = edited(lambda artifact: artifact.update(account_id="acc-004"))
+        self.assertEqual((refused.returncode, refused.stdout), (2, ""))
+        self.assertIn("invalid saved brief evidence", refused.stderr)
+        saved.write_text(json.dumps(original))
+        self.assertEqual(self.json_result(self.run_cli("trace", brief["brief_id"], "1"))["n"], 1)
 
     def test_a_spoken_number_traces_to_its_sentence_speaker_and_source_digest(self):
         brief = self.json_result(self.run_cli("brief", "acc-003", "--with-slack"))

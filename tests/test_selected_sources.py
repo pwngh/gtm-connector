@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
 import os
+import re
 from pathlib import Path
 import select
 import signal
@@ -159,10 +160,24 @@ class SelectedSourceTests(SelectedFixture, unittest.TestCase):
             self.assertRegex(lines[injected[1] - 1], r"^  \[\d+\] unknown \(no speaker label\); call ")
             saved = json.loads((runtime.directory / "selected-briefs" / (brief_id + ".json")).read_text())
             self.assertEqual((saved["schema_version"], saved["text"]), (2, prepared["text"]))
+            self.assertEqual(set(saved), {"kind", "schema_version", "brief_id", "account_id", "as_of", "prepared_by",
+                                          "bindings", "slack_scopes", "sources", "text", "units", "evidence"})
+            # The caller gets the units, so every number on the card resolves without the owner's CLI.
+            units = prepared["units"]
+            self.assertEqual(saved["units"], units)
+            self.assertEqual([unit["n"] for unit in units], list(range(1, len(units) + 1)))
+            cited = {int(number) for number in re.findall(r"\[(\d+)\]", prepared["text"])}
+            self.assertLessEqual(cited, {unit["n"] for unit in units})
+            quoted = {json.loads(line.strip()) for line in lines if line.startswith('      "')}
+            self.assertLessEqual(quoted, {unit["text"] for unit in units if unit["kind"] == "sentence"})
+            # Units hold neutralized text only. The raw records stay in the saved file.
+            self.assertNotIn("evidence", prepared)
+            self.assertFalse({"body", "name", "email"} & {key for unit in units for key in unit})
             with closing(sqlite3.connect(runtime.directory / "crm.sqlite3")) as connection:
                 self.assertEqual(connection.execute("SELECT count(*) FROM activities").fetchone()[0], 0)
             released = self.ok(owner.call(full, "read_renewal_brief", {"brief_id": brief_id}))["brief"]
             self.assertEqual(released["text"], prepared["text"])
+            self.assertEqual(released["units"], units)
             self.assertIs(released["provider_rechecked"], False)
             self.assertIn("not rechecked", released["notice"])
             crm_only = owner.authorize(["crm:read"])

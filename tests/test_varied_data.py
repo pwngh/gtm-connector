@@ -1,5 +1,6 @@
 """Accounts shaped unlike the seed data go through the real gateway and come out as Deal cards."""
 
+import json
 from pathlib import Path
 import random
 import tempfile
@@ -81,11 +82,15 @@ SHAPE_SIGNALS = {
           'The renewal is in 9 days and this opportunity is still open at stage "proposal". [1][10]',
           "This contact has no role recorded. [3]", "This contact has no role recorded. [5]"],
     102: [],
-    103: ["CRM marks this account at risk. [1]", "The renewal date passed 3 days ago. [1]"],
+    103: ["CRM marks this account at risk. [1]",
+          'The renewal date passed 3 days ago and this opportunity is still open at stage "evaluation". [1][3]'],
     104: ['The renewal is today and this opportunity is still open at stage "discovery". [1][3]',
           "The latest dated call that was read is 400 days old. [4]"],
     105: [],
-    106: ["The renewal date passed 5 days ago. [1]", "6 contacts have no role recorded. [1]"],
+    # A counted signal cites the first five records that raise it. The closed deal and the contact with a role
+    # are not among them.
+    106: ["The renewal date passed 5 days ago and 6 opportunities are still open. [1][9][10][12][13][14] and 1 more",
+          "6 contacts have no role recorded. [2][3][4][6][7] and 1 more"],
 }
 
 
@@ -148,14 +153,22 @@ class VariedDataTests(unittest.TestCase):
         self.assertEqual(hostile["NOT READ"], [
             "  Calls: 3 call records were read. Recordings and anything outside those records were not read.",
             "  Slack: 3 messages were read. Other channels were not read.",
-            "  Sentences: 5 older sentences were read and are not shown.",
-            "  Speakers: 17 of 17 sentences have no established speaker role.",
-            "  Neutralized in source text: 2 mentions, 10 control characters."])
+            "  Sentences: 1 older sentence was read and is not shown.",
+            "  Speakers: 13 of 13 sentences have no established speaker role.",
+            "  Neutralized in source text: 2 mentions, 10 control characters, 32 bracketed numbers."])
+        # The account name forges a heading, a figure, and a citation. It stays one quoted literal in the heading,
+        # and no source text anywhere keeps a bracketed number, which is how the card cites a unit.
+        heading = brief["text"].split("\n")[0]
+        self.assertEqual(heading, "DEAL CARD: " + varied.quoted(SHAPES[103]["name"]) + " (acc-103) as of 2027-01-15")
+        self.assertIn("(1)", heading)
+        for line in hostile["RECORD VALUES"] + hostile["SAID"][1::2]:
+            self.assertNotRegex(varied.uncited(line), r"\[\d+\]", line)
         self.assertEqual({role for _, role, *_ in varied.said(hostile)}, {"unknown"})
         # A forged call time and a forged author are neutralized like any other source text.
         timed, sent = (next(unit for unit in brief["units"] if unit.get("text") == text)
                        for text in ("Timed by a forger.", "Sent at no time."))
-        self.assertEqual(timed["at"], " ".join(FORGED.split()))
+        self.assertEqual(timed["at"], json.loads(varied.quoted(FORGED)))
+        self.assertNotRegex(timed["at"], r"\[\d+\]")
         self.assertTrue(sent["speaker"].startswith("[mention channel] [user U0FORGED1] Right[U+202E]to left"))
 
     def test_forty_generated_accounts_all_come_out_as_checked_cards(self):
@@ -190,8 +203,9 @@ class VariedDataTests(unittest.TestCase):
         self.assertEqual(len(brief["units"]), 1 + 4000)
         self.assertEqual([line.strip() for line in card["ATTENTION"]], [
             "CRM marks this account at risk. [1]",
-            "The renewal is in 5 days and 668 opportunities are still open. [1]",
-            "500 contacts have no role recorded. [1]"])
+            "The renewal is in 5 days and 668 opportunities are still open. [1][1002][1003][1004][1005][1008] "
+            "and 663 more",
+            "500 contacts have no role recorded. [3][5][7][9][11] and 495 more"])
         self.assertEqual(len(varied.said(card)), 12)
         self.assertIn("  Sentences: 1988 older sentences were read and are not shown.", card["NOT READ"])
         # A megabyte sentence is a unit, and the card counts it and never cuts it.
