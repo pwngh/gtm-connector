@@ -332,6 +332,47 @@ class Evidence(unittest.TestCase):
                          ["We will sign only if the rider is approved."])
         self.assertNotIn("control character", text)
 
+    def test_said_deals_its_places_by_role_so_neither_side_crowds_out_the_other(self):
+        def said(notes):
+            text = build(evidence(notes=notes))[1]
+            heads = text.split("\nSAID", 1)[1].split("\n\n", 1)[0].splitlines()[1::2]
+            return [head.split("] ", 1)[1].split(" (", 1)[0] for head in heads], text
+
+        # One customer sentence beside sixty by a seller is first, with the eleven that fit after it.
+        roles, text = said([("Dana Ito", "We will not sign.")]
+                           + [("Morgan Reed", f"Sync {number} went fine.") for number in range(60)])
+        self.assertEqual(roles, ["customer"] + ["seller"] * 11)
+        self.assertIn("Sentences: 49 more sentences were read and are not shown (49 seller); the card shows 12.", text)
+        # The mirror: one seller sentence beside fourteen by the customer is still on the card.
+        roles, text = said([("Morgan Reed", "Legal is fine.")]
+                           + [("Dana Ito", f"Point {number} stands.") for number in range(14)])
+        self.assertEqual(roles, ["customer"] * 11 + ["seller"])
+        self.assertIn("Sentences: 3 more sentences were read and are not shown (3 customer); the card shows 12.", text)
+        # Twenty of each: four of each, and the count says whose sentences are left out.
+        roles, text = said([(who, f"Point {number} stands.") for number in range(20)
+                            for who in ("Dana Ito", "Morgan Reed", "Sam Roe")])
+        self.assertEqual(roles, ["customer"] * 4 + ["seller"] * 4 + ["unknown"] * 4)
+        self.assertIn("are not shown (16 customer, 16 seller, 16 unknown); the card shows 12.", text)
+        # When a role runs out, its turns pass to the others in order: one customer, then six and five.
+        roles, _ = said([("Dana Ito", "We will not sign.")] + [(who, f"Point {number} stands.") for number in range(20)
+                                                              for who in ("Morgan Reed", "Sam Roe")])
+        self.assertEqual(roles, ["customer"] + ["seller"] * 6 + ["unknown"] * 5)
+        # A sentence too long to show is counted with its speaker's role too.
+        _, text = said([("Dana Ito", "X" * 301 + ".")] + [("Morgan Reed", f"Point {number} stands.")
+                                                         for number in range(14)])
+        self.assertIn("Sentences: 2 more sentences were read and are not shown (2 seller); the card shows 12.", text)
+        self.assertIn("Sentences: 1 over 300 characters was read and is not shown (1 customer), because a quotation "
+                      "is never cut.", text)
+
+    def test_sentences_that_were_read_and_cannot_be_shown_are_not_reported_as_none_read(self):
+        for notes, line in (([("Dana Ito", "X" * 421 + ".")], "1 sentence was read and is not shown. NOT READ says why."),
+                            ([("Dana Ito", "X" * 421 + "."), ("Dana Ito", "Y" * 400 + ".")],
+                             "2 sentences were read and none is shown. NOT READ says why.")):
+            text = build(evidence(notes=notes))[1]
+            self.assertIn("  " + line, text.splitlines())
+            self.assertNotIn("No sentence was read.", text)
+        self.assertIn("  No sentence was read.", build(evidence(notes=[]))[1].splitlines())
+
     def test_a_denied_source_is_stated_and_never_filled_in(self):
         _, text = build(evidence(notes_status="denied", slack_status="denied"))
         self.assertIn("Calls: not read. The grant lacks calls:read.", text)

@@ -153,7 +153,7 @@ class VariedDataTests(unittest.TestCase):
         self.assertEqual(hostile["NOT READ"], [
             "  Calls: 3 call records were read. Recordings and anything outside those records were not read.",
             "  Slack: 3 messages were read. Other channels were not read.",
-            "  Sentences: 2 older sentences were read and are not shown.",
+            "  Sentences: 2 more sentences were read and are not shown (2 unknown); the card shows 12.",
             "  Speakers: 14 of 14 sentences have no established speaker role.",
             "  Neutralized in source text: 2 mentions, 10 control characters, 32 bracketed numbers."])
         # The account name forges a heading, a figure, and a citation. It stays one quoted literal in the heading,
@@ -207,13 +207,13 @@ class VariedDataTests(unittest.TestCase):
             "and 663 more",
             "500 contacts have no role recorded. [3][5][7][9][11] and 495 more"])
         self.assertEqual(len(varied.said(card)), 12)
-        self.assertIn("  Sentences: 1988 older sentences were read and are not shown.", card["NOT READ"])
+        self.assertIn("  Sentences: 1988 more sentences were read and are not shown (1988 unknown); the card shows 12.", card["NOT READ"])
         # A megabyte sentence is a unit, and the card counts it and never cuts it.
         brief, card = cards[410]
         self.assertEqual(sorted(len(unit["text"]) for unit in brief["units"] if unit["kind"] == "sentence"),
                          [1_000_000] * 6)
-        self.assertEqual(card["SAID"], ["  No sentence was read."])
-        self.assertIn("  Sentences: 6 over 300 characters were read and are not shown, because a quotation is "
+        self.assertEqual(card["SAID"], ["  6 sentences were read and none is shown. NOT READ says why."])
+        self.assertIn("  Sentences: 6 over 300 characters were read and are not shown (6 unknown), because a quotation is "
                       "never cut.", card["NOT READ"])
         before = len(self.runtime.connector.audit.read())
         for number in many:

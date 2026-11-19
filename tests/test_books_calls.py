@@ -541,7 +541,7 @@ class BookCallsTests(unittest.TestCase):
                 self.assertEqual([unit["text"] for unit in units_ if unit["partial"]], partial)
                 self.assertEqual(sorted(quote[-1] for quote in varied.said(card)), sorted(whole))
                 self.assertIn(f"  Sentences: {len(partial)} cut off at a pause, a change of speaker, or the edge of "
-                              "the excerpt were read and are not shown.", card["NOT READ"])
+                              f"the excerpt were read and are not shown ({len(partial)} unknown).", card["NOT READ"])
 
 
 if __name__ == "__main__":

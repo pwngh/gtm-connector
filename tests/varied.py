@@ -116,7 +116,10 @@ def uncited(line):
 def said(card):
     """Each shown sentence as (number, role, basis, source, time, speaker literal or None, text)."""
     lines = card["SAID"]
-    if lines == ["  No sentence was read."]:
+    if len(lines) == 1:
+        # One line says that nothing was read, or that what was read is not shown.
+        assert re.fullmatch(r"  (No sentence was read\.|1 sentence was read and is not shown\. NOT READ says why\."
+                            r"|\d+ sentences were read and none is shown\. NOT READ says why\.)", lines[0]), lines
         return []
     shown = []
     for head, quote in zip(lines[::2], lines[1::2], strict=True):
@@ -271,10 +274,19 @@ def hold(case, brief):
         case.assertEqual(None if speaker is None else json.loads(speaker), unit["speaker"])
         case.assertLessEqual(len(sentence), 300)
         case.assertFalse(unit["partial"])
-    moments = [instant(units[number - 1]["at"]) for number, *_ in quotes]
-    dated = [moment for moment in moments if moment is not None]
-    case.assertEqual(dated, sorted(dated, reverse=True))
-    case.assertEqual(moments[:len(dated)], dated)
+    # The customer's sentences come first, then the seller's, then the rest. Inside a role the newest record
+    # is first and a sentence with no time is last. No role is left out while another has two places.
+    roles = [role for _, role, *_ in quotes]
+    case.assertEqual(roles, sorted(roles, key=("customer", "seller", "unknown").index))
+    for role in set(roles):
+        moments = [instant(units[number - 1]["at"]) for number, said_by, *_ in quotes if said_by == role]
+        dated = [moment for moment in moments if moment is not None]
+        case.assertEqual(dated, sorted(dated, reverse=True))
+        case.assertEqual(moments[:len(dated)], dated)
+    fit = {role: sum(unit["kind"] == "sentence" and unit["role"] == role and not unit["partial"]
+                     and len(unit["text"]) <= 300 for unit in units) for role in ("customer", "seller", "unknown")}
+    for role, count in fit.items():
+        case.assertGreaterEqual(roles.count(role), min(count, 12 // sum(map(bool, fit.values())) if count else 0))
     # A few numbers, traced from the saved evidence alone, name the same record and a finished receipt.
     for number in sorted({1, len(units), *(quote[0] for quote in quotes[:2])}):
         traced = trace(evidence, number)

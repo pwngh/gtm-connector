@@ -158,7 +158,7 @@ class ImportedBriefingTests(unittest.TestCase):
                           "It is under 28 U.S.C.", "The vendor is Veldrune Systems, LLC."])
         self.assertNotIn("We do not Approve", artifact["text"])
         self.assertIn("Sentences: 6 cut off at a pause, a change of speaker, or the edge of the excerpt were read and "
-                      "are not shown.", artifact["text"])
+                      "are not shown (6 customer).", artifact["text"])
 
     def test_the_two_gaps_are_two_seconds_and_ten(self):
         _, spoken = self.cues(
@@ -186,7 +186,7 @@ class ImportedBriefingTests(unittest.TestCase):
         self.assertEqual([text for text, partial in spoken if partial], ["We will sign if..."])
         self.assertEqual(len(spoken), 11)
         self.assertIn("Sentences: 1 cut off at a pause, a change of speaker, or the edge of the excerpt was read and "
-                      "is not shown.", artifact["text"])
+                      "is not shown (1 unknown).", artifact["text"])
 
     def test_in_an_excerpt_that_starts_inside_a_call_each_speakers_first_words_are_in_doubt(self):
         raw = ("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Dana Crest>We will not\n\n"
@@ -274,7 +274,7 @@ class ImportedBriefingTests(unittest.TestCase):
         self.assertIn("Calls: one transcript excerpt was read, lines 2 to 5 of 6. The rest of that call and every "
                       "other call were not read.", artifact["text"])
         self.assertIn("Sentences: 2 cut off at a pause, a change of speaker, or the edge of the excerpt were read "
-                      "and are not shown.", artifact["text"])
+                      "and are not shown (2 unknown).", artifact["text"])
         cut = next(unit["n"] for unit in artifact["units"] if unit.get("partial"))
         self.assertEqual(trace_saved(self.state, artifact["brief_id"], cut)["text"],
                          "will not sign until the rider is approved.")

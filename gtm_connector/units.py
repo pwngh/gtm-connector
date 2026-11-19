@@ -62,6 +62,8 @@ _PLAIN_INSTANT = re.compile(
     r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})")
 # A WebVTT voice tag, or the tag that closes one. A class holds no dot, so the pattern cannot backtrack.
 _VOICE = re.compile(r"<v(?:\.[^\s>.]*)*[ \t]+([^<>\n]+)>|</v>")
+# The order of SAID, and of every count by role.
+_ROLES = ("customer", "seller", "unknown")
 # Cues by one speaker join into one run only when the next starts within this long of the last.
 _RUN_GAP_MS = 2000
 # One speaker's cues up to this far apart still join when the earlier one stops mid-sentence and the later one
@@ -437,7 +439,7 @@ class _Card:
         self.evidence, self.groups = evidence, groups
         self.units: list[dict[str, Any]] = []
         self.neutralized = {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}
-        self.missing = self.partial = 0
+        self.missing = 0
         self.values: list[str] = []
         self.signals: list[str] = []
         self.not_read: list[str] = []
@@ -514,7 +516,6 @@ class _Card:
                 cut = transcript and (_unfinished(sentence) if position == len(found) - 1
                                       else not _ENDED.search(sentence))
                 partial, follows = follows or cut, cut
-                self.partial += partial
                 self.units.append({"n": len(self.units) + 1, "kind": "sentence", "source": _SOURCES[table][0],
                                    "record_ref": row["record_ref"], "tool": _SOURCES[table][2], "at": at,
                                    "speaker": speaker, "role": role, "basis": basis, "text": sentence,
@@ -781,16 +782,26 @@ def _slack(card):
 
 
 def _said(card):
-    """Whole sentences, newest record first. Sentences keep their order inside one moment."""
+    """Whole sentences by role: the customer's, then the seller's, then those of no established role.
+
+    The places are dealt one at a time to each role that still has a sentence, newest record first, so one
+    side of a conversation never crowds out the other. Sentences keep their order inside one moment.
+    """
     spoken = [unit for unit in card.units if unit["kind"] == "sentence"]
     fits = [unit for unit in spoken if len(unit["text"]) <= MAX_SENTENCE and not unit["partial"]]
     def recency(unit):
         moment = _instant(unit["at"])
         return (moment is not None, moment.timestamp() if moment else 0.0)
 
-    ordered = sorted(fits, key=recency, reverse=True)
+    queues = {role: sorted((unit for unit in fits if unit["role"] == role), key=recency, reverse=True)
+              for role in _ROLES}
+    shown = dict.fromkeys(_ROLES, 0)
+    for _ in range(SHOWN_SENTENCES):
+        for role in _ROLES:
+            if shown[role] < len(queues[role]) and sum(shown.values()) < SHOWN_SENTENCES:
+                shown[role] += 1
     lines = []
-    for unit in ordered[:SHOWN_SENTENCES]:
+    for unit in (unit for role in _ROLES for unit in queues[role][:shown[role]]):
         where = {"calls": "call", "slack": "Slack"}[unit["source"]]
         who = "no speaker label" if unit["speaker"] is None else "speaker " + json.dumps(unit["speaker"],
                                                                                     ensure_ascii=False)
@@ -798,20 +809,25 @@ def _said(card):
                 else "time " + json.dumps(unit["at"], ensure_ascii=False))
         lines.append(f"  [{unit['n']}] {unit['role']} ({unit['basis']}); {where} {when}; {who}")
         lines.append("      " + json.dumps(unit["text"], ensure_ascii=False))
-    hidden = len(ordered) - min(len(ordered), SHOWN_SENTENCES)
-    long = sum(len(unit["text"]) > MAX_SENTENCE and not unit["partial"] for unit in spoken)
-    if card.partial:
-        card.not_read.append(f"Sentences: {card.partial} cut off at a pause, a change of speaker, or the edge of "
-                             f"the excerpt {'was read and is' if card.partial == 1 else 'were read and are'} "
-                             "not shown.")
-    if hidden:
-        card.not_read.append(f"Sentences: {hidden} older "
-                             f"{'sentence was read and is' if hidden == 1 else 'sentences were read and are'} "
-                             "not shown.")
+    def by_role(units):
+        counts = {role: sum(unit["role"] == role for unit in units) for role in _ROLES}
+        return "(" + ", ".join(f"{count} {role}" for role, count in counts.items() if count) + ")"
+
+    cut = [unit for unit in spoken if unit["partial"]]
+    more = [unit for role in _ROLES for unit in queues[role][shown[role]:]]
+    long = [unit for unit in spoken if len(unit["text"]) > MAX_SENTENCE and not unit["partial"]]
+    if cut:
+        card.not_read.append(f"Sentences: {len(cut)} cut off at a pause, a change of speaker, or the edge of "
+                             f"the excerpt {'was read and is' if len(cut) == 1 else 'were read and are'} "
+                             f"not shown {by_role(cut)}.")
+    if more:
+        card.not_read.append(f"Sentences: {len(more)} more "
+                             f"{'sentence was read and is' if len(more) == 1 else 'sentences were read and are'} "
+                             f"not shown {by_role(more)}; the card shows {SHOWN_SENTENCES}.")
     if long:
-        card.not_read.append(f"Sentences: {long} over {MAX_SENTENCE} characters "
-                             f"{'was read and is' if long == 1 else 'were read and are'} not shown, because a "
-                             "quotation is never cut.")
+        card.not_read.append(f"Sentences: {len(long)} over {MAX_SENTENCE} characters "
+                             f"{'was read and is' if len(long) == 1 else 'were read and are'} not shown "
+                             f"{by_role(long)}, because a quotation is never cut.")
     unknown = sum(unit["role"] == "unknown" for unit in spoken)
     if unknown:
         card.not_read.append(f"Speakers: {unknown} of {len(spoken)} "
@@ -828,6 +844,11 @@ def _build(evidence):
     _calls(card, as_of, contacts)
     _slack(card)
     said = _said(card)
+    if not said:
+        read = sum(unit["kind"] == "sentence" for unit in card.units)
+        said = ["  No sentence was read." if not read else
+                "  1 sentence was read and is not shown. NOT READ says why." if read == 1 else
+                f"  {read} sentences were read and none is shown. NOT READ says why."]
     if card.missing:
         card.not_read.insert(0, "CRM: 1 field is empty on the record and prints as Missing." if card.missing == 1
                              else f"CRM: {card.missing} fields are empty on the record and print as Missing.")
@@ -844,7 +865,7 @@ def _build(evidence):
         lines += ["ATTENTION, from record fields and dates", *card.signals, ""]
     lines += ["RECORD VALUES, from CRM fields and connector arithmetic", *card.values, "",
               "SAID, whole sentences as recorded; not record values",
-              *(said or ["  No sentence was read."]), "",
+              *said, "",
               "NOT READ", *("  " + line for line in card.not_read), ""]
     return card.units, "\n".join(lines)
 

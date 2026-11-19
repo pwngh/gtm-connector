@@ -56,7 +56,7 @@ never cut.
 | --- | --- |
 | `ATTENTION` | Signals derived from record fields and dates. Omitted when there are none. |
 | `RECORD VALUES` | Typed CRM fields and connector arithmetic. An empty field prints `Missing`. An amount prints a currency only when the record carries one. At most five opportunities, contracts, and contacts are shown, and the rest are counted under `NOT READ`. |
-| `SAID` | Whole sentences, newest record first, each with a role, its basis, the time, and the speaker label. At most 12 are shown. A figure inside a sentence stays there and never becomes a record value. |
+| `SAID` | Whole sentences, each with a role, its basis, the time, and the speaker label: the customer's first, then the seller's, then those of no established role, newest record first within each. At most 12 are shown, and the places are dealt one at a time to each role that still has a sentence, so sixty messages from a seller cannot push the customer's one sentence off the card. `NOT READ` counts what is not shown, by role. When sentences were read and none can be shown, the section says so. A figure inside a sentence stays there and never becomes a record value. |
 | `NOT READ` | What each source did not return or was not asked for, the fields that are empty, how many sentences are not shown, how many speakers have no role, and what was neutralized. |
 
 ## Signals

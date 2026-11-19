@@ -127,8 +127,9 @@ class Cases(unittest.TestCase):
                    for day in range(3, 15) for hour in range(9, 14)]
         planted = ("2026-12-01T09:00:00Z", "Morgan Reed", "Legal will not approve the data-processing addendum.", 0)
         brief = card(self, account(904, messages=[planted, *routine]))
-        self.assertIn("Sentences: 49 older sentences were read and are not shown.", brief["text"])
-        # Not yet: the connector's own order is newest first. The assistant's ranking will pass this.
+        self.assertIn("Sentences: 49 more sentences were read and are not shown (49 seller); the card shows 12.", brief["text"])
+        # Not yet: all sixty-one sentences are the seller's, and within a role the newest comes first. The
+        # assistant's ranking will pass this.
         with self.assertRaises(AssertionError):
             self.assertIn("Legal will not approve the data-processing addendum.",
                           " ".join(brief["text"].split()[:150]))
@@ -160,7 +161,7 @@ class Cases(unittest.TestCase):
         # A line break inside a sentence is a wrap. The sentence is never shown as two halves.
         self.assertEqual(said(brief), [("seller", "Their counsel has not approved the rider.")])
         self.assertNotIn("The committee has", brief["text"])
-        self.assertIn("1 over 300 characters was read and is not shown, because a quotation is never cut.",
+        self.assertIn("1 over 300 characters was read and is not shown (1 seller), because a quotation is never cut.",
                       " ".join(brief["text"].split()))
         self.assertEqual(brief["trace"](3)["text"], long)
 
