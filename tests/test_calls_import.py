@@ -89,11 +89,14 @@ class ParsingTests(unittest.TestCase):
         parsed = imports.parse_transcript(raw, format="vtt")
         self.assert_code("calls_excerpt_too_large", imports.select_excerpt, parsed)
 
-    def test_whitespace_only_vtt_identifier_refuses_during_parsing(self):
-        for identifier in (" ", "\t", " \t ", "\u00a0", "\u2003"):
+    def test_a_blank_line_of_spaces_separates_cues_and_other_blank_identifiers_refuse(self):
+        for identifier, refused in ((" ", False), ("\t", False), (" \t ", False), ("\u00a0", True), ("\u2003", True)):
             with self.subTest(identifier=repr(identifier)):
                 raw = f"WEBVTT\n\n{identifier}\n00:00.000 --> 00:01.000\nInvented call text.\n".encode()
-                self.assert_code("calls_import_invalid", imports.parse_transcript, raw, format="vtt")
+                if refused:
+                    self.assert_code("calls_import_invalid", imports.parse_transcript, raw, format="vtt")
+                else:
+                    self.assertIsNone(imports.parse_transcript(raw, format="vtt")["units"][0]["cue_id"])
 
     def test_invalid_inputs_and_units_are_fixed_private_errors(self):
         for raw in (b"", b" \n\t", b"\xef\xbb\xbf", b"\xff", b"a\x00", b"a\x1b", "a\u0085b".encode()):
@@ -124,18 +127,47 @@ class ParsingTests(unittest.TestCase):
                 self.assert_code("calls_import_invalid", imports.parse_transcript, (header + cue).encode(),
                                  format="vtt")
 
+    def test_srt_files_and_the_cue_shapes_real_exports_use_are_read(self):
+        srt = ("1\n00:00:01,000 --> 00:00:04,000\nDana: hello\n\n"
+               "2\n00:00:04,500 --> 00:00:06,000\nline two\nsecond line\n \n3\n01:00:00,000 --> 01:00:00,000\nlast\n")
+        units = imports.parse_transcript(srt.encode(), format="srt")["units"]
+        self.assertEqual([(unit["cue_id"], unit["text"], unit["start_ms"], unit["end_ms"]) for unit in units],
+                         [("1", "Dana: hello", 1000, 4000), ("2", "line two\nsecond line", 4500, 6000),
+                          ("3", "last", 3_600_000, 3_600_000)])
+        excerpt = imports.select_excerpt(imports.parse_transcript(srt.encode(), format="srt"))
+        self.assertEqual((excerpt["unit_kind"], excerpt["total_units"]), ("cues", 3))
+        # Auto-captions repeat a start time, end a cue where it starts, and are not always in order.
+        vtt = ("WEBVTT\n\n00:00:02.000 --> 00:00:02.000\nzero length\n\t\n"
+               "00:00:01.000 --> 00:00:03.000\nearlier start\n \n00:00:01.000 --> 00:00:02.500\nsame start\n")
+        units = imports.parse_transcript(vtt.encode(), format="vtt")["units"]
+        self.assertEqual([unit["text"] for unit in units], ["zero length", "earlier start", "same start"])
+        # Webex writes the speaker as the cue identifier, so identifiers repeat.
+        webex = "WEBVTT\n\nDana Crest\n00:01.000 --> 00:02.000\none\n\nDana Crest\n00:02.000 --> 00:03.000\ntwo\n"
+        units = imports.parse_transcript(webex.encode(), format="vtt")["units"]
+        self.assertEqual([(unit["cue_id"], unit["text"]) for unit in units], [("Dana Crest", "one"), ("Dana Crest", "two")])
+        # The speaker stays in the quote. A number or a single token is only an identifier and does not.
+        parsed = imports.parse_transcript(webex.encode(), format="vtt")
+        self.assertEqual(imports.select_excerpt(parsed)["body"], "Dana Crest\none\nDana Crest\ntwo")
+        numbered = imports.parse_transcript(b"WEBVTT\n\n1\n00:01.000 --> 00:02.000\none\n\nabc-def\n00:02.000 --> 00:03.000\ntwo\n",
+                                            format="vtt")
+        self.assertEqual(imports.select_excerpt(numbered)["body"], "one\ntwo")
+        # A line of spaces inside a cue's text stays text, because no cue starts after it.
+        spaced = "WEBVTT\n\n00:01.000 --> 00:02.000\none\n \nstill one\n \n00:02.000 --> 00:03.000\ntwo\n"
+        units = imports.parse_transcript(spaced.encode(), format="vtt")["units"]
+        self.assertEqual([unit["text"] for unit in units], ["one\n \nstill one", "two"])
+        # An SRT file still needs its timing lines, and no cue may end before it starts.
+        for bad in ("1\nDana: hello\n", "1\n00:00:04,000 --> 00:00:01,000\ntext\n", "WEBVTT\n\n1\n00:00:01,000 --> 00:00:02,000\nx\n"):
+            self.assert_code("calls_import_invalid", imports.parse_transcript, bad.encode(), format="srt")
+
     def test_malformed_vtt_cannot_silently_drop_spoken_content(self):
         self.assert_code("calls_import_invalid", imports.parse_transcript,
                          (FIXTURES / "invalid-timing.vtt").read_bytes(), format="vtt")
         bad = (
             "BAD\n\n00:00.000 --> 00:01.000\ntext",
             "WEBVTT\n00:00.000 --> 00:01.000\ntext",
-            "WEBVTT\n\n00:00.000 --> 00:00.000\ntext",
             "WEBVTT\n\n00:02.000 --> 00:01.000\ntext",
             "WEBVTT\n\n00:60.000 --> 01:01.000\ntext",
             "WEBVTT\n\n00:00.00 --> 00:01.000\ntext",
-            "WEBVTT\n\n00:01.000 --> 00:02.000\ntext\n\n00:00.000 --> 00:03.000\nlate",
-            "WEBVTT\n\nid\n00:00.000 --> 00:01.000\none\n\nid\n00:01.000 --> 00:02.000\ntwo",
             "WEBVTT\n\n00:00.000 --> 00:01.000\none\n00:01.000 --> 00:02.000\ntwo",
             "WEBVTT\n\nNOTE hidden\n00:00.000 --> 00:01.000\ntext",
             "WEBVTT\n\nunknown block\nspoken text",

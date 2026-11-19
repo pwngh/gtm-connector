@@ -1,6 +1,6 @@
 # Import a call transcript
 
-Import a UTF-8 TXT or WebVTT export and associate it with one account. The renewal brief then
+Import a UTF-8 TXT, WebVTT, or SRT export and associate it with one account. The renewal brief then
 quotes a selected excerpt. The connector does not record, transcribe, connect to a call provider,
 or summarize. The original bytes stay in private local state.
 
@@ -17,7 +17,7 @@ gtm-connector brief acc-007 --calls-backend imported --state-dir var/imported-ca
 | Option | Meaning |
 | --- | --- |
 | `--account ID`, `--account-number NUMBER` | `import` requires exactly one. `--account-number` needs Salesforce. `list` accepts `--account` as a filter. |
-| `--lines FIRST:LAST`, `--cues FIRST:LAST` | The excerpt, in TXT lines or VTT cues. Ranges start at one and include the end. |
+| `--lines FIRST:LAST`, `--cues FIRST:LAST` | The excerpt, in TXT lines or in VTT or SRT cues. Ranges start at one and include the end. |
 | `--called-at TIMESTAMP` | The meeting time with a UTC offset. Without it the call time stays unknown. |
 | `--reassign` | Moves known content, or a known AccountNumber, to another account. |
 | `--state-dir PATH` | The import state folder. `calls` commands default to `var/imported-calls`. |
@@ -38,10 +38,14 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
   refuses and is never truncated.
 - Repeating the same bytes, account, call time, and range reuses the revision. Any change creates
   a new active revision. Older revisions stay inspectable.
-- `.txt` or `.vtt` selects the parser. TXT units are lines and VTT units are timed cues. Well-formed
-  `Kind:`, `Language:`, and `X-TIMESTAMP-MAP=` lines under the `WEBVTT` line are skipped, and any
-  other text there refuses. Control characters other than tabs and line endings refuse. No provider
-  download has been tested.
+- `.txt`, `.vtt`, or `.srt` selects the parser. TXT units are lines. VTT and SRT units are timed
+  cues, in file order. Cues may repeat or reorder start times, end where they start, repeat an
+  identifier, and be separated by a line of spaces. A cue that ends before it starts refuses.
+- An identifier with a space in it, as Webex writes a speaker's name, is quoted above its cue. Other
+  identifiers and inline tags such as `<v Name>` are kept as the file has them.
+- Well-formed `Kind:`, `Language:`, and `X-TIMESTAMP-MAP=` lines under the `WEBVTT` line are
+  skipped, and any other text there refuses. Control characters other than tabs and line endings
+  refuse. No provider download has been tested.
 - With Salesforce, pass the same connection flags to `calls import` and `brief`. `--account-number`
   is exact, at most 40 characters, and refuses a non-literal or second match. On a refusal, pass
   `--account acc-sf-NATIVE_ID`. See [Salesforce](salesforce.md) and [live Slack](slack.md).
@@ -58,7 +62,7 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
 
 | Code | Exit | Cause | Fix |
 | --- | ---: | --- | --- |
-| `calls_import_invalid` | 2 | The export or range is invalid. | Use a valid UTF-8 TXT or VTT file and range. |
+| `calls_import_invalid` | 2 | The export or range is invalid. | Use a valid UTF-8 TXT, VTT, or SRT file and range. |
 | `calls_import_too_large`, `calls_excerpt_too_large` | 2 | The export or excerpt exceeds a limit above. | Use a smaller export or fewer units. |
 | `calls_import_not_found` | 2 | The import is not in this state folder. | Run `calls list`. |
 | `calls_account_not_found` | 2 | No CRM account matched. | Check the ID or exact AccountNumber. |

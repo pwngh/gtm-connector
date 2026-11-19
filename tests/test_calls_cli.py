@@ -330,9 +330,9 @@ class CallsCLITests(unittest.TestCase):
                 resolve.assert_not_called()
             self.assertFalse(self.state.exists())
 
-    def test_whitespace_vtt_identifier_fails_before_runtime_or_resolution(self):
-        self.export = self.root / 'whitespace-id.vtt'
-        self.export.write_bytes(b'WEBVTT\n\n \t\n00:00.000 --> 00:01.000\nInvented cue.\n')
+    def test_blank_vtt_identifier_fails_before_runtime_or_resolution(self):
+        self.export = self.root / 'blank-id.vtt'
+        self.export.write_bytes('WEBVTT\n\n\u00a0\n00:00.000 --> 00:01.000\nInvented cue.\n'.encode())
         with patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No state')) as runtime, \
                 patch('gtm_connector.call_workflow.resolve_call_account',
                       side_effect=AssertionError('No CRM resolution')) as resolve:

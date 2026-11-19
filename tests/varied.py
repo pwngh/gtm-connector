@@ -7,6 +7,7 @@ demo stores. `expected` restates, from those rows alone, what a brief must say a
 from contextlib import closing
 from datetime import date, datetime, timezone
 import json
+import os
 from pathlib import Path
 import sqlite3
 
@@ -14,7 +15,10 @@ from gtm_connector import strict_json
 
 
 AS_OF = date(2027, 1, 15)
-BOOKS = {path.stem: path for path in sorted((Path(__file__).parent / "books").glob("*.json"))}
+# GTM_BOOKS=name,name runs only those books, for a quick pass over new data.
+_ONLY = set(filter(None, os.environ.get("GTM_BOOKS", "").split(",")))
+BOOKS = {path.stem: path for path in sorted((Path(__file__).parent / "books").glob("*.json"))
+         if not _ONLY or path.stem in _ONLY}
 STAGES = ("discovery", "evaluation", "proposal", "negotiation", "closed_won", "closed_lost")
 # A line that no single row states: it is derived from several rows, a date, or an empty read.
 DERIVED = ("- Signal: ", "- Renewal is in ", "- Renewal was ", "- Renewal is due on ", "- No ",

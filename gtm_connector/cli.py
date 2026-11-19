@@ -894,10 +894,10 @@ def _calls_arguments(args):
             invalid("--called-at requires an ISO timestamp with a UTC offset, such as 2027-01-15T10:00:00Z.")
     path = Path(args.value)
     format_name = path.suffix.lower().lstrip(".")
-    if format_name not in ("txt", "vtt"):
-        invalid("Import an existing UTF-8 .txt or .vtt transcript export.")
-    if (args.cues is not None and format_name != "vtt") or (args.lines is not None and format_name != "txt"):
-        invalid("Use --cues with VTT or --lines with TXT.")
+    if format_name not in ("txt", "vtt", "srt"):
+        invalid("Import an existing UTF-8 .txt, .vtt, or .srt transcript export.")
+    if (args.cues is not None and format_name == "txt") or (args.lines is not None and format_name != "txt"):
+        invalid("Use --cues with VTT or SRT, or --lines with TXT.")
     selected_range = None
     supplied = args.cues if args.cues is not None else args.lines
     if supplied is not None:
