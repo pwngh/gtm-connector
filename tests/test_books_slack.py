@@ -232,7 +232,8 @@ class BookSlackTests(unittest.TestCase):
                          (pages, len(served), len(upstream.requests) - asked))
         # Every message is one record: literal text, thread order, and the time and author label the reader gives.
         messages = [record for record in evidence["records"] if record["record_ref"].startswith("slack/")]
-        label = lambda row: ("Slack app" if "bot_id" in row or row.get("subtype") == "bot_message"  # noqa: E731
+        label = lambda row: ("Deleted Slack message" if row.get("subtype") == "tombstone"  # noqa: E731
+                             else "Slack app" if "bot_id" in row or row.get("subtype") == "bot_message"
                              else "Slack participant" if "user" in row else "Unknown Slack author")
         sent = lambda row: (EPOCH + timedelta(microseconds=micros(row["ts"]))).isoformat().replace(  # noqa: E731
             "+00:00", "Z")
@@ -314,6 +315,31 @@ class BookSlackTests(unittest.TestCase):
                                   for row in thread_rows if len(row["text"]) >= 12 and row["text"] not in kept}
                         self.brief(runtime, upstream, rows[number], channels[number], served,
                                    pages=math.ceil(len(served) / sizes[number]), others=others)
+
+    def test_threads_as_the_slack_api_returns_them_are_read_whole(self):
+        # tests/slack_threads holds conversations.replies pages written by three models: full message objects
+        # with blocks, reactions, edits, files, attachments, apps, broadcasts, and a deleted parent.
+        folder = Path(__file__).parent / "slack_threads"
+        read = 0
+        for path in sorted(folder.glob("*.json")):
+            for index, thread_ in enumerate(json.loads(path.read_text())["threads"]):
+                rows, seen = [], set()
+                for page in thread_["pages"]:
+                    for message in page["messages"]:
+                        if message["ts"] not in seen:
+                            seen.add(message["ts"])
+                            # The saved connection belongs to this team.
+                            rows.append(json.loads(json.dumps(message).replace("T0AAAAAAA1", "T12345678")))
+                upstream = Upstream()
+                with self.subTest(file=path.stem, thread=thread_["kind"]), \
+                        self.runtime(f"{path.stem}-{index}", upstream) as runtime:
+                    account = varied.demo_rows(400, PLAIN)
+                    load(runtime.directory, account)
+                    size = len(thread_["pages"][0]["messages"])
+                    channel = self.serve(runtime, upstream, "acc-400", rows, page=size)
+                    self.brief(runtime, upstream, account, channel, rows, pages=-(-len(rows) // size), spoil=False)
+                    read += 1
+        self.assertEqual(read, 36)
 
     def test_an_account_without_a_thread_can_still_be_briefed_without_the_slack_grant(self):
         upstream = Upstream()

@@ -158,9 +158,22 @@ class ReaderTests(unittest.TestCase):
             if subtype == "thread_broadcast":
                 row["root"] = {"ts": PARENT, "text": "Discarded nested source text."}
             result = self.read([page(row)])
-            self.assertEqual(result.records[0]["author"], "Slack app" if subtype == "bot_message"
-                             else "Unknown Slack author")
+            self.assertEqual(result.records[0]["author"], {"bot_message": "Slack app", "tombstone": "Deleted Slack message"}
+                             .get(subtype, "Unknown Slack author"))
             self.validate(result)
+
+    def test_a_deleted_parent_is_kept_as_slacks_placeholder_so_its_replies_are_read(self):
+        # Slack leaves this in place of a deleted parent that still has replies.
+        gone = message(subtype="tombstone", hidden=True, user="USLACKBOT", text="This message was deleted.")
+        result = self.read([page(gone, message(REPLY, text="The reply is still here."))])
+        self.assertEqual([(row["author"], row["body"]) for row in result.records],
+                         [("Deleted Slack message", "This message was deleted."),
+                          ("Slack participant", "The reply is still here.")])
+        self.validate(result)
+        # Only the parent can be one, and no other message may be hidden.
+        self.refuses([page(message(), message(REPLY, subtype="tombstone", hidden=True, user="USLACKBOT"))],
+                     "slack_response_invalid")
+        self.refuses([page(message(hidden=True))], "slack_response_invalid")
 
     def test_unsupported_or_malformed_rows_refuse_whole_observation(self):
         missing = message()

@@ -79,10 +79,10 @@ gtm-connector brief acc-007 --with-slack --slack-backend slack \
 | One cursor | 2,048 UTF-8 bytes |
 | Selections in one state folder | 100, one thread per account and one account per thread |
 | Retries | One after `token_expired`, with at most one refresh. One after HTTP 429 when its delay is at most five seconds. Nothing else retries, and a read never starts a login. |
-| Accepted messages | Plain messages, `bot_message`, `me_message`, `file_share`, and `thread_broadcast` |
-| Refuse the whole read | Hidden messages, edit or delete wrappers, other subtypes, and missing text |
+| Accepted messages | Plain messages, `bot_message`, `me_message`, `file_share`, `thread_broadcast`, and the `tombstone` Slack leaves for a deleted parent that still has replies |
+| Refuse the whole read | Other hidden messages, edit or delete wrappers, other subtypes, and missing text |
 | Counted and left out | Files, attachments, and blocks |
-| Author labels | `Slack app`, `Slack participant`, or `Unknown Slack author` |
+| Author labels | `Slack app`, `Slack participant`, `Unknown Slack author`, or `Deleted Slack message` |
 | Slack's rate policy | Slack limits some commercially distributed apps outside its Marketplace to one request per minute and 15 messages per request on this method. The connector cannot tell which [policy](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps/) applies. |
 
 - A read is not an archive. Earlier edits, deletions, and retention are unknown.
