@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from gtm_connector.briefing import create_brief, trace_saved
 from gtm_connector.call_workflow import resolve_call_account
+from gtm_connector.cli import human_result
 from gtm_connector.calls_import import (CallsImportError, _make_record, list_imports, parse_transcript,
                                         select_excerpt, store_import, validate_imported_record)
 from gtm_connector.runtime import Runtime
@@ -340,13 +341,29 @@ class ImportedBriefingTests(unittest.TestCase):
             (2.0, 2.5, "<v Dana Crest>We will sign"), (0.8, 1.0, "<v Dana Crest>on Friday."),
             # Two sentences in one cue, and a link written across two voice spans of the next.
             (10, 12, "<v Dana Crest>Fine. Agreed."),
-            (20, 22, "<v Dana Crest>See [the notes](<v Dana Crest>https://notes.example/a)."))
+            (20, 22, "<v Dana Crest>See [the notes](<v Dana Crest>https://notes.example/a)."),
+            # One sentence across three cues in order.
+            (30, 31, "<v Dana Crest>We will"), (31.5, 32, "<v Dana Crest>renew for"), (32.5, 34, "<v Dana Crest>a year."))
         spoken = [(unit["text"], unit["span"]) for unit in artifact["units"] if unit["kind"] == "sentence"]
         self.assertEqual(spoken, [
             ("We will sign on Friday.", {"first": 1, "last": 2, "start_ms": 800, "end_ms": 2500}),
             ("Fine.", {"first": 3, "last": 3, "start_ms": 10000, "end_ms": 12000}),
             ("Agreed.", {"first": 3, "last": 3, "start_ms": 10000, "end_ms": 12000}),
-            ("See the notes [link notes.example].", {"first": 4, "last": 4, "start_ms": 20000, "end_ms": 22000})])
+            ("See the notes [link notes.example].", {"first": 4, "last": 4, "start_ms": 20000, "end_ms": 22000}),
+            ("We will renew for a year.", {"first": 5, "last": 7, "start_ms": 30000, "end_ms": 34000})])
+        # `trace` says the same to a person: whether the sentence is on the card, and where it lies.
+        first = next(unit for unit in artifact["units"] if unit["kind"] == "sentence")
+        with patch("sys.stdout.isatty", return_value=False):
+            printed = human_result("trace", trace_saved(self.state, artifact["brief_id"], first["n"]))
+        self.assertIn("On the card\tyes", printed)
+        self.assertIn("Cues or lines\t1 to 2", printed)
+        # A sentence that is not on the card says why, and a card sealed before these keys existed says so.
+        self.assertIn("On the card\tno: cut off", human_result("trace", {
+            **trace_saved(self.state, artifact["brief_id"], first["n"]), "shown": "cut", "span": None}))
+        older = {key: value for key, value in trace_saved(self.state, artifact["brief_id"], first["n"]).items()
+                 if key not in ("shown", "span", "contact")}
+        self.assertIn("On the card\tnot recorded", human_result("trace", older))
+        self.assertNotIn("Cues or lines", human_result("trace", older))
 
     def test_cues_with_no_speaker_label_are_never_read_as_one_persons_sentence(self):
         artifact, spoken = self.cues((1, 3, "we will not sign"), (3.2, 5, "Great, so you will sign Friday."),
@@ -401,6 +418,8 @@ class ImportedBriefingTests(unittest.TestCase):
             self.import_call(runtime, raw=raw, format="vtt")
             artifact = create_brief(runtime, "acc-007", as_of=AS_OF)
         self.assertEqual(artifact["evidence"]["sellers"], [])
+        # No demo text was read, so the demo's invented sellers are no input to this card.
+        self.assertEqual(artifact["evidence"]["demo_sellers"], [])
         self.assertIn("unknown (label matches no listed seller and no contact); call time Missing; "
                       'speaker "Morgan Reed"', artifact["text"])
         self.assertIn("Speakers: 1 of 1 sentence has no established speaker role.", artifact["text"])

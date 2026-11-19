@@ -21,7 +21,7 @@ SQLite store of invented records.
   returned.
 - `serve --selection FILE` limits reads to the selected accounts and replaces `log_activity` with
   `prepare_renewal_brief` and `read_renewal_brief`, which return a [Deal card](briefs.md) as `text`
-  and its numbered `units`. See [selection](selection.md).
+  with its numbered `units` and its `gaps`. See [selection](selection.md).
 - `serve --crm-backend salesforce` reads CRM from Salesforce and omits `log_activity`. See
   [Salesforce](salesforce.md).
 

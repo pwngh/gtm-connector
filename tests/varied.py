@@ -32,6 +32,32 @@ _HEAD = re.compile(r"  \[(\d+)\] (seller|customer|unknown) \((.+?)\); (call|Slac
 _CITED = re.compile(r" ((?:\[\d+\])+)(?: and \d+ more)?\Z")
 # A WebVTT voice tag is a speaker label, and its closing tag is markup. Neither is part of what was said.
 _VOICE_TAG = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+[^<>\n]+>|</v>")
+# Every line NOT READ can print: how it opens, its code, and what kind of line it is. Where the pattern has a
+# group, the group is the number the line is about ("no" is zero).
+_GAP_LINES = (
+    (r"CRM: (\d+) fields? (?:is|are) empty", "crm_fields_empty", "note"),
+    (r"CRM: annual recurring revenue and renewal risk are not mapped", "crm_unmapped_fields", "not_read"),
+    (r"CRM: (\d+) more opportunit", "crm_more_opportunities", "read_not_shown"),
+    (r"CRM: (\d+) more contracts?", "crm_more_contracts", "read_not_shown"),
+    (r"CRM: (\d+) more contacts?", "crm_more_contacts", "read_not_shown"),
+    (r"CRM: (no) opportunity was returned", "crm_no_opportunity", "note"),
+    (r"Calls: not read\. The grant lacks calls:read", "calls_denied", "not_read"),
+    (r"Calls: (no) call record was returned", "calls_no_record", "note"),
+    (r"Calls: one transcript excerpt was read", "calls_excerpt", "not_read"),
+    (r"Calls: \d+ call records? (?:was|were) read\.", "calls_outside_records", "not_read"),
+    (r"Slack: not requested", "slack_not_requested", "not_read"),
+    (r"Slack: not read\. The grant lacks slack:read", "slack_denied", "not_read"),
+    (r"Slack: .* from one selected thread", "slack_thread", "not_read"),
+    (r"Slack: (no) message was returned", "slack_no_message", "note"),
+    (r"Slack: [^.]*\.(?: (\d+) attached files? (?:was|were) not read)?", "slack_channel", "not_read"),
+    (r"Sentences: (\d+) cut off", "sentences_cut", "read_not_shown"),
+    (r"Sentences: (\d+) more", "sentences_more", "read_not_shown"),
+    (r"Sentences: (\d+) over", "sentences_long", "read_not_shown"),
+    (r"Speakers: (\d+) of", "speakers_unknown", "note"),
+    (r"Neutralized in source text: ", "neutralized", "note"),
+)
+
+
 def named(text):
     """One line or cue of a transcript that declares speaker names as (name, words), read here apart from the connector.
 
@@ -321,14 +347,24 @@ def hold(case, brief):
             case.assertEqual((units[unit["contact"] - 1]["record_ref"].split("/")[:2], unit["basis"]),
                              (["crm", "contacts"], f"label matches contact [{unit['contact']}]"))
     case.assertEqual(card["NOT READ"], ["  " + gap["text"] for gap in brief["gaps"]])
+    case.assertEqual(len({gap["code"] for gap in brief["gaps"]}), len(brief["gaps"]))
     for gap in brief["gaps"]:
-        case.assertEqual((set(gap), gap["disposition"]),
-                         ({"code", "disposition", "count", "by_role", "text"}, GAP_CODES[gap["code"]]))
-        # A line that counts sentences says whose they are, and the roles add up to the count.
-        case.assertEqual(gap["by_role"] is not None, gap["code"].startswith(("sentences_", "speakers_")))
-        if gap["by_role"] is not None:
-            case.assertEqual((list(gap["by_role"]), sum(gap["by_role"].values())),
-                             (["customer", "seller", "unknown"], gap["count"]))
+        case.assertEqual(set(gap), {"code", "disposition", "count", "by_role", "text"})
+        # Each line has the code, kind and number that this table, written apart from the connector's, gives it.
+        pattern, code, disposition = next(row for row in _GAP_LINES if re.match(row[0], gap["text"]))
+        found = re.match(pattern, gap["text"])
+        numbers = [int(number) for number in re.findall(r"\d+", gap["text"])]
+        count = (sum(numbers) if code == "neutralized" else sum(numbers[-3:]) if code == "slack_thread"
+                 else None if not found.groups() or found.group(1) is None
+                 else 0 if found.group(1) == "no" else int(found.group(1)))
+        case.assertEqual((gap["code"], gap["disposition"], gap["count"], GAP_CODES[code]),
+                         (code, disposition, count, disposition), gap["text"])
+        # A line that counts sentences says whose they are.
+        which = {"sentences_cut": "cut", "sentences_more": "more", "sentences_long": "long"}.get(code)
+        counted = [unit for unit in spoken if unit["shown"] == which or code == "speakers_unknown"]
+        case.assertEqual(gap["by_role"], None if which is None and code != "speakers_unknown" else {
+            role: sum(unit["role"] == role for unit in counted if code != "speakers_unknown" or role == "unknown")
+            for role in ("customer", "seller", "unknown")})
     # A sentence of an imported transcript says which cues or lines it lies in, inside the cited range, with
     # times that cover them. No other sentence has a place.
     manifests = {record["record_ref"]: record["manifest"] for record in evidence["records"] if "manifest" in record}

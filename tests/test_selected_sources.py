@@ -338,6 +338,8 @@ class SelectedSourceTests(SelectedFixture, unittest.TestCase):
             token = owner.authorize(["crm:read", "calls:read"])
             prepared = self.ok(owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"}))["brief"]
             self.assertIn("slack_not_requested", [gap["code"] for gap in prepared["gaps"]])
+            released = self.ok(owner.call(token, "read_renewal_brief", {"brief_id": prepared["brief_id"]}))["brief"]
+            self.assertEqual((released["gaps"], released["units"]), (prepared["gaps"], prepared["units"]))
             # The earlier build saved no gaps. Its file, under the digest its receipt names, still reads.
             path = self.state / "selected-briefs" / (prepared["brief_id"] + ".json")
             older = json.loads(path.read_text())

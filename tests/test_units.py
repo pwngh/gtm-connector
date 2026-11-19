@@ -1,13 +1,10 @@
 """Units, neutralized text, speaker roles, and the evidence checks behind a card."""
 
 from copy import deepcopy
-import hashlib
-import json
 import time
 import unittest
 
-from gtm_connector.units import (SANITIZER_VERSION, BriefRejected, build, safe_text, sentences, speaker_role, trace,
-                                 voices)
+from gtm_connector.units import BriefRejected, build, safe_text, sentences, speaker_role, trace, voices
 
 
 def evidence(*, notes_status="available", slack_status="not_requested", notes=None, messages=()):
@@ -378,10 +375,14 @@ class Evidence(unittest.TestCase):
         self.assertIn("  No sentence was read.", build(evidence(notes=[]))[1].splitlines())
 
     def test_a_denied_source_is_stated_and_never_filled_in(self):
-        _, text, _ = build(evidence(notes_status="denied", slack_status="denied"))
+        _, text, gaps = build(evidence(notes_status="denied", slack_status="denied"))
         self.assertIn("Calls: not read. The grant lacks calls:read.", text)
         self.assertIn("Slack: not read. The grant lacks slack:read.", text)
         self.assertIn("No sentence was read.", text)
+        # Each line is also data: a tool names it by its code, never by its words.
+        self.assertEqual([(gap["code"], gap["disposition"], gap["count"], gap["text"]) for gap in gaps], [
+            ("calls_denied", "not_read", None, "Calls: not read. The grant lacks calls:read."),
+            ("slack_denied", "not_read", None, "Slack: not read. The grant lacks slack:read.")])
 
     def test_tampered_evidence_gives_no_card(self):
         def changed(edit, **options):

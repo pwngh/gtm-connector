@@ -122,8 +122,10 @@ def assemble_evidence(brief_id, account_id, as_of, records, receipts, statuses, 
                 "calls_backend": calls_backend, "calls_binding": deepcopy(calls_binding),
                 "slack_backend": slack_backend, "slack_binding": deepcopy(slack_binding),
                 "thread_snapshot": thread_snapshot, "sellers": list(sellers),
-                # Demo text names its own invented sellers. They are an input to roles, so the evidence holds them.
-                "demo_sellers": list(SELLERS) if "fixture" in (calls_backend, slack_backend) else []}
+                # Demo text names its own invented sellers. Where demo text was read they are an input to
+                # roles, so the evidence holds them.
+                "demo_sellers": list(SELLERS) if calls_backend == "fixture" or (
+                    slack_backend == "fixture" and statuses["slack_status"] != "not_requested") else []}
     units, text, gaps = build(evidence)
     return evidence, units, text, gaps
 

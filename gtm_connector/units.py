@@ -17,8 +17,6 @@ import unicodedata
 from urllib.parse import urlsplit
 
 
-
-
 class BriefRejected(ValueError):
     """The evidence cannot support a card."""
 
@@ -899,7 +897,8 @@ def _slack(card):
         card.gap("slack_thread",
                  f"Slack: {count} from one selected thread, and paging completed. Not read: "
                  f"files ({counts['omitted_files']}), attachments ({counts['omitted_attachments']}), "
-                 f"blocks ({counts['omitted_blocks']}), earlier versions of edited messages, and every other thread.")
+                 f"blocks ({counts['omitted_blocks']}), earlier versions of edited messages, and every other thread.",
+                 counts["omitted_files"] + counts["omitted_attachments"] + counts["omitted_blocks"])
     elif not messages:
         card.gap("slack_no_message", "Slack: no message was returned for this account.", 0)
     else:
@@ -1014,13 +1013,6 @@ def build(evidence: dict) -> tuple[list[Unit], str, list[Gap]]:
         raise BriefRejected("Evidence contains missing or invalid fields.") from None
 
 
-def fields(record: dict) -> dict:
-    """One record's plain fields, neutralized onto one line each: what `trace` shows for a record unit."""
-    return {key: (" ".join(safe_text(value)[0].split()) if isinstance(value, str) else value)
-            for key, value in sorted(record.items())
-            if key != "record_ref" and (value is None or isinstance(value, (str, int, bool)))}
-
-
 def trace(evidence: dict, number: int, units: list[Unit] | None = None) -> dict:
     """Resolve one number on a card to its source record, its neutralized text, and its audit receipt.
 
@@ -1035,11 +1027,16 @@ def trace(evidence: dict, number: int, units: list[Unit] | None = None) -> dict:
     receipt = next((row for row in evidence["receipts"] if row["tool"] == tool), None)
     record = next((row for row in evidence["records"] if row["record_ref"] == unit["record_ref"]), None)
     # A unit answers only as its own number, for a record of this evidence that its read's receipt returned.
-    if unit["n"] != number or receipt is None or record is None or unit["record_ref"] not in receipt["rows"]:
+    # A sentence also names the stored text it was cut from. None of this depends on a sentence rule.
+    if (unit["n"] != number or receipt is None or record is None or unit["record_ref"] not in receipt["rows"]
+            or unit["kind"] == "sentence" and unit["raw_sha256"] != hashlib.sha256(
+                record["body"].encode("utf-8", "surrogatepass")).hexdigest()):
         raise ValueError("This number does not resolve to a record and a receipt of its own card.")
     unit["receipt"] = {key: receipt[key] for key in ("audit_id", "tool", "status", "http_status")}
     if unit["kind"] == "record":
-        unit["fields"] = fields(record)
+        unit["fields"] = {key: (" ".join(safe_text(value)[0].split()) if isinstance(value, str) else value)
+                          for key, value in sorted(record.items())
+                          if key != "record_ref" and (value is None or isinstance(value, (str, int, bool)))}
     else:  # Neutralized again, so a card sealed under older rules shows nothing today's would have replaced.
         unit.update({key: safe_text(unit[key])[0] for key in ("text", "speaker") if isinstance(unit[key], str)})
     return unit

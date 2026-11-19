@@ -105,10 +105,14 @@ class BriefPersistenceTests(unittest.TestCase):
         # Nothing is rebuilt, and a unit still answers only as itself: under its own number, for a record of
         # this card that the receipt of its read returned. Only the folder's owner can write a file like these.
         for wrong in ({**last, "n": 1}, {**last, "record_ref": "calls/call_notes/note-999"},
-                      {**last, "record_ref": brief["units"][0]["record_ref"]}, {**last, "tool": "log_activity"}):
+                      {**last, "record_ref": brief["units"][0]["record_ref"]}, {**last, "tool": "log_activity"},
+                      {**last, "raw_sha256": "0" * 64}):
             self.reseal(brief, units=brief["units"][:-1] + [wrong])
             with self.subTest(wrong=wrong), self.assertRaisesRegex(ValueError, "does not resolve to a record"):
                 trace_saved(self.state, brief["brief_id"], last["n"])
+        # The wording of a card may change in a later release. Its units answer, so it still traces.
+        self.reseal(brief, text="DEAL CARD, reworded")
+        self.assertEqual(trace_saved(self.state, brief["brief_id"], last["n"])["text"], last["text"])
 
     def test_a_later_call_that_names_a_saved_card_does_not_stop_it_tracing(self):
         with Runtime(self.state) as runtime:
