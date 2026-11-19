@@ -63,6 +63,8 @@ imported calls never share a folder. Stop `serve` before running a `calls` comma
   - The name starts with a letter that is not lower case, is at most 100 characters, and holds no
     colon, question or exclamation mark, angle bracket, or sentence end. "Dr. J. Vance" is a name.
     "We have signed. Dana Crest" and "final word on the matter" are not.
+- The checks on a name are made when the file is imported. An import that was accepted is read
+  afterwards by the layout alone, so a later change to how sentences are split never unreads it.
 - A stated layout says how the file is read. It does not show who spoke: anyone who can start a
   line of the file can write a name there, and a wrapped line that happens to open like a name
   reads as one. State it only of an export whose lines the recorder wrote. `calls list` and

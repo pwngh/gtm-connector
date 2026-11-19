@@ -18,7 +18,7 @@ import stat
 from typing import Any
 
 from . import strict_json
-from .units import named
+from .units import named, sentences
 
 
 MAX_RAW_BYTES = 2 * 1024 * 1024
@@ -174,7 +174,8 @@ def _milliseconds(value):
     return ((hours * 60 + int(fields[-2])) * 60 + int(seconds)) * 1000 + int(millis)
 
 
-def parse_transcript(raw: bytes, *, format: str, speaker_names: bool = False) -> dict[str, Any]:
+def parse_transcript(raw: bytes, *, format: str, speaker_names: bool = False,
+                     stored: bool = False) -> dict[str, Any]:
     """Parse a strict transcript subset, preserving the exact original bytes.
 
     `speaker_names` is the operator's statement that every line or cue is one line that opens with its
@@ -256,8 +257,13 @@ def parse_transcript(raw: bytes, *, format: str, speaker_names: bool = False) ->
                 raise CallsImportError("calls_import_too_large")
     if not units or not any(unit["text"].strip() for unit in units):
         raise CallsImportError("calls_import_invalid")
-    if speaker_names and not all(named(unit["text"]) for unit in units if unit["text"].strip()):
-        raise CallsImportError("calls_speaker_names_missing")
+    if speaker_names:
+        names = [named(unit["text"]) for unit in units if unit["text"].strip()]
+        # A name holds no sentence end ("We have signed. Dana Crest: ..."), so words never leave a quotation
+        # to become a label. A file is held to that when it is imported, by the sentence rules of that day.
+        # A stored import is not held to it again: later rules must not unread what was accepted.
+        if not all(names) or not stored and any(len(sentences(name)) != 1 for name, _ in filter(None, names)):
+            raise CallsImportError("calls_speaker_names_missing")
     return {"raw": raw, "format": format, "parser_version": PARSER_VERSION, "speaker_names": speaker_names,
             "content_sha256": hashlib.sha256(raw).hexdigest(), "units": tuple(units)}
 
@@ -555,7 +561,8 @@ def _load_record(connection, import_id, binding):
         if content is None or not _int(content[0], 1, MAX_RAW_BYTES):
             raise CallsImportError("calls_import_corrupt")
         raw = connection.execute("SELECT raw FROM contents WHERE content_sha256 = ?", (row[0],)).fetchone()[0]
-        parsed = parse_transcript(raw, format=manifest["format"], speaker_names="speaker_names" in manifest)
+        parsed = parse_transcript(raw, format=manifest["format"], speaker_names="speaker_names" in manifest,
+                                  stored=True)
         selection = (None if manifest["selection_mode"] == "default" else
                      (manifest["requested_range"]["first"], manifest["requested_range"]["last"]))
         excerpt = select_excerpt(parsed, requested_range=selection)
@@ -592,7 +599,8 @@ def store_import(path: Path, parsed: dict, excerpt: dict, *, association: dict,
     if not _time(called_at, nullable=True) or not _time(imported_at) or type(reassign) is not bool:
         raise CallsImportError("calls_import_invalid")
     try:
-        reparsed = parse_transcript(parsed["raw"], format=parsed["format"], speaker_names=parsed["speaker_names"])
+        reparsed = parse_transcript(parsed["raw"], format=parsed["format"], speaker_names=parsed["speaker_names"],
+                                    stored=True)
         if reparsed != parsed:
             raise CallsImportError("calls_import_invalid")
         span = excerpt["requested_range"]
