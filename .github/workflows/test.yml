@@ -44,7 +44,7 @@ jobs:
           "$GITHUB_WORKSPACE/.venv/bin/python" -m gtm_connector --help
           "$GITHUB_WORKSPACE/.venv/bin/gtm-connector" demo --json > installed-demo.json
           "$GITHUB_WORKSPACE/.venv/bin/python" -c 'import json; r=json.load(open("installed-demo.json")); assert r["status"] == "accepted" and r["account"]["id"] == "acc-003" and r["audit"]["rows"] == 7 and r["activities_created"] == 0 and r["brief"]["text"].startswith("DEAL CARD")'
-          "$GITHUB_WORKSPACE/.venv/bin/gtm-connector" verify --json --state-dir installed-verification > installed-verification.json
+          "$GITHUB_WORKSPACE/.venv/bin/gtm-connector" debug verify --json --state-dir installed-verification > installed-verification.json
           "$GITHUB_WORKSPACE/.venv/bin/python" -c 'import json; r=json.load(open("installed-verification.json")); assert r["accounts"] == 30 and r["audit_rows"] == 12 and r["brief_audit_rows"] == 9 and r["idempotent_write"]["activities"] == 1'
       - name: Check generated audit sequences
         run: .venv/bin/python -m unittest discover -s tests_stateful -v

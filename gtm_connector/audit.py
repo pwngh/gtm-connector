@@ -16,11 +16,7 @@ def read_audit(path: str | Path, brief_id: str | None = None, *,
                tool=None, caller=None, since=None, until=None, status=None) -> list[dict]:
     """Read existing receipts without initializing or changing the database."""
     filters = ReceiptFilters(tool=tool, caller=caller, since=since, until=until, status=status)
-    database = Path(path).expanduser().absolute()
-    if database.is_symlink():
-        raise ValueError("Audit database must not be a symbolic link.")
-    if not database.is_file():
-        raise ValueError("audit database not found; run the demo first")
+    database = _existing(path)
     query = """SELECT audit_id, started_at, token_id, tool, arguments, request_id,
                       brief_id, status, http_status, row_count, rows, elapsed_ms, error
                FROM audit_log"""
@@ -41,6 +37,20 @@ def read_audit(path: str | Path, brief_id: str | None = None, *,
             raise ValueError("Audit receipt contains invalid JSON.") from None
         records.append(record)
     return records
+
+
+def _existing(path):
+    database = Path(path).expanduser().absolute()
+    if database.is_symlink():
+        raise ValueError("Audit database must not be a symbolic link.")
+    if not database.is_file():
+        raise ValueError("audit database not found; run the demo first")
+    return database
+
+
+def read_receipt(path: str | Path, audit_id: str) -> dict:
+    """One receipt by its ID, read as read_audit reads, without creating or changing the database."""
+    return read_ids(_existing(path), [audit_id])[0]
 
 
 def read_ids(path: str | Path, audit_ids: list[str]) -> list[dict]:

@@ -15,29 +15,36 @@ import shlex
 from . import __version__, profile
 
 
+# The commands in the order help lists them, each with what it does and an example.
 COMMANDS = {
-    "slack": ("Manage Slack authentication, select a thread, or check its audited read.", "slack status"),
-    "calls": ("Import and inspect private transcript exports without contacting a call provider.",
-              "calls import call.vtt --account acc-003"),
-    "salesforce": ("Check Salesforce setup and a renewal brief without printing org records.",
-                   "salesforce check --sf-org gtm-de"),
-    "doctor": ("Check the local setup and show a fix for each failure.", "doctor"),
+    "demo": ("Open one invented law-firm renewal as a Deal card.", "demo"),
     "connect": ("Connect a source or an assistant app, or show what is connected.",
                 "connect salesforce --org gtm-de"),
-    "mcp": ("Run a local stdio MCP bridge to a running connector for an assistant app.",
-            "mcp stdio --scope crm:read"),
-    "completion": ("Print shell completion without reading local state.", "completion bash"),
-    "demo": ("Open one invented law-firm renewal as a Deal card.", "demo"),
+    "accounts": ("Search the connected CRM by account name.", "accounts --query Thornfield"),
+    "brief": ("Print the Deal card for one account from the connected sources.", "brief acc-003"),
+    "inspect": ("Show an account, a saved card, numbers on it, or an audit receipt.", "inspect acc-003"),
+    "audit": ("Read tool-call receipts from the local audit database.", "audit --state-dir var/renewal-demo"),
+    "mcp": ("Run the local stdio MCP bridge that an assistant app starts.", "mcp stdio --scope crm:read"),
+    "debug": ("Serve over HTTPS, check the setup, and work on one source by hand.", "debug doctor"),
+}
+# The commands under debug.
+DEBUG = {
+    "serve": ("Start the local HTTPS connector and authorization server.", "serve"),
+    "doctor": ("Check the local setup and show a fix for each failure.", "doctor"),
     "verify": ("Check scopes, injection handling, retries, and rate limits on invented data.",
                "verify --with-slack"),
-    "brief": ("Print the Deal card for one account from the connected sources.", "brief acc-003"),
-    "trace": ("Resolve one number on a saved card to its record and audit receipt.",
-              "trace brief-REPLACE 4 --state-dir var/renewal-demo"),
-    "serve": ("Start the local HTTPS connector and authorization server.", "serve"),
-    "accounts": ("Search the connected CRM by account name.", "accounts --query Thornfield"),
-    "account": ("Read one account, its contacts, and available contracts.", "account acc-003"),
-    "audit": ("Read tool-call receipts from the local audit database.", "audit --state-dir var/renewal-demo"),
+    "completion": ("Print shell completion without reading local state.", "completion bash"),
+    "salesforce": ("Check Salesforce setup and a renewal brief without printing org records.",
+                   "salesforce check --sf-org gtm-de"),
+    "calls": ("Import and inspect private transcript exports without contacting a call provider.",
+              "calls import call.vtt --account acc-003"),
+    "slack": ("Manage Slack authentication, select a thread, or check its audited read.", "slack status"),
 }
+INSPECT_FORMS = ("inspect takes an account ID (acc-003, or acc-sf- and 18 characters), a brief ID (brief- and 32 "
+                 "lowercase hex digits), a brief ID and numbers printed on its card, or a receipt ID from audit.")
+# Why a sentence is not on its card, by its shown value.
+NOT_SHOWN = {"cut": "cut off", "long": "too long to show", "later": "dated after the card's day",
+             "more": "past the card's places"}
 # What connect attaches: the source it fills, the provider profile.json records, and the options it takes.
 PROVIDERS = {"demo": ("crm", "demo", ()), "salesforce": ("crm", "salesforce", ("org", "environment", "seller")),
              "calls": ("calls", "imported", ("seller",)), "slack": ("slack", "slack", ("seller",))}
@@ -51,7 +58,8 @@ CALL_FAILURES = {
     "calls_excerpt_too_large": "The excerpt exceeds its text, unit, or metadata limit. Select fewer cues or lines.",
     "calls_speaker_names_missing": "Not every line or cue of the file opens with a name and a colon. "
                                    "Import it without --speaker-names.",
-    "calls_import_not_found": "This import is not in the selected state folder. Run calls list to find its identifier.",
+    "calls_import_not_found": "This import is not in the selected state folder. Run debug calls list to find its "
+                              "identifier.",
     "calls_account_not_found": "No CRM account matched the selection. Check its ID or exact AccountNumber.",
     "calls_reassign_required": "This content belongs to another account. Use --reassign only to move that association.",
     "calls_association_changed": "AccountNumber now resolves to another account. Review it before using --reassign.",
@@ -122,6 +130,17 @@ class Parser(argparse.ArgumentParser):
                                  flags=re.DOTALL))
 
 
+class RootParser(Parser):
+    """The top level lists each command on one line, so its help fits one screen."""
+
+    def format_help(self):
+        commands = next(action for action in self._actions if isinstance(action, argparse._SubParsersAction))
+        width = max(map(len, commands.choices))
+        return "\n".join([f"usage: {self.prog} [-h] [--version] [--json] COMMAND ...", "", str(self.description),
+                          "", *(f"  {name.ljust(width)}  {command.description}"
+                                for name, command in commands.choices.items()), "", str(self.epilog), ""])
+
+
 def _state_option(command, default=STATE_DIR):
     """Add --state-dir. An action passes SUPPRESS, so it keeps a folder given before its name."""
     shown = STATE_DIR if default is argparse.SUPPRESS else default
@@ -145,7 +164,7 @@ def _slack_commands(command):
                    "slack map --account acc-003 --channel C12345678 --thread-ts 1790000000.000001"
                    if action == "map" else "slack check --account acc-003" if action == "check" else
                    f"slack {action}")
-        epilog = f"Example: gtm-connector {example}"
+        epilog = f"Example: gtm-connector debug {example}"
         if action == "connect":
             epilog += ("\nReplace EXISTING_PUBLIC_CLIENT_ID with your existing app's public client ID. "
                        "PKCE and that exact localhost redirect must already be registered. "
@@ -198,7 +217,7 @@ def _calls_commands(command):
                 "list": "calls list --account acc-003", "inspect": "calls inspect IMPORT_ID --full"}
     for action, description in descriptions.items():
         child = actions.add_parser(action, help=description, description=description,
-                                   epilog=f"Example: gtm-connector {examples[action]}")
+                                   epilog=f"Example: gtm-connector debug {examples[action]}")
         child.set_defaults(value=None, account=None, account_number=None, called_at=None, cues=None, lines=None,
                            reassign=False, full=False, after=None)
         child.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
@@ -222,106 +241,127 @@ def _calls_commands(command):
             child.add_argument("--after", help="Continue after the import ID returned as next_after.")
         else:
             child.add_argument("value", metavar="IMPORT_ID",
-                               help="Select the import identifier returned by calls list.")
+                               help="Select the import identifier returned by debug calls list.")
             child.add_argument("--full", action="store_true", help="Show all units and the original export text.")
 
 
+def _command(commands, name, description, example):
+    """One command, with --json and an example under its help."""
+    command = commands.add_parser(name, help=description, description=description,
+                                  epilog=f"Example: gtm-connector {example}",
+                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    command.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                         help="Write the documented JSON result for scripts.")
+    return command
+
+
 def build_parser():
-    parser = Parser(prog="gtm-connector",
-                    description="Build a Deal card for a renewal from scoped CRM, call, and Slack reads.",
-                    epilog="Example: gtm-connector demo\n"
-                           "Documentation: https://github.com/pwngh/gtm-connector#readme",
-                    formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = RootParser(prog="gtm-connector",
+                        description="Build a Deal card for a renewal from scoped CRM, call, and Slack reads.",
+                        epilog="Each COMMAND --help lists its options. --json goes before or after the COMMAND.\n"
+                               "Documentation: https://github.com/pwngh/gtm-connector#readme")
     parser.add_argument("--version", action="store_true", help="Show the installed version and exit.")
     parser.add_argument("--json", action="store_true", help="Write the documented JSON result for scripts.")
-    commands = parser.add_subparsers(dest="command", metavar="COMMAND")
+    commands = parser.add_subparsers(dest="command", metavar="COMMAND", parser_class=Parser)
     for name, (description, example) in COMMANDS.items():
-        command = commands.add_parser(name, help=description, description=description,
-                                      epilog=f"Example: gtm-connector {example}",
-                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-        if name == "calls":
-            command.epilog = ("Examples:\n  gtm-connector calls import call.vtt --account acc-003\n"
-                              "  gtm-connector calls list\n  gtm-connector calls inspect IMPORT_ID --full")
-        elif name == "slack":
-            command.epilog = ("Examples:\n  gtm-connector slack connect --help\n"
-                              "  gtm-connector slack status\n  gtm-connector slack map --help\n"
-                              "  gtm-connector slack check --help\n  gtm-connector slack disconnect")
-        command.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
-                             help="Write the documented JSON result for scripts.")
-        if name == "calls":
-            _calls_commands(command)
+        command = _command(commands, name, description, example)
+        if name != "debug":
+            _options(command, name)
             continue
-        if name == "slack":
-            _slack_commands(command)
-            continue
-        if name not in ("completion", "salesforce"):
-            _state_option(command, {"demo": Path("var/renewal-demo"),
-                                    "verify": Path("var/verification")}.get(name, STATE_DIR))
-        if name == "accounts":
-            command.add_argument("--query", default="", help="Match this literal part of an account name.")
-        if name in ("account", "brief"):
-            command.add_argument("account_id", help="Select an account, such as acc-003.")
-        if name == "serve":
-            command.add_argument("--selection", type=Path,
-                                 help="Serve only the accounts and Slack threads in this private selection file. "
-                                      "Adds the caller-run brief tools and turns writes off.")
-        if name == "salesforce":
-            command.add_argument("--sf-org", help="Read Salesforce credentials from this signed-in sf CLI alias.")
-            command.add_argument("--sf-environment", choices=("developer", "sandbox", "production"),
-                                 default="developer", help="Require this Salesforce environment (default: developer).")
-            command.add_argument("action", choices=("check",), help="Run the private, read-only setup check.")
-        if name in ("brief", "salesforce"):
-            command.add_argument("--as-of", help="Use YYYY-MM-DD for renewal planning. Salesforce uses today; "
-                                 "demo data uses 2027-01-15.")
-        if name == "verify":
-            command.add_argument("--with-slack", action="store_true", help="Include Slack messages.")
-        if name == "mcp":
-            command.add_argument("action", choices=("stdio",),
-                                 help="Serve MCP on stdin and stdout. An assistant app starts this command.")
-        if name in ("connect", "mcp"):
-            command.add_argument("--scope", action="append", required=name == "mcp",
-                                 choices=("crm:read", "calls:read", "crm:write", "slack:read"),
-                                 help="Grant this scope. Repeat for each explicit grant."
-                                 if name == "mcp" else "With an app: grant this scope. Repeat for each.")
-        if name == "connect":
-            command.epilog = ("Examples:\n  gtm-connector connect demo\n"
-                              "  gtm-connector connect salesforce --org gtm-de --seller 'Morgan Reed'\n"
-                              "  gtm-connector connect calls\n  gtm-connector connect slack\n"
-                              "  gtm-connector connect status\n  gtm-connector connect calls --remove\n"
-                              "  gtm-connector connect inspector --scope crm:read")
-            command.add_argument("provider", nargs="?", default="status", choices=("status", *PROVIDERS, *APPS),
-                                 help="Connect demo data, Salesforce, imported call transcripts, or the saved "
-                                      "Slack sign-in, or print the setup of an assistant app. "
-                                      "status, the default, shows what is connected.")
-            command.add_argument("--org", help="With salesforce: read credentials from this signed-in sf CLI alias.")
-            command.add_argument("--environment", choices=("developer", "sandbox", "production"),
-                                 help="With salesforce: require this environment (default: developer).")
-            command.add_argument("--seller", action="append",
-                                 help="With salesforce, calls, or slack: list this name or Slack ID as a seller. "
-                                      "Repeat for each. The list replaces the saved one.")
-            command.add_argument("--remove", action="store_true",
-                                 help="Detach this source. Removing the CRM removes its calls and Slack.")
-            command.add_argument("--transport", choices=("http", "stdio"),
-                                 help="With an app: use a supplied HTTP grant (default) or a local stdio bridge.")
-            command.add_argument("--config-file", type=Path,
-                                 help="With --transport stdio, merge the connector's entry into this client "
-                                      "configuration file. A backup is saved first.")
-        if name == "completion":
-            command.add_argument("shell", choices=("bash", "zsh", "fish"), help="Choose the shell to configure.")
-        if name == "audit":
-            command.add_argument("--brief", help="Select this brief or run correlation ID.")
-            command.add_argument("--tool", help="Select the exact tool name.")
-            command.add_argument("--caller", help="Select a full credential fingerprint or anonymous.")
-            command.add_argument("--status", choices=("ok", "error", "pending"), help="Select this receipt outcome.")
-            command.add_argument("--since", help="Include calls at or after this ISO timestamp with a UTC offset.")
-            command.add_argument("--until", help="Include calls before this ISO timestamp with a UTC offset.")
-            command.add_argument("--follow", action="store_true", help="Follow new or changed results until Ctrl-C.")
-        if name == "brief":
-            command.add_argument("--without-calls", action="store_true", help="Omit the calls:read grant.")
-        if name == "trace":
-            command.add_argument("brief_id", help="Select the saved brief identifier.")
-            command.add_argument("number", type=int, help="Select a number printed on its card.")
+        # The command under debug takes the place of debug in args.command.
+        tools = command.add_subparsers(dest="command", metavar="COMMAND", required=True)
+        for tool, (description, example) in DEBUG.items():
+            _options(_command(tools, tool, description, "debug " + example), tool)
     return parser
+
+
+def _options(command, name):
+    """The arguments and options of one command."""
+    if name == "calls":
+        command.epilog = ("Examples:\n  gtm-connector debug calls import call.vtt --account acc-003\n"
+                          "  gtm-connector debug calls list\n  gtm-connector debug calls inspect IMPORT_ID --full")
+        _calls_commands(command)
+        return
+    if name == "slack":
+        command.epilog = ("Examples:\n  gtm-connector debug slack connect --help\n"
+                          "  gtm-connector debug slack status\n  gtm-connector debug slack map --help\n"
+                          "  gtm-connector debug slack check --help\n  gtm-connector debug slack disconnect")
+        _slack_commands(command)
+        return
+    if name not in ("completion", "salesforce"):
+        _state_option(command, {"demo": Path("var/renewal-demo"),
+                                "verify": Path("var/verification")}.get(name, STATE_DIR))
+    if name == "accounts":
+        command.add_argument("--query", default="", help="Match this literal part of an account name.")
+    if name == "brief":
+        command.add_argument("account_id", help="Select an account, such as acc-003.")
+    if name == "inspect":
+        command.epilog = ("Examples:\n  gtm-connector inspect acc-003\n  gtm-connector inspect BRIEF_ID\n"
+                          "  gtm-connector inspect BRIEF_ID --role customer\n  gtm-connector inspect BRIEF_ID 5 6\n"
+                          "  gtm-connector inspect RECEIPT_ID")
+        command.add_argument("target", metavar="ID",
+                             help="An account ID such as acc-003, a brief ID, or a receipt ID from audit.")
+        command.add_argument("numbers", nargs="*", type=int, metavar="N",
+                             help="With a brief ID: resolve these numbers printed on its card.")
+        command.add_argument("--role", choices=("customer", "seller", "unknown"),
+                             help="With a brief ID alone: list only the sentences of this speaker role.")
+    if name == "serve":
+        command.add_argument("--selection", type=Path,
+                             help="Serve only the accounts and Slack threads in this private selection file. "
+                                  "Adds the caller-run brief tools and turns writes off.")
+    if name == "salesforce":
+        command.add_argument("--sf-org", help="Read Salesforce credentials from this signed-in sf CLI alias.")
+        command.add_argument("--sf-environment", choices=("developer", "sandbox", "production"),
+                             default="developer", help="Require this Salesforce environment (default: developer).")
+        command.add_argument("action", choices=("check",), help="Run the private, read-only setup check.")
+    if name in ("brief", "salesforce"):
+        command.add_argument("--as-of", help="Use YYYY-MM-DD for renewal planning. Salesforce uses today; "
+                             "demo data uses 2027-01-15.")
+    if name == "verify":
+        command.add_argument("--with-slack", action="store_true", help="Include Slack messages.")
+    if name == "mcp":
+        command.add_argument("action", choices=("stdio",),
+                             help="Serve MCP on stdin and stdout. An assistant app starts this command.")
+    if name in ("connect", "mcp"):
+        command.add_argument("--scope", action="append", required=name == "mcp",
+                             choices=("crm:read", "calls:read", "crm:write", "slack:read"),
+                             help="Grant this scope. Repeat for each explicit grant."
+                             if name == "mcp" else "With an app: grant this scope. Repeat for each.")
+    if name == "connect":
+        command.epilog = ("Examples:\n  gtm-connector connect demo\n"
+                          "  gtm-connector connect salesforce --org gtm-de --seller 'Morgan Reed'\n"
+                          "  gtm-connector connect calls\n  gtm-connector connect slack\n"
+                          "  gtm-connector connect status\n  gtm-connector connect calls --remove\n"
+                          "  gtm-connector connect inspector --scope crm:read")
+        command.add_argument("provider", nargs="?", default="status", choices=("status", *PROVIDERS, *APPS),
+                             help="Connect demo data, Salesforce, imported call transcripts, or the saved "
+                                  "Slack sign-in, or print the setup of an assistant app. "
+                                  "status, the default, shows what is connected.")
+        command.add_argument("--org", help="With salesforce: read credentials from this signed-in sf CLI alias.")
+        command.add_argument("--environment", choices=("developer", "sandbox", "production"),
+                             help="With salesforce: require this environment (default: developer).")
+        command.add_argument("--seller", action="append",
+                             help="With salesforce, calls, or slack: list this name or Slack ID as a seller. "
+                                  "Repeat for each. The list replaces the saved one.")
+        command.add_argument("--remove", action="store_true",
+                             help="Detach this source. Removing the CRM removes its calls and Slack.")
+        command.add_argument("--transport", choices=("http", "stdio"),
+                             help="With an app: use a supplied HTTP grant (default) or a local stdio bridge.")
+        command.add_argument("--config-file", type=Path,
+                             help="With --transport stdio, merge the connector's entry into this client "
+                                  "configuration file. A backup is saved first.")
+    if name == "completion":
+        command.add_argument("shell", choices=("bash", "zsh", "fish"), help="Choose the shell to configure.")
+    if name == "audit":
+        command.add_argument("--brief", help="Select this brief or run correlation ID.")
+        command.add_argument("--tool", help="Select the exact tool name.")
+        command.add_argument("--caller", help="Select a full credential fingerprint or anonymous.")
+        command.add_argument("--status", choices=("ok", "error", "pending"), help="Select this receipt outcome.")
+        command.add_argument("--since", help="Include calls at or after this ISO timestamp with a UTC offset.")
+        command.add_argument("--until", help="Include calls before this ISO timestamp with a UTC offset.")
+        command.add_argument("--follow", action="store_true", help="Follow new or changed results until Ctrl-C.")
+    if name == "brief":
+        command.add_argument("--without-calls", action="store_true", help="Omit the calls:read grant.")
 
 
 def table(headers, rows):
@@ -359,12 +399,12 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
                                  for row in result["imports"]])
             if result["next_after"] is not None:
                 if sys.stdout.isatty():
-                    resume = "gtm-connector calls list --after " + result["next_after"]
+                    resume = "gtm-connector debug calls list --after " + result["next_after"]
                     if state_dir is not None and Path(state_dir) != STATE_DIR:
                         resume += " \\\n  --state-dir " + shlex.quote(str(state_dir))
                     display += "\nMore imports are available. Continue with:\n" + resume
                 else:
-                    display += ("\nMore imports are available. Repeat calls list with --after " +
+                    display += ("\nMore imports are available. Repeat debug calls list with --after " +
                                 result["next_after"] + ".")
             return display or "No transcript imports are stored."
         metadata = result.get("import", result)
@@ -421,45 +461,13 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
                                       or "none listed")
         return shown
     if command == "brief":
-        return (f"{result['text']}\nBrief: {result['brief_id']}\n"
-                f"Resolve any number: gtm-connector trace {result['brief_id']} N" +
-                (f" --state-dir {shlex.quote(str(state_dir))}" if state_dir is not None else ""))
-    if command == "trace":
-        receipt = result["receipt"]
-        rows = [["Number", result["n"]], ["Kind", result["kind"]], ["Record", result["record_ref"]],
-                ["Receipt", f"{receipt['audit_id']} ({receipt['tool']}, {receipt['status']})"]]
-        if result["kind"] == "sentence":
-            rows += [["Text", json.dumps(result["text"], ensure_ascii=False)],
-                     ["Speaker", result["speaker"] or "no speaker label"],
-                     ["Role", f"{result['role']} ({result['basis']})"], ["Time", result["at"] or "Missing"],
-                     ["On the card", {"yes": "yes", "cut": "no: cut off", "long": "no: too long to show",
-                                      "later": "no: dated after the card's day",
-                                      "more": "no: past the card's places"}.get(result.get("shown"), "not recorded")],
-                     *([["Cues or lines", f"{span['first']} to {span['last']}"]]
-                       if (span := result.get("span")) else []),
-                     ["Source text SHA-256", result["raw_sha256"]],
-                     ["Neutralizer version", result["sanitizer_version"]]]
-        else:
-            rows += [[key, "Missing" if value in (None, "") else value] for key, value in result["fields"].items()]
-        return table(["FIELD", "VALUE"], rows)
+        return f"{result['text']}\nBrief: {result['brief_id']}\n" + _inspect_lines(result["brief_id"], state_dir)
+    if command == "inspect":
+        return _human_inspect(result, action=action, crm_backend=crm_backend, state_dir=state_dir)
     if command == "accounts":
         rows = result["accounts"] if isinstance(result, dict) else result
         return table(["ID", "ACCOUNT", "INDUSTRY", "RENEWAL"],
                      [[row.get(key) for key in ("id", "name", "industry", "renewal_date")] for row in rows])
-    if command == "account":
-        keys = ("id", "name", "industry", "account_number") if crm_backend == "salesforce" else result
-        fields = [[key.replace("_", " ").capitalize(), result.get(key)] for key in keys
-                  if key not in ("contacts", "contracts")]
-        contacts = result["contacts"]
-        displayed = table(["FIELD", "VALUE"], fields) + "\n\nContacts\n" + table(
-            ["ID", "NAME", "TITLE", "EMAIL"], [[row.get(key) for key in ("id", "name", "title", "email")]
-                                              for row in contacts])
-        if "contracts" in result:
-            displayed += "\n\nContracts\n" + table(
-                ["ID", "STATUS", "CATEGORY", "START", "END", "TERM MONTHS"],
-                [[row.get(key) for key in ("id", "status", "status_code", "start_date", "end_date", "contract_term")]
-                 for row in result["contracts"]])
-        return displayed
     if command == "audit":
         return table(["TIME", "TOOL", "CALLER", "DECISION", "MS", "RECEIPT", "REASON"],
                      [[row["started_at"], row["tool"], row["token_id"], row["status"],
@@ -469,9 +477,7 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
         brief = result["brief"]
         return (f"Call-note access was refused (HTTP {result['denied_read']['status']}) for a grant without "
                 "calls:read.\nEvery source below is an invented demo fixture.\n\n"
-                f"{brief['text']}\nBrief: {brief['brief_id']}\n"
-                f"Resolve any number: gtm-connector trace {brief['brief_id']} N"
-                f" --state-dir {shlex.quote(str(state_dir))}")
+                f"{brief['text']}\nBrief: {brief['brief_id']}\n" + _inspect_lines(brief["brief_id"], state_dir))
     if command == "verify":
         return ("Connector checks on invented demo data\n\n" + result["briefs"][0]["text"] + "\n" +
                 table(["CHECK", "RESULT"], [["Read without calls:read", "Denied (HTTP 403)"],
@@ -483,6 +489,78 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
     raise ValueError("No display is available for this command.")
 
 
+def _inspect_lines(brief_id, state_dir):
+    """The commands that list a saved card's units and resolve one of its numbers, with the card's folder."""
+    folder = "" if state_dir is None else f" --state-dir {shlex.quote(str(state_dir))}"
+    return (f"List every unit: gtm-connector inspect {brief_id}{folder}\n"
+            f"Resolve a number: gtm-connector inspect {brief_id} N{folder}")
+
+
+def _human_inspect(result, *, action, crm_backend, state_dir):
+    if action == "account":
+        keys = ("id", "name", "industry", "account_number") if crm_backend == "salesforce" else result
+        fields = [[key.replace("_", " ").capitalize(), result.get(key)] for key in keys
+                  if key not in ("contacts", "contracts", "newest_brief_id")]
+        displayed = table(["FIELD", "VALUE"], fields) + "\n\nContacts\n" + table(
+            ["ID", "NAME", "TITLE", "EMAIL"], [[row.get(key) for key in ("id", "name", "title", "email")]
+                                              for row in result["contacts"]])
+        if "contracts" in result:
+            displayed += "\n\nContracts\n" + table(
+                ["ID", "STATUS", "CATEGORY", "START", "END", "TERM MONTHS"],
+                [[row.get(key) for key in ("id", "status", "status_code", "start_date", "end_date", "contract_term")]
+                 for row in result["contracts"]])
+        if (newest := result["newest_brief_id"]) is not None:
+            here = _here(argparse.Namespace(state_dir=state_dir))
+            displayed += f"\n\nNewest card: {newest}  (gtm-connector inspect {newest}{here})"
+        return displayed
+    if action == "brief":
+        return "\n".join(map(_unit_line, result["units"])) or "No sentence on this card has that role."
+    if action == "numbers":
+        return "\n\n".join(map(_human_trace, result))
+    rows = "\n".join(safe_text(row) for row in result["rows"]) or "none"
+    return (human_result("audit", [result]) + "\n\nArguments\n"
+            + safe_text(json.dumps(result["arguments"], ensure_ascii=False)) + "\n\nReturned rows\n" + rows)
+
+
+def _unit_line(unit):
+    """One unit of a saved card on one line: a record by its table and ID, a sentence with where, who, and why."""
+    if unit["kind"] == "record":
+        _, table_name, identifier = unit["record_ref"].split("/", 2)
+        fields = [unit["n"], "record", table_name, identifier]
+    else:
+        from .units import card_time
+        when = card_time(unit["at"])
+        if span := unit.get("span"):
+            # A transcript's lines have no times, and its cues always have them.
+            when += f" {'lines' if span['start_ms'] is None else 'cues'} {span['first']}-{span['last']}"
+        fields = [unit["n"], unit["source"], when, unit["role"],
+                  "no speaker label" if unit["speaker"] is None else json.dumps(unit["speaker"], ensure_ascii=False),
+                  "shown" if unit.get("shown") == "yes" else NOT_SHOWN.get(unit.get("shown"), "not recorded"),
+                  json.dumps(unit["text"], ensure_ascii=False)]
+    return "  ".join(safe_text(field) for field in fields)
+
+
+def _human_trace(result):
+    receipt = result["receipt"]
+    rows = [["Number", result["n"]], ["Kind", result["kind"]], ["Record", result["record_ref"]],
+            ["Receipt", f"{receipt['audit_id']} ({receipt['tool']}, {receipt['status']})"]]
+    if result["kind"] == "sentence":
+        following = result.get("next_by_speaker")
+        rows += [["Text", json.dumps(result["text"], ensure_ascii=False)],
+                 ["Speaker", result["speaker"] or "no speaker label"],
+                 ["Next by this speaker", "none" if following is None else following],
+                 ["Role", f"{result['role']} ({result['basis']})"], ["Time", result["at"] or "Missing"],
+                 ["On the card", "yes" if result.get("shown") == "yes" else "no: " + NOT_SHOWN[result["shown"]]
+                  if result.get("shown") in NOT_SHOWN else "not recorded"],
+                 *([["Cues or lines", f"{span['first']} to {span['last']}"]]
+                   if (span := result.get("span")) else []),
+                 ["Source text SHA-256", result["raw_sha256"]],
+                 ["Neutralizer version", result["sanitizer_version"]]]
+    else:
+        rows += [[key, "Missing" if value in (None, "") else value] for key, value in result["fields"].items()]
+    return table(["FIELD", "VALUE"], rows)
+
+
 def _call_range(metadata, field="cited_range", *, context=True):
     selected = metadata[field]
     return (f"{metadata['unit_kind']} {selected['first']}:{selected['last']}" +
@@ -492,14 +570,15 @@ def _call_range(metadata, field="cited_range", *, context=True):
 def _slack_status_command(state_dir, *, check=False):
     path = str(state_dir or STATE_DIR)
     if any(not character.isprintable() for character in path):
-        return "gtm-connector slack status --help"
-    return shlex.join(["gtm-connector", "slack", "status", *(["--check"] if check else []), "--state-dir", path])
+        return "gtm-connector debug slack status --help"
+    return shlex.join(["gtm-connector", "debug", "slack", "status", *(["--check"] if check else []),
+                       "--state-dir", path])
 
 
 def _human_slack(result, *, action, state_dir):
     if action == "map":
         return (f"Slack thread selection {result['status']}. Thread access has not been checked.\n"
-                "Next: gtm-connector slack check --help")
+                "Next: gtm-connector debug slack check --help")
     if action == "check":
         headline = f"Slack thread check {result['status']}. CRM and calls access were not checked.\n"
         keys = ("name", "status", "count", "duration_ms", "api_calls", "response_bytes")
@@ -527,7 +606,7 @@ def _human_slack(result, *, action, state_dir):
         return local + "\n" + remote + "\nApp removal and other credentials are managed separately in Slack."
     if not result["configured"]:
         return ("No Slack connection is saved. An existing registered public app is required.\n"
-                "Next: gtm-connector slack connect --help")
+                "Next: gtm-connector debug slack connect --help")
     next_command = None
     if result["credential_state"] == "identity_unchecked" and not result["needs_login"]:
         headline = "Saved credentials require an authentication check."
@@ -535,10 +614,10 @@ def _human_slack(result, *, action, state_dir):
     elif result["credential_state"] == "refresh_pending":
         headline = ("A previous credential update or authentication check did not finish safely. "
                     "Browser authorization is required.")
-        next_command = "gtm-connector slack connect --help"
+        next_command = "gtm-connector debug slack connect --help"
     elif result["needs_login"]:
         headline = "Saved Slack authentication is no longer usable. Browser authorization is required."
-        next_command = "gtm-connector slack connect --help"
+        next_command = "gtm-connector debug slack connect --help"
     elif result["verification"] == "live":
         headline = ("Slack authentication is saved and verified." if action == "connect" else
                     "Slack authentication is verified.") + " No messages were read."
@@ -571,7 +650,7 @@ def _slack_progress(args):
             return
         if not args.json and (step == "save" or status == "passed"):
             return
-        output = {"progress": {"command": f"slack {args.action}", "step": step, "status": status}}
+        output = {"progress": {"command": f"debug slack {args.action}", "step": step, "status": status}}
         print(json.dumps(output) if args.json else messages[step, status], file=sys.stderr, flush=True)
     return report
 
@@ -614,7 +693,7 @@ def _slack_source_progress(args):
                 or status not in ("running", "pass", "fail", "not_run")):
             return
         if args.json:
-            print(json.dumps({"progress": {"command": f"slack {args.action}", "step": step, "status": status}}),
+            print(json.dumps({"progress": {"command": f"debug slack {args.action}", "step": step, "status": status}}),
                   file=sys.stderr, flush=True)
         elif status == "running":
             print(steps[step], file=sys.stderr, flush=True)
@@ -653,8 +732,8 @@ def _run_slack_source(args):
     from .slack_mapping import SlackMappingError, parse_thread_selection, save_slack_mapping, slack_identity_binding
     progress = _slack_source_progress(args)
     if _connected(args)["slack_backend"] != "slack":
-        raise profile.ProfileError(f"Slack is not connected. Run gtm-connector slack connect{_here(args)} to sign in, "
-                                   f"then gtm-connector connect slack{_here(args)}.")
+        raise profile.ProfileError(f"Slack is not connected. Run gtm-connector debug slack connect{_here(args)} to "
+                                   f"sign in, then gtm-connector connect slack{_here(args)}.")
     if args.action == "check":
         if re.fullmatch(r"acc-(?:[0-9]{3}|sf-[A-Za-z0-9]{18})", args.account) is None:
             raise SlackMappingError("slack_selection_invalid")
@@ -688,7 +767,7 @@ def _run_slack_source(args):
                                    replace=args.replace, reassign=args.reassign)
     return {"schema_version": 1, "status": "saved" if saved["changed"] else "unchanged", "selection": "saved",
             "thread_access": "unchecked", "counts": {"selected_threads": 1},
-            "duration_ms": round((monotonic() - started) * 1000, 3), "next": "gtm-connector slack check --help"}
+            "duration_ms": round((monotonic() - started) * 1000, 3), "next": "gtm-connector debug slack check --help"}
 
 
 def _slack_failure(exc, args):
@@ -697,11 +776,11 @@ def _slack_failure(exc, args):
         code, detail = exc.exit_code, exc.code
     else:
         code, detail = 1, "slack_storage_failed"
-    next_command = "gtm-connector slack connect --help"
+    next_command = "gtm-connector debug slack connect --help"
     if detail in ("slack_response_invalid", "slack_rate_limited", "slack_timeout", "slack_unavailable"):
         next_command = _slack_status_command(args.state_dir)
     elif detail in ("slack_connection_busy", "slack_storage_failed"):
-        next_command = f"gtm-connector slack {args.action} --help"
+        next_command = f"gtm-connector debug slack {args.action} --help"
     return _error(detail + ": " + SLACK_FAILURES[detail], code, next_command, as_json=args.json)
 
 
@@ -713,7 +792,8 @@ def _slack_source_failure(exc, args):
         if args.command == "slack":
             return _slack_failure(exc, args)
         message = SLACK_FAILURES.get(detail, SLACK_FAILURES["slack_storage_failed"])
-        return _error(f"{detail}: {message}", exc.exit_code, "gtm-connector slack connect --help", as_json=args.json)
+        return _error(f"{detail}: {message}", exc.exit_code, "gtm-connector debug slack connect --help",
+                      as_json=args.json)
     if kind in ("SlackMappingError", "SlackReadError"):
         message, next_command = slack_failure_details(detail)
         return _error(f"{detail}: {message}", exc.exit_code, next_command, as_json=args.json)
@@ -721,16 +801,16 @@ def _slack_source_failure(exc, args):
         message = ("source_identity_mismatch: " + str(exc).split(". ", 1)[0].rstrip(".") +
                    ". Connect the original CRM, calls, and Slack sign-in in the existing state folder. "
                    "Existing files are retained.")
-        return _error(message, 3, "gtm-connector slack map --help", as_json=args.json)
+        return _error(message, 3, "gtm-connector debug slack map --help", as_json=args.json)
     if kind == "StateInUseError":
         return _error("The selected state is in use. Stop its server or finish the other command, then retry.",
-                      1, f"gtm-connector slack {args.action} --help", as_json=args.json)
+                      1, f"gtm-connector debug slack {args.action} --help", as_json=args.json)
     if kind == "SalesforceReadError":
         from .salesforce_check import _FAILURES
         message = _FAILURES.get(detail, _FAILURES["check_failed"])[0]
         code = 2 if detail == "salesforce_invalid_configuration" else (
             3 if detail == "salesforce_environment_mismatch" else 5)
-        return _error(f"{detail}: {message}", code, "gtm-connector salesforce check --help", as_json=args.json)
+        return _error(f"{detail}: {message}", code, "gtm-connector debug salesforce check --help", as_json=args.json)
     message, next_command = slack_failure_details("slack_storage_failed")
     return _error("slack_storage_failed: " + message, 1, next_command, as_json=args.json)
 
@@ -749,7 +829,7 @@ def _print_event(event, as_json):
 def _salesforce_progress(as_json):
     def report(name, status, count):
         if as_json:
-            print(json.dumps({"progress": {"command": "salesforce check", "step": name,
+            print(json.dumps({"progress": {"command": "debug salesforce check", "step": name,
                                            "status": status, "count": count}}), file=sys.stderr, flush=True)
         else:
             print(f"Salesforce {name.replace('_', ' ')}: {status}." +
@@ -864,7 +944,7 @@ def _check_folder(args, kinds):
     except SlackAuthError as exc:
         if exc.code != "slack_not_connected":
             raise
-        raise ValueError("No Slack sign-in is saved in this state folder. Run gtm-connector slack connect"
+        raise ValueError("No Slack sign-in is saved in this state folder. Run gtm-connector debug slack connect"
                          f"{_here(args)} --client-id PUBLIC_CLIENT_ID --redirect-uri REGISTERED_REDIRECT "
                          "first.") from None
 
@@ -947,9 +1027,9 @@ def _calls_arguments(args):
         raise ValueError(message)
 
     if args.action == "inspect" and not re.fullmatch(r"note-[0-9a-f]{64}", args.value):
-        invalid("The import ID must be the note- identifier returned by calls import or calls list.")
+        invalid("The import ID must be the note- identifier returned by debug calls import or debug calls list.")
     if args.after is not None and not re.fullmatch(r"note-[0-9a-f]{64}", args.after):
-        invalid("--after requires the import ID returned as next_after by calls list.")
+        invalid("--after requires the import ID returned as next_after by debug calls list.")
     if args.account is not None and not re.fullmatch(r"acc-(?:[0-9]{3}|sf-[A-Za-z0-9]{18})", args.account):
         invalid("The account must be a canonical acc-NNN or acc-sf- Salesforce identifier.")
     if args.action != "import":
@@ -1011,7 +1091,7 @@ def _calls_progress(as_json, step):
                 "preparing_state": "Preparing the connected CRM and private state.",
                 "resolving_account": "Resolving the account through an audited CRM read.",
                 "saving_import": "Saving the private transcript selection."}
-    output = {"progress": {"command": "calls import", "step": step}}
+    output = {"progress": {"command": "debug calls import", "step": step}}
     print(json.dumps(output) if as_json else messages[step], file=sys.stderr, flush=True)
 
 
@@ -1108,7 +1188,49 @@ def _salesforce_account_read(args, reader):
             raise SalesforceReadError("salesforce_invalid_response") from None
 
 
+def _inspect_form(args):
+    """Which of its four forms inspect was given. Anything else is a usage error that names them."""
+    if re.fullmatch(r"brief-[0-9a-f]{32}", args.target):
+        form = "numbers" if args.numbers else "brief"
+    elif args.numbers:
+        raise ValueError(INSPECT_FORMS)
+    elif re.fullmatch(r"acc-(?:[0-9]{3}|sf-[A-Za-z0-9]{18})", args.target):
+        form = "account"
+    elif re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", args.target):
+        form = "receipt"
+    else:
+        raise ValueError(INSPECT_FORMS)
+    if args.role is not None and form != "brief":
+        raise ValueError("--role lists one role's sentences of a saved card. Give it a brief ID alone.")
+    return form
+
+
+def _inspect_saved(args):
+    """A saved card's units, numbers on it, or one receipt, read from the folder. No source is read."""
+    if args.action == "receipt":
+        from .audit import read_receipt
+        return read_receipt(args.state_dir / "audit.sqlite3", args.target)
+    from .briefing import trace_saved, units_saved
+    if args.action == "numbers":
+        return [trace_saved(args.state_dir, args.target, number) for number in args.numbers]
+    listed = units_saved(args.state_dir, args.target)
+    if args.role is not None:
+        listed["units"] = [unit for unit in listed["units"] if unit.get("role") == args.role]
+    return listed
+
+
+def _with_newest_card(args, account):
+    """The account as the CRM returns it, and the newest saved card of it in the folder."""
+    from .briefing import newest_saved
+    return {**account, "newest_brief_id": newest_saved(args.state_dir, args.account_id)}
+
+
 def _run(args, argv):
+    if args.command == "inspect":
+        args.action = _inspect_form(args)
+        if args.action != "account":
+            return _inspect_saved(args)
+        args.account_id = args.target
     if args.command == "completion":
         from .completion import generate
         return {"shell": args.shell, "script": generate(build_parser(), args.shell)}
@@ -1125,7 +1247,7 @@ def _run(args, argv):
         run_bridge(args.state_dir, args.scope, sources)
         return None
     # Dependencies belong to the command that uses them, after help is handled.
-    reads_sources = (args.command in ("serve", "brief", "accounts", "account")
+    reads_sources = (args.command in ("serve", "brief", "accounts", "inspect")
                      or (args.command == "calls" and args.action == "import"))
     if reads_sources and _connected(args)["calls_backend"] != "imported" and args.command == "calls":
         raise profile.ProfileError(f"Transcripts are not connected. Run gtm-connector connect calls{_here(args)} "
@@ -1135,7 +1257,7 @@ def _run(args, argv):
     if reads_sources:
         if args.command == "calls":
             _calls_progress(args.json, "preparing_state")
-        if args.command in ("accounts", "account") and args.crm_backend == "salesforce":
+        if args.command in ("accounts", "inspect") and args.crm_backend == "salesforce":
             from .salesforce import SalesforceReadError, _account_id, _like_literal
             try:
                 _like_literal(args.query) if args.command == "accounts" else _account_id(args.account_id)
@@ -1159,8 +1281,9 @@ def _run(args, argv):
             return run_check(sf_org=args.sf_org, as_of=args.as_of, environment=args.sf_environment,
                              progress=_salesforce_progress(args.json),
                              on_refresh=None if args.json else _sf_refresh_notice(False))
-    if args.command in ("accounts", "account") and crm_reader is not None:
-        return _salesforce_account_read(args, crm_reader)
+    if args.command in ("accounts", "inspect") and crm_reader is not None:
+        result = _salesforce_account_read(args, crm_reader)
+        return result if args.command == "accounts" else _with_newest_card(args, result)
     if args.command == "doctor":
         from .doctor import doctor
         return doctor(args.state_dir)
@@ -1189,22 +1312,20 @@ def _run(args, argv):
                                  as_of=as_of, include_slack=True)
             # The raw records stay in the private saved file. Output holds neutralized text only.
             return {key: value for key, value in brief.items() if key != "evidence"}
-    if args.command == "trace":
-        from .briefing import trace_saved
-        return trace_saved(args.state_dir, args.brief_id, args.number)
     if args.command == "demo":
         from .demo import run
         if profile.load(args.state_dir) not in ({}, profile.DEMO):
             raise profile.ProfileError("This folder is connected to other sources. "
                                        "Give the demo its own --state-dir.")
         result = run(args.state_dir)
-        # The demo's folder then answers brief, accounts, and serve as a folder connected to demo data.
+        # The demo's folder then answers brief, accounts, inspect, and debug serve as a folder of demo data.
         profile.save(args.state_dir, profile.DEMO)
         return result
     if args.command == "verify":
         from .verification import run as run_verification
         if profile.load(args.state_dir) not in ({}, profile.DEMO):
-            raise profile.ProfileError("This folder is connected to other sources. Give verify its own --state-dir.")
+            raise profile.ProfileError("This folder is connected to other sources. "
+                                       "Give debug verify its own --state-dir.")
         return run_verification(args.state_dir, include_slack=args.with_slack)
     if args.command == "serve":
         from queue import Empty, SimpleQueue
@@ -1270,9 +1391,9 @@ def _run(args, argv):
         if args.command == "accounts":
             return _account_list(*store.search_accounts(connection, args.query))
         result = store.get_account(connection, args.account_id)
-        if result is None:
-            raise ValueError(f"account not found: {args.account_id}")
-        return result
+    if result is None:
+        raise ValueError(f"account not found: {args.account_id}")
+    return _with_newest_card(args, result)
 
 
 def _fresh(args, name):
@@ -1303,15 +1424,15 @@ def _failure(exc, args):
     from .units import BriefRejected
     import sqlite3
     command = args.command
-    next_command = f"gtm-connector {command} --help"
+    next_command = f"gtm-connector {'debug ' if command in DEBUG else ''}{command} --help"
     message = str(exc)
     code = 2 if isinstance(exc, ValueError) else 1
     if type(exc).__name__ == "CallsImportError":
         code = exc.exit_code
         message = f"{exc.code}: {CALL_FAILURES[exc.code]}"
-        next_command = "gtm-connector calls import --help"
+        next_command = "gtm-connector debug calls import --help"
         if exc.code == "calls_import_not_found":
-            next_command = "gtm-connector calls list --state-dir " + shlex.quote(str(args.state_dir))
+            next_command = "gtm-connector debug calls list --state-dir " + shlex.quote(str(args.state_dir))
         elif exc.code in ("calls_account_not_found", "calls_account_ambiguous"):
             next_command = "gtm-connector accounts --help"
         return _error(message, code, next_command, as_json=args.json)
@@ -1345,8 +1466,8 @@ def _failure(exc, args):
                 recovery += "Connect the original org and environment with gtm-connector connect salesforce. "
             message = (f"source_identity_mismatch: {message} "
                        + recovery +
-                       "To start importing, run calls import --help. Existing files are retained.")
-            next_command = "gtm-connector calls import --help"
+                       "To start importing, run debug calls import --help. Existing files are retained.")
+            next_command = "gtm-connector debug calls import --help"
         else:
             fresh = _fresh(args, (args.state_dir.name or "state") + "-fresh")
             again = ("Repeat this command" if command == "connect" and args.provider == "salesforce"
@@ -1366,14 +1487,14 @@ def _failure(exc, args):
                         f"gtm-connector accounts --state-dir {shlex.quote(str(args.state_dir))}")
     elif command == "connect" and (
             isinstance(exc, FileNotFoundError) or type(exc).__name__ == "InspectorConnectionError"):
-        next_command = f"gtm-connector serve --state-dir {shlex.quote(str(args.state_dir))}"
+        next_command = f"gtm-connector debug serve --state-dir {shlex.quote(str(args.state_dir))}"
     if command == "connect" and code == 2 and args.provider in APPS:
-        next_command = f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}"
+        next_command = f"gtm-connector debug doctor --state-dir {shlex.quote(str(args.state_dir))}"
     if type(exc).__name__ == "SalesforceReadError":
         from .salesforce_check import _FAILURES
         detail = _FAILURES.get(exc.code, _FAILURES["check_failed"])[0]
         message = f"{exc.code}: {detail}"
-        next_command = "gtm-connector salesforce check --help"
+        next_command = "gtm-connector debug salesforce check --help"
     return _error(message, code, next_command, as_json=args.json)
 
 
@@ -1404,24 +1525,31 @@ def _main(argv):
         if args.command is None:
             raise ParserError("A command is required.")
     except ParserError as exc:
-        suggestion = "gtm-connector --help"
-        candidate = next((argument for argument in arguments if not argument.startswith("-")), "")
-        if candidate == "slack":
+        words = [argument for argument in arguments if not argument.startswith("-")]
+        candidate, names = (words[0] if words else ""), COMMANDS
+        if candidate == "debug":
+            # A command under debug is read the same way, one level down.
+            candidate, names = (words[1] if len(words) > 1 else ""), DEBUG
+        prefix = "gtm-connector debug " if names is DEBUG else "gtm-connector "
+        if names is DEBUG and candidate == "slack":
             index = arguments.index("slack") + 1
             action = arguments[index] if index < len(arguments) else ""
             child = " " + action if action in ("connect", "status", "disconnect", "map", "check") else ""
             return _error("The Slack arguments do not match this action. Check its required arguments and options.",
-                          2, "gtm-connector slack" + child + " --help", as_json=as_json)
-        if candidate == "calls":
+                          2, prefix + "slack" + child + " --help", as_json=as_json)
+        if names is DEBUG and candidate == "calls":
             index = arguments.index("calls") + 1
             action = arguments[index] if index < len(arguments) else ""
-            suggestion = "gtm-connector calls" + (" " + action if action in ("import", "list", "inspect") else "")
+            suggestion = prefix + "calls" + (" " + action if action in ("import", "list", "inspect") else "")
             return _error("The calls arguments do not match this action. Check its required arguments and options.",
                           2, suggestion + " --help", as_json=as_json)
-        if candidate not in COMMANDS:
-            close = difflib.get_close_matches(candidate, COMMANDS, n=1)
+        suggestion = prefix + "--help"
+        if names is COMMANDS and candidate in DEBUG:
+            suggestion = f"gtm-connector debug {candidate} --help"
+        elif candidate not in names:
+            close = difflib.get_close_matches(candidate, names, n=1)
             if close:
-                suggestion = f"gtm-connector {close[0]} --help"
+                suggestion = f"{prefix}{close[0]} --help"
         return _error(str(exc), 2, suggestion, as_json=as_json)
     except SystemExit as exc:
         return int(exc.code or 0)
@@ -1442,23 +1570,24 @@ def _main(argv):
             detail = SLACK_FAILURES.get(reason, SLACK_FAILURES["slack_unavailable"])
             return _error("Remote access-token revocation is unconfirmed. " + detail +
                           " Manage the whole grant in Slack settings.", 5,
-                          "gtm-connector slack disconnect --help", as_json=args.json)
+                          "gtm-connector debug slack disconnect --help", as_json=args.json)
         if args.command == "slack" and args.action == "check" and result["status"] != "passed":
             return _error("Slack thread checks failed. Apply the next action beside each failed step.", 4,
-                          "gtm-connector slack check --help", as_json=args.json)
+                          "gtm-connector debug slack check --help", as_json=args.json)
         if args.command == "doctor" and result["status"] != "passed":
             return _error("Setup checks failed. Apply the fix beside each failed check.", 4,
-                          f"gtm-connector doctor --state-dir {shlex.quote(str(args.state_dir))}", as_json=args.json)
+                          f"gtm-connector debug doctor --state-dir {shlex.quote(str(args.state_dir))}",
+                          as_json=args.json)
         if args.command == "salesforce" and result["status"] != "passed":
             return _error("Salesforce checks failed. Apply the fix beside each failed step.", 4,
-                          "gtm-connector salesforce check --help", as_json=args.json)
+                          "gtm-connector debug salesforce check --help", as_json=args.json)
         return 0
     except KeyboardInterrupt:
         if args.command == "slack":
             if args.action in ("map", "check"):
                 return _error("The Slack source operation was interrupted. Existing state and committed receipts "
                               "are retained. Check the selected state before retrying.", 130,
-                              f"gtm-connector slack {args.action} --help", as_json=args.json)
+                              f"gtm-connector debug slack {args.action} --help", as_json=args.json)
             return _error("Slack authorization was interrupted. Inspect saved status; completed remote approval "
                           "or local saves may remain.", 130, _slack_status_command(args.state_dir),
                           as_json=args.json)

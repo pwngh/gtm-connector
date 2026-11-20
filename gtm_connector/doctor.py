@@ -49,7 +49,7 @@ def _read_owner(directory):
     """Return validated local settings; error text never contains their values."""
     directory = _directory(directory)
     if not _private(directory, directory=True) or not _private(directory / "owner.json"):
-        raise ValueError("State must contain regular, owner-only files. Run gtm-connector doctor.")
+        raise ValueError("State must contain regular, owner-only files. Run gtm-connector debug doctor.")
     try:
         descriptor = os.open(directory / "owner.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(descriptor) as source:
@@ -84,7 +84,7 @@ def _read_owner(directory):
                 or not Path(owner["slack_connection_dir"]).is_absolute()):
             raise ValueError
     except (OSError, ValueError, TypeError, KeyError, UnicodeError, RecursionError):
-        raise ValueError("Owner configuration is invalid. Run gtm-connector doctor.") from None
+        raise ValueError("Owner configuration is invalid. Run gtm-connector debug doctor.") from None
     return owner
 
 
@@ -96,10 +96,10 @@ def _validate_sources(directory, owner):
             if state.crm_backend != owner["crm_backend"]:
                 raise ValueError
         except Exception:
-            raise ValueError("Slack source state is invalid. Run gtm-connector doctor.") from None
+            raise ValueError("Slack source state is invalid. Run gtm-connector debug doctor.") from None
     elif owner["slack_backend"] == "fixture" and any(
             os.path.lexists(directory / name) for name in ("slack-source.json", "slack-mappings.json")):
-        raise ValueError("Slack source selection is invalid. Run gtm-connector doctor.")
+        raise ValueError("Slack source selection is invalid. Run gtm-connector debug doctor.")
     if owner["calls_backend"] == "imported":
         from .runtime import _inspect_import_state
         try:
@@ -107,10 +107,10 @@ def _validate_sources(directory, owner):
             if state.crm_backend != owner["crm_backend"]:
                 raise ValueError
         except Exception:
-            raise ValueError("Imported calls state is invalid. Run gtm-connector doctor.") from None
+            raise ValueError("Imported calls state is invalid. Run gtm-connector debug doctor.") from None
     elif owner["calls_backend"] == "fixture" and any(
             os.path.lexists(directory / name) for name in ("calls-source.json", "imports.sqlite3")):
-        raise ValueError("Calls source selection is invalid. Run gtm-connector doctor.")
+        raise ValueError("Calls source selection is invalid. Run gtm-connector debug doctor.")
 
 
 def load_local_owner(directory):
@@ -118,7 +118,7 @@ def load_local_owner(directory):
     directory = _directory(directory)
     owner = _read_owner(directory)
     if any(not _private(directory / name) for name in _REQUIRED_FILES + _source_files(owner)):
-        raise ValueError("State must contain regular, owner-only files. Run gtm-connector doctor.")
+        raise ValueError("State must contain regular, owner-only files. Run gtm-connector debug doctor.")
     _validate_sources(directory, owner)
     return owner
 
@@ -126,12 +126,12 @@ def load_local_owner(directory):
 def doctor(directory):
     """Inspect private state and GET local metadata; never grant scopes or read sources."""
     directory = _directory(directory)
-    serve = shlex.join(["gtm-connector", "serve", "--state-dir", str(directory)])
+    serve = shlex.join(["gtm-connector", "debug", "serve", "--state-dir", str(directory)])
     if not os.path.lexists(directory / "profile.json"):
-        # serve reads the folder's profile, so a folder with none is connected first.
+        # debug serve reads the folder's profile, so a folder with none is connected first.
         serve = (shlex.join(["gtm-connector", "connect", "demo", "--state-dir", str(directory)])
                  + " (or connect salesforce --org ALIAS), then " + serve)
-    fresh = "connect and serve a fresh private folder with --state-dir var/doctor-new"
+    fresh = "connect a fresh private folder with --state-dir var/doctor-new and run debug serve there"
     checks = []
 
     def check(name, passed, message, fix):

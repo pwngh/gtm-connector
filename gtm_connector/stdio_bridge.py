@@ -27,7 +27,7 @@ RENEW_BEFORE_SECONDS = 60
 BRIEF_READ_SECONDS = 75
 _BRIEF_TOOLS = ("prepare_renewal_brief",)
 _INTERNAL_ERROR = -32603
-_UNREACHABLE = "The connector is unreachable or restarted. Start serve again, then restart this client."
+_UNREACHABLE = "The connector is unreachable or restarted. Start debug serve again, then restart this client."
 
 
 class BridgeError(RuntimeError):
@@ -172,10 +172,10 @@ def run_bridge(directory, scopes, sources) -> None:
         owner = load_local_owner(directory)
     except (OSError, ValueError):
         raise BridgeError("No running connector state was found in this folder. "
-                          "Start gtm-connector serve with the same --state-dir first.") from None
+                          "Start gtm-connector debug serve with the same --state-dir first.") from None
     if any(owner.get(name) != value for name, value in sources.items()):
         raise BridgeError("The running connector was started before this folder's sources changed. "
-                          "Start gtm-connector serve again, then restart this client.")
+                          "Start gtm-connector debug serve again, then restart this client.")
     bridge = Bridge(owner, scopes).start()
     server = build_server(bridge)
 

@@ -16,7 +16,7 @@ import httpx2
 
 from . import strict_json
 from .seed import DEMO_AS_OF, SELLERS
-from .units import SANITIZER_VERSION, BriefRejected, build, trace
+from .units import SANITIZER_VERSION, BriefRejected, build, neutralized, trace
 
 
 class BriefingError(RuntimeError):
@@ -275,5 +275,42 @@ def trace_saved(directory, brief_id, number):
     changed seller list would give other units for the same evidence, and the sealed ones are the card.
     """
     artifact = _sealed(directory, brief_id)
+    units = artifact["units"]
+    traced = trace(artifact["evidence"], number, units)
+    # The next sentence under the same speaker label in the same record, where a condition often is. A sentence
+    # with no label has none: no label is not one speaker.
+    sealed, following = units[number - 1], None
+    if sealed["kind"] == "sentence" and sealed["speaker"] is not None:
+        following = next((unit["n"] for unit in units[number:] if unit["kind"] == "sentence"
+                          and unit["record_ref"] == sealed["record_ref"] and unit["speaker"] == sealed["speaker"]),
+                         None)
+    return {"brief_id": brief_id, "account_id": artifact["account_id"], **traced, "next_by_speaker": following}
+
+
+def units_saved(directory, brief_id):
+    """Every unit of a saved card in number order, as sealed. Each must resolve as trace resolves it."""
+    artifact = _sealed(directory, brief_id)
+    for number in range(1, len(artifact["units"]) + 1):
+        trace(artifact["evidence"], number, artifact["units"])
     return {"brief_id": brief_id, "account_id": artifact["account_id"],
-            **trace(artifact["evidence"], number, artifact["units"])}
+            "units": [neutralized(unit) for unit in artifact["units"]]}
+
+
+def newest_saved(directory, account_id):
+    """The newest saved card of this account that the folder holds, by when it was sealed, or None.
+
+    The seal receipts are in the order they were committed. The card itself is checked when it is inspected.
+    """
+    log = Path(directory) / "audit.sqlite3"
+    if not os.path.lexists(log):
+        return None
+    from .audit import read_audit
+    for seal in reversed(read_audit(log, tool=SEAL_TOOL, status="ok")):
+        arguments = seal["arguments"]
+        if isinstance(arguments, dict) and arguments.get("account_id") == account_id:
+            try:
+                if _artifact_path(directory, arguments.get("brief_id")).is_file():
+                    return arguments["brief_id"]
+            except ValueError:
+                continue
+    return None

@@ -24,7 +24,7 @@ _FAILURES = {
         "Use an existing API-enabled org and a user with the API Enabled permission."),
     "salesforce_schema_unavailable": (
         "The selected org does not expose all required standard fields.",
-        "Run gtm-connector salesforce check with the same alias and environment to see the missing fields."),
+        "Run gtm-connector debug salesforce check with the same alias and environment to see the missing fields."),
     "salesforce_auth_required": (
         "The sf CLI login or token refresh did not provide usable credentials.",
         "Install Salesforce CLI if missing. Run sf org login web --alias gtm-de, then repeat with --sf-org gtm-de."),
@@ -54,13 +54,13 @@ _FAILURES = {
         "Check access to the listed standard fields, then repeat the check."),
     "salesforce_account_number_ambiguous": (
         "AccountNumber did not resolve to a literal match within the bounded lookup.",
-        "Select the canonical account ID with --account. Run gtm-connector calls import --help."),
+        "Select the canonical account ID with --account. Run gtm-connector debug calls import --help."),
     "salesforce_pagination_invalid": (
         "Salesforce returned an unsupported result-page locator.",
         "Repeat the check on a smaller account book."),
     "salesforce_invalid_arguments": (
         "A read could not use the returned account or date.",
-        "Run gtm-connector salesforce check --help and repeat with a valid date."),
+        "Run gtm-connector debug salesforce check --help and repeat with a valid date."),
     "renewal_fields_unmapped": (
         "No eligible Contract has an EndDate on or after the planning date.",
         "Create a Draft Contract with StartDate and ContractTerm; verify its EndDate and read access."),
@@ -129,7 +129,7 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
                 if code == "salesforce_result_limit" and environment != "developer" and name in metadata_steps:
                     message = "Salesforce startup metadata exceeded the shared request or response-size bound."
                     fix = ("Use a connection whose required metadata fits the startup limits. "
-                           "Run gtm-connector salesforce check --help to review the check.")
+                           "Run gtm-connector debug salesforce check --help to review the check.")
                 row.update(code=code, message=message, fix=fix)
                 if "reader" not in state:
                     extra_sf = getattr(exc, "sf_cli_invocations", 0)
