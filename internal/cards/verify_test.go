@@ -19,8 +19,9 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The three folders: a card saved by brief, a brief prepared without as_of under a grant that lacks Slack,
-// and one prepared with as_of under every scope.
+// The four folders: a card saved by brief, a brief prepared without as_of under a grant that lacks Slack,
+// one prepared with as_of under every scope, and one prepared under every scope for an account selected
+// without Slack.
 type folderCase struct {
 	name, brief, seal, read, account string
 	prepared                         bool
@@ -33,6 +34,8 @@ var folders = []folderCase{
 		"7a78ae31-0000-4000-8000-000000000003", "acc-007", true},
 	{"prepared_as_of", "brief-3b4b6cec000040008000000000000002", "3b4b6cec-0000-4000-8000-000000000001",
 		"3b4b6cec-0000-4000-8000-000000000003", "acc-003", true},
+	{"prepared_no_slack", "brief-2aee567d000040008000000000000002", "2aee567d-0000-4000-8000-000000000001",
+		"2aee567d-0000-4000-8000-000000000003", "acc-003", true},
 }
 
 func openFolder(t *testing.T, name string) *Folder {
@@ -95,7 +98,7 @@ func TestGoMakesTheFolderCards(t *testing.T) {
 	for _, c := range folders {
 		t.Run(c.name, func(t *testing.T) {
 			sc := newScope(map[string]string{"cli_card": "folders/cli_card/1", "prepared": "folders/prepared",
-				"prepared_as_of": "folders/prepared_as_of"}[c.name])
+				"prepared_as_of": "folders/prepared_as_of", "prepared_no_slack": "folders/prepared_no_slack"}[c.name])
 			m, store := sc.maker(demoBook(t), demoSources(nil))
 			token := sc.token(accessToken + 1) // each of these scopes also started the connector
 			var sealed *Sealed
@@ -111,6 +114,9 @@ func TestGoMakesTheFolderCards(t *testing.T) {
 				sealed, err = m.Prepare(ctx, prepareOf(token, c.account, true,
 					strictjson.NewObject("account_id", c.account, "as_of", "2027-01-20"), "crm:read", "calls:read",
 					"slack:read"))
+			case "prepared_no_slack":
+				sealed, err = m.Prepare(ctx, prepareOf(token, c.account, false,
+					strictjson.NewObject("account_id", c.account), "crm:read", "calls:read", "slack:read"))
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -444,7 +450,7 @@ func TestGoCardsPublishAndVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	card, found := store.Published(sealed.BriefID)
+	card, found := store.Published(testWorkspace, sealed.BriefID)
 	if !found || len(card.Units) != len(sealed.Units) || card.Units[0].ReceiptID == "" || card.Units[0].ContentVersion == "" {
 		t.Fatalf("published %+v", card)
 	}
@@ -546,7 +552,7 @@ func TestReceiptsComeFirstAndReleaseLast(t *testing.T) {
 	})
 	t.Run("a source changed during a read gives no card", func(t *testing.T) {
 		m, r, source := setup()
-		source.during = func() { r.SetGeneration("crm-1", 2) }
+		source.during = func() { r.SetGeneration(testWorkspace, "crm-1", 2) }
 		if _, err := m.Brief(ctx, brief); !errors.Is(err, receipts.ErrSourceChanged) || r.published != 0 {
 			t.Fatalf("got %v", err)
 		}
@@ -555,7 +561,7 @@ func TestReceiptsComeFirstAndReleaseLast(t *testing.T) {
 		m, r, source := setup()
 		source.during = func() {
 			if source.reads == 3 {
-				r.SetGeneration("crm-1", 2)
+				r.SetGeneration(testWorkspace, "crm-1", 2)
 			}
 		}
 		if _, err := m.Brief(ctx, brief); !errors.Is(err, receipts.ErrSourceChanged) {
@@ -602,7 +608,7 @@ func TestPrepareRefuses(t *testing.T) {
 		if sealed, err := m.Prepare(ctx, p); !errors.Is(err, want) || sealed != nil {
 			t.Fatalf("got %v, %v; want %v", sealed, err, want)
 		}
-		outer, _ := store.ByOperation(ctx, "prepare")
+		outer, _ := store.ByOperation(ctx, testWorkspace, "prepare")
 		if outer.Status != "error" || *outer.HTTPStatus != 200 || *outer.Error != "request_failed" {
 			t.Fatalf("the outer receipt: %+v", outer)
 		}

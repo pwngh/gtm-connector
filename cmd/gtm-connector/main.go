@@ -2,7 +2,7 @@
 //
 //	gtm-connector setup              make credentials, migrate, set up the app role, seed the demo workspace
 //	gtm-connector serve              run the HTTPS server, as the app role
-//	gtm-connector demo               publish a card for each demo account, for the demo sign-in to read
+//	gtm-connector demo [--again]     publish a card for each demo account that holds none, for the demo sign-in
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
 //	gtm-connector health             check that the local server answers
@@ -41,7 +41,7 @@ const usage = `usage: gtm-connector <command> [flags]
 commands:
   setup              make missing credentials, migrate, set up the app role, seed the demo workspace
   serve              run the HTTPS server, connecting as the app role
-  demo               publish a card for each demo account, for the demo sign-in to read
+  demo [--again]     publish a card for each demo account that holds none, for the demo sign-in
   backup --out FILE  write PostgreSQL and the credentials folder to FILE
   restore --in FILE  restore FILE into an empty database and credentials folder
   health             check that the local server answers

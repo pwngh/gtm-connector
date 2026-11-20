@@ -56,7 +56,7 @@ func (s *scope) maker(source Source, sources evidence.Sources) (*Maker, *receipt
 	store := receipts.NewMemory(s.clock, s.uuid)
 	connections := map[string]string{"crm": "crm-1", "calls": "calls-1", "slack": "slack-1"}
 	for _, id := range connections {
-		store.SetGeneration(id, 1)
+		store.SetGeneration(testWorkspace, id, 1)
 	}
 	return &Maker{Receipts: store, Source: source, Sources: sources, Connections: connections, NewID: s.uuid,
 		Now: still}, store
@@ -184,8 +184,34 @@ func (c *memoryCards) maker(_ *testing.T, sc *scope, s setup, _ fixtureRow, b Br
 
 func (c *memoryCards) published(_ *testing.T, sealed *Sealed, s setup, row fixtureRow,
 	mismatches *oracletest.Mismatches) ([]byte, string, receipts.Receipt) {
-	if published, _ := c.stores[s.scope].Published(sealed.BriefID); string(published.Bytes) != string(sealed.Payload) {
+	published, _ := c.stores[s.scope].Published(testWorkspace, sealed.BriefID)
+	if string(published.Bytes) != string(sealed.Payload) {
 		mismatches.Add("%s: the published bytes are not the sealed ones", row.Key)
+	}
+	// The published projections, type for type, are the oracle card's units and gaps.
+	want, err := receipts.ParsePayload([]byte(row.Card))
+	if err != nil || len(published.Units) != len(want.Units) || len(published.Gaps) != len(want.Gaps) {
+		mismatches.Add("%s: %d units and %d gaps published", row.Key, len(published.Units), len(published.Gaps))
+		return sealed.Payload, sealed.SHA256, sealed.Seal
+	}
+	for i, u := range published.Units {
+		value, err := strictjson.Loads(u.Value)
+		if err != nil || !sameJSON(value, want.Units[i]) {
+			mismatches.Add("%s: published unit %d is not the oracle's", row.Key, i+1)
+		}
+	}
+	for i, g := range published.Gaps {
+		var count, byRole any
+		if g.Count != nil {
+			count = g.Count
+		}
+		if g.ByRole != nil {
+			byRole, _ = strictjson.Loads(g.ByRole)
+		}
+		if !sameJSON(strictjson.NewObject("code", g.Code, "disposition", g.Disposition, "count", count,
+			"by_role", byRole, "text", g.Text), want.Gaps[i]) {
+			mismatches.Add("%s: published gap %d is not the oracle's", row.Key, i+1)
+		}
 	}
 	return sealed.Payload, sealed.SHA256, sealed.Seal
 }

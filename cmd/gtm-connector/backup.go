@@ -462,7 +462,7 @@ func exactEntries(m manifest) error {
 	for i, name := range credentialFiles {
 		want[i] = "credentials/" + name
 	}
-	if !slices.Equal(tables, postgres.BackupTableNames()) || !slices.Equal(files, want) {
+	if !slices.Equal(tables, postgres.BackupTableNames(m.SchemaVersion)) || !slices.Equal(files, want) {
 		return errors.New("the manifest does not list exactly the expected tables and credentials")
 	}
 	return nil

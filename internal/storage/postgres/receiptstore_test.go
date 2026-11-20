@@ -3,7 +3,6 @@ package postgres_test
 import (
 	"testing"
 
-	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/receipts/receiptstest"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/pgtest"
@@ -23,31 +22,28 @@ func TestReceiptStoreKeepsTheContract(t *testing.T) {
 		ok(t, err)
 		principal, err := store.CreatePrincipal(ctx, workspace, "person", "Demo reader")
 		ok(t, err)
-		const account = "acc-001"
+		stranger, err := store.CreatePrincipal(ctx, workspace, "person", "Another reader")
+		ok(t, err)
+		const account, otherAccount = "acc-001", "acc-002"
 		ok(t, store.EnsureAccount(ctx, workspace.ID, account, "Invented account"))
+		ok(t, store.EnsureAccount(ctx, workspace.ID, otherAccount, "Another invented account"))
 		connection, err := store.EnsureConnection(ctx, workspace, "crm", "demo")
+		ok(t, err)
+		otherConnection, err := store.EnsureConnection(ctx, other, "crm", "demo")
 		ok(t, err)
 		f := &postgrestest.Fixture{URL: url} // for count
 		return &receiptstest.Fixture{Store: &postgres.ReceiptStore{Store: store}, Workspace: workspace.ID,
-			Other: other.ID, Principal: principal.ID, Account: account, Connection: connection.ID,
+			Other: other.ID, Principal: principal.ID, Stranger: stranger.ID, Account: account,
+			OtherAccount: otherAccount, Connection: connection.ID, OtherConnection: otherConnection.ID,
 			Bump: func(t *testing.T) {
 				_, err := store.BumpConnectionGeneration(ctx, connection.ID)
 				ok(t, err)
 			},
-			Grant: func(t *testing.T) { ok(t, store.GrantAccount(ctx, workspace.ID, principal.ID, account)) },
-			Records: func(t *testing.T, auditID string) []receipts.RecordVersion {
-				bound, err := store.ReceiptRecords(ctx, workspace.ID, auditID)
-				ok(t, err)
-				out := make([]receipts.RecordVersion, len(bound))
-				for i, v := range bound {
-					out[i] = receipts.RecordVersion{Source: v.Source, Table: v.Table, RecordID: v.RecordID,
-						ContentVersion: v.ContentVersion, Body: v.Body}
-				}
-				return out
-			},
+			Grant:     func(t *testing.T) { ok(t, store.GrantAccount(ctx, workspace.ID, principal.ID, account)) },
 			Committed: func(t *testing.T) int { return count(t, f, "SELECT count(*) FROM receipts") },
 			Published: func(t *testing.T, briefID string) bool {
-				return count(t, f, "SELECT count(*) FROM cards WHERE brief_id = $1", briefID) == 1
+				return count(t, f, "SELECT count(*) FROM cards WHERE workspace_id = $1 AND brief_id = $2",
+					workspace.ID, briefID) == 1
 			},
 		}
 	})

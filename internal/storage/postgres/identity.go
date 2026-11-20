@@ -79,6 +79,27 @@ func (s *Store) EnsureDemoPrincipal(ctx context.Context, w Workspace, login, dis
 	return p, nil
 }
 
+// ErrDisabled means the principal exists and is disabled.
+var ErrDisabled = errors.New("the principal is disabled")
+
+// DemoPrincipal gives the demo principal for login, enabled or not: a
+// disabled one with ErrDisabled, a missing one with ErrNotFound.
+func (s *Store) DemoPrincipal(ctx context.Context, login string) (Principal, error) {
+	p := Principal{Login: login}
+	var disabled bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, workspace_id, workspace_kind, kind, display_name, disabled_at IS NOT NULL
+		  FROM principals WHERE login = $1 AND workspace_kind = 'demo'`, login).
+		Scan(&p.ID, &p.WorkspaceID, &p.WorkspaceKind, &p.Kind, &p.DisplayName, &disabled)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return Principal{}, ErrNotFound
+	case err == nil && disabled:
+		return p, ErrDisabled
+	}
+	return p, err
+}
+
 // DemoPrincipalByLogin gives the enabled demo principal for login and its
 // credential digest, or ErrNotFound.
 func (s *Store) DemoPrincipalByLogin(ctx context.Context, login string) (Principal, []byte, error) {
@@ -104,13 +125,49 @@ func (s *Store) EnsureAccount(ctx context.Context, workspaceID, ref, displayName
 }
 
 // GrantAccount gives a principal read access to an account, or renews a
-// revoked grant.
+// revoked grant. A live grant keeps the time it was granted.
 func (s *Store) GrantAccount(ctx context.Context, workspaceID, principalID, accountRef string) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO account_grants (workspace_id, principal_id, account_ref) VALUES ($1, $2, $3)
 		ON CONFLICT (workspace_id, principal_id, account_ref)
-		DO UPDATE SET revoked_at = NULL, granted_at = now()`, workspaceID, principalID, accountRef)
+		DO UPDATE SET revoked_at = NULL, granted_at = now() WHERE account_grants.revoked_at IS NOT NULL`,
+		workspaceID, principalID, accountRef)
 	return err
+}
+
+// EnsureAccountGrant gives a principal read access to an account it was
+// never granted, and leaves a grant that exists as it is: a revoked grant
+// stays revoked. It reports whether the grant is live.
+func (s *Store) EnsureAccountGrant(ctx context.Context, workspaceID, principalID, accountRef string) (bool, error) {
+	var live bool
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO account_grants (workspace_id, principal_id, account_ref) VALUES ($1, $2, $3)
+			ON CONFLICT (workspace_id, principal_id, account_ref) DO NOTHING`,
+			workspaceID, principalID, accountRef); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `SELECT revoked_at IS NULL FROM account_grants
+			WHERE workspace_id = $1 AND principal_id = $2 AND account_ref = $3`,
+			workspaceID, principalID, accountRef).Scan(&live)
+	})
+	return live, err
+}
+
+// AccountsWithCards lists the accounts holding a card made here, sealed by
+// this principal, as of this day.
+func (s *Store) AccountsWithCards(ctx context.Context, workspaceID, principalID, asOf string) (map[string]bool, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT c.account_ref FROM cards c JOIN receipts r ON r.id = c.seal_receipt_id
+		 WHERE c.workspace_id = $1 AND c.kind = 'go' AND r.principal_id = $2
+		   AND convert_from(c.card_bytes, 'UTF8')::jsonb ->> 'as_of' = $3`, workspaceID, principalID, asOf)
+	if err != nil {
+		return nil, err
+	}
+	accounts := map[string]bool{}
+	var account string
+	_, err = pgx.ForEachRow(rows, []any{&account}, func() error { accounts[account] = true; return nil })
+	return accounts, err
 }
 
 // RevokeAccountGrant ends a principal's grant on an account.

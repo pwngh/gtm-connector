@@ -15,10 +15,11 @@ import (
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
-// demoCommand makes the demo book's cards in the demo workspace, as the
-// app role, after setup has made the demo principal.
+// demoCommand makes the demo book's cards in the demo workspace, as the app
+// role, after setup has made the demo principal.
 func demoCommand(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("demo", flag.ContinueOnError)
+	again := flags.Bool("again", false, "publish a new card for every account, also those that hold one")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -26,23 +27,12 @@ func demoCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if c.databaseURL == "" {
-		return errors.New("set GTM_DATABASE_URL to the app role's PostgreSQL URL")
-	}
-	store, err := openStore(ctx, c.databaseURL)
+	store, err := openAppStore(ctx, c)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	if version, err := store.SchemaVersion(ctx); err != nil {
-		return err
-	} else if version != postgres.LatestSchemaVersion() {
-		return fmt.Errorf("the database is at schema %d, not %d; run setup first", version, postgres.LatestSchemaVersion())
-	}
-	made, err := makeDemoCards(ctx, store, demoLogin, os.Stdout)
-	if err == nil {
-		fmt.Printf("%d cards published for %s. Sign in as %s to read them.\n", made, demoLogin, demoLogin)
-	}
+	_, err = makeDemoCards(ctx, store, demoLogin, *again, os.Stdout)
 	return err
 }
 
@@ -50,57 +40,90 @@ func demoCommand(ctx context.Context, args []string) error {
 var demoSources = evidence.Sources{CRMBackend: "sqlite", CRMBinding: evidence.FixtureCRMBinding(),
 	CallsBackend: "fixture", SlackBackend: "fixture"}
 
-// makeDemoCards loads the demo book into the demo workspace: its accounts,
-// a grant on each for the demo principal signing in as login, and a
-// connection per source. Then it makes and publishes each account's card
-// through the maker on PostgreSQL, as that principal, under a bearer made
-// for this run that is never stored or shown. Each run publishes a new card
-// per account. It returns how many it published.
-func makeDemoCards(ctx context.Context, store *postgres.Store, login string, out io.Writer) (int, error) {
+// demoRun is what one run of the demo did.
+type demoRun struct {
+	Published, Held int      // cards published; accounts that hold a card already
+	Revoked         []string // accounts whose grant was revoked, left alone
+}
+
+// makeDemoCards loads the demo book into the demo workspace: its accounts, a
+// grant on each for the demo principal signing in as login, and a
+// connection per source. A grant that exists is left as it is, so a revoked
+// one stays revoked and its account gets no card. Then it makes and
+// publishes the card of each account that holds none, or of every granted
+// account with again, through the maker on PostgreSQL, as that principal,
+// under a bearer made for this run that is never stored or shown. A run that
+// stopped part way is finished by running again. Cards and receipts are
+// never deleted, so each card again adds rows only a new database removes.
+func makeDemoCards(ctx context.Context, store *postgres.Store, login string, again bool, out io.Writer) (demoRun, error) {
+	var run demoRun
 	workspace, err := store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace")
 	if err != nil {
-		return 0, err
+		return run, err
 	}
-	principal, _, err := store.DemoPrincipalByLogin(ctx, login)
-	if errors.Is(err, postgres.ErrNotFound) || err == nil && principal.WorkspaceID != workspace.ID {
-		return 0, fmt.Errorf("no demo principal %s in the demo workspace; run setup first", login)
-	}
-	if err != nil {
-		return 0, err
+	principal, err := store.DemoPrincipal(ctx, login)
+	switch {
+	case errors.Is(err, postgres.ErrDisabled):
+		return run, fmt.Errorf("the demo principal %s is disabled; enable it, or start a new database", login)
+	case errors.Is(err, postgres.ErrNotFound) || err == nil && principal.WorkspaceID != workspace.ID:
+		return run, fmt.Errorf("no demo principal %s in the demo workspace; run setup first", login)
+	case err != nil:
+		return run, err
 	}
 	book, err := demo.Seeded()
 	if err != nil {
-		return 0, err
+		return run, err
 	}
 	connections := map[string]string{}
 	for _, source := range []string{"crm", "calls", "slack"} {
 		connection, err := store.EnsureConnection(ctx, workspace, source, "demo")
 		if err != nil {
-			return 0, err
+			return run, err
 		}
 		connections[source] = connection.ID
 	}
-	accounts := book.Accounts()
-	for _, account := range accounts {
+	held, err := store.AccountsWithCards(ctx, workspace.ID, principal.ID, cards.DemoAsOf)
+	if err != nil {
+		return run, err
+	}
+	var todo []string
+	for _, account := range book.Accounts() {
 		if err := store.EnsureAccount(ctx, workspace.ID, account.ID, account.Name); err != nil {
-			return 0, err
+			return run, err
 		}
-		if err := store.GrantAccount(ctx, workspace.ID, principal.ID, account.ID); err != nil {
-			return 0, err
+		live, err := store.EnsureAccountGrant(ctx, workspace.ID, principal.ID, account.ID)
+		switch {
+		case err != nil:
+			return run, err
+		case !live:
+			run.Revoked = append(run.Revoked, account.ID)
+		case held[account.ID] && !again:
+			run.Held++
+		default:
+			todo = append(todo, account.ID)
 		}
 	}
 	maker := &cards.Maker{Receipts: &postgres.ReceiptStore{Store: store}, Source: book, Sources: demoSources,
 		Connections: connections}
 	actor := cards.Principal{WorkspaceID: workspace.ID, PrincipalID: principal.ID,
 		TokenID: receipts.Fingerprint(randomToken()), Scopes: []string{"crm:read", "calls:read", "slack:read"}}
-	run := receipts.RandomID()
-	for i, account := range accounts {
-		sealed, err := maker.Brief(ctx, cards.Brief{Principal: actor, OperationID: "demo-" + run + "-" + account.ID,
-			AccountID: account.ID, AsOf: cards.DemoAsOf, IncludeSlack: true})
+	operation := receipts.RandomID()
+	for _, account := range todo {
+		sealed, err := maker.Brief(ctx, cards.Brief{Principal: actor, OperationID: "demo-" + operation + "-" + account,
+			AccountID: account, AsOf: cards.DemoAsOf, IncludeSlack: true})
 		if err != nil {
-			return i, fmt.Errorf("%s: %w", account.ID, err)
+			return run, fmt.Errorf("%s: %w", account, err)
 		}
-		fmt.Fprintf(out, "%s  %s  %d units  sha256 %s\n", account.ID, sealed.BriefID, len(sealed.Units), sealed.SHA256)
+		run.Published++
+		fmt.Fprintf(out, "%s  %s  %d units  sha256 %s\n", account, sealed.BriefID, len(sealed.Units), sealed.SHA256)
 	}
-	return len(accounts), nil
+	fmt.Fprintf(out, "%d cards published for %s; %d accounts hold one already", run.Published, login, run.Held)
+	if run.Held > 0 {
+		fmt.Fprint(out, " (demo --again publishes another; cards are never deleted)")
+	}
+	fmt.Fprintln(out, ".")
+	if len(run.Revoked) > 0 {
+		fmt.Fprintf(out, "Left alone, their grant revoked: %v.\n", run.Revoked)
+	}
+	return run, nil
 }

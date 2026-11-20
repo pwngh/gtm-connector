@@ -202,13 +202,15 @@ restore connect as the database owner; the server connects as an app role that r
 and cannot change the schema or switch off a check. Browsers do not separate cookies by port, so
 another HTTPS server on `127.0.0.1` would see this one's cookies.
 
-`make demo` (or `gtm-connector demo` after setup) loads the invented demo book into the demo workspace,
-grants the demo sign-in its 30 accounts, and makes and publishes each account's card through the Go
-card maker on PostgreSQL, under receipts. Each card is the one the Python package makes for that
-account, apart from its brief and receipt IDs, its token fingerprint and its read times. Each run adds
-a new card per account. Signed in, the server lists them at `/api/v1/accounts` and
-`/api/v1/accounts/ACCOUNT/cards`. Demo data and a real source never share a workspace: the database
-refuses a real connection in the demo workspace.
+`make demo` (or `gtm-connector demo` after setup, as the app role) loads the invented demo book into the
+demo workspace, grants the demo sign-in its 30 accounts, and makes and publishes each account's card
+through the Go card maker on PostgreSQL, under receipts. Each card is the one the Python package makes for
+that account, apart from its brief and receipt IDs, its token fingerprint and its read times. A run
+publishes only for accounts that hold no card, so running it again finishes a run that stopped part way;
+`demo --again` publishes another card for every account. Cards and receipts are never deleted. A grant
+someone revoked stays revoked, and its account gets no card. Signed in, the server lists the accounts at
+`/api/v1/accounts` and their cards at `/api/v1/accounts/ACCOUNT/cards`. Demo data and a real source never
+share a workspace: the database refuses a real connection in the demo workspace.
 
 Backups go to `~/.config/gtm-connector/backups`. A backup's digests detect corruption only: they
 are stored in the backup itself, so they do not prove who made it. A restore needs an empty

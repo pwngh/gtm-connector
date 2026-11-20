@@ -243,9 +243,10 @@ func TestExpiredLeaseCannotFinish(t *testing.T) {
 	if gone.Status != "error" || *gone.HTTPStatus != 503 || *gone.Error != "interrupted" || gone.LeaseFence != 2 {
 		t.Fatalf("abandoned receipt %+v", gone)
 	}
-	// The old worker comes back and still cannot finish it.
+	// The old worker comes back and still cannot finish it: the lease was
+	// taken over, so it is told nothing about the outcome.
 	_, err = f.Store.FinishReceipt(ctx, finishOK(r))
-	is(t, err, postgres.ErrAlreadyFinished)
+	is(t, err, postgres.ErrLeaseLost)
 }
 
 func TestLostAcknowledgement(t *testing.T) {
@@ -288,14 +289,14 @@ func TestLostAcknowledgement(t *testing.T) {
 	is(t, err, postgres.ErrAlreadyFinished)
 
 	// Committed and delivered are recorded apart.
-	byOperation, err := f.Store.ReceiptByOperation(ctx, got.OperationID)
+	byOperation, err := f.Store.ReceiptByOperation(ctx, f.Workspace.ID, got.OperationID)
 	ok(t, err)
 	if byOperation.Status != "ok" || byOperation.DeliveredAt != nil {
 		t.Fatalf("before delivery %+v", byOperation)
 	}
 	ok(t, f.Store.MarkDelivered(ctx, got.ID))
 	ok(t, f.Store.MarkDelivered(ctx, got.ID))
-	byOperation, err = f.Store.ReceiptByOperation(ctx, got.OperationID)
+	byOperation, err = f.Store.ReceiptByOperation(ctx, f.Workspace.ID, got.OperationID)
 	ok(t, err)
 	if byOperation.DeliveredAt == nil {
 		t.Fatal("delivery not recorded")
@@ -410,29 +411,13 @@ func TestCrashAtEachStepBoundary(t *testing.T) {
 	}
 }
 
-// publication starts a brief, a read under it and a seal receipt, and
-// describes a one-unit card resting on that read.
+// publication starts a prepare_renewal_brief call for brief, which seals
+// it, and a read under it, and describes a one-unit card resting on that read.
 func publication(t *testing.T, f *postgrestest.Fixture, brief string) (postgres.CardPublication, postgres.Receipt) {
 	t.Helper()
-	p := parent(t, f, brief+"-parent", time.Minute)
-	read, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute),
-		func(context.Context) ([]postgres.RecordVersion, error) { return records(brief), nil })
-	ok(t, err)
-	versions, err := f.Store.ReceiptRecordIDs(ctx, f.Workspace.ID, read.ID)
-	ok(t, err)
-	seal, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
-		OperationID: brief + "-seal", PrincipalID: f.Reader.ID, TokenID: "anonymous", Tool: "save_brief",
-		AccountRef: postgrestest.Account, BriefID: brief, Arguments: json.RawMessage(`{}`), Lease: time.Minute})
-	ok(t, err)
-	rules := "3"
-	units := []postgres.Unit{{N: 1, Kind: "record", RecordRef: "crm/accounts/acc-003", Tool: "get_account",
-		ReceiptID: read.ID, SourceRecordID: versions["crm/accounts/acc-003"],
-		Body: postgrestest.UnitBody(1, "record", "crm/accounts/acc-003", "get_account", "", nil)}}
-	gaps := []postgres.Gap{{Code: "neutralized", Disposition: "note", Text: "none"}}
-	return postgres.CardPublication{WorkspaceID: f.Workspace.ID, AccountRef: postgrestest.Account, BriefID: brief,
-		ParentReceiptID: p.ID, PrincipalID: f.Reader.ID, SealReceiptID: seal.ID, SealLeaseToken: seal.LeaseToken,
-		Kind: "go", SchemaVersion: 3, RulesVersion: &rules, Bytes: postgrestest.CardBytes(brief, units, gaps),
-		Units: units, Gaps: gaps, ReadReceiptIDs: []string{read.ID}}, seal
+	pub, seal, _ := postgrestest.Prepared(t, f.Store, f, brief+"-call", brief, f.Reader.ID,
+		postgres.TokenID("raw-token"), postgrestest.Record("accounts", "acc-003", "id", "acc-003", "v", brief))
+	return pub, seal
 }
 
 func TestUnavailableReceiptStore(t *testing.T) {
@@ -461,7 +446,7 @@ func TestUnavailableReceiptStore(t *testing.T) {
 	if err == nil || released != nil {
 		t.Fatal("records were released without a finished receipt")
 	}
-	c, err := f.Store.ReceiptByOperation(ctx, p.OperationID+"#2")
+	c, err := f.Store.ReceiptByOperation(ctx, f.Workspace.ID, p.OperationID+"#2")
 	ok(t, err)
 	if c.Status != "pending" {
 		t.Fatalf("receipt %s", c.Status)
@@ -518,17 +503,39 @@ func TestOrdinalsAndOperationsAreUnique(t *testing.T) {
 	other.Tool = "get_contacts"
 	_, err := f.Store.StartChildRead(ctx, other)
 	is(t, err, postgres.ErrOperationReused)
-	if code(sql(t, f, `INSERT INTO receipts (workspace_id, operation_id, parent_id, ordinal, token_id, tool, scope,
-		connection_id, connection_generation, arguments, request_id, lease_token, lease_expires_at)
-		VALUES ($1, 'another-op', $2, 1, 'anonymous', 't', 'crm:read', $3, 1, '{}', 'null', gen_random_uuid(),
-		now() + interval '1 minute')`, f.Workspace.ID, p.ID, f.Connection.ID)) != "23505" {
+	if code(sql(t, f, `INSERT INTO receipts (workspace_id, operation_id, parent_id, ordinal, principal_id, token_id,
+		tool, scope, connection_id, connection_generation, arguments, request_id, lease_token, lease_expires_at)
+		VALUES ($1, 'another-op', $2, 1, $4, $5, 't', 'crm:read', $3, 1, '{}', 'null', gen_random_uuid(),
+		now() + interval '1 minute')`, f.Workspace.ID, p.ID, f.Connection.ID, p.PrincipalID, p.TokenID)) != "23505" {
 		t.Fatal("two children share (parent, ordinal)")
 	}
+	// An operation ID belongs to its workspace: another workspace's is
+	// another receipt, and hands over nothing.
 	otherWorkspace, err := f.Store.EnsureWorkspace(ctx, "other", "demo", "Other")
 	ok(t, err)
-	_, err = f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: otherWorkspace.ID, OperationID: "unique",
-		TokenID: "anonymous", Tool: "brief", Arguments: json.RawMessage(`{}`), Lease: time.Minute})
-	is(t, err, postgres.ErrOperationReused)
+	theirs, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: otherWorkspace.ID,
+		OperationID: "unique", TokenID: "anonymous", Tool: "brief", Arguments: json.RawMessage(`{}`),
+		Lease: time.Minute})
+	ok(t, err)
+	if theirs.ID == p.ID || theirs.LeaseToken == p.LeaseToken || theirs.Replay {
+		t.Fatalf("another workspace's start under the operation: %+v", theirs)
+	}
+	if _, err := f.Store.ReceiptByOperation(ctx, otherWorkspace.ID, "unique-never"); !errors.Is(err, postgres.ErrNotFound) {
+		t.Fatal(err)
+	}
+	mine, err := f.Store.ReceiptByOperation(ctx, f.Workspace.ID, "unique")
+	ok(t, err)
+	if mine.ID != p.ID || mine.LeaseToken != "" {
+		t.Fatalf("by operation: %+v", mine)
+	}
+	// Only the start's replay gives back the lease.
+	again := parent(t, f, "unique", time.Minute)
+	if again.ID != p.ID || again.LeaseToken != p.LeaseToken || !again.Replay {
+		t.Fatalf("the replay: %+v", again)
+	}
+	if read, err := f.Store.Receipt(ctx, f.Workspace.ID, p.ID); err != nil || read.LeaseToken != "" {
+		t.Fatalf("an owner read handed out the lease: %v", err)
+	}
 }
 
 func TestParentsAndChildren(t *testing.T) {
@@ -617,15 +624,15 @@ func TestCardSealMustNameItsBytes(t *testing.T) {
 		Status: "ok", HTTPStatus: 200, Rows: []string{"briefs/forged/" + strings.Repeat("0", 64)}})
 	ok(t, err)
 	err = sql(t, f, `INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count)
-		VALUES ($1, 'acc-003', 'forged', 'go', 3, '3', $3, sha256($3), $4, $2, 0, 0)`,
+		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
+		VALUES ($1, 'acc-003', 'forged', 'go', 3, '3', $3, sha256($3), $4, $2, 0, 0, 0)`,
 		f.Workspace.ID, seal.ID, []byte(`{"units":[],"gaps":[]}`), pub.ParentReceiptID)
 	if code(err) != "GT009" {
 		t.Fatalf("a card was stored under a seal for other bytes: %v", err)
 	}
 	if code(sql(t, f, `INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count)
-		VALUES ($1, 'acc-003', 'x', 'go', 3, '3', 'x', sha256('y'), $3, $2, 0, 0)`,
+		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
+		VALUES ($1, 'acc-003', 'x', 'go', 3, '3', 'x', sha256('y'), $3, $2, 0, 0, 0)`,
 		f.Workspace.ID, seal.ID, pub.ParentReceiptID)) != "23514" {
 		t.Fatal("a card's digest need not match its bytes")
 	}

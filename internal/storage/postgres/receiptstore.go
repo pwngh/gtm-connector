@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -96,13 +97,9 @@ func (rs *ReceiptStore) Finish(ctx context.Context, t receipts.Ticket, o receipt
 	r, err := rs.Store.FinishReceipt(ctx, ReceiptFinish{ReceiptID: t.AuditID, LeaseToken: lease, Status: o.Status,
 		HTTPStatus: o.HTTPStatus, Rows: o.Rows, ElapsedMS: o.ElapsedMS, Error: code})
 	if errors.Is(err, ErrSourceRead) {
-		// A source read binds its rows: an ok finish binds none, through FinishRead.
+		// A source read finishes ok only through FinishRead, which binds its rows.
 		if o.Status == "ok" {
-			if len(o.Rows) > 0 {
-				return receipts.Receipt{}, fmt.Errorf("%w: a read's rows are the versions FinishRead binds",
-					receipts.ErrInvalid)
-			}
-			return rs.FinishRead(ctx, t, nil, o.ElapsedMS)
+			return receipts.Receipt{}, fmt.Errorf("%w: %w", receipts.ErrInvalid, err)
 		}
 		r, err = rs.Store.FailRead(ctx, t.AuditID, lease, o.HTTPStatus, code, o.ElapsedMS)
 	}
@@ -135,21 +132,20 @@ func (rs *ReceiptStore) Publish(ctx context.Context, p receipts.Publication) (re
 		return receipts.Card{}, receipts.ErrNotFound
 	}
 	units := make([]Unit, len(p.Units))
-	bound := map[string]map[[2]string]string{} // by read: (reference, version) to the record version's ID
+	var cited []string
+	for _, u := range p.Units {
+		if validUUID(u.ReceiptID) {
+			cited = append(cited, u.ReceiptID)
+		}
+	}
+	bound, err := rs.Store.versionIDs(ctx, p.WorkspaceID, cited)
+	if err != nil {
+		return receipts.Card{}, err
+	}
 	for i, u := range p.Units {
 		units[i] = Unit{N: u.N, Kind: u.Kind, RecordRef: u.RecordRef, Tool: u.Tool, Shown: u.Shown,
-			ReceiptID: u.ReceiptID, Body: append(json.RawMessage(nil), u.Value...)}
-		if !validUUID(u.ReceiptID) {
-			continue // PublishCard refuses it
-		}
-		if _, read := bound[u.ReceiptID]; !read {
-			versions, err := rs.Store.boundVersions(ctx, p.WorkspaceID, u.ReceiptID)
-			if err != nil {
-				return receipts.Card{}, err
-			}
-			bound[u.ReceiptID] = versions
-		}
-		units[i].SourceRecordID = bound[u.ReceiptID][[2]string{u.RecordRef, u.ContentVersion}]
+			ReceiptID: u.ReceiptID, Body: append(json.RawMessage(nil), u.Value...),
+			SourceRecordID: bound[[3]string{u.ReceiptID, u.RecordRef, u.ContentVersion}]}
 	}
 	gaps := make([]Gap, len(p.Gaps))
 	for i, g := range p.Gaps {
@@ -167,6 +163,9 @@ func (rs *ReceiptStore) Publish(ctx context.Context, p receipts.Publication) (re
 	if p.RulesVersion != "" {
 		rules = &p.RulesVersion
 	}
+	if p.Kind != "card" && p.Kind != "selected_brief" {
+		return receipts.Card{}, fmt.Errorf("%w: a publication is a card or a selected_brief", receipts.ErrInvalid)
+	}
 	card, err := rs.Store.PublishCard(ctx, CardPublication{WorkspaceID: p.WorkspaceID, AccountRef: p.AccountRef,
 		BriefID: p.BriefID, ParentReceiptID: p.Seal.AuditID, PrincipalID: p.PrincipalID,
 		SealReceiptID: p.Seal.AuditID, SealLeaseToken: ticketLease(p.Seal), Kind: "go",
@@ -175,25 +174,70 @@ func (rs *ReceiptStore) Publish(ctx context.Context, p receipts.Publication) (re
 	if err != nil {
 		return receipts.Card{}, receiptError(err)
 	}
-	seal, err := rs.Store.Receipt(ctx, p.WorkspaceID, p.Seal.AuditID)
+	return rs.committed(ctx, card)
+}
+
+// committed is a published card as the store holds it: its bytes, its seal,
+// and its projections as written, whatever a retry sent.
+func (rs *ReceiptStore) committed(ctx context.Context, card Card) (receipts.Card, error) {
+	seal, err := rs.Store.Receipt(ctx, card.WorkspaceID, card.SealReceiptID)
 	if err != nil {
 		return receipts.Card{}, receiptError(err)
 	}
-	seal.LeaseToken = ""
 	sealed, err := converted(seal, nil)
 	if err != nil {
 		return receipts.Card{}, err
 	}
-	out := receipts.Card{WorkspaceID: card.WorkspaceID, AccountRef: card.AccountRef, BriefID: card.BriefID,
-		Kind: p.Kind, Bytes: append([]byte(nil), card.Bytes...), SHA256: hex.EncodeToString(card.SHA256),
-		Seal: sealed, Units: make([]receipts.UnitRow, len(p.Units)), Gaps: make([]receipts.GapRow, len(p.Gaps))}
-	for i, u := range p.Units {
-		u.Value = append([]byte(nil), u.Value...)
-		out.Units[i] = u
+	kind := "card"
+	payload, err := receipts.ParsePayload(card.Bytes)
+	if err != nil {
+		return receipts.Card{}, err
 	}
-	for i, g := range p.Gaps {
-		g.ByRole = append([]byte(nil), g.ByRole...)
-		out.Gaps[i] = g
+	if payload.Prepared {
+		kind = "selected_brief"
+	}
+	out := receipts.Card{WorkspaceID: card.WorkspaceID, AccountRef: card.AccountRef, BriefID: card.BriefID,
+		Kind: kind, Bytes: append([]byte(nil), card.Bytes...), SHA256: hex.EncodeToString(card.SHA256), Seal: sealed}
+	rows, err := rs.Store.pool.Query(ctx, `
+		SELECT u.n, u.kind, u.record_ref, u.tool, coalesce(u.shown, ''), coalesce(u.receipt_id::text, ''),
+		       coalesce(v.content_version, '')
+		  FROM evidence_units u LEFT JOIN source_records v ON v.id = u.source_record_id
+		 WHERE u.workspace_id = $1 AND u.card_id = $2 ORDER BY u.n`, card.WorkspaceID, card.ID)
+	if err != nil {
+		return receipts.Card{}, err
+	}
+	out.Units, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (receipts.UnitRow, error) {
+		var u receipts.UnitRow
+		err := row.Scan(&u.N, &u.Kind, &u.RecordRef, &u.Tool, &u.Shown, &u.ReceiptID, &u.ContentVersion)
+		return u, err
+	})
+	if err != nil {
+		return receipts.Card{}, err
+	}
+	// A unit's value is its element of the sealed bytes, which its row equals.
+	for i := range out.Units {
+		if i >= len(payload.Units) {
+			return receipts.Card{}, fmt.Errorf("card %s holds more units than its bytes", card.ID)
+		}
+		value, err := strictjson.Dumps(payload.Units[i], strictjson.Prepared)
+		if err != nil {
+			return receipts.Card{}, err
+		}
+		out.Units[i].Value = []byte(value)
+	}
+	stored, err := gaps(ctx, rs.Store.pool, card.WorkspaceID, card.ID)
+	if err != nil {
+		return receipts.Card{}, err
+	}
+	for _, g := range stored {
+		row := receipts.GapRow{Code: g.Code, Disposition: g.Disposition, Text: g.Text}
+		if g.Count != nil {
+			row.Count = big.NewInt(int64(*g.Count))
+		}
+		if len(g.ByRole) > 0 {
+			row.ByRole = []byte(g.ByRole)
+		}
+		out.Gaps = append(out.Gaps, row)
 	}
 	return out, nil
 }
@@ -213,27 +257,53 @@ func (rs *ReceiptStore) Read(ctx context.Context, workspaceID string, auditIDs [
 	return out, nil
 }
 
-func (rs *ReceiptStore) ByOperation(ctx context.Context, operationID string) (receipts.Receipt, error) {
-	return converted(rs.Store.ReceiptByOperation(ctx, operationID))
-}
-
-// boundVersions gives the record versions a read bound, by reference and
-// content version.
-func (s *Store) boundVersions(ctx context.Context, workspaceID, receiptID string) (map[[2]string]string, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT v.source || '/' || v.record_table || '/' || v.record_id, v.content_version, v.id::text
-		  FROM receipt_records b JOIN source_records v ON v.id = b.source_record_id
-		 WHERE b.workspace_id = $1 AND b.receipt_id = $2`, workspaceID, receiptID)
+func (rs *ReceiptStore) Records(ctx context.Context, workspaceID, auditID string) ([]receipts.RecordVersion, error) {
+	if _, err := rs.Store.Receipt(ctx, workspaceID, auditID); err != nil {
+		return nil, receiptError(err)
+	}
+	bound, err := rs.Store.ReceiptRecords(ctx, workspaceID, auditID)
 	if err != nil {
 		return nil, err
 	}
-	versions := map[[2]string]string{}
-	var ref, version, id string
-	_, err = pgx.ForEachRow(rows, []any{&ref, &version, &id}, func() error {
-		versions[[2]string{ref, version}] = id
+	out := make([]receipts.RecordVersion, len(bound))
+	for i, v := range bound {
+		out[i] = receipts.RecordVersion{Source: v.Source, Table: v.Table, RecordID: v.RecordID,
+			ContentVersion: v.ContentVersion, Body: v.Body}
+	}
+	return out, nil
+}
+
+func (rs *ReceiptStore) ByOperation(ctx context.Context, workspaceID, operationID string) (receipts.Receipt, error) {
+	return converted(rs.Store.ReceiptByOperation(ctx, workspaceID, operationID))
+}
+
+// versionIDs gives the record version IDs these reads bound, by read,
+// reference and content version.
+func (s *Store) versionIDs(ctx context.Context, workspaceID string, reads []string) (map[[3]string]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT b.receipt_id::text, v.source || '/' || v.record_table || '/' || v.record_id, v.content_version, v.id::text
+		  FROM receipt_records b JOIN source_records v ON v.id = b.source_record_id
+		 WHERE b.workspace_id = $1 AND b.receipt_id = ANY($2::uuid[])`, workspaceID, reads)
+	if err != nil {
+		return nil, err
+	}
+	ids := map[[3]string]string{}
+	var read, ref, version, id string
+	_, err = pgx.ForEachRow(rows, []any{&read, &ref, &version, &id}, func() error {
+		ids[[3]string{read, ref, version}] = id
 		return nil
 	})
-	return versions, err
+	return ids, err
+}
+
+// AuditValue is the receipt as the audit log's readers return it, as a card
+// embeds it.
+func (r Receipt) AuditValue() (*strictjson.Object, error) {
+	converted, err := converted(r, nil)
+	if err != nil {
+		return nil, err
+	}
+	return converted.Value(), nil
 }
 
 func ticketLease(t receipts.Ticket) string {
@@ -273,7 +343,7 @@ func converted(r Receipt, err error) (receipts.Receipt, error) {
 		Arguments: arguments, RequestID: requestID, Status: r.Status, HTTPStatus: r.HTTPStatus,
 		Rows: append([]string{}, r.Rows...), ElapsedMS: r.ElapsedMS, Error: r.Error, WorkspaceID: r.WorkspaceID,
 		OperationID: r.OperationID, PrincipalID: r.PrincipalID, Scope: r.Scope, AccountRef: r.RequestedAccount,
-		ConnectionID: r.ConnectionID, Generation: r.ConnectionGeneration, Lease: r.LeaseToken}
+		ConnectionID: r.ConnectionID, Generation: r.ConnectionGeneration, Lease: r.LeaseToken, Replay: r.Replay}
 	if r.BriefID != "" {
 		brief := r.BriefID
 		out.BriefID = &brief
@@ -298,9 +368,11 @@ func receiptError(err error) error {
 		{ErrPendingChild, receipts.ErrInvalid},
 		{ErrWrongSource, receipts.ErrInvalid},
 		{ErrNotSourceRead, receipts.ErrInvalid},
-		{ErrProvenance, receipts.ErrInvalid},
-		{ErrProjection, receipts.ErrInvalid},
+		{ErrProvenance, receipts.ErrProvenance},
+		{ErrProjection, receipts.ErrProjection},
 		{ErrSealMismatch, receipts.ErrInvalid},
+		{ErrInvalidArguments, receipts.ErrInvalid},
+		{ErrRecordRows, receipts.ErrInvalid},
 	} {
 		if errors.Is(err, pair.ours) {
 			return fmt.Errorf("%w: %w", pair.theirs, err)

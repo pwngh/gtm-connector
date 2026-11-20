@@ -2,14 +2,20 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/pwngh/gtm-connector/internal/authz"
 	"github.com/pwngh/gtm-connector/internal/cards"
@@ -20,27 +26,76 @@ import (
 
 const demoPassword = "demo-password-0123456789-abcdefghijklmn"
 
-// setUpDemo is a migrated database with the demo workspace and the demo
-// principal, as setup leaves it.
-func setUpDemo(t *testing.T) (*postgres.Store, postgres.Workspace) {
+// demoDatabase is a migrated database with the demo workspace and the demo
+// principal, as setup leaves it, and an app role made as setup makes it.
+type demoDatabase struct {
+	owner     *postgres.Store
+	ownerURL  string
+	appURL    string
+	workspace postgres.Workspace
+}
+
+func setUpDemo(t *testing.T) *demoDatabase {
 	t.Helper()
-	store, err := postgres.Open(ctx, pgtest.URL(t))
-	if err != nil {
+	d := &demoDatabase{ownerURL: pgtest.URL(t)}
+	var err error
+	if d.owner, err = postgres.Open(ctx, d.ownerURL); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(store.Close)
-	if err := store.Migrate(ctx); err != nil {
+	t.Cleanup(d.owner.Close)
+	if err := d.owner.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace")
-	if err != nil {
+	if d.workspace, err = d.owner.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace"); err != nil {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte(demoPassword))
-	if _, err := store.EnsureDemoPrincipal(ctx, workspace, demoLogin, "Demo reviewer", digest[:]); err != nil {
+	if _, err := d.owner.EnsureDemoPrincipal(ctx, d.workspace, demoLogin, "Demo reviewer", digest[:]); err != nil {
 		t.Fatal(err)
 	}
-	return store, workspace
+	suffix := make([]byte, 6)
+	rand.Read(suffix)
+	role := "gtm_app_" + hex.EncodeToString(suffix)
+	if err := d.owner.EnsureAppRole(ctx, role, "app-password-for-this-test"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		conn, err := pgx.Connect(context.Background(), d.ownerURL)
+		if err != nil {
+			return
+		}
+		defer conn.Close(context.Background())
+		conn.Exec(context.Background(), "DROP OWNED BY "+role)
+		conn.Exec(context.Background(), "DROP ROLE "+role)
+	})
+	parsed, err := url.Parse(d.ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.User = url.UserPassword(role, "app-password-for-this-test")
+	d.appURL = parsed.String()
+	return d
+}
+
+// demo runs the command as a person does, with GTM_DATABASE_URL naming databaseURL.
+func (d *demoDatabase) demo(t *testing.T, databaseURL string, args ...string) error {
+	t.Helper()
+	t.Setenv("GTM_DATABASE_URL", databaseURL)
+	return demoCommand(ctx, args)
+}
+
+func (d *demoDatabase) count(t *testing.T, query string, args ...any) int {
+	t.Helper()
+	conn, err := pgx.Connect(ctx, d.ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	var n int
+	if err := conn.QueryRow(ctx, query, args...).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
 
 // signedIn is a browser signed in to the server as the demo principal.
@@ -115,17 +170,15 @@ func (b *signedIn) json(reply *http.Response, out any) {
 }
 
 func TestDemoPublishesTheBookForTheDemoSignIn(t *testing.T) {
-	store, workspace := setUpDemo(t)
-	var out bytes.Buffer
-	made, err := makeDemoCards(ctx, store, demoLogin, &out)
-	if err != nil {
+	d := setUpDemo(t)
+	if err := d.demo(t, d.appURL); err != nil {
 		t.Fatal(err)
 	}
-	if made != 30 || strings.Count(out.String(), "\n") != 30 || !strings.Contains(out.String(), "acc-003  brief-") {
-		t.Fatalf("made %d:\n%s", made, out.String())
+	if n := d.count(t, "SELECT count(*) FROM cards WHERE kind = 'go'"); n != 30 {
+		t.Fatalf("%d cards", n)
 	}
 
-	b := signInToDemo(t, store)
+	b := signInToDemo(t, d.owner)
 	var accounts struct {
 		Accounts []struct{ Account, Name string } `json:"accounts"`
 	}
@@ -163,17 +216,92 @@ func TestDemoPublishesTheBookForTheDemoSignIn(t *testing.T) {
 	// The bytes the browser gets are the sealed card, which verifies against the stored receipts.
 	payload := b.get("/api/v1/cards/" + listed.Cards[0].ID + "/bytes")
 	admitted, err := cards.VerifyCard(ctx, payload, listed.Cards[0].BriefID,
-		cards.StoreLog{Store: &postgres.ReceiptStore{Store: store}, WorkspaceID: workspace.ID}, demoSources)
+		cards.StoreLog{Store: &postgres.ReceiptStore{Store: d.owner}, WorkspaceID: d.workspace.ID}, demoSources)
 	if err != nil || admitted.AccountID != "acc-003" || !strings.Contains(string(payload), "Thornfield Wren LLP") {
 		t.Fatalf("the served card: %v", err)
 	}
 
-	// Each run adds a new card per account.
-	if _, err := makeDemoCards(ctx, store, demoLogin, io.Discard); err != nil {
+	// Running it again publishes nothing; --again publishes a new card per account.
+	if err := d.demo(t, d.appURL); err != nil || d.count(t, "SELECT count(*) FROM cards") != 30 {
+		t.Fatalf("a second run: %v", err)
+	}
+	if err := d.demo(t, d.appURL, "--again"); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(b.get("/api/v1/accounts/acc-003/cards"), &listed); err != nil || len(listed.Cards) != 2 {
-		t.Fatalf("after a second run: %+v %v", listed, err)
+		t.Fatalf("after --again: %+v %v", listed, err)
+	}
+}
+
+// A grant someone revoked stays revoked through every run, and its account
+// gets no card; a live grant keeps the time it was granted.
+func TestDemoKeepsAGrantDecision(t *testing.T) {
+	d := setUpDemo(t)
+	principal, err := d.owner.DemoPrincipal(ctx, demoLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range []string{"acc-001", "acc-003"} {
+		if err := d.owner.EnsureAccount(ctx, d.workspace.ID, account, "Invented account"); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.owner.GrantAccount(ctx, d.workspace.ID, principal.ID, account); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.owner.RevokeAccountGrant(ctx, d.workspace.ID, principal.ID, "acc-003"); err != nil {
+		t.Fatal(err)
+	}
+	granted := func() string {
+		conn, err := pgx.Connect(ctx, d.ownerURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close(ctx)
+		var at string
+		if err := conn.QueryRow(ctx, `SELECT granted_at::text FROM account_grants WHERE account_ref = 'acc-001'`).
+			Scan(&at); err != nil {
+			t.Fatal(err)
+		}
+		return at
+	}
+	before := granted()
+	for _, args := range [][]string{nil, {"--again"}} {
+		if err := d.demo(t, d.appURL, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d.count(t, "SELECT count(*) FROM cards WHERE account_ref = 'acc-003'") != 0 ||
+		d.count(t, "SELECT count(*) FROM account_grants WHERE account_ref = 'acc-003' AND revoked_at IS NULL") != 0 ||
+		d.count(t, "SELECT count(*) FROM cards WHERE account_ref = 'acc-001'") != 2 || granted() != before {
+		t.Fatal("a run changed a grant decision")
+	}
+	// GrantAccount itself renews only a revoked grant.
+	if err := d.owner.GrantAccount(ctx, d.workspace.ID, principal.ID, "acc-001"); err != nil || granted() != before {
+		t.Fatalf("a live grant was granted again: %v", err)
+	}
+}
+
+// demo runs as the app role, on a database setup has migrated and no
+// restore has left half done, as serve does.
+func TestDemoRunsOnlyAsTheAppRole(t *testing.T) {
+	d := setUpDemo(t)
+	if err := d.demo(t, d.ownerURL); err == nil || !strings.Contains(err.Error(), "app role") {
+		t.Fatalf("demo as the owner: %v", err)
+	}
+	conn, err := pgx.Connect(ctx, d.ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	if _, err := conn.Exec(ctx, "INSERT INTO restores (archive_sha256) VALUES ($1)", strings.Repeat("a", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.demo(t, d.appURL); err == nil || !strings.Contains(err.Error(), "restore") {
+		t.Fatalf("demo during a restore: %v", err)
+	}
+	if d.count(t, "SELECT count(*) FROM cards") != 0 {
+		t.Fatal("a refused run published")
 	}
 }
 
@@ -186,8 +314,19 @@ func TestDemoNeedsSetupAndADemoWorkspace(t *testing.T) {
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := makeDemoCards(ctx, store, demoLogin, io.Discard); err == nil || !strings.Contains(err.Error(), "setup") {
+	if _, err := makeDemoCards(ctx, store, demoLogin, false, io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "setup") {
 		t.Fatalf("without the demo principal: %v", err)
+	}
+	// A disabled demo principal is named as such: setup does not enable it.
+	d := setUpDemo(t)
+	if _, err := conn(t, d.ownerURL).Exec(ctx, "UPDATE principals SET disabled_at = now() WHERE login = $1",
+		demoLogin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := makeDemoCards(ctx, d.owner, demoLogin, false, io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("a disabled demo principal: %v", err)
 	}
 	// The demo book never goes into a workspace that holds real sources.
 	other, err := postgres.Open(ctx, pgtest.URL(t))
@@ -201,7 +340,17 @@ func TestDemoNeedsSetupAndADemoWorkspace(t *testing.T) {
 	if _, err := other.EnsureWorkspace(ctx, "demo", "live", "A live workspace"); err != nil {
 		t.Fatal(err)
 	}
-	if made, err := makeDemoCards(ctx, other, demoLogin, io.Discard); err == nil || made != 0 {
-		t.Fatalf("the demo book went into a live workspace: %d %v", made, err)
+	if run, err := makeDemoCards(ctx, other, demoLogin, false, io.Discard); err == nil || run.Published != 0 {
+		t.Fatalf("the demo book went into a live workspace: %+v %v", run, err)
 	}
+}
+
+func conn(t *testing.T, url string) *pgx.Conn {
+	t.Helper()
+	c, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close(context.Background()) })
+	return c
 }

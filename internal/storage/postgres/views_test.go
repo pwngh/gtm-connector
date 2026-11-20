@@ -1,7 +1,9 @@
 package postgres_test
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/postgrestest"
@@ -34,4 +36,42 @@ func TestViewAccountsListsLiveGrants(t *testing.T) {
 	ok(t, sql(t, f, "UPDATE principals SET disabled_at = now() WHERE id = $1", f.Reader.ID))
 	_, err = f.Store.ViewAccounts(ctx, reader)
 	is(t, err, postgres.ErrNotPermitted)
+}
+
+// Listing the accounts holds a revocation of a listed grant off until the
+// list is read.
+func TestViewAccountsHoldsOffARevocation(t *testing.T) {
+	f := postgrestest.New(t)
+	paused, release := make(chan struct{}), make(chan struct{})
+	postgres.SetCrash(f.Store, func(at string) error {
+		if at == "view:accounts" {
+			close(paused)
+			<-release
+		}
+		return nil
+	})
+	defer postgres.SetCrash(f.Store, nil)
+	listed := make(chan error, 1)
+	go func() {
+		_, err := f.Store.ViewAccounts(context.Background(),
+			postgres.Viewer{WorkspaceID: f.Workspace.ID, PrincipalID: f.Reader.ID})
+		listed <- err
+	}()
+	<-paused
+	other, err := postgres.Open(ctx, f.URL)
+	ok(t, err)
+	defer other.Close()
+	revoked := make(chan error, 1)
+	go func() {
+		revoked <- other.RevokeAccountGrant(context.Background(), f.Workspace.ID, f.Reader.ID, postgrestest.Account)
+	}()
+	select {
+	case err := <-revoked:
+		close(release)
+		t.Fatalf("the revocation committed while the list was read: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	ok(t, <-listed)
+	ok(t, <-revoked)
 }

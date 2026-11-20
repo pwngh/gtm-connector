@@ -285,6 +285,25 @@ def _prepared_as_of(writer: Writer, folder: Path) -> None:
         _folder(writer, "prepared_as_of", state, ("selected-briefs",))
 
 
+def _prepared_no_slack(writer: Writer, folder: Path) -> None:
+    """A brief prepared for an account selected without Slack, under a grant that includes slack:read: no Slack
+    read is made, and the card says Slack was not requested."""
+    state, scopes = folder / "prepared-no-slack", ["crm:read", "calls:read", "slack:read"]
+    selection = _selection(folder / "no-slack-selection.json", [{"account_id": "acc-003", "slack": False}])
+    with freeze.scope("folders/prepared_no_slack"), Runtime(state, selection=selection) as runtime, \
+            LocalClient(runtime.config) as owner:
+        token = owner.authorize(scopes)
+        response = owner.call(token, "prepare_renewal_brief", {"account_id": "acc-003"})
+        result = response.json()["result"]
+        if response.status_code != 200 or result.get("isError"):
+            raise AssertionError(f"the prepared brief was refused: {response.status_code} {response.text[:500]}")
+        writer.json("folders/prepared_no_slack/tool_result.json", {
+            "note": "the prepare_renewal_brief result as the assistant received it", "selection": json.loads(
+                (folder / "no-slack-selection.json").read_text()), "scopes": scopes,
+            "arguments": {"account_id": "acc-003"}, "result": result["structuredContent"]}, 1)
+        _folder(writer, "prepared_no_slack", state, ("selected-briefs",))
+
+
 def generate(writer: Writer) -> None:
     with tempfile.TemporaryDirectory(prefix="oracle-") as name:
         folder = Path(name)
@@ -293,6 +312,7 @@ def generate(writer: Writer) -> None:
         _cli_card(writer, folder)
         _prepared(writer, folder)
         _prepared_as_of(writer, folder)
+        _prepared_no_slack(writer, folder)
         shutil.rmtree(folder / "state", ignore_errors=True)
     writer.json("commands/index.json", {
         "note": ("commands run in order against one demo state folder; IDs, ports, token fingerprints, receipt "

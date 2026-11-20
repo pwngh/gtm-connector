@@ -178,7 +178,8 @@ func (s *Store) ViewAccountCards(ctx context.Context, v Viewer, accountRef strin
 	return cards, err
 }
 
-// AccountView is an account a principal holds a live grant on.
+// AccountView is an account a principal holds a live grant on. Its display
+// name comes from a source and is shown only after neutralizing.
 type AccountView struct {
 	Ref, DisplayName string
 }
@@ -201,11 +202,14 @@ func (s *Store) ViewAccounts(ctx context.Context, v Viewer) ([]AccountView, erro
 		if err != nil {
 			return err
 		}
+		// The share lock on each listed grant holds a revocation off until
+		// the list is read, as the other views hold the one grant they need.
 		rows, err := tx.Query(ctx, `
 			SELECT a.ref, a.display_name FROM account_grants g
 			  JOIN accounts a ON a.workspace_id = g.workspace_id AND a.ref = g.account_ref
 			 WHERE g.workspace_id = $1 AND g.principal_id = $2 AND g.revoked_at IS NULL
-			 ORDER BY a.ref`, v.WorkspaceID, v.PrincipalID)
+			 ORDER BY a.ref
+			   FOR SHARE OF g`, v.WorkspaceID, v.PrincipalID)
 		if err != nil {
 			return err
 		}
@@ -214,7 +218,10 @@ func (s *Store) ViewAccounts(ctx context.Context, v Viewer) ([]AccountView, erro
 			err := row.Scan(&a.Ref, &a.DisplayName)
 			return a, err
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		return s.at("view:accounts")
 	})
 	return accounts, err
 }

@@ -23,7 +23,7 @@ func fixed() *Memory {
 		n++
 		return fmt.Sprintf("00000000-0000-4000-8000-%012x", n)
 	})
-	m.SetGeneration("crm", 1)
+	m.SetGeneration(workspace, "crm", 1)
 	return m
 }
 

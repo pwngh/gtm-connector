@@ -2,7 +2,7 @@
 #
 #   make dev                  PostgreSQL in Compose, the connector on this machine
 #   make up                   everything in Compose
-#   make demo                 publish a card for each demo account
+#   make demo                 publish a card for each demo account that holds none
 #   make down                 stop; the database and credentials are kept
 #   make backup               back up the database and the credentials folder
 #   make restore BACKUP=NAME  restore a backup into an empty database
@@ -78,7 +78,7 @@ up: require-compose state ## Build and start PostgreSQL and the connector in Com
 	@scripts/colima-forward.sh ensure $(GTM_DB_PORT) $(GTM_PORT)
 	@echo "Open https://127.0.0.1:$(GTM_PORT)/ (local certificate in $(GTM_HOME)/credentials/tls.pem)"
 
-demo: db build/gtm-connector ## Publish a card for each demo account, for the demo sign-in to read
+demo: db build/gtm-connector ## Publish a card for each demo account that holds none, for the demo sign-in
 	scripts/host.sh setup
 	scripts/host.sh demo
 

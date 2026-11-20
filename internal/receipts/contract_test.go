@@ -10,26 +10,21 @@ import (
 func TestMemoryKeepsTheContract(t *testing.T) {
 	receiptstest.Run(t, func(t *testing.T) *receiptstest.Fixture {
 		m := receipts.NewMemory(nil, nil)
-		const workspace, principal, account, connection = "ws-1", "p1", "acc-001", "crm"
+		const workspace, principal, account = "ws-1", "p1", "acc-001"
 		generation := int64(1)
-		m.SetGeneration(connection, generation)
+		m.SetGeneration(workspace, "crm", generation)
+		m.SetGeneration("ws-2", "crm-other", 1)
 		return &receiptstest.Fixture{Store: m, Workspace: workspace, Other: "ws-2", Principal: principal,
-			Account: account, Connection: connection,
+			Stranger: "p2", Account: account, OtherAccount: "acc-002", Connection: "crm",
+			OtherConnection: "crm-other",
 			Bump: func(*testing.T) {
 				generation++
-				m.SetGeneration(connection, generation)
+				m.SetGeneration(workspace, "crm", generation)
 			},
-			Grant: func(*testing.T) { m.Grant(workspace, principal, account) },
-			Records: func(t *testing.T, auditID string) []receipts.RecordVersion {
-				bound, err := m.Records(workspace, auditID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return bound
-			},
+			Grant:     func(*testing.T) { m.Grant(workspace, principal, account) },
 			Committed: func(*testing.T) int { return len(m.All()) },
 			Published: func(_ *testing.T, briefID string) bool {
-				_, found := m.Published(briefID)
+				_, found := m.Published(workspace, briefID)
 				return found
 			},
 		}

@@ -115,7 +115,7 @@ func TestRestoreRefusesEditedArchives(t *testing.T) {
 	f, archive := backedUp(t)
 	for name, change := range map[string]func(map[string][]byte){
 		"a seal pointed at a pending receipt": func(files map[string][]byte) {
-			pending, err := f.Store.ReceiptByOperation(ctx, "never-finished")
+			pending, err := f.Store.ReceiptByOperation(ctx, f.Workspace.ID, "never-finished")
 			if err != nil {
 				t.Fatal(err)
 			}

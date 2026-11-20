@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -149,8 +151,9 @@ func TestChildReadsNeedACompositeParent(t *testing.T) {
 func cliCard(t *testing.T, f *postgrestest.Fixture, brief string) (postgres.CardPublication, postgres.Receipt) {
 	t.Helper()
 	token := postgres.TokenID("cli bearer")
+	record := postgrestest.Record("accounts", "acc-003", "id", "acc-003", "v", brief)
 	r := cliRead(t, f, brief+"-read", brief, token)
-	_, err := f.Store.FinishRead(ctx, r.ID, r.LeaseToken, records(brief), 1)
+	r, err := f.Store.FinishRead(ctx, r.ID, r.LeaseToken, []postgres.RecordVersion{record}, 1)
 	ok(t, err)
 	versions, err := f.Store.ReceiptRecordIDs(ctx, f.Workspace.ID, r.ID)
 	ok(t, err)
@@ -164,10 +167,36 @@ func cliCard(t *testing.T, f *postgrestest.Fixture, brief string) (postgres.Card
 		ReceiptID: r.ID, SourceRecordID: versions["crm/accounts/acc-003"],
 		Body: postgrestest.UnitBody(1, "record", "crm/accounts/acc-003", "get_account", "", nil)}}
 	gaps := []postgres.Gap{{Code: "neutralized", Disposition: "note", Text: "none"}}
-	return postgres.CardPublication{WorkspaceID: f.Workspace.ID, AccountRef: postgrestest.Account, BriefID: brief,
+	pub := postgres.CardPublication{WorkspaceID: f.Workspace.ID, AccountRef: postgrestest.Account, BriefID: brief,
 		ParentReceiptID: seal.ID, PrincipalID: f.Reader.ID, SealReceiptID: seal.ID, SealLeaseToken: seal.LeaseToken,
-		Kind: "go", SchemaVersion: 3, RulesVersion: &rules, Bytes: postgrestest.CardBytes(brief, units, gaps),
-		Units: units, Gaps: gaps, ReadReceiptIDs: []string{r.ID}}, seal
+		Kind: "go", SchemaVersion: 3, RulesVersion: &rules, Units: units, Gaps: gaps}
+	embed(t, f, &pub, seal, []postgres.RecordVersion{record}, r)
+	return pub, seal
+}
+
+// embed makes the card rest on exactly these reads, embedded as stored.
+func embed(t *testing.T, f *postgrestest.Fixture, pub *postgres.CardPublication, seal postgres.Receipt,
+	records []postgres.RecordVersion, reads ...postgres.Receipt) {
+	t.Helper()
+	pub.ReadReceiptIDs = nil
+	stored := make([]postgres.Receipt, len(reads))
+	for i, r := range reads {
+		var err error
+		stored[i], err = f.Store.Receipt(ctx, f.Workspace.ID, r.ID)
+		ok(t, err)
+		pub.ReadReceiptIDs = append(pub.ReadReceiptIDs, r.ID)
+	}
+	pub.Bytes = postgrestest.CardBytes(t, seal, pub.AccountRef, pub.BriefID, stored, records, pub.Units, pub.Gaps)
+}
+
+// finishedRead is a CLI read of brief under token that bound one record.
+func finishedRead(t *testing.T, f *postgrestest.Fixture, operation, brief, token string) postgres.Receipt {
+	t.Helper()
+	r := cliRead(t, f, operation, brief, token)
+	r, err := f.Store.FinishRead(ctx, r.ID, r.LeaseToken, []postgres.RecordVersion{
+		postgrestest.Record("accounts", "acc-003", "id", "acc-003", "v", operation)}, 1)
+	ok(t, err)
+	return r
 }
 
 func TestACLISealWithoutABriefIDPublishes(t *testing.T) {
@@ -180,46 +209,71 @@ func TestACLISealWithoutABriefIDPublishes(t *testing.T) {
 	denied := cliRead(t, f, "brief-cli-denied", "brief-cli", postgres.TokenID("cli bearer"))
 	_, err := f.Store.FailRead(ctx, denied.ID, denied.LeaseToken, 403, "request_failed", 1)
 	ok(t, err)
-	pub.ReadReceiptIDs = append(pub.ReadReceiptIDs, denied.ID)
+	read, err := f.Store.Receipt(ctx, f.Workspace.ID, pub.ReadReceiptIDs[0])
+	ok(t, err)
+	embed(t, f, &pub, seal, []postgres.RecordVersion{postgrestest.Record("accounts", "acc-003", "id", "acc-003",
+		"v", "brief-cli")}, read, denied)
 	card, err := f.Store.PublishCard(ctx, pub)
 	ok(t, err)
 	sealed, err := f.Store.Receipt(ctx, f.Workspace.ID, seal.ID)
 	ok(t, err)
-	if card.ParentReceiptID != seal.ID || sealed.Status != "ok" || sealed.BriefID != "" {
+	if card.ParentReceiptID != seal.ID || sealed.Status != "ok" || sealed.BriefID != "" ||
+		count(t, f, "SELECT count(*) FROM card_reads WHERE card_id = $1", card.ID) != 2 {
 		t.Fatalf("card %+v, seal %+v", card, sealed)
 	}
 }
 
 func TestACLICardRestsOnlyOnItsOwnBriefsReads(t *testing.T) {
 	f := postgrestest.New(t)
-	for name, change := range map[string]func(t *testing.T, pub *postgres.CardPublication){
-		"a read of another brief": func(t *testing.T, pub *postgres.CardPublication) {
-			other := cliRead(t, f, pub.BriefID+"-other", "brief-other", postgres.TokenID("cli bearer"))
-			_, err := f.Store.FinishRead(ctx, other.ID, other.LeaseToken, records(pub.BriefID+"-other"), 1)
-			ok(t, err)
-			pub.ReadReceiptIDs = append(pub.ReadReceiptIDs, other.ID)
-		},
-		"a read under another token": func(t *testing.T, pub *postgres.CardPublication) {
-			other := cliRead(t, f, pub.BriefID+"-token", pub.BriefID, postgres.TokenID("another bearer"))
-			_, err := f.Store.FinishRead(ctx, other.ID, other.LeaseToken, records(pub.BriefID+"-token"), 1)
-			ok(t, err)
-			pub.ReadReceiptIDs = append(pub.ReadReceiptIDs, other.ID)
-		},
-		"a pending read": func(t *testing.T, pub *postgres.CardPublication) {
-			pending := cliRead(t, f, pub.BriefID+"-pending", pub.BriefID, postgres.TokenID("cli bearer"))
-			pub.ReadReceiptIDs = append(pub.ReadReceiptIDs, pending.ID)
-		},
-		"a unit on a failed read": func(t *testing.T, pub *postgres.CardPublication) {
+	other, err := f.Store.CreatePrincipal(ctx, f.Workspace, "person", "Another reader")
+	ok(t, err)
+	record := func(brief string) []postgres.RecordVersion {
+		return []postgres.RecordVersion{postgrestest.Record("accounts", "acc-003", "id", "acc-003", "v", brief)}
+	}
+	for i, c := range []struct {
+		name   string
+		change func(t *testing.T, pub *postgres.CardPublication, seal postgres.Receipt)
+	}{
+		{"a read of another brief", func(t *testing.T, pub *postgres.CardPublication, seal postgres.Receipt) {
+			read, _ := f.Store.Receipt(ctx, f.Workspace.ID, pub.ReadReceiptIDs[0])
+			embed(t, f, pub, seal, record(pub.BriefID), read,
+				finishedRead(t, f, pub.BriefID+"-other", "brief-other", postgres.TokenID("cli bearer")))
+		}},
+		{"a read under another token", func(t *testing.T, pub *postgres.CardPublication, seal postgres.Receipt) {
+			read, _ := f.Store.Receipt(ctx, f.Workspace.ID, pub.ReadReceiptIDs[0])
+			embed(t, f, pub, seal, record(pub.BriefID), read,
+				finishedRead(t, f, pub.BriefID+"-token", pub.BriefID, postgres.TokenID("another bearer")))
+		}},
+		{"a read by another principal under the same token",
+			func(t *testing.T, pub *postgres.CardPublication, seal postgres.Receipt) {
+				r, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
+					OperationID: pub.BriefID + "-principal", PrincipalID: other.ID, TokenID: postgres.TokenID("cli bearer"),
+					Tool: "get_account", Scope: "crm:read", AccountRef: postgrestest.Account,
+					ConnectionID: f.Connection.ID, Arguments: json.RawMessage(`{"account_id":"acc-003"}`),
+					RequestID: json.RawMessage(`2`), BriefID: pub.BriefID, Lease: time.Minute})
+				ok(t, err)
+				r, err = f.Store.FinishRead(ctx, r.ID, r.LeaseToken, record(pub.BriefID+"-p"), 1)
+				ok(t, err)
+				read, _ := f.Store.Receipt(ctx, f.Workspace.ID, pub.ReadReceiptIDs[0])
+				embed(t, f, pub, seal, record(pub.BriefID), read, r)
+			}},
+		{"a pending read", func(t *testing.T, pub *postgres.CardPublication, seal postgres.Receipt) {
+			read, _ := f.Store.Receipt(ctx, f.Workspace.ID, pub.ReadReceiptIDs[0])
+			embed(t, f, pub, seal, record(pub.BriefID), read,
+				cliRead(t, f, pub.BriefID+"-pending", pub.BriefID, postgres.TokenID("cli bearer")))
+		}},
+		{"a unit on a failed read", func(t *testing.T, pub *postgres.CardPublication, seal postgres.Receipt) {
 			failed := cliRead(t, f, pub.BriefID+"-failed", pub.BriefID, postgres.TokenID("cli bearer"))
 			_, err := f.Store.FailRead(ctx, failed.ID, failed.LeaseToken, 403, "request_failed", 1)
 			ok(t, err)
+			read, _ := f.Store.Receipt(ctx, f.Workspace.ID, pub.ReadReceiptIDs[0])
 			pub.Units[0].ReceiptID = failed.ID
-		},
+			embed(t, f, pub, seal, record(pub.BriefID), read, failed)
+		}},
 	} {
-		t.Run(name, func(t *testing.T) {
-			pub, seal := cliCard(t, f, "brief-"+map[string]string{"a read of another brief": "a",
-				"a read under another token": "b", "a pending read": "c", "a unit on a failed read": "d"}[name])
-			change(t, &pub)
+		t.Run(c.name, func(t *testing.T) {
+			pub, seal := cliCard(t, f, fmt.Sprintf("brief-%d", i))
+			c.change(t, &pub, seal)
 			_, err := f.Store.PublishCard(ctx, pub)
 			is(t, err, postgres.ErrProvenance)
 			sealed, err := f.Store.Receipt(ctx, f.Workspace.ID, seal.ID)
@@ -229,38 +283,31 @@ func TestACLICardRestsOnlyOnItsOwnBriefsReads(t *testing.T) {
 			}
 		})
 	}
-	// The trigger holds a top-level read of another brief off a card too.
-	pub, seal := cliCard(t, f, "brief-e")
-	other := cliRead(t, f, "brief-e-other", "brief-other", postgres.TokenID("cli bearer"))
-	_, err := f.Store.FinishRead(ctx, other.ID, other.LeaseToken, records("brief-e-other"), 1)
-	ok(t, err)
-	_, err = f.Store.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: seal.ID, LeaseToken: seal.LeaseToken,
-		Status: "ok", HTTPStatus: 200, Rows: []string{"briefs/brief-e/" + sha(pub.Bytes)}})
-	ok(t, err)
-	if code(sql(t, f, `WITH c AS (
-			INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version, card_bytes,
-				card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count)
-			VALUES ($1, 'acc-003', 'brief-e', 'cli', 3, '3', $2, sha256($2), $3, $3, 1, 1) RETURNING id),
-		u AS (INSERT INTO evidence_units (workspace_id, card_id, n, kind, record_ref, tool, receipt_id, body)
-			SELECT $1, id, 1, 'record', 'crm/accounts/acc-003', 'get_account', $4, $5 FROM c)
-		INSERT INTO gaps (workspace_id, card_id, ordinal, code, disposition, text)
-			SELECT $1, id, 0, 'neutralized', 'note', 'none' FROM c`,
-		f.Workspace.ID, pub.Bytes, seal.ID, other.ID, pub.Units[0].Body)) != "GT009" {
-		t.Fatal("the database stored a card on another brief's read")
-	}
 }
 
 func TestASealNamingAnotherBriefIsRefused(t *testing.T) {
 	f := postgrestest.New(t)
 	pub, _ := cliCard(t, f, "brief-named")
-	seal, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
-		OperationID: "named-seal", PrincipalID: f.Reader.ID, TokenID: postgres.TokenID("cli bearer"),
-		Tool: "save_brief", AccountRef: postgrestest.Account, BriefID: "brief-another",
-		Arguments: json.RawMessage(`{}`), Lease: time.Minute})
-	ok(t, err)
-	pub.SealReceiptID, pub.SealLeaseToken, pub.ParentReceiptID = seal.ID, seal.LeaseToken, seal.ID
-	_, err = f.Store.PublishCard(ctx, pub)
-	is(t, err, postgres.ErrSealMismatch)
+	for name, start := range map[string]postgres.ReceiptStart{
+		"a brief_id": {OperationID: "named-seal", Tool: "save_brief", BriefID: "brief-named",
+			Arguments: json.RawMessage(`{"account_id":"acc-003","brief_id":"brief-named"}`)},
+		"another brief in its arguments": {OperationID: "argued-seal", Tool: "save_brief",
+			Arguments: json.RawMessage(`{"account_id":"acc-003","brief_id":"brief-another"}`)},
+		"another tool": {OperationID: "tool-seal", Tool: "save_brief_later",
+			Arguments: json.RawMessage(`{"account_id":"acc-003","brief_id":"brief-named"}`)},
+		"a request ID": {OperationID: "request-seal", Tool: "save_brief", RequestID: json.RawMessage(`3`),
+			Arguments: json.RawMessage(`{"account_id":"acc-003","brief_id":"brief-named"}`)},
+	} {
+		start.WorkspaceID, start.PrincipalID, start.TokenID = f.Workspace.ID, f.Reader.ID, postgres.TokenID("cli bearer")
+		start.AccountRef, start.Lease = postgrestest.Account, time.Minute
+		seal, err := f.Store.StartReceipt(ctx, start)
+		ok(t, err)
+		pub.SealReceiptID, pub.SealLeaseToken, pub.ParentReceiptID = seal.ID, seal.LeaseToken, seal.ID
+		_, err = f.Store.PublishCard(ctx, pub)
+		if !errors.Is(err, postgres.ErrSealMismatch) {
+			t.Errorf("a seal with %s: %v", name, err)
+		}
+	}
 }
 
 func TestArgumentsKeepTheirOrder(t *testing.T) {

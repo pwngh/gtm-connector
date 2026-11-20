@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -25,13 +27,18 @@ import (
 //
 // PostgreSQL gives every receipt its ID (gen_random_uuid) and its start time (clock_timestamp) when it
 // commits, and takes neither from a caller, so the frozen generator's receipt IDs and times cannot be
-// reproduced. Before a card is compared with the oracle exactly those are put back: in the card, each read
-// receipt's audit_id and started_at under evidence.receipts, sealed_by, and the text's "Sources read" line,
-// which states the first and last start time of the ok reads (checked first to be what the stored times
-// give); in the seal, its audit_id, its started_at, and the digest its row names, which is the digest of
-// the card being compared. Everything else is compared as stored: every other byte of the card, its SHA-256
-// after that replacement, and every other column of the seal. The stored bytes themselves must re-verify
-// against the stored receipts.
+// reproduced. Before a card is compared with the oracle, those values, and nothing else, are put back,
+// each at its own field's byte span: in the card, every embedded read's audit_id and started_at (and, in a
+// prepared brief, its request_id's parent_audit_id), sealed_by or prepared_by's outer_audit_id, and within
+// text only its "Sources read" line, which states the first and last start time of the ok reads; in the
+// seal, its audit_id, its started_at, and the digest its row names, which is the digest of the card being
+// compared. First, every value put back is checked against the receipts table, read with SQL apart from
+// the store's own code: each embedded read and the seal are the rows' audit-log JSON, the reads started in
+// list order and the seal after them, and the "Sources read" line is what the stored times give. The text
+// is also built again from the stored card's evidence with the oracle's times put in, and must be the
+// oracle's text byte for byte. Everything else is compared as stored: every other byte of the card, its
+// SHA-256 after the replacement, every other column of the seal, and the unit and gap rows, type for type,
+// against the oracle's units and gaps, each unit's read and record version against the verifier's binding.
 
 func TestCardsOnPostgres(t *testing.T) {
 	demoStoreFamilies(t, newPostgresCards)
@@ -84,7 +91,7 @@ func (c *postgresCards) maker(t *testing.T, sc *scope, s setup, row fixtureRow, 
 		t.Fatal(err)
 	}
 	b.Principal.WorkspaceID = c.workspace
-	// Operation IDs are unique in the database; the oracle's are per scope.
+	// Operation IDs are unique in a workspace; the oracle's are per scope.
 	digest := sha256.Sum256([]byte(s.scope))
 	b.OperationID = "parity-" + hex.EncodeToString(digest[:16])
 	return &Maker{Receipts: c.receipts, Source: s.source, Sources: s.sources, Connections: c.connections,
@@ -93,96 +100,227 @@ func (c *postgresCards) maker(t *testing.T, sc *scope, s setup, row fixtureRow, 
 
 func (c *postgresCards) published(t *testing.T, sealed *Sealed, s setup, row fixtureRow,
 	mismatches *oracletest.Mismatches) ([]byte, string, receipts.Receipt) {
-	ctx, conn := context.Background(), c.conn
-	var stored, digest []byte
-	var kind string
-	var units, gaps, unbound int
-	err := conn.QueryRow(ctx, `
-		SELECT card_bytes, card_sha256, kind,
-		       (SELECT count(*) FROM evidence_units u WHERE u.card_id = c.id),
-		       (SELECT count(*) FROM gaps g WHERE g.card_id = c.id),
-		       (SELECT count(*) FROM evidence_units u WHERE u.card_id = c.id
-		           AND (u.receipt_id IS NULL OR u.source_record_id IS NULL))
-		  FROM cards c WHERE workspace_id = $1 AND brief_id = $2`, c.workspace, sealed.BriefID).
-		Scan(&stored, &digest, &kind, &units, &gaps, &unbound)
+	stored, problems := c.check(t, sealed, s.sources, []byte(row.Card), false)
+	for _, problem := range problems {
+		mismatches.Add("%s: %s", row.Key, problem)
+	}
+	value, err := strictjson.Loads(row.Seal)
 	if err != nil {
-		t.Fatalf("%s: the published card: %v", row.Key, err)
+		t.Fatal(err)
 	}
-	sum := sha256.Sum256(stored)
-	if !bytes.Equal(stored, sealed.Payload) || !bytes.Equal(digest, sum[:]) || hex.EncodeToString(sum[:]) != sealed.SHA256 ||
-		sealed.Seal.Rows[0] != receipts.Reference(sealed.BriefID, stored) {
-		mismatches.Add("%s: the stored bytes, their digest and the seal disagree", row.Key)
+	oracleSeal, err := receipts.Decode(value)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if kind != "go" || units != len(sealed.Units) || gaps != len(sealed.Gaps) || unbound != 0 {
-		mismatches.Add("%s: %s card with %d units (%d unbound) and %d gaps projected, want %d and %d", row.Key,
-			kind, units, unbound, gaps, len(sealed.Units), len(sealed.Gaps))
-	}
-	if !projectionsMatch(t, conn, c.workspace, sealed.BriefID, row.Card) {
-		mismatches.Add("%s: the projected units or gaps differ from the oracle's", row.Key)
-	}
-	log := StoreLog{Store: c.receipts, WorkspaceID: c.workspace}
-	if _, err := VerifyCard(ctx, stored, sealed.BriefID, log, s.sources); err != nil {
-		mismatches.Add("%s: the stored card does not verify: %v", row.Key, err)
-	}
-	normalised, seal, err := normalise(stored, sealed.BriefID, sealed.Seal, row)
+	normalised, err := normalise(stored, []byte(row.Card), false)
 	if err != nil {
 		mismatches.Add("%s: %v", row.Key, err)
 		return stored, sealed.SHA256, sealed.Seal
 	}
-	sum = sha256.Sum256(normalised)
+	seal := sealed.Seal
+	seal.AuditID, seal.StartedAt = oracleSeal.AuditID, oracleSeal.StartedAt
+	seal.Rows = []string{receipts.Reference(sealed.BriefID, normalised)}
+	sum := sha256.Sum256(normalised)
 	return normalised, hex.EncodeToString(sum[:]), seal
 }
 
-// projectionsMatch is whether the unit and gap rows hold, as values, the oracle card's units and gaps.
-func projectionsMatch(t *testing.T, conn *pgx.Conn, workspace, briefID, card string) bool {
+// check reads what PostgreSQL holds for a card the maker published, and gives the stored bytes and every
+// way they or their rows differ from what the maker sealed, the receipts table, the verifier and want.
+func (c *postgresCards) check(t *testing.T, sealed *Sealed, sources evidence.Sources, want []byte,
+	prepared bool) ([]byte, []string) {
+	t.Helper()
 	ctx := context.Background()
-	want, err := strictjson.Loads([]byte(card))
+	var problems []string
+	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
+	var stored, digest []byte
+	var kind, card, parent, seal string
+	err := c.conn.QueryRow(ctx, `SELECT card_bytes, card_sha256, kind, id::text, parent_receipt_id::text,
+		seal_receipt_id::text FROM cards WHERE workspace_id = $1 AND brief_id = $2`, c.workspace, sealed.BriefID).
+		Scan(&stored, &digest, &kind, &card, &parent, &seal)
+	if err != nil {
+		t.Fatalf("the published card: %v", err)
+	}
+	sum := sha256.Sum256(stored)
+	if !bytes.Equal(stored, sealed.Payload) || !bytes.Equal(digest, sum[:]) || hex.EncodeToString(sum[:]) != sealed.SHA256 ||
+		sealed.Seal.Rows[0] != receipts.Reference(sealed.BriefID, stored) || kind != "go" || parent != seal ||
+		seal != sealed.Seal.AuditID {
+		add("the stored card, its digest and its seal disagree")
+	}
+	// The embedded reads and the seal are the receipts table's rows, in order of their start.
+	payload, err := receipts.ParsePayload(stored)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantUnits, _ := want.(*strictjson.Object).Get("units")
-	wantGaps, _ := want.(*strictjson.Object).Get("gaps")
-	rows, err := conn.Query(ctx, `SELECT u.body::text FROM evidence_units u JOIN cards c ON c.id = u.card_id
-		WHERE c.workspace_id = $1 AND c.brief_id = $2 ORDER BY u.n`, workspace, briefID)
+	var last time.Time
+	for i, embedded := range payload.Receipts {
+		row, started := rawReceipt(t, c.conn, payload.ReadIDs[i])
+		if !sameJSON(row, embedded) {
+			add("read %d is embedded other than its row", i+1)
+		}
+		if !started.After(last) {
+			add("read %d did not start after the read before it", i+1)
+		}
+		last = started
+	}
+	// A card's seal starts after its reads; a prepared brief's call starts before them.
+	row, started := rawReceipt(t, c.conn, seal)
+	if !sameJSON(row, sealed.Seal.Value()) {
+		got, _ := strictjson.Dumps(sealed.Seal.Value(), strictjson.Quoted)
+		add("the seal %s is not its row %v", got, row)
+	}
+	if first, _ := time.Parse(time.RFC3339Nano, get(payload.Receipts[0], "started_at").(string)); prepared &&
+		!started.Before(first) || !prepared && !started.After(last) {
+		add("the seal started out of order with the reads")
+	}
+	if got := countRows(t, c.conn, `SELECT count(*) FROM card_reads WHERE card_id = $1`, card); got != len(payload.ReadIDs) {
+		add("%d reads recorded, the card embeds %d", got, len(payload.ReadIDs))
+	}
+	// The text, built again from the stored evidence with the oracle's times put in, is the oracle's.
+	wantPayload, err := receipts.ParsePayload(want)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bodies, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if text, ok := textAt(t, stored, wantPayload); !ok || text != get(load(t, want).(*strictjson.Object), "text") {
+		add("the text, built again under the oracle's times, is not the oracle's")
+	}
+	// The unit and gap rows, type for type, are the oracle's units and gaps; each unit binds the read and
+	// version the verifier resolves.
+	log := StoreLog{Store: c.receipts, WorkspaceID: c.workspace}
+	var admitted *Admitted
+	if prepared {
+		admitted, err = VerifyPrepared(ctx, stored, sealed.BriefID, log, sources)
+	} else {
+		admitted, err = VerifyCard(ctx, stored, sealed.BriefID, log, sources)
+	}
+	if err != nil {
+		add("the stored card does not verify: %v", err)
+		return stored, problems
+	}
+	rows, err := c.conn.Query(ctx, `SELECT u.body::text, u.receipt_id::text, v.content_version,
+		v.source || '/' || v.record_table || '/' || v.record_id
+		  FROM evidence_units u JOIN source_records v ON v.id = u.source_record_id
+		 WHERE u.card_id = $1 ORDER BY u.n`, card)
 	if err != nil {
 		t.Fatal(err)
 	}
-	units := make([]any, len(bodies))
-	for i, body := range bodies {
-		if units[i], err = strictjson.Loads([]byte(body)); err != nil {
-			t.Fatal(err)
+	var n int
+	var body, receipt, version, ref string
+	_, err = pgx.ForEachRow(rows, []any{&body, &receipt, &version, &ref}, func() error {
+		n++
+		if n > len(wantPayload.Units) || n > len(admitted.Units) || !sameJSON(load(t, []byte(body)), wantPayload.Units[n-1]) {
+			add("unit %d's row is not the oracle's unit", n)
+			return nil
+		}
+		b := admitted.Units[n-1]
+		if receipt != b.ReceiptID || version != b.Record.ContentVersion || ref != b.Record.Source+"/"+b.Record.Table+
+			"/"+b.Record.RecordID {
+			add("unit %d binds %s %s, the verifier %s %s", n, receipt, version, b.ReceiptID, b.Record.ContentVersion)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(wantPayload.Units) {
+		add("%d unit rows for %d units", n, len(wantPayload.Units))
+	}
+	rows, err = c.conn.Query(ctx, `SELECT json_build_object('code', code, 'disposition', disposition,
+		'count', count, 'by_role', by_role, 'text', text)::text FROM gaps WHERE card_id = $1 ORDER BY ordinal`, card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gaps, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gaps) != len(wantPayload.Gaps) {
+		add("%d gap rows for %d gaps", len(gaps), len(wantPayload.Gaps))
+	}
+	for i := range min(len(gaps), len(wantPayload.Gaps)) {
+		if !sameJSON(load(t, []byte(gaps[i])), wantPayload.Gaps[i]) {
+			add("gap %d's row is not the oracle's gap", i+1)
 		}
 	}
-	rows, err = conn.Query(ctx, `
-		SELECT json_build_object('code', g.code, 'disposition', g.disposition, 'count', g.count,
-		       'by_role', g.by_role, 'text', g.text)::text
-		  FROM gaps g JOIN cards c ON c.id = g.card_id
-		 WHERE c.workspace_id = $1 AND c.brief_id = $2 ORDER BY g.ordinal`, workspace, briefID)
-	if err != nil {
+	return stored, problems
+}
+
+// sameJSON compares two JSON values type for type, as strictjson writes them.
+func sameJSON(a, b any) bool {
+	x, errA := strictjson.Dumps(a, strictjson.Prepared)
+	y, errB := strictjson.Dumps(b, strictjson.Prepared)
+	return errA == nil && errB == nil && x == y
+}
+
+func countRows(t *testing.T, conn *pgx.Conn, query string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := conn.QueryRow(context.Background(), query, args...).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	texts, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
+	return n
+}
+
+// rawReceipt is a receipt's audit-log JSON built from its row with SQL and this test's own code, apart from
+// the store's, and its start time.
+func rawReceipt(t *testing.T, conn *pgx.Conn, id string) (*strictjson.Object, time.Time) {
+	t.Helper()
+	var started time.Time
+	var token, tool, arguments, requestID, status, rows string
+	var brief, errorCode *string
+	var httpStatus *int
+	var rowCount int
+	var elapsed *float64
+	if err := conn.QueryRow(context.Background(), `SELECT started_at, token_id, tool, arguments::text,
+		request_id::text, brief_id, status, http_status, row_count, rows::text, elapsed_ms, error
+		FROM receipts WHERE id = $1`, id).Scan(&started, &token, &tool, &arguments, &requestID, &brief, &status,
+		&httpStatus, &rowCount, &rows, &elapsed, &errorCode); err != nil {
 		t.Fatal(err)
 	}
-	gaps := make([]any, len(texts))
-	for i, text := range texts {
-		if gaps[i], err = strictjson.Loads([]byte(text)); err != nil {
-			t.Fatal(err)
+	optional := func(p any) any {
+		switch v := p.(type) {
+		case *string:
+			if v != nil {
+				return *v
+			}
+		case *int:
+			if v != nil {
+				return *v
+			}
+		case *float64:
+			if v != nil {
+				return *v
+			}
 		}
+		return nil
 	}
-	return evidence.Equal(units, wantUnits) && evidence.Equal(gaps, wantGaps)
+	return strictjson.NewObject("audit_id", id, "started_at", receipts.StartedAtText(started), "token_id", token,
+		"tool", tool, "arguments", load(t, []byte(arguments)), "request_id", load(t, []byte(requestID)),
+		"brief_id", optional(brief), "status", status, "http_status", optional(httpStatus), "row_count", rowCount,
+		"rows", load(t, []byte(rows)), "elapsed_ms", optional(elapsed), "error", optional(errorCode)), started
+}
+
+// textAt builds a card's text again from its stored evidence with want's read times put in.
+func textAt(t *testing.T, stored []byte, want *receipts.Payload) (string, bool) {
+	t.Helper()
+	value := load(t, stored).(*strictjson.Object)
+	snapshot, _ := value.Get("evidence")
+	list, _ := snapshot.(*strictjson.Object).Get("receipts")
+	reads := list.([]any)
+	if len(reads) != len(want.Receipts) {
+		return "", false
+	}
+	for i, r := range reads {
+		at, _ := want.Receipts[i].Get("started_at")
+		r.(*strictjson.Object).Set("started_at", at)
+	}
+	_, text, _, err := evidence.Build(snapshot.(*strictjson.Object))
+	return text, err == nil
 }
 
 // sourcesRead is the text's line on when the ok reads started, as evidence.Build writes it.
-func sourcesRead(reads []any) string {
+func sourcesRead(reads []*strictjson.Object) string {
 	var first, last time.Time
-	for _, value := range reads {
-		r := value.(*strictjson.Object)
+	for _, r := range reads {
 		at, err := time.Parse(time.RFC3339Nano, get(r, "started_at").(string))
 		if err != nil || get(r, "status") != "ok" {
 			continue
@@ -201,67 +339,260 @@ func sourcesRead(reads []any) string {
 	return "Sources read " + from + " to " + to + "."
 }
 
-// normalise puts the oracle's receipt IDs and start times into a card and its seal, as the comment at the
-// top of this file says, and nothing else.
-func normalise(stored []byte, briefID string, seal receipts.Receipt, row fixtureRow) ([]byte, receipts.Receipt, error) {
-	reads := func(card []byte) ([]any, string, error) {
-		value, err := strictjson.Loads(card)
-		if err != nil {
-			return nil, "", err
+// spans maps each scalar value of a JSON document to the byte span it is written at, by its path: object
+// keys and array indexes joined with ".".
+func spans(data []byte) (map[string][2]int, error) {
+	found := map[string][2]int{}
+	i := 0
+	blank := func() {
+		for i < len(data) && strings.IndexByte(" \t\r\n", data[i]) >= 0 {
+			i++
 		}
-		snapshot, _ := get(value.(*strictjson.Object), "evidence").(*strictjson.Object)
-		list, _ := get(snapshot, "receipts").([]any)
-		sealedBy, _ := get(value.(*strictjson.Object), "sealed_by").(string)
-		return list, sealedBy, nil
 	}
-	got, gotSeal, err := reads(stored)
-	if err != nil {
-		return nil, seal, err
+	quoted := func() (string, error) {
+		start := i
+		for i++; i < len(data) && data[i] != '"'; i++ {
+			if data[i] == '\\' {
+				i++
+			}
+		}
+		if i >= len(data) {
+			return "", errors.New("an unterminated string")
+		}
+		i++
+		var s string
+		return s, json.Unmarshal(data[start:i], &s)
 	}
-	want, wantSeal, err := reads([]byte(row.Card))
-	if err != nil {
-		return nil, seal, err
+	join := func(path, key string) string {
+		if path == "" {
+			return key
+		}
+		return path + "." + key
 	}
-	const startedAt = `"started_at": "`
-	text := string(stored)
-	if len(got) != len(want) || strings.Count(text, startedAt) != len(got) ||
-		strings.Count(row.Card, startedAt) != len(want) || gotSeal != seal.AuditID {
-		return nil, seal, fmt.Errorf("the card holds %d read receipts, the oracle's %d", len(got), len(want))
+	var value func(path string) error
+	value = func(path string) error {
+		blank()
+		if i >= len(data) {
+			return errors.New("the document ends early")
+		}
+		switch data[i] {
+		case '{', '[':
+			closing, index := byte('}'), 0
+			if data[i] == '[' {
+				closing = ']'
+			}
+			i++
+			blank()
+			if i < len(data) && data[i] == closing {
+				i++
+				return nil
+			}
+			for {
+				key := fmt.Sprint(index)
+				if closing == '}' {
+					blank()
+					var err error
+					if key, err = quoted(); err != nil {
+						return err
+					}
+					blank()
+					if i >= len(data) || data[i] != ':' {
+						return errors.New("a key without its value")
+					}
+					i++
+				}
+				if err := value(join(path, key)); err != nil {
+					return err
+				}
+				index++
+				blank()
+				switch {
+				case i < len(data) && data[i] == ',':
+					i++
+				case i < len(data) && data[i] == closing:
+					i++
+					return nil
+				default:
+					return errors.New("a list or object without its end")
+				}
+			}
+		case '"':
+			start := i
+			if _, err := quoted(); err != nil {
+				return err
+			}
+			found[path] = [2]int{start, i}
+		default:
+			start := i
+			for i < len(data) && strings.IndexByte(",]} \t\r\n", data[i]) < 0 {
+				i++
+			}
+			found[path] = [2]int{start, i}
+		}
+		return nil
 	}
-	gotLine, wantLine := sourcesRead(got), sourcesRead(want)
-	if strings.Count(text, gotLine) != 1 || strings.Count(row.Card, wantLine) != 1 {
-		return nil, seal, fmt.Errorf("the text does not state %q once", gotLine)
-	}
-	ids := []string{`"` + gotSeal + `"`, `"` + wantSeal + `"`, gotLine, wantLine}
-	var times []string
-	for i := range got {
-		g, w := got[i].(*strictjson.Object), want[i].(*strictjson.Object)
-		ids = append(ids, `"`+get(g, "audit_id").(string)+`"`, `"`+get(w, "audit_id").(string)+`"`)
-		times = append(times, get(w, "started_at").(string))
-	}
-	text = strings.NewReplacer(ids...).Replace(text)
-	// The i-th started_at is the i-th read receipt's.
-	var out strings.Builder
-	for _, at := range times {
-		before, after, _ := strings.Cut(text, startedAt)
-		end := strings.IndexByte(after, '"')
-		out.WriteString(before + startedAt + at)
-		text = after[end:]
-	}
-	out.WriteString(text)
-	normalised := []byte(out.String())
+	return found, value("")
+}
 
-	value, err := strictjson.Loads(row.Seal)
+// normalise puts want's receipt IDs and read times into stored, each at its own field's span, as the
+// comment at the top of this file says, and nothing else.
+func normalise(stored, want []byte, prepared bool) ([]byte, error) {
+	got, err := spans(stored)
 	if err != nil {
-		return nil, seal, err
+		return nil, err
 	}
-	oracleSeal, err := receipts.Decode(value)
+	oracle, err := spans(want)
 	if err != nil {
-		return nil, seal, err
+		return nil, err
 	}
-	seal.AuditID, seal.StartedAt = oracleSeal.AuditID, oracleSeal.StartedAt
-	seal.Rows = []string{receipts.Reference(briefID, normalised)}
-	return normalised, seal, nil
+	storedPayload, err := receipts.ParsePayload(stored)
+	if err != nil {
+		return nil, err
+	}
+	wantPayload, err := receipts.ParsePayload(want)
+	if err != nil {
+		return nil, err
+	}
+	if len(storedPayload.Receipts) != len(wantPayload.Receipts) {
+		return nil, fmt.Errorf("the card embeds %d reads, the oracle's %d", len(storedPayload.Receipts),
+			len(wantPayload.Receipts))
+	}
+	fields := []string{"sealed_by"}
+	if prepared {
+		fields = []string{"prepared_by.outer_audit_id"}
+	}
+	for i := range storedPayload.Receipts {
+		read := fmt.Sprintf("evidence.receipts.%d.", i)
+		fields = append(fields, read+"audit_id", read+"started_at")
+		if prepared {
+			fields = append(fields, read+"request_id.parent_audit_id")
+		}
+	}
+	type patch struct {
+		at   [2]int
+		with []byte
+	}
+	var patches []patch
+	for _, field := range fields {
+		at, found := got[field]
+		from, oracleFound := oracle[field]
+		if !found || !oracleFound {
+			return nil, fmt.Errorf("%s is missing", field)
+		}
+		patches = append(patches, patch{at, want[from[0]:from[1]]})
+	}
+	// Within text, only the "Sources read" line.
+	at, found := got["text"]
+	if !found {
+		return nil, errors.New("the card has no text")
+	}
+	line, oracleLine := sourcesRead(storedPayload.Receipts), sourcesRead(wantPayload.Receipts)
+	text := string(stored[at[0]:at[1]])
+	if strings.Count(text, line) != 1 || !bytes.Contains(want[oracle["text"][0]:oracle["text"][1]], []byte(oracleLine)) {
+		return nil, fmt.Errorf("the text does not state %q once", line)
+	}
+	patches = append(patches, patch{at, []byte(strings.Replace(text, line, oracleLine, 1))})
+	sort.Slice(patches, func(i, j int) bool { return patches[i].at[0] > patches[j].at[0] })
+	out := append([]byte(nil), stored...)
+	for _, p := range patches {
+		out = append(out[:p.at[0]], append(append([]byte(nil), p.with...), out[p.at[1]:]...)...)
+	}
+	return out, nil
+}
+
+// The folder cards on PostgreSQL: a card made by brief and three prepared briefs, the last for an account
+// selected without Slack. Each is compared with the oracle's file by bytes, and each receipt with the
+// oracle's audit row, with the IDs and times put back as above.
+func TestFolderCardsOnPostgres(t *testing.T) {
+	ctx := context.Background()
+	for _, fc := range folders {
+		t.Run(fc.name, func(t *testing.T) {
+			c := newPostgresCards(t).(*postgresCards)
+			if err := c.store.EnsureAccount(ctx, c.workspace, fc.account, "Invented account"); err != nil {
+				t.Fatal(err)
+			}
+			sc := newScope(map[string]string{"cli_card": "folders/cli_card/1", "prepared": "folders/prepared",
+				"prepared_as_of": "folders/prepared_as_of", "prepared_no_slack": "folders/prepared_no_slack"}[fc.name])
+			token := sc.token(accessToken + 1)
+			if fc.prepared {
+				sc.uuid() // the oracle's outer receipt drew the first ID
+			}
+			m := &Maker{Receipts: c.receipts, Source: demoBook(t), Sources: demoSources(nil),
+				Connections: c.connections, NewID: sc.uuid, Now: still}
+			principal := owner(token, "crm:read", "calls:read", "slack:read")
+			principal.WorkspaceID = c.workspace
+			var sealed *Sealed
+			var err error
+			switch fc.name {
+			case "cli_card":
+				sealed, err = m.Brief(ctx, Brief{Principal: principal, OperationID: "brief", AccountID: fc.account,
+					AsOf: DemoAsOf, IncludeSlack: true})
+			case "prepared":
+				principal.Scopes = []string{"crm:read", "calls:read"}
+				sealed, err = m.Prepare(ctx, prepareOf("", fc.account, true, strictjson.NewObject("account_id",
+					fc.account)).with(principal))
+			case "prepared_as_of":
+				sealed, err = m.Prepare(ctx, prepareOf("", fc.account, true, strictjson.NewObject("account_id",
+					fc.account, "as_of", "2027-01-20")).with(principal))
+			case "prepared_no_slack":
+				sealed, err = m.Prepare(ctx, prepareOf("", fc.account, false, strictjson.NewObject("account_id",
+					fc.account)).with(principal))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := openFolder(t, fc.name)
+			want := *f.payload(fc.brief)
+			stored, problems := c.check(t, sealed, demoSources(nil), want, fc.prepared)
+			for _, problem := range problems {
+				t.Error(problem)
+			}
+			normalised, err := normalise(stored, want, fc.prepared)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sealed.BriefID != fc.brief || !bytes.Equal(normalised, want) {
+				t.Fatalf("%s differs at %s", sealed.BriefID, oracletest.FirstDifference(string(normalised), string(want)))
+			}
+			// Each receipt is the oracle's row, but for its ID, its time and its parent's ID.
+			storedPayload, _ := receipts.ParsePayload(stored)
+			wantPayload, _ := receipts.ParsePayload(want)
+			pairs := map[string]string{storedPayload.SealID: wantPayload.SealID}
+			for i, id := range storedPayload.ReadIDs {
+				pairs[id] = wantPayload.ReadIDs[i]
+			}
+			if len(pairs) != len(f.Log) {
+				t.Fatalf("Go wrote %d receipts; the folder holds %d", len(pairs), len(f.Log))
+			}
+			for mine, theirs := range pairs {
+				row, _ := rawReceipt(t, c.conn, mine)
+				logged, err := f.Log.Receipts(ctx, []string{theirs})
+				if err != nil {
+					t.Fatal(err)
+				}
+				oracleRow := logged[0]
+				row.Set("audit_id", theirs)
+				at, _ := oracleRow.Get("started_at")
+				row.Set("started_at", at)
+				if request, isObject := get(row, "request_id").(*strictjson.Object); isObject {
+					request.Set("parent_audit_id", wantPayload.SealID)
+				}
+				if mine == storedPayload.SealID {
+					row.Set("rows", []any{receipts.Reference(fc.brief, normalised)})
+				}
+				if !sameJSON(row, oracleRow) {
+					got, _ := strictjson.Dumps(row, strictjson.Quoted)
+					t.Errorf("receipt %s:\n got %s\nwant %v", theirs, got, oracleRow)
+				}
+			}
+		})
+	}
+}
+
+// with makes a prepared brief's call under this principal.
+func (p Prepare) with(principal Principal) Prepare {
+	p.Principal = principal
+	return p
 }
 
 // e2e is a demo workspace on a fresh database whose reader holds a grant on acc-003, for the maker to read

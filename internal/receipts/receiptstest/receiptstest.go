@@ -1,4 +1,5 @@
 // Package receiptstest is the contract every receipts.Store keeps, written once and run against each store.
+// Each case changes one thing, so a store that skips one rule fails one case.
 package receiptstest
 
 import (
@@ -18,18 +19,19 @@ import (
 // Fixture is one empty store and what the contract needs around it.
 type Fixture struct {
 	Store receipts.Store
-	// Workspace holds Principal, Account and Connection, a CRM connection; Other is a second workspace.
-	Workspace, Other               string
-	Principal, Account, Connection string
+	// Workspace holds Principal, Stranger (a second principal), Account, OtherAccount and Connection, a CRM
+	// connection; Other is a second workspace, with OtherConnection, a CRM connection of its own.
+	Workspace, Other            string
+	Principal, Stranger         string
+	Account, OtherAccount       string
+	Connection, OtherConnection string
 	// Bump changes Connection's source: its generation goes up.
 	Bump func(t *testing.T)
-	// Grant gives Principal a grant on Account; it starts without one.
+	// Grant gives Principal a grant on Account; it starts without one, and Stranger never holds one.
 	Grant func(t *testing.T)
-	// Records gives the record versions a read bound, in order.
-	Records func(t *testing.T, auditID string) []receipts.RecordVersion
 	// Committed counts the receipts the store holds.
 	Committed func(t *testing.T) int
-	// Published is whether a card of this brief was written.
+	// Published is whether a card of this brief was written in Workspace.
 	Published func(t *testing.T, briefID string) bool
 }
 
@@ -41,13 +43,20 @@ func Run(t *testing.T, fresh func(t *testing.T) *Fixture) {
 	}{
 		{"PendingThenFinishedOnce", pendingThenFinishedOnce},
 		{"OperationRetry", operationRetry},
+		{"OperationsBelongToTheirWorkspace", operationsBelongToTheirWorkspace},
 		{"GenerationFence", generationFence},
+		{"ChildReadsAreFenced", childReadsAreFenced},
+		{"VersionConflicts", versionConflicts},
 		{"RacingFinishersOneWins", racingFinishersOneWins},
 		{"ChildReads", childReads},
 		{"DenialAndNotSelected", denialAndNotSelected},
+		{"OnlyReadsClaimRecordRows", onlyReadsClaimRecordRows},
 		{"StartRefusesBadReceipts", startRefusesBadReceipts},
 		{"ReceiptsAreDetached", receiptsAreDetached},
-		{"Publish", publish},
+		{"PublishACard", publishACard},
+		{"PublishAPreparedBrief", publishAPreparedBrief},
+		{"PublishRefusals", publishRefusals},
+		{"PublishRetries", publishRetries},
 	} {
 		t.Run(c.name, func(t *testing.T) { c.test(t, fresh(t)) })
 	}
@@ -62,10 +71,9 @@ var (
 // start commits a receipt for the fixture's account; a non-empty connection makes it a source read.
 func start(t *testing.T, f *Fixture, operation, tool string, id receipts.RequestID, connection string) receipts.Receipt {
 	t.Helper()
-	scope := "crm:read"
 	b := brief
 	r, err := f.Store.Start(ctx, receipts.Start{WorkspaceID: f.Workspace, OperationID: operation,
-		PrincipalID: f.Principal, TokenID: token, Tool: tool, Scope: scope, AccountRef: f.Account,
+		PrincipalID: f.Principal, TokenID: token, Tool: tool, Scope: "crm:read", AccountRef: f.Account,
 		ConnectionID: connection, Arguments: strictjson.NewObject("account_id", f.Account), RequestID: id, BriefID: &b})
 	if err != nil {
 		t.Fatal(err)
@@ -102,13 +110,17 @@ func is(t *testing.T, err, want error, what string) {
 	}
 }
 
+// must is the value of a call that cannot fail here; a failure panics, which fails the test with its stack.
+func must[T any](value T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return value
+}
+
 func readOne(t *testing.T, f *Fixture, id string) receipts.Receipt {
 	t.Helper()
-	read, err := f.Store.Read(ctx, f.Workspace, []string{id})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return read[0]
+	return must(f.Store.Read(ctx, f.Workspace, []string{id}))[0]
 }
 
 func pendingThenFinishedOnce(t *testing.T, f *Fixture) {
@@ -120,24 +132,35 @@ func pendingThenFinishedOnce(t *testing.T, f *Fixture) {
 		t.Fatalf("pending receipt:\n got %s\nwant %s", got, want)
 	}
 	if r.Generation != 1 || r.WorkspaceID != f.Workspace || r.PrincipalID != f.Principal || r.Lease == "" ||
-		r.ConnectionID != f.Connection || r.OperationID != "op-1" {
+		r.ConnectionID != f.Connection || r.OperationID != "op-1" || r.Replay {
 		t.Fatalf("start recorded %+v", r)
 	}
 	_, err := f.Store.Finish(ctx, receipts.Ticket{AuditID: r.AuditID, Lease: receipts.RandomID()}, receipts.Denied())
 	is(t, err, receipts.ErrLeaseLost, "a finish without the lease")
-	done, err := f.Store.FinishRead(ctx, r.Ticket(), []receipts.RecordVersion{version(f.Account, "{}")}, 0)
-	if err != nil || done.Status != "ok" || len(done.Rows) != 1 || done.Rows[0] != "crm/accounts/"+f.Account {
+	// Three versions, bound and claimed in the order given.
+	three := []receipts.RecordVersion{version(f.Account, "{}"),
+		{Source: "crm", Table: "contacts", RecordID: "con-2", Body: []byte(`{"c": 2}`)},
+		{Source: "crm", Table: "contacts", RecordID: "con-1", Body: []byte(`{"c": 1}`)}}
+	done, err := f.Store.FinishRead(ctx, r.Ticket(), three, 0)
+	if err != nil || done.Status != "ok" ||
+		strings.Join(done.Rows, " ") != "crm/accounts/"+f.Account+" crm/contacts/con-2 crm/contacts/con-1" {
 		t.Fatalf("finish: %+v %v", done, err)
 	}
 	// A retry after a lost acknowledgement returns the finished receipt.
-	again, err := f.Store.FinishRead(ctx, r.Ticket(), []receipts.RecordVersion{version(f.Account, "{}")}, 0)
+	again, err := f.Store.FinishRead(ctx, r.Ticket(), three, 0)
 	if err != nil || !again.Same(done) {
 		t.Fatalf("the identical retry: %+v %v", again, err)
 	}
-	for _, other := range [][]receipts.RecordVersion{{version(f.Account, `{"a": 1}`)}, {version("acc-002", "{}")}} {
+	for _, other := range [][]receipts.RecordVersion{{version(f.Account, `{"a": 1}`)}, {version("acc-002", "{}")},
+		{three[0], three[2], three[1]}} {
 		_, err := f.Store.FinishRead(ctx, r.Ticket(), other, 0)
 		is(t, err, receipts.ErrFinished, "a retry with other records")
 	}
+	// After the finish, only the lease holder hears back.
+	_, err = f.Store.FinishRead(ctx, receipts.Ticket{AuditID: r.AuditID, Lease: receipts.RandomID()}, three, 0)
+	is(t, err, receipts.ErrLeaseLost, "the identical retry without the lease")
+	_, err = f.Store.Finish(ctx, receipts.Ticket{AuditID: r.AuditID, Lease: receipts.RandomID()}, receipts.Denied())
+	is(t, err, receipts.ErrLeaseLost, "another outcome without the lease")
 	_, err = f.Store.Finish(ctx, r.Ticket(), receipts.Denied())
 	is(t, err, receipts.ErrFinished, "a second finish with another outcome")
 	_, err = f.Store.Finish(ctx, receipts.Ticket{AuditID: receipts.RandomID(), Lease: receipts.RandomID()},
@@ -151,27 +174,70 @@ func pendingThenFinishedOnce(t *testing.T, f *Fixture) {
 	}
 	_, err = f.Store.Read(ctx, f.Other, []string{r.AuditID})
 	is(t, err, receipts.ErrNotFound, "reading another workspace's receipt")
-	bound := f.Records(t, r.AuditID)
-	if len(bound) != 1 || bound[0].Version() != version(f.Account, "{}").Version() || string(bound[0].Body) != "{}" {
-		t.Fatalf("bound versions: %+v", bound)
+	bound := must(f.Store.Records(ctx, f.Workspace, r.AuditID))
+	if len(bound) != 3 {
+		t.Fatalf("bound %d versions", len(bound))
 	}
+	for i, v := range bound {
+		if v.Ref() != three[i].Ref() || v.Version() != three[i].Version() || string(v.Body) != string(three[i].Body) {
+			t.Fatalf("bound version %d: %+v", i, v)
+		}
+	}
+	_, err = f.Store.Records(ctx, f.Other, r.AuditID)
+	is(t, err, receipts.ErrNotFound, "another workspace's bindings")
 }
 
 func operationRetry(t *testing.T, f *Fixture) {
 	first := start(t, f, "op-1", "get_account", receipts.RPC(1), f.Connection)
 	again := start(t, f, "op-1", "get_account", receipts.RPC(1), f.Connection)
-	if again.AuditID != first.AuditID || again.Lease != first.Lease || f.Committed(t) != 1 {
+	if again.AuditID != first.AuditID || again.Lease != first.Lease || !again.Replay || f.Committed(t) != 1 {
 		t.Fatalf("a retried start made %+v", again)
 	}
-	_, err := f.Store.Start(ctx, receipts.Start{WorkspaceID: f.Workspace, OperationID: "op-1", TokenID: token,
-		Tool: "list_opportunities", Arguments: strictjson.NewObject()})
-	is(t, err, receipts.ErrOperationReused, "another request under the operation")
-	found, err := f.Store.ByOperation(ctx, "op-1")
-	if err != nil || found.AuditID != first.AuditID || found.Lease != first.Lease {
+	b, other := brief, "brief-other"
+	same := receipts.Start{WorkspaceID: f.Workspace, OperationID: "op-1", PrincipalID: f.Principal, TokenID: token,
+		Tool: "get_account", Scope: "crm:read", AccountRef: f.Account, ConnectionID: f.Connection,
+		Arguments: strictjson.NewObject("account_id", f.Account), RequestID: receipts.RPC(1), BriefID: &b}
+	for name, change := range map[string]func(s *receipts.Start){
+		"tool":       func(s *receipts.Start) { s.Tool = "list_opportunities" },
+		"principal":  func(s *receipts.Start) { s.PrincipalID = f.Stranger },
+		"token":      func(s *receipts.Start) { s.TokenID = receipts.Anonymous },
+		"scope":      func(s *receipts.Start) { s.Scope = "calls:read" },
+		"account":    func(s *receipts.Start) { s.AccountRef = f.OtherAccount },
+		"connection": func(s *receipts.Start) { s.ConnectionID = "" },
+		"arguments":  func(s *receipts.Start) { s.Arguments = strictjson.NewObject("account_id", f.OtherAccount) },
+		"request ID": func(s *receipts.Start) { s.RequestID = receipts.RPC(2) },
+		"brief ID":   func(s *receipts.Start) { s.BriefID = &other },
+		"no brief":   func(s *receipts.Start) { s.BriefID = nil },
+	} {
+		changed := same
+		change(&changed)
+		_, err := f.Store.Start(ctx, changed)
+		is(t, err, receipts.ErrOperationReused, "another "+name+" under the operation")
+	}
+	found, err := f.Store.ByOperation(ctx, f.Workspace, "op-1")
+	if err != nil || found.AuditID != first.AuditID || found.Lease != "" {
 		t.Fatalf("by operation: %+v %v", found, err)
 	}
-	_, err = f.Store.ByOperation(ctx, "op-unknown")
+	_, err = f.Store.ByOperation(ctx, f.Workspace, "op-unknown")
 	is(t, err, receipts.ErrNotFound, "an operation never started")
+}
+
+// operationsBelongToTheirWorkspace: one operation ID in two workspaces is two receipts, and neither
+// workspace learns about, or gets the lease of, the other's.
+func operationsBelongToTheirWorkspace(t *testing.T, f *Fixture) {
+	mine := start(t, f, "op-shared", "get_account", receipts.RPC(1), f.Connection)
+	theirs, err := f.Store.Start(ctx, receipts.Start{WorkspaceID: f.Other, OperationID: "op-shared",
+		TokenID: token, Tool: "get_account", Scope: "crm:read", ConnectionID: f.OtherConnection,
+		Arguments: strictjson.NewObject(), RequestID: receipts.RPC(1)})
+	if err != nil || theirs.AuditID == mine.AuditID || theirs.Lease == mine.Lease || theirs.Replay {
+		t.Fatalf("the other workspace's start: %+v %v", theirs, err)
+	}
+	found, err := f.Store.ByOperation(ctx, f.Other, "op-shared")
+	if err != nil || found.AuditID != theirs.AuditID {
+		t.Fatalf("by operation in the other workspace: %+v %v", found, err)
+	}
+	_, err = f.Store.ByOperation(ctx, f.Other, "op-1-never")
+	is(t, err, receipts.ErrNotFound, "an operation of neither workspace")
 }
 
 func generationFence(t *testing.T, f *Fixture) {
@@ -183,7 +249,7 @@ func generationFence(t *testing.T, f *Fixture) {
 	if read.Status != "error" || *read.HTTPStatus != 409 || *read.Error != "source_changed" || len(read.Rows) != 0 {
 		t.Fatalf("the fenced receipt: %s", encode(t, read.Value()))
 	}
-	if bound := f.Records(t, r.AuditID); len(bound) != 0 {
+	if bound := must(f.Store.Records(ctx, f.Workspace, r.AuditID)); len(bound) != 0 {
 		t.Fatalf("a fenced read bound %v", bound)
 	}
 	_, err = f.Store.FinishRead(ctx, r.Ticket(), []receipts.RecordVersion{version(f.Account, "{}")}, 0)
@@ -192,14 +258,52 @@ func generationFence(t *testing.T, f *Fixture) {
 	if other.Generation != r.Generation+1 {
 		t.Fatalf("a read after the change records generation %d", other.Generation)
 	}
-	if _, err := f.Store.FinishRead(ctx, other.Ticket(), []receipts.RecordVersion{version(f.Account, "{}")}, 0); err != nil {
-		t.Fatal(err)
+	must(f.Store.FinishRead(ctx, other.Ticket(), []receipts.RecordVersion{version(f.Account, "{}")}, 0))
+}
+
+// childReadsAreFenced: a read inside a composite call is fenced like any other.
+func childReadsAreFenced(t *testing.T, f *Fixture) {
+	parent := start(t, f, "op-1", receipts.Composite, receipts.RPC(1), "")
+	b := brief
+	child := must(f.Store.StartChild(ctx, receipts.ChildStart{Parent: parent.AuditID, Ordinal: 1,
+		Tool: "get_account", Scope: "crm:read", ConnectionID: f.Connection,
+		Arguments: strictjson.NewObject("account_id", f.Account), BriefID: &b}))
+	if child.Generation != 1 || child.ConnectionID != f.Connection {
+		t.Fatalf("child: %+v", child)
 	}
-	third := start(t, f, "op-3", "get_account", receipts.RPC(3), f.Connection)
-	conflicting := version(f.Account, "[]")
-	conflicting.ContentVersion = version(f.Account, "{}").Version()
-	_, err = f.Store.FinishRead(ctx, third.Ticket(), []receipts.RecordVersion{conflicting}, 0)
-	is(t, err, receipts.ErrVersionConflict, "one version with two bodies")
+	f.Bump(t)
+	_, err := f.Store.FinishRead(ctx, child.Ticket(), []receipts.RecordVersion{version(f.Account, "{}")}, 0)
+	is(t, err, receipts.ErrSourceChanged, "a child read across a source change")
+	read := readOne(t, f, child.AuditID)
+	if read.Status != "error" || *read.HTTPStatus != 409 || *read.Error != "source_changed" ||
+		len(must(f.Store.Records(ctx, f.Workspace, child.AuditID))) != 0 {
+		t.Fatalf("the fenced child: %s", encode(t, read.Value()))
+	}
+}
+
+// versionConflicts: a version that arrives with two bodies stores nothing and finishes the read 409.
+func versionConflicts(t *testing.T, f *Fixture) {
+	for i, versions := range [][][]receipts.RecordVersion{
+		// within one read
+		{{version(f.Account, "{}"), {Source: "crm", Table: "accounts", RecordID: f.Account,
+			ContentVersion: version(f.Account, "{}").Version(), Body: []byte("[]")}}},
+		// against an earlier read
+		{{version("acc-009", "{}")}, {{Source: "crm", Table: "accounts", RecordID: "acc-009",
+			ContentVersion: version("acc-009", "{}").Version(), Body: []byte("[]")}}},
+	} {
+		var last receipts.Receipt
+		var err error
+		for j, read := range versions {
+			last = start(t, f, fmt.Sprintf("op-%d-%d", i, j), "get_account", receipts.RPC(j+1), f.Connection)
+			_, err = f.Store.FinishRead(ctx, last.Ticket(), read, 0)
+		}
+		is(t, err, receipts.ErrVersionConflict, "one version with two bodies")
+		conflicted := readOne(t, f, last.AuditID)
+		if conflicted.Status != "error" || *conflicted.HTTPStatus != 409 || *conflicted.Error != "version_conflict" ||
+			len(must(f.Store.Records(ctx, f.Workspace, last.AuditID))) != 0 {
+			t.Fatalf("the conflicted read: %s", encode(t, conflicted.Value()))
+		}
+	}
 }
 
 func racingFinishersOneWins(t *testing.T, f *Fixture) {
@@ -239,7 +343,8 @@ func childReads(t *testing.T, f *Fixture) {
 	}
 	if got, ordinal, ok := first.RequestID.Parent(); !ok || got != parent.AuditID || ordinal != 1 ||
 		first.TokenID != parent.TokenID || first.PrincipalID != parent.PrincipalID || first.WorkspaceID != f.Workspace ||
-		first.OperationID != "op-1#1" || first.Lease == "" || first.BriefID == nil || *first.BriefID != brief {
+		first.OperationID != "op-1#1" || first.Lease == "" || first.BriefID == nil || *first.BriefID != brief ||
+		first.Generation != 1 || first.ConnectionID != f.Connection || first.AccountRef != f.Account || first.Replay {
 		t.Fatalf("child: %+v", first)
 	}
 	// A read runs at most once: a pending child is not handed out again.
@@ -261,7 +366,12 @@ func childReads(t *testing.T, f *Fixture) {
 	is(t, err, receipts.ErrInvalid, "a child that names no connection")
 	_, err = child(first.AuditID, 1)
 	is(t, err, receipts.ErrParent, "a child of a child")
-	seal := start(t, f, "op-seal", "save_brief", receipts.Null(), "")
+	// A child whose own tool is the composite one is still a child, and takes no child of its own.
+	composite := must(f.Store.StartChild(ctx, receipts.ChildStart{Parent: parent.AuditID, Ordinal: 2,
+		Tool: receipts.Composite, Scope: "crm:read", ConnectionID: f.Connection, Arguments: strictjson.NewObject()}))
+	_, err = child(composite.AuditID, 1)
+	is(t, err, receipts.ErrParent, "a child of a composite child")
+	seal := start(t, f, "op-seal", receipts.SaveBrief, receipts.Null(), "")
 	_, err = child(seal.AuditID, 1)
 	is(t, err, receipts.ErrParent, "a child of a seal")
 	_, err = f.Store.Start(ctx, receipts.Start{WorkspaceID: f.Workspace, OperationID: "op-x", TokenID: token,
@@ -269,18 +379,14 @@ func childReads(t *testing.T, f *Fixture) {
 	is(t, err, receipts.ErrInvalid, "a child request ID through Start")
 	_, err = f.Store.Finish(ctx, parent.Ticket(), receipts.Failed(200, "request_failed"))
 	is(t, err, receipts.ErrInvalid, "finishing a parent with a pending child")
-	denied, err := f.Store.Finish(ctx, first.Ticket(), receipts.Denied())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Store.Finish(ctx, parent.Ticket(), receipts.Failed(200, "request_failed")); err != nil {
-		t.Fatal(err)
-	}
+	denied := must(f.Store.Finish(ctx, first.Ticket(), receipts.Denied()))
+	must(f.Store.Finish(ctx, composite.Ticket(), receipts.Denied()))
+	must(f.Store.Finish(ctx, parent.Ticket(), receipts.Failed(200, "request_failed")))
 	_, err = child(parent.AuditID, 3)
 	is(t, err, receipts.ErrParent, "a child of a finished parent")
-	// A finished child's outcome stands, after its parent finished too.
+	// A finished child's outcome stands, after its parent finished too, without its lease.
 	again, err := child(parent.AuditID, 1)
-	if err != nil || again.AuditID != first.AuditID || again.Lease != "" || !again.Same(denied) {
+	if err != nil || again.AuditID != first.AuditID || again.Lease != "" || !again.Replay || !again.Same(denied) {
 		t.Fatalf("a retried start of a finished child: %+v %v", again, err)
 	}
 }
@@ -304,6 +410,27 @@ func denialAndNotSelected(t *testing.T, f *Fixture) {
 	is(t, err, receipts.ErrInvalid, "an error receipt with rows")
 }
 
+// onlyReadsClaimRecordRows: a receipt that reads no source cannot claim a record row, and a read claims its
+// rows only through FinishRead.
+func onlyReadsClaimRecordRows(t *testing.T, f *Fixture) {
+	call := start(t, f, "op-call", "get_account", receipts.RPC(1), "")
+	for _, row := range []string{"crm/accounts/" + f.Account, "calls/call_notes/note-1", "slack/messages/m-1"} {
+		_, err := f.Store.Finish(ctx, call.Ticket(), receipts.Outcome{Status: "ok", HTTPStatus: 200,
+			Rows: []string{row}})
+		is(t, err, receipts.ErrInvalid, "a call with no connection claiming "+row)
+	}
+	read := start(t, f, "op-read", "get_account", receipts.RPC(2), f.Connection)
+	for _, rows := range [][]string{{"crm/accounts/" + f.Account}, {}} {
+		_, err := f.Store.Finish(ctx, read.Ticket(), receipts.Outcome{Status: "ok", HTTPStatus: 200, Rows: rows})
+		is(t, err, receipts.ErrInvalid, "a read finished ok without FinishRead")
+	}
+	_, err := f.Store.FinishRead(ctx, call.Ticket(), []receipts.RecordVersion{version(f.Account, "{}")}, 0)
+	is(t, err, receipts.ErrInvalid, "FinishRead on a call that reads no source")
+	// What a seal names is not a record.
+	must(f.Store.Finish(ctx, call.Ticket(), receipts.Outcome{Status: "ok", HTTPStatus: 200,
+		Rows: []string{"briefs/" + brief + "/" + strings.Repeat("0", 64)}}))
+}
+
 func startRefusesBadReceipts(t *testing.T, f *Fixture) {
 	w, a := f.Workspace, receipts.Anonymous
 	for _, s := range []receipts.Start{
@@ -320,6 +447,9 @@ func startRefusesBadReceipts(t *testing.T, f *Fixture) {
 	_, err := f.Store.Start(ctx, receipts.Start{WorkspaceID: w, OperationID: "f", TokenID: a, Tool: "get_account",
 		Scope: "crm:read", ConnectionID: receipts.RandomID(), Arguments: strictjson.NewObject()})
 	is(t, err, receipts.ErrNotFound, "an unknown connection")
+	_, err = f.Store.Start(ctx, receipts.Start{WorkspaceID: w, OperationID: "g", TokenID: a, Tool: "get_account",
+		Scope: "crm:read", ConnectionID: f.OtherConnection, Arguments: strictjson.NewObject()})
+	is(t, err, receipts.ErrNotFound, "another workspace's connection")
 	if f.Committed(t) != 0 {
 		t.Fatal("a refused start left a receipt")
 	}
@@ -331,11 +461,8 @@ func receiptsAreDetached(t *testing.T, f *Fixture) {
 	arguments := strictjson.NewObject("account_id", f.Account, "nested", []any{big.NewInt(1)})
 	id := big.NewInt(7)
 	b := "brief-x"
-	started, err := f.Store.Start(ctx, receipts.Start{WorkspaceID: f.Workspace, OperationID: "op", TokenID: token,
-		Tool: "get_account", Arguments: arguments, RequestID: receipts.RPC(id), BriefID: &b})
-	if err != nil {
-		t.Fatal(err)
-	}
+	started := must(f.Store.Start(ctx, receipts.Start{WorkspaceID: f.Workspace, OperationID: "op",
+		TokenID: token, Tool: "get_account", Arguments: arguments, RequestID: receipts.RPC(id), BriefID: &b}))
 	before := encode(t, started.Value())
 	arguments.Set("account_id", "acc-999")
 	arguments.Values[1].([]any)[0].(*big.Int).SetInt64(99)
@@ -347,19 +474,13 @@ func receiptsAreDetached(t *testing.T, f *Fixture) {
 	value.Set("tool", "changed")
 	value.Values[4].(*strictjson.Object).Set("account_id", "acc-997")
 	code := "worker"
-	finished, err := f.Store.Finish(ctx, started.Ticket(), receipts.Outcome{Status: "error", HTTPStatus: 500,
-		Rows: []string{}, Error: &code})
-	if err != nil {
-		t.Fatal(err)
-	}
+	finished := must(f.Store.Finish(ctx, started.Ticket(), receipts.Outcome{Status: "error", HTTPStatus: 500,
+		Rows: []string{}, Error: &code}))
 	code = "changed"
 	*finished.HTTPStatus = 200
 	*finished.Error = "changed"
 	*finished.ElapsedMS = 5
-	read, err := f.Store.Read(ctx, f.Workspace, []string{started.AuditID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	read := must(f.Store.Read(ctx, f.Workspace, []string{started.AuditID}))
 	read[0].Arguments.(*strictjson.Object).Set("account_id", "acc-996")
 	read[0].Rows = append(read[0].Rows, "x")
 	pending := `"status": "pending", "http_status": null, "row_count": 0, "rows": [], "elapsed_ms": null, "error": null}`
@@ -371,73 +492,4 @@ func receiptsAreDetached(t *testing.T, f *Fixture) {
 	if got := encode(t, readOne(t, f, started.AuditID).Value()); got != want {
 		t.Fatalf("the committed receipt changed:\n got %s\nwant %s", got, want)
 	}
-}
-
-func publish(t *testing.T, f *Fixture) {
-	unit := `{"kind": "record", "n": 1, "record_ref": "crm/accounts/` + f.Account + `", "tool": "get_account"}`
-	payload := []byte(`{"units": [` + unit + `], "gaps": []}`)
-	read := func(operation string) receipts.Receipt {
-		r := start(t, f, operation, "get_account", receipts.RPC(1), f.Connection)
-		if _, err := f.Store.FinishRead(ctx, r.Ticket(), []receipts.RecordVersion{version(f.Account, "{}")}, 0); err != nil {
-			t.Fatal(err)
-		}
-		return r
-	}
-	publication := func(seal, read receipts.Receipt, bytes []byte) receipts.Publication {
-		return receipts.Publication{WorkspaceID: f.Workspace, AccountRef: f.Account, BriefID: brief,
-			PrincipalID: f.Principal, Seal: seal.Ticket(), Kind: "card", SchemaVersion: 3, RulesVersion: "3",
-			Bytes: append([]byte(nil), bytes...), Reads: []string{read.AuditID},
-			Units: []receipts.UnitRow{{N: 1, Kind: "record", RecordRef: "crm/accounts/" + f.Account, Tool: "get_account",
-				ReceiptID: read.AuditID, ContentVersion: version(f.Account, "{}").Version(), Value: []byte(unit)}}}
-	}
-	sealStart := func(operation string) receipts.Receipt {
-		r, err := f.Store.Start(ctx, receipts.Start{WorkspaceID: f.Workspace, OperationID: operation,
-			PrincipalID: f.Principal, TokenID: token, Tool: "save_brief", AccountRef: f.Account,
-			Arguments: strictjson.NewObject("account_id", f.Account, "brief_id", brief)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return r
-	}
-	first := read("op-read-1")
-	// No grant: nothing is written and the seal finishes as not permitted.
-	refused := sealStart("seal-1")
-	_, err := f.Store.Publish(ctx, publication(refused, first, payload))
-	is(t, err, receipts.ErrNotPermitted, "publishing without a grant")
-	if f.Published(t, brief) {
-		t.Fatal("a refused publication wrote a card")
-	}
-	if r := readOne(t, f, refused.AuditID); *r.HTTPStatus != 403 || *r.Error != "not_permitted" {
-		t.Fatalf("the refused seal: %s", encode(t, r.Value()))
-	}
-	f.Grant(t)
-	f.Bump(t)
-	changed := sealStart("seal-2")
-	_, err = f.Store.Publish(ctx, publication(changed, first, payload))
-	is(t, err, receipts.ErrSourceChanged, "publishing across a source change")
-	if r := readOne(t, f, changed.AuditID); *r.HTTPStatus != 409 || *r.Error != "source_changed" || f.Published(t, brief) {
-		t.Fatalf("the fenced seal: %s", encode(t, r.Value()))
-	}
-	current := read("op-read-2")
-	seal := sealStart("seal-3")
-	p := publication(seal, current, payload)
-	card, err := f.Store.Publish(ctx, p)
-	if err != nil || card.Seal.Status != "ok" || card.Seal.Rows[0] != receipts.Reference(brief, payload) ||
-		card.SHA256 != card.Seal.Rows[0][len(card.Seal.Rows[0])-64:] || string(card.Bytes) != string(payload) ||
-		!f.Published(t, brief) {
-		t.Fatalf("publish: %+v %v", card, err)
-	}
-	p.Bytes[0] = 'X'
-	p.Units[0].Value[0] = 'X'
-	card.Bytes[0] = 'Y'
-	again, err := f.Store.Publish(ctx, publication(seal, current, payload))
-	if err != nil || string(again.Bytes) != string(payload) || string(again.Units[0].Value) != unit ||
-		!again.Seal.Same(card.Seal) {
-		t.Fatalf("a retried publication: %+v %v", again, err)
-	}
-	other := publication(seal, current, []byte(`{"units": [`+unit+`], "gaps": [], "other": 1}`))
-	_, err = f.Store.Publish(ctx, other)
-	is(t, err, receipts.ErrFinished, "publishing other bytes under a finished seal")
-	_, err = f.Store.Publish(ctx, publication(sealStart("seal-4"), current, payload))
-	is(t, err, receipts.ErrInvalid, "publishing a brief twice")
 }

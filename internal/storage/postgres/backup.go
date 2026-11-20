@@ -13,22 +13,27 @@ import (
 
 // backupTables are copied in this order, so every foreign key points at a
 // table, or (for receipts) a row, that is already restored. Sessions are left
-// out: a restore signs everyone out.
-var backupTables = []struct{ name, order string }{
-	{"workspaces", "id"},
-	{"principals", "id"},
-	{"accounts", "workspace_id, ref"},
-	{"account_grants", "workspace_id, principal_id, account_ref"},
-	{"machine_tokens", "id"},
-	{"connections", "id"},
-	{"source_records", "id"},
+// out: a restore signs everyone out. since is the schema version that made
+// the table, so a backup of an older version lists only its own tables.
+var backupTables = []struct {
+	name, order string
+	since       int
+}{
+	{"workspaces", "id", 1},
+	{"principals", "id", 1},
+	{"accounts", "workspace_id, ref", 1},
+	{"account_grants", "workspace_id, principal_id, account_ref", 1},
+	{"machine_tokens", "id", 1},
+	{"connections", "id", 1},
+	{"source_records", "id", 1},
 	// A parent receipt always starts before its children.
-	{"receipts", "started_at, id"},
-	{"receipt_records", "receipt_id, ordinal"},
-	{"receipt_deliveries", "receipt_id"},
-	{"cards", "id"},
-	{"evidence_units", "card_id, n"},
-	{"gaps", "card_id, ordinal"},
+	{"receipts", "started_at, id", 1},
+	{"receipt_records", "receipt_id, ordinal", 1},
+	{"receipt_deliveries", "receipt_id", 1},
+	{"cards", "id", 1},
+	{"evidence_units", "card_id, n", 1},
+	{"gaps", "card_id, ordinal", 1},
+	{"card_reads", "card_id, ordinal", 2},
 }
 
 // TableCopy describes one table in a backup.
@@ -50,10 +55,19 @@ func (s *Store) Dump(ctx context.Context, open func(table string) (io.WriteClose
 		return 0, nil, fmt.Errorf("the database is at schema %d; run serve or setup to migrate it to %d first",
 			version, LatestSchemaVersion())
 	}
+	copies, err := s.dump(ctx, version, open)
+	return version, copies, err
+}
+
+// dump copies the tables of this schema version.
+func (s *Store) dump(ctx context.Context, version int, open func(table string) (io.WriteCloser, error)) ([]TableCopy, error) {
 	var copies []TableCopy
-	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
+	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
 		func(tx pgx.Tx) error {
 			for _, table := range backupTables {
+				if table.since > version {
+					continue
+				}
 				columns, err := tableColumns(ctx, tx, table.name)
 				if err != nil {
 					return err
@@ -75,26 +89,28 @@ func (s *Store) Dump(ctx context.Context, open func(table string) (io.WriteClose
 			}
 			return nil
 		})
-	return version, copies, err
+	return copies, err
 }
 
 // Restore loads a dump into an empty database. In one transaction it creates
 // the schema at the dump's version, copies every table with the tables' own
 // triggers off, checks the row counts, checks the loaded rows against every
-// rule the triggers enforce (gtm_integrity_violations), and records the
-// restore as waiting for its credentials. Then it migrates to the latest
-// version. FinishRestore records that the credentials are in place.
+// rule the triggers enforce (gtm_integrity_violations), applies the later
+// migrations and checks again at the latest version, and records the restore
+// as waiting for its credentials. FinishRestore records that the credentials
+// are in place.
 func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion int, copies []TableCopy,
 	open func(table string) (io.ReadCloser, error)) error {
 	if schemaVersion < 1 || schemaVersion > LatestSchemaVersion() {
 		return fmt.Errorf("the backup is at schema %d; this binary knows 1 to %d", schemaVersion, LatestSchemaVersion())
 	}
-	if len(copies) != len(backupTables) {
+	tables := BackupTableNames(schemaVersion)
+	if len(copies) != len(tables) {
 		return errors.New("the backup does not list the expected tables")
 	}
-	for i, table := range backupTables {
-		if copies[i].Name != table.name {
-			return fmt.Errorf("the backup lists %q where %q belongs", copies[i].Name, table.name)
+	for i, table := range tables {
+		if copies[i].Name != table {
+			return fmt.Errorf("the backup lists %q where %q belongs", copies[i].Name, table)
 		}
 	}
 	list, err := migrations()
@@ -103,7 +119,7 @@ func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion
 	}
 	// One transaction for the schema and the rows: a failed restore leaves
 	// the database empty, so it can be run again.
-	err = s.inTx(ctx, func(tx pgx.Tx) error {
+	return s.inTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationLock); err != nil {
 			return err
 		}
@@ -167,25 +183,43 @@ func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion
 			}
 		}
 		// The rows went in with the triggers off: check every rule the
-		// triggers enforce on writing before anything commits.
-		rows, err := tx.Query(ctx, "SELECT v FROM gtm_integrity_violations() v LIMIT 5")
-		if err != nil {
+		// triggers enforce on writing, at the backup's version; then apply
+		// the later migrations, which refuse rows their rules do not admit,
+		// and check again at the latest version, before anything commits.
+		if err := integrity(ctx, tx); err != nil {
 			return err
 		}
-		violations, err := pgx.CollectRows(rows, pgx.RowTo[string])
-		if err != nil {
+		for _, m := range list[schemaVersion:] {
+			if _, err := tx.Exec(ctx, m.sql); err != nil {
+				return fmt.Errorf("migration %s: %w", m.name, err)
+			}
+			if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, $2, $3)",
+				m.version, m.name, m.sha256); err != nil {
+				return err
+			}
+		}
+		if err := integrity(ctx, tx); err != nil {
 			return err
 		}
-		if len(violations) > 0 {
-			return fmt.Errorf("the backup holds rows the connector would refuse: %s", strings.Join(violations, "; "))
-		}
-		_, err = tx.Exec(ctx, "INSERT INTO restores (archive_sha256) VALUES ($1)", archiveSHA256)
+		_, err := tx.Exec(ctx, "INSERT INTO restores (archive_sha256) VALUES ($1)", archiveSHA256)
 		return err
 	})
+}
+
+// integrity refuses rows that break a rule the triggers enforce on writing.
+func integrity(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, "SELECT v FROM gtm_integrity_violations() v LIMIT 5")
 	if err != nil {
 		return err
 	}
-	return s.Migrate(ctx)
+	violations, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf("the backup holds rows the connector would refuse: %s", strings.Join(violations, "; "))
+	}
+	return nil
 }
 
 func tableColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error) {
@@ -230,11 +264,14 @@ func (s *Store) FinishRestore(ctx context.Context, archiveSHA256 string) error {
 	return err
 }
 
-// BackupTableNames lists the tables a backup holds, in restore order.
-func BackupTableNames() []string {
-	names := make([]string, len(backupTables))
-	for i, table := range backupTables {
-		names[i] = table.name
+// BackupTableNames lists the tables a backup at this schema version holds,
+// in restore order.
+func BackupTableNames(version int) []string {
+	var names []string
+	for _, table := range backupTables {
+		if table.since <= version {
+			names = append(names, table.name)
+		}
 	}
 	return names
 }

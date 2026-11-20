@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/authz"
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
@@ -142,7 +143,13 @@ func (s *Server) accounts(w http.ResponseWriter, r *http.Request, p authz.Princi
 	}
 	views := make([]accountView, len(accounts))
 	for i, a := range accounts {
-		views[i] = accountView{a.Ref, a.DisplayName}
+		// A display name is source text: neutralized before anything shows it.
+		name, _, err := evidence.SafeText(a.DisplayName)
+		if err != nil {
+			internal(w)
+			return
+		}
+		views[i] = accountView{a.Ref, name}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": views})
 }

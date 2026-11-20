@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // Receipt errors. Callers match them with errors.Is.
@@ -44,6 +46,10 @@ var (
 	ErrSourceChanged = errors.New("the source changed after the read started")
 	// ErrVersionConflict: one content version of a record arrived with two bodies.
 	ErrVersionConflict = errors.New("a record version already exists with a different body")
+	// ErrInvalidArguments: a receipt's arguments are not one JSON value with unique keys.
+	ErrInvalidArguments = errors.New("a receipt's arguments are one JSON value, each object's keys unique")
+	// ErrRecordRows: a receipt that reads no source claimed a record row.
+	ErrRecordRows = errors.New("only a source read claims a record row, through FinishRead")
 )
 
 // Receipt is one row of the receipts table.
@@ -67,11 +73,14 @@ type Receipt struct {
 	ElapsedMS                    *float64
 	Error                        *string
 	FinishedAt                   *time.Time
-	// LeaseToken is set only for the caller that holds the lease.
+	// LeaseToken is set only for the caller that holds the lease: a new
+	// start, or StartReceipt's replay, whose operation ID is the claim.
 	LeaseToken     string
 	LeaseExpiresAt time.Time
 	LeaseFence     int64
 	DeliveredAt    *time.Time
+	// Replay is set when a start found the receipt committed already.
+	Replay bool
 }
 
 // Composite is the one tool whose source reads are child reads.
@@ -93,16 +102,19 @@ const receiptColumns = `r.id, r.workspace_id, r.operation_id, r.parent_id, r.ord
 	r.elapsed_ms, r.error, r.finished_at, r.lease_token, r.lease_expires_at, r.lease_fence,
 	(SELECT d.delivered_at FROM receipt_deliveries d WHERE d.receipt_id = r.id)`
 
-func scanReceipt(row pgx.Row) (Receipt, error) {
+func scanReceipt(row pgx.Row) (Receipt, error) { return scanReceiptWith(row) }
+
+// scanReceiptWith scans receiptColumns and then the extra columns after them.
+func scanReceiptWith(row pgx.Row, extra ...any) (Receipt, error) {
 	var r Receipt
 	var parent, principal, scope, requested, account, connection, brief *string
 	var generation *int64
 	var rows []byte
-	err := row.Scan(&r.ID, &r.WorkspaceID, &r.OperationID, &parent, &r.Ordinal, &principal,
+	err := row.Scan(append([]any{&r.ID, &r.WorkspaceID, &r.OperationID, &parent, &r.Ordinal, &principal,
 		&r.TokenID, &r.Tool, &scope, &requested, &account, &connection, &generation,
 		&r.Arguments, &r.RequestID, &brief, &r.StartedAt, &r.Status, &r.HTTPStatus, &rows,
 		&r.ElapsedMS, &r.Error, &r.FinishedAt, &r.LeaseToken, &r.LeaseExpiresAt, &r.LeaseFence,
-		&r.DeliveredAt)
+		&r.DeliveredAt}, extra...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Receipt{}, ErrNotFound
 	}
@@ -182,8 +194,9 @@ func (in ReceiptStart) requestID() json.RawMessage {
 }
 
 // StartReceipt commits a pending receipt in its own transaction, before the
-// caller may run the tool. The same operation ID with the same request (every
-// field but the lease) gives back the existing receipt; with a different
+// caller may run the tool. Operation IDs are unique per workspace. The same
+// operation ID with the same request (every field but the lease) gives back
+// the existing receipt, with its lease and Replay set; with a different
 // request it is refused.
 func (s *Store) StartReceipt(ctx context.Context, in ReceiptStart) (Receipt, error) {
 	if err := checkLease(in.Lease); err != nil {
@@ -194,6 +207,9 @@ func (s *Store) StartReceipt(ctx context.Context, in ReceiptStart) (Receipt, err
 	}
 	if !validUUID(in.WorkspaceID) || in.ConnectionID != "" && !validUUID(in.ConnectionID) {
 		return Receipt{}, ErrNotFound
+	}
+	if err := checkArguments(in.Arguments); err != nil {
+		return Receipt{}, err
 	}
 	requested := requestedAccount(in.AccountRef)
 	// A connection of another workspace matches no row: ErrNotFound below.
@@ -207,23 +223,28 @@ func (s *Store) StartReceipt(ctx context.Context, in ReceiptStart) (Receipt, err
 		  FROM (SELECT 1) one
 		  LEFT JOIN connections c ON c.workspace_id = $1 AND c.id = $12
 		 WHERE $12::uuid IS NULL OR c.id IS NOT NULL
-		ON CONFLICT (operation_id) DO NOTHING
+		ON CONFLICT (workspace_id, operation_id) DO NOTHING
 		RETURNING `+receiptColumns,
 		in.WorkspaceID, in.OperationID, nullable(in.PrincipalID), in.TokenID, in.Tool, nullable(in.Scope),
 		requested, string(in.Arguments), in.requestID(), nullable(in.BriefID), in.Lease.Seconds(),
 		nullable(in.ConnectionID))
 	r, err := scanReceipt(row)
-	if sqlState(err) == "GT012" {
+	if err == nil {
+		return r, nil
+	}
+	// The operation exists, or the insert was refused: a replay of another
+	// request is refused as such, whatever the insert's own refusal.
+	existing, lookupErr := s.receiptByOperation(ctx, in.WorkspaceID, in.OperationID)
+	switch {
+	case lookupErr == nil:
+	case sqlState(err) == "GT012":
 		return Receipt{}, ErrWrongSource
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return r, err
-	}
-	existing, err := s.ReceiptByOperation(ctx, in.OperationID)
-	if err != nil {
+	case errors.Is(err, ErrNotFound):
+		return Receipt{}, lookupErr
+	default:
 		return Receipt{}, err
 	}
-	if existing.WorkspaceID != in.WorkspaceID || existing.ParentID != "" ||
+	if existing.ParentID != "" ||
 		existing.PrincipalID != in.PrincipalID || existing.TokenID != in.TokenID ||
 		existing.Tool != in.Tool || existing.Scope != in.Scope ||
 		existing.RequestedAccount != deref(requested) || existing.BriefID != in.BriefID ||
@@ -231,7 +252,17 @@ func (s *Store) StartReceipt(ctx context.Context, in ReceiptStart) (Receipt, err
 		!sameJSON(existing.Arguments, in.Arguments) || !sameJSON(existing.RequestID, in.requestID()) {
 		return Receipt{}, ErrOperationReused
 	}
+	existing.Replay = true
 	return existing, nil
+}
+
+// checkArguments refuses arguments strictjson would not read back: two
+// values, a duplicate key, a number no float holds.
+func checkArguments(arguments json.RawMessage) error {
+	if _, err := strictjson.Loads(arguments); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidArguments, err)
+	}
+	return nil
 }
 
 // RecordRefusal commits a receipt for a request that is refused before any
@@ -279,6 +310,9 @@ func (s *Store) StartChildRead(ctx context.Context, in ChildReadStart) (Receipt,
 	if in.Ordinal < 1 || !validUUID(in.ParentID) {
 		return Receipt{}, ErrParent
 	}
+	if err := checkArguments(in.Arguments); err != nil {
+		return Receipt{}, err
+	}
 	if !validUUID(in.ConnectionID) {
 		return Receipt{}, ErrNotFound
 	}
@@ -311,7 +345,7 @@ func (s *Store) StartChildRead(ctx context.Context, in ChildReadStart) (Receipt,
 		  FROM receipts p
 		  JOIN connections c ON c.workspace_id = p.workspace_id AND c.id = $9
 		 WHERE p.id = $1
-		ON CONFLICT (operation_id) DO NOTHING
+		ON CONFLICT (workspace_id, operation_id) DO NOTHING
 		RETURNING `+receiptColumns,
 		in.ParentID, in.Ordinal, in.Tool, nullable(in.Scope), requestedAccount(in.AccountRef),
 		string(in.Arguments), requestID, in.Lease.Seconds(), in.ConnectionID, nullable(in.BriefID))
@@ -351,7 +385,7 @@ func (s *Store) replayChild(ctx context.Context, existing Receipt, in ChildReadS
 		return Receipt{}, ErrOperationReused
 	}
 	if existing.Status != "pending" {
-		existing.LeaseToken = ""
+		existing.LeaseToken, existing.Replay = "", true
 		return existing, nil
 	}
 	if _, err := s.abandon(ctx, existing.ID); err != nil {
@@ -361,7 +395,7 @@ func (s *Store) replayChild(ctx context.Context, existing Receipt, in ChildReadS
 		return Receipt{}, err
 	}
 	finished, err := s.receiptByID(ctx, existing.ID)
-	finished.LeaseToken = ""
+	finished.LeaseToken, finished.Replay = "", true
 	return finished, err
 }
 
@@ -444,6 +478,8 @@ func finishLocked(ctx context.Context, tx pgx.Tx, f ReceiptFinish, sourceRead bo
 		return Receipt{}, fmt.Errorf("%w: the database refused the presented lease", ErrLeaseLost)
 	case "GT013":
 		return Receipt{}, ErrSourceChanged
+	case "GT014":
+		return Receipt{}, ErrRecordRows
 	}
 	if errors.Is(err, ErrNotFound) {
 		return Receipt{}, errNotPending
@@ -466,7 +502,8 @@ func (s *Store) settled(ctx context.Context, f ReceiptFinish, sourceRead bool) (
 		}
 		return Receipt{}, ErrSourceRead
 	}
-	if r.Status == "pending" {
+	// The lease token stays on a finished receipt: only its holder hears back.
+	if r.Status == "pending" || r.LeaseToken != f.LeaseToken {
 		return Receipt{}, ErrLeaseLost
 	}
 	rows := f.Rows
@@ -776,21 +813,34 @@ func (s *Store) RunChildRead(ctx context.Context, in ChildReadStart,
 	return finished, records, nil
 }
 
-// ReceiptByOperation finds a receipt by its operation ID, which is how a
-// caller that lost an acknowledgement learns what was committed.
-func (s *Store) ReceiptByOperation(ctx context.Context, operationID string) (Receipt, error) {
-	return scanReceipt(s.pool.QueryRow(ctx,
-		`SELECT `+receiptColumns+` FROM receipts r WHERE r.operation_id = $1`, operationID))
+// ReceiptByOperation finds a receipt of a workspace by its operation ID,
+// which is how a caller that lost an acknowledgement learns what was
+// committed. It gives no lease: starting the operation again does.
+func (s *Store) ReceiptByOperation(ctx context.Context, workspaceID, operationID string) (Receipt, error) {
+	r, err := s.receiptByOperation(ctx, workspaceID, operationID)
+	r.LeaseToken = ""
+	return r, err
 }
 
-// Receipt reads one receipt of a workspace, for the owner.
+func (s *Store) receiptByOperation(ctx context.Context, workspaceID, operationID string) (Receipt, error) {
+	if !validUUID(workspaceID) {
+		return Receipt{}, ErrNotFound
+	}
+	return scanReceipt(s.pool.QueryRow(ctx,
+		`SELECT `+receiptColumns+` FROM receipts r WHERE r.workspace_id = $1 AND r.operation_id = $2`,
+		workspaceID, operationID))
+}
+
+// Receipt reads one receipt of a workspace, for the owner, without its lease.
 func (s *Store) Receipt(ctx context.Context, workspaceID, receiptID string) (Receipt, error) {
 	if !validUUID(workspaceID) || !validUUID(receiptID) {
 		return Receipt{}, ErrNotFound
 	}
-	return scanReceipt(s.pool.QueryRow(ctx,
+	r, err := scanReceipt(s.pool.QueryRow(ctx,
 		`SELECT `+receiptColumns+` FROM receipts r WHERE r.workspace_id = $1 AND r.id = $2`,
 		workspaceID, receiptID))
+	r.LeaseToken = ""
+	return r, err
 }
 
 func (s *Store) receiptByID(ctx context.Context, receiptID string) (Receipt, error) {

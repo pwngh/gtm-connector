@@ -30,7 +30,6 @@ func TestPublishChecksEveryUnitsProvenance(t *testing.T) {
 		pub, _ := publication(t, f, "prov-pending")
 		pending := child(t, f, parentOf(t, f, pub), 2, time.Minute)
 		pub.Units[0].ReceiptID, pub.Units[0].SourceRecordID = pending.ID, ""
-		pub.Kind, pub.ReadReceiptIDs = "cli", nil
 		refuse(t, f, pub)
 	})
 	t.Run("a read of another account", func(t *testing.T) {
@@ -42,7 +41,6 @@ func TestPublishChecksEveryUnitsProvenance(t *testing.T) {
 		})
 		ok(t, err)
 		pub.Units[0].ReceiptID, pub.Units[0].SourceRecordID = other.ID, ""
-		pub.Kind, pub.ReadReceiptIDs = "cli", nil
 		refuse(t, f, pub)
 	})
 	t.Run("a read under another brief", func(t *testing.T) {
@@ -52,7 +50,6 @@ func TestPublishChecksEveryUnitsProvenance(t *testing.T) {
 			func(context.Context) ([]postgres.RecordVersion, error) { return records("elsewhere"), nil })
 		ok(t, err)
 		pub.Units[0].ReceiptID, pub.Units[0].SourceRecordID = read.ID, ""
-		pub.Kind, pub.ReadReceiptIDs = "cli", nil
 		refuse(t, f, pub)
 	})
 	t.Run("a record version its receipt never returned", func(t *testing.T) {
@@ -66,6 +63,21 @@ func TestPublishChecksEveryUnitsProvenance(t *testing.T) {
 			&stranger, read.ID))
 		pub.Units[0].SourceRecordID = stranger
 		refuse(t, f, pub)
+	})
+	// Only cards made here publish, each sealed by its own brief receipt.
+	t.Run("a card of kind cli or prepared", func(t *testing.T) {
+		for _, kind := range []string{"cli", "prepared"} {
+			pub, _ := publication(t, f, "prov-kind-"+kind)
+			pub.Kind = kind
+			_, err := f.Store.PublishCard(ctx, pub)
+			is(t, err, postgres.ErrSealMismatch)
+		}
+	})
+	t.Run("a brief receipt other than the seal", func(t *testing.T) {
+		pub, _ := publication(t, f, "prov-parent-seal")
+		pub.ParentReceiptID = f.Parent.ID
+		_, err := f.Store.PublishCard(ctx, pub)
+		is(t, err, postgres.ErrSealMismatch)
 	})
 	t.Run("a stale generation on a unit's receipt", func(t *testing.T) {
 		pub, _ := publication(t, f, "prov-stale")
@@ -329,8 +341,8 @@ func TestRecoveryAfterPublicationCommits(t *testing.T) {
 	// The fixture's brief has finished. Its read, retried, is the committed one.
 	reads := 0
 	r, versions, err := f.Store.RunChildRead(ctx, postgres.ChildReadStart{ParentID: f.Parent.ID, Ordinal: 1,
-		Tool: "get_account", Scope: "crm:read", ConnectionID: f.Connection.ID,
-		Arguments: json.RawMessage(`{"account_id":"acc-003"}`), Lease: time.Minute},
+		Tool: "get_account", Scope: "crm:read", ConnectionID: f.Connection.ID, BriefID: "brief-1",
+		Arguments: json.RawMessage(`{"account_id": "acc-003"}`), Lease: time.Minute},
 		func(context.Context) ([]postgres.RecordVersion, error) { reads++; return nil, nil })
 	ok(t, err)
 	if reads != 0 || r.ID != f.Read.ID || len(versions) != 2 {
@@ -408,7 +420,7 @@ func TestVersionConflictsAndLeaseErrors(t *testing.T) {
 	_, _, err = f.Store.RunChildRead(ctx, childStart(f, p, 2, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return v, nil })
 	is(t, err, postgres.ErrVersionConflict)
-	c, err := f.Store.ReceiptByOperation(ctx, p.OperationID+"#2")
+	c, err := f.Store.ReceiptByOperation(ctx, f.Workspace.ID, p.OperationID+"#2")
 	ok(t, err)
 	if c.Status != "error" || c.HTTPStatus == nil || *c.HTTPStatus != 409 || *c.Error != "version_conflict" {
 		t.Fatalf("conflicted read %+v", c)
