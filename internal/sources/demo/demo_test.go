@@ -1,6 +1,7 @@
 package demo
 
 import (
+	"bytes"
 	"errors"
 	"math/big"
 	"testing"
@@ -16,6 +17,20 @@ func book(t *testing.T) *Store {
 		t.Fatal(err)
 	}
 	return s
+}
+
+func TestTheBuiltInBookIsTheOracles(t *testing.T) {
+	if !bytes.Equal(Book, oracletest.Read(t, "cards/demo_book.json")) {
+		t.Fatal("book.json differs from testdata/oracle/cards/demo_book.json; copy it again")
+	}
+	s, err := Seeded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts := s.Accounts()
+	if len(accounts) != 30 || accounts[2] != (Account{"acc-003", "Thornfield Wren LLP"}) {
+		t.Fatalf("accounts: %v", accounts)
+	}
 }
 
 func refs(records []*strictjson.Object) []string {

@@ -88,12 +88,12 @@ func New(t testing.TB) *Fixture {
 
 	f.Parent, err = store.StartReceipt(ctx, postgres.ReceiptStart{
 		WorkspaceID: f.Workspace.ID, OperationID: "fixture-brief", PrincipalID: f.Reader.ID,
-		TokenID: postgres.TokenID(""), Tool: "brief", AccountRef: Account,
+		TokenID: postgres.TokenID(""), Tool: postgres.Composite, AccountRef: Account,
 		Arguments: json.RawMessage(`{"account_id":"acc-003"}`), Lease: time.Minute})
 	must(t, err)
 	parentToken := f.Parent.LeaseToken
 	f.Read, _, err = store.RunChildRead(ctx, postgres.ChildReadStart{
-		ParentID: f.Parent.ID, Ordinal: 0, Tool: "get_account", Scope: "crm:read",
+		ParentID: f.Parent.ID, Ordinal: 1, Tool: "get_account", Scope: "crm:read",
 		ConnectionID: f.Connection.ID, Arguments: json.RawMessage(`{"account_id":"acc-003"}`), Lease: time.Minute,
 	}, func(context.Context) ([]postgres.RecordVersion, error) {
 		return []postgres.RecordVersion{

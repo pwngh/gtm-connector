@@ -5,8 +5,8 @@
 //
 //   - A receipt is committed as pending, in its own transaction, before the work it records starts. If
 //     Start fails, the work does not happen. A start names its workspace, principal, scope and an
-//     operation ID; one that names a source connection records the connection's generation at commit.
-//     Starting the same operation again gives back the receipt the first start made.
+//     operation ID without '#'; one that names a source connection records the connection's generation
+//     at commit. Starting the same operation again gives back the receipt the first start made.
 //   - A receipt goes from pending to finished once. Only the holder of its lease finishes it. Finishing it
 //     again with the same outcome, as a retry after a lost acknowledgement does, returns the finished
 //     receipt; another outcome is refused with ErrFinished.
@@ -19,7 +19,9 @@
 //   - request_id takes four forms: a JSON-RPC id (an integer or a string), null, "<invalid>" for an id of
 //     any other JSON type, and {"kind": "brief_child", "parent_audit_id", "ordinal"} for a read inside a
 //     composite call. A child read starts only under a pending top-level prepare_renewal_brief receipt of its
-//     workspace, takes its principal and token from it, and (parent, ordinal) is unique.
+//     workspace, takes its principal and token from it, names its connection, and (parent, ordinal) is
+//     unique. Its operation ID is the parent's, "#" and the ordinal. Starting it again gives back the
+//     finished child without its lease, or ErrInProgress while it is pending: a read runs at most once.
 //   - Only an "ok" receipt carries rows. A scope denial finishes as error/403 and a source with no selection
 //     for the account as error/200, both with no rows (Denied, NotSelected).
 //   - Publish writes a card's bytes and digest, its unit and gap projections, and finishes its seal receipt
@@ -29,9 +31,10 @@
 //   - Receipts handed in are copied, and receipts handed out are copies: no caller can change a committed
 //     receipt through a value it holds.
 //
-// Memory keeps all of this in process, and its tests show it. A PostgreSQL store must keep the same
-// contract: the single finish by a guarded UPDATE ... WHERE status = 'pending' and a trigger, the child
-// uniqueness by a unique index on (parent, ordinal), and FinishRead and Publish each as one transaction.
+// Memory keeps all of this in process; postgres.ReceiptStore keeps it on PostgreSQL, with the single finish
+// by a guarded UPDATE ... WHERE status = 'pending' and a trigger, the child uniqueness by a unique index on
+// (parent, ordinal), and FinishRead and Publish each as one transaction. receiptstest runs the same tests
+// on both.
 package receipts
 
 import (
@@ -84,6 +87,7 @@ var (
 	ErrSourceChanged   = errors.New("receipts: the source changed after the read started")
 	ErrVersionConflict = errors.New("receipts: a record version already exists with a different body")
 	ErrNotPermitted    = errors.New("receipts: the principal holds no grant on the account")
+	ErrInProgress      = errors.New("receipts: another worker holds this pending child read")
 )
 
 // Anonymous is the token_id of a call that carried no credential.
@@ -237,6 +241,21 @@ type Start struct {
 	BriefID      *string
 }
 
+// Check is what every Store refuses before it commits anything: a start without its workspace, operation,
+// tool or token fingerprint, an operation ID holding '#' (which joins a parent's to a child's ordinal), a
+// child request ID, and arguments that are not JSON.
+func (s Start) Check() error {
+	if s.WorkspaceID == "" || s.OperationID == "" || strings.Contains(s.OperationID, "#") || s.Tool == "" ||
+		!validTokenID(s.TokenID) {
+		return fmt.Errorf("%w: a receipt needs a workspace, an operation without '#', a tool and a token fingerprint",
+			ErrInvalid)
+	}
+	if _, _, isChild := s.RequestID.Parent(); isChild {
+		return fmt.Errorf("%w: a child read starts with StartChild", ErrInvalid)
+	}
+	return checkArguments(s.Arguments)
+}
+
 // ChildStart is what a child read records before the read. The workspace, principal and token are the
 // parent's.
 type ChildStart struct {
@@ -248,6 +267,15 @@ type ChildStart struct {
 	AccountRef   string
 	Arguments    any
 	BriefID      *string
+}
+
+// Check is what every Store refuses before it commits a child read: one without its parent, an ordinal from
+// 1, a tool or a connection, or with arguments that are not JSON.
+func (s ChildStart) Check() error {
+	if s.Parent == "" || s.Ordinal < 1 || s.Tool == "" || s.ConnectionID == "" {
+		return fmt.Errorf("%w: a child read needs its parent, an ordinal from 1, a tool and a connection", ErrInvalid)
+	}
+	return checkArguments(s.Arguments)
 }
 
 // Ticket is what finishes a receipt: its ID and the lease only its starter holds.
@@ -275,7 +303,9 @@ func NotSelected() Outcome { return failed(200, "request_failed") }
 // Failed finishes work that failed with this HTTP status and error code, with no rows.
 func Failed(status int, code string) Outcome { return failed(status, code) }
 
-func (o Outcome) check() error {
+// Check refuses an outcome no receipt can finish with: a status other than ok or error, rows on an error, or
+// an HTTP status outside 100 to 599.
+func (o Outcome) Check() error {
 	switch {
 	case o.Status != "ok" && o.Status != "error":
 		return fmt.Errorf("%w: a final status is ok or error", ErrInvalid)
@@ -522,6 +552,7 @@ type Publication struct {
 	Seal          Ticket // started, pending, before the card existed
 	Kind          string // "card" or "selected_brief"
 	SchemaVersion int
+	RulesVersion  string // the rules the card's text was made under
 	Bytes         []byte
 	Units         []UnitRow
 	Gaps          []GapRow
@@ -662,14 +693,7 @@ func (m *Memory) commit(r Receipt) (Receipt, error) {
 }
 
 func (m *Memory) Start(_ context.Context, s Start) (Receipt, error) {
-	if s.WorkspaceID == "" || s.OperationID == "" || s.Tool == "" || !validTokenID(s.TokenID) {
-		return Receipt{}, fmt.Errorf("%w: a receipt needs a workspace, an operation, a tool and a token fingerprint",
-			ErrInvalid)
-	}
-	if _, _, isChild := s.RequestID.Parent(); isChild {
-		return Receipt{}, fmt.Errorf("%w: a child read starts with StartChild", ErrInvalid)
-	}
-	if err := checkArguments(s.Arguments); err != nil {
+	if err := s.Check(); err != nil {
 		return Receipt{}, err
 	}
 	m.mu.Lock()
@@ -690,10 +714,7 @@ func (m *Memory) Start(_ context.Context, s Start) (Receipt, error) {
 }
 
 func (m *Memory) StartChild(_ context.Context, s ChildStart) (Receipt, error) {
-	if s.Parent == "" || s.Ordinal < 1 || s.Tool == "" {
-		return Receipt{}, fmt.Errorf("%w: a child read needs its parent, an ordinal from 1 and a tool", ErrInvalid)
-	}
-	if err := checkArguments(s.Arguments); err != nil {
+	if err := s.Check(); err != nil {
 		return Receipt{}, err
 	}
 	m.mu.Lock()
@@ -711,7 +732,12 @@ func (m *Memory) StartChild(_ context.Context, s ChildStart) (Receipt, error) {
 		if existing.Tool != s.Tool || existing.ConnectionID != s.ConnectionID || !sameJSON(existing.Arguments, s.Arguments) {
 			return Receipt{}, ErrDuplicateChild
 		}
-		return existing.clone(), nil
+		if existing.Status == "pending" {
+			return Receipt{}, ErrInProgress
+		}
+		finished := existing.clone()
+		finished.Lease = ""
+		return finished, nil
 	}
 	if parent.Status != "pending" {
 		return Receipt{}, ErrParent
@@ -763,7 +789,7 @@ func (m *Memory) finish(r *Receipt, o Outcome) Receipt {
 }
 
 func (m *Memory) Finish(_ context.Context, t Ticket, o Outcome) (Receipt, error) {
-	if err := o.check(); err != nil {
+	if err := o.Check(); err != nil {
 		return Receipt{}, err
 	}
 	m.mu.Lock()

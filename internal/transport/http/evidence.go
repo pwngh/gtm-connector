@@ -128,6 +128,25 @@ func readFailed(w http.ResponseWriter, err error) {
 	}
 }
 
+type accountView struct {
+	Account string `json:"account"`
+	Name    string `json:"name"`
+}
+
+// accounts lists the accounts the principal may read, by reference.
+func (s *Server) accounts(w http.ResponseWriter, r *http.Request, p authz.Principal) {
+	accounts, err := s.evidence.Accounts(r.Context(), p)
+	if err != nil {
+		readFailed(w, err)
+		return
+	}
+	views := make([]accountView, len(accounts))
+	for i, a := range accounts {
+		views[i] = accountView{a.Ref, a.DisplayName}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": views})
+}
+
 func (s *Server) accountCards(w http.ResponseWriter, r *http.Request, p authz.Principal) {
 	cards, err := s.evidence.AccountCards(r.Context(), p, r.PathValue("account"))
 	if err != nil {

@@ -358,6 +358,33 @@ func TestEvidenceReadsNeedAGrant(t *testing.T) {
 	}
 }
 
+// The accounts a principal may read, for a page to start from.
+func TestAccountsListThePrincipalsGrants(t *testing.T) {
+	s := newSite(t, 0)
+	if r := s.browser(t).do(http.MethodGet, "/api/v1/accounts", nil, nil); r.status != 401 {
+		t.Fatalf("anonymous: %d", r.status)
+	}
+	reader := s.browser(t)
+	reader.signIn("demo-reader", readerPassword)
+	r := reader.do(http.MethodGet, "/api/v1/accounts", nil, nil)
+	if r.status != 200 || string(r.raw) != `{"accounts":[{"account":"acc-003","name":"Invented account"}]}`+"\n" {
+		t.Fatalf("reader: %d %s", r.status, r.raw)
+	}
+	outsider := s.browser(t)
+	outsider.signIn("demo-outsider", outsiderPassword)
+	if r := outsider.do(http.MethodGet, "/api/v1/accounts", nil, nil); r.status != 200 ||
+		string(r.raw) != `{"accounts":[]}`+"\n" {
+		t.Fatalf("outsider: %d %s", r.status, r.raw)
+	}
+	if err := s.Store.RevokeAccountGrant(t.Context(), s.Workspace.ID, s.reader.ID, "acc-003"); err != nil {
+		t.Fatal(err)
+	}
+	if r := reader.do(http.MethodGet, "/api/v1/accounts", nil, nil); r.status != 200 ||
+		string(r.raw) != `{"accounts":[]}`+"\n" {
+		t.Fatalf("after a revocation: %d %s", r.status, r.raw)
+	}
+}
+
 // Item 8: one pre-session signs in once, however many requests race.
 func TestConcurrentSignInsFromOnePreSession(t *testing.T) {
 	s := newSite(t, 0)

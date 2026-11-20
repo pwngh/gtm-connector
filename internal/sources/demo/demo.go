@@ -5,9 +5,12 @@
 // rowid order, as testdata/oracle/cards/demo_book.json holds them, and takes rows inserted later. Values are
 // kept as given: nil, string, or an integer as *big.Int. A read returns its rows ordered by ID, each row's
 // columns in table order followed by its record_ref.
+//
+// Book is that dump, built into the program; its test keeps it equal to the oracle's.
 package demo
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"math/big"
@@ -22,6 +25,39 @@ var schema = map[string][]string{
 	"crm":   {"accounts", "contacts", "opportunities", "activities"},
 	"calls": {"call_notes"},
 	"slack": {"messages"},
+}
+
+// Book is the demo stores as the demo seeds them: testdata/oracle/cards/demo_book.json.
+//
+//go:embed book.json
+var Book []byte
+
+// Seeded is a Store holding Book.
+func Seeded() (*Store, error) { return Load(Book) }
+
+// Account is one CRM account of a Store.
+type Account struct{ ID, Name string }
+
+// Accounts lists the CRM accounts in ID order.
+func (s *Store) Accounts() []Account {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t := s.tables["crm/accounts"]
+	name := -1
+	for i, c := range t.columns {
+		if c == "name" {
+			name = i
+		}
+	}
+	out := make([]Account, len(t.rows))
+	for i, row := range t.rows {
+		out[i].ID = row[0].(string)
+		if name >= 0 {
+			out[i].Name, _ = row[name].(string)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
 }
 
 // ErrAccountNotFound is get_account's refusal of an unknown account.

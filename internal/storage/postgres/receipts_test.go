@@ -68,12 +68,12 @@ func is(t *testing.T, err, want error) {
 	}
 }
 
-// parent starts a pending top-level receipt for the fixture's account.
+// parent starts a pending prepare_renewal_brief receipt for the fixture's account.
 func parent(t *testing.T, f *postgrestest.Fixture, operation string, lease time.Duration) postgres.Receipt {
 	t.Helper()
 	r, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
 		OperationID: operation, PrincipalID: f.Reader.ID, TokenID: postgres.TokenID("raw-token"),
-		Tool: "brief", AccountRef: postgrestest.Account, Arguments: json.RawMessage(`{"account_id":"acc-003"}`),
+		Tool: postgres.Composite, AccountRef: postgrestest.Account, Arguments: json.RawMessage(`{"account_id":"acc-003"}`),
 		Lease: lease})
 	ok(t, err)
 	return r
@@ -191,7 +191,7 @@ func TestTwoFinishersRace(t *testing.T) {
 	}
 	// Two FinishRead calls racing bind one set of versions.
 	p := parent(t, f, "race-read", time.Minute)
-	c := child(t, f, p, 0, time.Minute)
+	c := child(t, f, p, 1, time.Minute)
 	var wg sync.WaitGroup
 	var wins atomic.Int32
 	for i := range 4 {
@@ -267,16 +267,16 @@ func TestLostAcknowledgement(t *testing.T) {
 	// receipt and the versions it bound, without reading again.
 	reads := 0
 	read := func(context.Context) ([]postgres.RecordVersion, error) { reads++; return records("a"), nil }
-	got, versions, err := f.Store.RunChildRead(ctx, childStart(f, first, 0, time.Minute), read)
+	got, versions, err := f.Store.RunChildRead(ctx, childStart(f, first, 1, time.Minute), read)
 	ok(t, err)
-	again, versionsAgain, err := f.Store.RunChildRead(ctx, childStart(f, first, 0, time.Minute), read)
+	again, versionsAgain, err := f.Store.RunChildRead(ctx, childStart(f, first, 1, time.Minute), read)
 	ok(t, err)
 	if reads != 1 || again.ID != got.ID || len(versionsAgain) != len(versions) ||
 		string(versionsAgain[0].Body) != string(versions[0].Body) {
 		t.Fatalf("retry read %d times", reads)
 	}
 	// FinishRead repeated with the same records is the same result.
-	held := child(t, f, first, 1, time.Minute)
+	held := child(t, f, first, 2, time.Minute)
 	done, err := f.Store.FinishRead(ctx, held.ID, held.LeaseToken, records("a"), 1)
 	ok(t, err)
 	same, err := f.Store.FinishRead(ctx, held.ID, held.LeaseToken, records("a"), 1)
@@ -313,7 +313,7 @@ func TestCrashAtEachStepBoundary(t *testing.T) {
 
 	t.Run("after the child receipt commits, before the read", func(t *testing.T) {
 		p := parent(t, f, "crash-1", time.Minute)
-		c := child(t, f, p, 0, 200*time.Millisecond)
+		c := child(t, f, p, 1, 200*time.Millisecond)
 		time.Sleep(300 * time.Millisecond)
 		n, err := f.Store.AbandonExpired(ctx, 10)
 		ok(t, err)
@@ -330,7 +330,7 @@ func TestCrashAtEachStepBoundary(t *testing.T) {
 	for _, point := range []string{"read:locked", "read:record", "read:bound", "read:finished"} {
 		t.Run("inside the read's finishing transaction at "+point, func(t *testing.T) {
 			p := parent(t, f, "crash-"+point, time.Minute)
-			c := child(t, f, p, 0, time.Minute)
+			c := child(t, f, p, 1, time.Minute)
 			postgres.SetCrash(f.Store, func(at string) error {
 				if at == point {
 					return errors.New("stopped at " + at)
@@ -365,12 +365,12 @@ func TestCrashAtEachStepBoundary(t *testing.T) {
 			reads++
 			return records("delivery"), nil
 		}
-		r, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 0, time.Minute), read)
+		r, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute), read)
 		ok(t, err)
 		if r.DeliveredAt != nil {
 			t.Fatal("delivered before anyone said so")
 		}
-		again, versions, err := f.Store.RunChildRead(ctx, childStart(f, p, 0, time.Minute), read)
+		again, versions, err := f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute), read)
 		ok(t, err)
 		if reads != 1 || again.ID != r.ID || len(versions) != 2 {
 			t.Fatal("recovery read the source again")
@@ -415,7 +415,7 @@ func TestCrashAtEachStepBoundary(t *testing.T) {
 func publication(t *testing.T, f *postgrestest.Fixture, brief string) (postgres.CardPublication, postgres.Receipt) {
 	t.Helper()
 	p := parent(t, f, brief+"-parent", time.Minute)
-	read, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 0, time.Minute),
+	read, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return records(brief), nil })
 	ok(t, err)
 	versions, err := f.Store.ReceiptRecordIDs(ctx, f.Workspace.ID, read.ID)
@@ -443,7 +443,7 @@ func TestUnavailableReceiptStore(t *testing.T) {
 	ok(t, err)
 	down.Close()
 	reads := 0
-	_, _, err = down.RunChildRead(ctx, childStart(f, p, 0, time.Minute),
+	_, _, err = down.RunChildRead(ctx, childStart(f, p, 1, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { reads++; return records("x"), nil })
 	if err == nil || reads != 0 {
 		t.Fatalf("the read ran without a receipt (reads %d, err %v)", reads, err)
@@ -456,12 +456,12 @@ func TestUnavailableReceiptStore(t *testing.T) {
 	// released, and the receipt stays pending until it is abandoned.
 	failing, err := postgres.Open(ctx, f.URL)
 	ok(t, err)
-	_, released, err := failing.RunChildRead(ctx, childStart(f, p, 1, 200*time.Millisecond),
+	_, released, err := failing.RunChildRead(ctx, childStart(f, p, 2, 200*time.Millisecond),
 		func(context.Context) ([]postgres.RecordVersion, error) { failing.Close(); return records("y"), nil })
 	if err == nil || released != nil {
 		t.Fatal("records were released without a finished receipt")
 	}
-	c, err := f.Store.ReceiptByOperation(ctx, p.OperationID+"#1")
+	c, err := f.Store.ReceiptByOperation(ctx, p.OperationID+"#2")
 	ok(t, err)
 	if c.Status != "pending" {
 		t.Fatalf("receipt %s", c.Status)
@@ -494,7 +494,7 @@ func TestForeignKeysStayInsideOneWorkspace(t *testing.T) {
 		t.Fatal("a receipt named another workspace's principal")
 	}
 	p := parent(t, f, "fk-parent", time.Minute)
-	start := childStart(f, p, 0, time.Minute)
+	start := childStart(f, p, 1, time.Minute)
 	start.ConnectionID = otherConnection.ID
 	_, err = f.Store.StartChildRead(ctx, start)
 	is(t, err, postgres.ErrNotFound)
@@ -513,14 +513,15 @@ func TestForeignKeysStayInsideOneWorkspace(t *testing.T) {
 func TestOrdinalsAndOperationsAreUnique(t *testing.T) {
 	f := postgrestest.New(t)
 	p := parent(t, f, "unique", time.Minute)
-	child(t, f, p, 0, time.Minute)
-	other := childStart(f, p, 0, time.Minute)
+	child(t, f, p, 1, time.Minute)
+	other := childStart(f, p, 1, time.Minute)
 	other.Tool = "get_contacts"
 	_, err := f.Store.StartChildRead(ctx, other)
 	is(t, err, postgres.ErrOperationReused)
-	if code(sql(t, f, `INSERT INTO receipts (workspace_id, operation_id, parent_id, ordinal, token_id, tool,
-		arguments, request_id, lease_token, lease_expires_at) VALUES ($1, 'another-op', $2, 0, 'anonymous', 't',
-		'{}', 'null', gen_random_uuid(), now() + interval '1 minute')`, f.Workspace.ID, p.ID)) != "23505" {
+	if code(sql(t, f, `INSERT INTO receipts (workspace_id, operation_id, parent_id, ordinal, token_id, tool, scope,
+		connection_id, connection_generation, arguments, request_id, lease_token, lease_expires_at)
+		VALUES ($1, 'another-op', $2, 1, 'anonymous', 't', 'crm:read', $3, 1, '{}', 'null', gen_random_uuid(),
+		now() + interval '1 minute')`, f.Workspace.ID, p.ID, f.Connection.ID)) != "23505" {
 		t.Fatal("two children share (parent, ordinal)")
 	}
 	otherWorkspace, err := f.Store.EnsureWorkspace(ctx, "other", "demo", "Other")
@@ -533,7 +534,7 @@ func TestOrdinalsAndOperationsAreUnique(t *testing.T) {
 func TestParentsAndChildren(t *testing.T) {
 	f := postgrestest.New(t)
 	p := parent(t, f, "family", time.Minute)
-	c := child(t, f, p, 0, time.Minute)
+	c := child(t, f, p, 1, time.Minute)
 	if c.PrincipalID != p.PrincipalID || c.TokenID != p.TokenID || c.ConnectionGeneration != f.Connection.Generation ||
 		!strings.Contains(string(c.RequestID), `"brief_child"`) {
 		t.Fatalf("child %+v", c)
@@ -544,14 +545,14 @@ func TestParentsAndChildren(t *testing.T) {
 	ok(t, err)
 	_, err = f.Store.FinishReceipt(ctx, finishOK(p))
 	ok(t, err)
-	_, err = f.Store.StartChildRead(ctx, childStart(f, p, 1, time.Minute))
-	is(t, err, postgres.ErrParentFinished)
+	_, err = f.Store.StartChildRead(ctx, childStart(f, p, 2, time.Minute))
+	is(t, err, postgres.ErrParent)
 }
 
 func TestSourceChangeFencesReadsAndPublication(t *testing.T) {
 	f := postgrestest.New(t)
 	p := parent(t, f, "fence", time.Minute)
-	c := child(t, f, p, 0, time.Minute)
+	c := child(t, f, p, 1, time.Minute)
 	before := count(t, f, "SELECT count(*) FROM source_records")
 	_, err := f.Store.BumpConnectionGeneration(ctx, f.Connection.ID)
 	ok(t, err)
@@ -635,23 +636,23 @@ func TestRecordVersions(t *testing.T) {
 	p := parent(t, f, "versions", time.Minute)
 	versioned := []postgres.RecordVersion{{Source: "crm", Table: "accounts", RecordID: "acc-010",
 		ContentVersion: "1700000000.000100", Body: []byte("first")}}
-	_, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 0, time.Minute),
+	_, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return versioned, nil })
 	ok(t, err)
 	versioned[0].Body = []byte("second")
-	_, _, err = f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute),
+	_, _, err = f.Store.RunChildRead(ctx, childStart(f, p, 2, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return versioned, nil })
 	is(t, err, postgres.ErrVersionConflict)
 	// The same version read again binds the stored row; no duplicate.
 	versioned[0].Body = []byte("first")
-	_, _, err = f.Store.RunChildRead(ctx, childStart(f, p, 2, time.Minute),
+	_, _, err = f.Store.RunChildRead(ctx, childStart(f, p, 3, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return versioned, nil })
 	ok(t, err)
 	if count(t, f, "SELECT count(*) FROM source_records WHERE record_id = 'acc-010'") != 1 {
 		t.Fatal("one version stored twice")
 	}
 	// A failed read finishes as an error with no rows.
-	r, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 3, time.Minute),
+	r, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 4, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) {
 			return nil, &postgres.ReadFailure{HTTPStatus: 403, Code: "calls_denied"}
 		})

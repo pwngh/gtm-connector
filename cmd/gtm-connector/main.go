@@ -2,13 +2,14 @@
 //
 //	gtm-connector setup              make credentials, migrate, set up the app role, seed the demo workspace
 //	gtm-connector serve              run the HTTPS server, as the app role
+//	gtm-connector demo               publish a card for each demo account, for the demo sign-in to read
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
 //	gtm-connector health             check that the local server answers
 //
 // Settings come from the environment:
 //
-//	GTM_DATABASE_URL        the app role's URL, which serve uses (setup creates that role)
+//	GTM_DATABASE_URL        the app role's URL, which serve and demo use (setup creates that role)
 //	GTM_OWNER_DATABASE_URL  the owner role's URL, for setup, backup and restore
 //	GTM_CREDENTIALS_DIR     the private credentials folder
 //	GTM_LISTEN              a loopback host:port (default 127.0.0.1:8443)
@@ -40,6 +41,7 @@ const usage = `usage: gtm-connector <command> [flags]
 commands:
   setup              make missing credentials, migrate, set up the app role, seed the demo workspace
   serve              run the HTTPS server, connecting as the app role
+  demo               publish a card for each demo account, for the demo sign-in to read
   backup --out FILE  write PostgreSQL and the credentials folder to FILE
   restore --in FILE  restore FILE into an empty database and credentials folder
   health             check that the local server answers
@@ -58,6 +60,8 @@ func main() {
 		err = serve(ctx, args)
 	case "setup":
 		err = setupCommand(ctx, args)
+	case "demo":
+		err = demoCommand(ctx, args)
 	case "backup":
 		err = backupCommand(ctx, args)
 	case "restore":

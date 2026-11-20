@@ -28,12 +28,16 @@ var (
 	ErrInvalidOperation = errors.New("an operation ID is 1 to 128 characters without '#'")
 	// ErrInProgress: another worker holds the live claim on this read.
 	ErrInProgress = errors.New("another worker is running this read")
-	// ErrParentFinished: a child read cannot start under a finished parent.
-	ErrParentFinished = errors.New("the parent receipt is not pending")
+	// ErrParent: a child read starts only under a pending top-level
+	// prepare_renewal_brief receipt, numbered from 1.
+	ErrParent = errors.New("a child read needs a pending top-level prepare_renewal_brief receipt and an ordinal from 1")
 	// ErrPendingChild: a parent cannot finish while a child read is pending.
 	ErrPendingChild = errors.New("a child receipt is still pending")
 	// ErrSourceRead: a source read finishes through FinishRead or FailRead.
 	ErrSourceRead = errors.New("a source read finishes through FinishRead or FailRead")
+	// ErrNotSourceRead: a receipt that reads no source finishes through
+	// FinishReceipt.
+	ErrNotSourceRead = errors.New("this receipt reads no source; finish it with FinishReceipt")
 	// ErrWrongSource: a read named or returned a source other than its connection's.
 	ErrWrongSource = errors.New("the read does not match its connection's source")
 	// ErrSourceChanged: the connection's generation changed after the read started.
@@ -69,6 +73,9 @@ type Receipt struct {
 	LeaseFence     int64
 	DeliveredAt    *time.Time
 }
+
+// Composite is the one tool whose source reads are child reads.
+const Composite = "prepare_renewal_brief"
 
 // TokenID is the receipt fingerprint of a bearer credential: its SHA-256 in
 // hex, or "anonymous" when there is none.
@@ -156,10 +163,15 @@ type ReceiptStart struct {
 	// AccountRef is the account the request named, known or not; the
 	// receipt resolves it in the workspace.
 	AccountRef string
-	Arguments  json.RawMessage
-	RequestID  json.RawMessage // a JSON-RPC id, null, or "<invalid>"; nil means null
-	BriefID    string
-	Lease      time.Duration // how long the caller may take to finish it
+	// ConnectionID makes the receipt a source read of that connection, as
+	// the CLI's reads are: it records the connection's generation, needs
+	// Scope to be that source's, and finishes through FinishRead or FailRead.
+	ConnectionID string
+	// Arguments are kept as given, key order included.
+	Arguments json.RawMessage
+	RequestID json.RawMessage // a JSON-RPC id, null, or "<invalid>"; nil means null
+	BriefID   string
+	Lease     time.Duration // how long the caller may take to finish it
 }
 
 func (in ReceiptStart) requestID() json.RawMessage {
@@ -180,21 +192,30 @@ func (s *Store) StartReceipt(ctx context.Context, in ReceiptStart) (Receipt, err
 	if in.OperationID == "" || len(in.OperationID) > 128 || strings.Contains(in.OperationID, "#") {
 		return Receipt{}, ErrInvalidOperation
 	}
-	if !validUUID(in.WorkspaceID) {
+	if !validUUID(in.WorkspaceID) || in.ConnectionID != "" && !validUUID(in.ConnectionID) {
 		return Receipt{}, ErrNotFound
 	}
 	requested := requestedAccount(in.AccountRef)
+	// A connection of another workspace matches no row: ErrNotFound below.
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO receipts AS r (workspace_id, operation_id, principal_id, token_id, tool, scope,
-			requested_account, account_ref, arguments, request_id, brief_id, lease_token, lease_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7,
+			requested_account, account_ref, connection_id, connection_generation, arguments, request_id,
+			brief_id, lease_token, lease_expires_at)
+		SELECT $1, $2, $3, $4, $5, $6, $7,
 			(SELECT ref FROM accounts WHERE workspace_id = $1 AND ref = $7),
-			$8, $9, $10, gen_random_uuid(), clock_timestamp() + make_interval(secs => $11))
+			c.id, c.generation, $8, $9, $10, gen_random_uuid(), clock_timestamp() + make_interval(secs => $11)
+		  FROM (SELECT 1) one
+		  LEFT JOIN connections c ON c.workspace_id = $1 AND c.id = $12
+		 WHERE $12::uuid IS NULL OR c.id IS NOT NULL
 		ON CONFLICT (operation_id) DO NOTHING
 		RETURNING `+receiptColumns,
 		in.WorkspaceID, in.OperationID, nullable(in.PrincipalID), in.TokenID, in.Tool, nullable(in.Scope),
-		requested, in.Arguments, in.requestID(), nullable(in.BriefID), in.Lease.Seconds())
+		requested, string(in.Arguments), in.requestID(), nullable(in.BriefID), in.Lease.Seconds(),
+		nullable(in.ConnectionID))
 	r, err := scanReceipt(row)
+	if sqlState(err) == "GT012" {
+		return Receipt{}, ErrWrongSource
+	}
 	if !errors.Is(err, ErrNotFound) {
 		return r, err
 	}
@@ -206,6 +227,7 @@ func (s *Store) StartReceipt(ctx context.Context, in ReceiptStart) (Receipt, err
 		existing.PrincipalID != in.PrincipalID || existing.TokenID != in.TokenID ||
 		existing.Tool != in.Tool || existing.Scope != in.Scope ||
 		existing.RequestedAccount != deref(requested) || existing.BriefID != in.BriefID ||
+		existing.ConnectionID != in.ConnectionID ||
 		!sameJSON(existing.Arguments, in.Arguments) || !sameJSON(existing.RequestID, in.requestID()) {
 		return Receipt{}, ErrOperationReused
 	}
@@ -226,21 +248,23 @@ func (s *Store) RecordRefusal(ctx context.Context, in ReceiptStart, httpStatus i
 // ChildReadStart is what a child read receipt records before the read.
 type ChildReadStart struct {
 	ParentID     string
-	Ordinal      int
+	Ordinal      int // from 1
 	Tool         string
 	Scope        string // the connection's source, as "<source>:read"
 	ConnectionID string
 	AccountRef   string // empty to take the parent's
 	Arguments    json.RawMessage
+	BriefID      string // the brief the read is for, or empty
 	Lease        time.Duration
 }
 
 // StartChildRead commits a pending child receipt in its own transaction,
 // before a source read, and gives its lease to this caller only: the read
 // runs at most once per receipt. It takes the workspace, principal and token
-// from the parent, which must be pending, and records the connection's
-// current generation. Its operation ID is the parent's, then "#" and the
-// ordinal.
+// from the parent, which must be a pending top-level prepare_renewal_brief
+// receipt (else ErrParent), and records the connection's current
+// generation. Ordinals start at 1. Its operation ID is the parent's, then
+// "#" and the ordinal.
 //
 // A retry of the same request finds the child already there:
 //   - finished: it gets the committed receipt (its outcome stands), even
@@ -252,10 +276,10 @@ func (s *Store) StartChildRead(ctx context.Context, in ChildReadStart) (Receipt,
 	if err := checkLease(in.Lease); err != nil {
 		return Receipt{}, err
 	}
-	if in.Ordinal < 0 {
-		return Receipt{}, errors.New("a child ordinal is never negative")
+	if in.Ordinal < 1 || !validUUID(in.ParentID) {
+		return Receipt{}, ErrParent
 	}
-	if !validUUID(in.ParentID) || !validUUID(in.ConnectionID) {
+	if !validUUID(in.ConnectionID) {
 		return Receipt{}, ErrNotFound
 	}
 	if existing, err := s.childByOrdinal(ctx, in.ParentID, in.Ordinal); err == nil {
@@ -263,28 +287,38 @@ func (s *Store) StartChildRead(ctx context.Context, in ChildReadStart) (Receipt,
 	} else if !errors.Is(err, ErrNotFound) {
 		return Receipt{}, err
 	}
+	// The trigger refuses the same; this check names the refusal.
+	var composite bool
+	err := s.pool.QueryRow(ctx, `SELECT parent_id IS NULL AND tool = $2 AND status = 'pending' FROM receipts
+		WHERE id = $1`, in.ParentID, Composite).Scan(&composite)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !composite {
+		return Receipt{}, ErrParent
+	}
+	if err != nil {
+		return Receipt{}, err
+	}
 	requestID, _ := json.Marshal(map[string]any{
 		"kind": "brief_child", "parent_audit_id": in.ParentID, "ordinal": in.Ordinal})
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO receipts AS r (workspace_id, operation_id, parent_id, ordinal, principal_id, token_id,
 			tool, scope, requested_account, account_ref, connection_id, connection_generation, arguments,
-			request_id, lease_token, lease_expires_at)
+			request_id, brief_id, lease_token, lease_expires_at)
 		SELECT p.workspace_id, p.operation_id || '#' || $2::integer, p.id, $2::integer, p.principal_id,
 			p.token_id, $3, $4, coalesce($5, p.requested_account),
 			CASE WHEN $5::text IS NULL THEN p.account_ref
 			     ELSE (SELECT ref FROM accounts a WHERE a.workspace_id = p.workspace_id AND a.ref = $5) END,
-			c.id, c.generation, $6, $7, gen_random_uuid(), clock_timestamp() + make_interval(secs => $8)
+			c.id, c.generation, $6, $7, $10, gen_random_uuid(), clock_timestamp() + make_interval(secs => $8)
 		  FROM receipts p
 		  JOIN connections c ON c.workspace_id = p.workspace_id AND c.id = $9
 		 WHERE p.id = $1
 		ON CONFLICT (operation_id) DO NOTHING
 		RETURNING `+receiptColumns,
-		in.ParentID, in.Ordinal, in.Tool, nullable(in.Scope), requestedAccount(in.AccountRef), in.Arguments,
-		requestID, in.Lease.Seconds(), in.ConnectionID)
+		in.ParentID, in.Ordinal, in.Tool, nullable(in.Scope), requestedAccount(in.AccountRef),
+		string(in.Arguments), requestID, in.Lease.Seconds(), in.ConnectionID, nullable(in.BriefID))
 	r, err := scanReceipt(row)
 	switch {
-	case sqlState(err) == "GT006":
-		return Receipt{}, ErrParentFinished
+	case sqlState(err) == "GT006", sqlState(err) == "GT017":
+		return Receipt{}, ErrParent
 	case sqlState(err) == "GT012":
 		return Receipt{}, ErrWrongSource
 	case !errors.Is(err, ErrNotFound):
@@ -312,7 +346,8 @@ func (s *Store) replayChild(ctx context.Context, existing Receipt, in ChildReadS
 		requested = parent.RequestedAccount
 	}
 	if existing.Tool != in.Tool || existing.Scope != in.Scope || existing.ConnectionID != in.ConnectionID ||
-		existing.RequestedAccount != requested || !sameJSON(existing.Arguments, in.Arguments) {
+		existing.RequestedAccount != requested || existing.BriefID != in.BriefID ||
+		!sameJSON(existing.Arguments, in.Arguments) {
 		return Receipt{}, ErrOperationReused
 	}
 	if existing.Status != "pending" {
@@ -427,7 +462,7 @@ func (s *Store) settled(ctx context.Context, f ReceiptFinish, sourceRead bool) (
 	}
 	if (r.ConnectionID != "") != sourceRead {
 		if sourceRead {
-			return Receipt{}, errors.New("this receipt reads no source; finish it with FinishReceipt")
+			return Receipt{}, ErrNotSourceRead
 		}
 		return Receipt{}, ErrSourceRead
 	}
@@ -534,7 +569,7 @@ func (s *Store) FinishRead(ctx context.Context, receiptID, leaseToken string, re
 			return errNotPending
 		}
 		if connectionID == nil {
-			return errors.New("this receipt reads no source; finish it with FinishReceipt")
+			return ErrNotSourceRead
 		}
 		var current int64
 		// The share lock holds off a generation bump until this commits.

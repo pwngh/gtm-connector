@@ -21,6 +21,8 @@ var (
 	ErrProvenance = errors.New("a unit cites a read the card may not rest on")
 	// ErrProjection: the units and gaps are not exactly the card bytes' own.
 	ErrProjection = errors.New("the units and gaps differ from the card's bytes")
+	// ErrSealMismatch: the seal receipt is of another account or brief.
+	ErrSealMismatch = errors.New("the seal receipt names another account or brief")
 )
 
 // Card is a stored card: its bytes, their digest, and how it was sealed.
@@ -60,7 +62,9 @@ type Gap struct {
 type CardPublication struct {
 	WorkspaceID, AccountRef, BriefID string
 	// ParentReceiptID is the brief's receipt: every read a unit cites is its
-	// child. It may be the seal itself (a prepared brief).
+	// child. It may be the seal itself: a prepared brief's reads are the
+	// seal's children, and a CLI card's are top-level reads of BriefID by the
+	// seal's principal and token.
 	ParentReceiptID string
 	// PrincipalID, when set, must be the seal's principal. The actor is
 	// always the seal's principal; a seal without one is the local owner's.
@@ -76,8 +80,9 @@ type CardPublication struct {
 	Units []Unit
 	Gaps  []Gap
 	// ReadReceiptIDs are further reads the card rests on, beside those its
-	// units cite. Each must have finished ok, for the card's account, under
-	// the brief, at its connection's current generation.
+	// units cite, such as a denied read the card states. Each must have
+	// finished, for the card's account, under the brief, at its connection's
+	// current generation; a read a unit cites must have finished ok.
 	ReadReceiptIDs []string
 	ElapsedMS      float64
 }
@@ -122,8 +127,8 @@ func (s *Store) PublishCard(ctx context.Context, in CardPublication) (Card, erro
 			return errNotPending
 		case !leaseHeld:
 			return ErrLeaseLost
-		case account != in.AccountRef || brief != in.BriefID:
-			return errors.New("the seal receipt names another account or brief")
+		case account != in.AccountRef || brief != "" && brief != in.BriefID:
+			return ErrSealMismatch
 		}
 		refused, err = s.recheck(ctx, tx, in, principal)
 		if err != nil {
@@ -156,24 +161,37 @@ func (s *Store) PublishCard(ctx context.Context, in CardPublication) (Card, erro
 			Scan(&card.ID, &card.PublishedAt); err != nil {
 			return err
 		}
+		// One round trip for the projections.
+		batch := &pgx.Batch{}
 		for _, u := range in.Units {
-			if _, err := tx.Exec(ctx, `
+			batch.Queue(`
 				INSERT INTO evidence_units (workspace_id, card_id, n, kind, record_ref, tool, shown,
 					receipt_id, source_record_id, body)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 				in.WorkspaceID, card.ID, u.N, u.Kind, u.RecordRef, u.Tool, nullable(u.Shown),
-				nullable(u.ReceiptID), nullable(u.SourceRecordID), u.Body); err != nil {
+				nullable(u.ReceiptID), nullable(u.SourceRecordID), u.Body)
+		}
+		for i, g := range in.Gaps {
+			batch.Queue(`
+				INSERT INTO gaps (workspace_id, card_id, ordinal, code, disposition, count, by_role, text)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+				in.WorkspaceID, card.ID, i, g.Code, g.Disposition, g.Count, nullJSON(g.ByRole), g.Text)
+		}
+		results := tx.SendBatch(ctx, batch)
+		for _, u := range in.Units {
+			if _, err := results.Exec(); err != nil {
+				results.Close()
 				return fmt.Errorf("unit %d: %w", u.N, err)
 			}
 		}
-		for i, g := range in.Gaps {
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO gaps (workspace_id, card_id, ordinal, code, disposition, count, by_role, text)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-				in.WorkspaceID, card.ID, i, g.Code, g.Disposition, g.Count, nullJSON(g.ByRole),
-				g.Text); err != nil {
+		for _, g := range in.Gaps {
+			if _, err := results.Exec(); err != nil {
+				results.Close()
 				return fmt.Errorf("gap %s: %w", g.Code, err)
 			}
+		}
+		if err := results.Close(); err != nil {
+			return err
 		}
 		if err := s.at("publish:written"); err != nil {
 			return err
@@ -237,9 +255,12 @@ func (s *Store) recheck(ctx context.Context, tx pgx.Tx, in CardPublication, prin
 	if err := checkProjection(in.Bytes, in.Units, in.Gaps); err != nil {
 		return err, nil
 	}
+	// Each read, and whether a unit cites it.
 	reads := map[string]bool{}
 	for _, id := range in.ReadReceiptIDs {
-		reads[id] = true
+		if _, seen := reads[id]; !seen {
+			reads[id] = false
+		}
 	}
 	for _, u := range in.Units {
 		if u.ReceiptID != "" {
@@ -251,18 +272,25 @@ func (s *Store) recheck(ctx context.Context, tx pgx.Tx, in CardPublication, prin
 			return ErrProvenance, nil
 		}
 	}
-	for id := range reads {
+	for id, cited := range reads {
 		if !validUUID(id) {
 			return ErrProvenance, nil
 		}
+		var status string
 		var fits, current bool
+		// gtm_read_of_card, before the card exists.
 		err := tx.QueryRow(ctx, `
-			SELECT r.status = 'ok' AND r.account_ref IS NOT DISTINCT FROM $3 AND r.parent_id = $4,
+			SELECT r.status, coalesce(r.account_ref IS NOT DISTINCT FROM $3 AND (r.parent_id = $4
+			         OR (r.parent_id IS NULL AND $4 = $5 AND r.brief_id = $6
+			             AND r.principal_id IS NOT DISTINCT FROM s.principal_id AND r.token_id = s.token_id)), false),
 			       c.generation = r.connection_generation
-			  FROM receipts r JOIN connections c ON c.id = r.connection_id
+			  FROM receipts r
+			  JOIN connections c ON c.id = r.connection_id
+			  JOIN receipts s ON s.id = $5
 			 WHERE r.id = $1 AND r.workspace_id = $2
-			   FOR SHARE OF r, c`, id, in.WorkspaceID, in.AccountRef, in.ParentReceiptID).Scan(&fits, &current)
-		if errors.Is(err, pgx.ErrNoRows) || err == nil && !fits {
+			   FOR SHARE OF r, c`, id, in.WorkspaceID, in.AccountRef, in.ParentReceiptID, in.SealReceiptID,
+			in.BriefID).Scan(&status, &fits, &current)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && (!fits || status == "pending" || cited && status != "ok") {
 			return ErrProvenance, nil
 		}
 		if err != nil {
@@ -272,6 +300,10 @@ func (s *Store) recheck(ctx context.Context, tx pgx.Tx, in CardPublication, prin
 			return ErrSourceChanged, nil
 		}
 	}
+	// Each bound unit's record version is one its read bound, under its
+	// reference: one round trip for them all.
+	batch := &pgx.Batch{}
+	var bound []Unit
 	for _, u := range in.Units {
 		if u.SourceRecordID == "" {
 			continue
@@ -279,12 +311,18 @@ func (s *Store) recheck(ctx context.Context, tx pgx.Tx, in CardPublication, prin
 		if !validUUID(u.SourceRecordID) {
 			return ErrProvenance, nil
 		}
-		var ref string
-		err := tx.QueryRow(ctx, `
+		bound = append(bound, u)
+		batch.Queue(`
 			SELECT v.source || '/' || v.record_table || '/' || v.record_id
 			  FROM receipt_records b JOIN source_records v ON v.id = b.source_record_id
 			 WHERE b.workspace_id = $1 AND b.receipt_id = $2 AND b.source_record_id = $3`,
-			in.WorkspaceID, u.ReceiptID, u.SourceRecordID).Scan(&ref)
+			in.WorkspaceID, u.ReceiptID, u.SourceRecordID)
+	}
+	results := tx.SendBatch(ctx, batch)
+	defer results.Close()
+	for _, u := range bound {
+		var ref string
+		err := results.QueryRow().Scan(&ref)
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && ref != u.RecordRef {
 			return ErrProvenance, nil
 		}
@@ -292,7 +330,7 @@ func (s *Store) recheck(ctx context.Context, tx pgx.Tx, in CardPublication, prin
 			return nil, err
 		}
 	}
-	return nil, nil
+	return nil, results.Close()
 }
 
 // checkProjection requires the units and gaps to be exactly the card

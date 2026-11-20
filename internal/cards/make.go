@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,6 +114,9 @@ type Sealed struct {
 	Gaps    []evidence.Gap
 	Text    string
 }
+
+// rulesVersion is the version of the rules a card's text is made under.
+var rulesVersion = strconv.Itoa(evidence.SanitizerVersion)
 
 // The scopes the reads need.
 var scopes = map[string]string{"get_account": "crm:read", "list_opportunities": "crm:read",
@@ -357,8 +361,10 @@ func (m *Maker) publish(ctx context.Context, p receipts.Publication, units []evi
 // Brief is briefing.create_brief: the card a person asks for with brief or demo. Each read is its own
 // tool call, numbered as the CLI numbers its JSON-RPC requests; the save_brief receipt seals the card.
 type Brief struct {
-	Principal    Principal
-	OperationID  string // the same across retries of the command
+	Principal Principal
+	// OperationID is the same across retries of the command. The n-th read's operation is OperationID/n
+	// and the seal's OperationID/seal.
+	OperationID  string
 	AccountID    string
 	AsOf         string
 	IncludeSlack bool
@@ -376,7 +382,7 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	c, err := m.collect(ctx, plan(m.Sources, b.IncludeSlack), b.AccountID, p, time.Time{}, b.IncludeSlack,
 		func(n int, read planned) (receipts.Receipt, error) {
 			return m.Receipts.Start(ctx, receipts.Start{WorkspaceID: p.WorkspaceID,
-				OperationID: fmt.Sprintf("%s#%d", b.OperationID, n), PrincipalID: p.PrincipalID, TokenID: p.TokenID,
+				OperationID: fmt.Sprintf("%s/%d", b.OperationID, n), PrincipalID: p.PrincipalID, TokenID: p.TokenID,
 				Tool: read.tool, Scope: scopes[read.tool], AccountRef: b.AccountID,
 				ConnectionID: m.connection(read.system), Arguments: strictjson.NewObject("account_id", b.AccountID),
 				RequestID: receipts.RPC(n), BriefID: &id})
@@ -392,7 +398,7 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	if err != nil {
 		return nil, fmt.Errorf("brief %s rejected; no card published: %w", id, err)
 	}
-	seal, err := m.Receipts.Start(ctx, receipts.Start{WorkspaceID: p.WorkspaceID, OperationID: b.OperationID + "#seal",
+	seal, err := m.Receipts.Start(ctx, receipts.Start{WorkspaceID: p.WorkspaceID, OperationID: b.OperationID + "/seal",
 		PrincipalID: p.PrincipalID, TokenID: p.TokenID, Tool: "save_brief", AccountRef: b.AccountID,
 		Arguments: strictjson.NewObject("account_id", b.AccountID, "brief_id", id), RequestID: receipts.Null()})
 	if err != nil {
@@ -411,7 +417,7 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 		return nil, err
 	}
 	return m.publish(ctx, receipts.Publication{WorkspaceID: p.WorkspaceID, AccountRef: b.AccountID, BriefID: id,
-		PrincipalID: p.PrincipalID, Seal: seal.Ticket(), Kind: "card", SchemaVersion: 3, Bytes: []byte(encoded),
+		PrincipalID: p.PrincipalID, Seal: seal.Ticket(), Kind: "card", SchemaVersion: 3, RulesVersion: rulesVersion, Bytes: []byte(encoded),
 		Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c, receipts.Failed(500, "brief_save_failed"))
 }
 
@@ -516,7 +522,7 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 		return fail(ErrInvalidToken)
 	}
 	return m.publish(ctx, receipts.Publication{WorkspaceID: principal.WorkspaceID, AccountRef: accountID, BriefID: id,
-		PrincipalID: principal.PrincipalID, Seal: outer.Ticket(), Kind: "selected_brief", SchemaVersion: 3,
+		PrincipalID: principal.PrincipalID, Seal: outer.Ticket(), Kind: "selected_brief", SchemaVersion: 3, RulesVersion: rulesVersion,
 		Bytes: []byte(encoded), Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c,
 		receipts.Failed(200, "request_failed"))
 }

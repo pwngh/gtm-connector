@@ -27,6 +27,7 @@ func (p Principal) viewer() postgres.Viewer {
 
 // Store is the storage Evidence reads through.
 type Store interface {
+	ViewAccounts(ctx context.Context, v postgres.Viewer) ([]postgres.AccountView, error)
 	ViewAccountCards(ctx context.Context, v postgres.Viewer, accountRef string) ([]postgres.Card, error)
 	ViewCard(ctx context.Context, v postgres.Viewer, cardID string) (postgres.CardView, error)
 	ViewUnit(ctx context.Context, v postgres.Viewer, cardID string, n int) (postgres.Unit, *postgres.Receipt, string, error)
@@ -36,6 +37,11 @@ type Store interface {
 // Evidence is the read side of cards, units and receipts, with grants enforced.
 type Evidence struct {
 	Store Store
+}
+
+// Accounts lists the accounts the principal holds a live grant on.
+func (e Evidence) Accounts(ctx context.Context, p Principal) ([]postgres.AccountView, error) {
+	return e.Store.ViewAccounts(ctx, p.viewer())
 }
 
 // AccountCards lists an account's cards.
