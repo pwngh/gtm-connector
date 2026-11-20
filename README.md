@@ -186,7 +186,10 @@ The card shows what the records say, not whether a source is true.
   customers.
 - Authorization is a local owner emulator. The file owner can request every scope and edit the
   stores. Audit records are not tamper-proof. [Security review](SECURITY_REVIEW.md)
-- macOS and Linux. No web interface, hosted model, or multi-user mode.
+- macOS and Linux. No hosted model or multi-user mode.
+- `web/` is a browser-only prototype of the renewal workflow on invented data. It does not read the
+  connector, its state lives in the browser, and its reviews and approvals are demonstrations, not
+  authorization. Run it with `npm ci`, `npm test`, and `npm run dev` inside `web/`.
 
 More: [commands and output](docs/cli.md), [tools, scopes, and protocol](docs/tools.md),
 [Deal cards](docs/briefs.md), [audit](docs/audit.md),
