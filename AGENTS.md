@@ -68,9 +68,9 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 The goal is the renewal workflow: find what blocks a renewal in the evidence, turn it into reviewed
 work, and keep the history of what resolved it. No model writes text on a card.
 
-1. Write `tools/oracle/`. It runs the Python package at b7b29a1 on CPython 3.14.6 with clocks and
-   IDs fixed and records what Go must match: Unicode tables, scanner matches, every card the tests
-   build, and the seven commands' JSON output and exit codes. A Python fix regenerates its fixtures.
+1. The reference is `testdata/oracle/`, written by `tools/oracle/` from the Python package on
+   CPython 3.14.6 with clocks and IDs fixed. `tests/test_oracle_fixtures.py` fails when Python and
+   the fixtures disagree, so a Python fix regenerates its fixtures in the same PR.
 2. Build the parity skeleton: `cmd/gtm-connector`, with PostgreSQL in `compose.yaml`. Go reads the
    demo book under receipts; card text must match the oracle byte for byte, and units and gaps must
    match as values. Sign-in, grants, and a Host check come before any evidence is served, and MCP

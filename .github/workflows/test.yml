@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        python-version: ['3.11', '3.14']
+        python-version: ['3.11', '3.14.6']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,11 +51,11 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    # The suite starts a local server for each end-to-end case and takes about seven minutes here.
-    timeout-minutes: 15
+    # The suite starts a local server for each end-to-end case and takes up to fifteen minutes here.
+    timeout-minutes: 25
     strategy:
       matrix:
-        python-version: ['3.11', '3.14']
+        python-version: ['3.11', '3.14.6']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -64,6 +64,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: ./scripts/demo.sh
+        env:
+          GTM_REQUIRE_ORACLE: ${{ matrix.python-version == '3.14.6' && '1' || '' }}
 
   inspector:
     runs-on: ubuntu-latest
