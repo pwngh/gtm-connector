@@ -76,6 +76,7 @@ function SelectedItem({selection, headingRef, onClose, entryLink, returnTo, retu
     {kind === 'work-item' && <>
       <dl className="wl-facts"><div><dt>Action owner</dt><dd>{item.ownerLabel}</dd></div><div><dt>Waiting on</dt><dd>{item.waitingLabel}{item.waitingReason && <span className="wl-detail-line">{item.waitingReason}</span>}{item.waitingOn && <span className="wl-detail-line">{item.waitingOn.basis}</span>}</dd></div><div><dt>Due date</dt><dd>{item.dueLabel}{item.overdue && <span className="wl-detail-line wl-urgent">Overdue on the walkthrough clock</span>}</dd></div><div><dt>Work state</dt><dd>{item.statusLabel}</dd></div><div><dt>Next permitted action</dt><dd>{item.nextActionLabel}</dd></div><ChangeFact item={item}/></dl>
       <section className="wl-completion"><h3>What completes this item</h3><p>{item.completionRule}</p>{item.output && <p><strong>Recorded output: </strong>{item.output}</p>}</section>
+      {item.readinessAction && <Link className="wl-inline-link" to={worklistActionHref(item.readinessAction, returnTo)} state={returnState}>{item.readinessAction.label}<ArrowUpRight size={16}/></Link>}
       {item.requirementId && <div className="wl-context-link">{entryLink(`requirement:${item.requirementId}`, 'Inspect the linked requirement')}<p>Work-item completion does not resolve the requirement.</p></div>}
     </>}
     {blockedReasons.length > 0 && <section className="wl-blocked"><h3>Blocked, because</h3><ul>{blockedReasons.map(reason => <li key={`${reason.action}-${reason.code}`}>{reason.reason}</li>)}</ul></section>}

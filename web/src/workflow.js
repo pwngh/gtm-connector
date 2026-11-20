@@ -41,6 +41,7 @@ export function derive(state, reviewer = fixturePeople.internalReviewer) {
     isPlanApproved,
     isDocumentVerified,
     hasCustomerApproval,
+    customerReviewIsCurrent,
     isReviewerEligible,
     planReviewBlockedReason,
     canRequestReview: isReviewerEligible && ['draft', 'changes_requested'].includes(state.plan.status),

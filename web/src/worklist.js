@@ -112,6 +112,7 @@ function walkthroughWork(item, state, d, fixture) {
     ...ownerFields(owner), status, waitingOn, waitingReason, output, outputTimeLabel: output ? formatWorklistTime(outputAt) : null,
     planRevision: String(state.plan.revision), entryTargetId: `work-item-${item.id}`,
     workflowAction: command && !unavailable ? {command, label} : null,
+    readinessAction: item.readinessCheckId ? {id: 'inspect_readiness', label: 'Inspect this transition’s readiness', href: `${fixture.walkthrough.paths.root}/readiness?${new URLSearchParams({check: item.readinessCheckId})}`} : null,
     revision: revisionFor(state, events, item.revision), lastChangedAt: lastEvent(state, events)?.at || item.lastChangedAt,
     allowedActions, blockedReasons: reason ? [reason] : [],
     nextActionLabel: ['ready', 'waiting', 'complete'].includes(status) && allowedActions.length ? label : 'Inspect work item',
@@ -127,7 +128,7 @@ export function buildWorklist(state, fixture = worklistFixture) {
   const requirements = fixture.requirements.map(item => {
     const interactive = item.renewalId === walkthrough.renewalId;
     const status = interactive ? state.requirement.status : item.status;
-    const allowedActions = interactive ? [{id: 'open_requirement', label: status === 'resolved' ? 'Inspect resolution' : d.canResolveRequirement ? 'Review requirement resolution' : 'Inspect resolution criteria', intent: 'inspect', href: `${walkthrough.paths.workplan}?${new URLSearchParams({requirement: item.id})}`} ] : [];
+    const allowedActions = interactive ? [{id: 'open_requirement', label: 'Inspect requirement readiness', intent: 'inspect', href: `${walkthrough.paths.root}/readiness?${new URLSearchParams({requirement: item.id})}`} ] : [];
     return {
       ...item, status, kindLabel: requirementKinds[item.kind] || item.kind, selectionKey: keyFor('requirement', item.id),
       ...ownerFields(person(people, item.ownerId)),
