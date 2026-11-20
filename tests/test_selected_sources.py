@@ -667,6 +667,29 @@ class SelectedSalesforceTests(unittest.TestCase):
             self.assertEqual(reread["structuredContent"]["brief"]["text"], brief["text"])
             self.assertEqual(len(self.queries), before)
 
+    def test_a_selected_brief_names_the_sources_that_are_not_connected_and_reads_only_the_crm(self):
+        path = self.root / "selection.json"
+        path.write_text(json.dumps({"schema_version": 1, "accounts": [
+            {"account_id": "acc-sf-" + SF_ACCOUNT, "slack": False}]}))
+        os.chmod(path, 0o600)
+        selection = load_selection(path, crm_backend="salesforce")
+        with Runtime(self.root / "state", crm_reader=self.reader, selection=selection, calls_backend="none",
+                     slack_backend="none") as runtime, LocalClient(runtime.config) as owner:
+            token = owner.authorize(["crm:read", "calls:read", "slack:read"])
+            prepared = _result(owner.call(token, "prepare_renewal_brief",
+                                          {"account_id": "acc-sf-" + SF_ACCOUNT, "as_of": "2027-01-15"}))
+            self.assertFalse(prepared.get("isError"), prepared)
+            brief = prepared["structuredContent"]["brief"]
+            expected = {"crm": "salesforce", "calls": "not_connected", "slack": "not_connected"}
+            self.assertEqual(brief["sources"], expected)
+            self.assertIn("  Calls: not connected.", brief["text"].splitlines())
+            self.assertIn("  Slack: not connected.", brief["text"].splitlines())
+            reread = _result(owner.call(token, "read_renewal_brief", {"brief_id": brief["brief_id"]}))
+            self.assertEqual(reread["structuredContent"]["brief"]["sources"], expected)
+            tools = {row["tool"] for row in runtime.connector.audit.read()}
+        self.assertEqual(tools & {"get_account", "list_opportunities", "read_call_notes", "read_slack_messages"},
+                         {"get_account", "list_opportunities"})
+
     def test_a_row_past_a_full_selection_refuses_the_search_instead_of_saying_more_exist(self):
         selected = [f"001{number:012d}AAA" for number in range(100)]
         path = self.root / "selection.json"

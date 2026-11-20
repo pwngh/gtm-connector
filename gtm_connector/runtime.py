@@ -221,6 +221,83 @@ def check_folder(directory, *, demo_crm, calls_backend, slack_backend, slack_con
             _refuse_salesforce_state(directory)
 
 
+# What connect may leave in a folder it created and then could not connect.
+_CONNECT_FILES = ("server.lock", "profile.json", "sellers.json", "crm-connection.json", "calls-source.json")
+
+
+@contextmanager
+def changing_sources(directory):
+    """Hold the folder's state lock while the sources it is connected to change.
+
+    A running connector holds the same lock, so a folder being served refuses, and two changes never
+    interleave. A folder this creates is removed again when the change fails.
+    """
+    directory = _state_directory(directory)
+    if directory.is_symlink():
+        raise SourceIdentityError("The state folder must not be a symbolic link. Use a private --state-dir.")
+    created = not os.path.lexists(directory)
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    try:
+        descriptor = os.open(directory / "server.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "wb") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise StateInUseError("This state folder has a running connector or another command. "
+                                      "Stop it, then connect again.") from None
+            yield directory
+    except BaseException:
+        if created:
+            for name in _CONNECT_FILES:
+                (directory / name).unlink(missing_ok=True)
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        raise
+
+
+def pin_crm(directory, reader, *, calls_backend):
+    """Check a Salesforce connection's identity and pin it to the folder, as starting the services does, without
+    starting them. The caller holds the folder's lock."""
+    return _prepare_source_state(_state_directory(directory), reader, calls_backend=calls_backend)
+
+
+def held_sources(directory):
+    """The transcripts and Slack thread a folder has already read. Demo data never stands in for them."""
+    directory = _state_directory(directory)
+    held = {}
+    if any(os.path.lexists(directory / name) for name in ("calls-source.json", "imports.sqlite3")):
+        held["calls"] = {"provider": "imported"}
+    if any(os.path.lexists(directory / name) for name in ("slack-source.json", "slack-mappings.json")):
+        held["slack"] = {"provider": "slack"}
+    return held
+
+
+def demo_book(directory):
+    """The folder's own copy of the demo book, or None before its services have run. Nothing is written.
+
+    A folder pinned to Salesforce has no demo book, and the book must be the folder's own private file.
+    """
+    directory = _state_directory(directory)
+    if not os.path.lexists(directory):
+        return None
+    if directory.is_symlink():
+        raise SourceIdentityError("The state folder must not be a symbolic link. Use a private --state-dir.")
+    _refuse_salesforce_state(directory)
+    path = directory / "crm.sqlite3"
+    if not os.path.lexists(path):
+        return None
+    try:
+        _private_existing(path)
+        if path.lstat().st_nlink != 1:
+            raise ValueError
+    except (OSError, ValueError):
+        raise SourceIdentityError("The folder's CRM database must be its own private file, not a link. "
+                                  "Use a fresh --state-dir.") from None
+    return path
+
+
 def _prepare_source_state(directory, reader, *, calls_backend="fixture"):
     """Validate both source selections before publishing either marker or source data."""
     path = directory / "crm-connection.json"

@@ -19,8 +19,8 @@ demo for invented data."
 
 | Command | What it does |
 | --- | --- |
-| `connect demo` | Every source is the invented demo data. Nothing is contacted. |
-| `connect salesforce --org ALIAS` | Reads the `sf` login of that alias, checks the org's identity and environment, pins them to the folder, and saves the alias and environment. `--environment sandbox` or `production` replaces the default, `developer`. Calls and Slack start not connected. See [Salesforce](salesforce.md). |
+| `connect demo` | The invented demo data, for every source the folder has not already read for real: transcripts or a Slack thread the folder holds stay connected. Nothing is contacted. |
+| `connect salesforce --org ALIAS` | Reads the `sf` login of that alias, checks the org's identity and environment, pins them to the folder, and saves the alias and environment. It starts no services and reads no record. `ALIAS` is an `sf` alias, never a username. `--environment sandbox` or `production` replaces the default, `developer`. Calls and Slack start not connected. See [Salesforce](salesforce.md). |
 | `connect calls` | Connects imported call transcripts. Add files with `calls import`. See [calls](calls.md). |
 | `connect slack` | Connects the Slack sign-in saved in the folder by `slack connect`. Without one it exits `2` and names that command. See [Slack](slack.md). |
 | `connect status`, or `connect` alone | Lists `crm`, `calls`, and `slack` as connected or not connected, with the org alias and environment for Salesforce. It reads only `profile.json`. |
@@ -37,6 +37,9 @@ demo for invented data."
 - `--seller NAME` with `salesforce`, `calls`, or `slack` lists a seller's name or Slack user ID.
   Repeat it for each seller. The list replaces the saved one, and a connect without `--seller`
   keeps it. See [roles](briefs.md).
+- `connect` changes the profile while it holds the folder's lock. A folder that `serve` or another
+  command is using refuses with exit `1` until it is free. A `connect` that fails leaves the profile
+  as it was, and removes a folder it created.
 - `profile.json` holds the provider of each source and, for Salesforce, the alias and environment.
   It holds no credential, org ID, or address.
 - A folder keeps the sources it first read. Demo data that was read cannot become Salesforce or
@@ -78,7 +81,7 @@ demo for invented data."
 | `trace BRIEF_ID NUMBER` | One number on a saved card, resolved from its stored evidence: object with `brief_id`, `account_id`, `n`, `kind` (`"record"` or `"sentence"`), `source`, `record_ref`, and `receipt` (`audit_id`, `tool`, `status`, `http_status`). A record adds `fields`. A sentence adds `text`, `speaker`, `role`, `basis`, `contact`, `at`, `partial`, `shown`, `span`, `raw_sha256`, and `sanitizer_version`. An unknown brief, a number that is not on the card, a card saved before sealing, or a file that is not the one its seal receipt names exits `2`. |
 | `audit` | Array of receipts in stored order. `--follow` prints one JSON line per changed receipt until Ctrl-C, which exits `130`. See [audit](audit.md). |
 | `demo` | One law-firm renewal on invented data. Object with `schema_version: 2`, `status: "accepted"`, `workflow: "renewal-demo"`, `data_mode: "demo"`, `sources` (each `"demo_fixture"`), `account`, `lookup` (`query`, `matches`, `receipt_id`), `denied_read` (`read_call_notes`, status `403`, required scope `calls:read`), `brief` (`brief_id`, `account_id`, `as_of`, `text`, `units`, and `gaps`, copied from the saved artifact), `audit` (`run_id`, `rows: 7`), and `activities_created: 0`. Each run adds one saved card and seven receipts, the last of which seals the card, and creates no activity. An older or edited book in the folder exits `4`. |
-| `verify` | Object with the connector checks, `briefs`, receipt counts, and `injection_brief`. `--with-slack` adds `slack` and `workflow`. See [tools](tools.md). |
+| `verify` | Object with the connector checks, `briefs`, receipt counts, and `injection_brief`. `--with-slack` adds `slack` and `workflow`. It runs on invented data, in a folder that is connected to nothing or to the demo data only. See [tools](tools.md). |
 | `serve` | One `ready` line, then one `tool_call` line per tool attempt. See the server output below. |
 | `connect status` | Object with `schema_version: 1` and `sources`, the `sources` object of `profile.json`: each of `crm`, `calls`, and `slack` that is connected, with its `provider` (`"demo"`, `"salesforce"`, `"imported"`, or `"slack"`) and, for Salesforce, `org` and `environment`. |
 | `connect demo`, `salesforce`, `calls`, `slack` | The same object with `provider`, the name given, and `status`: `"connected"`, `"removed"`, or `"not_connected"` when `--remove` named a source that was not connected. |

@@ -54,6 +54,15 @@ class SourceStateTests(unittest.TestCase):
         return {str(path.relative_to(self.state)): path.read_bytes()
                 for path in self.state.rglob("*") if path.is_file() and path.name != "server.lock"}
 
+    def test_the_files_a_removed_source_leaves_do_not_make_the_running_connector_unreadable(self):
+        from gtm_connector.doctor import load_local_owner
+        with Runtime(self.state, crm_reader=InventedReader(), calls_backend="imported"):
+            pass
+        self.assertTrue((self.state / "calls-source.json").exists())
+        # Calls removed beside Salesforce: the imports stay, and the connector started without them is usable.
+        with Runtime(self.state, crm_reader=InventedReader(), calls_backend="none"):
+            self.assertEqual(load_local_owner(self.state)["calls_backend"], "none")
+
     def test_pin_precedes_sources_and_survives_same_identity_with_another_alias(self):
         reader = InventedReader()
         from gtm_connector import store

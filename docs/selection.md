@@ -40,7 +40,10 @@ neutralized text, speaker, and role. The units hold more than the card prints: e
 was read, shown or not, and for a transcript the cues it lies in and their times. A caller with
 `calls:read` receives those. Each read inside it writes its own receipt, linked to the outer call by
 `{"kind": "brief_child", "parent_audit_id": ..., "ordinal": N}`. A successful brief has one outer
-receipt and three read receipts, or four with Slack. The reads write no `serve` event lines.
+receipt and one read receipt for each source read: the account and its opportunities, then calls
+and Slack when they are connected and Slack is selected for the account. A source that is not
+connected is never called, and the card and `sources` name it as not connected. The reads write no
+`serve` event lines.
 
 - Preparing a brief has 45 seconds. Writing the final receipt and sending the response come after
   that check. A read already in progress keeps its own limit, 20 seconds for Salesforce and live

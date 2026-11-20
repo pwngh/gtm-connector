@@ -45,8 +45,10 @@ fixture set is rejected, and so are a combined CRM and calls database and a data
 currency, speaker, or file-count column. Nothing is migrated, so use a fresh `--state-dir`.
 
 In a folder connected to the demo data, `accounts --query 'Alder Vale'` and `account acc-003` read
-`crm.sqlite3` in the state folder directly, outside MCP authorization, and the first read writes the
-demo book there. The account view leaves out opportunities and call notes. In a folder connected to
+the demo book directly, outside MCP authorization: the folder's own `crm.sqlite3` once its services
+have run, and otherwise a copy in memory, so reading accounts writes nothing. A book that is a link,
+or a folder pinned to Salesforce, is refused. The account view leaves out opportunities and call
+notes. In a folder connected to
 Salesforce, `accounts` and `account` read through the scoped, audited gateway instead.
 
 ## Run the guarantee checks

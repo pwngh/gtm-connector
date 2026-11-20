@@ -7,6 +7,7 @@ import argparse
 import difflib
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import shlex
@@ -116,7 +117,9 @@ class ParserError(ValueError):
 
 class Parser(argparse.ArgumentParser):
     def error(self, message):
-        raise ParserError(message)
+        # A value that is not one of the choices is not repeated back: it may be a URL or a username.
+        raise ParserError(re.sub(r"invalid choice: .*? \(choose from", "invalid choice (choose from", message,
+                                 flags=re.DOTALL))
 
 
 def _state_option(command, default=STATE_DIR):
@@ -643,6 +646,9 @@ def _run_slack_source(args):
     from time import monotonic
     from .slack_mapping import SlackMappingError, parse_thread_selection, save_slack_mapping, slack_identity_binding
     progress = _slack_source_progress(args)
+    if _connected(args)["slack_backend"] != "slack":
+        raise profile.ProfileError("Slack is not connected. Run gtm-connector slack connect to sign in, "
+                                   "then gtm-connector connect slack.")
     if args.action == "check":
         if re.fullmatch(r"acc-(?:[0-9]{3}|sf-[A-Za-z0-9]{18})", args.account) is None:
             raise SlackMappingError("slack_selection_invalid")
@@ -652,9 +658,6 @@ def _run_slack_source(args):
         return run_slack_check(args.state_dir, connection_dir=_slack_connection(args),
                                account_id=args.account, progress=progress)
     started = monotonic()
-    if _connected(args)["slack_backend"] != "slack":
-        raise profile.ProfileError("Slack is not connected. Run gtm-connector slack connect to sign in, "
-                                   "then gtm-connector connect slack.")
     selection = _slack_map_arguments(args)
     from .slack_auth import SlackAuthError, inspect_slack_connection
     connection = inspect_slack_connection(_slack_connection(args))
@@ -866,43 +869,53 @@ def _run_connect(args):
         from .connections import connect
         return connect(args.state_dir, args.provider, args.scope, transport=args.transport or "http",
                        config_file=args.config_file)
-    sources = profile.load(args.state_dir)
     if args.provider == "status":
-        return {"schema_version": 1, "sources": sources}
+        return {"schema_version": 1, "sources": profile.load(args.state_dir)}
     kind, provider, _ = PROVIDERS[args.provider]
-    if args.remove:
-        attached = sources.get(kind, {}).get("provider") == provider
-        if attached:
+
+    def result(status, sources):
+        return {"schema_version": 1, "provider": args.provider, "status": status, "sources": sources}
+
+    if args.remove and profile.load(args.state_dir).get(kind, {}).get("provider") != provider:
+        # Nothing to detach, so the folder is left as it is.
+        return result("not_connected", profile.load(args.state_dir))
+    from .runtime import changing_sources, held_sources, pin_crm, save_sellers, valid_sellers
+    source = {"provider": provider}
+    if not args.remove:
+        if args.seller is not None and not valid_sellers(args.seller):
+            raise ValueError("Name at most 200 sellers with --seller, each a name or Slack ID of 1 to 200 characters.")
+        if provider == "salesforce":
+            if args.org is None or "@" in args.org:
+                raise ValueError("connect salesforce needs --org ALIAS, the alias of an org signed in with "
+                                 "sf org login web --alias ALIAS. A username is not an alias.")
+            source.update(org=args.org, environment=args.environment or "developer")
+    with changing_sources(args.state_dir):
+        # Read under the lock: the profile is changed by one command at a time.
+        sources = profile.load(args.state_dir)
+        if args.remove:
+            if sources.get(kind, {}).get("provider") != provider:
+                return result("not_connected", sources)
             sources = profile.removed(sources, kind)
             if kind in sources:
                 # Beside the demo CRM a removed source is demo data again, which the folder may already rule out.
                 _use(args, sources)
                 _check_folder(args)
             profile.save(args.state_dir, sources)
-        return {"schema_version": 1, "provider": args.provider, "status": "removed" if attached else "not_connected",
-                "sources": sources}
-    from .runtime import save_sellers, valid_sellers
-    if args.seller is not None and not valid_sellers(args.seller):
-        raise ValueError("Name at most 200 sellers with --seller, each a name or Slack ID of 1 to 200 characters.")
-    source = {"provider": provider}
-    if provider == "salesforce":
-        if args.org is None:
-            raise ValueError("connect salesforce needs --org ALIAS, the alias of an org signed in with "
-                             "sf org login web --alias ALIAS.")
-        source.update(org=args.org, environment=args.environment or "developer")
-    sources = profile.merged(sources, kind, source)
-    profile.check(sources)
-    _use(args, sources)
-    if provider == "salesforce":
-        # The org's identity and environment are checked and pinned to the folder before the profile names it.
-        with _runtime(args, _salesforce_reader(args)):
-            pass
-    else:
+            return result("removed", sources)
+        sources = profile.merged(sources, kind, source)
+        if provider == "demo":
+            # Transcripts or a Slack thread the folder already read stay connected beside the demo CRM.
+            sources.update(held_sources(args.state_dir))
+        profile.check(sources)
+        _use(args, sources)
         _check_folder(args)
-    profile.save(args.state_dir, sources)
-    if args.seller is not None:
-        save_sellers(args.state_dir, args.seller)
-    return {"schema_version": 1, "provider": args.provider, "status": "connected", "sources": sources}
+        if provider == "salesforce":
+            # The org's identity and environment are checked and pinned to the folder before the profile names it.
+            pin_crm(args.state_dir, _salesforce_reader(args), calls_backend=args.calls_backend)
+        if args.seller is not None:
+            save_sellers(args.state_dir, args.seller)
+        profile.save(args.state_dir, sources)
+    return result("connected", sources)
 
 
 def _calls_arguments(args):
@@ -1088,7 +1101,10 @@ def _run(args, argv):
     if args.command == "mcp":
         # stdout carries only MCP messages from here on; diagnostics go to stderr.
         from .stdio_bridge import run_bridge
-        run_bridge(args.state_dir, args.scope, _connected(args))
+        sources = _connected(args)
+        if args.crm_backend == "salesforce":
+            sources["sf_environment"] = args.sf_environment
+        run_bridge(args.state_dir, args.scope, sources)
         return None
     # Dependencies belong to the command that uses them, after help is handled.
     reads_sources = (args.command in ("serve", "brief", "accounts", "account")
@@ -1168,6 +1184,8 @@ def _run(args, argv):
         return result
     if args.command == "verify":
         from .verification import run as run_verification
+        if profile.load(args.state_dir) not in ({}, profile.DEMO):
+            raise profile.ProfileError("This folder is connected to other sources. Give verify its own --state-dir.")
         return run_verification(args.state_dir, include_slack=args.with_slack)
     if args.command == "serve":
         from queue import Empty, SimpleQueue
@@ -1221,12 +1239,12 @@ def _run(args, argv):
         return None
     from contextlib import closing
     from . import store
-    path = args.state_dir / "crm.sqlite3"
+    from .runtime import demo_book
     # A folder whose services have run holds its own copy of the demo book. Before that the book is read from
     # memory, so reading accounts leaves nothing in the folder that could rule out a source connected later.
-    held = os.path.lexists(path)
-    with closing(store.connect(path if held else ":memory:", readonly=held)) as connection:
-        if not held:
+    path = demo_book(args.state_dir)
+    with closing(store.connect(":memory:" if path is None else path, readonly=path is not None)) as connection:
+        if path is None:
             store.initialize(connection)
             store.seed(connection)
         if args.command == "accounts":
@@ -1311,7 +1329,12 @@ def _failure(exc, args):
             message = (f"source_identity_mismatch: {message} "
                        f"{again} with --state-dir {shlex.quote(str(fresh))}. Existing files are retained.")
     if "audit database not found" in message:
-        next_command = f"gtm-connector demo --state-dir {shlex.quote(str(args.state_dir))}"
+        try:
+            demo_folder = profile.load(args.state_dir) in ({}, profile.DEMO)
+        except profile.ProfileError:
+            demo_folder = False
+        next_command = (f"gtm-connector demo --state-dir {shlex.quote(str(args.state_dir))}" if demo_folder
+                        else "gtm-connector brief --help")
     elif "account not found" in message:
         next_command = ("gtm-connector accounts --help" if command == "calls" or
                         getattr(args, "crm_backend", None) == "salesforce" else

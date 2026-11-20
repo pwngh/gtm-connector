@@ -129,17 +129,21 @@ class SlackSourceCLITests(unittest.TestCase):
         crm.assert_not_called()
         self.assertEqual(self.files(), {"profile.json"})
 
-    def test_a_map_needs_slack_connected_in_the_profile_before_credentials_or_state(self):
+    def test_a_map_or_a_check_needs_slack_connected_in_the_profile_before_credentials_or_state(self):
+        check = ("slack", "check", "--state-dir", str(self.state), "--account", "acc-003")
         with patch("gtm_connector.slack_auth.inspect_slack_connection", side_effect=AssertionError("No credentials")), \
+                patch("gtm_connector.slack_workflow.run_slack_check", side_effect=AssertionError("No thread read")), \
                 patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")):
-            detail = self.failure(self.map(), 2)
-            self.assertEqual(detail["message"], str(profile.NotConnected()))
-            self.assertFalse(self.state.exists())
+            for attempt in (self.map, lambda: self.invoke(*check)):
+                detail = self.failure(attempt(), 2)
+                self.assertEqual(detail["message"], str(profile.NotConnected()))
+                self.assertFalse(self.state.exists())
             profile.save(self.state, profile.DEMO)
-            detail = self.failure(self.map(), 2)
-        self.assertIn("Slack is not connected.", detail["message"])
-        self.assertIn("gtm-connector connect slack", detail["message"])
-        self.assertEqual(detail["next"], "gtm-connector connect --help")
+            for attempt in (self.map, lambda: self.invoke(*check)):
+                detail = self.failure(attempt(), 2)
+                self.assertIn("Slack is not connected.", detail["message"])
+                self.assertIn("gtm-connector connect slack", detail["message"])
+                self.assertEqual(detail["next"], "gtm-connector connect --help")
         self.assertEqual(self.files(), {"profile.json"})
 
     def test_connected_slack_whose_sign_in_is_gone_refuses_and_never_reads_demo_messages(self):
@@ -335,6 +339,7 @@ class SlackSourceCLITests(unittest.TestCase):
             self.assertNotIn(value, out + err)
 
     def test_completed_check_passes_report_through_and_failed_report_exits_four(self):
+        self.connected()
         names = ("private_state", "mapping", "credential_binding", "thread_read", "receipt")
         report = {"schema_version": 1, "status": "passed", "crm_access_checked": False,
                   "calls_access_checked": False, "duration_ms": 2.5, "api_calls": 1, "response_bytes": 100,
@@ -365,9 +370,10 @@ class SlackSourceCLITests(unittest.TestCase):
             self.assertEqual([row["progress"]["step"] for row in events[:2]], ["private_state", "thread_read"])
             if expected == 4:
                 self.assertEqual(events[-1]["error"]["code"], "check_failed")
-        self.assertFalse(self.state.exists())
+        self.assertEqual(self.files(), {"profile.json"})
 
     def test_source_errors_and_interrupt_do_not_inherit_auth_or_calls_recovery(self):
+        self.connected()
         from gtm_connector.runtime import SourceIdentityError
         from gtm_connector.slack_mapping import SlackMappingError
         for error, expected, text in ((SlackMappingError("slack_mapping_missing"), 3, "slack map"),

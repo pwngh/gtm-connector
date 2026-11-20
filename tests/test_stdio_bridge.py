@@ -241,6 +241,23 @@ class StdioBridgeTests(unittest.TestCase):
             self.assertEqual(runtime.connector.authority.tokens, {})
 
 
+    def test_the_bridge_refuses_a_connector_serving_another_salesforce_environment(self):
+        from unittest.mock import patch
+        from gtm_connector.cli import main
+        from gtm_connector.stdio_bridge import BridgeError, run_bridge
+        backends = {"crm_backend": "salesforce", "calls_backend": "none", "slack_backend": "none"}
+        owner = {**backends, "sf_environment": "developer"}
+        with patch("gtm_connector.doctor.load_local_owner", return_value=owner):
+            with self.assertRaisesRegex(BridgeError, "sources changed"):
+                run_bridge(self.state, ["crm:read"], {**backends, "sf_environment": "production"})
+        # The command passes the environment the profile names, so a changed profile is noticed.
+        profile.save(self.state, {"crm": {"provider": "salesforce", "org": "invented-alias",
+                                          "environment": "production"}})
+        with patch("gtm_connector.stdio_bridge.run_bridge") as bridge:
+            self.assertEqual(main(["mcp", "stdio", "--scope", "crm:read", "--state-dir", str(self.state)]), 0)
+        self.assertEqual(bridge.call_args.args[2], {**backends, "sf_environment": "production"})
+
+
 class GrantTests(unittest.TestCase):
     def test_a_refused_token_that_another_call_already_replaced_is_not_renewed_again(self):
         from gtm_connector.stdio_bridge import Grant

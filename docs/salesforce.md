@@ -24,7 +24,7 @@ gtm-connector serve
 
 | Option | Meaning |
 | --- | --- |
-| `connect salesforce --org ALIAS` | Reads credentials from this signed-in `sf` alias, checks the org, and saves the alias and environment in the folder's `profile.json`. `accounts`, `account`, `brief`, `serve`, `calls import`, and `slack map` then read that org with no further option. |
+| `connect salesforce --org ALIAS` | Reads credentials from this signed-in `sf` alias, checks the org's identity and environment, pins them to the folder, and saves the alias and environment in the folder's `profile.json`. It starts no services and reads no record. `accounts`, `account`, `brief`, `serve`, `calls import`, and `slack map` then read that org with no further option. An alias is never a username. |
 | `--environment` | `developer` (the default): OrganizationType is Developer Edition and IsSandbox is false. `sandbox`: IsSandbox is true. `production`: IsSandbox is false and OrganizationType is not Developer Edition. Missing or malformed metadata refuses. Sandbox and production also require that the four objects are queryable and expose the mapped fields. |
 | `--seller NAME` | Lists a seller's name or Slack user ID for [speaker roles](briefs.md). Repeat it for each. |
 | `--remove` | Detaches Salesforce, with its calls and Slack. The folder's files stay. |

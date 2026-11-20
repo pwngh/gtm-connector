@@ -173,10 +173,22 @@ print(json.dumps({{"status": 0, "result": result}}))
             created.append(Path(directory.name))
             return directory
 
+        from gtm_connector import briefing
+        built, real_create_brief = [], briefing.create_brief
+
+        def create_brief(*args, **kwargs):
+            brief = real_create_brief(*args, **kwargs)
+            built.append((brief["sources"], [row["tool"] for row in brief["evidence"]["receipts"]]))
+            return brief
+
         with patch("gtm_connector.salesforce_check.TemporaryDirectory", side_effect=temporary), \
+                patch("gtm_connector.briefing.create_brief", side_effect=create_brief), \
                 redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
             report = run_check(sf_org=ALIAS, as_of=AS_OF, adapter_factory=self.adapter,
                                progress=lambda *event: progress.append(event))
+        # The card is built from the org alone: calls are not connected, and no demo calls are read beside it.
+        self.assertEqual(built, [({"crm": "salesforce", "calls": "not_connected"},
+                                  ["get_account", "list_opportunities"])])
         self.assertEqual(stdout.getvalue(), "")
         self.assertEqual(stderr.getvalue(), "")
         self.assert_report(report)

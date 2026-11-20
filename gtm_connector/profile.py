@@ -20,7 +20,7 @@ KINDS = ("crm", "calls", "slack")
 # The Slack sign-in of a state folder is saved in this folder inside it.
 SLACK_CONNECTION = "slack-connection"
 DEMO = {kind: {"provider": "demo"} for kind in KINDS}
-_ALIAS = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,79}\Z")
+_ALIAS = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
 _PROVIDERS = {"crm": ("demo",), "calls": ("demo", "imported"), "slack": ("demo", "slack")}
 
 
@@ -71,8 +71,9 @@ def load(directory) -> dict:
         raise ProfileError("profile.json cannot be opened. It must be a regular file, not a link.") from None
     try:
         info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise ProfileError("profile.json must be a private regular file that you own.")
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
+                or info.st_nlink != 1):
+            raise ProfileError("profile.json must be a private regular file that you own, with no other link.")
         document = os.read(descriptor, 4097)
     finally:
         os.close(descriptor)
@@ -81,7 +82,8 @@ def load(directory) -> dict:
     except (ValueError, RecursionError):
         profile = None
     if (len(document) > 4096 or not isinstance(profile, dict) or set(profile) != {"schema_version", "sources"}
-            or profile["schema_version"] != 1 or not _valid(profile["sources"])):
+            or type(profile["schema_version"]) is not int or profile["schema_version"] != 1
+            or not _valid(profile["sources"])):
         raise ProfileError("profile.json is not a profile this version wrote. Reconnect in a fresh --state-dir.")
     return profile["sources"]
 
@@ -89,7 +91,7 @@ def load(directory) -> dict:
 def check(sources) -> None:
     if not _valid(sources):
         raise ProfileError("These sources cannot be connected together. Beside Salesforce a source is real or "
-                           "not connected, and an org alias holds only letters, digits, and . _ @ -")
+                           "not connected, and an org alias holds only letters, digits, and . _ -")
 
 
 def save(directory, sources) -> None:

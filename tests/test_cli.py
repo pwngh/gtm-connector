@@ -110,7 +110,9 @@ class CLITests(unittest.TestCase):
         self.assertEqual(sum(row["status"] == "error" for row in all_rows), 6)
 
     def test_accounts_past_one_hundred_matches_show_the_first_hundred_and_say_so(self):
-        self.assertEqual(len(self.json_result(self.run_cli("accounts"))), 30)  # The first read writes the demo book.
+        self.assertEqual(len(self.json_result(self.run_cli("accounts"))), 30)
+        # A card's services write the folder's own book. accounts then reads that book.
+        self.json_result(self.run_cli("brief", "acc-003"))
 
         def add(rows):
             with closing(sqlite3.connect(self.database)) as connection, connection:

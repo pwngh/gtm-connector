@@ -97,7 +97,8 @@ def _validate_sources(directory, owner):
                 raise ValueError
         except Exception:
             raise ValueError("Slack source state is invalid. Run gtm-connector doctor.") from None
-    elif any(os.path.lexists(directory / name) for name in ("slack-source.json", "slack-mappings.json")):
+    elif owner["slack_backend"] == "fixture" and any(
+            os.path.lexists(directory / name) for name in ("slack-source.json", "slack-mappings.json")):
         raise ValueError("Slack source selection is invalid. Run gtm-connector doctor.")
     if owner["calls_backend"] == "imported":
         from .runtime import _inspect_import_state
@@ -107,7 +108,8 @@ def _validate_sources(directory, owner):
                 raise ValueError
         except Exception:
             raise ValueError("Imported calls state is invalid. Run gtm-connector doctor.") from None
-    elif any(os.path.lexists(directory / name) for name in ("calls-source.json", "imports.sqlite3")):
+    elif owner["calls_backend"] == "fixture" and any(
+            os.path.lexists(directory / name) for name in ("calls-source.json", "imports.sqlite3")):
         raise ValueError("Calls source selection is invalid. Run gtm-connector doctor.")
 
 

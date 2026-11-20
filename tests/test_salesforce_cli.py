@@ -152,7 +152,9 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual(len(self.requests), 1)
         self.assertIn(" FROM Organization ", self.requests[0].url.params["q"])
         self.assertEqual(json.loads((self.state / "crm-connection.json").read_text())["organization_id"], ORG_ID)
-        self.assertEqual(read_audit(self.state / "audit.sqlite3"), [])
+        # connect starts no services: the folder holds the profile, the seller list, the pin, and the lock.
+        self.assertEqual({path.name for path in self.state.iterdir()},
+                         {"profile.json", "sellers.json", "crm-connection.json", "server.lock"})
         code, out, err, _ = self.invoke(["connect", "status"], connect=False)
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(out, f"crm\tconnected\tSalesforce org alias {ALIAS} (developer)\n"
@@ -190,6 +192,8 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual((code, out), (3, ""))
         self.assertIn("salesforce_environment_mismatch", json.loads(err)["error"]["message"])
         self.assert_private(err)
+        # A connect that fails in a folder it created leaves no folder behind.
+        self.assertFalse(self.state.exists())
         with patch.dict(os.environ, self.env, clear=True), \
                 patch.object(SalesforceReadOnlyAdapter, "from_sf",
                              side_effect=SalesforceReadError("salesforce_auth_required")), \
@@ -200,8 +204,7 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertIn("salesforce_auth_required", error["message"])
         self.assertEqual(error["next"], "gtm-connector salesforce check --help")
         self.assert_private(err.getvalue())
-        for name in ("profile.json", "sellers.json", "crm-connection.json", "audit.sqlite3"):
-            self.assertFalse((self.state / name).exists(), name)
+        self.assertFalse(self.state.exists())
 
     def test_connect_without_the_sf_cli_fails_before_creating_state(self):
         empty = self.root / "empty-path"

@@ -173,7 +173,7 @@ def run_bridge(directory, scopes, sources) -> None:
     except (OSError, ValueError):
         raise BridgeError("No running connector state was found in this folder. "
                           "Start gtm-connector serve with the same --state-dir first.") from None
-    if any(owner[name] != backend for name, backend in sources.items()):
+    if any(owner.get(name) != value for name, value in sources.items()):
         raise BridgeError("The running connector was started before this folder's sources changed. "
                           "Start gtm-connector serve again, then restart this client.")
     bridge = Bridge(owner, scopes).start()

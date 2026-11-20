@@ -206,7 +206,8 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
         from .briefing import create_brief
         from .runtime import Runtime
         with TemporaryDirectory(prefix="gtm-salesforce-check-") as temporary:
-            with Runtime(Path(temporary) / "state", crm_reader=state["reader"]) as runtime:
+            with Runtime(Path(temporary) / "state", crm_reader=state["reader"], calls_backend="none",
+                         slack_backend="none") as runtime:
                 result = create_brief(runtime, state["account_id"], as_of=as_of)
                 if not any(row["record_ref"].startswith("crm/contracts/") and (row["end_date"] or "") >= as_of
                            for row in result["evidence"]["records"]):

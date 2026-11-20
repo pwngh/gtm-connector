@@ -164,7 +164,8 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
         raise ToolError("brief_evidence_invalid") from None
     if time.monotonic() >= invocation.deadline:
         raise ToolError("brief_deadline_exceeded")
-    sources = source_names(connector.crm_backend, context.calls_backend, context.slack_backend, include_slack)
+    sources = source_names(connector.crm_backend, context.calls_backend, context.slack_backend,
+                           include_slack or not with_slack)
     artifact = {
         "kind": "selected_brief", "schema_version": 3, "brief_id": brief_id, "account_id": account_id,
         "as_of": as_of,

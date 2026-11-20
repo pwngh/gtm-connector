@@ -102,3 +102,14 @@ class ProfileTests(unittest.TestCase):
         path.symlink_to(self.state / "elsewhere.json")
         with self.assertRaisesRegex(profile.ProfileError, "not a link"):
             profile.load(self.state)
+        path.unlink()
+        path.write_bytes(written)
+        os.chmod(path, 0o600)
+        os.link(path, self.state / "second-name.json")
+        with self.assertRaisesRegex(profile.ProfileError, "no other link"):
+            profile.load(self.state)
+        (self.state / "second-name.json").unlink()
+        for version in (b"true", b"1.0", b"1e0"):
+            path.write_bytes(written.replace(b'"schema_version": 1', b'"schema_version": ' + version))
+            with self.subTest(version=version), self.assertRaisesRegex(profile.ProfileError, "not a profile"):
+                profile.load(self.state)
