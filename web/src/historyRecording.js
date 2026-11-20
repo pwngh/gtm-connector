@@ -1,7 +1,8 @@
 import {readinessFixture} from './renewalFixtures.js';
+import {workflowEvidence} from './evidenceChecks.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
-const resources = ['plan', 'document', 'customerReview', 'requirement', 'requirements', 'task', 'commercial'];
+const resources = ['plan', 'document', 'customerReview', 'evidence', 'requirement', 'requirements', 'task', 'commercial'];
 const text = value => typeof value === 'string' && value.trim() ? value.trim() : null;
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
@@ -73,8 +74,8 @@ export function recordHistoryInputs(before, patch, action, recordingId) {
     && fieldValue(after, field) === fieldValue(before, field)));
   const supplied = {
     approve_plan: ['plan.approver', action.approver], verify_document: ['document.verifiedBy', action.verifiedBy],
-    request_customer_review: ['customerReview.requestedBy', null], record_customer_approval: ['customerReview.recordedBy', action.recordedBy],
-    request_changes: ['plan.reviewNote', action.note],
+    request_customer_review: ['customerReview.requestedBy', null], record_customer_approval: ['customerReview.recordedBy', action.actor || action.recordedBy],
+    request_changes: ['plan.reviewNote', action.note], reject_document: ['document.rejectedBy', action.actor],
   }[action.type];
   if (supplied) {
     defaultsAfter.delete(supplied[0]);
@@ -83,13 +84,20 @@ export function recordHistoryInputs(before, patch, action, recordingId) {
   const priorReceipt = [...before.history].reverse().find(event => event.type === 'obtain_document');
   const receiptBeforeId = before.document ? prior?.receiptAfterId || priorReceipt?.id || null : null;
   const receiptAfterId = action.type === 'obtain_document' ? recordingId : after.document ? receiptBeforeId : null;
-  const context = historyEvidenceSnapshot(), contextBeforeId = historyContextKey(context);
-  const historyContexts = Object.hasOwn(before.historyContexts || {}, contextBeforeId) ? before.historyContexts
-    : {...before.historyContexts, [contextBeforeId]: context};
+  // The evidence each side of the event was evaluated against, as recorded at the time.
+  let historyContexts = before.historyContexts || {};
+  const retain = context => {
+    const key = historyContextKey(context);
+    if (!Object.hasOwn(historyContexts, key)) historyContexts = {...historyContexts, [key]: context};
+    return key;
+  };
+  const contextBeforeId = retain(historyEvidenceSnapshot(workflowEvidence(before)));
+  const contextAfterId = retain(historyEvidenceSnapshot(workflowEvidence(after)));
   return {
     historyContexts,
     historyRecord: {
       schema: '2', before: historyWorkflowSnapshot(before), after: historyWorkflowSnapshot(after), contextBeforeId,
+      ...(contextAfterId !== contextBeforeId ? {contextAfterId} : {}),
       receiptBeforeId, receiptAfterId,
       defaultsBefore, defaultsAfter: [...defaultsAfter], actor: text(action.actor), actorSource: text(action.actor) ? 'action' : null,
       eventAt: text(action.eventAt), reason: text(action.reason) || (action.type === 'request_changes' ? text(action.note) : null),

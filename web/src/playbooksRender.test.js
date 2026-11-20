@@ -8,6 +8,8 @@ import {MotionConfig} from 'motion/react';
 import {createServer} from 'vite';
 import {initialState, transition} from './workflow.js';
 import {renewalEvidence, renewalFixture, fixturePeople} from './renewalFixtures.js';
+import {walkthroughCommands} from './customerDecision.js';
+import {walkthroughInputs} from './testing/walkthroughInputs.js';
 import {playbookTemplates} from './playbookTemplates.js';
 import {buildPlaybookContext, createPlaybooksSession, playbookSearch, playbooksSessionReducer} from './playbookDrafts.js';
 
@@ -55,7 +57,8 @@ test('authority and reviewer selects start unassigned and offer fixture names on
   assert.match(owner, /<option value="" selected="">/);
   assert.ok(!owner.includes(fixturePeople.otherAccountOwner));
   for (const name of renewalFixture.roles.actionOwners) assert.ok(owner.includes(`value="${name}"`));
-  assert.ok(authority.includes(`${fixturePeople.customerCounsel} · walkthrough fixture, authority unconfirmed`));
+  // No counsel name is offered before a walkthrough authority record exists.
+  assert.doesNotMatch(authority, /<option value="[^"]+"/);
   assert.doesNotMatch(authority, /<option value="[^\"]+" selected=/);
   assert.match(html, /type="checkbox"[^>]*required=""/);
   assert.match(html, /type="submit"[^>]*disabled=""/);
@@ -199,14 +202,16 @@ test('fixture extraction keeps the existing renewal, Evidence, Operations, work-
 
 test('shared fixtures still render the approved workflow and its recorded decisions without alteration', () => {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review']) state = transition(state, {type});
-  state = transition(state, {type: 'record_customer_approval', reviewedBy: fixturePeople.customerCounsel, evidenceText: 'Recorded walkthrough decision.'});
+  for (const type of walkthroughCommands.slice(0, -1)) state = transition(state, {type, ...walkthroughInputs(state, type)});
   state = transition(state, {type: 'resolve_requirement'});
   const before = structuredClone(state);
   for (const path of ['/operations', renewalFixture.paths.evidence, renewalFixture.paths.workplan, renewalFixture.paths.history]) {
     const html = renderApp(path, state);
-    assert.ok(html.includes(renewalFixture.account.name));
-    assert.ok(html.includes(state.document.version) || path === '/operations');
+    assert.ok(html.includes(renewalFixture.account.name), path);
+    // Visible text only: icon path data can contain a version-like string.
+    if (path === renewalFixture.paths.evidence) assert.ok(stripTags(html).includes(`Version ${state.document.version}`), path);
+    if (path === renewalFixture.paths.history) assert.ok(stripTags(html).includes(state.history.at(-1).title), path);
+    if (path === renewalFixture.paths.workplan) assert.ok(stripTags(html).includes('Condition resolved'), path);
   }
   assert.deepEqual(state, before);
 });

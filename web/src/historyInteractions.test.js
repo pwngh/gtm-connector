@@ -2,7 +2,9 @@ import {eagerRouteModules, expandRouteContent} from './testing/routeModules.js';
 import test, {before, after, beforeEach, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
-import {historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughDecisions, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughActors, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {walkthroughCommands} from './customerDecision.js';
+import {typedInputs, walkthroughInputs} from './testing/walkthroughInputs.js';
 import {transitionWalkthrough} from './workflow.js';
 import {advanceReadinessJournal, readinessHref} from './readiness.js';
 import {historyHref, selectHistory} from './history.js';
@@ -140,9 +142,10 @@ const control = (hooks, key) => hooks.elements.get(`focus:${key}`);
 const target = (hooks, id) => hooks.elements.get(`target:entry:${id}`);
 const eventIds = tree => [...nodes(tree)].filter(node => node.props['data-history-id']).map(node => node.props['data-history-id']);
 function escape(tree, target = null) {const event = {key: 'Escape', target, preventDefault() {this.prevented = true;}, stopPropagation() {this.stopped = true;}}; tree.props.onKeyDown(event); return event;}
-const act = (state, type, extra = {}) => transitionWalkthrough(state, {type, ...extra});
+// Document inspection needs the reason the operator types; tests supply it here.
+const act = (state, type, extra = {}) => transitionWalkthrough(state, {type, ...(type === 'verify_document' ? typedInputs.verify_document : {}), ...extra});
 function complete() {
-  return ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review', 'record_customer_approval', 'resolve_requirement'].reduce((state, type) => act(state, type, {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step}), initialState);
+  return walkthroughCommands.reduce((state, type) => act(state, type, walkthroughInputs(state, type)), initialState);
 }
 const example = historyFixture.examples.find(item => item.mode === 'example');
 const exampleId = type => example.steps.find(step => step.action?.type === type || step.correction?.type === type).id;
@@ -330,7 +333,7 @@ test('Readiness links to the exact recording and known-by point and keeps its ow
 });
 
 test('a replacement receipt retains a link to the earlier document record rather than substituting the live file', () => {
-  const first = complete(), state = act(first, 'obtain_document', {document: walkthroughDocumentExamples.replacement});
+  const first = complete(), state = act(first, 'obtain_document', {document: walkthroughDocumentExamples.replacement, actorId: walkthroughActors.acquisitionId});
   const page = bench(new URLSearchParams({entry: state.history.at(-1).id, category: 'document'}), state); let tree = page.render();
   const comparison = link(tree, `compare:${state.history.at(-1).id}`);
   open(page.hooks, comparison); tree = page.render();

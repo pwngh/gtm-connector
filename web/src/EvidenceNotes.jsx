@@ -53,12 +53,9 @@ export function SpeakerRole({source}) {
   return <dl className="speaker-role"><SpeakerRows source={source}/></dl>;
 }
 
-export function ReviewerInput({label, children}) {
-  return <div className="reviewer-input"><span className="note-label">{label} (reviewer input)</span><p>{children || 'Not recorded'}</p></div>;
-}
 
-export function DecisionAuthority() {
-  return <div><dt>Customer decision authority</dt><dd>{decisionAuthorityLabel()}</dd></div>;
+export function DecisionAuthority({state = null}) {
+  return <div><dt>Customer decision authority</dt><dd>{decisionAuthorityLabel(state)}</dd></div>;
 }
 
 const sourceIcons = {call: Phone, message: MessageSquare, record: Database};

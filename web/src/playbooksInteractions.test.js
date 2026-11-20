@@ -7,6 +7,8 @@ import {
 } from './playbookDrafts.js';
 import {initialState, transition} from './workflow.js';
 import {renewalEvidence, renewalFixture, fixturePeople} from './renewalFixtures.js';
+import {walkthroughCommands} from './customerDecision.js';
+import {walkthroughInputs} from './testing/walkthroughInputs.js';
 
 // Run real component handlers with controlled hooks, not a layout or browser emulator.
 let server, Playbooks, App;
@@ -136,8 +138,7 @@ function workbench(view = 'context', prepared = false) {
 
 function finishedWorkflow() {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review']) state = transition(state, {type});
-  state = transition(state, {type: 'record_customer_approval', reviewedBy: fixturePeople.customerCounsel, evidenceText: 'Walkthrough decision evidence.'});
+  for (const type of walkthroughCommands.slice(0, -1)) state = transition(state, {type, ...walkthroughInputs(state, type)});
   return transition(state, {type: 'resolve_requirement'});
 }
 

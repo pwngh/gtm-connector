@@ -31,8 +31,8 @@ export const awaitedCounsel = worklistFixture.workItems.find(item => item.kind =
 export const awaitedCounselNote = 'Unidentified until a reviewer records who decides, with evidence';
 
 // The same projection Readiness shows, so a typed name never becomes authority.
-export function decisionAuthorityLabel() {
-  return customerAuthorityLabel(readinessFixture);
+export function decisionAuthorityLabel(state = null) {
+  return customerAuthorityLabel(readinessFixture, state);
 }
 
 // A role and how it was established. A role never establishes authority.

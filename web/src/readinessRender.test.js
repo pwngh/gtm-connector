@@ -4,7 +4,9 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
-import {initialState, readinessFixture, readinessEvidenceFixture, renewalEvidence, walkthroughDecisions} from './renewalFixtures.js';
+import {initialState, readinessFixture, readinessEvidenceFixture, renewalEvidence} from './renewalFixtures.js';
+import {walkthroughCommands} from './customerDecision.js';
+import {walkthroughAction, walkthroughInputs} from './testing/walkthroughInputs.js';
 import {transitionWalkthrough} from './workflow.js';
 import {advanceReadinessJournal, readinessHref, selectReadiness} from './readiness.js';
 
@@ -23,7 +25,7 @@ function render(search = '', source = journal()) {
 }
 function complete() {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review', 'record_customer_approval', 'resolve_requirement']) state = transitionWalkthrough(state, {type, reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step});
+  for (const type of walkthroughCommands) state = transitionWalkthrough(state, {type, ...walkthroughInputs(state, type)});
   return state;
 }
 
@@ -64,7 +66,7 @@ test('passed, failed, inapplicable and unevaluated checks have distinct semantic
 
 test('selected checks render only their own input versions, evaluation time and exact permitted destination', () => {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document']) state = transitionWalkthrough(state, {type});
+  for (const type of ['request_review', 'approve_plan', 'obtain_document']) state = transitionWalkthrough(state, walkthroughAction(state, type));
   const source = journal(state), check = source.current.checks.find(item => item.id === 'verify_document');
   const html = render('check=verify_document', source);
   assert.ok(links(html).some(link => link.attributes.includes('data-readiness-target="check:verify_document"') && link.attributes.includes('data-readiness-entry="true"')));
@@ -80,7 +82,7 @@ test('selected checks render only their own input versions, evaluation time and 
 
 test('requirements render separate owners, awaited roles, authority unknowns, and one permitted corrective entry', () => {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review']) state = transitionWalkthrough(state, {type});
+  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review']) state = transitionWalkthrough(state, walkthroughAction(state, type));
   const source = journal(state), item = source.current.requirements[0];
   const html = render('', source), facts = html.split('class="rd-responsibility"')[1].split('</dl>')[0];
   assert.ok(facts.match(/<dt>Next-step owner<\/dt><dd>([\s\S]*?)<\/dd>/)[1].includes(item.nextStepOwnerLabel));
@@ -88,7 +90,12 @@ test('requirements render separate owners, awaited roles, authority unknowns, an
   assert.ok(facts.match(/<dt>Customer decision authority<\/dt><dd>([\s\S]*?)<\/dd>/)[1].includes(item.customerAuthorityLabel));
   const actions = links(html).filter(link => link.attributes.includes(`data-readiness-focus="requirement:${item.id}:action"`));
   assert.equal(actions.length, 1);
-  assert.equal(new URL(actions[0].href, 'http://local.test').searchParams.get('check'), 'customer_authority');
+  // The reducer's own next step: adding the customer's signed letter on the review work item.
+  const url = new URL(actions[0].href, 'http://local.test');
+  assert.equal(url.pathname, readinessFixture.paths.workplan);
+  assert.equal(url.searchParams.get('workItem'), readinessFixture.worklist.workItems.find(work => work.kind === 'customer_review').id);
+  assert.equal(item.waitingLabel, 'Customer counsel · unidentified');
+  assert.equal(item.customerAuthorityLabel, 'Unidentified');
 });
 
 test('the page keeps CRM, requirement readiness and the commercial outcome in separate facts even after resolution', () => {
@@ -99,8 +106,10 @@ test('the page keeps CRM, requirement readiness and the commercial outcome in se
   assert.ok(crm.includes(source.current.crm.stageLabel));
   assert.ok(crm.includes(source.current.crm.readAt));
   assert.ok(commercial.includes(source.current.commercial.label));
-  assert.equal((html.match(/data-check-result="failed"/g) || []).length, 3);
+  // Resolution needed every evidence check to pass; none is left failed.
+  assert.equal((html.match(/data-check-result="failed"/g) || []).length, 0);
   assert.ok(!html.includes('rd-requirement-state passed'));
+  assert.ok(html.includes('rd-requirement-state recorded'));
 });
 
 test('citations render fixture text exactly, distinguish workflow notes, and link by card plus unit number', () => {
@@ -190,7 +199,7 @@ test('every local focus key is unique even where the same check or source is cit
 
 test('comparison rendering retains removed check rows and changed blocker explanations', () => {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document']) state = transitionWalkthrough(state, {type});
+  for (const type of ['request_review', 'approve_plan', 'obtain_document']) state = transitionWalkthrough(state, walkthroughAction(state, type));
   const before = journal(state), fixture = structuredClone(readinessFixture);
   fixture.checks = fixture.checks.filter(check => check.id !== 'verify_document');
   const removed = advanceReadinessJournal(before, state, fixture);
@@ -202,7 +211,8 @@ test('comparison rendering retains removed check rows and changed blocker explan
   assert.ok(unescape(row).includes(removed.changes.checks.find(check => check.id === 'verify_document').afterLabel));
 
   const earlier = {...state, document: {...state.document, version: 'outdated'}};
-  const later = {...earlier, document: {...earlier.document, currentVersion: 'replacement'}};
+  // The file's own currentVersion no longer changes anything; a different received version does.
+  const later = {...earlier, document: {...earlier.document, version: 'replacement'}};
   const changed = advanceReadinessJournal(journal(earlier), later);
   const html = render('', changed), comparison = html.split('data-comparison-id="verify_document"')[1].split('</li>')[0];
   const difference = changed.changes.checks.find(check => check.id === 'verify_document').updated[0];

@@ -9,6 +9,7 @@ import {createServer} from 'vite';
 import {derive, initialState, transition} from './workflow.js';
 import {renewalFixture, worklistFixture, fixturePeople} from './renewalFixtures.js';
 import {buildWorklist, worklistHref} from './worklist.js';
+import {walkthroughAction} from './testing/walkthroughInputs.js';
 
 let server, Worklists, WorklistStepEntry, ReviewDecision, App;
 before(async () => {
@@ -141,7 +142,7 @@ test('empty results, truncated results and unknown selection render different st
 
 test('queue cells keep action owner, waiting party and due time in separate columns', () => {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review']) state = transition(state, {type});
+  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review']) state = transition(state, walkthroughAction(state, type));
   const result = buildWorklist(state);
   const row = result.workItems.find(item => item.kind === 'customer_review');
   const html = render('queue', '', result);
@@ -190,7 +191,7 @@ test('renewal cells show the current action owner separately from the renewal ow
   const ownerCell = html.match(/data-label="Renewal owner">([\s\S]*?)<\/td>/)[1];
   assert.equal(ownerCell, fixturePeople.accountOwner);
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review']) state = transition(state, {type});
+  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review']) state = transition(state, walkthroughAction(state, type));
   const waiting = render('renewals', '', buildWorklist(state)).match(/data-label="Next step">([\s\S]*?)<\/td>/)[1];
   assert.ok(waiting.includes(worklistFixture.workItems[3].awaitedParty.label));
 });
@@ -257,7 +258,7 @@ test('table rows and cells retain explicit semantics when the responsive layout 
 test('the exact work destination renders only its permitted action, prerequisite, or recorded output', () => {
   let state = initialState;
   const states = [state];
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document']) {state = transition(state, {type}); states.push(state);}
+  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document']) {state = transition(state, walkthroughAction(state, type)); states.push(state);}
   for (const state of states) {
     for (const item of buildWorklist(state).workItems.filter(row => row.mode === 'walkthrough')) {
       const html = renderToStaticMarkup(React.createElement(WorklistStepEntry, {item, onAction() {}}));
@@ -282,7 +283,7 @@ test('the Work plan review form uses shared eligibility and cannot approve a sub
 
 test('the main badge follows walkthrough outputs without counting illustrative work as open tasks', () => {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document']) state = transition(state, {type});
+  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document']) state = transition(state, walkthroughAction(state, type));
   const html = renderApp('/queue', state);
   assert.match(html, /aria-label="1 open walkthrough work item">1<\/span>/);
   assert.deepEqual(recordIds(html), ['work-review-ai-terms']);

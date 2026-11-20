@@ -1,6 +1,8 @@
 import {historyEventActor} from './historyRecording.js';
 import {readinessFixture} from './renewalFixtures.js';
 import {derive, transitionEvidenceChecks} from './workflow.js';
+import {decisionContact, evaluateEvidenceCheck, workflowEvidence} from './evidenceChecks.js';
+export {resolveEvidenceReference} from './evidenceChecks.js';
 import {buildWorklist, formatWorklistTime, safeWorklistReturn, worklistActionHref} from './worklist.js';
 
 export const readinessStates = [
@@ -40,7 +42,7 @@ function latestInputTime(values) {
 function inputMarkers(state, fixture, previous) {
   const {card, documentVersionBasis, customerAuthority, decisionReceipt, contacts, artifactReceipts, ...configuration} = fixture;
   const lastEvent = state.history.at(-1);
-  const registryTimes = [...(contacts || []).map(record => record.recordedAt), ...(artifactReceipts || []).map(record => record.inspection?.at)];
+  const registryTimes = [...(contacts || []).map(record => record.recordedAt), ...(artifactReceipts || []).map(record => record.inspection?.at || record.receivedAt)];
   const inputs = [
     {kind: 'workflow', value: {plan: state.plan, document: state.document, decision: state.customerReview, requirement: state.requirement, task: state.task, commercial: state.commercial, history: state.history},
       at: lastEvent ? lastEvent.at : fixture.initialEvaluationAt, recording: lastEvent?.id || 'initial'},
@@ -65,7 +67,7 @@ function inputVersions(state, fixture, worklist) {
   const resource = (kind, label, value, extra = {}) => ({kind, label, id: value?.id ?? null, recorded: Boolean(value), revision: value?.revision == null ? null : String(value.revision), ...extra});
   return [
     resource('plan', 'Work plan', state.plan, {workItemRevision: work('plan_review')?.revision ?? null}),
-    resource('document', 'Received document', state.document, {version: state.document?.version ?? null}),
+    resource('document', 'Received document', state.document, {version: state.document?.version ?? null, receipt: state.document?.receiptId ?? null}),
     resource('inspection_work_item', 'Inspection work item', work('inspection')),
     resource('customer_decision', 'Customer review record', state.customerReview, {version: state.customerReview?.documentVersion ?? null}),
     resource('customer_review_work_item', 'Customer review work item', work('customer_review')),
@@ -73,100 +75,20 @@ function inputVersions(state, fixture, worklist) {
     resource('version_basis', 'Separate version source', fixture.documentVersionBasis),
     resource('authority', 'Customer authority basis', fixture.customerAuthority),
     resource('decision_receipt', 'Cited decision receipt', fixture.decisionReceipt),
+    resource('artifact_receipts', 'Artifact receipts', fixture.artifactReceipts?.length ? {id: fixture.artifactReceipts.at(-1).id, revision: fixture.artifactReceipts.length} : null),
     resource('card', 'Source card', fixture.card),
     resource('policy', 'Local workflow rules', {id: fixture.policyVersion, revision: fixture.revision}),
   ];
 }
 
-export function resolveEvidenceReference(ref, fixture = readinessFixture) {
-  if (!ref || typeof ref !== 'object') return {issue: 'No supported evidence reference is recorded.'};
-  if (ref.kind === 'receipt') {
-    const record = fixture.artifactReceipts?.find(item => item.id === ref.id);
-    if (!record) return {issue: 'The cited artifact receipt does not exist.'};
-    if (record.status !== 'received' || record.inspection?.status !== 'accepted') return {issue: 'The cited artifact receipt needs an accepted inspection.'};
-    return {record, source: null};
-  }
-  if (!fixture.card) return {issue: 'The source card is not available.'};
-  if (ref.kind === 'source') {
-    const source = fixture.card.sources.find(item => item.id === ref.id);
-    if (!source) return {issue: 'The referenced source does not exist.'};
-    if (source.status !== 'read') return {issue: 'The referenced source has not been read.'};
-    return {record: source, source};
-  }
-  if (ref.kind === 'unit') {
-    const record = ref.cardId === fixture.card.id && fixture.card.units.find(item => item.cardId === ref.cardId && item.n === ref.n);
-    if (!record) return {issue: 'The cited card and unit do not exist.'};
-    if (!record.shown || (record.kind === 'sentence' ? !record.text?.trim() : !record.fields?.length)) return {issue: 'The cited unit is not available for inspection.'};
-    const source = fixture.card.sources.find(item => item.id === record.sourceId);
-    if (!source || source.status !== 'read') return {issue: 'The cited unit has no available read source.'};
-    return {record, source};
-  }
-  return {issue: 'The evidence reference has an unsupported kind.'};
-}
-
-function isIndependentSource(reference, document) {
-  if (!reference.record || !document?.id) return false;
-  const records = [reference.record, reference.source].filter(Boolean);
-  if (records.some(record => [record.id, record.documentId, record.artifactId].includes(document.id))) return false;
-  return reference.source ? ['call', 'message', 'record'].includes(reference.source.kind)
-    : Boolean(reference.record.artifactId || reference.record.documentId);
-}
-
-function authorityEvidence(fixture) {
-  const basis = fixture.customerAuthority;
-  if (!basis) return {issues: ['No authority record is recorded for this agreement.'], contact: null};
-  const issues = [];
-  const contact = fixture.contacts?.find(item => item.id === basis.contactId && item.status === 'active');
-  if (!contact) issues.push('The authority record does not identify an available customer contact.');
-  if (basis.status !== 'accepted' || basis.agreementId !== fixture.agreement.id) issues.push('The authority record is not accepted for this agreement.');
-  const reference = resolveEvidenceReference(basis.evidenceRef, fixture);
-  if (reference.issue) issues.push(reference.issue);
-  return {issues, contact: issues.length ? null : contact};
-}
-
 // The customer decision authority, named only when accepted authority evidence supports a contact.
 const authorityLabel = check => check?.supportedContact?.displayName || 'Unidentified';
-export function customerAuthorityLabel(fixture = readinessFixture) {
-  return authorityLabel(evaluateEvidence({id: 'customer_authority'}, null, fixture));
+export function customerAuthorityLabel(fixture = readinessFixture, state = null) {
+  return authorityLabel(evaluateEvidenceCheck('customer_authority', state, workflowEvidence(state, fixture)));
 }
 
 function unknownCheck(explanation) {
   return {result: 'not_evaluated', allowed: null, blockedReasons: [], allowedActions: [], explanation};
-}
-
-function evaluateEvidence(definition, state, fixture) {
-  if (!['current_version_basis', 'customer_authority', 'decision_citation'].includes(definition.id)) return unknownCheck('No evaluation rule is recorded for this evidence check.');
-  if (!fixture.card) return unknownCheck('No source card is recorded. This evidence check has not been evaluated.');
-  let issues = [], contact = null;
-  if (definition.id === 'current_version_basis') {
-    const basis = fixture.documentVersionBasis;
-    if (!basis) issues.push('No independent current-version basis is recorded. The document cannot vouch for its own current version.');
-    else {
-      const reference = resolveEvidenceReference(basis.source, fixture);
-      if (reference.issue) issues.push(reference.issue);
-      else if (!isIndependentSource(reference, state.document)) issues.push('The version source is not established as independent of the document.');
-      if (!state.document?.id || !state.document.version || basis.documentId !== state.document.id || basis.version !== state.document.version || basis.agreementId !== fixture.agreement.id || basis.status === 'withdrawn') issues.push('The separate version basis does not identify this document version for this agreement.');
-    }
-  } else if (definition.id === 'customer_authority') {
-    ({issues, contact} = authorityEvidence(fixture));
-  } else {
-    const basis = fixture.decisionReceipt;
-    if (!basis) issues.push('No cited customer decision is recorded. Typed walkthrough input is not a cited unit or inspected approval receipt.');
-    else {
-      const reference = resolveEvidenceReference(basis.evidenceRef, fixture);
-      if (reference.issue) issues.push(reference.issue);
-      if (!['unit', 'receipt'].includes(basis.evidenceRef?.kind)) issues.push('A customer decision must cite a unit or an inspected artifact receipt.');
-      if (!state.document?.id || !state.document.version || basis.status !== 'accepted' || basis.outcome !== 'approved' || basis.agreementId !== fixture.agreement.id || basis.documentId !== state.document.id || basis.documentVersion !== state.document.version) issues.push('The accepted decision is not bound to this agreement and document version.');
-      const authority = authorityEvidence(fixture);
-      if (!authority.contact || basis.contactId !== authority.contact.id) issues.push('The decision does not identify the contact supported by the accepted authority basis.');
-    }
-  }
-  const explanation = issues.length ? issues.join(' ') : 'A resolved evidence reference supports this check within the synthetic records.';
-  return {
-    result: issues.length ? 'failed' : 'passed', allowed: null, allowedActions: [], supportedContact: contact,
-    blockedReasons: issues.length ? [{code: definition.id, action: 'establish_evidence', name: definition.title, reason: explanation, checkId: definition.id, evidenceGap: true}] : [],
-    explanation,
-  };
 }
 
 function correctiveAction(checks, fixture) {
@@ -192,21 +114,15 @@ function commandAction(definition, state, fixture, worklist, replacement) {
 function evaluateTransition(definition, state, fixture, worklist, d, evidenceChecks) {
   const rule = d.transitions[definition.command];
   if (!rule) return unknownCheck('No evaluation rule is recorded for this transition.');
-  const demonstration = {allowed: rule.allowed, fact: null};
   const title = rule.replacement ? definition.replacementTitle : definition.title;
-  if (rule.recorded) return {title, result: 'not_applicable', recorded: true, allowed: false, blockedReasons: [], allowedActions: [], demonstration, explanation: rule.recordedReason};
-  const requiredEvidence = (transitionEvidenceChecks[definition.command] || []).map(id => evidenceChecks.find(check => check.id === id)
-    || {id, result: 'not_evaluated', blockedReasons: [], title: id, explanation: 'No evaluation rule is recorded for this evidence check.'});
-  const evidenceBlockers = requiredEvidence.filter(check => check.result !== 'passed').flatMap(check => check.blockedReasons.length ? check.blockedReasons : [{
-    code: check.id, action: definition.command, name: check.title, reason: check.explanation, checkId: check.id, evidenceGap: true,
-  }]);
-  const blockedReasons = [...rule.blockedReasons, ...evidenceBlockers.map(reason => ({...reason, action: definition.command}))];
-  const allowed = rule.allowed && !evidenceBlockers.length;
-  if (rule.allowed && evidenceBlockers.length) demonstration.fact = 'The demonstration walkthrough would still allow this step; real use would refuse it.';
+  if (rule.recorded) return {title, result: 'not_applicable', recorded: true, allowed: false, blockedReasons: [], allowedActions: [], explanation: rule.recordedReason};
+  // The reducer's own gates, evidence checks included, so a step shown as allowed is a step the reducer takes.
+  const requiredEvidence = (transitionEvidenceChecks[definition.command] || []).map(id => evidenceChecks.find(check => check.id === id)).filter(Boolean);
+  const allowed = rule.allowed;
   return {
-    title, result: allowed ? 'passed' : 'failed', allowed, blockedReasons, demonstration, replacement: rule.replacement,
+    title, result: allowed ? 'passed' : 'failed', allowed, blockedReasons: rule.blockedReasons, replacement: rule.replacement,
     allowedActions: allowed ? [commandAction(definition, state, fixture, worklist, rule.replacement)] : [],
-    correctiveAction: evidenceBlockers.length ? correctiveAction(requiredEvidence, fixture) : null,
+    correctiveAction: rule.blockedReasons.some(reason => reason.evidenceGap) ? correctiveAction(requiredEvidence, fixture) : null,
     explanation: allowed ? 'The local transition prerequisites pass with these inputs.' : 'Every unmet workflow or required evidence check is listed below.',
   };
 }
@@ -224,15 +140,17 @@ function decorateCheck(check, evaluatedAt, versions) {
   };
 }
 
-export function evaluateReadiness(state, fixture = readinessFixture, previous = null) {
+export function evaluateReadiness(state, fixtureInput = readinessFixture, previous = null) {
+  // The fixture's card and configuration with the walkthrough's own evidence records.
+  const fixture = workflowEvidence(state, fixtureInput);
   const reviewer = person(fixture, fixture.worklist.walkthrough.reviewerId);
-  const d = derive(state, reviewer?.displayName ?? null);
+  const d = derive(state, reviewer?.displayName ?? null, fixtureInput);
   const worklist = buildWorklist(state, fixture.worklist);
   const renewal = worklist.renewals.find(row => row.id === fixture.renewalId);
   const markers = inputMarkers(state, fixture, previous);
   const evaluatedAt = latestInputTime(markers.map(input => input.asOf));
   const versions = inputVersions(state, fixture, worklist);
-  const evidence = fixture.checks.filter(definition => definition.kind === 'evidence').map(definition => ({...definition, ...evaluateEvidence(definition, state, fixture)}));
+  const evidence = fixture.checks.filter(definition => definition.kind === 'evidence').map(definition => ({...definition, ...evaluateEvidenceCheck(definition.id, state, fixture)}));
   const checks = fixture.checks.map((definition, index) => decorateCheck({
     ...definition, order: index, revision: String(Number(fixture.revision) + state.history.length),
     ...(definition.kind === 'transition' ? evaluateTransition(definition, state, fixture, worklist, d, evidence) : evidence.find(check => check.id === definition.id) || unknownCheck('No evaluation rule is recorded for this check.')),
@@ -243,12 +161,13 @@ export function evaluateReadiness(state, fixture = readinessFixture, previous = 
     const related = checks.filter(check => record.checkIds.includes(check.id));
     const evidenceChecks = checks.filter(check => record.evidenceCheckIds.includes(check.id));
     const evidenceOpen = record.evidenceCheckIds.some(id => checks.find(check => check.id === id)?.result !== 'passed');
-    const status = recordedStatus === 'resolved' && evidenceOpen ? 'open' : recordedStatus;
+    // The same effective status every view shows: a recorded resolution counts only while its evidence supports it.
+    const status = bound ? d.requirementStatus : recordedStatus === 'resolved' && evidenceOpen ? 'open' : recordedStatus;
     const authority = evidenceChecks.find(check => check.id === 'customer_authority');
     const resolution = related.find(check => check.command === 'resolve_requirement');
     const nextCheck = related.find(check => check.command === d.nextCommand);
     const nextAction = bound && status === 'open' ? recordedStatus === 'resolved' ? correctiveAction(evidenceChecks, fixture)
-      : nextCheck?.allowedActions[0] || (nextCheck?.demonstration?.allowed ? nextCheck.correctiveAction : null) || null : null;
+      : nextCheck?.allowedActions[0] || (nextCheck?.blockedReasons.length && nextCheck.blockedReasons.every(reason => reason.evidenceGap) ? nextCheck.correctiveAction : null) || null : null;
     const owner = person(fixture, record.ownerId);
     const planWork = worklist.workItems.find(item => item.renewalId === fixture.renewalId && item.kind === 'plan_review');
     const nextStepOwner = nextAction ? nextAction.owner : (bound && status === 'open' && !d.isPlanApproved ? state.plan.owner?.trim() ? planWork?.owner || null : null : owner);
@@ -257,7 +176,8 @@ export function evaluateReadiness(state, fixture = readinessFixture, previous = 
       code: check.id, name: check.title, reason: check.explanation, checkId: check.id, evidenceGap: true,
     }))].map(reason => [reason.code, reason])).values()];
     if (bound && status === 'open' && resolution?.allowed) missing.unshift({code: 'explicit_resolution', name: 'Explicit requirement resolution', reason: 'The supported decision is recorded. A reviewer still needs to record the resolution.', checkId: resolution.id});
-    const waitingOn = bound && state.customerReview && (d.canRecordCustomerApproval || authority?.result !== 'passed')
+    // Waiting only while the customer's own decision has not arrived; the recorded contact replaces the unidentified role.
+    const waitingOn = bound && d.customerReviewIsCurrent && !d.hasCustomerApproval && d.nextCommand === 'upload_approval_letter'
       ? authority?.supportedContact ? {id: authority.supportedContact.id, label: authority.supportedContact.displayName, basis: 'Contact supported by the accepted authority evidence.'} : record.awaitedParty : null;
     return {
       ...record, agreement: fixture.agreement, title: bound ? state.requirement.title : record.title, status, statusLabel: requirementLabel(status), recordedStatus, recordedStatusLabel: requirementLabel(recordedStatus),
@@ -274,8 +194,10 @@ export function evaluateReadiness(state, fixture = readinessFixture, previous = 
       actionUnavailableReason: !bound ? 'No executable workflow is recorded for this requirement.' : status === 'open' && !nextAction ? d.planReviewBlockedReason || 'No corrective transition is currently permitted by the local workflow.' : null,
       inspectAction: bound && recordedStatus === 'open' && !nextAction && planWork ? {id: 'inspect_prerequisite', label: 'Inspect review prerequisites', intent: 'inspect', href: `${fixture.paths.workplan}?${new URLSearchParams({workItem: planWork.id})}#${planWork.entryTargetId}`} : null,
       citations: record.citations.map(citation => ({...citation, unit: fixture.card?.units.find(unit => unit.cardId === citation.cardId && unit.n === citation.n) || null})),
-      recordedDecision: bound && state.customerReview?.status === 'approved' ? {
-        label: 'Reviewer input in the existing walkthrough', text: state.customerReview.evidenceText,
+      recordedDecision: bound && ['approved', 'needs_re_review'].includes(state.customerReview?.status) && state.customerReview.evidenceRef ? {
+        label: d.hasCustomerApproval ? 'Recorded customer decision' : 'Recorded customer decision · needs re-review', current: d.hasCustomerApproval,
+        reReviewReason: state.customerReview.reReview?.reason || null, contact: decisionContact(state)?.displayName || null,
+        citation: state.customerReview.evidenceRef?.kind === 'receipt' ? `Receipt ${state.customerReview.evidenceRef.id}` : state.customerReview.evidenceRef?.kind === 'unit' ? `Card ${state.customerReview.evidenceRef.cardId} · Unit ${state.customerReview.evidenceRef.n}` : null,
         recordedBy: state.customerReview.recordedBy || null, recordedAt: state.customerReview.approvedAt || null,
         documentVersion: state.customerReview.documentVersion || null,
       } : null,
@@ -336,7 +258,7 @@ function compareRequirements(before, after) {
     const kinds = [...new Set([...(old?.inputVersions || []), ...(next?.inputVersions || [])].map(input => input.kind))];
     for (const kind of kinds) {
       const prior = old?.inputVersions?.find(item => item.kind === kind), input = next?.inputVersions?.find(item => item.kind === kind);
-      const describe = value => !value?.recorded ? 'Not recorded' : `${value.id || 'Record ID not recorded'} · Revision ${value.revision ?? 'not recorded'}${value.workItemRevision ? ` · Work-item revision ${value.workItemRevision}` : ''}${value.version ? ` · Version ${value.version}` : ''}`;
+      const describe = value => !value?.recorded ? 'Not recorded' : `${value.id || 'Record ID not recorded'} · Revision ${value.revision ?? 'not recorded'}${value.workItemRevision ? ` · Work-item revision ${value.workItemRevision}` : ''}${value.version ? ` · Version ${value.version}` : ''}${value.receipt ? ` · Receipt ${value.receipt}` : ''}`;
       if (describe(prior) !== describe(input)) differences.push({field: `input:${kind}`, label: `${input?.label || prior.label} input`, before: describe(prior), after: describe(input)});
     }
     if (old?.title !== next?.title) differences.push({field: 'title', label: 'Requirement title', before: old?.title || 'Not recorded', after: next?.title || 'Not recorded'});
@@ -426,7 +348,7 @@ function withholdActions(evaluation, notEvaluated) {
     evaluatedAt: notEvaluated ? null : evaluation.evaluatedAt,
     requirements: evaluation.requirements?.map(item => ({...item, allowedActions: [], nextAction: null, inspectAction: null, reopenAction: null, missing: notEvaluated ? null : item.missing, actionUnavailableReason: notEvaluated ? 'Actions are withheld because this example has not been evaluated.' : 'This is a retained result. Return to the current evaluation before continuing.'})) ?? null,
     checks: evaluation.checks.map(check => notEvaluated ? {
-      ...check, correctiveAction: null, demonstration: null, result: 'not_evaluated', resultLabel: stateLabel('not_evaluated'), resultDetail: 'Blocker count unknown',
+      ...check, correctiveAction: null, result: 'not_evaluated', resultLabel: stateLabel('not_evaluated'), resultDetail: 'Blocker count unknown',
       evaluatedAt: null, blockerCount: null, allowed: null, allowedActions: [], blockedReasons: [], explanation: 'No evaluation has run in this local example.',
     } : {...check, allowed: null, allowedActions: [], correctiveAction: null}),
   };

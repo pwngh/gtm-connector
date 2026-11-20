@@ -2,7 +2,9 @@ import {eagerRouteModules, expandRouteContent} from './testing/routeModules.js';
 import test, {before, after, beforeEach, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
-import {fixturePeople, initialState, readinessFixture, readinessEvidenceFixture, walkthroughDecisions, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {approvalLetters, fixturePeople, initialState, readinessFixture, readinessEvidenceFixture, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {walkthroughCommands} from './customerDecision.js';
+import {walkthroughInputs} from './testing/walkthroughInputs.js';
 import {transitionWalkthrough} from './workflow.js';
 import {advanceReadinessJournal, readinessHref, readinessStorageKey, selectReadiness} from './readiness.js';
 
@@ -146,9 +148,7 @@ const checks = tree => [...nodes(tree)].filter(node => node.props['data-check-id
 
 function complete() {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review', 'record_customer_approval', 'resolve_requirement']) {
-    state = transitionWalkthrough(state, {type, reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step});
-  }
+  for (const type of walkthroughCommands) state = transitionWalkthrough(state, {type, ...walkthroughInputs(state, type)});
   return state;
 }
 
@@ -328,15 +328,24 @@ test('main evaluates changes made on Work plan, retains prior results, persists 
   assert.deepEqual(named(tree, 'Readiness').props.journal, current);
 });
 
-test('the resolved walkthrough offers a reopen form separately from the still-open evidence correction', () => {
-  const page = bench('requirements=all', complete()); let tree = page.render();
-  const button = focusLink(tree, `requirement:${initialState.requirement.id}:reopen`);
+test('the resolved walkthrough offers a reopen form, and separately from an evidence correction once its authority is withdrawn', () => {
+  const state = complete();
+  const page = bench('requirements=all', state); let tree = page.render();
+  const button = focusLink(tree, `requirement:${initialState.requirement.id}:action`);
   assert.equal(button.type, 'button');
   assert.deepEqual(page.commands, []);
   button.props.onClick();
   assert.deepEqual(page.commands, ['reopen_requirement']);
-  assert.equal(page.source().current.requirements[0].recordedStatus, 'resolved');
-  assert.equal(page.source().current.requirements[0].status, 'open');
+  assert.equal(page.source().current.requirements[0].status, 'resolved');
+  // A fixture cannot override the walkthrough's own authority record; a recorded resolution whose own authority is withdrawn is the contested case.
+  const withdrawn = {...state, evidence: {...state.evidence, customerAuthority: {...state.evidence.customerAuthority, status: 'withdrawn'}}};
+  const contested = bench('requirements=all', withdrawn); tree = contested.render();
+  const reopen = focusLink(tree, `requirement:${initialState.requirement.id}:reopen`);
+  assert.equal(reopen.type, 'button');
+  reopen.props.onClick();
+  assert.deepEqual(contested.commands, ['reopen_requirement']);
+  assert.equal(contested.source().current.requirements[0].recordedStatus, 'resolved');
+  assert.equal(contested.source().current.requirements[0].status, 'open');
 });
 
 test('after selection, arrow keys operate from the focused check entry without changing URL selection', () => {
@@ -403,33 +412,34 @@ test('comparison and header jumps focus their sections without creating hash his
   assert.equal(hooks.useLocation().hash, '');
 });
 
-test('the authority corrective step selects its missing check, preserves filters, and executes no decision', () => {
+test('an evidence corrective step selects its missing check, preserves filters, and executes no decision', () => {
   const state = complete();
-  const page = bench('check=resolve_requirement&order=blockers&checkState=failed', {...state, requirement: {...state.requirement, status: 'open', resolvedAt: null}});
+  // A recorded decision whose version basis is missing: resolution is blocked on evidence alone. A missing authority
+  // record is no longer an evidence-only gap, because recording it from the accepted letter is a permitted step.
+  const page = bench('check=resolve_requirement&order=blockers&checkState=failed', {...state, requirement: {...state.requirement, status: 'open', resolvedAt: null}}, null, {...readinessFixture, documentVersionBasis: null});
   let tree = page.render();
   const action = focusLink(tree, 'next-action');
   assert.equal(new URL(action.props.to, 'http://local.test').pathname, readinessFixture.paths.readiness);
   open(page.hooks, action); tree = page.render();
-  assert.equal(page.hooks.useSearchParams()[0].get('check'), 'customer_authority');
+  assert.equal(page.hooks.useSearchParams()[0].get('check'), 'current_version_basis');
   assert.equal(page.hooks.useSearchParams()[0].get('order'), 'blockers');
   assert.equal(page.hooks.useSearchParams()[0].get('checkState'), 'failed');
-  assert.equal(globalThis.document.activeElement, targetElement(page.hooks, 'check:customer_authority'));
-  assert.equal(page.source().current.requirements[0].waitingOn.id, null);
+  assert.equal(globalThis.document.activeElement, targetElement(page.hooks, 'check:current_version_basis'));
+  assert.equal(page.source().current.requirements[0].waitingOn, null);
   assert.deepEqual(page.commands, []);
   escape(tree); page.render();
   assert.equal(globalThis.document.activeElement, controlElement(page.hooks, 'next-action'));
 });
 
-function pendingReplacement() {
+// A pending review whose signed letter is inspected and whose authority record exists.
+function authorizedReview() {
   let state = initialState;
-  for (const type of ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review']) {
-    state = transitionWalkthrough(state, {type, ...(type === 'obtain_document' ? {document: walkthroughDocumentExamples.replacement} : {})});
-  }
+  for (const type of walkthroughCommands.slice(0, walkthroughCommands.indexOf('record_customer_approval'))) state = transitionWalkthrough(state, {type, ...walkthroughInputs(state, type)});
   return state;
 }
 
-test('every decision-form opener starts with explicit blank input for the active replacement review', () => {
-  const state = pendingReplacement(), reviewItem = readinessFixture.worklist.workItems.find(item => item.kind === 'customer_review');
+test('every decision-form opener starts unconfirmed, cites the inspected letter and has no field for typed approval', () => {
+  const state = authorizedReview(), reviewItem = readinessFixture.worklist.workItems.find(item => item.kind === 'customer_review');
   for (const opener of ['next-action', 'exact-work-item', 'step']) {
     storage.set('gtm-workflow-demo-v1', JSON.stringify(state));
     const path = opener === 'exact-work-item' ? `${readinessFixture.paths.workplan}?workItem=${reviewItem.id}` : readinessFixture.paths.workplan;
@@ -451,12 +461,13 @@ test('every decision-form opener starts with explicit blank input for the active
     tree = hooks.render(App); hooks.flush();
     const formNode = named(tree, 'CustomerDecisionForm');
     assert.ok(formNode);
-    assert.equal(formNode.props.input.documentVersion, walkthroughDocumentExamples.replacement.version);
+    assert.equal(formNode.props.input.documentVersion, state.document.version);
     assert.equal(formNode.props.input.documentId, state.document.id);
     const form = CustomerDecisionForm(formNode.props);
-    assert.equal(field(form, 'evidenceText').props.value, '');
-    assert.equal(field(form, 'reviewedBy').props.type, 'text');
-    assert.equal(field(form, 'reviewedBy').props.value, '');
+    assert.equal(field(form, 'evidenceText'), undefined);
+    assert.equal(field(form, 'reviewedBy'), undefined);
+    assert.equal(field(form, 'evidenceRef').props.type, 'radio');
+    assert.equal(field(form, 'evidenceRef').props.checked, true);
     assert.equal(field(form, 'confirmedVersion').props.checked, false);
     assert.equal(find(form, node => node.props.type === 'submit').props.disabled, true);
     form.props.onSubmit({preventDefault() {}});
@@ -465,8 +476,8 @@ test('every decision-form opener starts with explicit blank input for the active
   }
 });
 
-test('the actual decision form refuses blank input and records only explicitly confirmed input for the active version', () => {
-  const state = pendingReplacement(), typed = walkthroughDocumentExamples.replacementDecision;
+test('the actual decision form refuses unconfirmed input and records the cited decision for the active version', () => {
+  const state = authorizedReview();
   storage.set('gtm-workflow-demo-v1', JSON.stringify(state));
   const hooks = new Hooks(readinessFixture.paths.workplan);
   let tree = hooks.render(App); hooks.flush();
@@ -474,9 +485,6 @@ test('the actual decision form refuses blank input and records only explicitly c
   find(actionBar, node => node.props.primary).props.onClick();
   const renderForm = () => {tree = hooks.render(App); hooks.flush(); return CustomerDecisionForm(named(tree, 'CustomerDecisionForm').props);};
   let form = renderForm();
-  field(form, 'evidenceText').props.onChange({target: {value: typed.evidenceText}}); form = renderForm();
-  assert.equal(find(form, node => node.props.type === 'submit').props.disabled, true);
-  field(form, 'reviewedBy').props.onChange({target: {value: typed.reviewedBy}}); form = renderForm();
   assert.equal(find(form, node => node.props.type === 'submit').props.disabled, true);
   form.props.onSubmit({preventDefault() {}}); form = renderForm();
   assert.equal(named(tree, 'CustomerDecisionForm').props.state.history.length, state.history.length);
@@ -488,9 +496,12 @@ test('the actual decision form refuses blank input and records only explicitly c
   const saved = JSON.parse(storage.get('gtm-workflow-demo-v1'));
   assert.equal(saved.customerReview.documentVersion, state.customerReview.documentVersion);
   assert.equal(saved.customerReview.documentId, state.document.id);
-  assert.equal(saved.customerReview.evidenceText, typed.evidenceText);
-  assert.equal(saved.customerReview.reviewedBy, typed.reviewedBy);
-  assert.equal(saved.history.at(-1).evidenceSnapshot.documentVersion, walkthroughDocumentExamples.replacement.version);
+  assert.equal(saved.customerReview.evidenceText, null);
+  assert.deepEqual(saved.customerReview.evidenceRef, {kind: 'receipt', id: state.evidence.customerAuthority.evidenceRef.id});
+  assert.equal(saved.customerReview.reviewedBy, approvalLetters[0].signatory.name);
+  assert.equal(saved.customerReview.recordedBy, fixturePeople.internalReviewer);
+  assert.equal(saved.history.at(-1).actor, fixturePeople.internalReviewer);
+  assert.equal(saved.history.at(-1).evidenceSnapshot.documentVersion, state.document.version);
   assert.equal(saved.history.length, state.history.length + 1);
   assert.equal(saved.requirement.status, 'open');
 });
@@ -522,6 +533,23 @@ test('evidence checks are a sibling section, not counted or nested as transition
   assert.equal(find(transitions, node => node === evidence), undefined);
   assert.ok(find(parent, node => node === evidence));
   assert.ok(find(parent, node => node === transitions));
-  assert.equal(checks(transitions).length, 7);
+  assert.equal(checks(transitions).length, 10);
   assert.equal(checks(evidence).length, 3);
+});
+
+test('a replacement version the agreement record does not name offers no decision and names nobody for it', () => {
+  let state = complete();
+  state = transitionWalkthrough(state, {...walkthroughInputs(state, 'obtain_document'), type: 'obtain_document', document: walkthroughDocumentExamples.replacement});
+  assert.match(transitionWalkthrough(state, {type: 'verify_document', ...walkthroughInputs(state, 'verify_document')}).error, /names version v4/);
+  const reviewItem = readinessFixture.worklist.workItems.find(item => item.kind === 'customer_review');
+  storage.set('gtm-workflow-demo-v1', JSON.stringify(state));
+  const hooks = new Hooks(`${readinessFixture.paths.workplan}?workItem=${reviewItem.id}`); let tree = hooks.render(App); hooks.flush();
+  tree = hooks.render(App); hooks.flush();
+  const primary = find(find(tree, node => node.props.className === 'action-buttons'), node => node.props.primary);
+  assert.equal(primary.props.disabled, undefined);
+  assert.equal(primary.props.children, 'Attach replacement document');
+  const entry = named(tree, 'WorklistStepEntry');
+  assert.equal(entry.props.item.status, 'blocked');
+  assert.equal(entry.props.item.workflowAction, null);
+  assert.ok(!entry.props.item.waitingLabel.includes(approvalLetters[0].signatory.name));
 });

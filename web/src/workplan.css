@@ -70,7 +70,7 @@
   font-style:normal; font-family:inherit; letter-spacing:0;
 }
 .workflow-note p {margin:2px 0 0; font-size:1rem; line-height:1.55}
-.workflow-note .note-label,.reviewer-input .note-label,.flow-context-boundary .note-label,.source-excerpt .note-label,.evidence-flow .flow-node-note {
+.workflow-note .note-label,.flow-context-boundary .note-label,.source-excerpt .note-label,.evidence-flow .flow-node-note {
   display:block; font-size:.875rem; font-weight:600; line-height:1.5; letter-spacing:.02em; opacity:.85;
 }
 .work-grid .quote-bottom {align-items:flex-end; gap:8px 16px; flex-wrap:wrap}
@@ -102,9 +102,34 @@
 .source-excerpt p {margin:4px 0 0; font-size:1rem; line-height:1.55}
 .source-excerpt .excerpt-place {margin-right:8px; font-size:.875rem; font-weight:600; opacity:.85}
 
-/* Typed reviewer input is not a quotation. */
-.reviewer-input {margin:18px 0; padding:12px 14px; border:1px dashed color-mix(in srgb,currentColor 35%,transparent); border-radius:8px}
-.reviewer-input p {margin:4px 0 0; font-size:1rem; line-height:1.6; overflow-wrap:anywhere}
+
+/* Upload receipts: version, uploader, received time, checksum and inspection, as label and value pairs. */
+.receipt-meta {display:grid; grid-template-columns:minmax(104px,max-content) minmax(0,1fr); gap:6px 16px; margin:14px 0 0}
+/* Receipt facts are a definition list; each row's term and value sit in the two grid columns. */
+.receipt-meta>div {display:contents}
+.receipt-meta dt {font-size:.875rem; line-height:1.5; opacity:.85; font-weight:inherit}
+.receipt-meta dd {margin:0; font-size:1rem; line-height:1.5; overflow-wrap:anywhere}
+.work-grid .step-summary .receipt-meta dd {font-size:1rem; line-height:1.5}
+.receipt-inspections {margin:0; padding-left:1.2em}
+.receipt-inspections li+li {margin-top:4px}
+/* The letter's own words, labelled as an excerpt and reachable by keyboard. */
+.letter-text {margin:16px 0 0; padding:14px 16px; border-left:3px solid color-mix(in srgb,currentColor 30%,transparent); background:color-mix(in srgb,currentColor 5%,transparent); border-radius:0 8px 8px 0}
+.letter-text p {margin:8px 0 0; font-size:1rem; line-height:1.6}
+.letter-text .letter-text-note {font-size:.875rem; opacity:.85}
+.letter-text:focus-visible {outline:3px solid var(--chrome-focus); outline-offset:3px}
+.dialog-body .receipt-meta+.receipt-meta {margin-top:18px; padding-top:14px; border-top:1px solid color-mix(in srgb,currentColor 14%,transparent)}
+.handoff-card .letter-signatory {margin:14px 0 0; font-size:1rem; line-height:1.6}
+.handoff-card[data-status=rejected] .handoff-state {color:#a2453d}
+html[data-theme='dark'] .handoff-card[data-status=rejected] .handoff-state {color:#f0a59c}
+.step-summary .handoff-card+.button {margin-top:4px}
+/* The decision form cites a receipt; it has no text field for approval. */
+.reviewer-decision-form .decision-citation {margin:20px 0 0; padding:0; border:0; min-width:0}
+.reviewer-decision-form .decision-citation legend {padding:0; font-size:1rem; font-weight:600; line-height:1.5}
+.reviewer-decision-form .decision-citation .decision-version-confirmation {margin-top:8px}
+.reviewer-decision-form .decision-citation>p {font-size:1rem}
+.reviewer-decision-form .decision-contact {margin-top:20px}
+/* Reason forms for rejecting a version or a letter, and for requesting changes: no caption under 14px. */
+.dialog :is(.review-changes,.decision-letter-inspection,.decision-verify) :is(.field-required,.field-hint) {font-size:.875rem; line-height:1.5}
 
 /* Sources read, gaps and the workflow document, in the shared wording. */
 .dialog-body .coverage-heading {margin:22px 0 4px; font-size:1rem; line-height:1.5; font-weight:600; letter-spacing:0}
@@ -128,7 +153,16 @@
   .dialog .coverage-row>div {flex:1 1 calc(100% - 40px)}
   .dialog .coverage-row .pill {margin-left:33px}
   .speaker-role>div {grid-template-columns:minmax(0,1fr); gap:0}
+  .receipt-meta {grid-template-columns:minmax(0,1fr); gap:0}
+  .receipt-meta dd {margin-bottom:8px}
   /* Stacked, the buttons drop their negative margins and keep a gap between hit areas. */
   .work-grid .gap-actions {flex-direction:column; align-items:flex-start; gap:8px}
   .work-grid .gap-actions button {margin-block:0}
+}
+/* Inspection dialogs carry Cancel, Reject and Accept. On a narrow screen the reject control wraps like the others, never below its label. */
+@media (max-width:650px) {
+  .dialog .decision-actions>.button:not(.primary):not(.ghost) {flex:1 1 140px; white-space:normal; line-height:1.5; text-align:center}
+}
+@media (max-width:360px) {
+  .dialog .decision-actions>.button:not(.primary):not(.ghost) {flex:auto}
 }

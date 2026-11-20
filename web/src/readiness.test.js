@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixturePeople, initialState, readinessFixture, readinessEvidenceFixture, readinessEvidenceExample, renewalEvidence, worklistFixture, walkthroughDecisions, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {approvalLetters, fixturePeople, initialState, readinessFixture, readinessEvidenceFixture, readinessEvidenceExample, renewalEvidence, worklistFixture, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {customerDecisionSteps} from './customerDecision.js';
+import {typedInputs, walkthroughInputs} from './testing/walkthroughInputs.js';
 import {derive, transitionEvidenceChecks, transitionWalkthrough, workflowTransitionChecks} from './workflow.js';
 import {buildWorklist, resolveWorklistEntry, worklistActionHref} from './worklist.js';
 import {
@@ -9,13 +11,18 @@ import {
   safeReadinessReturn, selectReadiness,
 } from './readiness.js';
 
-const act = (state, type, fields = {}) => transitionWalkthrough(state, {type, ...fields});
+// Document inspection needs the reason the operator types; tests supply it here.
+const act = (state, type, fields = {}) => transitionWalkthrough(state, {type, ...(type === 'verify_document' ? typedInputs.verify_document : {}), ...fields});
 const chain = (...actions) => actions.reduce((state, action) => act(state, typeof action === 'string' ? action : action.type, typeof action === 'string' ? {} : action), initialState);
 const approved = () => chain('request_review', 'approve_plan');
 const received = () => act(approved(), 'obtain_document');
 const verified = () => act(received(), 'verify_document');
 const requested = () => act(verified(), 'request_customer_review');
-const decided = () => act(requested(), 'record_customer_approval', {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step});
+const step = (state, type) => act(state, type, walkthroughInputs(state, type));
+const lettered = () => step(requested(), 'upload_approval_letter');
+const inspected = () => step(lettered(), 'inspect_approval_letter');
+const authorized = () => step(inspected(), 'record_customer_authority');
+const decided = () => step(authorized(), 'record_customer_approval');
 const resolved = () => act(decided(), 'resolve_requirement');
 const journal = (state = initialState, fixture = readinessFixture) => advanceReadinessJournal(null, state, fixture);
 const byId = (model, id) => model.checks.find(check => check.id === id);
@@ -49,7 +56,8 @@ test('readiness is a pure API-shaped projection with string identities and indep
 
 test('every displayed transition is accepted by the reducer, including replacements, reopening and plan edits', () => {
   const completed = resolved();
-  const states = [initialState, act(initialState, 'request_review'), approved(), received(), verified(), requested(), decided(), completed,
+  const states = [initialState, act(initialState, 'request_review'), approved(), received(), verified(), requested(), lettered(), inspected(), authorized(), decided(), completed,
+    act(received(), 'reject_document', {reason: initialState.plan.specifications}),
     act(completed, 'reopen_requirement', {reason: initialState.plan.specifications}),
     act(completed, 'save_plan', {title: initialState.plan.instructions}),
     act(completed, 'save_plan', {specifications: initialState.plan.instructions}),
@@ -58,13 +66,15 @@ test('every displayed transition is accepted by the reducer, including replaceme
     act(act(initialState, 'request_review'), 'request_changes', {note: initialState.plan.specifications}),
     {...initialState, plan: {...initialState.plan, owner: fixturePeople.internalReviewer}},
   ];
+  // Readiness shows the reducer's own decision. The isolated evidence example is only compared, never acted on.
   for (const fixture of [readinessFixture, readinessEvidenceFixture]) for (const state of states) {
-    const d = derive(state), model = evaluateReadiness(state, fixture);
+    const d = derive(state, fixturePeople.internalReviewer, fixture), model = evaluateReadiness(state, fixture);
     for (const definition of fixture.checks.filter(item => item.kind === 'transition')) {
       const check = byId(model, definition.id), rule = d.transitions[definition.command];
-      assert.equal(check.demonstration.allowed, rule.allowed, definition.id);
+      assert.equal(check.allowed, rule.recorded ? false : rule.allowed, definition.id);
       const missingEvidence = (transitionEvidenceChecks[definition.command] || []).some(id => byId(model, id).result !== 'passed');
-      assert.equal(check.allowed, rule.allowed && !missingEvidence);
+      if (missingEvidence) assert.equal(check.allowed, false);
+      assert.equal('demonstration' in check, false);
       assert.equal(check.allowedActions.length, check.allowed ? 1 : 0);
       if (check.allowed) {
         assert.equal(check.result, 'passed');
@@ -78,7 +88,8 @@ test('every displayed transition is accepted by the reducer, including replaceme
         assert.equal(action.checkId, localURL(action.href).searchParams.get('check'));
         continue;
       }
-      const next = act(state, action.command, {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step,
+      if (fixture !== readinessFixture) continue;
+      const next = act(state, action.command, {...walkthroughInputs(state, action.command),
         reason: initialState.plan.specifications, ...(action.replacement ? {document: walkthroughDocumentExamples.replacement} : {})});
       assert.equal(next.error, null, `${state.plan.status}: ${action.command}`);
       assert.ok(next.history.length >= state.history.length);
@@ -94,7 +105,11 @@ test('missing documents do not block submission but later transitions list every
   assert.deepEqual(codes(byId(model, 'approve_plan')), ['plan_submission']);
   assert.deepEqual(codes(byId(model, 'verify_document')), ['plan_approval', 'document_receipt']);
   assert.deepEqual(codes(byId(model, 'request_customer_review')), ['plan_approval', 'document_receipt', 'document_inspection']);
-  assert.deepEqual(codes(byId(model, 'record_customer_decision')), ['plan_approval', 'document_receipt', 'document_inspection', 'customer_request', 'customer_authority', 'decision_citation', 'current_version_basis']);
+  assert.deepEqual(codes(byId(model, 'record_customer_decision')), ['plan_approval', 'document_receipt', 'document_inspection', 'customer_request', 'letter_receipt', 'letter_accepted', 'customer_authority', 'current_version_basis']);
+  assert.deepEqual(codes(byId(model, 'receive_approval_letter')), ['plan_approval', 'document_receipt', 'document_inspection', 'customer_request', 'letter_available']);
+  // Letter inspection and the authority record wait on the same plan, document and request gates as the upload.
+  assert.deepEqual(codes(byId(model, 'inspect_approval_letter')), ['plan_approval', 'document_receipt', 'document_inspection', 'customer_request', 'letter_receipt', 'letter_inspection_needed']);
+  assert.deepEqual(codes(byId(model, 'record_customer_authority')), ['plan_approval', 'document_receipt', 'document_inspection', 'customer_request', 'letter_receipt', 'letter_accepted']);
   assert.deepEqual(codes(byId(model, 'resolve_requirement')), ['plan_approval', 'document_receipt', 'document_inspection', 'customer_request', 'customer_approval', 'customer_authority', 'decision_citation', 'current_version_basis']);
   for (const check of model.checks.filter(item => item.result === 'failed')) {
     assert.equal(check.blockerCount, check.blockedReasons.length);
@@ -129,23 +144,33 @@ test('independent-review refusal is shared for draft and submitted plans, includ
   }
 });
 
-test('legacy verification and typed approval never manufacture independent version, authority, or citation evidence', () => {
-  for (const state of [initialState, received(), verified(), decided(), resolved()]) {
-    const model = evaluateReadiness(state);
-    for (const check of model.checks.filter(item => item.kind === 'evidence')) {
+test('verification and typed approval never manufacture evidence; the inspected letter and authority record do', () => {
+  const typed = act(requested(), 'record_customer_approval', {reviewedBy: approvalLetters[0].signatory.name, evidenceText: 'Approved.'});
+  assert.ok(typed.error);
+  // The version basis is the agreement record, so it passes once the version it names is received; authority and decision stay failed.
+  for (const state of [initialState, received(), verified(), requested(), typed]) {
+    const model = evaluateReadiness(state), basisPasses = state !== initialState;
+    for (const check of model.checks.filter(item => item.kind === 'evidence' && (item.id !== 'current_version_basis' || !basisPasses))) {
       assert.equal(check.result, 'failed');
       assert.equal(check.blockerCount, 1);
       assert.equal(check.blockedReasons[0].code, check.id);
       assert.equal(check.allowed, null);
       assert.equal(check.evaluatedAt, model.evaluatedAt);
     }
+    assert.equal(byId(model, 'current_version_basis').result, basisPasses ? 'passed' : 'failed');
     assert.equal(model.requirements[0].customerAuthorityLabel.toLowerCase(), 'unidentified');
-    assert.equal(model.evidenceGapCount, 3);
-    assert.ok(model.requirements[0].missing.some(item => item.code === 'current_version_basis'));
+    assert.equal(model.evidenceGapCount, basisPasses ? 2 : 3);
+    assert.equal(model.requirements[0].missing.some(item => item.code === 'current_version_basis'), !basisPasses);
     assert.ok(model.requirements[0].missing.some(item => item.code === 'customer_authority'));
   }
   const state = decided(), model = evaluateReadiness(state);
-  assert.equal(model.requirements[0].recordedDecision.text, state.customerReview.evidenceText);
+  assert.ok(model.checks.filter(item => item.kind === 'evidence').every(check => check.result === 'passed'));
+  assert.equal(model.evidenceGapCount, 0);
+  assert.equal(model.requirements[0].customerAuthorityLabel, approvalLetters[0].signatory.name);
+  assert.equal(evaluateReadiness(inspected()).requirements[0].customerAuthorityLabel, 'Unidentified');
+  assert.equal(byId(evaluateReadiness(inspected()), 'current_version_basis').result, 'passed');
+  assert.equal(model.requirements[0].recordedDecision.contact, approvalLetters[0].signatory.name);
+  assert.equal(model.requirements[0].recordedDecision.citation, `Receipt ${state.customerReview.evidenceRef.id}`);
   assert.equal(model.requirements[0].recordedDecision.recordedBy, state.customerReview.recordedBy);
   assert.equal(model.requirements[0].recordedDecision.documentVersion, state.document.version);
 });
@@ -160,8 +185,14 @@ test('requirements separate the action owner, requirement owner, customer role, 
   assert.equal(pending.waitingOn.id, null);
   assert.equal(pending.waitingOn.basis, worklistFixture.workItems[3].awaitedParty.basis);
   assert.notEqual(pending.waitingLabel, pending.nextStepOwnerLabel);
-  assert.deepEqual(evaluateReadiness(decided()).requirements[0].waitingOn, pending.waitingOn);
-  assert.equal(evaluateReadiness(decided(), readinessEvidenceFixture).requirements[0].waitingOn, null);
+  // Once the signed letter is in hand nobody is awaited. A later version the agreement record does not name is not
+  // requested, and the v4 authority record never names anyone for it.
+  for (const state of [lettered(), authorized(), decided()]) assert.equal(evaluateReadiness(state).requirements[0].waitingOn, null);
+  const later = act(resolved(), 'obtain_document', {...walkthroughInputs(resolved(), 'obtain_document'), document: walkthroughDocumentExamples.replacement});
+  assert.match(act(later, 'verify_document').error, /names version v4/);
+  const replaced = evaluateReadiness(later).requirements[0];
+  assert.equal(replaced.waitingOn, null);
+  assert.equal(replaced.customerAuthorityLabel, 'Unidentified');
 });
 
 test('all permitted next steps open the precise work item or requirement without executing a command', () => {
@@ -192,18 +223,20 @@ test('resolving the recorded requirement does not change CRM, commercial outcome
   const beforeState = decided(), afterState = act(beforeState, 'resolve_requirement');
   const before = evaluateReadiness(beforeState), after = evaluateReadiness(afterState);
   assert.equal(before.openRequirementCount, 1);
-  assert.equal(after.openRequirementCount, 1);
+  assert.equal(after.openRequirementCount, 0);
   assert.equal(after.requirements[0].recordedStatus, 'resolved');
   assert.deepEqual(after.crm, before.crm);
   assert.deepEqual(afterState.task, beforeState.task);
   assert.equal(afterState.task.status, beforeState.task.status);
-  assert.equal(after.requirements[0].evidenceStatus, 'open');
+  assert.equal(after.requirements[0].evidenceStatus, 'established');
+  assert.deepEqual(afterState.requirement.resolvedWith, {decisionId: beforeState.customerReview.id, evidenceRef: beforeState.customerReview.evidenceRef,
+    authorityId: beforeState.evidence.customerAuthority.id, authorityRevision: beforeState.evidence.customerAuthority.revision, versionBasisId: readinessFixture.documentVersionBasis.id});
   assert.deepEqual(after.commercial, before.commercial);
   assert.deepEqual(buildWorklist(afterState).workItems.map(item => [item.id, item.status, item.revision]), buildWorklist(beforeState).workItems.map(item => [item.id, item.status, item.revision]));
   assert.equal(byId(after, 'resolve_requirement').result, 'not_applicable');
-  assert.equal(after.requirements[0].reopenAction.command, 'reopen_requirement');
-  assert.equal(after.requirements[0].nextAction.intent, 'inspect_evidence');
-  assert.ok(after.requirements[0].missing.length > 0);
+  assert.equal(after.requirements[0].allowedActions[0].command, 'reopen_requirement');
+  assert.equal(after.requirements[0].nextAction, null);
+  assert.deepEqual(after.requirements[0].missing, []);
 });
 
 test('multiple requirement records keep their own states and do not borrow the executable requirement status', () => {
@@ -292,7 +325,8 @@ test('new walkthrough inputs retain the previous evaluation and identify changed
 
 test('changes in document inputs are recorded even when an open requirement and its next action stay the same', () => {
   const first = received(), prior = journal(first);
-  const replacement = act(first, 'obtain_document', {document: {...first.document, version: `${first.document.version}-replacement`, currentVersion: `${first.document.version}-replacement`}});
+  // A distinct file of the same version: the next action stays the same, and the new receipt is recorded as a changed input.
+  const replacement = act(first, 'obtain_document', {document: walkthroughDocumentExamples.rescan});
   const next = advanceReadinessJournal(prior, replacement);
   assert.equal(next.current.requirements[0].status, prior.current.requirements[0].status);
   assert.equal(next.current.requirements[0].nextAction.id, prior.current.requirements[0].nextAction.id);
@@ -300,15 +334,16 @@ test('changes in document inputs are recorded even when an open requirement and 
   assert.equal(next.previous.document.version, first.document.version);
 });
 
-test('reopening retains the old resolved result and reports the recorded reason without inventing an actor', () => {
+test('reopening retains the old resolved result and reports the recorded reason with its explicit actor', () => {
   const state = resolved(), prior = journal(state);
-  const opened = act(state, 'reopen_requirement', {reason: initialState.plan.specifications});
+  assert.match(act(state, 'reopen_requirement', {reason: initialState.plan.specifications}).error, /Name the principal reopening/);
+  const opened = act(state, 'reopen_requirement', {reason: initialState.plan.specifications, actorId: 'principal-reviewer'});
   const next = advanceReadinessJournal(prior, opened);
   assert.equal(next.previous.requirements[0].recordedStatus, 'resolved');
   assert.equal(next.current.requirements[0].recordedStatus, 'open');
   assert.equal(next.current.requirements[0].status, 'open');
   assert.equal(next.changes.cause.detail, opened.history.at(-1).detail);
-  assert.equal(next.changes.cause.actor, null);
+  assert.equal(next.changes.cause.actor, fixturePeople.internalReviewer);
   assert.ok(next.changes.requirements[0].differences.some(difference => difference.field === 'recordedStatus'));
   assert.ok(next.changes.requirements[0].added.some(reason => reason.code === 'customer_approval'));
 });
@@ -329,7 +364,8 @@ test('the evaluation journal survives reload, rejects broken storage, and never 
   for (const value of [null, '', '{', '{}', JSON.stringify({schema: '1', current: {}})]) assert.equal(readReadinessJournal(value), null);
   assert.equal(journal(resolved()).previous, null);
   assert.equal(journal(resolved()).current.requirements[0].recordedStatus, 'resolved');
-  assert.equal(journal(resolved()).current.requirements[0].status, 'open');
+  assert.equal(journal(resolved()).current.requirements[0].status, 'resolved');
+  assert.equal(journal(resolved(), {...readinessFixture, card: null}).current.requirements[0].status, 'open');
 });
 
 test('retained evaluations are snapshots, not live references to the source card or workflow', () => {
@@ -387,7 +423,7 @@ test('requirement filtering produces real empty views while keeping an explicitl
 test('filter-hidden checks retain exact selection and evidence checks never borrow transition-filter membership', () => {
   const source = journal();
   const hidden = selectReadiness(source, 'check=submit_plan&checkState=failed');
-  assert.equal(hidden.visibleChecks.length, 6);
+  assert.equal(hidden.visibleChecks.length, 9);
   assert.equal(hidden.selectedCheckOutside.id, 'submit_plan');
   const evidence = selectReadiness(source, 'check=customer_authority&checkState=passed');
   assert.equal(evidence.selection.outside, false);
@@ -558,7 +594,7 @@ test('an outdated receipt blocks verification and exposes a replacement accepted
   const state = act(approved(), 'obtain_document', {document: walkthroughDocumentExamples.outdated});
   const model = evaluateReadiness(state), verification = byId(model, 'verify_document'), receipt = byId(model, 'receive_document');
   assert.equal(verification.allowed, false);
-  assert.deepEqual(codes(verification), ['document_current_version']);
+  assert.deepEqual(codes(verification), ['document_applies']);
   assert.deepEqual(verification.blockedReasons, derive(state).transitions.verify_document.blockedReasons);
   assert.equal(verification.allowedActions.length, 0);
   assert.equal(receipt.allowed, true);
@@ -573,33 +609,34 @@ test('an outdated receipt blocks verification and exposes a replacement accepted
   assert.equal(act(replaced, 'verify_document').error, null);
 });
 
-test('decision recording and resolution require three evidence checks without tightening the demonstration reducer', () => {
-  for (const [state, id] of [[requested(), 'record_customer_decision'], [decided(), 'resolve_requirement']]) {
-    const model = evaluateReadiness(state), check = byId(model, id);
-    assert.equal(check.result, 'failed');
-    assert.equal(check.allowed, false);
-    assert.deepEqual(codes(check), ['customer_authority', 'decision_citation', 'current_version_basis']);
-    assert.equal(check.blockerCount, 3);
-    assert.equal(check.allowedActions.length, 0);
-    assert.equal(check.demonstration.allowed, true);
-    assert.ok(check.demonstration.fact);
-    assert.equal(model.nextAction.intent, 'inspect_evidence');
-    assert.equal(model.nextAction.checkId, 'customer_authority');
-    assert.equal(model.nextAction.command, undefined);
-    assert.equal(act(state, check.command, {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step}).error, null);
-  }
-  const supported = evaluateReadiness(decided(), readinessEvidenceFixture);
+test('the reducer refuses decision recording and resolution until their evidence checks pass, and Readiness shows the same blockers', () => {
+  const pending = requested(), recording = byId(evaluateReadiness(pending), 'record_customer_decision');
+  assert.equal(recording.allowed, false);
+  assert.deepEqual(codes(recording), ['letter_receipt', 'letter_accepted', 'customer_authority']);
+  assert.deepEqual(recording.blockedReasons, derive(pending).transitions.record_customer_approval.blockedReasons);
+  assert.equal(evaluateReadiness(pending).nextAction.command, 'upload_approval_letter');
+  assert.ok(act(pending, 'record_customer_approval', walkthroughInputs(pending, 'record_customer_approval')).error);
+  // Without the agreement record's version basis, resolution is blocked on that evidence alone, in Readiness and the reducer.
+  const state = decided(), withoutBasis = {...readinessFixture, documentVersionBasis: null};
+  const blocked = evaluateReadiness(state, withoutBasis), check = byId(blocked, 'resolve_requirement');
+  assert.deepEqual(codes(check), ['current_version_basis']);
+  assert.equal(check.allowedActions.length, 0);
+  assert.equal(blocked.nextAction.intent, 'inspect_evidence');
+  assert.equal(blocked.nextAction.checkId, 'current_version_basis');
+  assert.match(derive(state, undefined, withoutBasis).transitions.resolve_requirement.refusal, /approval evidence/);
+  const supported = evaluateReadiness(state);
   assert.equal(byId(supported, 'resolve_requirement').allowed, true);
   assert.equal(byId(supported, 'resolve_requirement').blockerCount, 0);
   assert.equal(supported.nextAction.command, 'resolve_requirement');
+  assert.equal(act(state, 'resolve_requirement').error, null);
 });
 
 test('known-missing evidence fails by name while a missing card or rule stays unevaluated', () => {
-  const missing = evaluateReadiness(decided());
-  for (const id of ['customer_authority', 'decision_citation', 'current_version_basis']) {
-    assert.equal(byId(missing, id).result, 'failed');
-    assert.deepEqual(codes(byId(missing, id)), [id]);
-    assert.equal(byId(missing, id).blockerCount, 1);
+  const missing = evaluateReadiness(requested()), noDocument = evaluateReadiness(approved());
+  for (const [model, id] of [[missing, 'customer_authority'], [missing, 'decision_citation'], [noDocument, 'current_version_basis']]) {
+    assert.equal(byId(model, id).result, 'failed');
+    assert.deepEqual(codes(byId(model, id)), [id]);
+    assert.equal(byId(model, id).blockerCount, 1);
   }
   const fixture = structuredClone(readinessFixture);
   fixture.card = null;
@@ -621,7 +658,8 @@ test('each reference resolves by its real source, card and unit, or inspected re
     assert.ok(resolved.record);
     assert.equal(resolved.issue, undefined);
     fixture.documentVersionBasis.source = reference;
-    assert.equal(byId(evaluateReadiness(received(), fixture), 'current_version_basis').result, 'passed');
+    // A receipt resolves, but a letter receipt never establishes which version applies.
+    assert.equal(byId(evaluateReadiness(received(), fixture), 'current_version_basis').result, reference.kind === 'receipt' ? 'failed' : 'passed');
   }
   for (const reference of [null, example.source.label, {kind: 'source', id: 'missing'}, {kind: 'unit', cardId: 'missing', n: example.unit.n},
     {kind: 'unit', cardId: example.unit.cardId, n: 'missing'}, {kind: 'receipt', id: 'missing'}, {kind: 'unknown', id: example.receipt.id}]) {
@@ -637,7 +675,7 @@ test('unread sources, hidden units, and uninspected receipts cannot support evid
     [example.documentVersionBasis.source, fixture => {fixture.card.sources.at(-1).status = 'not_read';}],
     [{kind: 'unit', cardId: example.unit.cardId, n: example.unit.n}, fixture => {fixture.card.units.at(-1).shown = false;}],
     [{kind: 'unit', cardId: example.unit.cardId, n: example.unit.n}, fixture => {fixture.card.sources.at(-1).status = 'not_read';}],
-    [example.decisionReceipt.evidenceRef, fixture => {fixture.artifactReceipts[0].inspection.status = 'pending';}],
+    [example.decisionReceipt.evidenceRef, fixture => {fixture.artifactReceipts[0].inspections[0].status = 'pending';}],
     [example.decisionReceipt.evidenceRef, fixture => {fixture.artifactReceipts[0].status = 'withdrawn';}],
   ]) {
     const fixture = structuredClone(readinessEvidenceFixture);
@@ -645,7 +683,8 @@ test('unread sources, hidden units, and uninspected receipts cannot support evid
     fixture.customerAuthority.evidenceRef = ref;
     fixture.decisionReceipt.evidenceRef = ref;
     invalidate(fixture);
-    const model = evaluateReadiness(decided(), fixture);
+    // The walkthrough's own records win over a fixture, so the fixture's records are read against a pending request.
+    const model = evaluateReadiness(requested(), fixture);
     assert.ok(model.checks.filter(check => check.kind === 'evidence').every(check => check.result === 'failed'));
     assert.equal(byId(model, 'resolve_requirement').allowed, false);
   }
@@ -678,11 +717,11 @@ test('accepted authority requires a real contact, agreement binding, and a resol
   ]) {
     const fixture = structuredClone(readinessEvidenceFixture);
     invalidate(fixture);
-    const model = evaluateReadiness(decided(), fixture);
+    const model = evaluateReadiness(requested(), fixture);
     assert.equal(byId(model, 'customer_authority').result, 'failed');
     assert.equal(byId(model, 'decision_citation').result, 'failed');
-    assert.equal(model.requirements[0].waitingOn.id, null);
-    assert.equal(model.requirements[0].customerAuthorityLabel, evaluateReadiness(decided()).requirements[0].customerAuthorityLabel);
+    assert.equal(model.requirements[0].customerAuthorityLabel, 'Unidentified');
+    assert.equal(evaluateReadiness(requested(), fixture).requirements[0].waitingOn.id, null);
   }
 });
 
@@ -691,21 +730,25 @@ test('a cited decision must bind the agreement, document, version, and evidence-
     ['contactId', 'missing'], ['status', 'pending'], ['outcome', 'rejected']]) {
     const fixture = structuredClone(readinessEvidenceFixture);
     fixture.decisionReceipt[field] = value;
-    const model = evaluateReadiness(decided(), fixture);
+    const model = evaluateReadiness(requested(), fixture);
     assert.equal(byId(model, 'customer_authority').result, 'passed');
     assert.equal(byId(model, 'decision_citation').result, 'failed', field);
     assert.equal(byId(model, 'resolve_requirement').allowed, false);
   }
   const fixture = structuredClone(readinessEvidenceFixture);
+  assert.equal(byId(evaluateReadiness(requested(), fixture), 'decision_citation').result, 'passed');
   fixture.decisionReceipt.evidenceRef = fixture.documentVersionBasis.source;
-  assert.equal(byId(evaluateReadiness(decided(), fixture), 'decision_citation').result, 'failed');
+  assert.equal(byId(evaluateReadiness(requested(), fixture), 'decision_citation').result, 'failed');
   fixture.decisionReceipt.evidenceRef = {kind: 'unit', cardId: fixture.card.id, n: 'missing'};
-  assert.equal(byId(evaluateReadiness(decided(), fixture), 'decision_citation').result, 'failed');
+  assert.equal(byId(evaluateReadiness(requested(), fixture), 'decision_citation').result, 'failed');
+  // A shown unit from a read source still cannot stand as the decision.
+  fixture.decisionReceipt.evidenceRef = {kind: 'unit', cardId: fixture.card.id, n: '1'};
+  assert.match(byId(evaluateReadiness(requested(), fixture), 'decision_citation').explanation, /source unit cannot establish an approval/);
 });
 
 test('work queue readiness follows each current command and completed items fall back to their recorded output', () => {
-  const states = [initialState, act(initialState, 'request_review'), approved(), received(), verified(), requested(), decided(), resolved(),
-    act(approved(), 'obtain_document', {document: walkthroughDocumentExamples.outdated})];
+  const states = [initialState, act(initialState, 'request_review'), approved(), received(), verified(), requested(), lettered(), inspected(), authorized(), decided(), resolved(),
+    act(approved(), 'obtain_document', {document: walkthroughDocumentExamples.outdated}), act(received(), 'reject_document', {reason: initialState.plan.specifications})];
   for (const state of states) {
     const data = buildWorklist(state), source = journal(state);
     for (const item of data.workItems.filter(row => row.mode === 'walkthrough')) {
@@ -719,11 +762,12 @@ test('work queue readiness follows each current command and completed items fall
         assert.equal(url.pathname, readinessFixture.paths.readiness);
         const check = selectReadiness(source, url.search).selection.resource;
         if (command) assert.equal(check.id, workflowTransitionChecks[command]);
-        if (command) assert.equal(check.command, command);
+        // Rejection shares the inspection check with acceptance.
+        if (command) assert.equal(check.command, command === 'reject_document' ? 'verify_document' : command);
         assert.notEqual(check.result, 'not_applicable');
       }
       for (const action of [item.workflowAction, item.replacementAction].filter(action => action && !action.command.startsWith('inspect_'))) {
-        assert.equal(act(state, action.command, {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step,
+        assert.equal(act(state, action.command, {...walkthroughInputs(state, action.command),
           ...(item.replacementAction === action ? {document: walkthroughDocumentExamples.replacement} : {})}).error, null);
       }
     }
@@ -731,7 +775,9 @@ test('work queue readiness follows each current command and completed items fall
   const plan = buildWorklist(states[1]).workItems.find(item => item.kind === 'plan_review');
   assert.equal(localURL(plan.readinessAction.href).searchParams.get('check'), 'approve_plan');
   const review = buildWorklist(requested()).workItems.find(item => item.kind === 'customer_review');
-  assert.equal(localURL(review.readinessAction.href).searchParams.get('check'), 'record_customer_decision');
+  assert.equal(localURL(review.readinessAction.href).searchParams.get('check'), 'receive_approval_letter');
+  const authority = buildWorklist(inspected()).workItems.find(item => item.kind === 'customer_review');
+  assert.equal(localURL(authority.readinessAction.href).searchParams.get('check'), 'record_customer_authority');
 });
 
 test('check differences include added and removed IDs and changes to blocker details without changing their codes', () => {
@@ -748,12 +794,13 @@ test('check differences include added and removed IDs and changes to blocker det
   assert.equal(added.changes.checks.find(check => check.id === row.id).after, 'passed');
   const old = act(approved(), 'obtain_document', {document: walkthroughDocumentExamples.outdated});
   before = journal(old);
-  const changed = advanceReadinessJournal(before, {...old, document: {...old.document, currentVersion: walkthroughDocumentExamples.replacement.version}});
+  // The file's own currentVersion changes nothing; a different received version changes the agreement-record blocker.
+  const changed = advanceReadinessJournal(before, {...old, document: {...old.document, version: 'v2'}});
   const diff = changed.changes.checks.find(check => check.id === 'verify_document');
   assert.equal(diff.before, diff.after);
   assert.equal(diff.added.length, 0);
   assert.equal(diff.cleared.length, 0);
-  assert.equal(diff.updated[0].code, 'document_current_version');
+  assert.equal(diff.updated[0].code, 'document_applies');
   assert.notEqual(diff.updated[0].before.reason, diff.updated[0].after.reason);
   assert.equal(changed.current.evaluatedAt, null);
 });
@@ -761,10 +808,10 @@ test('check differences include added and removed IDs and changes to blocker det
 test('requirement differences preserve changed blocker explanations with the same code', () => {
   const fixture = structuredClone(readinessEvidenceFixture);
   fixture.customerAuthority.evidenceRef.id = 'missing';
-  const before = advanceReadinessJournal(null, decided(), fixture);
+  const before = advanceReadinessJournal(null, requested(), fixture);
   fixture.customerAuthority.evidenceRef = readinessEvidenceExample.customerAuthority.evidenceRef;
-  fixture.artifactReceipts[0].inspection.status = 'pending';
-  const after = advanceReadinessJournal(before, decided(), fixture);
+  fixture.artifactReceipts[0].inspections[0].status = 'pending';
+  const after = advanceReadinessJournal(before, requested(), fixture);
   const change = after.changes.requirements.find(item => item.id === initialState.requirement.id);
   assert.ok(change.updated.some(item => item.code === 'customer_authority' && item.before.reason !== item.after.reason));
 });
@@ -796,7 +843,7 @@ test('the first local evaluation always has an initial cause, and later raw even
   assert.equal(after.changes.cause.detail, decided().history.at(-1).detail);
   assert.ok(after.changes.cause.label);
   assert.notEqual(after.changes.cause.label, first.changes.cause.label);
-  assert.equal(after.changes.cause.actor, null);
+  assert.equal(after.changes.cause.actor, fixturePeople.internalReviewer);
 });
 
 test('input identities distinguish document and review records from their work-item revisions', () => {
@@ -807,7 +854,7 @@ test('input identities distinguish document and review records from their work-i
   assert.equal(document.id, state.document.id);
   assert.equal(document.revision, null);
   assert.equal(document.version, state.document.version);
-  assert.equal(review.id, null);
+  assert.equal(review.id, state.customerReview.id);
   assert.equal(review.revision, null);
   assert.equal(review.version, state.customerReview.documentVersion);
   assert.equal(review.recorded, true);
@@ -832,17 +879,19 @@ test('compact input keys change on relevant records but not error-only updates o
   assert.ok(!changed.current.inputKey.includes(JSON.stringify(fixture)));
 });
 
-test('unknown authority keeps the requirement open in readiness even after a walkthrough resolution', () => {
-  const state = resolved(), source = journal(state), model = source.current;
+test('authority that becomes unknown keeps the requirement open in readiness even after a walkthrough resolution', () => {
+  // A fixture cannot override the walkthrough's own authority record; a restored record whose own authority is withdrawn can.
+  const supportedState = resolved(), withdrawn = readinessFixture;
+  const state = {...supportedState, evidence: {...supportedState.evidence, customerAuthority: {...supportedState.evidence.customerAuthority, status: 'withdrawn'}}};
+  const source = journal(state, withdrawn), model = source.current;
   assert.equal(state.requirement.status, 'resolved');
   assert.equal(model.requirements[0].recordedStatus, state.requirement.status);
   assert.equal(model.requirements[0].status, 'open');
   assert.equal(model.openRequirementCount, 1);
   assert.equal(model.requirements[0].nextAction.checkId, 'customer_authority');
-  assert.equal(model.requirements[0].waitingOn.id, null);
-  assert.equal(selectReadiness(source, 'requirements=open').visibleRequirements.length, 1);
-  assert.equal(selectReadiness(source, 'requirements=resolved').visibleRequirements.length, 1);
-  const supported = evaluateReadiness(state, readinessEvidenceFixture);
+  assert.equal(selectReadiness(source, 'requirements=open', withdrawn).visibleRequirements.length, 1);
+  assert.equal(selectReadiness(source, 'requirements=resolved', withdrawn).visibleRequirements.length, 1);
+  const supported = evaluateReadiness(supportedState);
   assert.equal(supported.requirements[0].status, 'resolved');
   assert.equal(supported.openRequirementCount, 0);
   assert.equal(supported.requirements[0].allowedActions[0].command, 'reopen_requirement');

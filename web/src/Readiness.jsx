@@ -75,9 +75,10 @@ function Requirement({item, selected, outside, entryLink, unitLink, action, onCl
         <UnitContent unit={citation.unit}/><aside className="rd-workflow-note">{citation.context}</aside>
       </article>) : <p>No cited units are recorded. This is not evidence that a condition is absent.</p>}
     </section>
-    {item.recordedDecision && <section className="rd-section rd-reviewer-input"><h4>{item.recordedDecision.label}</h4><p>{item.recordedDecision.text || 'Decision text not recorded'}</p>
-      <dl className="rd-inputs"><div><dt>Recorded by</dt><dd>{item.recordedDecision.recordedBy || 'Not recorded'}</dd></div><div><dt>Decision time</dt><dd><Time value={item.recordedDecision.recordedAt}/></dd></div><div><dt>Document version</dt><dd>{item.recordedDecision.documentVersion || 'Not recorded'}</dd></div></dl>
-      <p>This input is not a source quotation, cited receipt, or authority finding.</p>
+    {item.recordedDecision && <section className="rd-section rd-recorded-decision"><h4>{item.recordedDecision.label}</h4>
+      {item.recordedDecision.reReviewReason && <p className="rd-notice">Not current. {item.recordedDecision.reReviewReason}</p>}
+      <dl className="rd-inputs"><div><dt>Approving contact</dt><dd>{item.recordedDecision.contact || 'Not recorded'}</dd></div><div><dt>Cited evidence</dt><dd>{item.recordedDecision.citation || 'Not recorded'}</dd></div><div><dt>Recorded by</dt><dd>{item.recordedDecision.recordedBy || 'Not recorded'}</dd></div><div><dt>Decision time</dt><dd><Time value={item.recordedDecision.recordedAt}/></dd></div><div><dt>Document version</dt><dd>{item.recordedDecision.documentVersion || 'Not recorded'}</dd></div></dl>
+      <p>The decision is a record bound to its citation. It is not a source quotation, and its evidence checks are listed above.</p>
     </section>}
     {item.resolvedAt && <p className="rd-resolution-time">Recorded resolution: <Time value={item.resolvedAt}/>. Separate work-item outputs and the commercial outcome are unchanged.</p>}
     <div className="rd-item-action"><span className="rd-kicker">{item.status === 'resolved' ? 'RECORDED STATE, NOT COMMERCIAL COMPLETION' : 'ONE NEXT CORRECTIVE STEP'}</span>
@@ -97,7 +98,6 @@ function CheckItem({check, selected, outside, entryLink, action, stale, onClose}
     {check.blockedReasons.length > 0 && <ul className="rd-blocker-names" aria-label={`All blockers for ${check.title}`}>{check.blockedReasons.map(reason => <li key={reason.code}>
       {reason.checkId && reason.checkId !== check.id ? entryLink('check', reason.checkId, reason.name, `check:${check.id}:blocker:${reason.code}`) : <span>{reason.name}</span>}
     </li>)}</ul>}
-    {check.demonstration?.fact && <aside className="rd-demonstration"><strong>{stale ? 'Retained demonstration reducer fact' : 'Demonstration reducer fact'}</strong><p>{check.demonstration.fact}</p></aside>}
     {['not_evaluated', 'not_applicable'].includes(check.result) && <p className="rd-check-explanation">{check.explanation}</p>}
     {selected && <section className="rd-check-details rd-paper" aria-label={`${check.title} evaluation`}>
       <p>{check.scope}</p>
