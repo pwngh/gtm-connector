@@ -7,6 +7,7 @@ import {createServer} from 'vite';
 import {historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughDecisions, walkthroughDocumentExamples} from './renewalFixtures.js';
 import {transitionWalkthrough} from './workflow.js';
 import {historyHref, selectHistory} from './history.js';
+import {hydrateHistoryRecord} from './historyRecording.js';
 
 let server, History;
 before(async () => {
@@ -73,7 +74,9 @@ test('typed reviewer input renders as attributed scoped values, never as a sourc
   assert.ok(!quotes.includes(state.customerReview.evidenceText));
   const decision = html.split('data-history-field="decision.text"')[1].split('</dd>')[0];
   assert.ok(unescape(decision).includes(state.customerReview.evidenceText));
-  assert.ok(unescape(decision).includes(state.customerReview.recordedBy));
+  assert.ok(!unescape(decision).includes(state.customerReview.recordedBy));
+  const recorder = html.split('data-history-field="decision.recordedBy"')[1].split('</dd>')[0];
+  assert.ok(unescape(recorder).includes(state.customerReview.recordedBy));
   assert.ok(unescape(decision).includes(state.customerReview.reviewedBy));
   assert.ok(decision.includes(state.customerReview.documentVersion));
   assert.ok(decision.includes('hs-attribution'));
@@ -87,9 +90,9 @@ test('corrections render supersedes links and typed attribution changes while th
   assert.equal(new URL(supersedes.href, 'http://local.test').searchParams.get('entry'), decisionId);
   assert.ok(correction.includes('data-diff-field="decision.reviewer"'));
   assert.ok(correction.includes('data-diff-field="decision.text"'));
-  assert.ok(correction.includes('data-diff-field="decision.authority"'));
-  assert.ok(correction.includes('data-diff-field="decision.citation"'));
-  assert.ok(correction.includes('data-diff-field="source.eventAt"'));
+  assert.ok(!correction.includes('data-diff-field="decision.authority"'));
+  assert.ok(!correction.includes('data-diff-field="decision.citation"'));
+  assert.ok(!correction.includes('data-diff-field="source.eventAt"'));
   const effective = render(new URLSearchParams({example: example.id, entry: decisionId, view: 'effective'}));
   const original = effective.split('class="hs-disclosure hs-original"')[1].split('</details>')[0];
   assert.ok(unescape(original).includes(walkthroughDecisions.reviewedBy));
@@ -181,4 +184,43 @@ test('readiness effects render the selector’s actual invalidated checks, not s
   assert.deepEqual([...html.matchAll(/data-effect="([^"]+)" data-effect-status="invalidated"/g)].map(match => match[1]), view.selection.resource.impacts.effects.filter(effect => effect.status === 'invalidated').map(effect => effect.id));
   assert.equal((html.match(/data-evidence-result="failed"/g) || []).length, 3);
   assert.ok(!html.includes('data-evidence-result="passed"'));
+});
+
+
+test('malformed nested saved inputs render partial details safely instead of evaluating the broken snapshot', () => {
+  for (const mutate of [record => {record.after.requirements = {};}, record => {record.contextAfter.contacts = [null];},
+    record => {record.contextAfter.card.units[2].fields = [null];}]) {
+    const state = complete(), event = state.history.at(-1);
+    event.historyRecord = structuredClone(hydrateHistoryRecord(event.historyRecord, state.historyContexts));
+    mutate(event.historyRecord);
+    const query = new URLSearchParams({entry: event.id}), view = selectHistory(state, query), html = render(query, state);
+    assert.equal(view.selection.resource.complete, false);
+    assert.ok(html.includes('<section class="hs-proof"'));
+    assert.equal((html.match(/data-evidence-result=/g) || []).length, 0);
+    assert.equal((html.match(/data-effect-status=/g) || []).length, 0);
+  }
+});
+
+test('required reasons are present in collapsed decision rows without opening an entry', () => {
+  const state = act(act(initialState, 'request_review'), 'request_changes', {note: historyTestRecords.editReason});
+  const html = render('', state), row = html.split(`data-history-id="${state.history.at(-1).id}"`)[1].split('</li>')[0];
+  assert.ok(!row.includes('class="hs-proof"'));
+  assert.ok(row.includes('class="hs-row-reason"'));
+  assert.ok(unescape(row).includes(state.history.at(-1).reason));
+  const correction = render(new URLSearchParams({example: example.id}));
+  const collapsed = correction.split(`data-history-id="${exampleId('correction')}"`)[1].split('</li>')[0];
+  assert.ok(collapsed.includes('class="hs-row-reason"'));
+  assert.ok(!collapsed.includes('class="hs-proof"'));
+});
+
+test('collapsed effective entries distinguish corrected projections and their dependent resolution', () => {
+  const recorded = render(new URLSearchParams({example: example.id}));
+  const effective = render(new URLSearchParams({example: example.id, view: 'effective'}));
+  for (const id of [exampleId('record_customer_approval'), exampleId('resolve_requirement')]) {
+    const originalRow = recorded.split(`data-history-id="${id}"`)[1].split('</li>')[0];
+    const effectiveRow = effective.split(`data-history-id="${id}"`)[1].split('</li>')[0];
+    assert.ok(!originalRow.includes('data-corrected-projection="true"'));
+    assert.ok(effectiveRow.includes('data-corrected-projection="true"'));
+    assert.ok(!effectiveRow.includes('class="hs-proof"'));
+  }
 });

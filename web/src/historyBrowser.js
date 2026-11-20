@@ -17,7 +17,15 @@ export function historyFocusTarget(root, key) {
 export function restoreHistoryFocus(root, opener, fallback, heading) {
   const candidates = [...(root?.querySelectorAll('[data-history-focus]') || [])];
   for (const candidate of [opener, fallback]) {
-    if (focusHistoryElement(candidates.find(element => element.dataset.historyFocus === candidate))) return;
+    const target = candidates.find(element => element.dataset.historyFocus === candidate);
+    if (target && target.isConnected !== false && !target.disabled && !target.closest?.('[hidden],[inert],[aria-hidden="true"]')) {
+      const seen = new Set();
+      for (let disclosure = target.closest?.('details'); disclosure && !seen.has(disclosure); disclosure = disclosure.parentElement?.closest('details')) {
+        seen.add(disclosure);
+        if (!disclosure.querySelector('summary')?.contains(target)) disclosure.open = true;
+      }
+    }
+    if (focusHistoryElement(target)) return;
   }
   focusHistoryElement(heading);
 }

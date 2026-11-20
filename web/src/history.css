@@ -118,8 +118,8 @@ html[data-theme='dark'] .hs-page select {color-scheme:dark}
 .hs-values>div {padding:16px 0; border-bottom:1px solid var(--hs-line)}.hs-values>div:last-child {border:0}
 .hs-values dt {font-weight:600; font-size:1rem; color:var(--hs-ink); margin-bottom:9px}
 .hs-page .hs-value {white-space:pre-wrap; unicode-bidi:plaintext; color:var(--hs-ink); margin:0; line-height:1.65}
-.hs-page .hs-attribution {margin-top:10px; padding-top:9px; border-top:1px solid var(--hs-line)}
-.hs-page .hs-value-scope {margin-top:5px}
+.hs-page .hs-attribution {font-size:1rem; color:var(--hs-muted); margin-top:10px; padding-top:9px; border-top:1px solid var(--hs-line)}
+.hs-page .hs-value-scope {font-size:1rem; color:var(--hs-muted); margin-top:5px}
 .hs-differences {margin-top:18px}.hs-difference+.hs-difference {margin-top:24px}
 .hs-difference-heading {margin-bottom:12px}.hs-difference-heading .hs-label {margin-top:5px}
 .hs-comparison-pair {display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px}
@@ -158,11 +158,6 @@ html[data-theme='dark'] .hs-page select {color-scheme:dark}
 .hs-examples {margin-top:26px; border-top:1px solid var(--hs-line); padding-top:10px; color:var(--hs-muted)}
 .hs-examples>summary {padding:10px 0}.hs-examples>p {margin:10px 0 17px}.hs-examples>label {max-width:400px}
 .hs-footnote {display:flex; align-items:flex-start; gap:10px; padding-top:23px; color:var(--hs-muted)}.hs-footnote>svg {margin-top:5px}
-.main-content:has(.hs-page)>.page-heading .heading-actions :is(.text-button,.pill) {font-size:1rem}
-.main-content:has(.hs-page)>.page-heading .heading-actions .text-button {min-height:44px}
-.main-content:has(.hs-page)>.detail-nav nav a {min-height:44px; font-size:1rem}
-.main-content:has(.hs-page)>.detail-nav .save-indicator,.main-content:has(.hs-page)>.page-heading .account-meta {font-size:1rem}
-.main-content:has(.hs-page)>.page-heading .context-link {display:inline-flex; align-items:center; min-height:44px; min-width:44px; font-size:1rem}
 .hs-return-context {display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:12px 16px; border:1px solid var(--line); border-radius:8px; margin-bottom:18px; font-size:1rem; line-height:1.6}
 .hs-return-context a {display:inline-flex; align-items:center; min-height:44px; color:var(--blue); text-decoration:underline; text-underline-offset:4px}
 @media(min-width:1550px) {
@@ -198,20 +193,14 @@ html[data-theme='dark'] .hs-page select {color-scheme:dark}
 }
 @media(max-height:420px) {
   .hs-page :is([tabindex='-1'],a,button,input,select,summary) {scroll-margin-block:18px}
-  .main-content:has(.hs-page)>.detail-nav {position:static}
 }
 @media(prefers-reduced-motion:reduce) {
   .hs-page * {transition:none!important; animation:none!important; scroll-behavior:auto!important}
 }
-.main-content:has(.hs-page) .hs-current-owner {font-size:.875rem; color:inherit; line-height:1.5}
 
-.main-content:has(.hs-page)>.page-heading .heading-actions {flex-wrap:wrap}
-.main-content:has(.hs-page)>.page-heading .heading-actions .pill {max-width:100%; white-space:normal; text-align:left}
-.main-shell:has(.hs-page) .topbar :is(.search-trigger,.theme-toggle,.mobile-menu,.profile) {min-width:44px; min-height:44px}
-.app:has(.hs-page) .sidebar :is(.demo-account,.reset-link) {min-height:44px}
-@media(max-width:650px) {
-  .main-content:has(.hs-page)>.detail-nav nav {grid-template-columns:1fr 1fr 1.15fr .85fr; min-width:0}
-  .main-content:has(.hs-page)>.detail-nav nav a {min-width:0; padding-inline:4px; flex-wrap:wrap; white-space:normal; overflow-wrap:anywhere; gap:2px 4px; text-align:center}
-}
+
 .hs-page .hs-reference-fields {padding:8px 0; margin-top:9px; border-block:1px solid var(--hs-line)}
 .hs-reference-fields>div {padding:6px 0}.hs-reference-fields dd {font-size:1rem; margin-top:3px}
+
+.hs-page .hs-row-reason {margin-top:12px}
+.hs-current-owner {font-size:.875rem; color:inherit; line-height:1.5}

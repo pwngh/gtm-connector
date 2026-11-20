@@ -319,11 +319,11 @@ test('second review rounds at one plan revision invalidate the snapshot by note 
 });
 
 test('snapshots detect source, decision timing, and version-basis changes without silently rebasing', () => {
-  const target = context(completed());
+  const state = completed(), target = context(state);
   const draft = prepare(templateIds[0], target).draft;
-  assert.equal(isDraftContextCurrent(draft, context(completed())), true);
-  assert.equal(isDraftContextCurrent(draft, {...context(completed()), roles: {...target.roles, actionOwner: null}}), true);
-  const changed = context(completed());
+  assert.equal(isDraftContextCurrent(draft, context(structuredClone(state))), true);
+  assert.equal(isDraftContextCurrent(draft, {...context(structuredClone(state)), roles: {...target.roles, actionOwner: null}}), true);
+  const changed = context(structuredClone(state));
   changed.customerReview.approvedAt = at;
   assert.equal(isDraftContextCurrent(draft, changed), false);
   changed.customerReview.approvedAt = target.customerReview.approvedAt;

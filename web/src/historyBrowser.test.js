@@ -72,3 +72,26 @@ test('Escape closes history selection but leaves native form and handled events 
   }
   assert.equal(closes, 1);
 });
+
+
+test('restoring a nested history opener reveals all closed ancestor disclosures before focus', () => {
+  const target = element('nested'), heading = element('heading');
+  const outer = {open: false, querySelector: () => ({contains: () => false})};
+  const inner = {open: false, parentElement: {closest: () => outer}, querySelector: () => ({contains: () => false})};
+  target.closest = selector => selector === 'details' ? inner : selector === 'details:not([open])' ? !inner.open ? inner : !outer.open ? outer : null : null;
+  target.getClientRects = () => inner.open && outer.open ? [{}] : [];
+  restoreHistoryFocus({querySelectorAll: () => [target]}, 'nested', null, heading);
+  assert.equal(inner.open, true);
+  assert.equal(outer.open, true);
+  assert.deepEqual(target.calls, [['focus', {preventScroll: true}], ['scroll', {block: 'nearest', behavior: 'instant'}]]);
+  assert.equal(heading.calls.length, 0);
+});
+
+test('restoring an unavailable nested opener falls back without opening an inert disclosure', () => {
+  const target = element('nested'), fallback = element('entry'), disclosure = {open: false};
+  target.closest = selector => selector.startsWith('[hidden]') ? {} : disclosure;
+  restoreHistoryFocus({querySelectorAll: () => [target, fallback]}, 'nested', 'entry', element('heading'));
+  assert.equal(disclosure.open, false);
+  assert.equal(target.calls.length, 0);
+  assert.equal(fallback.calls[0][0], 'focus');
+});

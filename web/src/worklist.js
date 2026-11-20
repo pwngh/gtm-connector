@@ -349,7 +349,7 @@ export function resolveWorklistEntry(data, pathname, search) {
   const id = params.get('workItem'), requirementId = params.get('requirement');
   if (pathname !== data.paths.workplan || (!id && !requirementId)) return null;
   const resource = id ? data.workItems.find(item => item.id === id && item.mode === 'walkthrough') : data.requirements.find(item => item.id === requirementId && item.renewalId === data.walkthroughRenewalId);
-  const returnTo = safeWorklistReturn(params.get('returnTo'));
+  const returnTo = params.has('returnTo') ? safeWorklistReturn(params.get('returnTo')) : null;
   return resource ? {status: 'ready', id: resource.id, title: resource.title, kind: id ? 'work-item' : 'requirement', resource, targetId: id ? resource.entryTargetId : null, step: id ? resource.step : 4, returnTo} : {status: 'not_found', returnTo};
 }
 

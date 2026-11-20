@@ -1,3 +1,4 @@
+import {historyEventActor} from './historyRecording.js';
 import {readinessFixture} from './renewalFixtures.js';
 import {derive, transitionEvidenceChecks} from './workflow.js';
 import {buildWorklist, formatWorklistTime, safeWorklistReturn, worklistActionHref} from './worklist.js';
@@ -364,7 +365,7 @@ export function advanceReadinessJournal(previousJournal, state, fixture = readin
   const previous = journal?.current || null;
   const event = state.history.at(-1);
   const cause = previous && event && event.id !== previous.lastEventId ? {
-    id: event.id, title: event.title, detail: event.detail || 'No reason recorded.', at: event.at || null, actor: event.actor || null,
+    id: event.id, title: event.title, detail: event.detail || 'No reason recorded.', at: event.at || null, actor: historyEventActor(event),
     label: 'Walkthrough event text (reviewer input)',
   } : {id: null, title: previous ? 'Evaluation inputs changed' : 'Initial local evaluation', detail: previous ? 'The recorded inputs changed without a new workflow event. No actor or reason was supplied.' : 'Evaluated the available local records. This is not a live source read.', at: current.evaluatedAt, actor: null, label: 'Local evaluation context'};
   return {schema: '2', sequence, current, previous, changes: {cause,

@@ -1,7 +1,7 @@
 import React, {useId, useLayoutEffect, useMemo, useRef} from 'react';
 import {Link, useLocation, useSearchParams} from 'react-router';
 import {ArrowUpRight, Check, Clock, Download, FileText, GitCompareArrows, History as HistoryIcon, Info, RotateCcw, X} from 'lucide-react';
-import {formatHistoryTime, historyActionHref, historyCategories, historyExport, historyHref, historyScopeLabel, historySearch, selectHistory} from './history.js';
+import {createHistorySelector, formatHistoryTime, historyActionHref, historyCategories, historyExport, historyHref, historyScopeLabel, historySearch} from './history.js';
 import {readinessHref} from './readiness.js';
 import {closeHistoryOnEscape, focusHistoryElement, historyFocusTarget, moveHistoryFocus, restoreHistoryFocus} from './historyBrowser.js';
 import './history.css';
@@ -15,8 +15,8 @@ function TypedValue({value}) {
     {value.type === 'source_text' && value.value !== null ? <blockquote className="hs-source-text">{value.value}</blockquote> : <p className="hs-value">{value.type === 'time' ? <Time value={value.value}/> : value.display}</p>}
     {value.details?.length > 0 && <dl className="hs-reference-fields">{value.details.map(detail => <div key={detail.key}><dt>{detail.label}</dt><dd>{detail.type === 'time' ? <Time value={detail.value}/> : detail.display}</dd></div>)}</dl>}
     {value.attribution.partial && <p className="hs-label hs-warning">Partial excerpt · {value.attribution.partialReason || 'cut boundary not recorded'}</p>}
-    <p className="hs-label hs-attribution">{value.attributionLabel}</p>
-    <p className="hs-label hs-value-scope">{historyScopeLabel(value.scope)}</p>{value.attribution.role && <p className="hs-label">Role: {value.attribution.role}</p>}{value.attribution.basis && <><p className="hs-label">Role basis: {value.attribution.basis}</p><p className="hs-label">A role is not decision authority.</p></>}
+    <p className="hs-attribution">{value.attributionLabel}</p>
+    <p className="hs-value-scope">{historyScopeLabel(value.scope)}</p>{value.attribution.role && <p className="hs-muted">Role: {value.attribution.role}</p>}{value.attribution.basis && <><p className="hs-muted">Role basis: {value.attribution.basis}</p><p className="hs-label">A role is not decision authority.</p></>}
   </div>;
 }
 
@@ -88,20 +88,21 @@ function Reference({reference, entry, entryLink, actionLink}) {
 }
 
 function EntryDetails({entry, entryLink, actionLink, onClose, paths}) {
-  return <div className="hs-proof" aria-label={`${entry.kindLabel} detail`}>
+  return <section className="hs-proof" aria-label={`${entry.kindLabel} detail`}>
     <div className="hs-proof-heading"><div><span className="hs-kicker">RETAINED RECORD · {entry.identityRecorded ? entry.id : 'record ID not recorded'}</span><p className="hs-label">{entry.derived ? 'Derived row. The cause remains a separate recording.' : 'Original recording kept in append-only history.'}</p></div><button type="button" className="hs-icon-button" onClick={onClose} aria-label="Close selected history entry"><X size={19}/></button></div>
     {entry.appliedCorrections.length > 0 && <aside className="hs-correction-note"><strong>As effective: corrected projection</strong><p>This is not the original claim. Applied corrections:</p><ul>{entry.appliedCorrections.map(correction => <li key={correction.id}>{entryLink(correction.id, 'Inspect correction', `applied:${entry.id}:${correction.id}`)}<span className="hs-detail">Recorded <Time value={correction.recordedAt}/> · {correction.actor}</span></li>)}</ul></aside>}
     {entry.supersededBy.length > 0 && !entry.appliedCorrections.length && <aside className="hs-correction-note"><strong>Original entry, not rewritten</strong><p>A later correction is known at this point.</p>{entry.supersededBy.map(correction => entryLink(correction.id, 'Inspect the later correction', `superseded:${entry.id}:${correction.id}`))}</aside>}
     {entry.type === 'correction' && <aside className="hs-correction-note"><strong>A new entry, not an edit to the past</strong><p>Supersedes: {entry.supersedes ? entryLink(entry.supersedes, entry.supersedes, `supersedes:${entry.id}`) : 'not recorded'}.</p>{entry.correctionError && <p role="status">{entry.correctionError}</p>}</aside>}
     <dl className="hs-clocks" aria-label="Three distinct clocks">
-      <div data-clock="event"><dt>Source event time</dt><dd><Time value={entry.eventAt}/></dd><span className="hs-label">When it happened in the source, if supplied.{entry.appliedCorrections.length > 0 && ' Corrected projection.'}</span></div>
-      <div data-clock="recorded"><dt>Recorded time</dt><dd><Time value={entry.recordedAt}/></dd><span className="hs-label">When the walkthrough recorded this entry.</span></div>
-      <div data-clock="outcome"><dt>Later outcome recorded</dt><dd>{entry.outcomes.length ? entry.outcomes.map(outcome => <span key={outcome.id}><Time value={outcome.recordedAt}/>{entryLink(outcome.id, outcome.title, `outcome:${entry.id}:${outcome.id}`)}</span>) : 'not recorded'}</dd><span className="hs-label">Later recorded results, not validation of a corrected claim or the commercial renewal.</span></div>
+      <div data-clock="event"><dt>Source event time</dt><dd><Time value={entry.eventAt}/><span className="hs-label">When it happened in the source, if supplied.{entry.appliedCorrections.length > 0 && ' Corrected projection.'}</span></dd></div>
+      <div data-clock="recorded"><dt>Recorded time</dt><dd><Time value={entry.recordedAt}/><span className="hs-label">When the walkthrough recorded this entry.</span></dd></div>
+      <div data-clock="outcome"><dt>Later outcome recorded</dt><dd>{entry.outcomes.length ? entry.outcomes.map(outcome => <span key={outcome.id}><Time value={outcome.recordedAt}/>{entryLink(outcome.id, outcome.title, `outcome:${entry.id}:${outcome.id}`)}</span>) : 'not recorded'}<span className="hs-label">Later recorded results, not validation of a corrected claim or the commercial renewal.</span></dd></div>
     </dl>
     <dl className="hs-facts hs-accountability"><div><dt>Actor recorded for this event</dt><dd>{entry.actor}</dd></div>{entry.authorityRelevant && <div><dt>Customer decision authority · evidence check</dt><dd>{entry.impacts.authorityLabel || 'unidentified'}</dd></div>}<div><dt>{entry.reasonLabel}{entry.reasonRequired ? ' · required for this change' : ''}</dt><dd>{entry.reason || 'not recorded'}{entry.reasonRequired && !entry.reason && <span className="hs-detail hs-warning">The old workflow did not retain a separate reason here. A computed effect is not the reviewer’s reason.</span>}</dd></div></dl>
+    {entry.evidenceWithheld && <p className="hs-notice">Evidence received or inspected after this recording point is withheld. A retained snapshot does not make a later receipt known earlier.</p>}
     {entry.detail && <aside className="hs-event-note"><span className="hs-kicker">WALKTHROUGH EVENT TEXT, NOT SOURCE TEXT</span><p>{entry.detail}</p></aside>}
     {entry.parentId && <p>{entryLink(entry.parentId, 'Inspect the recorded cause', `cause:${entry.id}`)}</p>}
-    {entry.upstreamCorrections?.length > 0 && <aside className="hs-correction-note"><strong>The underlying decision has a correction.</strong><p>This original output is retained, not treated as current evidence of approval.</p>{entry.upstreamCorrections.map(correction => entryLink(correction.id, 'Inspect the correction', `output-correction:${entry.id}:${correction.id}`))}</aside>}
+    {entry.upstreamCorrections?.length > 0 && <aside className="hs-correction-note"><strong>The underlying decision has a correction.</strong><p>Original records and provenance are retained. A corrected dependency is not current evidence of approval or a new resolution.</p>{entry.upstreamCorrections.map(correction => entryLink(correction.id, 'Inspect the correction', `output-correction:${entry.id}:${correction.id}`))}</aside>}
     {entry.output && <p className="hs-notice">{entry.output.completionRule} This row reports the original work output, not a separate completion command or a commercial outcome.</p>}
     {entry.type === 'opening_snapshot' ? <section className="hs-section"><h4>Opening plan, not a new decision</h4><ValueList values={entry.values}/></section> : <Comparison entry={entry} entryLink={entryLink}/>}
     {entry.appliedCorrections.length > 0 && <details className="hs-disclosure hs-original"><summary>Original recording, unchanged</summary><p className="hs-label">Original source event time: <Time value={entry.recordedEventAt}/>. Recording time and actor are unchanged.</p><ValueList values={entry.recordedValues}/><h4>Effects at the original recording</h4><ul className="hs-check-changes">{entry.recordedImpacts.effects.map(effect => <li key={effect.id}>{effect.description}</li>)}</ul><h4>Evidence checks at the original recording</h4><ul className="hs-check-changes">{entry.recordedImpacts.evidenceChecks.map(check => <li key={check.id}><strong>{check.title}</strong><span className="hs-detail">{check.resultLabel} · {check.explanation}</span></li>)}</ul></details>}
@@ -111,18 +112,19 @@ function EntryDetails({entry, entryLink, actionLink, onClose, paths}) {
       <div className="hs-inspection-links">{entry.inspectionLinks.map(link => actionLink(link, `inspect:${entry.id}:${link.id}`, true))}</div>
     </section>
     <button type="button" className="hs-inline-link" onClick={onClose}>Close entry and return to its link<X size={16} aria-hidden="true"/></button>
-  </div>;
+  </section>;
 }
 
 function TimelineEntry({entry, selected, outside, entryLink, actionLink, onClose, paths}) {
-  return <li className={`hs-timeline-entry ${selected ? 'is-selected' : ''} ${entry.derived ? 'is-derived' : ''}`} data-history-id={entry.id} data-history-type={entry.type}>
+  return <li className={`hs-timeline-entry ${selected ? 'is-selected' : ''} ${entry.derived ? 'is-derived' : ''}`} data-history-id={entry.id} data-history-type={entry.type} data-corrected-projection={entry.correctedProjection || undefined}>
     <div className="hs-event-rail"><span className="hs-node" aria-hidden="true">{entry.type === 'correction' ? <RotateCcw size={16}/> : entry.derived ? <Check size={15}/> : <HistoryIcon size={16}/>}</span><span className="hs-label">{entry.sequence === '0' ? 'Opening' : `Recording ${entry.sequence}`}</span></div>
     <div className="hs-event-content">
       {outside && <p className="hs-notice">Selected entry outside the category filter. The filter and its counts are unchanged.</p>}
-      <div className="hs-entry-meta"><span className="hs-kicker">{entry.kindLabel}</span>{entry.supersededBy.length > 0 && <span className="hs-tag">Correction known</span>}{entry.derived && <span className="hs-tag">Derived row</span>}</div>
+      <div className="hs-entry-meta"><span className="hs-kicker">{entry.kindLabel}</span>{entry.correctedProjection && <span className="hs-tag">Corrected projection</span>}{entry.supersededBy.length > 0 && !entry.correctedProjection && <span className="hs-tag">Correction known</span>}{entry.upstreamCorrections.length > 0 && <span className="hs-tag hs-warning">The underlying decision has a correction</span>}{entry.derived && <span className="hs-tag">Derived row</span>}</div>
       <h3>{entryLink(entry.id, entry.title, `entry:${entry.id}`, true)}</h3>
       <div className="hs-recording-line"><span><Clock size={15} aria-hidden="true"/>Recorded: <Time value={entry.recordedAt}/></span><span>Actor: {entry.actor}</span></div>
-      {!entry.complete && !entry.derived && entry.type !== 'correction' && <p className="hs-label hs-warning">Partial older record. Missing inputs stay unknown.</p>}
+      {entry.reasonRequired && <p className="hs-row-reason"><span className="hs-label">Required reason</span>{entry.reason || 'not recorded'}</p>}
+      {!entry.complete && !entry.derived && entry.type !== 'correction' && <p className="hs-label hs-warning">Partial record. Missing or malformed inputs stay unknown.</p>}
       {selected && <EntryDetails entry={entry} entryLink={entryLink} actionLink={actionLink} onClose={onClose} paths={paths}/>}
     </div>
   </li>;
@@ -133,17 +135,18 @@ function Intervals({requirements, knownBy, entryLink}) {
     <div className="hs-section-heading"><div><span className="hs-kicker">FROM REQUIREMENT TRANSITIONS</span><h2 id="history-intervals" tabIndex={-1}>When the requirement was open</h2></div><Clock size={23} aria-hidden="true"/></div>
     <p className="hs-muted">Intervals use the walkthrough recording clock, not source event dates. An open interval stops at the known-by point, never at the device clock.</p>
     {requirements === null ? <p className="hs-notice">Requirements are not recorded at this point. Unknown is not zero.</p> : !requirements.length ? <p>No requirement records are available in this history.</p> : requirements.map(requirement => <article className="hs-interval-card hs-paper" key={requirement.id} data-interval-requirement={requirement.id}>
-      <div className="hs-section-title"><h3>{requirement.title}</h3><span className="hs-tag">{requirement.status === 'resolved' ? 'Resolved in walkthrough' : requirement.status === 'open' ? 'Open in walkthrough' : 'State not recorded'}</span></div>
-      <p className="hs-label">{requirement.id} · Through <Time value={knownBy.recordedAt}/></p>
-      {requirement.incomplete && <p className="hs-notice">Earlier events lack transition snapshots. These intervals include only recorded transitions; an unrecorded automatic reopening has not been inferred.</p>}
+      <div className="hs-section-title"><h3>{requirement.title}</h3><span className="hs-tag">Recorded: {requirement.status === 'resolved' ? 'Resolved in walkthrough' : requirement.status === 'open' ? 'Open in walkthrough' : 'State not recorded'}</span></div>
+      {requirement.projectedStatus !== undefined && <p className="hs-muted">Projected status: {requirement.projectedStatus === 'resolved' ? 'Resolved' : requirement.projectedStatus === 'open' ? 'Open' : 'not recorded'}. Recorded intervals are kept below.</p>}
+      <p className="hs-value-scope">{requirement.id} · Through <Time value={knownBy.recordedAt}/></p>
+      {requirement.incomplete && <p className="hs-notice">Earlier records have gaps. A later snapshot can show the observed state, but it cannot establish a missing reopening time or reason.</p>}
       <ol className="hs-intervals">{requirement.intervals.map((interval, index) => <li key={interval.id} data-interval-id={interval.id} data-interval-status={interval.status}>
         <div className="hs-interval-title"><h4>Open interval {index + 1}</h4><strong>{interval.durationLabel}</strong></div>
         <dl className="hs-facts">
-          <div><dt>{interval.initial ? 'Opened' : 'Reopened'}</dt><dd><Time value={interval.openedAt}/>{interval.initial && <span className="hs-detail">First observed open: <Time value={interval.observedAt}/></span>}<span className="hs-detail">Actor: {interval.openingActor}</span></dd></div>
-          <div><dt>{interval.status === 'closed' ? 'Resolved' : 'Still open through'}</dt><dd><Time value={interval.status === 'closed' ? interval.resolvedAt : interval.measuredThrough}/>{interval.status === 'closed' && <span className="hs-detail">Actor: {interval.resolvingActor || 'not recorded'}</span>}</dd></div>
+          <div><dt>{interval.initial ? 'Opened' : 'Reopened'}</dt><dd><Time value={interval.openedAt}/>{(interval.initial || interval.observationOnly) && <span className="hs-detail">First observed open: <Time value={interval.observedAt}/></span>}<span className="hs-detail">Actor: {interval.openingActor}</span></dd></div>
+          <div><dt>{interval.status === 'closed' ? 'Resolved' : interval.status === 'open' ? 'Still open through' : 'State unknown after recording gap'}</dt><dd><Time value={interval.status === 'closed' ? interval.resolvedAt : interval.measuredThrough}/>{interval.observedResolvedAt && <span className="hs-detail">Observed resolved: <Time value={interval.observedResolvedAt}/>. Resolution time not recorded.</span>}{interval.status === 'closed' && <span className="hs-detail">Actor: {interval.resolvingActor || 'not recorded'}</span>}</dd></div>
           {!interval.initial && <div><dt>Reason for reopening</dt><dd>{interval.reason || 'not recorded'}{interval.cause && <span className="hs-detail">Computed workflow effect: {interval.cause}</span>}</dd></div>}
         </dl>
-        <div className="hs-interval-links">{interval.startEntryId && entryLink(interval.startEntryId, interval.initial ? 'Inspect opening snapshot' : 'Inspect reopening', `interval:${interval.id}:start`)}{interval.endEntryId && entryLink(interval.endEntryId, 'Inspect resolution', `interval:${interval.id}:end`)}</div>
+        <div className="hs-interval-links">{interval.startEntryId && entryLink(interval.startEntryId, interval.initial ? 'Inspect opening snapshot' : interval.observationOnly ? 'Inspect observed open snapshot' : 'Inspect reopening', `interval:${interval.id}:start`)}{interval.endEntryId && entryLink(interval.endEntryId, 'Inspect resolution', `interval:${interval.id}:end`)}</div>
       </li>)}</ol>
       {!requirement.intervals.length && <p>No open interval can be reconstructed from the recorded transitions at this point.</p>}
     </article>)}
@@ -152,7 +155,8 @@ function Intervals({requirements, knownBy, entryLink}) {
 
 export default function History({state, onExport}) {
   const [params, setParams] = useSearchParams(), navigation = useLocation(), id = useId();
-  const view = useMemo(() => selectHistory(state, params), [state, params.toString()]);
+  const select = useMemo(() => createHistorySelector(), []);
+  const view = useMemo(() => select(state, params), [state, params.toString(), select]);
   const root = useRef(null), heading = useRef(null), previous = useRef(null), recovery = useRef(null), closing = useRef(false);
   const key = view.location.entry === null ? '' : `entry:${view.location.entry}`;
   const candidate = navigation.state?.historyOpener;
@@ -202,13 +206,16 @@ export default function History({state, onExport}) {
       <label htmlFor={`${id}-category`}>Entries<select id={`${id}-category`} name="category" data-history-focus="category-control" value={view.location.category} onChange={event => update({category: event.target.value})}>{historyCategories.map(category => <option key={category.id} value={category.id}>{category.label}{valid ? ` (${view.counts[category.id]})` : ''}</option>)}</select></label>
       <label htmlFor={`${id}-order`}>Recording order<select id={`${id}-order`} name="order" value={view.location.order} onChange={event => update({order: event.target.value})}><option value="oldest">Oldest first</option><option value="newest">Newest first</option></select></label>
     </section>
-    <div className="hs-view-context" role="status"><div><strong>{view.viewLabel}</strong><p>{view.viewDescription}</p>{valid && <p className="hs-label">{view.knownBy.label} · Recorded time: <Time value={view.knownBy.recordedAt}/></p>}</div>{valid && <button type="button" className="hs-inline-link" onClick={() => focusHistoryElement(root.current?.querySelector('#history-intervals'))}>Requirement intervals<Clock size={17} aria-hidden="true"/></button>}</div>
+    <div className="hs-view-context"><div><strong>{view.viewLabel}</strong><p>{view.viewDescription}</p>{valid && <p className="hs-label">{view.knownBy.label} · Recorded time: <Time value={view.knownBy.recordedAt}/></p>}</div>{valid && <button type="button" className="hs-inline-link" onClick={() => focusHistoryElement(root.current?.querySelector('#history-intervals'))}>Requirement intervals<Clock size={17} aria-hidden="true"/></button>}</div>
     {view.example.mode === 'example' && <aside className="hs-example-note"><span className="hs-kicker">SEPARATE, INSPECT-ONLY EXAMPLE</span><h3>{view.example.title}</h3><p>{view.example.description}</p><button type="button" className="hs-inline-link" onClick={() => recover({example: null, entry: null, as_of: null}, 'example-summary')}>Return to your walkthrough</button></aside>}
     {view.location.invalid && <div className="hs-notice" role="status"><p>Some URL settings are unavailable. Labelled defaults are showing; no entry has been substituted.</p><button type="button" className="hs-inline-link" onClick={() => recover(Object.fromEntries(view.location.invalidFields.map(field => [field, null])), 'category-control')}>Clear invalid settings</button></div>}
     {!valid ? <section className="hs-error hs-paper" role="alert"><h2 tabIndex={-1} data-history-target={key || undefined}>History {view.status === 'invalid_point' ? 'at that point is not available.' : 'cannot be read.'}</h2><p>{view.status === 'invalid_point' ? 'The URL does not identify one known recording point or a time with an offset. Later history is withheld, not substituted.' : 'The local log has missing or duplicate record identities. No partial history or inferred outcomes are shown. Your saved walkthrough has not been changed.'}</p>{view.status === 'invalid_point' && <button type="button" className="hs-button" onClick={() => recover({as_of: 'latest'}, 'point-control')}>Show latest recorded history</button>}</section> : <>
-      <section className="hs-outcomes" aria-label="Three separate outcomes">{view.outcomes.map(outcome => <div key={outcome.id} data-history-outcome={outcome.id}><span className="hs-label">{outcome.label}</span><strong>{outcome.value}</strong><p>{outcome.note}</p>{outcome.id === 'commercial' && <p className="hs-label">Outcome recorded: <Time value={outcome.recordedAt}/></p>}{outcome.entryIds.length > 0 && entryLink(outcome.entryIds.at(-1), 'Inspect latest recording', `summary:${outcome.id}`)}</div>)}</section>
+      <section className="hs-outcomes" aria-label="Three separate outcomes">{view.outcomes.map(outcome => <div key={outcome.id} data-history-outcome={outcome.id}><span className="hs-label">{outcome.label}</span><strong>{outcome.value}</strong>{outcome.projectionValue && <p>{outcome.projectionValue}</p>}<p>{outcome.note}</p>{outcome.id === 'commercial' && <p className="hs-label">Outcome recorded: <Time value={outcome.recordedAt}/></p>}{outcome.entryIds.length > 0 && entryLink(outcome.entryIds.at(-1), 'Inspect latest recording', `summary:${outcome.id}`)}</div>)}</section>
+      {view.dataQuality.map(observation => <p className="hs-notice" key={observation.code} data-history-quality={observation.code}><strong>Data quality observation: </strong>{observation.description}</p>)}
+      {view.withheldRecordings > 0 && <p className="hs-notice">{view.withheldRecordings} recordings are outside the eligible prefix. Snapshots and effects that depend on them are withheld too.</p>}
+      {view.malformedCount > 0 && <p className="hs-notice">Some retained inputs or correction patches are malformed. Those entries are partial records; unsafe projections and checks are withheld.</p>}
       {view.unrecordedStateChange && <p className="hs-notice">The loaded walkthrough differs from its last retained inputs. Current values have not been inserted into earlier entries. This is a gap in the local recording, not a historical correction.</p>}
-      {view.legacyCount > 0 && <p className="hs-notice">{view.legacyCount} older {view.legacyCount === 1 ? 'entry lacks' : 'entries lack'} full input snapshots. Missing actors, times, reasons, and fields remain not recorded. New walkthrough events preserve their before and after inputs.</p>}
+      {view.legacyCount > 0 && <p className="hs-notice">{view.legacyCount} {view.legacyCount === 1 ? 'entry lacks' : 'entries lack'} complete, valid input snapshots. Missing actors, times, reasons, and fields remain not recorded. New walkthrough events preserve their before and after inputs.</p>}
       {view.omittedUnknownTimes > 0 && <p className="hs-notice">Entries with unknown recording times are withheld from this time-bounded view. Choose a recording point to inspect them by append order.</p>}
       {view.emptyWalkthrough && <section className="hs-fresh hs-paper"><FileText size={26} aria-hidden="true"/><div><span className="hs-kicker">A NEW WALKTHROUGH</span><h3>The starting point is here. Decisions come next.</h3><p>No workflow decisions have been recorded. Inspect the opening snapshot, then request the plan’s review in Work plan. New events will retain their inputs, comparisons, and requirement intervals.</p><div className="hs-inspection-links">{view.startLinks.map(link => actionLink(link, `start:${link.id}`, true))}</div></div></section>}
       {view.selection?.status === 'not_available' && <section className="hs-selection-error hs-paper"><h2 tabIndex={-1} data-history-target={key}>That entry is not available at this point.</h2><p>The link may be unknown, ambiguous, or beyond the known-by point. No later text or substitute entry has been opened.</p><button type="button" className="hs-button" onClick={closeSelection}>Clear this selection</button></section>}

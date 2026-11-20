@@ -88,16 +88,33 @@ function expand(node) {
 const element = key => ({dataset: {}, calls: [], isConnected: true, closest: () => null,
   focus(options) {this.calls.push(['focus', options]); globalThis.document.activeElement = this;},
   scrollIntoView(options) {this.calls.push(['scroll', options]);}, key});
+function* domNodes(node, disclosures = [], summaryFor = null) {
+  if (Array.isArray(node)) {for (const child of node) yield* domNodes(child, disclosures, summaryFor); return;}
+  if (!node?.props) return;
+  let chain = disclosures;
+  if (node.type === 'details') {
+    const parent = chain.at(-1);
+    const disclosure = {open: Boolean(node.props.open), parentElement: {closest: () => parent},
+      querySelector: () => ({contains: element => element.summaryFor === disclosure})};
+    chain = [...chain, disclosure];
+  }
+  const summary = node.type === 'summary' ? chain.at(-1) : summaryFor;
+  yield {node, disclosures: chain, summaryFor: summary};
+  yield* domNodes(node.props.children, chain, summary);
+}
 function attach(tree, hooks) {
   const targets = [], controls = [], entries = [], headings = new Map();
   hooks.elements.forEach(element => {element.isConnected = false;});
-  for (const node of nodes(tree)) {
+  for (const {node, disclosures, summaryFor} of domNodes(tree)) {
     const focusKey = node.props['data-history-focus'], targetKey = node.props['data-history-target'], id = node.props.id;
     if (!focusKey && !targetKey && !id) continue;
     const key = focusKey ? `focus:${focusKey}` : targetKey ? `target:${targetKey}` : `id:${id}`;
     if (!hooks.elements.has(key)) hooks.elements.set(key, element(key));
     const dom = hooks.elements.get(key); dom.isConnected = true;
-    dom.getClientRects = () => node.props.name === 'example' ? [] : [{}];
+    dom.disclosures = disclosures; dom.summaryFor = summaryFor;
+    dom.closest = selector => selector === 'details' ? disclosures.at(-1)
+      : selector === 'details:not([open])' ? disclosures.findLast(disclosure => !disclosure.open) : null;
+    dom.getClientRects = () => disclosures.every(disclosure => disclosure.open || disclosure === summaryFor) ? [{}] : [];
     if (focusKey) {dom.dataset.historyFocus = focusKey; controls.push(dom);}
     if (targetKey) {dom.dataset.historyTarget = targetKey; targets.push(dom); hooks.elements.set(`target:${targetKey}`, dom);}
     if (node.props['data-history-entry']) entries.push(dom);
@@ -109,6 +126,7 @@ function attach(tree, hooks) {
     querySelector: selector => headings.get(selector.slice(1))};
   find(tree, node => node.type === 'h2' && node.props.ref).props.ref.current = hooks.elements.get('heading');
 }
+
 function bench(search = '', state = initialState, metadata = null) {
   const hooks = new Hooks(historyHref(search), metadata), exports = [];
   const page = {hooks, exports, state, render() {const tree = expand(hooks.render(History, {state: page.state, onExport: (data, filename) => exports.push({data, filename})})); attach(tree, hooks); hooks.flush(); return tree;}};
@@ -294,7 +312,7 @@ test('a source inspection round-trip preserves history state and restores the ex
 
 test('Readiness links to the exact recording and known-by point and keeps its own return focus', () => {
   const state = complete(), readinessParams = new URLSearchParams({check: 'resolve_requirement', order: 'blockers', returnTo: '/queue?sort=changed'});
-  const hooks = new Hooks(readinessHref(readinessParams)), journal = advanceReadinessJournal(null, state);
+  const hooks = new Hooks(readinessHref(readinessParams)), journal = advanceReadinessJournal(advanceReadinessJournal(null, initialState), state);
   const tree = expand(hooks.render(Readiness, {journal, onAction() {}}));
   const trace = find(tree, node => node.props['data-readiness-focus'] === 'history-recording');
   const url = new URL(trace.props.to, 'http://local.test');
@@ -388,4 +406,102 @@ test('new recordings retain URL selection and focus the same entry with its newl
   assert.equal(params(page.hooks).get('entry'), id);
   assert.equal(selected.calls[0][0], 'focus');
   assert.equal(selectHistory(page.state, params(page.hooks)).selection.resource.outcomes[0].id, page.state.history.at(-1).id);
+});
+
+
+test('a nested evidence-check return reopens its remounted disclosure before restoring keyboard focus', () => {
+  const state = complete(), id = state.history.find(event => event.type === 'record_customer_approval').id;
+  const page = bench(new URLSearchParams({entry: id, view: 'effective'}), state);
+  let tree = page.render();
+  const focusKey = `evidence-check:${id}:customer_authority`, opener = control(page.hooks, focusKey);
+  assert.ok(opener.disclosures.length > 0);
+  assert.equal(opener.getClientRects().length, 0);
+  opener.disclosures.forEach(disclosure => {disclosure.open = true;});
+  opener.focus();
+  const action = link(tree, focusKey), destination = new Hooks(action.props.to, action.props.state);
+  tree = destination.render(App); destination.flush();
+  const back = find(find(tree, node => node.props.className === 'hs-return-context'), node => node.props.to);
+  const returned = bench(new URL(back.props.to, 'http://local.test').search, state, back.props.state);
+  returned.render();
+  const restored = control(returned.hooks, focusKey);
+  assert.ok(restored.disclosures.every(disclosure => disclosure.open));
+  assert.equal(restored.getClientRects().length, 1);
+  assert.equal(globalThis.document.activeElement, restored);
+  assert.equal(target(returned.hooks, id).calls.length, 0);
+});
+
+test('Readiness does not link an input-only change to a previous unrelated recording', () => {
+  const state = complete(), prior = advanceReadinessJournal(null, state);
+  const changed = {...state, plan: {...state.plan, title: historyTestRecords.revisedTitle}};
+  const journal = advanceReadinessJournal(prior, changed), hooks = new Hooks(readinessHref());
+  assert.equal(journal.changes.cause.id, null);
+  assert.equal(journal.current.lastEventId, state.history.at(-1).id);
+  const tree = expand(hooks.render(Readiness, {journal, onAction() {}}));
+  assert.equal(find(tree, node => node.props['data-readiness-focus'] === 'history-recording'), undefined);
+});
+
+test('the History export handler includes the displayed outside-filter selection separately', () => {
+  const state = complete(), selected = state.history.at(-1).id;
+  const page = bench(new URLSearchParams({entry: selected, category: 'document'}), state), tree = page.render();
+  const intro = find(tree, node => node.props.className === 'hs-intro');
+  find(intro, node => node.type === 'button').props.onClick();
+  assert.equal(page.exports[0].data.selectedOutside.outsideFilter, true);
+  assert.equal(page.exports[0].data.selectedOutside.entry.id, selected);
+  assert.ok(page.exports[0].data.entries.every(entry => entry.category === 'document'));
+  assert.equal(eventIds(tree).filter(id => id === selected).length, 1);
+});
+
+test('History to a Work plan work-item link shows only supplied return paths, never a fabricated queue banner', () => {
+  const state = complete(), id = state.history.at(-1).id;
+  const page = bench(new URLSearchParams({entry: id}), state), tree = page.render();
+  const action = link(tree, `inspect:${id}:workplan`), hooks = new Hooks(action.props.to, action.props.state);
+  const destination = hooks.render(App); hooks.flush();
+  assert.ok(find(destination, node => node.props.className === 'hs-return-context'));
+  assert.equal(find(destination, node => node.props.className === 'wl-return-context'), undefined);
+});
+
+test('App exposes a failed browser save, keeps the new event in this tab and retries without duplicating it', () => {
+  const setItem = globalThis.localStorage.setItem;
+  let failed = false;
+  globalThis.localStorage.setItem = (key, value) => {
+    if (failed && key === 'gtm-workflow-demo-v1') throw new Error('Storage full');
+    setItem(key, value);
+  };
+  const hooks = new Hooks(historyFixture.paths.workplan);
+  let tree = hooks.render(App); hooks.flush();
+  tree = hooks.render(App); hooks.flush();
+  assert.equal(find(tree, node => node.props.className === 'save-indicator').props['data-save-status'], 'saved');
+  find(find(tree, node => node.props.className === 'action-buttons'), node => node.props.primary).props.onClick();
+  tree = hooks.render(App); hooks.flush();
+  failed = true;
+  named(tree, 'ReviewDecision').props.onPerform('request_review');
+  tree = hooks.render(App); hooks.flush();
+  hooks.navigate(historyHref()); tree = hooks.render(App); hooks.flush();
+  const savedInTab = named(tree, 'History').props.state;
+  assert.equal(savedInTab.history.length, 1);
+  assert.equal(JSON.parse(storage.get('gtm-workflow-demo-v1')).history.length, 0);
+  assert.equal(find(tree, node => node.props.className === 'save-indicator').props['data-save-status'], 'failed');
+  const notice = find(tree, node => node.props.className === 'save-failure-notice');
+  assert.equal(notice.props.role, 'alert');
+  failed = false;
+  find(notice, node => node.type === 'button').props.onClick();
+  tree = hooks.render(App); hooks.flush();
+  assert.equal(find(tree, node => node.props.className === 'save-indicator').props['data-save-status'], 'saved');
+  assert.equal(find(tree, node => node.props.className === 'save-failure-notice'), undefined);
+  assert.deepEqual(JSON.parse(storage.get('gtm-workflow-demo-v1')).history.map(event => event.id), savedInTab.history.map(event => event.id));
+  assert.equal(named(tree, 'History').props.state, savedInTab);
+});
+
+test('History details use a named section and description lists contain terms and definitions only', () => {
+  const state = complete(), id = state.history.at(-1).id, page = bench(new URLSearchParams({entry: id}), state), tree = page.render();
+  const proof = find(tree, node => node.props.className === 'hs-proof');
+  assert.equal(proof.type, 'section');
+  assert.ok(proof.props['aria-label']);
+  const clocks = find(proof, node => node.props.className === 'hs-clocks');
+  for (const group of clocks.props.children) {
+    assert.equal(group.type, 'div');
+    assert.ok(group.props.children.every(node => ['dt', 'dd'].includes(node.type)));
+  }
+  assert.equal(find(tree, node => node.props.className === 'hs-view-context').props.role, undefined);
+  assert.equal(find(tree, node => node.props.className === 'hs-result-count').props.role, 'status');
 });
