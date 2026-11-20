@@ -98,7 +98,8 @@ class BriefPersistenceTests(unittest.TestCase):
         # Older rules let a mention through. The sealed unit answers, and today's rules neutralize what it shows.
         last = brief["units"][-1]
         self.assertEqual(last["kind"], "sentence")
-        self.reseal(brief, rules_version=1, units=brief["units"][:-1] + [{**last, "text": "<!channel> " + last["text"]}])
+        self.reseal(brief, rules_version=1, units=brief["units"][:-1] + [
+            {**last, "text": "<!channel> " + last["text"], "sanitizer_version": 1}])
         traced = trace_saved(self.state, brief["brief_id"], last["n"])
         self.assertEqual((traced["n"], traced["record_ref"], traced["text"]),
                          (last["n"], last["record_ref"], "[mention channel] " + last["text"]))

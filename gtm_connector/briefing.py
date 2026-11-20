@@ -251,6 +251,9 @@ def _sealed(directory, brief_id):
         raise ValueError("invalid saved brief evidence")
     from .audit import read_ids
     log = Path(directory) / "audit.sqlite3"
+    # As audit and every other reader of the log refuse it, a linked log never vouches for a card.
+    if os.path.islink(log):
+        raise ValueError("Audit database must not be a symbolic link.")
     reference = f"briefs/{brief_id}/{hashlib.sha256(payload).hexdigest()}"
     try:
         [seal] = read_ids(log, [str(artifact.get("sealed_by"))])
@@ -292,7 +295,8 @@ def traces_saved(directory, brief_id, numbers):
     # A card is read only when every number on it resolves, as the listing checks it.
     resolved = [trace(artifact["evidence"], index, units) for index in range(1, len(units) + 1)]
     for number in numbers:
-        if not isinstance(number, int) or not 1 <= number <= len(units):
+        # Anything but a number on the card, True included, is refused the way trace refuses it.
+        if type(number) is not int or not 1 <= number <= len(units):
             trace(artifact["evidence"], number, units)
         found = resolved[number - 1]
         # The next whole sentence under the same speaker label in the same record, where a condition often is. A

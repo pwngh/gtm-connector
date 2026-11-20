@@ -42,7 +42,8 @@ reads the file, and refuses it unless that receipt is finished and names the dig
 it is now, and the receipts of the card's reads are the ones in the audit log. A changed amount,
 sentence, speaker, seller, date, or card text is refused. A card keeps the numbers it was sealed
 with: `inspect` answers from the sealed units and rebuilds nothing, so a later change to the rules
-cannot move or refuse them. It neutralizes a sentence again under today's rules before showing it. A card saved
+cannot move or refuse them. It shows a sentence as sealed, and neutralizes one sealed under older
+neutralizer rules again under today's before showing it. A card saved
 before sealing says so and has to be made again. A save that does not finish leaves no file, and
 its receipt ends as an error; after a hard stop the receipt stays `pending` and names the card in
 `arguments`. The owner of the state folder can still rewrite the file and the audit log together:

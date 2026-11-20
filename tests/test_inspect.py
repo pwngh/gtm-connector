@@ -309,11 +309,33 @@ class InspectTests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 self.assertIn("prepare_renewal_brief", self.refused("inspect", *arguments)["message"])
 
+    def test_a_listing_shows_todays_cards_text_exactly_as_the_card_quotes_it(self):
+        self.ok("connect", "calls")
+        export = self.root / "call.txt"
+        # Neutralizing this line twice is not neutralizing it once: a second pass would drop "will not sign".
+        export.write_text("Dana Crest: We agree <#<@U1> will not sign> today.\n")
+        self.ok("debug", "calls", "import", str(export), "--account", "acc-007", "--speaker-names")
+        brief = self.ok("brief", "acc-007")
+        [said] = [unit for unit in brief["units"] if unit["kind"] == "sentence" and unit["source"] == "calls"]
+        self.assertIn("will not sign", said["text"])
+        self.assertEqual(self.ok("inspect", brief["brief_id"])["units"], brief["units"])
+        self.assertEqual(self.ok("inspect", brief["brief_id"], str(said["n"]))[0]["text"], said["text"])
+        self.assertIn(json.dumps(said["text"]), self.text("inspect", brief["brief_id"]))
+
+    def test_a_linked_audit_log_vouches_for_no_card(self):
+        brief = self.ok("brief", "acc-003")["brief_id"]
+        log = self.state / "audit.sqlite3"
+        log.rename(self.root / "audit-elsewhere.sqlite3")
+        log.symlink_to(self.root / "audit-elsewhere.sqlite3")
+        for arguments in ((brief,), (brief, "1")):
+            with self.subTest(arguments=arguments):
+                self.assertIn("symbolic link", self.refused("inspect", *arguments)["message"])
+
     def test_a_listing_shows_a_card_sealed_under_older_rules_by_todays_rules_and_says_why_a_sentence_is_off(self):
         brief = self.ok("brief", "acc-003")["brief_id"]
 
         def older_rules(artifact):
-            artifact["units"][4]["text"] = "<!here> will not sign."
+            artifact["units"][4].update(text="<!here> will not sign.", sanitizer_version=1)
 
         self.reseal(brief, older_rules)
         self.assertIn('"[mention here] will not sign."', self.text("inspect", brief).splitlines()[4])

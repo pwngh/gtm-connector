@@ -1141,8 +1141,12 @@ def trace(evidence: dict, number: int, units: list[Unit] | None = None) -> dict:
 
 
 def neutralized(unit: dict) -> dict:
-    """A sealed unit as it is shown, with its text and speaker neutralized again.
+    """A sealed unit as it is shown.
 
-    A card sealed under older rules then shows nothing that today's rules replace.
+    A unit sealed under today's rules is shown as sealed: its text is the card's, and neutralizing twice is not
+    always neutralizing once. A unit sealed under older rules has its text and speaker neutralized again, so it
+    shows nothing that today's rules replace.
     """
+    if unit.get("sanitizer_version") == SANITIZER_VERSION:
+        return unit
     return {**unit, **{key: safe_text(unit[key])[0] for key in ("text", "speaker") if isinstance(unit.get(key), str)}}
