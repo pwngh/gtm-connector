@@ -87,7 +87,7 @@ class InspectTests(unittest.TestCase):
                          [(5, "sentence", 6), (1, "record", None), (7, "sentence", 8), (6, "sentence", None)])
         self.assertEqual(traced[1]["record_ref"], "crm/accounts/acc-003")
         five, six = self.text("inspect", brief["brief_id"], "5", "6").split("\n\n")
-        self.assertIn("Speaker\tMarian Holt\nNext by this speaker\t6\n", five)
+        self.assertIn('Speaker\t"Marian Holt"\nNext by this speaker\t6\n', five)
         self.assertIn("Next by this speaker\tnone\n", six + "\n")
         # Every number must be on the card, or nothing is printed.
         error = self.refused("inspect", brief["brief_id"], "5", "10")
@@ -210,6 +210,8 @@ class InspectTests(unittest.TestCase):
         said = {unit["text"]: unit for unit in brief["units"] if unit["kind"] == "sentence"}
         # The words after a cut sentence may be its other half, so they are cut too.
         self.assertEqual((said["and then"]["partial"], said["We objected."]["partial"]), (True, True))
+        listing = self.text("inspect", brief["brief_id"]).splitlines()
+        self.assertIn("cut off", listing[said["and then"]["n"] - 1])
         traced = self.ok("inspect", brief["brief_id"], str(said["We agreed."]["n"]), str(said["We signed."]["n"]))
         # The cut words between are skipped. Two labels that print alike are never called one speaker.
         self.assertEqual([row["next_by_speaker"] for row in traced], [said["We left."]["n"], None])
@@ -271,11 +273,64 @@ class InspectTests(unittest.TestCase):
                 self.assertEqual(self.refused("inspect", *arguments, *(() if "--role" in arguments else
                                                                        ("--role", "customer")))["code"], "usage_error")
 
-    def test_trace_and_account_are_gone(self):
+    def test_trace_and_account_are_gone_and_point_at_inspect(self):
         brief = self.ok("brief", "acc-003")["brief_id"]
         for arguments in (("trace", brief, "1"), ("account", "acc-003")):
             with self.subTest(command=arguments[0]):
-                self.assertEqual(self.refused(*arguments)["code"], "usage_error")
+                error = self.refused(*arguments)
+                self.assertEqual((error["code"], error["next"]), ("usage_error", "gtm-connector inspect --help"))
+
+    def test_numbers_are_the_digits_printed_on_the_card_and_every_number_is_checked(self):
+        brief = self.ok("brief", "acc-003")["brief_id"]
+        for spelled in ("\uff13", "+5", "05", "1_0", "5 ", "0", "-1"):
+            with self.subTest(spelled=spelled):
+                self.assertEqual(self.refused("inspect", brief, spelled)["next"], "gtm-connector inspect --help")
+
+        def break_unit_seven(artifact):
+            artifact["units"][6]["raw_sha256"] = "0" * 64
+
+        self.reseal(brief, break_unit_seven)
+        for numbers in (("1",), ("6",), ()):
+            with self.subTest(numbers=numbers):
+                self.assertIn("Number 7", self.refused("inspect", brief, *numbers)["message"])
+
+    def test_the_newest_card_never_fails_the_account_read(self):
+        self.ok("brief", "acc-003")
+        with closing(sqlite3.connect(self.state / "audit.sqlite3")) as connection, connection:
+            connection.execute("UPDATE audit_log SET arguments = '{bad' WHERE tool = 'save_brief'")
+        account = self.ok("inspect", "acc-001")
+        self.assertEqual((account["id"], account["newest_brief_id"]), ("acc-001", None))
+
+    def test_a_brief_an_assistant_prepared_is_named_as_such(self):
+        brief_id = "brief-" + "a" * 32
+        (self.state / "selected-briefs").mkdir()
+        (self.state / "selected-briefs" / (brief_id + ".json")).write_text("{}")
+        for arguments in ((brief_id,), (brief_id, "1")):
+            with self.subTest(arguments=arguments):
+                self.assertIn("prepare_renewal_brief", self.refused("inspect", *arguments)["message"])
+
+    def test_a_listing_shows_a_card_sealed_under_older_rules_by_todays_rules_and_says_why_a_sentence_is_off(self):
+        brief = self.ok("brief", "acc-003")["brief_id"]
+
+        def older_rules(artifact):
+            artifact["units"][4]["text"] = "<!here> will not sign."
+
+        self.reseal(brief, older_rules)
+        self.assertIn('"[mention here] will not sign."', self.text("inspect", brief).splitlines()[4])
+        self.assertEqual(self.ok("inspect", brief)["units"][4]["text"], "[mention here] will not sign.")
+
+    def test_a_receipt_with_a_tool_the_connector_does_not_have_shows_that_name_as_a_literal(self):
+        from gtm_connector.client import LocalClient
+        from gtm_connector.runtime import Runtime
+        with Runtime(self.state) as runtime, LocalClient(runtime.config) as client:
+            client.call(client.authorize(["crm:read"]), "get_account [1] <!here>", {})
+        [receipt] = [row for row in self.ok("audit") if row["tool"] not in ("get_account",)]
+        self.assertIn('"get_account [1] <!here>"', self.text("inspect", receipt["audit_id"]))
+
+    def test_mcp_help_says_what_it_needs_running(self):
+        with redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(["mcp", "--help"]), 0)
+        self.assertIn("debug serve", out.getvalue())
 
 
 if __name__ == "__main__":

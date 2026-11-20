@@ -172,6 +172,8 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertIn("  Slack: not connected.", lines)
         self.assertEqual([row["tool"] for row in read_audit(self.state / "audit.sqlite3", brief["brief_id"])],
                          ["get_account", "list_opportunities"])
+        code, out, err, _ = self.invoke(["inspect", ACCOUNT, "--json"], connect=False)
+        self.assertEqual((code, json.loads(out)["newest_brief_id"]), (0, brief["brief_id"]), err)
         for demo in ("calls.sqlite3", "slack.sqlite3"):
             self.assertFalse((self.state / demo).exists())
         # Detached, the folder is not connected again. Its files stay.
@@ -347,7 +349,10 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertIn("Sources: CRM is Salesforce (sandbox), identity verified.", err)
         self.assertIn("Contracts\n", out)
         self.assertIn("Draft\tDraft\t2026-02-01\t2027-01-31\tunknown", out)
-        self.assertIn("Industry\tunknown", out)
+        # A CRM value prints as a literal and an empty one as Missing, as on the card. The ID prints as it is.
+        self.assertIn("Industry\tMissing", out)
+        self.assertIn('Name\t"Invented Redwood Workshop"', out)
+        self.assertIn(f"Id\t{ACCOUNT}\n", out)
         self.assertNotIn("{'", out)
         self.assertNotIn("\x1b", out)
         self.assert_private(err)

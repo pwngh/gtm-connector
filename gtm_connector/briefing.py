@@ -235,6 +235,10 @@ def _sealed(directory, brief_id):
     try:
         payload = _artifact_path(directory, brief_id).read_bytes()
     except FileNotFoundError:
+        from .selected_briefs import ARTIFACT_DIRECTORY
+        if os.path.lexists(Path(directory) / ARTIFACT_DIRECTORY / (brief_id + ".json")):
+            raise ValueError("This brief was prepared by an assistant with prepare_renewal_brief, which reads it "
+                             "back with read_renewal_brief. inspect reads cards saved by brief or demo.") from None
         raise ValueError("No saved card has this brief ID in this state folder.") from None
     artifact = strict_json.loads(payload)
     evidence = artifact.get("evidence") if isinstance(artifact, dict) else None
@@ -285,8 +289,12 @@ def traces_saved(directory, brief_id, numbers):
     """
     artifact = _sealed(directory, brief_id)
     units, traced = artifact["units"], []
+    # A card is read only when every number on it resolves, as the listing checks it.
+    resolved = [trace(artifact["evidence"], index, units) for index in range(1, len(units) + 1)]
     for number in numbers:
-        found = trace(artifact["evidence"], number, units)
+        if not isinstance(number, int) or not 1 <= number <= len(units):
+            trace(artifact["evidence"], number, units)
+        found = resolved[number - 1]
         # The next whole sentence under the same speaker label in the same record, where a condition often is. A
         # sentence with no label has none, as no label is not one speaker, and so does a label that may print
         # like another one.
@@ -319,7 +327,11 @@ def newest_saved(directory, account_id):
     if not os.path.lexists(log):
         return None
     from .audit import read_audit
-    for seal in reversed(read_audit(log, tool=SEAL_TOOL, status="ok")):
+    try:
+        seals = read_audit(log, tool=SEAL_TOOL, status="ok")
+    except (ValueError, OSError, sqlite3.Error):
+        return None
+    for seal in reversed(seals):
         arguments = seal["arguments"]
         if isinstance(arguments, dict) and arguments.get("account_id") == account_id:
             # The newest card that passes the checks inspect makes, so the card named can be opened.

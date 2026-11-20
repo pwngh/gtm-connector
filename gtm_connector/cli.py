@@ -153,6 +153,13 @@ class RootParser(Parser):
                                 for name, command in commands.choices.items()), "", str(self.epilog), ""])
 
 
+def _card_number(text):
+    """A number as a card prints it: ASCII digits, not starting with 0."""
+    if re.fullmatch(r"[1-9][0-9]*", text) is None:
+        raise argparse.ArgumentTypeError("a number printed on the card, such as 5")
+    return int(text)
+
+
 def _state_option(command, default=STATE_DIR):
     """Add --state-dir. An action passes SUPPRESS, so it keeps a folder given before its name."""
     shown = STATE_DIR if default is argparse.SUPPRESS else default
@@ -313,8 +320,9 @@ def _options(command, name):
                           "  gtm-connector inspect RECEIPT_ID")
         command.add_argument("target", metavar="ID",
                              help="An account ID such as acc-003, a brief ID, or a receipt ID from audit.")
-        command.add_argument("numbers", nargs="*", type=int, metavar="N",
-                             help="With a brief ID: resolve these numbers printed on its card.")
+        command.add_argument("numbers", nargs="*", type=_card_number, metavar="N",
+                             help="With a brief ID: resolve these numbers printed on its card. "
+                                  "Give them together, after the ID.")
         command.add_argument("--role", choices=("customer", "seller", "unknown"),
                              help="With a brief ID alone: list only the sentences of this speaker role.")
     if name == "serve":
@@ -332,6 +340,8 @@ def _options(command, name):
     if name == "verify":
         command.add_argument("--with-slack", action="store_true", help="Include Slack messages.")
     if name == "mcp":
+        command.epilog = ("It attaches to the connector that gtm-connector debug serve runs in the same "
+                          "--state-dir, so start that first.\nExample: gtm-connector mcp stdio --scope crm:read")
         command.add_argument("action", choices=("stdio",),
                              help="Serve MCP on stdin and stdout. An assistant app starts this command.")
     if name in ("connect", "mcp"):
@@ -481,8 +491,12 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
         return table(["ID", "ACCOUNT", "INDUSTRY", "RENEWAL"],
                      [[row.get(key) for key in ("id", "name", "industry", "renewal_date")] for row in rows])
     if command == "audit":
+        from .briefing import SEAL_TOOL
+        from .tool_definitions import TOOL_DEFINITIONS
+        known = {*TOOL_DEFINITIONS, SEAL_TOOL}
         return table(["TIME", "TOOL", "CALLER", "DECISION", "MS", "RECEIPT", "REASON"],
-                     [[row["started_at"], row["tool"], row["token_id"], row["status"],
+                     [[row["started_at"], row["tool"] if row["tool"] in known
+                       else json.dumps(row["tool"], ensure_ascii=False), row["token_id"], row["status"],
                        round(row["elapsed_ms"], 2) if row["elapsed_ms"] is not None else None,
                        row["audit_id"], row["error"] or ""] for row in result])
     if command == "demo":
@@ -503,28 +517,34 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
 
 def _inspect_lines(brief_id, state_dir):
     """The commands that list a saved card's units and resolve one of its numbers, with the card's folder."""
-    folder = "" if state_dir is None else f" --state-dir {shlex.quote(str(state_dir))}"
     # A folder name can hold any byte. Escaped, the hint never writes a control character to the terminal.
-    return (safe_text(f"List every unit: gtm-connector inspect {brief_id}{folder}") + "\n"
-            + safe_text(f"Resolve a number: gtm-connector inspect {brief_id} N{folder}"))
+    return (safe_text(f"List every unit: gtm-connector inspect {brief_id}{_folder(state_dir)}") + "\n"
+            + safe_text(f"Resolve a number: gtm-connector inspect {brief_id} N{_folder(state_dir)}"))
+
+
+def _folder(state_dir):
+    """The --state-dir that names a card's folder in the commands printed under it."""
+    return "" if state_dir is None else f" --state-dir {shlex.quote(str(state_dir))}"
 
 
 def _human_inspect(result, *, action, crm_backend, state_dir):
     if action == "account":
         keys = ("id", "name", "industry", "account_number") if crm_backend == "salesforce" else result
-        fields = [[key.replace("_", " ").capitalize(), result.get(key)] for key in keys
-                  if key not in ("contacts", "contracts", "newest_brief_id")]
+        # A connector ID prints as it is. A CRM value prints as a literal, as on the card.
+        fields = [[key.replace("_", " ").capitalize(), result.get(key) if key == "id" else _literal(result.get(key))]
+                  for key in keys if key not in ("contacts", "contracts", "newest_brief_id")]
         displayed = table(["FIELD", "VALUE"], fields) + "\n\nContacts\n" + table(
-            ["ID", "NAME", "TITLE", "EMAIL"], [[row.get(key) for key in ("id", "name", "title", "email")]
-                                              for row in result["contacts"]])
+            ["ID", "NAME", "TITLE", "EMAIL"],
+            [[row.get("id"), *(_literal(row.get(key)) for key in ("name", "title", "email"))]
+             for row in result["contacts"]])
         if "contracts" in result:
             displayed += "\n\nContracts\n" + table(
                 ["ID", "STATUS", "CATEGORY", "START", "END", "TERM MONTHS"],
                 [[row.get(key) for key in ("id", "status", "status_code", "start_date", "end_date", "contract_term")]
                  for row in result["contracts"]])
         if (newest := result["newest_brief_id"]) is not None:
-            here = _here(argparse.Namespace(state_dir=state_dir))
-            displayed += "\n\n" + safe_text(f"Newest card: {newest}  (gtm-connector inspect {newest}{here})")
+            displayed += "\n\n" + safe_text(f"Newest card: {newest}  (gtm-connector inspect {newest}"
+                                              f"{_folder(state_dir)})")
         return displayed
     if action == "brief":
         return "\n".join(map(_unit_line, result["units"])) or "No sentence on this card has that role."
@@ -560,7 +580,8 @@ def _human_trace(result):
     if result["kind"] == "sentence":
         following = result.get("next_by_speaker")
         rows += [["Text", json.dumps(result["text"], ensure_ascii=False)],
-                 ["Speaker", result["speaker"] or "no speaker label"],
+                 ["Speaker", "no speaker label" if result["speaker"] is None
+                  else json.dumps(result["speaker"], ensure_ascii=False)],
                  ["Next by this speaker", "none" if following is None else following],
                  ["Role", f"{result['role']} ({result['basis']})"], ["Time", result["at"] or "Missing"],
                  ["On the card", "yes" if result.get("shown") == "yes" else "no: " + NOT_SHOWN[result["shown"]]
@@ -570,8 +591,15 @@ def _human_trace(result):
                  ["Source text SHA-256", result["raw_sha256"]],
                  ["Neutralizer version", result["sanitizer_version"]]]
     else:
-        rows += [[key, "Missing" if value in (None, "") else value] for key, value in result["fields"].items()]
+        rows += [[key, _literal(value)] for key, value in result["fields"].items()]
     return table(["FIELD", "VALUE"], rows)
+
+
+def _literal(value):
+    """A source value as the card prints one: a string as a quoted literal, an empty value as Missing."""
+    if value in (None, ""):
+        return "Missing"
+    return json.dumps(value, ensure_ascii=False) if isinstance(value, str) else value
 
 
 def _call_range(metadata, field="cited_range", *, context=True):
@@ -1565,7 +1593,9 @@ def _main(argv):
             return _error("The calls arguments do not match this action. Check its required arguments and options.",
                           2, suggestion + " --help", as_json=as_json)
         suggestion = prefix + "--help"
-        if names is COMMANDS and candidate in DEBUG:
+        if names is COMMANDS and candidate in ("trace", "account"):
+            suggestion = "gtm-connector inspect --help"
+        elif names is COMMANDS and candidate in DEBUG:
             suggestion = f"gtm-connector debug {candidate} --help"
         elif candidate in names:
             # A command that exists, given arguments it does not take: its own help says which it takes.

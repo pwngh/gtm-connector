@@ -66,17 +66,19 @@ Every number on a card resolves to its record and the receipt of the read that r
 
 ```text
 $ gtm-connector inspect brief-… 5
+FIELD                 VALUE
 Number                5
 Kind                  sentence
 Record                calls/call_notes/note-003b
 Receipt               b63a52fb-… (read_call_notes, ok)
-Text                  "Our general counsel will not sign until the zero-retention and client-consent
-                      rider for AI processing is approved."
-Speaker               Marian Holt
+Text                  "Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved."
+Speaker               "Marian Holt"
 Next by this speaker  6
 Role                  customer (label matches contact [2])
 Time                  2027-01-12T15:00:00Z
+On the card           yes
 Source text SHA-256   105807d2…
+Neutralizer version   3
 ```
 
 ## What it is tested against
