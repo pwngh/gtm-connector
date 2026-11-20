@@ -124,6 +124,12 @@ function authorityEvidence(fixture) {
   return {issues, contact: issues.length ? null : contact};
 }
 
+// The customer decision authority, named only when accepted authority evidence supports a contact.
+const authorityLabel = check => check?.supportedContact?.displayName || 'Unidentified';
+export function customerAuthorityLabel(fixture = readinessFixture) {
+  return authorityLabel(evaluateEvidence({id: 'customer_authority'}, null, fixture));
+}
+
 function unknownCheck(explanation) {
   return {result: 'not_evaluated', allowed: null, blockedReasons: [], allowedActions: [], explanation};
 }
@@ -260,7 +266,7 @@ export function evaluateReadiness(state, fixture = readinessFixture, previous = 
       resolvedAt: bound ? state.requirement.resolvedAt : null,
       owner, ownerLabel: owner?.displayName || 'Unassigned', nextStepOwner, nextStepOwnerLabel: nextStepOwner?.displayName || 'Unassigned',
       waitingOn, waitingLabel: waitingOn?.label || 'No external party currently awaited',
-      customerAuthorityLabel: authority?.supportedContact?.displayName || 'Unidentified',
+      customerAuthorityLabel: authorityLabel(authority),
       missing, evidenceChecks, nextAction, inputVersions: versions.filter(input => input.kind !== 'policy'),
       allowedActions: nextAction ? [nextAction] : bound && d.canReopenRequirement ? [{id: 'reopen_requirement', command: 'reopen_requirement', label: 'Reopen with a reason', intent: 'local_form', owner}] : [],
       reopenAction: bound && d.canReopenRequirement && nextAction ? {id: 'reopen_requirement', command: 'reopen_requirement', label: 'Reopen the walkthrough record with a reason', intent: 'local_form', owner} : null,

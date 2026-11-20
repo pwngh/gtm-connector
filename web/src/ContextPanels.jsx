@@ -1,6 +1,8 @@
 import {renewalFixture,fixturePeople} from './renewalFixtures.js';
 import React from 'react';
 import {FileText, Link2, ShieldCheck, Info} from 'lucide-react';
+import {DecisionAuthority, ReviewerInput} from './EvidenceNotes.jsx';
+import {awaitedCounselNote} from './renewalEvidence.js';
 
 export function RecordContext({state, onTask}) {
   return <div className="dialog-body context-body">
@@ -10,7 +12,7 @@ export function RecordContext({state, onTask}) {
       <div><span>Customer organization</span><strong>{renewalFixture.account.name}</strong><p>The account this work belongs to.</p></div>
       <div><span>Renewal deal · Opportunity {renewalFixture.renewal.id}</span><strong>Annual renewal</strong><p>The commercial decision being tracked. Its outcome is still unconfirmed.</p></div>
       <div><span>Contract · {renewalFixture.agreement.label}</span><strong>{renewalFixture.agreement.displayTitle}</strong><p>The AI terms document must apply to this agreement and its current version.</p></div>
-      <div><span>Customer condition</span><strong>Counsel approves the current AI terms</strong><p>{fixturePeople.customerCounsel} is the customer counsel in this demo. {fixturePeople.internalReviewer} reviews the internal work and the recorded evidence.</p></div>
+      <div><span>Customer condition</span><strong>Counsel approves the current AI terms</strong><p>The customer counsel is {awaitedCounselNote.toLowerCase()}. {fixturePeople.internalReviewer} reviews the internal work and the recorded evidence.</p></div>
     </div>
     <button className="button primary" onClick={()=>onTask(3)}>View the review task</button>
     <p className="small-note">Invented relationships for this walkthrough. No CRM is connected.</p>
@@ -33,8 +35,8 @@ export function DecisionEvidence({state, onHistory}) {
   return <div className="dialog-body decision-evidence">
     <span className="context-overline"><ShieldCheck size={16}/> RECORDED REVIEWER INPUT</span>
     <h3>Walkthrough decision input.</h3>
-    <p className="full-quote">{decision.evidenceText}</p>
-    <dl className="detail-list"><div><dt>Customer reviewer (reviewer input)</dt><dd>{decision.reviewedBy}</dd></div><div><dt>Recorded by</dt><dd>{decision.recordedBy}</dd></div><div><dt>Document</dt><dd>{state.document.title} · {decision.documentVersion}</dd></div><div><dt>Applies to</dt><dd>{renewalFixture.agreement.label} · Plan version {decision.planRevision}</dd></div></dl>
+    <ReviewerInput label="Decision text">{decision.evidenceText}</ReviewerInput>
+    <dl className="detail-list"><div><dt>Customer reviewer (reviewer input)</dt><dd>{decision.reviewedBy}</dd></div><DecisionAuthority/><div><dt>Recorded by</dt><dd>{decision.recordedBy}</dd></div><div><dt>Document</dt><dd>{state.document.title} · {decision.documentVersion}</dd></div><div><dt>Applies to</dt><dd>{renewalFixture.agreement.label} · Plan version {decision.planRevision}</dd></div></dl>
     <div className="interpretation"><strong>What this establishes</strong><p>Typed reviewer input for this document version, not a cited receipt or an authority finding. The commercial renewal outcome remains unconfirmed.</p></div>
     <button className="button" onClick={onHistory}>View decision history</button>
   </div>;

@@ -1,4 +1,6 @@
-import {renewalFixture,fixturePeople,renewalEvidence} from './renewalFixtures.js';
+import {renewalFixture,renewalEvidence} from './renewalFixtures.js';
+import {awaitedCounsel, decisionAuthorityLabel, evidenceCut, speakerLine} from './renewalEvidence.js';
+import {workflowNoteLabel} from './EvidenceNotes.jsx';
 import React, {useId, useState} from 'react';
 import {motion, useReducedMotion} from 'motion/react';
 import {Phone, FileText, MessageSquare, ShieldCheck, CheckCheck, Link2, Check, CircleDashed} from 'lucide-react';
@@ -6,7 +8,8 @@ import './evidence-flow.css';
 
 // Original relationship map. It describes the evidence in this walkthrough;
 // the lines are relationships, never a claim that an integration is running.
-export default function EvidenceFlow({state, derived: d, onSource, onDocument, onStep}) {
+// It takes the records the page shows, so the map, the library and the source dialog agree.
+export default function EvidenceFlow({state, derived: d, records = renewalEvidence, onSource, onDocument, onStep}) {
   const [active, setActive] = useState(null);
   const reduce = useReducedMotion();
   const titleId = useId();
@@ -16,13 +19,15 @@ export default function EvidenceFlow({state, derived: d, onSource, onDocument, o
   const reviewStep = d.hasCustomerApproval || d.canRecordCustomerApproval || d.canRequestCustomerReview ? 3 : d.isPlanApproved ? 2 : 1;
   const related = id => active === id || active === 'review';
   const spring = reduce ? {duration: 0} : {type: 'spring', stiffness: 380, damping: 32};
+  const shown = binding => records.find(record => record.binding === binding) || renewalEvidence.find(record => record.binding === binding);
+  const statement = shown('customer_statement'), comparison = shown('comparison_statement'), comparisonCut = evidenceCut(comparison);
 
-  function node({id, icon: Icon, eyebrow, title, detail, status, tone, onClick}) {
+  function node({id, icon: Icon, eyebrow, note, title, detail, status, tone, onClick}) {
     return <motion.button type="button" className={`evidence-flow-node flow-${id} ${tone || ''}`} onClick={onClick}
       onMouseEnter={() => setActive(id)} onMouseLeave={() => setActive(null)} onFocus={() => setActive(id)} onBlur={() => setActive(null)}
       whileHover={reduce ? undefined : {y: -2}} whileTap={reduce ? undefined : {scale: .985}} transition={spring}>
       <span className="flow-node-top"><span className="flow-node-icon"><Icon size={18}/></span><span className="flow-eyebrow">{eyebrow}</span><span className="flow-open-icon"><Link2 size={13}/></span></span>
-      <strong>{title}</strong><span className="flow-node-detail">{detail}</span>
+      {note && <span className="note-label flow-node-note">{note}</span>}<strong>{title}</strong><span className="flow-node-detail">{detail}</span>
       {status && <span className="flow-node-status">{tone === 'complete' ? <Check size={12}/> : <CircleDashed size={12}/>} {status}</span>}
     </motion.button>;
   }
@@ -42,13 +47,13 @@ export default function EvidenceFlow({state, derived: d, onSource, onDocument, o
       <span className="flow-relation relation-condition">Establishes<br/>the condition</span>
       <span className="flow-relation relation-document">Enables<br/>the review</span>
       <span className="flow-relation relation-decision">{d.hasCustomerApproval?<>Recorded<br/>approval</>:<>Approval<br/>required</>}</span>
-      {node({id:'customer', icon:Phone, eyebrow:`CUSTOMER · ${renewalFixture.bindings.customer_statement}`, title:'Counsel approval required', detail:`${renewalEvidence[0].speaker} · ${renewalEvidence[0].type}`, onClick:() => onSource(0), tone:'source'})}
+      {node({id:'customer', icon:Phone, eyebrow:`CUSTOMER · ${statement.id}`, note:'Workflow note', title:'Counsel approval required', detail:`${statement.speaker} · ${statement.type}`, onClick:() => onSource(statement), tone:'source'})}
       {node({id:'document', icon:FileText, eyebrow:'DOCUMENT', title:doc ? doc.title || doc.name : 'Current AI terms needed', detail:doc ? `Version ${doc.version} · ${renewalFixture.agreement.label}` : 'The applicable version is missing', status:d.isDocumentVerified ? 'Version verified' : doc ? 'Needs verification' : 'Not received', tone:d.isDocumentVerified ? 'complete' : doc ? '' : 'missing', onClick:() => doc ? onDocument() : onStep(d.isPlanApproved ? 2 : 1)})}
-      {node({id:'review', icon:ShieldCheck, eyebrow:'HUMAN DECISION', title:'Customer counsel review', detail:`${fixturePeople.customerCounsel} · Customer counsel`, status:reviewStatus, tone:d.hasCustomerApproval ? 'complete' : 'decision', onClick:() => onStep(reviewStep)})}
-      {node({id:'resolution', icon:CheckCheck, eyebrow:resolved?'VERIFIED OUTCOME':'RESOLUTION', title:'Customer condition', detail:resolved ? 'Resolution preserved in history' : 'Resolve with reviewed evidence', status:resolved ? 'Resolved' : 'Still open', tone:resolved ? 'complete' : '', onClick:() => onStep(4)})}
+      {node({id:'review', icon:ShieldCheck, eyebrow:'HUMAN DECISION', title:'Customer counsel review', detail:d.hasCustomerApproval ? `${state.customerReview.reviewedBy} · reviewer input · authority ${decisionAuthorityLabel().toLowerCase()}` : awaitedCounsel.label, status:reviewStatus, tone:d.hasCustomerApproval ? 'complete' : 'decision', onClick:() => onStep(reviewStep)})}
+      {node({id:'resolution', icon:CheckCheck, eyebrow:resolved?'RESOLUTION RECORDED':'RESOLUTION', title:'Customer condition', detail:resolved ? 'Recorded from reviewer input' : 'Resolve from the recorded decision', status:resolved ? 'Resolved' : 'Still open', tone:resolved ? 'complete' : '', onClick:() => onStep(4)})}
     </div>
-    <button type="button" className="flow-context" onClick={() => onSource(1)}>
-      <span className="flow-context-icon"><MessageSquare size={18}/></span><span className="flow-context-copy"><span className="flow-eyebrow">SELLER EXPECTATION · {renewalFixture.bindings.comparison_statement}</span><strong>“{renewalEvidence[1].quote}”</strong></span><span className="flow-context-boundary">Commercial context<span>Does not establish approval</span></span><Link2 className="flow-context-open" size={15}/>
+    <button type="button" className="flow-context" onClick={() => onSource(comparison)}>
+      <span className="flow-context-icon"><MessageSquare size={18}/></span><span className="flow-context-copy"><span className="flow-eyebrow">SELLER EXPECTATION · {comparison.id}</span><strong>“{comparison.quote}”</strong>{comparisonCut && <span className="evidence-cut">{comparisonCut}</span>}<span className="speaker-line">{speakerLine(comparison)}</span></span><span className="flow-context-boundary"><span className="note-label">{workflowNoteLabel}</span>Commercial context. Does not establish approval.</span><Link2 className="flow-context-open" size={15}/>
     </button>
     <p className="flow-caption">Open any record to inspect its source or the work it requires. A resolved condition does not confirm a signed renewal.</p>
   </section>;

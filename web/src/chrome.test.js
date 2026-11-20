@@ -276,6 +276,103 @@ test('a pending exact destination never takes focus behind an open dialog', () =
 });
 
 const pageDone = (tree, path) => find(tree, node => node.type?.name === 'RouteContent' && node.props.path === path).props.onReady(path);
+const dialogContent = tree => find(tree, node => node.props.modal && node.props.openStep);
+function stepTarget(step) {const button = element('step-' + step + '-button'); dom.targets.set('step-' + step, {querySelector: () => button}); return button;}
+
+test('a Work plan target that arrives late takes focus only if focus has not moved elsewhere', () => {
+  const item = buildWorklist(initialState).workItems.find(row => row.kind === 'inspection');
+  for (const moved of [false, true]) {
+    dom.targets.clear();
+    const page = bench(renewalFixture.paths.workplan + '?' + new URLSearchParams({workItem: item.id}));
+    page.render(); let tree = page.render(); dom.flushFrames();
+    // The link that asked is gone, so the heading holds focus while the page loads.
+    dom.mainHeading.focus();
+    if (moved) dom.get('search').focus();
+    const target = element('work-item'); dom.targets.set(item.entryTargetId, target);
+    pageDone(tree, renewalFixture.paths.workplan); tree = page.render(); dom.flushFrames();
+    assert.equal(document.activeElement, moved ? dom.get('search') : target);
+    // A dropped target stays dropped.
+    page.render(); dom.flushFrames();
+    assert.equal(target.calls.length, moved ? 0 : 2);
+    page.hooks.dispose();
+  }
+});
+
+test('a step asked for from a dialog takes focus when the dialog returns focus to its opener', () => {
+  for (const moved of [false, true]) {
+    dom.targets.clear();
+    const page = bench(renewalFixture.paths.workplan); pageDone(page.render(), renewalFixture.paths.workplan); let tree = page.render();
+    const opener = element('inspect-source'); opener.focus();
+    byClass(tree, 'context-link').props.onClick(); tree = page.render();
+    dialogContent(tree).props.openStep(3); tree = page.render();
+    // The closing dialog puts focus back on its opener, unless the user has gone on.
+    (moved ? dom.get('search') : opener).focus();
+    const target = stepTarget(3); page.render(); dom.flushFrames();
+    assert.equal(document.activeElement, moved ? dom.get('search') : target);
+    page.hooks.dispose();
+  }
+});
+
+test('a target waiting behind a dialog takes focus only if the dialog returns focus to a place that has not moved on', () => {
+  const item = buildWorklist(initialState).workItems.find(row => row.kind === 'inspection');
+  for (const moved of [false, true]) {
+    dom.targets.clear();
+    const page = bench(renewalFixture.paths.workplan + '?' + new URLSearchParams({workItem: item.id}));
+    page.render(); let tree = page.render(); dom.flushFrames();
+    const opener = moved ? dom.get('search') : dom.mainHeading; opener.focus();
+    byClass(tree, 'search-trigger').props.onClick(); tree = page.render();
+    const target = element('work-item'); dom.targets.set(item.entryTargetId, target);
+    pageDone(tree, renewalFixture.paths.workplan); tree = page.render(); dom.flushFrames();
+    named(tree, 'WorkspaceDialog').props.onClose(); page.render();
+    opener.focus(); dom.flushFrames();
+    assert.equal(document.activeElement, moved ? opener : target);
+    page.hooks.dispose();
+  }
+});
+
+test('a late Work plan target stays dropped once focus has moved on, even after focus falls back to the body', () => {
+  // From a Work queue link: the heading holds focus, the user moves to Search, then clicks the page background.
+  const item = buildWorklist(initialState).workItems.find(row => row.kind === 'inspection');
+  let page = bench(renewalFixture.paths.workplan + '?' + new URLSearchParams({workItem: item.id}));
+  page.render(); let tree = page.render(); dom.flushFrames();
+  dom.mainHeading.focus(); dom.get('search').focus(); document.activeElement = document.body;
+  const target = element('work-item'); dom.targets.set(item.entryTargetId, target);
+  pageDone(tree, renewalFixture.paths.workplan); page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, document.body);
+  assert.equal(target.calls.length, 0);
+  page.hooks.dispose();
+  // From Evidence: the opener is gone, the heading holds focus, then Search, then the background.
+  dom.targets.clear();
+  const evidence = renewalFixture.paths.evidence, workplan = renewalFixture.paths.workplan;
+  page = bench(evidence); pageDone(page.render(), evidence); tree = page.render();
+  const opener = element('inspect-source'); opener.focus();
+  byClass(tree, 'context-link').props.onClick(); tree = page.render();
+  dialogContent(tree).props.openStep(3);
+  opener.isConnected = false; document.activeElement = document.body;
+  tree = page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, dom.mainHeading);
+  dom.get('search').focus(); document.activeElement = document.body;
+  const step = stepTarget(3);
+  pageDone(tree, workplan); page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, document.body);
+  assert.equal(step.calls.length, 0);
+});
+
+test('View affected task from Evidence focuses the step once the Work plan arrives', () => {
+  const evidence = renewalFixture.paths.evidence, workplan = renewalFixture.paths.workplan;
+  const page = bench(evidence); pageDone(page.render(), evidence); let tree = page.render();
+  const opener = element('inspect-source'); opener.focus();
+  byClass(tree, 'context-link').props.onClick(); tree = page.render();
+  dialogContent(tree).props.openStep(3);
+  // Leaving Evidence removes the opener; the heading holds focus while Work plan loads.
+  opener.isConnected = false; document.activeElement = document.body;
+  tree = page.render(); dom.flushFrames();
+  assert.equal(page.hooks.useLocation().pathname, workplan);
+  assert.equal(document.activeElement, dom.mainHeading);
+  const target = stepTarget(3);
+  pageDone(tree, workplan); page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, target);
+});
 
 test('a link removed while its page loads leaves focus on the page heading until the page target takes it', () => {
   const readiness = renewalFixture.paths.root + '/readiness', history = renewalFixture.paths.history;

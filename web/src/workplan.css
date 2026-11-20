@@ -1,0 +1,134 @@
+/* Work plan and Evidence: 44px targets, 16px content and controls, 14px labels.
+   Loaded after the legacy layers, so these rules settle the cascade at every width. */
+
+/* Labels and captions: 14px. */
+:is(.work-panel,.evidence-panel,.evidence-library)>.section-kicker,
+.evidence-library .panel-header .section-kicker,
+.workflow-progress :is(.progress-summary,.progress-count,.progress-sub),
+.work-grid :is(.step-number,.step-heading>span,.step-status,.mini-label,.handoff-state,dt,.playbook-source>span),
+.work-grid .plan-footnote>span,.work-grid .evidence-label>span,.work-grid .quote-meta>div>span,
+.action-bar .action-context p,
+.evidence-flow :is(.flow-eyebrow,.flow-agreement,.flow-relation,.flow-node-detail,.flow-node-status,.flow-context-boundary,.flow-caption),
+.evidence-library :is(.library-meta,.pill,.muted,dt),
+:is(.work-grid,.dialog) :is(.handoff-file span,.handoff-meta>span,.handoff-state),
+.dialog :is(.mini-label,.context-overline,.small-note,.source-detail-meta,.pill,.decision-context>span,.decision-people span,.decision-people small,.decision-binding p,.prescription-details dt) {
+  font-size:.875rem; line-height:1.5;
+}
+.work-grid .step-heading>span {line-height:1.4}
+.evidence-flow .flow-relation {line-height:1.35}
+
+/* Content: 16px. */
+.workflow-progress .progress-label,
+.work-grid :is(.step-heading strong,dd,.step-summary p,.quote-meta strong,.document-gap strong,.document-gap p,.condition-note p,.condition-note strong),
+.action-bar .action-context strong,
+.evidence-flow .evidence-flow-node>strong,
+.evidence-library .library-row p,
+.dialog :is(.coverage-row strong,.coverage-row small) {
+  font-size:1rem;
+}
+.workflow-progress .progress-sub {margin-top:2px}
+.work-grid .step-heading strong {line-height:1.4}
+.work-grid .condition-note p {line-height:1.6}
+
+/* Controls: 16px text, 44px target. Text links keep their place: the hit area
+   reaches into the space around them, so rows stay as compact as before. */
+:is(.work-grid,.action-bar,.evidence-library,.dialog) .button {min-height:44px; font-size:1rem}
+.work-grid :is(.version-help,.playbook-source button,.text-button,.plan-footnote button,.evidence-label button,.help-link,.gap-actions button),
+.dialog .context-link {
+  display:inline-flex; align-items:center; gap:6px; min-height:44px; font-size:1rem; line-height:1.5; touch-action:manipulation;
+}
+/* A summary keeps its native disclosure marker: a list item, padded to 44px. */
+.dialog .decision-background summary {
+  display:list-item; min-height:44px; padding-block:10px; font-size:1rem; line-height:1.5; cursor:pointer; touch-action:manipulation;
+}
+.work-grid :is(.version-help,.playbook-source button,.plan-footnote button,.evidence-label button,.help-link) {margin-block:-10px}
+.work-grid .version-help {letter-spacing:0; text-transform:none; font-weight:500}
+/* Its hit area reaches up rather than down, and the edit button's reaches down, so the
+   two keep a gap. Padding holds the text where it was. */
+.work-grid .section-kicker .version-help {margin-block:-16px -4px; padding-top:12px}
+/* The row gap outweighs both negative margins, so wrapped buttons never share a hit area. */
+.work-grid .gap-actions {gap:12px 20px}
+.work-grid .gap-actions button {margin-block:-4px}
+.work-grid .step-summary>.text-button {margin-block:4px -6px}
+.dialog .context-link {margin-block:-10px}
+.work-grid :is(.plan-title-row,.quote-meta) .icon-button,.work-grid .playbook-help {
+  width:44px; height:44px; min-width:44px; flex-shrink:0; padding:0;
+  display:inline-flex; align-items:center; justify-content:center;
+}
+.work-grid .plan-title-row .icon-button {margin:-3px -5px -7px 0}
+.work-grid .quote-meta .icon-button {margin:-4px -4px -4px 0}
+.work-grid .playbook-help {margin-block:-10px}
+/* When the help button wraps under the link, the row gap outweighs both negative margins. */
+.work-grid .playbook-source {row-gap:24px}
+.work-grid .evidence-label {align-items:center; gap:12px; flex-wrap:wrap}
+.work-grid .plan-footnote {align-items:center}
+.action-bar .action-buttons .button,.action-bar .action-buttons .button.ghost {min-height:44px; font-size:1rem}
+
+/* Authored context: labelled and set apart from the quotation, in plain type. */
+.workflow-note {
+  margin:0; padding:10px 0 0; border-top:1px dashed color-mix(in srgb,currentColor 28%,transparent);
+  font-style:normal; font-family:inherit; letter-spacing:0;
+}
+.workflow-note p {margin:2px 0 0; font-size:1rem; line-height:1.55}
+.workflow-note .note-label,.reviewer-input .note-label,.flow-context-boundary .note-label,.source-excerpt .note-label,.evidence-flow .flow-node-note {
+  display:block; font-size:.875rem; font-weight:600; line-height:1.5; letter-spacing:.02em; opacity:.85;
+}
+.work-grid .quote-bottom {align-items:flex-end; gap:8px 16px; flex-wrap:wrap}
+.work-grid .quote-bottom .workflow-note {flex:1 1 100%}
+.evidence-library .workflow-note,.dialog .workflow-note {
+  margin-top:16px; padding:12px 14px; border:1px solid color-mix(in srgb,currentColor 18%,transparent); border-radius:8px;
+}
+.dialog .workflow-note {margin-block:22px}
+.evidence-cut {margin:6px 0 0; font-size:.875rem; font-weight:600; line-height:1.5}
+.evidence-flow .evidence-cut {display:block}
+.evidence-flow .flow-node-note {margin:2px 0 2px; font-weight:500}
+
+/* The speaker's role, its basis and authority, as a caption beside a preview. */
+.speaker-line {margin:8px 0 0; font-size:.875rem; line-height:1.5; opacity:.85}
+.work-grid .quote-card .speaker-line {margin:10px 0 12px}
+.evidence-flow .speaker-line {display:block; margin-top:4px; color:var(--flow-muted); opacity:1}
+
+/* A role is shown with how it was established. */
+.speaker-role {display:grid; gap:8px; margin:14px 0 0; padding:0}
+.speaker-role>div {display:grid; grid-template-columns:minmax(120px,190px) minmax(0,1fr); gap:4px 16px}
+.speaker-role dt {font-size:.875rem; line-height:1.5; opacity:.85}
+.speaker-role dd {margin:0; font-size:1rem; line-height:1.5}
+.dialog .detail-list dt {font-size:.875rem; line-height:1.5}
+.dialog .detail-list dd {font-size:1rem; line-height:1.55}
+.source-unit-note {margin:-6px 0 18px; font-size:.875rem; line-height:1.5; opacity:.85}
+
+/* The text around a cited unit: labelled context, in plain type, never a quotation. */
+.dialog .source-excerpt {margin:18px 0; padding:12px 14px; border:1px solid color-mix(in srgb,currentColor 18%,transparent); border-radius:8px}
+.source-excerpt p {margin:4px 0 0; font-size:1rem; line-height:1.55}
+.source-excerpt .excerpt-place {margin-right:8px; font-size:.875rem; font-weight:600; opacity:.85}
+
+/* Typed reviewer input is not a quotation. */
+.reviewer-input {margin:18px 0; padding:12px 14px; border:1px dashed color-mix(in srgb,currentColor 35%,transparent); border-radius:8px}
+.reviewer-input p {margin:4px 0 0; font-size:1rem; line-height:1.6; overflow-wrap:anywhere}
+
+/* Sources read, gaps and the workflow document, in the shared wording. */
+.dialog-body .coverage-heading {margin:22px 0 4px; font-size:1rem; line-height:1.5; font-weight:600; letter-spacing:0}
+.coverage-list {list-style:none; margin:0; padding:0}
+.dialog .coverage-row {align-items:flex-start}
+.dialog .coverage-row>svg {flex-shrink:0; margin-top:2px}
+.dialog .coverage-row small {margin-top:4px; line-height:1.55}
+.dialog .coverage-row .pill {flex-shrink:0; white-space:nowrap}
+.evidence-library .library-quote {font-style:normal}
+.evidence-library .library-gaps {padding:24px 0 6px; border-bottom:1px solid var(--line)}
+.evidence-library .library-gaps h3 {font-size:1rem; line-height:1.5; font-weight:600; margin:0}
+.evidence-library .coverage-row {display:flex; align-items:flex-start; gap:13px; padding:14px 0 0; border:0}
+.evidence-library .coverage-row>svg {flex-shrink:0; margin-top:2px}
+.evidence-library .coverage-row {color:inherit}
+.evidence-library .coverage-row strong {display:block; font-size:1rem; font-weight:500; color:inherit}
+.evidence-library .coverage-row small {display:block; font-size:1rem; line-height:1.6; margin-top:2px; color:inherit; opacity:.85}
+.evidence-flow .flow-context-boundary {line-height:1.45}
+
+@media(max-width:650px) {
+  .dialog .coverage-row {flex-wrap:wrap}
+  .dialog .coverage-row>div {flex:1 1 calc(100% - 40px)}
+  .dialog .coverage-row .pill {margin-left:33px}
+  .speaker-role>div {grid-template-columns:minmax(0,1fr); gap:0}
+  /* Stacked, the buttons drop their negative margins and keep a gap between hit areas. */
+  .work-grid .gap-actions {flex-direction:column; align-items:flex-start; gap:8px}
+  .work-grid .gap-actions button {margin-block:0}
+}
