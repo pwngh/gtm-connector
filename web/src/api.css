@@ -1,0 +1,85 @@
+/* Evidence and Readiness read from the server: the session, sign-in, refusals,
+   the card picker, receipts. 44px targets, 16px content and controls, 14px labels. */
+.api-frame {display:grid; gap:20px; min-width:0; overflow-wrap:anywhere}
+.api-readiness .api-frame {margin-bottom:24px}
+.api-label {display:block; font-size:.875rem; line-height:1.5; color:var(--muted)}
+.api-mono,.api-digest {font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.875rem; word-break:break-all}
+.api-frame :is(p,li,dd) {font-size:1rem; line-height:1.6}
+.api-frame .button {display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; font-size:1rem; text-decoration:none; max-width:100%}
+.api-frame :is(button,a,input):focus-visible {outline:3px solid #5b7fe8; outline-offset:3px}
+
+.api-session {display:flex; align-items:center; flex-wrap:wrap; gap:12px 16px; padding:14px 18px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink)}
+.api-session>svg {flex-shrink:0; color:#27705b}
+.api-session-who {flex:1 1 260px; min-width:0}
+.api-session-who strong {display:block; font-size:1rem; font-weight:600; line-height:1.5}
+.api-session>.api-problem {flex-basis:100%}
+
+.api-signin {max-width:620px; padding:24px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--ink)}
+.api-signin .section-kicker {font-size:.875rem; letter-spacing:.08em; color:var(--muted)}
+.api-signin h2 {font-size:1.5rem; line-height:1.3; letter-spacing:-.03em; margin:8px 0 10px; font-weight:550}
+.api-signin>p {color:var(--muted)}
+.api-signin-form {display:grid; gap:4px; margin-top:8px}
+.api-signin-form .button {justify-self:start; margin-top:12px}
+.api-frame .field {display:flex; flex-direction:column; gap:8px; margin:12px 0 0; font-size:.875rem; font-weight:500; color:var(--muted)}
+.api-frame .field input {min-height:44px; font:inherit; font-size:1rem; font-weight:400; line-height:1.5; padding:10px 12px; border:1px solid #c7d3df; border-radius:8px; background:#fff; color:#17243a; max-width:100%}
+
+.api-problem {display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border:1px solid #e5c8a4; border-left-width:4px; border-radius:10px; background:#fff8ef; color:#5d3d14; margin:0}
+.api-problem>svg {flex-shrink:0; margin-top:2px}
+.api-problem strong {display:block; font-size:1rem; line-height:1.5}
+.api-problem p {margin:4px 0 0; color:inherit}
+.api-problem .api-label {color:inherit; opacity:.85}
+.api-problem .button {margin-top:10px}
+.api-notice,.api-loading {margin:0; padding:12px 0; color:var(--muted); font-size:1rem}
+
+.api-account {display:flex; align-items:flex-end; flex-wrap:wrap; gap:12px 14px; padding:4px 0 18px; border-bottom:1px solid var(--line)}
+.api-account .field {flex:0 1 280px; margin:0}
+.api-cards {padding:16px 0 4px}
+.api-card-list {list-style:none; margin:8px 0 0; padding:0; display:grid; gap:8px}
+.api-card-list a {display:flex; flex-direction:column; justify-content:center; min-height:44px; padding:10px 14px; border:1px solid var(--line); border-radius:9px; color:inherit; text-decoration:none; font-size:1rem; line-height:1.5}
+.api-card-list a .api-label {font-size:1rem}
+.api-card-list a:hover {border-color:#5b7fe8}
+.api-card-list a[aria-current='true'] {border-color:#2458ce; box-shadow:inset 3px 0 #2458ce}
+
+.api-facts {display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px 24px; margin:18px 0 6px; padding:16px 0; border-block:1px solid var(--line)}
+.api-facts>div {min-width:0}
+.api-facts dt,.api-receipt dt {font-size:.875rem; line-height:1.5; color:var(--muted)}
+.api-facts dd,.api-receipt dd {margin:2px 0 0; font-size:1rem; line-height:1.5; overflow-wrap:anywhere}
+.api-section-title {font-size:1rem; font-weight:600; line-height:1.5; margin:18px 0 0}
+
+.evidence-library .api-quote {margin:13px 0 8px; padding:4px 0 4px 16px; border-left:3px solid #9fb4d6; font-size:1.125rem; line-height:1.55; max-width:700px; white-space:pre-wrap; overflow-wrap:anywhere}
+.evidence-library .api-record {margin:13px 0 8px}
+.api-unit-receipt {margin-top:14px}
+.api-receipt {display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px 20px; margin:6px 0 0}
+.api-receipt>div {min-width:0}
+.api-receipt-full {grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.api-rows {margin:0; padding-left:18px}
+.api-rows li {font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.875rem; word-break:break-all}
+.api-unit-detail {margin-top:16px; padding:16px; border:1px solid var(--line); border-radius:10px}
+.api-unit-detail-head {display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 16px}
+.api-unit-detail h4 {margin:0; font-size:1.125rem; line-height:1.4}
+.api-unit-detail h5 {margin:14px 0 0; font-size:1rem; line-height:1.5}
+.api-unit-detail [tabindex='-1']:focus {outline:2px solid #5b7fe8; outline-offset:4px}
+.evidence-library .api-unit.is-open>div {flex-basis:100%}
+
+.api-renewal-header .page-heading {flex-wrap:wrap}
+.api-renewal-header .page-heading>div:first-child {flex:1 1 380px; min-width:0}
+.api-renewal-header .account-meta>span {min-width:0; overflow-wrap:anywhere}
+.api-renewal-header .detail-nav nav {grid-template-columns:repeat(2,minmax(0,1fr))}
+.api-renewal-header h1 {overflow-wrap:anywhere}
+.api-picker {display:grid; gap:4px; margin-bottom:22px}
+.api-unit-summary {padding:18px 20px; margin-top:16px}
+.api-unit-summary h3 {margin-bottom:8px}
+
+html[data-theme='dark'] :is(.api-session,.api-signin) {background:#131d28; border-color:#2f3f51; color:var(--ink)}
+html[data-theme='dark'] .api-session>svg {color:#a1dcba}
+html[data-theme='dark'] .api-frame .field input {background:#0f1720; border-color:#4b637c; color:#edf2f8; color-scheme:dark}
+html[data-theme='dark'] .api-problem {background:#2a1f12; border-color:#7a5a30; color:#f3d7ae}
+html[data-theme='dark'] .api-card-list a[aria-current='true'] {border-color:#8fb1ff; box-shadow:inset 3px 0 #8fb1ff}
+html[data-theme='dark'] .evidence-library .api-quote {border-left-color:#55789b}
+
+@media (max-width:650px) {
+  .api-session,.api-signin {padding:14px}
+  .api-session .button {flex:1 1 100%}
+  .api-account .field {flex:1 1 100%}
+  .api-account .button {flex:1 1 100%}
+}

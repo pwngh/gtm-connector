@@ -9,6 +9,8 @@ export const pageLoaders = {
   Evidence: () => import('./Evidence.jsx'),
   History: () => import('./History.jsx'),
   FollowUpReport: () => import('./FollowUpReport.jsx'),
+  ApiEvidence: () => import('./ApiEvidence.jsx'),
+  ApiReadiness: () => import('./ApiReadiness.jsx'),
 };
 
 // React.lazy keeps a failed import forever. A page made here starts a fresh
@@ -45,5 +47,7 @@ export const WorkPlan = lazyPage(pageLoaders.WorkPlan);
 export const Evidence = lazyPage(pageLoaders.Evidence);
 export const History = lazyPage(pageLoaders.History);
 export const FollowUpReport = lazyPage(pageLoaders.FollowUpReport);
+export const ApiEvidence = lazyPage(pageLoaders.ApiEvidence);
+export const ApiReadiness = lazyPage(pageLoaders.ApiReadiness);
 
 export const WorkflowDialogContent = lazyPage(pageLoaders.WorkflowDialogContent);
