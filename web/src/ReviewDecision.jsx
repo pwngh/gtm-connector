@@ -1,3 +1,4 @@
+import {renewalFixture,fixturePeople} from './renewalFixtures.js';
 import React, {useEffect, useId, useRef, useState} from 'react';
 import {FileText, CheckCircle2, Clock, ShieldCheck} from 'lucide-react';
 
@@ -7,7 +8,7 @@ export function DocumentHandoff({document, verified = false, onInspect}) {
   if (!document) return <article className="handoff-card" data-status="missing"><div className="handoff-header"><FileText size={18}/><strong>Document not received</strong></div><p>The task needs the applicable document before it can be verified.</p></article>;
   return <article className="handoff-card" data-status={verified ? 'verified' : 'received'}>
     <div className="handoff-header"><span className="mini-label">RECEIVED DOCUMENT</span><span className="handoff-state">{verified ? <CheckCircle2 size={14}/> : <Clock size={14}/>} {verified ? 'Version verified' : 'Needs verification'}</span></div>
-    <div className="handoff-file"><FileText size={24}/><div><strong>{document.title || document.name}</strong><span>Version {document.version} · Agreement A-17</span></div></div>
+    <div className="handoff-file"><FileText size={24}/><div><strong>{document.title || document.name}</strong><span>Version {document.version} · {renewalFixture.agreement.label}</span></div></div>
     <div className="handoff-meta"><span>Source</span><p>{document.source}</p></div>
     {onInspect && <div className="handoff-actions"><button type="button" className="button" onClick={onInspect}>Inspect document</button></div>}
   </article>;
@@ -30,7 +31,7 @@ export default function ReviewDecision({type, state, derived, onCancel, onPerfor
   const doc = state.document;
   const decision = state.customerReview;
   const configuration = {
-    request: {action: 'request_review', enabled: derived.canRequestReview, label: 'Request review', message: 'Review requested from Alex Chen'},
+    request: {action: 'request_review', enabled: derived.canRequestReview, label: 'Request review', message: `Review requested from ${fixturePeople.internalReviewer}`},
     review: {action: 'approve_plan', enabled: derived.canApprovePlan, label: state.task ? 'Approve and resume task' : 'Approve and create task', message: state.task ? 'Plan approved. Existing task resumed.' : 'Plan approved. Document task created.'},
     verify: {action: 'verify_document', enabled: derived.canVerifyDocument, label: 'Confirm document matches requirements', message: 'Document version verified'},
     resolve: {action: 'resolve_requirement', enabled: derived.canResolveRequirement, label: 'Record resolution', message: 'Condition resolved with reviewed evidence'},
@@ -38,12 +39,12 @@ export default function ReviewDecision({type, state, derived, onCancel, onPerfor
   }[type];
   if (!configuration) return null;
   const inspect = onInspectDocument ? () => onInspectDocument(type) : undefined;
-  const perform = () => onPerform(configuration.action, type === 'review' ? {approver: 'Alex Chen'} : type === 'verify' ? {verifiedBy: plan.owner} : {}, configuration.message);
+  const perform = () => onPerform(configuration.action, type === 'review' ? {approver: fixturePeople.internalReviewer} : type === 'verify' ? {verifiedBy: plan.owner} : {}, configuration.message);
   return <div className={`dialog-body review-decision decision-${type}`}>
     {['request', 'review'].includes(type) && <>
-      <div className="decision-context"><span className="mini-label">PLAN VERSION {plan.revision}</span><span>Agreement A-17</span></div>
+      <div className="decision-context"><span className="mini-label">PLAN VERSION {plan.revision}</span><span>{renewalFixture.agreement.label}</span></div>
       <h3 className="decision-title">{plan.title}</h3>
-      <div className="decision-people"><div><span>Task owner</span><strong>{plan.owner}</strong></div><div><span>Internal reviewer</span><strong>Alex Chen</strong></div></div>
+      <div className="decision-people"><div><span>Task owner</span><strong>{plan.owner}</strong></div><div><span>Internal reviewer</span><strong>{fixturePeople.internalReviewer}</strong></div></div>
       <PlanScope plan={plan}/>
       <p className="decision-boundary">{type === 'request' ? 'Submit this version for internal review. The document task remains on hold until approval.' : state.task ? 'Approval resumes the existing document task under this plan version. Customer counsel’s approval must be recorded separately.' : 'Approval creates the task to obtain and verify this document. Customer counsel’s approval must be recorded separately.'}</p>
     </>}
@@ -52,17 +53,17 @@ export default function ReviewDecision({type, state, derived, onCancel, onPerfor
       <h3 className="decision-title">Check the file against the requirements.</h3>
       <DocumentHandoff document={doc} verified={derived.isDocumentVerified} onInspect={inspect}/>
       <PlanScope plan={plan}/>
-      <p className="decision-boundary">Recorded as checked by <strong>{plan.owner}</strong>. Confirm the current version applies to Agreement A-17 and meets these specifications. Customer approval is a separate decision.</p>
+      <p className="decision-boundary">Recorded as checked by <strong>{plan.owner}</strong>. Confirm the current version applies to {renewalFixture.agreement.label} and meets these specifications. Customer approval is a separate decision.</p>
     </>}
     {type === 'counselRequest' && <>
       <div className="decision-context"><span className="mini-label">CUSTOMER REVIEW HANDOFF</span><span>Plan version {plan.revision}</span></div>
       <h3 className="decision-title">Ready for customer counsel.</h3>
       <DocumentHandoff document={doc} verified={derived.isDocumentVerified} onInspect={inspect}/>
-      <div className="decision-people"><div><span>For</span><strong>Nina Patel</strong><small>Customer counsel</small></div><div><span>Recorded by</span><strong>{plan.owner}</strong><small>Document task owner</small></div></div>
+      <div className="decision-people"><div><span>For</span><strong>{fixturePeople.customerCounsel}</strong><small>Customer counsel</small></div><div><span>Recorded by</span><strong>{plan.owner}</strong><small>Document task owner</small></div></div>
       <p className="decision-boundary">This records an internal review request. No message is sent. Counsel’s decision and its supporting evidence are recorded in the next step.</p>
     </>}
     {type === 'resolve' && <>
-      <div className="decision-context"><span className="mini-label"><ShieldCheck size={14}/> SUPPORTED DECISION</span><span>Agreement A-17</span></div>
+      <div className="decision-context"><span className="mini-label"><ShieldCheck size={14}/> SUPPORTED DECISION</span><span>{renewalFixture.agreement.label}</span></div>
       <h3 className="decision-title">Resolve the customer condition.</h3>
       <blockquote className="decision-evidence-quote">“{decision?.evidenceText}”</blockquote>
       <div className="decision-people"><div><span>Customer counsel</span><strong>{decision?.reviewedBy}</strong></div><div><span>Recorded by</span><strong>{decision?.recordedBy}</strong></div></div>

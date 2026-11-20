@@ -1,3 +1,4 @@
+import {renewalFixture,fixturePeople} from './renewalFixtures.js';
 import React, {Fragment, useId, useLayoutEffect, useRef} from 'react';
 import {useSearchParams} from 'react-router';
 import {CheckCircle2, CircleDashed, ClipboardCheck, FileText, GitBranch, History, Info, Link2, Phone, ShieldCheck, UserRound, X} from 'lucide-react';
@@ -33,7 +34,7 @@ export default function FollowUpReport({state, derived:d, evidence, onTask, onHi
   const showAll=()=>recoverView({view:'all',status:null});
 
   return <div className="ops-page">
-    <div className="ops-scope"><span><strong>Thornfield Wren LLP</strong><span className="ops-scope-divider">/</span>Agreement A-17</span><button className="text-button" onClick={onScope}><Info size={15}/>Report scope</button></div>
+    <div className="ops-scope"><span><strong>{renewalFixture.account.name}</strong><span className="ops-scope-divider">/</span>{renewalFixture.agreement.label}</span><button className="text-button" onClick={onScope}><Info size={15}/>Report scope</button></div>
 
     <section className={`ops-brief ${next?'':'is-complete'}`} aria-label="Next action">
       <div className="ops-brief-mark" aria-hidden="true">{next?<GitBranch size={27}/>:<CheckCircle2 size={27}/>}</div>
@@ -63,8 +64,8 @@ export default function FollowUpReport({state, derived:d, evidence, onTask, onHi
           <div className="ops-completion-rule"><span className="ops-kicker">WHAT CLEARS THIS REASON</span><p>{row.completionRule}</p></div>
           <div className="ops-proof">
             <span className="ops-kicker">{row.id==='condition'?'SUPPORTING EVIDENCE':'RECORD TO INSPECT'}</span>
-            {row.id==='plan'&&<><button className="ops-record" onClick={()=>onTask(1)}><ClipboardCheck size={21}/><span><strong>Work plan · version {state.plan.revision}</strong><small>{d.isPlanApproved?`Approved by ${state.plan.approver||'Alex Chen'}`:state.plan.status==='in_review'?'Submitted to Alex Chen':'Document specifications and staff instructions'}</small></span><Link2 size={15}/></button>{state.plan.reviewNote&&<p className="ops-review-note"><strong>Reviewer’s note</strong>{state.plan.reviewNote}</p>}</>}
-            {row.id==='document'&&(state.document?<button className="ops-record" onClick={onDocument}><FileText size={21}/><span><strong>{state.document.title} · {state.document.version}</strong><small>{state.document.source}</small><small>{d.isDocumentVerified?`Verified ${dateText(state.document.verifiedAt)}`:`Received ${dateText(state.document.receivedAt)} · Needs verification`}</small></span><Link2 size={15}/></button>:<div className="ops-missing"><FileText size={22}/><div><strong>Current AI terms document</strong><span>Not received · Agreement A-17</span></div></div>)}
+            {row.id==='plan'&&<><button className="ops-record" onClick={()=>onTask(1)}><ClipboardCheck size={21}/><span><strong>Work plan · version {state.plan.revision}</strong><small>{d.isPlanApproved?`Approved by ${state.plan.approver||'${fixturePeople.internalReviewer}'}`:state.plan.status==='in_review'?`Submitted to ${fixturePeople.internalReviewer}`:'Document specifications and staff instructions'}</small></span><Link2 size={15}/></button>{state.plan.reviewNote&&<p className="ops-review-note"><strong>Reviewer’s note</strong>{state.plan.reviewNote}</p>}</>}
+            {row.id==='document'&&(state.document?<button className="ops-record" onClick={onDocument}><FileText size={21}/><span><strong>{state.document.title} · {state.document.version}</strong><small>{state.document.source}</small><small>{d.isDocumentVerified?`Verified ${dateText(state.document.verifiedAt)}`:`Received ${dateText(state.document.receivedAt)} · Needs verification`}</small></span><Link2 size={15}/></button>:<div className="ops-missing"><FileText size={22}/><div><strong>Current AI terms document</strong><span>Not received · {renewalFixture.agreement.label}</span></div></div>)}
             {row.id==='document'&&<div className="ops-artifact-note"><strong>Document specifications</strong><p>{state.plan.specifications}</p></div>}
             {row.id==='condition'&&<><blockquote>“{evidence[0].quote}”</blockquote><button className="ops-citation" onClick={()=>onSource(0)}><Phone size={15}/><span>{evidence[0].id} · {evidence[0].speaker}<small>{evidence[0].type} · {evidence[0].time}</small></span><Link2 size={14}/></button>{d.hasCustomerApproval&&<button className="ops-record approval" onClick={onDecision}><ShieldCheck size={20}/><span><strong>Customer approval recorded</strong><small>{state.customerReview.reviewedBy} · Document {state.customerReview.documentVersion}</small></span><Link2 size={15}/></button>}</>}
           </div>

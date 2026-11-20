@@ -18,7 +18,7 @@
 .pb-page button {white-space:normal; text-align:left}
 .pb-page :is(button,a,summary,input,select,textarea):focus-visible {outline:3px solid #4168d5; outline-offset:4px}
 .pb-page :is(h2,h3)[tabindex='-1']:focus {outline:2px solid #4168d5; outline-offset:7px; border-radius:2px}
-.pb-page :is(h2,details,[tabindex='-1']) {scroll-margin-block:90px 30px}
+.pb-page :is(h2,details,button,input,textarea,[tabindex='-1']) {scroll-margin-block:90px 30px}
 .pb-page .pb-button {display:inline-flex; align-items:center; justify-content:center; padding:10px 16px; border:1px solid #b8c6d9; border-radius:7px; background:#fff; color:#314767; font-size:1rem; font-weight:500; line-height:1.5; text-align:center; min-height:46px; transition:background .15s,border-color .15s}
 .pb-page .pb-button:hover:not(:disabled) {background:#eef3fc; border-color:#7c96bc}
 .pb-page .pb-button.pb-primary {background:#3158d9; border-color:#3158d9; color:#fff; box-shadow:inset 0 1px #ffffff28}
@@ -41,16 +41,16 @@
 .pb-page .pb-simulation p {margin-top:5px; color:var(--pb-shell-note)}
 .pb-page .pb-notice {border-left:3px solid #5c7fc0; padding:8px 15px; margin:0 0 20px; color:var(--pb-shell-ink)}
 .pb-page .pb-workbench {display:grid; grid-template-columns:minmax(245px,.42fr) minmax(0,1fr); align-items:start; gap:22px; min-width:0}
-.pb-page .pb-library {position:relative; min-width:0; border:1px solid #3d4e6c; border-radius:10px; overflow:hidden; background:#17243a; color:#f0f5ff}
+.pb-page .pb-library {min-width:0; border:1px solid #3d4e6c; border-radius:10px; overflow:hidden; background:#17243a; color:#f0f5ff}
 .pb-page .pb-library-heading {padding:23px 20px 19px}
 .pb-page .pb-library .pb-kicker {color:#b3c7e6}
 .pb-page .pb-library h2 {font-size:1.3rem; margin-top:9px; color:#f0f5ff}
 .pb-page .pb-library-heading p {color:#bfd0e9; margin-top:8px}
 .pb-page .pb-library>ul {list-style:none; margin:0; padding:0}
 .pb-page .pb-library>ul>li {border-top:1px solid #3d4e6c}
-.pb-page .pb-library>ul button {position:relative; display:flex; gap:12px; width:100%; min-width:0; padding:21px 20px; color:#e4edfa; background:#1c2b43; border:0; line-height:1.55}
+.pb-page .pb-library>ul button {display:flex; gap:12px; width:100%; min-width:0; padding:21px 20px; color:#e4edfa; background:#1c2b43; border:0; line-height:1.55}
 .pb-page .pb-library>ul button:hover {background:#263b5b}
-.pb-page .pb-library>ul button[aria-pressed='true'] {background:#304b75; box-shadow:inset 3px 0 #bad0ff; color:#fff}
+.pb-page .pb-library>ul button[aria-current='page'] {background:#304b75; box-shadow:inset 3px 0 #bad0ff; color:#fff}
 .pb-page .pb-library>ul button>svg {margin-top:4px; color:#b7cff1}
 .pb-page .pb-library>ul button>span {display:block; min-width:0}
 .pb-page .pb-library>ul button strong {display:block; font-size:1.0625rem; font-weight:550; line-height:1.45; letter-spacing:-.015em}
@@ -58,7 +58,7 @@
 .pb-page .pb-library :is(button,a):focus-visible {outline-color:#c1d5ff; outline-offset:-5px}
 .pb-page .pb-library-foot {font-size:1rem; line-height:1.65; margin:0; padding:20px; color:#b9cbe6; border-top:1px solid #3d4e6c}
 .pb-page .pb-retained {padding:20px; border-top:1px solid #567399; background:#223654}
-.pb-page .pb-retained p {margin:8px 0 12px}
+.pb-page .pb-retained p {margin:8px 0 12px; overflow-wrap:anywhere}
 .pb-page .pb-retained .pb-detail {color:#c3d4ec}
 .pb-page .pb-retained .pb-button {width:100%}
 .pb-page .pb-retained .pb-link-button {color:#d8e5ff; margin-top:4px}
@@ -88,6 +88,9 @@
 .pb-page .pb-source-meta {font-size:.875rem; color:#4c6382}
 .pb-page .pb-sources blockquote {margin:14px 0; padding-left:15px; border-left:2px solid #91a8cc; font-size:1.0625rem; line-height:1.65; color:#2a4265}
 .pb-page .pb-sources>p {padding:16px}
+.pb-page .pb-workflow-note {margin-top:16px; padding:14px; border:1px solid var(--pb-line); border-radius:5px; background:#fff; color:var(--pb-muted)}
+.pb-page .pb-workflow-note strong {font-size:.875rem}
+.pb-page .pb-workflow-note p {margin-top:6px}
 .pb-page .pb-context-links {display:flex; flex-wrap:wrap; gap:8px 22px; margin-top:14px}
 .pb-page .pb-callout, .pb-page .pb-boundary {padding:18px; margin-top:24px; border:1px solid #c9d8ec; border-radius:7px; background:#edf3fb; color:#2f486b}
 .pb-page .pb-callout strong, .pb-page .pb-boundary strong {font-size:1rem; font-weight:600}
@@ -109,12 +112,14 @@
 .pb-page .pb-tasks details[open]>summary::after {content:'−'}
 .pb-page .pb-task-title {display:block; font-size:1rem; font-weight:600; color:#2d4467}
 .pb-page .pb-task-body {border-top:1px solid #ced9e8; padding:17px; background:#fff; border-radius:0 0 7px 7px}
-.pb-page .pb-dependency {color:var(--pb-muted); font-size:1rem}
 .pb-page .pb-task-body .pb-records>div {display:block}
 .pb-page .pb-task-body .pb-records dd {margin-top:6px}
 .pb-page .pb-output>.pb-kicker {color:#526b8d; margin-bottom:8px}
 .pb-page .pb-output>ul {padding-left:22px; margin:12px 0}
 .pb-page .pb-output>ul>li {padding-left:3px; margin-bottom:10px}
+.pb-page .pb-additions {border:0; min-width:0; margin:26px 0 0; padding:0}
+.pb-page .pb-additions legend {font-size:1.125rem; font-weight:600; padding:0 0 10px}
+.pb-page .pb-additions .pb-confirm {margin-top:12px}
 .pb-page .pb-fields {border:0; min-width:0; margin:26px 0 0; padding:0}
 .pb-page .pb-fields legend {padding:0 0 12px; margin-bottom:2px; width:100%; border-bottom:1px solid var(--pb-line); font-size:1.125rem; font-weight:600; color:var(--pb-ink); line-height:1.5}
 .pb-page .pb-fields label {display:block; font-size:.875rem; font-weight:600; line-height:1.5; color:#3b506e; margin:18px 0 8px}
@@ -144,7 +149,6 @@ html[data-theme='dark'] .pb-page {--pb-shell-ink:#d9e5f8; --pb-shell-note:#b8cbe
 html[data-theme='dark'] .pb-page .pb-simulation {border-color:#3c5071}
 @media(max-width:1100px) {
   .pb-page .pb-workbench {grid-template-columns:minmax(0,1fr)}
-  .pb-page .pb-library {position:static}
   .pb-page .pb-library>ul button {padding:18px 22px}
   .pb-page .pb-retained .pb-button {width:auto; margin-right:20px}
   .pb-page .pb-library-foot {padding-block:16px}
@@ -173,10 +177,9 @@ html[data-theme='dark'] .pb-page .pb-simulation {border-color:#3c5071}
   .pb-page .pb-draft-work[open]>summary, .pb-page .pb-provenance[open]>summary {margin-inline:-12px}
   .pb-page .pb-callout, .pb-page .pb-boundary, .pb-page .pb-confirm {padding:15px}
 }
-@media(max-height:760px) {.pb-page .pb-library {position:static}}
 @media(prefers-reduced-motion:reduce) {.pb-page *, .pb-page *::before, .pb-page *::after {animation:none!important; transition:none!important; scroll-behavior:auto!important}}
 @media(forced-colors:active) {
-  .pb-page .pb-library>ul button[aria-pressed='true'] {outline:2px solid Highlight; outline-offset:-4px}
+  .pb-page .pb-library>ul button[aria-current='page'] {outline:2px solid Highlight; outline-offset:-4px}
   .pb-page .pb-fields select {appearance:auto; background-image:none}
   .pb-page .pb-button {border:1px solid ButtonText}
 }

@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {initialState, derive, transition} from './workflow.js';
-import {renewalEvidence} from './renewalEvidence.js';
+import {renewalEvidence, renewalFixture, fixturePeople} from './renewalFixtures.js';
 import {getPlaybookTemplate, playbookTemplates} from './playbookTemplates.js';
 import {
-  buildPlaybookContext, buildTemplateWork, changedDraftFields, createPlaybooksSession, describeDocument,
-  draftEditorValues, isDraftContextCurrent, playbookSearch, playbooksSessionReducer, preparePlaybookDraft,
+  buildPlaybookContext, buildTemplateWork, changedDraftFields, createPlaybooksSession, createPlaybooksSessionId,
+  describeDocument, draftAutomaticItems, draftEditorValues, hasUnsavedPlaybookEdits, inspectPlaybookDraft,
+  isDraftContextCurrent, playbookSearch, playbooksSessionReducer, preparedDraftLocation, preparePlaybookDraft,
   readPlaybookLocation, savePlaybookDraft, validateDraftEdits,
 } from './playbookDrafts.js';
 
@@ -13,359 +15,488 @@ const templateIds = ['obtain_current_rider', 'review_renewal_condition', 'reconc
 const at = '2026-11-20T06:00:00.000Z';
 const context = (state = initialState, evidence = renewalEvidence, roles = {}) => buildPlaybookContext(state, evidence, roles);
 const prepare = (templateId = templateIds[0], target = context()) => preparePlaybookDraft({templateId, context: target, confirmed: true, id: `test-${templateId}`, at});
-const authorized = () => transition(transition(structuredClone(initialState), {type: 'request_review'}), {type: 'approve_plan'});
-const verified = () => transition(transition(authorized(), {type: 'obtain_document'}), {type: 'verify_document'});
-const completed = () => transition(transition(transition(verified(), {type: 'request_customer_review'}), {
-  type: 'record_customer_approval', reviewedBy: 'Nina Patel', evidenceText: 'Synthetic approval of the current terms.',
-}), {type: 'resolve_requirement'});
+const act = (state, type, extra = {}) => transition(state, {type, ...extra});
+const authorized = () => act(act(structuredClone(initialState), 'request_review'), 'approve_plan');
+const verified = () => act(act(authorized(), 'obtain_document'), 'verify_document');
+const completed = () => act(act(act(verified(), 'request_customer_review'), 'record_customer_approval', {
+  reviewedBy: fixturePeople.customerCounsel, evidenceText: 'Synthetic approval of the current terms.',
+}), 'resolve_requirement');
 const start = (session = createPlaybooksSession('test-session'), templateId = templateIds[0], target = context()) => playbooksSessionReducer(session, {type: 'prepare', templateId, context: target, confirmed: true, at});
+const save = session => playbooksSessionReducer(session, {type: 'save_revision', expectedRevision: session.editorRevision, at});
+const item = (work, id) => work.items.find(item => item.id === id);
+const basis = (document, version = document.version) => ({id: 'version-fact', documentId: document.id, version, source: {kind: 'unit', ref: 'separate-version-source'}});
 
-function assertTaskGraph(tasks) {
-  const seen = new Set();
-  for (const task of tasks) {
-    assert.ok(!seen.has(task.id), `Task ID must be unique: ${task.id}`);
-    assert.ok(task.title && task.inputs.length && task.output && task.completionRule);
-    assert.equal(task.status, 'proposed');
-    assert.ok(['actionOwner', 'internalReviewer'].includes(task.role));
-    for (const dependency of task.dependsOn) assert.ok(seen.has(dependency), `Task ${task.id} must depend on earlier work, not ${dependency}`);
-    seen.add(task.id);
+function assertInputs(inputs) {
+  assert.ok(inputs.length);
+  for (const input of inputs) {
+    assert.deepEqual(Object.keys(input).sort(), ['label', 'mode', 'ref']);
+    assert.equal(typeof input.ref, 'string');
+    assert.ok(input.label);
+    assert.ok(['allowed', 'required'].includes(input.mode));
   }
-  assert.equal(tasks.at(-1).id, 'inspect_output');
 }
-
+function assertItemGraph(items, proposed = true) {
+  const ids = new Set(items.map(item => item.id));
+  assert.equal(ids.size, items.length);
+  const seen = new Set();
+  for (const item of items) {
+    assert.ok(item.title && item.output);
+    assertInputs(item.inputs);
+    if (proposed) assert.equal(item.status, 'proposed');
+    assert.ok(['actionOwner', 'internalReviewer'].includes(item.role));
+    assert.ok(['internal_task', 'customer_request'].includes(item.kind));
+    assert.ok(['unit', 'receipt', 'attestation'].includes(item.completionProof.kind));
+    assert.ok(item.completionProof.description && item.completionProof.ref);
+    assert.deepEqual(Object.keys(item.dependencies).sort(), ['all', 'excludes', 'oneOf']);
+    for (const id of [...item.dependencies.all, ...item.dependencies.oneOf.flat()]) assert.ok(seen.has(id), `${item.id} requires earlier work: ${id}`);
+    for (const group of item.dependencies.oneOf) assert.ok(group.length > 1);
+    for (const id of item.dependencies.excludes) assert.ok(ids.has(id));
+    if (item.addedBecauseOf) {
+      const source = items.find(source => source.id === item.addedBecauseOf);
+      assert.ok(source);
+      assert.equal(source.addedBecauseOf, undefined, 'Auto-added items cannot generate more items.');
+    }
+    seen.add(item.id);
+  }
+  assert.equal(items.at(-1).id, 'inspect_output');
+}
 function freeze(value) {
   if (value && typeof value === 'object') {Object.values(value).forEach(freeze); Object.freeze(value);}
   return value;
 }
 
-test('the three stable templates have distinct work, evidence needs, deliverables, and completion rules', () => {
+test('templates and drafts retain section 8 inputs, per-item dependency groups, kinds, and typed proof', () => {
   assert.deepEqual(playbookTemplates.map(template => template.id), templateIds);
   assert.equal(getPlaybookTemplate('unknown'), null);
   const drafts = templateIds.map(id => prepare(id).draft);
   assert.equal(new Set(drafts.map(draft => draft.output.id)).size, 3);
-  assert.equal(new Set(drafts.map(draft => JSON.stringify(draft.tasks))).size, 3);
-  assert.equal(new Set(drafts.map(draft => JSON.stringify(draft.completionRules))).size, 3);
-  assert.equal(new Set(drafts.map(draft => draft.specifications)).size, 3);
-  for (const draft of drafts) {
-    assertTaskGraph(draft.tasks);
-    assert.equal(draft.templateRef.version, '1.0');
+  assert.equal(new Set(drafts.map(draft => JSON.stringify(draft.items))).size, 3);
+  for (const [index, draft] of drafts.entries()) {
+    const template = playbookTemplates[index];
+    assertInputs(template.inputs);
+    assertInputs(draft.inputs);
+    assertItemGraph([...template.automaticItems, ...template.items], false);
+    assertItemGraph(draft.items);
+    assert.deepEqual(draft.templateRef, {id: template.id, version: template.version});
     assert.equal(draft.revision, 1);
     assert.equal(draft.status, 'draft');
-    assert.ok(draft.reviewBoundary);
-    for (const need of [...draft.evidenceNeeds, ...draft.prerequisites]) assert.ok(draft.tasks.some(task => task.id === need.recoveryTaskId));
+    for (const need of [...draft.evidenceNeeds, ...draft.prerequisites]) assert.ok(item(draft, need.recoveryTaskId));
+    for (const need of draft.evidenceNeeds.filter(need => need.output)) {
+      assert.equal(need.mode, 'allowed');
+      assert.ok(!draft.requiredEvidence.includes(need.ref));
+    }
   }
-  assert.ok(drafts[2].evidenceNeeds.some(need => need.ref === 'E-042'));
-  assert.ok(!drafts[0].evidenceNeeds.some(need => need.ref === 'E-042'));
+  const obtain = playbookTemplates[0];
+  assert.ok(!obtain.requiredEvidence.includes('current_document'));
+  assert.ok(obtain.output.evidence.includes('current_document'));
+  assert.ok(drafts[0].items.some(item => item.kind === 'customer_request'));
 });
 
-test('definitions are deeply immutable and drafts have their own task/output copies', () => {
+test('reconciliation requires one clarification or a sourced no-conflict finding without flattening the alternatives', () => {
+  const draft = prepare(templateIds[2]).draft;
+  const reconciliation = item(draft, 'draft_reconciliation');
+  assert.deepEqual(reconciliation.dependencies, {all: ['compare_claims', 'confirm_authority'], oneOf: [['seek_clarification', 'record_no_conflict']], excludes: []});
+  const request = item(draft, 'seek_clarification');
+  const noConflict = item(draft, 'record_no_conflict');
+  assert.equal(request.kind, 'customer_request');
+  assert.equal(request.completionProof.kind, 'unit');
+  assert.deepEqual(request.dependencies.excludes, [noConflict.id]);
+  assert.deepEqual(noConflict.dependencies.excludes, [request.id]);
+  assert.equal(noConflict.kind, 'internal_task');
+  assert.equal(noConflict.completionProof.kind, 'attestation');
+  assert.deepEqual(noConflict.completionProof.cites, renewalEvidence.map(source => source.id));
+});
+
+test('template definitions are deeply immutable and every draft has independent item and output copies', () => {
   const template = getPlaybookTemplate(templateIds[0]);
-  assert.throws(() => {template.tasks[0].inputs.push('Changed input');}, TypeError);
-  assert.throws(() => {template.completionRules[0].text = 'Complete without proof';}, TypeError);
+  assert.throws(() => {template.items[0].inputs.push({ref: 'other'});}, TypeError);
+  assert.throws(() => {template.items[0].completionProof.kind = 'attestation';}, TypeError);
   const before = structuredClone(template);
   const one = prepare().draft;
   const two = prepare().draft;
-  one.tasks.find(task => task.id === 'locate_document').inputs.push('Additional local instruction');
-  one.output.title = 'Different local output';
-  one.completionRules[0].text = 'Changed copy';
+  item(one, 'locate_document').inputs[0].label = 'Local input';
+  one.output.title = 'Local output';
+  one.completionRules[0].text = 'Local rule';
   assert.deepEqual(template, before);
-  assert.notDeepEqual(one.tasks, two.tasks);
+  assert.notDeepEqual(one.items, two.items);
   assert.equal(two.output.title, template.output.title);
 });
 
-test('the context adapter reuses E-017 and E-042 identities and strips presentation-only fields', () => {
-  const input = renewalEvidence.map(record => ({...record, icon: () => null}));
-  const snapshot = context(initialState, input);
-  assert.deepEqual(snapshot.refs, {accountId: 'thornfield', renewalId: '003', agreementId: 'A-17', requirementId: 'req-ai-counsel'});
+test('reusable templates contain semantic bindings, not synthetic names or record IDs', () => {
+  const templates = JSON.stringify(playbookTemplates);
+  for (const value of [...Object.values(fixturePeople), renewalFixture.id, renewalFixture.account.name, renewalFixture.agreement.id, ...renewalEvidence.map(source => source.id)]) {
+    assert.ok(!templates.includes(value), `Template must not contain ${value}`);
+  }
+  for (const path of ['Playbooks.jsx', 'playbookDrafts.js']) {
+    const code = readFileSync(new URL(path, import.meta.url), 'utf8');
+    for (const value of [...Object.values(fixturePeople), renewalFixture.id, renewalFixture.agreement.id, ...renewalEvidence.map(source => source.id)]) assert.ok(!code.includes(value));
+  }
+  assert.ok(playbookTemplates[0].inputs.some(input => input.ref === 'customer_statement'));
+  assert.ok(prepare().draft.inputs.some(input => input.ref === renewalFixture.bindings.customer_statement));
+});
+
+test('the context adapter reuses the single fixture and strips presentation fields', () => {
+  const snapshot = context(initialState, renewalEvidence.map(record => ({...record, icon: () => null})));
+  assert.deepEqual(snapshot.refs, {accountId: renewalFixture.account.id, renewalId: renewalFixture.renewal.id, agreementId: renewalFixture.agreement.id, requirementId: initialState.requirement.id});
   assert.deepEqual(snapshot.evidence.map(record => [record.id, record.quote, record.context]), renewalEvidence.map(record => [record.id, record.quote, record.context]));
-  assert.equal(snapshot.requirement.id, initialState.requirement.id);
-  assert.equal(snapshot.existingPlan.id, initialState.plan.id);
   assert.ok(snapshot.evidence.every(record => !Object.hasOwn(record, 'icon')));
   assert.doesNotThrow(() => structuredClone(snapshot));
   snapshot.evidence[0].quote = 'Local copy';
+  snapshot.agreement.title = 'Local title';
   assert.notEqual(snapshot.evidence[0].quote, renewalEvidence[0].quote);
+  assert.notEqual(snapshot.agreement.title, renewalFixture.agreement.title);
 });
 
-test('draft preparation requires an explicit confirmation and supported synthetic target', () => {
+test('preparation requires explicit confirmation and the fixture renewal, not a typed authorization', () => {
   for (const confirmed of [undefined, false, 'true']) {
-    const result = preparePlaybookDraft({templateId: templateIds[0], context: context(), id: 'draft', at, confirmed});
-    assert.equal(result.ok, false);
-    assert.match(result.error, /Confirm the synthetic context/);
+    assert.equal(preparePlaybookDraft({templateId: templateIds[0], context: context(), id: 'draft', at, confirmed}).ok, false);
   }
-  for (const badContext of [null, {...context(), synthetic: false}, {...context(), synthetic: 'true'}, {...context(), refs: {...context().refs, agreementId: 'A-99'}}]) {
+  for (const badContext of [null, {...context(), synthetic: false}, {...context(), synthetic: 'true'}, {...context(), refs: {...context().refs, agreementId: 'unknown-agreement'}}]) {
     assert.equal(preparePlaybookDraft({templateId: templateIds[0], context: badContext, id: 'draft', at, confirmed: true}).ok, false);
   }
   assert.equal(prepare('not-a-template').ok, false);
   assert.equal(preparePlaybookDraft({templateId: templateIds[0], context: context(), confirmed: true, at}).ok, false);
 });
 
-test('a missing document permits bounded acquisition without circular approval prerequisites', () => {
+test('missing customer statements get source-and-context recovery before document collection', () => {
+  const draft = prepare(templateIds[0], context(initialState, [])).draft;
+  const need = draft.evidenceNeeds.find(need => need.id === 'customer_statement');
+  const recovery = item(draft, need.recoveryTaskId);
+  assert.equal(need.state, 'missing');
+  assert.notEqual(recovery.id, 'locate_document');
+  assert.equal(recovery.completionProof.kind, 'unit');
+  assert.equal(recovery.completionProof.ref, renewalFixture.bindings.customer_statement);
+  assert.equal(recovery.completionProof.requiresContext, true);
+  assert.ok(item(draft, 'locate_document').dependencies.all.includes(recovery.id));
+  assert.deepEqual(recovery.dependencies, {all: [], oneOf: [], excludes: []});
+  assert.equal(recovery.inputs.find(input => input.ref === need.ref).mode, 'allowed');
+  assertItemGraph(draft.items);
+});
+
+test('preserving statements does not wait for scope authorization, even when the owner is unknown', () => {
+  for (const template of playbookTemplates) {
+    const draft = prepare(template.id, context(initialState, [], {actionOwner: null})).draft;
+    const firstSource = item(draft, template.recoveryTasks.customer_statement);
+    assert.deepEqual(firstSource.dependencies, {all: [], oneOf: [], excludes: []});
+    assert.equal(firstSource.completionProof.kind, 'unit');
+    assert.equal(firstSource.completionProof.requiresContext, true);
+    assertItemGraph(draft.items);
+  }
+});
+
+test('document collection and inspection are separate items with different receipt proof', () => {
   const draft = prepare().draft;
   assert.equal(draft.contextSnapshot.document, null);
-  assert.equal(draft.evidenceNeeds.find(need => need.id === 'current_document').state, 'missing');
-  assert.deepEqual(draft.tasks.find(task => task.id === 'authorize_scope').dependsOn, []);
-  assert.deepEqual(draft.tasks.find(task => task.id === 'locate_document').dependsOn, ['authorize_scope']);
-  assert.deepEqual(draft.tasks.find(task => task.id === 'verify_document').dependsOn, ['locate_document']);
-  assert.ok(draft.tasks.find(task => task.id === 'prepare_handoff').dependsOn.includes('verify_document'));
-  assertTaskGraph(draft.tasks);
-  assert.match(draft.output.description, /not customer approval/);
+  const collect = item(draft, 'locate_document');
+  const inspect = item(draft, 'verify_document');
+  assert.deepEqual(item(draft, 'authorize_scope').dependencies.all, []);
+  assert.ok(collect.dependencies.all.includes('authorize_scope'));
+  assert.equal(collect.completionProof.kind, 'receipt');
+  assert.equal(collect.completionProof.inspection, 'not_required');
+  assert.equal(inspect.completionProof.inspection, 'accepted');
+  assert.deepEqual(inspect.dependencies.all, [collect.id]);
+  assert.ok(item(draft, 'prepare_handoff').dependencies.all.includes(inspect.id));
+  assert.equal(item(draft, 'prepare_handoff').kind, 'customer_request');
+  assert.ok(collect.inputs.some(input => input.ref === 'internal_document_source'));
 });
 
-test('missing source statements have acquisition work, not invented statements or a blocked draft', () => {
-  for (const templateId of templateIds) {
-    const result = prepare(templateId, context(initialState, []));
-    assert.equal(result.ok, true);
-    assert.deepEqual(result.draft.contextSnapshot.evidence, []);
-    const missing = result.draft.evidenceNeeds.filter(need => need.id.includes('statement'));
-    assert.ok(missing.every(need => need.state === 'missing'));
-    assert.ok(missing.every(need => result.draft.tasks.some(task => task.id === need.recoveryTaskId)));
-    assertTaskGraph(result.draft.tasks);
+test('the authority and reviewer defaults remain unknown even after a legacy customer approval', () => {
+  for (const state of [initialState, completed()]) {
+    const draft = prepare(templateIds[0], context(state)).draft;
+    assert.equal(draft.contextSnapshot.roles.internalReviewer, null);
+    assert.equal(draft.contextSnapshot.roles.customerAuthority, null);
+    assert.equal(draft.contextSnapshot.roles.authorityBasis, null);
+    assert.equal(draft.evidenceNeeds.find(need => need.id === 'customer_authority').state, 'unknown');
+    assert.equal(item(draft, 'confirm_authority').completionProof.kind, 'unit');
+    assert.match(item(draft, 'confirm_authority').title, /Record who decides, with evidence/);
+  }
+  const chosen = prepare(templateIds[0], context(initialState, renewalEvidence, {customerAuthority: fixturePeople.customerCounsel})).draft;
+  assert.equal(chosen.contextSnapshot.roles.customerAuthority, fixturePeople.customerCounsel);
+  assert.equal(chosen.contextSnapshot.roles.authorityBasis, null);
+  assert.equal(chosen.contextSnapshot.customerReview, null);
+});
+
+test('owners from another account are not offered or silently adopted as the proposed owner', () => {
+  const state = {...initialState, plan: {...initialState.plan, owner: fixturePeople.otherAccountOwner}};
+  const target = context(state);
+  assert.ok(!target.roleOptions.actionOwners.includes(fixturePeople.otherAccountOwner));
+  assert.equal(target.roles.actionOwner, null);
+  assert.equal(target.existingPlan.owner, fixturePeople.otherAccountOwner);
+  assert.ok(item(prepare(templateIds[0], target).draft, 'assign_owner'));
+});
+
+test('self-review is refused when preparing, inspecting, saving, or using the session', () => {
+  for (const name of renewalFixture.roles.internalReviewers) {
+    const target = context(initialState, renewalEvidence, {actionOwner: name, internalReviewer: name});
+    const result = prepare(templateIds[0], target);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /cannot review their own draft/);
+    const forged = {...prepare().draft, contextSnapshot: target};
+    assert.equal(inspectPlaybookDraft(forged).ok, false);
+    assert.equal(savePlaybookDraft(forged, draftEditorValues(forged), {expectedRevision: 1, at}).ok, false);
+    const session = start(createPlaybooksSession('same-person'), templateIds[0], target);
+    assert.equal(session.draft, null);
+    assert.equal(session.nextDraftNumber, 1);
+    assert.match(session.error, /cannot review their own draft/);
+  }
+  assert.equal(prepare(templateIds[0], context(initialState, renewalEvidence, {internalReviewer: fixturePeople.internalReviewer})).ok, true);
+});
+
+test('auto-added items cite base items only, can be removed and restored, and never grant authorization', () => {
+  for (const template of playbookTemplates) {
+    let session = start(createPlaybooksSession(template.id), template.id, context(initialState, renewalEvidence, {actionOwner: null}));
+    const additions = draftAutomaticItems(session.draft);
+    assert.deepEqual(additions.map(item => item.id), ['assign_owner', 'authorize_scope']);
+    for (const addition of additions) {
+      assert.ok(!item(session.draft, addition.addedBecauseOf).addedBecauseOf);
+      session = playbooksSessionReducer(session, {type: 'toggle_auto_item', id: addition.id});
+    }
+    assert.equal(hasUnsavedPlaybookEdits(session), true);
+    assert.equal(session.draft.items.filter(item => item.addedBecauseOf).length, 2, 'Toggles remain unsaved.');
+    session = save(session);
+    assert.equal(session.draft.revision, 2);
+    assert.equal(session.draft.items.filter(item => item.addedBecauseOf).length, 0);
+    assertItemGraph(session.draft.items);
+    assert.equal(session.draft.roles, undefined);
+    assert.equal(session.draft.contextSnapshot.roles.actionOwner, null);
+    assert.equal(session.draft.prerequisites.find(need => need.id === 'internal_authorization').recoveryTaskId, null);
+    assert.deepEqual(session.draft.humanEdits[0].changes[0], {field: 'removedItemIds', before: [], after: ['assign_owner', 'authorize_scope']});
+    assert.equal(playbooksSessionReducer(session, {type: 'toggle_auto_item', id: 'inspect_output'}), session);
+    session = playbooksSessionReducer(session, {type: 'toggle_auto_item', id: 'authorize_scope'});
+    session = save(session);
+    assert.ok(item(session.draft, 'authorize_scope'));
+    assert.equal(item(session.draft, 'assign_owner'), undefined);
+    assertItemGraph(session.draft.items);
   }
 });
 
-test('unknown action owner and customer authority create owned discovery steps for every template', () => {
-  const target = context(initialState, renewalEvidence, {actionOwner: '', customerAuthority: null});
+test('a document cannot declare its own current version or upgrade its own verification label', () => {
+  const document = verified().document;
+  for (const candidate of [document, {...document, currentVersion: 'older'}, {...document, currentVersion: null}]) {
+    const description = describeDocument(candidate);
+    assert.equal(description.state, 'unknown');
+    assert.equal(description.currentVersion, null);
+    assert.match(description.label, /basis not recorded/);
+  }
+  assert.equal(Object.hasOwn(context(verified()).document, 'currentVersion'), false);
+  for (const invalidBasis of [null, {...basis(document), source: null}, {...basis(document), source: {kind: 'unit', ref: document.id}}, {...basis(document), documentId: 'different-file'}, {...basis(document), source: {kind: 'receipt', ref: 'file-receipt', documentId: document.id}}]) {
+    assert.equal(describeDocument(document, invalidBasis).state, 'unknown');
+  }
+});
+
+test('a separate version fact can expose mismatches without changing the legacy workflow', () => {
+  const state = verified();
+  const before = structuredClone(state);
+  const currentBasis = basis(state.document);
+  assert.equal(describeDocument(state.document, currentBasis).state, 'verified');
+  assert.equal(describeDocument({...state.document, status: 'received'}, currentBasis).state, 'received');
+  assert.equal(describeDocument({...state.document, id: null}, currentBasis).state, 'unknown');
+  const target = context({...state, documentVersionBasis: basis(state.document, 'v4')});
   for (const templateId of templateIds) {
     const draft = prepare(templateId, target).draft;
-    assert.equal(draft.contextSnapshot.roles.actionOwner, null);
-    assert.equal(draft.contextSnapshot.roles.customerAuthority, null);
-    assert.equal(draft.tasks[0].id, 'assign_owner');
-    assert.equal(draft.tasks[0].role, 'internalReviewer');
-    assert.deepEqual(draft.tasks[1].dependsOn, ['assign_owner']);
-    const authority = draft.tasks.find(task => task.id === 'confirm_authority');
-    assert.match(authority.title, /Identify/);
-    assert.ok(authority.inputs.some(input => input.includes('not established')));
-    assertTaskGraph(draft.tasks);
+    assert.equal(draft.evidenceNeeds.find(need => need.id === 'current_document').state, 'stale');
+    assertItemGraph(draft.items);
   }
+  assert.match(item(prepare(templateIds[0], target).draft, 'locate_document').title, /replacement/);
+  assert.deepEqual(state, before);
 });
 
-test('naming fixture counsel never authenticates authority or records a customer decision', () => {
+test('second review rounds at one plan revision invalidate the snapshot by note and timing', () => {
+  const first = act(act(initialState, 'request_review', {at}), 'request_changes', {at: '2026-11-20T06:01:00.000Z', note: 'Check the internal file source.'});
+  const draft = prepare(templateIds[0], context(first)).draft;
+  const second = act(act(first, 'request_review', {at: '2026-11-20T06:02:00.000Z'}), 'request_changes', {at: '2026-11-20T06:03:00.000Z', note: 'Keep the receipt with the source.'});
+  assert.equal(first.plan.revision, second.plan.revision);
+  assert.equal(first.plan.status, second.plan.status);
+  assert.equal(isDraftContextCurrent(draft, context(first)), true);
+  assert.equal(isDraftContextCurrent(draft, context(second)), false);
+  assert.equal(draft.contextSnapshot.existingPlan.reviewNote, first.plan.reviewNote);
+  assert.equal(draft.contextSnapshot.existingPlan.requestedAt, first.plan.requestedAt);
+  assert.equal(draft.contextSnapshot.planReviews.at(-1).at, first.history.at(-1).at);
+  const sameNote = act(act(first, 'request_review'), 'request_changes', {note: first.plan.reviewNote});
+  assert.equal(isDraftContextCurrent(draft, context(sameNote)), false, 'A repeated note still represents a later review round.');
+  const onlyFeedback = {...first, plan: {...first.plan, reviewNote: 'Different feedback at the same revision.'}};
+  assert.equal(isDraftContextCurrent(draft, context(onlyFeedback)), false);
+});
+
+test('snapshots detect source, decision timing, and version-basis changes without silently rebasing', () => {
+  const target = context(completed());
+  const draft = prepare(templateIds[0], target).draft;
+  assert.equal(isDraftContextCurrent(draft, context(completed())), true);
+  assert.equal(isDraftContextCurrent(draft, {...context(completed()), roles: {...target.roles, actionOwner: null}}), true);
+  const changed = context(completed());
+  changed.customerReview.approvedAt = at;
+  assert.equal(isDraftContextCurrent(draft, changed), false);
+  changed.customerReview.approvedAt = target.customerReview.approvedAt;
+  changed.documentVersionBasis = basis(target.document);
+  assert.equal(isDraftContextCurrent(draft, changed), false);
+  target.evidence[0].quote = 'Changed caller copy';
+  assert.equal(draft.contextSnapshot.evidence[0].quote, renewalEvidence[0].quote);
+});
+
+test('explicit saves carry the expected revision and refuse stale writes without losing unsaved text', () => {
+  let session = start();
+  session = playbooksSessionReducer(session, {type: 'edit_field', field: 'title', value: 'Human draft title'});
+  session = save(session);
+  assert.equal(session.draft.revision, 2);
+  assert.equal(session.draft.title, 'Human draft title');
+  assert.match(session.notice, /^Saved as revision 2\./);
+  const saved = session.draft;
+  session = playbooksSessionReducer(session, {type: 'edit_field', field: 'title', value: 'Uncommitted title'});
+  const stale = playbooksSessionReducer(session, {type: 'save_revision', expectedRevision: 1, at});
+  assert.equal(stale.draft, saved);
+  assert.equal(stale.editor.title, 'Uncommitted title');
+  assert.match(stale.error, /current saved revision is 2/);
+  assert.equal(savePlaybookDraft(saved, draftEditorValues(saved), {at}).code, 'stale_revision');
+  assert.equal(savePlaybookDraft(saved, draftEditorValues(saved), {expectedRevision: 1, at}).code, 'stale_revision');
+  assert.equal(savePlaybookDraft(saved, draftEditorValues(saved), {expectedRevision: '2', at}).ok, false);
+});
+
+test('Inspect is read-only and keeps both the saved revision and unsaved buffer unchanged', () => {
+  let session = start();
+  session = playbooksSessionReducer(session, {type: 'edit_field', field: 'instructions', value: 'Unfinished instructions.'});
+  const draft = freeze(session.draft), editor = freeze(session.editor);
+  const inspected = playbooksSessionReducer(session, {type: 'inspect'});
+  assert.equal(inspected.draft, draft);
+  assert.equal(inspected.editor, editor);
+  assert.equal(inspected.draft.revision, 1);
+  assert.equal(inspected.draft.humanEdits.length, 0);
+  assert.equal(inspectPlaybookDraft(draft).draft, draft);
+});
+
+test('Cancel restores saved text and removable items but does not delete the draft', () => {
+  let session = start();
+  session = save(playbooksSessionReducer(session, {type: 'edit_field', field: 'title', value: 'Saved human title'}));
+  const saved = session.draft;
+  session = playbooksSessionReducer(session, {type: 'edit_field', field: 'title', value: ''});
+  session = playbooksSessionReducer(session, {type: 'toggle_auto_item', id: 'authorize_scope'});
+  session = save(session);
+  assert.ok(session.fieldErrors.title);
+  session = playbooksSessionReducer(session, {type: 'cancel_edits'});
+  assert.equal(session.draft, saved);
+  assert.deepEqual(session.editor, draftEditorValues(saved));
+  assert.equal(session.editorRevision, saved.revision);
+  assert.equal(session.error, null);
+  assert.equal(hasUnsavedPlaybookEdits(session), false);
+});
+
+test('saved human edits keep before/after values and all version identities independent', () => {
+  const original = prepare(templateIds[0], context(verified())).draft;
+  const before = structuredClone(original);
+  const values = {...draftEditorValues(original), title: '  Refined collection scope  ', instructions: 'Preserve the file receipt timestamp.'};
+  const edited = savePlaybookDraft(original, values, {expectedRevision: 1, at}).draft;
+  assert.equal(edited.revision, 2);
+  assert.equal(edited.title, values.title.trim());
+  assert.deepEqual(edited.templateRef, original.templateRef);
+  assert.equal(edited.contextSnapshot.existingPlan.revision, initialState.plan.revision);
+  assert.equal(edited.contextSnapshot.document.version, verified().document.version);
+  assert.deepEqual(edited.contextSnapshot, original.contextSnapshot);
+  assert.deepEqual(edited.items, original.items);
+  assert.deepEqual(edited.completionRules, original.completionRules);
+  assert.deepEqual(edited.humanEdits[0].changes.map(change => change.field), ['title', 'instructions']);
+  assert.equal(edited.humanEdits[0].changes[1].before, original.instructions);
+  assert.equal(edited.humanEdits[0].changes[1].after, values.instructions);
+  assert.deepEqual(original, before);
+});
+
+test('no-op text normalization does not manufacture revisions or history', () => {
   const draft = prepare().draft;
-  assert.deepEqual(draft.contextSnapshot.roles, {
-    actionOwner: 'Morgan Reed', internalReviewer: 'Alex Chen', customerAuthority: 'Nina Patel',
-    authorityBasis: 'Synthetic counsel role only; not authenticated decision authority.',
-  });
-  assert.equal(draft.contextSnapshot.customerReview, null);
-  assert.equal(draft.evidenceNeeds.find(need => need.id === 'customer_authority').state, 'unknown');
-  assert.match(draft.tasks.find(task => task.id === 'confirm_authority').completionRule, /not authenticated/);
+  const values = {...draftEditorValues(draft), title: `  ${draft.title}  `};
+  assert.deepEqual(changedDraftFields(draft, values), []);
+  assert.equal(savePlaybookDraft(draft, values, {expectedRevision: 1, at}).draft, draft);
 });
 
-test('stale or unidentified documents produce version recovery work without verification claims', () => {
-  const stale = transition(authorized(), {type: 'obtain_document', document: {version: 'v2', currentVersion: 'v3'}});
-  for (const templateId of templateIds) {
-    const draft = prepare(templateId, context(stale)).draft;
-    const need = draft.evidenceNeeds.find(need => need.id === 'current_document');
-    assert.equal(need.state, 'stale');
-    assert.match(need.detail, /Received v2/);
-    assert.ok(draft.tasks.some(task => task.id === need.recoveryTaskId));
-    assertTaskGraph(draft.tasks);
+test('blank, overlong, non-text and unauthorized shape edits preserve the saved draft', () => {
+  const draft = freeze(prepare().draft);
+  for (const patch of [
+    {title: ' '}, {specifications: ''}, {instructions: '\n\t'}, {title: 'x'.repeat(161)}, {instructions: 'x'.repeat(1201)},
+    {specifications: null}, {status: 'approved'}, {completionRules: []}, {items: []}, {removedItemIds: ['verify_document']},
+    {removedItemIds: ['authorize_scope', 'authorize_scope']},
+  ]) {
+    const values = {...draftEditorValues(draft), ...patch};
+    assert.ok(Object.keys(validateDraftEdits(values, draft)).length > 0);
+    assert.equal(savePlaybookDraft(draft, values, {expectedRevision: 1, at}).ok, false);
+    assert.equal(draft.revision, 1);
   }
-  assert.match(prepare(templateIds[0], context(stale)).draft.tasks.find(task => task.id === 'locate_document').title, /replacement/);
-  assert.equal(describeDocument({...stale.document, currentVersion: null, status: 'verified'}).state, 'unknown');
-  assert.equal(describeDocument({...stale.document, id: null, status: 'verified'}).state, 'unknown');
-  assert.equal(describeDocument({...stale.document, status: 'verified'}).state, 'stale');
-  assert.equal(derive(stale).canRequestCustomerReview, false);
+  assert.equal(savePlaybookDraft({...draft, status: 'approved'}, draftEditorValues(draft), {expectedRevision: 1, at}).ok, false);
 });
 
-test('receipt, verification, existing customer approval, resolution and renewal remain separate', () => {
-  const received = transition(authorized(), {type: 'obtain_document'});
-  assert.equal(describeDocument(received.document).state, 'received');
-  assert.equal(describeDocument(verified().document).state, 'verified');
-  const state = completed();
-  const draft = prepare(templateIds[1], context(state)).draft;
-  assert.equal(draft.contextSnapshot.requirement.status, 'resolved');
-  assert.equal(draft.contextSnapshot.customerReview.status, 'approved');
-  assert.equal(draft.contextSnapshot.commercialStatus, 'not_confirmed');
-  assert.equal(draft.status, 'draft');
-  assert.equal(draft.prerequisites.find(item => item.id === 'internal_authorization').status, 'Not requested for this draft');
-  assert.ok(draft.tasks.every(task => task.status === 'proposed'));
-});
-
-test('the reconciliation example compares an expectation, not a fabricated second approval', () => {
-  const draft = prepare(templateIds[2]).draft;
-  assert.equal(draft.contextSnapshot.evidence[1].id, 'E-042');
-  assert.equal(draft.contextSnapshot.evidence[1].meaning, 'Seller expectation');
-  assert.match(draft.instructions, /seller forecast, not a second approval/);
-  assert.ok(draft.tasks.find(task => task.id === 'draft_reconciliation').completionRule.includes('unresolved'));
-  assert.match(draft.reviewBoundary, /does not create or revoke customer approval/);
-  assert.equal(Object.hasOwn(draft, 'reconciled'), false);
-});
-
-test('selection, preparation, editing and cancellation never mutate approved or resolved work', () => {
+test('every draft operation leaves approved and resolved workflow records byte-for-byte unchanged', () => {
   const state = freeze(completed());
   const before = structuredClone(state);
   const gates = derive(state);
   for (const templateId of templateIds) {
-    const target = context(state);
-    buildTemplateWork(templateId, target);
-    let session = start(createPlaybooksSession(templateId), templateId, target);
-    const url = playbookSearch(templateId, 'edit', session.draft.id);
-    assert.equal(readPlaybookLocation(url, session).view, 'edit');
-    session = playbooksSessionReducer(session, {type: 'edit_field', field: 'instructions', value: 'A human refinement to the proposed work.'});
-    session = playbooksSessionReducer(session, {type: 'save_edits', at});
-    session = playbooksSessionReducer(session, {type: 'discard_confirmed'});
+    let session = start(createPlaybooksSession(templateId), templateId, context(state));
+    session = playbooksSessionReducer(session, {type: 'edit_field', field: 'instructions', value: 'Refined proposed instructions.'});
+    session = playbooksSessionReducer(session, {type: 'toggle_auto_item', id: 'authorize_scope'});
+    session = save(session);
+    session = playbooksSessionReducer(session, {type: 'inspect'});
+    session = playbooksSessionReducer(session, {type: 'cancel_edits'});
+    session = playbooksSessionReducer(session, {type: 'delete_confirmed'});
     assert.equal(session.draft, null);
     assert.deepEqual(state, before);
     assert.deepEqual(derive(state), gates);
   }
 });
 
-test('draft, template, existing plan, and document versions are independent', () => {
-  const state = verified();
-  const original = prepare(templateIds[0], context(state)).draft;
-  const edited = savePlaybookDraft(original, {...draftEditorValues(original), specifications: 'Keep the applicable file and a precise source reference.'}, at).draft;
-  assert.equal(edited.revision, 2);
-  assert.equal(original.revision, 1);
-  assert.equal(edited.templateRef.version, '1.0');
-  assert.equal(edited.contextSnapshot.existingPlan.revision, 3);
-  assert.equal(edited.contextSnapshot.document.version, 'v3');
-  assert.equal(state.plan.approvedRevision, 3);
+test('successful preparation navigates using the reducer-owned ID; failure returns no new location', () => {
+  const empty = createPlaybooksSession('url-session');
+  const session = start(empty);
+  const location = preparedDraftLocation(empty, session);
+  assert.equal(location.get('draft'), session.draft.id);
+  assert.equal(location.get('view'), 'edit');
+  assert.equal(readPlaybookLocation(location, session).view, 'edit');
+  const failed = playbooksSessionReducer(empty, {type: 'prepare', templateId: templateIds[0], context: context(), confirmed: false, at});
+  assert.equal(preparedDraftLocation(empty, failed), null);
+  assert.equal(preparedDraftLocation(session, start(session)), null);
 });
 
-test('human edits preserve before/after, provenance, context refs, tasks and completion rules', () => {
-  const original = prepare().draft;
-  const before = structuredClone(original);
-  const values = {...draftEditorValues(original), title: '  Collect the applicable AI terms with source proof  ', instructions: 'Ask for a receipt timestamp as well as the file.'};
-  const result = savePlaybookDraft(original, values, at);
-  assert.equal(result.ok, true);
-  const edited = result.draft;
-  assert.equal(edited.title, values.title.trim());
-  assert.deepEqual(edited.templateRef, original.templateRef);
-  assert.deepEqual(edited.contextSnapshot.refs, original.contextSnapshot.refs);
-  assert.deepEqual(edited.completionRules, original.completionRules);
-  assert.deepEqual(edited.tasks, original.tasks);
-  assert.deepEqual(edited.humanEdits[0].changes.map(change => change.field), ['title', 'instructions']);
-  assert.equal(edited.humanEdits[0].changes[1].before, original.instructions);
-  assert.equal(edited.humanEdits[0].changes[1].after, values.instructions);
-  assert.equal(edited.humanEdits[0].actor, 'Local user; not authenticated');
-  assert.deepEqual(original, before);
-  assert.equal(getPlaybookTemplate(templateIds[0]).instructions, original.instructions);
-});
-
-test('whitespace-only no-op edits do not manufacture revisions or history', () => {
-  const draft = prepare().draft;
-  const values = Object.fromEntries(Object.entries(draftEditorValues(draft)).map(([key, value]) => [key, `  ${value}  `]));
-  assert.deepEqual(changedDraftFields(draft, values), []);
-  const result = savePlaybookDraft(draft, values, at);
-  assert.equal(result.draft, draft);
-  assert.equal(result.draft.humanEdits.length, 0);
-});
-
-test('blank, overlong, non-text and scope-changing edits are rejected without altering the draft', () => {
-  const draft = freeze(prepare().draft);
-  for (const values of [
-    {...draftEditorValues(draft), title: ' '},
-    {...draftEditorValues(draft), specifications: ''},
-    {...draftEditorValues(draft), instructions: '\n\t'},
-    {...draftEditorValues(draft), title: 'x'.repeat(161)},
-    {...draftEditorValues(draft), instructions: 'x'.repeat(1201)},
-    {...draftEditorValues(draft), specifications: null},
-    {...draftEditorValues(draft), status: 'approved'},
-    {...draftEditorValues(draft), completionRules: []},
-  ]) {
-    assert.ok(Object.keys(validateDraftEdits(values)).length > 0);
-    assert.equal(savePlaybookDraft(draft, values, at).ok, false);
-    assert.equal(draft.revision, 1);
-  }
-  assert.equal(savePlaybookDraft({...draft, status: 'approved'}, draftEditorValues(draft), at).ok, false);
-});
-
-test('draft context is a snapshot; live changes are detected without silently rebasing it', () => {
-  const target = context();
-  const draft = prepare(templateIds[0], target).draft;
-  assert.equal(isDraftContextCurrent(draft, context()), true);
-  assert.equal(isDraftContextCurrent(draft, context(initialState, renewalEvidence, {actionOwner: null, customerAuthority: null})), true);
-  assert.equal(isDraftContextCurrent(draft, context(verified())), false);
-  target.evidence[0].quote = 'Changed caller copy';
-  target.roles.actionOwner = 'Different proposed owner';
-  assert.equal(draft.contextSnapshot.evidence[0].quote, renewalEvidence[0].quote);
-  assert.equal(draft.contextSnapshot.roles.actionOwner, 'Morgan Reed');
-});
-
-test('the session retains unapplied edits during selection and navigation; Back can inspect the saved revision', () => {
+test('selection and navigation preserve unsaved edits and never save or replace a retained draft', () => {
   let session = start();
-  const draftId = session.draft.id;
-  session = playbooksSessionReducer(session, {type: 'edit_field', field: 'instructions', value: 'An unfinished human instruction.'});
+  session = playbooksSessionReducer(session, {type: 'edit_field', field: 'instructions', value: 'Keep this unsaved instruction.'});
   const before = structuredClone(session);
   readPlaybookLocation(playbookSearch(templateIds[1]), session);
-  readPlaybookLocation(playbookSearch(templateIds[0], 'context'), session);
-  assert.equal(readPlaybookLocation(playbookSearch(templateIds[0], 'edit', draftId), session).view, 'edit');
-  assert.equal(readPlaybookLocation(playbookSearch(templateIds[0], 'inspect', draftId), session).view, 'inspect');
-  assert.equal(session.editor.instructions, 'An unfinished human instruction.');
-  assert.notEqual(session.draft.instructions, session.editor.instructions);
+  assert.equal(readPlaybookLocation(playbookSearch(templateIds[0], 'inspect', session.draft.id), session).view, 'inspect');
   assert.deepEqual(session, before);
+  const second = start(session, templateIds[2]);
+  assert.equal(second.draft, session.draft);
+  assert.equal(second.editor, session.editor);
+  assert.equal(second.nextDraftNumber, session.nextDraftNumber);
+  assert.ok(second.error);
 });
 
-test('saving text edits keeps the draft unapproved and reverting only discards unapplied edits', () => {
-  let session = start();
-  session = playbooksSessionReducer(session, {type: 'edit_field', field: 'title', value: 'Human draft title'});
-  session = playbooksSessionReducer(session, {type: 'save_edits', at});
-  assert.equal(session.draft.revision, 2);
-  assert.equal(session.draft.title, 'Human draft title');
-  assert.equal(session.draft.status, 'draft');
-  const applied = session.draft;
-  session = playbooksSessionReducer(session, {type: 'edit_field', field: 'title', value: ''});
-  session = playbooksSessionReducer(session, {type: 'save_edits', at});
-  assert.ok(session.fieldErrors.title);
-  assert.equal(session.draft, applied);
-  session = playbooksSessionReducer(session, {type: 'revert_edits'});
-  assert.equal(session.editor.title, 'Human draft title');
-  assert.equal(session.draft, applied);
-  assert.equal(session.error, null);
+test('confirmed deletion and reset clear the session without reusing an old URL identity', () => {
+  for (const type of ['delete_confirmed', 'reset_session']) {
+    let first = start();
+    first = playbooksSessionReducer(first, {type: 'edit_field', field: 'title', value: 'Temporary edit'});
+    const oldUrl = playbookSearch(templateIds[0], 'edit', first.draft.id);
+    const cleared = playbooksSessionReducer(first, {type});
+    assert.equal(cleared.draft, null);
+    assert.equal(cleared.editor, null);
+    assert.equal(readPlaybookLocation(oldUrl, cleared).view, 'unavailable');
+    const second = start(cleared);
+    assert.notEqual(second.draft.id, first.draft.id);
+    assert.equal(readPlaybookLocation(oldUrl, second).view, 'unavailable');
+  }
 });
 
-test('preparing a second draft cannot silently replace the retained draft or its edits', () => {
-  let session = start();
-  session = playbooksSessionReducer(session, {type: 'edit_field', field: 'instructions', value: 'Keep this unsaved edit.'});
-  const result = start(session, templateIds[2]);
-  assert.equal(result.draft, session.draft);
-  assert.equal(result.editor, session.editor);
-  assert.equal(result.nextDraftNumber, session.nextDraftNumber);
-  assert.match(result.error, /Resume or discard/);
-});
-
-test('cancel removes only the draft; a new draft has a distinct identity and old URLs cannot bind to it', () => {
-  const first = start();
-  const oldUrl = playbookSearch(templateIds[0], 'edit', first.draft.id);
-  const cancelled = playbooksSessionReducer(first, {type: 'discard_confirmed'});
-  assert.equal(cancelled.draft, null);
-  assert.equal(cancelled.editor, null);
-  assert.equal(readPlaybookLocation(oldUrl, cancelled).view, 'unavailable');
-  const second = start(cancelled);
-  assert.notEqual(second.draft.id, first.draft.id);
-  assert.equal(readPlaybookLocation(oldUrl, second).view, 'unavailable');
-  assert.equal(second.draft.humanEdits.length, 0);
-  assert.equal(second.draft.revision, 1);
-});
-
-test('reload loses temporary drafts and buffers; selection URLs survive but draft links recover honestly', () => {
-  const current = start();
-  const editUrl = playbookSearch(templateIds[0], 'edit', current.draft.id);
-  const reloaded = createPlaybooksSession('new-page-mount');
-  assert.equal(reloaded.draft, null);
-  assert.equal(reloaded.editor, null);
-  assert.equal(readPlaybookLocation(editUrl, reloaded).view, 'unavailable');
-  const sameTemplateNewDraft = start(reloaded);
-  assert.notEqual(sameTemplateNewDraft.draft.id, current.draft.id);
-  assert.equal(readPlaybookLocation(editUrl, sameTemplateNewDraft).view, 'unavailable');
-  assert.deepEqual(readPlaybookLocation(playbookSearch(templateIds[2]), reloaded), {templateId: templateIds[2], view: 'template', invalidSelection: false});
-});
-
-test('invalid locations and mismatched template/draft URLs never select a different draft silently', () => {
+test('reload, missing drafts, and mismatched locations recover without fabricating draft contents', () => {
   const session = start();
-  const mismatch = playbookSearch(templateIds[1], 'inspect', session.draft.id);
-  assert.equal(readPlaybookLocation(mismatch, session).view, 'unavailable');
-  assert.equal(readPlaybookLocation(playbookSearch('not-supported', 'edit', session.draft.id), session).view, 'unavailable');
-  assert.equal(readPlaybookLocation(playbookSearch(templateIds[0], 'inspect', 'missing'), session).view, 'unavailable');
-  const invalid = readPlaybookLocation('template=not-supported&view=publish', session);
-  assert.equal(invalid.templateId, templateIds[0]);
-  assert.equal(invalid.view, 'template');
-  assert.equal(invalid.invalidSelection, true);
+  const reloaded = createPlaybooksSession('new-page-mount');
+  for (const target of [reloaded, start(reloaded)]) assert.equal(readPlaybookLocation(playbookSearch(templateIds[0], 'edit', session.draft.id), target).view, 'unavailable');
+  for (const search of [playbookSearch(templateIds[1], 'inspect', session.draft.id), playbookSearch('unknown', 'edit', session.draft.id), playbookSearch(templateIds[0], 'inspect', 'missing')]) assert.equal(readPlaybookLocation(search, session).view, 'unavailable');
+  assert.deepEqual(readPlaybookLocation('template=unknown&view=publish', session), {templateId: templateIds[0], view: 'template', invalidSelection: true});
 });
 
-test('this session exposes no execution, approval, send, persistence, or renewal transition', () => {
+test('session nonces work when the browser has no randomUUID or the method throws', () => {
+  assert.equal(createPlaybooksSessionId({randomUUID: () => 'available-uuid'}), 'available-uuid');
+  const ids = [createPlaybooksSessionId(null), createPlaybooksSessionId({}), createPlaybooksSessionId({randomUUID: () => {throw new Error('unavailable');}})];
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(ids.every(id => /^local-/.test(id)));
+});
+
+test('the session exposes no execution, approval, send, persistence, or workflow transition', () => {
   const session = freeze(start());
-  for (const type of ['approve_plan', 'request_review', 'send', 'verify_document', 'record_customer_approval', 'resolve_requirement', 'publish', 'persist']) {
+  for (const type of ['approve_plan', 'request_review', 'send', 'verify_document', 'record_customer_approval', 'resolve_requirement', 'save_plan', 'publish', 'persist']) {
     assert.equal(playbooksSessionReducer(session, {type}), session);
   }
   assert.equal(playbooksSessionReducer(session, {type: 'edit_field', field: 'status', value: 'approved'}), session);

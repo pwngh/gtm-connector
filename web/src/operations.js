@@ -1,3 +1,4 @@
+import {renewalFixture,fixturePeople} from './renewalFixtures.js';
 import {derive} from './workflow.js';
 
 // One account, three follow-up reasons. Reasons can share a prerequisite;
@@ -6,7 +7,7 @@ export function buildOperations(state, d=derive(state)) {
   const resolved=state.requirement.status==='resolved';
   const reviewPending=state.plan.status==='in_review';
   const changesRequested=state.plan.status==='changes_requested';
-  const planOwner=d.isPlanApproved||reviewPending?'Alex Chen':state.plan.owner;
+  const planOwner=d.isPlanApproved||reviewPending?fixturePeople.internalReviewer:state.plan.owner;
   const prerequisite=d.isPlanApproved
     ? {id:'document',label:'Document preparation',step:2}
     : {id:'plan',label:'Internal work approval',step:1};
@@ -32,12 +33,12 @@ export function buildOperations(state, d=derive(state)) {
       action:d.isDocumentVerified?'View document task':d.isPlanApproved?'Open document task':'Review prerequisite',
       step:d.isDocumentVerified||d.isPlanApproved?2:1,
       dependency:d.isDocumentVerified||d.isPlanApproved?null:{id:'plan',label:'Internal work approval',step:1},
-      completionRule:'Verify that the received document is current, applies to Agreement A-17, and meets the plan’s specifications.',
+      completionRule:`Verify that the received document is current, applies to ${renewalFixture.agreement.label}, and meets the plan’s specifications.`,
     },
     {
       id:'condition',title:'Customer condition',
-      owner:resolved||d.hasCustomerApproval||counselPending?'Alex Chen':d.canRequestCustomerReview?state.plan.owner:prerequisiteOwner,
-      waitingOn:counselPending?'Nina Patel · Customer counsel':null,
+      owner:resolved||d.hasCustomerApproval||counselPending?fixturePeople.internalReviewer:d.canRequestCustomerReview?state.plan.owner:prerequisiteOwner,
+      waitingOn:counselPending?`${fixturePeople.customerCounsel} · Customer counsel`:null,
       reason:resolved?'The condition was resolved with recorded approval evidence.':d.hasCustomerApproval?'Customer approval is recorded; the resolution still needs to be confirmed.':counselPending?'Customer counsel’s decision has not been recorded.':d.canRequestCustomerReview?'The current document is ready for customer counsel review.':!d.isPlanApproved?'The current work plan needs internal approval before customer review can proceed.':'Obtain and verify the applicable document before requesting customer counsel review.',
       status:resolved?'Resolved':d.hasCustomerApproval?'Ready to resolve':counselPending?'Awaiting counsel':d.canRequestCustomerReview?'Ready to request':'Prerequisite open',
       bucket:resolved?'done':d.hasCustomerApproval||d.canRequestCustomerReview?'ready':counselPending?'waiting':'blocked',

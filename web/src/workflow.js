@@ -1,65 +1,5 @@
-// All names, quotes, documents, and activity below are invented demo data.
-export const fixtureEvidence = [
-  {
-    id: 'ev-customer-001',
-    type: 'customer_quote',
-    title: 'Customer requirement',
-    quote: 'Before we can sign the renewal, our counsel needs to review the current AI terms and approve their use.',
-    source: 'Nina Patel · Thornfield Wren LLP · Nov 18, 2026',
-    interpretation: 'Counsel approval is a condition of the renewal, not approval of the acquisition plan.',
-  },
-  {
-    id: 'ev-seller-002',
-    type: 'seller_expectation',
-    title: 'Seller expectation',
-    quote: 'If we get the current terms to their counsel this week, I expect we can keep the renewal moving.',
-    source: 'Morgan Reed · Account owner · Nov 19, 2026',
-    interpretation: 'A conditional seller expectation. This does not confirm customer approval or a renewal.',
-  },
-  {
-    id: 'ev-document-003',
-    type: 'document',
-    title: 'Current AI terms',
-    name: 'AI Terms — Version 3',
-    version: 'v3',
-    currentVersion: 'v3',
-    source: 'Rachel Ellis · Customer-supplied fixture',
-    interpretation: 'The document is initially missing. Acquisition can be authorized before it is received.',
-  },
-];
-
-export const initialState = {
-  plan: {
-    id: 'plan-ai-terms',
-    title: 'Obtain the current AI terms document',
-    owner: 'Morgan Reed',
-    specifications: 'Confirm the current document applies to Agreement A-17 and preserve its source and version.',
-    instructions: 'Obtain the document from Rachel Ellis. Verify the version before routing it to Nina Patel for customer counsel review.',
-    revision: 3,
-    status: 'draft',
-    approvedRevision: null,
-    requestedAt: null,
-    approvedAt: null,
-    approver: null,
-    reviewNote: '',
-  },
-  task: null,
-  document: null,
-  customerReview: null,
-  requirement: {
-    id: 'req-ai-counsel',
-    title: 'Customer counsel approves current AI terms',
-    status: 'open',
-    resolvedAt: null,
-  },
-  commercial: {
-    status: 'not_confirmed',
-    label: 'Renewal not confirmed',
-    note: 'Resolving this legal requirement does not confirm a signed renewal.',
-  },
-  history: [],
-  error: null,
-};
+import {fixtureEvidence, initialState, fixturePeople, renewalFixture} from './renewalFixtures.js';
+export {fixtureEvidence, initialState} from './renewalFixtures.js';
 
 export function derive(state) {
   const isPlanApproved = state.plan.status === 'approved'
@@ -142,7 +82,7 @@ function planSnapshot(plan) {
 }
 
 function changed(state, action, patch, title, detail = '', evidenceSnapshot = null, eventDetails = {}) {
-  const at = action.at || new Date(Date.UTC(2026, 10, 19, 16, 30 + state.history.length)).toISOString();
+  const at = action.at || new Date(Date.parse(renewalFixture.workflowClockStart) + state.history.length * 60000).toISOString();
   return {
     ...state,
     ...patch,
@@ -153,7 +93,7 @@ function changed(state, action, patch, title, detail = '', evidenceSnapshot = nu
 
 export function transition(state, action) {
   const ready = derive(state);
-  const at = action.at || new Date(Date.UTC(2026, 10, 19, 16, 30 + state.history.length)).toISOString();
+  const at = action.at || new Date(Date.parse(renewalFixture.workflowClockStart) + state.history.length * 60000).toISOString();
   switch (action.type) {
     case 'reset':
       return initialState;
@@ -183,10 +123,10 @@ export function transition(state, action) {
     case 'approve_plan':
       if (!ready.canApprovePlan) return rejected(state, 'Submit the current revision for review before approving it.');
       return changed(state, action, {
-        plan: { ...state.plan, status: 'approved', approvedRevision: state.plan.revision, approvedAt: at, approver: action.approver?.trim() || 'Alex Chen' },
+        plan: { ...state.plan, status: 'approved', approvedRevision: state.plan.revision, approvedAt: at, approver: action.approver?.trim() || fixturePeople.internalReviewer },
         task: state.task
           ? { ...state.task, title: state.plan.title, owner: state.plan.owner, status: 'open', planRevision: state.plan.revision }
-          : { id: 'task-obtain-ai-terms', title: state.plan.title, owner: state.plan.owner, status: 'open', createdAt: at, planRevision: state.plan.revision },
+          : { id: renewalFixture.taskId, title: state.plan.title, owner: state.plan.owner, status: 'open', createdAt: at, planRevision: state.plan.revision },
       }, `Acquisition authorized for revision ${state.plan.revision}`, state.task ? 'The existing acquisition task is ready to continue.' : 'One acquisition task was created. Customer approval remains outstanding.', null, { planSnapshot: planSnapshot(state.plan) });
     case 'request_changes':
       if (!ready.canRequestChanges) return rejected(state, 'Changes can be requested while the plan is in review.');
@@ -233,7 +173,7 @@ export function transition(state, action) {
       if (!ready.canRecordCustomerApproval) return rejected(state, 'Request customer counsel review of the verified document before recording approval.');
       const evidenceText = action.evidenceText?.trim();
       const reviewedBy = action.reviewedBy?.trim();
-      const recordedBy = action.recordedBy?.trim() || 'Alex Chen';
+      const recordedBy = action.recordedBy?.trim() || fixturePeople.internalReviewer;
       if (!evidenceText || !reviewedBy) return rejected(state, 'Record the approving customer reviewer and their approval evidence.');
       return changed(state, action, {
         customerReview: { ...state.customerReview, status: 'approved', reviewedBy, recordedBy, evidenceText, approvedAt: at },

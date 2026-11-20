@@ -1,3 +1,4 @@
+import {renewalFixture,fixturePeople} from './renewalFixtures.js';
 import React from 'react';
 import PlanChanges from './PlanChanges';
 import {FileText, Pencil} from 'lucide-react';
@@ -11,11 +12,11 @@ export function WorkPrescriptionFields({edit, setEdit, revision, currentPlan, on
   const canSave=complete&&changedFields.length>0;
   return <form className="dialog-body prescription-form" onSubmit={event=>{if(!canSave){event.preventDefault();return;}onSubmit(event);}}>
     <div className="edit-mode-label"><Pencil size={14}/> Editing plan version {revision}</div>
-    <div className="form-context"><FileText size={18}/><div><strong>Agreement A-17</strong><span>Thornfield Wren LLP · Customer counsel approval</span></div></div>
+    <div className="form-context"><FileText size={18}/><div><strong>{renewalFixture.agreement.label}</strong><span>{renewalFixture.account.name} · Customer counsel approval</span></div></div>
     <p>Define the document and the work needed to prepare it for review.</p>
     <fieldset className="form-group"><legend>The work and its owner</legend><div className="form-grid">
       <label className="field"><span className="field-title">Document task <span className="field-required">(required)</span></span><input required maxLength={160} value={edit.title||''} onChange={e=>field('title',e.target.value)}/></label>
-      <label className="field"><span className="field-title">Document task owner <span className="field-required">(required)</span></span><select required value={edit.owner||''} onChange={e=>field('owner',e.target.value)}>{['Morgan Reed','Alex Chen','Maya Chen'].map(n=><option key={n}>{n}</option>)}</select></label>
+      <label className="field"><span className="field-title">Document task owner <span className="field-required">(required)</span></span><select required value={edit.owner||''} onChange={e=>field('owner',e.target.value)}>{[fixturePeople.accountOwner,fixturePeople.internalReviewer,fixturePeople.otherAccountOwner].map(n=><option key={n}>{n}</option>)}</select></label>
     </div></fieldset>
     <fieldset className="form-group"><legend>Document requirements</legend>
       <label className="field"><span className="field-title">Document specifications <span className="field-required">(required)</span></span><span className="field-hint">What must be true of the document you receive?</span><textarea required maxLength={1200} rows={3} value={edit.specifications||''} onChange={e=>field('specifications',e.target.value)}/></label>
