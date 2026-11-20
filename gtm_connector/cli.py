@@ -110,12 +110,24 @@ def safe_text(value):
                    json.dumps(character, ensure_ascii=True)[1:-1] for character in text)
 
 
+def _neutral(value):
+    """Source text made inert for display, as a card shows it, in every string of a result."""
+    from .units import safe_text as neutralize
+    if isinstance(value, str):
+        return neutralize(value)[0]
+    if isinstance(value, list):
+        return [_neutral(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _neutral(item) for key, item in value.items()}
+    return value
+
+
 def _error(message, code, next_command, *, as_json=False):
     if as_json:
         print(json.dumps({"error": {"code": EXIT_NAMES[code], "message": str(message), "next": next_command}}),
               file=sys.stderr)
     else:
-        print(f"Error: {safe_text(message)}\nNext: {next_command}", file=sys.stderr)
+        print(f"Error: {safe_text(message)}\nNext: {safe_text(next_command)}", file=sys.stderr)
     return code
 
 
@@ -492,8 +504,9 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
 def _inspect_lines(brief_id, state_dir):
     """The commands that list a saved card's units and resolve one of its numbers, with the card's folder."""
     folder = "" if state_dir is None else f" --state-dir {shlex.quote(str(state_dir))}"
-    return (f"List every unit: gtm-connector inspect {brief_id}{folder}\n"
-            f"Resolve a number: gtm-connector inspect {brief_id} N{folder}")
+    # A folder name can hold any byte. Escaped, the hint never writes a control character to the terminal.
+    return (safe_text(f"List every unit: gtm-connector inspect {brief_id}{folder}") + "\n"
+            + safe_text(f"Resolve a number: gtm-connector inspect {brief_id} N{folder}"))
 
 
 def _human_inspect(result, *, action, crm_backend, state_dir):
@@ -511,7 +524,7 @@ def _human_inspect(result, *, action, crm_backend, state_dir):
                  for row in result["contracts"]])
         if (newest := result["newest_brief_id"]) is not None:
             here = _here(argparse.Namespace(state_dir=state_dir))
-            displayed += f"\n\nNewest card: {newest}  (gtm-connector inspect {newest}{here})"
+            displayed += "\n\n" + safe_text(f"Newest card: {newest}  (gtm-connector inspect {newest}{here})")
         return displayed
     if action == "brief":
         return "\n".join(map(_unit_line, result["units"])) or "No sentence on this card has that role."
@@ -519,7 +532,7 @@ def _human_inspect(result, *, action, crm_backend, state_dir):
         return "\n\n".join(map(_human_trace, result))
     rows = "\n".join(safe_text(row) for row in result["rows"]) or "none"
     return (human_result("audit", [result]) + "\n\nArguments\n"
-            + safe_text(json.dumps(result["arguments"], ensure_ascii=False)) + "\n\nReturned rows\n" + rows)
+            + json.dumps(result["arguments"], ensure_ascii=False) + "\n\nReturned rows\n" + rows)
 
 
 def _unit_line(unit):
@@ -903,12 +916,12 @@ def _connected(args):
     return _use(args, profile.load(args.state_dir))
 
 
-def _runtime(args, crm_reader, **options):
+def _runtime(args, crm_reader, *, crm_only=False, **options):
+    """The folder's services for its connected sources, or for its CRM alone when only accounts are read."""
     from .runtime import Runtime
-    return Runtime(args.state_dir, crm_reader=crm_reader, calls_backend=args.calls_backend,
-                   slack_backend=args.slack_backend,
-                   slack_connection_dir=_slack_connection(args) if args.slack_backend == "slack" else None,
-                   **options)
+    calls, slack = ("none", "none") if crm_only else (args.calls_backend, args.slack_backend)
+    return Runtime(args.state_dir, crm_reader=crm_reader, calls_backend=calls, slack_backend=slack,
+                   slack_connection_dir=_slack_connection(args) if slack == "slack" else None, **options)
 
 
 def _sources_line(args, *, crm_only=False):
@@ -1122,7 +1135,8 @@ def _run_calls(args, prepared, crm_reader):
 
 
 def _account_list(rows, more):
-    """A complete list stays a plain array. A cut one is an object that says so."""
+    """A complete list stays a plain array. A cut one is an object that says so. Names are shown inert."""
+    rows = _neutral(rows)
     return {"accounts": rows, "has_more": True} if more else rows
 
 
@@ -1135,7 +1149,8 @@ def _salesforce_account_read(args, reader):
 
     tool = "search_accounts" if args.command == "accounts" else "get_account"
     arguments = {"query": args.query} if args.command == "accounts" else {"account_id": args.account_id}
-    with _runtime(args, reader) as runtime, LocalClient(runtime.config) as client:
+    # Reading accounts needs the CRM alone, so a problem with calls or Slack never stops it.
+    with _runtime(args, reader, crm_only=True) as runtime, LocalClient(runtime.config) as client:
         if not args.json:
             print(_sources_line(args, crm_only=True), file=sys.stderr)
         token = client.authorize(["crm:read"])
@@ -1209,10 +1224,12 @@ def _inspect_saved(args):
     """A saved card's units, numbers on it, or one receipt, read from the folder. No source is read."""
     if args.action == "receipt":
         from .audit import read_receipt
-        return read_receipt(args.state_dir / "audit.sqlite3", args.target)
-    from .briefing import trace_saved, units_saved
+        receipt = read_receipt(args.state_dir / "audit.sqlite3", args.target)
+        # A caller's arguments can hold any text: shown, it is inert as source text on a card is.
+        return {**receipt, "arguments": _neutral(receipt["arguments"])}
+    from .briefing import traces_saved, units_saved
     if args.action == "numbers":
-        return [trace_saved(args.state_dir, args.target, number) for number in args.numbers]
+        return traces_saved(args.state_dir, args.target, args.numbers)
     listed = units_saved(args.state_dir, args.target)
     if args.role is not None:
         listed["units"] = [unit for unit in listed["units"] if unit.get("role") == args.role]
@@ -1222,7 +1239,7 @@ def _inspect_saved(args):
 def _with_newest_card(args, account):
     """The account as the CRM returns it, and the newest saved card of it in the folder."""
     from .briefing import newest_saved
-    return {**account, "newest_brief_id": newest_saved(args.state_dir, args.account_id)}
+    return {**_neutral(account), "newest_brief_id": newest_saved(args.state_dir, args.account_id)}
 
 
 def _run(args, argv):
@@ -1517,8 +1534,12 @@ def _main(argv):
         return 0
     if arguments[0] == "help":
         arguments = arguments[1:] + ["--help"]
+    # --json may stand anywhere before "--": it is read above and removed, so no position changes the parse.
+    end = arguments.index("--") if "--" in arguments else len(arguments)
+    arguments = [argument for argument in arguments[:end] if argument != "--json"] + arguments[end:]
     try:
         args = parser.parse_args(arguments)
+        args.json = as_json
         if args.version:
             print(json.dumps({"version": __version__}) if args.json else f"gtm-connector {__version__}")
             return 0
@@ -1546,6 +1567,9 @@ def _main(argv):
         suggestion = prefix + "--help"
         if names is COMMANDS and candidate in DEBUG:
             suggestion = f"gtm-connector debug {candidate} --help"
+        elif candidate in names:
+            # A command that exists, given arguments it does not take: its own help says which it takes.
+            suggestion = f"{prefix}{candidate} --help"
         elif candidate not in names:
             close = difflib.get_close_matches(candidate, names, n=1)
             if close:

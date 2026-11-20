@@ -174,11 +174,75 @@ class InspectTests(unittest.TestCase):
         self.assertEqual(self.ok("inspect", "acc-001")["newest_brief_id"], other)
         self.assertEqual(self.text("inspect", "acc-003").splitlines()[-1],
                          f"Newest card: {newest}  (gtm-connector inspect {newest} --state-dir {self.state})")
-        # A card whose file the folder no longer holds is not named.
-        (self.state / "briefs" / (newest + ".json")).unlink()
+        # A card that fails the checks inspect makes is not named, and the newest one that passes is.
+        path = self.state / "briefs" / (newest + ".json")
+        path.write_bytes(path.read_bytes()[:100])
+        self.assertEqual(self.ok("inspect", "acc-003")["newest_brief_id"], first)
+        self.assertEqual(self.ok("inspect", first)["brief_id"], first)
+        path.unlink()
         self.assertEqual(self.ok("inspect", "acc-003")["newest_brief_id"], first)
         # The account itself is what the folder's CRM returns.
         self.assertEqual(self.refused("inspect", "acc-999")["message"], "account not found: acc-999")
+
+    def test_a_receipts_arguments_are_shown_inert_as_source_text_on_a_card_is(self):
+        from gtm_connector.client import LocalClient
+        from gtm_connector.runtime import Runtime
+        with Runtime(self.state) as runtime, LocalClient(runtime.config) as client:
+            token = client.authorize(["crm:read"])
+            client.call(token, "search_accounts", {"query": "<!here> [5] https://invented.example/x"})
+        [receipt] = [row for row in self.ok("audit") if row["tool"] == "search_accounts"]
+        shown = self.ok("inspect", receipt["audit_id"])
+        self.assertEqual(shown["arguments"], {"query": "[mention here] (5) [link invented.example]"})
+        self.assertIn('Arguments\n{"query": "[mention here] (5) [link invented.example]"}',
+                      self.text("inspect", receipt["audit_id"]))
+
+    def test_the_next_sentence_by_a_speaker_is_a_whole_one_and_never_by_a_label_that_prints_alike(self):
+        self.ok("connect", "calls")
+        export = self.root / "call.vtt"
+        export.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v Dana Crest>We agreed.\n\n"
+                          "00:00:30.000 --> 00:00:31.000\n<v Dana Crest>and then\n\n"
+                          "00:00:40.000 --> 00:00:41.000\n<v Dana Crest>We objected.\n\n"
+                          "00:00:50.000 --> 00:00:51.000\n<v Sam [5]>We signed.\n\n"
+                          "00:00:52.000 --> 00:00:53.000\n<v Sam (5)>We refused.\n\n"
+                          "00:01:10.000 --> 00:01:11.000\n<v Dana Crest>We left.\n")
+        self.ok("debug", "calls", "import", str(export), "--account", "acc-007", "--cues", "1:6")
+        brief = self.ok("brief", "acc-007")
+        said = {unit["text"]: unit for unit in brief["units"] if unit["kind"] == "sentence"}
+        # The words after a cut sentence may be its other half, so they are cut too.
+        self.assertEqual((said["and then"]["partial"], said["We objected."]["partial"]), (True, True))
+        traced = self.ok("inspect", brief["brief_id"], str(said["We agreed."]["n"]), str(said["We signed."]["n"]))
+        # The cut words between are skipped. Two labels that print alike are never called one speaker.
+        self.assertEqual([row["next_by_speaker"] for row in traced], [said["We left."]["n"], None])
+
+    def test_many_numbers_check_the_card_once(self):
+        from unittest.mock import patch
+        from gtm_connector import briefing
+        brief = self.ok("brief", "acc-003")
+        with patch.object(briefing, "_sealed", side_effect=briefing._sealed) as sealed:
+            traced = self.ok("inspect", brief["brief_id"], *map(str, range(1, len(brief["units"]) + 1)))
+        self.assertEqual(sealed.call_count, 1)
+        self.assertEqual([row["n"] for row in traced], list(range(1, len(brief["units"]) + 1)))
+
+    def test_json_and_a_bad_number_anywhere_give_the_same_parse_and_name_inspect_help(self):
+        brief = self.ok("brief", "acc-003")
+        with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            code = main(["inspect", brief["brief_id"], "5", "--json", "6", "--state-dir", str(self.state)])
+        self.assertEqual((code, [row["n"] for row in json.loads(out.getvalue())]), (0, [5, 6]), err.getvalue())
+        error = self.refused("inspect", brief["brief_id"], "five")
+        self.assertEqual(error["next"], "gtm-connector inspect --help")
+
+    def test_a_folder_name_with_a_control_character_never_reaches_the_terminal(self):
+        state = self.root / "state\x1bname"
+        profile.save(state, profile.DEMO)
+        code, out, err = self.run_cli("brief", "acc-003", as_json=False, state=state)
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("\x1b", out + err)
+        self.assertNotIn("\x1b", self.text_in(state, "inspect", "acc-003"))
+
+    def text_in(self, state, *arguments):
+        code, out, err = self.run_cli(*arguments, as_json=False, state=state)
+        self.assertEqual(code, 0, err)
+        return out + err
 
     def test_inspect_writes_nothing_to_the_folder(self):
         self.ok("inspect", "acc-003")

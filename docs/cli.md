@@ -61,12 +61,13 @@ default.
 - The default output is text, and its wording can change. A pipe gets tab-separated rows without
   headings or color. `NO_COLOR` turns color off on a terminal. Control characters in source values
   print as escapes.
-- Every command, and every command under `debug`, accepts `--json` before or after its name, with
+- Every command, and every command under `debug`, accepts `--json` anywhere before `--`, with
   the same result. Keys can be added. Existing keys keep their meaning and type within version 0.1.
   Help stays plain text.
 - A JSON error is one stderr object: `error.code`, `error.message`, and `error.next`, a command.
 - `debug salesforce check`, `debug calls import`, and the `debug slack` commands write progress. With
-  `--json`, a progress line is an object with one `progress` key, whose `command` names the command.
+  `--json`, a progress line is an object with one `progress` key, whose `command` is the command's
+  full path, such as `debug calls import`.
 - A failed `debug doctor`, `debug salesforce check`, or `debug slack check` prints its report on
   stdout.
 
@@ -87,10 +88,10 @@ default.
 | No command, `--version` | Object with `description`, `try` (string array), and `help`. Object with `version`. |
 | `accounts` | Array of account objects ordered by name and then ID, or `[]`. When more than 100 match: object with `accounts`, the first 100, and `has_more: true`. Text output then adds one line on stderr that says so. |
 | `brief` | The saved [Deal card](briefs.md): object with `schema_version: 3`, `brief_id`, `account_id`, `as_of`, `status: "accepted"`, `rules_version` (the sentence rules the units were numbered under), `sealed_by` (the receipt that holds the saved file's digest), `sources`, `text` (the card), `units`, and `gaps`. The saved file adds `evidence`, the raw records and receipts, which no command prints. `as_of` is today's UTC date with Salesforce and `2027-01-15` with demo data, unless `--as-of YYYY-MM-DD` is given. `sources.crm` is `"demo_fixture"` or `"salesforce"`, `sources.calls` is `"demo_fixture"`, `"imported_transcript"`, or `"not_connected"`, and `sources.slack` is `"demo_fixture"`, `"slack"`, or `"not_connected"`. A card reads every connected source. `--without-calls` leaves `calls:read` out of the grant, and the card says so. Text output names the sources on stderr and prints the card, then `Brief:` and the two `inspect` commands for it. |
-| `inspect ACCOUNT_ID` | Account object with a `contacts` array, read as `accounts` reads: the demo book's SQLite file directly, and Salesforce through the scoped, audited tools. Salesforce adds `contracts`, `backend`, and `source_id`. See [Salesforce](salesforce.md). `newest_brief_id` is the newest saved card of the account in this folder, by when it was sealed, or `null`. Text output ends with that card and the command that lists it. |
+| `inspect ACCOUNT_ID` | Account object with a `contacts` array, read as `accounts` reads: the demo book's SQLite file directly, and Salesforce through the scoped, audited tools with the CRM alone, so a problem with calls or Slack never stops it. Its text, as the names `accounts` lists, is neutralized as a card's is. Salesforce adds `contracts`, `backend`, and `source_id`. See [Salesforce](salesforce.md). `newest_brief_id` is the newest saved card of the account in this folder, by when it was sealed, or `null`. Text output ends with that card and the command that lists it. |
 | `inspect BRIEF_ID` | Object with `brief_id`, `account_id`, and `units`: every unit of the saved card as sealed, in number order, with text and speaker labels neutralized again. `--role customer`, `seller`, or `unknown` keeps only the sentences of that role. Text output is one line per unit, never cut or wrapped. A record line holds its number, `record`, its table, and its ID. A sentence line holds its number, source, time (with `cues F-L` or `lines F-L` when it lies in an imported transcript), role, speaker label as a JSON literal or `no speaker label`, `shown` or why it is not on the card (`cut off`, `too long to show`, `dated after the card's day`, `past the card's places`, or `not recorded` for a card sealed before that was kept), and its text as a JSON literal. |
-| `inspect BRIEF_ID N [N ...]` | Array with one object per number, in the order given: `brief_id`, `account_id`, `n`, `kind` (`"record"` or `"sentence"`), `source`, `record_ref`, `receipt` (`audit_id`, `tool`, `status`, `http_status`), and `next_by_speaker`. A record adds `fields`. A sentence adds `text`, `speaker`, `role`, `basis`, `contact`, `at`, `partial`, `shown`, `span`, `raw_sha256`, and `sanitizer_version`. `next_by_speaker` is the number of the next sentence under the same speaker label in the same record, or `null`; it is `null` for a record and for a sentence with no label. Text output is one table per number, separated by a blank line. |
-| `inspect RECEIPT_ID` | The receipt object, as `audit` gives it. Text output is its `audit` row, then its arguments and the rows it returned. |
+| `inspect BRIEF_ID N [N ...]` | Array with one object per number, in the order given: `brief_id`, `account_id`, `n`, `kind` (`"record"` or `"sentence"`), `source`, `record_ref`, `receipt` (`audit_id`, `tool`, `status`, `http_status`), and `next_by_speaker`. A record adds `fields`. A sentence adds `text`, `speaker`, `role`, `basis`, `contact`, `at`, `partial`, `shown`, `span`, `raw_sha256`, and `sanitizer_version`. `next_by_speaker` is the number of the next whole sentence under the same speaker label in the same record, or `null`; it is `null` for a record, for a sentence with no label, and for a label that holds what neutralizing put there, such as `(5)`, because two labels can then print alike. Text output is one table per number, separated by a blank line. |
+| `inspect RECEIPT_ID` | The receipt object, as `audit` gives it, with the text in its `arguments` neutralized as a card's is. Text output is its `audit` row, then its arguments and the rows it returned. |
 | `audit` | Array of receipts in stored order. `--follow` prints one JSON line per changed receipt until Ctrl-C, which exits `130`. See [audit](audit.md). |
 | `demo` | One law-firm renewal on invented data. Object with `schema_version: 2`, `status: "accepted"`, `workflow: "renewal-demo"`, `data_mode: "demo"`, `sources` (each `"demo_fixture"`), `account`, `lookup` (`query`, `matches`, `receipt_id`), `denied_read` (`read_call_notes`, status `403`, required scope `calls:read`), `brief` (`brief_id`, `account_id`, `as_of`, `text`, `units`, and `gaps`, copied from the saved artifact), `audit` (`run_id`, `rows: 7`), and `activities_created: 0`. Each run adds one saved card and seven receipts, the last of which seals the card, and creates no activity. An older or edited book in the folder exits `4`. |
 | `debug verify` | Object with the connector checks, `briefs`, receipt counts, and `injection_brief`. `--with-slack` adds `slack` and `workflow`. It runs on invented data, in a folder that is connected to nothing or to the demo data only. See [tools](tools.md). |
@@ -111,8 +112,10 @@ Salesforce through the local services and the audited tools, which commit a rece
 read only the saved cards and the audit log of the folder. On the demo CRM, and in every other form,
 `inspect` writes nothing. A saved card is read only when the file is the one its seal
 receipt names and every number on it resolves to its record and receipt, so a changed card, or one
-copied from another folder, exits `2`. An ID that is none of the four forms, numbers after anything
-but a brief ID, or `--role` with anything but a brief ID alone exits `2`.
+copied from another folder, exits `2`. A brief prepared by an assistant with `prepare_renewal_brief`
+is read with `read_renewal_brief`, not with `inspect`. An ID that is none of the four forms, numbers
+after anything but a brief ID, or `--role` with anything but a brief ID alone exits `2`. Many numbers
+check the card once.
 
 `--state-dir` selects the private state folder. The default is `var/v2`, except `var/renewal-demo`
 for `demo` and `var/verification` for `debug verify`. One process holds a folder at a time, so while

@@ -331,6 +331,15 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual((receipt["tool"], receipt["status"], len(receipt["rows"])), ("get_account", "ok", 3))
         self.assertEqual(len(self.requests), 4)
 
+    def test_reading_an_account_opens_the_crm_alone_so_a_missing_slack_sign_in_does_not_stop_it(self):
+        profile.save(self.state, {"crm": {"provider": "salesforce", "org": ALIAS, "environment": "developer"},
+                                  "slack": {"provider": "slack"}})
+        code, out, err, _ = self.invoke(["inspect", ACCOUNT, "--json"], connect=False)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["id"], ACCOUNT)
+        receipt, = read_audit(self.state / "audit.sqlite3")
+        self.assertEqual((receipt["tool"], receipt["status"]), ("get_account", "ok"))
+
     def test_human_account_formats_contracts_and_unknown_values(self):
         code, out, err, _ = self.invoke(["inspect", ACCOUNT], environment="sandbox")
         self.assertEqual(code, 0, err)

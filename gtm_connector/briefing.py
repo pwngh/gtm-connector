@@ -268,23 +268,37 @@ def _sealed(directory, brief_id):
     return artifact
 
 
+# What neutralizing a label can put in it. Two labels that differ only where these stand print alike.
+_REPLACED = re.compile(r"\[(?:mention|user|channel|link|U\+)[^\]]*\]|\(\d+\)")
+
+
 def trace_saved(directory, brief_id, number):
-    """Resolve one number on a saved card from its sealed units and evidence, never from the card's text.
+    """Resolve one number on a saved card from its sealed units and evidence, never from the card's text."""
+    return traces_saved(directory, brief_id, [number])[0]
+
+
+def traces_saved(directory, brief_id, numbers):
+    """Resolve numbers on one saved card, checked once, from its sealed units and evidence.
 
     A card keeps the numbers it was sealed with. Nothing is rebuilt: a later rule fix, another Python, or a
     changed seller list would give other units for the same evidence, and the sealed ones are the card.
     """
     artifact = _sealed(directory, brief_id)
-    units = artifact["units"]
-    traced = trace(artifact["evidence"], number, units)
-    # The next sentence under the same speaker label in the same record, where a condition often is. A sentence
-    # with no label has none: no label is not one speaker.
-    sealed, following = units[number - 1], None
-    if sealed["kind"] == "sentence" and sealed["speaker"] is not None:
-        following = next((unit["n"] for unit in units[number:] if unit["kind"] == "sentence"
-                          and unit["record_ref"] == sealed["record_ref"] and unit["speaker"] == sealed["speaker"]),
-                         None)
-    return {"brief_id": brief_id, "account_id": artifact["account_id"], **traced, "next_by_speaker": following}
+    units, traced = artifact["units"], []
+    for number in numbers:
+        found = trace(artifact["evidence"], number, units)
+        # The next whole sentence under the same speaker label in the same record, where a condition often is. A
+        # sentence with no label has none, as no label is not one speaker, and so does a label that may print
+        # like another one.
+        sealed, following = units[number - 1], None
+        if (sealed["kind"] == "sentence" and sealed["speaker"] is not None
+                and not _REPLACED.search(sealed["speaker"])):
+            following = next((unit["n"] for unit in units[number:] if unit["kind"] == "sentence"
+                              and not unit["partial"] and unit["record_ref"] == sealed["record_ref"]
+                              and unit["speaker"] == sealed["speaker"]), None)
+        traced.append({"brief_id": brief_id, "account_id": artifact["account_id"], **found,
+                       "next_by_speaker": following})
+    return traced
 
 
 def units_saved(directory, brief_id):
@@ -308,9 +322,10 @@ def newest_saved(directory, account_id):
     for seal in reversed(read_audit(log, tool=SEAL_TOOL, status="ok")):
         arguments = seal["arguments"]
         if isinstance(arguments, dict) and arguments.get("account_id") == account_id:
+            # The newest card that passes the checks inspect makes, so the card named can be opened.
             try:
-                if _artifact_path(directory, arguments.get("brief_id")).is_file():
+                if _sealed(directory, arguments.get("brief_id"))["account_id"] == account_id:
                     return arguments["brief_id"]
-            except ValueError:
+            except (ValueError, TypeError, KeyError):
                 continue
     return None
