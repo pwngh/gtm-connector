@@ -282,7 +282,7 @@ class InspectTests(unittest.TestCase):
 
     def test_numbers_are_the_digits_printed_on_the_card_and_every_number_is_checked(self):
         brief = self.ok("brief", "acc-003")["brief_id"]
-        for spelled in ("\uff13", "+5", "05", "1_0", "5 ", "0", "-1"):
+        for spelled in ("\uff13", "+5", "1_0", "5 ", "five"):
             with self.subTest(spelled=spelled):
                 self.assertEqual(self.refused("inspect", brief, spelled)["next"], "gtm-connector inspect --help")
 

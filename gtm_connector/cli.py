@@ -154,8 +154,8 @@ class RootParser(Parser):
 
 
 def _card_number(text):
-    """A number as a card prints it: ASCII digits, not starting with 0."""
-    if re.fullmatch(r"[1-9][0-9]*", text) is None:
+    """A number written in ASCII digits. One the card does not have is refused by the card, which names its range."""
+    if re.fullmatch(r"-?[0-9]+", text) is None:
         raise argparse.ArgumentTypeError("a number printed on the card, such as 5")
     return int(text)
 
