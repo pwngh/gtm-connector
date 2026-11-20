@@ -1,10 +1,10 @@
 // Existing page tests render modules directly. Lazy loading has its own tests.
 export function eagerRouteModules() {
-  const names = ['Worklists', 'Playbooks', 'Readiness', 'WorkPlan', 'Evidence', 'History', 'FollowUpReport', 'WorkflowDialogContent', 'CommandPalette'];
+  const names = ['Worklists', 'Playbooks', 'Readiness', 'WorkPlan', 'Evidence', 'History', 'FollowUpReport', 'WorkflowDialogContent'];
   return {
     name: 'direct-page-modules', enforce: 'pre',
     load(id) {
-      if (id.endsWith('/src/lazyPages.js')) return names.map(name => 'export {default as ' + name + '} from \'/src/' + name + '.jsx\';').join('\n');
+      if (id.endsWith('/src/lazyPages.js')) return names.map(name => 'import ' + name + ' from \'/src/' + name + '.jsx\'; ' + name + '.preload = () => Promise.resolve(); export {' + name + '};').join('\n') + '\nexport function forgetFailedPages() {}';
     },
   };
 }

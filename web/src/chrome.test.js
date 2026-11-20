@@ -6,19 +6,19 @@ import {renewalFixture, initialState} from './renewalFixtures.js';
 import {buildWorklist} from './worklist.js';
 import {ChromeHooks, byClass, find, named, nodes, keyboard, element, chromeDOM} from './testing/chromeHarness.js';
 
-let server, App, Dialog, CommandPalette, pages;
+let server, App, Dialog, CommandPalette, RouteLoading, RouteError, pages;
 const hookNames = ['useState', 'useReducer', 'useRef', 'useMemo', 'useId', 'useEffect', 'useLayoutEffect'];
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [{
     name: 'chrome-handlers', enforce: 'pre',
     resolveId(id) {if (id.startsWith('virtual:chrome-')) return '\0' + id;},
     load(id) {
-      if (id === '\0virtual:chrome-react') return 'import React from \'react\'; export default React; ' + hookNames.map(name => 'export const ' + name + '=(...args)=>globalThis.__chromeHooks.' + name + '(...args);').join('\n');
+      if (id === '\0virtual:chrome-react') return 'export * from \'react\'; import React from \'react\'; export default React; ' + hookNames.map(name => 'export const ' + name + '=(...args)=>globalThis.__chromeHooks.' + name + '(...args);').join('\n');
       if (id === '\0virtual:chrome-router') return 'export * from \'react-router\'; ' + ['useNavigate', 'useLocation'].map(name => 'export const ' + name + '=(...args)=>globalThis.__chromeHooks.' + name + '(...args);').join('\n');
       if (id === '\0virtual:chrome-motion') return 'export const motion={section:\'section\'}; export const useReducedMotion=()=>false;';
     },
     transform(code, id) {
-      if (['main', 'WorkspaceDialog', 'CommandPalette'].some(name => id.endsWith('/src/' + name + '.jsx'))) {
+      if (['main', 'WorkspaceDialog', 'CommandPalette', 'RouteContent'].some(name => id.endsWith('/src/' + name + '.jsx'))) {
         code = code.replace("from 'react';", "from 'virtual:chrome-react';").replace("from 'react-router';", "from 'virtual:chrome-router';");
         if (id.endsWith('/WorkspaceDialog.jsx')) code = code.replace("from 'motion/react';", "from 'virtual:chrome-motion';");
         return code;
@@ -28,6 +28,7 @@ before(async () => {
   App = (await server.ssrLoadModule('/src/main.jsx')).App;
   Dialog = (await server.ssrLoadModule('/src/WorkspaceDialog.jsx')).default;
   CommandPalette = (await server.ssrLoadModule('/src/CommandPalette.jsx')).default;
+  ({RouteLoading, RouteError} = await server.ssrLoadModule('/src/RouteContent.jsx'));
   pages = await server.ssrLoadModule('/src/lazyPages.js');
 });
 after(async () => {await server?.close();});
@@ -117,7 +118,11 @@ test('theme is a stable named toggle with a persisted pressed state in both mode
   const label = byClass(tree, 'theme-toggle').props['aria-label'];
   assert.ok(label);
   for (const [before, after] of [['dark', 'light'], ['light', 'dark']]) {
-    assert.equal(byClass(tree, 'theme-toggle').props['aria-pressed'], before === 'dark');
+    const toggle = byClass(tree, 'theme-toggle');
+    assert.equal(toggle.props['aria-pressed'], before === 'dark');
+    assert.equal(toggle.props.title, label);
+    assert.equal(toggle.props.children.type.render.displayName, 'Moon');
+    assert.equal(toggle.props.children.props.fill, before === 'dark' ? 'currentColor' : 'none');
     byClass(tree, 'theme-toggle').props.onClick(); tree = page.render();
     assert.equal(byClass(tree, 'theme-toggle').props['aria-label'], label);
     assert.equal(byClass(tree, 'theme-toggle').props['aria-pressed'], after === 'dark');
@@ -148,7 +153,7 @@ test('the skip link focuses the main landmark without replacing worklist URL sta
   skip.props.onClick(event);
   assert.equal(event.prevented, true);
   assert.equal(document.activeElement, dom.get('main'));
-  assert.equal(dom.get('main').calls.at(-1)[0], 'scroll');
+  assert.deepEqual(dom.get('main').calls.at(-1), ['scroll', {block: 'start', behavior: 'instant'}]);
   assert.equal(page.hooks.entries[page.hooks.index], path);
   const opened = openNavigation(page);
   assert.equal(byClass(opened, 'skip').props.inert, true);
@@ -168,7 +173,9 @@ test('the search opener and both platform shortcuts open the same dialog and rem
     assert.equal(dialog.props.returnFocusRef.current, dom.get('search'));
     assert.equal(byClass(tree, 'search-trigger').props['aria-expanded'], true);
     assert.equal(byClass(tree, 'main-shell').props.inert, true);
-    assert.ok(find(tree, node => node.type === pages.CommandPalette));
+    // The palette ships with the shell, so its input exists in the same render.
+    assert.ok(find(tree, node => node.type === CommandPalette));
+    assert.equal(find(tree, node => node.type?.name === 'RouteContent' && node.props.path === 'search'), undefined);
     dialog.props.onClose(); page.render(); page.hooks.dispose();
   }
 });
@@ -200,10 +207,9 @@ test('a loading command dialog takes focus, contains Tab and returns focus on Es
 
 test('command search filters real destinations and Enter navigates the selected result', () => {
   const page = bench(); let tree = page.render(); byClass(tree, 'search-trigger').props.onClick(); tree = page.render();
-  const props = find(tree, node => node.type === pages.CommandPalette).props;
+  const props = find(tree, node => node.type === CommandPalette).props;
   const instance = hooks(); let palette = instance.render(CommandPalette, props);
   const input = find(palette, node => node.props.role === 'combobox');
-  assert.equal(input.props.autoFocus, true);
   input.props.onChange({target: {value: 'Work queue'}});
   palette = instance.render(CommandPalette, props);
   assert.equal([...nodes(palette)].filter(node => node.props.role === 'option').length, 1);
@@ -269,6 +275,129 @@ test('a pending exact destination never takes focus behind an open dialog', () =
   assert.equal(document.activeElement, target);
 });
 
+const pageDone = (tree, path) => find(tree, node => node.type?.name === 'RouteContent' && node.props.path === path).props.onReady(path);
+
+test('a link removed while its page loads leaves focus on the page heading until the page target takes it', () => {
+  const readiness = renewalFixture.paths.root + '/readiness', history = renewalFixture.paths.history;
+  const page = bench(readiness); pageDone(page.render(), readiness); page.render();
+  const link = element('trace-in-history'); link.focus();
+  page.hooks.navigate(history + '?' + new URLSearchParams({entry: 'history-1', view: 'recorded'}));
+  link.isConnected = false;
+  let tree = page.render();
+  assert.equal(document.activeElement, dom.mainHeading);
+  assert.equal(dom.mainHeading.tabIndex, -1);
+  // History focuses its selected entry when it mounts. The shell leaves that focus alone.
+  const entry = element('history-entry'); entry.focus();
+  pageDone(tree, history); tree = page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, entry);
+});
+
+test('while a page loads, focus on a control that is still there is never moved', () => {
+  const page = bench(renewalFixture.paths.workplan); page.render();
+  page.hooks.navigate(renewalFixture.paths.history + '?' + new URLSearchParams({entry: 'history-1'}));
+  const control = dom.get('search'); control.focus();
+  page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, control);
+});
+
+test('the first load of a page does not move focus to its heading', () => {
+  const page = bench(renewalFixture.paths.history + '?' + new URLSearchParams({entry: 'history-1'}));
+  document.activeElement = document.body;
+  page.render(); page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, document.body);
+});
+
+test('a header jump made during loading is dropped once focus has moved elsewhere', () => {
+  const path = renewalFixture.paths.root + '/readiness';
+  for (const moved of [false, true]) {
+    const page = bench(path); const tree = page.render();
+    const button = element('sources-and-gaps'); button.focus();
+    find(byClass(tree, 'heading-actions'), node => node.type === 'button').props.onClick();
+    if (moved) dom.get('search').focus();
+    const target = element('readiness-coverage'); dom.targets.set('readiness-coverage', target);
+    pageDone(tree, path); page.render();
+    assert.equal(document.activeElement, moved ? dom.get('search') : target);
+    page.hooks.dispose();
+  }
+});
+
+test('a page or dialog that fails to load gives focus to its message only when focus has no better place', () => {
+  const dialog = element('dialog');
+  for (const [inDialog, start, takes] of [[false, 'heading', true], [false, 'body', true], [false, 'control', false], [true, 'dialog', true], [true, 'control', false]]) {
+    const boundary = new RouteError({dialog: inDialog, children: null});
+    const panel = element('panel'); panel.ownerDocument = document; panel.closest = selector => inDialog && selector === '[role="dialog"]' ? dialog : null;
+    boundary.panel.current = panel;
+    if (start === 'heading') dom.mainHeading.focus();
+    else if (start === 'body') document.activeElement = document.body;
+    else if (start === 'dialog') dialog.focus();
+    else dom.get('search').focus();
+    const before = document.activeElement;
+    boundary.componentDidCatch(new Error('Failed to fetch a page module'));
+    assert.equal(document.activeElement, takes ? panel : before, inDialog + ' ' + start);
+  }
+});
+
+test('Try again clears the failure, keeps focus on a lasting spot and remounts the content', () => {
+  for (const inDialog of [false, true]) {
+    const dialog = element('dialog'), boundary = new RouteError({dialog: inDialog, children: 'page content'});
+    boundary.setState = update => Object.assign(boundary.state, typeof update === 'function' ? update(boundary.state) : update);
+    Object.assign(boundary.state, RouteError.getDerivedStateFromError(new Error('Failed to fetch a page module')));
+    const view = boundary.render();
+    assert.equal(view.props.tabIndex, -1);
+    assert.equal(find(view, node => node.props.role === 'alert').props.children.join(''), `This ${inDialog ? 'dialog' : 'page'} could not load. Your saved walkthrough has not been reset.`);
+    const panel = element('panel'); panel.closest = selector => inDialog && selector === '[role="dialog"]' ? dialog : null;
+    boundary.panel.current = panel;
+    const button = find(view, node => node.type === 'button');
+    assert.equal(button.props.children, 'Try again');
+    dom.get('retry').focus();
+    button.props.onClick();
+    assert.equal(document.activeElement, inDialog ? dialog : dom.mainHeading);
+    assert.equal(boundary.state.failed, false);
+    const content = boundary.render();
+    assert.equal(content.key, '1');
+    assert.equal(content.props.children, 'page content');
+  }
+});
+
+test('the command palette input takes focus from the dialog itself, never from a control the user moved to', () => {
+  const dialog = element('dialog'), close = element('dialog-close');
+  for (const [start, expected] of [[dialog, 'input'], [document.body, 'input'], [close, close]]) {
+    const instance = hooks(), tree = instance.render(CommandPalette, {items: []});
+    const input = element('palette-input'); input.ownerDocument = document;
+    input.closest = selector => selector === '[role="dialog"]' ? dialog : null;
+    find(tree, node => node.props.role === 'combobox').props.ref.current = input;
+    if (start === document.body) document.activeElement = document.body; else start.focus();
+    instance.flush();
+    assert.equal(document.activeElement, expected === 'input' ? input : expected);
+    instance.dispose();
+  }
+});
+
+test('the workflow dialog content preloads when the browser is idle', () => {
+  const preload = pages.WorkflowDialogContent.preload; let calls = 0, idle = null;
+  pages.WorkflowDialogContent.preload = () => {calls++; return Promise.resolve();};
+  window.requestIdleCallback = callback => {idle = callback; return 7;};
+  window.cancelIdleCallback = () => {};
+  try {
+    bench().render();
+    assert.equal(calls, 0);
+    idle();
+    assert.equal(calls, 1);
+  } finally {pages.WorkflowDialogContent.preload = preload;}
+});
+
+test('the loading state holds the rest of the viewport, so the footer does not jump, but not inside a dialog', () => {
+  for (const inDialog of [false, true]) {
+    const instance = hooks(), tree = instance.render(RouteLoading, {label: 'History'}), set = [];
+    tree.props.ref.current = {closest: () => inDialog ? {} : null, getBoundingClientRect: () => ({top: 300}), style: {setProperty: (...args) => set.push(args)}};
+    window.scrollY = 120; instance.flush();
+    assert.deepEqual(set, inDialog ? [] : [['--route-top', '420px']]);
+    assert.equal(tree.props.role, 'status');
+    instance.dispose();
+  }
+  assert.ok(css.includes('.main-content>.route-loading:not(.route-error) {min-height:max(160px, calc(100dvh - var(--route-top, 0px)))}'));
+});
+
 const css = readFileSync(new URL('./chrome.css', import.meta.url), 'utf8');
 const cssRules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(match => ({selector: match[1].trim(), declarations: Object.fromEntries(match[2].split(';').filter(part => part.includes(':')).map(part => {const index = part.indexOf(':'); return [part.slice(0, index).trim(), part.slice(index + 1).trim()];}))}));
 const rule = part => cssRules.find(rule => rule.selector.includes(part))?.declarations;
@@ -289,7 +418,7 @@ test('one shared CSS contract gives every chrome control a 44px target and 16px 
 });
 
 test('page styles cannot resize the shared shell, renewal heading or tabs after a lazy import', () => {
-  for (const name of ['worklists', 'readiness', 'history', 'playbooks', 'operations', 'evidence-flow']) {
+  for (const name of ['worklists', 'worklistEntry', 'readiness', 'history', 'playbooks', 'operations', 'evidence-flow', 'customerDecision', 'vendor/planes']) {
     const source = readFileSync(new URL('./' + name + '.css', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /\.(sidebar|topbar|main-content|main-shell|page-heading|detail-nav|nav-item|brand)(?=[\s.:>{,#])/);
     assert.doesNotMatch(source, /\.(wl|rd|hs)-return-context/);

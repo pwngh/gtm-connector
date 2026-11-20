@@ -11,12 +11,12 @@ import {MotionConfig} from 'motion/react';
 import {initialState, renewalFixture, historyFixture} from './renewalFixtures.js';
 import {buildWorklist, selectWorklist} from './worklist.js';
 
-let server, App, RouteContent, pageLoaders;
+let server, App, RouteContent, pageLoaders, lazyPage, forgetFailedPages;
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error'});
   App = (await server.ssrLoadModule('/src/main.jsx')).App;
   RouteContent = (await server.ssrLoadModule('/src/RouteContent.jsx')).default;
-  pageLoaders = (await server.ssrLoadModule('/src/lazyPages.js')).pageLoaders;
+  ({pageLoaders, lazyPage, forgetFailedPages} = await server.ssrLoadModule('/src/lazyPages.js'));
 });
 after(async () => {await server?.close();});
 
@@ -113,6 +113,48 @@ test('Back and Forward restore the lazy route, filters, ordering and selected wo
   } finally {router.dispose();}
 });
 
+function attempt(element) {
+  return new Promise((resolve, reject) => {
+    const errors = [], output = new PassThrough();
+    let html = '';
+    output.on('data', chunk => {html += chunk;});
+    output.on('end', () => resolve({html, errors}));
+    const renderer = renderToPipeableStream(element, {onAllReady() {renderer.pipe(output);}, onShellError: reject, onError(error) {errors.push(error.message);}});
+  });
+}
+
+test('a failed page import is tried again once its message has shown, not remembered for the session', async () => {
+  let calls = 0, fail = true;
+  const Page = lazyPage(async () => {
+    calls++;
+    if (fail) throw new Error('Failed to fetch a page module');
+    return {default: () => React.createElement('p', null, 'Loaded page')};
+  });
+  const page = () => React.createElement(React.Suspense, {fallback: 'Loading page'}, React.createElement(Page));
+  let result = await attempt(page());
+  assert.deepEqual(result.errors, ['Failed to fetch a page module']);
+  assert.doesNotMatch(result.html, /Loaded page/);
+  fail = false;
+  // Until the failure has reached its message, it stands rather than looping on new requests.
+  result = await attempt(page());
+  assert.deepEqual(result.errors, ['Failed to fetch a page module']);
+  assert.equal(calls, 1);
+  forgetFailedPages();
+  result = await attempt(page());
+  assert.deepEqual(result.errors, []);
+  assert.match(result.html, /<p>Loaded page<\/p>/);
+  assert.equal(calls, 2);
+});
+
+test('a preloaded page renders in the same pass, without a loading state', async () => {
+  let calls = 0;
+  const Page = lazyPage(async () => {calls++; return {default: () => React.createElement('p', null, 'Dialog content')};});
+  await Page.preload();
+  const html = renderToStaticMarkup(React.createElement(React.Suspense, {fallback: 'Loading dialog'}, React.createElement(Page)));
+  assert.equal(html, '<p>Dialog content</p>');
+  assert.equal(calls, 1);
+});
+
 test('the shell can render without browser globals while the page is still loading', () => {
   assert.equal(typeof window, 'undefined');
   const html = renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: ['/renewals']}, React.createElement(App)));
@@ -137,5 +179,29 @@ test('production chunks keep page implementations out of the shell and stay belo
     assert.ok(chunk.isDynamicEntry, name + ' is dynamically imported');
   }
   for (const chunk of chunks) assert.ok(Buffer.byteLength(chunk.code) < 500_000, chunk.fileName + ' exceeds 500 kB');
+  // The palette ships with the shell, so the first keystrokes reach its input. Dialog content loads on its own.
+  assert.ok(Object.keys(main.modules).some(id => id.endsWith('/src/CommandPalette.jsx')));
+  const dialog = chunks.find(chunk => Object.keys(chunk.modules).some(id => id.endsWith('/src/WorkflowDialogContent.jsx')));
+  assert.ok(dialog.isDynamicEntry);
+  assert.notEqual(dialog.fileName, main.fileName);
+  // Animation code loads with the pages that use it, never at startup.
+  const startup = new Set(), visit = name => {if (startup.has(name)) return; startup.add(name); chunks.find(chunk => chunk.fileName === name).imports.forEach(visit);};
+  visit(main.fileName);
+  const animated = chunks.filter(chunk => Object.keys(chunk.modules).some(id => /\/node_modules\/(motion|motion-dom|motion-utils|framer-motion)\//.test(id)));
+  assert.ok(animated.length > 0);
+  for (const chunk of animated) assert.ok(!startup.has(chunk.fileName), chunk.fileName + ' loads animation code at startup');
+  // All styles ship with the shell, page styles before shared ones, so the cascade
+  // is the same whichever page loads first.
+  const stylesheets = result.output.filter(asset => asset.type === 'asset' && asset.fileName.endsWith('.css'));
+  assert.equal(stylesheets.length, 1);
+  assert.deepEqual([...main.viteMetadata.importedCss], [stylesheets[0].fileName]);
+  for (const chunk of chunks) if (chunk !== main) assert.equal(chunk.viteMetadata.importedCss.size, 0, chunk.fileName + ' brings its own CSS');
+  const cssText = String(stylesheets[0].source), at = marker => {const index = cssText.indexOf(marker); assert.ok(index >= 0, marker); return index;};
+  const shared = at('--ink:#17243a');
+  for (const marker of ['.wl-page{', '.wl-step-entry{', '.evidence-flow{', '.planes-segmented{', '.ops-page{', '.pb-page{', '.rd-page{', '.hs-page{', '.reviewer-decision-form']) assert.ok(at(marker) < shared, marker + ' comes after the shared styles');
+  assert.ok(at(':root{--chrome-focus') > shared);
+  // Equal-weight rules: the shared dark primary button comes last and wins on Operations.
+  const operationsButton = cssText.search(/\.ops-page \.button\.primary\{/), sharedButton = cssText.search(/\.main-content \.button\.primary\{[^}]*linear-gradient\(#355be3/);
+  assert.ok(operationsButton >= 0 && sharedButton > operationsButton);
   assert.doesNotMatch(readFileSync(new URL('../vite.config.js', import.meta.url), 'utf8'), /chunkSizeWarningLimit/);
 });

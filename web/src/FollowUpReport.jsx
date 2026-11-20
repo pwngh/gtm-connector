@@ -3,6 +3,7 @@ import React, {Fragment, useId, useLayoutEffect, useRef} from 'react';
 import {useSearchParams} from 'react-router';
 import {CheckCircle2, CircleDashed, ClipboardCheck, FileText, GitBranch, History, Info, Link2, Phone, ShieldCheck, UserRound, X} from 'lucide-react';
 import PlanesSegmentedControl from './vendor/PlanesSegmentedControl';
+import {MotionConfig} from 'motion/react';
 import {buildOperations} from './operations';
 import './operations.css';
 
@@ -33,7 +34,7 @@ export default function FollowUpReport({state, derived:d, evidence, onTask, onHi
   function recoverView(values){restoreViewFocus.current=true;update(values);}
   const showAll=()=>recoverView({view:'all',status:null});
 
-  return <div className="ops-page">
+  return <MotionConfig reducedMotion="user"><div className="ops-page">
     <div className="ops-scope"><span><strong>{renewalFixture.account.name}</strong><span className="ops-scope-divider">/</span>{renewalFixture.agreement.label}</span><button className="text-button" onClick={onScope}><Info size={15}/>Report scope</button></div>
 
     <section className={`ops-brief ${next?'':'is-complete'}`} aria-label="Next action">
@@ -77,5 +78,5 @@ export default function FollowUpReport({state, derived:d, evidence, onTask, onHi
 
     <div className="ops-ledger-row"><span className="ops-ledger-icon"><History size={20}/></span><div><span className="ops-kicker">LATEST WORKSPACE CHANGE</span><strong>{latest?.title||'Prepared draft · no activity recorded yet'}</strong><p>{latest?dateText(latest.at):'Actions taken in this walkthrough will appear in decision history.'}</p></div><button className="text-button" onClick={onHistory}>View history</button></div>
     <div className="ops-commercial"><span><CircleDashed size={17}/><strong>Commercial renewal</strong></span><span className="ops-commercial-state">Not confirmed</span><p>Completion here records the operational work. A signed renewal is a separate outcome.</p></div>
-  </div>;
+  </div></MotionConfig>;
 }
