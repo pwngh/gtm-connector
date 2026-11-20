@@ -1,6 +1,6 @@
 import React, {createContext, use, useContext, useSyncExternalStore} from 'react';
-import {useSearchParams} from 'react-router';
-import {ChevronRight, UserRound} from 'lucide-react';
+import {ChevronRight, Compass, FileText, GitBranch, Layers, UserRound} from 'lucide-react';
+import {renewalFixture} from './renewalFixtures.js';
 import {walkthroughStore} from './serverSession.js';
 import {ApiEvidence, ApiReadiness} from './lazyPages.js';
 import {Avatar} from './WorkspaceControls.jsx';
@@ -40,10 +40,10 @@ export function ByMode({page, api = null, children = null}) {
   return api;
 }
 
-// The breadcrumb on a page that reads from the server: the account being read, no links.
+// The breadcrumb on a page that reads from the server. It names no account:
+// the link's text is not trusted, and the page heading shows the verified one.
 export function ApiCrumbs() {
-  const [params] = useSearchParams();
-  return <><span>Renewal</span><ChevronRight size={14}/><span>{params.get('account')?.trim() || 'No account chosen'}</span></>;
+  return <><span>Renewal</span><ChevronRight size={14}/><span>Read from the server</span></>;
 }
 
 // The signed-in principal's mark; signed out, a plain figure.
@@ -55,3 +55,18 @@ export function PrincipalMark() {
 
 // Commands and records from the walkthrough say so when the server serves the app.
 export const walkthroughItems = items => items.map(item => ({...item, sub: `Walkthrough · ${item.sub}`}));
+
+// The palette on a page that reads from the server: the two server pages, with
+// the chosen account and open card kept, and explicit ways into the walkthrough.
+// No walkthrough record or action opens over server data.
+export function apiCommandItems(go, search) {
+  const params = new URLSearchParams(search), keep = new URLSearchParams();
+  for (const key of ['account', 'card']) if (params.get(key)) keep.set(key, params.get(key));
+  const query = String(keep) ? `?${keep}` : '';
+  return [
+    {group: 'Read from the server', icon: FileText, label: 'Evidence', sub: 'The chosen account’s cards, units, receipts and gaps', onSelect: () => go(renewalFixture.paths.evidence + query)},
+    {group: 'Read from the server', icon: GitBranch, label: 'Readiness', sub: 'The open card’s gaps; the server has no workflow rules yet', onSelect: () => go(`${renewalFixture.paths.root}/readiness${query}`)},
+    {group: 'Walkthrough', icon: Compass, label: 'Open the walkthrough work plan', sub: 'Invented records, saved in this browser', onSelect: () => go(renewalFixture.paths.workplan)},
+    {group: 'Walkthrough', icon: Layers, label: 'Open the walkthrough renewals', sub: 'Invented records, saved in this browser', onSelect: () => go('/renewals')},
+  ];
+}

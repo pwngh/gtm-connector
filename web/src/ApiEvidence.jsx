@@ -5,6 +5,7 @@ import {gapDispositions, unitFacts} from './api.js';
 import {ApiFrame, ApiRenewalHeader, AccountPicker, CardFacts, CardList, Refusal, Time, gapsTarget, selectionHref, useApiRead, useCardSelection} from './ApiFrame.jsx';
 import {useServer} from './ServerSwitch.jsx';
 import {Pill} from './WorkspaceControls.jsx';
+import {focusElement} from './focusElement.js';
 
 // Evidence when the Go server serves the app: the signed-in principal's
 // cards for an account, a card's units with their receipts, and its gaps,
@@ -56,13 +57,18 @@ export function UnitBody({unit}) {
   </>;
 }
 
-function UnitDetail({cardId, n, who, params}) {
-  const heading = useRef(null);
-  const unit = useApiRead(`unit:${who}:${cardId}:${n}`, api => api.unit(cardId, n));
-  useEffect(() => {heading.current?.focus({preventScroll: true});}, [cardId, n]);
+// One unit read in full, with its receipt. Opening it, from its link or from
+// a shared URL, brings its heading into view and puts focus there.
+function UnitDetail({account, cardId, n, params}) {
+  const unit = useApiRead(`unit:${account}:${cardId}:${n}`, api => api.unit(cardId, n));
+  useEffect(() => {focusElement(document.getElementById(`api-unit-${n}-detail`), {block: 'start'});}, [cardId, n]);
+  return <UnitDetailView n={n} cardId={cardId} params={params} unit={unit}/>;
+}
+
+export function UnitDetailView({n, cardId, params, unit}) {
   return <section className="api-unit-detail" aria-labelledby={`api-unit-${n}-detail`}>
-    <div className="api-unit-detail-head"><h4 id={`api-unit-${n}-detail`} ref={heading} tabIndex={-1}>Unit {n} in full</h4>
-      <Link className="button ghost" to={selectionHref(params, {unit: null})} aria-label={`Close unit ${n} in full`} preventScrollReset><X size={16} aria-hidden="true"/>Close</Link></div>
+    <div className="api-unit-detail-head"><h4 id={`api-unit-${n}-detail`} tabIndex={-1}>Unit {n} in full</h4>
+      <Link className="button ghost" to={selectionHref(params, {card: cardId, unit: null})} aria-label={`Close unit ${n} in full`} preventScrollReset><X size={16} aria-hidden="true"/>Close</Link></div>
     {unit.status === 'failed' ? <Refusal error={unit.error} retry={unit.retry}/> : unit.status !== 'ready' ? <p className="api-loading" role="status">Reading unit {n}…</p> : <>
       <dl className="api-facts">
         <div><dt>Card and number</dt><dd>{unit.data.card} · unit {unit.data.n}</dd></div>
@@ -76,7 +82,7 @@ function UnitDetail({cardId, n, who, params}) {
   </section>;
 }
 
-export function UnitRow({unit, receipt, open, params, who, cardId}) {
+export function UnitRow({unit, receipt, open, params, account, cardId}) {
   const facts = unitFacts(unit);
   const Icon = facts.kind === 'record' ? Database : sourceIcons[facts.source] || MessageSquare;
   return <article className={`library-row api-unit ${open ? 'is-open' : ''}`} data-unit-n={facts.n} id={`api-unit-${facts.n}`}>
@@ -89,16 +95,16 @@ export function UnitRow({unit, receipt, open, params, who, cardId}) {
           : !receipt || receipt.status === 'loading' ? <p className="api-loading" role="status">Reading receipt…</p>
             : receipt.status === 'failed' ? <Refusal error={receipt.error}/> : <ReceiptSummary receipt={receipt.data}/>}
       </div>
-      {open && <UnitDetail cardId={cardId} n={facts.n} who={who} params={params}/>}
+      {open && <UnitDetail account={account} cardId={cardId} n={facts.n} params={params}/>}
     </div>
-    {!open && <Link className="button ghost" id={`api-unit-${facts.n}-inspect`} to={selectionHref(params, {unit: facts.n})} preventScrollReset>Inspect unit {facts.n}</Link>}
+    {!open && <Link className="button ghost" id={`api-unit-${facts.n}-inspect`} to={selectionHref(params, {card: cardId, unit: facts.n})} preventScrollReset>Inspect unit {facts.n}</Link>}
   </article>;
 }
 
 // Each distinct receipt once, read separately so one refusal stays with its units.
-function useReceipts(card, who) {
+function useReceipts(card) {
   const ids = card ? [...new Set(card.units?.map(unit => unit.receipt_id).filter(Boolean))] : [];
-  const read = useApiRead(card ? `receipts:${who}:${card.id}:${ids.join(',')}` : null, async api => {
+  const read = useApiRead(card ? `receipts:${card.account}:${card.id}:${ids.join(',')}` : null, async api => {
     const results = await Promise.all(ids.map(id => api.receipt(id).then(data => [id, {status: 'ready', data}], error => [id, {status: 'failed', error}])));
     const ended = results.find(([, result]) => result.error?.kind === 'signed_out');
     if (ended) throw ended[1].error;
@@ -107,7 +113,7 @@ function useReceipts(card, who) {
   return id => read.status === 'ready' ? read.data[id] : read.status === 'failed' ? {status: 'failed', error: read.error} : {status: 'loading'};
 }
 
-export function CardEvidence({card, receiptFor, params, who}) {
+export function CardEvidence({card, receiptFor, params}) {
   const openUnit = Number(params.get('unit')) || null;
   const units = Array.isArray(card.units) ? card.units : [];
   const gaps = Array.isArray(card.gaps) ? card.gaps : [];
@@ -121,7 +127,7 @@ export function CardEvidence({card, receiptFor, params, who}) {
   return <>
     <CardFacts card={card}/>
     <h3 className="api-section-title">{units.length} numbered units</h3>
-    {units.map(unit => <UnitRow key={unit.n} unit={unit} receipt={receiptFor(unit.receipt_id)} open={unit.n === openUnit} params={params} who={who} cardId={card.id}/>)}
+    {units.map(unit => <UnitRow key={unit.n} unit={unit} receipt={receiptFor(unit.receipt_id)} open={unit.n === openUnit} params={params} account={card.account} cardId={card.id}/>)}
     {openUnit && !units.some(unit => unit.n === openUnit) && <p className="api-notice" role="status">This card has no unit {openUnit}. No other unit is shown in its place.</p>}
     <section className="library-gaps" aria-labelledby={gapsTarget.evidence}>
       <h3 id={gapsTarget.evidence} tabIndex={-1}>What was not read or not shown</h3>
@@ -132,16 +138,16 @@ export function CardEvidence({card, receiptFor, params, who}) {
   </>;
 }
 
-function EvidenceFromServer({selection}) {
-  const {params, card, who} = selection;
-  const receiptFor = useReceipts(card.status === 'ready' ? card.data : null, who);
+export function EvidenceFromServer({selection}) {
+  const {params, card} = selection;
+  const receiptFor = useReceipts(card.status === 'ready' ? card.data : null);
   return <section className="plain-panel evidence-library api-evidence">
     <div className="panel-header"><div><div className="section-kicker">SOURCE LIBRARY · FROM THE SERVER</div><h2>The sealed card, unit by unit.</h2></div></div>
     <AccountPicker selection={selection}/>
     <CardList selection={selection}/>
     {selection.cardId && selection.listed && (card.status === 'failed' ? <Refusal error={card.error} retry={card.retry}/>
       : card.status !== 'ready' ? <p className="api-loading" role="status">Reading the card…</p>
-        : <CardEvidence card={card.data} receiptFor={receiptFor} params={params} who={who}/>)}
+        : <CardEvidence card={card.data} receiptFor={receiptFor} params={params}/>)}
     <div className="library-notice"><Info size={17}/><p>Read from the server as the signed-in principal. Quotations are the server’s neutralized text, shown exactly. Times are UTC.</p></div>
   </section>;
 }

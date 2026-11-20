@@ -3,7 +3,11 @@
 .api-frame {display:grid; gap:20px; min-width:0; overflow-wrap:anywhere}
 .api-readiness .api-frame {margin-bottom:24px}
 .api-label {display:block; font-size:.875rem; line-height:1.5; color:var(--muted)}
-.api-mono,.api-digest {font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.875rem; word-break:break-all}
+/* Record references, receipt rows and the digest are content: 16px. */
+.api-mono,.api-digest {font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:1rem; word-break:break-all}
+.api-label .api-mono,dt .api-mono {font-size:.875rem}
+/* Announces sign-in and sign-out to assistive technology; not drawn. */
+.api-announce {position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0}
 .api-frame :is(p,li,dd) {font-size:1rem; line-height:1.6}
 .api-frame .button {display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; font-size:1rem; text-decoration:none; max-width:100%}
 .api-frame :is(button,a,input):focus-visible {outline:3px solid #5b7fe8; outline-offset:3px}
@@ -34,7 +38,7 @@
 .api-account {display:flex; align-items:flex-end; flex-wrap:wrap; gap:8px 16px; padding:4px 0 18px; border-bottom:1px solid var(--line)}
 .api-account .field {flex:0 1 420px; min-width:0; margin:0}
 .api-account .field select {width:100%}
-.api-account .api-label {margin:0 0 10px}
+.api-account .api-label {flex-basis:100%; margin:0}
 .api-cards {padding:16px 0 4px}
 .api-card-list {list-style:none; margin:8px 0 0; padding:0; display:grid; gap:8px}
 .api-card-list a {display:flex; flex-direction:column; justify-content:center; min-height:44px; padding:10px 14px; border:1px solid var(--line); border-radius:9px; color:inherit; text-decoration:none; font-size:1rem; line-height:1.5}
@@ -42,7 +46,7 @@
 .api-card-list a:hover {border-color:#5b7fe8}
 .api-card-list a[aria-current='true'] {border-color:#2458ce; box-shadow:inset 3px 0 #2458ce}
 
-.api-facts {display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px 24px; margin:18px 0 6px; padding:16px 0; border-block:1px solid var(--line)}
+.api-facts {display:grid; grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr)); gap:12px 24px; margin:18px 0 6px; padding:16px 0; border-block:1px solid var(--line)}
 .api-facts>div {min-width:0}
 .api-facts dt,.api-receipt dt {font-size:.875rem; line-height:1.5; color:var(--muted)}
 .api-facts dd,.api-receipt dd {margin:2px 0 0; font-size:1rem; line-height:1.5; overflow-wrap:anywhere}
@@ -51,11 +55,11 @@
 .evidence-library .api-quote {margin:13px 0 8px; padding:4px 0 4px 16px; border-left:3px solid #9fb4d6; font-size:1.125rem; line-height:1.55; max-width:700px; white-space:pre-wrap; overflow-wrap:anywhere}
 .evidence-library .api-record {margin:13px 0 8px}
 .api-unit-receipt {margin-top:14px}
-.api-receipt {display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px 20px; margin:6px 0 0}
+.api-receipt {display:grid; grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr)); gap:8px 20px; margin:6px 0 0}
 .api-receipt>div {min-width:0}
-.api-receipt-full {grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.api-receipt-full {grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))}
 .api-rows {margin:0; padding-left:18px}
-.api-rows li {font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.875rem; word-break:break-all}
+.api-rows li {font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:1rem; word-break:break-all}
 .api-unit-detail {margin-top:16px; padding:16px; border:1px solid var(--line); border-radius:10px}
 .api-unit-detail-head {display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 16px}
 .api-unit-detail h4 {margin:0; font-size:1.125rem; line-height:1.4}
@@ -69,7 +73,10 @@
 .api-renewal-header .detail-nav nav {grid-template-columns:repeat(2,minmax(0,1fr))}
 .api-renewal-header h1 {overflow-wrap:anywhere}
 .api-picker {display:grid; gap:4px; margin-bottom:22px}
-.api-unit-summary {padding:18px 20px; margin-top:16px}
+.api-unit-summary,.api-card-notes {padding:18px 20px; margin-top:16px}
+.api-card-notes ul {margin:0; padding:0; list-style:none; display:grid; gap:10px}
+.api-card-notes p {margin:0}
+.api-no-rules {padding-top:4px}
 .api-unit-summary h3 {margin-bottom:8px}
 
 html[data-theme='dark'] :is(.api-session,.api-signin) {background:#131d28; border-color:#2f3f51; color:var(--ink)}
@@ -78,6 +85,9 @@ html[data-theme='dark'] .api-frame .field :is(input,select) {background:#0f1720;
 html[data-theme='dark'] .api-problem {background:#2a1f12; border-color:#7a5a30; color:#f3d7ae}
 html[data-theme='dark'] .api-card-list a[aria-current='true'] {border-color:#8fb1ff; box-shadow:inset 3px 0 #8fb1ff}
 html[data-theme='dark'] .evidence-library .api-quote {border-left-color:#55789b}
+/* A unit's kind, source and time are server facts: 4.5:1 in the light theme. */
+.api-evidence .library-meta {color:#53677f}
+html[data-theme='dark'] .api-evidence .library-meta {color:#9fb3c9}
 
 @media (max-width:650px) {
   .api-session,.api-signin {padding:14px}

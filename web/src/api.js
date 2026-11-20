@@ -41,10 +41,12 @@ export function refusal(status, body) {
   return new ApiError({status, kind, code, message});
 }
 
-async function readJson(response) {
+// What a response's body is: JSON that was read, a body that is not JSON, or
+// a body declared JSON that could not be read (cut off, or malformed).
+async function readBody(response) {
   const type = response.headers?.get?.('Content-Type') || '';
-  if (!/^application\/json\b/i.test(type)) return null;
-  try {return await response.json();} catch {return null;}
+  if (!/^application\/json\b/i.test(type)) return {kind: 'other', type};
+  try {return {kind: 'json', value: await response.json()};} catch {return {kind: 'broken'};}
 }
 
 export function isSessionView(value) {
@@ -57,21 +59,36 @@ const segment = value => {
   return encodeURIComponent(value);
 };
 
-export function createApiClient(fetchImpl = (...args) => globalThis.fetch(...args)) {
-  async function request(method, path, {csrf, body} = {}) {
+// How long any API request may take before it counts as unanswered.
+export const requestDeadline = 10_000;
+
+export function createApiClient(fetchImpl = (...args) => globalThis.fetch(...args), {timeoutMs = requestDeadline} = {}) {
+  // Every request has a deadline, and a redirect is refused rather than
+  // followed, so the cookie and the CSRF token never go anywhere else.
+  async function send(method, path, {csrf, body} = {}) {
     const headers = {Accept: 'application/json'};
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (csrf) headers[csrfHeader] = csrf;
-    let response;
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), timeoutMs);
     try {
-      response = await fetchImpl(path, {method, headers, credentials: 'same-origin', cache: 'no-store',
+      const response = await fetchImpl(path, {method, headers, credentials: 'same-origin', cache: 'no-store', redirect: 'manual', signal: abort.signal,
         body: body === undefined ? undefined : JSON.stringify(body)});
+      if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) return {response, body: null, redirect: true};
+      return {response, body: await readBody(response)};
     } catch {
       throw new ApiError({kind: 'unreachable'});
+    } finally {
+      clearTimeout(timer);
     }
-    const json = await readJson(response);
+  }
+  async function request(method, path, options) {
+    const {response, body, redirect} = await send(method, path, options);
+    if (redirect) throw new ApiError({status: response.status, kind: 'redirect'});
+    if (body.kind === 'broken') throw new ApiError({status: response.status, kind: 'unreachable'});
+    const json = body.kind === 'json' ? body.value : null;
     if (!response.ok) throw refusal(response.status, json);
-    if (json === null) throw new ApiError({status: response.status, kind: 'unexpected'});
+    if (json === null || typeof json !== 'object') throw new ApiError({status: response.status, kind: 'unexpected'});
     return json;
   }
   async function session() {
@@ -80,20 +97,26 @@ export function createApiClient(fetchImpl = (...args) => globalThis.fetch(...arg
     return view;
   }
   return {
-    // Which app this is: served by the Go server, which answers in JSON even
-    // when it refuses, or a static build, which has no API and answers with
-    // HTML or a plain 404. A request that gets no answer at all is neither.
+    // Which app this is. Only what a static host answers means the
+    // walkthrough: a 404, or a 2xx HTML page (its fallback for any path). The
+    // Go server answers in JSON, so anything else, a refusal, an error page
+    // in front of it or a body cut off, is the server's answer, shown as such.
     async probe() {
-      let response;
+      let sent;
       try {
-        response = await fetchImpl(sessionPath, {method: 'GET', headers: {Accept: 'application/json'}, credentials: 'same-origin', cache: 'no-store'});
-      } catch {
-        return {mode: 'unreachable', session: null, error: new ApiError({kind: 'unreachable'})};
+        sent = await send('GET', sessionPath);
+      } catch (error) {
+        return {mode: 'unreachable', session: null, error};
       }
-      const json = await readJson(response);
-      if (json === null) return {mode: 'walkthrough', session: null, error: null};
-      if (response.ok && isSessionView(json)) return {mode: 'api', session: json, error: null};
-      return {mode: 'api', session: null, error: response.ok ? new ApiError({status: response.status, kind: 'unexpected'}) : refusal(response.status, json)};
+      const {response, body, redirect} = sent;
+      if (redirect) return {mode: 'api', session: null, error: new ApiError({status: response.status, kind: 'redirect'})};
+      if (body.kind === 'broken') return {mode: 'api', session: null, error: new ApiError({status: response.status, kind: 'unreachable'})};
+      if (body.kind === 'other') {
+        if (response.status === 404 || (response.ok && /^text\/html\b/i.test(body.type))) return {mode: 'walkthrough', session: null, error: null};
+        return {mode: 'api', session: null, error: response.ok ? new ApiError({status: response.status, kind: 'unexpected'}) : refusal(response.status, null)};
+      }
+      if (response.ok && isSessionView(body.value)) return {mode: 'api', session: body.value, error: null};
+      return {mode: 'api', session: null, error: response.ok ? new ApiError({status: response.status, kind: 'unexpected'}) : refusal(response.status, body.value)};
     },
     session,
     signIn(csrf, login, password) {

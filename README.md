@@ -239,7 +239,8 @@ until it is finished. On Colima, if a port does not answer, the Makefile forward
 - macOS and Linux. No hosted model or multi-user mode.
 - `web/` is a prototype of the renewal workflow on invented data. Served by the Go server, its
   Evidence and Readiness pages sign in a demo principal and read sealed cards from `/api/v1`; Readiness
-  shows a card's gaps as open items and evaluates no workflow rule yet. Everything else, and every page
+  shows the sources a card did not read or show as open items, and the server has no workflow rules yet.
+  `scripts/api-browser.mjs` tests both pages in a browser against a stub of the API. Everything else, and every page
   when it runs alone, is a walkthrough whose state lives in the browser, and whose reviews and
   approvals are demonstrations, not authorization. Run it alone with `npm ci`, `npm test`, and
   `npm run dev` inside `web/`.
