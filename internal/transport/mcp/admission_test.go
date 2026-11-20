@@ -169,3 +169,23 @@ func TestLimitedCallPrunesExpiredWindows(t *testing.T) {
 		t.Fatalf("input windows changed: %v", windows)
 	}
 }
+
+// A token with no stated expiry is refused, as Python refuses expires_at None.
+func TestTokenWithoutExpiryIsRefused(t *testing.T) {
+	request, policy, token := pureSetup()
+	token.ExpiresAt = nil
+	if decision := CheckRequest(request, policy, Windows{}, Definitions, token, 1000, 100); decision.Error == nil ||
+		decision.Error.Reason != "invalid_token" || decision.Windows != nil {
+		t.Fatalf("%+v", decision)
+	}
+}
+
+// A typed-nil object is no object: it takes invalid_json.
+func TestTypedNilRequestIsInvalidJSON(t *testing.T) {
+	request, policy, token := pureSetup()
+	request.Parsed = (*strictjson.Object)(nil)
+	if decision := CheckRequest(request, policy, Windows{}, Definitions, token, 1000, 100); decision.Error == nil ||
+		decision.Error.Reason != "invalid_json" {
+		t.Fatalf("%+v", decision)
+	}
+}

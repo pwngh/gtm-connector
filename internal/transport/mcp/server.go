@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -12,28 +13,19 @@ import (
 
 // Call is one admitted tool call as a tool body sees it.
 type Call struct {
-	Tool      string
-	Arguments json.RawMessage
-	Scopes    []string // the caller's verified scopes
+	Tool       string
+	Arguments  json.RawMessage
+	Invocation *Invocation // the receipt and principal it was admitted under
 }
 
-// ToolError is a refusal a tool body returns; it becomes a tool result with isError, as Python's ToolError does.
+// ToolError is a refusal a tool body returns; it becomes a tool result with isError, as Python's ToolError
+// does. Any other error becomes the fixed "execution_failed", so a backend's own words never reach a client.
 type ToolError string
 
 func (e ToolError) Error() string { return string(e) }
 
-// ToolFunc runs one admitted call and returns its structured content as JSON, or a ToolError.
+// ToolFunc runs one admitted call and returns its structured content as a JSON object, or an error.
 type ToolFunc func(ctx context.Context, call Call) (json.RawMessage, error)
-
-// ServerConfig chooses what a server offers.
-type ServerConfig struct {
-	Tools []string // DefaultTools or SelectedTools
-	Run   ToolFunc
-	// Scopes gives the caller's scopes when the transport carries no bearer, as stdio does.
-	Scopes func() []string
-	// Versions limits the protocol revisions served; nil serves every revision the SDK knows.
-	Versions []string
-}
 
 // descriptions are the tools' docstrings, as the Python SDK publishes them.
 var descriptions = map[string]string{
@@ -96,18 +88,18 @@ func inputSchema(name string) json.RawMessage {
 	return b.Bytes()
 }
 
-// NewServer builds the SDK server that dispatches admitted requests. It never decides admission: the
-// HTTP gateway and the stdio connection refuse before a request reaches it.
-func NewServer(config ServerConfig) *sdk.Server {
+// newServer builds the SDK server that dispatches admitted requests. It never decides admission: the HTTP
+// gateway and the stdio connection refuse before a request reaches it, and rebuild what does reach it.
+func newServer(tools []string, run ToolFunc, lookup func(string) *Invocation, versions []string) *sdk.Server {
 	server := sdk.NewServer(&sdk.Implementation{Name: "gtm-connector", Version: "0.2.0"}, &sdk.ServerOptions{
 		Capabilities: &sdk.ServerCapabilities{Tools: &sdk.ToolCapabilities{}, Prompts: &sdk.PromptCapabilities{},
 			Resources: &sdk.ResourceCapabilities{}},
-		SupportedProtocolVersions: config.Versions,
+		SupportedProtocolVersions: versions,
 		SetCacheable: func(_ context.Context, _ sdk.Request, c *sdk.Cacheable) {
 			c.CacheScope, c.TTLMs = "private", 0
 		},
 	})
-	for _, name := range config.Tools {
+	for _, name := range tools {
 		definition := Definitions[name]
 		readOnly := definition.ReadOnly && name != "prepare_renewal_brief"
 		openWorld := false
@@ -119,12 +111,12 @@ func NewServer(config ServerConfig) *sdk.Server {
 				IdempotentHint: name != "prepare_renewal_brief", OpenWorldHint: &openWorld},
 			InputSchema:  inputSchema(name),
 			OutputSchema: json.RawMessage(fmt.Sprintf(`{"additionalProperties":true,"title":"%sDictOutput","type":"object"}`, name)),
-		}, toolHandler(name, config))
+		}, toolHandler(name, run, lookup))
 	}
 	// An unknown tool is a tool error with HTTP 200, as the Python SDK answers it, not a protocol error.
 	server.AddReceivingMiddleware(func(next sdk.MethodHandler) sdk.MethodHandler {
 		return func(ctx context.Context, method string, request sdk.Request) (sdk.Result, error) {
-			if call, ok := request.(*sdk.CallToolRequest); ok && call.Params != nil && !slices.Contains(config.Tools, call.Params.Name) {
+			if call, ok := request.(*sdk.CallToolRequest); ok && call.Params != nil && !slices.Contains(tools, call.Params.Name) {
 				return &sdk.CallToolResult{IsError: true,
 					Content: []sdk.Content{&sdk.TextContent{Text: "Unknown tool: " + call.Params.Name}}}, nil
 			}
@@ -134,24 +126,37 @@ func NewServer(config ServerConfig) *sdk.Server {
 	return server
 }
 
-func toolHandler(name string, config ServerConfig) sdk.ToolHandler {
-	return func(ctx context.Context, request *sdk.CallToolRequest) (*sdk.CallToolResult, error) {
-		var scopes []string
-		if extra := request.Extra; extra != nil && extra.TokenInfo != nil {
-			scopes = extra.TokenInfo.Scopes
-		} else if config.Scopes != nil {
-			scopes = config.Scopes()
+// toolHandler runs one tool for the invocation its dispatch id names. The scope check repeats the gateway's,
+// from the same admitted scopes, so a tool never runs outside its grant even if a gateway path missed it.
+func toolHandler(name string, run ToolFunc, lookup func(string) *Invocation) sdk.ToolHandler {
+	return func(ctx context.Context, request *sdk.CallToolRequest) (result *sdk.CallToolResult, err error) {
+		id, _ := request.Params.Meta[dispatchKey].(string)
+		inv := lookup(id)
+		if inv == nil || inv.Tool != name {
+			return toolFailure(name, "execution_failed"), nil
 		}
-		if !slices.Contains(scopes, Definitions[name].Scope) {
-			return toolFailure(name, "Required scope: "+Definitions[name].Scope), nil
+		defer func() {
+			// A panicking tool releases nothing: the gateway sees the mark and withholds the reply.
+			if recover() != nil {
+				inv.failed.Store(true)
+				result, err = toolFailure(name, "execution_failed"), nil
+			}
+		}()
+		if scope := Definitions[name].Scope; !slices.Contains(inv.Scopes, scope) {
+			return toolFailure(name, "Required scope: "+scope), nil
 		}
-		structured, err := config.Run(ctx, Call{Tool: name, Arguments: request.Params.Arguments, Scopes: scopes})
-		if err != nil {
-			return toolFailure(name, err.Error()), nil
+		structured, err := run(ctx, Call{Tool: name, Arguments: request.Params.Arguments, Invocation: inv})
+		var refusal ToolError
+		switch {
+		case errors.As(err, &refusal):
+			return toolFailure(name, string(refusal)), nil
+		case err != nil:
+			return toolFailure(name, "execution_failed"), nil
 		}
 		var text bytes.Buffer
-		if err := json.Indent(&text, structured, "", "  "); err != nil {
-			return nil, err
+		if !json.Valid(structured) || bytes.TrimSpace(structured)[0] != '{' || json.Indent(&text, structured, "", "  ") != nil {
+			inv.failed.Store(true)
+			return toolFailure(name, "execution_failed"), nil
 		}
 		return &sdk.CallToolResult{Content: []sdk.Content{&sdk.TextContent{Text: text.String()}},
 			StructuredContent: structured}, nil

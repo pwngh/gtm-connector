@@ -138,7 +138,7 @@ func CheckRequest(request RequestFacts, policy Policy, windows Windows, definiti
 		return refuse(nil, "request_too_large", "request body exceeds 65536 bytes", nil)
 	}
 	parsed, ok := request.Parsed.(*strictjson.Object)
-	if !ok {
+	if !ok || parsed == nil {
 		return refuse(nil, "invalid_json", "expected one valid JSON-RPC object", nil)
 	}
 	resource, err := url.Parse(policy.Resource)

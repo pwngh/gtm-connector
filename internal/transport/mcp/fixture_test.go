@@ -2,9 +2,13 @@ package mcp
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"reflect"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -56,18 +60,15 @@ func envelope(source string, rows []string) json.RawMessage {
 }
 
 func (f *fixture) Run(_ context.Context, call Call) (json.RawMessage, error) {
-	// The SDK may run calls concurrently, so look for this call's own pending receipt.
-	var sent any
-	json.Unmarshal(call.Arguments, &sent)
+	// The call names its own receipt, which must be committed and still pending.
 	pending := false
-	for _, row := range f.receipts.Read() {
-		recorded, _ := json.Marshal(row.Arguments)
-		var value any
-		json.Unmarshal(recorded, &value)
-		pending = pending || (row.Status == "pending" && row.Tool == call.Tool && reflect.DeepEqual(value, sent))
+	if call.Invocation != nil {
+		for _, row := range f.receipts.Read() {
+			pending = pending || (row.AuditID == call.Invocation.AuditID && row.Status == "pending" && row.Tool == call.Tool)
+		}
 	}
 	if !pending {
-		f.t.Errorf("%s ran without its committed pending receipt", call.Tool)
+		f.t.Errorf("%s ran without its own committed pending receipt", call.Tool)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -116,7 +117,7 @@ func (f *fixture) Run(_ context.Context, call Call) (json.RawMessage, error) {
 		switch {
 		case f.briefState == "changed selection":
 			return nil, ToolError("account_not_selected")
-		case !slices.Contains(call.Scopes, "calls:read"):
+		case !slices.Contains(call.Invocation.Scopes, "calls:read"):
 			return nil, ToolError("brief_scope_not_covered")
 		case f.briefState == "changed seal":
 			return nil, ToolError("brief_not_accepted")
@@ -181,4 +182,32 @@ func verifierFor(tokens map[string]*Token) Verifier {
 		}
 		return nil
 	}
+}
+
+func mustGateway(t testing.TB, config GatewayConfig) *Gateway {
+	t.Helper()
+	gateway, err := NewGateway(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return gateway
+}
+
+func jsonOf(v any) string {
+	data, _ := json.Marshal(v)
+	return string(data)
+}
+
+// newRequest builds a server-side request as the wire carries it: an origin-form target, the URL's authority
+// as the Host line, and TLS for https. (httptest.NewRequest keeps an absolute URL as the request target,
+// which the gateway refuses, as it refuses any absolute-form target.)
+func newRequest(method, target string, body io.Reader) *http.Request {
+	parsed, _ := url.Parse(target)
+	request := httptest.NewRequest(method, parsed.RequestURI(), body)
+	request.Host = parsed.Host
+	request.TLS = nil
+	if parsed.Scheme == "https" {
+		request.TLS = &tls.ConnectionState{}
+	}
+	return request
 }

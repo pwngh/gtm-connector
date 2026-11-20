@@ -47,7 +47,7 @@ func TestInspector(t *testing.T) {
 	server.StartTLS()
 	defer server.Close()
 	resource := server.URL + "/mcp"
-	gateway := NewGateway(GatewayConfig{Resource: resource, Issuer: "https://127.0.0.1:1", RateLimit: 2, WindowSeconds: 60,
+	gateway := mustGateway(t, GatewayConfig{Resource: resource, Issuer: "https://127.0.0.1:1", RateLimit: 2, WindowSeconds: 60,
 		Verify: func(raw string) *Token {
 			mu.Lock()
 			defer mu.Unlock()

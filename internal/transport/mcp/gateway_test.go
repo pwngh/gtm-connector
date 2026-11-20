@@ -44,7 +44,11 @@ func newHarness(t *testing.T, options ...option) *harness {
 	for _, o := range options {
 		o(&config)
 	}
-	h.gateway = NewGateway(config)
+	gateway, err := NewGateway(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.gateway = gateway
 	return h
 }
 
@@ -52,7 +56,7 @@ func newHarness(t *testing.T, options ...option) *harness {
 const unset = "\x00unset"
 
 func (h *harness) post(body []byte, headers [][2]string) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(http.MethodPost, testResource, bytes.NewReader(body))
+	request := newRequest(http.MethodPost, testResource, bytes.NewReader(body))
 	for _, pair := range headers {
 		if pair[1] == unset {
 			request.Header.Del(pair[0])
@@ -258,7 +262,9 @@ func TestScopesSeparateBothSourcesAndWrites(t *testing.T) {
 func TestRoutingHeaderCannotDisguiseACallNoteRequest(t *testing.T) {
 	h := newHarness(t)
 	response := h.tool("read_call_notes", map[string]any{"account_id": "acc-007"}, "crm", map[string]string{"Mcp-Name": "get_account"})
-	if (response.Code != 400 && response.Code != 403) || strings.Contains(response.Body.String(), "IGNORE PREVIOUS") {
+	// The scope check comes before the SDK's header checks, so the scope refusal wins.
+	if reason, _ := reasonOf(t, response); response.Code != 403 || reason != "insufficient_scope" ||
+		!strings.Contains(response.Header().Get("WWW-Authenticate"), `scope="calls:read"`) || strings.Contains(response.Body.String(), "IGNORE PREVIOUS") {
 		t.Fatalf("%d %s", response.Code, response.Body)
 	}
 	row := h.receipts.Read()[0]
@@ -487,7 +493,7 @@ func TestHostileOriginOrHostIsRejected(t *testing.T) {
 	}
 	for _, target := range []string{"https://localhost:8765/mcp", "http://127.0.0.1:8765/mcp"} {
 		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": map[string]any{}})
-		request := httptest.NewRequest(http.MethodPost, target, bytes.NewReader(body))
+		request := newRequest(http.MethodPost, target, bytes.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Authorization", "Bearer "+tokenValue("full"))
 		recorder := httptest.NewRecorder()
@@ -529,13 +535,21 @@ func TestStrictParserRefusalKeepsOneReceipt(t *testing.T) {
 	for _, body := range []string{
 		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001","weight":1e999}}}`,
 		`{"jsonrpc":"2.0","id":1,"id":2,"method":"tools/call","params":{}}`,
+		// json.loads reads these, so Python still sees a tool call and keeps a receipt.
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":NaN}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"n":Infinity}}}`,
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"n":-Infinity}}}`,
+		utf16(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001"}}}`, false, false),
+		utf16(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001"}}}`, true, false),
+		utf16(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001"}}}`, false, true),
+		utf32(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001"}}}`),
 	} {
 		before := len(h.receipts.Read())
 		response := h.post([]byte(body), [][2]string{{"Authorization", "Bearer unused"}})
 		reason, _ := reasonOf(t, response)
 		rows := h.receipts.Read()
 		last := rows[len(rows)-1]
-		if response.Code != 400 || reason != "invalid_json" || len(rows) != before+1 || last.Status != "error" ||
+		if response.Code != 400 || reason != "invalid_json" || len(rows) != before+1 || last.Status != "error" || last.Tool != "<unparsed>" ||
 			*last.HTTPStatus != 400 || last.RowCount != 0 || path(last.Arguments, "unparsed_sha256") == nil {
 			t.Fatalf("%s: %d %s %+v", body[:40], response.Code, response.Body, last)
 		}
@@ -592,7 +606,7 @@ func TestGetAndDeleteAreNotAllowed(t *testing.T) {
 	for _, c := range []struct {
 		method, allow, message string
 	}{{http.MethodGet, "POST", "Method Not Allowed"}, {http.MethodDelete, "", "Method Not Allowed: Session termination not supported"}} {
-		request := httptest.NewRequest(c.method, testResource, nil)
+		request := newRequest(c.method, testResource, nil)
 		request.Header.Set("Authorization", "Bearer "+tokenValue("full"))
 		recorder := httptest.NewRecorder()
 		h.gateway.ServeHTTP(recorder, request)
@@ -768,7 +782,7 @@ func TestOverRealTLS(t *testing.T) {
 	for _, token := range tokens {
 		token.Resource = resource
 	}
-	server.Config.Handler = NewGateway(GatewayConfig{Resource: resource, Issuer: testIssuer, RateLimit: 60, WindowSeconds: 60,
+	server.Config.Handler = mustGateway(t, GatewayConfig{Resource: resource, Issuer: testIssuer, RateLimit: 60, WindowSeconds: 60,
 		Verify: verifierFor(tokens), Receipts: receipts, Run: fx.Run, Wall: func() float64 { return testWall }})
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001"},` +
 		`"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
@@ -804,4 +818,32 @@ func TestOverRealTLS(t *testing.T) {
 	if !slices.Equal(fx.ran(), []string{"get_account"}) {
 		t.Fatalf("ran %v", fx.ran())
 	}
+}
+
+// utf16 encodes ASCII text as UTF-16, little- or big-endian, with or without a byte-order mark.
+func utf16(text string, bigEndian, mark bool) string {
+	var out []byte
+	if mark {
+		out = []byte{0xFF, 0xFE}
+		if bigEndian {
+			out = []byte{0xFE, 0xFF}
+		}
+	}
+	for _, c := range []byte(text) {
+		if bigEndian {
+			out = append(out, 0, c)
+		} else {
+			out = append(out, c, 0)
+		}
+	}
+	return string(out)
+}
+
+// utf32 encodes ASCII text as UTF-32 little-endian with no mark.
+func utf32(text string) string {
+	var out []byte
+	for _, c := range []byte(text) {
+		out = append(out, c, 0, 0, 0)
+	}
+	return string(out)
 }

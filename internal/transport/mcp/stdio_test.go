@@ -13,8 +13,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // These transcribe tests/test_stdio_bridge.py. In Go, stdio is served in process as a machine principal,
@@ -64,7 +62,7 @@ func newStdio(t *testing.T, scopes []string, change func(*StdioConfig)) *stdioHa
 		close(h.lines)
 	}()
 	go func() {
-		h.done <- ServeStdio(context.Background(), config, &sdk.IOTransport{Reader: clientIn, Writer: clientOut})
+		h.done <- ServeStdio(context.Background(), config, clientIn, clientOut)
 		clientOut.Close()
 	}()
 	t.Cleanup(func() { serverIn.Close() })

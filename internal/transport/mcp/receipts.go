@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -28,8 +29,8 @@ type Finish struct {
 // Recorder commits a pending receipt before a call runs and finishes it exactly once. The real store is
 // internal/receipts; this package only needs the two operations.
 type Recorder interface {
-	Start(Start) (string, error)
-	Finish(auditID string, finish Finish) error
+	Start(ctx context.Context, start Start) (string, error)
+	Finish(ctx context.Context, auditID string, finish Finish) error
 }
 
 // Receipt is one row of the in-package recorder, shaped as audit.read returns rows.
@@ -59,11 +60,13 @@ type MemoryRecorder struct {
 	Now        func() time.Time
 	FailStart  bool
 	FailFinish bool
+	// BeforeFinish, when set, runs at the start of every Finish, outside the lock; a test can block in it.
+	BeforeFinish func(auditID string)
 }
 
 var errUnavailable = errors.New("receipt store unavailable")
 
-func (m *MemoryRecorder) Start(s Start) (string, error) {
+func (m *MemoryRecorder) Start(_ context.Context, s Start) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.FailStart {
@@ -87,7 +90,10 @@ func (m *MemoryRecorder) Start(s Start) (string, error) {
 	return id, nil
 }
 
-func (m *MemoryRecorder) Finish(auditID string, f Finish) error {
+func (m *MemoryRecorder) Finish(_ context.Context, auditID string, f Finish) error {
+	if m.BeforeFinish != nil {
+		m.BeforeFinish(auditID)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if f.Status == "" || f.Status == "pending" {
