@@ -19,10 +19,10 @@ SQLite store of invented records.
 - When more than 100 accounts match a name search, `search_accounts` returns the first 100 and adds
   `has_more: true` beside `records`. Otherwise the field is absent. The receipt lists the records
   returned.
-- `serve --selection FILE` limits reads to the selected accounts and replaces `log_activity` with
+- `debug serve --selection FILE` limits reads to the selected accounts and replaces `log_activity` with
   `prepare_renewal_brief` and `read_renewal_brief`, which return a [Deal card](briefs.md) as `text`
   with its numbered `units` and its `gaps`. See [selection](selection.md).
-- `serve` in a folder connected to Salesforce reads CRM from Salesforce and omits `log_activity`.
+- `debug serve` in a folder connected to Salesforce reads CRM from Salesforce and omits `log_activity`.
   See [Salesforce](salesforce.md).
 
 ## Fixtures
@@ -44,19 +44,19 @@ Reseeding keeps record IDs, edits, activities, and accounts added beside the boo
 fixture set is rejected, and so are a combined CRM and calls database and a database without the
 currency, speaker, or file-count column. Nothing is migrated, so use a fresh `--state-dir`.
 
-In a folder connected to the demo data, `accounts --query 'Alder Vale'` and `account acc-003` read
+In a folder connected to the demo data, `accounts --query 'Alder Vale'` and `inspect acc-003` read
 the demo book directly, outside MCP authorization: the folder's own `crm.sqlite3` once its services
 have run, and otherwise a copy in memory, so reading accounts writes nothing. A book that is a link,
 or a folder pinned to Salesforce, is refused. The account view leaves out opportunities and call
 notes. In a folder connected to
-Salesforce, `accounts` and `account` read through the scoped, audited gateway instead.
+Salesforce, `accounts` and `inspect` read the account through the scoped, audited gateway instead.
 
 ## Run the guarantee checks
 
-`verify` creates one fixture activity, so keep its state apart from the demo's.
+`debug verify` creates one fixture activity, so keep its state apart from the demo's.
 
 ```sh
-.venv/bin/python -m gtm_connector verify --state-dir var/verification --json
+.venv/bin/python -m gtm_connector debug verify --state-dir var/verification --json
 ```
 
 | Field | Result |
@@ -69,7 +69,7 @@ Salesforce, `accounts` and `account` read through the scoped, audited gateway in
 | `briefs` | Two [Deal cards](briefs.md): `acc-003` with calls access, `acc-001` without it |
 | `injection_note.activities_created`, `injection_brief.activities_created` | `0`, the second across all three cards, including `acc-007` |
 
-`verify --with-slack` adds a Slack read to each card and checks the CRM-to-Slack, Slack-to-CRM,
+`debug verify --with-slack` adds a Slack read to each card and checks the CRM-to-Slack, Slack-to-CRM,
 and Slack-to-calls denials. `audit_rows` becomes `16` and `brief_audit_rows` becomes `12`. See
 [Slack context](slack.md).
 
@@ -84,7 +84,7 @@ section. The official Python SDK is pinned to **2.3.0**.
   `server/discover`. Only revision 2026-07-28 is accepted. Subscriptions and legacy initialization
   sessions are not supported.
 - Requests with an `Origin` header or a body over 65,536 bytes are refused.
-- Authorization is a local owner emulator, not production login or consent. `serve` grants no
+- Authorization is a local owner emulator, not production login or consent. `debug serve` grants no
   scopes at startup. See the [security review](../SECURITY_REVIEW.md).
 - S256 PKCE, state, and issuer are checked. A code lasts 60 seconds and works once. A token is
   opaque, bound to the resource, and lasts five minutes.

@@ -9,13 +9,16 @@ local state.
 
 ```sh
 gtm-connector connect calls --seller 'Morgan Reed'    # once, in a folder with a connected CRM; name every seller
-gtm-connector calls import meeting.vtt --account acc-007
-gtm-connector calls import meeting.vtt --account acc-007 --cues 8:14 --called-at 2027-01-14T15:00:00Z
-gtm-connector calls import meeting.txt --account acc-007 --speaker-names
-gtm-connector calls list
-gtm-connector calls inspect IMPORT_ID --full --json
+gtm-connector debug calls import meeting.vtt --account acc-007
+gtm-connector debug calls import meeting.vtt --account acc-007 --cues 8:14 --called-at 2027-01-14T15:00:00Z
+gtm-connector debug calls import meeting.txt --account acc-007 --speaker-names
+gtm-connector debug calls list
+gtm-connector debug calls inspect IMPORT_ID --full --json
 gtm-connector brief acc-007
 ```
+
+Transcripts are added with `debug calls import` until a later change lets `connect calls FOLDER` do
+it.
 
 | Option | Meaning |
 | --- | --- |
@@ -29,13 +32,13 @@ gtm-connector brief acc-007
 | `--full` | For `inspect`: prints every unit and the original text. This is not available as an MCP tool. |
 
 `connect calls` connects transcripts beside Salesforce or beside the demo CRM, and
-`connect calls --seller NAME` lists who the sellers are. `calls import` refuses until transcripts
-are connected. `brief` and `serve` then read the imports with no further option.
+`connect calls --seller NAME` lists who the sellers are. `debug calls import` refuses until
+transcripts are connected. `brief` and `debug serve` then read the imports with no further option.
 `connect calls --remove` detaches them and deletes nothing. Demo call notes and imported
 transcripts never share a folder: a folder that has read demo call notes refuses an import and
 names a fresh `--state-dir` to connect, and beside the demo CRM a folder that holds imports refuses
-`connect calls --remove`, which would make its calls demo data again. Stop `serve` before running a `calls` command on its
-folder.
+`connect calls --remove`, which would make its calls demo data again. Stop `debug serve` before running a
+`debug calls` command on its folder.
 
 ## Rules
 
@@ -75,8 +78,8 @@ folder.
   afterwards by the layout alone, so a later change to how sentences are split never unreads it.
 - A stated layout says how the file is read. It does not show who spoke: anyone who can start a
   line of the file can write a name there, and a wrapped line that happens to open like a name
-  reads as one. State it only of an export whose lines the recorder wrote. `calls list` and
-  `calls inspect` show which imports state it.
+  reads as one. State it only of an export whose lines the recorder wrote. `debug calls list` and
+  `debug calls inspect` show which imports state it.
 - Neighbouring cues under one speaker label are read together, so a sentence that runs across them
   stays whole: when they are at most two seconds apart, or at most ten when the earlier cue stops
   mid-sentence and the later one goes on in lower case. Cues or lines with no label are never
@@ -112,7 +115,7 @@ folder.
 | `calls_import_invalid` | 2 | The export or range is invalid. | Use a valid UTF-8 TXT, VTT, or SRT file and range. |
 | `calls_import_too_large`, `calls_excerpt_too_large` | 2 | The export or excerpt exceeds a limit above. | Use a smaller export or fewer units. |
 | `calls_speaker_names_missing` | 2 | `--speaker-names` was given and a line or cue does not open with a name and a colon. | Import the file without `--speaker-names`. |
-| `calls_import_not_found` | 2 | The import is not in this state folder. | Run `calls list`. |
+| `calls_import_not_found` | 2 | The import is not in this state folder. | Run `debug calls list`. |
 | `calls_account_not_found` | 2 | No CRM account matched. | Check the ID or exact AccountNumber. |
 | `calls_reassign_required`, `calls_association_changed` | 3 | The content or AccountNumber now belongs to another account. | Review it. Add `--reassign` only to move it. |
 | `calls_account_ambiguous` | 3 | The AccountNumber is not one literal match. | Use `--account` with the canonical ID. |

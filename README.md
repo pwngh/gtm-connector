@@ -61,20 +61,22 @@ flowchart LR
     U --> C(["Deal card<br/>every character written by the connector"])
 ```
 
-Every number on a card resolves to its record and the receipt of the read that returned it:
+Every number on a card resolves to its record and the receipt of the read that returned it.
+`gtm-connector inspect brief-…` lists every unit of the card, one per line, and a number shows one:
 
 ```text
-$ gtm-connector trace brief-… 5
-Number               5
-Kind                 sentence
-Record               calls/call_notes/note-003b
-Receipt              b63a52fb-… (read_call_notes, ok)
-Text                 "Our general counsel will not sign until the zero-retention and client-consent
-                     rider for AI processing is approved."
-Speaker              Marian Holt
-Role                 customer (label matches contact [2])
-Time                 2027-01-12T15:00:00Z
-Source text SHA-256  105807d2…
+$ gtm-connector inspect brief-… 5
+Number                5
+Kind                  sentence
+Record                calls/call_notes/note-003b
+Receipt               b63a52fb-… (read_call_notes, ok)
+Text                  "Our general counsel will not sign until the zero-retention and client-consent
+                      rider for AI processing is approved."
+Speaker               Marian Holt
+Next by this speaker  6
+Role                  customer (label matches contact [2])
+Time                  2027-01-12T15:00:00Z
+Source text SHA-256   105807d2…
 ```
 
 ## What it is tested against
@@ -102,7 +104,8 @@ pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector d
 
 `pipx install` with the same source keeps the command on your PATH. From a checkout,
 `./scripts/demo.sh` installs the pinned dependencies, runs the tests, and runs the demo.
-`gtm-connector --help` lists every command, and `--json` gives [stable output](docs/cli.md).
+`gtm-connector --help` lists the seven commands and `debug`, which holds the rest. `--json`, before or
+after a command, gives [stable output](docs/cli.md).
 
 ## Use your own sources
 
@@ -120,12 +123,15 @@ gtm-connector brief ACCOUNT_ID
 
 | Source | Commands | Guide |
 | --- | --- | --- |
-| Salesforce, read-only | `salesforce check --sf-org ALIAS`, `connect salesforce --org ALIAS` | [Salesforce](docs/salesforce.md) |
-| Call transcripts (TXT, VTT, SRT) | `connect calls`, `calls import meeting.vtt --account acc-007` | [Calls](docs/calls.md) |
-| Slack sign-in | `slack connect`, `connect slack`, `slack status`, `slack disconnect` | [Slack sign-in](docs/slack.md) |
-| One Slack thread per account | `slack map`, `slack check` | [Slack threads](docs/slack.md) |
-| Selected accounts for a client | `serve --selection selection.json` | [Selection](docs/selection.md) |
+| Salesforce, read-only | `debug salesforce check --sf-org ALIAS`, `connect salesforce --org ALIAS` | [Salesforce](docs/salesforce.md) |
+| Call transcripts (TXT, VTT, SRT) | `connect calls`, `debug calls import meeting.vtt --account acc-007` | [Calls](docs/calls.md) |
+| Slack sign-in | `debug slack connect`, `connect slack`, `debug slack status`, `debug slack disconnect` | [Slack sign-in](docs/slack.md) |
+| One Slack thread per account | `debug slack map`, `debug slack check` | [Slack threads](docs/slack.md) |
+| Selected accounts for a client | `debug serve --selection selection.json` | [Selection](docs/selection.md) |
 | Invented data | `connect demo` | [Commands](docs/cli.md) |
+
+Transcripts and Slack threads are added with `debug calls import` and `debug slack map` until a later
+change lets `connect calls FOLDER` and `connect slack --channel` do it.
 
 Salesforce uses an existing `sf` CLI login. Slack uses an existing public PKCE app. Tests use
 invented provider responses. No live org has been verified.
@@ -134,16 +140,26 @@ invented provider responses. No live org has been verified.
 
 ```sh
 gtm-connector connect status
-gtm-connector serve
-gtm-connector connect inspector --scope crm:read
-gtm-connector brief acc-003 --state-dir var/brief   # a second connected folder while serve runs
-gtm-connector trace brief-REPLACE 5 --state-dir var/brief
+gtm-connector accounts --query Thornfield
+gtm-connector brief acc-003
+gtm-connector inspect brief-REPLACE                 # every unit of that card, one per line
+gtm-connector inspect brief-REPLACE 5               # one number: its record and receipt
+gtm-connector inspect acc-003                       # the account and its newest card
 gtm-connector audit --tool get_account --follow
-gtm-connector doctor
 ```
 
-`serve` prints one line per tool attempt with its decision and receipt ID. The Inspector CLI is the
-tested client. Other assistant apps are untested. [Clients](docs/clients.md)
+An assistant app needs `debug serve` running in its folder, for the HTTP transport and for the stdio
+bridge. One process holds a folder at a time, so while it runs, connect a second folder for `brief`:
+
+```sh
+gtm-connector debug serve
+gtm-connector connect inspector --scope crm:read
+gtm-connector brief acc-003 --state-dir var/brief   # a second connected folder while debug serve runs
+gtm-connector debug doctor
+```
+
+`debug serve` prints one line per tool attempt with its decision and receipt ID. The Inspector CLI is
+the tested client. Other assistant apps are untested. [Clients](docs/clients.md)
 
 ## What it guarantees
 
@@ -154,7 +170,7 @@ tested client. Other assistant apps are untested. [Clients](docs/clients.md)
 | Retrying a write with the same key does not duplicate it. | [gateway](tests/test_gateway.py) |
 | A note cannot direct the workflow. An instruction inside one appears quoted and creates nothing. | [briefing](tests/test_briefing.py) |
 | A card is built only from checked evidence. A record of another account or a missing receipt gives no card. | [units](tests/test_units.py) |
-| With `serve --selection`, a client reads only the selected accounts, under its own grant. A source it lacks the scope for is stated as not read on the card. | [selection](tests/test_selected_sources.py) |
+| With `debug serve --selection`, a client reads only the selected accounts, under its own grant. A source it lacks the scope for is stated as not read on the card. | [selection](tests/test_selected_sources.py) |
 
 The card shows what the records say, not whether a source is true.
 
@@ -163,7 +179,7 @@ The card shows what the records say, not whether a source is true.
 - Nothing here was tried on a real deal. The cases test correctness on invented data, not usefulness.
 - The card shows up to twelve sentences, dealt by speaker role and by time, and counts the rest. It
   does not rank them or relate one to another, so on a long call the sentence that matters may be
-  among those counted. Every sentence read is in `brief --json`.
+  among those counted. Every sentence read is in `inspect BRIEF_ID` and `brief --json`.
 - A seller is whoever you list with `connect ... --seller NAME`. Slack authors are never shown as
   customers.
 - Authorization is a local owner emulator. The file owner can request every scope and edit the

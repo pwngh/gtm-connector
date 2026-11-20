@@ -6,7 +6,8 @@ connector writes every character of it. No model takes part.
 ```sh
 .venv/bin/python -m gtm_connector connect demo
 .venv/bin/python -m gtm_connector brief acc-003
-.venv/bin/python -m gtm_connector trace brief-REPLACE_WITH_ID 5
+.venv/bin/python -m gtm_connector inspect brief-REPLACE_WITH_ID
+.venv/bin/python -m gtm_connector inspect brief-REPLACE_WITH_ID 5
 ```
 
 A card reads the sources its state folder is [connected](cli.md) to, and `brief` takes no source
@@ -29,16 +30,18 @@ A source that is not connected is never called, and the card says "Calls: not co
 Evidence becomes numbered units in a fixed order: the account, its contacts, contracts, and
 opportunities by ID, then call text by time, then Slack messages by time. A CRM record is one unit.
 Call and Slack text is one unit for each whole sentence, and a call or message with no sentence is
-one unit, so every record that was read has a number. Every number on a card is one of these, and
-`trace` resolves it to the source record, the receipt of the read that returned it, and, for a
-sentence, its neutralized text, its speaker, and the SHA-256 of the record's text as stored.
+one unit, so every record that was read has a number. Every number on a card is one of these.
+`inspect BRIEF_ID` lists them all, one per line. `inspect BRIEF_ID N` resolves a number to the source
+record, the receipt of the read that returned it, and, for a sentence, its neutralized text, its
+speaker, the next sentence under the same speaker label in the same record, and the SHA-256 of the
+record's text as stored.
 
 A saved card is sealed. Saving it commits one more receipt, `save_brief`, that holds the SHA-256 of
-the saved file: the evidence, the units, the card text, the seller list, and the date. `trace`
+the saved file: the evidence, the units, the card text, the seller list, and the date. `inspect`
 reads the file, and refuses it unless that receipt is finished and names the digest of the file as
 it is now, and the receipts of the card's reads are the ones in the audit log. A changed amount,
-sentence, speaker, seller, date, or card text does not trace. A card keeps the numbers it was sealed
-with: `trace` answers from the sealed units and rebuilds nothing, so a later change to the rules
+sentence, speaker, seller, date, or card text is refused. A card keeps the numbers it was sealed
+with: `inspect` answers from the sealed units and rebuilds nothing, so a later change to the rules
 cannot move or refuse them. It neutralizes a sentence again under today's rules before showing it. A card saved
 before sealing says so and has to be made again. A save that does not finish leaves no file, and
 its receipt ends as an error; after a hard stop the receipt stays `pending` and names the card in
@@ -60,8 +63,8 @@ many its note is about, or how many files, attachments and blocks of a Slack rea
 read; it is `null` when the line gives no such number. `by_role` is that count by speaker role, for
 a line that counts sentences. The codes are the keys of `GAP_CODES` in `gtm_connector/units.py`. A gap has no
 number. Read a unit's `kind` before any other key, and name a gap by its `code`, never by its
-text. A card sealed by an earlier version keeps the keys it was sealed with: `trace` shows it
-without `contact`, `shown`, or `span`.
+text. A card sealed by an earlier version keeps the keys it was sealed with: `inspect` shows it
+without `contact`, `shown`, or `span`, and says `not recorded` for whether a sentence is shown.
 
 ## Sentences
 
@@ -133,7 +136,7 @@ names, speaker labels, and times as well as call and Slack text.
 - A control, direction-changing, or invisible format character becomes `[U+202E]`.
 - A bracketed number such as `[3]` becomes `(3)`, because a card cites its units that way.
 
-Letters in any script are kept. A quotation is exact against this text, and `trace` gives the
+Letters in any script are kept. A quotation is exact against this text, and `inspect` gives the
 SHA-256 of the record's stored text. The account name in the heading is a quoted literal on one line.
 
 ## Saved result
