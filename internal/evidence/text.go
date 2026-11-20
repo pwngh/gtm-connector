@@ -1,5 +1,6 @@
-// Package evidence is the port of the evidence rules in gtm_connector/units.py: neutralized source text
-// and whole sentences. It matches the Python oracle in testdata/oracle exactly.
+// Package evidence is the port of the evidence rules in gtm_connector/units.py and briefing.py: neutralized
+// source text, whole sentences, and the Deal card built from one evidence snapshot. It matches the Python
+// oracle in testdata/oracle exactly.
 //
 // SafeText and Sentences take valid UTF-8 and refuse anything else with ErrInvalidText. A Python str can
 // hold a lone surrogate, which safe_text would show as [U+D800], but no source can hand the connector one:
