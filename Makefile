@@ -10,7 +10,9 @@
 #   make verify-real          real public text through the Python oracle and Go (downloads; never in CI)
 #
 # Add POSTGRES=18.7 to any of them to use the pinned fallback PostgreSQL, on
-# its own volume. The first run writes .env (random passwords for the owner
+# its own volume. Go and Node are pinned too (pins.json): dev, test and every
+# Go build here refuse another Go, and dev another Node (nvm use reads
+# .nvmrc). The first run writes .env (random passwords for the owner
 # and app roles, your user IDs, and GTM_HOME, the folder holding
 # credentials/ and backups/). Recipes never name a password: scripts read
 # .env when they run, so `make -n` shows none.
@@ -20,6 +22,10 @@ SHELL := /bin/sh
 
 # Never let a toolchain line in go.mod download another Go.
 export GOTOOLCHAIN := local
+GO_VERSION := 1.27.4
+NODE_VERSION := $(shell cat .nvmrc 2>/dev/null)
+# The commit an image is built from, with -modified when the checkout has changes.
+export GTM_REVISION := $(shell git rev-parse HEAD 2>/dev/null)$(shell git status --porcelain 2>/dev/null | grep -q . && echo -modified)
 # Colima with a standalone docker-compose builds without BuildKit.
 export DOCKER_BUILDKIT := 0
 export COMPOSE_DOCKER_CLI_BUILD := 0
@@ -39,13 +45,22 @@ GTM_DB_PORT = $(shell sed -n 's/^GTM_DB_PORT=//p' .env 2>/dev/null)
 WEB_SOURCES := $(shell find web/src web/public web/index.html web/vite.config.js web/package.json web/package-lock.json -type f 2>/dev/null)
 GO_SOURCES := go.mod go.sum $(shell find cmd internal -name '*.go' -o -name '*.sql')
 
-.PHONY: help env dev up down db demo backup restore test vet psql logs clean require-compose state verify-real
+.PHONY: help env dev up down db demo backup restore test vet psql logs clean require-compose state verify-real \
+	go-version node-version
 
 help: ## List the targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 env:
 	@scripts/init-env.sh
+
+go-version:
+	@test "$$(go env GOVERSION 2>/dev/null)" = go$(GO_VERSION) || { \
+	  echo "Go $(GO_VERSION) is pinned (pins.json); this is $$(go env GOVERSION 2>/dev/null || echo no Go)." >&2; exit 1; }
+
+node-version:
+	@test "$$(node --version 2>/dev/null)" = v$(NODE_VERSION) || { \
+	  echo "Node $(NODE_VERSION) is pinned (.nvmrc; nvm use); this is $$(node --version 2>/dev/null || echo no Node)." >&2; exit 1; }
 
 require-compose:
 	@test -n "$(COMPOSE)" || { echo "Docker Compose was not found (docker compose or docker-compose)." >&2; exit 1; }
@@ -58,13 +73,13 @@ db: require-compose state ## Start PostgreSQL and make its port answer on 127.0.
 	$(COMPOSE) up -d --wait postgres
 	@scripts/colima-forward.sh ensure $$(sed -n 's/^GTM_DB_PORT=//p' .env)
 
-web/dist/index.html: $(WEB_SOURCES)
+web/dist/index.html: $(WEB_SOURCES) | node-version
 	cd web && npm ci --no-audit --no-fund && npm run build
 
-build/gtm-connector: $(GO_SOURCES)
+build/gtm-connector: $(GO_SOURCES) | go-version
 	go build -o $@ ./cmd/gtm-connector
 
-dev: db web/dist/index.html build/gtm-connector ## Run the connector here, on PostgreSQL in Compose
+dev: go-version node-version db web/dist/index.html build/gtm-connector ## Run the connector here, on PostgreSQL in Compose
 	@$(COMPOSE) stop app >/dev/null 2>&1 || true
 	@scripts/colima-forward.sh close $(GTM_PORT) >/dev/null 2>&1 || true
 	scripts/host.sh setup
@@ -95,10 +110,10 @@ restore: db ## Restore GTM_HOME/backups/$(BACKUP) into an empty database
 	@$(COMPOSE) stop app >/dev/null 2>&1 || true
 	$(COMPOSE) run --rm --no-deps admin restore --in '/state/backups/$(notdir $(BACKUP))'
 
-vet: ## go vet
+vet: go-version ## go vet
 	go vet ./...
 
-test: db vet ## The Go tests, with the race detector, against PostgreSQL in Compose
+test: go-version db vet ## The Go tests, with the race detector, against PostgreSQL in Compose
 	scripts/host.sh test
 
 # The pinned CPython 3.14.6 that runs the oracle. PYTHON= compares against the digests an earlier run
@@ -106,7 +121,7 @@ test: db vet ## The Go tests, with the race detector, against PostgreSQL in Comp
 # file outside the repository.
 PYTHON ?= .venv/bin/python
 
-verify-real: ## Fetch the public datasets, run the Python oracle and Go over them, compare
+verify-real: go-version ## Fetch the public datasets, run the Python oracle and Go over them, compare
 	go run ./cmd/realdata -python '$(PYTHON)' $(if $(LOCAL),-local '$(LOCAL)') verify $(DATASETS)
 
 psql: require-compose ## A database shell, as the owner

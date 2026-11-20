@@ -78,6 +78,9 @@ services:
     <<: *connector
     build:
       context: .
+      args:
+        # The commit, stamped into the binary and the image's labels.
+        GTM_REVISION: ${GTM_REVISION:-}
     command: [serve]
     environment:
       GTM_DATABASE_URL: postgres://gtm_app:${GTM_APP_PASSWORD:?run make, which adds it to .env}@postgres:5432/gtm?sslmode=disable

@@ -296,6 +296,24 @@ func (s *Store) RevokeSession(ctx context.Context, idSHA256 []byte) error {
 	return err
 }
 
+// DisablePrincipal disables a principal. From its commit, the principal's
+// grants open nothing, its sessions are not live, and it cannot sign in; it
+// waits for reads that hold the principal. A disabled principal keeps the
+// time it was first disabled; an unknown one gives ErrNotFound.
+func (s *Store) DisablePrincipal(ctx context.Context, workspaceID, principalID string) error {
+	if !validUUID(workspaceID) || !validUUID(principalID) {
+		return ErrNotFound
+	}
+	var disabled bool
+	err := s.pool.QueryRow(ctx, `
+		UPDATE principals SET disabled_at = coalesce(disabled_at, now())
+		 WHERE workspace_id = $1 AND id = $2 RETURNING true`, workspaceID, principalID).Scan(&disabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
 // RevokePrincipalSessions ends every live session of a principal.
 func (s *Store) RevokePrincipalSessions(ctx context.Context, workspaceID, principalID string) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `

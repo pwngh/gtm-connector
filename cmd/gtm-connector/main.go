@@ -6,6 +6,7 @@
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
 //	gtm-connector health             check that the local server answers
+//	gtm-connector version            print the commit this binary was built from
 //
 // Settings come from the environment:
 //
@@ -27,6 +28,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -45,6 +48,7 @@ commands:
   backup --out FILE  write PostgreSQL and the credentials folder to FILE
   restore --in FILE  restore FILE into an empty database and credentials folder
   health             check that the local server answers
+  version            print the commit this binary was built from
 `
 
 func main() {
@@ -68,6 +72,8 @@ func main() {
 		err = restoreCommand(ctx, args)
 	case "health":
 		err = health(ctx, args)
+	case "version":
+		fmt.Printf("gtm-connector %s %s\n", buildRevision(), runtime.Version())
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
@@ -78,6 +84,30 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gtm-connector:", err)
 		os.Exit(1)
 	}
+}
+
+// revision is the commit this binary was built from, given at link time
+// (-ldflags "-X main.revision=COMMIT"), as the image build does.
+var revision string
+
+// buildRevision is revision or, without it, the commit Go stamped from the
+// checkout it built in, with "-modified" when that checkout had changes.
+func buildRevision() string {
+	if revision != "" {
+		return revision
+	}
+	commit, modified := "unknown", ""
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			switch {
+			case setting.Key == "vcs.revision":
+				commit = setting.Value
+			case setting.Key == "vcs.modified" && setting.Value == "true":
+				modified = "-modified"
+			}
+		}
+	}
+	return commit + modified
 }
 
 // config is the install's settings, from the environment.

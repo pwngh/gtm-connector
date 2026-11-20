@@ -100,22 +100,46 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
-          go-version-file: go.mod
+          # The pinned patch (pins.json), never the newest of a range.
+          go-version: '1.27.4'
       - run: |
           go vet ./...
-          go test -race ./...
+          go test -race -count=1 ./...
 
-  # Compose startup end to end: the image builds, setup runs as the owner,
-  # the server starts as the app role, and TLS health and demo sign-in work.
+  # Compose end to end, on the pinned PostgreSQL and the fallback: the image
+  # builds with its commit, setup runs as the owner, the server starts as the
+  # app role, TLS health and demo sign-in work, and a published card keeps
+  # its digest across a restart and across a backup, clean and restore.
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['19.0', '18.7']
+    env:
+      POSTGRES: ${{ matrix.postgres }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: make up
       - run: scripts/smoke.sh
+      - name: A card reads the same after a restart
+        run: |
+          scripts/smoke.sh demo
+          scripts/smoke.sh card | tee "$RUNNER_TEMP/card"
+          make down up
+          scripts/smoke.sh card | diff "$RUNNER_TEMP/card" -
+      - name: A backup restores the card and the demo sign-in into a clean database
+        run: |
+          make backup
+          backup="$(ls -t "$(sed -n 's/^GTM_HOME=//p' .env)/backups" | head -n 1)"
+          make clean
+          make restore BACKUP="$backup"
+          make up
+          scripts/smoke.sh
+          scripts/smoke.sh card | diff "$RUNNER_TEMP/card" -
       - name: make -n prints no password
         run: |
           for key in POSTGRES_PASSWORD GTM_APP_PASSWORD; do
@@ -137,7 +161,7 @@ jobs:
           python-version: '3.11'
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: '22.23.4'
+          node-version-file: .nvmrc
       - run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
@@ -155,7 +179,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: '22.23.4'
+          node-version-file: .nvmrc
       - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run build

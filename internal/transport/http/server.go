@@ -123,17 +123,39 @@ func (s *Server) Close() error {
 	return nil
 }
 
+// route is one API route. A write's handler is admitted by Server.write.
+type route struct {
+	pattern string
+	read    http.HandlerFunc
+	signIn  bool
+	write   func(http.ResponseWriter, *http.Request, admission)
+}
+
+// apiRoutes are every /api/v1 route. Only a write route answers a method
+// other than GET (and HEAD), so every write passes the CSRF check.
+func (s *Server) apiRoutes() []route {
+	return []route{
+		{pattern: "GET /api/v1/session", read: s.getSession},
+		{pattern: "POST /api/v1/session", signIn: true, write: s.signIn},
+		{pattern: "DELETE /api/v1/session", write: s.signOut},
+		{pattern: "GET /api/v1/accounts", read: s.signedIn(s.accounts)},
+		{pattern: "GET /api/v1/accounts/{account}/cards", read: s.signedIn(s.accountCards)},
+		{pattern: "GET /api/v1/cards/{card}", read: s.signedIn(s.card)},
+		{pattern: "GET /api/v1/cards/{card}/bytes", read: s.signedIn(s.cardBytes)},
+		{pattern: "GET /api/v1/cards/{card}/units/{n}", read: s.signedIn(s.unit)},
+		{pattern: "GET /api/v1/receipts/{receipt}", read: s.signedIn(s.receipt)},
+	}
+}
+
 func (s *Server) routes() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/session", s.getSession)
-	mux.HandleFunc("POST /api/v1/session", s.signIn)
-	mux.HandleFunc("DELETE /api/v1/session", s.signOut)
-	mux.HandleFunc("GET /api/v1/accounts", s.signedIn(s.accounts))
-	mux.HandleFunc("GET /api/v1/accounts/{account}/cards", s.signedIn(s.accountCards))
-	mux.HandleFunc("GET /api/v1/cards/{card}", s.signedIn(s.card))
-	mux.HandleFunc("GET /api/v1/cards/{card}/bytes", s.signedIn(s.cardBytes))
-	mux.HandleFunc("GET /api/v1/cards/{card}/units/{n}", s.signedIn(s.unit))
-	mux.HandleFunc("GET /api/v1/receipts/{receipt}", s.signedIn(s.receipt))
+	for _, r := range s.apiRoutes() {
+		if r.write != nil {
+			mux.HandleFunc(r.pattern, s.write(r.signIn, r.write))
+		} else {
+			mux.HandleFunc(r.pattern, r.read)
+		}
+	}
 	notFound := func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Not found.")
 	}
@@ -181,6 +203,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !canonical(r.URL.Path) {
 		writeError(w, http.StatusNotFound, "not_found", "Not found.")
+		return
+	}
+	// The API takes the session cookie and nothing else. A request that also
+	// carries a bearer token is refused, not served by the cookie: the browser
+	// and MCP surfaces never share credentials.
+	if strings.HasPrefix(r.URL.Path, "/api/") && len(r.Header.Values("Authorization")) > 0 {
+		writeError(w, http.StatusUnauthorized, "authorization_refused",
+			"The API signs in with its session cookie; it takes no Authorization header.")
 		return
 	}
 	if isWrite(r.Method) && !isMCP(r.URL.Path) {

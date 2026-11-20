@@ -194,6 +194,12 @@ make test                       # go vet and the Go tests against the Compose da
 
 Add `POSTGRES=18.7` to any of these to use the pinned fallback PostgreSQL, on its own volume.
 
+`make dev` and `make test` need Go 1.27.4, and `make dev` Node 22.23.4 (`nvm use` reads `.nvmrc`); both
+refuse other versions. `pins.json` lists every pinned version and digest, from the toolchains and images
+to the CI actions, and a test fails when the Dockerfile, `compose.yaml`, the Makefile or CI uses another.
+`gtm-connector version` prints the commit a binary was built from. An image that `make up` builds carries
+it as the label `org.opencontainers.image.revision`, ending in `-modified` if the checkout had changes.
+
 `make verify-real` downloads public meeting, call, chat and CRM datasets into `~/.cache/gtm-connector/real`
 and checks them against pinned digests, then runs every utterance and message through the Python package
 and the Go port and compares their sentences, neutralized text, scanners and JSON parsing. It reports

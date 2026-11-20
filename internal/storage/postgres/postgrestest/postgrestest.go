@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/pgtest"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -123,14 +124,22 @@ func UnitBody(n int, kind, recordRef, tool, shown string, extra map[string]any) 
 func Prepared(t testing.TB, store *postgres.Store, f *Fixture, operation, brief, principal, token string,
 	records ...postgres.RecordVersion) (postgres.CardPublication, postgres.Receipt, postgres.Receipt) {
 	t.Helper()
+	return PreparedFor(t, store, f, Account, operation, brief, principal, token, records...)
+}
+
+// PreparedFor is Prepared for another account of the fixture's workspace.
+func PreparedFor(t testing.TB, store *postgres.Store, f *Fixture, account, operation, brief, principal, token string,
+	records ...postgres.RecordVersion) (postgres.CardPublication, postgres.Receipt, postgres.Receipt) {
+	t.Helper()
 	ctx := context.Background()
+	arguments, _ := json.Marshal(map[string]string{"account_id": account})
 	call, err := store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID, OperationID: operation,
-		PrincipalID: principal, TokenID: token, Tool: postgres.Composite, Scope: "crm:read", AccountRef: Account,
-		Arguments: json.RawMessage(`{"account_id": "acc-003"}`), RequestID: json.RawMessage(`1`), Lease: time.Minute})
+		PrincipalID: principal, TokenID: token, Tool: postgres.Composite, Scope: "crm:read", AccountRef: account,
+		Arguments: arguments, RequestID: json.RawMessage(`1`), Lease: time.Minute})
 	must(t, err)
 	read, _, err := store.RunChildRead(ctx, postgres.ChildReadStart{ParentID: call.ID, Ordinal: 1,
 		Tool: "get_account", Scope: "crm:read", ConnectionID: f.Connection.ID, BriefID: brief,
-		Arguments: json.RawMessage(`{"account_id": "acc-003"}`), Lease: time.Minute,
+		Arguments: arguments, Lease: time.Minute,
 	}, func(context.Context) ([]postgres.RecordVersion, error) { return records, nil })
 	must(t, err)
 	ids, err := store.ReceiptRecordIDs(ctx, f.Workspace.ID, read.ID)
@@ -143,11 +152,42 @@ func Prepared(t testing.TB, store *postgres.Store, f *Fixture, operation, brief,
 	}
 	gaps := []postgres.Gap{{Code: "neutralized", Disposition: "note", Text: "none"}}
 	rules := "3"
-	return postgres.CardPublication{WorkspaceID: f.Workspace.ID, AccountRef: Account, BriefID: brief,
+	return postgres.CardPublication{WorkspaceID: f.Workspace.ID, AccountRef: account, BriefID: brief,
 		ParentReceiptID: call.ID, PrincipalID: principal, SealReceiptID: call.ID, SealLeaseToken: call.LeaseToken,
 		Kind: "go", SchemaVersion: 3, RulesVersion: &rules,
-		Bytes: CardBytes(t, call, Account, brief, []postgres.Receipt{read}, records, units, gaps), Units: units,
+		Bytes: CardBytes(t, call, account, brief, []postgres.Receipt{read}, records, units, gaps), Units: units,
 		Gaps: gaps, ReadReceiptIDs: []string{read.ID}}, call, read
+}
+
+// Published is a card published by Publish, with its brief receipt and read.
+type Published struct {
+	Card       postgres.Card
+	Seal, Read postgres.Receipt
+}
+
+// Publish grants principal the account, recording the account if it is
+// new, and publishes a one-unit card for it sealed by that principal, with
+// these gaps.
+func Publish(t testing.TB, f *Fixture, account, principal, brief string, gaps ...postgres.Gap) Published {
+	t.Helper()
+	ctx := context.Background()
+	must(t, f.Store.EnsureAccount(ctx, f.Workspace.ID, account, "Invented account "+account))
+	must(t, f.Store.GrantAccount(ctx, f.Workspace.ID, principal, account))
+	record := Record("accounts", account, "id", account, "name", "Invented account "+account)
+	pub, call, read := PreparedFor(t, f.Store, f, account, brief+"-call", brief, principal,
+		postgres.TokenID(""), record)
+	if len(gaps) > 0 {
+		pub.Gaps = gaps
+		pub.Bytes = CardBytes(t, call, account, brief, []postgres.Receipt{read}, []postgres.RecordVersion{record},
+			pub.Units, gaps)
+	}
+	card, err := f.Store.PublishCard(ctx, pub)
+	must(t, err)
+	seal, err := f.Store.Receipt(ctx, f.Workspace.ID, call.ID)
+	must(t, err)
+	read, err = f.Store.Receipt(ctx, f.Workspace.ID, read.ID)
+	must(t, err)
+	return Published{card, seal, read}
 }
 
 // New migrates a fresh database and publishes the fixture card on it.
@@ -191,6 +231,50 @@ func New(t testing.TB) *Fixture {
 	must(t, err)
 	f.Seal, f.SealLease = f.Parent, call.LeaseToken
 	return f
+}
+
+// OracleGaps gives each gap with one of these codes as the first oracle demo
+// card stating it wrote it. A null count or by_role stays nil, and a gap
+// without a count key fails the test.
+func OracleGaps(t testing.TB, codes ...string) []postgres.Gap {
+	t.Helper()
+	found := map[string]map[string]json.RawMessage{}
+	for _, line := range oracletest.Lines(t, "cards/demo.jsonl.gz") {
+		var row struct{ Card string }
+		var card struct{ Gaps []map[string]json.RawMessage }
+		if json.Unmarshal(line, &row) != nil || json.Unmarshal([]byte(row.Card), &card) != nil {
+			t.Fatal("cards/demo.jsonl.gz holds a line that is not a card")
+		}
+		for _, g := range card.Gaps {
+			var code string
+			json.Unmarshal(g["code"], &code)
+			if found[code] == nil {
+				found[code] = g
+			}
+		}
+	}
+	gaps := make([]postgres.Gap, len(codes))
+	for i, code := range codes {
+		g := found[code]
+		if g == nil {
+			t.Fatalf("no oracle demo card states %s", code)
+		}
+		count, counted := g["count"]
+		if !counted {
+			t.Fatalf("the oracle's %s gap has no count key", code)
+		}
+		gaps[i] = postgres.Gap{Code: code}
+		json.Unmarshal(g["disposition"], &gaps[i].Disposition)
+		json.Unmarshal(g["text"], &gaps[i].Text)
+		if string(count) != "null" {
+			gaps[i].Count = new(int)
+			json.Unmarshal(count, gaps[i].Count)
+		}
+		if string(g["by_role"]) != "null" {
+			gaps[i].ByRole = g["by_role"]
+		}
+	}
+	return gaps
 }
 
 func ptr(n int) *int { return &n }

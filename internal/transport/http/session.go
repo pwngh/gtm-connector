@@ -171,10 +171,48 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, viewOf(nil, pre, expires))
 }
 
-// csrfValid checks the CSRF header against a session's token.
+// csrfValid checks the CSRF header against a session's token: exactly one
+// header, equal to the token derived from that session.
 func csrfValid(r *http.Request, token string) bool {
 	given := r.Header.Values(csrfHeader)
 	return len(given) == 1 && subtle.ConstantTimeCompare([]byte(given[0]), []byte(csrfFor(token))) == 1
+}
+
+// admission is what admitted a write: a live session and its token, or, for
+// sign-in only, a signed pre-session (token empty).
+type admission struct {
+	token  string
+	stored postgres.Admission
+}
+
+// write admits a write by its CSRF token, which must be the live session's
+// or, where signIn is set, a signed pre-session's. A write that needs a
+// session and has none gets 401; any other failure 403. Every write route in
+// apiRoutes is served through it.
+func (s *Server) write(signIn bool, next func(http.ResponseWriter, *http.Request, admission)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token, _, live, err := s.current(r)
+		if err != nil {
+			internal(w)
+			return
+		}
+		switch {
+		case live && csrfValid(r, token):
+			next(w, r, admission{token, postgres.Admission{IDSHA256: digest(token)}})
+			return
+		case signIn:
+			if pre, expires, ok := s.preSession(r); ok && csrfValid(r, pre) {
+				next(w, r, admission{stored: postgres.Admission{PreSession: true, IDSHA256: digest(pre),
+					ExpiresAt: expires}})
+				return
+			}
+		case !live:
+			writeError(w, http.StatusUnauthorized, "sign_in_required", "Sign in first.")
+			return
+		}
+		writeError(w, http.StatusForbidden, "csrf_invalid",
+			"The CSRF token is missing or stale. Get one from GET /api/v1/session and send it in X-CSRF-Token.")
+	}
 }
 
 type signInRequest struct {
@@ -186,22 +224,7 @@ type signInRequest struct {
 // admitted by the CSRF token of a live session or of a signed pre-session,
 // and the rotation consumes exactly that one, atomically: a pre-session
 // signs in once, and a session revoked meanwhile signs in nobody.
-func (s *Server) signIn(w http.ResponseWriter, r *http.Request) {
-	var admitted postgres.Admission
-	token, _, live, err := s.current(r)
-	if err != nil {
-		internal(w)
-		return
-	}
-	if live && csrfValid(r, token) {
-		admitted = postgres.Admission{IDSHA256: digest(token)}
-	} else if pre, expires, ok := s.preSession(r); ok && csrfValid(r, pre) {
-		admitted = postgres.Admission{PreSession: true, IDSHA256: digest(pre), ExpiresAt: expires}
-	} else {
-		writeError(w, http.StatusForbidden, "csrf_invalid",
-			"Get a CSRF token from GET /api/v1/session and send it in X-CSRF-Token.")
-		return
-	}
+func (s *Server) signIn(w http.ResponseWriter, r *http.Request, admitted admission) {
 	var request signInRequest
 	if !readJSON(w, r, &request) {
 		return
@@ -220,7 +243,7 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next := newToken()
-	expires, err := s.sessions.SignIn(r.Context(), admitted, digest(next), principal, s.cfg.SessionTTL)
+	expires, err := s.sessions.SignIn(r.Context(), admitted.stored, digest(next), principal, s.cfg.SessionTTL)
 	if errors.Is(err, postgres.ErrSessionUsed) {
 		writeError(w, http.StatusForbidden, "csrf_invalid",
 			"That session was already used or ended. Get a new token from GET /api/v1/session.")
@@ -236,21 +259,8 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request) {
 }
 
 // signOut ends the session. It is a protected write like any other.
-func (s *Server) signOut(w http.ResponseWriter, r *http.Request) {
-	token, _, ok, err := s.current(r)
-	if err != nil {
-		internal(w)
-		return
-	}
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "sign_in_required", "Sign in first.")
-		return
-	}
-	if !csrfValid(r, token) {
-		writeError(w, http.StatusForbidden, "csrf_invalid", "The CSRF token is missing or stale.")
-		return
-	}
-	if err := s.sessions.RevokeSession(r.Context(), digest(token)); err != nil {
+func (s *Server) signOut(w http.ResponseWriter, r *http.Request, admitted admission) {
+	if err := s.sessions.RevokeSession(r.Context(), digest(admitted.token)); err != nil {
 		internal(w)
 		return
 	}

@@ -167,6 +167,50 @@ func TestBackupAndRestoreKeepState(t *testing.T) {
 	}
 }
 
+// testdata/backup-schema1.tar.gz was written by the schema 1 binary (main at
+// b342ab7): setup on a fresh database, a grant, a refused call and a brief
+// whose child read bound a record, then backup. Every later binary restores
+// it, migrates it, and signs in its demo principal.
+func TestASchemaOneBackupRestores(t *testing.T) {
+	const (
+		workspace = "5ec3cc99-ec0b-4c64-a26c-fb31fba45e3c"
+		principal = "9a8f9f7f-0865-4c43-8b1d-cdc6e5c91678"
+		childRead = "66666666-6666-4666-8666-666666666666"
+	)
+	fresh := openFresh(t)
+	target := filepath.Join(t.TempDir(), "restored")
+	if err := restore(ctx, fresh, target, filepath.Join("testdata", "backup-schema1.tar.gz")); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := fresh.SchemaVersion(ctx); err != nil || v != postgres.LatestSchemaVersion() {
+		t.Fatalf("restored at schema %d (%v)", v, err)
+	}
+	creds, err := openCredentials(target, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer creds.Close()
+	demo, err := parseDemo(must(creds.read(demoFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, digest, err := fresh.DemoPrincipalByLogin(ctx, demo.Login)
+	if err != nil || p.ID != principal || p.WorkspaceID != workspace || !bytes.Equal(digest, demoDigest(demo)) {
+		t.Fatalf("the demo sign-in after restore: %+v %v", p, err)
+	}
+	if _, _, err := serving(creds); err != nil {
+		t.Fatalf("the restored TLS pair and session key: %v", err)
+	}
+	read, err := fresh.ViewReceipt(ctx, postgres.Viewer{WorkspaceID: workspace, PrincipalID: principal}, childRead)
+	if err != nil || read.Status != "ok" || len(read.Rows) != 1 || read.Rows[0] != "crm/accounts/acc-003" {
+		t.Fatalf("the child read after restore: %+v %v", read, err)
+	}
+	refused, err := fresh.ReceiptByOperation(ctx, workspace, "refused")
+	if err != nil || string(refused.Arguments) != `{"a": 2, "b": 1}` || *refused.HTTPStatus != 403 {
+		t.Fatalf("the refused call after restore: %s %v", refused.Arguments, err)
+	}
+}
+
 func openFresh(t *testing.T) *postgres.Store {
 	t.Helper()
 	url := pgtest.URL(t)

@@ -11,10 +11,19 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// notBackedUp are the tables a backup leaves out, each with the reason. Every
+// other table a migration makes must be in backupTables.
+var notBackedUp = map[string]string{
+	"sessions":             "a restore signs everyone out",
+	"consumed_presessions": "a restore signs everyone out",
+	"restores":             "restore records itself into the database it fills",
+	"schema_migrations":    "restore writes it as it applies each migration",
+}
+
 // backupTables are copied in this order, so every foreign key points at a
-// table, or (for receipts) a row, that is already restored. Sessions are left
-// out: a restore signs everyone out. since is the schema version that made
-// the table, so a backup of an older version lists only its own tables.
+// table, or (for receipts) a row, that is already restored. since is the
+// schema version that made the table, so a backup of an older version lists
+// only its own tables.
 var backupTables = []struct {
 	name, order string
 	since       int

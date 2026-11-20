@@ -1,10 +1,12 @@
 """Every code point under each predicate and class the evidence rules use, from this interpreter."""
 
+import hashlib
 import re
+from typing import Any, Iterable
 import unicodedata
 import urllib.parse
 
-from oracle.output import Writer, ranges
+from oracle.output import Writer, dumps, ranges
 
 
 LAST = 0x10FFFF
@@ -172,3 +174,28 @@ def _nfc(writer: Writer) -> None:
                 result = unicodedata.normalize("NFC", text)
                 rows.append([first, second, None if result == text else [ord(part) for part in result]])
     writer.lines("unicode/nfc_mark_pairs.jsonl.gz", rows)
+    # Every ordered pair of marks after "a", and every canonical two-part decomposition with each mark between its
+    # parts, which test blocking and reordering everywhere. Committed as the inputs that make them and a digest of
+    # the rows the oracle gives, [input, NFC] a line: the rows themselves are millions.
+    two_part = []
+    for code in range(LAST + 1):
+        mapping = unicodedata.decomposition(chr(code))
+        if mapping and not mapping.startswith("<") and len(mapping.split()) == 2:
+            two_part.append([int(part, 16) for part in mapping.split()])
+
+    def digest(texts: Iterable[str]) -> dict[str, Any]:
+        sha, count = hashlib.sha256(), 0
+        for text in texts:
+            row = [[ord(part) for part in text], [ord(part) for part in unicodedata.normalize("NFC", text)]]
+            sha.update((dumps(row) + "\n").encode())
+            count += 1
+        return {"rows": count, "sha256": sha.hexdigest()}
+
+    pairs = digest("a" + chr(first) + chr(second) for first in marks for second in marks)
+    between = digest(chr(base) + chr(mark) + chr(second) for base, second in two_part for mark in marks)
+    writer.json("unicode/nfc_all_marks.json", {
+        "note": ("the marks and canonical two-part decompositions, and the SHA-256 of the rows "
+                 "[[code points], [NFC code points]], one compact JSON line each, for a and every ordered pair "
+                 "of marks, then for each decomposition's base, every mark, and its second part"),
+        "marks": marks, "two_part": two_part, "pairs": pairs, "between": between},
+        pairs["rows"] + between["rows"])
