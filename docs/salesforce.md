@@ -14,37 +14,37 @@ connect a state folder to it once:
 
 ```sh
 sf org login web --alias gtm-de
-gtm-connector salesforce check --sf-org gtm-de
+gtm-connector debug salesforce check --sf-org gtm-de
 gtm-connector connect salesforce --org gtm-de --seller 'Morgan Reed'
 gtm-connector accounts --query SEARCH_TEXT
-gtm-connector account ACCOUNT_ID
+gtm-connector inspect ACCOUNT_ID
 gtm-connector brief ACCOUNT_ID
-gtm-connector serve
+gtm-connector debug serve
 ```
 
 | Option | Meaning |
 | --- | --- |
-| `connect salesforce --org ALIAS` | Reads credentials from this signed-in `sf` alias, checks the org's identity and environment, pins them to the folder, and saves the alias and environment in the folder's `profile.json`. It starts no services and reads no record. `accounts`, `account`, `brief`, `serve`, `calls import`, and `slack map` then read that org with no further option. An alias is never a username. |
+| `connect salesforce --org ALIAS` | Reads credentials from this signed-in `sf` alias, checks the org's identity and environment, pins them to the folder, and saves the alias and environment in the folder's `profile.json`. It starts no services and reads no record. `accounts`, `inspect`, `brief`, `debug serve`, `debug calls import`, and `debug slack map` then read that org with no further option. An alias is never a username. |
 | `--environment` | `developer` (the default): OrganizationType is Developer Edition and IsSandbox is false. `sandbox`: IsSandbox is true. `production`: IsSandbox is false and OrganizationType is not Developer Edition. Missing or malformed metadata refuses. Sandbox and production also require that the four objects are queryable and expose the mapped fields. |
 | `--seller NAME` | Lists a seller's name or Slack user ID for [speaker roles](briefs.md). Repeat it for each. |
 | `--remove` | Detaches Salesforce, with its calls and Slack. The folder's files stay. |
 | `--state-dir PATH` | The private state folder, `var/v2` by default. Give `connect` and every later command the same one. |
-| `salesforce check --sf-org ALIAS`, `--sf-environment` | The setup check takes the alias and environment itself and reads no profile, so it runs before anything is connected. |
+| `debug salesforce check --sf-org ALIAS`, `--sf-environment` | The setup check takes the alias and environment itself and reads no profile, so it runs before anything is connected. |
 
 Account IDs are `acc-sf-` followed by the 18-character Salesforce ID. `--query` is a literal part of
 the account name, at most 200 characters. `accounts` returns the first 100 matches by name and then
 ID and says when more match. To connect a client, see [client setup](clients.md). To serve only
 named accounts, see [selection](selection.md).
 
-`salesforce check` tests the credentials, the edition or environment, the four objects' fields, an
-account search, and one renewal candidate's account, opportunities, and card. A failed step fails
-the steps that depend on it with `prerequisite_failed`. A failed report exits `4`.
+`debug salesforce check` tests the credentials, the edition or environment, the four objects'
+fields, an account search, and one renewal candidate's account, opportunities, and card. A failed
+step fails the steps that depend on it with `prerequisite_failed`. A failed report exits `4`.
 
 `connect salesforce` writes the instance origin, org ID, and environment to private
 `crm-connection.json` in the state folder and saves nothing when the check fails. Every later
 command must match all three, or it fails with `source_identity_mismatch`. A folder that has read
 demo data also refuses, so connect Salesforce in a folder of its own. One process holds a state
-folder at a time, so while `serve` runs, connect another folder for the other commands.
+folder at a time, so while `debug serve` runs, connect another folder for the other commands.
 
 ## Credentials
 
@@ -53,9 +53,9 @@ for the token of the connected alias. Each command may take 120 seconds, and bot
 is separate from each read's 20 seconds. Without `--json`, a command that waits on `sf` at startup
 says so on stderr after 2 seconds and then every 10. If a token expires during a read that still
 has time and requests left, the read runs `sf` again and then continues. stderr says when `sf`
-starts and when it answers, and `serve` says so with `--json` too. An `sf` that outlasts its limit
+starts and when it answers, and `debug serve` says so with `--json` too. An `sf` that outlasts its limit
 is stopped with anything it started, and so is one still running when the connector exits. The
-connector keeps the token in memory and does not launch a login flow. `salesforce check` without
+connector keeps the token in memory and does not launch a login flow. `debug salesforce check` without
 `--sf-org` reads `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` from its environment, and
 no other command does. No default CLI org is ever selected. The instance address must be an HTTPS My Domain origin ending in
 `.my.salesforce.com`, with no path, query, credentials, or nonstandard port.
@@ -111,12 +111,12 @@ standard fields.
 
 | Code | Cause | Fix |
 | --- | --- | --- |
-| `salesforce_invalid_configuration` | The instance address, token, or environment is missing or invalid. | Run `sf org login web --alias gtm-de`, then `connect salesforce --org gtm-de`. For `salesforce check`, pass `--sf-org gtm-de` or set both variables. |
+| `salesforce_invalid_configuration` | The instance address, token, or environment is missing or invalid. | Run `sf org login web --alias gtm-de`, then `connect salesforce --org gtm-de`. For `debug salesforce check`, pass `--sf-org gtm-de` or set both variables. |
 | `salesforce_auth_required` | The `sf` login or refresh gave no usable credentials, a second 401 arrived, or the org behind the alias changed. | Sign in again with `sf`. |
 | `salesforce_edition_required` | Developer mode saw another edition. | Connect a Developer Edition alias, or connect with the intended `--environment`. |
 | `salesforce_environment_mismatch` | The org does not match the connected environment. | Check the alias and connect again with the intended `--environment`. |
 | `salesforce_api_disabled` | API access is disabled for the org. | Use an API-enabled org and a user with the API Enabled permission. |
-| `salesforce_schema_unavailable` | A required standard field is not exposed. | Run `salesforce check` with the same alias and environment to see the missing fields. |
+| `salesforce_schema_unavailable` | A required standard field is not exposed. | Run `debug salesforce check` with the same alias and environment to see the missing fields. |
 | `salesforce_forbidden` | Salesforce denied the read with another HTTP 403. | Grant the user read access to the four objects and their fields. |
 | `salesforce_rate_limited` | HTTP 429, or HTTP 403 with `REQUEST_LIMIT_EXCEEDED`. | Wait for API capacity and retry. |
 | `salesforce_result_limit` | A read exceeded the request, page, row, or size limit. | Use a narrower search or a smaller account book. |
@@ -126,7 +126,7 @@ standard fields.
 | `salesforce_http_error` | Another upstream HTTP status. | Check that the object is available and readable in this org. |
 | `salesforce_invalid_response` | The response was outside the supported shape. | Check access to the mapped fields, then retry. |
 | `salesforce_invalid_arguments` | An account ID, search text, or date is invalid. | Use an `acc-sf-` ID, a shorter query, or a `YYYY-MM-DD` date. |
-| `salesforce_account_number_ambiguous` | An AccountNumber lookup returned a number that is not a literal match. `calls import` reports `calls_account_ambiguous`. | Select the account with `--account` and its canonical ID. |
+| `salesforce_account_number_ambiguous` | An AccountNumber lookup returned a number that is not a literal match. `debug calls import` reports `calls_account_ambiguous`. | Select the account with `--account` and its canonical ID. |
 | `source_identity_mismatch` | The state folder belongs to another connection or cannot prove its identity. | Connect the original org again, or connect in an unused `--state-dir`. |
-| `renewal_fields_unmapped` | `salesforce check` found no account with a Contract `EndDate` on or after the planning date. Cards still work and say so. | Create a Draft Contract with `StartDate` and `ContractTerm`, or verify read access to `EndDate`. |
+| `renewal_fields_unmapped` | `debug salesforce check` found no account with a Contract `EndDate` on or after the planning date. Cards still work and say so. | Create a Draft Contract with `StartDate` and `ContractTerm`, or verify read access to `EndDate`. |
 | `crm_write_disabled` | A client attempted a write. | Do not retry. The Salesforce backend is read-only. |

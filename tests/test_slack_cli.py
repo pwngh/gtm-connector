@@ -51,7 +51,7 @@ class SlackCLITests(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def connect(self, *extra, **kwargs):
-        return self.invoke('slack', 'connect', '--client-id', CLIENT, '--redirect-uri', REDIRECT, *extra, **kwargs)
+        return self.invoke('debug', 'slack', 'connect', '--client-id', CLIENT, '--redirect-uri', REDIRECT, *extra, **kwargs)
 
     def failure(self, result, expected):
         code, out, err = result
@@ -62,7 +62,7 @@ class SlackCLITests(unittest.TestCase):
         self.assertNotIn(PRIVATE, err)
         self.assertNotIn(CLIENT, err)
         self.assertNotIn(REDIRECT, err)
-        self.assertIn('gtm-connector slack', detail['next'])
+        self.assertIn('gtm-connector debug slack', detail['next'])
         return detail
 
     def test_action_only_options_are_rejected_without_importing_provider(self):
@@ -81,13 +81,14 @@ class SlackCLITests(unittest.TestCase):
         with patch.object(sys, 'meta_path', [guard, *sys.meta_path]):
             for arguments in cases:
                 with self.subTest(arguments=arguments):
-                    self.failure(self.invoke('slack', *arguments), 2)
+                    self.failure(self.invoke('debug', 'slack', *arguments), 2)
                     self.assertFalse(self.state.exists())
 
     def test_global_parent_and_action_json_and_directory_positions(self):
-        for args in (['--json', 'slack', '--state-dir', str(self.state), 'status'],
-                     ['slack', '--json', '--state-dir', str(self.state), 'status'],
-                     ['slack', 'status', '--state-dir', str(self.state), '--json']):
+        for args in (['--json', 'debug', 'slack', '--state-dir', str(self.state), 'status'],
+                     ['debug', '--json', 'slack', '--state-dir', str(self.state), 'status'],
+                     ['debug', 'slack', '--json', '--state-dir', str(self.state), 'status'],
+                     ['debug', 'slack', 'status', '--state-dir', str(self.state), '--json']):
             with self.subTest(args=args), patch('gtm_connector.slack_auth.slack_status', return_value=READY) as status:
                 code, out, err = self.invoke(*args, directory=False, as_json=False)
             self.assertEqual(code, 0, err)
@@ -138,7 +139,7 @@ class SlackCLITests(unittest.TestCase):
         self.assertEqual(json.loads(out), READY)
         events = [json.loads(line)['progress'] for line in err.splitlines()]
         self.assertEqual([event['step'] for event in events], ['browser', 'identity', 'save'])
-        self.assertTrue(all(event['command'] == 'slack connect' for event in events))
+        self.assertTrue(all(event['command'] == 'debug slack connect' for event in events))
         self.assertNotIn(PRIVATE, out + err)
         with patch('gtm_connector.slack_auth.connect_slack', side_effect=connected):
             code, out, err = self.connect(as_json=False)
@@ -153,7 +154,7 @@ class SlackCLITests(unittest.TestCase):
         for name in SLACK_AUTH_ERROR_CODES:
             error = SlackAuthError(name)
             with self.subTest(name=name), patch('gtm_connector.slack_auth.slack_status', side_effect=error):
-                detail = self.failure(self.invoke('slack', 'status', '--check'), error.exit_code)
+                detail = self.failure(self.invoke('debug', 'slack', 'status', '--check'), error.exit_code)
             self.assertIn(name, detail['message'])
             self.assertFalse(self.state.exists())
 
@@ -161,7 +162,7 @@ class SlackCLITests(unittest.TestCase):
         for error in (OSError(PRIVATE), ValueError(PRIVATE), RuntimeError(PRIVATE)):
             with self.subTest(error=type(error).__name__), \
                     patch('gtm_connector.slack_auth.slack_status', side_effect=error):
-                detail = self.failure(self.invoke('slack', 'status', '--check'), 1)
+                detail = self.failure(self.invoke('debug', 'slack', 'status', '--check'), 1)
             self.assertIn('slack_storage_failed', detail['message'])
 
     def test_progress_can_precede_a_safe_final_error(self):
@@ -170,7 +171,7 @@ class SlackCLITests(unittest.TestCase):
             progress('refresh', 'running')
             raise SlackAuthError('slack_reconnect_required')
         with patch('gtm_connector.slack_auth.slack_status', side_effect=failed):
-            result = self.invoke('slack', 'status', '--check')
+            result = self.invoke('debug', 'slack', 'status', '--check')
         self.failure(result, 3)
         self.assertEqual(json.loads(result[2].splitlines()[0])['progress']['step'], 'refresh')
 
@@ -185,7 +186,7 @@ class SlackCLITests(unittest.TestCase):
 
     def test_local_missing_status_and_disconnect_never_create_state(self):
         for action in ('status', 'disconnect', 'disconnect'):
-            code, out, err = self.invoke('slack', action)
+            code, out, err = self.invoke('debug', 'slack', action)
             self.assertEqual(code, 0, err)
             self.assertEqual(err, '')
             result = json.loads(out)
@@ -211,9 +212,10 @@ sys.meta_path.insert(0,Guard())
 from gtm_connector.cli import main
 raise SystemExit(main(sys.argv[1:]))
 '''
-        cases = [(['slack', 'status'], 0), (['slack', 'disconnect'], 0),
-                 (['slack', 'status', '--check'], 3),
-                 (['slack', 'connect', '--client-id', CLIENT, '--redirect-uri', REDIRECT + '?private=' + PRIVATE], 2)]
+        cases = [(['debug', 'slack', 'status'], 0), (['debug', 'slack', 'disconnect'], 0),
+                 (['debug', 'slack', 'status', '--check'], 3),
+                 (['debug', 'slack', 'connect', '--client-id', CLIENT, '--redirect-uri',
+                   REDIRECT + '?private=' + PRIVATE], 2)]
         for args, expected in cases:
             package_root = str(Path(gtm_connector.__file__).resolve().parent.parent)
             result = subprocess.run([sys.executable, '-c', program, package_root, *args,
@@ -231,17 +233,17 @@ raise SystemExit(main(sys.argv[1:]))
         unrelated.write_text(PRIVATE)
         unrelated.chmod(0o600)
         for action in ('status', 'disconnect'):
-            self.failure(self.invoke('slack', action), 3)
+            self.failure(self.invoke('debug', 'slack', action), 3)
             self.assertEqual(unrelated.read_text(), PRIVATE)
 
     def test_status_check_and_revoke_flags_reach_only_their_operation(self):
         with patch('gtm_connector.slack_auth.slack_status', return_value=READY) as status:
-            code, out, err = self.invoke('slack', 'status', '--check')
+            code, out, err = self.invoke('debug', 'slack', 'status', '--check')
         self.assertEqual(code, 0, err)
         self.assertTrue(status.call_args.kwargs['check'])
         confirmed = {**DISCONNECTED, 'remote_revoke_requested': True, 'remote_access_token_revoked': True}
         with patch('gtm_connector.slack_auth.disconnect_slack', return_value=confirmed) as disconnect:
-            code, out, err = self.invoke('slack', 'disconnect', '--revoke')
+            code, out, err = self.invoke('debug', 'slack', 'disconnect', '--revoke')
         self.assertEqual(code, 0, err)
         self.assertTrue(disconnect.call_args.kwargs['revoke'])
         self.assertEqual(json.loads(out), confirmed)
@@ -249,14 +251,14 @@ raise SystemExit(main(sys.argv[1:]))
     def test_unconfirmed_revoke_keeps_local_outcome_and_exits_five(self):
         unconfirmed = {**DISCONNECTED, 'remote_revoke_requested': True, 'revocation_error': 'slack_unavailable'}
         with patch('gtm_connector.slack_auth.disconnect_slack', return_value=unconfirmed):
-            code, out, err = self.invoke('slack', 'disconnect', '--revoke')
+            code, out, err = self.invoke('debug', 'slack', 'disconnect', '--revoke')
         self.assertEqual(code, 5)
         self.assertEqual(json.loads(out), unconfirmed)
         detail = json.loads(err)['error']
         self.assertEqual(detail['code'], 'upstream_failure')
         self.assertIn('unconfirmed', detail['message'])
         self.assertIn('Slack settings', detail['message'])
-        self.assertEqual(detail['next'], 'gtm-connector slack disconnect --help')
+        self.assertEqual(detail['next'], 'gtm-connector debug slack disconnect --help')
 
     def test_human_saved_and_unfinished_status_never_claim_live_source_access(self):
         for state in ('ready', 'identity_unchecked', 'refresh_pending'):
@@ -264,12 +266,12 @@ raise SystemExit(main(sys.argv[1:]))
                      'needs_login': state == 'refresh_pending'}
             with self.subTest(state=state), patch('gtm_connector.slack_auth.slack_status', return_value=saved), \
                     patch.dict(os.environ, {'NO_COLOR': '1'}):
-                code, out, err = self.invoke('slack', 'status', as_json=False)
+                code, out, err = self.invoke('debug', 'slack', 'status', as_json=False)
             self.assertEqual(code, 0, err)
             self.assertEqual(err, '')
             self.assertNotIn('\x1b', out)
             self.assertNotIn('Slack authentication is verified.', out)
-            self.assertIn('Next: gtm-connector slack', out)
+            self.assertIn('Next: gtm-connector debug slack', out)
             if state == 'identity_unchecked':
                 self.assertIn('--check', out)
             elif state == 'refresh_pending':
@@ -280,10 +282,10 @@ raise SystemExit(main(sys.argv[1:]))
     def test_unchecked_credentials_needing_login_do_not_recommend_another_check(self):
         saved = {**READY, 'verification': 'saved', 'credential_state': 'identity_unchecked', 'needs_login': True}
         with patch('gtm_connector.slack_auth.slack_status', return_value=saved):
-            code, out, err = self.invoke('slack', 'status', as_json=False)
+            code, out, err = self.invoke('debug', 'slack', 'status', as_json=False)
         self.assertEqual(code, 0, err)
         self.assertEqual(err, '')
-        self.assertIn('Next: gtm-connector slack connect --help', out)
+        self.assertIn('Next: gtm-connector debug slack connect --help', out)
         self.assertNotIn('--check', out)
         self.assertIn('Browser authorization is required.', out)
 
@@ -293,7 +295,7 @@ raise SystemExit(main(sys.argv[1:]))
                       'revocation_error': 'slack_unavailable' if requested and not revoked else None}
             with self.subTest(requested=requested, revoked=revoked), \
                     patch('gtm_connector.slack_auth.disconnect_slack', return_value=result):
-                code, out, err = self.invoke('slack', 'disconnect', *(['--revoke'] if requested else []), as_json=False)
+                code, out, err = self.invoke('debug', 'slack', 'disconnect', *(['--revoke'] if requested else []), as_json=False)
             self.assertEqual(code, 5 if requested and not revoked else 0, err)
             self.assertIn('Local Slack credentials were removed.', out)
             if not requested:

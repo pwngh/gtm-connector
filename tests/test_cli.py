@@ -42,8 +42,8 @@ class CLITests(unittest.TestCase):
         return json.loads(result.stdout)
 
     def test_verification_runs_twice_with_distinct_audit_groups_and_one_activity(self):
-        first = self.json_result(self.run_cli("verify"))
-        second = self.json_result(self.run_cli("verify"))
+        first = self.json_result(self.run_cli("debug", "verify"))
+        second = self.json_result(self.run_cli("debug", "verify"))
         self.assertNotEqual(first["brief_id"], second["brief_id"])
         self.assertEqual(first["renewal_record"], second["renewal_record"])
         self.assertEqual(first["idempotent_write"], second["idempotent_write"])
@@ -148,7 +148,7 @@ class CLITests(unittest.TestCase):
         found = self.json_result(self.run_cli("accounts", "--query", accounts[0]["name"].upper()))
         self.assertIn(accounts[0]["id"], [row["id"] for row in found])
         self.assertEqual(self.json_result(self.run_cli("accounts", "--query", "not-an-account-xyz")), [])
-        account = self.json_result(self.run_cli("account", "acc-007"))
+        account = self.json_result(self.run_cli("inspect", "acc-007"))
         self.assertEqual(account["id"], "acc-007")
         self.assertEqual(account["contacts"][0]["id"], "con-007")
         self.assertNotIn("call_notes", account)
@@ -156,7 +156,7 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("IGNORE PREVIOUS INSTRUCTIONS", json.dumps(account))
 
     def test_optional_slack_verification_reads_slack_under_its_own_scope(self):
-        summary = self.json_result(self.run_cli("verify", "--with-slack"))
+        summary = self.json_result(self.run_cli("debug", "verify", "--with-slack"))
         self.assertEqual(summary["workflow"], "crm-calls-slack")
         self.assertEqual(summary["audit_rows"], 16)
         self.assertEqual(summary["brief_audit_rows"], 12)
@@ -180,14 +180,14 @@ class CLITests(unittest.TestCase):
         self.assertEqual((len(rows), sum(row["status"] == "error" for row in rows)), (31, 7))
 
     def test_missing_account_exits_two_without_json_on_stdout(self):
-        result = self.run_cli("account", "acc-missing")
+        result = self.run_cli("inspect", "acc-999")
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, "")
-        self.assertIn("acc-missing", result.stderr)
+        self.assertIn("account not found: acc-999", result.stderr)
 
     def test_read_commands_do_not_create_a_missing_folder_or_its_database(self):
         missing = Path(self.directory.name) / "missing"
-        for arguments in (("accounts",), ("account", "acc-001")):
+        for arguments in (("accounts",), ("inspect", "acc-001")):
             with self.subTest(arguments=arguments):
                 result = self.run_cli(*arguments, state=missing)
                 self.assertEqual(result.returncode, 2)
@@ -209,9 +209,10 @@ class CLITests(unittest.TestCase):
         result = self.run_cli("brief", "acc-001", "--as-of", "2027-02-01", json_output=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
-        self.assertRegex(result.stdout, r"\nBrief: brief-[0-9a-f]{32}\nResolve any number: gtm-connector trace "
-                                        r"brief-[0-9a-f]{32} N --state-dir \S+\n\Z")
-        identifier = result.stdout.splitlines()[-2].removeprefix("Brief: ")
+        self.assertRegex(result.stdout, r"\nBrief: (brief-[0-9a-f]{32})\n"
+                                        r"List every unit: gtm-connector inspect \1 --state-dir \S+\n"
+                                        r"Resolve a number: gtm-connector inspect \1 N --state-dir \S+\n\Z")
+        identifier = result.stdout.splitlines()[-3].removeprefix("Brief: ")
         artifact = json.loads((self.state / "briefs" / (identifier + ".json")).read_text())
         self.assertEqual(result.stdout.split("\nBrief: ", 1)[0], artifact["text"])
         self.assertIn("  Renewal date: 2027-02-01, today [1]", result.stdout.splitlines())
@@ -219,7 +220,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual([row["tool"] for row in rows],
                          ["get_account", "list_opportunities", "read_call_notes", "read_slack_messages"])
 
-    def test_json_brief_and_trace_resolve_each_number_from_saved_evidence(self):
+    def test_json_brief_and_inspect_resolve_each_number_from_saved_evidence(self):
         brief = self.json_result(self.run_cli("brief", "acc-001", "--without-calls"))
         self.assertEqual(set(brief), {"schema_version", "brief_id", "account_id", "as_of", "status", "rules_version",
                                       "sealed_by", "sources", "text", "units", "gaps"})
@@ -232,23 +233,23 @@ class CLITests(unittest.TestCase):
         self.assertEqual({key: artifact[key] for key in brief}, brief)
         self.assertEqual(set(artifact) - set(brief), {"evidence"})
         self.assertEqual(artifact["evidence"]["notes_status"], "denied")
-        traced = self.json_result(self.run_cli("trace", brief["brief_id"], "3"))
+        [traced] = self.json_result(self.run_cli("inspect", brief["brief_id"], "3"))
         self.assertEqual(set(traced), {"brief_id", "account_id", "n", "kind", "source", "record_ref", "receipt",
-                                       "fields"})
+                                       "fields", "next_by_speaker"})
         self.assertEqual((traced["brief_id"], traced["account_id"], traced["n"], traced["kind"], traced["record_ref"]),
                          (brief["brief_id"], "acc-001", 3, "record", "crm/opportunities/opp-001"))
         self.assertEqual(traced["fields"]["amount_cents"], 2_050_000)
         receipt = next(row for row in artifact["evidence"]["receipts"] if row["tool"] == "list_opportunities")
         self.assertEqual(traced["receipt"], {"audit_id": receipt["audit_id"], "tool": "list_opportunities",
                                              "status": "ok", "http_status": 200})
-        human = self.run_cli("trace", brief["brief_id"], "1", json_output=False)
+        human = self.run_cli("inspect", brief["brief_id"], "1", json_output=False)
         self.assertEqual(human.returncode, 0, human.stderr)
         self.assertIn("Record\tcrm/accounts/acc-001\n", human.stdout)
         self.assertIn("(get_account, ok)", human.stdout)
         last = max(unit["n"] for unit in brief["units"])
         for number in ("0", str(last + 1), "-1"):
             with self.subTest(number=number):
-                rejected = self.run_cli("trace", brief["brief_id"], number)
+                rejected = self.run_cli("inspect", brief["brief_id"], number)
                 self.assertEqual(rejected.returncode, 2)
                 self.assertEqual(rejected.stdout, "")
                 self.assertIn(f"This card has numbers 1 to {last}.", rejected.stderr)
@@ -266,14 +267,14 @@ class CLITests(unittest.TestCase):
         self.assertNotRegex(brief.stdout, r"<[!@]|https?://")
         self.assertIn("[mention channel]", printed["text"])
         self.assertIn("[link files.thornfield-wren.example]", printed["text"])
-        for command in (("demo",), ("trace", printed["brief_id"], "7")):
-            with self.subTest(command=command[0]):
-                state = self.state if command[0] == "trace" else Path(self.directory.name) / "demo"
+        for command in (("demo",), ("inspect", printed["brief_id"], "7"), ("inspect", printed["brief_id"])):
+            with self.subTest(command=command):
+                state = self.state if command[0] == "inspect" else Path(self.directory.name) / "demo"
                 output = self.run_cli(*command, state=state)
                 self.assertEqual(output.returncode, 0, output.stderr)
                 self.assertNotRegex(output.stdout, r"<[!@]|https?://")
 
-    def test_trace_refuses_a_saved_card_that_no_longer_matches_the_audit_log(self):
+    def test_inspect_refuses_a_saved_card_that_no_longer_matches_the_audit_log(self):
         brief = self.json_result(self.run_cli("brief", "acc-003"))
         saved = self.state / "briefs" / (brief["brief_id"] + ".json")
         sealed = saved.read_bytes()
@@ -283,7 +284,7 @@ class CLITests(unittest.TestCase):
             artifact = json.loads(json.dumps(original))
             change(artifact)
             saved.write_text(json.dumps(artifact))
-            return self.run_cli("trace", brief["brief_id"], "1")
+            return self.run_cli("inspect", brief["brief_id"], "1")
 
         cases = {
             "receipt outcome": lambda artifact: artifact["evidence"]["receipts"][0].update(row_count=9),
@@ -300,13 +301,13 @@ class CLITests(unittest.TestCase):
         self.assertIn("invalid saved brief evidence", refused.stderr)
         # The same content spelled another way is still not the sealed file. The sealed bytes trace.
         saved.write_text(json.dumps(original))
-        self.assertEqual(self.run_cli("trace", brief["brief_id"], "1").returncode, 2)
+        self.assertEqual(self.run_cli("inspect", brief["brief_id"], "1").returncode, 2)
         saved.write_bytes(sealed)
-        self.assertEqual(self.json_result(self.run_cli("trace", brief["brief_id"], "1"))["n"], 1)
+        self.assertEqual(self.json_result(self.run_cli("inspect", brief["brief_id"], "1"))[0]["n"], 1)
 
     def test_a_spoken_number_traces_to_its_sentence_speaker_and_source_digest(self):
         brief = self.json_result(self.run_cli("brief", "acc-003"))
-        traced = self.json_result(self.run_cli("trace", brief["brief_id"], "5"))
+        [traced] = self.json_result(self.run_cli("inspect", brief["brief_id"], "5"))
         self.assertEqual({key: traced[key] for key in ("kind", "source", "record_ref", "speaker", "role", "basis",
                                                        "at", "sanitizer_version")},
                          {"kind": "sentence", "source": "calls", "record_ref": "calls/call_notes/note-003b",
@@ -314,7 +315,7 @@ class CLITests(unittest.TestCase):
                           "at": "2027-01-12T15:00:00Z", "sanitizer_version": 3})
         self.assertRegex(traced["raw_sha256"], r"\A[0-9a-f]{64}\Z")
         self.assertIn(json.dumps(traced["text"]), brief["text"])
-        human = self.run_cli("trace", brief["brief_id"], "7", json_output=False)
+        human = self.run_cli("inspect", brief["brief_id"], "7", json_output=False)
         self.assertIn("Role\tseller (listed seller identity)\n", human.stdout)
         self.assertIn("[mention channel]", human.stdout)
         self.assertNotIn("<!channel>", human.stdout)
@@ -323,7 +324,7 @@ class CLITests(unittest.TestCase):
         brief = self.json_result(self.run_cli("brief", "acc-003"))
         path = self.state / "briefs" / (brief["brief_id"] + ".json")
         saved = path.read_text()
-        self.assertEqual(self.run_cli("trace", brief["brief_id"], "1").returncode, 0)
+        self.assertEqual(self.run_cli("inspect", brief["brief_id"], "1").returncode, 0)
 
         def edited(change):
             artifact = json.loads(saved)
@@ -346,20 +347,20 @@ class CLITests(unittest.TestCase):
         for name, change in edits.items():
             with self.subTest(edit=name):
                 path.write_text(edited(change))
-                refused = self.run_cli("trace", brief["brief_id"], "1")
+                refused = self.run_cli("inspect", brief["brief_id"], "1")
                 self.assertEqual((refused.returncode, refused.stdout), (2, ""))
                 self.assertIn("not the card that was sealed", refused.stderr)
         # The same bytes back, and the card traces again.
         path.write_text(saved)
-        self.assertEqual(self.run_cli("trace", brief["brief_id"], "5").returncode, 0)
+        self.assertEqual(self.run_cli("inspect", brief["brief_id"], "5").returncode, 0)
 
     def test_invalid_brief_inputs_and_missing_saved_evidence_use_distinct_exits(self):
         for arguments, expected_exit in ((("brief", "acc-missing"), 2),
                                          (("brief", "acc-999"), 5),
                                          (("brief", "acc-001", "--as-of", "2027-02-30"), 2),
-                                         (("trace", "brief-" + "0" * 32, "1"), 2),
-                                         (("trace", "not-a-brief", "1"), 2),
-                                         (("trace", "brief-" + "0" * 32, "one"), 2)):
+                                         (("inspect", "brief-" + "0" * 32, "1"), 2),
+                                         (("inspect", "not-a-brief", "1"), 2),
+                                         (("inspect", "brief-" + "0" * 32, "one"), 2)):
             with self.subTest(arguments=arguments):
                 rejected = self.run_cli(*arguments)
                 self.assertEqual(rejected.returncode, expected_exit)
@@ -370,7 +371,7 @@ class CLITests(unittest.TestCase):
 
     def test_serve_prints_endpoints_and_shuts_down_on_interrupt(self):
         process = subprocess.Popen(
-            [sys.executable, "-m", "gtm_connector", "serve", "--json", "--state-dir", str(self.state)],
+            [sys.executable, "-m", "gtm_connector", "debug", "serve", "--json", "--state-dir", str(self.state)],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True,
         )

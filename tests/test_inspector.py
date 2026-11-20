@@ -69,7 +69,7 @@ class InspectorConfigurationTests(unittest.TestCase):
             capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, 5)
-        self.assertIn("start serve", result.stderr)
+        self.assertIn("start debug serve", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertEqual(result.stdout, "")
         self.assertFalse((self.state / "inspector.json").exists())

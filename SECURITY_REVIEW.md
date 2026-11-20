@@ -18,7 +18,7 @@ default to invented local fixtures. A real source is used only when the operator
 
 | Scope | Allowed tools |
 | --- | --- |
-| `crm:read` | `search_accounts`, `get_account`, `list_opportunities`; with `serve --selection`, also `prepare_renewal_brief` and `read_renewal_brief` |
+| `crm:read` | `search_accounts`, `get_account`, `list_opportunities`; with `debug serve --selection`, also `prepare_renewal_brief` and `read_renewal_brief` |
 | `crm:write` | `log_activity` |
 | `calls:read` | `read_call_notes` |
 | `slack:read` | `read_slack_messages` |
@@ -55,7 +55,7 @@ untrusted data and cannot request a tool, a grant, or a write.
 | Audit receipts | `audit.sqlite3` stores, for each tool attempt, a SHA-256 token fingerprint, the tool, its arguments, a UTC timestamp, request and brief IDs, the outcome, and returned record references. Saving a card adds one more receipt, `save_brief`, that holds the saved file's SHA-256. Arguments can include activity text, search terms, and IDs. Bearer tokens and response bodies are not logged. A fingerprint establishes neither identity nor a valid grant. [docs/audit.md](docs/audit.md) has the HTTP 503 cases, the requests that get no receipt, and the rate limit. |
 | Retention | Runtime directories use mode 0700 and files use mode 0600. Nothing expires automatically. Saved briefs include source evidence and receipt copies. |
 | Cards | `units.py` builds a card from checked evidence alone. No model runs and no inference service is called. A seller is whoever the operator lists with `connect ... --seller NAME`, saved as `sellers.json`, and that list is the operator's own claim. The demo's invented sellers are the default only when every source is demo data. See [docs/briefs.md](docs/briefs.md). |
-| Imported transcripts | `calls import` is a local operator command. It parses a selected TXT, VTT, or SRT export, obtains only `crm:read`, and resolves the account through the audited gateway before committing an association. A missing, ambiguous, changed, or unreceipted association publishes nothing. An account with nothing imported gets a card that says so, and demo content never stands in. Local `calls inspect --full` returns the complete original and is not an MCP tool. See [docs/calls.md](docs/calls.md). |
+| Imported transcripts | `debug calls import` is a local operator command. It parses a selected TXT, VTT, or SRT export, obtains only `crm:read`, and resolves the account through the audited gateway before committing an association. A missing, ambiguous, changed, or unreceipted association publishes nothing. An account with nothing imported gets a card that says so, and demo content never stands in. Local `debug calls inspect --full` returns the complete original and is not an MCP tool. See [docs/calls.md](docs/calls.md). |
 
 ## Salesforce (optional, read-only)
 
@@ -72,35 +72,35 @@ each read's budget. An `sf` that outlasts its limit is stopped and reported as
 | Area | Behavior |
 | --- | --- |
 | Authority and storage | The local owner credential grants CRM access. This is not Salesforce user delegation, and the upstream token may hold broader permissions than these reads use. The connector stores no Salesforce credential file. The operator's existing CLI login storage and installed `sf` executable remain trusted. No Salesforce credential enters `owner.json`, a client config, brief evidence, or the audit. |
-| `salesforce check` without `--sf-org` | The check reads `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN`, and that path cannot refresh. No other command reads them. There is no implicit default CLI org. Both paths validate one HTTPS My Domain origin and a bounded printable token. |
+| `debug salesforce check` without `--sf-org` | The check reads `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN`, and that path cannot refresh. No other command reads them. There is no implicit default CLI org. Both paths validate one HTTPS My Domain origin and a bounded printable token. |
 | Environment and identity pin | Developer Edition is the default. Sandbox and production need an explicit `--environment` at `connect salesforce`. `connect` and every later startup check OrganizationType and IsSandbox before opening source stores. Sandbox and production also check that the required standard objects and fields are readable. A mode-0600 `crm-connection.json` pins the validated origin, org ID, and environment. A restart must match it. It holds private org identity and must not be shared or committed. |
 | Requests | GET only, with fixed SOQL fields, escaped search text, and no arbitrary query or URL input. TLS verification stays on. Proxies and redirects are disabled. Each operation has 12 GETs, 1 MiB, and 20 seconds, with at most 10 pages per query. One account's contacts, opportunities, and contracts are read up to 1,000 rows each, and a list across accounts up to 100. An account search returns its first 100 rows by name and then ID and states when more match. The write tool is omitted. A write attempt returns HTTP 403. |
 | HTTP 401 | The first 401 in an operation may reacquire credentials once through `sf`, read the Organization again to confirm the same org, and retry the same GET. Time spent waiting for `sf` is added back to the read's deadline. An `sf` that does not answer in time returns `salesforce_cli_timeout`. A second 401, a lookup failure, or a changed origin or org returns `salesforce_auth_required`. Other errors are not retried. |
-| `salesforce check` | A local diagnostic the operator runs. Its report holds fixed step names, outcomes, counts, timings, fixed errors, and missing required field names. It returns no source record, ID, org detail, or credential. |
+| `debug salesforce check` | A local diagnostic the operator runs. Its report holds fixed step names, outcomes, counts, timings, fixed errors, and missing required field names. It returns no source record, ID, org detail, or credential. |
 | Tests and guide | [test_sf_credentials.py](tests/test_sf_credentials.py), with a fake CLI on PATH. [docs/salesforce.md](docs/salesforce.md). |
 
 ## Slack (optional, read-only)
 
 | Area | Behavior |
 | --- | --- |
-| Sign-in | `slack connect` authorizes an existing PKCE public app in the system browser. It requests only user history scopes (`channels:history`, optionally `groups:history`), validates the exact granted set, and verifies the returned workspace and user. Authentication does not enable a source or grant a caller `slack:read`. `connect slack` enables the source for a state folder, and only where a sign-in is saved. The authentication commands call no message endpoint and create no tool receipts. |
+| Sign-in | `debug slack connect` authorizes an existing PKCE public app in the system browser. It requests only user history scopes (`channels:history`, optionally `groups:history`), validates the exact granted set, and verifies the returned workspace and user. Authentication does not enable a source or grant a caller `slack:read`. `connect slack` enables the source for a state folder, and only where a sign-in is saved. The authentication commands call no message endpoint and create no tool receipts. |
 | Browser flow | Fresh state and S256 PKCE. Only the exact registered localhost Host, port, and path are accepted. The code, state, and verifier stay in memory and out of results, progress, and browser HTML. |
 | Storage | Tokens and identity sit in one private credential file in its own folder, `slack-connection` inside the state folder, pinned to app, workspace, and user. `profile.json` holds none of them. A lock serializes processes. Symlinks, hard links, and unsafe modes are rejected. |
 | Credential states | `ready` is released to reads only with its stored grants and expected identity. `refresh_pending` marks an ambiguous exchange, identity mismatch, or rejected credential unusable. `identity_unchecked` allows a check-only retry and is never released to reads. |
 | Provider calls | Four fixed Slack methods: exchange, refresh, identity, and explicit revoke. No redirects, no ambient proxy, and bounded response bytes and HTTP time. Status, errors, and browser output omit tokens, provider IDs, and workspace details. |
 | Disconnect | Local disconnect makes no request. `--revoke` reports only the access-token outcome and local deletion. It never claims app or full-grant removal. |
-| `slack map` | Resolves one account through the audited `crm:read` tool and saves one thread selection without reading messages. A copied thread URL must match the saved workspace origin. It never supplies an HTTP destination or chooses credentials. |
+| `debug slack map` | Resolves one account through the audited `crm:read` tool and saves one thread selection without reading messages. A copied thread URL must match the saved workspace origin. It never supplies an HTTP destination or chooses credentials. |
 | `read_slack_messages` | Keeps its `slack:read` check and commits its pending receipt before mapping, credential, or provider work. The source makes only fixed GET `conversations.replies` requests with verified TLS, no redirect, and no environment proxy. The scope permits any mapped account, limited by `--selection` when set. There is no query or channel-search tool, and live Slack has no fixture fallback. No tool starts the browser flow, sends a message, or broadens a grant. |
 | Read budget | Ten HTTP attempts, 1 MiB of response bytes, and a 20-second deadline per read, covering pages, authentication, failures, and retries. One rate-limit retry, with a valid delay of at most five seconds. Only exact token expiry permits one retry, with at most one local refresh. An ambiguous refresh is not retried and then requires browser login. |
 | Content | Missing text, unsupported subtypes, and hidden content refuse the whole observation. Files, blocks, and attachments add omission counts only. A completed read does not establish a full archive or an atomic view while messages change. |
-| `slack check` | Reads the mapped thread through a temporary local service that enables only the Slack read tool. Its report holds no identifiers, paths, URLs, or message text. |
+| `debug slack check` | Reads the mapped thread through a temporary local service that enables only the Slack read tool. Its report holds no identifiers, paths, URLs, or message text. |
 | Tests and guides | [test_slack_auth.py](tests/test_slack_auth.py) and [test_slack_reader.py](tests/test_slack_reader.py). [docs/slack.md](docs/slack.md). |
 
 ## Selected sources and caller-run briefs
 
 | Area | Behavior |
 | --- | --- |
-| Selection file | `serve --selection FILE` limits every client read to the accounts and Slack threads in a file the operator writes. It must be a regular file the operator owns that others cannot write. `serve` validates it before opening any credential or source and never reloads it. |
+| Selection file | `debug serve --selection FILE` limits every client read to the accounts and Slack threads in a file the operator writes. It must be a regular file the operator owns that others cannot write. `debug serve` validates it before opening any credential or source and never reloads it. |
 | Unselected account | Refused with `account_not_selected` before any source access. The ID is never looked up. A Slack read also needs that account's Slack thread selected. |
 | Searches and account-wide opportunity lists | The selected IDs go into the SQLite or Salesforce query itself, before ordering and the result limit. |
 | Writes | No write tool is offered. A write attempt is refused as `crm_write_disabled`. |
@@ -118,7 +118,7 @@ each read's budget. An `sf` that outlasts its limit is stopped and reported as
 - The rate limit is not a distributed quota. Credential filesystem proof is POSIX only.
 - A card does not relate one record to another, so it flags no contradiction. A number attributes
   a source, not its truth.
-- `trace` refuses a saved card unless a finished receipt in the audit log names the SHA-256 of the
+- `inspect` refuses a saved card unless a finished receipt in the audit log names the SHA-256 of the
   saved file. The owner of the state folder can rewrite the file and the log together, so this
   catches a changed card, not a determined owner.
 - A speaker label is taken as the source gives it. The connector cannot tell that a transcript

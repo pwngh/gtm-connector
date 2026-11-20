@@ -15,22 +15,22 @@ The app needs:
 
 | Command | What it does | Slack requests |
 | --- | --- | ---: |
-| `slack connect --client-id PUBLIC_CLIENT_ID --redirect-uri http://localhost:REGISTERED_PORT/slack/callback` | Opens the browser, waits up to ten minutes for approval, exchanges the code with PKCE, checks the identity, and saves the credentials. | At most 2 |
-| `slack status` | Reads the saved file. A missing connection exits 0. A corrupt file is an error. | 0 |
-| `slack status --check` | Verifies authentication and refreshes an expiring token once. It does not show that a thread is readable. | 1 or 2 |
-| `slack disconnect` | Removes local credentials. Repeating it succeeds. | 0 |
-| `slack disconnect --revoke` | Asks Slack to revoke the saved access token, then removes local credentials. If Slack does not confirm, it exits 5. Remove the app itself in Slack settings. | At most 1 |
+| `debug slack connect --client-id PUBLIC_CLIENT_ID --redirect-uri http://localhost:REGISTERED_PORT/slack/callback` | Opens the browser, waits up to ten minutes for approval, exchanges the code with PKCE, checks the identity, and saves the credentials. | At most 2 |
+| `debug slack status` | Reads the saved file. A missing connection exits 0. A corrupt file is an error. | 0 |
+| `debug slack status --check` | Verifies authentication and refreshes an expiring token once. It does not show that a thread is readable. | 1 or 2 |
+| `debug slack disconnect` | Removes local credentials. Repeating it succeeds. | 0 |
+| `debug slack disconnect --revoke` | Asks Slack to revoke the saved access token, then removes local credentials. If Slack does not confirm, it exits 5. Remove the app itself in Slack settings. | At most 1 |
 
 | Flag | Meaning |
 | --- | --- |
 | `--client-id`, `--redirect-uri` | `connect` only, required. The existing app's public client ID and exact registered redirect. |
 | `--user-scope` | `connect` only. `channels:history` (the default) or `groups:history` for private channels. Repeat it for both. Passing it replaces the default. |
 | `--team-id` | `connect` only. Require this workspace. It is never printed. |
-| `--state-dir` | Every `slack` action. The state folder, `var/v2` by default. Its sign-in is saved inside it, in `slack-connection`. |
+| `--state-dir` | Every `debug slack` action. The state folder, `var/v2` by default. Its sign-in is saved inside it, in `slack-connection`. |
 
 - No other scope is requested, and a grant that returns other scopes is refused.
 - Slack requests in one command share a 20-second deadline. Each response is limited to 64 KiB.
-- Ctrl-C exits 130. An approval or save that already finished is not undone, so run `slack status`.
+- Ctrl-C exits 130. An approval or save that already finished is not undone, so run `debug slack status`.
 - A refresh token is single use and usable for 30 days.
 - Bot grants, organization-wide installs, GovSlack, confidential clients, and Slack's separate
   user-centric OAuth endpoints are not supported.
@@ -39,23 +39,25 @@ The app needs:
 ## Connect, map, check, and brief
 
 ```sh
-gtm-connector connect slack --seller 'Morgan Reed' --seller U12345678   # after slack connect; name every seller
-gtm-connector slack map --account acc-007 --thread-url 'COPIED_THREAD_LINK'
-gtm-connector slack check --account acc-007
+gtm-connector connect slack --seller 'Morgan Reed' --seller U12345678   # after debug slack connect; name every seller
+gtm-connector debug slack map --account acc-007 --thread-url 'COPIED_THREAD_LINK'
+gtm-connector debug slack check --account acc-007
 gtm-connector brief acc-007
 ```
 
+Slack threads are added with `debug slack map` until a later change lets `connect slack --channel` do it.
+
 | Command or flag | Rule |
 | --- | --- |
-| `connect slack` | Connects the sign-in saved in the folder, beside Salesforce or beside the demo CRM. With no saved sign-in it exits `2` and names `slack connect`. With one that needs a new login it exits `3`. It contacts nobody. `connect slack --remove` detaches Slack and keeps the sign-in. |
-| `slack map` | Requires Slack connected and a `ready` sign-in, makes one audited CRM lookup, and saves the selection. It fetches no messages. |
-| `slack check` | Reads the mapped thread through `read_slack_messages` and validates its receipt. It reads no CRM or calls data. |
+| `connect slack` | Connects the sign-in saved in the folder, beside Salesforce or beside the demo CRM. With no saved sign-in it exits `2` and names `debug slack connect`. With one that needs a new login it exits `3`. It contacts nobody. `connect slack --remove` detaches Slack and keeps the sign-in. |
+| `debug slack map` | Requires Slack connected and a `ready` sign-in, makes one audited CRM lookup, and saves the selection. It fetches no messages. |
+| `debug slack check` | Reads the mapped thread through `read_slack_messages` and validates its receipt. It reads no CRM or calls data. |
 | `--thread-url` | The saved workspace's HTTPS origin and the path `/archives/CHANNEL/pTIMESTAMP`. A reply link names its parent through `thread_ts`. An optional `cid` must match. Other query fields, fragments, and other workspaces are refused. |
 | `--channel` with `--thread-ts` | Needed when the saved connection has no workspace origin. The timestamp is whole seconds, a dot, and exactly six digits. |
 | `--account`, `--account-number` | The CRM account ID: `acc-007`, or the `acc-sf-` form with Salesforce. Or, Salesforce only, a number that matches exactly one account. |
 | `--replace`, `--reassign` | Needed when the account already has another thread, and when the thread belongs to another account. |
 
-- Use the same state folder every time. Stop a `serve` running on it first.
+- Use the same state folder every time. Stop a `debug serve` running on it first.
 - Select the parent message. A reply selected as the parent fails the check.
 - A folder that has read demo Slack messages refuses live Slack. Connect it in a fresh folder.
 - A card reads Slack whenever Slack is connected. An account with no mapped thread gets a card that
@@ -107,8 +109,8 @@ is never included. `connect` and `status` return:
 
 | Result | Fields |
 | --- | --- |
-| `slack map` | `schema_version`, `status` (`saved` or `unchanged`), `selection`, `thread_access: "unchecked"`, `counts`, `duration_ms`, and `next`. |
-| `slack check` | `schema_version: 1`, `status` (`passed` or `failed`), `crm_access_checked: false`, `calls_access_checked: false`, `duration_ms`, `api_calls`, `response_bytes`, `counts`, `steps`, and `next`, the first failed step's recovery command. Request and byte counts are `null` when unknown. |
+| `debug slack map` | `schema_version`, `status` (`saved` or `unchanged`), `selection`, `thread_access: "unchecked"`, `counts`, `duration_ms`, and `next`. |
+| `debug slack check` | `schema_version: 1`, `status` (`passed` or `failed`), `crm_access_checked: false`, `calls_access_checked: false`, `duration_ms`, `api_calls`, `response_bytes`, `counts`, `steps`, and `next`, the first failed step's recovery command. Request and byte counts are `null` when unknown. |
 | `counts` | `auth_calls`, `message_calls`, `pages`, `raw_rows`, `messages`, `duplicates`, `refresh_attempts`, `token_retries`, `rate_retries`. |
 | `steps` | `private_state`, `mapping`, `credential_binding`, `thread_read`, `receipt`. Each has `name`, `status` (`pass`, `fail`, `not_run`), `count`, `duration_ms`, `api_calls`, `response_bytes`, `code`, `message`, `next`. |
 
@@ -118,7 +120,7 @@ folder private. A `slack:read` grant can read every mapped account the server se
 
 ## Errors
 
-A reason sets the exit code of a command, and is a step `code` in `slack check`.
+A reason sets the exit code of a command, and is a step `code` in `debug slack check`.
 
 | Reason | Exit | Fix |
 | --- | ---: | --- |
@@ -126,7 +128,7 @@ A reason sets the exit code of a command, and is a step `code` in `slack check`.
 | `slack_connection_busy` | 1 | Finish or cancel the other command, then retry. |
 | `slack_private_state_invalid` | 3 | Use the original connection folder or an unused one. |
 | `slack_credentials_invalid` | 4 | Keep the file private and reconnect in an unused folder. |
-| `slack_not_connected`, `slack_reconnect_required` | 3 | Run `slack connect`. |
+| `slack_not_connected`, `slack_reconnect_required` | 3 | Run `debug slack connect`. |
 | `slack_browser_unavailable` | 1 | Retry where a system browser works. |
 | `slack_callback_unavailable` | 1 | Free the registered localhost port. |
 | `slack_login_timeout` | 1 | Retry and approve within ten minutes. |
@@ -139,15 +141,15 @@ A reason sets the exit code of a command, and is a step `code` in `slack check`.
 | `slack_account_ambiguous` | 3 | Pass the account ID with `--account`. |
 | `slack_association_failed`, `slack_association_invalid` | 4 | The CRM lookup failed. Nothing was saved. Check the CRM connection. |
 | `slack_crm_unavailable` | 5 | Check CRM access, then retry. |
-| `slack_mapping_missing`, `slack_mapping_conflict` | 3 | Run `slack map` for the account. For a conflict, review `--replace` and `--reassign`. |
+| `slack_mapping_missing`, `slack_mapping_conflict` | 3 | Run `debug slack map` for the account. For a conflict, review `--replace` and `--reassign`. |
 | `slack_source_mismatch` | 3 | Connect the original sources and Slack identity in the original folder. |
-| `slack_identity_unchecked` | 3 | Run `slack status --check`. |
+| `slack_identity_unchecked` | 3 | Run `debug slack status --check`. |
 | `slack_thread_unavailable`, `slack_forbidden`, `slack_thread_changed`, `slack_thread_incomplete` | 3 | Check the selected parent, the history scope, and channel access. For a changed or incomplete thread, retry when it is stable. |
 | `slack_resource_limit`, `slack_output_too_large` | 3 | Select a smaller thread. |
 | `slack_clock_invalid` | 3 | Correct the local clock. |
 | `slack_mapping_invalid`, `slack_snapshot_invalid` | 4 | Keep the private files and inspect the setup before recreating it. |
-| `slack_response_invalid`, `slack_rate_limited`, `slack_timeout`, `slack_unavailable` | 5 | Run `slack status`, wait, then retry. |
-| `slack_storage_failed` | 1 | Fix access to the private folders, then run `slack status`. |
+| `slack_response_invalid`, `slack_rate_limited`, `slack_timeout`, `slack_unavailable` | 5 | Run `debug slack status`, wait, then retry. |
+| `slack_storage_failed` | 1 | Fix access to the private folders, then run `debug slack status`. |
 
 ## Invented messages in the demo
 
@@ -157,7 +159,7 @@ card. It uses no Slack account, token, or network request.
 ```sh
 .venv/bin/python -m gtm_connector connect demo
 .venv/bin/python -m gtm_connector brief acc-003 --json
-.venv/bin/python -m gtm_connector verify --with-slack --state-dir var/slack-verification
+.venv/bin/python -m gtm_connector debug verify --with-slack --state-dir var/slack-verification
 .venv/bin/python -m gtm_connector demo --state-dir var/renewal-demo   # always includes Slack
 ```
 
@@ -173,5 +175,5 @@ card. It uses no Slack account, token, or network request.
 | `msg-007`, an instruction to call `log_activity` | Quoted sentences. No activity is created. |
 | No messages | `Slack: no message was returned for this account.` |
 | HTTP 403 for missing `slack:read` | `Slack: not read. The grant lacks slack:read.` |
-| A card prepared without Slack, as `verify` does without `--with-slack` | `Slack: not requested for this card.` |
+| A card prepared without Slack, as `debug verify` does without `--with-slack` | `Slack: not requested for this card.` |
 | Any other Slack failure | No card. The command stops. |

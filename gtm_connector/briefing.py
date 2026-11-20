@@ -16,7 +16,7 @@ import httpx2
 
 from . import strict_json
 from .seed import DEMO_AS_OF, SELLERS
-from .units import SANITIZER_VERSION, BriefRejected, build, trace
+from .units import SANITIZER_VERSION, BriefRejected, build, neutralized, trace
 
 
 class BriefingError(RuntimeError):
@@ -235,6 +235,10 @@ def _sealed(directory, brief_id):
     try:
         payload = _artifact_path(directory, brief_id).read_bytes()
     except FileNotFoundError:
+        from .selected_briefs import ARTIFACT_DIRECTORY
+        if os.path.lexists(Path(directory) / ARTIFACT_DIRECTORY / (brief_id + ".json")):
+            raise ValueError("This brief was prepared by an assistant with prepare_renewal_brief, which reads it "
+                             "back with read_renewal_brief. inspect reads cards saved by brief or demo.") from None
         raise ValueError("No saved card has this brief ID in this state folder.") from None
     artifact = strict_json.loads(payload)
     evidence = artifact.get("evidence") if isinstance(artifact, dict) else None
@@ -247,6 +251,9 @@ def _sealed(directory, brief_id):
         raise ValueError("invalid saved brief evidence")
     from .audit import read_ids
     log = Path(directory) / "audit.sqlite3"
+    # As audit and every other reader of the log refuse it, a linked log never vouches for a card.
+    if os.path.islink(log):
+        raise ValueError("Audit database must not be a symbolic link.")
     reference = f"briefs/{brief_id}/{hashlib.sha256(payload).hexdigest()}"
     try:
         [seal] = read_ids(log, [str(artifact.get("sealed_by"))])
@@ -268,12 +275,73 @@ def _sealed(directory, brief_id):
     return artifact
 
 
+# What neutralizing a label can put in it. Two labels that differ only where these stand print alike.
+_REPLACED = re.compile(r"\[(?:mention|user|channel|link|U\+)[^\]]*\]|\(\d+\)")
+
+
 def trace_saved(directory, brief_id, number):
-    """Resolve one number on a saved card from its sealed units and evidence, never from the card's text.
+    """Resolve one number on a saved card from its sealed units and evidence, never from the card's text."""
+    return traces_saved(directory, brief_id, [number])[0]
+
+
+def traces_saved(directory, brief_id, numbers):
+    """Resolve numbers on one saved card, checked once, from its sealed units and evidence.
 
     A card keeps the numbers it was sealed with. Nothing is rebuilt: a later rule fix, another Python, or a
     changed seller list would give other units for the same evidence, and the sealed ones are the card.
     """
     artifact = _sealed(directory, brief_id)
+    units, traced = artifact["units"], []
+    # A card is read only when every number on it resolves, as the listing checks it.
+    resolved = [trace(artifact["evidence"], index, units) for index in range(1, len(units) + 1)]
+    for number in numbers:
+        # Anything but a number on the card, True included, is refused the way trace refuses it.
+        if type(number) is not int or not 1 <= number <= len(units):
+            trace(artifact["evidence"], number, units)
+        found = resolved[number - 1]
+        # The next whole sentence under the same speaker label in the same record, where a condition often is. A
+        # sentence with no label has none, as no label is not one speaker, and so does a label that may print
+        # like another one.
+        sealed, following = units[number - 1], None
+        if (sealed["kind"] == "sentence" and sealed["speaker"] is not None
+                and not _REPLACED.search(sealed["speaker"])):
+            following = next((unit["n"] for unit in units[number:] if unit["kind"] == "sentence"
+                              and not unit["partial"] and unit["record_ref"] == sealed["record_ref"]
+                              and unit["speaker"] == sealed["speaker"]), None)
+        traced.append({"brief_id": brief_id, "account_id": artifact["account_id"], **found,
+                       "next_by_speaker": following})
+    return traced
+
+
+def units_saved(directory, brief_id):
+    """Every unit of a saved card in number order, as sealed. Each must resolve as trace resolves it."""
+    artifact = _sealed(directory, brief_id)
+    for number in range(1, len(artifact["units"]) + 1):
+        trace(artifact["evidence"], number, artifact["units"])
     return {"brief_id": brief_id, "account_id": artifact["account_id"],
-            **trace(artifact["evidence"], number, artifact["units"])}
+            "units": [neutralized(unit) for unit in artifact["units"]]}
+
+
+def newest_saved(directory, account_id):
+    """The newest saved card of this account that the folder holds, by when it was sealed, or None.
+
+    The seal receipts are in the order they were committed. The card itself is checked when it is inspected.
+    """
+    log = Path(directory) / "audit.sqlite3"
+    if not os.path.lexists(log):
+        return None
+    from .audit import read_audit
+    try:
+        seals = read_audit(log, tool=SEAL_TOOL, status="ok")
+    except (ValueError, OSError, sqlite3.Error):
+        return None
+    for seal in reversed(seals):
+        arguments = seal["arguments"]
+        if isinstance(arguments, dict) and arguments.get("account_id") == account_id:
+            # The newest card that passes the checks inspect makes, so the card named can be opened.
+            try:
+                if _sealed(directory, arguments.get("brief_id"))["account_id"] == account_id:
+                    return arguments["brief_id"]
+            except (ValueError, TypeError, KeyError):
+                continue
+    return None

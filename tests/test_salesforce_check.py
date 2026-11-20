@@ -373,7 +373,7 @@ print(json.dumps({{"status": 0, "result": result}}))
             with self.subTest(status=status), patch.object(
                     SalesforceReadOnlyAdapter, "from_sf", side_effect=lambda alias, **options: self.adapter()) as factory, \
                     redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
-                code = main(["salesforce", "check", "--sf-org", ALIAS, "--as-of", AS_OF, "--json"])
+                code = main(["debug", "salesforce", "check", "--sf-org", ALIAS, "--as-of", AS_OF, "--json"])
             self.assertEqual(code, expected_code)
             factory.assert_called_once_with(ALIAS, environment="developer")
             report = json.loads(stdout.getvalue())
@@ -384,12 +384,12 @@ print(json.dumps({{"status": 0, "result": result}}))
             self.assert_progress([(event["step"], event["status"], event["count"]) for event in progress], report)
             for event in progress:
                 self.assertEqual(set(event), {"command", "step", "status", "count"})
-                self.assertEqual(event["command"], "salesforce check")
+                self.assertEqual(event["command"], "debug salesforce check")
             if expected_code:
                 self.assertEqual(len(messages), len(progress) + 1)
                 error = messages[-1]["error"]
                 self.assertEqual(error["code"], "check_failed")
-                self.assertEqual(error["next"], "gtm-connector salesforce check --help")
+                self.assertEqual(error["next"], "gtm-connector debug salesforce check --help")
             else:
                 self.assertEqual(len(messages), len(progress))
             self.assert_safe(stdout.getvalue() + stderr.getvalue())
@@ -462,7 +462,7 @@ print(json.dumps({{"status": 0, "result": result}}))
                 self.assertEqual((code, stdout), (5, ""))
                 error = json.loads(stderr)["error"]
                 self.assertIn(expected, error["message"])
-                self.assertEqual(error["next"], "gtm-connector salesforce check --help")
+                self.assertEqual(error["next"], "gtm-connector debug salesforce check --help")
                 self.assert_safe(stderr)
                 self.assertFalse((state / "briefs").exists())
 

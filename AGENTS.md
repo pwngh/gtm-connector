@@ -63,9 +63,8 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 
 The goal is a showcase an engineer can judge in five minutes. No model writes text on a card.
 
-1. Seven top-level commands (demo, connect, accounts, brief, inspect, audit, mcp), the rest under
-   `debug`, and `cli.py` split into one module per command. Then in-process calls for the CLI and
-   the bridge with one brief store. The scope, selection, expiry, and receipt checks stay.
+1. `cli.py` split into one module per command. Then in-process calls for the CLI and the bridge
+   with one brief store. The scope, selection, expiry, and receipt checks stay.
 2. Transcript folders (replace hand-picked excerpts) and a bounded Slack channel window (replaces
    thread mapping), with what was not read counted on the card.
 3. Two assistant tools, evidence and submit. A submission is unit numbers, a label from a fixed

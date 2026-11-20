@@ -955,6 +955,12 @@ def _slack(card):
                  files or None)
 
 
+def card_time(at):
+    """A record's time as a card prints it: a plain time as it is, any other value as a quoted literal."""
+    return ("time Missing" if at is None else at if _PLAIN_INSTANT.fullmatch(at)
+            else "time " + json.dumps(at, ensure_ascii=False))
+
+
 def _said(card):
     """Whole sentences by role: the customer's, then the seller's, then those of no established role.
 
@@ -998,8 +1004,6 @@ def _said(card):
             lines.append("  " + heading)
         for unit in chosen:
             where = {"calls": "call", "slack": "Slack"}[unit["source"]]
-            when = ("time Missing" if unit["at"] is None else unit["at"] if _PLAIN_INSTANT.fullmatch(unit["at"])
-                    else "time " + json.dumps(unit["at"], ensure_ascii=False))
             who = "no speaker label" if unit["speaker"] is None else json.dumps(unit["speaker"], ensure_ascii=False)
             contact = unit["contact"]
             if contact is not None:
@@ -1009,7 +1013,7 @@ def _said(card):
                 who += f", role {card.titles[contact]} [{contact}]"
             elif role == "unknown" and unit["basis"] != "no speaker label":
                 who += f" ({unit['basis']})"
-            lines.append(f"    [{unit['n']}] {where} {when}; {who}")
+            lines.append(f"    [{unit['n']}] {where} {card_time(unit['at'])}; {who}")
             lines.append("        " + json.dumps(unit["text"], ensure_ascii=False))
     def withheld(why, line):
         """One line for the sentences not shown for this reason, with their count by role."""
@@ -1127,12 +1131,22 @@ def trace(evidence: dict, number: int, units: list[Unit] | None = None) -> dict:
     if (unit["n"] != number or receipt is None or record is None or unit["record_ref"] not in receipt["rows"]
             or unit["kind"] == "sentence" and unit["raw_sha256"] != hashlib.sha256(
                 record["body"].encode("utf-8", "surrogatepass")).hexdigest()):
-        raise ValueError("This number does not resolve to a record and a receipt of its own card.")
+        raise ValueError(f"Number {number} does not resolve to a record and a receipt of its own card.")
     unit["receipt"] = {key: receipt[key] for key in ("audit_id", "tool", "status", "http_status")}
     if unit["kind"] == "record":
         unit["fields"] = {key: (" ".join(safe_text(value)[0].split()) if isinstance(value, str) else value)
                           for key, value in sorted(record.items())
                           if key != "record_ref" and (value is None or isinstance(value, (str, int, bool)))}
-    else:  # Neutralized again, so a card sealed under older rules shows nothing today's would have replaced.
-        unit.update({key: safe_text(unit[key])[0] for key in ("text", "speaker") if isinstance(unit[key], str)})
-    return unit
+    return neutralized(unit)
+
+
+def neutralized(unit: dict) -> dict:
+    """A sealed unit as it is shown.
+
+    A unit sealed under today's rules is shown as sealed: its text is the card's, and neutralizing twice is not
+    always neutralizing once. A unit sealed under older rules has its text and speaker neutralized again, so it
+    shows nothing that today's rules replace.
+    """
+    if unit.get("sanitizer_version") == SANITIZER_VERSION:
+        return unit
+    return {**unit, **{key: safe_text(unit[key])[0] for key in ("text", "speaker") if isinstance(unit.get(key), str)}}

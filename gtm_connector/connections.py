@@ -29,7 +29,7 @@ _AUTH_LIMITS = [
     "http://127.0.0.1:8767/callback and requires the local owner header.",
     "There is no dynamic client registration, browser consent page, or token refresh. Browser Origin is rejected.",
     "Supplied grants expire after five minutes. Rerun connect with explicit scopes to replace the private config.",
-    "Restarting serve replaces its endpoints and certificate and invalidates old grants.",
+    "Restarting debug serve replaces its endpoints and certificate and invalidates old grants.",
 ]
 
 
@@ -47,11 +47,11 @@ _STDIO_DOCUMENTATION = {
 }
 _STDIO_LIMITS = [
     "Untested in the app itself. The bridge command is tested with the MCP SDK's own stdio client.",
-    "The app starts the bridge, which attaches to the serve process already running in this state folder. "
-    "Start serve first; the bridge exits with a message on stderr if it cannot reach it.",
+    "The app starts the bridge, which attaches to the debug serve process already running in this state "
+    "folder. Start debug serve first; the bridge exits with a message on stderr if it cannot reach it.",
     "At launch the bridge obtains a grant for exactly the listed scopes and keeps it in memory. "
     "It renews only those scopes.",
-    "Restarting serve replaces its endpoints. Restart the app afterward.",
+    "Restarting debug serve replaces its endpoints. Restart the app afterward.",
     "The configuration holds the Python path, the state folder, and scopes. It holds no token or owner credential.",
 ]
 _MAX_CONFIG_BYTES = 4 * 1024 * 1024
@@ -175,9 +175,9 @@ def _connect_stdio(directory, app, scopes, config_file):
 
 
 def _serve_steps(directory):
-    """How to start the connector in a folder. serve reads the folder's profile, so a folder with none is
+    """How to start the connector in a folder. debug serve reads the folder's profile, so a folder with none is
     connected first."""
-    serve = shlex.join(["gtm-connector", "serve", "--state-dir", str(directory)])
+    serve = shlex.join(["gtm-connector", "debug", "serve", "--state-dir", str(directory)])
     if os.path.lexists(directory / "profile.json"):
         return [serve]
     return [shlex.join(["gtm-connector", "connect", "demo", "--state-dir", str(directory)])
@@ -221,7 +221,7 @@ def connect(directory, app, scopes=None, *, transport="http", config_file=None):
                 token = client.authorize(scopes)
         except httpx2.HTTPError:
             raise InspectorConnectionError(
-                "Cannot reach the local authority; start serve in this state directory.") from None
+                "Cannot reach the local authority; start debug serve in this state directory.") from None
         entry = {"url": owner["resource"], "headers": {"Authorization": "Bearer " + token}}
         if app == "inspector":
             entry.update({"type": "streamable-http", "protocolEra": "modern"})

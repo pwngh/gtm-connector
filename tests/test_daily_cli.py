@@ -41,7 +41,7 @@ class DailyCLITests(unittest.TestCase):
     def test_server_json_lines_include_allowed_and_refused_calls(self):
         with tempfile.TemporaryDirectory() as directory:
             profile.save(directory, profile.DEMO)
-            process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "serve", "--json",
+            process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "debug", "serve", "--json",
                                         "--state-dir", directory], cwd=ROOT, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             try:
@@ -82,7 +82,7 @@ class DailyCLITests(unittest.TestCase):
     def test_closed_event_pipe_keeps_server_and_audit_running(self):
         with tempfile.TemporaryDirectory() as directory:
             profile.save(directory, profile.DEMO)
-            process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "serve", "--json",
+            process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "debug", "serve", "--json",
                                         "--state-dir", directory], cwd=ROOT, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             try:
@@ -117,7 +117,7 @@ class DailyCLITests(unittest.TestCase):
     def test_closed_combined_output_keeps_server_running(self):
         with tempfile.TemporaryDirectory() as directory:
             profile.save(directory, profile.DEMO)
-            process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "serve", "--json",
+            process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "debug", "serve", "--json",
                                         "--state-dir", directory], cwd=ROOT, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             try:
@@ -146,7 +146,7 @@ class DailyCLITests(unittest.TestCase):
     def test_doctor_reports_missing_setup_without_creating_it(self):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory) / "missing"
-            result = self.run_cli("doctor", "--state-dir", str(state), "--json")
+            result = self.run_cli("debug", "doctor", "--state-dir", str(state), "--json")
             self.assertEqual(result.returncode, 4, result.stderr)
             report = json.loads(result.stdout)
             self.assertEqual(report["status"], "failed")

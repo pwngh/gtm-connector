@@ -23,9 +23,9 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         failures = [check for check in result["checks"] if check["status"] == "fail"]
         self.assertEqual([row["name"] for row in failures], ["state_folder"])
-        # serve reads the folder's profile, so a folder with none is connected first.
+        # debug serve reads the folder's profile, so a folder with none is connected first.
         self.assertIn(f"gtm-connector connect demo --state-dir {self.state} (or connect salesforce --org ALIAS), "
-                      f"then gtm-connector serve --state-dir {self.state}", failures[0]["fix"])
+                      f"then gtm-connector debug serve --state-dir {self.state}", failures[0]["fix"])
         self.assertFalse(self.state.exists())
 
     def test_running_services_pass_without_changing_state_or_authorizing(self):
@@ -87,7 +87,7 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         failed = [row for row in result["checks"] if row["status"] == "fail"]
         self.assertEqual([row["name"] for row in failed], ["services"])
-        self.assertIn("gtm-connector serve", failed[0]["fix"])
+        self.assertIn("gtm-connector debug serve", failed[0]["fix"])
         self.assertNotIn("Connection refused", json.dumps(result))
 
     def test_salesforce_restart_fixes_name_the_serve_command_without_disclosing_the_connection(self):
@@ -105,8 +105,8 @@ class DoctorTests(unittest.TestCase):
         for result, name in zip(results, ("services", "certificate")):
             self.assertEqual(result["checks"][-1]["name"], name)
             fix = result["checks"][-1]["fix"]
-            # serve reads the folder's profile, so the one command restarts the same connection.
-            self.assertIn("gtm-connector serve --state-dir " + str(self.state.resolve()), fix)
+            # debug serve reads the folder's profile, so the one command restarts the same connection.
+            self.assertIn("gtm-connector debug serve --state-dir " + str(self.state.resolve()), fix)
             self.assertNotIn("--help", fix)
             for private in (secret, identity["instance_url"], identity["organization_id"]):
                 self.assertNotIn(private, json.dumps(result))

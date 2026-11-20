@@ -333,7 +333,7 @@ def _prepare_source_state(directory, reader, *, calls_backend="fixture"):
     identity = reader.prepare_connection()
     if not _valid_connection_identity(identity):
         raise SourceIdentityError("The selected Salesforce connection did not provide a usable identity. "
-                                  "Run gtm-connector salesforce check before starting it again.")
+                                  "Run gtm-connector debug salesforce check before starting it again.")
     if marker is not None and marker != identity:
         raise SourceIdentityError("This state folder belongs to a different Salesforce connection or environment. "
                                   "Select its original connection or use a fresh --state-dir.")
@@ -439,7 +439,8 @@ def open_import_state(directory):
         descriptor = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
     except (OSError, ValueError):
         raise SourceIdentityError("Existing private imported calls state is required. "
-                                  "Run gtm-connector calls import --help before selecting its --state-dir.") from None
+                                  "Run gtm-connector debug calls import --help before selecting its "
+                                  "--state-dir.") from None
     with os.fdopen(descriptor, "r+b") as lock:
         opened = os.fstat(lock.fileno())
         if not stat.S_ISREG(opened.st_mode) or opened.st_uid != os.getuid() or opened.st_mode & 0o077:
@@ -854,7 +855,7 @@ class Runtime:
                 except SlackMappingError:
                     raise SourceIdentityError(
                         "A selected Slack thread is not mapped in this state folder. Map it with "
-                        "gtm-connector slack map, or set slack to false for that account.") from None
+                        "gtm-connector debug slack map, or set slack to false for that account.") from None
         return SelectedContext(
             selection=self.selection, state_directory=self.directory, crm_binding=deepcopy(self.crm_binding),
             calls_backend=self.calls_backend, calls_binding=deepcopy(self.calls_binding),

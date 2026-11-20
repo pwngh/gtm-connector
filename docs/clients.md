@@ -2,12 +2,13 @@
 
 ```sh
 gtm-connector connect demo --state-dir var/clients    # or connect salesforce --org ALIAS
-gtm-connector serve --state-dir var/clients     # keep it running in one terminal
-gtm-connector doctor --state-dir var/clients    # second terminal, same directory
+gtm-connector debug serve --state-dir var/clients     # keep it running in one terminal
+gtm-connector debug doctor --state-dir var/clients    # second terminal, same directory
 gtm-connector connect inspector --state-dir var/clients --scope crm:read
 ```
 
-`serve` serves the sources its state folder is [connected](cli.md) to.
+An assistant app needs `debug serve` running in its state folder, for the HTTP transport and for the
+local bridge. `debug serve` serves the sources its state folder is [connected](cli.md) to.
 `connect APP` prints the setup commands and limits for one client. It does not launch an
 application. With `--scope`, it requests a local grant and saves it in `APP.json` in the state
 folder, mode 0600, without printing the bearer token. Without `--scope`, it previews the setup and
@@ -41,7 +42,7 @@ Some apps start a local MCP server as a process and speak to it on stdin and std
 `connect` writes an entry that starts the connector's bridge:
 
 ```sh
-gtm-connector serve --state-dir var/clients     # keep it running
+gtm-connector debug serve --state-dir var/clients     # keep it running
 gtm-connector connect claude-desktop --transport stdio --scope crm:read --scope calls:read \
   --state-dir var/clients --config-file "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
 ```
@@ -57,13 +58,13 @@ gtm-connector connect claude-desktop --transport stdio --scope crm:read --scope 
 - A call the bridge would refuse for its shape is still sent to the gateway, which records it and
   refuses it.
 - The app starts `gtm-connector mcp stdio --state-dir DIR --scope ...`. The bridge attaches to the
-  `serve` already running in that folder, obtains a grant for exactly those scopes, keeps it in
+  `debug serve` already running in that folder, obtains a grant for exactly those scopes, keeps it in
   memory, and renews only those scopes. Every call still goes through the HTTPS gateway, with its
   scope check, rate limit, and audit receipt. A call outside the scopes is refused.
-- Start `serve` first. Without it the bridge exits with a message on stderr. After `serve` restarts,
+- Start `debug serve` first. Without it the bridge exits with a message on stderr. After `debug serve` restarts,
   restart the app.
 - The bridge refuses a folder with no connected CRM. After `connect` changes the folder's sources,
-  it refuses the `serve` that was started before the change, so restart `serve` and then the app.
+  it refuses the `debug serve` that was started before the change, so restart `debug serve` and then the app.
 - Tested with the MCP SDK's own stdio client. No assistant app has been tested.
 
 ## Grants and private files
@@ -73,7 +74,7 @@ it.
 
 - A grant expires after five minutes. Rerun the same `connect` command with its scopes to replace
   the file. For Cursor, copy the entry again. For Claude Code, restart with the updated file.
-- Restarting `serve` replaces its endpoints and certificate and invalidates every earlier grant.
+- Restarting `debug serve` replaces its endpoints and certificate and invalidates every earlier grant.
   Run `connect` again after a restart.
 - The local authorization server registers only `gtm-demo-cli`, with callback
   `http://127.0.0.1:8767/callback`, and requires the local owner header. An assistant app cannot
@@ -89,7 +90,7 @@ Inspector 2.15.0 needs `npx` and Node 22.23.4+, 24.22.1+, or 26.12.1+.
 
 ```sh
 gtm-connector connect demo --state-dir var/inspector
-gtm-connector serve --state-dir var/inspector  # leave running; second terminal, same directory
+gtm-connector debug serve --state-dir var/inspector  # leave running; second terminal, same directory
 gtm-connector connect inspector --state-dir var/inspector --scope crm:read
 npx --yes @modelcontextprotocol/inspector@2.15.0 --version   # downloads the pinned package
 export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,$NO_PROXY}"

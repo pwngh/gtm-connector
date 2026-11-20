@@ -564,7 +564,7 @@ class SelectedLimitsTests(SelectedFixture, unittest.TestCase):
         os.chmod(path, 0o600)
         profile.save(self.state, profile.DEMO)
         process = subprocess.Popen(
-            [sys.executable, "-m", "gtm_connector", "serve", "--json", "--state-dir", str(self.state),
+            [sys.executable, "-m", "gtm_connector", "debug", "serve", "--json", "--state-dir", str(self.state),
              "--selection", str(path)], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             ready, _, _ = select.select([process.stdout], [], [], 60)
@@ -587,8 +587,8 @@ class SelectedLimitsTests(SelectedFixture, unittest.TestCase):
         profile.save(self.root / "sf-state", {"crm": {"provider": "salesforce", "org": "invented-alias",
                                                       "environment": "developer"}})
         result = subprocess.run(
-            [sys.executable, "-m", "gtm_connector", "serve", "--json", "--state-dir", str(self.root / "sf-state"),
-             "--selection", str(bad)],
+            [sys.executable, "-m", "gtm_connector", "debug", "serve", "--json",
+             "--state-dir", str(self.root / "sf-state"), "--selection", str(bad)],
             cwd=ROOT, capture_output=True, text=True, timeout=60, check=False,
             env={**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}"})
         self.assertEqual(result.returncode, 2, result.stderr)

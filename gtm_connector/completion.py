@@ -85,7 +85,7 @@ def generate(parser, shell):
     root_commands = _commands(parser)
     root = [*root_commands, *(flag for action in _options(parser) for flag in action.option_strings)]
     if shell == "fish":
-        lines = ["# Load with: gtm-connector completion fish | source", *_fish_position(commands)]
+        lines = ["# Load with: gtm-connector debug completion fish | source", *_fish_position(commands)]
         for command, subparser in root_commands.items():
             lines.append(f"complete -c gtm-connector -n '__fish_use_subcommand' -a {shlex.quote(command)} "
                          f"-d {shlex.quote(subparser.description)}")

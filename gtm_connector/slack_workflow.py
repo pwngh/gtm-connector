@@ -8,11 +8,11 @@ import time
 import uuid
 
 
-_MAP_HELP = "gtm-connector slack map --help"
-_CHECK_HELP = "gtm-connector slack check --help"
-_STATUS_HELP = "gtm-connector slack status --help"
-_CONNECT_HELP = "gtm-connector slack connect --help"
-_DOCTOR_HELP = "gtm-connector doctor --help"
+_MAP_HELP = "gtm-connector debug slack map --help"
+_CHECK_HELP = "gtm-connector debug slack check --help"
+_STATUS_HELP = "gtm-connector debug slack status --help"
+_CONNECT_HELP = "gtm-connector debug slack connect --help"
+_DOCTOR_HELP = "gtm-connector debug doctor --help"
 _DIAGNOSTICS = {
     "slack_selection_invalid": ("The account or thread selection is invalid. Check the account and link, "
                                 "or use --channel with --thread-ts.",
@@ -24,7 +24,7 @@ _DIAGNOSTICS = {
                               _MAP_HELP),
     "slack_source_mismatch": ("The source identity does not match the saved selection. Restore the original setup.",
                               _MAP_HELP),
-    "slack_identity_unchecked": ("The saved Slack identity needs verification. Run slack status --check first.",
+    "slack_identity_unchecked": ("The saved Slack identity needs verification. Run debug slack status --check first.",
                                  _STATUS_HELP),
     "slack_account_not_found": ("CRM did not return the selected account. Find its canonical account ID.",
                                 "gtm-connector accounts --help"),
@@ -34,7 +34,7 @@ _DIAGNOSTICS = {
                                  _MAP_HELP),
     "slack_association_invalid": ("The CRM result or its receipt did not validate. No selection was saved.", _MAP_HELP),
     "slack_crm_unavailable": ("The CRM lookup could not finish. Check CRM access before selecting a thread.",
-                              "gtm-connector salesforce check --help"),
+                              "gtm-connector debug salesforce check --help"),
     "slack_crm_configuration_invalid": ("The CRM connection options are invalid. Correct the selected connection.",
                                         _MAP_HELP),
     "slack_snapshot_invalid": ("The Slack snapshot failed its consistency checks. Preserve it and repeat the read.",

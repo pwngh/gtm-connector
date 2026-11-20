@@ -64,7 +64,8 @@ def card(test, rows, *, sellers=("Morgan Reed",)):
     brief = run("brief", identifier, "--state-dir", str(state))
 
     def trace(number):
-        return run("trace", brief["brief_id"], str(number), "--state-dir", str(state))
+        [traced] = run("inspect", brief["brief_id"], str(number), "--state-dir", str(state))
+        return traced
     brief["trace"] = trace
     return brief
 

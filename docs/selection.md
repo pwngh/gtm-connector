@@ -10,17 +10,17 @@ client can prepare a [Deal card](briefs.md) with its own grant and read it again
 
 ```sh
 chmod 600 selection.json
-gtm-connector serve --selection selection.json
+gtm-connector debug serve --selection selection.json
 ```
 
-- `serve` reads the sources its state folder is [connected](cli.md) to.
+- `debug serve` reads the sources its state folder is [connected](cli.md) to.
 - `accounts` lists 1 to 100 distinct accounts. Use `acc-007` style IDs with the demo CRM and
   `acc-sf-` plus the 18-character ID with Salesforce.
 - `slack: true` selects the account's Slack thread. With live Slack connected it must already be
-  mapped with `slack map`, or the server refuses to start.
+  mapped with `debug slack map`, or the server refuses to start.
 - The file must be a regular file you own that others cannot write, at most 64 KiB. Unknown keys,
   repeated keys or accounts, and non-finite numbers refuse.
-- To change the selection, restart `serve`. A restart also replaces every grant.
+- To change the selection, restart `debug serve`. A restart also replaces every grant.
 
 ## Tools
 
@@ -43,13 +43,13 @@ was read, shown or not, and for a transcript the cues it lies in and their times
 receipt and one read receipt for each source read: the account and its opportunities, then calls
 and Slack when they are connected and Slack is selected for the account. A source that is not
 connected is never called, and the card and `sources` name it as not connected. The reads write no
-`serve` event lines.
+`debug serve` event lines.
 
 - Preparing a brief has 45 seconds. Writing the final receipt and sending the response come after
   that check. A read already in progress keeps its own limit, 20 seconds for Salesforce and live
   Slack, and a late result is discarded.
 - The brief is saved as `selected-briefs/BRIEF_ID.json` in the state folder, mode 0600, at most
-  4 MiB. `trace` reads the cards the `brief` command saves, not these, so a caller resolves a
+  4 MiB. `inspect` reads the cards the `brief` command saves, not these, so a caller resolves a
   number from `units`.
 - `read_renewal_brief` releases a saved brief, with the same `text`, `units`, and `gaps`, to any
   caller that passes the rule in the [security review](../SECURITY_REVIEW.md). A brief saved before
@@ -58,12 +58,12 @@ connected is never called, and the card and `sources` name it as not connected. 
 
 ## Errors
 
-A bad selection file stops `serve` with exit `2`, and an unmapped Slack thread with exit `3`. Tools
+A bad selection file stops `debug serve` with exit `2`, and an unmapped Slack thread with exit `3`. Tools
 return these codes as tool errors, or a failed source's own code, such as `calls_not_connected`.
 
 | Code | Cause | Fix |
 | --- | --- | --- |
-| `account_not_selected`, `slack_not_selected` | The account or its Slack thread is not selected. | Edit the file and restart `serve`. |
+| `account_not_selected`, `slack_not_selected` | The account or its Slack thread is not selected. | Edit the file and restart `debug serve`. |
 | `crm_write_disabled` | A client attempted a write. | Do not retry. A selected server is read-only. |
 | `invalid_as_of` | `as_of` is not a `YYYY-MM-DD` date. | Correct the date. |
 | `rate_limited`, `brief_deadline_exceeded`, `brief_source_busy` | The rate limit was reached, the 45 seconds passed, or another Slack operation holds the connection. | Retry. |

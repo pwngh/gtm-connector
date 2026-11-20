@@ -134,10 +134,11 @@ def resolve_call_account(runtime, *, account_id=None, account_number=None):
     except CRMResolutionError as error:
         usage = {
             "crm_selector_required": "Select exactly one --account or --account-number. "
-                                     "Run gtm-connector calls --help.",
+                                     "Run gtm-connector debug calls --help.",
             "crm_account_number_invalid": "Use a valid --account-number with Salesforce. "
-                                          "Run gtm-connector calls --help.",
-            "crm_account_id_invalid": "Use a canonical --account ID from accounts. Run gtm-connector calls --help.",
+                                          "Run gtm-connector debug calls --help.",
+            "crm_account_id_invalid": "Use a canonical --account ID from accounts. "
+                                      "Run gtm-connector debug calls --help.",
         }
         if error.code in usage:
             raise ValueError(usage[error.code]) from None

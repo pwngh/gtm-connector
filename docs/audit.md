@@ -4,7 +4,8 @@ An audit receipt is a saved row for one tool attempt and its outcome. It has `au
 `started_at`, `token_id`, `tool`, `arguments`, `request_id`, `brief_id`, `status`, `http_status`,
 `row_count`, `rows`, `elapsed_ms`, and `error`. `token_id` is the SHA-256 fingerprint of the
 presented bearer token, even a rejected one, or `anonymous`. `rows` holds record references.
-`trace` shows the receipt behind any number on a [Deal card](briefs.md).
+`inspect BRIEF_ID N` shows the receipt behind any number on a [Deal card](briefs.md), and
+`inspect RECEIPT_ID` shows one receipt with its arguments and the rows it returned.
 
 Saving a card adds one receipt that is not a tool attempt: `save_brief`, the card's seal. Its
 `arguments` name the account and the card, its `rows` hold `briefs/<brief_id>/<SHA-256 of the saved
@@ -45,7 +46,7 @@ runs. Success or rejection finalizes that same row.
 ## Rate limits and writes
 
 - Each token gets 60 tool calls per fixed 60-second window. Scope denials count, and invalid
-  tokens do not. `verify` uses a limit of four.
+  tokens do not. `debug verify` uses a limit of four.
 - The counters live in process memory. A new token or a restart resets them.
 - `log_activity` requires an account ID, kind, body, and idempotency key. The same key with a
   different payload returns `idempotency_conflict`. There are no update or delete tools.
