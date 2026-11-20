@@ -5,10 +5,12 @@ from datetime import datetime, timezone
 import io
 import json
 from pathlib import Path
+import shlex
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from gtm_connector import profile
 from gtm_connector.cli import main
 
 
@@ -24,8 +26,22 @@ class SlackSourceCLITests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        self.state = self.root / "source state"
-        self.connection = self.root / "Slack connection"
+        self.use(self.root / "source state")
+
+    def use(self, state):
+        """Select a state folder. Its Slack sign-in is saved inside it."""
+        self.state = state
+        self.connection = state / profile.SLACK_CONNECTION
+
+    def connected(self, crm=None, *, calls=False):
+        """Save the profile connect saves: live Slack beside the demo CRM, or beside an invented org."""
+        imported = {"calls": {"provider": "imported"}} if calls else {}
+        profile.save(self.state, {**profile.DEMO, **imported, "slack": {"provider": "slack"}} if crm is None else
+                     {"crm": {"provider": "salesforce", "org": crm, "environment": "developer"}, **imported,
+                      "slack": {"provider": "slack"}})
+
+    def files(self):
+        return {path.name for path in self.state.iterdir()}
 
     def invoke(self, *arguments, as_json=True):
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
@@ -33,7 +49,7 @@ class SlackSourceCLITests(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def map(self, *arguments, as_json=True):
-        return self.invoke("slack", "map", "--state-dir", str(self.state), "--connection-dir", str(self.connection),
+        return self.invoke("slack", "map", "--state-dir", str(self.state),
                            "--account", "acc-003", "--channel", CHANNEL, "--thread-ts", STAMP,
                            *arguments, as_json=as_json)
 
@@ -71,27 +87,29 @@ class SlackSourceCLITests(unittest.TestCase):
         for action in ("map", "check"):
             code, out, err = self.invoke("slack", action, "--help")
             self.assertEqual(code, 0, err)
-            for flag in ("--state-dir", "--account", "--connection-dir", "--json"):
+            for flag in ("--state-dir", "--account", "--json"):
                 self.assertIn(flag, out)
-            for flag in ("--client-id", "--user-scope", "--redirect-uri", "--slack-backend"):
+            for flag in ("--client-id", "--user-scope", "--redirect-uri", "--connection-dir"):
                 self.assertNotIn(flag, out)
             if action == "check":
-                for flag in ("--account-number", "--sf-org", "--crm-backend", "--thread-url", "--replace"):
+                for flag in ("--account-number", "--thread-url", "--replace"):
                     self.assertNotIn(flag, out)
-        for args in (("slack", "map", "--account", "acc-003", "--channel", CHANNEL, "--thread-ts", STAMP),
+        for args in (("slack", "map", "--state-dir", str(self.state), "--account", "acc-003", "--channel", CHANNEL,
+                      "--thread-ts", STAMP, "--connection-dir", PRIVATE),
                      ("slack", "check", "--state-dir", str(self.state), "--account", "acc-003",
-                      "--sf-org", PRIVATE)):
+                      "--account-number", PRIVATE)):
             self.failure(self.invoke(*args), 2)
         self.assertFalse(self.state.exists())
 
     def test_invalid_map_selectors_do_not_open_credentials_or_runtime(self):
         cases = [
             ["--account", PRIVATE], ["--account", "acc-sf-001000000000001AAA"],
-            ["--channel", PRIVATE], ["--thread-ts", "1e6"], ["--sf-environment", "developer"],
+            ["--channel", PRIVATE], ["--thread-ts", "1e6"],
         ]
+        self.connected()
         with patch("gtm_connector.slack_auth.inspect_slack_connection", side_effect=AssertionError("No credentials")) as saved, \
                 patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")) as runtime, \
-                patch("gtm_connector.salesforce.SalesforceReadOnlyAdapter.from_env",
+                patch("gtm_connector.salesforce.SalesforceReadOnlyAdapter.from_sf",
                       side_effect=AssertionError("No CRM")) as crm:
             for options in cases:
                 with self.subTest(options=options):
@@ -100,45 +118,47 @@ class SlackSourceCLITests(unittest.TestCase):
                         ORIGIN + "/archives/" + CHANNEL + "/p1790000000000001?secret=" + PRIVATE):
                 self.failure(self.invoke("slack", "map", "--state-dir", str(self.state), "--account", "acc-003",
                                          "--thread-url", url), 2)
-            self.failure(self.invoke("slack", "map", "--state-dir", str(self.state), "--crm-backend", "salesforce",
+            self.failure(self.invoke("slack", "map", "--state-dir", str(self.state),
+                                     "--account-number", "invented-number", "--channel", CHANNEL,
+                                     "--thread-ts", STAMP), 2)
+            self.connected("invented-alias")
+            self.failure(self.invoke("slack", "map", "--state-dir", str(self.state),
                                      "--account-number", "invented\u0085number", "--channel", CHANNEL,
                                      "--thread-ts", STAMP), 2)
         saved.assert_not_called()
         runtime.assert_not_called()
         crm.assert_not_called()
-        self.assertFalse(self.state.exists())
-        self.assertFalse(self.connection.exists())
+        self.assertEqual(self.files(), {"profile.json"})
 
-    def test_live_daily_sources_require_explicit_state_before_export_or_credentials(self):
-        cases = [["serve"], ["brief", "acc-003", "--with-slack"],
-                 ["accounts", "--crm-backend", "salesforce"],
-                 ["account", "acc-sf-001000000000001AAA", "--crm-backend", "salesforce"],
-                 ["calls", "import", str(self.root / "missing.vtt"), "--account", "acc-003"]]
-        with patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")) as runtime, \
-                patch("gtm_connector.salesforce.SalesforceReadOnlyAdapter.from_env",
-                      side_effect=AssertionError("No CRM")) as crm, \
-                patch("gtm_connector.cli._calls_arguments", side_effect=AssertionError("No export")) as export:
-            for arguments in cases:
-                detail = self.failure(self.invoke(*arguments, "--slack-backend", "slack"), 2)
-                self.assertIn("explicit --state-dir", detail["message"])
-        runtime.assert_not_called()
-        crm.assert_not_called()
-        export.assert_not_called()
-        self.assertFalse(self.state.exists())
+    def test_a_map_or_a_check_needs_slack_connected_in_the_profile_before_credentials_or_state(self):
+        check = ("slack", "check", "--state-dir", str(self.state), "--account", "acc-003")
+        with patch("gtm_connector.slack_auth.inspect_slack_connection", side_effect=AssertionError("No credentials")), \
+                patch("gtm_connector.slack_workflow.run_slack_check", side_effect=AssertionError("No thread read")), \
+                patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")):
+            for attempt in (self.map, lambda: self.invoke(*check)):
+                detail = self.failure(attempt(), 2)
+                self.assertEqual(detail["message"],
+                                 str(profile.NotConnected(f" --state-dir {shlex.quote(str(self.state))}")))
+                self.assertFalse(self.state.exists())
+            profile.save(self.state, profile.DEMO)
+            for attempt in (self.map, lambda: self.invoke(*check)):
+                detail = self.failure(attempt(), 2)
+                self.assertIn("Slack is not connected.", detail["message"])
+                self.assertIn("gtm-connector connect slack", detail["message"])
+                self.assertEqual(detail["next"], "gtm-connector connect --help")
+        self.assertEqual(self.files(), {"profile.json"})
 
-    def test_live_daily_conflicting_options_refuse_before_source_state(self):
-        cases = [
-            ["brief", "acc-003", "--slack-backend", "slack", "--state-dir", str(self.state)],
-            ["serve", "--slack-connection-dir", str(self.connection)],
-            ["account", "acc-003", "--slack-backend", "fixture"],
-            ["serve", "--slack-backend", "slack", "--state-dir", str(self.state),
-             "--salesforce-demo-binding", PRIVATE],
-        ]
-        with patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")) as runtime:
-            for arguments in cases:
-                self.failure(self.invoke(*arguments), 2)
-        runtime.assert_not_called()
-        self.assertFalse(self.state.exists())
+    def test_connected_slack_whose_sign_in_is_gone_refuses_and_never_reads_demo_messages(self):
+        export = self.root / "invented.txt"
+        export.write_text("Invented renewal discussion.\n")
+        self.connected(calls=True)
+        for arguments in (["serve"], ["brief", "acc-003"],
+                          ["calls", "import", str(export), "--account", "acc-003"]):
+            with self.subTest(command=arguments[0]):
+                detail = self.failure(self.invoke(*arguments, "--state-dir", str(self.state)), 3)
+                self.assertIn("slack_not_connected", detail["message"])
+                self.assertIn("slack connect", detail["next"])
+        self.assertEqual(self.files(), {"profile.json", "server.lock"})
 
     def test_map_pending_unchecked_and_expired_credentials_have_distinct_recovery(self):
         for state, expired, detail_code, next_action in (
@@ -147,27 +167,28 @@ class SlackSourceCLITests(unittest.TestCase):
             ("refresh_pending", False, "slack_reconnect_required", "connect"),
         ):
             with self.subTest(state=state, expired=expired):
+                self.connected()
                 self.seed_connection(state=state, expired=expired)
                 with patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")) as runtime:
                     detail = self.failure(self.map(), 3)
                 self.assertIn(detail_code, detail["message"])
                 self.assertIn("slack " + next_action, detail["next"])
                 runtime.assert_not_called()
-                self.assertFalse(self.state.exists())
+                self.assertEqual(self.files(), {"profile.json", "slack-connection"})
 
     def test_copied_link_must_match_saved_origin_before_crm_or_state(self):
+        self.connected("invented-alias")
         self.seed_connection()
         with patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")) as runtime, \
-                patch("gtm_connector.salesforce.SalesforceReadOnlyAdapter.from_env",
+                patch("gtm_connector.salesforce.SalesforceReadOnlyAdapter.from_sf",
                       side_effect=AssertionError("No CRM")) as crm:
-            self.failure(self.invoke("slack", "map", "--state-dir", str(self.state), "--connection-dir",
-                                     str(self.connection), "--account-number", "invented-number", "--crm-backend",
-                                     "salesforce", "--thread-url",
+            self.failure(self.invoke("slack", "map", "--state-dir", str(self.state),
+                                     "--account-number", "invented-number", "--thread-url",
                                      "https://different-workspace.slack.com/archives/" + CHANNEL +
                                      "/p1790000000000001"), 2)
         runtime.assert_not_called()
         crm.assert_not_called()
-        self.assertFalse(self.state.exists())
+        self.assertEqual(self.files(), {"profile.json", "slack-connection"})
 
     def test_map_connection_switch_after_link_validation_never_pins_or_resolves(self):
         from gtm_connector import slack_auth as auth, runtime
@@ -175,7 +196,8 @@ class SlackSourceCLITests(unittest.TestCase):
         inspect = auth.inspect_slack_connection
         for copied_link in (False, True):
             with self.subTest(copied_link=copied_link):
-                self.state = self.root / ("linked" if copied_link else "native")
+                self.use(self.root / ("linked" if copied_link else "native"))
+                self.connected()
                 self.seed_connection()
                 observations = []
 
@@ -197,15 +219,16 @@ class SlackSourceCLITests(unittest.TestCase):
                         patch("gtm_connector.slack_workflow.resolve_slack_account",
                               wraps=resolve_slack_account) as resolve:
                     detail = self.failure(self.invoke("slack", "map", "--state-dir", str(self.state),
-                        "--connection-dir", str(self.connection), "--account", "acc-003", *selector), 3)
+                                                      "--account", "acc-003", *selector), 3)
                 self.assertIn("slack_source_mismatch", detail["message"])
                 source.assert_not_called()
                 resolve.assert_not_called()
                 self.assertEqual(len(observations), 2)
-                self.assertEqual({path.name for path in self.state.iterdir()}, {"server.lock"})
+                self.assertEqual(self.files(), {"server.lock", "profile.json", "slack-connection"})
 
     def test_actual_map_is_audited_idempotent_and_never_reads_slack(self):
         from gtm_connector.audit import read_audit
+        self.connected()
         self.seed_connection()
         with patch("gtm_connector.slack_auth.get_slack_access", side_effect=AssertionError("No token read")), \
                 patch("gtm_connector.slack_reader.SlackThreadReader.read_slack_messages",
@@ -233,17 +256,17 @@ class SlackSourceCLITests(unittest.TestCase):
         self.assertFalse((self.state / "slack.sqlite3").exists())
 
     def test_both_explicit_initialization_orders_keep_imported_calls_and_live_slack(self):
-        self.seed_connection()
         export = self.root / "invented.txt"
         export.write_text("Invented renewal discussion.\nKeep the next meeting tentative.\n")
         for map_first in (True, False):
             with self.subTest(map_first=map_first):
-                self.state = self.root / ("map first" if map_first else "import first")
+                self.use(self.root / ("map first" if map_first else "import first"))
+                self.connected(calls=True)
+                self.seed_connection()
                 def imported():
                     return self.invoke("calls", "--state-dir", str(self.state), "import", str(export),
-                                       "--account", "acc-003", "--slack-backend", "slack",
-                                       "--slack-connection-dir", str(self.connection))
-                actions = [lambda: self.map("--calls-backend", "imported"), imported]
+                                       "--account", "acc-003")
+                actions = [self.map, imported]
                 if not map_first:
                     actions.reverse()
                 with patch("gtm_connector.slack_reader.SlackThreadReader.read_slack_messages",
@@ -259,12 +282,11 @@ class SlackSourceCLITests(unittest.TestCase):
 
     def test_live_brief_banner_names_selected_sources_once_without_changing_json(self):
         brief = {"brief_id": "brief-invented", "as_of": "2027-01-15", "text": "An invented checked brief."}
+        self.connected(calls=True)
         for as_json in (False, True):
             with patch("gtm_connector.runtime.Runtime") as runtime, \
                     patch("gtm_connector.briefing.create_brief", return_value=brief) as create:
-                code, out, err = self.invoke("brief", "acc-003", "--with-slack", "--state-dir", str(self.state),
-                                             "--slack-backend", "slack", "--slack-connection-dir",
-                                             str(self.connection), "--calls-backend", "imported", as_json=as_json)
+                code, out, err = self.invoke("brief", "acc-003", "--state-dir", str(self.state), as_json=as_json)
             self.assertEqual(code, 0, err)
             self.assertEqual(runtime.call_args.kwargs["slack_backend"], "slack")
             self.assertEqual(runtime.call_args.kwargs["slack_connection_dir"], self.connection)
@@ -274,12 +296,13 @@ class SlackSourceCLITests(unittest.TestCase):
                 self.assertEqual(err, "")
             else:
                 self.assertEqual(err.count("Sources:"), 1)
-                self.assertIn("CRM uses demo fixtures", err)
-                self.assertIn("calls use user-supplied transcript exports", err)
-                self.assertIn("Slack uses the selected mapped thread", err)
-                self.assertNotIn("Slack use demo", err)
+                self.assertIn("CRM is demo data", err)
+                self.assertIn("calls are imported transcripts", err)
+                self.assertIn("Slack is the mapped thread, whose access is checked when it is read", err)
+                self.assertNotIn("Slack is demo", err)
 
     def test_map_human_result_discloses_unchecked_thread_without_private_selection(self):
+        self.connected()
         self.seed_connection()
         code, out, err = self.map(as_json=False)
         self.assertEqual(code, 0, err)
@@ -293,6 +316,7 @@ class SlackSourceCLITests(unittest.TestCase):
     def test_live_server_reports_selected_sources_without_reading_credentials_or_messages(self):
         from queue import SimpleQueue
         from gtm_connector.audit import read_audit
+        self.connected()
         self.seed_connection()
         class InterruptQueue(SimpleQueue):
             def get(self, *args, **kwargs):
@@ -308,8 +332,7 @@ class SlackSourceCLITests(unittest.TestCase):
                 patch("gtm_connector.slack_auth.get_slack_access", side_effect=AssertionError("No token acquisition")), \
                 patch("gtm_connector.slack_reader.SlackThreadReader.read_slack_messages",
                       side_effect=AssertionError("No messages")):
-            code, out, err = self.invoke("serve", "--state-d", str(self.state), "--slack-backend", "slack",
-                                         "--slack-connection-dir", str(self.connection))
+            code, out, err = self.invoke("serve", "--state-d", str(self.state))
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["sources"], {"crm": "demo_fixture", "calls": "demo_fixture", "slack": "slack"})
         self.assertEqual(read_audit(self.state / "audit.sqlite3"), [])
@@ -318,6 +341,7 @@ class SlackSourceCLITests(unittest.TestCase):
             self.assertNotIn(value, out + err)
 
     def test_completed_check_passes_report_through_and_failed_report_exits_four(self):
+        self.connected()
         names = ("private_state", "mapping", "credential_binding", "thread_read", "receipt")
         report = {"schema_version": 1, "status": "passed", "crm_access_checked": False,
                   "calls_access_checked": False, "duration_ms": 2.5, "api_calls": 1, "response_bytes": 100,
@@ -337,10 +361,10 @@ class SlackSourceCLITests(unittest.TestCase):
             report["status"] = "passed" if expected == 0 else "failed"
             with patch("gtm_connector.slack_workflow.run_slack_check", side_effect=checked), \
                     patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No normal Runtime")), \
-                    patch("gtm_connector.salesforce.SalesforceReadOnlyAdapter.from_env",
+                    patch("gtm_connector.salesforce.SalesforceReadOnlyAdapter.from_sf",
                           side_effect=AssertionError("No CRM")):
                 code, out, err = self.invoke("slack", "check", "--state-dir", str(self.state),
-                                             "--connection-dir", str(self.connection), "--account", "acc-003")
+                                             "--account", "acc-003")
             self.assertEqual(code, expected, err)
             self.assertEqual(json.loads(out), report)
             self.assertNotIn(PRIVATE, out + err)
@@ -348,9 +372,10 @@ class SlackSourceCLITests(unittest.TestCase):
             self.assertEqual([row["progress"]["step"] for row in events[:2]], ["private_state", "thread_read"])
             if expected == 4:
                 self.assertEqual(events[-1]["error"]["code"], "check_failed")
-        self.assertFalse(self.state.exists())
+        self.assertEqual(self.files(), {"profile.json"})
 
     def test_source_errors_and_interrupt_do_not_inherit_auth_or_calls_recovery(self):
+        self.connected()
         from gtm_connector.runtime import SourceIdentityError
         from gtm_connector.slack_mapping import SlackMappingError
         for error, expected, text in ((SlackMappingError("slack_mapping_missing"), 3, "slack map"),

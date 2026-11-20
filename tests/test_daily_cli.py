@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 
+from gtm_connector import profile
 from gtm_connector.audit import read_audit
 from gtm_connector.client import LocalClient
 from gtm_connector.runtime import Runtime
@@ -39,6 +40,7 @@ class DailyCLITests(unittest.TestCase):
 
     def test_server_json_lines_include_allowed_and_refused_calls(self):
         with tempfile.TemporaryDirectory() as directory:
+            profile.save(directory, profile.DEMO)
             process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "serve", "--json",
                                         "--state-dir", directory], cwd=ROOT, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -79,6 +81,7 @@ class DailyCLITests(unittest.TestCase):
 
     def test_closed_event_pipe_keeps_server_and_audit_running(self):
         with tempfile.TemporaryDirectory() as directory:
+            profile.save(directory, profile.DEMO)
             process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "serve", "--json",
                                         "--state-dir", directory], cwd=ROOT, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -113,6 +116,7 @@ class DailyCLITests(unittest.TestCase):
 
     def test_closed_combined_output_keeps_server_running(self):
         with tempfile.TemporaryDirectory() as directory:
+            profile.save(directory, profile.DEMO)
             process = subprocess.Popen([sys.executable, "-m", "gtm_connector", "serve", "--json",
                                         "--state-dir", directory], cwd=ROOT, stdin=subprocess.DEVNULL,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

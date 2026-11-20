@@ -106,15 +106,26 @@ pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector d
 
 ## Use your own sources
 
-Each source is selected explicitly. Nothing falls back to demo data.
+Connect each source once. Every other command then reads what is connected and takes no source
+option. A source you have not connected is stated as not connected on the card, and nothing falls
+back to demo data.
+
+```sh
+gtm-connector connect salesforce --org ALIAS --seller 'Morgan Reed'
+gtm-connector connect calls
+gtm-connector connect status
+gtm-connector accounts --query Thornfield
+gtm-connector brief ACCOUNT_ID
+```
 
 | Source | Commands | Guide |
 | --- | --- | --- |
-| Salesforce, read-only | `salesforce check --sf-org ALIAS`, `serve --crm-backend salesforce --sf-org ALIAS` | [Salesforce](docs/salesforce.md) |
-| Call transcripts (TXT, VTT, SRT) | `calls import meeting.vtt --account acc-007` | [Calls](docs/calls.md) |
-| Slack sign-in | `slack connect`, `slack status`, `slack disconnect` | [Slack sign-in](docs/slack.md) |
+| Salesforce, read-only | `salesforce check --sf-org ALIAS`, `connect salesforce --org ALIAS` | [Salesforce](docs/salesforce.md) |
+| Call transcripts (TXT, VTT, SRT) | `connect calls`, `calls import meeting.vtt --account acc-007` | [Calls](docs/calls.md) |
+| Slack sign-in | `slack connect`, `connect slack`, `slack status`, `slack disconnect` | [Slack sign-in](docs/slack.md) |
 | One Slack thread per account | `slack map`, `slack check` | [Slack threads](docs/slack.md) |
 | Selected accounts for a client | `serve --selection selection.json` | [Selection](docs/selection.md) |
+| Invented data | `connect demo` | [Commands](docs/cli.md) |
 
 Salesforce uses an existing `sf` CLI login. Slack uses an existing public PKCE app. Tests use
 invented provider responses. No live org has been verified.
@@ -122,12 +133,13 @@ invented provider responses. No live org has been verified.
 ## Daily commands
 
 ```sh
-gtm-connector serve --state-dir var/v2
-gtm-connector connect inspector --scope crm:read --state-dir var/v2
-gtm-connector brief acc-003 --with-slack --state-dir var/brief   # its own folder while serve runs
+gtm-connector connect status
+gtm-connector serve
+gtm-connector connect inspector --scope crm:read
+gtm-connector brief acc-003 --state-dir var/brief   # a second connected folder while serve runs
 gtm-connector trace brief-REPLACE 5 --state-dir var/brief
-gtm-connector audit --tool get_account --follow --state-dir var/v2
-gtm-connector doctor --state-dir var/v2
+gtm-connector audit --tool get_account --follow
+gtm-connector doctor
 ```
 
 `serve` prints one line per tool attempt with its decision and receipt ID. The Inspector CLI is the
@@ -152,7 +164,7 @@ The card shows what the records say, not whether a source is true.
 - The card shows up to twelve sentences, dealt by speaker role and by time, and counts the rest. It
   does not rank them or relate one to another, so on a long call the sentence that matters may be
   among those counted. Every sentence read is in `brief --json`.
-- A seller is whoever `sellers.json` in the state folder lists. Slack authors are never shown as
+- A seller is whoever you list with `connect ... --seller NAME`. Slack authors are never shown as
   customers.
 - Authorization is a local owner emulator. The file owner can request every scope and edit the
   stores. Audit records are not tamper-proof. [Security review](SECURITY_REVIEW.md)

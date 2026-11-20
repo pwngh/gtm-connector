@@ -116,10 +116,17 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
     as_of = _as_of(as_of, connector.crm_backend)
     include_slack = context.selection.includes_slack(account_id)
     brief_id = "brief-" + uuid.uuid4().hex
-    plan = [("get_account", "crm"), ("list_opportunities", "crm"), ("read_call_notes", "calls")]
+    # A source that is not connected is never called. The card says so.
+    with_calls, with_slack = context.calls_backend != "none", context.slack_backend != "none"
+    include_slack = include_slack and with_slack
+    plan = [("get_account", "crm"), ("list_opportunities", "crm")]
+    if with_calls:
+        plan.append(("read_call_notes", "calls"))
     if include_slack:
         plan.append(("read_slack_messages", "slack"))
-    statuses = {"notes_status": "available", "slack_status": "available" if include_slack else "not_requested"}
+    statuses = {"notes_status": "available" if with_calls else "not_connected",
+                "slack_status": ("available" if include_slack else "not_requested" if with_slack
+                                 else "not_connected")}
     records, snapshot, children, slack_scopes = [], None, [], None
     for ordinal, (tool, source) in enumerate(plan, 1):
         if time.monotonic() >= invocation.deadline:
@@ -157,7 +164,8 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
         raise ToolError("brief_evidence_invalid") from None
     if time.monotonic() >= invocation.deadline:
         raise ToolError("brief_deadline_exceeded")
-    sources = source_names(connector.crm_backend, context.calls_backend, context.slack_backend, include_slack)
+    sources = source_names(connector.crm_backend, context.calls_backend, context.slack_backend,
+                           include_slack or not with_slack)
     artifact = {
         "kind": "selected_brief", "schema_version": 3, "brief_id": brief_id, "account_id": account_id,
         "as_of": as_of,
@@ -264,7 +272,9 @@ def read_brief(connector, token, brief_id) -> dict:
         if notes and context.calls_backend == "imported":
             note_ids = [record["id"] for record in evidence["records"]
                         if record["record_ref"].startswith("calls/call_notes/")]
-            if len(note_ids) != 1 or connector.calls_reader.active_import_id(account_id) != note_ids[0]:
+            # The brief holds the account's selected transcript, or none when none was imported.
+            if (len(note_ids) > 1
+                    or connector.calls_reader.active_import_id(account_id) != (note_ids[0] if note_ids else None)):
                 raise ToolError("brief_source_changed")
         if not (slack and context.slack_backend == "slack"):
             return _release(connector, token, brief_id, artifact, reference)

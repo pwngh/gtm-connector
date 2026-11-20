@@ -21,7 +21,7 @@ Slack. One operator runs it. People use the CLI, assistants use the MCP tools. P
 | Area | Files |
 | --- | --- |
 | Request path | `gateway.py`, `request_checks.py`, `tool_definitions.py`, `audit.py`, `auth.py`, `strict_json.py` |
-| Server and state | `runtime.py`, `client.py`, `doctor.py` |
+| Server and state | `runtime.py`, `profile.py` (what a folder is connected to), `client.py`, `doctor.py` |
 | Client setup | `connections.py`, `stdio_bridge.py` (the local bridge an assistant app starts) |
 | Cards | `units.py` (units, roles, neutralized text, the card), `briefing.py`, `selection.py`, `selected_briefs.py` |
 | Sources | `store.py`, `calls.py`, `slack.py` (demo), `salesforce*.py`, `calls_import.py`, `slack_*.py` |
@@ -63,11 +63,9 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 
 The goal is a showcase an engineer can judge in five minutes. No model writes text on a card.
 
-1. One `connect <provider>` command over a provider registry (Salesforce, Slack, calls, assistant
-   apps) that saves to `profile.json`, so no other command takes a source flag. Seven top-level
-   commands (demo, connect, accounts, brief, inspect, audit, mcp), the rest under `debug`, and
-   `cli.py` split into one module per command. Then in-process calls for the CLI and the bridge
-   with one brief store. The scope, selection, expiry, and receipt checks stay.
+1. Seven top-level commands (demo, connect, accounts, brief, inspect, audit, mcp), the rest under
+   `debug`, and `cli.py` split into one module per command. Then in-process calls for the CLI and
+   the bridge with one brief store. The scope, selection, expiry, and receipt checks stay.
 2. Transcript folders (replace hand-picked excerpts) and a bounded Slack channel window (replaces
    thread mapping), with what was not read counted on the card.
 3. Two assistant tools, evidence and submit. A submission is unit numbers, a label from a fixed

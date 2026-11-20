@@ -37,10 +37,10 @@ def _private(path, *, directory=False):
 
 
 def _source_files(owner):
-    calls_files = (("calls.sqlite3",) if owner["calls_backend"] == "fixture"
-                   else ("imports.sqlite3", "calls-source.json"))
-    slack_files = (("slack.sqlite3",) if owner["slack_backend"] == "fixture"
-                   else ("slack-source.json", "slack-mappings.json"))
+    calls_files = {"fixture": ("calls.sqlite3",), "imported": ("imports.sqlite3", "calls-source.json"),
+                   "none": ()}[owner["calls_backend"]]
+    slack_files = {"fixture": ("slack.sqlite3",), "slack": ("slack-source.json", "slack-mappings.json"),
+                   "none": ()}[owner["slack_backend"]]
     return calls_files + slack_files + (
         ("crm-connection.json",) if owner["crm_backend"] == "salesforce" else ())
 
@@ -76,8 +76,8 @@ def _read_owner(directory):
                 or owner["client_id"] != "gtm-demo-cli"
                 or owner["cert_path"] != str(directory / "tls.pem")
                 or owner.get("crm_backend") not in ("sqlite", "salesforce")
-                or owner.get("calls_backend") not in ("fixture", "imported")
-                or owner.get("slack_backend") not in ("fixture", "slack")):
+                or owner.get("calls_backend") not in ("fixture", "imported", "none")
+                or owner.get("slack_backend") not in ("fixture", "slack", "none")):
             raise ValueError
         if owner.get("slack_backend") == "slack" and (
                 not isinstance(owner.get("slack_connection_dir"), str) or not owner["slack_connection_dir"]
@@ -97,7 +97,8 @@ def _validate_sources(directory, owner):
                 raise ValueError
         except Exception:
             raise ValueError("Slack source state is invalid. Run gtm-connector doctor.") from None
-    elif any(os.path.lexists(directory / name) for name in ("slack-source.json", "slack-mappings.json")):
+    elif owner["slack_backend"] == "fixture" and any(
+            os.path.lexists(directory / name) for name in ("slack-source.json", "slack-mappings.json")):
         raise ValueError("Slack source selection is invalid. Run gtm-connector doctor.")
     if owner["calls_backend"] == "imported":
         from .runtime import _inspect_import_state
@@ -107,7 +108,8 @@ def _validate_sources(directory, owner):
                 raise ValueError
         except Exception:
             raise ValueError("Imported calls state is invalid. Run gtm-connector doctor.") from None
-    elif any(os.path.lexists(directory / name) for name in ("calls-source.json", "imports.sqlite3")):
+    elif owner["calls_backend"] == "fixture" and any(
+            os.path.lexists(directory / name) for name in ("calls-source.json", "imports.sqlite3")):
         raise ValueError("Calls source selection is invalid. Run gtm-connector doctor.")
 
 
@@ -125,7 +127,11 @@ def doctor(directory):
     """Inspect private state and GET local metadata; never grant scopes or read sources."""
     directory = _directory(directory)
     serve = shlex.join(["gtm-connector", "serve", "--state-dir", str(directory)])
-    fresh = "gtm-connector serve --state-dir var/doctor-new"
+    if not os.path.lexists(directory / "profile.json"):
+        # serve reads the folder's profile, so a folder with none is connected first.
+        serve = (shlex.join(["gtm-connector", "connect", "demo", "--state-dir", str(directory)])
+                 + " (or connect salesforce --org ALIAS), then " + serve)
+    fresh = "connect and serve a fresh private folder with --state-dir var/doctor-new"
     checks = []
 
     def check(name, passed, message, fix):
@@ -152,42 +158,27 @@ def doctor(directory):
           "Install Python with SQLite support, then reinstall gtm-connector.")
     state_ok = _private(directory, directory=True)
     check("state_folder", state_ok, "The state folder must exist and belong only to this user.",
-          "Start the server with " + serve + ". If the folder is shared or a symlink, use " + fresh + ".")
+          "Start the server with " + serve + ". If the folder is shared or a symlink, " + fresh + ".")
     if not state_ok:
         return report()
     files_ok = all(_private(directory / name) for name in _REQUIRED_FILES)
     check("state_files", files_ok, "Owner settings, TLS files, and databases must be regular owner-only files.",
-          "Stop the server and use a fresh private folder: " + fresh + ".")
+          "Start the server with " + serve + ". If it is running, stop it and " + fresh + ".")
     if not files_ok:
         return report()
     try:
         owner = _read_owner(directory)
         if any(not _private(directory / name) for name in _source_files(owner)):
-            checks[-1].update(status="fail", fix="Stop the server and use a fresh private folder: " + fresh + ".")
+            checks[-1].update(status="fail", fix="Stop the server and " + fresh + ".")
             return report()
         _validate_sources(directory, owner)
     except ValueError:
         check("configuration", False, "Owner settings must use the supported HTTPS loopback endpoints.",
-              "Stop the server and keep this folder. Rerun your original serve command with a fresh --state-dir. "
-              "Run gtm-connector serve --help to check the flags.")
+              "Stop the server and keep this folder. Then " + fresh + ".")
         return report()
     check("configuration", True, "Owner settings use the supported HTTPS loopback endpoints.", "")
     restart_fix = "Stop and restart the server to generate a new certificate: " + serve + "."
     start_fix = "Start the server in another terminal with " + serve + "."
-    if owner.get("crm_backend") == "salesforce":
-        start_fix = ("Rerun the original Salesforce serve command for this state folder with the same connection, "
-                     "environment, calls backend, and demo binding, if used. "
-                     "Run gtm-connector serve --help to check the flags.")
-        restart_fix = "Stop the server to renew its certificate. " + start_fix
-    elif owner.get("calls_backend") == "imported":
-        start_fix = ("Rerun the original serve command for this folder with --calls-backend imported. "
-                     "Run gtm-connector serve --help to check the flags.")
-        restart_fix = "Stop the server to renew its certificate. " + start_fix
-    if owner.get("slack_backend") == "slack":
-        start_fix = ("Rerun the original serve command with the same CRM connection, source modes, "
-                     "private Slack connection folder, and existing state folder. "
-                     "Run gtm-connector serve --help to check the flags.")
-        restart_fix = "Stop the server to renew its certificate. " + start_fix
     if not dependencies_ok:
         return report()
     try:

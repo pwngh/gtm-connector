@@ -1,7 +1,7 @@
 # Slack
 
-Sign in to a Slack app you already have, map one thread to one CRM account, then read it onto a
-[Deal card](briefs.md).
+Sign in to a Slack app you already have, connect that sign-in, map one thread to one CRM account,
+then read it onto a [Deal card](briefs.md).
 The connector creates no app, asks for no client secret, and accepts no pasted token. A failed live
 read never falls back to invented messages. The tests use invented responses.
 
@@ -26,7 +26,7 @@ The app needs:
 | `--client-id`, `--redirect-uri` | `connect` only, required. The existing app's public client ID and exact registered redirect. |
 | `--user-scope` | `connect` only. `channels:history` (the default) or `groups:history` for private channels. Repeat it for both. Passing it replaces the default. |
 | `--team-id` | `connect` only. Require this workspace. It is never printed. |
-| `--connection-dir` | Every `slack` action. The credential folder, default `var/slack-connection`. |
+| `--state-dir` | Every `slack` action. The state folder, `var/v2` by default. Its sign-in is saved inside it, in `slack-connection`. |
 
 - No other scope is requested, and a grant that returns other scopes is refused.
 - Slack requests in one command share a 20-second deadline. Each response is limited to 64 KiB.
@@ -34,35 +34,32 @@ The app needs:
 - A refresh token is single use and usable for 30 days.
 - Bot grants, organization-wide installs, GovSlack, confidential clients, and Slack's separate
   user-centric OAuth endpoints are not supported.
-- Keep the credential folder apart from source state and audit folders, and never commit it.
+- The sign-in is a credential. Keep the state folder private and never commit it.
 
-## Map, check, and brief
-
-Choose an unused `--state-dir`.
+## Connect, map, check, and brief
 
 ```sh
-gtm-connector slack map --state-dir var/slack-selected --account acc-007 \
-  --thread-url 'COPIED_THREAD_LINK'
-gtm-connector slack check --state-dir var/slack-selected --account acc-007
-gtm-connector brief acc-007 --with-slack --slack-backend slack \
-  --slack-connection-dir var/slack-connection --state-dir var/slack-selected
+gtm-connector connect slack --seller 'Morgan Reed' --seller U12345678   # after slack connect; name every seller
+gtm-connector slack map --account acc-007 --thread-url 'COPIED_THREAD_LINK'
+gtm-connector slack check --account acc-007
+gtm-connector brief acc-007
 ```
 
 | Command or flag | Rule |
 | --- | --- |
-| `slack map` | Requires a `ready` connection, makes one audited CRM lookup, and saves the selection. It fetches no messages. |
+| `connect slack` | Connects the sign-in saved in the folder, beside Salesforce or beside the demo CRM. With no saved sign-in it exits `2` and names `slack connect`. With one that needs a new login it exits `3`. It contacts nobody. `connect slack --remove` detaches Slack and keeps the sign-in. |
+| `slack map` | Requires Slack connected and a `ready` sign-in, makes one audited CRM lookup, and saves the selection. It fetches no messages. |
 | `slack check` | Reads the mapped thread through `read_slack_messages` and validates its receipt. It reads no CRM or calls data. |
 | `--thread-url` | The saved workspace's HTTPS origin and the path `/archives/CHANNEL/pTIMESTAMP`. A reply link names its parent through `thread_ts`. An optional `cid` must match. Other query fields, fragments, and other workspaces are refused. |
 | `--channel` with `--thread-ts` | Needed when the saved connection has no workspace origin. The timestamp is whole seconds, a dot, and exactly six digits. |
 | `--account`, `--account-number` | The CRM account ID: `acc-007`, or the `acc-sf-` form with Salesforce. Or, Salesforce only, a number that matches exactly one account. |
 | `--replace`, `--reassign` | Needed when the account already has another thread, and when the thread belongs to another account. |
 
-- `slack` actions take `--connection-dir`. Other commands take `--slack-connection-dir`.
-- Reuse the same state folder and source flags every time. Stop a `serve` running on it first.
+- Use the same state folder every time. Stop a `serve` running on it first.
 - Select the parent message. A reply selected as the parent fails the check.
-- With Salesforce or an imported transcript, `slack map`, `calls import`, and `brief` must each name
-  all three sources on one unused folder. See [calls](calls.md). `--salesforce-demo-binding` cannot
-  be combined with live Slack or imported calls.
+- A folder that has read demo Slack messages refuses live Slack. Connect it in a fresh folder.
+- A card reads Slack whenever Slack is connected. An account with no mapped thread gets a card that
+  says so.
 
 ## Limits
 
@@ -138,12 +135,12 @@ A reason sets the exit code of a command, and is a step `code` in `slack check`.
 | `slack_scope_mismatch` | 3 | Use a grant with exactly the selected scopes. |
 | `slack_identity_mismatch` | 3 | Restore the original identity or use another folder. |
 | `slack_token_type_unsupported` | 3 | Use a user grant from a public PKCE client. |
-| `slack_selection_invalid`, `slack_crm_configuration_invalid`, `slack_account_not_found` | 2 | Correct the account, link, channel, timestamp, or CRM flags. Find the account ID with `accounts`. |
+| `slack_selection_invalid`, `slack_crm_configuration_invalid`, `slack_account_not_found` | 2 | Correct the account, link, channel, or timestamp. Find the account ID with `accounts`. |
 | `slack_account_ambiguous` | 3 | Pass the account ID with `--account`. |
 | `slack_association_failed`, `slack_association_invalid` | 4 | The CRM lookup failed. Nothing was saved. Check the CRM connection. |
 | `slack_crm_unavailable` | 5 | Check CRM access, then retry. |
 | `slack_mapping_missing`, `slack_mapping_conflict` | 3 | Run `slack map` for the account. For a conflict, review `--replace` and `--reassign`. |
-| `slack_source_mismatch` | 3 | Restore the original source flags, folders, and Slack identity. |
+| `slack_source_mismatch` | 3 | Connect the original sources and Slack identity in the original folder. |
 | `slack_identity_unchecked` | 3 | Run `slack status --check`. |
 | `slack_thread_unavailable`, `slack_forbidden`, `slack_thread_changed`, `slack_thread_incomplete` | 3 | Check the selected parent, the history scope, and channel access. For a changed or incomplete thread, retry when it is stable. |
 | `slack_resource_limit`, `slack_output_too_large` | 3 | Select a smaller thread. |
@@ -154,11 +151,12 @@ A reason sets the exit code of a command, and is a step `code` in `slack check`.
 
 ## Invented messages in the demo
 
-`--with-slack` adds an account channel's invented Slack messages to a card. It uses no Slack
-account, token, or network request.
+A folder connected with `connect demo` reads an account channel's invented Slack messages onto every
+card. It uses no Slack account, token, or network request.
 
 ```sh
-.venv/bin/python -m gtm_connector brief acc-003 --with-slack --json
+.venv/bin/python -m gtm_connector connect demo
+.venv/bin/python -m gtm_connector brief acc-003 --json
 .venv/bin/python -m gtm_connector verify --with-slack --state-dir var/slack-verification
 .venv/bin/python -m gtm_connector demo --state-dir var/renewal-demo   # always includes Slack
 ```
@@ -175,5 +173,5 @@ account, token, or network request.
 | `msg-007`, an instruction to call `log_activity` | Quoted sentences. No activity is created. |
 | No messages | `Slack: no message was returned for this account.` |
 | HTTP 403 for missing `slack:read` | `Slack: not read. The grant lacks slack:read.` |
-| `brief` without `--with-slack` | `Slack: not requested for this card.` |
+| A card prepared without Slack, as `verify` does without `--with-slack` | `Slack: not requested for this card.` |
 | Any other Slack failure | No card. The command stops. |

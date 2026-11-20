@@ -282,6 +282,37 @@ class SalesforceBriefingTests(unittest.TestCase):
         self.assertEqual([row["http_status"] for row in self.runtime.connector.audit.read()], [200, 200, 403, 403, 200])
         self.assertEqual(len(self.requests), 5)
 
+    def test_a_source_that_is_not_connected_is_said_so_never_read_and_never_filled_with_demo_data(self):
+        reader = SalesforceReadOnlyAdapter("https://fixture-brief.my.salesforce.com", TOKEN,
+                                           transport=httpx2.MockTransport(self.respond))
+        first = self.__dict__.pop("runtime")  # The fixture checks the receipts of whichever runtime is reading.
+        self.addCleanup(setattr, self, "runtime", first)
+        with Runtime(self.state.parent / "bare", crm_reader=reader, calls_backend="none",
+                     slack_backend="none") as runtime:
+            self.runtime = runtime
+            brief = create_brief(runtime, ACCOUNT_ID, as_of=AS_OF, include_slack=True)
+            self.assertEqual(brief["sources"], {"crm": "salesforce", "calls": "not_connected", "slack": "not_connected"})
+            for line in ("  Calls: not connected.", "  Slack: not connected."):
+                self.assertIn(line, brief["text"].splitlines())
+            self.assertLessEqual({"calls_not_connected", "slack_not_connected"}, {gap["code"] for gap in brief["gaps"]})
+            self.assertEqual({unit["source"] for unit in brief["units"]}, {"crm"})
+            # Only the CRM was read: two reads and the card's seal. No receipt claims a read that did not happen.
+            self.assertEqual([row["tool"] for row in runtime.connector.audit.read()],
+                             ["get_account", "list_opportunities", "save_brief"])
+            # A tool call for a source that is not connected is refused by name, with its own receipt.
+            with LocalClient(runtime.config) as client:
+                token = client.authorize(["crm:read", "calls:read", "slack:read"])
+                for tool, code in (("read_call_notes", "calls_not_connected"),
+                                   ("read_slack_messages", "slack_not_connected")):
+                    result = client.call(token, tool, {"account_id": ACCOUNT_ID}).json()["result"]
+                    self.assertTrue(result["isError"])
+                    self.assertEqual(result["content"][0]["text"].rsplit(": ", 1)[-1], code)
+                    receipt = runtime.connector.audit.read()[-1]
+                    self.assertEqual((receipt["tool"], receipt["status"], receipt["rows"]), (tool, "error", []))
+        # "Not connected" belongs beside a real CRM. The demo is whole or it is not the demo.
+        with self.assertRaisesRegex(ValueError, "Only a connected CRM"):
+            Runtime(self.state.parent / "demo-bare", calls_backend="none")
+
     def test_invented_local_sources_become_inert_sentences_without_crm_reads(self):
         with closing(sqlite3.connect(self.state / "calls.sqlite3")) as connection, connection:
             connection.execute("INSERT INTO call_notes VALUES (?, ?, ?, ?, ?)",

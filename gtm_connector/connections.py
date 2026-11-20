@@ -165,14 +165,23 @@ def _connect_stdio(directory, app, scopes, config_file):
         raise ValueError("--transport stdio needs --config-file naming the app's configuration file.")
     directory = _directory(directory)
     written = merge_client_config(config_file, stdio_entry(directory, app, scopes))
-    setup = [shlex.join(["gtm-connector", "serve", "--state-dir", str(directory)]),
-             f"Restart {app} so it reads {shlex.quote(written['config'])}."]
+    setup = [*_serve_steps(directory), f"Restart {app} so it reads {shlex.quote(written['config'])}."]
     if written["backup"] is not None:
         setup.append(f"The previous file is saved as {shlex.quote(written['backup'])}.")
     return {"app": app, "transport": "stdio", "status": "untested", "config": written["config"],
             "backup": written["backup"], "setup": setup, "limits": list(_STDIO_LIMITS),
             "documentation": _STDIO_DOCUMENTATION[app]}
 
+
+
+def _serve_steps(directory):
+    """How to start the connector in a folder. serve reads the folder's profile, so a folder with none is
+    connected first."""
+    serve = shlex.join(["gtm-connector", "serve", "--state-dir", str(directory)])
+    if os.path.lexists(directory / "profile.json"):
+        return [serve]
+    return [shlex.join(["gtm-connector", "connect", "demo", "--state-dir", str(directory)])
+            + " (or connect salesforce --org ALIAS)", serve]
 
 def connect(directory, app, scopes=None, *, transport="http", config_file=None):
     """Return setup text; only explicitly requested scopes create a local grant."""
@@ -198,7 +207,7 @@ def connect(directory, app, scopes=None, *, transport="http", config_file=None):
         ] + result["limits"]
         return result
     if not scopes:
-        setup.append(shlex.join(["gtm-connector", "serve", "--state-dir", str(directory)]))
+        setup.extend(_serve_steps(directory))
         setup.append(shlex.join(["gtm-connector", "connect", app, "--state-dir", str(directory),
                                  "--scope", "crm:read"]))
         result["limits"].insert(0, "No grant or config was created. Select each scope explicitly.")

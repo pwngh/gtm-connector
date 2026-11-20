@@ -15,6 +15,7 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 from mcp.shared.exceptions import MCPError
 
+from gtm_connector import profile
 from gtm_connector.connections import connect, merge_client_config, stdio_entry
 from gtm_connector.runtime import Runtime
 from gtm_connector.selection import load_selection
@@ -58,6 +59,7 @@ class StdioBridgeTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name).resolve()
         self.state = self.root / "state"
+        profile.save(self.state, profile.DEMO)
 
     def test_a_crm_only_bridge_reads_crm_through_the_gateway_and_never_widens(self):
         with Runtime(self.state) as runtime:
@@ -202,8 +204,15 @@ class StdioBridgeTests(unittest.TestCase):
         self.assertEqual([row["rows"] for row in receipts], [[]] * 3)
 
     def test_without_a_running_connector_the_bridge_exits_with_a_message(self):
-        result = subprocess.run(
+        missing = subprocess.run(
             [sys.executable, "-m", "gtm_connector", "mcp", "stdio", "--state-dir", str(self.root / "missing"),
+             "--scope", "crm:read"], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            timeout=120, check=False)
+        self.assertEqual((missing.returncode, missing.stdout), (2, ""))
+        self.assertIn("No CRM is connected. Run gtm-connector connect", missing.stderr)
+        self.assertFalse((self.root / "missing").exists())
+        result = subprocess.run(
+            [sys.executable, "-m", "gtm_connector", "mcp", "stdio", "--state-dir", str(self.state),
              "--scope", "crm:read"], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True,
             timeout=120, check=False)
         self.assertNotEqual(result.returncode, 0)
@@ -218,6 +227,35 @@ class StdioBridgeTests(unittest.TestCase):
         self.assertNotEqual(stopped.returncode, 0)
         self.assertEqual(stopped.stdout, "")
         self.assertIn("Start serve again", stopped.stderr)
+
+    def test_the_bridge_refuses_a_connector_that_serves_other_sources_than_the_profile_names(self):
+        with Runtime(self.state) as runtime:
+            profile.connect(self.state, "calls", {"provider": "imported"})
+            changed = subprocess.run(
+                [sys.executable, "-m", "gtm_connector", "mcp", "stdio", "--state-dir", str(self.state),
+                 "--scope", "crm:read"], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                timeout=120, check=False)
+            self.assertEqual((changed.returncode, changed.stdout), (1, ""))
+            self.assertIn("Start gtm-connector serve again", changed.stderr)
+            self.assertEqual(runtime.connector.audit.read(), [])
+            self.assertEqual(runtime.connector.authority.tokens, {})
+
+
+    def test_the_bridge_refuses_a_connector_serving_another_salesforce_environment(self):
+        from unittest.mock import patch
+        from gtm_connector.cli import main
+        from gtm_connector.stdio_bridge import BridgeError, run_bridge
+        backends = {"crm_backend": "salesforce", "calls_backend": "none", "slack_backend": "none"}
+        owner = {**backends, "sf_environment": "developer"}
+        with patch("gtm_connector.doctor.load_local_owner", return_value=owner):
+            with self.assertRaisesRegex(BridgeError, "sources changed"):
+                run_bridge(self.state, ["crm:read"], {**backends, "sf_environment": "production"})
+        # The command passes the environment the profile names, so a changed profile is noticed.
+        profile.save(self.state, {"crm": {"provider": "salesforce", "org": "invented-alias",
+                                          "environment": "production"}})
+        with patch("gtm_connector.stdio_bridge.run_bridge") as bridge:
+            self.assertEqual(main(["mcp", "stdio", "--scope", "crm:read", "--state-dir", str(self.state)]), 0)
+        self.assertEqual(bridge.call_args.args[2], {**backends, "sf_environment": "production"})
 
 
 class GrantTests(unittest.TestCase):
@@ -348,6 +386,7 @@ class ClientConfigurationTests(unittest.TestCase):
         (elsewhere / "gtm_connector").mkdir(parents=True)
         (elsewhere / "gtm_connector" / "__init__.py").write_text("raise SystemExit('shadowed')\n")
         (elsewhere / "gtm_connector" / "__main__.py").write_text("raise SystemExit('shadowed')\n")
+        profile.save(self.state, profile.DEMO)
         with Runtime(self.state):
             entry = stdio_entry(self.state, "cursor", ["crm:read"])
             parameters = StdioServerParameters(command=entry["command"], args=entry["args"], cwd=str(elsewhere),

@@ -10,17 +10,17 @@ client can prepare a [Deal card](briefs.md) with its own grant and read it again
 
 ```sh
 chmod 600 selection.json
-gtm-connector serve --state-dir var/selected --selection selection.json
+gtm-connector serve --selection selection.json
 ```
 
-- `accounts` lists 1 to 100 distinct accounts. Use `acc-007` style IDs with the fixture CRM and
+- `serve` reads the sources its state folder is [connected](cli.md) to.
+- `accounts` lists 1 to 100 distinct accounts. Use `acc-007` style IDs with the demo CRM and
   `acc-sf-` plus the 18-character ID with Salesforce.
-- `slack: true` selects the account's Slack thread. In live Slack mode it must already be mapped
-  with `slack map`, or the server refuses to start.
+- `slack: true` selects the account's Slack thread. With live Slack connected it must already be
+  mapped with `slack map`, or the server refuses to start.
 - The file must be a regular file you own that others cannot write, at most 64 KiB. Unknown keys,
   repeated keys or accounts, and non-finite numbers refuse.
 - To change the selection, restart `serve`. A restart also replaces every grant.
-- `--selection` cannot be combined with `--salesforce-demo-binding`.
 
 ## Tools
 
@@ -40,7 +40,10 @@ neutralized text, speaker, and role. The units hold more than the card prints: e
 was read, shown or not, and for a transcript the cues it lies in and their times. A caller with
 `calls:read` receives those. Each read inside it writes its own receipt, linked to the outer call by
 `{"kind": "brief_child", "parent_audit_id": ..., "ordinal": N}`. A successful brief has one outer
-receipt and three read receipts, or four with Slack. The reads write no `serve` event lines.
+receipt and one read receipt for each source read: the account and its opportunities, then calls
+and Slack when they are connected and Slack is selected for the account. A source that is not
+connected is never called, and the card and `sources` name it as not connected. The reads write no
+`serve` event lines.
 
 - Preparing a brief has 45 seconds. Writing the final receipt and sending the response come after
   that check. A read already in progress keeps its own limit, 20 seconds for Salesforce and live
@@ -56,7 +59,7 @@ receipt and three read receipts, or four with Slack. The reads write no `serve` 
 ## Errors
 
 A bad selection file stops `serve` with exit `2`, and an unmapped Slack thread with exit `3`. Tools
-return these codes as tool errors, or a failed source's own code, such as `calls_not_imported`.
+return these codes as tool errors, or a failed source's own code, such as `calls_not_connected`.
 
 | Code | Cause | Fix |
 | --- | --- | --- |

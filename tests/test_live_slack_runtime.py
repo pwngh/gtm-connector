@@ -148,7 +148,7 @@ class LiveSlackRuntimeTests(unittest.TestCase):
         (self.state / "crm.sqlite3").unlink()
         (self.state / "calls.sqlite3").unlink()
         before = self.snapshot()
-        sentinels = ("gtm_connector.runtime._prepare_source_state", "gtm_connector.runtime._seed_demo_sources",
+        sentinels = ("gtm_connector.runtime._prepare_source_state",
                      "gtm_connector.gateway.store.connect", "gtm_connector.gateway.calls.connect",
                      "gtm_connector.gateway.slack.connect", "gtm_connector.salesforce.SFCredentials",
                      "gtm_connector.slack_auth.inspect_slack_connection")

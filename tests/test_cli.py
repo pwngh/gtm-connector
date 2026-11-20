@@ -11,6 +11,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from gtm_connector import profile
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,15 +21,13 @@ class CLITests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.database = Path(self.directory.name) / "crm.sqlite3"
         self.state = Path(self.directory.name).resolve() / "state"
+        self.database = self.state / "crm.sqlite3"
+        profile.save(self.state, profile.DEMO)
 
-    def run_cli(self, *arguments, database=None, state=None, json_output=True):
-        location = (["--db", str(database or self.database)]
-                    if arguments[0] in ("seed", "accounts", "account")
-                    else ["--state-dir", str(state or self.state)])
+    def run_cli(self, *arguments, state=None, json_output=True):
         return subprocess.run(
-            [sys.executable, "-m", "gtm_connector", *arguments, *location,
+            [sys.executable, "-m", "gtm_connector", *arguments, "--state-dir", str(state or self.state),
              *(["--json"] if json_output else [])],
             cwd=ROOT,
             text=True,
@@ -110,7 +110,9 @@ class CLITests(unittest.TestCase):
         self.assertEqual(sum(row["status"] == "error" for row in all_rows), 6)
 
     def test_accounts_past_one_hundred_matches_show_the_first_hundred_and_say_so(self):
-        self.json_result(self.run_cli("seed"))
+        self.assertEqual(len(self.json_result(self.run_cli("accounts"))), 30)
+        # A card's services write the folder's own book. accounts then reads that book.
+        self.json_result(self.run_cli("brief", "acc-003"))
 
         def add(rows):
             with closing(sqlite3.connect(self.database)) as connection, connection:
@@ -139,8 +141,7 @@ class CLITests(unittest.TestCase):
         narrowed = self.run_cli("accounts", "--query", "zeta")
         self.assertEqual([row["id"] for row in self.json_result(narrowed)], ["acc-171"])
 
-    def test_seed_then_list_search_and_inspect_records(self):
-        self.json_result(self.run_cli("seed"))
+    def test_list_search_and_inspect_records(self):
         accounts = self.json_result(self.run_cli("accounts"))
         self.assertEqual(len(accounts), 30)
         self.assertEqual([row["name"] for row in accounts], sorted(row["name"] for row in accounts))
@@ -179,22 +180,21 @@ class CLITests(unittest.TestCase):
         self.assertEqual((len(rows), sum(row["status"] == "error" for row in rows)), (31, 7))
 
     def test_missing_account_exits_two_without_json_on_stdout(self):
-        self.json_result(self.run_cli("seed"))
         result = self.run_cli("account", "acc-missing")
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, "")
         self.assertIn("acc-missing", result.stderr)
 
-    def test_read_commands_do_not_create_missing_database_or_parent(self):
-        missing = Path(self.directory.name) / "missing" / "crm.sqlite3"
+    def test_read_commands_do_not_create_a_missing_folder_or_its_database(self):
+        missing = Path(self.directory.name) / "missing"
         for arguments in (("accounts",), ("account", "acc-001")):
             with self.subTest(arguments=arguments):
-                result = self.run_cli(*arguments, database=missing)
+                result = self.run_cli(*arguments, state=missing)
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stdout, "")
-                self.assertTrue(result.stderr.strip())
+                self.assertIn("No CRM is connected", result.stderr)
                 self.assertNotIn("Traceback", result.stderr)
-                self.assertFalse(missing.parent.exists())
+                self.assertFalse(missing.exists())
 
     def test_audit_does_not_create_missing_state(self):
         missing = Path(self.directory.name) / "missing-state"
@@ -216,7 +216,8 @@ class CLITests(unittest.TestCase):
         self.assertEqual(result.stdout.split("\nBrief: ", 1)[0], artifact["text"])
         self.assertIn("  Renewal date: 2027-02-01, today [1]", result.stdout.splitlines())
         rows = self.json_result(self.run_cli("audit", "--brief", identifier))
-        self.assertEqual(len(rows), 3)
+        self.assertEqual([row["tool"] for row in rows],
+                         ["get_account", "list_opportunities", "read_call_notes", "read_slack_messages"])
 
     def test_json_brief_and_trace_resolve_each_number_from_saved_evidence(self):
         brief = self.json_result(self.run_cli("brief", "acc-001", "--without-calls"))
@@ -244,17 +245,18 @@ class CLITests(unittest.TestCase):
         self.assertEqual(human.returncode, 0, human.stderr)
         self.assertIn("Record\tcrm/accounts/acc-001\n", human.stdout)
         self.assertIn("(get_account, ok)", human.stdout)
-        for number in ("0", "4", "-1"):
+        last = max(unit["n"] for unit in brief["units"])
+        for number in ("0", str(last + 1), "-1"):
             with self.subTest(number=number):
                 rejected = self.run_cli("trace", brief["brief_id"], number)
                 self.assertEqual(rejected.returncode, 2)
                 self.assertEqual(rejected.stdout, "")
-                self.assertIn("This card has numbers 1 to 3.", rejected.stderr)
+                self.assertIn(f"This card has numbers 1 to {last}.", rejected.stderr)
                 self.assertNotIn("Traceback", rejected.stderr)
         self.assertEqual(saved.read_bytes(), original_artifact)
 
     def test_printed_json_holds_neutralized_text_and_the_raw_records_stay_in_the_private_file(self):
-        brief = self.run_cli("brief", "acc-003", "--with-slack")
+        brief = self.run_cli("brief", "acc-003")
         printed = self.json_result(brief)
         saved = (self.state / "briefs" / (printed["brief_id"] + ".json")).read_text()
         for raw in ("<!channel>", "https://files.thornfield-wren.example", "rider-redline-v4.pdf"):
@@ -303,7 +305,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(self.json_result(self.run_cli("trace", brief["brief_id"], "1"))["n"], 1)
 
     def test_a_spoken_number_traces_to_its_sentence_speaker_and_source_digest(self):
-        brief = self.json_result(self.run_cli("brief", "acc-003", "--with-slack"))
+        brief = self.json_result(self.run_cli("brief", "acc-003"))
         traced = self.json_result(self.run_cli("trace", brief["brief_id"], "5"))
         self.assertEqual({key: traced[key] for key in ("kind", "source", "record_ref", "speaker", "role", "basis",
                                                        "at", "sanitizer_version")},
@@ -318,7 +320,7 @@ class CLITests(unittest.TestCase):
         self.assertNotIn("<!channel>", human.stdout)
 
     def test_an_edited_saved_card_does_not_trace(self):
-        brief = self.json_result(self.run_cli("brief", "acc-003", "--with-slack"))
+        brief = self.json_result(self.run_cli("brief", "acc-003"))
         path = self.state / "briefs" / (brief["brief_id"] + ".json")
         saved = path.read_text()
         self.assertEqual(self.run_cli("trace", brief["brief_id"], "1").returncode, 0)

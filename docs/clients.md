@@ -1,11 +1,13 @@
 # Connect a client
 
 ```sh
+gtm-connector connect demo --state-dir var/clients    # or connect salesforce --org ALIAS
 gtm-connector serve --state-dir var/clients     # keep it running in one terminal
 gtm-connector doctor --state-dir var/clients    # second terminal, same directory
 gtm-connector connect inspector --state-dir var/clients --scope crm:read
 ```
 
+`serve` serves the sources its state folder is [connected](cli.md) to.
 `connect APP` prints the setup commands and limits for one client. It does not launch an
 application. With `--scope`, it requests a local grant and saves it in `APP.json` in the state
 folder, mode 0600, without printing the bearer token. Without `--scope`, it previews the setup and
@@ -60,6 +62,8 @@ gtm-connector connect claude-desktop --transport stdio --scope crm:read --scope 
   scope check, rate limit, and audit receipt. A call outside the scopes is refused.
 - Start `serve` first. Without it the bridge exits with a message on stderr. After `serve` restarts,
   restart the app.
+- The bridge refuses a folder with no connected CRM. After `connect` changes the folder's sources,
+  it refuses the `serve` that was started before the change, so restart `serve` and then the app.
 - Tested with the MCP SDK's own stdio client. No assistant app has been tested.
 
 ## Grants and private files
@@ -84,6 +88,7 @@ it.
 Inspector 2.15.0 needs `npx` and Node 22.23.4+, 24.22.1+, or 26.12.1+.
 
 ```sh
+gtm-connector connect demo --state-dir var/inspector
 gtm-connector serve --state-dir var/inspector  # leave running; second terminal, same directory
 gtm-connector connect inspector --state-dir var/inspector --scope crm:read
 npx --yes @modelcontextprotocol/inspector@2.15.0 --version   # downloads the pinned package

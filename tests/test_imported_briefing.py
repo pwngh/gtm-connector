@@ -512,9 +512,8 @@ class ImportedBriefingTests(unittest.TestCase):
             with self.assertRaises(CallsImportError):
                 self.import_call(runtime, account_id="acc-008")
             self.import_call(runtime, account_id="acc-008", reassign=True)
-            with self.assertRaises(CallsImportError) as failure:
-                create_brief(runtime, "acc-007", as_of=AS_OF)
-            self.assertEqual(failure.exception.code, "calls_not_imported")
+            self.assertIn("  Calls: no transcript is imported for this account.",
+                          create_brief(runtime, "acc-007", as_of=AS_OF)["text"])
             self.assertEqual(create_brief(runtime, "acc-008", as_of=AS_OF)["status"], "accepted")
         first = next(unit for unit in artifact["units"] if unit["kind"] == "sentence")
         self.assertEqual(trace_saved(self.state, artifact["brief_id"], first["n"])["text"], first["text"])

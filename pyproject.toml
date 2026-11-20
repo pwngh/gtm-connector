@@ -22,9 +22,6 @@ Issues = "https://github.com/pwngh/gtm-connector/issues"
 packages = ["gtm_connector"]
 include-package-data = false
 
-[tool.setuptools.package-data]
-"gtm_connector" = ["demo_kit/*.json"]
-
 [tool.setuptools.dynamic]
 version = {attr = "gtm_connector.__version__"}
 dependencies = {file = ["requirements.in"]}

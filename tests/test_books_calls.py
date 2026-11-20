@@ -211,6 +211,11 @@ class BookCallsTests(unittest.TestCase):
         return store_import(runtime.imports_path, parsed, excerpt, association=association, called_at=called_at,
                             imported_at=IMPORTED_AT, reassign=reassign)
 
+    def no_transcript(self, runtime, account_id):
+        brief = create_brief(runtime, account_id, as_of=AS_OF)
+        self.assertIn("  Calls: no transcript is imported for this account.", varied.hold(self, brief)["NOT READ"])
+        self.assertEqual([row for row in brief["evidence"]["records"] if row["record_ref"].startswith("calls/")], [])
+
     def imports(self, runtime):
         return list_imports(runtime.imports_path, crm_binding=runtime.calls_binding)["imports"]
 
@@ -296,10 +301,7 @@ class BookCallsTests(unittest.TestCase):
                     with self.subTest(book=name, account=shape["name"][:40]):
                         if number not in carriers:
                             # No transcript: the brief stops. The account's fixture-style notes are not used instead.
-                            with self.assertRaises(CallsImportError) as missing:
-                                create_brief(runtime, f"acc-{number}", as_of=AS_OF)
-                            self.assertEqual((missing.exception.code, missing.exception.exit_code),
-                                             ("calls_not_imported", 3))
+                            self.no_transcript(runtime, f"acc-{number}")
                             continue
                         kind, raw = shape["transcript"]["format"], shape["transcript"]["text"].encode()
                         called_at = CALLED[carriers.index(number) % len(CALLED)]
@@ -372,9 +374,7 @@ class BookCallsTests(unittest.TestCase):
                 self.assertEqual((moved["status"], moved["reassigned"]), ("imported", True))
                 self.brief(runtime, there, moved, second, two)
                 # The account it left has no selected transcript.
-                with self.assertRaises(CallsImportError) as missing:
-                    create_brief(runtime, "acc-300", as_of=AS_OF)
-                self.assertEqual((missing.exception.code, missing.exception.exit_code), ("calls_not_imported", 3))
+                self.no_transcript(runtime, "acc-300")
 
     def test_size_cases_have_exact_outcomes(self):
         line = lambda size: b"x" * size  # noqa: E731
@@ -432,9 +432,7 @@ class BookCallsTests(unittest.TestCase):
                         self.assertEqual(deserved(raw, kind), code)
                     self.refused(code, runtime, "acc-500", raw, kind, selected=selected)
             # Nothing that was refused left the account with a transcript.
-            with self.assertRaises(CallsImportError) as missing:
-                create_brief(runtime, "acc-500", as_of=AS_OF)
-            self.assertEqual(missing.exception.code, "calls_not_imported")
+            self.no_transcript(runtime, "acc-500")
 
     def test_a_byte_order_mark_and_crlf_endings_leave_the_units_clean(self):
         text = "\ufeffDana: Caf\u00e9 at nine.\r\n\r\nLee: Agreed.\r\n".encode()

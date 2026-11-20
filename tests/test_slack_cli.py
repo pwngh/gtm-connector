@@ -36,12 +36,14 @@ class SlackCLITests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        self.directory = self.root / 'private Slack connection'
+        # A state folder holds its own Slack sign-in.
+        self.state = self.root / 'private state'
+        self.directory = self.state / 'slack-connection'
 
     def invoke(self, *arguments, as_json=True, directory=True):
         args = list(arguments)
         if directory:
-            args += ['--connection-dir', str(self.directory)]
+            args += ['--state-dir', str(self.state)]
         if as_json:
             args += ['--json']
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
@@ -74,18 +76,18 @@ class SlackCLITests(unittest.TestCase):
                  ['connect', '--client-id', CLIENT],
                  ['connect', '--client-id', CLIENT, '--redirect-uri', REDIRECT, '--user-scope', PRIVATE],
                  ['connect', '--client-id', CLIENT, '--redirect-uri', REDIRECT, '--client-secret', PRIVATE],
-                 ['status', '--state-dir', PRIVATE]]
+                 ['status', '--connection-dir', PRIVATE]]
         guard = Guard()
         with patch.object(sys, 'meta_path', [guard, *sys.meta_path]):
             for arguments in cases:
                 with self.subTest(arguments=arguments):
                     self.failure(self.invoke('slack', *arguments), 2)
-                    self.assertFalse(self.directory.exists())
+                    self.assertFalse(self.state.exists())
 
     def test_global_parent_and_action_json_and_directory_positions(self):
-        for args in (['--json', 'slack', '--connection-dir', str(self.directory), 'status'],
-                     ['slack', '--json', '--connection-dir', str(self.directory), 'status'],
-                     ['slack', 'status', '--connection-dir', str(self.directory), '--json']):
+        for args in (['--json', 'slack', '--state-dir', str(self.state), 'status'],
+                     ['slack', '--json', '--state-dir', str(self.state), 'status'],
+                     ['slack', 'status', '--state-dir', str(self.state), '--json']):
             with self.subTest(args=args), patch('gtm_connector.slack_auth.slack_status', return_value=READY) as status:
                 code, out, err = self.invoke(*args, directory=False, as_json=False)
             self.assertEqual(code, 0, err)
@@ -120,7 +122,7 @@ class SlackCLITests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 error = self.failure(self.connect(*arguments), 2)
                 self.assertIn('slack_invalid_configuration', error['message'])
-                self.assertFalse(self.directory.exists())
+                self.assertFalse(self.state.exists())
 
     def test_progress_is_bounded_stderr_data_and_ignores_private_unknown_events(self):
         def connected(*args, progress, **kwargs):
@@ -153,7 +155,7 @@ class SlackCLITests(unittest.TestCase):
             with self.subTest(name=name), patch('gtm_connector.slack_auth.slack_status', side_effect=error):
                 detail = self.failure(self.invoke('slack', 'status', '--check'), error.exit_code)
             self.assertIn(name, detail['message'])
-            self.assertFalse(self.directory.exists())
+            self.assertFalse(self.state.exists())
 
     def test_unknown_provider_exceptions_never_echo_their_values(self):
         for error in (OSError(PRIVATE), ValueError(PRIVATE), RuntimeError(PRIVATE)):
@@ -176,10 +178,10 @@ class SlackCLITests(unittest.TestCase):
         with patch('gtm_connector.slack_auth.connect_slack', side_effect=KeyboardInterrupt):
             detail = self.failure(self.connect(), 130)
         self.assertEqual(detail['code'], 'interrupted')
-        self.assertIn('slack status --connection-dir', detail['next'])
+        self.assertIn('slack status --state-dir', detail['next'])
         self.assertNotIn('audit', detail['next'])
         self.assertNotIn('--check', detail['next'])
-        self.assertFalse(self.directory.exists())
+        self.assertFalse(self.state.exists())
 
     def test_local_missing_status_and_disconnect_never_create_state(self):
         for action in ('status', 'disconnect', 'disconnect'):
@@ -195,7 +197,7 @@ class SlackCLITests(unittest.TestCase):
             else:
                 self.assertFalse(result['local_credentials_removed'])
                 self.assertFalse(result['remote_revoke_requested'])
-            self.assertFalse(self.directory.exists())
+            self.assertFalse(self.state.exists())
 
     def test_local_status_and_failures_never_import_source_runtime_or_http(self):
         program = r'''
@@ -215,14 +217,15 @@ raise SystemExit(main(sys.argv[1:]))
         for args, expected in cases:
             package_root = str(Path(gtm_connector.__file__).resolve().parent.parent)
             result = subprocess.run([sys.executable, '-c', program, package_root, *args,
-                                     '--connection-dir', str(self.directory), '--json'], cwd=self.root,
+                                     '--state-dir', str(self.state), '--json'], cwd=self.root,
                                     capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, expected, result.stderr)
             self.assertNotIn('Source runtime must not load', result.stdout + result.stderr)
             self.assertNotIn(PRIVATE, result.stdout + result.stderr)
-            self.assertFalse(self.directory.exists())
+            self.assertFalse(self.state.exists())
 
     def test_local_status_and_disconnect_preserve_unrelated_files(self):
+        self.state.mkdir(mode=0o700)
         self.directory.mkdir(mode=0o700)
         unrelated = self.directory / 'unrelated.txt'
         unrelated.write_text(PRIVATE)

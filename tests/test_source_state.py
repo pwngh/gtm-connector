@@ -13,7 +13,6 @@ from unittest.mock import patch
 
 from gtm_connector.runtime import Runtime, SourceIdentityError
 from gtm_connector.slack_mapping import SlackMappingError
-from gtm_connector.salesforce_demo import bind_import, load_binding, write_binding
 
 
 IDENTITY = {"schema_version": 1, "backend": "salesforce",
@@ -55,15 +54,14 @@ class SourceStateTests(unittest.TestCase):
         return {str(path.relative_to(self.state)): path.read_bytes()
                 for path in self.state.rglob("*") if path.is_file() and path.name != "server.lock"}
 
-    def binding(self):
-        records = {"status": 0, "result": [
-            {"refId": f"{name}Ref{number}", "type": "Account", "id": prefix + f"{number:012}" + "AAA"}
-            for number in range(1, 4)
-            for name, prefix in (("Account", "001"), ("Contact", "003"), ("Opportunity", "006"), ("Contract", "800"))
-        ]}
-        path = self.directory / "binding.json"
-        write_binding(path, bind_import(records))
-        return load_binding(path)
+    def test_the_files_a_removed_source_leaves_do_not_make_the_running_connector_unreadable(self):
+        from gtm_connector.doctor import load_local_owner
+        with Runtime(self.state, crm_reader=InventedReader(), calls_backend="imported"):
+            pass
+        self.assertTrue((self.state / "calls-source.json").exists())
+        # Calls removed beside Salesforce: the imports stay, and the connector started without them is usable.
+        with Runtime(self.state, crm_reader=InventedReader(), calls_backend="none"):
+            self.assertEqual(load_local_owner(self.state)["calls_backend"], "none")
 
     def test_pin_precedes_sources_and_survives_same_identity_with_another_alias(self):
         reader = InventedReader()
@@ -227,45 +225,13 @@ class SourceStateTests(unittest.TestCase):
         with Runtime(self.state, crm_reader=InventedReader()):
             self.assertEqual(json.loads(self.marker.read_text()), IDENTITY)
 
-    def test_second_marker_failure_preserves_connection_and_retries_before_source_initialization(self):
-        binding = self.binding()
-        original_replace = os.replace
-
-        def fail_binding(source, destination):
-            if Path(destination).name == "source-profile.json":
-                raise OSError("invented second-marker failure")
-            original_replace(source, destination)
-
-        with patch("gtm_connector.runtime.os.replace", side_effect=fail_binding):
-            with self.assertRaisesRegex(SourceIdentityError, "could not be saved"):
-                with Runtime(self.state, crm_reader=InventedReader(), demo_binding=binding):
-                    self.fail("Partial marker creation initialized sources")
-        self.assertEqual({path.name for path in self.state.iterdir()}, {"server.lock", "crm-connection.json"})
-        changed = InventedReader({**IDENTITY, "organization_id": "00D000000000002AAA"})
-        with self.assertRaises(SourceIdentityError):
-            with Runtime(self.state, crm_reader=changed, demo_binding=binding):
-                self.fail("A partial pin was repointed")
-        self.assertFalse((self.state / "source-profile.json").exists())
-        with Runtime(self.state, crm_reader=InventedReader(), demo_binding=binding):
-            self.assertTrue((self.state / "source-profile.json").is_file())
-            with closing(sqlite3.connect(self.state / "calls.sqlite3")) as connection:
-                self.assertEqual(connection.execute("SELECT COUNT(*) FROM call_notes").fetchone()[0], 3)
-
-    def test_unusable_identity_and_bad_binding_never_publish_a_connection_pin(self):
+    def test_an_unusable_identity_never_publishes_a_connection_pin(self):
         for changed in ({}, {**IDENTITY, "schema_version": True}, {**IDENTITY, "organization_id": "missing"}):
             with self.subTest(identity=changed), self.assertRaises(SourceIdentityError):
                 with Runtime(self.state, crm_reader=InventedReader(changed)):
                     self.fail("An unusable identity initialized source data")
             self.assertEqual({path.name for path in self.state.iterdir()}, {"server.lock"})
-        marker = self.state / "source-profile.json"
-        marker.write_text("invalid binding")
-        marker.chmod(0o600)
-        reader = InventedReader()
-        with self.assertRaisesRegex(ValueError, "source profile"):
-            with Runtime(self.state, crm_reader=reader, demo_binding=self.binding()):
-                self.fail("Invalid binding created a connection pin")
         self.assertFalse(self.marker.exists())
-        self.assertEqual(reader.prepared, 0)
 
 
 if __name__ == "__main__":

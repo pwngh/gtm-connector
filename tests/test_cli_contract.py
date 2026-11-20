@@ -17,7 +17,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 COMMANDS = (
-    "seed", "accounts", "account", "demo", "verify", "serve", "audit", "brief", "trace",
+    "accounts", "account", "demo", "verify", "serve", "audit", "brief", "trace",
     "doctor", "connect", "mcp", "completion", "salesforce", "calls", "slack",
 )
 
@@ -55,7 +55,7 @@ class CLIContractTests(unittest.TestCase):
             self.assertIn("--json", result.stdout)
             self.assertIn("--state-dir", result.stdout)
             if action != "import":
-                for flag in ("--sf-org", "--sf-environment", "--crm-backend", "--called-at", "--reassign", "--cues"):
+                for flag in ("--called-at", "--reassign", "--cues"):
                     self.assertNotIn(flag, result.stdout)
             if action == "inspect":
                 self.assertIn("--full", result.stdout)
@@ -70,9 +70,8 @@ class CLIContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(f"Example: gtm-connector slack {action}", result.stdout)
             self.assertIn("--json", result.stdout)
-            self.assertIn("--connection-dir", result.stdout)
-            self.assertNotIn("--state-dir", result.stdout)
-            self.assertNotIn("--crm-backend", result.stdout)
+            self.assertIn("--state-dir", result.stdout)
+            self.assertNotIn("--connection-dir", result.stdout)
             if action == "connect":
                 self.assertIn("--redirect-uri", result.stdout)
                 self.assertIn("already be registered", result.stdout)
@@ -90,7 +89,11 @@ class CLIContractTests(unittest.TestCase):
         parser = build_parser()
         self.assertEqual(parser.parse_args(["demo"]).state_dir, Path("var/renewal-demo"))
         self.assertEqual(parser.parse_args(["verify"]).state_dir, Path("var/verification"))
-        for arguments in (["brief", "acc-007"], ["serve"], ["doctor"], ["audit"], ["trace", "brief-x", "1"]):
+        for arguments in (["brief", "acc-007"], ["serve"], ["doctor"], ["audit"], ["trace", "brief-x", "1"],
+                          ["accounts"], ["account", "acc-007"], ["connect"], ["connect", "demo"],
+                          ["mcp", "stdio", "--scope", "crm:read"], ["calls", "list"], ["slack", "status"],
+                          ["calls", "import", "call.vtt", "--account", "acc-007"],
+                          ["slack", "check", "--account", "acc-007"]):
             self.assertEqual(parser.parse_args(arguments).state_dir, Path("var/v2"))
         for command in ("demo", "verify"):
             self.assertEqual(parser.parse_args([command, "--state-dir", "var/chosen"]).state_dir, Path("var/chosen"))
@@ -159,16 +162,15 @@ runpy.run_module("gtm_connector", run_name="__main__")
 
     def test_json_is_explicit_and_works_before_or_after_command(self):
         with tempfile.TemporaryDirectory() as directory:
-            database = str(Path(directory) / "crm.sqlite3")
-            seed = self.run_cli("--json", "seed", "--db", database)
-            self.assertEqual(seed.returncode, 0, seed.stderr)
-            self.assertEqual(json.loads(seed.stdout)["counts"]["accounts"], 30)
-            self.assertEqual(seed.stderr, "")
-            accounts = self.run_cli("accounts", "--db", database, "--json")
+            connected = self.run_cli("--json", "connect", "demo", "--state-dir", directory)
+            self.assertEqual(connected.returncode, 0, connected.stderr)
+            self.assertEqual(json.loads(connected.stdout)["sources"]["crm"], {"provider": "demo"})
+            self.assertEqual(connected.stderr, "")
+            accounts = self.run_cli("accounts", "--state-dir", directory, "--json")
             self.assertEqual(accounts.returncode, 0, accounts.stderr)
             self.assertEqual(len(json.loads(accounts.stdout)), 30)
             self.assertEqual(accounts.stderr, "")
-            plain = self.run_cli("accounts", "--db", database)
+            plain = self.run_cli("accounts", "--state-dir", directory)
             self.assertEqual(plain.returncode, 0, plain.stderr)
             self.assertIn("acc-001", plain.stdout)
             self.assertNotIn("\x1b", plain.stdout)
@@ -192,9 +194,8 @@ runpy.run_module("gtm_connector", run_name="__main__")
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stdout, "")
         with tempfile.TemporaryDirectory() as directory:
-            database = str(Path(directory) / "crm.sqlite3")
-            self.assertEqual(self.run_cli("seed", "--db", database).returncode, 0)
-            result = self.run_cli("account", "--db", database, "--", "--version")
+            self.assertEqual(self.run_cli("connect", "demo", "--state-dir", directory).returncode, 0)
+            result = self.run_cli("account", "--state-dir", directory, "--", "--version")
             self.assertEqual(result.returncode, 2)
             self.assertIn("account not found: --version", result.stderr)
         typo = self.run_cli("--json", "breif")
@@ -203,7 +204,7 @@ runpy.run_module("gtm_connector", run_name="__main__")
     def test_closed_reader_is_quiet_for_help_version_and_command_output(self):
         with tempfile.TemporaryDirectory() as directory:
             for arguments in (("--version",), ("--help",),
-                              ("seed", "--db", str(Path(directory) / "crm.sqlite3"))):
+                              ("connect", "demo", "--state-dir", directory)):
                 read_fd, write_fd = os.pipe()
                 os.close(read_fd)
                 try:
@@ -226,7 +227,9 @@ runpy.run_module("gtm_connector", run_name="__main__")
 
     def test_empty_as_of_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(self.run_cli("connect", "demo", "--state-dir", directory).returncode, 0)
             result = self.run_cli("brief", "acc-001", "--as-of", "", "--state-dir", directory)
+            self.assertNotIn("No CRM is connected", result.stderr)
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertEqual(result.stdout, "")
 
@@ -236,7 +239,9 @@ runpy.run_module("gtm_connector", run_name="__main__")
         from unittest.mock import patch
         from gtm_connector.cli import main
         from gtm_connector.runtime import Runtime
+        from gtm_connector import profile
         with tempfile.TemporaryDirectory() as directory, Runtime(directory):
+            profile.save(directory, profile.DEMO)
             result = self.run_cli("serve", "--state-dir", directory, "--json")
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertIn(directory, json.loads(result.stderr)["error"]["next"])
@@ -290,12 +295,11 @@ runpy.run_module("gtm_connector", run_name="__main__")
     @unittest.skipUnless(hasattr(os, "openpty"), "The supported platform needs a pseudo-terminal.")
     def test_no_color_and_empty_results_work_on_a_terminal(self):
         with tempfile.TemporaryDirectory() as directory:
-            database = str(Path(directory) / "crm.sqlite3")
-            seeded = self.terminal_output("seed", "--db", database)
-            self.assertIn(b"RECORDS", seeded)
-            self.assertIn(b"30", seeded)
-            self.assertNotIn(b"\x1b", seeded)
-            empty = self.terminal_output("accounts", "--query", "not-a-fixture-account", "--db", database)
+            connected = self.terminal_output("connect", "demo", "--state-dir", directory)
+            self.assertIn(b"SOURCE", connected)
+            self.assertIn(b"demo data", connected)
+            self.assertNotIn(b"\x1b", connected)
+            empty = self.terminal_output("accounts", "--query", "not-a-fixture-account", "--state-dir", directory)
             self.assertIn(b"ACCOUNT", empty)
             self.assertNotIn(b"\x1b", empty)
 

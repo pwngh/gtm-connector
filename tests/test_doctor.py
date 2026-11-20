@@ -23,7 +23,9 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         failures = [check for check in result["checks"] if check["status"] == "fail"]
         self.assertEqual([row["name"] for row in failures], ["state_folder"])
-        self.assertIn("gtm-connector serve --state-dir", failures[0]["fix"])
+        # serve reads the folder's profile, so a folder with none is connected first.
+        self.assertIn(f"gtm-connector connect demo --state-dir {self.state} (or connect salesforce --org ALIAS), "
+                      f"then gtm-connector serve --state-dir {self.state}", failures[0]["fix"])
         self.assertFalse(self.state.exists())
 
     def test_running_services_pass_without_changing_state_or_authorizing(self):
@@ -88,7 +90,7 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("gtm-connector serve", failed[0]["fix"])
         self.assertNotIn("Connection refused", json.dumps(result))
 
-    def test_salesforce_restart_fixes_preserve_the_original_connection_without_disclosing_it(self):
+    def test_salesforce_restart_fixes_name_the_serve_command_without_disclosing_the_connection(self):
         identity = {"schema_version": 1, "backend": "salesforce",
                     "instance_url": "https://private-invented.my.salesforce.com",
                     "organization_id": "00D000000000001AAA", "environment": "production"}
@@ -103,10 +105,9 @@ class DoctorTests(unittest.TestCase):
         for result, name in zip(results, ("services", "certificate")):
             self.assertEqual(result["checks"][-1]["name"], name)
             fix = result["checks"][-1]["fix"]
-            self.assertIn("original Salesforce serve command", fix)
-            self.assertIn("same connection", fix)
-            self.assertIn("gtm-connector serve --help", fix)
-            self.assertNotIn("gtm-connector serve --state-dir", fix)
+            # serve reads the folder's profile, so the one command restarts the same connection.
+            self.assertIn("gtm-connector serve --state-dir " + str(self.state.resolve()), fix)
+            self.assertNotIn("--help", fix)
             for private in (secret, identity["instance_url"], identity["organization_id"]):
                 self.assertNotIn(private, json.dumps(result))
 

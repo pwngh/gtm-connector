@@ -241,7 +241,7 @@ class StoreTests(unittest.TestCase):
         missing = self.directory / "absent" / "imports.sqlite3"
         imports.ImportedCallsReader(missing, crm_binding=BINDING)
         self.assertFalse(missing.parent.exists())
-        self.assert_code("calls_not_imported", self.read)
+        self.assertEqual(imports.ImportedCallsReader(self.path, crm_binding=BINDING).read_call_notes("acc-007"), [])
         self.assertFalse((self.directory / "calls.sqlite3").exists())
         self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o600)
         imports.validate_import_store(self.path, crm_binding=BINDING)
@@ -274,13 +274,13 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(before, self.dump())
         second = self.publish(account="acc-008", reassign=True, now=LATER)
         self.assertTrue(second["reassigned"])
-        self.assert_code("calls_not_imported", self.read)
+        self.assertEqual(imports.ImportedCallsReader(self.path, crm_binding=BINDING).read_call_notes("acc-007"), [])
         self.assertEqual(self.read("acc-008")["manifest"]["association_generation"], 2)
         self.assert_code("calls_reassign_required", self.publish)
         third = self.publish(reassign=True, now=LATER)
         self.assertNotEqual(first["import_id"], third["import_id"])
         self.assertEqual(self.read()["manifest"]["association_generation"], 3)
-        self.assert_code("calls_not_imported", self.read, "acc-008")
+        self.assertEqual(imports.ImportedCallsReader(self.path, crm_binding=BINDING).read_call_notes("acc-008"), [])
         self.assertEqual(imports.validate_imported_record(original, account_id="acc-007", crm_binding=BINDING), original)
 
     def test_reassignment_does_not_clear_a_newer_other_content_selection(self):
