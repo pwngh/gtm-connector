@@ -56,7 +56,7 @@ class SentenceUnit(TypedDict):
     contact: int | None
     text: str
     partial: bool
-    shown: Literal["yes", "cut", "long", "more"]
+    shown: Literal["yes", "cut", "later", "long", "more"]
     span: Span | None
     raw_sha256: str
     sanitizer_version: int
@@ -82,9 +82,9 @@ GAP_CODES: dict[str, Literal["not_read", "read_not_shown", "note"]] = {
     "slack_thread": "not_read", "slack_channel": "not_read",
     "crm_more_opportunities": "read_not_shown", "crm_more_contracts": "read_not_shown",
     "crm_more_contacts": "read_not_shown", "sentences_cut": "read_not_shown", "sentences_more": "read_not_shown",
-    "sentences_long": "read_not_shown",
+    "sentences_long": "read_not_shown", "sentences_later": "read_not_shown",
     "crm_fields_empty": "note", "crm_no_opportunity": "note", "calls_no_record": "note", "slack_no_message": "note",
-    "speakers_unknown": "note", "neutralized": "note",
+    "speakers_unknown": "note", "neutralized": "note", "calls_no_contact": "note",
 }
 
 SANITIZER_VERSION = 3
@@ -124,7 +124,7 @@ _IS_TARGET = re.compile(_TARGET, re.IGNORECASE)
 MAX_LABEL = 200
 # A time in this form is shown as given. Any other time is source text and is shown as a neutralized literal.
 _PLAIN_INSTANT = re.compile(
-    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})")
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])")
 # A WebVTT voice tag, or the tag that closes one. A class holds no dot, so the pattern cannot backtrack.
 _VOICE = re.compile(r"<v(?:\.[^\s>.]*)*[ \t]+([^<>\n]+)>|</v>")
 # The order of SAID, and of every count by role.
@@ -359,6 +359,10 @@ def _label(value):
     return " ".join(value.split()) if isinstance(value, str) else ""
 
 
+# The reasons for a role under which a call's speaker label equals no contact's name.
+_NO_CONTACT = ("listed seller identity", "label matches no listed seller and no contact")
+
+
 def speaker_role(label, sellers, contacts, *, slack=False) -> tuple[Role, str, int | None]:
     """Derive a role from identity only, never from what the text says about itself.
 
@@ -372,14 +376,14 @@ def speaker_role(label, sellers, contacts, *, slack=False) -> tuple[Role, str, i
     if listed and matches:
         return "unknown", "label matches a listed seller and a contact", None
     if listed:
-        return "seller", "listed seller identity", None
+        return "seller", _NO_CONTACT[0], None
     if len(matches) == 1:
         return "customer", f"label matches contact [{matches[0]['n']}]", matches[0]["n"]
     if matches:
         return "unknown", f"label matches {len(matches)} contacts", None
     if slack:
         return "unknown", "author is not a listed seller; Slack identities cannot show a customer", None
-    return "unknown", "label matches no listed seller and no contact", None
+    return "unknown", _NO_CONTACT[1], None
 
 
 def _day(value):
@@ -532,6 +536,10 @@ class _Card:
         self.values: list[str] = []
         self.signals: list[str] = []
         self.gaps: list[Gap] = []
+        # Each contact's title as the card prints it, by the contact's number. A contact past the few shown
+        # has its title rendered, and counted when empty, only where a sentence cites it.
+        self.titles: dict[int, str] = {}
+        self.unshown_titles: dict[int, Any] = {}
 
     def lines(self, value):
         """Source text neutralized, with what was replaced counted."""
@@ -698,7 +706,7 @@ def _crm(card, as_of):
     contract_numbers = {row["id"]: card.record(row, "contracts") for row in contracts}
     opportunities = sorted(groups["opportunities"], key=lambda row: row["id"])
     opportunity_numbers = {row["id"]: card.record(row, "opportunities") for row in opportunities}
-    days, renewal_numbers = None, (first,)
+    days, renewal_day, renewal_numbers = None, None, (first,)
     if salesforce:
         ahead: list[tuple] = []
         ended: list[tuple] = []
@@ -710,7 +718,7 @@ def _crm(card, as_of):
                 (ahead if end >= as_of else ended).append((end, contract["id"], contract))
         if ahead:
             end, _, contract = min(ahead, key=lambda candidate: candidate[:2])
-            days, renewal_numbers = (end - as_of).days, (contract_numbers[contract["id"]],)
+            days, renewal_day, renewal_numbers = (end - as_of).days, end, (contract_numbers[contract["id"]],)
             activated = ("" if contract["status_code"] == "Activated"
                          else "; a planning candidate, not activated")
             card.value("Contract end", f"{end}, {'in ' + _days(days) if days else 'today'}; "
@@ -725,7 +733,7 @@ def _crm(card, as_of):
         card.gap("crm_unmapped_fields", "CRM: annual recurring revenue and renewal risk are not mapped "
                  "from standard Salesforce fields.")
     else:
-        renewal = _day(account["renewal_date"])
+        renewal = renewal_day = _day(account["renewal_date"])
         days = (renewal - as_of).days
         timing = f"in {_days(days)}" if days > 0 else f"{_days(-days)} ago" if days < 0 else "today"
         card.value("Renewal date", f"{renewal}, {timing}", first)
@@ -775,8 +783,10 @@ def _crm(card, as_of):
         ends = "no end date" if row["end_date"] is None else f"ends {row['end_date']}"
         card.value("Contract", f"status {card.text(row['status'])}; {ends}", contract_numbers[row["id"]])
     for row in _shown(card, contacts, "contact", "contacts"):
-        card.value("Contact", f"{card.text(row['name'])}; role {card.text(row['title'])}; "
+        title = card.titles[contact_numbers[row["id"]]] = card.text(row["title"])
+        card.value("Contact", f"{card.text(row['name'])}; role {title}; "
                    f"email {card.text(row['email'])}", contact_numbers[row["id"]])
+    card.unshown_titles = {contact_numbers[row["id"]]: row["title"] for row in contacts[SHOWN_RECORDS:]}
     what = "contract end" if salesforce else "renewal"
     when = ("" if days is None else f"The {what} is today" if days == 0 else
             f"The {what} is in {_days(days)}" if days > 0 else f"The {what} date passed {_days(-days)} ago")
@@ -790,6 +800,17 @@ def _crm(card, as_of):
         for row in still_open:
             card.signal(f"{when} and this opportunity is still open at stage {card.quoted(row['stage'])}.",
                         *renewal_numbers, opportunity_numbers[row["id"]])
+    # An open opportunity that is to close after the renewal date: two dates of the record to set side by side.
+    late = [row for row in opportunities if row["id"] in open_ids and renewal_day is not None
+            and _day(row["close_date"]) > renewal_day]
+    if len(late) > SHOWN_RECORDS:
+        card.signal(f"{len(late)} open opportunities have a close date after the {what} date, {renewal_day}.",
+                    *renewal_numbers, *(opportunity_numbers[row["id"]] for row in late[:SHOWN_RECORDS]),
+                    more=len(late) - SHOWN_RECORDS)
+    else:
+        for row in late:
+            card.signal(f"This open opportunity's close date, {row['close_date']}, is after the {what} date, "
+                        f"{renewal_day}.", *renewal_numbers, opportunity_numbers[row["id"]])
     no_role = [row for row in contacts if row["title"] in (None, "")]
     if len(no_role) > SHOWN_RECORDS:
         card.signal(f"{len(no_role)} contacts have no role recorded.",
@@ -855,7 +876,9 @@ def _calls(card, as_of, contacts):
         card.gap("calls_outside_records",
                  f"Calls: {len(notes)} call {'record was' if len(notes) == 1 else 'records were'} read. "
                  "Recordings and anything outside those records were not read.")
-    timed = [(moment, note["record_ref"]) for note in notes if (moment := _instant(note["called_at"])) is not None]
+    # A call dated after the card's day is not shown, so it is not the latest call of that day either.
+    timed = [(moment, note["record_ref"]) for note in notes
+             if (moment := _instant(note["called_at"])) is not None and moment.date() <= as_of]
     if timed:
         moment, reference = max(timed)
         age = (as_of - moment.date()).days
@@ -912,14 +935,28 @@ def _slack(card):
 def _said(card):
     """Whole sentences by role: the customer's, then the seller's, then those of no established role.
 
-    The places are dealt one at a time to each role that still has a sentence, newest record first, so one
-    side of a conversation never crowds out the other. Sentences keep their order inside one moment.
+    The places are dealt one at a time to each role that still has a sentence, newest first, so one side of
+    a conversation never crowds out the other and the latest words are the ones kept. Inside one call a later
+    cue is newer. What is kept is then printed oldest first inside a role, so it reads in the order it was said.
     """
     spoken = [unit for unit in card.units if unit["kind"] == "sentence"]
+    opens: dict[str, int] = {}
+    for unit in spoken:
+        opens.setdefault(unit["record_ref"], unit["n"])
+    def moment(unit):
+        """The record's time, when it is one the card prints as a time. Any other form decides nothing."""
+        return _instant(unit["at"]) if isinstance(unit["at"], str) and _PLAIN_INSTANT.fullmatch(unit["at"]) else None
     def recency(unit):
-        moment = _instant(unit["at"])
-        return (moment is not None, moment.timestamp() if moment else 0.0)
+        at = moment(unit)
+        # Inside one record a later cue time is newer, and at one time the later sentence is.
+        return (at is not None, at.timestamp() if at else 0.0, opens[unit["record_ref"]],
+                (unit["span"] or {}).get("start_ms") or 0, unit["n"])
 
+    # A whole sentence of a record dated after the card's day, in UTC, is not part of a card as of that day.
+    as_of = _day(card.evidence["as_of"])
+    for unit in spoken:
+        if unit["shown"] != "cut" and (at := moment(unit)) is not None and at.date() > as_of:
+            unit["shown"] = "later"
     # Every whole sentence that fits waits as "more". A place on the card turns it into "yes".
     queues = {role: sorted((unit for unit in spoken if unit["shown"] == "more" and unit["role"] == role),
                            key=recency, reverse=True) for role in _ROLES}
@@ -930,14 +967,27 @@ def _said(card):
                 queues[role][dealt[role]]["shown"] = "yes"
                 dealt[role] += 1
     lines = []
-    for unit in (unit for role in _ROLES for unit in queues[role][:dealt[role]]):
-        where = {"calls": "call", "slack": "Slack"}[unit["source"]]
-        who = "no speaker label" if unit["speaker"] is None else "speaker " + json.dumps(unit["speaker"],
-                                                                                    ensure_ascii=False)
-        when = ("time Missing" if unit["at"] is None else unit["at"] if _PLAIN_INSTANT.fullmatch(unit["at"])
-                else "time " + json.dumps(unit["at"], ensure_ascii=False))
-        lines.append(f"  [{unit['n']}] {unit['role']} ({unit['basis']}); {where} {when}; {who}")
-        lines.append("      " + json.dumps(unit["text"], ensure_ascii=False))
+    for role, heading in (("customer", "Customer, by a speaker label equal to one contact's name"),
+                          ("seller", "Seller, by a listed seller's name or ID"), ("unknown", "No established role")):
+        # A sentence with no time is printed last in its role, as it is dealt last.
+        chosen = sorted(queues[role][:dealt[role]], key=lambda unit: (not recency(unit)[0], *recency(unit)[1:]))
+        if chosen:
+            lines.append("  " + heading)
+        for unit in chosen:
+            where = {"calls": "call", "slack": "Slack"}[unit["source"]]
+            when = ("time Missing" if unit["at"] is None else unit["at"] if _PLAIN_INSTANT.fullmatch(unit["at"])
+                    else "time " + json.dumps(unit["at"], ensure_ascii=False))
+            who = "no speaker label" if unit["speaker"] is None else json.dumps(unit["speaker"], ensure_ascii=False)
+            contact = unit["contact"]
+            if contact is not None:
+                # The contact's title stands where its name is used, so the reader need not look it up.
+                if contact not in card.titles:
+                    card.titles[contact] = card.text(card.unshown_titles[contact])
+                who += f", role {card.titles[contact]} [{contact}]"
+            elif role == "unknown" and unit["basis"] != "no speaker label":
+                who += f" ({unit['basis']})"
+            lines.append(f"    [{unit['n']}] {where} {when}; {who}")
+            lines.append("        " + json.dumps(unit["text"], ensure_ascii=False))
     def withheld(why, line):
         """One line for the sentences not shown for this reason, with their count by role."""
         units = [unit for unit in spoken if unit["shown"] == why]
@@ -949,12 +999,22 @@ def _said(card):
     withheld("cut", lambda count, roles: (
         f"Sentences: {count} cut off at a pause, a change of speaker, or the edge of the excerpt "
         f"{'was read and is' if count == 1 else 'were read and are'} not shown {roles}."))
+    withheld("later", lambda count, roles: (
+        f"Sentences: {count} dated after {as_of} {'was read and is' if count == 1 else 'were read and are'} "
+        f"not shown {roles}."))
     withheld("more", lambda count, roles: (
         f"Sentences: {count} more {'sentence was read and is' if count == 1 else 'sentences were read and are'} "
         f"not shown {roles}; the card shows {SHOWN_SENTENCES}."))
     withheld("long", lambda count, roles: (
         f"Sentences: {count} over {MAX_SENTENCE} characters {'was read and is' if count == 1 else 'were read and are'} "
         f"not shown {roles}, because a quotation is never cut."))
+    # Worth saying only when a call sentence has a label, and true only when none equals any contact's name.
+    calls = [unit for unit in spoken if unit["source"] == "calls"]
+    if (any(unit["speaker"] is not None for unit in calls)
+            and all(unit["basis"] in _NO_CONTACT for unit in calls if unit["speaker"] is not None)):
+        records = len({unit["record_ref"] for unit in calls})
+        card.gap("calls_no_contact", f"Calls: no speaker label equals a contact's name in the {records} call "
+                 f"{'record' if records == 1 else 'records'} with a sentence.", records)
     unknown = sum(unit["role"] == "unknown" for unit in spoken)
     if unknown:
         card.gap("speakers_unknown",
@@ -990,7 +1050,19 @@ def _build(evidence):
                  sum(card.neutralized.values()))
     account = groups["accounts"][0]
     name = json.dumps(" ".join(safe_text(account["name"])[0].split()), ensure_ascii=False)
-    lines = [f"DEAL CARD: {name} ({evidence['account_id']}) as of {evidence['as_of']}", ""]
+    lines = [f"DEAL CARD: {name} ({evidence['account_id']}) as of {evidence['as_of']}"]
+    # "As of" is the day dates are counted from. The reads happened when their receipts say.
+    started = []
+    for receipt in evidence["receipts"]:
+        moment = (_instant(receipt["started_at"]) if isinstance(receipt["started_at"], str)
+                  and _PLAIN_INSTANT.fullmatch(receipt["started_at"]) else None)
+        if moment is None:
+            raise BriefRejected("An audit receipt has no valid start time.")
+        # A refused read read nothing, so it sets no end of the range.
+        if receipt["status"] == "ok":
+            started.append(moment)
+    first, last = (f"{moment:%Y-%m-%dT%H:%M:%SZ}" for moment in (min(started), max(started)))
+    lines += [f"Sources read {first}" + (f" to {last}." if last != first else "."), ""]
     if card.signals:
         lines += ["ATTENTION, from record fields and dates", *card.signals, ""]
     lines += ["RECORD VALUES, from CRM fields and connector arithmetic", *card.values, "",

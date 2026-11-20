@@ -1,6 +1,6 @@
 """Run owner-selected Salesforce GET checks and release only bounded diagnostics."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
@@ -82,7 +82,7 @@ class NoCandidate(Exception):
 def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_factory=None, progress=None,
               on_refresh=None):
     """Never return records, configuration, credentials, exception text, or identifiers."""
-    as_of = date.today().isoformat() if as_of is None else as_of
+    as_of = datetime.now(timezone.utc).date().isoformat() if as_of is None else as_of
     try:
         if not isinstance(as_of, str) or date.fromisoformat(as_of).isoformat() != as_of:
             raise ValueError

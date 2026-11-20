@@ -9,7 +9,7 @@ bindings still cover everything it contains. That check makes no source system c
 
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 import hashlib
 import json
 import os
@@ -91,7 +91,7 @@ def _directory(context: SelectedContext) -> Path:
 
 def _as_of(value, crm_backend: str) -> str:
     if value is None:
-        return date.today().isoformat() if crm_backend == "salesforce" else DEMO_AS_OF
+        return datetime.now(timezone.utc).date().isoformat() if crm_backend == "salesforce" else DEMO_AS_OF
     try:
         if date.fromisoformat(value).isoformat() == value:
             return value
