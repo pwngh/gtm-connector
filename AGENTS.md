@@ -92,13 +92,21 @@ work, and keep the history of what resolved it. No model writes text on a card.
    `review_renewal_condition`, and `reconcile_approval_conflict`; review bound to one plan revision,
    where an edit needs review again and changed cited evidence marks it for re-review; work items;
    and history. Every actor comes from a signed-in session.
+   - Readiness signals are rules over versioned records, each citing its receipts: customer silence
+     against days to renewal, close-date pushes, a deal where one contact says everything, and a
+     sentence whose amount differs from a record value. That last one is a candidate a person
+     resolves, never a verdict.
+   - History shows what changed since an account's last card: units, record versions, and gaps.
 4. Port the evidence engine and sources behind the fixtures, with character classes from generated
    tables, never Go's or RE2's. Build these in Go:
    - one brief store and request path for the CLI and the assistant tools, with the same scope,
      selection, expiry, and receipt checks;
+   - `gtm-connector mcp` over stdio, with `setup` printing the configuration for Claude Desktop,
+     Claude Code, and Cursor. Docs name a client only after it is tested live;
    - transcript folders, which replace hand-picked excerpts;
    - a bounded Slack channel window, which replaces thread mapping, counts what was not read, and
-     says when more exist;
+     says when more exist. Folders and channels propose account links that a person accepts;
+     nothing binds on its own;
    - two assistant tools, evidence and submit, on one sealed card. A submission is unit numbers, a
      label from a fixed list checked against each speaker's role, and pairs marked in tension. A cut
      sentence, an unknown label, or a unit of another account is refused with a receipt.
@@ -110,5 +118,8 @@ work, and keep the history of what resolved it. No model writes text on a card.
    receipts, and runs without the Python fallback.
 
 After each of these, use the product end to end as a stranger and fix what only shows from there.
+The README's first limit stays until the owner has run the connector on five real renewals outside
+the repository. Agents never read those transcripts or results; each parser failure they report
+becomes an invented fixture. A public meeting corpus tests parsing, not usefulness.
 Later, when a real user needs them: Salesforce task creation, transcript provider adapters,
 Windows, MCP Apps, a second CRM, team deployment.
