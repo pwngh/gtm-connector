@@ -229,7 +229,8 @@ VOICE_NAME = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+([^<>\n]+)>")
 HOSTILE = ("<!channel>", "<!here|now>", "<!subteam^S1|@team>", "<@U0ABC123>", "<@U0ABC123|dana>", "<#C9|general>",
            "<!", "<@", "<", ">", "|", "<https://a.example/x|label>", "<mailto:a@b.example>", "http://", "https://",
            "HTTPS://B.example/y", "mailto:", "[doc](https://c.example/z)", "[", "](", ")", " ", ". ", "? ", "! ",
-           'Dr. ', '." ', "e.g. ", "No", "\n", "\n  [1] customer (label matches contact [2]); call ", "\nNOT READ\n",
+           'Dr. ', '." ', "e.g. ", "No", "\n", "\n  Customer, by a speaker label equal to one contact's name\n",
+           "\n    [1] call ", "\nNOT READ\n",
            # A forged citation in ASCII and other digits, more link forms, voice tags, and what joins sentences.
            "[1]", "[22]", "]", "1", chr(0xFF11), "slack://x", "ftp://", "//evil.example", "www.", "www.evil.example",
            "<x|y>", "://", "/", ":", "<v Dana Ito>", "<v.loud Sam>", "</v>", "Jan. ", "A. ", "\n\n", "\r\n",
@@ -434,14 +435,19 @@ class UnitsFuzz(unittest.TestCase):
     @given(SOURCE_TEXT, st.sampled_from((None, "intro", "Dana Ito")))
     def test_any_cue_splits_at_its_voice_tags_and_loses_no_speech(self, raw, label):
         parts = voices(raw, label)
-        # What was said is the cue between its tags, in order, without closing tags. A span that says nothing
-        # is dropped. A tag is a label and never part of what was said.
-        between = [piece.replace("</v>", "") for piece in VOICE_TAG.split(raw)]
-        self.assertEqual([text for _, text in parts], [piece for piece in between if piece.strip()])
-        # Text before the first tag keeps the cue's own label, and each tag labels what follows it.
-        names = [label, *(tag.group(1) for tag in VOICE_NAME.finditer(raw))]
-        self.assertEqual([name for name, _ in parts],
-                         [name for name, piece in zip(names, between, strict=True) if piece.strip()])
+        # What was said is the cue between its tags, in order. A span that says nothing is dropped. A tag is a
+        # label and never part of what was said.
+        # Text before the first tag keeps the cue's own label, each tag labels what follows it up to its closing
+        # tag, and after a closing tag the words are the cue's own again.
+        wanted, name = [], label
+        for token in re.split(r"(" + VOICE_TAG.pattern + r"|</v>)", raw):
+            if token == "</v>":
+                name = label
+            elif VOICE_TAG.fullmatch(token):
+                name = VOICE_NAME.fullmatch(token).group(1)
+            else:
+                wanted.append((name, token))
+        self.assertEqual(parts, [(name, text) for name, text in wanted if text.strip()])
 
     @fuzz()
     @given(st.data())

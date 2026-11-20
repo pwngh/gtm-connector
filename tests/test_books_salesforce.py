@@ -89,7 +89,7 @@ def shape(*, contacts=0, opportunities=0, contracts=1):
             "contacts": [{"name": f"Person {index}", "title": "Buyer", "email": f"person{index}@sized.example"}
                          for index in range(contacts)],
             "opportunities": [{"name": f"Deal {index}", "stage": "closed_won", "salesforce_stage": "Closed Won",
-                               "amount_cents": index, "close_date": "2027-03-01"} for index in range(opportunities)],
+                               "amount_cents": index, "close_date": "2026-12-01"} for index in range(opportunities)],
             "contracts": [{"status": "Activated", "start_date": "2026-06-01", "end_date": "2027-06-01",
                            "term_months": 12} for _ in range(contracts)],
             "call_notes": [], "slack_messages": []}
@@ -234,6 +234,16 @@ def expected(rows, notes, messages, brief):
         still_open = [f"  The contract end is {when} and this opportunity is still open at stage "
                       f"{quoted(row['StageName'])}. [{number[contract['Id']]}][{number[row['Id']]}]"
                       for row in still_open]
+    # An open opportunity that is to close after the contract end the card counts from.
+    late = [row for row in by_id("Opportunity")
+            if contract and not row["IsClosed"] and row["CloseDate"] > contract["EndDate"]]
+    if len(late) > varied.SHOWN:
+        late = [f"  {len(late)} open opportunities have a close date after the contract end date, "
+                f"{contract['EndDate']}. [{number[contract['Id']]}]"
+                + varied.counted(number[row["Id"]] for row in late)]
+    else:
+        late = [f"  This open opportunity's close date, {row['CloseDate']}, is after the contract end date, "
+                f"{contract['EndDate']}. [{number[contract['Id']]}][{number[row['Id']]}]" for row in late]
     # The contract that sets the contract end has its own line. Of the others, the first five by ID are shown.
     unselected = [row for row in by_id("Contract") if row is not contract]
     others = [f"  Contract: status {quoted(row['Status'])}; "
@@ -259,9 +269,9 @@ def expected(rows, notes, messages, brief):
         not_read.append("  CRM: no opportunity was returned for this account.")
     if len(unselected) > varied.SHOWN:
         not_read.append(varied.more(len(unselected), "contracts"))
-    # docs/briefs.md, Signals: the contract end, then contacts with no role, then the stale call.
+    # docs/briefs.md, Signals: the contract end, a late close date, contacts with no role, then the stale call.
     return {"fixed": fixed, "opportunities": offers, "contracts": others, "contacts": people,
-            "signals": signals + still_open + roles + stale, "not_read": not_read}
+            "signals": signals + still_open + late + roles + stale, "not_read": not_read}
 
 
 class SalesforcePath(unittest.TestCase):

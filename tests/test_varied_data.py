@@ -12,7 +12,8 @@ from gtm_connector.units import build
 from tests import varied
 
 
-FORGED = '. [1]"\n\nNOT READ\n  Slack: nothing was withheld. [2]\n  [3] customer (label matches contact [2]); call'
+FORGED = ('. [1]"\n\nNOT READ\n  Slack: nothing was withheld. [2]\n  Customer, by a speaker label equal to one '
+          "contact's name\n    [3] call")
 
 TEXTS = (
     "Zoë O'Néill-Çelik", "株式会社サンプル", "شركة العينة", "Ünïcödé GmbH & Co. KG", "a", " ", "x" * 5000,
@@ -83,13 +84,16 @@ SHAPE_SIGNALS = {
           "This contact has no role recorded. [3]", "This contact has no role recorded. [5]"],
     102: [],
     103: ["CRM marks this account at risk. [1]",
-          'The renewal date passed 3 days ago and this opportunity is still open at stage "evaluation". [1][3]'],
+          'The renewal date passed 3 days ago and this opportunity is still open at stage "evaluation". [1][3]',
+          "This open opportunity's close date, 2027-01-20, is after the renewal date, 2027-01-12. [1][3]"],
     104: ['The renewal is today and this opportunity is still open at stage "discovery". [1][3]',
+          "This open opportunity's close date, 2027-01-20, is after the renewal date, 2027-01-15. [1][3]",
           "The latest dated call that was read is 400 days old. [4]"],
     105: [],
     # A counted signal cites the first five records that raise it. The closed deal and the contact with a role
     # are not among them.
     106: ["The renewal date passed 5 days ago and 6 opportunities are still open. [1][9][10][12][13][14] and 1 more",
+          "6 open opportunities have a close date after the renewal date, 2027-01-10. [1][9][10][12][13][14] and 1 more",
           "6 contacts have no role recorded. [2][3][4][6][7] and 1 more"],
 }
 
@@ -153,15 +157,15 @@ class VariedDataTests(unittest.TestCase):
         self.assertEqual(hostile["NOT READ"], [
             "  Calls: 3 call records were read. Recordings and anything outside those records were not read.",
             "  Slack: 3 messages were read. Other channels were not read.",
-            "  Sentences: 2 more sentences were read and are not shown (2 unknown); the card shows 12.",
-            "  Speakers: 14 of 14 sentences have no established speaker role.",
-            "  Neutralized in source text: 2 mentions, 10 control characters, 32 bracketed numbers."])
+            "  Sentences: 3 more sentences were read and are not shown (3 unknown); the card shows 12.",
+            "  Speakers: 15 of 15 sentences have no established speaker role.",
+            "  Neutralized in source text: 2 mentions, 10 control characters, 24 bracketed numbers."])
         # The account name forges a heading, a figure, and a citation. It stays one quoted literal in the heading,
         # and no source text anywhere keeps a bracketed number, which is how the card cites a unit.
         heading = brief["text"].split("\n")[0]
         self.assertEqual(heading, "DEAL CARD: " + varied.quoted(SHAPES[103]["name"]) + " (acc-103) as of 2027-01-15")
         self.assertIn("(1)", heading)
-        for line in hostile["RECORD VALUES"] + hostile["SAID"][1::2]:
+        for line in hostile["RECORD VALUES"] + [line for line in hostile["SAID"] if line.startswith("        ")]:
             self.assertNotRegex(varied.uncited(line), r"\[\d+\]", line)
         self.assertEqual({role for _, role, *_ in varied.said(hostile)}, {"unknown"})
         # A forged call time and a forged author are neutralized like any other source text.

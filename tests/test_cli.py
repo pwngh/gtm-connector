@@ -82,7 +82,7 @@ class CLITests(unittest.TestCase):
                 self.assertEqual(full["account_id"], "acc-003")
                 self.assertTrue(full["text"].startswith(
                     'DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15\n'))
-                self.assertIn('      "We will have the order form countersigned by January 30."',
+                self.assertIn('        "We will have the order form countersigned by January 30."',
                               full["text"].splitlines())
                 self.assertIn("  Slack: not requested for this card.", full["text"].splitlines())
                 self.assertEqual(restricted["account_id"], "acc-001")
@@ -170,7 +170,7 @@ class CLITests(unittest.TestCase):
                 "get_account", "list_opportunities", "read_call_notes", "read_slack_messages"])
         full, restricted = summary["briefs"]
         # The message's mention, link, and figure reach the card as inert quoted text.
-        self.assertIn('      "Heads up [mention channel]: their general counsel will not sign until the zero-retention '
+        self.assertIn('        "Heads up [mention channel]: their general counsel will not sign until the zero-retention '
                       'and client-consent rider is approved."', full["text"].splitlines())
         self.assertNotIn("<!channel>", full["text"])
         self.assertNotIn("300,000", full["text"].split("SAID", 1)[0])
