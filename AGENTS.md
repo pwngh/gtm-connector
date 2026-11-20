@@ -1,7 +1,9 @@
 # Working on gtm-connector
 
 A local connector that builds a Deal card for a renewal from CRM records, call transcripts, and
-Slack. One operator runs it. People use the CLI, assistants use the MCP tools. Python 3.11+ and SQLite.
+Slack. One operator runs it. People use the CLI, assistants use the MCP tools. Python 3.11+ and SQLite
+today. It is becoming one Go program with PostgreSQL that also runs the renewal workflow and its web
+app. Until the Go CLI ships, the Python package is the product and the reference the Go code matches.
 
 ## Never break these
 
@@ -39,7 +41,9 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 1. State the PR as "after this, a user can ...". If you cannot, it is a cleanup and must shrink the
    source. Report source lines before and after.
 2. Replace, do not add: the old way goes in the same PR as the better one. Never remove a useful
-   feature without its replacement.
+   feature without its replacement. The Go port is the one exception: the Python package stays, with
+   fixes only, while `tools/oracle/` and the Go code grow beside it, and the PR that ships the Go CLI
+   removes the package and the tool.
 3. If the change touches a rule above, write the failing test first. Test through the CLI and the
    gateway, not internals.
 4. Build it, run it as a user, then clean it before review: no duplicate helpers, leftover flags,
@@ -61,17 +65,39 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 
 ## Next, in order
 
-The goal is a showcase an engineer can judge in five minutes. No model writes text on a card.
+The goal is the renewal workflow: find what blocks a renewal in the evidence, turn it into reviewed
+work, and keep the history of what resolved it. No model writes text on a card.
 
-1. `cli.py` split into one module per command. Then in-process calls for the CLI and the bridge
-   with one brief store. The scope, selection, expiry, and receipt checks stay.
-2. Transcript folders (replace hand-picked excerpts) and a bounded Slack channel window (replaces
-   thread mapping), with what was not read counted on the card.
-3. Two assistant tools, evidence and submit. A submission is unit numbers, a label from a fixed
-   list checked against each speaker's role, and pairs marked in tension. A cut sentence, an
-   unknown label, or a unit of another account is refused with a receipt.
-4. `evaluate`: the ten cases as a table, and a model's unchecked answers on the same deals, kept
-   as test inputs and scored offline.
+1. Write `tools/oracle/`. It runs the Python package at b7b29a1 on CPython 3.14.6 with clocks and
+   IDs fixed and records what Go must match: Unicode tables, scanner matches, every card the tests
+   build, and the seven commands' JSON output and exit codes. A Python fix regenerates its fixtures.
+2. Build the parity skeleton: `cmd/gtm-connector`, with PostgreSQL in `compose.yaml`. Go reads the
+   demo book under receipts; card text must match the oracle byte for byte, and units and gaps must
+   match as values. Sign-in, grants, and a Host check come before any evidence is served, and MCP
+   passes the vectors in `tests/test_request_checks.py` and `tests/test_gateway.py`. If only
+   rendering differs, Go gives the frozen Python what `briefing.assemble_evidence` takes, as a
+   no-network job. Go keeps authorization, storage, and receipts, and withholds any card that fails
+   to render or finish.
+3. Build the workflow beside step 4: readiness; the playbooks `obtain_current_rider`,
+   `review_renewal_condition`, and `reconcile_approval_conflict`; review bound to one plan revision,
+   where an edit needs review again and changed cited evidence marks it for re-review; work items;
+   and history. Every actor comes from a signed-in session.
+4. Port the evidence engine and sources behind the fixtures, with character classes from generated
+   tables, never Go's or RE2's. Build these in Go:
+   - one brief store and request path for the CLI and the assistant tools, with the same scope,
+     selection, expiry, and receipt checks;
+   - transcript folders, which replace hand-picked excerpts;
+   - a bounded Slack channel window, which replaces thread mapping, counts what was not read, and
+     says when more exist;
+   - two assistant tools, evidence and submit, on one sealed card. A submission is unit numbers, a
+     label from a fixed list checked against each speaker's role, and pairs marked in tension. A cut
+     sentence, an unknown label, or a unit of another account is refused with a receipt.
+5. Add model assistance, which proposes units, labels, and a playbook for a person to review, and
+   `evaluate`: the ten cases as a table and a model's unchecked answers on the same deals, kept as
+   test inputs and scored offline. Then ship the Go CLI in one PR that removes the Python package.
+   That PR passes the fixtures and the CLI contract tests, and lists changes such as `serve` and
+   `evaluate`. It keeps the stdio bridge and source setup working, opens existing cards and
+   receipts, and runs without the Python fallback.
 
 After each of these, use the product end to end as a stranger and fix what only shows from there.
 Later, when a real user needs them: Salesforce task creation, transcript provider adapters,
