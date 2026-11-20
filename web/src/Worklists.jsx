@@ -4,6 +4,7 @@ import {ArrowDown, ArrowUp, ArrowUpRight, ChevronRight, Info, ListFilter, Search
 import {clearWorklistSearch, selectWorklist, updateWorklistSearch, worklistActionHref, worklistCount, worklistHref, worklistNoun} from './worklist.js';
 import {activateWorklistRow, focusWorklistElement, moveWorklistFocus, restoreWorklistFocus, worklistFocusKey} from './worklistBrowser.js';
 import './worklists.css';
+export {default as WorklistStepEntry} from './WorklistStepEntry.jsx';
 
 function ScopeLabel({row}) {
   return <span className={`wl-scope-label ${row.mode}`}>{row.modeLabel}</span>;
@@ -23,18 +24,6 @@ function ChangeFact({item}) {
     : <div><dt>Last change</dt><dd>{item.lastChangedLabel}<span className="wl-detail-line">{item.lastChangedTime}</span></dd></div>;
 }
 
-export function WorklistStepEntry({item, onAction}) {
-  return <section className="wl-step-entry" aria-labelledby={item.entryTargetId} data-work-item={item.id}>
-    <h3 id={item.entryTargetId} tabIndex={-1}>{item.title}</h3>
-    <p>{item.statusLabel} · Action owner: {item.ownerLabel}</p>
-    <p>{item.completionRule}</p>
-    {item.waitingOn && <p><strong>Waiting on: </strong>{item.waitingLabel}<br/>{item.waitingReason}</p>}
-    {item.blockedReasons.length > 0 && <div className="wl-step-prerequisites"><h4>Prerequisites</h4><ul>{item.blockedReasons.map(reason => <li key={reason.code}>{reason.reason}</li>)}</ul></div>}
-    {item.output && <div className="wl-step-output"><h4>Recorded output</h4><p>{item.output}</p><p>{item.outputTimeLabel}</p></div>}
-    {item.workflowAction && <button type="button" className="button" onClick={() => onAction(item.workflowAction.command)}>{item.workflowAction.label}</button>}
-    {item.replacementAction && <button type="button" className="button" onClick={() => onAction(item.replacementAction.command)}>{item.replacementAction.label}</button>}
-  </section>;
-}
 
 function SelectedItem({selection, headingRef, onClose, entryLink, returnTo, returnState}) {
   if (selection.status !== 'ready') return <section className="wl-inspector wl-state">

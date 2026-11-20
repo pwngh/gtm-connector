@@ -206,13 +206,6 @@ html[data-theme='dark'] .rd-page select {color-scheme:dark}
 .rd-examples>p {margin:10px 0 17px}.rd-examples>label {max-width:370px}
 .rd-footnote {display:flex; align-items:flex-start; gap:10px; margin-top:23px; color:var(--rd-muted)}
 .rd-footnote>svg {margin-top:5px}
-.main-content:has(.rd-page)>.page-heading .heading-actions :is(.text-button,.pill) {font-size:1rem}
-.main-content:has(.rd-page)>.page-heading .heading-actions .text-button {min-height:44px}
-.main-content:has(.rd-page)>.detail-nav nav a {min-height:44px; font-size:1rem}
-.main-content:has(.rd-page)>.detail-nav .save-indicator,.main-content:has(.rd-page)>.page-heading .account-meta {font-size:1rem}
-.main-content:has(.rd-page)>.page-heading .context-link {display:inline-flex; align-items:center; min-height:44px; min-width:44px; font-size:1rem}
-.rd-return-context {display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding:12px 16px; border:1px solid var(--line); border-radius:8px; margin-bottom:18px; font-size:1rem; line-height:1.6}
-.rd-return-context a {display:inline-flex; align-items:center; min-height:44px; color:var(--blue); text-decoration:underline; text-underline-offset:4px}
 @media(max-width:1250px) {
   .rd-workbench {grid-template-columns:minmax(0,1fr); gap:28px}
   .rd-position {gap:18px}.rd-position>div {padding-right:15px}
@@ -259,7 +252,6 @@ html[data-theme='dark'] .rd-page select {color-scheme:dark}
 }
 @media(max-height:420px) {
   .rd-page :is([tabindex='-1'],a,button,select,summary) {scroll-margin-block:18px}
-  .main-content:has(.rd-page)>.detail-nav {position:static}
 }
 @media(prefers-reduced-motion:reduce) {
   .rd-page * {transition:none!important; animation:none!important; scroll-behavior:auto!important}

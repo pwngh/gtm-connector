@@ -158,8 +158,6 @@ html[data-theme='dark'] .hs-page select {color-scheme:dark}
 .hs-examples {margin-top:26px; border-top:1px solid var(--hs-line); padding-top:10px; color:var(--hs-muted)}
 .hs-examples>summary {padding:10px 0}.hs-examples>p {margin:10px 0 17px}.hs-examples>label {max-width:400px}
 .hs-footnote {display:flex; align-items:flex-start; gap:10px; padding-top:23px; color:var(--hs-muted)}.hs-footnote>svg {margin-top:5px}
-.hs-return-context {display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:12px 16px; border:1px solid var(--line); border-radius:8px; margin-bottom:18px; font-size:1rem; line-height:1.6}
-.hs-return-context a {display:inline-flex; align-items:center; min-height:44px; color:var(--blue); text-decoration:underline; text-underline-offset:4px}
 @media(min-width:1550px) {
   .hs-controls {grid-template-columns:minmax(260px,.9fr) minmax(0,1.4fr) minmax(0,1fr) minmax(0,.6fr)}
 }
@@ -203,4 +201,3 @@ html[data-theme='dark'] .hs-page select {color-scheme:dark}
 .hs-reference-fields>div {padding:6px 0}.hs-reference-fields dd {font-size:1rem; margin-top:3px}
 
 .hs-page .hs-row-reason {margin-top:12px}
-.hs-current-owner {font-size:.875rem; color:inherit; line-height:1.5}

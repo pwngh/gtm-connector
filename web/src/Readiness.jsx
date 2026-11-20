@@ -6,7 +6,7 @@ import {
   readinessSelectionKey, readinessStates, selectReadiness,
 } from './readiness.js';
 import {closeReadinessOnEscape, focusReadinessElement, moveReadinessFocus, readinessFocusTarget, restoreReadinessFocus} from './readinessBrowser.js';
-import {historyHref} from './history.js';
+import {historyHref} from './historyLocation.js';
 import './readiness.css';
 
 const icons = {passed: CheckCircle2, failed: CircleX, not_evaluated: CircleDashed, not_applicable: MinusCircle};

@@ -1,3 +1,4 @@
+import {eagerRouteModules, expandRouteContent} from './testing/routeModules.js';
 import test, {before, after, beforeEach, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
@@ -11,7 +12,7 @@ import {renewalEvidence, renewalFixture, fixturePeople} from './renewalFixtures.
 let server, Playbooks, App;
 const hookNames = ['useState', 'useReducer', 'useRef', 'useId', 'useEffect', 'useLayoutEffect', 'useMemo'];
 before(async () => {
-  server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [{
+  server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [eagerRouteModules(), {
     name: 'playbooks-handler-harness', enforce: 'pre',
     resolveId(id) {if (id.startsWith('virtual:pb-test-')) return `\0${id}`;},
     load(id) {
@@ -105,7 +106,7 @@ class Hooks {
     this.cursor = 0;
     this.pending = {layout: [], effect: []};
     globalThis.__playbooksTestHooks = this;
-    return Component(props);
+    return expandRouteContent(Component(props));
   }
   flushLayout() {for (const callback of this.pending.layout.splice(0)) callback();}
   flushEffects() {for (const callback of this.pending.effect.splice(0)) callback();}

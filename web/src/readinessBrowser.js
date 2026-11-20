@@ -1,17 +1,5 @@
-function visible(element) {
-  if (!element || element.isConnected === false || element.disabled || element.closest?.('[hidden],[inert],[aria-hidden="true"]')) return false;
-  const closed = element.closest?.('details:not([open])');
-  if (closed && !closed.querySelector('summary')?.contains(element)) return false;
-  return !element.getClientRects || element.getClientRects().length > 0;
-}
-
-export function focusReadinessElement(element) {
-  if (!visible(element) || !element.focus) return false;
-  element.focus({preventScroll: true});
-  if (element.ownerDocument && element.ownerDocument.activeElement !== element) return false;
-  element.scrollIntoView?.({block: 'nearest', behavior: 'instant'});
-  return true;
-}
+import {visibleElement as visible, focusElement as focusReadinessElement} from './focusElement.js';
+export {focusElement as focusReadinessElement} from './focusElement.js';
 
 export function readinessFocusTarget(root, key) {
   return [...(root?.querySelectorAll('[data-readiness-target]') || [])].find(element => element.dataset.readinessTarget === key && visible(element));

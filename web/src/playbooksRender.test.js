@@ -1,3 +1,4 @@
+import {eagerRouteModules} from './testing/routeModules.js';
 import test, {before, after} from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -13,7 +14,7 @@ import {buildPlaybookContext, createPlaybooksSession, playbookSearch, playbooksS
 // Markup checks use the installed JSX transform, without a listening server.
 let server, Playbooks, App;
 before(async () => {
-  server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error'});
+  server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [eagerRouteModules()]});
   Playbooks = (await server.ssrLoadModule('/src/Playbooks.jsx')).default;
   App = (await server.ssrLoadModule('/src/main.jsx')).App;
 });
