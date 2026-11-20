@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 import re
+import shlex
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -15,8 +16,11 @@ from gtm_connector.cli import main
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NOT_CONNECTED = ("No CRM is connected. Run gtm-connector connect salesforce --org ALIAS, "
-                 "or gtm-connector connect demo for invented data.")
+def not_connected(state):
+    """The no-CRM message, which names the folder when it is not the default."""
+    here = f" --state-dir {shlex.quote(str(state))}"
+    return (f"No CRM is connected. Run gtm-connector connect salesforce --org ALIAS{here}, "
+            f"or gtm-connector connect demo{here} for invented data.")
 DEMO = {"crm": {"provider": "demo"}, "calls": {"provider": "demo"}, "slack": {"provider": "demo"}}
 PRIVATE = "invented-private-slack-token"
 
@@ -48,7 +52,7 @@ class ConnectTests(unittest.TestCase):
     def files(self):
         return {path.name for path in self.state.iterdir()}
 
-    def sign_in_to_slack(self):
+    def sign_in_to_slack(self, state="ready"):
         from gtm_connector import slack_auth as auth
         configuration = auth.validate_configuration(client_id="123456789.987654321",
                                                     redirect_uri="http://localhost:8765/slack/callback")
@@ -58,7 +62,7 @@ class ConnectTests(unittest.TestCase):
              "authed_user": {"id": "U12345678", "token_type": "user", "scope": "channels:history",
                              "access_token": PRIVATE, "refresh_token": "invented-refresh", "expires_in": 3600}},
             configuration=configuration, obtained_at=now)
-        document["credential_state"] = "ready"
+        document["credential_state"] = state
         document["last_verified_at"] = auth._stamp(now)
         with auth._connection_lock(self.state / profile.SLACK_CONNECTION, create=True) as descriptor:
             auth._write_credentials(descriptor, document)
@@ -73,13 +77,13 @@ class ConnectTests(unittest.TestCase):
             with self.subTest(command=arguments[0]), \
                     patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")):
                 error = self.refused(*arguments)
-                self.assertEqual((error["code"], error["message"]), ("usage_error", NOT_CONNECTED))
-                self.assertEqual(error["message"], str(profile.NotConnected()))
+                self.assertEqual((error["code"], error["message"]), ("usage_error", not_connected(self.state)))
+                self.assertEqual(error["message"], str(profile.NotConnected(f" --state-dir {self.state}")))
                 self.assertEqual(error["next"], "gtm-connector connect --help")
                 self.assertFalse(self.state.exists())
         code, out, err = self.run_cli("brief", "acc-003", as_json=False)
         self.assertEqual((code, out), (2, ""))
-        self.assertEqual(err, f"Error: {NOT_CONNECTED}\nNext: gtm-connector connect --help\n")
+        self.assertEqual(err, f"Error: {not_connected(self.state)}\nNext: gtm-connector connect --help\n")
 
     def test_connect_demo_then_brief_accounts_and_account_read_demo_data_with_no_flags(self):
         connected = self.ok("connect", "demo")
@@ -116,21 +120,24 @@ class ConnectTests(unittest.TestCase):
 
     def test_status_says_what_is_connected_before_and_after(self):
         for arguments in (["connect"], ["connect", "status"]):
-            self.assertEqual(self.ok(*arguments), {"schema_version": 1, "sources": {}})
+            self.assertEqual(self.ok(*arguments), {"schema_version": 1, "sources": {}, "sellers": []})
             code, out, err = self.run_cli(*arguments, as_json=False)
             self.assertEqual((code, err), (0, ""))
-            self.assertEqual(out, "crm\tnot connected\t\ncalls\tnot connected\t\nslack\tnot connected\t\n")
+            self.assertEqual(out, "crm\tnot connected\t\ncalls\tnot connected\t\nslack\tnot connected\t\n"
+                                  "Sellers: none listed\n")
         self.assertFalse(self.state.exists())
         self.ok("connect", "demo")
-        self.assertEqual(self.ok("connect", "status"), {"schema_version": 1, "sources": DEMO})
+        self.assertEqual(self.ok("connect", "status"), {"schema_version": 1, "sources": DEMO, "sellers": []})
         code, out, err = self.run_cli("connect", as_json=False)
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, "crm\tconnected\tdemo data\ncalls\tconnected\tdemo data\nslack\tconnected\tdemo data\n")
+        self.assertEqual(out, "crm\tconnected\tdemo data\ncalls\tconnected\tdemo data\nslack\tconnected\tdemo data\n"
+                              "Sellers: none listed\n")
         from gtm_connector.cli import human_result
         with patch("sys.stdout.isatty", return_value=True), patch.dict("os.environ", {"NO_COLOR": "1"}):
             shown = human_result("connect", self.ok("connect", "status"))
         self.assertEqual([line.split() for line in shown.splitlines()],
-                         [["SOURCE", "STATUS", "DETAIL"], *[[kind, "connected", "demo", "data"] for kind in DEMO]])
+                         [["SOURCE", "STATUS", "DETAIL"], *[[kind, "connected", "demo", "data"] for kind in DEMO],
+                          ["Sellers:", "none", "listed"]])
 
     def test_remove_detaches_the_named_source_and_only_when_it_is_the_one_connected(self):
         self.assertEqual(self.ok("connect", "demo", "--remove")["status"], "not_connected")
@@ -142,13 +149,13 @@ class ConnectTests(unittest.TestCase):
         self.assertEqual(self.ok("connect", "calls", "--remove")["sources"], DEMO)
         removed = self.ok("connect", "demo", "--remove")
         self.assertEqual(removed, {"schema_version": 1, "provider": "demo", "status": "removed", "sources": {}})
-        self.assertEqual(self.refused("brief", "acc-003")["message"], NOT_CONNECTED)
+        self.assertEqual(self.refused("brief", "acc-003")["message"], not_connected(self.state))
         code, out, err = self.run_cli("connect", "demo", "--remove", as_json=False)
         self.assertEqual((code, err), (0, ""))
         self.assertTrue(out.startswith("Demo data was not connected. Nothing changed.\n"), out)
 
     def test_connect_calls_then_import_then_brief_shows_the_transcript(self):
-        self.assertEqual(self.refused("connect", "calls")["message"], NOT_CONNECTED)
+        self.assertEqual(self.refused("connect", "calls")["message"], not_connected(self.state))
         self.assertFalse(self.state.exists())
         self.ok("connect", "demo")
         connected = self.ok("connect", "calls")
@@ -190,10 +197,12 @@ class ConnectTests(unittest.TestCase):
         self.assertIn(fresh, error["message"])
         error = self.refused("connect", "slack", code=3)
         self.assertIn("slack_source_mismatch", error["message"])
+        self.assertIn(fresh, error["message"])
         self.assertEqual({path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}, before)
         self.assertEqual(profile.load(self.state), DEMO)
         self.assertEqual(self.refused("calls", "import", str(self.export), "--account", "acc-003")["message"],
-                         "Transcripts are not connected. Run gtm-connector connect calls first.")
+                         f"Transcripts are not connected. Run gtm-connector connect calls --state-dir {self.state} "
+                         "first.")
 
     def test_the_demo_crm_connected_again_keeps_the_transcripts_the_folder_holds(self):
         self.ok("connect", "demo")
@@ -204,12 +213,44 @@ class ConnectTests(unittest.TestCase):
         # Over the same profile, and after the CRM was removed, demo data never stands in for the transcripts.
         self.assertEqual(self.ok("connect", "demo")["sources"], held)
         self.assertEqual(self.ok("connect", "demo", "--remove")["sources"], {})
-        self.assertEqual(self.refused("connect", "calls")["message"], NOT_CONNECTED)
+        self.assertEqual(self.refused("connect", "calls")["message"], not_connected(self.state))
         self.assertEqual(self.ok("connect", "demo")["sources"], held)
         self.assertEqual(self.ok("brief", "acc-003")["sources"]["calls"], "imported_transcript")
         # A folder made before profiles, which holds the same state with no profile.json, connects the same way.
         (self.state / "profile.json").unlink()
         self.assertEqual(self.ok("connect", "demo")["sources"], held)
+
+    def test_the_same_crm_connected_again_keeps_its_calls_and_slack(self):
+        self.ok("connect", "demo")
+        self.ok("connect", "calls")
+        # Nothing is imported yet, and connecting the demo CRM again still keeps the transcripts connected.
+        self.assertEqual(self.ok("connect", "demo")["sources"], {**DEMO, "calls": {"provider": "imported"}})
+
+    def test_a_problem_with_one_source_never_blocks_connecting_another(self):
+        self.ok("connect", "demo")
+        self.sign_in_to_slack()
+        self.ok("connect", "slack")
+        self.sign_in_to_slack(state="refresh_pending")
+        self.assertEqual(self.ok("connect", "calls")["sources"],
+                         {**DEMO, "calls": {"provider": "imported"}, "slack": {"provider": "slack"}})
+
+    def test_a_refusal_names_its_real_reason_and_a_fresh_folder(self):
+        self.ok("connect", "demo")
+        (self.state / "crm-connection.json").write_text("{}")
+        error = self.refused("connect", "demo", code=3)
+        self.assertIn("belongs to a Salesforce connection", error["message"])
+        self.assertNotIn("slack_source_mismatch", error["message"])
+
+    def test_app_setup_in_a_folder_with_no_profile_connects_before_serve(self):
+        state = self.state.parent.resolve() / self.state.name
+        code, out, err = self.run_cli("connect", "inspector")
+        setup = json.loads(out)["setup"]
+        self.assertEqual(setup[:2], [f"gtm-connector connect demo --state-dir {state} "
+                                     "(or connect salesforce --org ALIAS)",
+                                     f"gtm-connector serve --state-dir {state}"])
+        self.ok("connect", "demo")
+        self.assertEqual(json.loads(self.run_cli("connect", "inspector")[1])["setup"][0],
+                         f"gtm-connector serve --state-dir {state}")
 
     def test_a_folder_being_served_or_changed_refuses_connect_and_keeps_its_profile(self):
         import fcntl
@@ -226,7 +267,7 @@ class ConnectTests(unittest.TestCase):
         self.assertEqual(self.ok("connect", "calls")["sources"]["calls"], {"provider": "imported"})
 
     def test_a_connect_that_fails_leaves_no_folder_and_a_failed_seller_list_changes_nothing(self):
-        self.assertEqual(self.refused("connect", "calls")["message"], NOT_CONNECTED)
+        self.assertEqual(self.refused("connect", "calls")["message"], not_connected(self.state))
         self.assertFalse(self.state.exists())
         self.ok("connect", "demo")
         (self.state / "sellers.json").mkdir()

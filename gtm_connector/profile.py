@@ -31,9 +31,10 @@ class ProfileError(ValueError):
 class NotConnected(ProfileError):
     """No CRM is connected, so there is nothing to read an account from."""
 
-    def __init__(self):
-        super().__init__("No CRM is connected. Run gtm-connector connect salesforce --org ALIAS, "
-                         "or gtm-connector connect demo for invented data.")
+    def __init__(self, here=""):
+        # `here` repeats the folder's --state-dir in the advice when it is not the default.
+        super().__init__(f"No CRM is connected. Run gtm-connector connect salesforce --org ALIAS{here}, "
+                         f"or gtm-connector connect demo{here} for invented data.")
 
 
 def _valid_source(kind, source):
@@ -62,13 +63,16 @@ def _valid(sources):
 
 def load(directory) -> dict:
     """Return the connected sources by kind. A folder with no profile has none."""
+    if Path(directory).is_symlink():
+        raise ProfileError("The state folder must not be a symbolic link. Use a private --state-dir.")
     path = Path(directory) / NAME
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return {}
     except OSError:
-        raise ProfileError("profile.json cannot be opened. It must be a regular file, not a link.") from None
+        raise ProfileError("profile.json cannot be opened. It must be a private regular file that you own, "
+                           "not a link.") from None
     try:
         info = os.fstat(descriptor)
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
@@ -115,15 +119,15 @@ def save(directory, sources) -> None:
 
 
 def merged(sources, kind, source) -> dict:
-    """The profile after one source is connected. Another CRM starts over: calls and Slack belong to a CRM."""
+    """The profile after one source is connected. Another CRM starts over, because calls and Slack belong to a
+    CRM: beside the demo CRM they start as demo data, beside Salesforce as not connected. The same CRM again
+    keeps them."""
     if kind != "crm":
         if "crm" not in sources:
             raise NotConnected()
         return {**sources, kind: source}
-    if source["provider"] == "demo":
-        return dict(DEMO)
     if sources.get("crm", {}).get("provider") != source["provider"]:
-        return {"crm": source}
+        return dict(DEMO) if source["provider"] == "demo" else {"crm": source}
     return {**sources, "crm": source}
 
 

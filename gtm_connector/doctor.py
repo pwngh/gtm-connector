@@ -127,6 +127,10 @@ def doctor(directory):
     """Inspect private state and GET local metadata; never grant scopes or read sources."""
     directory = _directory(directory)
     serve = shlex.join(["gtm-connector", "serve", "--state-dir", str(directory)])
+    if not os.path.lexists(directory / "profile.json"):
+        # serve reads the folder's profile, so a folder with none is connected first.
+        serve = (shlex.join(["gtm-connector", "connect", "demo", "--state-dir", str(directory)])
+                 + " (or connect salesforce --org ALIAS), then " + serve)
     fresh = "connect and serve a fresh private folder with --state-dir var/doctor-new"
     checks = []
 

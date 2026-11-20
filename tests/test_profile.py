@@ -109,6 +109,11 @@ class ProfileTests(unittest.TestCase):
         with self.assertRaisesRegex(profile.ProfileError, "no other link"):
             profile.load(self.state)
         (self.state / "second-name.json").unlink()
+        # A state folder that is a link is refused too.
+        linked = self.state.parent / "linked-state"
+        linked.symlink_to(self.state, target_is_directory=True)
+        with self.assertRaisesRegex(profile.ProfileError, "symbolic link"):
+            profile.load(linked)
         for version in (b"true", b"1.0", b"1e0"):
             path.write_bytes(written.replace(b'"schema_version": 1', b'"schema_version": ' + version))
             with self.subTest(version=version), self.assertRaisesRegex(profile.ProfileError, "not a profile"):

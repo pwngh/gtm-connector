@@ -23,7 +23,9 @@ class DoctorTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         failures = [check for check in result["checks"] if check["status"] == "fail"]
         self.assertEqual([row["name"] for row in failures], ["state_folder"])
-        self.assertIn("gtm-connector serve --state-dir", failures[0]["fix"])
+        # serve reads the folder's profile, so a folder with none is connected first.
+        self.assertIn(f"gtm-connector connect demo --state-dir {self.state} (or connect salesforce --org ALIAS), "
+                      f"then gtm-connector serve --state-dir {self.state}", failures[0]["fix"])
         self.assertFalse(self.state.exists())
 
     def test_running_services_pass_without_changing_state_or_authorizing(self):

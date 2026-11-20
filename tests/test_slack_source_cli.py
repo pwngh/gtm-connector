@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import io
 import json
 from pathlib import Path
+import shlex
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -136,7 +137,8 @@ class SlackSourceCLITests(unittest.TestCase):
                 patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")):
             for attempt in (self.map, lambda: self.invoke(*check)):
                 detail = self.failure(attempt(), 2)
-                self.assertEqual(detail["message"], str(profile.NotConnected()))
+                self.assertEqual(detail["message"],
+                                 str(profile.NotConnected(f" --state-dir {shlex.quote(str(self.state))}")))
                 self.assertFalse(self.state.exists())
             profile.save(self.state, profile.DEMO)
             for attempt in (self.map, lambda: self.invoke(*check)):

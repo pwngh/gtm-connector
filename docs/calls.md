@@ -8,7 +8,7 @@ local state.
 ## Commands
 
 ```sh
-gtm-connector connect calls --seller 'Morgan Reed'    # once, in a folder with a connected CRM
+gtm-connector connect calls --seller 'Morgan Reed'    # once, in a folder with a connected CRM; name every seller
 gtm-connector calls import meeting.vtt --account acc-007
 gtm-connector calls import meeting.vtt --account acc-007 --cues 8:14 --called-at 2027-01-14T15:00:00Z
 gtm-connector calls import meeting.txt --account acc-007 --speaker-names

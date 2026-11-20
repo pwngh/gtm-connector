@@ -211,14 +211,20 @@ def _refuse_salesforce_state(directory):
                                   "Select its original connection or use a fresh --state-dir.")
 
 
-def check_folder(directory, *, demo_crm, calls_backend, slack_backend, slack_connection_dir):
-    """Refuse sources that what this folder already read rules out. Nothing is written or contacted."""
+def check_folder(directory, *, demo_crm, calls_backend=None, slack_backend=None, slack_connection_dir=None):
+    """Refuse sources that what this folder already read rules out. Nothing is written or contacted.
+
+    A source given as None is not changing and is not checked, so a problem with one source never blocks
+    connecting another.
+    """
     directory = _state_directory(directory)
     if directory.is_dir():
-        _prepare_slack_selection(directory, slack_backend, slack_connection_dir)
-        _prepare_calls_selection(directory, calls_backend)
         if demo_crm:
             _refuse_salesforce_state(directory)
+        if calls_backend is not None:
+            _prepare_calls_selection(directory, calls_backend)
+        if slack_backend is not None:
+            _prepare_slack_selection(directory, slack_backend, slack_connection_dir)
 
 
 # What connect may leave in a folder it created and then could not connect.
@@ -346,6 +352,11 @@ def _prepare_source_state(directory, reader, *, calls_backend="fixture"):
 def valid_sellers(sellers):
     return (isinstance(sellers, list) and len(sellers) <= 200
             and all(isinstance(seller, str) and 1 <= len(seller) <= 200 for seller in sellers))
+
+
+def saved_sellers(directory):
+    """The seller list connect saved for a folder, for a person to check."""
+    return list(_sellers(_state_directory(directory)))
 
 
 def _sellers(directory):

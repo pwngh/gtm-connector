@@ -407,13 +407,19 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
             detail = "" if source is None else details.get(source["provider"]) or (
                 f"Salesforce org alias {source['org']} ({source['environment']})")
             rows.append([kind, "not connected" if source is None else "connected", detail])
-        name = {"demo": "Demo data", "salesforce": "Salesforce", "calls": "Call transcripts",
-                "slack": "Slack"}.get(result.get("provider"))
+        name, was = {"demo": ("Demo data", "was"), "salesforce": ("Salesforce", "was"),
+                     "calls": ("Call transcripts", "were"), "slack": ("Slack", "was")}.get(result.get("provider"),
+                                                                                         ("", ""))
         headline = {"connected": f"{name} connected.\n", "removed": f"{name} removed. No file was deleted.\n",
-                    "not_connected": f"{name} was not connected. Nothing changed.\n"}.get(result.get("status"), "")
+                    "not_connected": f"{name} {was} not connected. Nothing changed.\n"}.get(result.get("status"), "")
         if (result.get("provider"), result.get("status")) == ("salesforce", "connected"):
             headline = "Salesforce connected. The org's identity and environment were checked.\n"
-        return headline + table(["SOURCE", "STATUS", "DETAIL"], rows)
+        shown = headline + table(["SOURCE", "STATUS", "DETAIL"], rows)
+        if "sellers" in result:
+            # Each name as a quoted literal: the operator typed them, and they print as data.
+            shown += "\nSellers: " + (", ".join(json.dumps(name, ensure_ascii=False) for name in result["sellers"])
+                                      or "none listed")
+        return shown
     if command == "brief":
         return (f"{result['text']}\nBrief: {result['brief_id']}\n"
                 f"Resolve any number: gtm-connector trace {result['brief_id']} N" +
@@ -647,8 +653,8 @@ def _run_slack_source(args):
     from .slack_mapping import SlackMappingError, parse_thread_selection, save_slack_mapping, slack_identity_binding
     progress = _slack_source_progress(args)
     if _connected(args)["slack_backend"] != "slack":
-        raise profile.ProfileError("Slack is not connected. Run gtm-connector slack connect to sign in, "
-                                   "then gtm-connector connect slack.")
+        raise profile.ProfileError(f"Slack is not connected. Run gtm-connector slack connect{_here(args)} to sign in, "
+                                   f"then gtm-connector connect slack{_here(args)}.")
     if args.action == "check":
         if re.fullmatch(r"acc-(?:[0-9]{3}|sf-[A-Za-z0-9]{18})", args.account) is None:
             raise SlackMappingError("slack_selection_invalid")
@@ -840,18 +846,27 @@ def _sources_line(args, *, crm_only=False):
     return f"Sources: CRM is {crm}; calls are {calls}; Slack is {slack}."
 
 
-def _check_folder(args):
-    """Refuse sources that what the folder already read rules out, before the profile names them."""
+def _here(args):
+    """The --state-dir to repeat in advice, when the folder is not the default."""
+    folder = getattr(args, "state_dir", None)
+    return "" if folder is None or Path(folder) == STATE_DIR else " --state-dir " + shlex.quote(str(folder))
+
+
+def _check_folder(args, kinds):
+    """Refuse the named sources when what the folder already read rules them out, before the profile names them."""
     from .runtime import check_folder
     from .slack_auth import SlackAuthError
     try:
-        check_folder(args.state_dir, demo_crm=args.crm_backend == "sqlite", calls_backend=args.calls_backend,
-                     slack_backend=args.slack_backend, slack_connection_dir=_slack_connection(args))
+        check_folder(args.state_dir, demo_crm=args.crm_backend == "sqlite",
+                     calls_backend=args.calls_backend if "calls" in kinds else None,
+                     slack_backend=args.slack_backend if "slack" in kinds else None,
+                     slack_connection_dir=_slack_connection(args))
     except SlackAuthError as exc:
         if exc.code != "slack_not_connected":
             raise
-        raise ValueError("No Slack sign-in is saved in this state folder. Run gtm-connector slack connect "
-                         "--client-id PUBLIC_CLIENT_ID --redirect-uri REGISTERED_REDIRECT first.") from None
+        raise ValueError("No Slack sign-in is saved in this state folder. Run gtm-connector slack connect"
+                         f"{_here(args)} --client-id PUBLIC_CLIENT_ID --redirect-uri REGISTERED_REDIRECT "
+                         "first.") from None
 
 
 def _run_connect(args):
@@ -870,7 +885,9 @@ def _run_connect(args):
         return connect(args.state_dir, args.provider, args.scope, transport=args.transport or "http",
                        config_file=args.config_file)
     if args.provider == "status":
-        return {"schema_version": 1, "sources": profile.load(args.state_dir)}
+        from .runtime import saved_sellers
+        return {"schema_version": 1, "sources": profile.load(args.state_dir),
+                "sellers": saved_sellers(args.state_dir)}
     kind, provider, _ = PROVIDERS[args.provider]
 
     def result(status, sources):
@@ -899,7 +916,7 @@ def _run_connect(args):
             if kind in sources:
                 # Beside the demo CRM a removed source is demo data again, which the folder may already rule out.
                 _use(args, sources)
-                _check_folder(args)
+                _check_folder(args, (kind,))
             profile.save(args.state_dir, sources)
             return result("removed", sources)
         sources = profile.merged(sources, kind, source)
@@ -908,7 +925,8 @@ def _run_connect(args):
             sources.update(held_sources(args.state_dir))
         profile.check(sources)
         _use(args, sources)
-        _check_folder(args)
+        # Only what changes is checked: a problem with one source never blocks connecting another.
+        _check_folder(args, ("calls", "slack") if provider == "demo" else (kind,) if kind != "crm" else ())
         if provider == "salesforce":
             # The org's identity and environment are checked and pinned to the folder before the profile names it.
             pin_crm(args.state_dir, _salesforce_reader(args), calls_backend=args.calls_backend)
@@ -1110,7 +1128,8 @@ def _run(args, argv):
     reads_sources = (args.command in ("serve", "brief", "accounts", "account")
                      or (args.command == "calls" and args.action == "import"))
     if reads_sources and _connected(args)["calls_backend"] != "imported" and args.command == "calls":
-        raise profile.ProfileError("Transcripts are not connected. Run gtm-connector connect calls first.")
+        raise profile.ProfileError(f"Transcripts are not connected. Run gtm-connector connect calls{_here(args)} "
+                                   "first.")
     prepared_calls = _calls_arguments(args) if args.command == "calls" else None
     crm_reader = None
     if reads_sources:
@@ -1215,9 +1234,10 @@ def _run(args, argv):
             else:
                 sources = _sources_line(args)
                 if selection is not None:
-                    sources += (f"\nSelection: {len(selection.accounts)} accounts, "
-                                f"{len(selection.slack_accounts)} with a Slack thread. Callers can read only these "
-                                "and can prepare and reread briefs for them. Writes are off.")
+                    slack = (f"{len(selection.slack_accounts)} with a Slack thread" if args.slack_backend != "none"
+                             else "Slack not connected")
+                    sources += (f"\nSelection: {len(selection.accounts)} accounts, {slack}. Callers can read only "
+                                "these and can prepare and reread briefs for them. Writes are off.")
                 _server_notice(f"Connector ready at {ready['resource']}\nBackend: {runtime.crm_backend}\n"
                                f"{sources}\n"
                                f"State folder: {runtime.directory}\n"
@@ -1255,9 +1275,24 @@ def _run(args, argv):
         return result
 
 
+def _fresh(args, name):
+    """A folder beside this one that does not exist yet, for advice to start over in."""
+    fresh, suffix = args.state_dir.parent / name, 2
+    while os.path.lexists(fresh):
+        fresh, suffix = args.state_dir.parent / f"{name}-{suffix}", suffix + 1
+    return fresh
+
+
 def _failure(exc, args):
     if isinstance(exc, profile.ProfileError):
+        if isinstance(exc, profile.NotConnected):
+            exc = profile.NotConnected(_here(args))
         return _error(exc, 2, "gtm-connector connect --help", as_json=args.json)
+    if args.command == "connect" and getattr(exc, "code", None) == "slack_source_mismatch":
+        fresh = _fresh(args, (args.state_dir.name or "state") + "-fresh")
+        return _error("slack_source_mismatch: This state folder has read Slack data that cannot sit beside these "
+                      f"sources. Connect the sources again with --state-dir {shlex.quote(str(fresh))}. "
+                      "Existing files are retained.", 3, "gtm-connector connect --help", as_json=args.json)
     if args.command == "slack":
         return (_slack_source_failure(exc, args) if args.action in ("map", "check") else
                 _slack_failure(exc, args))
@@ -1297,20 +1332,15 @@ def _failure(exc, args):
         code = 1
     if getattr(exc, "code", None) == "demo_state_mismatch":
         code = 4
-        fresh = args.state_dir.parent / "renewal-demo-fresh"
-        suffix = 2
-        while os.path.lexists(fresh):
-            fresh = args.state_dir.parent / f"renewal-demo-fresh-{suffix}"
-            suffix += 1
-        next_command = shlex.join(["gtm-connector", "demo", "--state-dir", str(fresh)])
+        next_command = shlex.join(["gtm-connector", "demo", "--state-dir", str(_fresh(args, "renewal-demo-fresh"))])
     if getattr(exc, "code", None) == "source_identity_mismatch":
         if ((command == "calls" and args.action in ("list", "inspect"))
                 or (command not in ("calls", "connect") and getattr(args, "calls_backend", None) == "imported")):
             # Keep the first sentence. The fresh-state advice after it applies only to import.
             message = message.split(". ", 1)[0].rstrip(".") + "."
             recovery = ("Select the original existing import state folder with --state-dir. " if command == "calls"
-                        else "Restore the original CRM connection and select its existing import state folder "
-                             "with --state-dir. ")
+                        else "Restore the original CRM connection, or select the existing import state folder "
+                             "that holds these transcripts with --state-dir. ")
             if command != "calls" and getattr(args, "crm_backend", None) == "salesforce":
                 recovery += "Connect the original org and environment with gtm-connector connect salesforce. "
             message = (f"source_identity_mismatch: {message} "
@@ -1318,12 +1348,7 @@ def _failure(exc, args):
                        "To start importing, run calls import --help. Existing files are retained.")
             next_command = "gtm-connector calls import --help"
         else:
-            folder = (args.state_dir.name or "state") + "-fresh"
-            fresh = args.state_dir.parent / folder
-            suffix = 2
-            while os.path.lexists(fresh):
-                fresh = args.state_dir.parent / f"{folder}-{suffix}"
-                suffix += 1
+            fresh = _fresh(args, (args.state_dir.name or "state") + "-fresh")
             again = ("Repeat this command" if command == "connect" and args.provider == "salesforce"
                      else "Connect the sources again")
             message = (f"source_identity_mismatch: {message} "

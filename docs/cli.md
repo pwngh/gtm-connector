@@ -15,7 +15,8 @@ python -m gtm_connector COMMAND            # accepts the same arguments
 `serve`, `mcp`, `calls import`, and `slack map` read that file and take no source option. In a
 folder with no connected CRM each of them exits `2`, creates nothing, and says:
 "No CRM is connected. Run gtm-connector connect salesforce --org ALIAS, or gtm-connector connect
-demo for invented data."
+demo for invented data.", with the folder's `--state-dir` in both commands when it is not the
+default.
 
 | Command | What it does |
 | --- | --- |
@@ -35,8 +36,9 @@ demo for invented data."
 - Connecting Salesforce over demo data keeps nothing of it. Connecting the same kind of CRM again
   keeps calls and Slack.
 - `--seller NAME` with `salesforce`, `calls`, or `slack` lists a seller's name or Slack user ID.
-  Repeat it for each seller. The list replaces the saved one, and a connect without `--seller`
-  keeps it. See [roles](briefs.md).
+  Repeat it for each seller. The list replaces the saved one, so name every seller each time, and
+  a connect without `--seller` keeps it. `connect status` shows the saved list. See
+  [roles](briefs.md).
 - `connect` changes the profile while it holds the folder's lock. A folder that `serve` or another
   command is using refuses with exit `1` until it is free. A `connect` that fails leaves the profile
   as it was, and removes a folder it created.
@@ -77,14 +79,14 @@ demo for invented data."
 | No command, `--version` | Object with `description`, `try` (string array), and `help`. Object with `version`. |
 | `accounts` | Array of account objects ordered by name and then ID, or `[]`. When more than 100 match: object with `accounts`, the first 100, and `has_more: true`. Text output then adds one line on stderr that says so. |
 | `account` | Account object with a `contacts` array. Salesforce adds `contracts`, `backend`, and `source_id`. See [Salesforce](salesforce.md). `accounts` and `account` read the demo book's SQLite file directly and Salesforce through the scoped, audited tools. |
-| `brief` | The saved [Deal card](briefs.md): object with `schema_version: 3`, `brief_id`, `account_id`, `as_of`, `status: "accepted"`, `rules_version` (the sentence rules the units were numbered under), `sealed_by` (the receipt that holds the saved file's digest), `sources`, `text` (the card), `units`, and `gaps`. The saved file adds `evidence`, the raw records and receipts, which no command prints. `as_of` is today's local date with Salesforce and `2027-01-15` with demo data, unless `--as-of YYYY-MM-DD` is given. `sources.crm` is `"demo_fixture"` or `"salesforce"`, `sources.calls` is `"demo_fixture"`, `"imported_transcript"`, or `"not_connected"`, and `sources.slack` is `"demo_fixture"`, `"slack"`, or `"not_connected"`. A card reads every connected source. `--without-calls` leaves `calls:read` out of the grant, and the card says so. Text output names the sources on stderr and prints the card, then `Brief:` and the `trace` command. |
+| `brief` | The saved [Deal card](briefs.md): object with `schema_version: 3`, `brief_id`, `account_id`, `as_of`, `status: "accepted"`, `rules_version` (the sentence rules the units were numbered under), `sealed_by` (the receipt that holds the saved file's digest), `sources`, `text` (the card), `units`, and `gaps`. The saved file adds `evidence`, the raw records and receipts, which no command prints. `as_of` is today's UTC date with Salesforce and `2027-01-15` with demo data, unless `--as-of YYYY-MM-DD` is given. `sources.crm` is `"demo_fixture"` or `"salesforce"`, `sources.calls` is `"demo_fixture"`, `"imported_transcript"`, or `"not_connected"`, and `sources.slack` is `"demo_fixture"`, `"slack"`, or `"not_connected"`. A card reads every connected source. `--without-calls` leaves `calls:read` out of the grant, and the card says so. Text output names the sources on stderr and prints the card, then `Brief:` and the `trace` command. |
 | `trace BRIEF_ID NUMBER` | One number on a saved card, resolved from its stored evidence: object with `brief_id`, `account_id`, `n`, `kind` (`"record"` or `"sentence"`), `source`, `record_ref`, and `receipt` (`audit_id`, `tool`, `status`, `http_status`). A record adds `fields`. A sentence adds `text`, `speaker`, `role`, `basis`, `contact`, `at`, `partial`, `shown`, `span`, `raw_sha256`, and `sanitizer_version`. An unknown brief, a number that is not on the card, a card saved before sealing, or a file that is not the one its seal receipt names exits `2`. |
 | `audit` | Array of receipts in stored order. `--follow` prints one JSON line per changed receipt until Ctrl-C, which exits `130`. See [audit](audit.md). |
 | `demo` | One law-firm renewal on invented data. Object with `schema_version: 2`, `status: "accepted"`, `workflow: "renewal-demo"`, `data_mode: "demo"`, `sources` (each `"demo_fixture"`), `account`, `lookup` (`query`, `matches`, `receipt_id`), `denied_read` (`read_call_notes`, status `403`, required scope `calls:read`), `brief` (`brief_id`, `account_id`, `as_of`, `text`, `units`, and `gaps`, copied from the saved artifact), `audit` (`run_id`, `rows: 7`), and `activities_created: 0`. Each run adds one saved card and seven receipts, the last of which seals the card, and creates no activity. An older or edited book in the folder exits `4`. |
 | `verify` | Object with the connector checks, `briefs`, receipt counts, and `injection_brief`. `--with-slack` adds `slack` and `workflow`. It runs on invented data, in a folder that is connected to nothing or to the demo data only. See [tools](tools.md). |
 | `serve` | One `ready` line, then one `tool_call` line per tool attempt. See the server output below. |
-| `connect status` | Object with `schema_version: 1` and `sources`, the `sources` object of `profile.json`: each of `crm`, `calls`, and `slack` that is connected, with its `provider` (`"demo"`, `"salesforce"`, `"imported"`, or `"slack"`) and, for Salesforce, `org` and `environment`. |
-| `connect demo`, `salesforce`, `calls`, `slack` | The same object with `provider`, the name given, and `status`: `"connected"`, `"removed"`, or `"not_connected"` when `--remove` named a source that was not connected. |
+| `connect status` | Object with `schema_version: 1`, `sources`, and `sellers`. `sources` is the `sources` object of `profile.json`: each of `crm`, `calls`, and `slack` that is connected, with its `provider` (`"demo"`, `"salesforce"`, `"imported"`, or `"slack"`) and, for Salesforce, `org` and `environment`. `sellers` is the saved seller list, or `[]`. |
+| `connect demo`, `salesforce`, `calls`, `slack` | Object with `schema_version: 1`, `sources`, `provider` (the name given), and `status`: `"connected"`, `"removed"`, or `"not_connected"` when `--remove` named a source that was not connected. |
 | `connect APP` | Prints MCP client configuration. Object with `app`, `status`, `setup`, `limits`, and `documentation`. A grant adds `config`, the private file's path. `--transport stdio` adds `transport`, `config`, and `backup`. See [client setup](clients.md). |
 | `mcp stdio` | The local bridge an assistant app starts. stdout carries only MCP messages. `--json` changes only how a startup error is written to stderr. See [client setup](clients.md). |
 | `doctor` | Checks Python, the dependencies, SQLite, the private state files, the owner configuration, the certificate dates, and the metadata of both local services. It changes nothing, grants nothing, and reads no CRM, call, or Slack record. Object with `status` (`"passed"` or `"failed"`) and `checks`, each with `name`, `status` (`"pass"` or `"fail"`), `message`, and `fix`. |

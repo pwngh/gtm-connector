@@ -503,7 +503,8 @@ class CallsCLITests(unittest.TestCase):
         with patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No state')), \
                 patch.object(Path, 'lstat', side_effect=AssertionError('Export must remain unopened')):
             error = self.error(self.import_file(), 2)
-        self.assertEqual(error['message'], 'Transcripts are not connected. Run gtm-connector connect calls first.')
+        self.assertEqual(error['message'], f'Transcripts are not connected. Run gtm-connector connect calls '
+                                           f'--state-dir {self.state} first.')
         self.assertEqual(error['next'], 'gtm-connector connect --help')
         self.assert_only_the_profile()
 

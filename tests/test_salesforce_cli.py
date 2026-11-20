@@ -158,7 +158,7 @@ class SalesforceCLITests(unittest.TestCase):
         code, out, err, _ = self.invoke(["connect", "status"], connect=False)
         self.assertEqual((code, err), (0, ""))
         self.assertEqual(out, f"crm\tconnected\tSalesforce org alias {ALIAS} (developer)\n"
-                              "calls\tnot connected\t\nslack\tnot connected\t\n")
+                              "calls\tnot connected\t\nslack\tnot connected\t\nSellers: \"Morgan Reed\"\n")
 
     def test_after_connect_a_brief_with_no_flags_says_calls_and_slack_are_not_connected(self):
         self.assertEqual(self.invoke(["connect", "salesforce", "--org", ALIAS], connect=False)[0], 0)
@@ -179,7 +179,7 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual((code, json.loads(out)["sources"]), (0, {}))
         code, out, err, factory = self.invoke(["brief", ACCOUNT, "--json"], connect=False)
         self.assertEqual((code, out), (2, ""))
-        self.assertEqual(json.loads(err)["error"]["message"], str(profile.NotConnected()))
+        self.assertEqual(json.loads(err)["error"]["message"], str(profile.NotConnected(f" --state-dir {self.state}")))
         factory.assert_not_called()
         self.assertTrue((self.state / "crm-connection.json").is_file())
 

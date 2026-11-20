@@ -39,7 +39,7 @@ The app needs:
 ## Connect, map, check, and brief
 
 ```sh
-gtm-connector connect slack --seller U12345678     # after slack connect, in a folder with a connected CRM
+gtm-connector connect slack --seller 'Morgan Reed' --seller U12345678   # after slack connect; name every seller
 gtm-connector slack map --account acc-007 --thread-url 'COPIED_THREAD_LINK'
 gtm-connector slack check --account acc-007
 gtm-connector brief acc-007
