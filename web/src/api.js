@@ -6,7 +6,8 @@
 export const sessionPath = '/api/v1/session';
 export const csrfHeader = 'X-CSRF-Token';
 
-// The connector demo's account for this renewal.
+// The connector demo's account for this renewal: the default choice when the
+// signed-in principal holds a grant on it.
 export const demoAccount = 'acc-003';
 
 const kinds = {
@@ -102,6 +103,7 @@ export function createApiClient(fetchImpl = (...args) => globalThis.fetch(...arg
       });
     },
     signOut(csrf) {return request('DELETE', sessionPath, {csrf});},
+    accounts() {return request('GET', '/api/v1/accounts');},
     accountCards(account) {return request('GET', `/api/v1/accounts/${segment(account)}/cards`);},
     card(id) {return request('GET', `/api/v1/cards/${segment(id)}`);},
     unit(card, n) {

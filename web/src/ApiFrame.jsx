@@ -130,32 +130,56 @@ export function selectionHref(params, changes) {
   return search ? `?${search}` : '?';
 }
 
-// The account in the URL, its cards, and the open card: the one in the URL,
-// else the latest published. Nothing is read without a signed-in session.
+// The principal's accounts, the chosen one, its cards, and the open card.
+// The account is the one in ?account=; without one, the demo's account when
+// it is granted, else the first, written back to the URL. The card is the one
+// in ?card=, else the latest published. Nothing is read without a session.
 export function useCardSelection(session) {
-  const [params] = useSearchParams();
-  const account = params.get('account')?.trim() || demoAccount;
+  const [params, setParams] = useSearchParams();
   const who = session?.principal?.id || null;
-  const cards = useApiRead(who ? `cards:${who}:${account}` : null, api => api.accountCards(account));
+  const accounts = useApiRead(who ? `accounts:${who}` : null, api => api.accounts());
+  const granted = accounts.status === 'ready' && Array.isArray(accounts.data?.accounts) ? accounts.data.accounts : null;
+  const asked = params.get('account')?.trim() || null;
+  const account = asked || (granted?.length ? (granted.find(item => item.account === demoAccount) || granted[0]).account : null);
+  useEffect(() => {
+    if (!asked && account) setParams(current => new URLSearchParams(selectionHref(current, {account}).slice(1)), {replace: true, preventScrollReset: true});
+  }, [asked, account]);
+  const accountName = granted?.find(item => item.account === account)?.name || null;
+  const readable = who && account && !(granted && !granted.length);
+  const cards = useApiRead(readable ? `cards:${who}:${account}` : null, api => api.accountCards(account));
   const listed = cards.status === 'ready' && Array.isArray(cards.data?.cards) ? cards.data.cards : null;
   const cardId = params.get('card') || listed?.[0]?.id || null;
   const card = useApiRead(cardId && listed ? `card:${who}:${cardId}` : null, api => api.card(cardId));
-  return {params, account, cards, listed, cardId, card, who};
+  return {params, accounts, granted, account, accountName, cards, listed, cardId, card, who};
 }
 
-export function AccountForm({account, params}) {
+const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+// The principal's accounts by name and ID. The choice goes in ?account=. An
+// account in the URL that is not on the list stays visible as such; reading
+// it is refused by the server, and that refusal shows below.
+export function AccountPicker({selection}) {
   const id = useId();
-  const [value, setValue] = useState(account);
   const [, setParams] = useSearchParams();
-  useEffect(() => setValue(account), [account]);
-  return <form className="api-account" onSubmit={event => {event.preventDefault(); setParams(new URLSearchParams(selectionHref(params, {account: value.trim(), card: null, unit: null}).slice(1)));}}>
-    <label className="field" htmlFor={`${id}-account`}>Account ID<input id={`${id}-account`} name="account" autoCapitalize="none" spellCheck={false} required value={value} onChange={event => setValue(event.target.value)}/></label>
-    <button type="submit" className="button">Show cards</button>
-  </form>;
+  const {accounts, granted, account, params} = selection;
+  if (accounts.status === 'failed') return <Refusal error={accounts.error} retry={accounts.retry}/>;
+  if (!granted) return accounts.status === 'ready' ? <Refusal error={{kind: 'unexpected'}}/> : <p className="api-loading" role="status">Reading your accounts…</p>;
+  if (!granted.length) return <p className="api-notice api-no-accounts" role="status">No accounts are granted to you.</p>;
+  const listed = granted.some(item => item.account === account);
+  return <div className="api-account">
+    <label className="field" htmlFor={`${id}-account`}>Account<select id={`${id}-account`} name="account" value={account || ''}
+      onChange={event => setParams(new URLSearchParams(selectionHref(params, {account: event.target.value, card: null, unit: null}).slice(1)))}>
+      {account && !listed && <option value={account}>{account} · not in your accounts</option>}
+      {granted.map(item => <option key={item.account} value={item.account}>{item.name ? `${item.name} · ${item.account}` : item.account}</option>)}
+    </select></label>
+    <p className="api-label">{plural(granted.length, 'account')} granted to you</p>
+  </div>;
 }
 
 export function CardList({selection}) {
   const {cards, listed, cardId, params, account} = selection;
+  if (!account || cards.status === 'idle' && !selection.who) return null;
+  if (selection.granted && !selection.granted.length) return null;
   if (cards.status === 'loading' || cards.status === 'idle') return <p className="api-loading" role="status">Reading cards for {account}…</p>;
   if (cards.status === 'failed') return <Refusal error={cards.error} retry={cards.retry}/>;
   if (!listed) return <Refusal error={{kind: 'unexpected'}}/>;
@@ -187,15 +211,16 @@ const readinessPath = `${renewalFixture.paths.root}/readiness`;
 // publish time. It links only the pages that read from the server; the
 // walkthrough pages stay in the sidebar, marked as such.
 export function ApiRenewalHeader({page, selection}) {
-  const {account, cardId} = selection;
+  const {account, accountName, cardId} = selection;
   const card = selection.card.status === 'ready' ? selection.card.data : null;
-  const keep = new URLSearchParams({account});
+  const keep = new URLSearchParams(account ? {account} : {});
   if (cardId) keep.set('card', cardId);
-  const tabs = [['readiness', 'Readiness', `${readinessPath}?${keep}`], ['evidence', 'Evidence', `${renewalFixture.paths.evidence}?${keep}`]];
+  const query = String(keep) ? `?${keep}` : '';
+  const tabs = [['readiness', 'Readiness', readinessPath + query], ['evidence', 'Evidence', renewalFixture.paths.evidence + query]];
   return <header className="api-renewal-header">
     <div className="page-heading api-heading"><div><div className="eyebrow">RENEWAL WORKSPACE <span> / </span> READ FROM THE SERVER</div>
-      <h1>{account}<span className="company-dot">.</span></h1>
-      <div className="account-meta"><span>Account ID</span><i/>{card ? <span data-card-id={card.id}>Card {card.id} · published <Time value={card.published_at}/></span> : <span>No card open</span>}<i/><span>Renewal date, agreement and owner: not available from the server yet</span></div></div>
+      <h1>{accountName || account || 'No account chosen'}<span className="company-dot">.</span></h1>
+      <div className="account-meta">{account && <><span>Account ID {account}</span><i/></>}{card ? <span data-card-id={card.id}>Card {card.id} · published <Time value={card.published_at}/></span> : <span>No card open</span>}<i/><span>Renewal date, agreement and owner: not available from the server yet</span></div></div>
       <div className="heading-actions">{page === 'readiness' ? <Pill icon={GitBranch}>Readiness by transition</Pill> : <Pill icon={Server}>Read from the server</Pill>}
         {card && <button type="button" className="text-button" data-target={gapsTarget[page]} onClick={() => focusElement(document.getElementById(gapsTarget[page]), {block: 'start'})}><Info size={16}/>Sources and gaps</button>}</div></div>
     <div className="detail-nav"><nav aria-label="Renewal sections">{tabs.map(([id, label, to]) => <NavLink key={id} to={to} className={id === page ? 'selected' : ''} aria-current={id === page ? 'page' : undefined}>{label}</NavLink>)}</nav>

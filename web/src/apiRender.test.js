@@ -69,11 +69,13 @@ test('API mode: Evidence and Readiness read from the server and show no walkthro
   const page = await renderApp(renewalFixture.paths.evidence, store);
   assert.match(page, /class="plain-panel evidence-library api-evidence"/);
   assert.match(text(page), /Signed in as a demo principal Demo reviewer Demo principal · demo workspace/);
-  assert.match(text(page), /Reading cards for acc-003/);
+  // Without ?account= the page waits for the principal's accounts before it reads any cards.
+  assert.match(text(page), /Reading your accounts…/);
+  assert.doesNotMatch(text(page), /Reading cards for/);
   assert.doesNotMatch(page, /class="evidence-flow|data-record-id|library-row/);
   const rd = await renderApp(renewalFixture.paths.root + '/readiness?account=acc-001', storeOf({mode: 'api', session, error: null, ended: false}));
   assert.match(rd, /class="rd-page api-readiness"/);
-  assert.match(text(rd), /Reading cards for acc-001/);
+  assert.match(text(rd), /Reading your accounts… Reading cards for acc-001/);
   assert.doesNotMatch(rd, /data-check-result="(passed|failed)"/);
 });
 
@@ -159,7 +161,7 @@ const walkthroughHeader = () => [
   'View sources checked', 'Saved in this browser', 'Saving in this browser', 'Not saved in this browser', 'Append-only walkthrough',
   'Opened from your worklist', 'Return to worklist', 'Return to readiness', 'Return to history',
 ];
-const returns = '?' + new URLSearchParams({returnTo: '/queue', readinessReturn: renewalFixture.paths.root + '/readiness', historyReturn: renewalFixture.paths.history});
+const returns = '?' + new URLSearchParams({account: 'acc-003', returnTo: '/queue', readinessReturn: renewalFixture.paths.root + '/readiness', historyReturn: renewalFixture.paths.history});
 const signedIn = {mode: 'api', session: {signed_in: true, principal, csrf_token: 't', expires_at: '2027-01-15T23:00:00Z'}, error: null, ended: false};
 const apiStates = {
   'signed in': signedIn,
@@ -210,4 +212,37 @@ test('the API header shows the open card, and Sources and gaps targets the gaps 
   const closed = inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'readiness', selection: {account: 'acc-001', cardId: null, card: {status: 'idle'}}}));
   assert.match(text(closed), /No card open/);
   assert.doesNotMatch(closed, /Sources and gaps/);
+  const named = inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'evidence', selection: {account: 'acc-002', accountName: 'Named by the server', cardId: null, card: {status: 'idle'}}}));
+  assert.match(named, /<h1>Named by the server<span/);
+  assert.match(text(named), /Account ID acc-002/);
+  const none = inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'evidence', selection: {account: null, cardId: null, card: {status: 'idle'}}}));
+  assert.match(none, /<h1>No account chosen<span/);
+  assert.match(none, /href="\/renewals\/thornfield\/evidence"/);
+});
+
+// The picker's states, from what GET /api/v1/accounts returns.
+const pickerOf = (accounts, account) => ({account, params: new URLSearchParams(account ? {account} : {}), accounts, granted: accounts.status === 'ready' ? accounts.data.accounts : null});
+test('the account picker lists the granted accounts by name and ID, with the chosen one selected', () => {
+  const granted = {status: 'ready', data: {accounts: [{account: 'acc-002', name: 'Second <b>account</b>'}, {account: 'acc-003', name: 'Third account'}, {account: 'acc-004', name: ''}]}};
+  const html = inRouter(React.createElement(frame.AccountPicker, {selection: pickerOf(granted, 'acc-003')}));
+  const options = [...html.matchAll(/<option value="([^"]+)"( selected="")?>([^<]*)<\/option>/g)].map(match => [match[1], Boolean(match[2]), match[3]]);
+  assert.deepEqual(options, [['acc-002', false, 'Second &lt;b&gt;account&lt;/b&gt; · acc-002'], ['acc-003', true, 'Third account · acc-003'], ['acc-004', false, 'acc-004']]);
+  assert.match(html, /<label class="field" for="[^"]+">Account<select/);
+  assert.match(text(html), /3 accounts granted to you/);
+  // An account in the URL that is not granted stays visible as such; the server's refusal of it shows with the cards.
+  const outside = inRouter(React.createElement(frame.AccountPicker, {selection: pickerOf(granted, 'acc-001')}));
+  assert.match(outside, /<option value="acc-001" selected="">acc-001 · not in your accounts<\/option>/);
+});
+
+test('an empty account list says so, never an empty picker; a refused list shows the refusal', () => {
+  const empty = inRouter(React.createElement(frame.AccountPicker, {selection: pickerOf({status: 'ready', data: {accounts: []}}, null)}));
+  assert.match(text(empty), /^ ?No accounts are granted to you\. ?$/);
+  assert.doesNotMatch(empty, /<select|<option/);
+  const cards = inRouter(React.createElement(frame.CardList, {selection: {...pickerOf({status: 'ready', data: {accounts: []}}, 'acc-003'), who: 'p-1', cards: {status: 'idle'}, listed: null}}));
+  assert.equal(cards, '');
+  const refused = inRouter(React.createElement(frame.AccountPicker, {selection: pickerOf({status: 'failed', error: {kind: 'not_permitted', code: 'not_permitted'}}, null)}));
+  assert.match(refused, /data-refusal="not_permitted"/);
+  assert.doesNotMatch(refused, /<select|No accounts are granted/);
+  const loading = inRouter(React.createElement(frame.AccountPicker, {selection: pickerOf({status: 'loading'}, null)}));
+  assert.match(text(loading), /Reading your accounts…/);
 });

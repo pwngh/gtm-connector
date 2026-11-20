@@ -21,7 +21,7 @@
 .api-signin-form {display:grid; gap:4px; margin-top:8px}
 .api-signin-form .button {justify-self:start; margin-top:12px}
 .api-frame .field {display:flex; flex-direction:column; gap:8px; margin:12px 0 0; font-size:.875rem; font-weight:500; color:var(--muted)}
-.api-frame .field input {min-height:44px; font:inherit; font-size:1rem; font-weight:400; line-height:1.5; padding:10px 12px; border:1px solid #c7d3df; border-radius:8px; background:#fff; color:#17243a; max-width:100%}
+.api-frame .field :is(input,select) {min-height:44px; font:inherit; font-size:1rem; font-weight:400; line-height:1.5; padding:10px 12px; border:1px solid #c7d3df; border-radius:8px; background:#fff; color:#17243a; max-width:100%}
 
 .api-problem {display:flex; align-items:flex-start; gap:12px; padding:14px 16px; border:1px solid #e5c8a4; border-left-width:4px; border-radius:10px; background:#fff8ef; color:#5d3d14; margin:0}
 .api-problem>svg {flex-shrink:0; margin-top:2px}
@@ -31,8 +31,10 @@
 .api-problem .button {margin-top:10px}
 .api-notice,.api-loading {margin:0; padding:12px 0; color:var(--muted); font-size:1rem}
 
-.api-account {display:flex; align-items:flex-end; flex-wrap:wrap; gap:12px 14px; padding:4px 0 18px; border-bottom:1px solid var(--line)}
-.api-account .field {flex:0 1 280px; margin:0}
+.api-account {display:flex; align-items:flex-end; flex-wrap:wrap; gap:8px 16px; padding:4px 0 18px; border-bottom:1px solid var(--line)}
+.api-account .field {flex:0 1 420px; min-width:0; margin:0}
+.api-account .field select {width:100%}
+.api-account .api-label {margin:0 0 10px}
 .api-cards {padding:16px 0 4px}
 .api-card-list {list-style:none; margin:8px 0 0; padding:0; display:grid; gap:8px}
 .api-card-list a {display:flex; flex-direction:column; justify-content:center; min-height:44px; padding:10px 14px; border:1px solid var(--line); border-radius:9px; color:inherit; text-decoration:none; font-size:1rem; line-height:1.5}
@@ -72,7 +74,7 @@
 
 html[data-theme='dark'] :is(.api-session,.api-signin) {background:#131d28; border-color:#2f3f51; color:var(--ink)}
 html[data-theme='dark'] .api-session>svg {color:#a1dcba}
-html[data-theme='dark'] .api-frame .field input {background:#0f1720; border-color:#4b637c; color:#edf2f8; color-scheme:dark}
+html[data-theme='dark'] .api-frame .field :is(input,select) {background:#0f1720; border-color:#4b637c; color:#edf2f8; color-scheme:dark}
 html[data-theme='dark'] .api-problem {background:#2a1f12; border-color:#7a5a30; color:#f3d7ae}
 html[data-theme='dark'] .api-card-list a[aria-current='true'] {border-color:#8fb1ff; box-shadow:inset 3px 0 #8fb1ff}
 html[data-theme='dark'] .evidence-library .api-quote {border-left-color:#55789b}
@@ -81,5 +83,4 @@ html[data-theme='dark'] .evidence-library .api-quote {border-left-color:#55789b}
   .api-session,.api-signin {padding:14px}
   .api-session .button {flex:1 1 100%}
   .api-account .field {flex:1 1 100%}
-  .api-account .button {flex:1 1 100%}
 }

@@ -2,7 +2,7 @@ import React, {useEffect, useRef} from 'react';
 import {Link} from 'react-router';
 import {CircleDashed, Database, Info, MessageSquare, Phone, X} from 'lucide-react';
 import {gapDispositions, unitFacts} from './api.js';
-import {ApiFrame, ApiRenewalHeader, AccountForm, CardFacts, CardList, Refusal, Time, gapsTarget, selectionHref, useApiRead, useCardSelection} from './ApiFrame.jsx';
+import {ApiFrame, ApiRenewalHeader, AccountPicker, CardFacts, CardList, Refusal, Time, gapsTarget, selectionHref, useApiRead, useCardSelection} from './ApiFrame.jsx';
 import {useServer} from './ServerSwitch.jsx';
 import {Pill} from './WorkspaceControls.jsx';
 
@@ -133,11 +133,11 @@ export function CardEvidence({card, receiptFor, params, who}) {
 }
 
 function EvidenceFromServer({selection}) {
-  const {account, params, card, who} = selection;
+  const {params, card, who} = selection;
   const receiptFor = useReceipts(card.status === 'ready' ? card.data : null, who);
   return <section className="plain-panel evidence-library api-evidence">
     <div className="panel-header"><div><div className="section-kicker">SOURCE LIBRARY · FROM THE SERVER</div><h2>The sealed card, unit by unit.</h2></div></div>
-    <AccountForm account={account} params={params}/>
+    <AccountPicker selection={selection}/>
     <CardList selection={selection}/>
     {selection.cardId && selection.listed && (card.status === 'failed' ? <Refusal error={card.error} retry={card.retry}/>
       : card.status !== 'ready' ? <p className="api-loading" role="status">Reading the card…</p>

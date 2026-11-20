@@ -2,7 +2,7 @@ import React, {useId} from 'react';
 import {Link} from 'react-router';
 import {ArrowUpRight, CircleDashed, Clock, GitBranch, ShieldCheck} from 'lucide-react';
 import {gapDispositions, unitFacts} from './api.js';
-import {ApiFrame, ApiRenewalHeader, AccountForm, CardList, Refusal, Time, gapsTarget, useCardSelection} from './ApiFrame.jsx';
+import {ApiFrame, ApiRenewalHeader, AccountPicker, CardList, Refusal, Time, gapsTarget, useCardSelection} from './ApiFrame.jsx';
 import {useServer} from './ServerSwitch.jsx';
 import {readinessFixture} from './renewalFixtures.js';
 import './readiness.css';
@@ -81,11 +81,11 @@ export function CardReadiness({card, evidenceHref}) {
 }
 
 function ReadinessFromServer({selection}) {
-  const {account, params, card} = selection;
+  const {account, card} = selection;
   const evidence = new URLSearchParams({account});
   if (selection.cardId) evidence.set('card', selection.cardId);
   return <>
-    <div className="api-picker"><AccountForm account={account} params={params}/><CardList selection={selection}/></div>
+    <div className="api-picker"><AccountPicker selection={selection}/><CardList selection={selection}/></div>
     {selection.cardId && selection.listed && (card.status === 'failed' ? <Refusal error={card.error} retry={card.retry}/>
       : card.status !== 'ready' ? <p className="api-loading" role="status">Reading the card…</p>
         : <CardReadiness card={card.data} evidenceHref={`${readinessFixture.paths.evidence}?${evidence}`}/>)}

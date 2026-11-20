@@ -62,12 +62,13 @@ test('sign-in and sign-out send the CSRF header, JSON and same-origin credential
 });
 
 test('reads carry no CSRF header and escape their path segments', async () => {
-  const {fetch, calls} = fakeFetch({json: {account: 'a/b', cards: []}}, {json: {}}, {json: {}});
+  const {fetch, calls} = fakeFetch({json: {accounts: []}}, {json: {account: 'a/b', cards: []}}, {json: {}}, {json: {}});
   const api = createApiClient(fetch);
+  await api.accounts();
   await api.accountCards('a/b');
   await api.card('card 1');
   await api.unit('c-1', 5);
-  assert.deepEqual(calls.map(call => call.path), ['/api/v1/accounts/a%2Fb/cards', '/api/v1/cards/card%201', '/api/v1/cards/c-1/units/5']);
+  assert.deepEqual(calls.map(call => call.path), ['/api/v1/accounts', '/api/v1/accounts/a%2Fb/cards', '/api/v1/cards/card%201', '/api/v1/cards/c-1/units/5']);
   for (const call of calls) {
     assert.equal(call.method, 'GET');
     assert.equal(call.credentials, 'same-origin');
