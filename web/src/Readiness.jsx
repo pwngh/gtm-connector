@@ -6,6 +6,7 @@ import {
   readinessSelectionKey, readinessStates, selectReadiness,
 } from './readiness.js';
 import {closeReadinessOnEscape, focusReadinessElement, moveReadinessFocus, readinessFocusTarget, restoreReadinessFocus} from './readinessBrowser.js';
+import {historyHref} from './history.js';
 import './readiness.css';
 
 const icons = {passed: CheckCircle2, failed: CircleX, not_evaluated: CircleDashed, not_applicable: MinusCircle};
@@ -143,13 +144,13 @@ function Coverage({coverage, document, unitLink}) {
   </section>;
 }
 
-function EvaluationChanges({journal, entryLink, preview}) {
+function EvaluationChanges({journal, entryLink, historyLink, preview}) {
   const {current, previous, changes} = journal;
   return <section className="rd-changes" aria-labelledby="readiness-changes">
     <div className="rd-section-heading"><div><span className="rd-kicker">EVALUATION RECORD</span><h2 id="readiness-changes" tabIndex={-1}>What changed, and why</h2></div><History size={22} aria-hidden="true"/></div>
     {preview && <p className="rd-detail">The saved evaluation log is unchanged by the local response example above.</p>}
     <div className="rd-evaluation-pair"><div><span className="rd-label">Latest inputs as of</span><strong><Time value={current.evaluatedAt}/></strong><span className="rd-label">{current.evaluationId}</span></div><div><span className="rd-label">Previous inputs as of</span><strong>{previous ? <Time value={previous.evaluatedAt}/> : 'Not recorded'}</strong><span className="rd-label">{previous?.evaluationId || 'No prior result has been invented.'}</span></div></div>
-    <div className="rd-change-cause"><span className="rd-kicker">{changes.cause.label}</span><strong>{changes.cause.title}</strong><p>{changes.cause.detail}</p><p className="rd-label">Actor: {changes.cause.actor || 'Not recorded by the existing walkthrough'}</p></div>
+    <div className="rd-change-cause"><span className="rd-kicker">{changes.cause.label}</span><strong>{changes.cause.title}</strong><p>{changes.cause.detail}</p><p className="rd-label">Actor: {changes.cause.actor || 'Not recorded by the existing walkthrough'}</p>{current.lastEventId && historyLink(current.lastEventId)}</div>
     {!previous ? <p className="rd-detail">The first evaluated result is retained. Future walkthrough changes will show their requirement and check differences here.</p> : <>
       <h3>Changed requirements</h3>{changes.requirements.length ? <ul className="rd-change-list">{changes.requirements.map(change => <li key={change.id}>
         {entryLink('requirement', change.id, change.title, `change:requirement:${change.id}`)}
@@ -264,7 +265,7 @@ export default function Readiness({journal, onAction, children}) {
     </div>
     {view.unitSelection && <UnitInspector selection={view.unitSelection} onClose={closeSelection} unitLink={unitLink}/>}
     <Coverage coverage={view.coverage} document={view.document} unitLink={unitLink}/>
-    <EvaluationChanges journal={journal} entryLink={entryLink} preview={view.status !== 'ready'}/>
+    <EvaluationChanges journal={journal} entryLink={entryLink} historyLink={eventId => <Link className="rd-inline-link" data-readiness-focus="history-recording" to={readinessActionHref({href: historyHref('', {entry: eventId, view: 'recorded', as_of: eventId}, view.paths)}, params, view.paths)} state={{...navigation.state, readinessRestoreFocus: null, readinessActionOpener: 'history-recording'}}>Trace this recording in History<ArrowUpRight size={17} aria-hidden="true"/></Link>} preview={view.status !== 'ready'}/>
     <details className="rd-examples"><summary data-readiness-focus="response-summary">Local evaluation examples</summary><p>Preview an unevaluated result or a failed refresh. These controls never change workflow records, source text, or saved evaluations.</p><label htmlFor={`${id}-response`}>Simulated evaluation<select id={`${id}-response`} name="evaluation" data-readiness-focus="response-control" value={view.location.evaluation} onChange={event => update({evaluation: event.target.value === 'current' ? null : event.target.value})}>{view.examples.map(example => <option key={example.id} value={example.id}>{example.label}</option>)}</select></label></details>
     <p className="rd-footnote"><Check size={16} aria-hidden="true"/>{view.scope}</p>
   </div>;

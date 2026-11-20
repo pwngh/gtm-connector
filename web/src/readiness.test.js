@@ -796,7 +796,7 @@ test('the first local evaluation always has an initial cause, and later raw even
   assert.equal(after.changes.cause.detail, decided().history.at(-1).detail);
   assert.ok(after.changes.cause.label);
   assert.notEqual(after.changes.cause.label, first.changes.cause.label);
-  assert.equal(after.changes.cause.actor, null);
+  assert.equal(after.changes.cause.actor, decided().customerReview.recordedBy);
 });
 
 test('input identities distinguish document and review records from their work-item revisions', () => {

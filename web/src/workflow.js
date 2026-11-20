@@ -1,4 +1,5 @@
 import {fixtureEvidence, initialState, fixturePeople, renewalFixture} from './renewalFixtures.js';
+import {recordHistoryInputs} from './historyRecording.js';
 export {fixtureEvidence, initialState} from './renewalFixtures.js';
 
 export const workflowTransitionChecks = {
@@ -178,11 +179,12 @@ function planSnapshot(plan) {
 
 function changed(state, action, patch, title, detail = '', evidenceSnapshot = null, eventDetails = {}) {
   const at = action.at || new Date(Date.parse(renewalFixture.workflowClockStart) + state.history.length * 60000).toISOString();
+  const historyRecord = recordHistoryInputs(state, patch, action);
   return {
     ...state,
     ...patch,
     error: null,
-    history: [...state.history, { id: `activity-${state.history.length + 1}`, type: action.type, at, title, detail, ...(evidenceSnapshot ? { evidenceSnapshot } : {}), ...eventDetails }],
+    history: [...state.history, { id: `activity-${state.history.length + 1}`, type: action.type, at, recordedAt: at, eventAt: historyRecord.eventAt, actor: historyRecord.actor, reason: historyRecord.reason, title, detail, historyRecord, ...(evidenceSnapshot ? { evidenceSnapshot } : {}), ...eventDetails }],
   };
 }
 
