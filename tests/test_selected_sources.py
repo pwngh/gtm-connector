@@ -21,6 +21,7 @@ from unittest import mock
 
 import httpx2
 
+from gtm_connector import profile
 from gtm_connector.calls_import import parse_transcript, select_excerpt, store_import
 from gtm_connector.call_workflow import resolve_call_account
 from gtm_connector.client import LocalClient
@@ -383,10 +384,11 @@ class SelectedSourceTests(SelectedFixture, unittest.TestCase):
         with Runtime(self.state, calls_backend="imported", selection=selection) as runtime, \
                 LocalClient(runtime.config) as owner:
             token = owner.authorize(["crm:read", "calls:read"])
-            self.refused(owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"}),
-                         "calls_not_imported")
-            self.assertEqual(self.artifacts(), [])
+            empty = self.ok(owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"}))["brief"]
+            self.assertIn("  Calls: no transcript is imported for this account.", empty["text"])
             import_excerpt(runtime, b"A first invented renewal discussion.")
+            self.refused(owner.call(token, "read_renewal_brief", {"brief_id": empty["brief_id"]}),
+                         "brief_source_changed")
             prepared = self.ok(owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"}))["brief"]
             self.assertEqual(prepared["sources"]["calls"], "imported_transcript")
             self.ok(owner.call(token, "read_renewal_brief", {"brief_id": prepared["brief_id"]}))
@@ -560,6 +562,7 @@ class SelectedLimitsTests(SelectedFixture, unittest.TestCase):
         path.write_text(json.dumps({"schema_version": 1, "accounts": [
             {"account_id": "acc-007", "slack": True}, {"account_id": "acc-012", "slack": False}]}))
         os.chmod(path, 0o600)
+        profile.save(self.state, profile.DEMO)
         process = subprocess.Popen(
             [sys.executable, "-m", "gtm_connector", "serve", "--json", "--state-dir", str(self.state),
              "--selection", str(path)], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -581,15 +584,17 @@ class SelectedLimitsTests(SelectedFixture, unittest.TestCase):
         bad = self.root / "bad.json"
         bad.write_text('{"schema_version": 1, "accounts": []}')
         os.chmod(bad, 0o600)
+        profile.save(self.root / "sf-state", {"crm": {"provider": "salesforce", "org": "invented-alias",
+                                                      "environment": "developer"}})
         result = subprocess.run(
-            [sys.executable, "-m", "gtm_connector", "serve", "--json", "--crm-backend", "salesforce",
-             "--sf-org", "invented-alias", "--state-dir", str(self.root / "sf-state"), "--selection", str(bad)],
+            [sys.executable, "-m", "gtm_connector", "serve", "--json", "--state-dir", str(self.root / "sf-state"),
+             "--selection", str(bad)],
             cwd=ROOT, capture_output=True, text=True, timeout=60, check=False,
             env={**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}"})
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn("selection", (result.stdout + result.stderr).lower())
         self.assertFalse(marker.exists())
-        self.assertFalse((self.root / "sf-state").exists())
+        self.assertEqual([path.name for path in (self.root / "sf-state").iterdir()], ["profile.json"])
 
 
 ROOT = Path(__file__).resolve().parents[1]

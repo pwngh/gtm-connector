@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import httpx2
 
+from gtm_connector import profile
 from gtm_connector.audit import read_audit
 from gtm_connector.cli import main
 from gtm_connector.salesforce import SalesforceReadOnlyAdapter
@@ -33,6 +34,17 @@ class CallsCLITests(unittest.TestCase):
         self.export.write_text('\n'.join(f'Invented line {number}.' for number in range(1, 31)) + '\n')
         self.env = {key: value for key, value in os.environ.items() if not key.startswith('SALESFORCE_')}
         self.requests = []
+        self.connected()
+
+    def connected(self, crm=None, *, calls=True, state=None):
+        """Save the profile connect saves: transcripts beside the demo CRM, or beside an invented org."""
+        sources = {**profile.DEMO, 'calls': {'provider': 'imported'}} if crm is None else {
+            'crm': {'provider': 'salesforce', 'org': crm, 'environment': 'developer'},
+            **({'calls': {'provider': 'imported'}} if calls else {})}
+        profile.save(state or self.state, sources)
+
+    def assert_only_the_profile(self):
+        self.assertEqual({path.name for path in self.state.iterdir()}, {'profile.json'})
 
     def invoke(self, *arguments, json_output=True):
         args = [*arguments, '--state-dir', str(self.state)]
@@ -143,7 +155,8 @@ class CallsCLITests(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())['imports'][0]['import_id'], imported['import_id'])
         self.assertEqual(err.getvalue(), '')
 
-    def test_import_defaults_to_separate_import_state(self):
+    def test_import_defaults_to_the_one_state_folder(self):
+        self.connected(state=self.root / 'var/v2')
         previous = Path.cwd()
         try:
             os.chdir(self.root)
@@ -153,8 +166,8 @@ class CallsCLITests(unittest.TestCase):
             os.chdir(previous)
         self.assertEqual(code, 0, err.getvalue())
         self.assertEqual(json.loads(out.getvalue())['account_id'], 'acc-003')
-        self.assertTrue((self.root / 'var/imported-calls/imports.sqlite3').is_file())
-        self.assertFalse((self.root / 'var/v2').exists())
+        self.assertTrue((self.root / 'var/v2/imports.sqlite3').is_file())
+        self.assertEqual([path.name for path in (self.root / 'var').iterdir()], ['v2'])
 
     def test_list_paginates_metadata_without_transcript_text(self):
         from gtm_connector.call_workflow import resolve_call_account
@@ -218,8 +231,8 @@ class CallsCLITests(unittest.TestCase):
         code, out, err = self.import_file(json_output=False)
         self.assertEqual(code, 0, err)
         self.assertEqual(err.count('Sources:'), 1)
-        self.assertIn('CRM uses demo fixtures; calls use user-supplied transcript exports.', err)
-        self.assertIn('Transcript provider identity and statements are unverified.', err)
+        self.assertIn('Sources: CRM is demo data; calls are imported transcripts, whose provider and statements '
+                      'are unverified; Slack is demo data.', err)
         self.assertIn('Transcript imported.', out)
         self.assertNotIn('Invented line 1.', out + err)
 
@@ -259,7 +272,7 @@ class CallsCLITests(unittest.TestCase):
     def test_speaker_names_are_read_only_when_declared_and_only_from_a_file_laid_out_that_way(self):
         # The fixture's lines open with no name, so the statement is refused before any state is opened.
         self.error(self.import_file('--speaker-names'), 2)
-        self.assertFalse(self.state.exists())
+        self.assert_only_the_profile()
         self.export.write_text('Jordan Lee: We will sign on Friday.\nMorgan Reed: Noted.\n')
         plain = self.success(self.import_file())
         named = self.success(self.import_file('--speaker-names'))
@@ -274,49 +287,48 @@ class CallsCLITests(unittest.TestCase):
         with patch('sys.stdout.isatty', return_value=True):
             self.assertEqual(human_result('calls', listed).count('Speaker names: the name that opens each line.'), 1)
         self.assertNotEqual(plain['import_id'], named['import_id'])
-        code, out, err = self.invoke('brief', 'acc-003', '--calls-backend', 'imported')
+        code, out, err = self.invoke('brief', 'acc-003')
         self.assertEqual(code, 0, err)
         self.assertEqual([(unit['speaker'], unit['text']) for unit in json.loads(out)['units']
-                          if unit['kind'] == 'sentence'],
+                          if unit['kind'] == 'sentence' and unit['source'] == 'calls'],
                          [('Jordan Lee', 'We will sign on Friday.'), ('Morgan Reed', 'Noted.')])
 
-    def test_imported_brief_banner_names_slack_only_when_requested(self):
+    def test_imported_brief_banner_names_each_source_once(self):
         self.success(self.import_file())
-        for include_slack in (False, True):
-            code, out, err = self.invoke('brief', 'acc-003', '--calls-backend', 'imported',
-                                        *(['--with-slack'] if include_slack else []), json_output=False)
-            self.assertEqual(code, 0, err)
-            self.assertIn('Brief:', out)
-            self.assertEqual(err.count('Sources:'), 1)
-            self.assertEqual('Slack' in err, include_slack)
+        code, out, err = self.invoke('brief', 'acc-003', json_output=False)
+        self.assertEqual(code, 0, err)
+        self.assertIn('Brief:', out)
+        self.assertEqual(err, 'Sources: CRM is demo data; calls are imported transcripts, whose provider and '
+                              'statements are unverified; Slack is demo data.\n')
 
-    def test_salesforce_brief_banner_follows_requested_slack_for_each_calls_mode(self):
+    def test_salesforce_brief_banner_and_reads_follow_what_is_connected(self):
         artifact = {'brief_id': 'invented-brief', 'as_of': '2027-01-15', 'text': 'Invented checked text.'}
-        for calls_backend in ('fixture', 'imported'):
-            for include_slack in (False, True):
-                with self.subTest(calls=calls_backend, slack=include_slack), \
-                        patch.object(SalesforceReadOnlyAdapter, 'from_env', return_value=object()), \
-                        patch('gtm_connector.runtime.Runtime'), \
-                        patch('gtm_connector.briefing.create_brief', return_value=artifact) as create:
-                    code, out, err = self.invoke('brief', ACCOUNT, '--crm-backend', 'salesforce',
-                                                '--calls-backend', calls_backend,
-                                                *(['--with-slack'] if include_slack else []), json_output=False)
-                self.assertEqual(code, 0, err)
-                self.assertEqual(err.count('Sources:'), 1)
-                self.assertEqual('Slack' in err, include_slack)
-                self.assertEqual(create.call_args.kwargs['include_slack'], include_slack)
-        self.assertFalse(self.state.exists())
+        for calls in (False, True):
+            self.connected('invented-alias', calls=calls)
+            with self.subTest(calls=calls), \
+                    patch.object(SalesforceReadOnlyAdapter, 'from_sf'), \
+                    patch('gtm_connector.runtime.Runtime') as runtime, \
+                    patch('gtm_connector.briefing.create_brief', return_value=artifact) as create:
+                code, out, err = self.invoke('brief', ACCOUNT, json_output=False)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(err.count('Sources:'), 1)
+            self.assertIn('calls are imported transcripts' if calls else 'calls are not connected', err)
+            self.assertIn('Slack is not connected', err)
+            self.assertNotIn('demo', err)
+            self.assertEqual((runtime.call_args.kwargs['calls_backend'], runtime.call_args.kwargs['slack_backend']),
+                             ('imported' if calls else 'none', 'none'))
+            # A card asks for every connected source. A source that is not connected is never called.
+            self.assertIs(create.call_args.kwargs['include_slack'], True)
+        self.assert_only_the_profile()
 
     def test_action_conflicts_fail_before_source_or_credentials_or_state(self):
         cases = [
             ['calls', 'import', str(self.export)],
             ['calls', 'import', str(self.export), '--account', 'acc-003', '--full'],
             ['calls', 'import', str(self.export), '--account', 'acc-003', '--after', 'note-' + 'a' * 64],
-            ['calls', 'import', str(self.export), '--account', 'acc-003', '--sf-environment', 'developer'],
-            ['calls', 'import', str(self.export), '--account', 'acc-003', '--crm-backend', 'salesforce'],
             ['calls', 'import', str(self.export), '--account-number', 'INVENTED-001'],
             ['calls', 'list', str(self.export)], ['calls', 'list', '--full'],
-            ['calls', 'list', '--crm-backend', 'sqlite'], ['calls', 'list', '--sf-org', 'private-alias'],
+            ['calls', 'list', '--called-at', '2027-01-15T10:00:00Z'], ['calls', 'list', '--reassign'],
             ['calls', 'inspect', 'note-' + 'a' * 64, '--account', 'acc-003'],
             ['calls', 'inspect', 'note-' + 'a' * 64, '--lines', '1:2'],
             ['calls', 'inspect'], ['calls', 'list', '--after', 'private-cursor'],
@@ -324,10 +336,10 @@ class CallsCLITests(unittest.TestCase):
         for arguments in cases:
             with self.subTest(arguments=arguments), \
                     patch.object(Path, 'lstat', side_effect=AssertionError('Export must remain unopened')), \
-                    patch.object(SalesforceReadOnlyAdapter, 'from_env') as factory:
+                    patch.object(SalesforceReadOnlyAdapter, 'from_sf') as factory:
                 self.error(self.invoke(*arguments), 2)
                 factory.assert_not_called()
-            self.assertFalse(self.state.exists())
+            self.assert_only_the_profile()
 
     def test_invalid_metadata_and_ranges_fail_before_source_access(self):
         cases = [('--called-at', '2027-01-15'), ('--called-at', '2027-01-15T10:00:00'),
@@ -336,23 +348,24 @@ class CallsCLITests(unittest.TestCase):
         for options in cases:
             with self.subTest(options=options), patch.object(Path, 'lstat', side_effect=AssertionError('No source read')):
                 self.error(self.import_file(*options), 2)
-            self.assertFalse(self.state.exists())
+            self.assert_only_the_profile()
 
     def test_account_number_controls_fail_before_credentials_runtime_or_resolution(self):
+        self.connected('invented-alias')
         for character in ('\x7f', '\x80', '\x85', '\x9f', '\ud800'):
             with self.subTest(character=repr(character)), \
-                    patch.object(SalesforceReadOnlyAdapter, 'from_env',
+                    patch.object(SalesforceReadOnlyAdapter, 'from_sf',
                                  side_effect=AssertionError('No credential load')) as credentials, \
                     patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No state')) as runtime, \
                     patch('gtm_connector.call_workflow.resolve_call_account',
                           side_effect=AssertionError('No CRM resolution')) as resolve:
-                error = self.error(self.invoke('calls', 'import', str(self.export), '--crm-backend', 'salesforce',
+                error = self.error(self.invoke('calls', 'import', str(self.export),
                                                '--account-number', 'INVENTED' + character + '001'), 2)
                 self.assertIn('AccountNumber', error['message'])
                 credentials.assert_not_called()
                 runtime.assert_not_called()
                 resolve.assert_not_called()
-            self.assertFalse(self.state.exists())
+            self.assert_only_the_profile()
 
     def test_blank_vtt_identifier_fails_before_runtime_or_resolution(self):
         self.export = self.root / 'blank-id.vtt'
@@ -364,7 +377,7 @@ class CallsCLITests(unittest.TestCase):
             self.assertIn('calls_import_invalid', error['message'])
             runtime.assert_not_called()
             resolve.assert_not_called()
-        self.assertFalse(self.state.exists())
+        self.assert_only_the_profile()
 
     def test_invalid_binary_timing_and_limits_fail_without_state(self):
         cases = [('bad.txt', b'private-text\x00'), ('bad.vtt', b'WEBVTT\n\n00:02.000 --> 00:01.000\nprivate\n'),
@@ -374,7 +387,7 @@ class CallsCLITests(unittest.TestCase):
                 self.export = self.root / filename
                 self.export.write_bytes(raw)
                 self.error(self.import_file(), 2)
-                self.assertFalse(self.state.exists())
+                self.assert_only_the_profile()
 
     def test_symlink_and_fifo_refuse_without_opening_them(self):
         target = self.export
@@ -382,17 +395,25 @@ class CallsCLITests(unittest.TestCase):
             path = self.root / (kind + '.txt')
             path.symlink_to(target) if kind == 'symlink' else os.mkfifo(path)
             self.export = path
-            with patch('gtm_connector.cli.os.open', side_effect=AssertionError('Must not open nonregular input')):
+            real_open = os.open
+
+            def refuse_the_export(opened, *args, **kwargs):
+                if Path(opened) == path:
+                    raise AssertionError('Must not open nonregular input')
+                return real_open(opened, *args, **kwargs)
+
+            with patch('gtm_connector.cli.os.open', side_effect=refuse_the_export):
                 self.error(self.import_file(), 2)
-            self.assertFalse(self.state.exists())
+            self.assert_only_the_profile()
 
     def test_unreadable_file_error_is_fixed_without_raw_exception(self):
         with patch.object(Path, 'lstat', side_effect=PermissionError('private filesystem secret')):
             error = self.error(self.import_file(), 1)
         self.assertNotIn('private filesystem secret', error['message'])
-        self.assertFalse(self.state.exists())
+        self.assert_only_the_profile()
 
     def test_missing_offline_state_never_initializes_it(self):
+        self.state = self.root / 'missing'
         for action in [('list',), ('inspect', 'note-' + 'a' * 64)]:
             with self.subTest(action=action):
                 error = self.error(self.invoke('calls', *action), 3)
@@ -407,37 +428,37 @@ class CallsCLITests(unittest.TestCase):
         with Runtime(self.state):
             pass
         before = {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}
-        error = self.error(self.invoke('brief', 'acc-003', '--calls-backend', 'imported'), 3)
+        error = self.error(self.invoke('brief', 'acc-003'), 3)
         self.assertIn('Imported transcripts cannot reuse fixture calls', error['message'])
         self.assertIn('existing import state folder', error['message'])
         self.assertNotIn('fresh', error['message'])
         self.assertNotIn('Repeat this command with --state-dir', error['message'])
         self.assertEqual(error['next'], 'gtm-connector calls import --help')
         self.assertEqual(before, {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()})
-        # An explicit import can initialize a new folder before daily use.
+        # An import names a fresh folder to connect and import into.
         import_error = self.error(self.import_file(), 3)
-        self.assertIn('Repeat this command with --state-dir', import_error['message'])
+        self.assertIn('Connect the sources again with --state-dir ' + str(self.root / 'state-fresh'),
+                      import_error['message'])
 
     def test_imported_brief_with_wrong_org_recovers_to_original_connection_and_state(self):
+        self.connected('invented-original')
         with patch.object(SalesforceReadOnlyAdapter, 'from_sf', return_value=self.reader()):
-            self.success(self.import_file('--crm-backend', 'salesforce', '--sf-org', 'invented-original',
-                                          account=ACCOUNT))
+            self.success(self.import_file(account=ACCOUNT))
         before = {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}
         prior_requests = len(self.requests)
         other = self.reader(organization='00D000000000002AAA')
         with patch.object(SalesforceReadOnlyAdapter, 'from_sf', return_value=other):
-            error = self.error(self.invoke('brief', ACCOUNT, '--crm-backend', 'salesforce',
-                                           '--sf-org', 'invented-other', '--calls-backend', 'imported'), 3)
+            error = self.error(self.invoke('brief', ACCOUNT), 3)
         self.assertEqual(error['code'], 'refused')
         self.assertIn('source_identity_mismatch', error['message'])
         self.assertIn('different Salesforce connection or environment', error['message'])
         self.assertIn('original CRM connection', error['message'])
         self.assertIn('existing import state folder', error['message'])
-        self.assertIn('original --sf-org or environment credentials', error['message'])
-        self.assertIn('original --sf-environment value', error['message'])
+        self.assertIn('Connect the original org and environment with gtm-connector connect salesforce',
+                      error['message'])
         self.assertNotIn('fresh', error['message'])
         self.assertEqual(error['next'], 'gtm-connector calls import --help')
-        for private in ('invented-original', 'invented-other', '00D000000000001AAA', '00D000000000002AAA'):
+        for private in ('invented-original', '00D000000000001AAA', '00D000000000002AAA'):
             self.assertNotIn(private, json.dumps(error))
         self.assertEqual(before, {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()})
         self.assertEqual(len(self.requests), prior_requests + 1)
@@ -445,9 +466,10 @@ class CallsCLITests(unittest.TestCase):
 
     def test_salesforce_account_number_resolves_once_through_audited_search(self):
         reader = self.reader()
-        with patch.object(SalesforceReadOnlyAdapter, 'from_env', return_value=reader):
-            result = self.success(self.invoke('calls', 'import', str(self.export), '--account-number', 'INVENTED-001',
-                                             '--crm-backend', 'salesforce'))
+        self.connected('invented-alias')
+        with patch.object(SalesforceReadOnlyAdapter, 'from_sf', return_value=reader):
+            result = self.success(self.invoke('calls', 'import', str(self.export),
+                                              '--account-number', 'INVENTED-001'))
         self.assertEqual(result['account_id'], ACCOUNT)
         self.assertEqual(len(self.requests), 2)
         query = self.requests[-1].url.params['q']
@@ -459,43 +481,46 @@ class CallsCLITests(unittest.TestCase):
         self.assertEqual(receipt['audit_id'], result['resolution_receipt_id'])
 
     def test_native_salesforce_fallback_uses_audited_account_read(self):
-        with patch.object(SalesforceReadOnlyAdapter, 'from_env', return_value=self.reader()):
-            result = self.success(self.import_file('--crm-backend', 'salesforce', account=ACCOUNT))
+        self.connected('invented-alias')
+        with patch.object(SalesforceReadOnlyAdapter, 'from_sf', return_value=self.reader()):
+            result = self.success(self.import_file(account=ACCOUNT))
         self.assertEqual(result['account_id'], ACCOUNT)
         receipt, = read_audit(self.state / 'audit.sqlite3')
         self.assertEqual(receipt['tool'], 'get_account')
         self.assertEqual(len(self.requests), 4)
 
     def test_ambiguous_salesforce_number_never_publishes_import(self):
-        with patch.object(SalesforceReadOnlyAdapter, 'from_env', return_value=self.reader(duplicate=True)):
-            error = self.error(self.invoke('calls', 'import', str(self.export), '--account-number', 'INVENTED-001',
-                                          '--crm-backend', 'salesforce'), 3)
+        self.connected('invented-alias')
+        with patch.object(SalesforceReadOnlyAdapter, 'from_sf', return_value=self.reader(duplicate=True)):
+            error = self.error(self.invoke('calls', 'import', str(self.export),
+                                           '--account-number', 'INVENTED-001'), 3)
         self.assertIn('calls_account_ambiguous', error['message'])
         listed = self.success(self.invoke('calls', 'list'))
         self.assertEqual(listed['imports'], [])
 
-    def test_direct_sqlite_inspection_refuses_calls_backend_flags(self):
-        for command, extra in [('accounts', []), ('account', ['acc-003'])]:
-            code, out, err = self.invoke(command, *extra, '--calls-backend', 'imported')
-            self.assertEqual(code, 2, err)
-            self.assertEqual(out, '')
-            self.assertIn('--calls-backend', err)
-            self.assertFalse(self.state.exists())
+    def test_an_import_needs_transcripts_connected_and_never_writes_into_demo_call_notes(self):
+        profile.save(self.state, profile.DEMO)
+        with patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No state')), \
+                patch.object(Path, 'lstat', side_effect=AssertionError('Export must remain unopened')):
+            error = self.error(self.import_file(), 2)
+        self.assertEqual(error['message'], 'Transcripts are not connected. Run gtm-connector connect calls first.')
+        self.assertEqual(error['next'], 'gtm-connector connect --help')
+        self.assert_only_the_profile()
 
-    def test_imported_daily_commands_require_explicit_state_before_credentials_or_runtime(self):
+    def test_daily_commands_in_the_default_folder_refuse_before_credentials_or_runtime_when_nothing_is_connected(self):
         previous = Path.cwd()
         try:
             os.chdir(self.root)
-            for command in (['serve'], ['brief', ACCOUNT], ['accounts'], ['account', ACCOUNT]):
+            for command in (['serve'], ['brief', ACCOUNT], ['accounts'], ['account', ACCOUNT],
+                            ['calls', 'import', str(self.export), '--account', ACCOUNT]):
                 with self.subTest(command=command), \
-                        patch.object(SalesforceReadOnlyAdapter, 'from_env',
+                        patch.object(SalesforceReadOnlyAdapter, 'from_sf',
                                      side_effect=AssertionError('No credential load')) as credentials, \
                         patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No state')) as runtime, \
                         redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
-                    code = main([*command, '--crm-backend', 'salesforce', '--calls-backend', 'imported', '--json'])
+                    code = main([*command, '--json'])
                     error = self.error((code, out.getvalue(), err.getvalue()), 2)
-                    self.assertIn('--state-dir', error['message'])
-                    self.assertIn('same import state folder', error['message'])
+                    self.assertEqual(error['message'], str(profile.NotConnected()))
                     credentials.assert_not_called()
                     runtime.assert_not_called()
                 self.assertFalse((self.root / 'var').exists())
@@ -505,8 +530,7 @@ class CallsCLITests(unittest.TestCase):
     def test_abbreviated_explicit_state_uses_the_existing_import(self):
         self.success(self.import_file())
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
-            code = main(['brief', 'acc-003', '--calls-backend', 'imported',
-                         '--state-d', str(self.state), '--json'])
+            code = main(['brief', 'acc-003', '--state-d', str(self.state), '--json'])
         self.assertEqual(code, 0, err.getvalue())
         self.assertEqual(json.loads(out.getvalue())['status'], 'accepted')
 
@@ -522,21 +546,13 @@ class CallsCLITests(unittest.TestCase):
                 return InterruptQueue()
             return SimpleQueue()
         with patch('queue.SimpleQueue', side_effect=queue_factory):
-            code, out, err = self.invoke('serve', '--calls-backend', 'imported')
+            code, out, err = self.invoke('serve')
         self.assertEqual(code, 0, err)
         ready = json.loads(out)
         self.assertEqual(ready['sources'], {'crm': 'demo_fixture', 'calls': 'imported_transcript',
                                            'slack': 'demo_fixture'})
         self.assertFalse((self.state / 'calls.sqlite3').exists())
         self.assertEqual(read_audit(self.state / 'audit.sqlite3'), [])
-
-    def test_bound_demo_and_imported_calls_conflict_before_binding_or_state(self):
-        code, out, err = self.invoke('serve', '--crm-backend', 'salesforce', '--calls-backend', 'imported',
-                                    '--salesforce-demo-binding', str(self.root / 'does-not-exist'))
-        self.assertEqual(code, 2, err)
-        self.assertEqual(out, '')
-        self.assertIn('cannot be combined', err)
-        self.assertFalse(self.state.exists())
 
 
 if __name__ == '__main__':

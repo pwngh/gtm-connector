@@ -87,14 +87,6 @@ class ImportedRuntimeTests(unittest.TestCase):
         reader.prepare_connection.assert_not_called()
         self.assertFalse((fixture / "imports.sqlite3").exists())
 
-    def test_demo_binding_conflict_does_not_preflight_or_create_any_source(self):
-        reader = self.reader()
-        with self.assertRaises(SourceIdentityError):
-            with Runtime(self.state, crm_reader=reader, demo_binding=Mock(), calls_backend="imported"):
-                self.fail("Two source binding systems were combined")
-        reader.prepare_connection.assert_not_called()
-        self.assertEqual({path.name for path in self.state.iterdir()}, {"server.lock"})
-
     def test_changed_crm_identity_or_missing_calls_pin_preserves_imported_state(self):
         with Runtime(self.state, crm_reader=self.reader(), calls_backend="imported"):
             pass
@@ -236,7 +228,7 @@ class ImportedRuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.connector.authority.tokens, {})
         result = doctor(self.state)
         self.assertEqual(result["checks"][-1]["name"], "services")
-        self.assertIn("--calls-backend imported", result["checks"][-1]["fix"])
+        self.assertIn("gtm-connector serve --state-dir " + str(self.state.resolve()), result["checks"][-1]["fix"])
         (self.state / "imports.sqlite3").unlink()
         with patch.object(calls_import, "initialize_import_store") as initialize:
             with self.assertRaises(SourceIdentityError):

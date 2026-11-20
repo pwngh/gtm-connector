@@ -229,9 +229,8 @@ class ImportedGatewayTests(unittest.TestCase):
         runtime, client = self.open_runtime()
         token = client.authorize(["calls:read"])
         result = client.call(token, "read_call_notes", {"account_id": "acc-007"}).json()["result"]
-        self.assertTrue(result["isError"])
-        self.assertIn("calls_not_imported", result["content"][0]["text"])
-        self.assertEqual(runtime.connector.audit.read()[-1]["status"], "error")
+        self.assertEqual((result.get("isError", False), result["structuredContent"]["records"]), (False, []))
+        self.assertEqual(runtime.connector.audit.read()[-1]["status"], "ok")
         self.assertEqual(runtime.connector.audit.read()[-1]["rows"], [])
 
     def test_direct_sdk_scope_and_selector_checks_precede_source_io(self):

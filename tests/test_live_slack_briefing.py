@@ -146,9 +146,8 @@ class LiveSlackBriefingTests(LiveSlackFixture, unittest.TestCase):
             self.map_account(runtime)
             artifact = create_brief(runtime, ACCOUNT, as_of="2027-01-15", include_slack=True)
             self.map_account(runtime, "acc-008", reassign=True)
-            with self.assertRaises(SlackReadError) as failure:
-                create_brief(runtime, ACCOUNT, as_of="2027-01-15", include_slack=True)
-            self.assertEqual(failure.exception.code, "slack_mapping_missing")
+            self.assertIn("  Slack: no thread is selected for this account.",
+                          create_brief(runtime, ACCOUNT, as_of="2027-01-15", include_slack=True)["text"])
         with patch("gtm_connector.slack_mapping.load_slack_mapping", side_effect=AssertionError("No current mapping")):
             first = next(unit for unit in artifact["units"] if unit["source"] == "slack")
             self.assertEqual(trace_saved(self.state, artifact["brief_id"], first["n"])["text"], first["text"])

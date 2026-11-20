@@ -281,7 +281,10 @@ class BookSlackTests(unittest.TestCase):
                     with self.subTest(book=name, account=shape["name"][:40]):
                         if number not in threads:
                             # No thread, no mapping: the read is refused before Slack is asked, and the brief stops.
-                            self.stopped("slack_mapping_missing", runtime, upstream, account_id, requests=0)
+                            asked = len(upstream.requests)
+                            card = varied.hold(self, create_brief(runtime, account_id, as_of=AS_OF, include_slack=True))
+                            self.assertIn("  Slack: no thread is selected for this account.", card["NOT READ"])
+                            self.assertEqual(len(upstream.requests), asked)
                             continue
                         served = threads[number]
                         reason = refusal(served, self.cutoff)

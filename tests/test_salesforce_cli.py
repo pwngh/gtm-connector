@@ -1,6 +1,6 @@
-"""Explicit backend selection through invented Salesforce responses and local HTTPS."""
+"""A folder connected to Salesforce, through invented Salesforce responses and local HTTPS."""
 
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 import io
 import json
@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import httpx2
 
+from gtm_connector import profile
 from gtm_connector.audit import read_audit
 from gtm_connector.cli import main
 from gtm_connector.salesforce import REQUIRED_FIELDS, SalesforceReadOnlyAdapter
@@ -92,16 +93,29 @@ class SalesforceCLITests(unittest.TestCase):
             ORIGIN, TOKEN, environment=environment,
             transport=httpx2.MockTransport(lambda request: self.response(request, environment=environment, **options)))
 
-    def invoke(self, arguments, *, reader=None, add_state=True):
-        selected = reader or self.reader()
+    def connected(self, environment="developer", state=None):
+        """Save the profile connect salesforce saves, without opening the folder."""
+        profile.save(state or self.state, {"crm": {"provider": "salesforce", "org": ALIAS,
+                                                   "environment": environment}})
+
+    def snapshot(self):
+        return {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}
+
+    def invoke(self, arguments, *, reader=None, add_state=True, environment="developer", connect=True, sf=True):
+        """Run one command in a folder connected to Salesforce. Every sf login returns the invented reader."""
+        selected = reader or self.reader(environment=environment)
+        if connect:
+            self.connected(environment)
         arguments = [*arguments, *(["--state-dir", str(self.state)] if add_state else [])]
+        login = patch.object(SalesforceReadOnlyAdapter, "from_sf", return_value=selected) if sf else nullcontext()
         with patch.dict(os.environ, self.env, clear=True), \
-                patch.object(SalesforceReadOnlyAdapter, "from_env", return_value=selected) as factory, \
+                patch.object(SalesforceReadOnlyAdapter, "from_env", side_effect=AssertionError("No environment")), \
+                login as factory, \
                 redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
             code = main(arguments)
         return code, out.getvalue(), err.getvalue(), factory
 
-    def stop_serve(self, arguments):
+    def stop_serve(self, arguments, **options):
         class InterruptQueue(SimpleQueue):
             def get(self, *args, **kwargs):
                 raise KeyboardInterrupt
@@ -115,57 +129,136 @@ class SalesforceCLITests(unittest.TestCase):
             return SimpleQueue()
 
         with patch("queue.SimpleQueue", side_effect=queue_factory):
-            return self.invoke(["serve", *arguments])
+            return self.invoke(["serve", *arguments], **options)
 
     def assert_private(self, text):
         for value in (TOKEN, ORIGIN, ORG_ID, ALIAS, "Avery Example", "@example"):
             self.assertNotIn(value, text)
 
-    def test_external_selection_requires_environment_before_creating_state(self):
-        result = self.run_cli("serve", "--crm-backend", "salesforce")
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("salesforce_invalid_configuration", result.stderr)
+    def test_connect_checks_the_org_and_saves_only_its_alias_and_environment(self):
+        code, out, err, factory = self.invoke(["connect", "salesforce", "--org", ALIAS, "--seller", "Morgan Reed",
+                                               "--json"], connect=False)
+        self.assertEqual((code, err), (0, ""))
+        factory.assert_called_once_with(ALIAS, environment="developer")
+        crm = {"provider": "salesforce", "org": ALIAS, "environment": "developer"}
+        self.assertEqual(json.loads(out), {"schema_version": 1, "provider": "salesforce", "status": "connected",
+                                          "sources": {"crm": crm}})
+        saved = (self.state / "profile.json").read_text()
+        self.assertEqual(json.loads(saved), {"schema_version": 1, "sources": {"crm": crm}})
+        self.assertEqual(json.loads((self.state / "sellers.json").read_text())["sellers"], ["Morgan Reed"])
+        for private in (TOKEN, ORIGIN, ORG_ID, "invented-cli"):
+            self.assertNotIn(private, out + saved)
+        # The identity check ran against the org and pinned it. No record was read.
+        self.assertEqual(len(self.requests), 1)
+        self.assertIn(" FROM Organization ", self.requests[0].url.params["q"])
+        self.assertEqual(json.loads((self.state / "crm-connection.json").read_text())["organization_id"], ORG_ID)
+        self.assertEqual(read_audit(self.state / "audit.sqlite3"), [])
+        code, out, err, _ = self.invoke(["connect", "status"], connect=False)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"crm\tconnected\tSalesforce org alias {ALIAS} (developer)\n"
+                              "calls\tnot connected\t\nslack\tnot connected\t\n")
+
+    def test_after_connect_a_brief_with_no_flags_says_calls_and_slack_are_not_connected(self):
+        self.assertEqual(self.invoke(["connect", "salesforce", "--org", ALIAS], connect=False)[0], 0)
+        code, out, err, factory = self.invoke(["brief", ACCOUNT, "--as-of", "2027-01-15", "--json"], connect=False)
+        self.assertEqual((code, err), (0, ""))
+        factory.assert_called_once_with(ALIAS, environment="developer")
+        brief = json.loads(out)
+        self.assertEqual(brief["sources"], {"crm": "salesforce", "calls": "not_connected", "slack": "not_connected"})
+        lines = brief["text"].splitlines()
+        self.assertIn("  Calls: not connected.", lines)
+        self.assertIn("  Slack: not connected.", lines)
+        self.assertEqual([row["tool"] for row in read_audit(self.state / "audit.sqlite3", brief["brief_id"])],
+                         ["get_account", "list_opportunities"])
+        for demo in ("calls.sqlite3", "slack.sqlite3"):
+            self.assertFalse((self.state / demo).exists())
+        # Detached, the folder is not connected again. Its files stay.
+        code, out, err, _ = self.invoke(["connect", "salesforce", "--remove", "--json"], connect=False)
+        self.assertEqual((code, json.loads(out)["sources"]), (0, {}))
+        code, out, err, factory = self.invoke(["brief", ACCOUNT, "--json"], connect=False)
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(json.loads(err)["error"]["message"], str(profile.NotConnected()))
+        factory.assert_not_called()
+        self.assertTrue((self.state / "crm-connection.json").is_file())
+
+    def test_a_connect_that_fails_its_check_saves_no_profile(self):
+        from gtm_connector.salesforce import SalesforceReadError
+        wrong = self.reader(environment="production")
+        wrong._transport = httpx2.MockTransport(lambda request: self.response(request, environment="sandbox"))
+        arguments = ["connect", "salesforce", "--org", ALIAS, "--seller", "Morgan Reed", "--json"]
+        code, out, err, _ = self.invoke([*arguments, "--environment", "production"], reader=wrong, connect=False)
+        self.assertEqual((code, out), (3, ""))
+        self.assertIn("salesforce_environment_mismatch", json.loads(err)["error"]["message"])
+        self.assert_private(err)
+        with patch.dict(os.environ, self.env, clear=True), \
+                patch.object(SalesforceReadOnlyAdapter, "from_sf",
+                             side_effect=SalesforceReadError("salesforce_auth_required")), \
+                redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            code = main([*arguments, "--state-dir", str(self.state)])
+        self.assertEqual((code, out.getvalue()), (5, ""))
+        error = json.loads(err.getvalue())["error"]
+        self.assertIn("salesforce_auth_required", error["message"])
+        self.assertEqual(error["next"], "gtm-connector salesforce check --help")
+        self.assert_private(err.getvalue())
+        for name in ("profile.json", "sellers.json", "crm-connection.json", "audit.sqlite3"):
+            self.assertFalse((self.state / name).exists(), name)
+
+    def test_connect_without_the_sf_cli_fails_before_creating_state(self):
+        empty = self.root / "empty-path"
+        empty.mkdir()
+        self.env["PATH"] = str(empty)
+        result = self.run_cli("connect", "salesforce", "--org", ALIAS, "--json")
+        self.assertEqual((result.returncode, result.stdout), (5, ""))
+        self.assertIn("salesforce_auth_required", json.loads(result.stderr)["error"]["message"])
+        self.assert_private(result.stderr)
         self.assertFalse(self.state.exists())
 
-    def test_external_brief_requires_credentials_before_creating_state(self):
-        result = self.run_cli("brief", ACCOUNT, "--crm-backend", "salesforce")
-        self.assertEqual(result.returncode, 2)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("salesforce_invalid_configuration", result.stderr)
-        self.assertFalse(self.state.exists())
+    def test_a_connected_brief_reads_the_login_before_creating_state(self):
+        empty = self.root / "empty-path"
+        empty.mkdir()
+        self.env["PATH"] = str(empty)
+        self.connected()
+        result = self.run_cli("brief", ACCOUNT, "--json")
+        self.assertEqual((result.returncode, result.stdout), (5, ""))
+        self.assertIn("salesforce_auth_required", json.loads(result.stderr)["error"]["message"])
+        self.assertEqual({path.name for path in self.state.iterdir()}, {"profile.json"})
 
-    def test_conflicts_refuse_before_credentials_or_state(self):
-        cases = [
-            ["serve", "--sf-org", ALIAS], ["brief", ACCOUNT, "--sf-org", ALIAS],
-            ["accounts", "--sf-org", ALIAS], ["account", ACCOUNT, "--sf-org", ALIAS],
-            ["serve", "--sf-environment", "production"], ["brief", ACCOUNT, "--sf-environment", "sandbox"],
-            ["accounts", "--sf-environment", "sandbox"], ["account", ACCOUNT, "--sf-environment", "production"],
-            ["serve", "--sf-environment", "developer"], ["brief", ACCOUNT, "--sf-environment", "developer"],
-            ["accounts", "--sf-environment", "developer"], ["account", ACCOUNT, "--sf-environment", "developer"],
-            ["accounts", "--crm-backend", "salesforce", "--db", "var/v2/crm.sqlite3"],
-            ["account", ACCOUNT, "--crm-backend", "salesforce", "--db", "var/v2/crm.sqlite3"],
-            ["accounts", "--state-dir", str(self.state)], ["account", "acc-001", "--state-dir", str(self.state)],
-        ]
-        for arguments in cases:
-            with self.subTest(arguments=arguments):
-                code, out, err, factory = self.invoke([*arguments, "--json"], add_state=False)
-                self.assertEqual(code, 2, err)
-                self.assertEqual(out, "")
-                self.assertEqual(json.loads(err)["error"]["code"], "usage_error")
-                factory.assert_not_called()
-                self.assert_private(err)
-                self.assertFalse(self.state.exists())
-        self.assertEqual(self.requests, [])
+    def test_salesforce_replaces_an_unused_demo_profile_and_refuses_a_folder_that_read_demo_data(self):
+        profile.save(self.state, profile.DEMO)
+        code, out, err, _ = self.invoke(["connect", "salesforce", "--org", ALIAS, "--json"], connect=False)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(set(json.loads(out)["sources"]), {"crm"})
+        self.state = self.root / "demo-state"
+        profile.save(self.state, profile.DEMO)
+        with patch.dict(os.environ, self.env, clear=True), redirect_stdout(io.StringIO()), \
+                redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(main(["brief", "acc-003", "--json", "--state-dir", str(self.state)]), 0, err.getvalue())
+        before = self.snapshot()
+        code, out, err, _ = self.invoke(["connect", "salesforce", "--org", ALIAS, "--json"], connect=False)
+        self.assertEqual((code, out), (3, ""))
+        message = json.loads(err)["error"]["message"]
+        self.assertIn("source_identity_mismatch", message)
+        self.assertIn("Repeat this command with --state-dir " + str(self.root / "demo-state-fresh"), message)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(profile.load(self.state), profile.DEMO)
+
+    def test_another_org_cannot_be_connected_over_a_folder_that_belongs_to_the_first(self):
+        self.assertEqual(self.invoke(["connect", "salesforce", "--org", ALIAS], connect=False)[0], 0)
+        saved = (self.state / "profile.json").read_bytes()
+        code, out, err, _ = self.invoke(["connect", "salesforce", "--org", "another-invented-alias", "--json"],
+                                        reader=self.reader(organization="00D000000000002AAA"), connect=False)
+        self.assertEqual((code, out), (3, ""))
+        self.assertIn("source_identity_mismatch", json.loads(err)["error"]["message"])
+        self.assertEqual((self.state / "profile.json").read_bytes(), saved)
 
     def test_malformed_connected_lookup_is_usage_before_credentials(self):
         for arguments in (["account", "acc-001"], ["accounts", "--query", "x" * 201],
                           ["accounts", "--query", "bad\nquery"]):
-            code, out, err, factory = self.invoke([*arguments, "--crm-backend", "salesforce", "--json"])
+            code, out, err, factory = self.invoke([*arguments, "--json"])
             self.assertEqual(code, 2, err)
             self.assertEqual(out, "")
             factory.assert_not_called()
-            self.assertFalse(self.state.exists())
+            self.assertEqual({path.name for path in self.state.iterdir()}, {"profile.json"})
         self.assertEqual(self.requests, [])
 
     def test_local_client_allows_the_upstream_operation_to_finish(self):
@@ -185,13 +278,12 @@ class SalesforceCLITests(unittest.TestCase):
             grants.append(scopes)
             return original(client, scopes)
         with patch.object(LocalClient, "authorize", authorize):
-            code, out, err, factory = self.invoke(["accounts", "--query", "Redwood", "--crm-backend", "salesforce",
-                                                   "--json"])
+            code, out, err, factory = self.invoke(["accounts", "--query", "Redwood", "--json"])
         self.assertEqual(code, 0, err)
         self.assertEqual(err, "")
         self.assertEqual([row["id"] for row in json.loads(out)], [ACCOUNT])
         self.assertNotIn("Cedarline", out)
-        factory.assert_called_once_with(environment="developer")
+        factory.assert_called_once_with(ALIAS, environment="developer")
         self.assertEqual(grants, [["crm:read"]])
         receipt, = read_audit(self.state / "audit.sqlite3")
         self.assertEqual((receipt["tool"], receipt["status"], receipt["rows"]),
@@ -201,7 +293,7 @@ class SalesforceCLITests(unittest.TestCase):
 
     def test_accounts_past_one_hundred_matches_show_the_first_hundred_and_say_so(self):
         notice = "Showing the first 100 accounts. More match; narrow the search with --query."
-        arguments = ["accounts", "--crm-backend", "salesforce"]
+        arguments = ["accounts"]
         for matching in (100, 101, 250):
             book = [{"Id": f"001{number:012d}AAA", "Name": f"Invented account {number:03d}", "Industry": None,
                      "AccountNumber": None} for number in range(matching)]
@@ -222,7 +314,7 @@ class SalesforceCLITests(unittest.TestCase):
                 self.assertEqual([receipt["row_count"] for receipt in receipts], [100, 100])
 
     def test_account_json_groups_contacts_and_contracts_without_new_tool(self):
-        code, out, err, _ = self.invoke(["account", ACCOUNT, "--crm-backend", "salesforce", "--json"])
+        code, out, err, _ = self.invoke(["account", ACCOUNT, "--json"])
         self.assertEqual(code, 0, err)
         self.assertEqual(err, "")
         account = json.loads(out)
@@ -237,11 +329,10 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual(len(self.requests), 4)
 
     def test_human_account_formats_contracts_and_unknown_values(self):
-        code, out, err, _ = self.invoke(["account", ACCOUNT, "--crm-backend", "salesforce",
-                                        "--sf-environment", "sandbox"], reader=self.reader(environment="sandbox"))
+        code, out, err, _ = self.invoke(["account", ACCOUNT], environment="sandbox")
         self.assertEqual(code, 0, err)
         self.assertEqual(err.count("Sources:"), 1)
-        self.assertIn("Sources: live. CRM uses Salesforce (sandbox). Connection identity is verified.", err)
+        self.assertIn("Sources: CRM is Salesforce (sandbox), identity verified.", err)
         self.assertIn("Contracts\n", out)
         self.assertIn("Draft\tDraft\t2026-02-01\t2027-01-31\tunknown", out)
         self.assertIn("Industry\tunknown", out)
@@ -251,38 +342,36 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual(len(self.requests), 8)
 
     def test_human_search_does_not_invent_a_renewal(self):
-        code, out, err, _ = self.invoke(["accounts", "--crm-backend", "salesforce"])
+        code, out, err, _ = self.invoke(["accounts"])
         self.assertEqual(code, 0, err)
         self.assertIn("Invented Redwood Workshop\tunknown\tunknown", out)
         self.assertEqual(err.count("Sources:"), 1)
 
     def test_production_search_checks_capabilities_once_and_preserves_json_shape(self):
-        code, out, err, factory = self.invoke(
-            ["accounts", "--crm-backend", "salesforce", "--sf-environment", "production", "--json"],
-            reader=self.reader(environment="production"))
+        code, out, err, factory = self.invoke(["accounts", "--json"], environment="production")
         self.assertEqual(code, 0, err)
         self.assertEqual(err, "")
         self.assertEqual([row["id"] for row in json.loads(out)], [ACCOUNT])
-        factory.assert_called_once_with(environment="production")
+        factory.assert_called_once_with(ALIAS, environment="production")
         self.assertEqual(len(self.requests), 6)
         self.assertEqual(sum(request.url.path.endswith("/describe") for request in self.requests), 4)
         self.assertEqual(len(read_audit(self.state / "audit.sqlite3")), 1)
 
-    def test_connected_inspection_uses_its_own_default_state(self):
+    def test_connected_inspection_uses_the_one_default_state_folder(self):
+        self.connected(state=self.root / "var/v2")
         previous = Path.cwd()
         try:
             os.chdir(self.root)
-            code, out, err, _ = self.invoke(["accounts", "--crm-backend", "salesforce", "--json"], add_state=False)
+            code, out, err, _ = self.invoke(["accounts", "--json"], add_state=False, connect=False)
         finally:
             os.chdir(previous)
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)[0]["id"], ACCOUNT)
-        self.assertTrue((self.root / "var/salesforce/audit.sqlite3").is_file())
-        self.assertFalse((self.root / "var/v2").exists())
+        self.assertTrue((self.root / "var/v2/audit.sqlite3").is_file())
+        self.assertEqual([path.name for path in (self.root / "var").iterdir()], ["v2"])
 
     def test_missing_account_has_receipt_and_no_local_fallback(self):
-        code, out, err, _ = self.invoke(["account", ACCOUNT, "--crm-backend", "salesforce", "--json"],
-                                        reader=self.reader(missing=True))
+        code, out, err, _ = self.invoke(["account", ACCOUNT, "--json"], reader=self.reader(missing=True))
         self.assertEqual(code, 2, err)
         self.assertEqual(out, "")
         error = json.loads(err)["error"]
@@ -294,8 +383,7 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual(len(self.requests), 2)
 
     def test_tool_upstream_error_is_fixed_and_audited(self):
-        code, out, err, _ = self.invoke(["accounts", "--crm-backend", "salesforce", "--json"],
-                                        reader=self.reader(failure=403))
+        code, out, err, _ = self.invoke(["accounts", "--json"], reader=self.reader(failure=403))
         self.assertEqual(code, 5, err)
         self.assertEqual(out, "")
         self.assertIn("salesforce_forbidden", json.loads(err)["error"]["message"])
@@ -306,8 +394,7 @@ class SalesforceCLITests(unittest.TestCase):
     def test_environment_mismatch_is_refusal_before_record_artifacts(self):
         reader = self.reader(environment="production")
         reader._transport = httpx2.MockTransport(lambda request: self.response(request, environment="sandbox"))
-        code, out, err, _ = self.invoke(["accounts", "--crm-backend", "salesforce", "--sf-environment", "production",
-                                        "--json"], reader=reader)
+        code, out, err, _ = self.invoke(["accounts", "--json"], reader=reader, environment="production")
         self.assertEqual(code, 3, err)
         self.assertEqual(out, "")
         self.assertIn("salesforce_environment_mismatch", json.loads(err)["error"]["message"])
@@ -315,30 +402,31 @@ class SalesforceCLITests(unittest.TestCase):
         self.assert_private(err)
 
     def test_identity_mismatch_keeps_existing_state_and_names_unused_recovery_folder(self):
-        self.assertEqual(self.invoke(["accounts", "--crm-backend", "salesforce", "--json"])[0], 0)
+        self.assertEqual(self.invoke(["accounts", "--json"])[0], 0)
         audit = (self.state / "audit.sqlite3").read_bytes()
-        (self.root / "salesforce-fresh").mkdir()
-        code, out, err, _ = self.invoke(["accounts", "--crm-backend", "salesforce", "--json"],
-                                        reader=self.reader(organization="00D000000000002AAA"))
+        (self.root / "state-fresh").mkdir()
+        code, out, err, _ = self.invoke(["accounts", "--json"], reader=self.reader(organization="00D000000000002AAA"))
         self.assertEqual(code, 3, err)
         self.assertEqual(out, "")
         error = json.loads(err)["error"]
         self.assertIn("source_identity_mismatch", error["message"])
-        self.assertIn("--state-dir " + str(self.root / "salesforce-fresh-2"), error["message"])
+        self.assertIn("Connect the sources again with --state-dir " + str(self.root / "state-fresh-2"),
+                      error["message"])
         self.assertEqual(error["next"], "gtm-connector accounts --help")
         self.assertEqual((self.state / "audit.sqlite3").read_bytes(), audit)
         self.assert_private(err)
 
     def test_identity_marker_write_failure_retains_safe_specific_detail(self):
         secret = "invented-private-filesystem-secret"
+        self.connected()
         with patch("gtm_connector.runtime.os.replace", side_effect=OSError(secret)):
-            code, out, err, _ = self.invoke(["accounts", "--crm-backend", "salesforce", "--json"])
+            code, out, err, _ = self.invoke(["accounts", "--json"], connect=False)
         self.assertEqual(code, 3, err)
         self.assertEqual(out, "")
         error = json.loads(err)["error"]
         self.assertIn("The private source markers could not be saved.", error["message"])
         self.assertIn("Check the state folder permissions", error["message"])
-        self.assertIn("Repeat this command with --state-dir " + str(self.root / "salesforce-fresh"),
+        self.assertIn("Connect the sources again with --state-dir " + str(self.root / "state-fresh"),
                       error["message"])
         self.assertEqual(error["next"], "gtm-connector accounts --help")
         self.assertNotIn(secret, err)
@@ -364,10 +452,9 @@ print(json.dumps({"status": 0, "result": {field: value}}))
         def from_sf(alias, *, environment):
             return original(alias, environment=environment, transport=httpx2.MockTransport(self.response))
         with patch.object(SalesforceReadOnlyAdapter, "from_sf", side_effect=from_sf) as factory:
-            code, out, err, env_factory = self.stop_serve(["--json", "--crm-backend", "salesforce", "--sf-org", ALIAS])
+            code, out, err, _ = self.stop_serve(["--json"], sf=False)
         self.assertEqual(code, 0, err)
         factory.assert_called_once_with(ALIAS, environment="developer")
-        env_factory.assert_not_called()
         ready = json.loads(out)
         self.assertEqual(ready["crm_backend"], "salesforce")
         self.assertEqual(ready["sf_environment"], "developer")
@@ -378,21 +465,22 @@ print(json.dumps({"status": 0, "result": {field: value}}))
                                       ["org", "auth", "show-access-token", "--target-org", ALIAS, "--json"]])
         self.assert_private(out + err + (self.state / "owner.json").read_text())
 
-    def test_serve_human_mode_identifies_verified_mixed_sources(self):
-        code, out, err, _ = self.stop_serve(["--crm-backend", "salesforce"])
+    def test_serve_human_mode_names_the_verified_org_and_what_is_not_connected(self):
+        code, out, err, _ = self.stop_serve([])
         self.assertEqual(code, 0, err)
         self.assertEqual(out, "")
-        self.assertIn("Sources: mixed. CRM uses Salesforce (developer); call notes and Slack use demo fixtures.", err)
-        self.assertIn("Connection identity is verified.", err)
+        self.assertIn("Sources: CRM is Salesforce (developer), identity verified; calls are not connected; "
+                      "Slack is not connected.", err)
+        self.assertNotIn("demo", err)
         self.assertEqual(err.count("Sources:"), 1)
         self.assert_private(err)
 
-    def test_brief_human_mode_labels_mixed_sources_once(self):
-        code, out, err, _ = self.invoke(["brief", ACCOUNT, "--crm-backend", "salesforce", "--as-of", "2027-01-15"])
+    def test_brief_human_mode_names_its_sources_once(self):
+        code, out, err, _ = self.invoke(["brief", ACCOUNT, "--as-of", "2027-01-15"])
         self.assertEqual(code, 0, err)
         self.assertIn("2027-01-31", out)
         self.assertEqual(err.count("Sources:"), 1)
-        self.assertIn("Sources: mixed.", err)
+        self.assertIn("CRM is Salesforce (developer), identity verified; calls are not connected", err)
         self.assert_private(err)
 
     def test_the_default_planning_day_is_the_utc_day_in_any_time_zone(self):
@@ -402,7 +490,7 @@ print(json.dumps({"status": 0, "result": {field: value}}))
             with self.subTest(zone=zone), patch.dict(os.environ, {"TZ": zone}):
                 time.tzset()
                 days = {datetime.now(timezone.utc).date().isoformat()}
-                code, out, err, _ = self.invoke(["brief", ACCOUNT, "--crm-backend", "salesforce"])
+                code, out, err, _ = self.invoke(["brief", ACCOUNT])
                 days.add(datetime.now(timezone.utc).date().isoformat())
                 self.assertEqual(code, 0, err)
                 self.assertIn(out.splitlines()[0].rsplit(" as of ", 1)[1], days)
@@ -422,6 +510,7 @@ print(json.dumps({"status": 0, "result": {field: value}}))
 
     def test_default_stays_offline_with_external_credentials_in_environment(self):
         self.env.update(SALESFORCE_INSTANCE_URL=ORIGIN, SALESFORCE_ACCESS_TOKEN=TOKEN)
+        profile.save(self.state, profile.DEMO)
         process = subprocess.Popen(
             [sys.executable, "-m", "gtm_connector", "serve", "--json", "--state-dir", str(self.state)],
             cwd=ROOT, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

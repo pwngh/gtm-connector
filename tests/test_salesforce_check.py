@@ -387,10 +387,11 @@ print(json.dumps({{"status": 0, "result": result}}))
         def adapter_factory(alias, **kwargs):
             return self.adapter()
 
+        from gtm_connector import profile
+        profile.save(state, {"crm": {"provider": "salesforce", "org": ALIAS, "environment": "developer"}})
         with patch.object(SalesforceReadOnlyAdapter, "from_sf", side_effect=adapter_factory) as factory, \
                 redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
-            code = main(["brief", "acc-sf-" + ACCOUNT, "--crm-backend", "salesforce", "--sf-org", ALIAS,
-                         "--as-of", AS_OF, "--state-dir", str(state), "--json"])
+            code = main(["brief", "acc-sf-" + ACCOUNT, "--as-of", AS_OF, "--state-dir", str(state), "--json"])
         factory.assert_called_once_with(ALIAS, environment="developer")
         return code, stdout.getvalue(), stderr.getvalue(), state
 
@@ -404,14 +405,15 @@ print(json.dumps({{"status": 0, "result": result}}))
         self.assertEqual(len(list((state / "briefs").iterdir())), 1)
         self.assert_safe(stderr)
 
-    def test_cli_brief_with_contract_returns_the_numbered_three_tool_artifact(self):
+    def test_cli_brief_with_contract_returns_the_numbered_artifact_of_its_two_crm_reads(self):
         code, stdout, stderr, state = self.brief_cli()
         self.assertEqual(code, 0, stderr)
         self.assertEqual(stderr, "")
         result = json.loads(stdout)
         self.assertEqual(result["status"], "accepted")
         self.assertEqual(result["account_id"], "acc-sf-" + ACCOUNT)
-        self.assertEqual(result["sources"], {"crm": "salesforce", "calls": "demo_fixture"})
+        # Beside Salesforce nothing is demo data: calls and Slack are not connected, and neither is read.
+        self.assertEqual(result["sources"], {"crm": "salesforce", "calls": "not_connected", "slack": "not_connected"})
         self.assertIn("  Contract end: 2027-01-31, in 16 days; status ", result["text"])
         self.assertIn("; a planning candidate, not activated [", result["text"])
         # The printed result holds the card and its units. The records and receipts stay in the private file.
@@ -419,8 +421,7 @@ print(json.dumps({{"status": 0, "result": result}}))
         saved = json.loads((state / "briefs" / (result["brief_id"] + ".json")).read_text())
         self.assertEqual({key: saved[key] for key in result}, result)
         receipts = saved["evidence"]["receipts"]
-        self.assertEqual([row["tool"] for row in receipts],
-                         ["get_account", "list_opportunities", "read_call_notes"])
+        self.assertEqual([row["tool"] for row in receipts], ["get_account", "list_opportunities"])
         self.assertIn("crm/contracts/ctr-sf-" + CONTRACT, receipts[0]["rows"])
         self.assertEqual(len(self.requests), 5)
         self.assertEqual((self.directory / "count").read_text(), "2")

@@ -54,13 +54,14 @@ def card(test, rows, *, sellers=("Morgan Reed",)):
     folder = tempfile.TemporaryDirectory()
     test.addCleanup(folder.cleanup)
     state = Path(folder.name) / "state"
+    run("connect", "demo", "--state-dir", str(state))
     run("brief", "acc-001", "--state-dir", str(state))  # The first card creates and seeds the three stores.
     for database, inserts in tables.items():
         with closing(sqlite3.connect(state / f"{database}.sqlite3")) as connection, connection:
             for table, row in inserts:
                 connection.execute(f"INSERT INTO {table} VALUES ({', '.join('?' * len(row))})", row)
     (state / "sellers.json").write_text(json.dumps({"schema_version": 1, "sellers": list(sellers)}))
-    brief = run("brief", identifier, "--with-slack", "--state-dir", str(state))
+    brief = run("brief", identifier, "--state-dir", str(state))
 
     def trace(number):
         return run("trace", brief["brief_id"], str(number), "--state-dir", str(state))
