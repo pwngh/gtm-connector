@@ -42,3 +42,8 @@ them into a temporary folder and fails when any file differs. It is skipped on a
 
 A Python fix regenerates its fixtures in the same pull request. The diff of `testdata/oracle/` is part of the
 review: it shows what the fix changed in what the package does.
+
+## Real text
+
+`real.py` runs the package over an items file for `make verify-real` and records each output and its
+digest beside it. It reads no fixture and writes none. [Real data](../../docs/real-data.md)

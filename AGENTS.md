@@ -46,6 +46,7 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 .venv/bin/python -m ruff check . && .venv/bin/python -m mypy
 GOTOOLCHAIN=local go vet ./... && GOTOOLCHAIN=local go test ./...   # the Go port, in seconds
 make test                                          # the same, with PostgreSQL in Compose
+make verify-real                                   # real public text, Python against Go; downloads, never in CI
 ```
 
 ## How to work
