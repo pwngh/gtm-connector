@@ -32,9 +32,9 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
     """
     if crm_backend not in ("sqlite", "salesforce"):
         raise ValueError("unsupported CRM backend")
-    if calls_backend not in ("fixture", "imported"):
+    if calls_backend not in ("fixture", "imported", "none"):
         raise ValueError("unsupported calls backend")
-    if slack_backend not in ("fixture", "slack"):
+    if slack_backend not in ("fixture", "slack", "none"):
         raise ValueError("unsupported Slack backend")
     pattern = r"acc-sf-[A-Za-z0-9]{18}" if crm_backend == "salesforce" else r"acc-[0-9]{3}"
     if not isinstance(account_id, str) or not re.fullmatch(pattern, account_id):
@@ -42,12 +42,16 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
                          if crm_backend == "salesforce" else "account ID must have the form acc-001")
     if not isinstance(as_of, str) or date.fromisoformat(as_of).isoformat() != as_of:
         raise ValueError("as-of date must use YYYY-MM-DD")
-    records, statuses = [], {"notes_status": "available", "slack_status": "not_requested"}
+    # A source that is not connected is never called. The card says so.
+    records, statuses = [], {"notes_status": "not_connected" if calls_backend == "none" else "available",
+                             "slack_status": "not_connected" if slack_backend == "none" else "not_requested"}
     thread_snapshot = None
-    read_plan = [("get_account", "crm"), ("list_opportunities", "crm"),
-                 ("read_call_notes", "calls")]
-    optional_scopes = {"read_call_notes": ("notes_status", "calls:read")}
-    if include_slack:
+    read_plan = [("get_account", "crm"), ("list_opportunities", "crm")]
+    optional_scopes = {}
+    if calls_backend != "none":
+        read_plan.append(("read_call_notes", "calls"))
+        optional_scopes["read_call_notes"] = ("notes_status", "calls:read")
+    if include_slack and slack_backend != "none":
         read_plan.append(("read_slack_messages", "slack"))
         statuses["slack_status"] = "available"
         optional_scopes["read_slack_messages"] = ("slack_status", "slack:read")
@@ -71,6 +75,10 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
                 content = result.get("content")
                 if (isinstance(content, list) and len(content) == 1 and isinstance(content[0], dict)
                         and content[0].get("type") == "text"):
+                    if content[0].get("text") == f"Error executing tool {tool}: slack_mapping_missing":
+                        # No thread is selected for this account. The card states it.
+                        statuses["slack_status"] = "not_selected"
+                        continue
                     for code in SLACK_READ_ERROR_CODES:
                         if content[0].get("text") == f"Error executing tool {tool}: {code}":
                             raise SlackReadError(code)
@@ -160,9 +168,9 @@ def _save_artifact(path, payload):
 
 def source_names(crm_backend, calls_backend, slack_backend, include_slack):
     """Which kind of source supplied each part of a card."""
-    return {"crm": "salesforce" if crm_backend == "salesforce" else "demo_fixture",
-            "calls": "imported_transcript" if calls_backend == "imported" else "demo_fixture",
-            **({"slack": "slack" if slack_backend == "slack" else "demo_fixture"} if include_slack else {})}
+    names = {"fixture": "demo_fixture", "sqlite": "demo_fixture", "none": "not_connected"}
+    return {"crm": names.get(crm_backend, "salesforce"), "calls": names.get(calls_backend, "imported_transcript"),
+            **({"slack": names.get(slack_backend, "slack")} if include_slack else {})}
 
 
 def create_brief(runtime, account_id, *, include_calls=True, as_of=DEMO_AS_OF, include_slack=False,

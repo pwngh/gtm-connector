@@ -53,7 +53,7 @@ _CATEGORIES = {
     "calls_import_invalid": "usage", "calls_import_too_large": "usage", "calls_excerpt_too_large": "usage",
     "calls_speaker_names_missing": "usage",
     "calls_import_not_found": "usage", "calls_account_not_found": "usage",
-    "calls_not_imported": "refusal", "calls_reassign_required": "refusal",
+    "calls_reassign_required": "refusal",
     "calls_association_changed": "refusal", "calls_source_mismatch": "refusal",
     "calls_account_ambiguous": "refusal", "calls_import_corrupt": "check",
     "calls_association_invalid": "check", "calls_association_failed": "check",
@@ -761,7 +761,7 @@ class ImportedCallsReader:
             row = connection.execute("SELECT import_id FROM active_imports WHERE account_id = ?",
                                      (account_id,)).fetchone()
             if row is None:
-                raise CallsImportError("calls_not_imported")
+                return []  # No transcript is imported for this account. The card says so.
             record, _ = _load_record(connection, row[0], self.crm_binding)
             if record["account_id"] != account_id:
                 raise CallsImportError("calls_import_corrupt")

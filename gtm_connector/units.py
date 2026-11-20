@@ -79,11 +79,13 @@ class Gap(TypedDict):
 GAP_CODES: dict[str, Literal["not_read", "read_not_shown", "note"]] = {
     "crm_unmapped_fields": "not_read", "calls_denied": "not_read", "calls_excerpt": "not_read",
     "calls_outside_records": "not_read", "slack_not_requested": "not_read", "slack_denied": "not_read",
-    "slack_thread": "not_read", "slack_channel": "not_read",
+    "slack_thread": "not_read", "slack_channel": "not_read", "calls_not_connected": "not_read",
+    "slack_not_connected": "not_read", "slack_not_selected": "not_read",
     "crm_more_opportunities": "read_not_shown", "crm_more_contracts": "read_not_shown",
     "crm_more_contacts": "read_not_shown", "sentences_cut": "read_not_shown", "sentences_more": "read_not_shown",
     "sentences_long": "read_not_shown", "sentences_later": "read_not_shown",
     "crm_fields_empty": "note", "crm_no_opportunity": "note", "calls_no_record": "note", "slack_no_message": "note",
+    "calls_no_transcript": "note",
     "speakers_unknown": "note", "neutralized": "note", "calls_no_contact": "note",
 }
 
@@ -417,13 +419,19 @@ def _validated(evidence):
     if not isinstance(evidence, dict) or set(evidence) != _KEYS:
         raise BriefRejected("Evidence has an unsupported shape.")
     crm, calls, slack = evidence["crm_backend"], evidence["calls_backend"], evidence["slack_backend"]
-    if (crm not in ("sqlite", "salesforce") or calls not in ("fixture", "imported")
-            or slack not in ("fixture", "slack")
-            or evidence["notes_status"] not in ("available", "denied")
-            or evidence["slack_status"] not in ("available", "denied", "not_requested")):
+    if (crm not in ("sqlite", "salesforce") or calls not in ("fixture", "imported", "none")
+            or slack not in ("fixture", "slack", "none")
+            or evidence["notes_status"] not in ("available", "denied", "not_connected")
+            or evidence["slack_status"] not in ("available", "denied", "not_requested", "not_connected",
+                                                "not_selected")
+            # A source that is not connected has that one outcome, and a connected source never has it.
+            or (calls == "none") != (evidence["notes_status"] == "not_connected")
+            or (slack == "none") != (evidence["slack_status"] == "not_connected")
+            or (evidence["slack_status"] == "not_selected" and slack != "slack")):
         raise BriefRejected("Evidence names an unknown source or outcome.")
     salesforce, imported = crm == "salesforce", calls == "imported"
-    with_slack = evidence["slack_status"] != "not_requested"
+    with_calls = calls != "none"
+    with_slack = evidence["slack_status"] in ("available", "denied", "not_selected")
     live_slack = with_slack and slack == "slack"
     if imported and (not _valid_binding(evidence["calls_binding"], key="crm_backend", backend=crm)
                      or evidence["crm_binding"] != evidence["calls_binding"]):
@@ -445,7 +453,8 @@ def _validated(evidence):
         raise BriefRejected("The account identifier does not match its CRM.")
     if not isinstance(evidence["records"], list) or not isinstance(evidence["receipts"], list):
         raise BriefRejected("Evidence records and receipts must be lists.")
-    tables = set(_SOURCES) - (set() if salesforce else {"contracts"}) - (set() if with_slack else {"messages"})
+    tables = (set(_SOURCES) - (set() if salesforce else {"contracts"}) - (set() if with_slack else {"messages"})
+              - (set() if with_calls else {"call_notes"}))
     groups: dict[str, list[dict[str, Any]]] = {name: [] for name in tables}
     expected_rows: dict[str, list[str]] = {_SOURCES[name][2]: [] for name in tables}
     seen = set()
@@ -484,12 +493,12 @@ def _validated(evidence):
         expected_rows[tool].append(reference)
     if len(groups["accounts"]) != 1:
         raise BriefRejected("Evidence must contain exactly one account.")
-    if imported and evidence["notes_status"] == "available" and len(groups["call_notes"]) != 1:
-        raise BriefRejected("Imported calls require exactly one selected transcript excerpt.")
+    if imported and len(groups["call_notes"]) > 1:
+        raise BriefRejected("Imported calls hold at most one selected transcript excerpt for an account.")
     if live_slack:
-        if evidence["slack_status"] == "denied":
+        if evidence["slack_status"] != "available":
             if groups["messages"] or evidence["thread_snapshot"] is not None:
-                raise BriefRejected("A denied Slack read cannot contain a source snapshot or messages.")
+                raise BriefRejected("A Slack read that returned nothing cannot contain a snapshot or messages.")
         else:
             from .slack_reader import SlackReadError, validate_slack_snapshot
             try:
@@ -514,10 +523,12 @@ def _validated(evidence):
             raise BriefRejected("Audit receipt does not match returned records.")
         denied = ((tool == "read_call_notes" and evidence["notes_status"] == "denied")
                   or (tool == "read_slack_messages" and evidence["slack_status"] == "denied"))
-        if (receipt["status"], receipt["http_status"]) != (("error", 403) if denied else ("ok", 200)):
+        unselected = tool == "read_slack_messages" and evidence["slack_status"] == "not_selected"
+        outcome = ("error", 403) if denied else ("error", 200) if unselected else ("ok", 200)
+        if (receipt["status"], receipt["http_status"]) != outcome:
             raise BriefRejected("Audit receipt has an unsupported outcome.")
-        if denied and refs:
-            raise BriefRejected("A denied read must not contain returned records.")
+        if (denied or unselected) and refs:
+            raise BriefRejected("A read that returned nothing must not contain records.")
         receipt_ids.add(audit_id)
         receipts[tool] = receipt
     if set(receipts) != set(expected_rows):
@@ -832,14 +843,20 @@ def _sellers(evidence, backend):
 
 def _calls(card, as_of, contacts):
     evidence, sellers = card.evidence, _sellers(card.evidence, "calls_backend")
-    notes = card.groups["call_notes"]
+    notes = card.groups.get("call_notes", [])
+    imported = evidence["calls_backend"] == "imported"
+    if evidence["notes_status"] == "not_connected":
+        card.gap("calls_not_connected", "Calls: not connected.")
+        return
     if evidence["notes_status"] == "denied":
         card.gap("calls_denied", "Calls: not read. The grant lacks calls:read.")
         return
     if not notes:
-        card.gap("calls_no_record", "Calls: no call record was returned for this account.", 0)
+        if imported:
+            card.gap("calls_no_transcript", "Calls: no transcript is imported for this account.", 0)
+        else:
+            card.gap("calls_no_record", "Calls: no call record was returned for this account.", 0)
         return
-    imported = evidence["calls_backend"] == "imported"
 
     def role_of(label):
         return speaker_role(label, sellers, contacts)
@@ -889,6 +906,12 @@ def _calls(card, as_of, contacts):
 def _slack(card):
     evidence, sellers = card.evidence, _sellers(card.evidence, "slack_backend")
     status = evidence["slack_status"]
+    if status in ("not_connected", "not_selected"):
+        if status == "not_connected":
+            card.gap("slack_not_connected", "Slack: not connected.")
+        else:
+            card.gap("slack_not_selected", "Slack: no thread is selected for this account.")
+        return
     if status == "not_requested":
         card.gap("slack_not_requested", "Slack: not requested for this card.")
         return

@@ -162,14 +162,20 @@ async def _record_malformed_calls(bridge: Bridge, source, target) -> None:
             await target.send(item)
 
 
-def run_bridge(directory, scopes) -> None:
-    """Serve MCP on stdin and stdout until the client closes stdin. Diagnostics go to stderr."""
+def run_bridge(directory, scopes, sources) -> None:
+    """Serve MCP on stdin and stdout until the client closes stdin. Diagnostics go to stderr.
+
+    The connector it attaches to must serve the sources the folder's profile names.
+    """
     from .doctor import load_local_owner
     try:
         owner = load_local_owner(directory)
     except (OSError, ValueError):
         raise BridgeError("No running connector state was found in this folder. "
                           "Start gtm-connector serve with the same --state-dir first.") from None
+    if any(owner[name] != backend for name, backend in sources.items()):
+        raise BridgeError("The running connector was started before this folder's sources changed. "
+                          "Start gtm-connector serve again, then restart this client.")
     bridge = Bridge(owner, scopes).start()
     server = build_server(bridge)
 

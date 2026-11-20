@@ -65,15 +65,15 @@ def require_distinct_databases(paths):
 class Connector:
     def __init__(self, crm_path, calls_path, audit_path, authority,
                  rate_limit=60, window_seconds=60, clock=time.monotonic, *, slack_path=None,
-                 crm_reader=None, on_call=None, demo_binding=None, calls_reader=None,
-                 slack_reader=None, _slack_only=False, selected=None):
+                 crm_reader=None, on_call=None, calls_reader=None,
+                 slack_reader=None, _slack_only=False, selected=None, calls_connected=True,
+                 slack_connected=True):
         if rate_limit < 1 or window_seconds <= 0:
             raise ValueError("rate limits must be positive")
-        if _slack_only and (slack_reader is None or crm_reader is not None or calls_reader is not None
-                            or demo_binding is not None):
+        if _slack_only and (slack_reader is None or crm_reader is not None or calls_reader is not None):
             raise ValueError("A Slack-only check requires only its selected Slack reader.")
-        if selected is not None and (_slack_only or demo_binding is not None):
-            raise ValueError("A selection cannot be combined with the Slack check or a demo binding.")
+        if selected is not None and _slack_only:
+            raise ValueError("A selection cannot be combined with the Slack check.")
         if _slack_only:
             # Disabled source paths are never resolved, statted, initialized, or opened.
             paths = [Path(p).absolute() for p in (crm_path, calls_path, audit_path)]
@@ -89,15 +89,13 @@ class Connector:
         self.calls_reader = calls_reader
         self.slack_reader = slack_reader
         self._slack_only = _slack_only
+        self.calls_connected, self.slack_connected = calls_connected, slack_connected
         self.selected = selected
         self._definitions = TOOL_DEFINITIONS if selected is not None else _DEFAULT_DEFINITIONS
         self.enabled_tools = ({"read_slack_messages"} if _slack_only else
                               set(SELECTED_TOOLS) if selected is not None else set(DEFAULT_TOOLS))
-        self.demo_binding = demo_binding
         self.on_call = on_call
         self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
-        if demo_binding is not None and self.crm_backend != "salesforce":
-            raise ValueError("Salesforce demo bindings require the Salesforce CRM backend.")
         if selected is not None and selected.selection.crm_backend != self.crm_backend:
             raise ValueError("The selection was written for another CRM backend.")
         self.audit = AuditLog(paths[2])
@@ -254,11 +252,6 @@ class Connector:
                     account = store.get_account(conn, account_id)
             if account is None:
                 raise ToolError("account not found")
-            if self.demo_binding is not None:
-                try:
-                    self.demo_binding.validate_account(account)
-                except ValueError:
-                    raise ToolError("salesforce_demo_binding_mismatch") from None
             contacts = account.pop("contacts")
             contracts = account.pop("contracts", [])
             return _data("crm", _records("crm", "accounts", [account]) +
@@ -289,6 +282,8 @@ class Connector:
 
         def notes_body(account_id):
             self._require_selected(account_id)
+            if not self.calls_connected:
+                raise ToolError("calls_not_connected")
             if self.calls_reader is not None:
                 from .calls_import import CallsImportError
                 try:
@@ -307,6 +302,8 @@ class Connector:
 
         def slack_body(account_id, private=None):
             self._require_selected(account_id, slack=True)
+            if not self.slack_connected:
+                raise ToolError("slack_not_connected")
             if self.slack_reader is not None:
                 from .slack_reader import SlackReadError
                 try:

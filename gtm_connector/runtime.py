@@ -31,9 +31,11 @@ from .gateway import Connector, require_distinct_databases
 
 _FIXTURE_CRM_IDENTITY = {"schema_version": 1, "backend": "sqlite", "fixture_book": "renewal-book-v2"}
 _DATABASE_NAMES = ("crm", "calls", "slack", "audit", "imports")
-# sellers.json is the operator's own list. It may be in a folder before any source is pinned to it.
-_INITIAL_METADATA = {"server.lock", "crm-connection.json", "calls-source.json", "slack-source.json",
-                     "slack-mappings.json", "sellers.json"}
+# What connect leaves in a folder before any source is pinned to it: the profile, the seller list,
+# and the Slack sign-in.
+_UNPINNED = {"server.lock", "profile.json", "sellers.json", "slack-connection"}
+_INITIAL_METADATA = _UNPINNED | {"crm-connection.json", "calls-source.json", "slack-source.json",
+                                 "slack-mappings.json"}
 
 
 def private_file(path, content):
@@ -139,7 +141,7 @@ def _valid_calls_marker(marker):
             and re.fullmatch(r"[0-9a-f]{64}", binding["identity_sha256"]) is not None)
 
 
-def _prepare_calls_selection(directory, backend, demo_binding):
+def _prepare_calls_selection(directory, backend):
     """Reject a calls mode switch before reading CRM metadata or changing source state."""
     try:
         marker = _read_marker(directory / "calls-source.json")
@@ -151,27 +153,28 @@ def _prepare_calls_selection(directory, backend, demo_binding):
     try:
         owner = _read_marker(directory / "owner.json", require_schema=False)
         prior_backend = owner.get("calls_backend") if owner is not None else None
-        if owner is not None and (prior_backend not in ("fixture", "imported")
+        if owner is not None and (prior_backend not in ("fixture", "imported", "none")
                                   or owner.get("crm_backend") not in ("sqlite", "salesforce")
-                                  or owner.get("slack_backend") not in ("fixture", "slack")):
+                                  or owner.get("slack_backend") not in ("fixture", "slack", "none")):
             raise ValueError
     except (OSError, ValueError, UnicodeError, RecursionError):
         raise SourceIdentityError("The prior local backend cannot be verified from private owner metadata. "
                                   "Use a fresh --state-dir.") from None
+    if backend == "none":
+        # Not connected: nothing is pinned or seeded, so imported transcripts can be connected later.
+        return None
     if backend == "fixture":
-        if (marker is not None or prior_backend == "imported"
+        if (marker is not None or prior_backend in ("imported", "none")
                 or any(os.path.lexists(directory / name) for name in ("imports.sqlite3", "imports.sqlite3-journal"))):
             raise SourceIdentityError("This state folder uses imported transcripts. "
-                                      "Select --calls-backend imported or use a fresh --state-dir.")
+                                      "Run gtm-connector connect calls or use a fresh --state-dir.")
         return None
-    if (demo_binding is not None or os.path.lexists(directory / "source-profile.json")
-            or os.path.lexists(directory / "calls.sqlite3") or prior_backend == "fixture"):
-        raise SourceIdentityError("Imported transcripts cannot reuse fixture calls or a Salesforce demo binding. "
-                                  "Select a fresh --state-dir with --calls-backend imported.")
-    if marker is None and any(child.name not in _INITIAL_METADATA
-                              for child in directory.iterdir()):
+    if os.path.lexists(directory / "calls.sqlite3") or prior_backend == "fixture":
+        raise SourceIdentityError("Imported transcripts cannot reuse fixture calls. Use a fresh --state-dir.")
+    if marker is None and prior_backend != "none" and any(child.name not in _INITIAL_METADATA
+                                                          for child in directory.iterdir()):
         raise SourceIdentityError("This state folder has no pinned imported calls source. "
-                                  "Select fresh state with --calls-backend imported.")
+                                  "Use fresh state with another --state-dir.")
     if marker is not None and not os.path.lexists(directory / "imports.sqlite3") and any(
             child.name not in _INITIAL_METADATA
             for child in directory.iterdir()):
@@ -190,34 +193,35 @@ def _new_calls_marker(backend, marker, identity):
     return expected if marker is None else None
 
 
-def _prepare_demo_state(directory, binding):
-    """Validate a demo binding and return a missing marker for later publication."""
-    path = directory / "source-profile.json"
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        info = None
-    if binding is None:
-        if info is not None:
-            raise ValueError("This state directory belongs to a Salesforce demo binding. "
-                             "Pass the same --salesforce-demo-binding or choose a fresh --state-dir.")
-        return
-    expected = {"schema_version": 1, "kit_id": binding.kit_id,
-                "manifest_sha256": binding.manifest_sha256, "binding_sha256": binding.binding_sha256}
-    if info is not None:
+def _refuse_salesforce_state(directory):
+    """Demo CRM data never opens in a folder that belongs to a Salesforce connection."""
+    connected_state = os.path.lexists(directory / "crm-connection.json")
+    if not connected_state:
         try:
-            if _read_marker(path) != expected:
-                raise ValueError
+            owner = _read_marker(directory / "owner.json", require_schema=False)
+            if owner is not None:
+                if owner.get("crm_backend") not in ("sqlite", "salesforce"):
+                    raise ValueError
+                connected_state = owner["crm_backend"] == "salesforce"
         except (OSError, ValueError, UnicodeError, RecursionError):
-            raise ValueError("The source profile does not match this private Salesforce demo binding. "
-                             "Use the original binding or choose a fresh --state-dir.") from None
-        return
-    if any(child.name not in ("server.lock", "crm-connection.json", "sellers.json") for child in directory.iterdir()):
-        raise ValueError("A Salesforce demo binding requires fresh state. Choose an empty --state-dir.")
-    return expected
+            raise SourceIdentityError("The prior local backend cannot be verified from private owner metadata. "
+                                      "Use a fresh --state-dir.") from None
+    if connected_state:
+        raise SourceIdentityError("This state folder belongs to a Salesforce connection. "
+                                  "Select its original connection or use a fresh --state-dir.")
 
 
-def _prepare_source_state(directory, reader, binding, *, calls_backend="fixture"):
+def check_folder(directory, *, demo_crm, calls_backend, slack_backend, slack_connection_dir):
+    """Refuse sources that what this folder already read rules out. Nothing is written or contacted."""
+    directory = _state_directory(directory)
+    if directory.is_dir():
+        _prepare_slack_selection(directory, slack_backend, slack_connection_dir)
+        _prepare_calls_selection(directory, calls_backend)
+        if demo_crm:
+            _refuse_salesforce_state(directory)
+
+
+def _prepare_source_state(directory, reader, *, calls_backend="fixture"):
     """Validate both source selections before publishing either marker or source data."""
     path = directory / "crm-connection.json"
     marker = None
@@ -229,24 +233,9 @@ def _prepare_source_state(directory, reader, binding, *, calls_backend="fixture"
         except (OSError, ValueError, UnicodeError, RecursionError):
             raise SourceIdentityError("The private Salesforce connection marker is invalid. "
                                       "Use the original private state or a fresh --state-dir.") from None
-    calls_marker = _prepare_calls_selection(directory, calls_backend, binding)
+    calls_marker = _prepare_calls_selection(directory, calls_backend)
     if reader is None:
-        connected_state = os.path.lexists(path)
-        if not connected_state:
-            try:
-                owner = _read_marker(directory / "owner.json", require_schema=False)
-                if owner is not None:
-                    if owner.get("crm_backend") not in ("sqlite", "salesforce"):
-                        raise ValueError
-                    connected_state = owner["crm_backend"] == "salesforce"
-            except (OSError, ValueError, UnicodeError, RecursionError):
-                raise SourceIdentityError("The prior local backend cannot be verified from private owner metadata. "
-                                          "Use a fresh --state-dir.") from None
-        if connected_state:
-            raise SourceIdentityError("This state folder belongs to a Salesforce connection or demo binding. "
-                                      "Select its original connection or use a fresh --state-dir.")
-    demo_marker = _prepare_demo_state(directory, binding)
-    if reader is None:
+        _refuse_salesforce_state(directory)
         new_calls = _new_calls_marker(calls_backend, calls_marker, None)
         if new_calls is not None:
             try:
@@ -255,8 +244,7 @@ def _prepare_source_state(directory, reader, binding, *, calls_backend="fixture"
                 raise SourceIdentityError("The private calls source marker could not be saved. "
                                           "Check private folder permissions, then retry the same selection.") from None
         return None
-    if marker is None and any(child.name not in ("server.lock", "source-profile.json", "sellers.json")
-                              for child in directory.iterdir()):
+    if marker is None and any(child.name not in _UNPINNED for child in directory.iterdir()):
         raise SourceIdentityError("This state folder has no pinned Salesforce connection. "
                                   "Use fresh state with a different --state-dir.")
     identity = reader.prepare_connection()
@@ -270,14 +258,17 @@ def _prepare_source_state(directory, reader, binding, *, calls_backend="fixture"
     try:
         if marker is None:
             _write_marker(path, identity)
-        if demo_marker is not None:
-            _write_marker(directory / "source-profile.json", demo_marker)
         if new_calls is not None:
             _write_marker(directory / "calls-source.json", new_calls)
     except OSError:
         raise SourceIdentityError("The private source markers could not be saved. "
                                   "Check the state folder permissions, then retry with the same connection.") from None
     return identity
+
+
+def valid_sellers(sellers):
+    return (isinstance(sellers, list) and len(sellers) <= 200
+            and all(isinstance(seller, str) and 1 <= len(seller) <= 200 for seller in sellers))
 
 
 def _sellers(directory):
@@ -289,12 +280,17 @@ def _sellers(directory):
     except (OSError, ValueError, RecursionError):
         document = None
     if (not isinstance(document, dict) or set(document) != {"schema_version", "sellers"}
-            or document["schema_version"] != 1 or not isinstance(document["sellers"], list)
-            or len(document["sellers"]) > 200
-            or any(not isinstance(seller, str) or not 1 <= len(seller) <= 200 for seller in document["sellers"])):
+            or document["schema_version"] != 1 or not valid_sellers(document["sellers"])):
         raise SourceIdentityError('sellers.json must be {"schema_version": 1, "sellers": ["a name or Slack ID"]} '
                                   "with at most 200 entries.")
     return tuple(document["sellers"])
+
+
+def save_sellers(directory, sellers):
+    """Replace the seller list of an existing state folder. The reader's checks apply."""
+    if not valid_sellers(sellers):
+        raise ValueError("Name at most 200 sellers, each a name or Slack ID of 1 to 200 characters.")
+    _write_marker(_state_directory(directory) / "sellers.json", {"schema_version": 1, "sellers": sellers})
 
 
 def _state_directory(directory):
@@ -324,7 +320,7 @@ def _inspect_import_state(directory):
     directory = _state_directory(directory)
     try:
         _private_existing(directory, directory=True)
-        marker = _prepare_calls_selection(directory, "imported", None)
+        marker = _prepare_calls_selection(directory, "imported")
         if marker is None:
             raise ValueError
         identity = _read_marker(directory / "crm-connection.json")
@@ -368,30 +364,6 @@ def open_import_state(directory):
         yield _inspect_import_state(directory)
 
 
-def _seed_demo_sources(directory, binding):
-    """Validate every seed before committing; a seed error rolls back all three."""
-    with ExitStack() as stack:
-        pending = []
-        for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
-            path = directory / f"{name}.sqlite3"
-            if path.is_symlink():
-                raise ValueError("source databases must not be symbolic links")
-            connection = stack.enter_context(closing(module.connect(path)))
-            path.chmod(0o600)
-            connection.execute("BEGIN")
-            module.initialize(connection)
-            if name == "calls":
-                binding.seed_calls(connection)
-            elif name == "slack":
-                binding.seed_slack(connection)
-            else:
-                module.seed(connection)
-            pending.append((path, connection))
-        for path, connection in pending:
-            connection.commit()
-            path.chmod(0o600)
-
-
 def _valid_slack_marker(marker):
     from .slack_mapping import valid_crm_binding, valid_slack_binding
     return (isinstance(marker, dict)
@@ -425,22 +397,26 @@ def _prepare_slack_selection(directory, backend, connection_dir, expected_bindin
     try:
         owner = _read_marker(directory / "owner.json", require_schema=False)
         prior = owner.get("slack_backend") if owner is not None else None
-        if owner is not None and prior not in ("fixture", "slack"):
+        if owner is not None and prior not in ("fixture", "slack", "none"):
             raise ValueError
     except (OSError, ValueError, UnicodeError, RecursionError):
         if backend == "fixture" and marker is None and not os.path.lexists(directory / "slack-mappings.json"):
             # CRM and calls preparation reports this unusable owner file with its own error.
             return None, None
         raise SlackMappingError("slack_mapping_invalid") from None
+    if backend == "none":
+        # Not connected: nothing is pinned or seeded, so Slack can be connected later.
+        return None, None
     if backend == "fixture":
-        if marker is not None or prior == "slack" or os.path.lexists(directory / "slack-mappings.json"):
+        if (marker is not None or prior in ("slack", "none")
+                or os.path.lexists(directory / "slack-mappings.json")):
             raise SlackMappingError("slack_source_mismatch")
         return None, None
-    if prior == "fixture" or any(os.path.lexists(directory / name)
-                                for name in ("slack.sqlite3", "source-profile.json")):
+    if prior == "fixture" or os.path.lexists(directory / "slack.sqlite3"):
         raise SlackMappingError("slack_source_mismatch")
-    if marker is None and any(child.name not in {"server.lock", "crm-connection.json", "calls-source.json",
-                                                  "sellers.json"} for child in directory.iterdir()):
+    if marker is None and prior != "none" and any(
+            child.name not in _UNPINNED | {"crm-connection.json", "calls-source.json"}
+            for child in directory.iterdir()):
         raise SlackMappingError("slack_source_mismatch")
     if marker is not None and not os.path.lexists(directory / "slack-mappings.json") and any(
             child.name not in _INITIAL_METADATA - {"slack-mappings.json"} for child in directory.iterdir()):
@@ -638,27 +614,27 @@ class SlackCheckRuntime:
 class Runtime:
     """One process, two ports, four databases; owns shutdown and a state lock."""
 
-    def __init__(self, directory, *, rate_limit=60, crm_reader=None, on_call=None, demo_binding=None,
+    def __init__(self, directory, *, rate_limit=60, crm_reader=None, on_call=None,
                  calls_backend="fixture", calls_reader=None, slack_backend="fixture", slack_connection_dir=None,
                  slack_reader=None, on_source_read=None, slack_expected_binding=None, selection=None):
-        if calls_backend not in ("fixture", "imported"):
-            raise ValueError("The calls backend must be fixture or imported.")
+        if calls_backend not in ("fixture", "imported", "none"):
+            raise ValueError("The calls backend must be fixture, imported, or none.")
+        if "none" in (calls_backend, slack_backend) and crm_reader is None:
+            raise ValueError("Only a connected CRM can have a source that is not connected.")
         if selection is not None:
             from .selection import Selection
             if not isinstance(selection, Selection):
                 raise ValueError("A selection must come from load_selection.")
-            if demo_binding is not None:
-                raise SourceIdentityError("A selection cannot be combined with --salesforce-demo-binding.")
             if selection.crm_backend != ("sqlite" if crm_reader is None else crm_reader.name):
                 raise SourceIdentityError("The selection was written for another CRM backend. "
                                           "Use acc-007 style IDs for fixtures or acc-sf- IDs for Salesforce.")
         self.selection = selection
         if calls_reader is not None and (calls_backend != "imported" or calls_reader.name != "imported"):
-            raise ValueError("An imported calls reader requires --calls-backend imported.")
-        if slack_backend not in ("fixture", "slack"):
-            raise ValueError("The Slack backend must be fixture or slack.")
-        if slack_backend == "slack" and (slack_connection_dir is None or demo_binding is not None):
-            raise SourceIdentityError("Live Slack requires its private connection folder and no demo binding.")
+            raise ValueError("An imported calls reader requires imported calls.")
+        if slack_backend not in ("fixture", "slack", "none"):
+            raise ValueError("The Slack backend must be fixture, slack, or none.")
+        if slack_backend == "slack" and slack_connection_dir is None:
+            raise SourceIdentityError("Live Slack requires its private connection folder.")
         if slack_reader is not None and (slack_backend != "slack" or slack_reader.name != "slack"):
             raise SourceIdentityError("The Slack reader does not match the selected source mode.")
         if slack_expected_binding is not None:
@@ -671,7 +647,6 @@ class Runtime:
         self.crm_reader = crm_reader
         self.on_call = on_call
         self.crm_backend = "sqlite" if crm_reader is None else crm_reader.name
-        self.demo_binding = demo_binding
         self.crm_connection_identity = None
         self.calls_backend = calls_backend
         self.calls_reader = calls_reader
@@ -686,8 +661,6 @@ class Runtime:
         self.sellers: tuple = ()
         self.on_source_read = on_source_read
         self.imports_path = self.directory / "imports.sqlite3"
-        if demo_binding is not None and self.crm_backend != "salesforce":
-            raise ValueError("--salesforce-demo-binding requires --crm-backend salesforce")
         self.servers, self.threads, self.sockets = [], [], []
         self.lock = None
         self._services = None
@@ -714,7 +687,7 @@ class Runtime:
             self.sellers = _sellers(self.directory)
             slack_marker, self.slack_binding = _prepare_slack_selection(
                 self.directory, self.slack_backend, self.slack_connection_dir, self.slack_expected_binding)
-            self.crm_connection_identity = _prepare_source_state(self.directory, self.crm_reader, self.demo_binding,
+            self.crm_connection_identity = _prepare_source_state(self.directory, self.crm_reader,
                                                                   calls_backend=self.calls_backend)
             self.crm_binding = _calls_binding(self.crm_connection_identity)
             if self.slack_backend == "slack":
@@ -738,21 +711,18 @@ class Runtime:
                 initialize_import_store(self.imports_path, crm_binding=self.calls_binding)
                 if self.calls_reader is None:
                     self.calls_reader = ImportedCallsReader(self.imports_path, crm_binding=self.calls_binding)
-            if self.demo_binding is not None:
-                _seed_demo_sources(self.directory, self.demo_binding)
-            else:
-                for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
-                    if name == "calls" and self.calls_backend == "imported":
-                        continue
-                    if name == "slack" and self.slack_backend == "slack":
-                        continue
-                    path = self.directory / f"{name}.sqlite3"
-                    if path.is_symlink():
-                        raise ValueError("source databases must not be symbolic links")
-                    with closing(module.connect(path)) as connection:
-                        module.initialize(connection)
-                        module.seed(connection)
-                    path.chmod(0o600)
+            for name, module in (("crm", store), ("calls", calls), ("slack", slack)):
+                if name == "calls" and self.calls_backend != "fixture":
+                    continue
+                if name == "slack" and self.slack_backend != "fixture":
+                    continue
+                path = self.directory / f"{name}.sqlite3"
+                if path.is_symlink():
+                    raise ValueError("source databases must not be symbolic links")
+                with closing(module.connect(path)) as connection:
+                    module.initialize(connection)
+                    module.seed(connection)
+                path.chmod(0o600)
             calls_path = self.imports_path if self.calls_backend == "imported" else self.directory / "calls.sqlite3"
             selected = self._selected_context()
 
@@ -760,8 +730,9 @@ class Runtime:
                 return Connector(self.directory / "crm.sqlite3", calls_path,
                                  self.directory / "audit.sqlite3", authority, rate_limit=self.rate_limit,
                                  slack_path=self.directory / "slack.sqlite3", crm_reader=self.crm_reader,
-                                 on_call=self.on_call, demo_binding=self.demo_binding,
-                                 calls_reader=self.calls_reader, slack_reader=self.slack_reader,
+                                 on_call=self.on_call, calls_reader=self.calls_reader, slack_reader=self.slack_reader,
+                                 calls_connected=self.calls_backend != "none",
+                                 slack_connected=self.slack_backend != "none",
                                  selected=selected)
 
             self._services = _LocalHTTPS(self.directory, connector_factory)
