@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ErrNotFound means no row matched.
@@ -135,16 +136,20 @@ func (s *Store) HasAccountGrant(ctx context.Context, workspaceID, principalID, a
 	return granted, err
 }
 
-// Session is a browser session. A pre-session has no principal.
+// Session is a signed-in browser session.
 type Session struct {
 	IDSHA256  []byte
 	Principal *Principal
 	ExpiresAt time.Time
 }
 
-// CreateSession stores a session that lasts ttl from now, by the database's
-// clock. A nil principal makes a pre-session.
-func (s *Store) CreateSession(ctx context.Context, idSHA256 []byte, principal *Principal, ttl time.Duration) (time.Time, error) {
+// ErrSessionUsed means the session or pre-session a sign-in presented was
+// already used, revoked or expired when the rotation ran.
+var ErrSessionUsed = errors.New("the session was already used, revoked or expired")
+
+// CreateSession stores a signed-in session that lasts ttl from now, by the
+// database's clock.
+func (s *Store) CreateSession(ctx context.Context, idSHA256 []byte, principal Principal, ttl time.Duration) (time.Time, error) {
 	return createSession(ctx, s.pool, idSHA256, principal, ttl)
 }
 
@@ -152,64 +157,76 @@ type execQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func createSession(ctx context.Context, q execQuerier, idSHA256 []byte, principal *Principal, ttl time.Duration) (time.Time, error) {
-	var workspaceID, principalID, principalKind *string
-	if principal != nil {
-		workspaceID, principalID, principalKind = &principal.WorkspaceID, &principal.ID, &principal.Kind
-	}
+func createSession(ctx context.Context, q execQuerier, idSHA256 []byte, principal Principal, ttl time.Duration) (time.Time, error) {
 	var expires time.Time
 	err := q.QueryRow(ctx, `
 		INSERT INTO sessions (id_sha256, workspace_id, principal_id, principal_kind, expires_at)
 		VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5))
 		RETURNING expires_at`,
-		idSHA256, workspaceID, principalID, principalKind, ttl.Seconds()).Scan(&expires)
+		idSHA256, principal.WorkspaceID, principal.ID, principal.Kind, ttl.Seconds()).Scan(&expires)
 	return expires, err
 }
 
 // LiveSession gives the session with this ID digest if it has neither
 // expired nor been revoked, and its principal is enabled; else ErrNotFound.
 func (s *Store) LiveSession(ctx context.Context, idSHA256 []byte) (Session, error) {
-	session := Session{IDSHA256: idSHA256}
-	var id, workspaceID, workspaceKind, kind, name, login *string
+	session := Session{IDSHA256: idSHA256, Principal: &Principal{}}
+	var login *string
+	p := session.Principal
 	err := s.pool.QueryRow(ctx, `
-		SELECT s.expires_at, p.id, p.workspace_id, p.workspace_kind, p.kind,
-		       p.display_name, p.login
+		SELECT s.expires_at, p.id, p.workspace_id, p.workspace_kind, p.kind, p.display_name, p.login
 		  FROM sessions s
-		  LEFT JOIN principals p ON p.workspace_id = s.workspace_id AND p.id = s.principal_id
+		  JOIN principals p ON p.workspace_id = s.workspace_id AND p.id = s.principal_id
 		 WHERE s.id_sha256 = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
-		   AND (s.principal_id IS NULL OR p.disabled_at IS NULL)`, idSHA256).
-		Scan(&session.ExpiresAt, &id, &workspaceID, &workspaceKind, &kind, &name, &login)
+		   AND p.disabled_at IS NULL`, idSHA256).
+		Scan(&session.ExpiresAt, &p.ID, &p.WorkspaceID, &p.WorkspaceKind, &p.Kind, &p.DisplayName, &login)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
 	if err != nil {
 		return Session{}, err
 	}
-	if id != nil {
-		session.Principal = &Principal{ID: *id, WorkspaceID: *workspaceID, WorkspaceKind: *workspaceKind,
-			Kind: *kind, DisplayName: *name}
-		if login != nil {
-			session.Principal.Login = *login
-		}
-	}
+	p.Login = deref(login)
 	return session, nil
 }
 
-// SignIn ends the old session (if any) and stores a new one for the
-// principal, in one transaction, so the session ID (and the CSRF token
-// derived from it) rotate.
-func (s *Store) SignIn(ctx context.Context, oldIDSHA256, idSHA256 []byte, principal Principal, ttl time.Duration) (time.Time, error) {
+// Admission is what a sign-in presented: a signed pre-session (its digest
+// and expiry) or a live session.
+type Admission struct {
+	PreSession bool
+	IDSHA256   []byte
+	ExpiresAt  time.Time // pre-sessions only
+}
+
+// SignIn consumes exactly one live admission and stores a new session for
+// the principal, in one transaction, so the session ID (and the CSRF token
+// derived from it) rotate. A pre-session signs in once; a session must still
+// be live. Otherwise it gives ErrSessionUsed and stores nothing.
+func (s *Store) SignIn(ctx context.Context, admitted Admission, idSHA256 []byte, principal Principal, ttl time.Duration) (time.Time, error) {
 	var expires time.Time
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		if oldIDSHA256 != nil {
-			if _, err := tx.Exec(ctx, `
-				UPDATE sessions SET revoked_at = now()
-				 WHERE id_sha256 = $1 AND revoked_at IS NULL`, oldIDSHA256); err != nil {
-				return err
-			}
-		}
+		var tag pgconn.CommandTag
 		var err error
-		expires, err = createSession(ctx, tx, idSHA256, &principal, ttl)
+		if admitted.PreSession {
+			tag, err = tx.Exec(ctx, `
+				INSERT INTO consumed_presessions (id_sha256, expires_at)
+				SELECT $1, $2 WHERE $2 > now()
+				ON CONFLICT (id_sha256) DO NOTHING`, admitted.IDSHA256, admitted.ExpiresAt)
+		} else {
+			tag, err = tx.Exec(ctx, `
+				UPDATE sessions SET revoked_at = now()
+				 WHERE id_sha256 = $1 AND revoked_at IS NULL AND expires_at > now()`, admitted.IDSHA256)
+		}
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return ErrSessionUsed
+		}
+		if err := s.at("signin:consumed"); err != nil {
+			return err
+		}
+		expires, err = createSession(ctx, tx, idSHA256, principal, ttl)
 		return err
 	})
 	return expires, err
@@ -236,7 +253,11 @@ func (s *Store) DeleteEndedSessions(ctx context.Context) (int64, error) {
 	tag, err := s.pool.Exec(ctx, `
 		DELETE FROM sessions
 		 WHERE expires_at < now() - interval '1 day' OR revoked_at < now() - interval '1 day'`)
-	return tag.RowsAffected(), err
+	if err != nil {
+		return 0, err
+	}
+	consumed, err := s.pool.Exec(ctx, `DELETE FROM consumed_presessions WHERE expires_at < now() - interval '1 day'`)
+	return tag.RowsAffected() + consumed.RowsAffected(), err
 }
 
 // Connection is what one source of a workspace is connected to.

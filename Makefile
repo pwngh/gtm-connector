@@ -7,8 +7,11 @@
 #   make restore BACKUP=NAME  restore a backup into an empty database
 #   make test                 go vet and the Go tests against the Compose database
 #
-# The first run writes .env (a random database password, your user IDs, and
-# GTM_HOME, the folder holding credentials/ and backups/).
+# Add POSTGRES=18.7 to any of them to use the pinned fallback PostgreSQL, on
+# its own volume. The first run writes .env (random passwords for the owner
+# and app roles, your user IDs, and GTM_HOME, the folder holding
+# credentials/ and backups/). Recipes never name a password: scripts read
+# .env when they run, so `make -n` shows none.
 
 SHELL := /bin/sh
 .DEFAULT_GOAL := help
@@ -19,79 +22,85 @@ export GOTOOLCHAIN := local
 export DOCKER_BUILDKIT := 0
 export COMPOSE_DOCKER_CLI_BUILD := 0
 
+ifeq ($(POSTGRES),18.7)
+export GTM_POSTGRES_IMAGE := postgres:18.7-alpine3.24@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff
+export GTM_PG_VOLUME := pgdata18
+endif
+
 COMPOSE := $(shell if docker compose version >/dev/null 2>&1; then echo "docker compose"; elif command -v docker-compose >/dev/null 2>&1; then echo docker-compose; fi)
 
--include .env
+# Only the non-secret settings are read here.
+GTM_HOME = $(shell sed -n 's/^GTM_HOME=//p' .env 2>/dev/null)
+GTM_PORT = $(shell sed -n 's/^GTM_PORT=//p' .env 2>/dev/null)
+GTM_DB_PORT = $(shell sed -n 's/^GTM_DB_PORT=//p' .env 2>/dev/null)
 
-HOST_ENV = GTM_DATABASE_URL='postgres://gtm:$(POSTGRES_PASSWORD)@127.0.0.1:$(GTM_DB_PORT)/gtm?sslmode=disable' \
-	GTM_CREDENTIALS_DIR='$(GTM_HOME)/credentials' GTM_LISTEN='127.0.0.1:$(GTM_PORT)' \
-	GTM_PUBLIC_ORIGIN='https://127.0.0.1:$(GTM_PORT)' \
-	GTM_ALLOWED_HOSTS='127.0.0.1:$(GTM_PORT),localhost:$(GTM_PORT)' GTM_WEB_DIR=web/dist
+WEB_SOURCES := $(shell find web/src web/public web/index.html web/vite.config.js web/package.json web/package-lock.json -type f 2>/dev/null)
+GO_SOURCES := go.mod go.sum $(shell find cmd internal -name '*.go' -o -name '*.sql')
 
-.PHONY: help dev up down db backup restore test vet psql logs clean require-compose state
+.PHONY: help env dev up down db backup restore test vet psql logs clean require-compose state
 
 help: ## List the targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  %-10s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-.env:
+env:
 	@scripts/init-env.sh
 
 require-compose:
 	@test -n "$(COMPOSE)" || { echo "Docker Compose was not found (docker compose or docker-compose)." >&2; exit 1; }
 
 # Made here, before Compose mounts it, so Docker does not create it as root.
-state: .env
-	@mkdir -p '$(GTM_HOME)/backups' && chmod 700 '$(GTM_HOME)' '$(GTM_HOME)/backups'
+state: env
+	@home="$$(sed -n 's/^GTM_HOME=//p' .env)"; mkdir -p "$$home/backups" && chmod 700 "$$home" "$$home/backups"
 
 db: require-compose state ## Start PostgreSQL and make its port answer on 127.0.0.1
 	$(COMPOSE) up -d --wait postgres
-	@scripts/colima-forward.sh ensure $(GTM_DB_PORT)
+	@scripts/colima-forward.sh ensure $$(sed -n 's/^GTM_DB_PORT=//p' .env)
 
-web/dist/index.html: web/package.json web/package-lock.json
+web/dist/index.html: $(WEB_SOURCES)
 	cd web && npm ci --no-audit --no-fund && npm run build
 
-build/gtm-connector: go.mod go.sum $(shell find cmd internal -name '*.go' -o -name '*.sql')
+build/gtm-connector: $(GO_SOURCES)
 	go build -o $@ ./cmd/gtm-connector
 
 dev: db web/dist/index.html build/gtm-connector ## Run the connector here, on PostgreSQL in Compose
 	@$(COMPOSE) stop app >/dev/null 2>&1 || true
 	@scripts/colima-forward.sh close $(GTM_PORT) >/dev/null 2>&1 || true
+	scripts/host.sh setup
 	@echo "Open https://127.0.0.1:$(GTM_PORT)/ (local certificate in $(GTM_HOME)/credentials/tls.pem)"
-	@# Not echoed: the environment carries the database password.
-	@$(HOST_ENV) exec build/gtm-connector serve
+	exec scripts/host.sh serve
 
 up: require-compose state ## Build and start PostgreSQL and the connector in Compose
 	$(COMPOSE) build app
-	$(COMPOSE) up -d --wait
+	$(COMPOSE) up -d --wait postgres
+	$(COMPOSE) run --rm admin setup
+	$(COMPOSE) up -d --wait app
 	@scripts/colima-forward.sh ensure $(GTM_DB_PORT) $(GTM_PORT)
 	@echo "Open https://127.0.0.1:$(GTM_PORT)/ (local certificate in $(GTM_HOME)/credentials/tls.pem)"
 
 down: require-compose ## Stop everything; the database volume and credentials are kept
-	$(COMPOSE) down --remove-orphans
+	$(COMPOSE) --profile tools down --remove-orphans
 	@scripts/colima-forward.sh close $(GTM_DB_PORT) $(GTM_PORT) >/dev/null 2>&1 || true
 
 backup: db ## Write GTM_HOME/backups/gtm-<time>.tar.gz
-	$(COMPOSE) run --rm --no-deps app backup --out /state/backups/gtm-$$(date -u +%Y%m%dT%H%M%SZ).tar.gz
+	$(COMPOSE) run --rm --no-deps admin backup --out /state/backups/gtm-$$(date -u +%Y%m%dT%H%M%SZ).tar.gz
 
 restore: db ## Restore GTM_HOME/backups/$(BACKUP) into an empty database
 	@test -n "$(BACKUP)" || { echo "usage: make restore BACKUP=<file name in $(GTM_HOME)/backups>" >&2; exit 2; }
 	@$(COMPOSE) stop app >/dev/null 2>&1 || true
-	$(COMPOSE) run --rm --no-deps app restore --in '/state/backups/$(notdir $(BACKUP))'
+	$(COMPOSE) run --rm --no-deps admin restore --in '/state/backups/$(notdir $(BACKUP))'
 
 vet: ## go vet
 	go vet ./...
 
 test: db vet ## The Go tests, with the race detector, against PostgreSQL in Compose
-	@echo "go test -race ./... (on the Compose database)"
-	@GTM_TEST_DATABASE_URL='postgres://gtm:$(POSTGRES_PASSWORD)@127.0.0.1:$(GTM_DB_PORT)/gtm?sslmode=disable' \
-		GTM_REQUIRE_DATABASE=1 go test -race ./...
+	scripts/host.sh test
 
-psql: require-compose ## A database shell
+psql: require-compose ## A database shell, as the owner
 	$(COMPOSE) exec postgres psql -U gtm -d gtm
 
 logs: require-compose ## Follow the connector's log
 	$(COMPOSE) logs -f --tail 100 app
 
 clean: require-compose ## Stop everything and DELETE the database volume (credentials and backups stay)
-	$(COMPOSE) down --volumes --remove-orphans
+	$(COMPOSE) --profile tools down --volumes --remove-orphans
 	@scripts/colima-forward.sh close $(GTM_DB_PORT) $(GTM_PORT) >/dev/null 2>&1 || true

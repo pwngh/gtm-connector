@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/pwngh/gtm-connector/internal/authz"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/postgrestest"
@@ -88,20 +90,23 @@ func TestOtherWorkspacesAndMissingThings(t *testing.T) {
 	// The same account ref granted in another workspace opens nothing here.
 	p := authz.Principal{WorkspaceID: other.ID, ID: stranger.ID}
 	_, err = evidence.Card(ctx, p, f.Card.ID)
-	is(t, err, authz.ErrNotFound)
+	is(t, err, authz.ErrNotPermitted)
 	_, err = evidence.Receipt(ctx, p, f.Read.ID)
-	is(t, err, authz.ErrNotFound)
+	is(t, err, authz.ErrNotPermitted)
 	if cards, err := evidence.AccountCards(ctx, p, postgrestest.Account); err != nil || len(cards) != 0 {
 		t.Fatalf("other workspace's cards: %v", err)
+	}
+	if !errors.Is(authz.ErrNotPermitted, postgres.ErrNotPermitted) || authz.ErrNotPermitted != postgres.ErrNotPermitted {
+		t.Fatal("two refusals")
 	}
 
 	reader := authz.Principal{WorkspaceID: f.Workspace.ID, ID: f.Reader.ID}
 	_, err = evidence.Card(ctx, reader, "not-a-uuid")
-	is(t, err, authz.ErrNotFound)
+	is(t, err, authz.ErrNotPermitted)
 	_, err = evidence.Unit(ctx, reader, f.Card.ID, 99)
-	is(t, err, authz.ErrNotFound)
+	is(t, err, authz.ErrNotPermitted)
 	_, err = evidence.AccountCards(ctx, reader, "acc-999")
-	is(t, err, authz.ErrNotFound)
+	is(t, err, authz.ErrNotPermitted)
 
 	// A receipt about no account is not for the browser.
 	owner, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
@@ -111,5 +116,49 @@ func TestOtherWorkspacesAndMissingThings(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = evidence.Receipt(ctx, reader, owner.ID)
+	is(t, err, authz.ErrNotPermitted)
+}
+
+// A card whose unit rests on a read of another account is refused whole,
+// even if such a row got in around the write path.
+func TestAUnitOnAnotherAccountsReadClosesTheCard(t *testing.T) {
+	f := postgrestest.New(t)
+	if err := f.Store.EnsureAccount(ctx, f.Workspace.ID, "acc-004", "Other"); err != nil {
+		t.Fatal(err)
+	}
+	brief, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
+		OperationID: "other-brief", TokenID: "anonymous", Tool: "brief", AccountRef: "acc-004",
+		Arguments: json.RawMessage(`{}`), Lease: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, _, err := f.Store.RunChildRead(ctx, postgres.ChildReadStart{ParentID: brief.ID, Tool: "get_account",
+		Scope: "crm:read", ConnectionID: f.Connection.ID, Arguments: json.RawMessage(`{}`), Lease: time.Minute},
+		func(context.Context) ([]postgres.RecordVersion, error) {
+			return []postgres.RecordVersion{{Source: "crm", Table: "accounts", RecordID: "acc-004", Body: []byte("{}")}}, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := pgx.Connect(ctx, f.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	for _, statement := range []string{
+		"ALTER TABLE evidence_units DISABLE TRIGGER USER",
+		`INSERT INTO evidence_units (workspace_id, card_id, n, kind, record_ref, tool, receipt_id, body)
+		 VALUES ('` + f.Workspace.ID + `', '` + f.Card.ID + `', 3, 'record', 'crm/accounts/acc-004', 'get_account', '` +
+			read.ID + `', '{}')`,
+		"ALTER TABLE evidence_units ENABLE TRIGGER USER",
+	} {
+		if _, err := conn.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reader := authz.Principal{WorkspaceID: f.Workspace.ID, ID: f.Reader.ID}
+	_, err = authz.Evidence{Store: f.Store}.Card(ctx, reader, f.Card.ID)
+	is(t, err, authz.ErrNotPermitted)
+	_, err = authz.Evidence{Store: f.Store}.Unit(ctx, reader, f.Card.ID, 3)
 	is(t, err, authz.ErrNotPermitted)
 }

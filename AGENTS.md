@@ -32,8 +32,9 @@ app. Until the Go CLI ships, the Python package is the product and the reference
 The Go port is the module at the root, in `internal/`: `unicodetab` (generated from `testdata/oracle/unicode`),
 `strictjson`, `evidence` (neutralized text, sentences, the card), `receipts`, `cards` (make, seal, verify, admit)
 and `sources/demo`. Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate.
-`storage/postgres` holds the migrations and every query, `authz` the grant checks on evidence reads,
-`transport/http` the browser surface, and `cmd/gtm-connector` `serve`, `setup`, `backup` and `restore`.
+`storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
+rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
+surface, and `cmd/gtm-connector` `setup`, `serve`, `backup` and `restore`.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
 
 ```sh

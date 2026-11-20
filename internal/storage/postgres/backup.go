@@ -79,18 +79,13 @@ func (s *Store) Dump(ctx context.Context, open func(table string) (io.WriteClose
 }
 
 // Restore loads a dump into an empty database. In one transaction it creates
-// the schema at the dump's version and copies every table with the tables'
-// own triggers off (the rows were checked when first written), checking the
-// row counts. Then it migrates to the latest version.
-func (s *Store) Restore(ctx context.Context, schemaVersion int, copies []TableCopy,
+// the schema at the dump's version, copies every table with the tables' own
+// triggers off, checks the row counts, checks the loaded rows against every
+// rule the triggers enforce (gtm_integrity_violations), and records the
+// restore as waiting for its credentials. Then it migrates to the latest
+// version. FinishRestore records that the credentials are in place.
+func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion int, copies []TableCopy,
 	open func(table string) (io.ReadCloser, error)) error {
-	current, err := s.SchemaVersion(ctx)
-	if err != nil {
-		return err
-	}
-	if current != 0 {
-		return errors.New("restore needs an empty database; this one is already set up")
-	}
 	if schemaVersion < 1 || schemaVersion > LatestSchemaVersion() {
 		return fmt.Errorf("the backup is at schema %d; this binary knows 1 to %d", schemaVersion, LatestSchemaVersion())
 	}
@@ -112,15 +107,21 @@ func (s *Store) Restore(ctx context.Context, schemaVersion int, copies []TableCo
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationLock); err != nil {
 			return err
 		}
+		// Empty means no table, view, sequence or function in the schema at
+		// all, checked under the lock that migrations take.
+		var objects int
+		if err := tx.QueryRow(ctx, `
+			SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+			         WHERE n.nspname = current_schema())
+			     + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+			         WHERE n.nspname = current_schema())`).Scan(&objects); err != nil {
+			return err
+		}
+		if objects != 0 {
+			return errors.New("restore needs an empty database; this one already holds tables or functions")
+		}
 		if _, err := tx.Exec(ctx, createMigrationsTable); err != nil {
 			return err
-		}
-		var applied int
-		if err := tx.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&applied); err != nil {
-			return err
-		}
-		if applied != 0 {
-			return errors.New("restore needs an empty database; this one is already set up")
 		}
 		for _, m := range list[:schemaVersion] {
 			if _, err := tx.Exec(ctx, m.sql); err != nil {
@@ -165,7 +166,21 @@ func (s *Store) Restore(ctx context.Context, schemaVersion int, copies []TableCo
 				return err
 			}
 		}
-		return nil
+		// The rows went in with the triggers off: check every rule the
+		// triggers enforce on writing before anything commits.
+		rows, err := tx.Query(ctx, "SELECT v FROM gtm_integrity_violations() v LIMIT 5")
+		if err != nil {
+			return err
+		}
+		violations, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		if len(violations) > 0 {
+			return fmt.Errorf("the backup holds rows the connector would refuse: %s", strings.Join(violations, "; "))
+		}
+		_, err = tx.Exec(ctx, "INSERT INTO restores (archive_sha256) VALUES ($1)", archiveSHA256)
+		return err
 	})
 	if err != nil {
 		return err
@@ -190,4 +205,36 @@ func quoteColumns(columns []string) string {
 		quoted[i] = pgx.Identifier{c}.Sanitize()
 	}
 	return strings.Join(quoted, ", ")
+}
+
+// PendingRestore gives the archive digest of a restore whose credentials
+// were not installed yet, or "".
+func (s *Store) PendingRestore(ctx context.Context) (string, error) {
+	var exists bool
+	if err := s.pool.QueryRow(ctx, "SELECT to_regclass('restores') IS NOT NULL").Scan(&exists); err != nil || !exists {
+		return "", err
+	}
+	var archive string
+	err := s.pool.QueryRow(ctx, `SELECT archive_sha256 FROM restores WHERE credentials_installed_at IS NULL
+		ORDER BY restored_at DESC LIMIT 1`).Scan(&archive)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return archive, err
+}
+
+// FinishRestore records that a restore's credentials are installed.
+func (s *Store) FinishRestore(ctx context.Context, archiveSHA256 string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE restores SET credentials_installed_at = now()
+		WHERE archive_sha256 = $1 AND credentials_installed_at IS NULL`, archiveSHA256)
+	return err
+}
+
+// BackupTableNames lists the tables a backup holds, in restore order.
+func BackupTableNames() []string {
+	names := make([]string, len(backupTables))
+	for i, table := range backupTables {
+		names[i] = table.name
+	}
+	return names
 }

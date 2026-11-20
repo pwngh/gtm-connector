@@ -21,4 +21,6 @@ RUN go build -trimpath -ldflags="-s -w" -o /out/gtm-connector ./cmd/gtm-connecto
 FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 COPY --from=build /out/gtm-connector /app/gtm-connector
 COPY --from=web /web/dist /app/web
+# Never root, also outside Compose (which runs it as your own user).
+USER 65532:65532
 ENTRYPOINT ["/app/gtm-connector"]

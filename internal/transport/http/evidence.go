@@ -13,7 +13,8 @@ import (
 )
 
 // Every read here goes through authz.Evidence. A denial is 403
-// "not_permitted", never an empty list; 404 means nothing by that ID.
+// "not_permitted", never an empty list, and an unknown ID answers the same,
+// so a principal learns nothing about what it may not read.
 
 type cardView struct {
 	ID            string     `json:"id"`
@@ -122,8 +123,6 @@ func readFailed(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, authz.ErrNotPermitted):
 		writeError(w, http.StatusForbidden, "not_permitted", "Not permitted.")
-	case errors.Is(err, authz.ErrNotFound):
-		writeError(w, http.StatusNotFound, "not_found", "Not found.")
 	default:
 		internal(w)
 	}

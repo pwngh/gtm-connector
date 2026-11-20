@@ -85,8 +85,9 @@ jobs:
           POSTGRES_DB: gtm
           POSTGRES_HOST_AUTH_METHOD: trust
           POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+        # Trust authentication, so the port answers on the runner's loopback only.
         ports:
-          - 5432:5432
+          - 127.0.0.1:5432:5432
         options: >-
           --health-cmd "pg_isready -U gtm -d gtm"
           --health-interval 2s --health-timeout 3s --health-retries 30
@@ -103,6 +104,26 @@ jobs:
       - run: |
           go vet ./...
           go test -race ./...
+
+  # Compose startup end to end: the image builds, setup runs as the owner,
+  # the server starts as the app role, and TLS health and demo sign-in work.
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make up
+      - run: scripts/smoke.sh
+      - name: make -n prints no password
+        run: |
+          for key in POSTGRES_PASSWORD GTM_APP_PASSWORD; do
+            secret="$(sed -n "s/^$key=//p" .env)"
+            if make -n dev test up backup restore BACKUP=x | grep -qF "$secret"; then exit 1; fi
+          done
+      - if: failure()
+        run: docker compose logs --no-color
 
   inspector:
     runs-on: ubuntu-latest

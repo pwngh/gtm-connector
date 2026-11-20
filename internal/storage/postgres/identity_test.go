@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,24 +27,29 @@ func TestSessionsRotateExpireAndRevoke(t *testing.T) {
 	_, err = f.Store.EnsureDemoPrincipal(ctx, f.Workspace, "demo-reviewer", "Demo reviewer", other[:])
 	is(t, err, postgres.ErrCredentialMismatch)
 
-	_, err = f.Store.CreateSession(ctx, id(1), nil, time.Hour)
+	// A pre-session signs in once.
+	pre := postgres.Admission{PreSession: true, IDSHA256: id(1), ExpiresAt: time.Now().Add(time.Hour)}
+	_, err = f.Store.SignIn(ctx, pre, id(2), demo, time.Hour)
 	ok(t, err)
-	pre, err := f.Store.LiveSession(ctx, id(1))
-	ok(t, err)
-	if pre.Principal != nil {
-		t.Fatal("a pre-session has a principal")
-	}
-	_, err = f.Store.SignIn(ctx, id(1), id(2), demo, time.Hour)
-	ok(t, err)
-	_, err = f.Store.LiveSession(ctx, id(1))
-	is(t, err, postgres.ErrNotFound)
+	_, err = f.Store.SignIn(ctx, pre, id(9), demo, time.Hour)
+	is(t, err, postgres.ErrSessionUsed)
+	expired := postgres.Admission{PreSession: true, IDSHA256: id(8), ExpiresAt: time.Now().Add(-time.Second)}
+	_, err = f.Store.SignIn(ctx, expired, id(9), demo, time.Hour)
+	is(t, err, postgres.ErrSessionUsed)
 	signed, err := f.Store.LiveSession(ctx, id(2))
 	ok(t, err)
 	if signed.Principal == nil || signed.Principal.ID != demo.ID || signed.Principal.WorkspaceKind != "demo" {
 		t.Fatalf("session %+v", signed)
 	}
+	// Signing in again from a live session consumes it.
+	_, err = f.Store.SignIn(ctx, postgres.Admission{IDSHA256: id(2)}, id(4), demo, time.Hour)
+	ok(t, err)
+	_, err = f.Store.LiveSession(ctx, id(2))
+	is(t, err, postgres.ErrNotFound)
+	_, err = f.Store.SignIn(ctx, postgres.Admission{IDSHA256: id(2)}, id(5), demo, time.Hour)
+	is(t, err, postgres.ErrSessionUsed)
 
-	_, err = f.Store.CreateSession(ctx, id(3), &demo, 200*time.Millisecond)
+	_, err = f.Store.CreateSession(ctx, id(3), demo, 200*time.Millisecond)
 	ok(t, err)
 	time.Sleep(300 * time.Millisecond)
 	_, err = f.Store.LiveSession(ctx, id(3))
@@ -54,7 +60,7 @@ func TestSessionsRotateExpireAndRevoke(t *testing.T) {
 	if n != 2 {
 		t.Fatalf("revoked %d", n)
 	}
-	_, err = f.Store.LiveSession(ctx, id(2))
+	_, err = f.Store.LiveSession(ctx, id(4))
 	is(t, err, postgres.ErrNotFound)
 
 	// Only demo people in a demo workspace may sign in with a password.
@@ -75,6 +81,7 @@ func (memoryFile) Close() error { return nil }
 func TestDumpAndRestoreKeepState(t *testing.T) {
 	f := postgrestest.New(t)
 	files := map[string]*bytes.Buffer{}
+	archive := strings.Repeat("b", 64)
 	version, copies, err := f.Store.Dump(ctx, func(table string) (io.WriteCloser, error) {
 		files[table] = &bytes.Buffer{}
 		return memoryFile{files[table]}, nil
@@ -87,7 +94,7 @@ func TestDumpAndRestoreKeepState(t *testing.T) {
 	open := func(table string) (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(files[table].Bytes())), nil
 	}
-	ok(t, fresh.Restore(ctx, version, copies, open))
+	ok(t, fresh.Restore(ctx, archive, version, copies, open))
 
 	card, err := fresh.Card(ctx, f.Workspace.ID, f.Card.ID)
 	ok(t, err)
@@ -114,7 +121,7 @@ func TestDumpAndRestoreKeepState(t *testing.T) {
 	is(t, err, postgres.ErrAlreadyFinished)
 
 	// A database that is not empty is refused.
-	if err := fresh.Restore(ctx, version, copies, open); err == nil {
+	if err := fresh.Restore(ctx, archive, version, copies, open); err == nil {
 		t.Fatal("restored over existing data")
 	}
 	// So is a dump whose row counts do not match.
@@ -122,7 +129,7 @@ func TestDumpAndRestoreKeepState(t *testing.T) {
 	ok(t, err)
 	defer other.Close()
 	copies[0].Rows++
-	if err := other.Restore(ctx, version, copies, open); err == nil {
+	if err := other.Restore(ctx, archive, version, copies, open); err == nil {
 		t.Fatal("a short table was accepted")
 	}
 	// A failed restore leaves the database empty, so it can be run again.
@@ -130,5 +137,5 @@ func TestDumpAndRestoreKeepState(t *testing.T) {
 		t.Fatalf("schema after a failed restore: %d %v", v, err)
 	}
 	copies[0].Rows--
-	ok(t, other.Restore(ctx, version, copies, open))
+	ok(t, other.Restore(ctx, archive, version, copies, open))
 }

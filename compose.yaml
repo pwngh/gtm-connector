@@ -1,6 +1,10 @@
 # PostgreSQL and the connector. `make dev` starts only postgres and runs the
 # binary on this machine; `make up` starts both. Settings come from .env,
 # which the Makefile creates. Ports are published on 127.0.0.1 only.
+#
+# Two database roles: the owner (gtm), which the admin service uses to set
+# up, back up and restore, and the app role (gtm_app), which setup creates
+# and the server connects as. The app role owns no table.
 
 x-hardening: &hardening
   security_opt:
@@ -8,9 +12,25 @@ x-hardening: &hardening
   cap_drop:
     - ALL
 
+x-connector: &connector
+  image: gtm-connector:local
+  # The same user as on this machine, so the credentials folder it shares
+  # passes the ownership check on both sides.
+  user: ${GTM_UID:?run make, which creates .env}:${GTM_GID:?run make, which creates .env}
+  volumes:
+    # The folder that holds credentials/ and backups/, mounted whole: a
+    # mount point itself shows as root-owned inside the container.
+    - ${GTM_HOME:?run make, which creates .env}:/state
+  read_only: true
+  tmpfs:
+    - /tmp
+  <<: *hardening
+
 services:
   postgres:
-    image: postgres:19.0-alpine3.24@sha256:8b0ff4cdf221f0c53d7fcda681d3b461be725c492cd881c5ec9c0ad25023f188
+    # The pinned PostgreSQL; `make ... POSTGRES=18.7` selects the pinned
+    # fallback and its own volume.
+    image: ${GTM_POSTGRES_IMAGE:-postgres:19.0-alpine3.24@sha256:8b0ff4cdf221f0c53d7fcda681d3b461be725c492cd881c5ec9c0ad25023f188}
     environment:
       POSTGRES_USER: gtm
       POSTGRES_DB: gtm
@@ -18,7 +38,7 @@ services:
       # C collation, so text compares byte by byte as the oracle's SQLite does.
       POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
     volumes:
-      - pgdata:/var/lib/postgresql
+      - ${GTM_PG_VOLUME:-pgdata}:/var/lib/postgresql
     ports:
       - 127.0.0.1:${GTM_DB_PORT:-55432}:5432
     healthcheck:
@@ -39,25 +59,35 @@ services:
       - SETGID
       - SETUID
 
+  # One-off owner commands: `run --rm admin setup|backup|restore`.
+  admin:
+    <<: *connector
+    profiles: [tools]
+    command: [setup]
+    environment:
+      GTM_OWNER_DATABASE_URL: postgres://gtm:${POSTGRES_PASSWORD}@postgres:5432/gtm?sslmode=disable
+      GTM_DATABASE_URL: postgres://gtm_app:${GTM_APP_PASSWORD:?run make, which adds it to .env}@postgres:5432/gtm?sslmode=disable
+      GTM_CREDENTIALS_DIR: /state/credentials
+      GTM_PUBLIC_ORIGIN: https://127.0.0.1:${GTM_PORT:-8443}
+      GTM_ALLOWED_HOSTS: 127.0.0.1:${GTM_PORT:-8443},localhost:${GTM_PORT:-8443}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   app:
+    <<: *connector
     build:
       context: .
-    image: gtm-connector:local
     command: [serve]
-    # The same user as on this machine, so the credentials folder it shares
-    # passes the ownership check on both sides.
-    user: ${GTM_UID:?run make, which creates .env}:${GTM_GID:?run make, which creates .env}
     environment:
-      GTM_DATABASE_URL: postgres://gtm:${POSTGRES_PASSWORD}@postgres:5432/gtm?sslmode=disable
+      GTM_DATABASE_URL: postgres://gtm_app:${GTM_APP_PASSWORD:?run make, which adds it to .env}@postgres:5432/gtm?sslmode=disable
       GTM_CREDENTIALS_DIR: /state/credentials
-      GTM_LISTEN: 0.0.0.0:8443
+      # Inside the container's own network; Compose publishes it on the
+      # host's loopback only.
+      GTM_CONTAINER_LISTEN: 0.0.0.0:8443
       GTM_PUBLIC_ORIGIN: https://127.0.0.1:${GTM_PORT:-8443}
       GTM_ALLOWED_HOSTS: 127.0.0.1:${GTM_PORT:-8443},localhost:${GTM_PORT:-8443}
       GTM_WEB_DIR: /app/web
-    volumes:
-      # The folder that holds credentials/ and backups/, mounted whole: a
-      # mount point itself shows as root-owned inside the container.
-      - ${GTM_HOME:?run make, which creates .env}:/state
     ports:
       - 127.0.0.1:${GTM_PORT:-8443}:8443
     depends_on:
@@ -69,10 +99,7 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
-    read_only: true
-    tmpfs:
-      - /tmp
-    <<: *hardening
 
 volumes:
   pgdata:
+  pgdata18:

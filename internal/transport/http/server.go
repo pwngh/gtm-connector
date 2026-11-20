@@ -35,15 +35,24 @@ type Config struct {
 	// SessionTTL is how long a signed-in session lasts; PreSessionTTL how
 	// long a sign-in CSRF token does.
 	SessionTTL, PreSessionTTL time.Duration
+	// SessionKey signs pre-session tokens, so a visitor without a session
+	// costs no database row. At least 32 bytes, from the credentials folder.
+	SessionKey []byte
+	// ClientRoutes are the path prefixes the web app routes itself; only
+	// they fall back to index.html. Empty means DefaultClientRoutes.
+	ClientRoutes []string
 	// MCP, when set, serves /mcp. It does its own admission checks.
 	MCP http.Handler
 }
 
+// DefaultClientRoutes are the web app's routes today: "/" and these
+// prefixes, each with anything below it.
+var DefaultClientRoutes = []string{"/renewals", "/queue", "/playbooks", "/operations"}
+
 // Sessions is the session storage the surface needs.
 type Sessions interface {
-	CreateSession(ctx context.Context, idSHA256 []byte, principal *postgres.Principal, ttl time.Duration) (time.Time, error)
 	LiveSession(ctx context.Context, idSHA256 []byte) (postgres.Session, error)
-	SignIn(ctx context.Context, oldIDSHA256, idSHA256 []byte, principal postgres.Principal, ttl time.Duration) (time.Time, error)
+	SignIn(ctx context.Context, admitted postgres.Admission, idSHA256 []byte, principal postgres.Principal, ttl time.Duration) (time.Time, error)
 	RevokeSession(ctx context.Context, idSHA256 []byte) error
 	DemoPrincipalByLogin(ctx context.Context, login string) (postgres.Principal, []byte, error)
 	Ping(ctx context.Context) error
@@ -55,7 +64,9 @@ type Server struct {
 	sessions Sessions
 	evidence authz.Evidence
 	hosts    map[string]bool
+	host     string // the public origin's host
 	web      *os.Root
+	policy   string // the Content-Security-Policy of every response
 	mux      *http.ServeMux
 }
 
@@ -75,7 +86,14 @@ func New(cfg Config, sessions Sessions, evidence authz.Evidence) (*Server, error
 	if cfg.PreSessionTTL <= 0 {
 		cfg.PreSessionTTL = time.Hour
 	}
-	s := &Server{cfg: cfg, sessions: sessions, evidence: evidence, hosts: map[string]bool{}}
+	if len(cfg.SessionKey) < 32 {
+		return nil, errors.New("the session key must be at least 32 bytes")
+	}
+	if len(cfg.ClientRoutes) == 0 {
+		cfg.ClientRoutes = DefaultClientRoutes
+	}
+	s := &Server{cfg: cfg, sessions: sessions, evidence: evidence, hosts: map[string]bool{},
+		host: strings.ToLower(origin.Host), policy: basePolicy}
 	for _, host := range cfg.AllowedHosts {
 		s.hosts[strings.ToLower(host)] = true
 	}
@@ -88,6 +106,10 @@ func New(cfg Config, sessions Sessions, evidence authz.Evidence) (*Server, error
 			return nil, fmt.Errorf("web app folder: %w", err)
 		}
 		s.web = root
+		if s.policy, err = policyFor(root); err != nil {
+			root.Close()
+			return nil, err
+		}
 	}
 	s.routes()
 	return s, nil
@@ -131,7 +153,9 @@ func (s *Server) routes() {
 	s.mux = mux
 }
 
-// ServeHTTP checks the Host, then the origin of any browser write, then routes.
+// ServeHTTP checks the Host, sends other allowed hosts to the public origin,
+// refuses non-canonical paths, checks the origin of any browser write, then
+// routes.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header := w.Header()
 	header.Set("X-Content-Type-Options", "nosniff")
@@ -139,8 +163,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header.Set("X-Frame-Options", "DENY")
 	header.Set("Cross-Origin-Opener-Policy", "same-origin")
 	header.Set("Cross-Origin-Resource-Policy", "same-origin")
-	if !s.hosts[strings.ToLower(r.Host)] {
+	header.Set("Content-Security-Policy", s.policy)
+	host := strings.ToLower(r.Host)
+	if !s.hosts[host] {
 		writeError(w, http.StatusMisdirectedRequest, "untrusted_host", "This Host is not served here.")
+		return
+	}
+	if r.RequestURI == "*" {
+		writeError(w, http.StatusNotFound, "not_found", "Not found.")
+		return
+	}
+	if host != s.host {
+		// One origin holds the session cookie, so every allowed alias leads there.
+		http.Redirect(w, r, s.cfg.PublicOrigin+r.URL.RequestURI(), http.StatusPermanentRedirect)
+		return
+	}
+	if !canonical(r.URL.Path) {
+		writeError(w, http.StatusNotFound, "not_found", "Not found.")
 		return
 	}
 	if isWrite(r.Method) && !isMCP(r.URL.Path) {
@@ -150,6 +189,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// canonical admits a path that ServeMux would not rewrite: it starts with
+// "/", has no empty, "." or ".." segment (a final "/" aside), and names a
+// reserved prefix only in lower case.
+func canonical(p string) bool {
+	if !strings.HasPrefix(p, "/") {
+		return false
+	}
+	trimmed := strings.TrimSuffix(p[1:], "/")
+	if trimmed != "" {
+		for _, segment := range strings.Split(trimmed, "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return false
+			}
+		}
+	}
+	lower := strings.ToLower(p)
+	for _, prefix := range reserved {
+		if (lower == prefix || strings.HasPrefix(lower, prefix+"/")) && !strings.HasPrefix(p, prefix) {
+			return false
+		}
+	}
+	return true
 }
 
 func isWrite(method string) bool {

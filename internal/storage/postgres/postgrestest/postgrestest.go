@@ -29,6 +29,42 @@ type Fixture struct {
 // Account is the fixture's account.
 const Account = "acc-003"
 
+// CardBytes is a card document whose "units" and "gaps" are exactly these,
+// as PublishCard requires.
+func CardBytes(text string, units []postgres.Unit, gaps []postgres.Gap) []byte {
+	doc := map[string]any{"schema_version": 3, "text": text, "units": []json.RawMessage{}, "gaps": []any{}}
+	bodies := make([]json.RawMessage, len(units))
+	for _, u := range units {
+		bodies[u.N-1] = u.Body
+	}
+	doc["units"] = bodies
+	list := make([]any, len(gaps))
+	for i, g := range gaps {
+		var byRole any
+		if len(g.ByRole) > 0 {
+			byRole = g.ByRole
+		}
+		list[i] = map[string]any{"code": g.Code, "disposition": g.Disposition, "count": g.Count,
+			"by_role": byRole, "text": g.Text}
+	}
+	doc["gaps"] = list
+	out, _ := json.Marshal(doc)
+	return out
+}
+
+// UnitBody is a unit body carrying the columns PublishCard checks.
+func UnitBody(n int, kind, recordRef, tool, shown string, extra map[string]any) json.RawMessage {
+	body := map[string]any{"n": n, "kind": kind, "record_ref": recordRef, "tool": tool}
+	if shown != "" {
+		body["shown"] = shown
+	}
+	for k, v := range extra {
+		body[k] = v
+	}
+	out, _ := json.Marshal(body)
+	return out
+}
+
 // New migrates a fresh database and publishes the fixture card on it.
 func New(t testing.TB) *Fixture {
 	t.Helper()
@@ -55,39 +91,48 @@ func New(t testing.TB) *Fixture {
 		TokenID: postgres.TokenID(""), Tool: "brief", AccountRef: Account,
 		Arguments: json.RawMessage(`{"account_id":"acc-003"}`), Lease: time.Minute})
 	must(t, err)
+	parentToken := f.Parent.LeaseToken
 	f.Read, _, err = store.RunChildRead(ctx, postgres.ChildReadStart{
 		ParentID: f.Parent.ID, Ordinal: 0, Tool: "get_account", Scope: "crm:read",
 		ConnectionID: f.Connection.ID, Arguments: json.RawMessage(`{"account_id":"acc-003"}`), Lease: time.Minute,
 	}, func(context.Context) ([]postgres.RecordVersion, error) {
 		return []postgres.RecordVersion{
 			{Source: "crm", Table: "accounts", RecordID: Account, Body: []byte(`{"id":"acc-003","name":"Invented account"}`)},
-			{Source: "calls", Table: "calls", RecordID: "call-1", Body: []byte(`{"id":"call-1"}`)},
+			{Source: "crm", Table: "contacts", RecordID: "con-001", Body: []byte(`{"id":"con-001"}`)},
 		}, nil
 	})
 	must(t, err)
+	versions := map[string]string{}
+	rows, err := store.ReceiptRecordIDs(ctx, f.Workspace.ID, f.Read.ID)
+	must(t, err)
+	for ref, id := range rows {
+		versions[ref] = id
+	}
 	f.Seal, err = store.StartReceipt(ctx, postgres.ReceiptStart{
 		WorkspaceID: f.Workspace.ID, OperationID: "fixture-seal", PrincipalID: f.Reader.ID,
 		TokenID: postgres.TokenID(""), Tool: "save_brief", AccountRef: Account, BriefID: "brief-1",
 		Arguments: json.RawMessage(`{"account_id":"acc-003","brief_id":"brief-1"}`), Lease: time.Minute})
 	must(t, err)
+	units := []postgres.Unit{
+		{N: 1, Kind: "record", RecordRef: "crm/accounts/acc-003", Tool: "get_account", ReceiptID: f.Read.ID,
+			SourceRecordID: versions["crm/accounts/acc-003"],
+			Body:           UnitBody(1, "record", "crm/accounts/acc-003", "get_account", "", nil)},
+		{N: 2, Kind: "sentence", RecordRef: "crm/contacts/con-001", Tool: "get_account", Shown: "yes",
+			ReceiptID: f.Read.ID, SourceRecordID: versions["crm/contacts/con-001"],
+			Body: UnitBody(2, "sentence", "crm/contacts/con-001", "get_account", "yes",
+				map[string]any{"text": "We agree."})},
+	}
+	gaps := []postgres.Gap{{Code: "neutralized", Disposition: "note", Count: ptr(1),
+		Text: "1 sentence had markup neutralized."}}
 	rules := "3"
 	f.Card, err = store.PublishCard(ctx, postgres.CardPublication{
-		WorkspaceID: f.Workspace.ID, AccountRef: Account, BriefID: "brief-1", PrincipalID: f.Reader.ID,
+		WorkspaceID: f.Workspace.ID, AccountRef: Account, BriefID: "brief-1", ParentReceiptID: f.Parent.ID,
 		SealReceiptID: f.Seal.ID, SealLeaseToken: f.Seal.LeaseToken, Kind: "go", SchemaVersion: 3,
-		RulesVersion: &rules, Bytes: []byte(`{"schema_version":3,"text":"DEAL CARD acc-003\n"}`),
-		Units: []postgres.Unit{
-			{N: 1, Kind: "record", RecordRef: "crm/accounts/acc-003", Tool: "get_account", ReceiptID: f.Read.ID,
-				Body: json.RawMessage(`{"n":1,"kind":"record","record_ref":"crm/accounts/acc-003"}`)},
-			{N: 2, Kind: "sentence", RecordRef: "calls/calls/call-1", Tool: "get_account", Shown: "yes",
-				ReceiptID: f.Read.ID, Body: json.RawMessage(`{"n":2,"kind":"sentence","text":"We agree."}`)},
-		},
-		Gaps: []postgres.Gap{{Code: "neutralized", Disposition: "note", Count: ptr(1),
-			Text: "1 sentence had markup neutralized."}},
-		ReadReceiptIDs: []string{f.Read.ID},
+		RulesVersion: &rules, Bytes: CardBytes("DEAL CARD acc-003\n", units, gaps), Units: units, Gaps: gaps,
 	})
 	must(t, err)
 	f.Parent, err = store.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: f.Parent.ID,
-		LeaseToken: f.Parent.LeaseToken, Status: "ok", HTTPStatus: 200, Rows: []string{"briefs/brief-1"}})
+		LeaseToken: parentToken, Status: "ok", HTTPStatus: 200, Rows: []string{"briefs/brief-1"}})
 	must(t, err)
 	f.Seal, err = store.Receipt(ctx, f.Workspace.ID, f.Seal.ID)
 	must(t, err)

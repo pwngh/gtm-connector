@@ -19,6 +19,9 @@ import (
 	httptransport "github.com/pwngh/gtm-connector/internal/transport/http"
 )
 
+// serve runs the HTTPS server as the app role. It refuses to start before
+// setup has run, while a restore is unfinished, or as a role that owns the
+// tables.
 func serve(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	if err := flags.Parse(args); err != nil {
@@ -28,28 +31,42 @@ func serve(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if c.databaseURL == "" {
+		return errors.New("set GTM_DATABASE_URL to the app role's PostgreSQL URL")
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	store, creds, err := setUp(ctx, c)
+	store, err := openStore(ctx, c.databaseURL)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	certPEM, err := creds.read(tlsCertFile)
-	if err != nil {
+	if err := store.CheckAppRole(ctx); err != nil {
 		return err
 	}
-	keyPEM, err := creds.read(tlsKeyFile)
+	if version, err := store.SchemaVersion(ctx); err != nil {
+		return err
+	} else if version != postgres.LatestSchemaVersion() {
+		return fmt.Errorf("the database is at schema %d, not %d; run setup first", version, postgres.LatestSchemaVersion())
+	}
+	if pending, err := store.PendingRestore(ctx); err != nil {
+		return err
+	} else if pending != "" {
+		return errors.New("a restore has not installed its credentials; run restore again with the same backup")
+	}
+	creds, err := openCredentials(c.credentialsDir, false)
+	if err != nil {
+		return fmt.Errorf("%w (run setup first)", err)
+	}
+	pair, key, err := serving(creds)
+	creds.Close()
 	if err != nil {
 		return err
-	}
-	pair, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return fmt.Errorf("TLS key pair: %w", err)
 	}
 	surface, err := httptransport.New(httptransport.Config{
 		PublicOrigin: c.publicOrigin,
 		AllowedHosts: c.allowedHosts,
 		WebDir:       c.webDir,
+		SessionKey:   key,
 	}, store, authz.Evidence{Store: store})
 	if err != nil {
 		return err
@@ -60,16 +77,7 @@ func serve(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{
-		Handler:           surface,
-		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{pair}},
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       2 * time.Minute,
-		MaxHeaderBytes:    64 << 10,
-		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
-	}
+	server := newServer(surface, pair, logger)
 	go housekeeping(ctx, store, logger)
 	served := make(chan error, 1)
 	go func() { served <- server.ServeTLS(listener, "", "") }()
@@ -88,6 +96,40 @@ func serve(ctx context.Context, args []string) error {
 	defer cancel()
 	logger.Info("stopping")
 	return server.Shutdown(shutdown)
+}
+
+// serving reads the TLS pair and the session key.
+func serving(creds *credentials) (tls.Certificate, []byte, error) {
+	certPEM, err := creds.read(tlsCertFile)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	keyPEM, err := creds.read(tlsKeyFile)
+	if err != nil {
+		return tls.Certificate{}, nil, err
+	}
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return tls.Certificate{}, nil, fmt.Errorf("TLS key pair: %w", err)
+	}
+	key, err := creds.sessionKey()
+	return pair, key, err
+}
+
+// newServer is the HTTPS server. Go's own answer to "OPTIONS *" is off, so
+// that request meets the Host check like any other.
+func newServer(handler http.Handler, pair tls.Certificate, logger *slog.Logger) *http.Server {
+	return &http.Server{
+		Handler:                      handler,
+		DisableGeneralOptionsHandler: true,
+		TLSConfig:                    &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{pair}},
+		ReadHeaderTimeout:            10 * time.Second,
+		ReadTimeout:                  30 * time.Second,
+		WriteTimeout:                 60 * time.Second,
+		IdleTimeout:                  2 * time.Minute,
+		MaxHeaderBytes:               64 << 10,
+		ErrorLog:                     slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
+	}
 }
 
 // housekeeping finishes receipts whose worker's lease expired and removes
@@ -113,7 +155,7 @@ func housekeeping(ctx context.Context, store *postgres.Store, logger *slog.Logge
 }
 
 // health asks the local server's /healthz over TLS, trusting only this
-// install's certificate, with the first allowed Host.
+// install's certificate, with the public origin's Host.
 func health(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("health", flag.ContinueOnError)
 	if err := flags.Parse(args); err != nil {
@@ -128,6 +170,7 @@ func health(ctx context.Context, args []string) error {
 		return err
 	}
 	certPEM, err := creds.read(tlsCertFile)
+	creds.Close()
 	if err != nil {
 		return err
 	}
@@ -143,7 +186,9 @@ func health(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	request.Host = c.allowedHosts[0]
+	if origin, err := urlHost(c.publicOrigin); err == nil {
+		request.Host = origin
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return err

@@ -2,6 +2,7 @@ package httptransport_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,8 +12,11 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/pwngh/gtm-connector/internal/authz"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
@@ -42,7 +46,7 @@ func newSite(t *testing.T, sessionTTL time.Duration) *site {
 	ts := httptest.NewUnstartedServer(nil)
 	origin := "https://" + ts.Listener.Addr().String()
 	s, err := httptransport.New(httptransport.Config{PublicOrigin: origin,
-		AllowedHosts: []string{ts.Listener.Addr().String()}, SessionTTL: sessionTTL},
+		AllowedHosts: []string{ts.Listener.Addr().String()}, SessionTTL: sessionTTL, SessionKey: testKey},
 		f.Store, authz.Evidence{Store: f.Store})
 	if err != nil {
 		t.Fatal(err)
@@ -149,19 +153,25 @@ func (b *browser) signIn(login, password string) reply {
 	return r
 }
 
-func (b *browser) cookie() string {
+func (b *browser) cookie() string { return b.named("__Host-gtm-session") }
+
+func (b *browser) preCookie() string { return b.named("__Host-gtm-pre") }
+
+func (b *browser) named(name string) string {
 	u, _ := url.Parse(b.site.server.URL)
 	for _, c := range b.client.Jar.Cookies(u) {
-		if c.Name == "__Host-gtm-session" {
+		if c.Name == name {
 			return c.Value
 		}
 	}
 	return ""
 }
 
-func (b *browser) setCookie(value string) {
+func (b *browser) setCookie(value string) { b.setNamed("__Host-gtm-session", value) }
+
+func (b *browser) setNamed(name, value string) {
 	u, _ := url.Parse(b.site.server.URL)
-	b.client.Jar.SetCookies(u, []*http.Cookie{{Name: "__Host-gtm-session", Value: value, Path: "/"}})
+	b.client.Jar.SetCookies(u, []*http.Cookie{{Name: name, Value: value, Path: "/"}})
 }
 
 func TestSignInRotatesTheSessionAndCSRF(t *testing.T) {
@@ -171,16 +181,19 @@ func TestSignInRotatesTheSessionAndCSRF(t *testing.T) {
 	if first.body["signed_in"] != false || b.csrf == "" {
 		t.Fatalf("pre-session %s", first.raw)
 	}
-	set := first.header.Get("Set-Cookie")
-	for _, attribute := range []string{"__Host-gtm-session=", "Path=/", "HttpOnly", "Secure", "SameSite=Lax"} {
-		if !strings.Contains(set, attribute) {
-			t.Errorf("cookie lacks %s: %s", attribute, set)
+	checkCookie := func(set, name string) {
+		t.Helper()
+		for _, attribute := range []string{name + "=", "Path=/", "HttpOnly", "Secure", "SameSite=Lax"} {
+			if !strings.Contains(set, attribute) {
+				t.Errorf("cookie lacks %s: %s", attribute, set)
+			}
+		}
+		if strings.Contains(strings.ToLower(set), "domain=") {
+			t.Errorf("cookie names a domain: %s", set)
 		}
 	}
-	if strings.Contains(strings.ToLower(set), "domain=") {
-		t.Errorf("cookie names a domain: %s", set)
-	}
-	preCookie, preCSRF := b.cookie(), b.csrf
+	checkCookie(first.header.Get("Set-Cookie"), "__Host-gtm-pre")
+	preCookie, preCSRF := b.preCookie(), b.csrf
 
 	login := map[string]string{"login": "demo-reader", "password": readerPassword}
 	origin := map[string]string{"Origin": s.origin}
@@ -211,6 +224,7 @@ func TestSignInRotatesTheSessionAndCSRF(t *testing.T) {
 	if r.status != 200 || r.body["signed_in"] != true {
 		t.Fatalf("sign-in: %d %s", r.status, r.raw)
 	}
+	checkCookie(strings.Join(r.header.Values("Set-Cookie"), "\n"), "__Host-gtm-session")
 	principal := r.body["principal"].(map[string]any)
 	if principal["demo"] != true || principal["workspace_kind"] != "demo" || principal["id"] != s.reader.ID {
 		t.Fatalf("principal %v", principal)
@@ -221,11 +235,12 @@ func TestSignInRotatesTheSessionAndCSRF(t *testing.T) {
 	}
 	b.csrf = signedCSRF
 
-	// The pre-session's cookie no longer opens anything.
+	// The pre-session signs in once.
 	stale := s.browser(t)
-	stale.setCookie(preCookie)
-	if r := stale.do(http.MethodGet, "/api/v1/session", nil, nil); r.body["signed_in"] != false {
-		t.Fatal("the pre-session survived sign-in")
+	stale.setNamed("__Host-gtm-pre", preCookie)
+	stale.csrf = preCSRF
+	if r := stale.write(http.MethodPost, "/api/v1/session", login); r.status != 403 {
+		t.Fatalf("a used pre-session signed in again: %d", r.status)
 	}
 	// A stale CSRF token is refused, even with the live cookie.
 	if r := b.do(http.MethodDelete, "/api/v1/session", nil,
@@ -316,10 +331,11 @@ func TestEvidenceReadsNeedAGrant(t *testing.T) {
 		t.Fatalf("account cards: %d", r.status)
 	}
 	for path, want := range map[string]int{
-		"/api/v1/cards/00000000-0000-0000-0000-000000000000": 404,
-		"/api/v1/cards/" + s.Card.ID + "/units/9":            404,
-		"/api/v1/cards/" + s.Card.ID + "/units/01":           404,
-		"/api/v1/accounts/acc-999/cards":                     404,
+		"/api/v1/cards/00000000-0000-0000-0000-000000000000":    403,
+		"/api/v1/cards/" + s.Card.ID + "/units/9":               403,
+		"/api/v1/cards/" + s.Card.ID + "/units/01":              404,
+		"/api/v1/receipts/00000000-0000-0000-0000-000000000000": 403,
+		"/api/v1/accounts/acc-999/cards":                        403,
 	} {
 		if r := reader.do(http.MethodGet, path, nil, nil); r.status != want {
 			t.Errorf("%s: %d", path, r.status)
@@ -340,4 +356,114 @@ func TestEvidenceReadsNeedAGrant(t *testing.T) {
 			t.Errorf("outsider %s: %d %s", path, r.status, r.raw)
 		}
 	}
+}
+
+// Item 8: one pre-session signs in once, however many requests race.
+func TestConcurrentSignInsFromOnePreSession(t *testing.T) {
+	s := newSite(t, 0)
+	b := s.browser(t)
+	b.start()
+	pre := b.preCookie()
+	statuses := make(chan int, 6)
+	var wg sync.WaitGroup
+	for range 6 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c := s.browser(t)
+			c.setNamed("__Host-gtm-pre", pre)
+			c.csrf = b.csrf
+			statuses <- c.write(http.MethodPost, "/api/v1/session",
+				map[string]string{"login": "demo-reader", "password": readerPassword}).status
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	won := 0
+	for status := range statuses {
+		if status == 200 {
+			won++
+		} else if status != 403 {
+			t.Errorf("status %d", status)
+		}
+	}
+	if won != 1 || liveSessionRows(t, s) != 1 {
+		t.Fatalf("%d sign-ins won, %d live sessions", won, liveSessionRows(t, s))
+	}
+}
+
+// Item 8: a session revoked between admission and rotation signs in nobody.
+type revokingSessions struct {
+	httptransport.Sessions
+	store *postgres.Store
+}
+
+func (r revokingSessions) SignIn(ctx context.Context, admitted postgres.Admission, id []byte,
+	p postgres.Principal, ttl time.Duration) (time.Time, error) {
+	if !admitted.PreSession {
+		r.store.RevokeSession(ctx, admitted.IDSHA256)
+	}
+	return r.Sessions.SignIn(ctx, admitted, id, p, ttl)
+}
+
+func TestARevocationBetweenAdmissionAndRotation(t *testing.T) {
+	f := postgrestest.New(t)
+	ts := httptest.NewUnstartedServer(nil)
+	origin := "https://" + ts.Listener.Addr().String()
+	server, err := httptransport.New(httptransport.Config{PublicOrigin: origin,
+		AllowedHosts: []string{ts.Listener.Addr().String()}, SessionKey: testKey},
+		revokingSessions{f.Store, f.Store}, authz.Evidence{Store: f.Store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts.Config.Handler = server
+	ts.StartTLS()
+	defer ts.Close()
+	digest := sha256.Sum256([]byte(readerPassword))
+	if _, err := f.Store.EnsureDemoPrincipal(t.Context(), f.Workspace, "demo-reader", "Demo reader", digest[:]); err != nil {
+		t.Fatal(err)
+	}
+	s := &site{Fixture: f, server: ts, origin: origin}
+	b := s.browser(t)
+	if r := b.signIn("demo-reader", readerPassword); r.status != 200 {
+		t.Fatalf("first sign-in: %d", r.status)
+	}
+	// Signing in again from the session: the session is revoked after
+	// admission and before rotation, so no new session may appear.
+	if r := b.write(http.MethodPost, "/api/v1/session",
+		map[string]string{"login": "demo-reader", "password": readerPassword}); r.status != 403 {
+		t.Fatalf("a revoked session rotated into a new one: %d", r.status)
+	}
+	if liveSessionRows(t, s) != 0 {
+		t.Fatal("a live session remains")
+	}
+}
+
+// Item 8: cookieless GETs leave no rows.
+func TestCookielessVisitsLeaveNoRows(t *testing.T) {
+	s := newSite(t, 0)
+	for range 100 {
+		s.browser(t).start()
+	}
+	if n := rowCount(t, s, "SELECT count(*) FROM sessions") + rowCount(t, s, "SELECT count(*) FROM consumed_presessions"); n != 0 {
+		t.Fatalf("%d rows", n)
+	}
+}
+
+func liveSessionRows(t *testing.T, s *site) int {
+	return rowCount(t, s, "SELECT count(*) FROM sessions WHERE revoked_at IS NULL AND expires_at > now()")
+}
+
+func rowCount(t *testing.T, s *site, query string) int {
+	t.Helper()
+	conn, err := pgx.Connect(t.Context(), s.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(t.Context())
+	var n int
+	if err := conn.QueryRow(t.Context(), query).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

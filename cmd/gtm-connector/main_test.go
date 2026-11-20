@@ -103,6 +103,7 @@ func TestBackupAndRestoreKeepState(t *testing.T) {
 	f := postgrestest.New(t)
 	source := privateDir(t)
 	creds, _ := openCredentials(source, false)
+	defer creds.Close()
 	if _, err := creds.setUp(certificateHosts([]string{"127.0.0.1:8443"})); err != nil {
 		t.Fatal(err)
 	}
@@ -168,11 +169,13 @@ func TestBackupAndRestoreKeepState(t *testing.T) {
 
 func openFresh(t *testing.T) *postgres.Store {
 	t.Helper()
-	store, err := postgres.Open(ctx, pgtest.URL(t))
+	url := pgtest.URL(t)
+	store, err := postgres.Open(ctx, url)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
+	freshURLs[store] = url
 	return store
 }
 

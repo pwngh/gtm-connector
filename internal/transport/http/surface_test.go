@@ -2,6 +2,9 @@ package httptransport_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -20,16 +23,15 @@ import (
 
 const appMarker = "APP-HTML-MARKER"
 
+const themeScript = `try{document.documentElement.dataset.theme="dark"}catch{}`
+
 // noSessions answers Ping and fails every session lookup.
 type noSessions struct{}
 
-func (noSessions) CreateSession(context.Context, []byte, *postgres.Principal, time.Duration) (time.Time, error) {
-	return time.Time{}, errors.New("no database")
-}
 func (noSessions) LiveSession(context.Context, []byte) (postgres.Session, error) {
 	return postgres.Session{}, postgres.ErrNotFound
 }
-func (noSessions) SignIn(context.Context, []byte, []byte, postgres.Principal, time.Duration) (time.Time, error) {
+func (noSessions) SignIn(context.Context, postgres.Admission, []byte, postgres.Principal, time.Duration) (time.Time, error) {
 	return time.Time{}, errors.New("no database")
 }
 func (noSessions) RevokeSession(context.Context, []byte) error { return errors.New("no database") }
@@ -38,11 +40,14 @@ func (noSessions) DemoPrincipalByLogin(context.Context, string) (postgres.Princi
 }
 func (noSessions) Ping(context.Context) error { return nil }
 
+var testKey = []byte("0123456789abcdef0123456789abcdef")
+
 func webDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	files := map[string]string{
-		"index.html":     "<!doctype html><title>" + appMarker + "</title><script type=module src=/assets/app.js></script>",
+		"index.html": "<!doctype html><script>" + themeScript + "</script><title>" + appMarker +
+			"</title><script type=module src=/assets/app.js></script>",
 		"assets/app.js":  "console.log(1)",
 		"robots.txt":     "User-agent: *",
 		".env":           "SECRET=1",
@@ -63,7 +68,7 @@ func webDir(t *testing.T) string {
 func surface(t *testing.T) *httptransport.Server {
 	t.Helper()
 	s, err := httptransport.New(httptransport.Config{PublicOrigin: "https://127.0.0.1:8443",
-		AllowedHosts: []string{"127.0.0.1:8443", "localhost:8443"}, WebDir: webDir(t)},
+		AllowedHosts: []string{"127.0.0.1:8443", "localhost:8443"}, WebDir: webDir(t), SessionKey: testKey},
 		noSessions{}, authz.Evidence{})
 	if err != nil {
 		t.Fatal(err)
@@ -95,8 +100,31 @@ func TestWrongHostIsRefused(t *testing.T) {
 			}
 		}
 	}
-	if w := send(s, http.MethodGet, "/healthz", "LOCALHOST:8443", nil); w.Code != http.StatusOK {
-		t.Errorf("an allowed host in capitals: %d", w.Code)
+	if w := send(s, http.MethodGet, "/healthz", "127.0.0.1:8443", nil); w.Code != http.StatusOK {
+		t.Errorf("the public host: %d", w.Code)
+	}
+	// Item 11 (Opus): OPTIONS * meets the Host check like any request.
+	for host, want := range map[string]int{"evil.example": 421, "127.0.0.1:8443": 404} {
+		r := httptest.NewRequest(http.MethodOptions, "https://127.0.0.1:8443/", nil)
+		r.RequestURI, r.Host = "*", host
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Errorf("OPTIONS * with Host %s: %d", host, w.Code)
+		}
+	}
+}
+
+// Item 8: another allowed host is sent to the public origin, where the
+// session cookie lives.
+func TestOtherAllowedHostsGoToThePublicOrigin(t *testing.T) {
+	s := surface(t)
+	for _, host := range []string{"localhost:8443", "LOCALHOST:8443"} {
+		w := send(s, http.MethodGet, "/renewals/x?tab=2", host, nil)
+		if w.Code != http.StatusPermanentRedirect ||
+			w.Header().Get("Location") != "https://127.0.0.1:8443/renewals/x?tab=2" {
+			t.Errorf("%s: %d %q", host, w.Code, w.Header().Get("Location"))
+		}
 	}
 }
 
@@ -111,16 +139,32 @@ func TestReservedPathsNeverServeTheApp(t *testing.T) {
 			if strings.Contains(w.Body.String(), appMarker) || strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
 				t.Errorf("%s %s returned the app's HTML (%d)", method, path, w.Code)
 			}
-			if w.Code == http.StatusOK && path != "/healthz" {
+			if w.Code == http.StatusOK && path != "/healthz" && path != "/api/v1/session" {
 				t.Errorf("%s %s: %d", method, path, w.Code)
 			}
 		}
 	}
-	for _, path := range []string{"/", "/renewals/r-1/evidence", "/operations", "/index.html"} {
+	for _, path := range []string{"/", "/renewals/r-1/evidence", "/operations", "/index.html", "/queue",
+		"/playbooks"} {
 		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), appMarker) ||
 			!strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 			t.Errorf("client route %s: %d", path, w.Code)
+		}
+	}
+	// Item 12: only client routes fall back; non-canonical spellings of a
+	// reserved path get the API's JSON 404.
+	for _, path := range []string{"/random", "/renewalsx", "/admin/x", "/renewals/x.png"} {
+		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
+		if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), appMarker) {
+			t.Errorf("not a client route %s: %d", path, w.Code)
+		}
+	}
+	for _, path := range []string{"/api/v1//session", "/api//", "/API/v1/session", "/mcp/../api", "/Healthz",
+		"/api/v1/./session", "/renewals//x"} {
+		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
+		if w.Code != http.StatusNotFound || w.Header().Get("Content-Type") != "application/json" {
+			t.Errorf("non-canonical %s: %d %q", path, w.Code, w.Header().Get("Content-Type"))
 		}
 	}
 	w := send(s, http.MethodGet, "/assets/app.js", "127.0.0.1:8443", nil)
@@ -167,13 +211,91 @@ func TestWritesNeedTheConfiguredOrigin(t *testing.T) {
 
 func TestConfigIsChecked(t *testing.T) {
 	for name, cfg := range map[string]httptransport.Config{
-		"http origin":        {PublicOrigin: "http://127.0.0.1:8443", AllowedHosts: []string{"127.0.0.1:8443"}},
-		"origin with a path": {PublicOrigin: "https://127.0.0.1:8443/app", AllowedHosts: []string{"127.0.0.1:8443"}},
-		"origin not allowed": {PublicOrigin: "https://127.0.0.1:8443", AllowedHosts: []string{"localhost:8443"}},
-		"no hosts":           {PublicOrigin: "https://127.0.0.1:8443"},
+		"http origin":        {PublicOrigin: "http://127.0.0.1:8443", AllowedHosts: []string{"127.0.0.1:8443"}, SessionKey: testKey},
+		"origin with a path": {PublicOrigin: "https://127.0.0.1:8443/app", AllowedHosts: []string{"127.0.0.1:8443"}, SessionKey: testKey},
+		"origin not allowed": {PublicOrigin: "https://127.0.0.1:8443", AllowedHosts: []string{"localhost:8443"}, SessionKey: testKey},
+		"no hosts":           {PublicOrigin: "https://127.0.0.1:8443", SessionKey: testKey},
+		"no session key":     {PublicOrigin: "https://127.0.0.1:8443", AllowedHosts: []string{"127.0.0.1:8443"}},
 	} {
 		if _, err := httptransport.New(cfg, noSessions{}, authz.Evidence{}); err == nil {
 			t.Errorf("%s was accepted", name)
 		}
+	}
+}
+
+// Item 12: every response carries the CSP; the shell's inline theme script
+// is allowed by its hash and no other inline script is; content types come
+// from a fixed table.
+func TestEveryDocumentIsUnderThePolicy(t *testing.T) {
+	dir := webDir(t)
+	os.WriteFile(filepath.Join(dir, "assets", "logo.svg"), []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`), 0o644)
+	os.WriteFile(filepath.Join(dir, "report.html"), []byte(`<script>alert(1)</script>`), 0o644)
+	os.WriteFile(filepath.Join(dir, "assets", "blob.xyz123"), []byte(`<html><script>alert(1)</script>`), 0o644)
+	s, err := httptransport.New(httptransport.Config{PublicOrigin: "https://127.0.0.1:8443",
+		AllowedHosts: []string{"127.0.0.1:8443"}, WebDir: dir, SessionKey: testKey}, noSessions{}, authz.Evidence{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	sum := sha256.Sum256([]byte(themeScript))
+	allowed := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	for path, kind := range map[string]string{
+		"/assets/logo.svg": "image/svg+xml", "/report.html": "text/html; charset=utf-8",
+		"/assets/blob.xyz123": "application/octet-stream", "/assets/app.js": "text/javascript; charset=utf-8",
+		"/": "text/html; charset=utf-8", "/api/v1/nope": "application/json", "/robots.txt": "text/plain; charset=utf-8",
+	} {
+		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
+		policy := w.Header().Get("Content-Security-Policy")
+		if w.Header().Get("Content-Type") != kind || !strings.Contains(policy, "script-src 'self' "+allowed+";") ||
+			strings.Contains(policy, "unsafe-inline' https://fonts.gstatic") || !strings.Contains(policy, "https://fonts.googleapis.com") {
+			t.Errorf("%s: %q, policy %q", path, w.Header().Get("Content-Type"), policy)
+		}
+	}
+}
+
+// Item 13: the sign-in body is exactly one JSON object.
+func TestTheSignInBodyIsOneObject(t *testing.T) {
+	s := surface(t)
+	first := send(s, http.MethodGet, "/api/v1/session", "127.0.0.1:8443", nil)
+	var view struct {
+		CSRF string `json:"csrf_token"`
+	}
+	json.Unmarshal(first.Body.Bytes(), &view)
+	cookie := first.Header().Get("Set-Cookie")
+	cookie = cookie[:strings.Index(cookie, ";")]
+	post := func(body string) int {
+		r := httptest.NewRequest(http.MethodPost, "https://127.0.0.1:8443/api/v1/session", strings.NewReader(body))
+		r.Host = "127.0.0.1:8443"
+		r.Header.Set("Origin", "https://127.0.0.1:8443")
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-CSRF-Token", view.CSRF)
+		r.Header.Set("Cookie", cookie)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w.Code
+	}
+	for _, body := range []string{`{"login":"a","password":"b"}}`, `{"login":"a","password":"b"}{}`,
+		`{"login":"a","password":"b"} []`, `null`, `[]`, `"x"`, `{"login":"a","password":"b","x":1}`} {
+		if code := post(body); code != http.StatusBadRequest {
+			t.Errorf("%s: %d", body, code)
+		}
+	}
+	if code := post(`{"login":"a","password":"b"}` + "\n"); code != http.StatusUnauthorized {
+		t.Errorf("one object: %d", code)
+	}
+}
+
+// Item 8: visitors without a session cost no database work.
+func TestPreSessionsAreStateless(t *testing.T) {
+	s := surface(t) // noSessions fails any write
+	for range 50 {
+		w := send(s, http.MethodGet, "/api/v1/session", "127.0.0.1:8443", nil)
+		if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Set-Cookie"), "__Host-gtm-pre=") {
+			t.Fatalf("GET session: %d", w.Code)
+		}
+	}
+	if _, err := httptransport.New(httptransport.Config{PublicOrigin: "https://127.0.0.1:8443",
+		AllowedHosts: []string{"127.0.0.1:8443"}, SessionKey: []byte("short")}, noSessions{}, authz.Evidence{}); err == nil {
+		t.Fatal("a short session key was accepted")
 	}
 }

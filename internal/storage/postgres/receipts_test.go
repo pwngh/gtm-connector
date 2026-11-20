@@ -155,7 +155,7 @@ func TestReceiptFinishesOnce(t *testing.T) {
 		t.Fatal("an error receipt took rows")
 	}
 	if code(sql(t, f, `UPDATE receipts SET status = 'error', http_status = 500, rows = '["x"]', row_count = 1,
-		finished_at = now() WHERE id = $1`, bad.ID)) != "23514" {
+		finished_at = now(), finishing_lease = lease_token WHERE id = $1`, bad.ID)) != "23514" {
 		t.Fatal("the table accepted an error receipt with rows")
 	}
 }
@@ -276,12 +276,15 @@ func TestLostAcknowledgement(t *testing.T) {
 		t.Fatalf("retry read %d times", reads)
 	}
 	// FinishRead repeated with the same records is the same result.
-	same, err := f.Store.FinishRead(ctx, got.ID, got.LeaseToken, records("a"), 1)
+	held := child(t, f, first, 1, time.Minute)
+	done, err := f.Store.FinishRead(ctx, held.ID, held.LeaseToken, records("a"), 1)
 	ok(t, err)
-	if same.ID != got.ID {
+	same, err := f.Store.FinishRead(ctx, held.ID, held.LeaseToken, records("a"), 1)
+	ok(t, err)
+	if same.ID != done.ID || *same.FinishedAt != *done.FinishedAt {
 		t.Fatal("a repeated FinishRead changed the receipt")
 	}
-	_, err = f.Store.FinishRead(ctx, got.ID, got.LeaseToken, records("b")[:1], 1)
+	_, err = f.Store.FinishRead(ctx, held.ID, held.LeaseToken, records("b")[:1], 1)
 	is(t, err, postgres.ErrAlreadyFinished)
 
 	// Committed and delivered are recorded apart.
@@ -407,26 +410,29 @@ func TestCrashAtEachStepBoundary(t *testing.T) {
 	}
 }
 
-// publication starts a seal receipt and describes a one-unit card resting
-// on a fresh read.
+// publication starts a brief, a read under it and a seal receipt, and
+// describes a one-unit card resting on that read.
 func publication(t *testing.T, f *postgrestest.Fixture, brief string) (postgres.CardPublication, postgres.Receipt) {
 	t.Helper()
 	p := parent(t, f, brief+"-parent", time.Minute)
 	read, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 0, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return records(brief), nil })
 	ok(t, err)
+	versions, err := f.Store.ReceiptRecordIDs(ctx, f.Workspace.ID, read.ID)
+	ok(t, err)
 	seal, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
 		OperationID: brief + "-seal", PrincipalID: f.Reader.ID, TokenID: "anonymous", Tool: "save_brief",
 		AccountRef: postgrestest.Account, BriefID: brief, Arguments: json.RawMessage(`{}`), Lease: time.Minute})
 	ok(t, err)
 	rules := "3"
+	units := []postgres.Unit{{N: 1, Kind: "record", RecordRef: "crm/accounts/acc-003", Tool: "get_account",
+		ReceiptID: read.ID, SourceRecordID: versions["crm/accounts/acc-003"],
+		Body: postgrestest.UnitBody(1, "record", "crm/accounts/acc-003", "get_account", "", nil)}}
+	gaps := []postgres.Gap{{Code: "neutralized", Disposition: "note", Text: "none"}}
 	return postgres.CardPublication{WorkspaceID: f.Workspace.ID, AccountRef: postgrestest.Account, BriefID: brief,
-		PrincipalID: f.Reader.ID, SealReceiptID: seal.ID, SealLeaseToken: seal.LeaseToken, Kind: "go",
-		SchemaVersion: 3, RulesVersion: &rules, Bytes: []byte(`{"brief":"` + brief + `"}`),
-		Units: []postgres.Unit{{N: 1, Kind: "record", RecordRef: "crm/accounts/acc-003", Tool: "get_account",
-			ReceiptID: read.ID, Body: json.RawMessage(`{"n":1}`)}},
-		Gaps:           []postgres.Gap{{Code: "neutralized", Disposition: "note", Text: "none"}},
-		ReadReceiptIDs: []string{read.ID}}, seal
+		ParentReceiptID: p.ID, PrincipalID: f.Reader.ID, SealReceiptID: seal.ID, SealLeaseToken: seal.LeaseToken,
+		Kind: "go", SchemaVersion: 3, RulesVersion: &rules, Bytes: postgrestest.CardBytes(brief, units, gaps),
+		Units: units, Gaps: gaps, ReadReceiptIDs: []string{read.ID}}, seal
 }
 
 func TestUnavailableReceiptStore(t *testing.T) {
@@ -605,19 +611,21 @@ func TestDurableRowsRefuseChange(t *testing.T) {
 
 func TestCardSealMustNameItsBytes(t *testing.T) {
 	f := postgrestest.New(t)
-	_, seal := publication(t, f, "forged")
+	pub, seal := publication(t, f, "forged")
 	_, err := f.Store.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: seal.ID, LeaseToken: seal.LeaseToken,
 		Status: "ok", HTTPStatus: 200, Rows: []string{"briefs/forged/" + strings.Repeat("0", 64)}})
 	ok(t, err)
 	err = sql(t, f, `INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-		card_bytes, card_sha256, seal_receipt_id) VALUES ($1, 'acc-003', 'forged', 'go', 3, '3', 'x', sha256('x'), $2)`,
-		f.Workspace.ID, seal.ID)
+		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count)
+		VALUES ($1, 'acc-003', 'forged', 'go', 3, '3', $3, sha256($3), $4, $2, 0, 0)`,
+		f.Workspace.ID, seal.ID, []byte(`{"units":[],"gaps":[]}`), pub.ParentReceiptID)
 	if code(err) != "GT009" {
 		t.Fatalf("a card was stored under a seal for other bytes: %v", err)
 	}
 	if code(sql(t, f, `INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-		card_bytes, card_sha256, seal_receipt_id) VALUES ($1, 'acc-003', 'x', 'go', 3, '3', 'x', sha256('y'), $2)`,
-		f.Workspace.ID, seal.ID)) != "23514" {
+		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count)
+		VALUES ($1, 'acc-003', 'x', 'go', 3, '3', 'x', sha256('y'), $3, $2, 0, 0)`,
+		f.Workspace.ID, seal.ID, pub.ParentReceiptID)) != "23514" {
 		t.Fatal("a card's digest need not match its bytes")
 	}
 }
@@ -625,7 +633,7 @@ func TestCardSealMustNameItsBytes(t *testing.T) {
 func TestRecordVersions(t *testing.T) {
 	f := postgrestest.New(t)
 	p := parent(t, f, "versions", time.Minute)
-	versioned := []postgres.RecordVersion{{Source: "slack", Table: "messages", RecordID: "msg-1",
+	versioned := []postgres.RecordVersion{{Source: "crm", Table: "accounts", RecordID: "acc-010",
 		ContentVersion: "1700000000.000100", Body: []byte("first")}}
 	_, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 0, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return versioned, nil })
@@ -639,7 +647,7 @@ func TestRecordVersions(t *testing.T) {
 	_, _, err = f.Store.RunChildRead(ctx, childStart(f, p, 2, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return versioned, nil })
 	ok(t, err)
-	if count(t, f, "SELECT count(*) FROM source_records WHERE record_id = 'msg-1'") != 1 {
+	if count(t, f, "SELECT count(*) FROM source_records WHERE record_id = 'acc-010'") != 1 {
 		t.Fatal("one version stored twice")
 	}
 	// A failed read finishes as an error with no rows.
