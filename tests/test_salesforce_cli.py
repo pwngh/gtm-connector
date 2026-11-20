@@ -129,7 +129,7 @@ class SalesforceCLITests(unittest.TestCase):
             return SimpleQueue()
 
         with patch("queue.SimpleQueue", side_effect=queue_factory):
-            return self.invoke(["serve", *arguments], **options)
+            return self.invoke(["debug", "serve", *arguments], **options)
 
     def assert_private(self, text):
         for value in (TOKEN, ORIGIN, ORG_ID, ALIAS, "Avery Example", "@example"):
@@ -202,7 +202,7 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual((code, out.getvalue()), (5, ""))
         error = json.loads(err.getvalue())["error"]
         self.assertIn("salesforce_auth_required", error["message"])
-        self.assertEqual(error["next"], "gtm-connector salesforce check --help")
+        self.assertEqual(error["next"], "gtm-connector debug salesforce check --help")
         self.assert_private(err.getvalue())
         self.assertFalse(self.state.exists())
 
@@ -255,7 +255,7 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual((self.state / "profile.json").read_bytes(), saved)
 
     def test_malformed_connected_lookup_is_usage_before_credentials(self):
-        for arguments in (["account", "acc-001"], ["accounts", "--query", "x" * 201],
+        for arguments in (["inspect", "acc-001"], ["accounts", "--query", "x" * 201],
                           ["accounts", "--query", "bad\nquery"]):
             code, out, err, factory = self.invoke([*arguments, "--json"])
             self.assertEqual(code, 2, err)
@@ -317,11 +317,11 @@ class SalesforceCLITests(unittest.TestCase):
                 self.assertEqual([receipt["row_count"] for receipt in receipts], [100, 100])
 
     def test_account_json_groups_contacts_and_contracts_without_new_tool(self):
-        code, out, err, _ = self.invoke(["account", ACCOUNT, "--json"])
+        code, out, err, _ = self.invoke(["inspect", ACCOUNT, "--json"])
         self.assertEqual(code, 0, err)
         self.assertEqual(err, "")
         account = json.loads(out)
-        self.assertEqual(account["id"], ACCOUNT)
+        self.assertEqual((account["id"], account["newest_brief_id"]), (ACCOUNT, None))
         self.assertIsNone(account["industry"])
         self.assertEqual(account["contacts"][0]["id"], "con-sf-" + CONTACT_ID)
         self.assertEqual(account["contracts"][0]["end_date"], "2027-01-31")
@@ -332,7 +332,7 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual(len(self.requests), 4)
 
     def test_human_account_formats_contracts_and_unknown_values(self):
-        code, out, err, _ = self.invoke(["account", ACCOUNT], environment="sandbox")
+        code, out, err, _ = self.invoke(["inspect", ACCOUNT], environment="sandbox")
         self.assertEqual(code, 0, err)
         self.assertEqual(err.count("Sources:"), 1)
         self.assertIn("Sources: CRM is Salesforce (sandbox), identity verified.", err)
@@ -374,7 +374,7 @@ class SalesforceCLITests(unittest.TestCase):
         self.assertEqual([path.name for path in (self.root / "var").iterdir()], ["v2"])
 
     def test_missing_account_has_receipt_and_no_local_fallback(self):
-        code, out, err, _ = self.invoke(["account", ACCOUNT, "--json"], reader=self.reader(missing=True))
+        code, out, err, _ = self.invoke(["inspect", ACCOUNT, "--json"], reader=self.reader(missing=True))
         self.assertEqual(code, 2, err)
         self.assertEqual(out, "")
         error = json.loads(err)["error"]
@@ -504,7 +504,7 @@ print(json.dumps({"status": 0, "result": {field: value}}))
         report = {"status": "failed", "steps": []}
         with patch("gtm_connector.salesforce_check.run_check", return_value=report) as check, \
                 redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
-            code = main(["salesforce", "check", "--sf-environment", "production", "--sf-org", ALIAS, "--json"])
+            code = main(["debug", "salesforce", "check", "--sf-environment", "production", "--sf-org", ALIAS, "--json"])
         self.assertEqual(code, 4)
         self.assertEqual(json.loads(out.getvalue()), report)
         self.assertEqual(check.call_args.kwargs["environment"], "production")
@@ -515,7 +515,7 @@ print(json.dumps({"status": 0, "result": {field: value}}))
         self.env.update(SALESFORCE_INSTANCE_URL=ORIGIN, SALESFORCE_ACCESS_TOKEN=TOKEN)
         profile.save(self.state, profile.DEMO)
         process = subprocess.Popen(
-            [sys.executable, "-m", "gtm_connector", "serve", "--json", "--state-dir", str(self.state)],
+            [sys.executable, "-m", "gtm_connector", "debug", "serve", "--json", "--state-dir", str(self.state)],
             cwd=ROOT, env=self.env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             readable, _, _ = select.select([process.stdout], [], [], 20)

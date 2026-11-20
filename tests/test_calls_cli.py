@@ -56,14 +56,14 @@ class CallsCLITests(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def import_file(self, *options, account='acc-003', json_output=True):
-        return self.invoke('calls', 'import', str(self.export), '--account', account, *options,
+        return self.invoke('debug', 'calls', 'import', str(self.export), '--account', account, *options,
                            json_output=json_output)
 
     def success(self, result):
         code, out, err = result
         self.assertEqual(code, 0, err)
         for line in err.splitlines():
-            self.assertEqual(json.loads(line)['progress']['command'], 'calls import')
+            self.assertEqual(json.loads(line)['progress']['command'], 'debug calls import')
         return json.loads(out)
 
     def error(self, result, code):
@@ -125,11 +125,11 @@ class CallsCLITests(unittest.TestCase):
 
     def test_inspection_hides_unselected_original_until_full_is_explicit(self):
         imported = self.success(self.import_file('--lines', '3:4'))
-        inspected = self.success(self.invoke('calls', 'inspect', imported['import_id']))
+        inspected = self.success(self.invoke('debug', 'calls', 'inspect', imported['import_id']))
         self.assertEqual([unit['index'] for unit in inspected['units']], [2, 3, 4, 5])
         self.assertNotIn('original_text', inspected)
         self.assertNotIn('Invented line 30.', json.dumps(inspected))
-        full = self.success(self.invoke('calls', 'inspect', imported['import_id'], '--full'))
+        full = self.success(self.invoke('debug', 'calls', 'inspect', imported['import_id'], '--full'))
         self.assertEqual(full['original_text'], self.export.read_text())
         self.assertEqual(len(full['units']), 30)
 
@@ -139,8 +139,8 @@ class CallsCLITests(unittest.TestCase):
         with patch.object(SalesforceReadOnlyAdapter, 'from_sf', side_effect=AssertionError('No credentials')), \
                 patch.object(SalesforceReadOnlyAdapter, 'from_env', side_effect=AssertionError('No credentials')), \
                 patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No server')):
-            listed = self.success(self.invoke('calls', 'list', '--account', 'acc-003'))
-            inspected = self.success(self.invoke('calls', 'inspect', imported['import_id']))
+            listed = self.success(self.invoke('debug', 'calls', 'list', '--account', 'acc-003'))
+            inspected = self.success(self.invoke('debug', 'calls', 'inspect', imported['import_id']))
         self.assertEqual(listed['imports'][0]['import_id'], imported['import_id'])
         self.assertTrue(listed['imports'][0]['active'])
         self.assertIsNone(listed['next_after'])
@@ -150,7 +150,7 @@ class CallsCLITests(unittest.TestCase):
     def test_common_options_work_before_or_after_the_action(self):
         imported = self.success(self.import_file())
         with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
-            code = main(['calls', '--json', '--state-dir', str(self.state), 'list'])
+            code = main(['debug', 'calls', '--json', '--state-dir', str(self.state), 'list'])
         self.assertEqual(code, 0, err.getvalue())
         self.assertEqual(json.loads(out.getvalue())['imports'][0]['import_id'], imported['import_id'])
         self.assertEqual(err.getvalue(), '')
@@ -161,7 +161,7 @@ class CallsCLITests(unittest.TestCase):
         try:
             os.chdir(self.root)
             with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
-                code = main(['calls', 'import', str(self.export), '--account', 'acc-003', '--json'])
+                code = main(['debug', 'calls', 'import', str(self.export), '--account', 'acc-003', '--json'])
         finally:
             os.chdir(previous)
         self.assertEqual(code, 0, err.getvalue())
@@ -179,10 +179,10 @@ class CallsCLITests(unittest.TestCase):
                 parsed = parse_transcript(f'Private invented revision {number}.'.encode(), format='txt')
                 store_import(runtime.imports_path, parsed, select_excerpt(parsed), association=association,
                              called_at=None, imported_at='2027-01-15T12:00:00Z')
-        first = self.success(self.invoke('calls', 'list'))
+        first = self.success(self.invoke('debug', 'calls', 'list'))
         self.assertEqual(len(first['imports']), 100)
         self.assertIsNotNone(first['next_after'])
-        second = self.success(self.invoke('calls', 'list', '--after', first['next_after']))
+        second = self.success(self.invoke('debug', 'calls', 'list', '--after', first['next_after']))
         self.assertEqual(len(second['imports']), 1)
         self.assertIsNone(second['next_after'])
         self.assertEqual(len({item['import_id'] for item in first['imports'] + second['imports']}), 101)
@@ -194,7 +194,7 @@ class CallsCLITests(unittest.TestCase):
         second = self.success(self.import_file('--reassign', account='acc-002'))
         self.assertTrue(second['reassigned'])
         self.assertNotEqual(second['import_id'], first['import_id'])
-        old = self.success(self.invoke('calls', 'inspect', first['import_id']))
+        old = self.success(self.invoke('debug', 'calls', 'inspect', first['import_id']))
         self.assertEqual(old['import']['account_id'], 'acc-003')
         self.assertFalse(old['import']['active'])
 
@@ -202,7 +202,7 @@ class CallsCLITests(unittest.TestCase):
         self.export = self.root / 'invented.vtt'
         self.export.write_bytes(VTT.replace(b'Confirm seats.', 'Confirm seats.\u202e'.encode()))
         imported = self.success(self.import_file('--cues', '1:1'))
-        code, out, err = self.invoke('calls', 'inspect', imported['import_id'], '--full', json_output=False)
+        code, out, err = self.invoke('debug', 'calls', 'inspect', imported['import_id'], '--full', json_output=False)
         self.assertEqual(code, 0, err)
         self.assertIn('0 to 3000 ms', out)
         self.assertIn('Original export text (quoted)', out)
@@ -239,7 +239,7 @@ class CallsCLITests(unittest.TestCase):
     def test_terminal_list_stacks_full_identifiers_and_preserves_piped_tsv(self):
         from gtm_connector.cli import human_result
         self.success(self.import_file('--lines', '3:4'))
-        listed = self.success(self.invoke('calls', 'list'))
+        listed = self.success(self.invoke('debug', 'calls', 'list'))
         row = listed['imports'][0]
         with patch('sys.stdout.isatty', return_value=True), patch.dict(os.environ, {'NO_COLOR': '1'}):
             terminal = human_result('calls', listed)
@@ -254,14 +254,14 @@ class CallsCLITests(unittest.TestCase):
         listed['next_after'] = row['import_id']
         with patch('sys.stdout.isatty', return_value=True), patch.dict(os.environ, {'NO_COLOR': '1'}):
             paginated = human_result('calls', listed, state_dir=Path('var/private-calls'))
-        self.assertIn('gtm-connector calls list --after ' + row['import_id'] + ' \\', paginated.splitlines())
+        self.assertIn('gtm-connector debug calls list --after ' + row['import_id'] + ' \\', paginated.splitlines())
         self.assertIn('  --state-dir var/private-calls', paginated.splitlines())
         self.assertLessEqual(max(map(len, paginated.splitlines())), 112)
 
     def test_import_and_inspection_show_requested_and_cited_ranges(self):
         from gtm_connector.cli import human_result
         imported = self.success(self.import_file('--lines', '3:4'))
-        inspected = self.success(self.invoke('calls', 'inspect', imported['import_id']))
+        inspected = self.success(self.invoke('debug', 'calls', 'inspect', imported['import_id']))
         for result in (imported, inspected):
             with patch('sys.stdout.isatty', return_value=False):
                 rendered = human_result('calls', result)
@@ -282,7 +282,7 @@ class CallsCLITests(unittest.TestCase):
             self.assertIn('Speaker names\tthe name that opens each line', human_result('calls', named))
             self.assertIn('Speaker names\tnot declared', human_result('calls', plain))
             # Two revisions of one file differ only in this, so the list shows it on each row.
-            listed = self.success(self.invoke('calls', 'list'))
+            listed = self.success(self.invoke('debug', 'calls', 'list'))
             self.assertEqual(human_result('calls', listed).count('\tTrue'), 2)  # one active row, one declared row
         with patch('sys.stdout.isatty', return_value=True):
             self.assertEqual(human_result('calls', listed).count('Speaker names: the name that opens each line.'), 1)
@@ -323,15 +323,15 @@ class CallsCLITests(unittest.TestCase):
 
     def test_action_conflicts_fail_before_source_or_credentials_or_state(self):
         cases = [
-            ['calls', 'import', str(self.export)],
-            ['calls', 'import', str(self.export), '--account', 'acc-003', '--full'],
-            ['calls', 'import', str(self.export), '--account', 'acc-003', '--after', 'note-' + 'a' * 64],
-            ['calls', 'import', str(self.export), '--account-number', 'INVENTED-001'],
-            ['calls', 'list', str(self.export)], ['calls', 'list', '--full'],
-            ['calls', 'list', '--called-at', '2027-01-15T10:00:00Z'], ['calls', 'list', '--reassign'],
-            ['calls', 'inspect', 'note-' + 'a' * 64, '--account', 'acc-003'],
-            ['calls', 'inspect', 'note-' + 'a' * 64, '--lines', '1:2'],
-            ['calls', 'inspect'], ['calls', 'list', '--after', 'private-cursor'],
+            ['debug', 'calls', 'import', str(self.export)],
+            ['debug', 'calls', 'import', str(self.export), '--account', 'acc-003', '--full'],
+            ['debug', 'calls', 'import', str(self.export), '--account', 'acc-003', '--after', 'note-' + 'a' * 64],
+            ['debug', 'calls', 'import', str(self.export), '--account-number', 'INVENTED-001'],
+            ['debug', 'calls', 'list', str(self.export)], ['debug', 'calls', 'list', '--full'],
+            ['debug', 'calls', 'list', '--called-at', '2027-01-15T10:00:00Z'], ['debug', 'calls', 'list', '--reassign'],
+            ['debug', 'calls', 'inspect', 'note-' + 'a' * 64, '--account', 'acc-003'],
+            ['debug', 'calls', 'inspect', 'note-' + 'a' * 64, '--lines', '1:2'],
+            ['debug', 'calls', 'inspect'], ['debug', 'calls', 'list', '--after', 'private-cursor'],
         ]
         for arguments in cases:
             with self.subTest(arguments=arguments), \
@@ -359,7 +359,7 @@ class CallsCLITests(unittest.TestCase):
                     patch('gtm_connector.runtime.Runtime', side_effect=AssertionError('No state')) as runtime, \
                     patch('gtm_connector.call_workflow.resolve_call_account',
                           side_effect=AssertionError('No CRM resolution')) as resolve:
-                error = self.error(self.invoke('calls', 'import', str(self.export),
+                error = self.error(self.invoke('debug', 'calls', 'import', str(self.export),
                                                '--account-number', 'INVENTED' + character + '001'), 2)
                 self.assertIn('AccountNumber', error['message'])
                 credentials.assert_not_called()
@@ -416,11 +416,11 @@ class CallsCLITests(unittest.TestCase):
         self.state = self.root / 'missing'
         for action in [('list',), ('inspect', 'note-' + 'a' * 64)]:
             with self.subTest(action=action):
-                error = self.error(self.invoke('calls', *action), 3)
+                error = self.error(self.invoke('debug', 'calls', *action), 3)
                 self.assertIn('existing import state folder', error['message'])
                 self.assertNotIn('fresh', error['message'])
                 self.assertNotIn('Repeat this command with --state-dir', error['message'])
-                self.assertEqual(error['next'], 'gtm-connector calls import --help')
+                self.assertEqual(error['next'], 'gtm-connector debug calls import --help')
                 self.assertFalse(self.state.exists())
 
     def test_imported_brief_on_fixture_state_recovers_to_existing_imports(self):
@@ -433,7 +433,7 @@ class CallsCLITests(unittest.TestCase):
         self.assertIn('existing import state folder', error['message'])
         self.assertNotIn('fresh', error['message'])
         self.assertNotIn('Repeat this command with --state-dir', error['message'])
-        self.assertEqual(error['next'], 'gtm-connector calls import --help')
+        self.assertEqual(error['next'], 'gtm-connector debug calls import --help')
         self.assertEqual(before, {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()})
         # An import names a fresh folder to connect and import into.
         import_error = self.error(self.import_file(), 3)
@@ -457,7 +457,7 @@ class CallsCLITests(unittest.TestCase):
         self.assertIn('Connect the original org and environment with gtm-connector connect salesforce',
                       error['message'])
         self.assertNotIn('fresh', error['message'])
-        self.assertEqual(error['next'], 'gtm-connector calls import --help')
+        self.assertEqual(error['next'], 'gtm-connector debug calls import --help')
         for private in ('invented-original', '00D000000000001AAA', '00D000000000002AAA'):
             self.assertNotIn(private, json.dumps(error))
         self.assertEqual(before, {path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()})
@@ -468,7 +468,7 @@ class CallsCLITests(unittest.TestCase):
         reader = self.reader()
         self.connected('invented-alias')
         with patch.object(SalesforceReadOnlyAdapter, 'from_sf', return_value=reader):
-            result = self.success(self.invoke('calls', 'import', str(self.export),
+            result = self.success(self.invoke('debug', 'calls', 'import', str(self.export),
                                               '--account-number', 'INVENTED-001'))
         self.assertEqual(result['account_id'], ACCOUNT)
         self.assertEqual(len(self.requests), 2)
@@ -492,10 +492,10 @@ class CallsCLITests(unittest.TestCase):
     def test_ambiguous_salesforce_number_never_publishes_import(self):
         self.connected('invented-alias')
         with patch.object(SalesforceReadOnlyAdapter, 'from_sf', return_value=self.reader(duplicate=True)):
-            error = self.error(self.invoke('calls', 'import', str(self.export),
+            error = self.error(self.invoke('debug', 'calls', 'import', str(self.export),
                                            '--account-number', 'INVENTED-001'), 3)
         self.assertIn('calls_account_ambiguous', error['message'])
-        listed = self.success(self.invoke('calls', 'list'))
+        listed = self.success(self.invoke('debug', 'calls', 'list'))
         self.assertEqual(listed['imports'], [])
 
     def test_an_import_needs_transcripts_connected_and_never_writes_into_demo_call_notes(self):
@@ -512,8 +512,8 @@ class CallsCLITests(unittest.TestCase):
         previous = Path.cwd()
         try:
             os.chdir(self.root)
-            for command in (['serve'], ['brief', ACCOUNT], ['accounts'], ['account', ACCOUNT],
-                            ['calls', 'import', str(self.export), '--account', ACCOUNT]):
+            for command in (['debug', 'serve'], ['brief', ACCOUNT], ['accounts'], ['inspect', ACCOUNT],
+                            ['debug', 'calls', 'import', str(self.export), '--account', ACCOUNT]):
                 with self.subTest(command=command), \
                         patch.object(SalesforceReadOnlyAdapter, 'from_sf',
                                      side_effect=AssertionError('No credential load')) as credentials, \
@@ -547,7 +547,7 @@ class CallsCLITests(unittest.TestCase):
                 return InterruptQueue()
             return SimpleQueue()
         with patch('queue.SimpleQueue', side_effect=queue_factory):
-            code, out, err = self.invoke('serve')
+            code, out, err = self.invoke('debug', 'serve')
         self.assertEqual(code, 0, err)
         ready = json.loads(out)
         self.assertEqual(ready['sources'], {'crm': 'demo_fixture', 'calls': 'imported_transcript',

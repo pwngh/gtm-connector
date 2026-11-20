@@ -217,7 +217,7 @@ class StdioBridgeTests(unittest.TestCase):
             timeout=120, check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
-        self.assertIn("gtm-connector serve", result.stderr)
+        self.assertIn("gtm-connector debug serve", result.stderr)
         with Runtime(self.state):
             pass
         stopped = subprocess.run(
@@ -226,7 +226,7 @@ class StdioBridgeTests(unittest.TestCase):
             timeout=120, check=False)
         self.assertNotEqual(stopped.returncode, 0)
         self.assertEqual(stopped.stdout, "")
-        self.assertIn("Start serve again", stopped.stderr)
+        self.assertIn("Start debug serve again", stopped.stderr)
 
     def test_the_bridge_refuses_a_connector_that_serves_other_sources_than_the_profile_names(self):
         with Runtime(self.state) as runtime:
@@ -236,7 +236,7 @@ class StdioBridgeTests(unittest.TestCase):
                  "--scope", "crm:read"], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                 timeout=120, check=False)
             self.assertEqual((changed.returncode, changed.stdout), (1, ""))
-            self.assertIn("Start gtm-connector serve again", changed.stderr)
+            self.assertIn("Start gtm-connector debug serve again", changed.stderr)
             self.assertEqual(runtime.connector.audit.read(), [])
             self.assertEqual(runtime.connector.authority.tokens, {})
 

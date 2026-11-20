@@ -15,15 +15,16 @@ from gtm_connector.cli import main
 
 EXAMPLES = int(os.environ.get("GTM_FUZZ_EXAMPLES", "1500"))
 # Commands that reach no network, browser, or long-running server.
-COMMANDS = ("brief", "trace", "accounts", "account", "audit", "doctor", "calls", "completion", "--help",
-            "--version")
+COMMANDS = (("brief",), ("inspect",), ("accounts",), ("audit",), ("debug",), ("debug", "doctor"),
+            ("debug", "calls"), ("debug", "completion"), ("--help",), ("--version",))
 WORDS = (
     "acc-001", "acc-007", "acc-999", "", " ", "-", "--", "--json", "--without-calls", "--as-of",
     "2027-01-15", "2027-13-45", "--state-dir", "STATE", "OTHER", "--query", "x" * 300, "é", "\x00", "\ud800",
     "1", "0", "list", "import", "show", "FILE.txt", "FILE.vtt", "FILE.srt", "--account",
     "--lines", "1:2", "9:1", "--cues", "0:0", "--called-at", "2027-01-15T10:00:00Z", "yesterday", "--tool",
     "get_account", "--limit", "-1", "99999999999999999999", "brief-" + "0" * 32, "--reassign",
-    "--account-number", "A" * 41, "bash", "zsh", "fish", "--help",
+    "--account-number", "A" * 41, "bash", "zsh", "fish", "--help", "--role", "customer",
+    "00000000-0000-4000-8000-000000000000",
 )
 FILES = {"FILE.txt": "Dana: hello\nSam: forty seats\n", "FILE.vtt": "WEBVTT\n\n00:01.000 --> 00:02.000\nhi\n",
          "FILE.srt": "1\n00:00:01,000 --> 00:00:02,000\nhi\n"}
@@ -46,7 +47,7 @@ class CommandLineFuzz(unittest.TestCase):
             profile.save(folder + "/state", {**profile.DEMO, "calls": {"provider": "imported"}})
             places = {"STATE": folder + "/state", "OTHER": folder + "/other",
                       **{name: folder + "/" + name for name in FILES}}
-            argv = [command, *(places.get(word, word) for word in rest)]
+            argv = [*command, *(places.get(word, word) for word in rest)]
             out, err = io.StringIO(), io.StringIO()
             here = os.getcwd()
             os.chdir(folder)  # Default state folders land in the temporary folder.

@@ -138,7 +138,9 @@ class NarrativeDemoTests(unittest.TestCase):
             "Call-note access was refused (HTTP 403) for a grant without calls:read.\n"
             "Every source below is an invented demo fixture.\n\n" + artifact["text"]))
         self.assertTrue(completed.stdout.endswith(
-            f"Brief: {artifact['brief_id']}\nResolve any number: gtm-connector trace {artifact['brief_id']} N "
+            f"Brief: {artifact['brief_id']}\n"
+            f"List every unit: gtm-connector inspect {artifact['brief_id']} --state-dir {shlex.quote(str(self.state))}\n"
+            f"Resolve a number: gtm-connector inspect {artifact['brief_id']} N "
             f"--state-dir {shlex.quote(str(self.state))}\n"))
         self.assertNotIn("Idempotent write", completed.stdout)
         self.assertNotIn("Rate limit", completed.stdout)
@@ -177,8 +179,8 @@ class NarrativeDemoTests(unittest.TestCase):
         with closing(sqlite3.connect(legacy / "crm.sqlite3")) as connection, connection:
             connection.execute("UPDATE accounts SET name = 'Fixture account acc-003' WHERE id = 'acc-003'")
         before = {path.name: path.read_bytes() for path in legacy.iterdir() if path.is_file()}
-        for command, folder in (("demo", "renewal-demo"), ("verify", "verification")):
-            completed = subprocess.run([sys.executable, "-m", "gtm_connector", command, "--json"],
+        for command, folder in ((["demo"], "renewal-demo"), (["debug", "verify"], "verification")):
+            completed = subprocess.run([sys.executable, "-m", "gtm_connector", *command, "--json"],
                                        cwd=self.directory, env={**os.environ, "PYTHONPATH": str(ROOT)},
                                        capture_output=True, text=True, timeout=30)
             self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -213,11 +215,11 @@ class NarrativeDemoTests(unittest.TestCase):
     def test_verification_invariant_failure_uses_the_failed_check_exit(self):
         with patch("gtm_connector.verification.run", side_effect=ValueError("demo invariant failed; inspect audit")), \
                 redirect_stdout(io.StringIO()) as stdout, redirect_stderr(io.StringIO()) as stderr:
-            code = main(["verify", "--json", "--state-dir", str(self.state)])
+            code = main(["debug", "verify", "--json", "--state-dir", str(self.state)])
         self.assertEqual(code, 4)
         self.assertEqual(stdout.getvalue(), "")
         self.assertEqual(json.loads(stderr.getvalue())["error"]["code"], "check_failed")
-        self.assertEqual(json.loads(stderr.getvalue())["error"]["next"], "gtm-connector verify --help")
+        self.assertEqual(json.loads(stderr.getvalue())["error"]["next"], "gtm-connector debug verify --help")
 
 
 if __name__ == "__main__":

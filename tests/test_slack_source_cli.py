@@ -49,7 +49,7 @@ class SlackSourceCLITests(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def map(self, *arguments, as_json=True):
-        return self.invoke("slack", "map", "--state-dir", str(self.state),
+        return self.invoke("debug", "slack", "map", "--state-dir", str(self.state),
                            "--account", "acc-003", "--channel", CHANNEL, "--thread-ts", STAMP,
                            *arguments, as_json=as_json)
 
@@ -85,7 +85,7 @@ class SlackSourceCLITests(unittest.TestCase):
 
     def test_source_action_help_and_auth_options_remain_separate(self):
         for action in ("map", "check"):
-            code, out, err = self.invoke("slack", action, "--help")
+            code, out, err = self.invoke("debug", "slack", action, "--help")
             self.assertEqual(code, 0, err)
             for flag in ("--state-dir", "--account", "--json"):
                 self.assertIn(flag, out)
@@ -94,9 +94,9 @@ class SlackSourceCLITests(unittest.TestCase):
             if action == "check":
                 for flag in ("--account-number", "--thread-url", "--replace"):
                     self.assertNotIn(flag, out)
-        for args in (("slack", "map", "--state-dir", str(self.state), "--account", "acc-003", "--channel", CHANNEL,
+        for args in (("debug", "slack", "map", "--state-dir", str(self.state), "--account", "acc-003", "--channel", CHANNEL,
                       "--thread-ts", STAMP, "--connection-dir", PRIVATE),
-                     ("slack", "check", "--state-dir", str(self.state), "--account", "acc-003",
+                     ("debug", "slack", "check", "--state-dir", str(self.state), "--account", "acc-003",
                       "--account-number", PRIVATE)):
             self.failure(self.invoke(*args), 2)
         self.assertFalse(self.state.exists())
@@ -116,13 +116,13 @@ class SlackSourceCLITests(unittest.TestCase):
                     self.failure(self.map(*options), 2)
             for url in ("https://example.invalid/" + PRIVATE, ORIGIN + "/archives/" + CHANNEL + "/pbad",
                         ORIGIN + "/archives/" + CHANNEL + "/p1790000000000001?secret=" + PRIVATE):
-                self.failure(self.invoke("slack", "map", "--state-dir", str(self.state), "--account", "acc-003",
+                self.failure(self.invoke("debug", "slack", "map", "--state-dir", str(self.state), "--account", "acc-003",
                                          "--thread-url", url), 2)
-            self.failure(self.invoke("slack", "map", "--state-dir", str(self.state),
+            self.failure(self.invoke("debug", "slack", "map", "--state-dir", str(self.state),
                                      "--account-number", "invented-number", "--channel", CHANNEL,
                                      "--thread-ts", STAMP), 2)
             self.connected("invented-alias")
-            self.failure(self.invoke("slack", "map", "--state-dir", str(self.state),
+            self.failure(self.invoke("debug", "slack", "map", "--state-dir", str(self.state),
                                      "--account-number", "invented\u0085number", "--channel", CHANNEL,
                                      "--thread-ts", STAMP), 2)
         saved.assert_not_called()
@@ -131,7 +131,7 @@ class SlackSourceCLITests(unittest.TestCase):
         self.assertEqual(self.files(), {"profile.json"})
 
     def test_a_map_or_a_check_needs_slack_connected_in_the_profile_before_credentials_or_state(self):
-        check = ("slack", "check", "--state-dir", str(self.state), "--account", "acc-003")
+        check = ("debug", "slack", "check", "--state-dir", str(self.state), "--account", "acc-003")
         with patch("gtm_connector.slack_auth.inspect_slack_connection", side_effect=AssertionError("No credentials")), \
                 patch("gtm_connector.slack_workflow.run_slack_check", side_effect=AssertionError("No thread read")), \
                 patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")):
@@ -152,8 +152,8 @@ class SlackSourceCLITests(unittest.TestCase):
         export = self.root / "invented.txt"
         export.write_text("Invented renewal discussion.\n")
         self.connected(calls=True)
-        for arguments in (["serve"], ["brief", "acc-003"],
-                          ["calls", "import", str(export), "--account", "acc-003"]):
+        for arguments in (["debug", "serve"], ["brief", "acc-003"],
+                          ["debug", "calls", "import", str(export), "--account", "acc-003"]):
             with self.subTest(command=arguments[0]):
                 detail = self.failure(self.invoke(*arguments, "--state-dir", str(self.state)), 3)
                 self.assertIn("slack_not_connected", detail["message"])
@@ -182,7 +182,7 @@ class SlackSourceCLITests(unittest.TestCase):
         with patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")) as runtime, \
                 patch("gtm_connector.salesforce.SalesforceReadOnlyAdapter.from_sf",
                       side_effect=AssertionError("No CRM")) as crm:
-            self.failure(self.invoke("slack", "map", "--state-dir", str(self.state),
+            self.failure(self.invoke("debug", "slack", "map", "--state-dir", str(self.state),
                                      "--account-number", "invented-number", "--thread-url",
                                      "https://different-workspace.slack.com/archives/" + CHANNEL +
                                      "/p1790000000000001"), 2)
@@ -218,7 +218,7 @@ class SlackSourceCLITests(unittest.TestCase):
                         patch.object(runtime, "_prepare_source_state", wraps=runtime._prepare_source_state) as source, \
                         patch("gtm_connector.slack_workflow.resolve_slack_account",
                               wraps=resolve_slack_account) as resolve:
-                    detail = self.failure(self.invoke("slack", "map", "--state-dir", str(self.state),
+                    detail = self.failure(self.invoke("debug", "slack", "map", "--state-dir", str(self.state),
                                                       "--account", "acc-003", *selector), 3)
                 self.assertIn("slack_source_mismatch", detail["message"])
                 source.assert_not_called()
@@ -264,7 +264,7 @@ class SlackSourceCLITests(unittest.TestCase):
                 self.connected(calls=True)
                 self.seed_connection()
                 def imported():
-                    return self.invoke("calls", "--state-dir", str(self.state), "import", str(export),
+                    return self.invoke("debug", "calls", "--state-dir", str(self.state), "import", str(export),
                                        "--account", "acc-003")
                 actions = [self.map, imported]
                 if not map_first:
@@ -332,7 +332,7 @@ class SlackSourceCLITests(unittest.TestCase):
                 patch("gtm_connector.slack_auth.get_slack_access", side_effect=AssertionError("No token acquisition")), \
                 patch("gtm_connector.slack_reader.SlackThreadReader.read_slack_messages",
                       side_effect=AssertionError("No messages")):
-            code, out, err = self.invoke("serve", "--state-d", str(self.state))
+            code, out, err = self.invoke("debug", "serve", "--state-d", str(self.state))
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["sources"], {"crm": "demo_fixture", "calls": "demo_fixture", "slack": "slack"})
         self.assertEqual(read_audit(self.state / "audit.sqlite3"), [])
@@ -363,7 +363,7 @@ class SlackSourceCLITests(unittest.TestCase):
                     patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No normal Runtime")), \
                     patch("gtm_connector.salesforce.SalesforceReadOnlyAdapter.from_sf",
                           side_effect=AssertionError("No CRM")):
-                code, out, err = self.invoke("slack", "check", "--state-dir", str(self.state),
+                code, out, err = self.invoke("debug", "slack", "check", "--state-dir", str(self.state),
                                              "--account", "acc-003")
             self.assertEqual(code, expected, err)
             self.assertEqual(json.loads(out), report)
@@ -383,7 +383,7 @@ class SlackSourceCLITests(unittest.TestCase):
                                        (RuntimeError(PRIVATE), 1, "doctor"),
                                        (KeyboardInterrupt(), 130, "slack check")):
             with patch("gtm_connector.slack_workflow.run_slack_check", side_effect=error):
-                detail = self.failure(self.invoke("slack", "check", "--state-dir", str(self.state),
+                detail = self.failure(self.invoke("debug", "slack", "check", "--state-dir", str(self.state),
                                                   "--account", "acc-003"), expected)
             self.assertIn(text, detail["next"])
             self.assertNotIn("calls import", detail["next"])
@@ -395,14 +395,14 @@ class SlackSourceCLITests(unittest.TestCase):
         report = {"status": "failed", "steps": [
             {"name": "thread_read", "status": "fail", "count": 0, "duration_ms": 20.5, "api_calls": 1,
              "response_bytes": 200, "message": "The selected thread was not accessible. Check its parent and access.",
-             "next": "gtm-connector slack map --help"}]}
+             "next": "gtm-connector debug slack map --help"}]}
         with patch("sys.stdout.isatty", return_value=True), patch.dict("os.environ", {"NO_COLOR": "1"}):
             rendered = human_result("slack", report, action="check")
         self.assertIn("CRM and calls access were not checked", rendered)
         self.assertIn("20.5", rendered)
         self.assertIn("200", rendered)
         self.assertIn(report["steps"][0]["message"], rendered)
-        self.assertIn("Next: gtm-connector slack map --help", rendered)
+        self.assertIn("Next: gtm-connector debug slack map --help", rendered)
         self.assertLessEqual(max(map(len, rendered.splitlines())), 80)
 
 

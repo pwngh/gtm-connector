@@ -358,18 +358,20 @@ class ImportedBriefingTests(unittest.TestCase):
         # `trace` says the same to a person: whether the sentence is on the card, and where it lies.
         first = next(unit for unit in artifact["units"] if unit["kind"] == "sentence")
         with patch("sys.stdout.isatty", return_value=False):
-            printed = human_result("trace", trace_saved(self.state, artifact["brief_id"], first["n"]))
+            printed = human_result("inspect", [trace_saved(self.state, artifact["brief_id"], first["n"])],
+                                   action="numbers")
         self.assertIn("On the card\tyes", printed)
         self.assertIn("Cues or lines\t1 to 2", printed)
         # A sentence that is not on the card says why, and a card sealed before these keys existed says so.
         for shown, why in (("cut", "cut off"), ("later", "dated after the card's day"),
                            ("long", "too long to show"), ("more", "past the card's places")):
-            self.assertIn(f"On the card\tno: {why}", human_result("trace", {
-                **trace_saved(self.state, artifact["brief_id"], first["n"]), "shown": shown, "span": None}))
+            self.assertIn(f"On the card\tno: {why}", human_result("inspect", [{
+                **trace_saved(self.state, artifact["brief_id"], first["n"]), "shown": shown, "span": None}],
+                action="numbers"))
         older = {key: value for key, value in trace_saved(self.state, artifact["brief_id"], first["n"]).items()
                  if key not in ("shown", "span", "contact")}
-        self.assertIn("On the card\tnot recorded", human_result("trace", older))
-        self.assertNotIn("Cues or lines", human_result("trace", older))
+        self.assertIn("On the card\tnot recorded", human_result("inspect", [older], action="numbers"))
+        self.assertNotIn("Cues or lines", human_result("inspect", [older], action="numbers"))
 
     def test_inside_one_call_the_cue_time_says_which_sentence_is_newer_whatever_order_the_file_wrote(self):
         # Thirteen whole sentences by one speaker, and the export wrote the last one said first.

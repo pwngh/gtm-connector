@@ -308,7 +308,7 @@ class BriefPersistenceTests(unittest.TestCase):
         path.parent.mkdir(parents=True)
         path.write_text("[]")
         result = subprocess.run(
-            [sys.executable, "-m", "gtm_connector", "trace", identifier, "1", "--state-dir", str(self.state)],
+            [sys.executable, "-m", "gtm_connector", "inspect", identifier, "1", "--state-dir", str(self.state)],
             cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, 2)

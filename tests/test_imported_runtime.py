@@ -228,7 +228,8 @@ class ImportedRuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.connector.authority.tokens, {})
         result = doctor(self.state)
         self.assertEqual(result["checks"][-1]["name"], "services")
-        self.assertIn("gtm-connector serve --state-dir " + str(self.state.resolve()), result["checks"][-1]["fix"])
+        self.assertIn("gtm-connector debug serve --state-dir " + str(self.state.resolve()),
+                      result["checks"][-1]["fix"])
         (self.state / "imports.sqlite3").unlink()
         with patch.object(calls_import, "initialize_import_store") as initialize:
             with self.assertRaises(SourceIdentityError):

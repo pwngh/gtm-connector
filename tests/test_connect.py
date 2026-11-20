@@ -68,13 +68,13 @@ class ConnectTests(unittest.TestCase):
             auth._write_credentials(descriptor, document)
 
     def test_a_folder_with_no_profile_refuses_each_daily_command_and_creates_nothing(self):
-        commands = (["brief", "acc-003"], ["accounts"], ["account", "acc-003"], ["serve"],
+        commands = (["brief", "acc-003"], ["accounts"], ["inspect", "acc-003"], ["debug", "serve"],
                     ["mcp", "stdio", "--scope", "crm:read"],
-                    ["calls", "import", str(self.export), "--account", "acc-003"],
-                    ["slack", "map", "--account", "acc-003", "--channel", "C12345678",
+                    ["debug", "calls", "import", str(self.export), "--account", "acc-003"],
+                    ["debug", "slack", "map", "--account", "acc-003", "--channel", "C12345678",
                      "--thread-ts", "1790000000.000001"])
         for arguments in commands:
-            with self.subTest(command=arguments[0]), \
+            with self.subTest(command=arguments[:3]), \
                     patch("gtm_connector.runtime.Runtime", side_effect=AssertionError("No state")):
                 error = self.refused(*arguments)
                 self.assertEqual((error["code"], error["message"]), ("usage_error", not_connected(self.state)))
@@ -98,17 +98,17 @@ class ConnectTests(unittest.TestCase):
                                 brief["text"], count=1), "DEAL CARD" + shown)
         self.assertEqual(brief["sources"], {"crm": "demo_fixture", "calls": "demo_fixture", "slack": "demo_fixture"})
         self.assertEqual(len(self.ok("accounts")), 30)
-        self.assertEqual(self.ok("account", "acc-003")["name"], "Thornfield Wren LLP")
-        self.assertEqual(self.ok("trace", brief["brief_id"], "5")["speaker"], "Marian Holt")
+        self.assertEqual(self.ok("inspect", "acc-003")["name"], "Thornfield Wren LLP")
+        self.assertEqual(self.ok("inspect", brief["brief_id"], "5")[0]["speaker"], "Marian Holt")
 
     def test_accounts_read_the_demo_book_before_any_card_and_leave_the_folder_as_it_was(self):
         self.ok("connect", "demo")
         self.assertEqual([row["id"] for row in self.ok("accounts", "--query", "Thornfield")], ["acc-003"])
-        self.assertEqual(self.ok("account", "acc-003")["name"], "Thornfield Wren LLP")
+        self.assertEqual(self.ok("inspect", "acc-003")["name"], "Thornfield Wren LLP")
         self.assertEqual(self.files(), {"profile.json", "server.lock"})
         # Reading accounts rules nothing out: transcripts can still be connected and read beside the demo CRM.
         self.ok("connect", "calls")
-        code, out, err = self.run_cli("calls", "import", str(self.export), "--account", "acc-003")
+        code, out, err = self.run_cli("debug", "calls", "import", str(self.export), "--account", "acc-003")
         self.assertEqual(code, 0, err)
         self.assertEqual(self.ok("brief", "acc-003")["sources"]["calls"], "imported_transcript")
         # Once the folder holds its own book, that book is the one read, as the card reads it.
@@ -161,7 +161,8 @@ class ConnectTests(unittest.TestCase):
         connected = self.ok("connect", "calls")
         self.assertEqual(connected["sources"], {**DEMO, "calls": {"provider": "imported"}})
         self.assertEqual(self.files(), {"profile.json", "server.lock"})
-        code, out, err = self.run_cli("calls", "import", str(self.export), "--account", "acc-003", "--speaker-names")
+        code, out, err = self.run_cli("debug", "calls", "import", str(self.export), "--account", "acc-003",
+                                      "--speaker-names")
         self.assertEqual(code, 0, err)
         self.assertEqual(json.loads(out)["source"], "imported_transcript")
         brief = self.ok("brief", "acc-003")
@@ -200,14 +201,15 @@ class ConnectTests(unittest.TestCase):
         self.assertIn(fresh, error["message"])
         self.assertEqual({path.name: path.read_bytes() for path in self.state.iterdir() if path.is_file()}, before)
         self.assertEqual(profile.load(self.state), DEMO)
-        self.assertEqual(self.refused("calls", "import", str(self.export), "--account", "acc-003")["message"],
+        self.assertEqual(self.refused("debug", "calls", "import", str(self.export), "--account",
+                                      "acc-003")["message"],
                          f"Transcripts are not connected. Run gtm-connector connect calls --state-dir {self.state} "
                          "first.")
 
     def test_the_demo_crm_connected_again_keeps_the_transcripts_the_folder_holds(self):
         self.ok("connect", "demo")
         self.ok("connect", "calls")
-        code, out, err = self.run_cli("calls", "import", str(self.export), "--account", "acc-003")
+        code, out, err = self.run_cli("debug", "calls", "import", str(self.export), "--account", "acc-003")
         self.assertEqual(code, 0, err)
         held = {**DEMO, "calls": {"provider": "imported"}}
         # Over the same profile, and after the CRM was removed, demo data never stands in for the transcripts.
@@ -247,10 +249,10 @@ class ConnectTests(unittest.TestCase):
         setup = json.loads(out)["setup"]
         self.assertEqual(setup[:2], [f"gtm-connector connect demo --state-dir {state} "
                                      "(or connect salesforce --org ALIAS)",
-                                     f"gtm-connector serve --state-dir {state}"])
+                                     f"gtm-connector debug serve --state-dir {state}"])
         self.ok("connect", "demo")
         self.assertEqual(json.loads(self.run_cli("connect", "inspector")[1])["setup"][0],
-                         f"gtm-connector serve --state-dir {state}")
+                         f"gtm-connector debug serve --state-dir {state}")
 
     def test_a_folder_being_served_or_changed_refuses_connect_and_keeps_its_profile(self):
         import fcntl
@@ -286,7 +288,7 @@ class ConnectTests(unittest.TestCase):
         for link in ("symlink_to", "hardlink_to"):
             with self.subTest(link=link):
                 getattr(self.state / "crm.sqlite3", link)(other)
-                self.assertEqual(self.refused("account", "acc-003", code=3)["code"], "refused")
+                self.assertEqual(self.refused("inspect", "acc-003", code=3)["code"], "refused")
                 (self.state / "crm.sqlite3").unlink()
         # A folder pinned to Salesforce has no demo book, whatever its profile says.
         (self.state / "crm-connection.json").write_text("{}")
@@ -305,7 +307,7 @@ class ConnectTests(unittest.TestCase):
     def test_verify_runs_only_in_a_folder_of_its_own(self):
         self.ok("connect", "demo")
         self.ok("connect", "calls")
-        self.assertIn("Give verify its own --state-dir", self.refused("verify")["message"])
+        self.assertIn("Give debug verify its own --state-dir", self.refused("debug", "verify")["message"])
         self.assertFalse((self.state / "calls.sqlite3").exists())
 
     def test_audit_before_any_read_names_a_command_the_folder_can_run(self):
@@ -318,7 +320,7 @@ class ConnectTests(unittest.TestCase):
         self.ok("connect", "demo")
         error = self.refused("connect", "slack")
         self.assertEqual(error["code"], "usage_error")
-        self.assertIn("gtm-connector slack connect", error["message"])
+        self.assertIn("gtm-connector debug slack connect", error["message"])
         self.assertEqual(profile.load(self.state), DEMO)
         self.sign_in_to_slack()
         connected = self.ok("connect", "slack")
@@ -340,7 +342,7 @@ class ConnectTests(unittest.TestCase):
         queues = [InterruptQueue()]
         with patch("queue.SimpleQueue", side_effect=lambda: queues.pop() if queues else SimpleQueue()), \
                 patch("gtm_connector.slack_auth.get_slack_access", side_effect=AssertionError("No token read")):
-            code, out, err = self.run_cli("serve")
+            code, out, err = self.run_cli("debug", "serve")
         self.assertEqual(code, 0, err)
         ready = json.loads(out)
         self.assertEqual(ready["sources"], {"crm": "demo_fixture", "calls": "imported_transcript", "slack": "slack"})
@@ -374,7 +376,8 @@ class ConnectTests(unittest.TestCase):
                 self.assertEqual(self.refused(*arguments)["code"], "usage_error")
                 self.assertEqual(json.loads(sellers.read_text())["sellers"], ["Jordan Lee", "U12345678"])
         self.assertEqual(profile.load(self.state), {**DEMO, "calls": {"provider": "imported"}})
-        code, out, err = self.run_cli("calls", "import", str(self.export), "--account", "acc-003", "--speaker-names")
+        code, out, err = self.run_cli("debug", "calls", "import", str(self.export), "--account", "acc-003",
+                                      "--speaker-names")
         self.assertEqual(code, 0, err)
         roles = {unit["speaker"]: (unit["role"], unit["basis"]) for unit in self.ok("brief", "acc-003")["units"]
                  if unit["kind"] == "sentence" and unit["source"] == "calls"}
@@ -401,18 +404,21 @@ class ConnectTests(unittest.TestCase):
         # The two cards differ only in the line that says when their sources were read.
         lines, shown = brief["text"].splitlines(), demo["brief"]["text"].splitlines()
         self.assertEqual(lines[:1] + lines[2:], shown[:1] + shown[2:])
-        self.assertEqual(self.ok("trace", demo["brief"]["brief_id"], "5")["kind"], "sentence")
+        self.assertEqual(self.ok("inspect", demo["brief"]["brief_id"], "5")[0]["kind"], "sentence")
         self.assertEqual(len(self.ok("audit", "--brief", brief["brief_id"])), 4)
 
     def test_the_source_flags_and_the_seed_command_are_gone(self):
         self.ok("connect", "demo")
-        for arguments in (["brief", "acc-003", "--crm-backend", "sqlite"], ["serve", "--calls-backend", "imported"],
+        for arguments in (["brief", "acc-003", "--crm-backend", "sqlite"],
+                          ["debug", "serve", "--calls-backend", "imported"],
                           ["brief", "acc-003", "--slack-backend", "fixture"], ["brief", "acc-003", "--with-slack"],
-                          ["serve", "--slack-connection-dir", str(self.root)], ["accounts", "--sf-org", "invented"],
-                          ["account", "acc-003", "--sf-environment", "sandbox"],
+                          ["debug", "serve", "--slack-connection-dir", str(self.root)],
+                          ["accounts", "--sf-org", "invented"],
+                          ["inspect", "acc-003", "--sf-environment", "sandbox"],
                           ["accounts", "--db", str(self.root / "crm.sqlite3")],
-                          ["calls", "import", str(self.export), "--account", "acc-003", "--crm-backend", "sqlite"],
-                          ["slack", "status", "--connection-dir", str(self.root)], ["seed"]):
+                          ["debug", "calls", "import", str(self.export), "--account", "acc-003",
+                           "--crm-backend", "sqlite"],
+                          ["debug", "slack", "status", "--connection-dir", str(self.root)], ["seed"]):
             with self.subTest(arguments=arguments):
                 self.assertEqual(self.refused(*arguments)["code"], "usage_error")
         self.assertEqual(self.files(), {"profile.json", "server.lock"})
