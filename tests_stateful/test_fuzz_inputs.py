@@ -251,10 +251,28 @@ KEYS = ("workflow_version", "slack_status", "notes_status", "crm_backend", "call
 DEEP = [], {}
 for _ in range(3000):
     DEEP = [DEEP[0]], {"account_id": DEEP[1]}
+
+
+class Deep:
+    """One of the deep values, in a wrapper. Hypothesis prints what a test draws and its printer recurses, so
+    the value is taken out only where it is put into the evidence."""
+
+    def __init__(self, name, value):
+        self.name, self.value = name, value
+
+    def __repr__(self):
+        return self.name
+
+
+def plain(value):
+    return value.value if isinstance(value, Deep) else value
+
+
 JUNK = st.one_of(
     st.none(), st.booleans(), st.integers(-2, 2), st.sampled_from((2**63, -2**63, 10**400, 10**4200, 200, 403)),
     st.floats(allow_nan=False, allow_infinity=False), any_text(max_size=8), st.sampled_from(DATES + WORDS),
-    st.sampled_from(DEEP), st.recursive(st.none() | st.integers() | any_text(max_size=3), lambda inner: st.lists(
+    st.sampled_from((Deep("a list nested 3,000 deep", DEEP[0]), Deep("a dict nested 3,000 deep", DEEP[1]))),
+    st.recursive(st.none() | st.integers() | any_text(max_size=3), lambda inner: st.lists(
         inner, max_size=3) | st.dictionaries(st.sampled_from(KEYS), inner, max_size=3), max_leaves=5))
 
 
@@ -315,11 +333,11 @@ def altered(draw, source, places, pool):
         at = draw(st.integers(0, len(parent)))
         return replaced(source, path[:-1], lambda node: node[:at] + [value] + node[at:])
     if kind == "extra" and isinstance(value, dict):
-        key, item = draw(st.sampled_from(KEYS)), draw(JUNK)
+        key, item = draw(st.sampled_from(KEYS)), plain(draw(JUNK))
         return replaced(source, path, lambda node: {**node, key: item})
     # "other" takes a value from somewhere else in this or another account's evidence: a swapped id or record.
-    new = (draw(tweaks(value)) if kind == "tweak" else pool[draw(st.integers(0, len(pool) - 1))] if kind == "other"
-           else draw(JUNK))
+    new = plain(draw(tweaks(value)) if kind == "tweak" else pool[draw(st.integers(0, len(pool) - 1))]
+                if kind == "other" else draw(JUNK))
     return replaced(source, path, lambda _: new)
 
 
@@ -367,10 +385,11 @@ class UnitsFuzz(unittest.TestCase):
     def held(self, source, data=None):
         """Evidence gives no card, or a card that keeps every promise. Any error but a refusal fails the test."""
         try:
-            units, text = build(source)
+            units, text, gaps = build(source)
         except BriefRejected:
             return None
-        varied.hold(self, {"status": "accepted", "evidence": source, "units": units, "text": text})
+        varied.hold(self, {"status": "accepted", "evidence": source, "units": units, "text": text,
+                           "gaps": gaps})
         self.assertIsNone(LIVE.search(text + json.dumps(units, ensure_ascii=False)))
         # Every bracketed number on the card is a unit of this card. Source text cannot add one.
         self.assertLessEqual({int(number) for number in CITATION.findall(text)}, set(range(1, len(units) + 1)))

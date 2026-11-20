@@ -221,7 +221,7 @@ class CLITests(unittest.TestCase):
     def test_json_brief_and_trace_resolve_each_number_from_saved_evidence(self):
         brief = self.json_result(self.run_cli("brief", "acc-001", "--without-calls"))
         self.assertEqual(set(brief), {"schema_version", "brief_id", "account_id", "as_of", "status", "rules_version",
-                                      "sealed_by", "sources", "text", "units"})
+                                      "sealed_by", "sources", "text", "units", "gaps"})
         self.assertEqual((brief["schema_version"], brief["status"]), (3, "accepted"))
         self.assertIn("  Calls: not read. The grant lacks calls:read.", brief["text"].splitlines())
         saved = self.state / "briefs" / (brief["brief_id"] + ".json")
@@ -309,7 +309,7 @@ class CLITests(unittest.TestCase):
                                                        "at", "sanitizer_version")},
                          {"kind": "sentence", "source": "calls", "record_ref": "calls/call_notes/note-003b",
                           "speaker": "Marian Holt", "role": "customer", "basis": "label matches contact [2]",
-                          "at": "2027-01-12T15:00:00Z", "sanitizer_version": 2})
+                          "at": "2027-01-12T15:00:00Z", "sanitizer_version": 3})
         self.assertRegex(traced["raw_sha256"], r"\A[0-9a-f]{64}\Z")
         self.assertIn(json.dumps(traced["text"]), brief["text"])
         human = self.run_cli("trace", brief["brief_id"], "7", json_output=False)

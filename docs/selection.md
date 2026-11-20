@@ -34,10 +34,11 @@ gtm-connector serve --state-dir var/selected --selection selection.json
 
 ## Prepared briefs
 
-`prepare_renewal_brief` returns the same card as the `brief` command, as `text`, with its `units`:
-each number on the card with its record reference and, for a sentence, its neutralized text,
-speaker, and role. Each read inside
-it writes its own receipt, linked to the outer call by
+`prepare_renewal_brief` returns the same card as the `brief` command, as `text`, with its `gaps`
+and its `units`: each number on the card with its record reference and, for a sentence, its
+neutralized text, speaker, and role. The units hold more than the card prints: every sentence that
+was read, shown or not, and for a transcript the cues it lies in and their times. A caller with
+`calls:read` receives those. Each read inside it writes its own receipt, linked to the outer call by
 `{"kind": "brief_child", "parent_audit_id": ..., "ordinal": N}`. A successful brief has one outer
 receipt and three read receipts, or four with Slack. The reads write no `serve` event lines.
 
@@ -47,9 +48,10 @@ receipt and three read receipts, or four with Slack. The reads write no `serve` 
 - The brief is saved as `selected-briefs/BRIEF_ID.json` in the state folder, mode 0600, at most
   4 MiB. `trace` reads the cards the `brief` command saves, not these, so a caller resolves a
   number from `units`.
-- `read_renewal_brief` releases a saved brief, with the same `text` and `units`, to any caller that
-  passes the rule in the [security review](../SECURITY_REVIEW.md). Its result includes
-  `provider_rechecked: false` and a notice. Logging out of the `sf` CLI does not withhold saved Salesforce content.
+- `read_renewal_brief` releases a saved brief, with the same `text`, `units`, and `gaps`, to any
+  caller that passes the rule in the [security review](../SECURITY_REVIEW.md). A brief saved before
+  gaps existed releases `gaps: null`. Its result includes `provider_rechecked: false` and a notice.
+  Logging out of the `sf` CLI does not withhold saved Salesforce content.
 
 ## Errors
 

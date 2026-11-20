@@ -248,7 +248,7 @@ class SignalRuleTests(unittest.TestCase):
     def test_grouped_signals_keep_the_order_and_every_record_stays_a_unit(self):
         source = repeated(repeated(demo(renewal_date="2027-01-24", risk_status="at_risk"), "contacts", 6, title=""),
                           "opportunities", 6, stage="proposal")
-        units, text = build(source)
+        units, text, _ = build(source)
         card = varied.sections(self, text)
         self.assertEqual(card["ATTENTION"], [
             "  CRM marks this account at risk. [1]",

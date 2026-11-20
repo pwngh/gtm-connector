@@ -36,7 +36,7 @@ NOTICE = ("This saved brief was not rechecked against what the source systems sh
 _BRIEF_ID = re.compile(r"brief-[0-9a-f]{32}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _ARTIFACT_KEYS = {"kind", "schema_version", "brief_id", "account_id", "as_of", "prepared_by",
-                  "bindings", "slack_scopes", "sources", "text", "units", "evidence"}
+                  "bindings", "slack_scopes", "sources", "text", "units", "gaps", "evidence"}
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,7 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
             snapshot = deepcopy(envelope.get("thread_snapshot"))
         records.extend(deepcopy(envelope["records"]))
     try:
-        evidence, units, text = assemble_evidence(
+        evidence, units, text, gaps = assemble_evidence(
             brief_id, account_id, as_of, records, connector.audit.read_ids(children), statuses, snapshot,
             crm_backend=connector.crm_backend, calls_backend=context.calls_backend,
             calls_binding=context.calls_binding, slack_backend=context.slack_backend,
@@ -159,15 +159,15 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
         raise ToolError("brief_deadline_exceeded")
     sources = source_names(connector.crm_backend, context.calls_backend, context.slack_backend, include_slack)
     artifact = {
-        "kind": "selected_brief", "schema_version": 2, "brief_id": brief_id, "account_id": account_id,
+        "kind": "selected_brief", "schema_version": 3, "brief_id": brief_id, "account_id": account_id,
         "as_of": as_of,
         "prepared_by": {"outer_audit_id": invocation.audit_id,
                         "token_id": hashlib.sha256(invocation.raw_token.encode()).hexdigest()},
         "bindings": context.bindings(connector.crm_backend), "slack_scopes": slack_scopes,
         "sources": sources,
-        "text": text, "units": units, "evidence": evidence,
+        "text": text, "units": units, "gaps": gaps, "evidence": evidence,
     }
-    payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, sort_keys=True, indent=2).encode()
+    payload = json.dumps(artifact, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")).encode()
     if len(payload) > MAX_ARTIFACT_BYTES:
         raise ToolError("brief_too_large")
     digest = hashlib.sha256(payload).hexdigest()
@@ -194,7 +194,7 @@ def prepare_brief(connector, invocation: Invocation, account_id: str, as_of) -> 
     reference = f"briefs/{brief_id}/{digest}"
     return {"source": "brief", "records": [{"id": brief_id, "record_ref": reference}], "untrusted_data": True,
             "brief": {"brief_id": brief_id, "account_id": account_id, "as_of": as_of, "text": text,
-                      "units": units, "sources": sources, **statuses}}
+                      "units": units, "gaps": gaps, "sources": sources, **statuses}}
 
 
 def _load(context: SelectedContext, brief_id) -> tuple[dict, str]:
@@ -219,14 +219,16 @@ def _load(context: SelectedContext, brief_id) -> tuple[dict, str]:
         artifact = strict_json.loads(payload)
     except (ValueError, UnicodeError, RecursionError):
         raise ToolError("brief_invalid") from None
-    if (not isinstance(artifact, dict) or set(artifact) != _ARTIFACT_KEYS
-            or artifact["kind"] != "selected_brief" or artifact["schema_version"] != 2
+    # A brief prepared before gaps were saved has none. It still reads, under the digest it was saved with.
+    if (not isinstance(artifact, dict) or set(artifact) | {"gaps"} != _ARTIFACT_KEYS
+            or artifact["kind"] != "selected_brief" or artifact["schema_version"] != 3
             or artifact["brief_id"] != brief_id or not isinstance(artifact["evidence"], dict)
             or artifact["evidence"].get("brief_id") != brief_id
             or artifact["evidence"].get("account_id") != artifact["account_id"]
             or not isinstance(artifact["prepared_by"], dict)
             or not isinstance(artifact["prepared_by"].get("outer_audit_id"), str)
-            or not isinstance(artifact["text"], str) or not isinstance(artifact["units"], list)):
+            or not isinstance(artifact["text"], str) or not isinstance(artifact["units"], list)
+            or not isinstance(artifact.get("gaps", []), list)):
         raise ToolError("brief_invalid")
     return artifact, hashlib.sha256(payload).hexdigest()
 
@@ -298,6 +300,7 @@ def _release(connector, token, brief_id, artifact, reference) -> dict:
         raise ToolError("invalid_token")
     return {"source": "brief", "records": [{"id": brief_id, "record_ref": reference}], "untrusted_data": True,
             "brief": {"brief_id": brief_id, "account_id": artifact["account_id"], "as_of": artifact["as_of"],
-                      "text": artifact["text"], "units": artifact["units"], "sources": artifact["sources"],
+                      "text": artifact["text"], "units": artifact["units"], "gaps": artifact.get("gaps"),
+                      "sources": artifact["sources"],
                       "provider_rechecked": False,
                       "notice": NOTICE}}

@@ -6,23 +6,88 @@ role of its speaker and never promoted to a record value. Source text is data: i
 once, here, before anything displays it.
 """
 
+from bisect import bisect_left, bisect_right
 from datetime import date, datetime, timezone
 import hashlib
+from itertools import accumulate
 import json
 import re
-from typing import Any
+from typing import Any, Literal, TypedDict, cast
 import unicodedata
 from urllib.parse import urlsplit
-
-
-from .seed import SELLERS
 
 
 class BriefRejected(ValueError):
     """The evidence cannot support a card."""
 
 
-SANITIZER_VERSION = 2
+Source = Literal["crm", "calls", "slack"]
+Role = Literal["customer", "seller", "unknown"]
+
+
+class RecordUnit(TypedDict):
+    """One record that was read. Its values are in the evidence, and `trace` gives them as `fields`."""
+    n: int
+    kind: Literal["record"]
+    source: Source
+    record_ref: str
+    tool: str
+
+
+class Span(TypedDict):
+    """The cues or lines of an imported transcript that one sentence lies in, and their times when they have any."""
+    first: int
+    last: int
+    start_ms: int | None
+    end_ms: int | None
+
+
+class SentenceUnit(TypedDict):
+    """One sentence of one record's text, neutralized, with the role of its speaker."""
+    n: int
+    kind: Literal["sentence"]
+    source: Literal["calls", "slack"]
+    record_ref: str
+    tool: str
+    at: str | None
+    speaker: str | None
+    role: Role
+    basis: str
+    contact: int | None
+    text: str
+    partial: bool
+    shown: Literal["yes", "cut", "long", "more"]
+    span: Span | None
+    raw_sha256: str
+    sanitizer_version: int
+
+
+Unit = RecordUnit | SentenceUnit
+
+
+class Gap(TypedDict):
+    """One line under NOT READ. It has no number. `text` is the line as the card prints it."""
+    code: str
+    disposition: Literal["not_read", "read_not_shown", "note"]
+    count: int | None
+    by_role: dict[str, int] | None
+    text: str
+
+
+# Every line NOT READ can print, by code: what the connector did not read, what it read and does not show, and
+# what it notes about a read. The list is closed, so a tool can name a line without quoting it.
+GAP_CODES: dict[str, Literal["not_read", "read_not_shown", "note"]] = {
+    "crm_unmapped_fields": "not_read", "calls_denied": "not_read", "calls_excerpt": "not_read",
+    "calls_outside_records": "not_read", "slack_not_requested": "not_read", "slack_denied": "not_read",
+    "slack_thread": "not_read", "slack_channel": "not_read",
+    "crm_more_opportunities": "read_not_shown", "crm_more_contracts": "read_not_shown",
+    "crm_more_contacts": "read_not_shown", "sentences_cut": "read_not_shown", "sentences_more": "read_not_shown",
+    "sentences_long": "read_not_shown",
+    "crm_fields_empty": "note", "crm_no_opportunity": "note", "calls_no_record": "note", "slack_no_message": "note",
+    "speakers_unknown": "note", "neutralized": "note",
+}
+
+SANITIZER_VERSION = 3
 SHOWN_SENTENCES = 12
 SHOWN_RECORDS = 5
 MAX_SENTENCE = 300
@@ -32,8 +97,8 @@ _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z")
 _CURRENCY = re.compile(r"[A-Z]{3}\Z")
 _KEYS = {"brief_id", "account_id", "as_of", "records", "receipts", "notes_status", "slack_status",
          "crm_backend", "crm_binding", "calls_backend", "calls_binding", "slack_backend", "slack_binding",
-         "thread_snapshot", "sellers"}
-_SOURCES = {
+         "thread_snapshot", "sellers", "demo_sellers"}
+_SOURCES: dict[str, tuple[Source, str, str]] = {
     "accounts": ("crm", "acc", "get_account"),
     "contacts": ("crm", "con", "get_account"),
     "contracts": ("crm", "ctr", "get_account"),
@@ -294,24 +359,27 @@ def _label(value):
     return " ".join(value.split()) if isinstance(value, str) else ""
 
 
-def speaker_role(label, sellers, contacts, *, slack=False) -> tuple[str, str]:
-    """Derive a role from identity only, never from what the text says about itself."""
+def speaker_role(label, sellers, contacts, *, slack=False) -> tuple[Role, str, int | None]:
+    """Derive a role from identity only, never from what the text says about itself.
+
+    Returns the role, why, and the card number of the one contact a customer label equals.
+    """
     name = _label(label)
     if not name:
-        return "unknown", "no speaker label"
+        return "unknown", "no speaker label", None
     matches = [] if slack else [contact for contact in contacts if _label(contact["name"]) == name]
     listed = name in {_label(seller) for seller in sellers}
     if listed and matches:
-        return "unknown", "label matches a listed seller and a contact"
+        return "unknown", "label matches a listed seller and a contact", None
     if listed:
-        return "seller", "listed seller identity"
+        return "seller", "listed seller identity", None
     if len(matches) == 1:
-        return "customer", f"label matches contact [{matches[0]['n']}]"
+        return "customer", f"label matches contact [{matches[0]['n']}]", matches[0]["n"]
     if matches:
-        return "unknown", f"label matches {len(matches)} contacts"
+        return "unknown", f"label matches {len(matches)} contacts", None
     if slack:
-        return "unknown", "author is not a listed seller; Slack identities cannot show a customer"
-    return "unknown", "label matches no listed seller and no contact"
+        return "unknown", "author is not a listed seller; Slack identities cannot show a customer", None
+    return "unknown", "label matches no listed seller and no contact", None
 
 
 def _day(value):
@@ -362,10 +430,10 @@ def _validated(evidence):
         raise BriefRejected("Live Slack evidence requires its exact source selections and bindings.")
     if not live_slack and evidence["thread_snapshot"] is not None:
         raise BriefRejected("Only a live Slack read carries a thread snapshot.")
-    sellers = evidence["sellers"]
-    if (not isinstance(sellers, list) or len(sellers) > 200
-            or any(not isinstance(seller, str) or not 1 <= len(seller) <= 200 for seller in sellers)):
-        raise BriefRejected("Seller identities must be a short list of names or IDs.")
+    for sellers in (evidence["sellers"], evidence["demo_sellers"]):
+        if (not isinstance(sellers, list) or len(sellers) > 200
+                or any(not isinstance(seller, str) or not 1 <= len(seller) <= 200 for seller in sellers)):
+            raise BriefRejected("Seller identities must be a short list of names or IDs.")
     account_id, brief_id = evidence["account_id"], evidence["brief_id"]
     if not all(isinstance(value, str) and _ID.fullmatch(value) for value in (account_id, brief_id)):
         raise BriefRejected("Invalid account or brief identifier.")
@@ -458,19 +526,23 @@ class _Card:
 
     def __init__(self, evidence, groups):
         self.evidence, self.groups = evidence, groups
-        self.units: list[dict[str, Any]] = []
+        self.units: list[Unit] = []
         self.neutralized = {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}
         self.missing = 0
         self.values: list[str] = []
         self.signals: list[str] = []
-        self.not_read: list[str] = []
+        self.gaps: list[Gap] = []
 
-    def line(self, value):
-        """Source text neutralized onto one line."""
+    def lines(self, value):
+        """Source text neutralized, with what was replaced counted."""
         safe, counts = safe_text(value)
         for key, count in counts.items():
             self.neutralized[key] += count
-        return " ".join(safe.split())
+        return safe
+
+    def line(self, value):
+        """Source text neutralized onto one line."""
+        return " ".join(self.lines(value).split())
 
     def quoted(self, value):
         """One field as a quoted literal on one line, or Missing when the record has none."""
@@ -487,7 +559,7 @@ class _Card:
         return len(self.units)
 
     def spoken(self, row, table, parts, *, at, role_of, transcript=False, open_start=False):
-        """Units for one record's speech. `parts` is (speaker label, text, start ms, end ms) in order.
+        """Units for one record's speech. `parts` is (speaker label, text, start ms, end ms, cue or line) in order.
 
         Neighbouring parts under one speaker label are one run, so a sentence wrapped across cues stays whole:
         when they are at most two seconds apart, or at most ten when the earlier part stops mid-sentence and
@@ -499,32 +571,39 @@ class _Card:
         if at is not None and not (isinstance(at, str) and _PLAIN_INSTANT.fullmatch(at)):
             at = self.line(at) or None
         runs: list[list] = []
-        for label, raw, start, end in parts:
+        for label, raw, start, end, cue in parts:
             label = _label(label) or None
             last = runs[-1] if runs else None
             gap = None if last is None or start is None or last[2] is None else start - last[2]
             if last is not None and label is not None and last[0] == label and gap is not None and (
                     abs(gap) <= _RUN_GAP_MS
                     or 0 < gap <= _BRIDGE_GAP_MS and _unfinished(last[1]) and _goes_on(raw)):
-                last[1:] = [last[1] + "\n" + raw, end]
+                last[1:3] = [last[1] + "\n" + raw, end]
+                # One piece per cue: a link or a mention written across two voices of a cue is still one.
+                if last[3][-1][1] == cue:
+                    last[3][-1] = (last[3][-1][0] + "\n" + raw, cue, last[3][-1][2], end)
+                else:
+                    last[3].append((raw, cue, start, end))
             else:
-                runs.append([label, raw, end])
+                runs.append([label, raw, end, [(raw, cue, start, end)]])
         before = len(self.units)
         # The digest is of the record's text as stored, so it can be checked against the source.
         digest = hashlib.sha256(row["body"].encode("utf-8", "surrogatepass")).hexdigest()
         waiting: set = set()  # speakers whose last run stopped mid-sentence
         heard: set = set()  # speakers who have spoken in this excerpt
         cut = False  # whether the sentence before this one, by anyone, stopped mid-sentence
-        for index, (label, raw, _) in enumerate(runs):
-            role, basis = role_of(label)
+        for index, (label, _, _, pieces) in enumerate(runs):
+            role, basis, contact = role_of(label)
             # A speaker label is source text too. The role was derived from the label as given.
             speaker = None if label is None else self.line(label) or None
             if speaker is not None and len(speaker) > MAX_LABEL:
-                speaker, role, basis = None, "unknown", f"speaker label over {MAX_LABEL} characters"
-            safe, counts = safe_text(raw)
-            for key, count in counts.items():
-                self.neutralized[key] += count
+                speaker, role, basis, contact = None, "unknown", f"speaker label over {MAX_LABEL} characters", None
+            # Each cue is neutralized on its own, so a sentence can be placed among the cues by counting.
+            texts = [self.lines(piece[0]) for piece in pieces]
+            safe = "\n".join(texts)
             found = sentences(safe, lines=table == "messages")
+            ends = list(accumulate(sum(map(len, text.split())) for text in texts))  # characters, spaces apart
+            reached = size = 0
             # What follows a sentence that stopped may be its other half: the same speaker's next words, or
             # anyone's when they go on in lower case. In an excerpt that starts inside a call, each speaker's
             # first words may finish a sentence begun before it.
@@ -538,16 +617,32 @@ class _Card:
                 cut = transcript and (_unfinished(sentence) if position == len(found) - 1
                                       else not _ENDED.search(sentence))
                 partial, follows = follows or cut, cut
-                self.units.append({"n": len(self.units) + 1, "kind": "sentence", "source": _SOURCES[table][0],
+                reached, size = reached + size, sum(map(len, sentence.split()))
+                lies = pieces[bisect_right(ends, reached):bisect_left(ends, reached + size) + 1]
+                self.units.append({"n": len(self.units) + 1, "kind": "sentence",
+                                   "source": cast(Literal["calls", "slack"], _SOURCES[table][0]),
                                    "record_ref": row["record_ref"], "tool": _SOURCES[table][2], "at": at,
-                                   "speaker": speaker, "role": role, "basis": basis, "text": sentence,
-                                   "partial": bool(partial), "raw_sha256": digest,
+                                   "speaker": speaker, "role": role, "basis": basis, "contact": contact,
+                                   "text": sentence,
+                                   "partial": bool(partial),
+                                   "shown": "cut" if partial else "long" if len(sentence) > MAX_SENTENCE else "more",
+                                   # Joined cues may be out of time order: the times cover every cue it lies in.
+                                   "span": None if lies[0][1] is None else {
+                                       "first": lies[0][1], "last": lies[-1][1],
+                                       "start_ms": None if lies[0][2] is None else min(piece[2] for piece in lies),
+                                       "end_ms": None if lies[0][3] is None else max(piece[3] for piece in lies)},
+                                   "raw_sha256": digest,
                                    "sanitizer_version": SANITIZER_VERSION})
             if found and cut:
                 waiting.add(label)
         if len(self.units) == before:
             self.record(row, table)
         return before + 1
+
+    def gap(self, code: str, text: str, count: int | None = None, *, first=False, by_role=None):
+        """One line under NOT READ, with the count it states when it states one, by role when it counts sentences."""
+        self.gaps.insert(0 if first else len(self.gaps), {"code": code, "disposition": GAP_CODES[code],
+                                                          "count": count, "by_role": by_role, "text": text})
 
     def value(self, label, value, *numbers):
         self.values.append(f"  {label}: {value} " + "".join(f"[{number}]" for number in numbers))
@@ -585,9 +680,9 @@ def _shown(card, rows, one, many):
     """The first few records in their fixed order. The rest are counted, never dropped silently."""
     more = len(rows) - SHOWN_RECORDS
     if more > 0:
-        card.not_read.append(f"CRM: {more} more {many if more > 1 else one} "
-                             f"{'were read and are' if more > 1 else 'was read and is'} not shown "
-                             f"({len(rows)} in all).")
+        card.gap(f"crm_more_{many}",
+                 f"CRM: {more} more {many if more > 1 else one} "
+                 f"{'were read and are' if more > 1 else 'was read and is'} not shown ({len(rows)} in all).", more)
     return rows[:SHOWN_RECORDS]
 
 
@@ -627,8 +722,8 @@ def _crm(card, as_of):
                 end, _, last = max(ended, key=lambda candidate: candidate[:2])
                 card.signal(f"The latest contract end date, {end}, was {_days((as_of - end).days)} ago.",
                             contract_numbers[last["id"]])
-        card.not_read.append("CRM: annual recurring revenue and renewal risk are not mapped from "
-                             "standard Salesforce fields.")
+        card.gap("crm_unmapped_fields", "CRM: annual recurring revenue and renewal risk are not mapped "
+                 "from standard Salesforce fields.")
     else:
         renewal = _day(account["renewal_date"])
         days = (renewal - as_of).days
@@ -671,7 +766,7 @@ def _crm(card, as_of):
         card.value("Opportunity", f"{card.text(row['name'])}; stage {card.text(row['stage'])}; amount {amount}; "
                    f"close date {row['close_date']}{outcome}", opportunity_numbers[row["id"]])
     if not opportunities:
-        card.not_read.append("CRM: no opportunity was returned for this account.")
+        card.gap("crm_no_opportunity", "CRM: no opportunity was returned for this account.", 0)
     for row in contracts:
         if row["end_date"] is not None:
             _day(row["end_date"])
@@ -707,18 +802,21 @@ def _crm(card, as_of):
 
 
 def _sellers(evidence, backend):
-    """The operator's list. Demo data adds its own invented sellers, for demo text only."""
-    return evidence["sellers"] + (list(SELLERS) if evidence[backend] == "fixture" else [])
+    """The operator's list. Demo data adds its own invented sellers, for demo text only.
+
+    Both lists are in the evidence, so a saved card names every input its roles came from.
+    """
+    return evidence["sellers"] + (evidence["demo_sellers"] if evidence[backend] == "fixture" else [])
 
 
 def _calls(card, as_of, contacts):
     evidence, sellers = card.evidence, _sellers(card.evidence, "calls_backend")
     notes = card.groups["call_notes"]
     if evidence["notes_status"] == "denied":
-        card.not_read.append("Calls: not read. The grant lacks calls:read.")
+        card.gap("calls_denied", "Calls: not read. The grant lacks calls:read.")
         return
     if not notes:
-        card.not_read.append("Calls: no call record was returned for this account.")
+        card.gap("calls_no_record", "Calls: no call record was returned for this account.", 0)
         return
     imported = evidence["calls_backend"] == "imported"
 
@@ -739,23 +837,24 @@ def _calls(card, as_of, contacts):
                 label, text = (named(cue["text"]) or (None, cue["text"]) if "speaker_names" in manifest
                                else (cue_name, cue["text"]))
                 spans = voices(text, label) if manifest["format"] == "vtt" else [(label, text)]
-                parts += [(label, text, cue["start_ms"], cue["end_ms"]) for label, text in spans]
+                parts += [(label, text, cue["start_ms"], cue["end_ms"], cue["index"]) for label, text in spans]
             first_unit[note["record_ref"]] = card.spoken(
                 note, "call_notes", parts, at=note["called_at"], role_of=role_of, transcript=True,
                 open_start=cited["first"] > 1)
             whole = cited["first"] == 1 and cited["last"] == manifest["total_units"]
-            card.not_read.append(
-                f"Calls: one transcript excerpt was read, {manifest['unit_kind']} {cited['first']} to {cited['last']} "
-                f"of {manifest['total_units']}. "
-                + ("Every other call was not read." if whole else
-                   "The rest of that call and every other call were not read."))
+            card.gap("calls_excerpt",
+                     f"Calls: one transcript excerpt was read, {manifest['unit_kind']} {cited['first']} to "
+                     f"{cited['last']} of {manifest['total_units']}. "
+                     + ("Every other call was not read." if whole else
+                        "The rest of that call and every other call were not read."))
         else:
             first_unit[note["record_ref"]] = card.spoken(
-                note, "call_notes", [(note.get("speaker"), note["body"], None, None)], at=note["called_at"],
+                note, "call_notes", [(note.get("speaker"), note["body"], None, None, None)], at=note["called_at"],
                 role_of=role_of)
     if not imported:
-        card.not_read.append(f"Calls: {len(notes)} call {'record was' if len(notes) == 1 else 'records were'} read. "
-                             "Recordings and anything outside those records were not read.")
+        card.gap("calls_outside_records",
+                 f"Calls: {len(notes)} call {'record was' if len(notes) == 1 else 'records were'} read. "
+                 "Recordings and anything outside those records were not read.")
     timed = [(moment, note["record_ref"]) for note in notes if (moment := _instant(note["called_at"])) is not None]
     if timed:
         moment, reference = max(timed)
@@ -768,10 +867,10 @@ def _slack(card):
     evidence, sellers = card.evidence, _sellers(card.evidence, "slack_backend")
     status = evidence["slack_status"]
     if status == "not_requested":
-        card.not_read.append("Slack: not requested for this card.")
+        card.gap("slack_not_requested", "Slack: not requested for this card.")
         return
     if status == "denied":
-        card.not_read.append("Slack: not read. The grant lacks slack:read.")
+        card.gap("slack_denied", "Slack: not read. The grant lacks slack:read.")
         return
     messages = card.groups["messages"]
     live = evidence["slack_backend"] == "slack"
@@ -787,24 +886,27 @@ def _slack(card):
             if type(message["files"]) is not int or message["files"] < 0:
                 raise BriefRejected("A Slack file count must be a nonnegative integer.")
             files += message["files"]
-        first = card.spoken(message, "messages", [(speaker, message["body"], None, None)], at=message["sent_at"],
+        first = card.spoken(message, "messages", [(speaker, message["body"], None, None, None)],
+                            at=message["sent_at"],
                             role_of=lambda label: speaker_role(label, sellers, (), slack=True))
         if not live and message["files"]:
             attached_to.append(f"[{first}]")
     count = f"{len(messages)} {'message was' if len(messages) == 1 else 'messages were'} read"
     if live:
         counts = evidence["thread_snapshot"]["counts"]
-        card.not_read.append(
-            f"Slack: {count} from one selected thread, and paging completed. Not read: "
-            f"files ({counts['omitted_files']}), attachments ({counts['omitted_attachments']}), "
-            f"blocks ({counts['omitted_blocks']}), earlier versions of edited messages, and every other thread.")
+        card.gap("slack_thread",
+                 f"Slack: {count} from one selected thread, and paging completed. Not read: "
+                 f"files ({counts['omitted_files']}), attachments ({counts['omitted_attachments']}), "
+                 f"blocks ({counts['omitted_blocks']}), earlier versions of edited messages, and every other thread.",
+                 counts["omitted_files"] + counts["omitted_attachments"] + counts["omitted_blocks"])
     elif not messages:
-        card.not_read.append("Slack: no message was returned for this account.")
+        card.gap("slack_no_message", "Slack: no message was returned for this account.", 0)
     else:
         where = f" (messages starting at {''.join(attached_to[:SHOWN_RECORDS])})" if attached_to else ""
         attached = (f" {files} attached {'file was' if files == 1 else 'files were'} not read{where}."
                     if files else "")
-        card.not_read.append(f"Slack: {count}.{attached} Other channels were not read.")
+        card.gap("slack_channel", f"Slack: {count}.{attached} Other channels were not read.",
+                 files or None)
 
 
 def _said(card):
@@ -814,20 +916,21 @@ def _said(card):
     side of a conversation never crowds out the other. Sentences keep their order inside one moment.
     """
     spoken = [unit for unit in card.units if unit["kind"] == "sentence"]
-    fits = [unit for unit in spoken if len(unit["text"]) <= MAX_SENTENCE and not unit["partial"]]
     def recency(unit):
         moment = _instant(unit["at"])
         return (moment is not None, moment.timestamp() if moment else 0.0)
 
-    queues = {role: sorted((unit for unit in fits if unit["role"] == role), key=recency, reverse=True)
-              for role in _ROLES}
-    shown = dict.fromkeys(_ROLES, 0)
+    # Every whole sentence that fits waits as "more". A place on the card turns it into "yes".
+    queues = {role: sorted((unit for unit in spoken if unit["shown"] == "more" and unit["role"] == role),
+                           key=recency, reverse=True) for role in _ROLES}
+    dealt = dict.fromkeys(_ROLES, 0)
     for _ in range(SHOWN_SENTENCES):
         for role in _ROLES:
-            if shown[role] < len(queues[role]) and sum(shown.values()) < SHOWN_SENTENCES:
-                shown[role] += 1
+            if dealt[role] < len(queues[role]) and sum(dealt.values()) < SHOWN_SENTENCES:
+                queues[role][dealt[role]]["shown"] = "yes"
+                dealt[role] += 1
     lines = []
-    for unit in (unit for role in _ROLES for unit in queues[role][:shown[role]]):
+    for unit in (unit for role in _ROLES for unit in queues[role][:dealt[role]]):
         where = {"calls": "call", "slack": "Slack"}[unit["source"]]
         who = "no speaker label" if unit["speaker"] is None else "speaker " + json.dumps(unit["speaker"],
                                                                                     ensure_ascii=False)
@@ -835,30 +938,29 @@ def _said(card):
                 else "time " + json.dumps(unit["at"], ensure_ascii=False))
         lines.append(f"  [{unit['n']}] {unit['role']} ({unit['basis']}); {where} {when}; {who}")
         lines.append("      " + json.dumps(unit["text"], ensure_ascii=False))
-    def by_role(units):
+    def withheld(why, line):
+        """One line for the sentences not shown for this reason, with their count by role."""
+        units = [unit for unit in spoken if unit["shown"] == why]
         counts = {role: sum(unit["role"] == role for unit in units) for role in _ROLES}
-        return "(" + ", ".join(f"{count} {role}" for role, count in counts.items() if count) + ")"
+        roles = "(" + ", ".join(f"{count} {role}" for role, count in counts.items() if count) + ")"
+        if units:
+            card.gap("sentences_" + why, line(len(units), roles), len(units), by_role=counts)
 
-    cut = [unit for unit in spoken if unit["partial"]]
-    more = [unit for role in _ROLES for unit in queues[role][shown[role]:]]
-    long = [unit for unit in spoken if len(unit["text"]) > MAX_SENTENCE and not unit["partial"]]
-    if cut:
-        card.not_read.append(f"Sentences: {len(cut)} cut off at a pause, a change of speaker, or the edge of "
-                             f"the excerpt {'was read and is' if len(cut) == 1 else 'were read and are'} "
-                             f"not shown {by_role(cut)}.")
-    if more:
-        card.not_read.append(f"Sentences: {len(more)} more "
-                             f"{'sentence was read and is' if len(more) == 1 else 'sentences were read and are'} "
-                             f"not shown {by_role(more)}; the card shows {SHOWN_SENTENCES}.")
-    if long:
-        card.not_read.append(f"Sentences: {len(long)} over {MAX_SENTENCE} characters "
-                             f"{'was read and is' if len(long) == 1 else 'were read and are'} not shown "
-                             f"{by_role(long)}, because a quotation is never cut.")
+    withheld("cut", lambda count, roles: (
+        f"Sentences: {count} cut off at a pause, a change of speaker, or the edge of the excerpt "
+        f"{'was read and is' if count == 1 else 'were read and are'} not shown {roles}."))
+    withheld("more", lambda count, roles: (
+        f"Sentences: {count} more {'sentence was read and is' if count == 1 else 'sentences were read and are'} "
+        f"not shown {roles}; the card shows {SHOWN_SENTENCES}."))
+    withheld("long", lambda count, roles: (
+        f"Sentences: {count} over {MAX_SENTENCE} characters {'was read and is' if count == 1 else 'were read and are'} "
+        f"not shown {roles}, because a quotation is never cut."))
     unknown = sum(unit["role"] == "unknown" for unit in spoken)
     if unknown:
-        card.not_read.append(f"Speakers: {unknown} of {len(spoken)} "
-                             f"{'sentence has' if len(spoken) == 1 else 'sentences have'} no established speaker "
-                             "role.")
+        card.gap("speakers_unknown",
+                 f"Speakers: {unknown} of {len(spoken)} "
+                 f"{'sentence has' if len(spoken) == 1 else 'sentences have'} no established speaker role.", unknown,
+                 by_role={"customer": 0, "seller": 0, "unknown": unknown})
     return lines
 
 
@@ -876,14 +978,16 @@ def _build(evidence):
                 "  1 sentence was read and is not shown. NOT READ says why." if read == 1 else
                 f"  {read} sentences were read and none is shown. NOT READ says why."]
     if card.missing:
-        card.not_read.insert(0, "CRM: 1 field is empty on the record and prints as Missing." if card.missing == 1
-                             else f"CRM: {card.missing} fields are empty on the record and print as Missing.")
+        card.gap("crm_fields_empty", "CRM: 1 field is empty on the record and prints as Missing."
+                 if card.missing == 1 else f"CRM: {card.missing} fields are empty on the record and print as Missing.",
+                 card.missing, first=True)
     words = {"mentions": "mention", "links": "link", "controls": "control character",
              "brackets": "bracketed number"}
     replaced = [f"{count} {words[name]}{'' if count == 1 else 's'}"
                 for name, count in card.neutralized.items() if count]
     if replaced:
-        card.not_read.append("Neutralized in source text: " + ", ".join(replaced) + ".")
+        card.gap("neutralized", "Neutralized in source text: " + ", ".join(replaced) + ".",
+                 sum(card.neutralized.values()))
     account = groups["accounts"][0]
     name = json.dumps(" ".join(safe_text(account["name"])[0].split()), ensure_ascii=False)
     lines = [f"DEAL CARD: {name} ({evidence['account_id']}) as of {evidence['as_of']}", ""]
@@ -892,35 +996,45 @@ def _build(evidence):
     lines += ["RECORD VALUES, from CRM fields and connector arithmetic", *card.values, "",
               "SAID, whole sentences as recorded; not record values",
               *said, "",
-              "NOT READ", *("  " + line for line in card.not_read), ""]
-    return card.units, "\n".join(lines)
+              "NOT READ", *("  " + gap["text"] for gap in card.gaps), ""]
+    return card.units, "\n".join(lines), card.gaps
 
 
-def build(evidence: dict) -> tuple[list[dict], str]:
-    """Check the evidence and return its numbered units and the card. Bad evidence gives no card."""
+def build(evidence: dict) -> tuple[list[Unit], str, list[Gap]]:
+    """Check the evidence and return its numbered units, the card, and the lines of NOT READ as entries.
+
+    Bad evidence gives no card.
+    """
     try:
         return _build(evidence)
     except BriefRejected:
         raise
-    except (KeyError, TypeError, ValueError, AttributeError):
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError):
+        # RecursionError: a saved file can nest a value deeper than Python reads it.
         raise BriefRejected("Evidence contains missing or invalid fields.") from None
 
 
-def trace(evidence: dict, number: int, units: list[dict] | None = None) -> dict:
+def trace(evidence: dict, number: int, units: list[Unit] | None = None) -> dict:
     """Resolve one number on a card to its source record, its neutralized text, and its audit receipt.
 
     `units` are a sealed card's own; without them the card is built from the evidence.
     """
     if units is None:
-        units, _ = build(evidence)
+        units = build(evidence)[0]
     if type(number) is not int or not 1 <= number <= len(units):
         raise ValueError(f"This card has numbers 1 to {len(units)}.")
     unit = dict(units[number - 1])
     tool = unit.pop("tool")
-    receipt = next(row for row in evidence["receipts"] if row["tool"] == tool)
+    receipt = next((row for row in evidence["receipts"] if row["tool"] == tool), None)
+    record = next((row for row in evidence["records"] if row["record_ref"] == unit["record_ref"]), None)
+    # A unit answers only as its own number, for a record of this evidence that its read's receipt returned.
+    # A sentence also names the stored text it was cut from. None of this depends on a sentence rule.
+    if (unit["n"] != number or receipt is None or record is None or unit["record_ref"] not in receipt["rows"]
+            or unit["kind"] == "sentence" and unit["raw_sha256"] != hashlib.sha256(
+                record["body"].encode("utf-8", "surrogatepass")).hexdigest()):
+        raise ValueError("This number does not resolve to a record and a receipt of its own card.")
     unit["receipt"] = {key: receipt[key] for key in ("audit_id", "tool", "status", "http_status")}
     if unit["kind"] == "record":
-        record = next(row for row in evidence["records"] if row["record_ref"] == unit["record_ref"])
         unit["fields"] = {key: (" ".join(safe_text(value)[0].split()) if isinstance(value, str) else value)
                           for key, value in sorted(record.items())
                           if key != "record_ref" and (value is None or isinstance(value, (str, int, bool)))}

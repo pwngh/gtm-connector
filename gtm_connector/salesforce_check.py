@@ -208,8 +208,8 @@ def run_check(*, sf_org=None, as_of=None, environment="developer", adapter_facto
         with TemporaryDirectory(prefix="gtm-salesforce-check-") as temporary:
             with Runtime(Path(temporary) / "state", crm_reader=state["reader"]) as runtime:
                 result = create_brief(runtime, state["account_id"], as_of=as_of)
-                if not any(line.startswith("  Contract end: ") and not line.startswith("  Contract end: Missing")
-                           for line in result["text"].splitlines()):
+                if not any(row["record_ref"].startswith("crm/contracts/") and (row["end_date"] or "") >= as_of
+                           for row in result["evidence"]["records"]):
                     # The candidate's contract was gone by the time the card read it.
                     raise NoCandidate
                 count = len(result["units"])
