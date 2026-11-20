@@ -1,0 +1,147 @@
+// Synthetic playbook definitions for the invented renewal.
+// Reusable definitions are immutable. They are not approved work or executable authority.
+const task = (id, title, role, dependsOn, inputs, output, completionRule) => ({
+  id, title, role, dependsOn, inputs, output, completionRule,
+});
+
+function freeze(value) {
+  if (value && typeof value === 'object') {
+    Object.values(value).forEach(freeze);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+export const playbookTemplates = freeze([
+  {
+    id: 'obtain_current_rider',
+    version: '1.0',
+    title: 'Obtain the current document',
+    summary: 'Find the applicable AI terms, verify their version, and prepare a counsel handoff.',
+    whenToUse: 'The renewal needs an identified document, but the file is missing, stale, or not yet checked against the agreement. A “rider” is an additional document that adds or changes terms.',
+    draftTitle: 'Obtain the current AI terms for Agreement A-17',
+    requiredEvidence: ['customer_statement', 'current_document', 'customer_authority'],
+    recoveryTasks: {customer_statement: 'locate_document', current_document: 'locate_document', customer_authority: 'confirm_authority'},
+    specifications: 'Identify the AI terms applicable to Agreement A-17. Retain the file identity, source, receipt time, version, and the basis for treating that version as current.',
+    instructions: 'Ask Rachel Ellis for the applicable document or the person who can supply it. Preserve any older file separately. Verify the agreement and version before preparing a handoff to customer counsel; do not send it from this draft.',
+    output: {id: 'document_handoff_packet', title: 'A verified-document handoff packet', description: 'The applicable file, its provenance and version check, and an identified counsel route. This packet enables review; it is not customer approval.'},
+    completionRules: [
+      {id: 'document_provenance', text: 'The received file is linked to Agreement A-17 with its source, version, and receipt time.'},
+      {id: 'current_version_check', text: 'The applicable current version is verified against a stated basis; stale or unknown versions remain open.'},
+      {id: 'handoff_inspection', text: 'The internal reviewer checks the packet and counsel route. Customer review and approval remain separate work.'},
+    ],
+    reviewBoundary: 'Internal review may authorize collection and inspect the resulting packet. It cannot approve the AI terms for the customer, resolve the condition, or confirm the renewal.',
+    tasks: [
+      task('locate_document', 'Obtain the applicable AI terms', 'actionOwner', ['authorize_scope'],
+        ['Agreement A-17', 'E-017: the customer’s document request', 'Rachel Ellis: synthetic source contact'],
+        'A received document with source, version, and receipt time.',
+        'Retain the applicable file and its provenance. If it cannot be found, record the gap and next contact; do not claim receipt.'),
+      task('verify_document', 'Verify agreement and current version', 'actionOwner', ['locate_document'],
+        ['Received file and provenance', 'Evidence of the version applicable to Agreement A-17'],
+        'An explicit applicability and current-version check.',
+        'The file matches the agreement and a supported current version. An older or unidentified version does not pass.'),
+      task('confirm_authority', 'Confirm the customer counsel route', 'actionOwner', ['authorize_scope'],
+        ['Customer contact and role information', 'Scope of the requested customer decision'],
+        'Named counsel and the basis for routing this decision to them.',
+        'Identify who can review these terms for the customer. A fixture name alone is not authenticated authority.'),
+      task('prepare_handoff', 'Prepare the document review handoff', 'actionOwner', ['verify_document', 'confirm_authority'],
+        ['Verified-document record', 'Confirmed counsel route'],
+        'A prepared, unsent review packet with the exact file version.',
+        'The packet names the document, agreement, recipient, and requested decision. Preparation is not sending.'),
+      task('inspect_output', 'Inspect the collection packet', 'internalReviewer', ['prepare_handoff'],
+        ['Document handoff packet', 'Collection specifications and completion rules'],
+        'An internal inspection note identifying any remaining gaps.',
+        'A reviewer checks the packet against this work-plan revision. Do not record customer approval as part of collection.'),
+    ],
+  },
+  {
+    id: 'review_renewal_condition',
+    version: '1.0',
+    title: 'Review a customer condition',
+    summary: 'Preserve the customer’s prerequisite and prepare a supported condition assessment.',
+    whenToUse: 'A customer has said what must be true before they can proceed. Clarify the exact condition, the evidence it needs, and who can decide—without treating a seller expectation as approval.',
+    draftTitle: 'Assess the counsel-approval condition for Agreement A-17',
+    requiredEvidence: ['customer_statement', 'current_document', 'customer_authority'],
+    recoveryTasks: {customer_statement: 'preserve_condition', current_document: 'assess_prerequisites', customer_authority: 'confirm_authority'},
+    specifications: 'Preserve the exact customer statement, its qualifiers, source, and agreement. Distinguish the stated requirement, available evidence, missing prerequisites, and the customer decision still needed.',
+    instructions: 'Read E-017 in context. Identify the responsible action owner and the customer’s decision authority separately. If the file or authority is unknown, prepare a bounded evidence request rather than asserting the condition is satisfied.',
+    output: {id: 'condition_assessment', title: 'A condition assessment and review brief', description: 'The exact prerequisite, an evidence checklist, the decision authority, and an owned next step. An assessment may conclude that more evidence is needed.'},
+    completionRules: [
+      {id: 'exact_condition', text: 'The original condition and qualifiers remain linked to their source and Agreement A-17.'},
+      {id: 'bounded_gaps', text: 'Every missing prerequisite has a specific information request and responsible role; unknowns remain explicit.'},
+      {id: 'condition_review', text: 'An internal reviewer checks the assessment. Customer approval requires separate evidence bound to the applicable document version.'},
+    ],
+    reviewBoundary: 'This work reviews what the customer requires and prepares the next decision. An internally reviewed brief is not a customer decision, a resolved requirement, or a signed renewal.',
+    tasks: [
+      task('preserve_condition', 'Preserve the exact customer condition', 'actionOwner', ['authorize_scope'],
+        ['E-017: customer statement and context', 'Requirement req-ai-counsel'],
+        'A sourced condition record retaining “only after” and the current-document qualifier.',
+        'Retain the exact statement and its speaker, time, and context. If absent, obtain the original statement before interpreting it.'),
+      task('assess_prerequisites', 'Assess evidence and missing prerequisites', 'actionOwner', ['preserve_condition'],
+        ['Sourced condition record', 'Document availability and version information'],
+        'An evidence checklist with bounded acquisition requests for gaps.',
+        'Separate missing, received, and verified evidence. Name the information needed and a next action for every open prerequisite.'),
+      task('confirm_authority', 'Confirm who can decide for the customer', 'actionOwner', ['preserve_condition'],
+        ['Condition and decision scope', 'Customer contact and counsel role information'],
+        'A customer decision route, with unresolved authority questions retained.',
+        'Identify the authority basis or a specific request to establish it. Do not infer approval from a contact’s job title.'),
+      task('prepare_condition_brief', 'Prepare the condition review brief', 'actionOwner', ['assess_prerequisites', 'confirm_authority'],
+        ['Condition record', 'Evidence checklist and authority questions'],
+        'An assessment: supported facts, unmet prerequisites, and the next customer decision needed.',
+        'Explain what is established and what remains unknown. Missing evidence may support an information-needed assessment, not an approval.'),
+      task('inspect_output', 'Inspect the condition assessment', 'internalReviewer', ['prepare_condition_brief'],
+        ['Condition assessment', 'Original customer statement'],
+        'An internal review note and owned next step.',
+        'Check that the assessment preserves the source and does not confuse internal review with the customer’s decision.'),
+    ],
+  },
+  {
+    id: 'reconcile_approval_conflict',
+    version: '1.0',
+    title: 'Reconcile conflicting approval',
+    summary: 'Compare claims, versions, and authority before proposing a reconciliation.',
+    whenToUse: 'Statements disagree—or appear to—about approval. First establish whether they concern the same decision and document. A newer statement is not automatically more authoritative.',
+    draftTitle: 'Compare the approval claims for Agreement A-17',
+    requiredEvidence: ['customer_statement', 'comparison_statement', 'current_document', 'customer_authority'],
+    recoveryTasks: {customer_statement: 'assemble_statements', comparison_statement: 'assemble_statements', current_document: 'seek_clarification', customer_authority: 'confirm_authority'},
+    specifications: 'Keep both original statements intact. Compare their authors, roles, timestamps, decision scope, and document versions. Distinguish a genuine contradiction from statements about different things.',
+    instructions: 'Compare E-017 with E-042. The supplied Slack statement is a seller forecast, not a second approval. Seek only the missing clarification and authority basis. If evidence cannot reconcile a claim, retain it as unresolved with an owner.',
+    output: {id: 'reconciliation_record', title: 'A sourced reconciliation proposal', description: 'A statement comparison and proposed disposition: different claims, superseded with evidence, or unresolved. Both originals and remaining questions stay visible.'},
+    completionRules: [
+      {id: 'both_originals', text: 'Both statements retain their original identities, wording, authors, and timestamps.'},
+      {id: 'scope_comparison', text: 'The comparison addresses authority, agreement, decision scope, and document version without filling gaps by assumption.'},
+      {id: 'supported_disposition', text: 'A reviewer checks the proposed disposition and its evidence; any unresolved claim has an owned clarification request.'},
+    ],
+    reviewBoundary: 'An internal reconciliation proposal does not create or revoke customer approval. Only a supported customer decision on the applicable document could inform a later, separately gated resolution.',
+    tasks: [
+      task('assemble_statements', 'Preserve both statements and their context', 'actionOwner', ['authorize_scope'],
+        ['E-017: customer condition', 'E-042: seller expectation'],
+        'A two-source statement ledger, with missing sources explicitly requested.',
+        'Retain both originals with author, role, and time. Acquire a missing statement instead of inventing the other side of a conflict.'),
+      task('compare_claims', 'Compare decision scope and document versions', 'actionOwner', ['assemble_statements'],
+        ['Statement ledger', 'Agreement and document-version information'],
+        'A comparison of what each statement actually establishes.',
+        'Check whether the claims concern the same authority, decision, and version. Mark unspecified versions as unknown.'),
+      task('confirm_authority', 'Establish the authority behind each claim', 'actionOwner', ['compare_claims'],
+        ['Claim comparison', 'Customer and internal role information'],
+        'Authority distinctions and the route for clarification.',
+        'Separate seller expectation, internal review, and customer authority. An expectation of signature is not an approval.'),
+      task('seek_clarification', 'Prepare a targeted clarification request', 'actionOwner', ['compare_claims', 'confirm_authority'],
+        ['Unresolved scope, version, or authority questions'],
+        'An unsent clarification request, or a sourced explanation that no contradictory approval is present.',
+        'Request only the missing facts, including a current file if needed. Leave unanswered questions open.'),
+      task('draft_reconciliation', 'Propose a supported disposition', 'actionOwner', ['seek_clarification'],
+        ['Original statements', 'Comparison and any clarification evidence'],
+        'A proposed disposition with evidence and remaining questions.',
+        'Use different claims, superseded with evidence, or unresolved. Never choose a winner based only on recency.'),
+      task('inspect_output', 'Inspect the reconciliation proposal', 'internalReviewer', ['draft_reconciliation'],
+        ['Reconciliation proposal', 'Both original statements and their version context'],
+        'An internal review note preserving the evidence trail.',
+        'Check the disposition and retain both originals. The review does not record customer approval or resolve the renewal condition.'),
+    ],
+  },
+]);
+
+export function getPlaybookTemplate(id) {
+  return playbookTemplates.find(template => template.id === id) || null;
+}
