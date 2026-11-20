@@ -1,0 +1,84 @@
+/* Plain-CSS adaptation of Planes' free Segmented Control. */
+.planes-segmented {
+  --planes-track:#e8edf4;
+  --planes-track-line:#cdd8e5;
+  --planes-pill:#fff;
+  --planes-pill-line:#c4d2e2;
+  --planes-label:#42556d;
+  --planes-active:#173c68;
+  position:relative;
+  isolation:isolate;
+  display:inline-flex;
+  align-items:stretch;
+  gap:0;
+  padding:4px;
+  min-width:0;
+  max-width:100%;
+  border:1px solid var(--planes-track-line);
+  border-radius:12px;
+  background:var(--planes-track);
+}
+.planes-segmented-pill {
+  position:absolute;
+  top:4px;
+  bottom:4px;
+  border-radius:8px;
+  pointer-events:none;
+  background:var(--planes-pill);
+  border:1px solid var(--planes-pill-line);
+  box-shadow:0 1px 3px #0c1c3115,inset 0 1px #ffffff8c;
+}
+.planes-segmented-separator {
+  position:absolute;
+  top:25%;
+  bottom:25%;
+  width:1px;
+  background:var(--planes-track-line);
+  pointer-events:none;
+  transform-origin:center;
+}
+.planes-segmented .planes-segment {
+  position:relative;
+  z-index:1;
+  display:inline-flex;
+  flex:1 1 auto;
+  align-items:center;
+  justify-content:center;
+  min-width:0;
+  min-height:44px;
+  padding:9px 16px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  color:var(--planes-label);
+  font-size:.875rem;
+  font-weight:500;
+  line-height:1.4;
+  text-align:center;
+  white-space:nowrap;
+  cursor:pointer;
+}
+.planes-segmented .planes-segment.is-selected {color:var(--planes-active);font-weight:600}
+.planes-segmented .planes-segment:focus-visible {outline:2px solid #7fa5e7;outline-offset:3px}
+.planes-segment-content {display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:0}
+.planes-segment-content>span:last-child {min-width:0;text-wrap:balance;overflow-wrap:anywhere}
+.planes-segment-icon {display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.planes-segment-icon svg {width:16px;height:16px}
+html[data-theme='dark'] .planes-segmented {
+  --planes-track:#101722;
+  --planes-track-line:#334052;
+  --planes-pill:#2c3e55;
+  --planes-pill-line:#4b6280;
+  --planes-label:#b5c1d1;
+  --planes-active:#edf4ff;
+}
+html[data-theme='dark'] .planes-segmented-pill {box-shadow:0 2px 5px #0003,inset 0 1px #ffffff10}
+@media(max-width:650px){
+  .planes-segmented .planes-segment {padding:9px 12px;min-height:44px;white-space:normal}
+}
+@media(max-width:360px){
+  .planes-segmented .planes-segment {padding-inline:8px;white-space:normal}
+}
+@media(prefers-reduced-motion:reduce){
+  .planes-segmented *, .planes-segmented *::before, .planes-segmented *::after {animation:none!important;transition:none!important}
+}
