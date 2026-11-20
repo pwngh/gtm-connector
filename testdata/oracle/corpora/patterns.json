@@ -1,0 +1,1684 @@
+{
+ "note": "every R0 function of each invented item in internal/realdata/testdata/patterns.jsonl, as tools/oracle/real.py records it",
+ "cases": [
+  {
+   "id": "long-sentence-300",
+   "text": "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last May call. Then we stopped.",
+   "outputs": {
+    "safe_text": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last May call. Then we stopped.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last May call.",
+     "Then we stopped."
+    ],
+    "sentences_lines": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last May call.",
+     "Then we stopped."
+    ],
+    "sentences_safe": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last May call.",
+     "Then we stopped."
+    ],
+    "sentences_safe_lines": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last May call.",
+     "Then we stopped."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      299,
+      300,
+      301
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      301,
+      305
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "long-sentence-301",
+   "text": "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last two calls. Then we stopped.",
+   "outputs": {
+    "safe_text": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last two calls. Then we stopped.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last two calls.",
+     "Then we stopped."
+    ],
+    "sentences_lines": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last two calls.",
+     "Then we stopped."
+    ],
+    "sentences_safe": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last two calls.",
+     "Then we stopped."
+    ],
+    "sentences_safe_lines": [
+     "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last two calls.",
+     "Then we stopped."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      300,
+      301,
+      302
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      302,
+      306
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "long-sentence-accented-300",
+   "text": "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras esa llamada. Firmamos el viernes.",
+   "outputs": {
+    "safe_text": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras esa llamada. Firmamos el viernes.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras esa llamada.",
+     "Firmamos el viernes."
+    ],
+    "sentences_lines": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras esa llamada.",
+     "Firmamos el viernes."
+    ],
+    "sentences_safe": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras esa llamada.",
+     "Firmamos el viernes."
+    ],
+    "sentences_safe_lines": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras esa llamada.",
+     "Firmamos el viernes."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      299,
+      300,
+      301
+     ]
+    ],
+    "units_opener": [],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "long-sentence-accented-301",
+   "text": "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras las llamadas. Firmamos el viernes.",
+   "outputs": {
+    "safe_text": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras las llamadas. Firmamos el viernes.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras las llamadas.",
+     "Firmamos el viernes."
+    ],
+    "sentences_lines": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras las llamadas.",
+     "Firmamos el viernes."
+    ],
+    "sentences_safe": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras las llamadas.",
+     "Firmamos el viernes."
+    ],
+    "sentences_safe_lines": [
+     "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras las llamadas.",
+     "Firmamos el viernes."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      300,
+      301,
+      302
+     ]
+    ],
+    "units_opener": [],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "long-sentence-run-on",
+   "text": "So the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and nobody wrote an end to it",
+   "outputs": {
+    "safe_text": [
+     "So the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and nobody wrote an end to it",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "So the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and nobody wrote an end to it"
+    ],
+    "sentences_lines": [
+     "So the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and nobody wrote an end to it"
+    ],
+    "sentences_safe": [
+     "So the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and nobody wrote an end to it"
+    ],
+    "sentences_safe_lines": [
+     "So the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and nobody wrote an end to it"
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [],
+    "units_opener": [
+     [
+      0,
+      2
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "long-sentence-near-bracket",
+   "text": "We said (the buyer asked whether the price holds? Ask legal) that it does.",
+   "outputs": {
+    "safe_text": [
+     "We said (the buyer asked whether the price holds? Ask legal) that it does.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "We said (the buyer asked whether the price holds? Ask legal) that it does."
+    ],
+    "sentences_lines": [
+     "We said (the buyer asked whether the price holds? Ask legal) that it does."
+    ],
+    "sentences_safe": [
+     "We said (the buyer asked whether the price holds? Ask legal) that it does."
+    ],
+    "sentences_safe_lines": [
+     "We said (the buyer asked whether the price holds? Ask legal) that it does."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      48,
+      49,
+      50
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "long-sentence-far-bracket",
+   "text": "We said (the buyer asked whether the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call? Ask legal) that it holds. The next item is pricing.",
+   "outputs": {
+    "safe_text": [
+     "We said (the buyer asked whether the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call? Ask legal) that it holds. The next item is pricing.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "We said (the buyer asked whether the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call?",
+     "Ask legal) that it holds.",
+     "The next item is pricing."
+    ],
+    "sentences_lines": [
+     "We said (the buyer asked whether the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call?",
+     "Ask legal) that it holds.",
+     "The next item is pricing."
+    ],
+    "sentences_safe": [
+     "We said (the buyer asked whether the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call?",
+     "Ask legal) that it holds.",
+     "The next item is pricing."
+    ],
+    "sentences_safe_lines": [
+     "We said (the buyer asked whether the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call?",
+     "Ask legal) that it holds.",
+     "The next item is pricing."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      318,
+      319,
+      320
+     ],
+     [
+      344,
+      345,
+      346
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      346,
+      349
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "long-sentence-far-abbreviation",
+   "text": "We met Dr. Example and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call v. the old terms. Next we sign.",
+   "outputs": {
+    "safe_text": [
+     "We met Dr. Example and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call v. the old terms. Next we sign.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "We met Dr. Example and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call v. the old terms.",
+     "Next we sign."
+    ],
+    "sentences_lines": [
+     "We met Dr. Example and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call v. the old terms.",
+     "Next we sign."
+    ],
+    "sentences_safe": [
+     "We met Dr. Example and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call v. the old terms.",
+     "Next we sign."
+    ],
+    "sentences_safe_lines": [
+     "We met Dr. Example and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call v. the old terms.",
+     "Next we sign."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      9,
+      10,
+      11
+     ],
+     [
+      325,
+      326,
+      327
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "references-named",
+   "text": "Terms &amp; conditions stay. The &lt;draft&gt; says &quot;net 30&quot; today.",
+   "outputs": {
+    "safe_text": [
+     "Terms &amp; conditions stay. The &lt;draft&gt; says &quot;net 30&quot; today.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "Terms &amp; conditions stay.",
+     "The &lt;draft&gt; says &quot;net 30&quot; today."
+    ],
+    "sentences_lines": [
+     "Terms &amp; conditions stay.",
+     "The &lt;draft&gt; says &quot;net 30&quot; today."
+    ],
+    "sentences_safe": [
+     "Terms &amp; conditions stay.",
+     "The &lt;draft&gt; says &quot;net 30&quot; today."
+    ],
+    "sentences_safe_lines": [
+     "Terms &amp; conditions stay.",
+     "The &lt;draft&gt; says &quot;net 30&quot; today."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      27,
+      28,
+      29
+     ]
+    ],
+    "units_opener": [
+     [
+      29,
+      32
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "references-numeric",
+   "text": "We don&#39;t sign until Friday&#x27;s call. It&#8217;s fine &#x1F642; we agree.",
+   "outputs": {
+    "safe_text": [
+     "We don&#39;t sign until Friday&#x27;s call. It&#8217;s fine &#x1F642; we agree.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "We don&#39;t sign until Friday&#x27;s call.",
+     "It&#8217;s fine &#x1F642; we agree."
+    ],
+    "sentences_lines": [
+     "We don&#39;t sign until Friday&#x27;s call.",
+     "It&#8217;s fine &#x1F642; we agree."
+    ],
+    "sentences_safe": [
+     "We don&#39;t sign until Friday&#x27;s call.",
+     "It&#8217;s fine &#x1F642; we agree."
+    ],
+    "sentences_safe_lines": [
+     "We don&#39;t sign until Friday&#x27;s call.",
+     "It&#8217;s fine &#x1F642; we agree."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      42,
+      43,
+      44
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      44,
+      46
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "references-double",
+   "text": "R&amp;amp;D asked again.&nbsp;The rider is &unknown; to us. Done &#0; now.",
+   "outputs": {
+    "safe_text": [
+     "R&amp;amp;D asked again.&nbsp;The rider is &unknown; to us. Done &#0; now.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "R&amp;amp;D asked again.&nbsp;The rider is &unknown; to us.",
+     "Done &#0; now."
+    ],
+    "sentences_lines": [
+     "R&amp;amp;D asked again.&nbsp;The rider is &unknown; to us.",
+     "Done &#0; now."
+    ],
+    "sentences_safe": [
+     "R&amp;amp;D asked again.&nbsp;The rider is &unknown; to us.",
+     "Done &#0; now."
+    ],
+    "sentences_safe_lines": [
+     "R&amp;amp;D asked again.&nbsp;The rider is &unknown; to us.",
+     "Done &#0; now."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      58,
+      59,
+      60
+     ]
+    ],
+    "units_opener": [
+     [
+      30,
+      33
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "references-at-end",
+   "text": "Approved by legal &amp;",
+   "outputs": {
+    "safe_text": [
+     "Approved by legal &amp;",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "Approved by legal &amp;"
+    ],
+    "sentences_lines": [
+     "Approved by legal &amp;"
+    ],
+    "sentences_safe": [
+     "Approved by legal &amp;"
+    ],
+    "sentences_safe_lines": [
+     "Approved by legal &amp;"
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [],
+    "units_opener": [],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "format-zero-width-space",
+   "text": "We\u200b agree.\u200bThe rider\u200bholds. Next\u200b steps follow.",
+   "outputs": {
+    "safe_text": [
+     "We[U+200B] agree.[U+200B]The rider[U+200B]holds. Next[U+200B] steps follow.",
+     [
+      0,
+      0,
+      4,
+      0
+     ]
+    ],
+    "sentences": [
+     "We\u200b agree.\u200bThe rider\u200bholds.",
+     "Next\u200b steps follow."
+    ],
+    "sentences_lines": [
+     "We\u200b agree.\u200bThe rider\u200bholds.",
+     "Next\u200b steps follow."
+    ],
+    "sentences_safe": [
+     "We[U+200B] agree.[U+200B]The rider[U+200B]holds.",
+     "Next[U+200B] steps follow."
+    ],
+    "sentences_safe_lines": [
+     "We[U+200B] agree.[U+200B]The rider[U+200B]holds.",
+     "Next[U+200B] steps follow."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      26,
+      27,
+      28
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      11,
+      14
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "format-word-joiner",
+   "text": "We agree.\u2060 The rider holds.\u2060\u2060Then we sign. No.\u2060 14 goes on.",
+   "outputs": {
+    "safe_text": [
+     "We agree.[U+2060] The rider holds.[U+2060][U+2060]Then we sign. No.[U+2060] 14 goes on.",
+     [
+      0,
+      0,
+      4,
+      0
+     ]
+    ],
+    "sentences": [
+     "We agree.\u2060 The rider holds.\u2060\u2060Then we sign.",
+     "No.\u2060 14 goes on."
+    ],
+    "sentences_lines": [
+     "We agree.\u2060 The rider holds.\u2060\u2060Then we sign.",
+     "No.\u2060 14 goes on."
+    ],
+    "sentences_safe": [
+     "We agree.[U+2060] The rider holds.[U+2060][U+2060]Then we sign.",
+     "No.[U+2060] 14 goes on."
+    ],
+    "sentences_safe_lines": [
+     "We agree.[U+2060] The rider holds.[U+2060][U+2060]Then we sign.",
+     "No.[U+2060] 14 goes on."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      41,
+      42,
+      43
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      11,
+      14
+     ],
+     [
+      29,
+      33
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "format-bom-mid-text",
+   "text": "We agree. \ufeffThe rider holds\ufeff. Then \ufeffwe sign.",
+   "outputs": {
+    "safe_text": [
+     "We agree. [U+FEFF]The rider holds[U+FEFF]. Then [U+FEFF]we sign.",
+     [
+      0,
+      0,
+      3,
+      0
+     ]
+    ],
+    "sentences": [
+     "We agree.",
+     "\ufeffThe rider holds\ufeff.",
+     "Then \ufeffwe sign."
+    ],
+    "sentences_lines": [
+     "We agree.",
+     "\ufeffThe rider holds\ufeff.",
+     "Then \ufeffwe sign."
+    ],
+    "sentences_safe": [
+     "We agree.",
+     "[U+FEFF]The rider holds[U+FEFF].",
+     "Then [U+FEFF]we sign."
+    ],
+    "sentences_safe_lines": [
+     "We agree.",
+     "[U+FEFF]The rider holds[U+FEFF].",
+     "Then [U+FEFF]we sign."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      8,
+      9,
+      10
+     ],
+     [
+      27,
+      28,
+      29
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      11,
+      14
+     ],
+     [
+      29,
+      33
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "format-soft-hyphen-and-marks",
+   "text": "Re\u00adnewal is set.\u200e The rider\u200f holds. \u2066Then\u2069 we sign.",
+   "outputs": {
+    "safe_text": [
+     "Re[U+00AD]newal is set.[U+200E] The rider[U+200F] holds. [U+2066]Then[U+2069] we sign.",
+     [
+      0,
+      0,
+      5,
+      0
+     ]
+    ],
+    "sentences": [
+     "Re\u00adnewal is set.\u200e The rider\u200f holds.",
+     "\u2066Then\u2069 we sign."
+    ],
+    "sentences_lines": [
+     "Re\u00adnewal is set.\u200e The rider\u200f holds.",
+     "\u2066Then\u2069 we sign."
+    ],
+    "sentences_safe": [
+     "Re[U+00AD]newal is set.[U+200E] The rider[U+200F] holds.",
+     "[U+2066]Then[U+2069] we sign."
+    ],
+    "sentences_safe_lines": [
+     "Re[U+00AD]newal is set.[U+200E] The rider[U+200F] holds.",
+     "[U+2066]Then[U+2069] we sign."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      34,
+      35,
+      36
+     ]
+    ],
+    "units_opener": [
+     [
+      18,
+      21
+     ],
+     [
+      37,
+      41
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "format-others",
+   "text": "We agree.\u061c The rider\u180e holds. \udb40\udc01Then\ufff9 we sign\ufffb.",
+   "outputs": {
+    "safe_text": [
+     "We agree.[U+061C] The rider[U+180E] holds. [U+E0001]Then[U+FFF9] we sign[U+FFFB].",
+     [
+      0,
+      0,
+      5,
+      0
+     ]
+    ],
+    "sentences": [
+     "We agree.\u061c The rider\u180e holds.",
+     "\udb40\udc01Then\ufff9 we sign\ufffb."
+    ],
+    "sentences_lines": [
+     "We agree.\u061c The rider\u180e holds.",
+     "\udb40\udc01Then\ufff9 we sign\ufffb."
+    ],
+    "sentences_safe": [
+     "We agree.[U+061C] The rider[U+180E] holds.",
+     "[U+E0001]Then[U+FFF9] we sign[U+FFFB]."
+    ],
+    "sentences_safe_lines": [
+     "We agree.[U+061C] The rider[U+180E] holds.",
+     "[U+E0001]Then[U+FFF9] we sign[U+FFFB]."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      27,
+      28,
+      29
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      11,
+      14
+     ],
+     [
+      30,
+      34
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "controls-c0",
+   "text": "We agree.\u0007 The rider\u0000 holds. \u001b[31mThen\u001b[0m we sign.\b Done.",
+   "outputs": {
+    "safe_text": [
+     "We agree.[U+0007] The rider[U+0000] holds. [U+001B][31mThen[U+001B][0m we sign.[U+0008] Done.",
+     [
+      0,
+      0,
+      5,
+      0
+     ]
+    ],
+    "sentences": [
+     "We agree.\u0007 The rider\u0000 holds.",
+     "\u001b[31mThen\u001b[0m we sign.\b Done."
+    ],
+    "sentences_lines": [
+     "We agree.\u0007 The rider\u0000 holds.",
+     "\u001b[31mThen\u001b[0m we sign.\b Done."
+    ],
+    "sentences_safe": [
+     "We agree.[U+0007] The rider[U+0000] holds.",
+     "[U+001B][31mThen[U+001B][0m we sign.[U+0008] Done."
+    ],
+    "sentences_safe_lines": [
+     "We agree.[U+0007] The rider[U+0000] holds.",
+     "[U+001B][31mThen[U+001B][0m we sign.[U+0008] Done."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      27,
+      28,
+      29
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      11,
+      14
+     ],
+     [
+      34,
+      38
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "controls-c1-and-delete",
+   "text": "We agree.\u007f The rider\u009b holds.\u0090 Then we sign.\u009f",
+   "outputs": {
+    "safe_text": [
+     "We agree.[U+007F] The rider[U+009B] holds.[U+0090] Then we sign.[U+009F]",
+     [
+      0,
+      0,
+      4,
+      0
+     ]
+    ],
+    "sentences": [
+     "We agree.\u007f The rider\u009b holds.\u0090 Then we sign.\u009f"
+    ],
+    "sentences_lines": [
+     "We agree.\u007f The rider\u009b holds.\u0090 Then we sign.\u009f"
+    ],
+    "sentences_safe": [
+     "We agree.[U+007F] The rider[U+009B] holds.[U+0090] Then we sign.[U+009F]"
+    ],
+    "sentences_safe_lines": [
+     "We agree.[U+007F] The rider[U+009B] holds.[U+0090] Then we sign.[U+009F]"
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      11,
+      14
+     ],
+     [
+      30,
+      34
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "controls-alone",
+   "text": "\u0001\u0002\u0003",
+   "outputs": {
+    "safe_text": [
+     "[U+0001][U+0002][U+0003]",
+     [
+      0,
+      0,
+      3,
+      0
+     ]
+    ],
+    "sentences": [
+     "\u0001\u0002\u0003"
+    ],
+    "sentences_lines": [
+     "\u0001\u0002\u0003"
+    ],
+    "sentences_safe": [
+     "[U+0001][U+0002][U+0003]"
+    ],
+    "sentences_safe_lines": [
+     "[U+0001][U+0002][U+0003]"
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [],
+    "units_opener": [],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "spanish-sra-lic",
+   "text": "La Sra. Directora aprob\u00f3 el anexo. El Lic. Responsable pidi\u00f3 otra revisi\u00f3n.",
+   "outputs": {
+    "safe_text": [
+     "La Sra. Directora aprob\u00f3 el anexo. El Lic. Responsable pidi\u00f3 otra revisi\u00f3n.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "La Sra. Directora aprob\u00f3 el anexo.",
+     "El Lic.",
+     "Responsable pidi\u00f3 otra revisi\u00f3n."
+    ],
+    "sentences_lines": [
+     "La Sra. Directora aprob\u00f3 el anexo.",
+     "El Lic.",
+     "Responsable pidi\u00f3 otra revisi\u00f3n."
+    ],
+    "sentences_safe": [
+     "La Sra. Directora aprob\u00f3 el anexo.",
+     "El Lic.",
+     "Responsable pidi\u00f3 otra revisi\u00f3n."
+    ],
+    "sentences_safe_lines": [
+     "La Sra. Directora aprob\u00f3 el anexo.",
+     "El Lic.",
+     "Responsable pidi\u00f3 otra revisi\u00f3n."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      6,
+      7,
+      8
+     ],
+     [
+      33,
+      34,
+      35
+     ],
+     [
+      41,
+      42,
+      43
+     ]
+    ],
+    "units_opener": [],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "spanish-others",
+   "text": "El Ing. Asesor y la Dra. Auditora firmaron. Ud. revise la p\u00e1g. 4 y el n\u00fam. 12. Atte. El equipo.",
+   "outputs": {
+    "safe_text": [
+     "El Ing. Asesor y la Dra. Auditora firmaron. Ud. revise la p\u00e1g. 4 y el n\u00fam. 12. Atte. El equipo.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "El Ing.",
+     "Asesor y la Dra.",
+     "Auditora firmaron.",
+     "Ud. revise la p\u00e1g.",
+     "4 y el n\u00fam.",
+     "12. Atte.",
+     "El equipo."
+    ],
+    "sentences_lines": [
+     "El Ing.",
+     "Asesor y la Dra.",
+     "Auditora firmaron.",
+     "Ud. revise la p\u00e1g.",
+     "4 y el n\u00fam.",
+     "12. Atte.",
+     "El equipo."
+    ],
+    "sentences_safe": [
+     "El Ing.",
+     "Asesor y la Dra.",
+     "Auditora firmaron.",
+     "Ud. revise la p\u00e1g.",
+     "4 y el n\u00fam.",
+     "12. Atte.",
+     "El equipo."
+    ],
+    "sentences_safe_lines": [
+     "El Ing.",
+     "Asesor y la Dra.",
+     "Auditora firmaron.",
+     "Ud. revise la p\u00e1g.",
+     "4 y el n\u00fam.",
+     "12. Atte.",
+     "El equipo."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      6,
+      7,
+      8
+     ],
+     [
+      23,
+      24,
+      25
+     ],
+     [
+      42,
+      43,
+      44
+     ],
+     [
+      61,
+      62,
+      63
+     ],
+     [
+      73,
+      74,
+      75
+     ],
+     [
+      77,
+      78,
+      79
+     ],
+     [
+      83,
+      84,
+      85
+     ]
+    ],
+    "units_opener": [],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "spanish-company",
+   "text": "La C\u00eda. Ejemplo S.A. de C.V. renueva. Sres. Compradores, gracias. Aprox. 30 d\u00edas.",
+   "outputs": {
+    "safe_text": [
+     "La C\u00eda. Ejemplo S.A. de C.V. renueva. Sres. Compradores, gracias. Aprox. 30 d\u00edas.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "La C\u00eda.",
+     "Ejemplo S.A. de C.V. renueva.",
+     "Sres.",
+     "Compradores, gracias.",
+     "Aprox.",
+     "30 d\u00edas."
+    ],
+    "sentences_lines": [
+     "La C\u00eda.",
+     "Ejemplo S.A. de C.V. renueva.",
+     "Sres.",
+     "Compradores, gracias.",
+     "Aprox.",
+     "30 d\u00edas."
+    ],
+    "sentences_safe": [
+     "La C\u00eda.",
+     "Ejemplo S.A. de C.V. renueva.",
+     "Sres.",
+     "Compradores, gracias.",
+     "Aprox.",
+     "30 d\u00edas."
+    ],
+    "sentences_safe_lines": [
+     "La C\u00eda.",
+     "Ejemplo S.A. de C.V. renueva.",
+     "Sres.",
+     "Compradores, gracias.",
+     "Aprox.",
+     "30 d\u00edas."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      6,
+      7,
+      8
+     ],
+     [
+      36,
+      37,
+      38
+     ],
+     [
+      42,
+      43,
+      44
+     ],
+     [
+      64,
+      65,
+      66
+     ],
+     [
+      71,
+      72,
+      73
+     ]
+    ],
+    "units_opener": [],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "spanish-lower-after",
+   "text": "La Sra. directora aprob\u00f3. El Lic. responsable firm\u00f3.",
+   "outputs": {
+    "safe_text": [
+     "La Sra. directora aprob\u00f3. El Lic. responsable firm\u00f3.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "La Sra. directora aprob\u00f3.",
+     "El Lic. responsable firm\u00f3."
+    ],
+    "sentences_lines": [
+     "La Sra. directora aprob\u00f3.",
+     "El Lic. responsable firm\u00f3."
+    ],
+    "sentences_safe": [
+     "La Sra. directora aprob\u00f3.",
+     "El Lic. responsable firm\u00f3."
+    ],
+    "sentences_safe_lines": [
+     "La Sra. directora aprob\u00f3.",
+     "El Lic. responsable firm\u00f3."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      24,
+      25,
+      26
+     ]
+    ],
+    "units_opener": [],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "lines-newline",
+   "text": "We will\nsign Friday.\nThe rider holds.\n\nNext steps follow.",
+   "outputs": {
+    "safe_text": [
+     "We will\nsign Friday.\nThe rider holds.\n\nNext steps follow.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "We will sign Friday.",
+     "The rider holds.",
+     "Next steps follow."
+    ],
+    "sentences_lines": [
+     "We will",
+     "sign Friday.",
+     "The rider holds.",
+     "Next steps follow."
+    ],
+    "sentences_safe": [
+     "We will sign Friday.",
+     "The rider holds.",
+     "Next steps follow."
+    ],
+    "sentences_safe_lines": [
+     "We will",
+     "sign Friday.",
+     "The rider holds.",
+     "Next steps follow."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      19,
+      20,
+      21
+     ],
+     [
+      36,
+      37,
+      39
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      21,
+      24
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "lines-windows-and-bare-cr",
+   "text": "We agree.\r\nThe rider holds.\rThen we sign.\r\n\r\nDone.",
+   "outputs": {
+    "safe_text": [
+     "We agree.\nThe rider holds.[U+000D]Then we sign.\n\nDone.",
+     [
+      0,
+      0,
+      1,
+      0
+     ]
+    ],
+    "sentences": [
+     "We agree.",
+     "The rider holds.",
+     "Then we sign.",
+     "Done."
+    ],
+    "sentences_lines": [
+     "We agree.",
+     "The rider holds.",
+     "Then we sign.",
+     "Done."
+    ],
+    "sentences_safe": [
+     "We agree.",
+     "The rider holds.[U+000D]Then we sign.",
+     "Done."
+    ],
+    "sentences_safe_lines": [
+     "We agree.",
+     "The rider holds.[U+000D]Then we sign.",
+     "Done."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      8,
+      9,
+      11
+     ],
+     [
+      26,
+      27,
+      28
+     ],
+     [
+      40,
+      41,
+      45
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      11,
+      14
+     ],
+     [
+      28,
+      32
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "lines-unicode-separators",
+   "text": "We agree.\u2028The rider holds.\u2029Then we sign.\u0085Done.",
+   "outputs": {
+    "safe_text": [
+     "We agree.\nThe rider holds.\nThen we sign.\nDone.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "We agree.",
+     "The rider holds.",
+     "Then we sign.",
+     "Done."
+    ],
+    "sentences_lines": [
+     "We agree.",
+     "The rider holds.",
+     "Then we sign.",
+     "Done."
+    ],
+    "sentences_safe": [
+     "We agree.",
+     "The rider holds.",
+     "Then we sign.",
+     "Done."
+    ],
+    "sentences_safe_lines": [
+     "We agree.",
+     "The rider holds.",
+     "Then we sign.",
+     "Done."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      8,
+      9,
+      10
+     ],
+     [
+      25,
+      26,
+      27
+     ],
+     [
+      39,
+      40,
+      41
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      10,
+      13
+     ],
+     [
+      27,
+      31
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "lines-vertical-and-file",
+   "text": "We agree.\u000bThe rider holds.\fThen\u001cwe\u001dsign\u001e now.",
+   "outputs": {
+    "safe_text": [
+     "We agree.\nThe rider holds.\nThen[U+001C]we[U+001D]sign[U+001E] now.",
+     [
+      0,
+      0,
+      3,
+      0
+     ]
+    ],
+    "sentences": [
+     "We agree.",
+     "The rider holds.",
+     "Then we sign now."
+    ],
+    "sentences_lines": [
+     "We agree.",
+     "The rider holds.",
+     "Then we sign now."
+    ],
+    "sentences_safe": [
+     "We agree.",
+     "The rider holds.",
+     "Then[U+001C]we[U+001D]sign[U+001E] now."
+    ],
+    "sentences_safe_lines": [
+     "We agree.",
+     "The rider holds.",
+     "Then[U+001C]we[U+001D]sign[U+001E] now."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      8,
+      9,
+      10
+     ],
+     [
+      25,
+      26,
+      27
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ],
+     [
+      10,
+      13
+     ],
+     [
+      27,
+      31
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "lines-after-abbreviation",
+   "text": "We met Dr.\nExample today. La Sra.\nDirectora firm\u00f3. No.\n14 goes on.",
+   "outputs": {
+    "safe_text": [
+     "We met Dr.\nExample today. La Sra.\nDirectora firm\u00f3. No.\n14 goes on.",
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "We met Dr. Example today.",
+     "La Sra. Directora firm\u00f3.",
+     "No. 14 goes on."
+    ],
+    "sentences_lines": [
+     "We met Dr.",
+     "Example today.",
+     "La Sra.",
+     "Directora firm\u00f3.",
+     "No.",
+     "14 goes on."
+    ],
+    "sentences_safe": [
+     "We met Dr. Example today.",
+     "La Sra. Directora firm\u00f3.",
+     "No. 14 goes on."
+    ],
+    "sentences_safe_lines": [
+     "We met Dr.",
+     "Example today.",
+     "La Sra.",
+     "Directora firm\u00f3.",
+     "No.",
+     "14 goes on."
+    ],
+    "units_target": null,
+    "units_raw_link": [],
+    "units_sentence_end": [
+     [
+      9,
+      10,
+      11
+     ],
+     [
+      24,
+      25,
+      26
+     ],
+     [
+      32,
+      33,
+      34
+     ],
+     [
+      49,
+      50,
+      51
+     ],
+     [
+      53,
+      54,
+      55
+     ]
+    ],
+    "units_opener": [
+     [
+      0,
+      2
+     ]
+    ],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  },
+  {
+   "id": "lines-in-a-mention",
+   "text": "<@U0ABC123>\nwe agree <https://renewal.example/x|the\nrider> holds.",
+   "outputs": {
+    "safe_text": [
+     "[user U0ABC123]\nwe agree <[link renewal.example]\nrider> holds.",
+     [
+      1,
+      1,
+      0,
+      0
+     ]
+    ],
+    "sentences": [
+     "<@U0ABC123> we agree <https://renewal.example/x|the rider> holds."
+    ],
+    "sentences_lines": [
+     "<@U0ABC123>",
+     "we agree <https://renewal.example/x|the",
+     "rider> holds."
+    ],
+    "sentences_safe": [
+     "[user U0ABC123] we agree <[link renewal.example] rider> holds."
+    ],
+    "sentences_safe_lines": [
+     "[user U0ABC123]",
+     "we agree <[link renewal.example]",
+     "rider> holds."
+    ],
+    "units_target": null,
+    "units_raw_link": [
+     [
+      22,
+      51
+     ]
+    ],
+    "units_sentence_end": [],
+    "units_opener": [],
+    "units_named": null,
+    "slack_mapping_percent": [],
+    "slack_callback_percent": []
+   }
+  }
+ ]
+}

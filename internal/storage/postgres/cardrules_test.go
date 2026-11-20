@@ -21,7 +21,7 @@ import (
 
 // sqlCard finishes the seal naming the bytes, then writes the card, its
 // units, gaps and read set in one transaction, and returns what the commit
-// gave. The card counts the reads its bytes embed.
+// gave. The card counts the units, gaps and reads its bytes hold.
 func sqlCard(t *testing.T, f *postgrestest.Fixture, pub postgres.CardPublication) error {
 	t.Helper()
 	payload, err := receipts.ParsePayload(pub.Bytes)
@@ -40,7 +40,7 @@ func sqlCard(t *testing.T, f *postgrestest.Fixture, pub postgres.CardPublication
 				card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
 			VALUES ($1, $2, $3, $4, 3, '3', $5, sha256($5), $6, $7, $8, $9, $10) RETURNING id`,
 			pub.WorkspaceID, pub.AccountRef, pub.BriefID, pub.Kind, pub.Bytes, pub.ParentReceiptID,
-			pub.SealReceiptID, len(pub.Units), len(pub.Gaps), len(payload.ReadIDs)).Scan(&card); err != nil {
+			pub.SealReceiptID, len(payload.Units), len(payload.Gaps), len(payload.ReadIDs)).Scan(&card); err != nil {
 			return err
 		}
 		for _, u := range pub.Units {
@@ -184,6 +184,97 @@ func TestTheTriggersHoldTheCardRules(t *testing.T) {
 	}
 	if violations := integrityViolations(t, f); len(violations) != 0 {
 		t.Fatalf("the cards that committed break a rule: %v", violations)
+	}
+}
+
+// refusal is the code and text of an error from PostgreSQL.
+func refusal(err error) (string, string) { return code(err), fmt.Sprint(err) }
+
+// A card holds exactly the units, gaps and reads it counts: when it commits, when its units alone are
+// checked before then, and when a row is added to it later, at any number.
+func TestACardHoldsExactlyTheRowsItCounts(t *testing.T) {
+	f := postgrestest.New(t)
+	three := func(brief string) postgres.CardPublication {
+		pub, _, _ := postgrestest.Prepared(t, f.Store, f, brief+"-call", brief, f.Reader.ID,
+			postgres.TokenID("raw-token"), postgrestest.Record("accounts", "acc-003", "id", "acc-003", "v", brief),
+			postgrestest.Record("contacts", "con-001", "id", "con-001", "v", brief),
+			postgrestest.Record("contacts", "con-002", "id", "con-002", "v", brief))
+		return pub
+	}
+	t.Run("a unit fewer than it counts", func(t *testing.T) {
+		pub := three("count-fewer")
+		pub.Units = pub.Units[:2]
+		if c, m := refusal(sqlCard(t, f, pub)); c != "GT009" || !strings.Contains(m, "does not hold exactly its units") {
+			t.Fatalf("committed with %s %q", c, m)
+		}
+	})
+	t.Run("a unit more than it counts", func(t *testing.T) {
+		pub := three("count-more")
+		extra := pub.Units[2]
+		extra.N, extra.Body = 4, postgrestest.UnitBody(4, "record", extra.RecordRef, extra.Tool, "", nil)
+		pub.Units = append(pub.Units, extra)
+		if c, m := refusal(sqlCard(t, f, pub)); c != "GT009" || !strings.Contains(m, "does not hold exactly its units") {
+			t.Fatalf("committed with %s %q", c, m)
+		}
+	})
+	t.Run("units checked on their own before the card is whole", func(t *testing.T) {
+		pub := three("count-early")
+		payload, err := receipts.ParsePayload(pub.Bytes)
+		ok(t, err)
+		_, err = f.Store.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: pub.SealReceiptID,
+			LeaseToken: pub.SealLeaseToken, Status: "ok", HTTPStatus: 200,
+			Rows: []string{"briefs/" + pub.BriefID + "/" + sha(pub.Bytes)}})
+		ok(t, err)
+		conn, err := pgx.Connect(ctx, f.URL)
+		ok(t, err)
+		defer conn.Close(ctx)
+		err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+			var card string
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version, card_bytes,
+					card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
+				VALUES ($1, $2, $3, 'go', 3, '3', $4, sha256($4), $5, $5, 3, 1, $6) RETURNING id`,
+				pub.WorkspaceID, pub.AccountRef, pub.BriefID, pub.Bytes, pub.SealReceiptID,
+				len(payload.ReadIDs)).Scan(&card); err != nil {
+				return err
+			}
+			for _, u := range pub.Units[:2] {
+				if _, err := tx.Exec(ctx, `INSERT INTO evidence_units (workspace_id, card_id, n, kind, record_ref, tool,
+					receipt_id, source_record_id, body) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+					pub.WorkspaceID, card, u.N, u.Kind, u.RecordRef, u.Tool, u.ReceiptID, u.SourceRecordID,
+					u.Body); err != nil {
+					return err
+				}
+			}
+			_, err := tx.Exec(ctx, "SET CONSTRAINTS evidence_units_counted IMMEDIATE")
+			return err
+		})
+		if c, m := refusal(err); c != "GT009" || !strings.Contains(m, "a unit was added to published card") {
+			t.Fatalf("two units of three passed their own check: %s %q", c, m)
+		}
+	})
+	for _, c := range []struct{ name, statement, message string }{
+		{"the next unit", `INSERT INTO evidence_units (workspace_id, card_id, n, kind, record_ref, tool, body)
+			VALUES ($1, $2, 3, 'record', 'crm/accounts/acc-003', 'get_account', '{}')`, "a unit was added"},
+		{"a unit numbered far above", `INSERT INTO evidence_units (workspace_id, card_id, n, kind, record_ref, tool,
+			body) VALUES ($1, $2, 1000, 'record', 'crm/accounts/acc-003', 'get_account', '{}')`, "a unit was added"},
+		{"two units", `INSERT INTO evidence_units (workspace_id, card_id, n, kind, record_ref, tool, body)
+			VALUES ($1, $2, 4, 'record', 'crm/accounts/acc-003', 'get_account', '{}'),
+			       ($1, $2, 3, 'record', 'crm/accounts/acc-003', 'get_account', '{}')`, "a unit was added"},
+		{"a gap", `INSERT INTO gaps (workspace_id, card_id, ordinal, code, disposition, text)
+			VALUES ($1, $2, 1, 'speakers_unknown', 'note', 'added later')`, "a gap was added"},
+		{"a read", `INSERT INTO card_reads (workspace_id, card_id, ordinal, receipt_id) VALUES ($1, $2, 1, $3)`,
+			"a read was added"},
+	} {
+		t.Run(c.name+" added after publication", func(t *testing.T) {
+			args := []any{f.Workspace.ID, f.Card.ID}
+			if strings.Contains(c.statement, "$3") {
+				args = append(args, f.Parent.ID)
+			}
+			if code, m := refusal(sql(t, f, c.statement, args...)); code != "GT009" || !strings.Contains(m, c.message) {
+				t.Fatalf("got %s %q", code, m)
+			}
+		})
 	}
 }
 

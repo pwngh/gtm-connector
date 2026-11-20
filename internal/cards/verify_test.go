@@ -828,18 +828,21 @@ func TestNoWindowBetweenCheckAndOpen(t *testing.T) {
 }
 
 // TestBriefChecksItsRequestAsPythonDoes: the account first, then the day, with collect_evidence's messages,
-// and no receipt for a refused request.
+// and no receipt for a refused request. A day that is not one is never quoted back: an invented canary stands
+// for a real org's name typed where the day belongs.
 func TestBriefChecksItsRequestAsPythonDoes(t *testing.T) {
+	const canary = "zz-canary-renewal-7Q4"
 	for _, c := range []struct{ account, asOf, want string }{
 		{"acc-1", "soon", "account ID must have the form acc-001"},
-		{"acc-001", "soon", "Invalid isoformat string: 'soon'"},
-		{"acc-001", "2027-02-30", "day 30 must be in range 1..28 for month 2 in year 2027"},
+		{"acc-001", "soon", "as-of date must use YYYY-MM-DD"},
+		{"acc-001", canary, "as-of date must use YYYY-MM-DD"},
+		{"acc-001", "2027-02-30", "as-of date must use YYYY-MM-DD"},
 		{"acc-001", "20270115", "as-of date must use YYYY-MM-DD"},
 	} {
 		m, store := newScope("request").maker(demoBook(t), demoSources(nil))
 		_, err := m.Brief(context.Background(), Brief{Principal: owner("t", "crm:read"), OperationID: "b",
 			AccountID: c.account, AsOf: c.asOf})
-		if err == nil || err.Error() != c.want || len(store.All()) != 0 {
+		if err == nil || err.Error() != c.want || strings.Contains(err.Error(), canary) || len(store.All()) != 0 {
 			t.Errorf("%s %s: got %v", c.account, c.asOf, err)
 		}
 	}

@@ -2,6 +2,7 @@ package realdata
 
 import (
 	"encoding/hex"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -78,6 +79,40 @@ func TestOutputsMatchOracleFixtures(t *testing.T) {
 		with, _ := canonical(row[2])
 		if outputs[at("sentences")] != without || outputs[at("sentences_lines")] != with {
 			split.Add("%s", line)
+		}
+	}
+}
+
+// The invented items in testdata/patterns.jsonl stand for text patterns real data showed: sentences over 300
+// characters, character references, format characters other than ZWJ, control characters, a sentence split
+// after a Spanish abbreviation, and line breaks inside a message. Every R0 function gives, for each, what
+// Python recorded in corpora/patterns.json.
+func TestInventedPatternsMatchTheOracle(t *testing.T) {
+	items, _ := readItems(t, filepath.Join("testdata", "patterns.jsonl"), true)
+	value, err := strictjson.Loads(oracletest.Read(t, "corpora/patterns.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases, _ := value.(*strictjson.Object).Get("cases")
+	if len(cases.([]any)) != len(items) {
+		t.Fatalf("%d items and %d recorded cases; regenerate the oracle fixtures", len(items), len(cases.([]any)))
+	}
+	m := oracletest.NewMismatches(t, "corpora/patterns.json")
+	for i, it := range items {
+		m.Row()
+		recorded := cases.([]any)[i].(*strictjson.Object)
+		id, _ := recorded.Get("id")
+		text, _ := recorded.Get("text")
+		if id != it.ID || text != it.Text {
+			t.Fatalf("case %d is not item %s; regenerate the oracle fixtures", i, it.ID)
+		}
+		outputs, _ := recorded.Get("outputs")
+		got := Outputs(it)
+		for j, name := range TextFunctions {
+			want, _ := outputs.(*strictjson.Object).Get(name)
+			if encoded, err := canonical(want); err != nil || got[j] != encoded {
+				m.Add("%s: %s", it.ID, name)
+			}
 		}
 	}
 }

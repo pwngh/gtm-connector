@@ -2,7 +2,7 @@
  "python_version": "3.14.6",
  "python_build": "3.14.6 (main, Jun 25 2026, 00:12:50) [Clang 14.0.3 (clang-1403.0.22.14.1)]",
  "unicode_version": "16.0.0",
- "package_sha256": "84db6a1574764fdf637f9dea86989fc261a16a85f6cbbc1e9aa711973cc9d913",
+ "package_sha256": "061bdd04ce4937d48f6d60117117aebfc2275d222022def853e664365f69736c",
  "generator": "tools/oracle/generate.py",
  "files": {
   "cards/books_calls.jsonl.gz": {
@@ -66,14 +66,19 @@
    "records": 46
   },
   "commands/index.json": {
-   "sha256": "6dd5016f9e4b51caef494a815032dadb1e676a68995966103a321437b88d199b",
+   "sha256": "d76eb948d8a4bede32804b2a3289f479dc0ac8a00d3000c8470bfa9b5339bb34",
    "bytes": 221,
-   "records": 31
+   "records": 33
   },
   "commands/session.jsonl": {
-   "sha256": "f8502e0c5a8ef1b6f745f3469f29d9d11e86d6094a750bbe654bc267266e465c",
-   "bytes": 120780,
-   "records": 31
+   "sha256": "0f649fe161e0aedad19d89c533d90982663c09e66fdc81bccd507d6801e1c286",
+   "bytes": 121422,
+   "records": 33
+  },
+  "corpora/patterns.json": {
+   "sha256": "3d1c8ca8b1ade242516c8b6530b576b1817ea24f7cb41b7aa72cecf8ccd08a46",
+   "bytes": 46664,
+   "records": 30
   },
   "corpora/safe_text.jsonl.gz": {
    "sha256": "4d34c4601860dc408ed078112d03a9b622a1e0cb024907f982cd8651fa80e558",

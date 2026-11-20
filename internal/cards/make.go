@@ -164,11 +164,10 @@ func checkRequest(s evidence.Sources, accountID, asOf string) error {
 		}
 		return errors.New("account ID must have the form acc-001")
 	}
-	switch _, err := evidence.Day(asOf); {
-	case errors.Is(err, evidence.ErrDay):
+	// One message for every day that is not YYYY-MM-DD: date.fromisoformat's own quotes the text, which can
+	// carry a real org's names.
+	if _, err := evidence.Day(asOf); err != nil {
 		return errors.New("as-of date must use YYYY-MM-DD")
-	case err != nil:
-		return err // date.fromisoformat's own ValueError
 	}
 	return nil
 }

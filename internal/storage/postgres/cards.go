@@ -317,13 +317,10 @@ func (s *Store) recheck(ctx context.Context, tx pgx.Tx, in CardPublication, seal
 		return refusalOf(err), nil
 	}
 	// Each unit's record version is the one its read bound, under its reference.
+	cited := receipts.IndexBound(bound)
 	for _, u := range in.Units {
-		found := false
-		for _, v := range bound[u.ReceiptID] {
-			found = found || versions[u.SourceRecordID] != "" && v.Version() == versions[u.SourceRecordID] &&
-				v.Ref() == u.RecordRef
-		}
-		if !found {
+		key := receipts.Citation{ReceiptID: u.ReceiptID, Ref: u.RecordRef, Version: versions[u.SourceRecordID]}
+		if _, found := cited[key]; key.Version == "" || !found {
 			return fmt.Errorf("%w: unit %d", ErrProvenance, u.N), nil
 		}
 	}
