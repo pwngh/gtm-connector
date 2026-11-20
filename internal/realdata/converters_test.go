@@ -172,7 +172,7 @@ func TestConvertIRC(t *testing.T) {
 	if got := textItems(items); !reflect.DeepEqual(got, want) {
 		t.Errorf("%v", got)
 	}
-	if counts["other lines"] != 1 || counts["lines that are not UTF-8"] != 1 {
+	if counts["system lines"] != 1 || counts["lines that are not UTF-8"] != 1 {
 		t.Errorf("%v", counts)
 	}
 }
@@ -242,6 +242,8 @@ item []:
     item [1]:
         class = "IntervalTier"
         name = "S1"
+        xmin = 0
+        xmax = 9
         intervals: size = 3
         intervals [1]:
             xmin = 0
@@ -266,12 +268,12 @@ func TestConvertTextGrids(t *testing.T) {
 	})
 	items, counts := convertSample(t, "textgrid", map[string][]byte{"test.tar.gz": archive})
 	want := map[string]string{
-		"test/TextGrid/S01.TextGrid#2": "role-played|我们同意。他说\"好\"。<sil>",
-		"test/TextGrid/S01.TextGrid#3": "role-played|明天签字！",
-		"test/TextGrid/S02.TextGrid#2": "role-played|我们同意。他说\"好\"。<sil>",
-		"test/TextGrid/S02.TextGrid#3": "role-played|明天签字！",
+		"test/TextGrid/S01.TextGrid#1.2": "role-played|我们同意。他说\"好\"。<sil>",
+		"test/TextGrid/S01.TextGrid#1.3": "role-played|明天签字！",
+		"test/TextGrid/S02.TextGrid#1.2": "role-played|我们同意。他说\"好\"。<sil>",
+		"test/TextGrid/S02.TextGrid#1.3": "role-played|明天签字！",
 	}
-	if got := textItems(items); !reflect.DeepEqual(got, want) || counts["empty intervals"] != 2 {
+	if got := textItems(items); !reflect.DeepEqual(got, want) || counts["blank"] != 2 || counts["intervals"] != 6 {
 		t.Errorf("%v %v", got, counts)
 	}
 	lone := string([]byte{0xFE, 0xFF, 0xD8, 0x00, 0x00, 0x41})
@@ -280,5 +282,126 @@ func TestConvertTextGrids(t *testing.T) {
 	}
 	if text, ok := decodeTextGrid([]byte(utf16BE("a\U0001F642"))); !ok || text != "a\U0001F642" || strings.ContainsRune(text, 0xFFFD) {
 		t.Errorf("a surrogate pair: %q %v", text, ok)
+	}
+}
+
+// The short TextGrid format, comments, a text over two lines and point tiers are read by Praat's token
+// rules; a file whose intervals do not add up is refused.
+func TestTextGridTokenFormat(t *testing.T) {
+	short := "File type = \"ooTextFile\"\nObject class = \"TextGrid\"\n\n0\n9\n<exists>\n2\n" +
+		"\"IntervalTier\"\n\"S1\"\n0\n9\n2\n0\n4\n\"我们同意。\"\n4\n9\n\"\"\n" +
+		"\"TextTier\"\n\"marks\"\n0\n9\n1\n3.5\n\"点\"\n"
+	long := strings.Replace(sampleTextGrid, `text = "明天签字！"`, "text = \"明天\n签字！\" ! the speaker paused", 1)
+	order := []string{"t/short.TextGrid", "t/long.TextGrid"}
+	items, counts := convertSample(t, "textgrid", map[string][]byte{"test.tar.gz": buildTarGz(t, order, map[string]string{
+		"t/short.TextGrid": short, "t/long.TextGrid": long})})
+	want := map[string]string{
+		"t/short.TextGrid#1.1": "role-played|我们同意。",
+		"t/short.TextGrid#2.1": "role-played|点",
+		"t/long.TextGrid#1.2":  "role-played|我们同意。他说\"好\"。<sil>",
+		"t/long.TextGrid#1.3":  "role-played|明天\n签字！",
+	}
+	if got := textItems(items); !reflect.DeepEqual(got, want) {
+		t.Errorf("%v %v", got, counts)
+	}
+	for name, broken := range map[string]string{
+		"fewer intervals than declared": strings.Replace(sampleTextGrid, "intervals: size = 3", "intervals: size = 4", 1),
+		"more intervals than declared":  strings.Replace(sampleTextGrid, "intervals: size = 3", "intervals: size = 2", 1),
+		"an unclosed string":            strings.Replace(sampleTextGrid, `text = "明天签字！"`, `text = "明天签字！`, 1),
+		"another object class":          strings.Replace(sampleTextGrid, `"TextGrid"`, `"Sound"`, 1),
+	} {
+		cache, d := placeFiles(t, "textgrid", map[string][]byte{"test.tar.gz": buildTarGz(t, []string{"t/a.TextGrid"},
+			map[string]string{"t/a.TextGrid": broken})})
+		if _, err := Convert(cache, d); err == nil {
+			t.Errorf("%s: converted", name)
+		}
+	}
+}
+
+// Rev's case codes are applied as documented: UC capitalizes, LC lower-cases, CA upper-cases, MC keeps. An
+// empty token adds only its punctuation, and a line that is not UTF-8 ends the turn.
+func TestRevCasing(t *testing.T) {
+	nlp := "token|speaker|ts|endTs|punctuation|case|tags|wer_tags\n" +
+		"hELLO|1|||,|UC|[]|[]\nWORLD|1||||LC|[]|[]\nusa|1||||CA|[]|[]\niPhone|1||||MC|[]|[]\n|1|||.|UC|[]|[]\n" +
+		"bad\xff|1||||LC|[]|[]\nagain|1||||LC|[]|[]\n"
+	items, counts := convertSample(t, "rev-nlp", map[string][]byte{"earnings21/transcripts/nlp_references/1.nlp": []byte(nlp)})
+	want := map[string]string{
+		"earnings21/transcripts/nlp_references/1.nlp#1": "role-played|Hello, world USA iPhone .",
+		"earnings21/transcripts/nlp_references/1.nlp#2": "role-played|again",
+	}
+	if got := textItems(items); !reflect.DeepEqual(got, want) || counts["lines that are not UTF-8"] != 1 {
+		t.Errorf("%q %v", got, counts)
+	}
+}
+
+// Valid JSON of an unexpected shape is counted apart from what strict_json refuses, and a missing
+// transcript or message container fails the conversion.
+func TestJSONShapes(t *testing.T) {
+	base := "benchmark-datasets/dev_set/240825.1_dev1/MTG/MTG_1/"
+	meta := []byte(`{"Hashtags": ""}`)
+	for name, c := range map[string]struct {
+		converter string
+		files     map[string][]byte
+	}{
+		"a transcript that is not a list": {"notsofar", map[string][]byte{
+			base + "gt_meeting_metadata.json": meta, base + "gt_transcription.json": []byte(`{"text": "x"}`)}},
+		"a call without segments": {"apptek-jsonl", map[string][]byte{
+			"diarization/x/metadata.jsonl": []byte(`{"file_name": "a.wav"}` + "\n")}},
+		"a day file that is not a list": {"slack-export", map[string][]byte{
+			"c.tar.gz": buildTarGz(t, []string{"top/raw/general/2016-01-07.json"},
+				map[string]string{"top/raw/general/2016-01-07.json": `{"text": "x"}`})}},
+	} {
+		cache, d := placeFiles(t, c.converter, c.files)
+		if _, err := Convert(cache, d); err == nil {
+			t.Errorf("%s: converted", name)
+		}
+	}
+	// What strict_json refuses is still compared, as a document, and counted on its own.
+	items, counts := convertSample(t, "notsofar", map[string][]byte{
+		base + "gt_meeting_metadata.json": meta, base + "gt_transcription.json": []byte(`[{"text": "x", "text": "y"}]`)})
+	if len(jsonItems(items)) != 2 || counts["files strict_json refuses"] != 1 || counts["files of another shape"] != 0 {
+		t.Errorf("%v %v", jsonItems(items), counts)
+	}
+}
+
+// IRC actions (/me, logged as "  * nick words" or "=== nick words") and notices are text too; joins, parts,
+// quits and nick changes are not.
+func TestConvertIRCActionsAndNotices(t *testing.T) {
+	log := "[03:56] <alice> hi\n" +
+		"[03:57]  * alice waves at bob\n" +
+		"=== carol is away for lunch\n" +
+		"=== bob [n=b@host.example]  has joined #channel\n" +
+		"=== [erin]  [n=e@host.example]  has left #channel\n" +
+		"=== bob is now known as bobby\n" +
+		"[03:58] -ChanServ:#channel- Welcome to the channel\n" +
+		"[03:59] <dave>\n"
+	items, counts := convertSample(t, "irc-raw", map[string][]byte{"data/dev/2008-12-11_11.raw.txt": []byte(log)})
+	want := map[string]string{
+		"data/dev/2008-12-11_11.raw.txt:1": "role-played|hi",
+		"data/dev/2008-12-11_11.raw.txt:2": "role-played|waves at bob",
+		"data/dev/2008-12-11_11.raw.txt:3": "role-played|is away for lunch",
+		"data/dev/2008-12-11_11.raw.txt:7": "role-played|Welcome to the channel",
+	}
+	if got := textItems(items); !reflect.DeepEqual(got, want) {
+		t.Errorf("%v", got)
+	}
+	if counts["messages"] != 1 || counts["actions"] != 2 || counts["notices"] != 1 || counts["system lines"] != 3 ||
+		counts["messages without words"] != 1 {
+		t.Errorf("%v", counts)
+	}
+}
+
+// Rows with every cell empty are padding, not messages; Slack entity escapes are counted.
+func TestConvertCSVPaddingAndEntities(t *testing.T) {
+	archive := buildZip(t, map[string]string{
+		"clojurians.csv": "thread,time,speaker,message\r\n1,0,u1,a &amp; b\r\n1,4,u2,\r\n,,,\r\n,,,\r\n",
+	})
+	items, counts := convertSample(t, "csv-columns", map[string][]byte{"chat.zip": archive})
+	want := map[string]string{"clojurians.csv:2": "role-played|a &amp; b", "clojurians.csv:3": "role-played|"}
+	if got := textItems(items); !reflect.DeepEqual(got, want) {
+		t.Errorf("%v", got)
+	}
+	if counts["rows"] != 2 || counts["empty rows"] != 2 || counts["messages with &amp; &lt; or &gt;"] != 1 {
+		t.Errorf("%v", counts)
 	}
 }

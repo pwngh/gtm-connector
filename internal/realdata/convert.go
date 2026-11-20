@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -37,12 +36,15 @@ var converters = map[string]Converter{
 // maxMember is the most any one file may hold once decompressed.
 const maxMember = 256 << 20
 
-// Files are a dataset's downloads, checked against their pins. A .zip is read as its members, a .tar.gz
-// as its members in archive order, and any other file as itself.
+// Files are a dataset's downloads, each opened once and checked against its pin. Converters read only
+// those open files, so a file replaced after the check is never read, and Recheck finds one changed in
+// place. A .zip is read as its members, a .tar.gz as its members in archive order, and any other file as
+// itself.
 type Files struct {
-	dir     string
+	root    *os.Root
 	files   []File
-	zips    map[string]*zip.ReadCloser
+	open    map[string]*os.File
+	zips    map[string]*zip.Reader
 	dataset Dataset
 }
 
@@ -79,17 +81,23 @@ func (m Member) Read() ([]byte, error) {
 // Kind is the dataset's kind, for items a converter does not tag itself.
 func (f *Files) Kind() string { return f.dataset.Kind }
 
-// openFiles checks each download against its pin and opens the zip archives.
-func openFiles(dir string, d Dataset) (*Files, error) {
-	f := &Files{dir: dir, files: d.Files, zips: map[string]*zip.ReadCloser{}, dataset: d}
+// openFiles opens each of a dataset's downloads in its folder in the cache and checks it against its pin.
+func openFiles(cache string, d Dataset) (*Files, error) {
+	root, err := datasetDir(cache, d.ID)
+	if err != nil {
+		return nil, err
+	}
+	f := &Files{root: root, files: append([]File(nil), d.Files...), open: map[string]*os.File{},
+		zips: map[string]*zip.Reader{}, dataset: d}
 	for _, file := range d.Files {
-		path := filepath.Join(dir, filepath.FromSlash(file.Path))
-		if err := Verify(path, file); err != nil {
+		in, err := openVerified(root, "files/"+file.Path, file)
+		if err != nil {
 			f.Close()
 			return nil, err
 		}
+		f.open[file.Path] = in
 		if strings.HasSuffix(file.Path, ".zip") {
-			archive, err := zip.OpenReader(path)
+			archive, err := zip.NewReader(io.NewSectionReader(in, 0, file.Bytes), file.Bytes)
 			if err != nil {
 				f.Close()
 				return nil, fmt.Errorf("%s: %w", file.Path, err)
@@ -101,11 +109,52 @@ func openFiles(dir string, d Dataset) (*Files, error) {
 	return f, nil
 }
 
-// Close closes the archives.
-func (f *Files) Close() {
-	for _, archive := range f.zips {
-		archive.Close()
+// openVerified opens a regular file in the folder and checks its bytes against its pin.
+func openVerified(root *os.Root, name string, file File) (*os.File, error) {
+	info, err := root.Lstat(name)
+	if err != nil {
+		return nil, err
 	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", file.Path)
+	}
+	in, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if opened, err := in.Stat(); err != nil || !os.SameFile(info, opened) {
+		in.Close()
+		return nil, fmt.Errorf("%s changed while it was opened", file.Path)
+	}
+	if err := verifyOpen(in, file); err != nil {
+		in.Close()
+		return nil, err
+	}
+	return in, nil
+}
+
+// Recheck checks every open download against its pin again, so one changed in place while it was read is
+// found before its items are kept.
+func (f *Files) Recheck() error {
+	for _, file := range f.files {
+		if err := verifyOpen(f.open[file.Path], file); err != nil {
+			return fmt.Errorf("%w, after it was checked", err)
+		}
+	}
+	return nil
+}
+
+// Close closes the downloads and the folder.
+func (f *Files) Close() {
+	for _, in := range f.open {
+		in.Close()
+	}
+	f.root.Close()
+}
+
+// section reads a download's checked bytes from its open file.
+func (f *Files) section(file File) *io.SectionReader {
+	return io.NewSectionReader(f.open[file.Path], 0, file.Bytes)
 }
 
 // Walk calls fn on each member whose inner path matches the pattern: downloads in path order, a zip's
@@ -113,18 +162,17 @@ func (f *Files) Close() {
 // within one folder; one that starts with **/ matches the rest against the last segment, at any depth.
 func (f *Files) Walk(pattern string, fn func(Member) error) error {
 	for _, file := range f.files {
-		local := filepath.Join(f.dir, filepath.FromSlash(file.Path))
 		var err error
 		switch {
 		case f.zips[file.Path] != nil:
 			err = walkZip(file.Path, f.zips[file.Path], pattern, fn)
 		case strings.HasSuffix(file.Path, ".tar.gz") || strings.HasSuffix(file.Path, ".tgz"):
-			err = walkTar(file.Path, local, pattern, fn)
+			err = walkTar(file.Path, f.section(file), pattern, fn)
 		default:
 			var ok bool
 			if ok, err = matchPath(pattern, file.Path); ok {
 				err = fn(Member{Name: file.Path, Inner: file.Path, size: file.Bytes,
-					open: func() (io.ReadCloser, error) { return os.Open(local) }})
+					open: func() (io.ReadCloser, error) { return io.NopCloser(f.section(file)), nil }})
 			}
 		}
 		if err != nil {
@@ -134,7 +182,7 @@ func (f *Files) Walk(pattern string, fn func(Member) error) error {
 	return nil
 }
 
-func walkZip(name string, archive *zip.ReadCloser, pattern string, fn func(Member) error) error {
+func walkZip(name string, archive *zip.Reader, pattern string, fn func(Member) error) error {
 	entries := append([]*zip.File(nil), archive.File...)
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
 	for _, entry := range entries {
@@ -155,13 +203,8 @@ func walkZip(name string, archive *zip.ReadCloser, pattern string, fn func(Membe
 	return nil
 }
 
-func walkTar(name, local, pattern string, fn func(Member) error) error {
-	file, err := os.Open(local)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	unzipped, err := gzip.NewReader(file)
+func walkTar(name string, in io.Reader, pattern string, fn func(Member) error) error {
+	unzipped, err := gzip.NewReader(in)
 	if err != nil {
 		return fmt.Errorf("%s is not gzip", name)
 	}
@@ -210,8 +253,8 @@ func (f *Files) Read(name string) ([]byte, error) {
 			}
 		}
 		if file.Path == name {
-			local := filepath.Join(f.dir, filepath.FromSlash(file.Path))
-			return Member{Name: name, size: file.Bytes, open: func() (io.ReadCloser, error) { return os.Open(local) }}.Read()
+			return Member{Name: name, size: file.Bytes,
+				open: func() (io.ReadCloser, error) { return io.NopCloser(f.section(file)), nil }}.Read()
 		}
 	}
 	return nil, fmt.Errorf("%s is not among the files", name)
@@ -242,13 +285,12 @@ func Convert(cache string, d Dataset) (*ConvertSummary, error) {
 	if d.Converter == "" {
 		return nil, fmt.Errorf("%s: %w", d.ID, ErrNoConverter)
 	}
-	files, err := openFiles(filesDir(cache, d), d)
+	files, err := openFiles(cache, d)
 	if err != nil {
 		return nil, err
 	}
 	defer files.Close()
-	run := DatasetRun(cache, d)
-	w, err := CreateItems(run.Items)
+	w, err := CreateItems(files.root, itemsFile)
 	if err != nil {
 		return nil, err
 	}
@@ -263,6 +305,12 @@ func Convert(cache string, d Dataset) (*ConvertSummary, error) {
 		kinds[it.Kind]++
 		return w.Add(it)
 	})
+	if err == nil && w.Text+w.JSON == 0 {
+		err = errors.New("the converter found nothing it reads")
+	}
+	if err == nil {
+		err = files.Recheck()
+	}
 	if err != nil {
 		w.Abort()
 		return nil, fmt.Errorf("%s: %w", d.ID, err)
@@ -272,17 +320,14 @@ func Convert(cache string, d Dataset) (*ConvertSummary, error) {
 	}
 	summary := &ConvertSummary{Dataset: d.ID, Version: d.Version, Converter: d.Converter, TextItems: w.Text,
 		JSONItems: w.JSON, Kinds: kinds, ItemsSHA256: w.SHA256(), Counts: counts}
-	return summary, writeJSON(filepath.Join(run.Out, itemsMeta), summary, 0o644)
+	return summary, writeJSON(files.root, itemsMeta, summary, 0o644)
 }
 
-func writeJSON(path string, value any, mode os.FileMode) error {
+// writeJSON writes a value as indented JSON, a fresh file in the folder.
+func writeJSON(root *os.Root, name string, value any, mode os.FileMode) error {
 	data, err := json.MarshalIndent(value, "", " ")
 	if err != nil {
 		return err
 	}
-	partial := path + ".partial"
-	if err := os.WriteFile(partial, append(data, '\n'), mode); err != nil {
-		return err
-	}
-	return os.Rename(partial, path)
+	return writeExclusive(root, name, append(data, '\n'), mode)
 }

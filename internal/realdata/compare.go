@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"time"
@@ -32,15 +31,18 @@ type Report struct {
 	Run string `json:"run"`
 	// Against is "outputs" when Python's outputs were there to locate each difference, or "digests" when
 	// only their digests were (after the Python package is gone).
-	Against       string          `json:"against"`
-	Python        string          `json:"python"`
-	PackageSHA256 string          `json:"package_sha256"`
-	ItemsSHA256   string          `json:"items_sha256"`
-	TextItems     int             `json:"text_items"`
-	JSONItems     int             `json:"json_items"`
-	Kinds         []KindCount     `json:"kinds"`
-	Functions     []FunctionCount `json:"functions"`
-	Differences   []Difference    `json:"differences"`
+	Against       string      `json:"against"`
+	Python        string      `json:"python"`
+	PackageSHA256 string      `json:"package_sha256"`
+	ItemsSHA256   string      `json:"items_sha256"`
+	TextItems     int         `json:"text_items"`
+	JSONItems     int         `json:"json_items"`
+	Kinds         []KindCount `json:"kinds"`
+	// Decoding counts the items file's lines: a line Python and Go decode differently is a difference here,
+	// and its functions are not compared.
+	Decoding    FunctionCount   `json:"decoding"`
+	Functions   []FunctionCount `json:"functions"`
+	Differences []Difference    `json:"differences"`
 	// Unlisted counts the differences past the first maxListed, which are counted but not listed.
 	Unlisted int     `json:"unlisted_differences"`
 	Seconds  float64 `json:"seconds"`
@@ -91,33 +93,68 @@ const maxListed = 1000
 // ErrNoOracle is a run with no recorded oracle digests.
 var ErrNoOracle = errors.New("no oracle digests")
 
+// The oracle the records must come from: the pinned interpreter and Unicode, and the package the oracle
+// fixtures were made from (testdata/oracle/manifest.json). A test keeps these equal to the fixtures.
+const (
+	oraclePython  = "3.14.6"
+	oracleUnicode = "16.0.0"
+	oraclePackage = "84db6a1574764fdf637f9dea86989fc261a16a85f6cbbc1e9aa711973cc9d913"
+)
+
+// portOutputs runs the Go port on an item; a test replaces it to check that every function is counted.
+var portOutputs = Outputs
+
 // Compare runs the Go port over a run's items and compares each output with the digest Python recorded.
-// When Python's outputs are there too, each difference gets the first position where the outputs differ.
+// The records are checked first: they must come from the pinned oracle, be for this very items file, name
+// exactly the functions each item has, and hold only SHA-256 digests; when Python's outputs are there, each
+// must be the bytes its digest names, and each difference gets the first position where the outputs differ.
+// A line Python and Go decode differently is a difference of its own, and the run goes on. Nothing a record
+// holds reaches the report except digests that passed these checks. A run with no items is a failure, and a
+// failed run leaves no report.
 func Compare(run Run) (*Report, error) {
 	started := time.Now()
+	if run.open == nil {
+		return nil, fmt.Errorf("%s: no results folder", run.Name)
+	}
+	root, err := run.open()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	if err := root.Remove(reportFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
 	var meta OracleMeta
-	if err := readJSON(filepath.Join(run.Out, metaFile), &meta); err != nil {
+	if err := readJSON(root, metaFile, &meta); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("%s: %w; run the oracle first", run.Name, ErrNoOracle)
 		}
 		return nil, fmt.Errorf("%s: %s is not readable", run.Name, metaFile)
 	}
+	if meta.Python != oraclePython || meta.Unicode != oracleUnicode || meta.PackageSHA256 != oraclePackage {
+		return nil, fmt.Errorf("%s: the oracle's records were not made by CPython %s with Unicode %s from the "+
+			"frozen package; run the oracle again", run.Name, oraclePython, oracleUnicode)
+	}
 	if !slices.Equal(meta.TextFunctions, TextFunctions) || !slices.Equal(meta.JSONFunctions, JSONFunctions) {
 		return nil, fmt.Errorf("%s: the oracle ran other functions than this comparison knows; run it again", run.Name)
 	}
-	items, err := OpenItems(run.Items, run.Local)
+	// Stale records are records of another items file; nothing else is called stale.
+	if whole, err := itemsDigest(run, root); err != nil || whole != meta.ItemsSHA256 {
+		return nil, fmt.Errorf("%s: the oracle's records are for other items; run the oracle again", run.Name)
+	}
+	items, err := openRunItems(run, root)
 	if err != nil {
 		return nil, err
 	}
 	defer items.Close()
-	digests, err := openLines(filepath.Join(run.Out, digestsFile))
+	digests, err := openLines(root, digestsFile)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", run.Name, err)
 	}
 	defer digests.Close()
-	report := &Report{Run: run.Name, Against: "digests", Python: meta.Python, PackageSHA256: meta.PackageSHA256,
-		ItemsSHA256: meta.ItemsSHA256, Differences: []Difference{}}
-	outputs, err := openLines(filepath.Join(run.Out, outputsFile))
+	report := &Report{Run: run.Name, Against: "digests", Python: oraclePython, PackageSHA256: oraclePackage,
+		ItemsSHA256: meta.ItemsSHA256, Decoding: FunctionCount{Function: "item"}, Differences: []Difference{}}
+	outputs, err := openLines(root, outputsFile)
 	if err == nil {
 		defer outputs.Close()
 		report.Against = "outputs"
@@ -129,28 +166,80 @@ func Compare(run Run) (*Report, error) {
 		tally[name] = &FunctionCount{Function: name, ByKind: map[string]*Tally{}}
 	}
 	kinds := map[string]*KindCount{}
-	stale := fmt.Errorf("%s: the oracle's records are for other items; run the oracle again", run.Name)
-	for n := 1; ; n++ {
+	forged := fmt.Errorf("%s: the oracle's records are not in the form it writes; run the oracle again", run.Name)
+	differ := func(d Difference, it Item) {
+		if len(report.Differences) == maxListed {
+			report.Unlisted++
+			return
+		}
+		if !run.Local {
+			d.File, d.Item, d.Kind = it.File, it.ID, it.Kind
+		}
+		report.Differences = append(report.Differences, d)
+	}
+	rows := 0
+	for {
 		it, err := items.Next()
 		if err == io.EOF {
 			break
 		}
-		if err != nil {
+		var refused *ErrNotItem
+		if err != nil && !errors.As(err, &refused) {
 			return nil, err
 		}
-		recorded, err := digests.next()
-		if err != nil {
-			return nil, stale
+		line := it.Line
+		if refused != nil {
+			line = refused.Line
 		}
-		input, sums, ok := decodeDigests(recorded)
-		if !ok || input != it.InputSHA256() {
-			return nil, stale
+		recorded, err := digests.next()
+		if err == io.EOF {
+			return nil, fmt.Errorf("%s: Python and Go read the items file's lines differently at line %d", run.Name, line)
+		}
+		if err != nil {
+			return nil, forged
+		}
+		rows++
+		row, ok := decodeRow(recorded)
+		if !ok {
+			return nil, forged
+		}
+		if row.line != line {
+			return nil, fmt.Errorf("%s: Python and Go read the items file's lines differently at line %d", run.Name, line)
 		}
 		var pythonOutputs map[string]json.RawMessage
 		if outputs != nil {
-			line, err := outputs.next()
-			if err != nil || json.Unmarshal(line, &pythonOutputs) != nil {
-				return nil, fmt.Errorf("%s: %s line %d is not readable", run.Name, outputsFile, n)
+			raw, err := outputs.next()
+			if err != nil || json.Unmarshal(raw, &pythonOutputs) != nil || len(pythonOutputs) != len(row.sums) {
+				return nil, forged
+			}
+			for name, output := range pythonOutputs {
+				if Digest(string(output)) != row.sums[name] {
+					return nil, fmt.Errorf("%s: Python's outputs are not the bytes its digests name (line %d); run the oracle again",
+						run.Name, line)
+				}
+			}
+		}
+		report.Decoding.Items++
+		if refused != nil {
+			report.Decoding.Differences++
+			differ(Difference{Line: line, Function: "item", Position: "Go refuses the line Python read",
+				PythonSHA256: row.input}, Item{})
+			continue
+		}
+		if row.input != it.InputSHA256() {
+			report.Decoding.Differences++
+			differ(Difference{Line: line, Function: "item", Position: "Python and Go decode the line differently",
+				InputSHA256: it.InputSHA256(), PythonSHA256: row.input, GoSHA256: it.InputSHA256()}, it)
+			continue
+		}
+		report.Decoding.Matches++
+		names := Functions(it)
+		if len(row.sums) != len(names) {
+			return nil, forged
+		}
+		for _, name := range names {
+			if _, ok := row.sums[name]; !ok {
+				return nil, forged
 			}
 		}
 		kind := kinds[it.Kind]
@@ -165,8 +254,12 @@ func Compare(run Run) (*Report, error) {
 			report.TextItems++
 			kind.TextItems++
 		}
-		for i, encoded := range Outputs(it) {
-			name := Functions(it)[i]
+		encodedAll := portOutputs(it)
+		if len(encodedAll) != len(names) {
+			return nil, fmt.Errorf("%s: the Go port gave %d outputs for %d functions", run.Name, len(encodedAll), len(names))
+		}
+		for i, name := range names {
+			encoded := encodedAll[i]
 			count := tally[name]
 			byKind := count.ByKind[it.Kind]
 			if byKind == nil {
@@ -179,9 +272,8 @@ func Compare(run Run) (*Report, error) {
 			if encoded != "[]" && encoded != "null" {
 				count.NonEmpty++
 			}
-			want, ok := sums[name]
-			got := Digest(encoded)
-			if ok && want == got {
+			want, got := row.sums[name], Digest(encoded)
+			if want == got {
 				count.Matches++
 				byKind.Matches++
 				continue
@@ -189,33 +281,36 @@ func Compare(run Run) (*Report, error) {
 			count.Differences++
 			byKind.Differences++
 			kind.Differences++
-			if len(report.Differences) == maxListed {
-				report.Unlisted++
-				continue
-			}
 			d := Difference{Line: it.Line, Function: name, InputSHA256: it.InputSHA256(), PythonSHA256: want,
 				GoSHA256: got, Position: "unknown: only digests were recorded"}
-			if !run.Local {
-				d.File, d.Item, d.Kind = it.File, it.ID, it.Kind
-			}
 			if raw, ok := pythonOutputs[name]; ok {
 				d.Position = FirstDifference(raw, []byte(encoded))
 			}
-			report.Differences = append(report.Differences, d)
+			differ(d, it)
 		}
 	}
 	if _, err := digests.next(); err != io.EOF {
-		return nil, stale
+		return nil, fmt.Errorf("%s: the oracle's digests hold more rows than the items file has items", run.Name)
 	}
 	if outputs != nil {
 		if _, err := outputs.next(); err != io.EOF {
-			return nil, stale
+			return nil, fmt.Errorf("%s: the oracle's outputs hold more rows than the items file has items", run.Name)
 		}
 	}
-	if items.SHA256() != meta.ItemsSHA256 || report.TextItems+report.JSONItems != meta.Items {
-		return nil, stale
+	if meta.Items != rows {
+		return nil, fmt.Errorf("%s: oracle.json's item count is not the number of its digests' rows", run.Name)
+	}
+	if report.Decoding.Items == 0 {
+		return nil, fmt.Errorf("%s: no items to compare", run.Name)
 	}
 	for _, name := range append(slices.Clone(TextFunctions), JSONFunctions...) {
+		want := report.TextItems
+		if slices.Contains(JSONFunctions, name) {
+			want = report.JSONItems
+		}
+		if tally[name].Items != want {
+			return nil, fmt.Errorf("%s: %s ran on %d of %d items", run.Name, name, tally[name].Items, want)
+		}
 		report.Functions = append(report.Functions, *tally[name])
 	}
 	for _, name := range append([]string{""}, Kinds...) {
@@ -224,24 +319,81 @@ func Compare(run Run) (*Report, error) {
 		}
 	}
 	report.Seconds = time.Since(started).Seconds()
-	return report, writeJSON(filepath.Join(run.Out, reportFile), report, 0o600)
+	return report, writeJSON(root, reportFile, report, 0o600)
+}
+
+// itemsDigest is the SHA-256 of a run's whole items file, uncompressed, as the oracle read it.
+func itemsDigest(run Run, root *os.Root) (string, error) {
+	items, err := openRunItems(run, root)
+	if err != nil {
+		return "", err
+	}
+	defer items.Close()
+	if _, err := io.Copy(io.Discard, items.in); err != nil {
+		return "", err
+	}
+	return items.SHA256(), nil
+}
+
+// ClearReport removes a run's report, so that a run that fails before its comparison leaves none behind.
+func (run Run) ClearReport() error {
+	if run.open == nil {
+		return nil
+	}
+	root, err := run.open()
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := root.Remove(reportFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// openRunItems opens a run's items: a local file where it is, or a dataset's items in its folder.
+func openRunItems(run Run, root *os.Root) (*ItemReader, error) {
+	if run.Local {
+		return OpenItems(run.Items, true)
+	}
+	file, err := root.Open(itemsFile)
+	if err != nil {
+		return nil, err
+	}
+	return newItemReader(file, true, false)
 }
 
 // Total is the number of differences.
 func (r *Report) Total() int {
-	total := 0
+	total := r.Decoding.Differences
 	for _, f := range r.Functions {
 		total += f.Differences
 	}
 	return total
 }
 
-// decodeDigests reads a digests line: [input SHA-256, {function: output SHA-256}].
-func decodeDigests(line []byte) (input string, outputs map[string]string, ok bool) {
-	var pair []json.RawMessage
-	ok = json.Unmarshal(line, &pair) == nil && len(pair) == 2 && json.Unmarshal(pair[0], &input) == nil &&
-		json.Unmarshal(pair[1], &outputs) == nil
-	return input, outputs, ok
+// digestRow is one row of oracle-digests.jsonl.gz: [line, input SHA-256, {function: output SHA-256}].
+type digestRow struct {
+	line  int
+	input string
+	sums  map[string]string
+}
+
+// decodeRow reads a digests row whose digests are all SHA-256 digests.
+func decodeRow(data []byte) (digestRow, bool) {
+	var row digestRow
+	var parts []json.RawMessage
+	if json.Unmarshal(data, &parts) != nil || len(parts) != 3 || json.Unmarshal(parts[0], &row.line) != nil ||
+		json.Unmarshal(parts[1], &row.input) != nil || json.Unmarshal(parts[2], &row.sums) != nil ||
+		row.line < 1 || !digest.MatchString(row.input) {
+		return digestRow{}, false
+	}
+	for _, sum := range row.sums {
+		if !digest.MatchString(sum) {
+			return digestRow{}, false
+		}
+	}
+	return row, true
 }
 
 // FirstDifference says where two outputs first differ, by path and code point, with no text: a path such as
@@ -376,25 +528,25 @@ type lineReader struct {
 	in   *bufio.Reader
 }
 
-func openLines(path string) (*lineReader, error) {
-	file, err := os.Open(path)
+func openLines(root *os.Root, name string) (*lineReader, error) {
+	file, err := root.Open(name)
 	if err != nil {
 		return nil, err
 	}
 	unzipped, err := gzip.NewReader(file)
 	if err != nil {
 		file.Close()
-		return nil, fmt.Errorf("%s is not gzip", filepath.Base(path))
+		return nil, fmt.Errorf("%s is not gzip", name)
 	}
 	return &lineReader{file: file, zip: unzipped, in: bufio.NewReaderSize(unzipped, 1<<20)}, nil
 }
 
 func (r *lineReader) next() ([]byte, error) {
 	line, err := r.in.ReadBytes('\n')
-	if len(line) == 0 && err != nil {
-		if err == io.EOF {
-			return nil, io.EOF
-		}
+	switch {
+	case err == io.EOF && len(line) == 0:
+		return nil, io.EOF
+	case err != nil && err != io.EOF:
 		return nil, errors.New("unreadable")
 	}
 	return bytes.TrimSuffix(line, []byte("\n")), nil
@@ -402,8 +554,8 @@ func (r *lineReader) next() ([]byte, error) {
 
 func (r *lineReader) Close() error { return errors.Join(r.zip.Close(), r.file.Close()) }
 
-func readJSON(path string, value any) error {
-	data, err := os.ReadFile(path)
+func readJSON(root *os.Root, name string, value any) error {
+	data, err := root.ReadFile(name)
 	if err != nil {
 		return err
 	}

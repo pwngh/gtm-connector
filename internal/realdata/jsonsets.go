@@ -11,7 +11,8 @@ import (
 
 // The converters of datasets that ship JSON. Each JSON file (or JSON Lines line) is an item for strict_json
 // as it is, and the text fields inside become text items as they are. A file strict_json refuses gives its
-// JSON item and no text items, and is counted.
+// JSON item and no text items, and is counted. A file strict_json reads whose transcript, segments or
+// messages are not where the format puts them stops the conversion: nothing is skipped unseen.
 
 // strictValue reads a JSON value by strict_json's rules; ok is false when they refuse it.
 func strictValue(data []byte) (any, bool) {
@@ -37,7 +38,7 @@ func text(value any, key string) (string, bool) {
 // gt_meeting_metadata.json, whose "Hashtags" name #NaturalMeeting for the natural meetings.
 func convertNOTSOFAR(files *Files, add func(Item) error) (map[string]int, error) {
 	counts := map[string]int{"meetings": 0, "natural meetings": 0, "utterances": 0, "utterances without text": 0,
-		"files strict_json refuses": 0}
+		"files strict_json refuses": 0, "files of another shape": 0}
 	kind := map[string]string{}
 	err := files.Walk("benchmark-datasets/*/*/MTG/*/gt_meeting_metadata.json", func(m Member) error {
 		data, err := m.Read()
@@ -50,6 +51,8 @@ func convertNOTSOFAR(files *Files, add func(Item) error) (map[string]int, error)
 		value, ok := strictValue(data)
 		if !ok {
 			counts["files strict_json refuses"]++
+		} else if _, isObject := value.(*strictjson.Object); !isObject {
+			counts["files of another shape"]++
 		}
 		tags, _ := text(value, "Hashtags")
 		kind[path.Dir(m.Inner)] = "role-played"
@@ -76,10 +79,13 @@ func convertNOTSOFAR(files *Files, add func(Item) error) (map[string]int, error)
 			return err
 		}
 		value, ok := strictValue(data)
-		records, isList := value.([]any)
-		if !ok || !isList {
+		if !ok {
 			counts["files strict_json refuses"]++
 			return nil
+		}
+		records, isList := value.([]any)
+		if !isList {
+			return fmt.Errorf("%s is not a list of utterances", m.Inner)
 		}
 		for i, record := range records {
 			counts["utterances"]++
@@ -115,11 +121,14 @@ func convertAppTek(files *Files, add func(Item) error) (map[string]int, error) {
 				return err
 			}
 			value, ok := strictValue(line)
-			segments, _ := field(value, "segments")
-			list, isList := segments.([]any)
-			if !ok || !isList {
+			if !ok {
 				counts["lines strict_json refuses"]++
 				continue
+			}
+			segments, _ := field(value, "segments")
+			list, isList := segments.([]any)
+			if !isList {
+				return fmt.Errorf("%s has no list of segments", id)
 			}
 			for i, segment := range list {
 				counts["segments"]++
@@ -163,7 +172,10 @@ func convertSlackExport(files *Files, add func(Item) error) (map[string]int, err
 				return nil
 			}
 			counts["day files"]++
-			messages, _ := value.([]any)
+			messages, isList := value.([]any)
+			if !isList {
+				return fmt.Errorf("%s is not a list of messages", m.Inner)
+			}
 			for i, message := range messages {
 				counts["messages"]++
 				words, ok := text(message, "text")
@@ -171,9 +183,7 @@ func convertSlackExport(files *Files, add func(Item) error) (map[string]int, err
 					counts["messages without text"]++
 					continue
 				}
-				if strings.Contains(words, "&amp;") || strings.Contains(words, "&lt;") || strings.Contains(words, "&gt;") {
-					counts["messages with &amp; &lt; or &gt;"]++
-				}
+				slackEntities(counts, words)
 				if err := add(Item{ID: fmt.Sprintf("%s#%d", m.Inner, i), File: m.Inner, Text: words}); err != nil {
 					return err
 				}
@@ -207,8 +217,14 @@ func convertSObjectTree(files *Files, add func(Item) error) (map[string]int, err
 			counts["files strict_json refuses"]++
 			return nil
 		}
+		if path.Base(m.Inner) == "data-plan.json" {
+			return nil
+		}
 		records, _ := field(value, "records")
-		list, _ := records.([]any)
+		list, isList := records.([]any)
+		if !isList {
+			return fmt.Errorf("%s has no list of records", m.Inner)
+		}
 		for i, record := range list {
 			counts["records"]++
 			o, _ := record.(*strictjson.Object)

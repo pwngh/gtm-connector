@@ -1,7 +1,12 @@
 package realdata
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +17,14 @@ import (
 const secret = "Quarterly renewal blocked by Zanzibar clause"
 
 func TestItemsRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "items.jsonl.gz")
-	w, err := CreateItems(path)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "items.jsonl.gz")
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	w, err := CreateItems(root, "items.jsonl.gz")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,4 +135,58 @@ func longWords(text string) []string {
 		}
 	}
 	return found
+}
+
+// Both readers accept and refuse the same lines (tools/oracle/real.py reads the same vectors).
+func TestItemLineVectors(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "item-lines.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors struct {
+		Lines []struct {
+			Why   string `json:"why"`
+			Hex   string `json:"hex"`
+			Local bool   `json:"local"`
+			OK    bool   `json:"ok"`
+		} `json:"lines"`
+	}
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range vectors.Lines {
+		line, err := hex.DecodeString(v.Hex)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = parseItem(line, 1, v.Local)
+		if (err == nil) != v.OK {
+			t.Errorf("%s: got %v, want accepted %v", v.Why, err, v.OK)
+		}
+	}
+}
+
+// A read error that comes with the last bytes of a file is reported, not dropped with them.
+func TestItemReaderKeepsReadErrors(t *testing.T) {
+	var zipped bytes.Buffer
+	w := gzip.NewWriter(&zipped)
+	io.WriteString(w, `{"id": "a", "text": "x"}`+"\n"+`{"id": "b", "text": "y"}`)
+	w.Close()
+	data := zipped.Bytes()
+	data[len(data)-8] ^= 0xFF // the CRC-32 in the trailer
+	path := filepath.Join(t.TempDir(), "items.jsonl.gz")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := OpenItems(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if _, err := r.Next(); err != nil {
+		t.Fatal(err)
+	}
+	if it, err := r.Next(); err == nil {
+		t.Errorf("the item read with a checksum error was given: %+v", it)
+	}
 }

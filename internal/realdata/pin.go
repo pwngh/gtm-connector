@@ -68,27 +68,32 @@ func (f *Fetcher) Pin(ctx context.Context, d Dataset) ([]File, error) {
 			files = append(files, file)
 		}
 	}
-	dir := filesDir(f.Cache, d)
+	root, err := datasetDir(f.Cache, d.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
 	var mu sync.Mutex
 	pins := map[string]File{}
-	err := each(ctx, files, func(ctx context.Context, file File) error {
-		local := filepath.Join(dir, filepath.FromSlash(file.Path))
+	err = each(ctx, files, func(ctx context.Context, file File) error {
+		name := "files/" + file.Path
+		ctx = withHosts(ctx, d, file)
 		if file.Pinned() {
-			if _, err := os.Lstat(local); err == nil {
-				return Verify(local, file)
+			if _, err := root.Lstat(name); err == nil {
+				return verifyIn(root, name, file)
 			}
-			_, err := f.download(ctx, file, local, true)
+			_, err := f.download(ctx, file, root, name, true)
 			return err
 		}
-		if _, err := os.Lstat(local); err == nil {
+		if _, err := root.Lstat(name); err == nil {
 			return fmt.Errorf("%s is in the cache but has no pin; remove it to fetch it again", file.Path)
 		}
-		pin, err := f.download(ctx, file, local, false)
+		pin, err := f.download(ctx, file, root, name, false)
 		if err == nil {
-			err = checkSource(local, pin, sources[file.Path])
+			err = checkSource(root, name, pin, sources[file.Path])
 		}
 		if err != nil {
-			os.Remove(local)
+			root.Remove(name)
 			return err
 		}
 		mu.Lock()
@@ -109,12 +114,12 @@ func (f *Fetcher) Pin(ctx context.Context, d Dataset) ([]File, error) {
 }
 
 // checkSource compares a fresh download with the digest its source lists.
-func checkSource(local string, pin File, source listed) error {
+func checkSource(root *os.Root, name string, pin File, source listed) error {
 	switch {
 	case source.sha256 != "" && source.sha256 != pin.SHA256:
 		return fmt.Errorf("%s has SHA-256 %s, not the %s its source lists", pin.Path, pin.SHA256, source.sha256)
 	case source.gitSHA1 != "":
-		data, err := os.ReadFile(local)
+		data, err := root.ReadFile(name)
 		if err != nil {
 			return err
 		}
@@ -140,10 +145,22 @@ func included(l *Listing, p string) bool {
 // listGit lists a repository at its revision from a clone of its trees alone: no file's content is fetched,
 // so a repository that holds audio costs no more than its folder listing.
 func (f *Fetcher) listGit(ctx context.Context, d Dataset) ([]listed, error) {
+	root, err := datasetDir(f.Cache, d.ID)
+	if err != nil {
+		return nil, err
+	}
+	info, err := root.Lstat("listing.git")
+	root.Close()
+	if err == nil && !info.IsDir() {
+		return nil, errors.New("listing.git in the dataset's folder is not a folder")
+	}
 	bare := filepath.Join(DatasetDir(f.Cache, d), "listing.git")
 	git := func(args ...string) ([]byte, error) {
-		command := exec.CommandContext(ctx, "git", append([]string{"-c", "credential.helper=",
-			"-c", "protocol.allow=never", "-c", "protocol.https.allow=always"}, args...)...)
+		config := []string{"-c", "credential.helper=", "-c", "protocol.allow=never"}
+		for _, protocol := range f.GitProtocols {
+			config = append(config, "-c", "protocol."+protocol+".allow=always")
+		}
+		command := exec.CommandContext(ctx, "git", append(config, args...)...)
 		command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1")
 		var stderr bytes.Buffer
 		command.Stderr = &stderr
@@ -246,7 +263,7 @@ func (f *Fetcher) listHuggingFace(ctx context.Context, l *Listing) ([]listed, er
 		named = named[len(batch):]
 		body, _ := json.Marshal(map[string]any{"paths": batch, "expand": false})
 		var entries []hubEntry
-		endpoint := "https://huggingface.co/api/datasets/" + l.HuggingFace + "/paths-info/" + l.Revision
+		endpoint := f.HubAPI + l.HuggingFace + "/paths-info/" + l.Revision
 		if _, err := f.hub(ctx, http.MethodPost, endpoint, body, &entries); err != nil {
 			return nil, err
 		}
@@ -267,7 +284,7 @@ func (f *Fetcher) listHuggingFace(ctx context.Context, l *Listing) ([]listed, er
 }
 
 func (f *Fetcher) hubTree(ctx context.Context, l *Listing, folder string) ([]hubEntry, error) {
-	next := "https://huggingface.co/api/datasets/" + l.HuggingFace + "/tree/" + l.Revision
+	next := f.HubAPI + l.HuggingFace + "/tree/" + l.Revision
 	if folder != "" {
 		next += "/" + escapePath(folder)
 	}
@@ -292,8 +309,9 @@ func (f *Fetcher) hubTree(ctx context.Context, l *Listing, folder string) ([]hub
 // down, it waits as long as the Hub asks, up to five minutes, three times at most.
 func (f *Fetcher) hub(ctx context.Context, method, endpoint string, body []byte, value any) (http.Header, error) {
 	u, err := url.Parse(endpoint)
-	if err != nil || u.Scheme != "https" || u.Host != "huggingface.co" {
-		return nil, errors.New("a Hub address that is not on https://huggingface.co")
+	hub, hubErr := url.Parse(f.HubAPI)
+	if err != nil || hubErr != nil || u.Scheme != "https" || u.Host != hub.Host {
+		return nil, errors.New("a Hub address that is not on the Hub's own https host")
 	}
 	for attempt := 0; ; attempt++ {
 		request, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(body))

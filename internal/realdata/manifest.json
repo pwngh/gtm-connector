@@ -133,7 +133,10 @@
    "access": "public",
    "kind": "natural",
    "converter": "slack-export",
-   "base_url": "https://github.com/hyperledger-archives/slack-archive/archive/"
+   "base_url": "https://github.com/hyperledger-archives/slack-archive/archive/",
+   "redirect_hosts": [
+    "codeload.github.com"
+   ]
   },
   {
    "id": "archival-slack",

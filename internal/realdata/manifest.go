@@ -57,11 +57,13 @@ type Dataset struct {
 	OwnerSteps string `json:"owner_steps,omitempty"`
 	Kind       string `json:"kind"`
 	// OptIn says why a dataset runs only when it is named.
-	OptIn     string   `json:"opt_in,omitempty"`
-	Converter string   `json:"converter,omitempty"`
-	BaseURL   string   `json:"base_url,omitempty"`
-	Listing   *Listing `json:"listing,omitempty"`
-	Files     []File   `json:"-"`
+	OptIn     string `json:"opt_in,omitempty"`
+	Converter string `json:"converter,omitempty"`
+	BaseURL   string `json:"base_url,omitempty"`
+	// RedirectHosts are the hosts besides the base URL's that a download may be redirected to.
+	RedirectHosts []string `json:"redirect_hosts,omitempty"`
+	Listing       *Listing `json:"listing,omitempty"`
+	Files         []File   `json:"-"`
 }
 
 // Listing says where `realdata pin` finds a dataset's files when they are too many to list by hand: a git
@@ -190,6 +192,11 @@ func (d *Dataset) check() error {
 	}
 	if d.BaseURL != "" && (!httpsURL(d.BaseURL) || !strings.HasSuffix(d.BaseURL, "/")) {
 		return errors.New("base_url must be an https URL ending in /")
+	}
+	for _, host := range d.RedirectHosts {
+		if u, err := url.Parse("https://" + host + "/"); err != nil || u.Host != host || host == "" {
+			return fmt.Errorf("redirect host %q: a host name only", host)
+		}
 	}
 	if l := d.Listing; l != nil {
 		if (l.Git == "") == (l.HuggingFace == "") || !revision.MatchString(l.Revision) || len(l.Include) == 0 {

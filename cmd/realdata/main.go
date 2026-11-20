@@ -44,18 +44,19 @@ const usage = `usage: realdata [flags] fetch|convert|compare|verify|pin [DATASET
 flags:
 `
 
-func main() {
+func main() { os.Exit(run(os.Args[1:])) }
+
+// dispatchCommand runs a command; a test replaces it to check what a panic shows.
+var dispatchCommand = dispatch
+
+func run(args []string) (code int) {
 	// A panic's value could hold an item's text, so only its type is shown.
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			fmt.Fprintf(os.Stderr, "realdata: internal error (%T)\n", recovered)
-			os.Exit(2)
+			code = 2
 		}
 	}()
-	os.Exit(run(os.Args[1:]))
-}
-
-func run(args []string) int {
 	flags := flag.NewFlagSet("realdata", flag.ContinueOnError)
 	python := flags.String("python", ".venv/bin/python", "the pinned CPython 3.14.6 that runs the oracle; '' to compare against recorded digests")
 	local := flags.String("local", "", "a private JSON Lines file of {\"id\", \"text\"} items, outside the repository")
@@ -73,7 +74,7 @@ func run(args []string) int {
 	command, names := flags.Arg(0), flags.Args()[1:]
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	differences, err := dispatch(ctx, command, names, *python, *local)
+	differences, err := dispatchCommand(ctx, command, names, *python, *local)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "realdata: %v\n", err)
 		return 2
@@ -84,7 +85,24 @@ func run(args []string) int {
 	return 0
 }
 
-type state struct{ cache, root, python string }
+type state struct {
+	cache, root, python string
+	explicit            bool // the datasets were named
+}
+
+// runnable says why a dataset cannot be compared, if it cannot.
+func runnable(d realdata.Dataset) error {
+	switch {
+	case d.Access == realdata.Owner && !d.Pinned():
+		return fmt.Errorf("%s needs the owner: %s", d.ID, d.OwnerSteps)
+	case d.Converter == "":
+		return fmt.Errorf("%s has no converter yet, so it cannot be compared (%s) `realdata fetch %s` fetches its files",
+			d.ID, d.Note, d.ID)
+	case !d.Pinned():
+		return fmt.Errorf("%s is not pinned yet; `realdata pin %s` fetches it and records its digests", d.ID, d.ID)
+	}
+	return nil
+}
 
 func dispatch(ctx context.Context, command string, names []string, python, local string) (int, error) {
 	root, err := repository()
@@ -111,6 +129,9 @@ func dispatch(ctx context.Context, command string, names []string, python, local
 	if s.cache, err = realdata.CacheDir(); err != nil {
 		return 0, err
 	}
+	if err := realdata.RefuseInsideRepository("the cache", s.cache, root); err != nil {
+		return 0, err
+	}
 	manifest, err := realdata.LoadManifest()
 	if err != nil {
 		return 0, err
@@ -118,6 +139,16 @@ func dispatch(ctx context.Context, command string, names []string, python, local
 	datasets, err := manifest.Select(names)
 	if err != nil {
 		return 0, err
+	}
+	// A dataset named for a comparison that cannot run is a failure of its own, never a pass: nothing is
+	// fetched for it. Without names, such datasets are skipped, each with what it waits for.
+	s.explicit = len(names) > 0
+	if s.explicit && (command == "verify" || command == "convert" || command == "compare") {
+		for _, d := range datasets {
+			if err := runnable(d); err != nil {
+				return 0, err
+			}
+		}
 	}
 	switch command {
 	case "pin":
@@ -164,7 +195,7 @@ func (s state) fetch(ctx context.Context, datasets []realdata.Dataset) ([]realda
 	var fetched []realdata.Dataset
 	for _, d := range datasets {
 		err := fetcher.Fetch(ctx, d)
-		if errors.Is(err, realdata.ErrNeedsOwner) || errors.Is(err, realdata.ErrNotPinned) {
+		if !s.explicit && (errors.Is(err, realdata.ErrNeedsOwner) || errors.Is(err, realdata.ErrNotPinned)) {
 			continue
 		}
 		if err != nil {
@@ -227,7 +258,7 @@ func (s state) convert(datasets []realdata.Dataset) ([]realdata.Run, error) {
 }
 
 // verify runs the oracle on each run, then compares. With no Python it compares against what an earlier run
-// recorded.
+// recorded. A run that fails is reported, and the others go on.
 func (s state) verify(ctx context.Context, runs []realdata.Run) (int, error) {
 	if s.python == "" {
 		logf("oracle: no Python given; comparing against the digests recorded earlier")
@@ -241,7 +272,12 @@ func (s state) verify(ctx context.Context, runs []realdata.Run) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("no Python at %s; set PYTHON to the pinned CPython 3.14.6, or to '' to compare against recorded digests", s.python)
 	}
+	var ready []realdata.Run
+	failed := 0
 	for _, r := range runs {
+		if err := r.ClearReport(); err != nil {
+			return 0, err
+		}
 		args := []string{"-I", filepath.Join(s.root, "tools", "oracle", "real.py"), "--out", r.Out, r.Items}
 		if r.Local {
 			args = append(args, "--local")
@@ -251,21 +287,34 @@ func (s state) verify(ctx context.Context, runs []realdata.Run) (int, error) {
 		command.Dir = s.root
 		command.Stdout, command.Stderr = os.Stdout, os.Stderr
 		if err := command.Run(); err != nil {
-			return 0, fmt.Errorf("the oracle failed on %s", r.Name)
+			fmt.Fprintf(os.Stderr, "realdata: the oracle failed on %s\n", r.Name)
+			failed++
+			continue
 		}
+		ready = append(ready, r)
 	}
-	return compare(runs)
+	differences, err := compare(ready)
+	if failed > 0 {
+		err = errors.Join(fmt.Errorf("the oracle failed on %d of %d runs", failed, len(runs)), err)
+	}
+	return differences, err
 }
 
+// compare compares each run and prints its report. A run that fails is reported, and the others go on.
 func compare(runs []realdata.Run) (int, error) {
-	total := 0
+	total, failed := 0, 0
 	for _, r := range runs {
 		report, err := realdata.Compare(r)
 		if err != nil {
-			return 0, err
+			fmt.Fprintf(os.Stderr, "realdata: %v\n", err)
+			failed++
+			continue
 		}
 		realdata.PrintReport(os.Stdout, report, r)
 		total += report.Total()
+	}
+	if failed > 0 {
+		return total, fmt.Errorf("%d of %d comparisons failed", failed, len(runs))
 	}
 	return total, nil
 }

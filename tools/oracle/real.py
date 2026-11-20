@@ -8,13 +8,14 @@ ITEMS is an items file: cmd/realdata's conversion of a dataset, or with --local 
 {"id", "text"} objects. DIR receives:
 
 - oracle.jsonl.gz: each item's outputs, {function: value}, one line per item in order;
-- oracle-digests.jsonl.gz: [SHA-256 of the input, {function: SHA-256 of its output}], one line per item, which
-  the comparison keeps using after the Python package is gone;
+- oracle-digests.jsonl.gz: [line, SHA-256 of the input, {function: SHA-256 of its output}], one line per item,
+  which the comparison keeps using after the Python package is gone;
 - oracle.json: the interpreter, the package digest, the items file's digest and the functions.
 
 An output is encoded as oracle/output.py's dumps writes it, and its digest is of those bytes. The items are read
 by the rules internal/realdata/items.go states. Nothing printed holds item text: a refused line is named by its
-number, and any other failure by its exception type only.
+number, and any other failure by its exception type only. Files are written as Folder says, so nothing leaves
+DIR; with --local, DIR must be private. The package must be the one testdata/oracle/ was made from.
 """
 
 import argparse
@@ -28,6 +29,8 @@ import io
 import json
 import os
 from pathlib import Path
+import secrets
+import stat
 import sys
 import time
 from typing import IO, Any, Callable, Iterator
@@ -85,10 +88,14 @@ class Items:
         if ("text" in value) == ("json" in value):
             raise refuse('not exactly one of "text" and "json"')
         if "json" in value:
+            # Canonical base64 only: no line breaks, padding, and no bits set in the padding.
             try:
-                return base64.b64decode(value["json"], validate=True)
+                data = base64.b64decode(value["json"], validate=True)
             except binascii.Error:
-                raise refuse('"json" is not standard base64') from None
+                data = None
+            if data is None or base64.b64encode(data).decode("ascii") != value["json"]:
+                raise refuse('"json" is not canonical base64')
+            return data
         return value["text"]
 
 
@@ -144,8 +151,42 @@ def text_outputs(text: str) -> dict[str, Any]:
     return found
 
 
-def _create(path: Path) -> IO[bytes]:
-    return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "wb")
+class Folder:
+    """The results folder, opened once. Every file is created fresh under a name no one could have prepared,
+    relative to the open folder, and renamed over its name: a link or a file left at any name is replaced,
+    never written through, and every file is 0600. A local run's folder must be a folder, not a link, owned by
+    this user and open to no one else."""
+
+    def __init__(self, path: Path, private: bool) -> None:
+        if private:
+            try:
+                os.mkdir(path, 0o700)
+            except FileExistsError:
+                pass
+        else:
+            path.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        info = os.fstat(self.fd)
+        if private and (info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700):
+            os.close(self.fd)
+            raise Refused("the results folder is not private: it must belong to you and have mode 0700")
+
+    def create(self, name: str) -> tuple[IO[bytes], str]:
+        temporary = f".{name}.{secrets.token_hex(12)}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        return os.fdopen(os.open(temporary, flags, 0o600, dir_fd=self.fd), "wb"), temporary
+
+    def keep(self, temporary: str, name: str) -> None:
+        os.replace(temporary, name, src_dir_fd=self.fd, dst_dir_fd=self.fd)
+
+    def discard(self, temporary: str) -> None:
+        try:
+            os.unlink(temporary, dir_fd=self.fd)
+        except FileNotFoundError:
+            pass
+
+    def close(self) -> None:
+        os.close(self.fd)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -169,18 +210,26 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if TEXT_FUNCTIONS[5:] != tuple(SCANNERS):
         raise SystemExit("The scanners changed; update TEXT_FUNCTIONS here and in internal/realdata.")
+    frozen = json.loads((ROOT / "testdata" / "oracle" / "manifest.json").read_text())["package_sha256"]
+    if _package_digest() != frozen:
+        print("The package differs from the one testdata/oracle/ was made from; regenerate the fixtures first.",
+              file=sys.stderr)
+        return 2
     started = time.monotonic()
-    out = args.out.resolve()
-    out.mkdir(mode=0o700, parents=True, exist_ok=True)
+    folder = Folder(args.out.absolute(), args.local)
     items = Items(args.items.resolve(), args.local)
     counts = {"text": 0, "json": 0}
     names = ("oracle.jsonl.gz", "oracle-digests.jsonl.gz")
-    unfinished = [out / (name + ".partial") for name in names]
+    temporary: list[str] = []
     try:
-        with _create(unfinished[0]) as raw_outputs, _create(unfinished[1]) as raw_digests, \
+        raw_outputs, name = folder.create(names[0])
+        temporary.append(name)
+        raw_digests, name = folder.create(names[1])
+        temporary.append(name)
+        with raw_outputs, raw_digests, \
                 gzip.GzipFile(filename="", mode="wb", fileobj=raw_outputs, mtime=0) as outputs, \
                 gzip.GzipFile(filename="", mode="wb", fileobj=raw_digests, mtime=0) as digests:
-            for _, value in items:
+            for number, value in items:
                 if isinstance(value, bytes):
                     counts["json"] += 1
                     found, data = document_outputs(value), value
@@ -191,20 +240,23 @@ def main(argv: list[str] | None = None) -> int:
                 outputs.write(("{" + ",".join(f"{dumps(name)}:{text}" for name, text in encoded.items())
                                + "}\n").encode())
                 sums = {name: hashlib.sha256(text.encode()).hexdigest() for name, text in encoded.items()}
-                digests.write((dumps([hashlib.sha256(data).hexdigest(), sums]) + "\n").encode())
+                digests.write((dumps([number, hashlib.sha256(data).hexdigest(), sums]) + "\n").encode())
+        meta = {"python": version, "unicode": unicodedata.unidata_version, "package_sha256": frozen,
+                "items_sha256": items.digest.hexdigest(), "items": counts["text"] + counts["json"],
+                "text_functions": list(TEXT_FUNCTIONS), "json_functions": list(JSON_FUNCTIONS)}
+        handle, name = folder.create("oracle.json")
+        temporary.append(name)
+        with handle:
+            handle.write((json.dumps(meta, indent=1) + "\n").encode())
+        for done, name in zip(temporary, (*names, "oracle.json")):
+            folder.keep(done, name)
     except BaseException:
         # What was written so far holds item text; a failed run leaves none of it.
-        for path in unfinished:
-            path.unlink(missing_ok=True)
+        for name in temporary:
+            folder.discard(name)
         raise
-    for path, name in zip(unfinished, names):
-        path.replace(out / name)
-    meta = {"python": version, "unicode": unicodedata.unidata_version, "package_sha256": _package_digest(),
-            "items_sha256": items.digest.hexdigest(), "items": counts["text"] + counts["json"],
-            "text_functions": list(TEXT_FUNCTIONS), "json_functions": list(JSON_FUNCTIONS)}
-    with _create(out / "oracle.json.partial") as handle:
-        handle.write((json.dumps(meta, indent=1) + "\n").encode())
-    (out / "oracle.json.partial").replace(out / "oracle.json")
+    finally:
+        folder.close()
     print(f"oracle: {counts['text']} text items and {counts['json']} JSON documents in "
           f"{time.monotonic() - started:.1f} s")
     return 0

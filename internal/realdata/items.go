@@ -77,13 +77,17 @@ func OpenItems(path string, local bool) (*ItemReader, error) {
 	if err != nil {
 		return nil, err
 	}
+	return newItemReader(file, strings.HasSuffix(path, ".gz"), local)
+}
+
+func newItemReader(file *os.File, gzipped, local bool) (*ItemReader, error) {
 	r := &ItemReader{closer: []io.Closer{file}, hash: sha256.New(), local: local}
 	var source io.Reader = file
-	if strings.HasSuffix(path, ".gz") {
+	if gzipped {
 		unzipped, err := gzip.NewReader(file)
 		if err != nil {
 			file.Close()
-			return nil, fmt.Errorf("%s is not gzip", path)
+			return nil, errors.New("the items file is not gzip")
 		}
 		r.closer = append(r.closer, unzipped)
 		source = unzipped
@@ -118,10 +122,10 @@ func (e *ErrNotItem) Error() string {
 func (r *ItemReader) Next() (Item, error) {
 	for {
 		raw, err := r.in.ReadBytes('\n')
-		if len(raw) == 0 && err != nil {
-			if err == io.EOF {
-				return Item{}, io.EOF
-			}
+		switch {
+		case err == io.EOF && len(raw) == 0:
+			return Item{}, io.EOF
+		case err != nil && err != io.EOF:
 			// A read error names the file's trouble, never its content.
 			return Item{}, fmt.Errorf("reading line %d failed", r.line+1)
 		}
@@ -184,34 +188,35 @@ func parseItem(raw []byte, line int, local bool) (Item, error) {
 	case hasText == (encoded != nil):
 		return refuse(`not exactly one of "text" and "json"`)
 	case encoded != nil:
+		// Canonical base64 only: no line breaks, padding, and no bits set in the padding.
 		data, err := base64.StdEncoding.Strict().DecodeString(*encoded)
-		if err != nil {
-			return refuse(`"json" is not standard base64`)
+		if err != nil || base64.StdEncoding.EncodeToString(data) != *encoded {
+			return refuse(`"json" is not canonical base64`)
 		}
 		it.JSON, it.IsJSON = data, true
 	}
 	return it, nil
 }
 
-// ItemWriter writes a gzipped items file, beside its place until Close moves it in.
+// ItemWriter writes a gzipped items file into a folder, under a fresh temporary name until Close moves it in.
 type ItemWriter struct {
-	path, partial string
-	file          *os.File
-	zip           *gzip.Writer
-	buffer        *bufio.Writer
-	hash          hash.Hash
-	ids           map[string]bool
-	Text, JSON    int
+	root            *os.Root
+	name, temporary string
+	file            *os.File
+	zip             *gzip.Writer
+	buffer          *bufio.Writer
+	hash            hash.Hash
+	ids             map[string]bool
+	Text, JSON      int
 }
 
-// CreateItems starts an items file.
-func CreateItems(path string) (*ItemWriter, error) {
-	partial := path + ".partial"
-	file, err := os.OpenFile(partial, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+// CreateItems starts an items file in a folder.
+func CreateItems(root *os.Root, name string) (*ItemWriter, error) {
+	file, temporary, err := createExclusive(root, name, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	w := &ItemWriter{path: path, partial: partial, file: file, hash: sha256.New(), ids: map[string]bool{}}
+	w := &ItemWriter{root: root, name: name, temporary: temporary, file: file, hash: sha256.New(), ids: map[string]bool{}}
 	// No name and no time in the header, so the same items give the same file.
 	w.zip, _ = gzip.NewWriterLevel(file, gzip.BestCompression)
 	w.buffer = bufio.NewWriterSize(io.MultiWriter(w.zip, w.hash), 1<<20)
@@ -244,10 +249,10 @@ func (w *ItemWriter) SHA256() string { return hex.EncodeToString(w.hash.Sum(nil)
 func (w *ItemWriter) Close() error {
 	err := errors.Join(w.buffer.Flush(), w.zip.Close(), w.file.Close())
 	if err == nil {
-		err = os.Rename(w.partial, w.path)
+		err = w.root.Rename(w.temporary, w.name)
 	}
 	if err != nil {
-		os.Remove(w.partial)
+		w.root.Remove(w.temporary)
 	}
 	return err
 }
@@ -256,5 +261,5 @@ func (w *ItemWriter) Close() error {
 func (w *ItemWriter) Abort() {
 	w.zip.Close()
 	w.file.Close()
-	os.Remove(w.partial)
+	w.root.Remove(w.temporary)
 }

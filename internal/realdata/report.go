@@ -19,6 +19,8 @@ func PrintReport(w io.Writer, r *Report, run Run) {
 	fmt.Fprintf(w, "compare: %s against Python's %s (CPython %s, package %s), %d text items and %d JSON documents in %.1f s\n",
 		r.Run, r.Against, r.Python, shown, r.TextItems, r.JSONItems, r.Seconds)
 	fmt.Fprintf(w, "  %-24s %9s %10s %9s %12s\n", "function", "items", "non-empty", "matches", "differences")
+	fmt.Fprintf(w, "  %-24s %9d %10s %9d %12d\n", "item (decoding the line)", r.Decoding.Items, "",
+		r.Decoding.Matches, r.Decoding.Differences)
 	for _, f := range r.Functions {
 		fmt.Fprintf(w, "  %-24s %9d %10d %9d %12d\n", f.Function, f.Items, f.NonEmpty, f.Matches, f.Differences)
 	}
@@ -38,7 +40,7 @@ func PrintReport(w io.Writer, r *Report, run Run) {
 	}
 	for i, d := range r.Differences {
 		if i == shownDifferences {
-			fmt.Fprintf(w, "  and %d more in the report\n", r.Total()-shownDifferences)
+			fmt.Fprintf(w, "  and %d more listed in the report\n", len(r.Differences)-shownDifferences)
 			break
 		}
 		where := fmt.Sprintf("line %d", d.Line)
@@ -47,6 +49,9 @@ func PrintReport(w io.Writer, r *Report, run Run) {
 		}
 		fmt.Fprintf(w, "  %s %s at %s; input %s, Python %s, Go %s\n", where, d.Function, d.Position,
 			d.InputSHA256, short(d.PythonSHA256), short(d.GoSHA256))
+	}
+	if r.Unlisted > 0 {
+		fmt.Fprintf(w, "  and %d counted but not listed\n", r.Unlisted)
 	}
 	fmt.Fprintf(w, "  report: %s\n", filepath.Join(run.Out, reportFile))
 }

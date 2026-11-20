@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // CacheDir is $GTM_REAL_CACHE, or ~/.cache/gtm-connector/real.
@@ -28,6 +27,8 @@ type Run struct {
 	Out   string // oracle.json, oracle-digests.jsonl.gz, oracle.jsonl.gz and report.json
 	// Local runs hold private text: reports name items by line, never by ID or file.
 	Local bool
+	// open opens the results folder, checked again each time.
+	open func() (*os.Root, error)
 }
 
 // The files of a run's folder.
@@ -48,16 +49,14 @@ func filesDir(cache string, d Dataset) string { return filepath.Join(DatasetDir(
 // DatasetRun is the run of a converted dataset.
 func DatasetRun(cache string, d Dataset) Run {
 	dir := DatasetDir(cache, d)
-	return Run{Name: d.ID, Items: filepath.Join(dir, itemsFile), Out: dir}
+	return Run{Name: d.ID, Items: filepath.Join(dir, itemsFile), Out: dir,
+		open: func() (*os.Root, error) { return datasetDir(cache, d.ID) }}
 }
 
 // LocalRun is the run of a private items file outside the repository. Its results go to the folder FILE.r0
-// beside it.
+// beside it, made private here when absent.
 func LocalRun(input, repository string) (Run, error) {
 	path, err := filepath.Abs(input)
-	if err == nil {
-		path, err = filepath.EvalSymlinks(path)
-	}
 	if err != nil {
 		return Run{}, fmt.Errorf("the local file: %w", err)
 	}
@@ -68,21 +67,17 @@ func LocalRun(input, repository string) (Run, error) {
 	if !info.Mode().IsRegular() {
 		return Run{}, errors.New("the local file is not a regular file")
 	}
-	root, err := filepath.EvalSymlinks(repository)
+	out := path + ".r0"
+	for _, p := range []string{path, out} {
+		if err := RefuseInsideRepository("the local file or its results folder", p, repository); err != nil {
+			return Run{}, err
+		}
+	}
+	root, err := privateDir(out)
 	if err != nil {
 		return Run{}, err
 	}
-	if inside(root, path) {
-		return Run{}, errors.New("the local file is inside the repository; keep private text outside it")
-	}
-	out := path + ".r0"
-	if info, err := os.Lstat(out); err == nil && !info.IsDir() {
-		return Run{}, fmt.Errorf("%s exists and is not a folder", out)
-	}
-	return Run{Name: "local", Items: path, Out: out, Local: true}, nil
-}
-
-func inside(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	root.Close()
+	return Run{Name: "local", Items: path, Out: out, Local: true,
+		open: func() (*os.Root, error) { return privateDir(out) }}, nil
 }

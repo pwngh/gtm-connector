@@ -3,6 +3,7 @@ package realdata
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -27,7 +28,7 @@ func writeOracle(t *testing.T, run Run, items []Item, outputs [][]string, itemsS
 			sums.Set(name, Digest(outputs[i][j]))
 		}
 		lines.WriteString("{" + strings.Join(pieces, ",") + "}\n")
-		row, err := canonical([]any{it.InputSHA256(), sums})
+		row, err := canonical([]any{it.Line, it.InputSHA256(), sums})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -45,9 +46,13 @@ func writeOracle(t *testing.T, run Run, items []Item, outputs [][]string, itemsS
 			t.Fatal(err)
 		}
 	}
-	meta := OracleMeta{Python: "3.14.6", Unicode: "16.0.0", PackageSHA256: strings.Repeat("ab", 32),
+	meta := OracleMeta{Python: "3.14.6", Unicode: "16.0.0", PackageSHA256: frozenPackage,
 		ItemsSHA256: itemsSHA256, Items: len(items), TextFunctions: TextFunctions, JSONFunctions: JSONFunctions}
-	if err := writeJSON(filepath.Join(run.Out, metaFile), meta, 0o600); err != nil {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(run.Out, metaFile), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -185,7 +190,14 @@ func TestCompareRefusesStaleRecords(t *testing.T) {
 	if _, err := Compare(other); err == nil || !strings.Contains(err.Error(), "other items") {
 		t.Errorf("an added item: %v", err)
 	}
-	missing := Run{Name: "local", Items: other.Items, Out: filepath.Join(t.TempDir(), "none"), Local: true}
+	fresh := filepath.Join(t.TempDir(), "fresh.jsonl")
+	if err := os.WriteFile(fresh, []byte(`{"id": "a", "text": "x"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing, err := LocalRun(fresh, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Compare(missing); !errors.Is(err, ErrNoOracle) {
 		t.Errorf("no oracle: %v", err)
 	}
@@ -254,6 +266,7 @@ func TestLocalRun(t *testing.T) {
 	if err != nil || !run.Local || run.Out != run.Items+".r0" {
 		t.Fatalf("%+v %v", run, err)
 	}
+	os.Remove(run.Out)
 	os.WriteFile(path+".r0", nil, 0o600)
 	if _, err := LocalRun(path, repo); err == nil {
 		t.Error("a file named like the results folder was accepted")

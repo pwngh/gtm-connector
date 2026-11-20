@@ -117,11 +117,10 @@ func TestFetch(t *testing.T) {
 func TestFetchRefusesMismatch(t *testing.T) {
 	server, _ := fetchServer(t, map[string][]byte{"b.zip": []byte("not what was pinned")})
 	for name, file := range map[string]File{
-		"another digest":  pin("b.zip", server.URL+"/b.zip", []byte("what was pinned, same len")[:19]),
-		"a longer body":   pin("b.zip", server.URL+"/b.zip", []byte("not what")),
-		"a shorter body":  pin("b.zip", server.URL+"/b.zip", []byte("not what was pinned at all")),
-		"a missing file":  pin("b.zip", server.URL+"/c.zip", []byte("x")),
-		"an http address": pin("b.zip", strings.Replace(server.URL, "https", "http", 1)+"/b.zip", []byte("x")),
+		"another digest": pin("b.zip", server.URL+"/b.zip", []byte("what was pinned, same len")[:19]),
+		"a longer body":  pin("b.zip", server.URL+"/b.zip", []byte("not what")),
+		"a shorter body": pin("b.zip", server.URL+"/b.zip", []byte("not what was pinned at all")),
+		"a missing file": pin("b.zip", server.URL+"/c.zip", []byte("x")),
 	} {
 		t.Run(name, func(t *testing.T) {
 			f, _ := testFetcher(t, server)
@@ -195,15 +194,20 @@ func TestPin(t *testing.T) {
 	if err := f.Fetch(context.Background(), d); err != nil {
 		t.Errorf("fetch once pinned: %v", err)
 	}
-	local := filepath.Join(filesDir(f.Cache, d), "dir", "a.txt")
-	if err := checkSource(local, files[0], listed{gitSHA1: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"}); err == nil {
+	root, err := datasetDir(f.Cache, d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	local := "files/dir/a.txt"
+	if err := checkSource(root, local, files[0], listed{gitSHA1: "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"}); err == nil {
 		t.Error("a file that is not the listed git blob was accepted")
 	}
 	// git hash-object of the same bytes.
-	if err := checkSource(local, files[0], listed{gitSHA1: gitBlob(data)}); err != nil {
+	if err := checkSource(root, local, files[0], listed{gitSHA1: gitBlob(data)}); err != nil {
 		t.Error(err)
 	}
-	if err := checkSource(local, files[0], listed{sha256: strings.Repeat("0", 64)}); err == nil {
+	if err := checkSource(root, local, files[0], listed{sha256: strings.Repeat("0", 64)}); err == nil {
 		t.Error("a file that is not the listed LFS object was accepted")
 	}
 	if _, err := f.Pin(context.Background(), dataset(Owner)); !errors.Is(err, ErrNeedsOwner) {
@@ -216,4 +220,62 @@ func gitBlob(data []byte) string {
 	fmt.Fprintf(h, "blob %d\x00", len(data))
 	h.Write(data)
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Only https is fetched: a plain http address is refused before any request.
+func TestFetchRefusesHTTP(t *testing.T) {
+	data := []byte("the pinned bytes")
+	var requests atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Write(data)
+	}))
+	t.Cleanup(plain.Close)
+	f := NewFetcher(t.TempDir(), func(string, ...any) {})
+	d := dataset(Public, pin("a.zip", plain.URL+"/a.zip", data))
+	if err := f.Fetch(context.Background(), d); err == nil || !strings.Contains(err.Error(), "only https") {
+		t.Errorf("got %v", err)
+	}
+	if requests.Load() != 0 {
+		t.Errorf("%d requests reached the http server", requests.Load())
+	}
+}
+
+// A redirect to http, even to a host the dataset names, or a chain of more than five, is refused, and
+// nothing lands in the cache.
+func TestFetchRefusesRedirects(t *testing.T) {
+	data := []byte("the pinned bytes")
+	var plainRequests atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		plainRequests.Add(1)
+		w.Write(data)
+	}))
+	t.Cleanup(plain.Close)
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/to-http":
+			http.Redirect(w, r, plain.URL+"/a.zip", http.StatusFound)
+		case strings.HasPrefix(r.URL.Path, "/hop/") && len(r.URL.Path) < len("/hop/xxxxxx"):
+			// Six hops, then the file: one more than a fetch follows.
+			http.Redirect(w, r, server.URL+r.URL.Path+"x", http.StatusFound)
+		default:
+			w.Write(data)
+		}
+	}))
+	t.Cleanup(server.Close)
+	for name, url := range map[string]string{"to http": server.URL + "/to-http", "six hops": server.URL + "/hop/"} {
+		f, _ := testFetcher(t, server)
+		d := dataset(Public, pin("a.zip", url, data))
+		d.RedirectHosts = []string{strings.TrimPrefix(plain.URL, "http://")}
+		if err := f.Fetch(context.Background(), d); err == nil {
+			t.Errorf("%s: fetched", name)
+		}
+		if entries, _ := os.ReadDir(filesDir(f.Cache, d)); len(entries) != 0 {
+			t.Errorf("%s: %d files left in the cache", name, len(entries))
+		}
+	}
+	if plainRequests.Load() != 0 {
+		t.Errorf("%d requests went over http", plainRequests.Load())
+	}
 }

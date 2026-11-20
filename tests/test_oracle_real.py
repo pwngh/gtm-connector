@@ -3,7 +3,9 @@
 import base64
 import gzip
 import hashlib
+import importlib.util
 import json
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -69,8 +71,9 @@ class RealOracleTest(unittest.TestCase):
         self.assertEqual(outputs[1], {
             "strict_json": {"ok": json.dumps(strict_json.loads(document), ensure_ascii=True)},
             "strict_json_decimal": {"ok": '{"Amount": {"decimal": "450000.00"}, "a": [1, {"decimal": "2.5E-7"}]}'}})
-        for row, digest, data in zip(outputs, digests, (text.encode(), document)):
-            self.assertEqual(digest, [sha256(data), {name: sha256(dumps(value).encode()) for name, value in row.items()}])
+        for row, digest, line, data in zip(outputs, digests, (1, 3), (text.encode(), document)):
+            sums = {name: sha256(dumps(value).encode()) for name, value in row.items()}
+            self.assertEqual(digest, [line, sha256(data), sums])
         self.assertEqual(meta["items_sha256"], sha256(items.read_bytes()))
         self.assertEqual((meta["items"], meta["python"]), (2, "3.14.6"))
         self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o700)
@@ -92,6 +95,95 @@ class RealOracleTest(unittest.TestCase):
                 self.assertIn("line 2 is not an item", result.stderr)
                 self.assertNotIn(SECRET, result.stdout + result.stderr)
                 self.assertEqual(sorted(path.name for path in out.iterdir()), [])
+
+    def test_outputs_stay_in_folder(self):
+        """Links and files left in the folder are replaced, never written through, and every output is private."""
+        items = self.folder / "items.jsonl"
+        items.write_text('{"id": "a", "text": "' + SECRET + ' first."}\n')
+        out = self.folder / "out"
+        out.mkdir(mode=0o700)
+        sentinel = self.folder / "outside" / "sentinel.txt"
+        sentinel.parent.mkdir()
+        sentinel.write_text("untouched")
+        for name in ("oracle.jsonl.gz", "oracle-digests.jsonl.gz", "oracle.json"):
+            (out / (name + ".partial")).symlink_to(sentinel)
+        os.link(sentinel, out / "oracle-digests.jsonl.gz")
+        (out / "oracle.json").write_text("{}")
+        (out / "oracle.json").chmod(0o644)
+        result, _ = self.run_oracle(items, "--local")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sentinel.read_text(), "untouched")
+        for name in ("oracle.jsonl.gz", "oracle-digests.jsonl.gz", "oracle.json"):
+            mode = (out / name).lstat().st_mode
+            self.assertTrue(stat.S_ISREG(mode), name)
+            self.assertEqual(stat.S_IMODE(mode), 0o600, name)
+        self.assertEqual(len(lines(out / "oracle-digests.jsonl.gz")), 1)
+
+    def test_local_folder_must_be_private(self):
+        items = self.folder / "items.jsonl"
+        items.write_text('{"id": "a", "text": "x"}\n')
+        out = self.folder / "out"
+        elsewhere = self.folder / "elsewhere"
+        elsewhere.mkdir(mode=0o700)
+        out.symlink_to(elsewhere)
+        result, _ = self.run_oracle(items, "--local")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(list(elsewhere.iterdir()), [])
+        out.unlink()
+        out.mkdir(mode=0o755)
+        out.chmod(0o755)
+        result, _ = self.run_oracle(items, "--local")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(list(out.iterdir()), [])
+
+    def test_item_line_vectors(self):
+        """Both readers accept and refuse the same lines (internal/realdata/items_test.go reads the same vectors)."""
+        spec = importlib.util.spec_from_file_location("oracle_real", REAL)
+        real = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(real)
+        vectors = json.loads((ROOT / "internal" / "realdata" / "testdata" / "item-lines.json").read_text())
+        for vector in vectors["lines"]:
+            with self.subTest(vector["why"]):
+                path = self.folder / "line.jsonl"
+                path.write_bytes(bytes.fromhex(vector["hex"]) + b"\n")
+                try:
+                    list(real.Items(path, vector["local"]))
+                    accepted = True
+                except real.Refused:
+                    accepted = False
+                self.assertEqual(accepted, vector["ok"])
+
+    def run_patched(self, patch, items, *flags):
+        """real.py under -I, after a patch to the oracle's modules, as cmd/realdata would run it."""
+        out = self.folder / "out"
+        code = (f"import runpy, sys; sys.path[:0] = [{str(ROOT)!r}, {str(ROOT / 'tools')!r}]; {patch}; "
+                f"sys.argv = [{str(REAL)!r}, '--out', {str(out)!r}, {str(items)!r}, *{list(flags)!r}]; "
+                f"runpy.run_path({str(REAL)!r}, run_name='__main__')")
+        return subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, cwd=ROOT), out
+
+    def test_interpreter_pin(self):
+        """Another interpreter or Unicode version is refused before anything is written."""
+        items = self.folder / "items.jsonl"
+        items.write_text('{"id": "a", "text": "x"}\n')
+        for patch, version in (("import oracle.generate as g; g.PYTHON = '3.99.0'", "3.99.0"),
+                               ("import oracle.generate as g; g.UNICODE = '15.0.0'", "15.0.0")):
+            with self.subTest(version):
+                result, out = self.run_patched(patch, items, "--local")
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn(version, result.stderr)
+                self.assertIn("3.14.6" if version == "3.99.0" else "16.0.0", result.stderr)
+                self.assertFalse(out.exists())
+
+    def test_failure_names_type_only(self):
+        """An exception whose message quotes an item shows only its type, and leaves no file behind."""
+        items = self.folder / "items.jsonl"
+        items.write_text('{"id": "a", "text": "' + SECRET + ' first."}\n')
+        patch = "import oracle.output as o; o.dumps = lambda value: (_ for _ in ()).throw(ValueError(repr(value)))"
+        result, out = self.run_patched(patch, items, "--local")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("ValueError", result.stderr)
+        self.assertNotIn(SECRET, result.stdout + result.stderr)
+        self.assertEqual(list(out.iterdir()), [])
 
     def test_needs_isolated_mode(self):
         items = self.folder / "items.jsonl"
