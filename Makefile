@@ -7,6 +7,7 @@
 #   make backup               back up the database and the credentials folder
 #   make restore BACKUP=NAME  restore a backup into an empty database
 #   make test                 go vet and the Go tests against the Compose database
+#   make verify-real          real public text through the Python oracle and Go (downloads; never in CI)
 #
 # Add POSTGRES=18.7 to any of them to use the pinned fallback PostgreSQL, on
 # its own volume. The first run writes .env (random passwords for the owner
@@ -38,10 +39,10 @@ GTM_DB_PORT = $(shell sed -n 's/^GTM_DB_PORT=//p' .env 2>/dev/null)
 WEB_SOURCES := $(shell find web/src web/public web/index.html web/vite.config.js web/package.json web/package-lock.json -type f 2>/dev/null)
 GO_SOURCES := go.mod go.sum $(shell find cmd internal -name '*.go' -o -name '*.sql')
 
-.PHONY: help env dev up down db demo backup restore test vet psql logs clean require-compose state
+.PHONY: help env dev up down db demo backup restore test vet psql logs clean require-compose state verify-real
 
 help: ## List the targets
-	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  %-10s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 env:
 	@scripts/init-env.sh
@@ -99,6 +100,14 @@ vet: ## go vet
 
 test: db vet ## The Go tests, with the race detector, against PostgreSQL in Compose
 	scripts/host.sh test
+
+# The pinned CPython 3.14.6 that runs the oracle. PYTHON= compares against the digests an earlier run
+# recorded. DATASETS='ID ...' narrows the run or names an opt-in dataset; LOCAL=FILE runs a private items
+# file outside the repository.
+PYTHON ?= .venv/bin/python
+
+verify-real: ## Fetch the public datasets, run the Python oracle and Go over them, compare
+	go run ./cmd/realdata -python '$(PYTHON)' $(if $(LOCAL),-local '$(LOCAL)') verify $(DATASETS)
 
 psql: require-compose ## A database shell, as the owner
 	$(COMPOSE) exec postgres psql -U gtm -d gtm

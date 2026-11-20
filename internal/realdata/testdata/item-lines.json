@@ -1,0 +1,239 @@
+{
+ "note": "Item lines both readers must accept or refuse alike: tools/oracle/real.py and internal/realdata/items.go. Each line is hex.",
+ "lines": [
+  {
+   "why": "a text item",
+   "hex": "7b226964223a202261222c202274657874223a202278227d",
+   "local": true,
+   "ok": true
+  },
+  {
+   "why": "a text item (dataset)",
+   "hex": "7b226964223a202261222c202274657874223a202278227d",
+   "local": false,
+   "ok": true
+  },
+  {
+   "why": "a JSON item",
+   "hex": "7b226964223a202261222c20226a736f6e223a20226533303d227d",
+   "local": false,
+   "ok": true
+  },
+  {
+   "why": "an empty JSON item",
+   "hex": "7b226964223a202261222c20226a736f6e223a2022227d",
+   "local": false,
+   "ok": true
+  },
+  {
+   "why": "base64 with padding bits set",
+   "hex": "7b226964223a202261222c20226a736f6e223a20226533313d227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "base64 with a line break",
+   "hex": "7b226964223a202261222c20226a736f6e223a202265335c725c6e303d227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "base64 without padding",
+   "hex": "7b226964223a202261222c20226a736f6e223a2022653330227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "base64 with a space",
+   "hex": "7b226964223a202261222c20226a736f6e223a2022206533303d227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "base64 URL alphabet",
+   "hex": "7b226964223a202261222c20226a736f6e223a20222d5f383d227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "a kind",
+   "hex": "7b226964223a202261222c20226b696e64223a20226e61747572616c222c202274657874223a202278227d",
+   "local": false,
+   "ok": true
+  },
+  {
+   "why": "a file",
+   "hex": "7b226964223a202261222c202266696c65223a2022662e747874222c202274657874223a202278227d",
+   "local": false,
+   "ok": true
+  },
+  {
+   "why": "another key",
+   "hex": "7b226964223a202261222c202274657874223a202278222c2022617574686f72223a202262227d",
+   "local": true,
+   "ok": true
+  },
+  {
+   "why": "another key (dataset)",
+   "hex": "7b226964223a202261222c202274657874223a202278222c2022617574686f72223a202262227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "json in a local file",
+   "hex": "7b226964223a202261222c20226a736f6e223a20226533303d227d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "text and json",
+   "hex": "7b226964223a202261222c202274657874223a202278222c20226a736f6e223a20226533303d227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "a number id",
+   "hex": "7b226964223a20312c202274657874223a202278227d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "a number id (dataset)",
+   "hex": "7b226964223a20312c202274657874223a202278227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "a number text",
+   "hex": "7b226964223a202261222c202274657874223a20317d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "a number text (dataset)",
+   "hex": "7b226964223a202261222c202274657874223a20317d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "no id",
+   "hex": "7b2274657874223a202278227d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "no id (dataset)",
+   "hex": "7b2274657874223a202278227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "no text",
+   "hex": "7b226964223a202261227d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "no text (dataset)",
+   "hex": "7b226964223a202261227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "a duplicate key",
+   "hex": "7b226964223a202261222c202274657874223a202278222c202274657874223a202279227d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "a duplicate key (dataset)",
+   "hex": "7b226964223a202261222c202274657874223a202278222c202274657874223a202279227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "a lone surrogate",
+   "hex": "7b226964223a202261222c202274657874223a20225c7564383030227d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "a lone surrogate (dataset)",
+   "hex": "7b226964223a202261222c202274657874223a20225c7564383030227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "a surrogate pair",
+   "hex": "7b226964223a202261222c202274657874223a20225c75643833645c7564653432227d",
+   "local": true,
+   "ok": true
+  },
+  {
+   "why": "a surrogate pair (dataset)",
+   "hex": "7b226964223a202261222c202274657874223a20225c75643833645c7564653432227d",
+   "local": false,
+   "ok": true
+  },
+  {
+   "why": "bad UTF-8",
+   "hex": "7b226964223a202261222c202274657874223a2022ff227d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "bad UTF-8 (dataset)",
+   "hex": "7b226964223a202261222c202274657874223a2022ff227d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "a byte-order mark",
+   "hex": "efbbbf7b226964223a202261222c202274657874223a202278227d",
+   "local": true,
+   "ok": true
+  },
+  {
+   "why": "a byte-order mark (dataset)",
+   "hex": "efbbbf7b226964223a202261222c202274657874223a202278227d",
+   "local": false,
+   "ok": true
+  },
+  {
+   "why": "trailing data",
+   "hex": "7b226964223a202261222c202274657874223a202278227d2031",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "trailing data (dataset)",
+   "hex": "7b226964223a202261222c202274657874223a202278227d2031",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "an array",
+   "hex": "5b2261225d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "an array (dataset)",
+   "hex": "5b2261225d",
+   "local": false,
+   "ok": false
+  },
+  {
+   "why": "NaN",
+   "hex": "7b226964223a202261222c202274657874223a202278222c20226e223a204e614e7d",
+   "local": true,
+   "ok": false
+  },
+  {
+   "why": "NaN (dataset)",
+   "hex": "7b226964223a202261222c202274657874223a202278222c20226e223a204e614e7d",
+   "local": false,
+   "ok": false
+  }
+ ]
+}

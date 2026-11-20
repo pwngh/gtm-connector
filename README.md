@@ -194,6 +194,12 @@ make test                       # go vet and the Go tests against the Compose da
 
 Add `POSTGRES=18.7` to any of these to use the pinned fallback PostgreSQL, on its own volume.
 
+`make verify-real` downloads public meeting, call, chat and CRM datasets into `~/.cache/gtm-connector/real`
+and checks them against pinned digests, then runs every utterance and message through the Python package
+and the Go port and compares their sentences, neutralized text, scanners and JSON parsing. It reports
+counts, positions and digests, never text. Nothing real is committed, and CI never runs it.
+[Real data](docs/real-data.md)
+
 Open `https://127.0.0.1:8443/`; `localhost` redirects there. The first run writes `.env` (mode 0600,
 with random passwords for two database roles) and a private credentials folder,
 `~/.config/gtm-connector/credentials` (mode 0700, files 0600): the owner secret, the session key, the

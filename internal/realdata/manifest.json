@@ -1,0 +1,326 @@
+{
+ "schema": 2,
+ "datasets": [
+  {
+   "id": "ami-manual-1.6.2",
+   "name": "AMI Meeting Corpus, manual annotations",
+   "url": "https://groups.inf.ed.ac.uk/ami/corpus/",
+   "version": "1.6.2",
+   "note": "The download page lists this archive as version 1.6.2 of 10 April 2017; its README names it release 1.7 of 16 June 2014. The EN and IN meetings are natural, the ES, IS, TS and IB meetings role-played.",
+   "licence": "CC BY 4.0",
+   "licence_source": "https://groups.inf.ed.ac.uk/ami/corpus/license.shtml",
+   "access": "public",
+   "kind": "role-played",
+   "converter": "ami-words",
+   "base_url": "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/"
+  },
+  {
+   "id": "notsofar-1-240825.1",
+   "name": "NOTSOFAR-1, transcript JSON of the 240825.1 sets",
+   "url": "https://huggingface.co/datasets/microsoft/NOTSOFAR",
+   "version": "revision ba8fd0f034ce185fe4d24f47e53b4b8194795f07, sets 240825.1",
+   "note": "Fetched file by file; the official helper, which needs a Hugging Face token, is not used. Meetings tagged #NaturalMeeting in their metadata are natural, the rest role-played.",
+   "licence": "CC BY 4.0",
+   "licence_source": "https://huggingface.co/datasets/microsoft/NOTSOFAR/blob/ba8fd0f034ce185fe4d24f47e53b4b8194795f07/LICENSE.txt",
+   "access": "public",
+   "kind": "role-played",
+   "converter": "notsofar",
+   "base_url": "https://huggingface.co/datasets/microsoft/NOTSOFAR/resolve/ba8fd0f034ce185fe4d24f47e53b4b8194795f07/",
+   "listing": {
+    "huggingface": "microsoft/NOTSOFAR",
+    "revision": "ba8fd0f034ce185fe4d24f47e53b4b8194795f07",
+    "include": [
+     "benchmark-datasets/*/240825.1_*/MTG/*/gt_transcription.json",
+     "benchmark-datasets/*/240825.1_*/MTG/*/gt_meeting_metadata.json"
+    ]
+   }
+  },
+  {
+   "id": "aishell-4-test",
+   "name": "AISHELL-4, Mandarin meetings, test set",
+   "url": "https://www.openslr.org/111/",
+   "version": "test.tar.gz",
+   "note": "5,241,010,904 bytes. Only the TextGrids inside are read. The organisers chose the topics, so the speech is elicited.",
+   "licence": "CC BY-SA 4.0",
+   "licence_source": "https://www.openslr.org/111/",
+   "access": "public",
+   "kind": "elicited",
+   "opt_in": "a single 5.2 GB download",
+   "converter": "textgrid",
+   "base_url": "https://www.openslr.org/resources/111/"
+  },
+  {
+   "id": "earnings21",
+   "name": "Earnings-21, transcripts",
+   "url": "https://github.com/revdotcom/speech-datasets/tree/c05ab6fd8b4b627d123c922a22a39e993dd37635/earnings21",
+   "version": "commit c05ab6fd8b4b627d123c922a22a39e993dd37635",
+   "note": "The licence covers the transcripts and associated text files; it is not confirmed for the spoken words. The audio and speaker-metadata.csv are not fetched.",
+   "licence": "CC BY-SA 4.0",
+   "licence_source": "https://github.com/revdotcom/speech-datasets/blob/c05ab6fd8b4b627d123c922a22a39e993dd37635/earnings21/LICENSE.md",
+   "access": "public",
+   "kind": "natural",
+   "converter": "rev-nlp",
+   "base_url": "https://raw.githubusercontent.com/revdotcom/speech-datasets/c05ab6fd8b4b627d123c922a22a39e993dd37635/",
+   "listing": {
+    "git": "https://github.com/revdotcom/speech-datasets.git",
+    "revision": "c05ab6fd8b4b627d123c922a22a39e993dd37635",
+    "include": [
+     "earnings21/transcripts/nlp_references/*.nlp",
+     "earnings21/transcripts/wer_tags/*.json"
+    ]
+   }
+  },
+  {
+   "id": "earnings22",
+   "name": "Earnings-22, transcripts",
+   "url": "https://github.com/revdotcom/speech-datasets/tree/c05ab6fd8b4b627d123c922a22a39e993dd37635/earnings22",
+   "version": "commit c05ab6fd8b4b627d123c922a22a39e993dd37635",
+   "note": "The licence covers the transcripts and associated text files; it is not confirmed for the spoken words. The audio is not fetched.",
+   "licence": "CC BY-SA 4.0",
+   "licence_source": "https://github.com/revdotcom/speech-datasets/blob/c05ab6fd8b4b627d123c922a22a39e993dd37635/earnings22/LICENSE.md",
+   "access": "public",
+   "kind": "natural",
+   "converter": "rev-nlp",
+   "base_url": "https://raw.githubusercontent.com/revdotcom/speech-datasets/c05ab6fd8b4b627d123c922a22a39e993dd37635/",
+   "listing": {
+    "git": "https://github.com/revdotcom/speech-datasets.git",
+    "revision": "c05ab6fd8b4b627d123c922a22a39e993dd37635",
+    "include": [
+     "earnings22/transcripts/nlp_references/*.nlp"
+    ]
+   }
+  },
+  {
+   "id": "fomc-press-conferences",
+   "name": "FOMC press conference transcripts",
+   "url": "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+   "version": "the 95 press conferences from 2011-04-27 to 2026-10-28",
+   "note": "One PDF per press conference. No converter yet: the text needs a PDF extractor, which this repository does not have.",
+   "licence": "Public domain unless otherwise indicated",
+   "licence_source": "https://www.federalreserve.gov/disclaimer.htm",
+   "access": "public",
+   "kind": "natural",
+   "base_url": "https://www.federalreserve.gov/mediacenter/files/"
+  },
+  {
+   "id": "apptek-callcenter",
+   "name": "AppTek Call-Center Dialogues, diarization metadata",
+   "url": "https://huggingface.co/datasets/apptek-com/apptek_callcenter_dialogues",
+   "version": "revision 82a72903da3c868604f6dc20ddc8788b25ed4f86",
+   "note": "Only the 14 diarization/*/metadata.jsonl files; the audio is not fetched. The card asks for evaluation and analysis only.",
+   "licence": "CC BY-SA 4.0",
+   "licence_source": "https://huggingface.co/datasets/apptek-com/apptek_callcenter_dialogues/blob/82a72903da3c868604f6dc20ddc8788b25ed4f86/README.md",
+   "access": "public",
+   "kind": "role-played",
+   "converter": "apptek-jsonl",
+   "base_url": "https://huggingface.co/datasets/apptek-com/apptek_callcenter_dialogues/resolve/82a72903da3c868604f6dc20ddc8788b25ed4f86/",
+   "listing": {
+    "huggingface": "apptek-com/apptek_callcenter_dialogues",
+    "revision": "82a72903da3c868604f6dc20ddc8788b25ed4f86",
+    "include": [
+     "diarization/*/metadata.jsonl"
+    ]
+   }
+  },
+  {
+   "id": "hyperledger-slack",
+   "name": "Hyperledger Slack archive, raw export",
+   "url": "https://github.com/hyperledger-archives/slack-archive",
+   "version": "commit 0324de1c4bccc8052b6ceb08e551fe267c2ef331",
+   "note": "One archive of the commit; only raw/ is read. A changed archive stops the run. The licence was added by the workspace operator and is not confirmed for the messages.",
+   "licence": "Apache-2.0",
+   "licence_source": "https://github.com/hyperledger-archives/slack-archive/blob/0324de1c4bccc8052b6ceb08e551fe267c2ef331/LICENSE",
+   "access": "public",
+   "kind": "natural",
+   "converter": "slack-export",
+   "base_url": "https://github.com/hyperledger-archives/slack-archive/archive/",
+   "redirect_hosts": [
+    "codeload.github.com"
+   ]
+  },
+  {
+   "id": "archival-slack",
+   "name": "Archival-worthy Slack conversations",
+   "url": "https://zenodo.org/records/3468559",
+   "version": "v0.1, DOI 10.5281/zenodo.3468559",
+   "note": "The licence is Zenodo's licence field; it is not confirmed for the message text. Usernames are pseudonymized.",
+   "licence": "CC BY 4.0",
+   "licence_source": "https://zenodo.org/records/3468559",
+   "access": "public",
+   "kind": "natural",
+   "converter": "csv-columns",
+   "base_url": "https://zenodo.org/records/3468559/files/"
+  },
+  {
+   "id": "irc-disentanglement",
+   "name": "IRC Disentanglement, raw logs",
+   "url": "https://github.com/jkkummerfeld/irc-disentanglement",
+   "version": "commit 82ed04f9627a45d0d6f2ec3c8683c88eb408a0d5",
+   "note": "The .raw.txt files of data/train, data/dev and data/test only. The licence is the annotators'; it is not confirmed for the IRC messages.",
+   "licence": "CC BY 4.0",
+   "licence_source": "https://github.com/jkkummerfeld/irc-disentanglement/blob/82ed04f9627a45d0d6f2ec3c8683c88eb408a0d5/data/LICENSE-data.txt",
+   "access": "public",
+   "kind": "natural",
+   "converter": "irc-raw",
+   "base_url": "https://raw.githubusercontent.com/jkkummerfeld/irc-disentanglement/82ed04f9627a45d0d6f2ec3c8683c88eb408a0d5/",
+   "listing": {
+    "git": "https://github.com/jkkummerfeld/irc-disentanglement.git",
+    "revision": "82ed04f9627a45d0d6f2ec3c8683c88eb408a0d5",
+    "include": [
+     "data/train/*.raw.txt",
+     "data/dev/*.raw.txt",
+     "data/test/*.raw.txt"
+    ]
+   }
+  },
+  {
+   "id": "apex-recipes",
+   "name": "Trailhead apex-recipes sample data, data-plan.json and its tree files",
+   "url": "https://github.com/trailheadapps/apex-recipes/tree/eda6167c5126a34daf66d9e1371ff6957ae223bd/data",
+   "version": "commit eda6167c5126a34daf66d9e1371ff6957ae223bd",
+   "licence": "CC0-1.0",
+   "licence_source": "https://github.com/trailheadapps/apex-recipes/blob/eda6167c5126a34daf66d9e1371ff6957ae223bd/LICENSE.md",
+   "access": "public",
+   "kind": "invented",
+   "converter": "sobject-tree",
+   "base_url": "https://raw.githubusercontent.com/trailheadapps/apex-recipes/eda6167c5126a34daf66d9e1371ff6957ae223bd/",
+   "listing": {
+    "git": "https://github.com/trailheadapps/apex-recipes.git",
+    "revision": "eda6167c5126a34daf66d9e1371ff6957ae223bd",
+    "include": [
+     "data/data-plan.json",
+     "data/Accounts.json",
+     "data/Contacts.json",
+     "data/Opportunities.json"
+    ]
+   }
+  },
+  {
+   "id": "lwc-recipes",
+   "name": "Trailhead lwc-recipes sample data",
+   "url": "https://github.com/trailheadapps/lwc-recipes/tree/b5af6ecb2f8d5d75d161b2a702d899f6e4ffc878/data",
+   "version": "commit b5af6ecb2f8d5d75d161b2a702d899f6e4ffc878",
+   "licence": "CC0-1.0",
+   "licence_source": "https://github.com/trailheadapps/lwc-recipes/blob/b5af6ecb2f8d5d75d161b2a702d899f6e4ffc878/LICENSE.md",
+   "access": "public",
+   "kind": "invented",
+   "converter": "sobject-tree",
+   "base_url": "https://raw.githubusercontent.com/trailheadapps/lwc-recipes/b5af6ecb2f8d5d75d161b2a702d899f6e4ffc878/",
+   "listing": {
+    "git": "https://github.com/trailheadapps/lwc-recipes.git",
+    "revision": "b5af6ecb2f8d5d75d161b2a702d899f6e4ffc878",
+    "include": [
+     "data/*.json"
+    ]
+   }
+  },
+  {
+   "id": "fivetran-salesforce-seeds",
+   "name": "Fivetran dbt_salesforce integration test seeds",
+   "url": "https://github.com/fivetran/dbt_salesforce/tree/8f9e9c0ae44f922283d238c2eef3f27d2f3e8d32/integration_tests/seeds",
+   "version": "commit 8f9e9c0ae44f922283d238c2eef3f27d2f3e8d32",
+   "note": "Invented fixtures in a warehouse layout the connector does not read; every cell is checked as text.",
+   "licence": "Apache-2.0",
+   "licence_source": "https://github.com/fivetran/dbt_salesforce/blob/8f9e9c0ae44f922283d238c2eef3f27d2f3e8d32/LICENSE",
+   "access": "public",
+   "kind": "invented",
+   "converter": "csv-cells",
+   "base_url": "https://raw.githubusercontent.com/fivetran/dbt_salesforce/8f9e9c0ae44f922283d238c2eef3f27d2f3e8d32/",
+   "listing": {
+    "git": "https://github.com/fivetran/dbt_salesforce.git",
+    "revision": "8f9e9c0ae44f922283d238c2eef3f27d2f3e8d32",
+    "include": [
+     "integration_tests/seeds/*.csv"
+    ]
+   }
+  },
+  {
+   "id": "icsi-meetings",
+   "name": "ICSI Meeting Corpus, Edinburgh distribution",
+   "url": "https://groups.inf.ed.ac.uk/ami/icsi/download/",
+   "version": "ICSI_original_transcripts.zip (3,720,243 bytes) and ICSI_core_NXT.zip (19,488,722 bytes) of 2016-07-25",
+   "licence": "CC BY 4.0, as Edinburgh states it; the grant is not confirmed",
+   "licence_source": "https://groups.inf.ed.ac.uk/ami/icsi/license.shtml",
+   "access": "owner",
+   "owner_steps": "Decide whether to rely on Edinburgh's statement or ask Edinburgh or ICSI to confirm the grant, record both sources, and switch the run on.",
+   "kind": "natural"
+  },
+  {
+   "id": "elitr-minuting-1.0",
+   "name": "ELITR Minuting Corpus 1.0",
+   "url": "https://hdl.handle.net/11234/1-4692",
+   "version": "ELITR-minuting-corpus.zip, 3,644,064 bytes",
+   "licence": "CC BY-NC-SA 4.0",
+   "licence_source": "https://hdl.handle.net/11234/1-4692",
+   "access": "owner",
+   "owner_steps": "Decide whether running these tests locally counts as NonCommercial under the licence, or ask UFAL for permission.",
+   "kind": "natural"
+  },
+  {
+   "id": "sec-edgar-earnings",
+   "name": "SEC EDGAR earnings-call exhibits with XBRL company facts",
+   "url": "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+   "version": "a selection of 8-K EX-99.x exhibits, pinned per exhibit",
+   "licence": "No licence covers the exhibit text; the filer keeps its copyright",
+   "licence_source": "https://www.sec.gov/privacy",
+   "access": "owner",
+   "owner_steps": "Supply your own declared User-Agent, which accepts the SEC's fair-access conditions; accept that filer text sits in the cache; and run or approve the one-time selection of exhibits.",
+   "kind": "natural"
+  },
+  {
+   "id": "foc-slack",
+   "name": "Future of Coding / Feeling of Computing Slack export",
+   "url": "https://github.com/akkartik/foc-archive/tree/9abcfb94551ca9e04befdbecb88bb0cad650c2cf/input",
+   "version": "commit 9abcfb94551ca9e04befdbecb88bb0cad650c2cf",
+   "licence": "No licence covers the messages",
+   "licence_source": "https://feelingof.com/member-handbook",
+   "access": "owner",
+   "owner_steps": "Decide whether to cache and test these unlicensed community messages locally, or ask the community's admins or the repository's maintainer first.",
+   "kind": "natural"
+  },
+  {
+   "id": "msr-2020-slack",
+   "name": "Software-related Slack Chats with Disentangled Conversations",
+   "url": "https://zenodo.org/records/3763432",
+   "version": "v2.0.0, DOI 10.5281/zenodo.3763432",
+   "licence": "Other (Open), with no text",
+   "licence_source": "https://zenodo.org/records/3763432",
+   "access": "owner",
+   "owner_steps": "Accept the authors' statement that the data is open for reuse as enough for local, opt-in tests.",
+   "kind": "natural"
+  },
+  {
+   "id": "crmarena",
+   "name": "CRMArena and CRMArena-Pro local data",
+   "url": "https://github.com/SalesforceAIResearch/CRMArena",
+   "version": "commit 521c1262162bb32f8f55b07193bb3931901e3587, local_data/",
+   "licence": "CC BY-NC 4.0, research use only",
+   "licence_source": "https://github.com/SalesforceAIResearch/CRMArena",
+   "access": "owner",
+   "owner_steps": "Decide whether these tests are NonCommercial research use, accept the acceptable-use policies the repository names, and allow a first local look at the databases' tables and counts.",
+   "kind": "invented"
+  },
+  {
+   "id": "maven-crm",
+   "name": "Maven Analytics CRM Sales Opportunities",
+   "url": "https://mavenanalytics.io/data-playground/crm-sales-opportunities",
+   "version": "the zip of 2024-04-03, 139,231 bytes",
+   "licence": "Public Domain, as a bare label; not confirmed",
+   "licence_source": "https://mavenanalytics.io/data-playground/crm-sales-opportunities",
+   "access": "owner",
+   "owner_steps": "Create a Maven account, which accepts Maven's terms, and download the zip once into the cache.",
+   "kind": "invented"
+  },
+  {
+   "id": "gleif-lei",
+   "name": "GLEIF LEI Golden Copy delta",
+   "url": "https://www.gleif.org/en/lei-data/gleif-golden-copy/download-the-golden-copy",
+   "version": "one dated delta, pinned with its publish date",
+   "licence": "CC0, with the conditions of the LEI Data Terms of Use",
+   "licence_source": "https://www.gleif.org/en/meta/lei-data-terms-of-use",
+   "access": "owner",
+   "owner_steps": "Read and accept the LEI Data Terms of Use and tick the download page's privacy acknowledgement; drop SOLE_PROPRIETOR records before any use.",
+   "kind": "natural"
+  }
+ ]
+}
