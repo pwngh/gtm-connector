@@ -16,3 +16,6 @@ func MigrateTo(s *Store, ctx context.Context, version int) error { return s.migr
 func DumpAt(s *Store, ctx context.Context, version int, open func(table string) (io.WriteCloser, error)) ([]TableCopy, error) {
 	return s.dump(ctx, version, open)
 }
+
+// NotBackedUp gives the tables a backup leaves out, with the reasons.
+func NotBackedUp() map[string]string { return notBackedUp }

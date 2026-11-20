@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -30,6 +31,7 @@ import (
 type site struct {
 	*postgrestest.Fixture
 	server   *httptest.Server
+	api      *httptransport.Server
 	origin   string
 	reader   postgres.Principal
 	outsider postgres.Principal
@@ -54,7 +56,7 @@ func newSite(t *testing.T, sessionTTL time.Duration) *site {
 	ts.Config.Handler = s
 	ts.StartTLS()
 	t.Cleanup(ts.Close)
-	result := &site{Fixture: f, server: ts, origin: origin}
+	result := &site{Fixture: f, server: ts, api: s, origin: origin}
 	for login, password := range map[string]string{"demo-reader": readerPassword, "demo-outsider": outsiderPassword} {
 		digest := sha256.Sum256([]byte(password))
 		p, err := f.Store.EnsureDemoPrincipal(t.Context(), f.Workspace, login, "Demo "+login, digest[:])
@@ -102,6 +104,16 @@ func (r reply) code() string {
 
 func (b *browser) do(method, path string, body any, header map[string]string) reply {
 	b.t.Helper()
+	values := http.Header{}
+	for name, value := range header {
+		values.Set(name, value)
+	}
+	return b.send(method, path, body, values)
+}
+
+// send is do with every header value as given, repeated names included.
+func (b *browser) send(method, path string, body any, header http.Header) reply {
+	b.t.Helper()
 	var reader io.Reader
 	if body != nil {
 		encoded, _ := json.Marshal(body)
@@ -114,8 +126,10 @@ func (b *browser) do(method, path string, body any, header map[string]string) re
 	if body != nil {
 		r.Header.Set("Content-Type", "application/json")
 	}
-	for name, value := range header {
-		r.Header.Set(name, value)
+	for name, values := range header {
+		for _, value := range values {
+			r.Header.Add(name, value)
+		}
 	}
 	response, err := b.client.Do(r)
 	if err != nil {
@@ -505,4 +519,226 @@ func rowCount(t *testing.T, s *site, query string) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// A grant on one account opens no other. The outsider holds acc-004, with a
+// card published there, and asks for acc-003's things by their IDs: each is
+// refused 403 not_permitted, with one grant and again after the second of
+// two grants is revoked, while its own account still reads.
+func TestAGrantOnOneAccountOpensNoOtherOverHTTP(t *testing.T) {
+	s := newSite(t, 0)
+	own := postgrestest.Publish(t, s.Fixture, "acc-004", s.outsider.ID, "brief-own")
+	outsider := s.browser(t)
+	if r := outsider.signIn("demo-outsider", outsiderPassword); r.status != 200 {
+		t.Fatal(r.status)
+	}
+	refused := func(t *testing.T) {
+		t.Helper()
+		for _, path := range []string{"/api/v1/cards/" + s.Card.ID, "/api/v1/cards/" + s.Card.ID + "/units/1",
+			"/api/v1/cards/" + s.Card.ID + "/units/2", "/api/v1/cards/" + s.Card.ID + "/bytes",
+			"/api/v1/receipts/" + s.Read.ID, "/api/v1/receipts/" + s.Seal.ID, "/api/v1/accounts/acc-003/cards"} {
+			if r := outsider.do(http.MethodGet, path, nil, nil); r.status != 403 || r.code() != "not_permitted" {
+				t.Errorf("%s: %d %s", path, r.status, r.raw)
+			}
+		}
+		for _, path := range []string{"/api/v1/cards/" + own.Card.ID, "/api/v1/cards/" + own.Card.ID + "/units/1",
+			"/api/v1/receipts/" + own.Read.ID} {
+			if r := outsider.do(http.MethodGet, path, nil, nil); r.status != 200 {
+				t.Errorf("its own %s: %d %s", path, r.status, r.raw)
+			}
+		}
+		list := outsider.do(http.MethodGet, "/api/v1/accounts/acc-004/cards", nil, nil)
+		cards, _ := list.body["cards"].([]any)
+		if list.status != 200 || len(cards) != 1 || cards[0].(map[string]any)["id"] != own.Card.ID {
+			t.Errorf("its own card list: %d %s", list.status, list.raw)
+		}
+		if r := outsider.do(http.MethodGet, "/api/v1/accounts", nil, nil); r.status != 200 ||
+			!strings.HasPrefix(string(r.raw), `{"accounts":[{"account":"acc-004",`) || strings.Contains(string(r.raw), "acc-003") {
+			t.Errorf("its accounts: %d %s", r.status, r.raw)
+		}
+	}
+	t.Run("one grant", refused)
+
+	if err := s.Store.GrantAccount(t.Context(), s.Workspace.ID, s.outsider.ID, postgrestest.Account); err != nil {
+		t.Fatal(err)
+	}
+	if r := outsider.do(http.MethodGet, "/api/v1/cards/"+s.Card.ID, nil, nil); r.status != 200 {
+		t.Fatalf("with both grants: %d", r.status)
+	}
+	if err := s.Store.RevokeAccountGrant(t.Context(), s.Workspace.ID, s.outsider.ID, postgrestest.Account); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("one of two grants revoked", refused)
+}
+
+// RF-05 on the wire: a source that was not read shows as not read, with its
+// count key present and null, and the oracle's text.
+func TestAGapNotReadShowsAnUnknownCount(t *testing.T) {
+	s := newSite(t, 0)
+	gaps := postgrestest.OracleGaps(t, "calls_denied", "slack_not_requested")
+	published := postgrestest.Publish(t, s.Fixture, postgrestest.Account, s.reader.ID, "brief-not-read", gaps...)
+	reader := s.browser(t)
+	reader.signIn("demo-reader", readerPassword)
+	r := reader.do(http.MethodGet, "/api/v1/cards/"+published.Card.ID, nil, nil)
+	if r.status != 200 {
+		t.Fatalf("card: %d %s", r.status, r.raw)
+	}
+	for _, g := range gaps {
+		text, _ := json.Marshal(g.Text)
+		want := `{"code":"` + g.Code + `","disposition":"not_read","count":null,"by_role":null,"text":` + string(text) + `}`
+		if g.Count != nil || !strings.Contains(string(r.raw), want) {
+			t.Errorf("the card does not hold %s:\n%s", want, r.raw)
+		}
+	}
+	for _, raw := range r.body["gaps"].([]any) {
+		gap := raw.(map[string]any)
+		if count, present := gap["count"]; !present || count != nil {
+			t.Errorf("gap %v: count %v (present %v)", gap["code"], count, present)
+		}
+	}
+}
+
+// Crossover, the browser half: the API takes no bearer token, alone or
+// beside the session cookie, and /mcp serves nothing for the cookie. The
+// MCP half (a cookie never admits a call at the mounted gateway) waits for
+// serve to mount MCP.
+func TestCookiesAndBearerTokensNeverCross(t *testing.T) {
+	s := newSite(t, 0)
+	reads, writes := httptransport.APIRoutes(s.api)
+	paths := map[string]string{}
+	for _, pattern := range append(reads, writes...) {
+		method, path, _ := strings.Cut(pattern, " ")
+		path = strings.NewReplacer("{account}", "acc-003", "{card}", s.Card.ID, "{n}", "1",
+			"{receipt}", s.Read.ID).Replace(path)
+		paths[method+" "+path] = path
+	}
+	bearer := map[string]string{"Authorization": "Bearer " + strings.Repeat("a", 43), "Origin": s.origin}
+
+	anonymous := s.browser(t)
+	anonymous.start()
+	signedIn := s.browser(t)
+	signedIn.signIn("demo-reader", readerPassword)
+	for name, b := range map[string]*browser{"a bearer token alone": anonymous, "a bearer token beside the cookie": signedIn} {
+		for key, path := range paths {
+			method, _, _ := strings.Cut(key, " ")
+			header := maps.Clone(bearer)
+			header["X-CSRF-Token"] = b.csrf
+			var body any
+			if method == http.MethodPost {
+				body = map[string]string{"login": "demo-reader", "password": readerPassword}
+			}
+			if r := b.do(method, path, body, header); r.status != 401 || r.code() != "authorization_refused" {
+				t.Errorf("%s, %s: %d %s", name, key, r.status, r.raw)
+			}
+		}
+	}
+	// Refused, not served by the cookie: the session is as it was.
+	if r := signedIn.do(http.MethodGet, "/api/v1/cards/"+s.Card.ID, nil, nil); r.status != 200 {
+		t.Fatalf("the session after the refusals: %d", r.status)
+	}
+	if n := liveSessionRows(t, s); n != 1 {
+		t.Fatalf("%d live sessions", n)
+	}
+	// The cookie on /mcp, even with the CSRF token and the right Origin.
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+		for _, path := range []string{"/mcp", "/mcp/"} {
+			r := signedIn.do(method, path, map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+				map[string]string{"Origin": s.origin, "X-CSRF-Token": signedIn.csrf})
+			if r.status != 404 || r.code() != "not_found" || strings.Contains(string(r.raw), "acc-003") {
+				t.Errorf("%s %s with the cookie: %d %s", method, path, r.status, r.raw)
+			}
+		}
+	}
+}
+
+// Every write needs its session's CSRF token: each write route, sent with a
+// live cookie and the right Origin, is refused with the token missing, stale,
+// another session's, or doubled, and changes nothing. That includes signing
+// in again from a live session. No other API route answers a write method.
+func TestEveryWriteNeedsItsCSRFToken(t *testing.T) {
+	s := newSite(t, 0)
+	reads, writes := httptransport.APIRoutes(s.api)
+	if len(writes) == 0 {
+		t.Fatal("no write routes")
+	}
+	concrete := strings.NewReplacer("{account}", "acc-003", "{card}", s.Card.ID, "{n}", "1", "{receipt}", s.Read.ID)
+	isWrite := map[string]bool{}
+	for _, pattern := range writes {
+		isWrite[pattern] = true
+	}
+	reader := s.browser(t)
+	reader.signIn("demo-reader", readerPassword)
+	for _, pattern := range reads {
+		_, path, _ := strings.Cut(pattern, " ")
+		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+			if isWrite[method+" "+path] {
+				continue
+			}
+			r := reader.do(method, concrete.Replace(path), nil, map[string]string{"Origin": s.origin,
+				"X-CSRF-Token": reader.csrf})
+			if r.status != http.StatusNotFound && r.status != http.StatusMethodNotAllowed {
+				t.Errorf("%s %s answered %d", method, path, r.status)
+			}
+		}
+	}
+
+	for _, pattern := range writes {
+		method, path, _ := strings.Cut(pattern, " ")
+		var body any
+		if method == http.MethodPost {
+			body = map[string]string{"login": "demo-reader", "password": readerPassword}
+		}
+		b := s.browser(t)
+		pre := b.start().body["csrf_token"].(string)
+		b.signIn("demo-reader", readerPassword)
+		earlier := b.csrf
+		b.signIn("demo-reader", readerPassword) // from the live session, so earlier is now stale
+		other := s.browser(t)
+		other.signIn("demo-reader", readerPassword)
+		sessions := liveSessionRows(t, s)
+		for name, tokens := range map[string][]string{
+			"no token":              nil,
+			"the pre-session token": {pre},
+			"an earlier token":      {earlier},
+			"another session's":     {other.csrf},
+			"the token twice":       {b.csrf, b.csrf},
+			"the token and another": {b.csrf, other.csrf},
+			"an empty token":        {""},
+		} {
+			header := http.Header{"Origin": {s.origin}, "X-Csrf-Token": tokens}
+			if r := b.send(method, path, body, header); r.status != 403 || r.code() != "csrf_invalid" {
+				t.Errorf("%s with %s: %d %s", pattern, name, r.status, r.raw)
+			}
+			if n := liveSessionRows(t, s); n != sessions {
+				t.Fatalf("%s with %s: %d live sessions, %d before", pattern, name, n, sessions)
+			}
+			if r := b.do(http.MethodGet, "/api/v1/session", nil, nil); r.body["signed_in"] != true ||
+				r.body["csrf_token"] != b.csrf {
+				t.Fatalf("%s with %s changed the session: %s", pattern, name, r.raw)
+			}
+		}
+		if r := b.write(method, path, body); r.status != 200 {
+			t.Errorf("%s with its token: %d %s", pattern, r.status, r.raw)
+		}
+	}
+}
+
+// A disabled principal's live session ends, and it cannot sign in again.
+func TestADisabledPrincipalIsSignedOut(t *testing.T) {
+	s := newSite(t, 0)
+	b := s.browser(t)
+	if r := b.signIn("demo-reader", readerPassword); r.status != 200 {
+		t.Fatal(r.status)
+	}
+	if err := s.Store.DisablePrincipal(t.Context(), s.Workspace.ID, s.reader.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/v1/cards/" + s.Card.ID, "/api/v1/accounts"} {
+		if r := b.do(http.MethodGet, path, nil, nil); r.status != 401 {
+			t.Errorf("%s after disabling: %d", path, r.status)
+		}
+	}
+	if r := s.browser(t).signIn("demo-reader", readerPassword); r.status != 401 || r.code() != "sign_in_refused" {
+		t.Fatalf("sign-in after disabling: %d %s", r.status, r.raw)
+	}
 }

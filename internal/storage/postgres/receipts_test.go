@@ -597,6 +597,26 @@ func TestPublicationRechecksTheGrant(t *testing.T) {
 	}
 }
 
+// The recheck is of the grant on the card's own account: the actor's live
+// grant on another account does not stand in for a revoked one.
+func TestPublicationRechecksTheCardsOwnGrant(t *testing.T) {
+	f := postgrestest.New(t)
+	ok(t, f.Store.EnsureAccount(ctx, f.Workspace.ID, "acc-004", "Other account"))
+	ok(t, f.Store.GrantAccount(ctx, f.Workspace.ID, f.Reader.ID, "acc-004"))
+	pub, seal := publication(t, f, "revoked-one-of-two")
+	ok(t, f.Store.RevokeAccountGrant(ctx, f.Workspace.ID, f.Reader.ID, postgrestest.Account))
+	_, err := f.Store.PublishCard(ctx, pub)
+	is(t, err, postgres.ErrNotPermitted)
+	sealed, err := f.Store.Receipt(ctx, f.Workspace.ID, seal.ID)
+	ok(t, err)
+	if sealed.Status != "error" || *sealed.HTTPStatus != 403 || *sealed.Error != "not_permitted" {
+		t.Fatalf("seal %+v", sealed)
+	}
+	if count(t, f, "SELECT count(*) FROM cards WHERE brief_id = 'revoked-one-of-two'") != 0 {
+		t.Fatal("a card was stored")
+	}
+}
+
 func TestDurableRowsRefuseChange(t *testing.T) {
 	f := postgrestest.New(t)
 	for _, statement := range []string{

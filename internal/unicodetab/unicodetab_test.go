@@ -2,9 +2,12 @@ package unicodetab
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/pwngh/gtm-connector/internal/oracletest"
@@ -254,6 +257,67 @@ func TestNFCMarkPairs(t *testing.T) {
 		if got := NFC(input); !slices.Equal(got, want) {
 			m.Add("a %U %U: got %U, want %U", first, second, got, want)
 		}
+	}
+}
+
+// NFC of "a" and every ordered pair of marks, and of every canonical two-part decomposition with each mark
+// between its parts: 2,335,784 rows, compared as the SHA-256 the oracle gives for them, so blocking and
+// reordering are checked everywhere, not only where the pair file has rows.
+func TestNFCEveryMarkPair(t *testing.T) {
+	var fixture struct {
+		Marks          []rune
+		TwoPart        [][2]rune `json:"two_part"`
+		Pairs, Between struct {
+			Rows   int
+			SHA256 string
+		}
+	}
+	oracletest.JSON(t, "unicode/nfc_all_marks.json", &fixture)
+	digest := func(each func(row func(text ...rune))) (int, string) {
+		sha, rows := sha256.New(), 0
+		var line []byte
+		write := func(points []rune) {
+			line = append(line, '[')
+			for i, r := range points {
+				if i > 0 {
+					line = append(line, ',')
+				}
+				line = strconv.AppendInt(line, int64(r), 10)
+			}
+			line = append(line, ']')
+		}
+		each(func(text ...rune) {
+			line = append(line[:0], '[')
+			write(text)
+			line = append(line, ',')
+			write(NFC(text))
+			line = append(line, "]\n"...)
+			sha.Write(line)
+			rows++
+		})
+		return rows, hex.EncodeToString(sha.Sum(nil))
+	}
+	rows, sum := digest(func(row func(text ...rune)) {
+		for _, first := range fixture.Marks {
+			for _, second := range fixture.Marks {
+				row('a', first, second)
+			}
+		}
+	})
+	if rows != fixture.Pairs.Rows || sum != fixture.Pairs.SHA256 {
+		t.Errorf("a and every pair of %d marks: %d rows with SHA-256 %s, the oracle %d with %s", len(fixture.Marks),
+			rows, sum, fixture.Pairs.Rows, fixture.Pairs.SHA256)
+	}
+	rows, sum = digest(func(row func(text ...rune)) {
+		for _, pair := range fixture.TwoPart {
+			for _, mark := range fixture.Marks {
+				row(pair[0], mark, pair[1])
+			}
+		}
+	})
+	if rows != fixture.Between.Rows || sum != fixture.Between.SHA256 {
+		t.Errorf("each of %d decompositions with every mark between: %d rows with SHA-256 %s, the oracle %d with %s",
+			len(fixture.TwoPart), rows, sum, fixture.Between.Rows, fixture.Between.SHA256)
 	}
 }
 

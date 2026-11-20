@@ -261,6 +261,11 @@
    "bytes": 197143,
    "records": 4561
   },
+  "unicode/nfc_all_marks.json": {
+   "sha256": "431c9d7399bcdb49cb5f384d3e160a4e6f49258da7af93d5662b853546a4caee",
+   "bytes": 44793,
+   "records": 2335784
+  },
   "unicode/nfc_mark_pairs.jsonl.gz": {
    "sha256": "94c3378cdee263e771563efc4e6e3d8d700d67831756fb091e6ce610c993303c",
    "bytes": 1151368,

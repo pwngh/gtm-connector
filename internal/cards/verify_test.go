@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -196,6 +197,16 @@ func editCard(t *testing.T, f *Folder, c folderCase, old, new string, count int)
 	f.setPayload(c.brief, bytes.Replace(data, []byte(old), []byte(new), count))
 }
 
+// sameValue fails unless two card files parse to one value, so an edit changed bytes only.
+func sameValue(t *testing.T, a, b []byte) {
+	t.Helper()
+	va, errA := strictjson.Loads(a)
+	vb, errB := strictjson.Loads(b)
+	if errA != nil || errB != nil || bytes.Equal(a, b) || !evidence.Equal(va, vb) {
+		t.Fatalf("the edit is not value-preserving (%v, %v)", errA, errB)
+	}
+}
+
 func TestVerifyRefuses(t *testing.T) {
 	ctx := context.Background()
 	type tampering struct {
@@ -213,6 +224,17 @@ func TestVerifyRefuses(t *testing.T) {
 	cases := []tampering{
 		{"a changed byte", func(t *testing.T, f *Folder, c folderCase) {
 			editCard(t, f, c, "DEAL CARD", "DEAL CARE", 1)
+		}, ErrNotSealed, ErrNotAccepted},
+		// The seal names the stored bytes, never a re-encoding: bytes that parse to the same value are refused.
+		{"a letter written as a JSON escape", func(t *testing.T, f *Folder, c folderCase) {
+			before := *f.payload(c.brief)
+			editCard(t, f, c, "DEAL CARD", `DEAL C\u0041RD`, 1)
+			sameValue(t, before, *f.payload(c.brief))
+		}, ErrNotSealed, ErrNotAccepted},
+		{"a trailing newline", func(t *testing.T, f *Folder, c folderCase) {
+			before := *f.payload(c.brief)
+			f.setPayload(c.brief, append(append([]byte(nil), before...), '\n'))
+			sameValue(t, before, *f.payload(c.brief))
 		}, ErrNotSealed, ErrNotAccepted},
 		{"a pending seal", seal(func(row *strictjson.Object) {
 			row.Set("status", "pending")
@@ -418,6 +440,101 @@ func TestVerifyRefuses(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
+}
+
+// The columns of an audit row besides its ID, and a change to each. A change to a column marked true leaves
+// the row a valid receipt, so only the comparison with the sealed copy can refuse it.
+var readColumns = []struct {
+	name    string
+	decodes bool
+	change  func(old any) any
+}{
+	{"started_at", true, func(old any) any { return "2027-02-01T00:00:00Z" }},
+	{"token_id", true, func(old any) any {
+		if old == receipts.Anonymous {
+			return strings.Repeat("c", 64)
+		}
+		return receipts.Anonymous
+	}},
+	{"tool", true, func(old any) any {
+		if old == "list_contacts" {
+			return "get_account"
+		}
+		return "list_contacts"
+	}},
+	{"arguments", true, func(old any) any { return `{"account_id": "acc-999"}` }},
+	{"request_id", true, func(old any) any { return "999" }},
+	{"brief_id", true, func(old any) any {
+		if old == nil {
+			return "brief-" + strings.Repeat("f", 32)
+		}
+		return nil
+	}},
+	{"status", false, func(old any) any {
+		if old == "error" {
+			return "ok"
+		}
+		return "error"
+	}},
+	{"http_status", true, func(old any) any { return 203 }},
+	{"row_count", false, func(old any) any { return 99 }},
+	{"rows", true, func(old any) any {
+		if old == "[]" {
+			return `["moved/row"]`
+		}
+		return strings.Replace(old.(string), `["`, `["moved/`, 1)
+	}},
+	{"elapsed_ms", true, func(old any) any { return 1.5 }},
+	{"error", true, func(old any) any { return "changed" }},
+}
+
+// Every read a card seals is compared with its log row in every column but its ID: one column of one row
+// changed in the log alone is refused, for each read of each folder.
+func TestVerifyComparesEveryColumnOfEveryRead(t *testing.T) {
+	ctx := context.Background()
+	for _, c := range folders {
+		base := openFolder(t, c.name)
+		value, err := strictjson.Loads(*base.payload(c.brief))
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, _ := get(value.(*strictjson.Object), "evidence").(*strictjson.Object)
+		sealed, _ := get(snapshot, "receipts").([]any)
+		if len(sealed) < 2 {
+			t.Fatalf("%s seals %d reads", c.name, len(sealed))
+		}
+		for i, r := range sealed {
+			id := get(r.(*strictjson.Object), "audit_id").(string)
+			if keys := base.Log[id].Keys; len(keys) != len(readColumns)+1 {
+				t.Fatalf("%s: a log row has columns %v", c.name, keys)
+			}
+			for _, column := range readColumns {
+				t.Run(fmt.Sprintf("%s/read %d/%s", c.name, i+1, column.name), func(t *testing.T) {
+					f := &Folder{Cards: base.Cards, Prepared: base.Prepared, Log: maps.Clone(base.Log)}
+					row := strictjson.Clone(base.Log[id]).(*strictjson.Object)
+					old, _ := row.Get(column.name)
+					changed := column.change(old)
+					if evidence.Equal(old, changed) {
+						t.Fatalf("%v is not a change", changed)
+					}
+					row.Set(column.name, changed)
+					f.Log[id] = row
+					if column.decodes && old != "[]" {
+						rows, err := f.Log.Receipts(ctx, []string{id})
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, err := receipts.Decode(rows[0]); err != nil {
+							t.Fatalf("the changed row is not a receipt: %v", err)
+						}
+					}
+					if _, err := f.Verify(ctx, c.brief, demoSources(nil)); !errors.Is(err, ErrReads) {
+						t.Fatalf("got %v, want %v", err, ErrReads)
+					}
+				})
+			}
+		}
+	}
 }
 
 func copyTree(t *testing.T, from, to string) {
