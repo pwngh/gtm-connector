@@ -322,10 +322,10 @@ test('duplicate commands, rejected commands, and unchanged reads do not manufact
 });
 
 test('the evaluation journal survives reload, rejects broken storage, and never fabricates an older result', () => {
-  const next = advanceReadinessJournal(journal(initialState), approved());
+  const state = approved(), next = advanceReadinessJournal(journal(initialState), state);
   const reloaded = readReadinessJournal(JSON.stringify(next));
   assert.deepEqual(reloaded, next);
-  assert.equal(advanceReadinessJournal(reloaded, approved()), reloaded);
+  assert.equal(advanceReadinessJournal(reloaded, structuredClone(state)), reloaded);
   for (const value of [null, '', '{', '{}', JSON.stringify({schema: '1', current: {}})]) assert.equal(readReadinessJournal(value), null);
   assert.equal(journal(resolved()).previous, null);
   assert.equal(journal(resolved()).current.requirements[0].recordedStatus, 'resolved');
@@ -819,13 +819,13 @@ test('input identities distinguish document and review records from their work-i
 });
 
 test('compact input keys change on relevant records but not error-only updates or fresh object copies', () => {
-  const before = journal(received()), key = before.current.inputKey;
+  const state = received(), before = journal(state), key = before.current.inputKey;
   assert.match(key, /^[0-9a-f]{16}$/);
-  assert.equal(advanceReadinessJournal(before, structuredClone(received())).current.inputKey, key);
-  assert.equal(advanceReadinessJournal(before, {...received(), error: 'Local refusal'}), before);
+  assert.equal(advanceReadinessJournal(before, structuredClone(state)).current.inputKey, key);
+  assert.equal(advanceReadinessJournal(before, {...state, error: 'Local refusal'}), before);
   const fixture = structuredClone(readinessFixture);
   fixture.card.sources[0].status = 'not_read';
-  const changed = advanceReadinessJournal(before, received(), fixture);
+  const changed = advanceReadinessJournal(before, state, fixture);
   assert.notEqual(changed.current.inputKey, key);
   assert.notEqual(changed.current.evaluationId, before.current.evaluationId);
   assert.equal(changed.previous.inputKey, key);

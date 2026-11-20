@@ -16,3 +16,7 @@ body{background:#f3f5f8}.main-content{padding-top:29px}.topbar{height:64px;backg
 @media(max-width:360px){.detail-nav nav{gap:8px}}
 
 .form-context+p{margin-top:16px}.review-task-title .mini-label{display:block;margin-bottom:8px}.review-task-title strong{display:block;color:#2d4866;font-size:1rem;line-height:1.55}
+
+.save-failure-notice {display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px; padding:16px; margin-bottom:20px; border:1px solid var(--line); border-radius:8px; font-size:1rem; line-height:1.6}
+.save-failure-notice p {margin:0; flex:1 1 320px; font-size:1rem}
+.save-failure-notice .button {min-height:44px; font-size:1rem}
