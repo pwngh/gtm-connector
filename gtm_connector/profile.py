@@ -63,7 +63,8 @@ def _valid(sources):
 
 def load(directory) -> dict:
     """Return the connected sources by kind. A folder with no profile has none."""
-    if Path(directory).is_symlink():
+    # os.path.islink, not Path.is_symlink: on Python 3.11 the latter goes through Path.lstat.
+    if os.path.islink(directory):
         raise ProfileError("The state folder must not be a symbolic link. Use a private --state-dir.")
     path = Path(directory) / NAME
     try:

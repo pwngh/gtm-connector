@@ -239,7 +239,7 @@ def changing_sources(directory):
     interleave. A folder this creates is removed again when the change fails.
     """
     directory = _state_directory(directory)
-    if directory.is_symlink():
+    if os.path.islink(directory):
         raise SourceIdentityError("The state folder must not be a symbolic link. Use a private --state-dir.")
     created = not os.path.lexists(directory)
     directory.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -288,7 +288,7 @@ def demo_book(directory):
     directory = _state_directory(directory)
     if not os.path.lexists(directory):
         return None
-    if directory.is_symlink():
+    if os.path.islink(directory):
         raise SourceIdentityError("The state folder must not be a symbolic link. Use a private --state-dir.")
     _refuse_salesforce_state(directory)
     path = directory / "crm.sqlite3"
