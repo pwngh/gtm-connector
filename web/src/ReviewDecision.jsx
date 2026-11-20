@@ -46,6 +46,7 @@ export default function ReviewDecision({type, state, derived, onCancel, onPerfor
       <h3 className="decision-title">{plan.title}</h3>
       <div className="decision-people"><div><span>Task owner</span><strong>{plan.owner}</strong></div><div><span>Internal reviewer</span><strong>{fixturePeople.internalReviewer}</strong></div></div>
       <PlanScope plan={plan}/>
+      {!derived.isReviewerEligible && <p className="decision-boundary" role="status">{derived.planReviewBlockedReason}</p>}
       <p className="decision-boundary">{type === 'request' ? 'Submit this version for internal review. The document task remains on hold until approval.' : state.task ? 'Approval resumes the existing document task under this plan version. Customer counsel’s approval must be recorded separately.' : 'Approval creates the task to obtain and verify this document. Customer counsel’s approval must be recorded separately.'}</p>
     </>}
     {type === 'verify' && <>

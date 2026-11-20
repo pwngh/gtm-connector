@@ -1,3 +1,5 @@
+export const worklistFocusKey = (rowKey, purpose) => `${rowKey}|${purpose}`;
+
 export function focusWorklistElement(element) {
   element?.focus({preventScroll: true});
   element?.scrollIntoView({block: 'nearest', behavior: 'instant'});
