@@ -10,6 +10,7 @@ on what basis, and it says what it did not read. No model writes any of it.
 
 ```text
 DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15
+Sources read 2027-01-15T14:00:02Z.
 
 ATTENTION, from record fields and dates
   The renewal is in 24 days and this opportunity is still open at stage "negotiation". [1][3]
@@ -23,18 +24,20 @@ RECORD VALUES, from CRM fields and connector arithmetic
   Contact: "Marian Holt"; role "Deputy general counsel"; email "marian@thornfield-wren.example" [2]
 
 SAID, whole sentences as recorded; not record values
-  [5] customer (label matches contact [2]); call 2027-01-12T15:00:00Z; speaker "Marian Holt"
-      "Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved."
-  [6] customer (label matches contact [2]); call 2027-01-12T15:00:00Z; speaker "Marian Holt"
-      "Please do not put a date on the order form."
-  [7] seller (listed seller identity); Slack 2027-01-12T16:00:00Z; speaker "Avery Linden"
-      "Heads up [mention channel]: their general counsel will not sign until the zero-retention and client-consent rider is approved."
-  [8] seller (listed seller identity); Slack 2027-01-12T16:00:00Z; speaker "Avery Linden"
-      "Their procurement lead mentioned USD 300,000 for a smaller seat count."
-  [9] seller (listed seller identity); Slack 2027-01-12T16:00:00Z; speaker "Avery Linden"
-      "The redline is attached, see rider redline v4 [link files.thornfield-wren.example]."
-  [4] seller (listed seller identity); call 2027-01-12T15:00:00Z; speaker "Morgan Reed"
-      "We will have the order form countersigned by January 30."
+  Customer, by a speaker label equal to one contact's name
+    [5] call 2027-01-12T15:00:00Z; "Marian Holt", role "Deputy general counsel" [2]
+        "Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved."
+    [6] call 2027-01-12T15:00:00Z; "Marian Holt", role "Deputy general counsel" [2]
+        "Please do not put a date on the order form."
+  Seller, by a listed seller's name or ID
+    [4] call 2027-01-12T15:00:00Z; "Morgan Reed"
+        "We will have the order form countersigned by January 30."
+    [7] Slack 2027-01-12T16:00:00Z; "Avery Linden"
+        "Heads up [mention channel]: their general counsel will not sign until the zero-retention and client-consent rider is approved."
+    [8] Slack 2027-01-12T16:00:00Z; "Avery Linden"
+        "Their procurement lead mentioned USD 300,000 for a smaller seat count."
+    [9] Slack 2027-01-12T16:00:00Z; "Avery Linden"
+        "The redline is attached, see rider redline v4 [link files.thornfield-wren.example]."
 
 NOT READ
   Calls: 2 call records were read. Recordings and anything outside those records were not read.
@@ -44,8 +47,10 @@ NOT READ
 
 - **Record values** come from typed CRM fields and connector arithmetic. The seller's "January 30"
   and the second-hand "USD 300,000" are sentences someone said, so they stay under SAID.
-- **A speaker role** comes from identity, never from wording. A seller is a name or ID the operator
-  listed. A customer is a label equal to exactly one contact of the account. Anything else is unknown.
+- **A speaker role** comes from a label, never from wording. A seller is a name or ID the operator
+  listed. A customer is a speaker label equal to the name of exactly one contact of the account, and
+  the card prints that contact's title beside it. Anything else is unknown. A label is what the
+  source wrote: it does not prove who spoke.
 - **A quotation** is one whole sentence. A sentence too long to show is counted, never cut.
 - **Source text is data.** The channel mention and the link were neutralized before anything
   displayed them, and the card says how many were.
@@ -144,8 +149,9 @@ The card shows what the records say, not whether a source is true.
 ## Limits
 
 - Nothing here was tried on a real deal. The cases test correctness on invented data, not usefulness.
-- The card lists sentences by speaker role, and newest first within a role. It does not rank them or
-  relate one to another.
+- The card shows up to twelve sentences, dealt by speaker role and by time, and counts the rest. It
+  does not rank them or relate one to another, so on a long call the sentence that matters may be
+  among those counted. Every sentence read is in `brief --json`.
 - A seller is whoever `sellers.json` in the state folder lists. Slack authors are never shown as
   customers.
 - Authorization is a local owner emulator. The file owner can request every scope and edit the

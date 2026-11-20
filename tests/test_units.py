@@ -36,7 +36,8 @@ def evidence(*, notes_status="available", slack_status="not_requested", notes=No
         rows = [record["record_ref"] for record in records if record["record_ref"].startswith(prefixes)]
         denied = ((tool == "read_call_notes" and notes_status == "denied")
                   or (tool == "read_slack_messages" and slack_status == "denied"))
-        receipts.append({"audit_id": "receipt-" + tool, "brief_id": "brief-fixture", "tool": tool,
+        receipts.append({"audit_id": "receipt-" + tool, "started_at": "2027-01-15T14:00:02Z",
+                         "brief_id": "brief-fixture", "tool": tool,
                          "arguments": {"account_id": "acc-001"}, "rows": rows, "row_count": len(rows),
                          "status": "error" if denied else "ok", "http_status": 403 if denied else 200})
     return {"brief_id": "brief-fixture", "account_id": "acc-001", "as_of": "2027-01-15", "records": records,
@@ -252,8 +253,10 @@ class Evidence(unittest.TestCase):
         self.assertEqual([unit["kind"] for unit in units], ["record"] * 3 + ["sentence"] * 2)
         for line in text.split("RECORD VALUES", 1)[1].split("\n\n")[0].splitlines()[1:]:
             self.assertRegex(line, r" \[\d+\]$")
-        self.assertIn('  [4] customer (label matches contact [2]); call 2027-01-12T15:00:00Z; speaker "Dana Ito"\n'
-                      '      "We will see."', text)
+        self.assertIn("  Customer, by a speaker label equal to one contact's name\n"
+                      '    [4] call 2027-01-12T15:00:00Z; "Dana Ito", role "Counsel" [2]\n'
+                      '        "We will see."', text)
+        self.assertEqual(text.split("\n")[1], "Sources read 2027-01-15T14:00:02Z.")
         self.assertEqual(trace(evidence(), 4)["receipt"]["audit_id"], "receipt-read_call_notes")
 
     def test_a_forged_account_name_stays_one_quoted_literal_in_the_heading(self):
@@ -336,8 +339,13 @@ class Evidence(unittest.TestCase):
     def test_said_deals_its_places_by_role_so_neither_side_crowds_out_the_other(self):
         def said(notes):
             text = build(evidence(notes=notes))[1]
-            heads = text.split("\nSAID", 1)[1].split("\n\n", 1)[0].splitlines()[1::2]
-            return [head.split("] ", 1)[1].split(" (", 1)[0] for head in heads], text
+            roles, role = [], None
+            for line in text.split("\nSAID", 1)[1].split("\n\n", 1)[0].splitlines()[1:]:
+                if line.startswith("    ["):
+                    roles.append(role)
+                elif not line.startswith("    "):
+                    role = {"Customer": "customer", "Seller": "seller", "No": "unknown"}[line.split()[0].rstrip(",")]
+            return roles, text
 
         # One customer sentence beside sixty by a seller is first, with the eleven that fit after it.
         roles, text = said([("Dana Ito", "We will not sign.")]
@@ -364,6 +372,115 @@ class Evidence(unittest.TestCase):
         self.assertIn("Sentences: 2 more sentences were read and are not shown (2 seller); the card shows 12.", text)
         self.assertIn("Sentences: 1 over 300 characters was read and is not shown (1 customer), because a quotation "
                       "is never cut.", text)
+
+    def test_the_newest_sentences_of_a_role_keep_its_places_and_print_in_the_order_said(self):
+        # Thirteen sentences in one record: the first is the one left out, and the rest read in order.
+        units, text, _ = build(evidence(notes=[("Morgan Reed", " ".join(f"Point {number} stands." for number in range(13)))]))
+        self.assertEqual([unit["shown"] for unit in units if unit["kind"] == "sentence"], ["more"] + ["yes"] * 12)
+        self.assertLess(text.index("Point 1 stands."), text.index("Point 12 stands."))
+        self.assertNotIn("Point 0 stands.", text)
+        # Across records the later time is newer, and a sentence with no time is dealt last and printed last.
+        source = evidence(notes=[("Morgan Reed", f"Call {number} went fine.") for number in range(14)])
+        for number, note in enumerate(row for row in source["records"] if row["record_ref"].startswith("calls/")):
+            note["called_at"] = None if number == 13 else f"2027-01-{14 - number:02d}T15:00:00Z"
+        units, text, _ = build(source)
+        self.assertEqual({unit["text"]: unit["shown"] for unit in units if unit["kind"] == "sentence"},
+                         {f"Call {number} went fine.": "yes" if number < 12 else "more" for number in range(14)})
+        self.assertEqual([text.index(f"Call {number} went fine.") for number in range(12)],
+                         sorted((text.index(f"Call {number} went fine.") for number in range(12)), reverse=True))
+
+    def test_a_sentence_dated_after_the_cards_day_is_counted_and_not_shown(self):
+        times = {"2027-01-15T23:59:59Z": "yes", "2027-01-16T00:00:00Z": "later",
+                 # The day is a UTC day whatever offset the record wrote.
+                 "2027-01-16T00:30:00+02:00": "yes", "2027-01-15T23:59:00-05:00": "later",
+                 # A time the card prints as a literal, or one with no offset, decides nothing.
+                 "2027-01-20x00:00:00Z": "yes", "2027-01-20T15:00:00": "yes", "2027-01-20T15:00:00+00:99": "yes"}
+        source = evidence(notes=[("Dana Ito", f"Point {number} stands.") for number in range(len(times))])
+        for note, called_at in zip((row for row in source["records"] if row["record_ref"].startswith("calls/")), times):
+            note["called_at"] = called_at
+        units, text, gaps = build(source)
+        spoken = [unit for unit in units if unit["kind"] == "sentence"]
+        self.assertEqual({unit["at"]: unit["shown"] for unit in spoken}, times)
+        self.assertIn("  Sentences: 2 dated after 2027-01-15 were read and are not shown (2 customer).", text.splitlines())
+        self.assertIn(("sentences_later", "read_not_shown", 2, {"customer": 2, "seller": 0, "unknown": 0}),
+                      [(gap["code"], gap["disposition"], gap["count"], gap["by_role"]) for gap in gaps])
+        for unit in spoken:
+            self.assertEqual(unit["text"] in text, unit["shown"] == "yes")
+            self.assertEqual(trace(source, unit["n"])["shown"], unit["shown"])
+        # A cut sentence stays cut, and a card with only later sentences says they were read.
+        source = evidence(notes=[("Dana Ito", "We signed.")])
+        source["records"][3]["called_at"] = "2027-02-01T09:00:00Z"
+        self.assertIn("  1 sentence was read and is not shown. NOT READ says why.", build(source)[1].splitlines())
+        # The latest call of the card's day is not one dated after it.
+        source = evidence(notes=[("Dana Ito", "We signed."), ("Dana Ito", "We met.")])
+        source["records"][3]["called_at"], source["records"][4]["called_at"] = "2027-01-16T09:00:00Z", "2026-01-10T09:00:00Z"
+        self.assertIn("  The latest dated call that was read is 370 days old. [4]", build(source)[1].splitlines())
+
+    def test_the_second_line_says_when_the_sources_were_read(self):
+        def second(source):
+            return build(source)[1].splitlines()[1]
+
+        self.assertEqual(second(evidence()), "Sources read 2027-01-15T14:00:02Z.")
+        source = evidence()
+        source["receipts"][0]["started_at"] = "2027-01-15T14:00:02.900000Z"
+        source["receipts"][2]["started_at"] = "2027-01-15T15:00:03.100000+01:00"
+        self.assertEqual(second(source), "Sources read 2027-01-15T14:00:02Z to 2027-01-15T14:00:03Z.")
+        # A refused read read nothing, so it sets no end of the range.
+        source = evidence(notes_status="denied")
+        source["receipts"][2]["started_at"] = "2027-01-15T14:05:00Z"
+        self.assertEqual(second(source), "Sources read 2027-01-15T14:00:02Z.")
+        # A receipt with no start time the card could print gives no card.
+        for started_at in (None, "", 1, "2027-01-15", "2027-01-15 14:00:02Z", "2027-01-15T14:00:02",
+                           "2027-01-15T14:00:02+00:99", "2027-01-15T25:00:02Z", "2027-01-15x14:00:02Z"):
+            source = evidence(notes_status="denied")
+            source["receipts"][2]["started_at"] = started_at
+            with self.subTest(started_at=started_at), self.assertRaises(BriefRejected):
+                build(source)
+        source = evidence()
+        del source["receipts"][1]["started_at"]
+        with self.assertRaises(BriefRejected):
+            build(source)
+
+    def test_a_customers_quotation_carries_the_contacts_title_even_past_the_contacts_shown(self):
+        source = evidence(notes=[("Eve Stone", "We will sign."), ("Eve Stone", "After legal."), ("Finn Moor", "Fine.")])
+        for number in range(2, 8):
+            source["records"].insert(number, {
+                "id": f"con-00{number}", "record_ref": f"crm/contacts/con-00{number}", "account_id": "acc-001",
+                "name": {6: "Eve Stone", 7: "Finn Moor"}.get(number, f"Person {number}"),
+                "title": {6: "", 7: "VP <!channel> [3]"}.get(number, "Counsel"), "email": f"p{number}@fixture.example"})
+        rows = [row["record_ref"] for row in source["records"] if row["record_ref"].startswith(("crm/accounts/", "crm/contacts/"))]
+        source["receipts"][0].update(rows=rows, row_count=len(rows))
+        lines = build(source)[1].splitlines()
+        # Neither contact has a Contact line. The title is source text, neutralized like any other.
+        self.assertIn('    [10] call 2027-01-12T15:00:00Z; "Eve Stone", role Missing [7]', lines)
+        self.assertIn('    [11] call 2027-01-12T15:00:00Z; "Eve Stone", role Missing [7]', lines)
+        self.assertIn('    [12] call 2027-01-12T15:00:00Z; "Finn Moor", role "VP [mention channel] (3)" [8]', lines)
+        self.assertNotIn("Eve Stone", "".join(line for line in lines if line.startswith("  Contact:")))
+        # An empty title cited twice is one empty field, and what the title held is counted.
+        self.assertIn("  CRM: 1 field is empty on the record and prints as Missing.", lines)
+        self.assertIn("  Neutralized in source text: 1 mention, 1 bracketed number.", lines)
+
+    def test_calls_whose_labels_equal_no_contact_are_named_once(self):
+        note = "Calls: no speaker label equals a contact's name in the"
+        def gap(source):
+            return [(gap["count"], gap["text"]) for gap in build(source)[2] if gap["code"] == "calls_no_contact"]
+
+        # Labels that are a seller's or nobody's: said, with the number of call records it is about.
+        self.assertEqual(gap(evidence(notes=[("Morgan Reed", "Fine."), ("Sam Roe", "Agreed."), (None, "Noted.")])),
+                         [(3, note + " 3 call records with a sentence.")])
+        self.assertEqual(gap(evidence(notes=[("Sam Roe", "Agreed.")])), [(1, note + " 1 call record with a sentence.")])
+        # Not said when a label is a customer's, when no call sentence has a label, or when only Slack was read.
+        self.assertEqual(gap(evidence()), [])
+        self.assertEqual(gap(evidence(notes=[(None, "Noted.")])), [])
+        self.assertEqual(gap(evidence(notes=[], slack_status="available", messages=[("Sam Roe", "Agreed.")])), [])
+        # Not said when a label equals a contact's name and the role still cannot be given.
+        for name in ("Dana Ito", "Morgan Reed"):
+            source = evidence(notes=[(name, "Agreed.")])
+            source["records"].insert(2, {**source["records"][1], "id": "con-002", "record_ref": "crm/contacts/con-002",
+                                         "name": name})
+            source["receipts"][0]["rows"].insert(2, "crm/contacts/con-002")
+            source["receipts"][0]["row_count"] += 1
+            self.assertEqual(gap(source), [], name)
 
     def test_sentences_that_were_read_and_cannot_be_shown_are_not_reported_as_none_read(self):
         for notes, line in (([("Dana Ito", "X" * 421 + ".")], "1 sentence was read and is not shown. NOT READ says why."),

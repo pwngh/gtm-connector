@@ -77,9 +77,14 @@ def section(text, heading):
 
 def said(brief):
     """Each shown sentence as (role, text)."""
-    lines = section(brief["text"], "SAID").splitlines()
-    return [(re.match(r"  \[\d+\] (\w+) ", head).group(1), json.loads(quote.strip()))
-            for head, quote in zip(lines[::2], lines[1::2])]
+    shown, role = [], None
+    for line in section(brief["text"], "SAID").splitlines():
+        if line.startswith("        "):
+            shown.append((role, json.loads(line.strip())))
+        elif not line.startswith("    "):
+            # A line under SAID that is not a sentence or its quotation names the role of those below it.
+            role = {"Customer": "customer", "Seller": "seller", "No": "unknown"}.get(line.split()[0].rstrip(","))
+    return shown
 
 
 class Cases(unittest.TestCase):
@@ -196,8 +201,9 @@ class Cases(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             demo = run("demo", "--state-dir", str(Path(folder) / "state"))
         shown = (ROOT / "README.md").read_text().split("```text\nDEAL CARD", 1)[1].split("```", 1)[0]
-        self.assertEqual("DEAL CARD" + shown, demo["brief"]["text"])
-        text = demo["brief"]["text"]
+        # One line of a card changes with the clock: when its sources were read.
+        text = re.sub(r"\nSources read [^\n]+\n", "\nSources read 2027-01-15T14:00:02Z.\n", demo["brief"]["text"], count=1)
+        self.assertEqual("DEAL CARD" + shown, text)
         self.assertIn("amount USD 450,000.00", section(text, "RECORD VALUES"))
         self.assertNotIn("300,000", section(text, "RECORD VALUES"))
         self.assertIn(("seller", "We will have the order form countersigned by January 30."), said(demo["brief"]))

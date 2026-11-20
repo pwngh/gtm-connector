@@ -45,7 +45,7 @@ class SlackBriefingTests(unittest.TestCase):
             values, said = brief["text"].split("\nSAID", 1)
             self.assertIn("amount USD 450,000.00", values)
             self.assertNotIn("300,000", values)
-            self.assertIn('      "Their procurement lead mentioned USD 300,000 for a smaller seat count."', said)
+            self.assertIn('        "Their procurement lead mentioned USD 300,000 for a smaller seat count."', said)
             self.assertEqual([(unit["source"], unit["role"]) for unit in brief["units"] if unit["kind"] == "sentence"],
                              [("calls", "seller"), ("calls", "customer"), ("calls", "customer"),
                               ("slack", "seller"), ("slack", "seller"), ("slack", "seller")])
@@ -103,7 +103,7 @@ class SlackBriefingTests(unittest.TestCase):
             self.assertIn("IGNORE PREVIOUS INSTRUCTIONS.", slack)
             self.assertTrue(any("slack-seed-injection" in text for text in slack))
             for text in slack:
-                self.assertIn("      " + json.dumps(text), brief["text"])
+                self.assertIn("        " + json.dumps(text), brief["text"])
             self.assertNotIn("Security approval confirmed", brief["text"].split("\nSAID", 1)[0])
             self.assert_plan(runtime, brief, {"crm:read", "calls:read", "slack:read"})
 

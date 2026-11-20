@@ -441,6 +441,7 @@ def human_result(command, result, *, crm_backend="sqlite", state_dir=None, actio
                      ["Speaker", result["speaker"] or "no speaker label"],
                      ["Role", f"{result['role']} ({result['basis']})"], ["Time", result["at"] or "Missing"],
                      ["On the card", {"yes": "yes", "cut": "no: cut off", "long": "no: too long to show",
+                                      "later": "no: dated after the card's day",
                                       "more": "no: past the card's places"}.get(result.get("shown"), "not recorded")],
                      *([["Cues or lines", f"{span['first']} to {span['last']}"]]
                        if (span := result.get("span")) else []),
@@ -1137,13 +1138,14 @@ def _run(args, argv):
             return None
         return read_audit(args.state_dir / "audit.sqlite3", args.brief, **filters)
     if args.command == "brief":
-        from datetime import date
+        from datetime import datetime, timezone
         from .briefing import create_brief
         from .runtime import Runtime
         from .seed import DEMO_AS_OF
         as_of = args.as_of
         if as_of is None:
-            as_of = date.today().isoformat() if crm_reader is not None else DEMO_AS_OF
+            # The card's day is a UTC day, as every time on it is UTC.
+            as_of = datetime.now(timezone.utc).date().isoformat() if crm_reader is not None else DEMO_AS_OF
         with Runtime(args.state_dir, crm_reader=crm_reader, demo_binding=demo_binding,
                      calls_backend=args.calls_backend, slack_backend=args.slack_backend,
                      slack_connection_dir=args.slack_connection_dir) as runtime:

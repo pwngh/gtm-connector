@@ -1,6 +1,7 @@
 """Explicit backend selection through invented Salesforce responses and local HTTPS."""
 
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
 import io
 import json
 import os
@@ -11,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +21,7 @@ import httpx2
 from gtm_connector.audit import read_audit
 from gtm_connector.cli import main
 from gtm_connector.salesforce import REQUIRED_FIELDS, SalesforceReadOnlyAdapter
+from gtm_connector.selected_briefs import _as_of
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -391,6 +394,20 @@ print(json.dumps({"status": 0, "result": {field: value}}))
         self.assertEqual(err.count("Sources:"), 1)
         self.assertIn("Sources: mixed.", err)
         self.assert_private(err)
+
+    def test_the_default_planning_day_is_the_utc_day_in_any_time_zone(self):
+        # At any instant one of these two zones is on another calendar day than UTC.
+        self.addCleanup(time.tzset)
+        for zone in ("Pacific/Kiritimati", "Pacific/Pago_Pago"):
+            with self.subTest(zone=zone), patch.dict(os.environ, {"TZ": zone}):
+                time.tzset()
+                days = {datetime.now(timezone.utc).date().isoformat()}
+                code, out, err, _ = self.invoke(["brief", ACCOUNT, "--crm-backend", "salesforce"])
+                days.add(datetime.now(timezone.utc).date().isoformat())
+                self.assertEqual(code, 0, err)
+                self.assertIn(out.splitlines()[0].rsplit(" as of ", 1)[1], days)
+                # The assistant's brief tool takes the same day.
+                self.assertIn(_as_of(None, "salesforce"), days)
 
     def test_check_passes_environment_without_changing_report_or_exit_contract(self):
         report = {"status": "failed", "steps": []}

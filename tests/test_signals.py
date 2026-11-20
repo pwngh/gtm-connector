@@ -15,15 +15,16 @@ ACCOUNT_ID = "acc-sf-001000000000001AAA"
 NO_ROLE = "This contact has no role recorded. [{}]"
 
 
-def demo(*, stage="closed_won", **account):
-    """The demo fixture evidence. Its one opportunity is closed unless a test opens it."""
+def demo(*, stage="closed_won", close_date="2026-05-01", **account):
+    """The demo fixture evidence. Its one opportunity is closed unless a test opens it, and closes before any
+    renewal date a test sets unless the test moves it."""
     source = evidence()
     source["records"][0].update(account)
-    source["records"][2]["stage"] = stage
+    source["records"][2].update(stage=stage, close_date=close_date)
     return source
 
 
-def salesforce(end="2027-06-01", *, is_closed=True, title=None):
+def salesforce(end="2027-06-01", *, is_closed=True, title=None, close_date="2026-05-01"):
     """One invented Salesforce account: a contact, an opportunity, and a contract that ends on `end`."""
     native = {"backend": "salesforce", "account_id": ACCOUNT_ID}
     records = [
@@ -36,7 +37,7 @@ def salesforce(end="2027-06-01", *, is_closed=True, title=None):
         {**native, "id": "opp-sf-006000000000001AAA", "source_id": "006000000000001AAA",
          "record_ref": "crm/opportunities/opp-sf-006000000000001AAA", "name": "Invented opportunity",
          "stage": "Negotiation", "is_closed": is_closed, "is_won": False, "amount_decimal": "1234.500",
-         "currency": None, "close_date": "2027-01-31"},
+         "currency": None, "close_date": close_date},
         {**native, "id": "ctr-sf-800000000000001AAA", "source_id": "800000000000001AAA",
          "record_ref": "crm/contracts/ctr-sf-800000000000001AAA", "status": "Activated", "status_code": "Activated",
          "start_date": "2026-01-01", "end_date": end, "contract_term": 12},
@@ -45,7 +46,8 @@ def salesforce(end="2027-06-01", *, is_closed=True, title=None):
     for tool, prefixes in (("get_account", ("crm/accounts/", "crm/contacts/", "crm/contracts/")),
                            ("list_opportunities", ("crm/opportunities/",)), ("read_call_notes", ("calls/",))):
         rows = [record["record_ref"] for record in records if record["record_ref"].startswith(prefixes)]
-        receipts.append({"audit_id": "receipt-" + tool, "brief_id": "brief-fixture", "tool": tool,
+        receipts.append({"audit_id": "receipt-" + tool, "started_at": "2027-01-15T14:00:02Z",
+                         "brief_id": "brief-fixture", "tool": tool,
                          "arguments": {"account_id": ACCOUNT_ID}, "rows": rows, "row_count": len(rows),
                          "status": "ok", "http_status": 200})
     return {**evidence(), "account_id": ACCOUNT_ID, "crm_backend": "salesforce", "records": records,
@@ -105,11 +107,12 @@ class SignalTests(unittest.TestCase):
 
     def test_signals_open_the_card_and_the_heading_is_absent_without_one(self):
         lines = create_brief(self.runtime, "acc-007", include_slack=True)["text"].split("\n")
-        self.assertTrue(lines[0].startswith("DEAL CARD: "))
-        self.assertEqual(lines[1:3], ["", "ATTENTION, from record fields and dates"])
-        self.assertEqual(lines[5:7], ["", "RECORD VALUES, from CRM fields and connector arithmetic"])
+        self.assertTrue(lines[0].startswith("DEAL CARD: ") and lines[1].startswith("Sources read "))
+        self.assertEqual(lines[2:4], ["", "ATTENTION, from record fields and dates"])
+        values = lines.index("RECORD VALUES, from CRM fields and connector arithmetic")
+        self.assertTrue(all(line.startswith("  ") for line in lines[4:values - 1]) and lines[values - 1] == "")
         quiet = create_brief(self.runtime, "acc-010", include_slack=True)["text"].split("\n")
-        self.assertEqual(quiet[1:3], ["", "RECORD VALUES, from CRM fields and connector arithmetic"])
+        self.assertEqual(quiet[2:4], ["", "RECORD VALUES, from CRM fields and connector arithmetic"])
         self.assertNotIn("ATTENTION", "\n".join(quiet))
 
 
@@ -121,6 +124,27 @@ class SignalRuleTests(unittest.TestCase):
 
     def signals(self, source):
         return [line.strip() for line in self.card(source)["ATTENTION"]]
+
+    def test_an_open_opportunity_that_closes_after_the_renewal_it_is_for_is_said(self):
+        late = "This open opportunity's close date, {}, is after the renewal date, 2027-06-01. [1][3]"
+        for close_date, stage, expected in (("2027-06-02", "negotiation", [late.format("2027-06-02")]),
+                                            ("2027-06-01", "negotiation", []),          # the same day is not after
+                                            ("2027-05-31", "negotiation", []),
+                                            ("2027-06-02", "closed_won", [])):           # only an open one
+            with self.subTest(close_date=close_date, stage=stage):
+                self.assertEqual(self.signals(demo(stage=stage, close_date=close_date, renewal_date="2027-06-01")),
+                                 expected)
+        # More than five are counted in one line that cites the first five.
+        many = repeated(demo(stage="negotiation", renewal_date="2027-06-01"), "opportunities", 6,
+                        close_date="2027-07-01")
+        self.assertEqual(self.signals(many), [
+            "6 open opportunities have a close date after the renewal date, 2027-06-01. [1][3][4][5][6][7] and 1 more"])
+        # With Salesforce the date is the contract end the card counts from, and the contract is cited.
+        self.assertEqual(self.signals(salesforce("2027-06-01", is_closed=False, close_date="2027-06-30", title="Counsel")),
+                         ["This open opportunity's close date, 2027-06-30, is after the contract end date, "
+                          "2027-06-01. [3][4]"])
+        self.assertEqual(self.signals(salesforce("2027-06-01", is_closed=False, close_date="2027-06-01", title="Counsel")),
+                         [])
 
     def test_an_open_opportunity_signals_from_thirty_days_out_and_stays_one_after_the_date_passes(self):
         stage = ' and this opportunity is still open at stage "negotiation". [1][3]'

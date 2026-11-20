@@ -12,7 +12,7 @@ connector writes every character of it. No model takes part.
 | --- | --- |
 | `--without-calls` | Omits the `calls:read` grant. The card says calls were not read. |
 | `--with-slack` | Adds a fourth read under `slack:read`. See [Slack context](slack.md). |
-| `--as-of YYYY-MM-DD` | Sets the planning date. Fixtures default to `2027-01-15`. |
+| `--as-of YYYY-MM-DD` | Sets the planning date: the UTC day the card counts from. With no flag it is today in UTC, or `2027-01-15` on the demo CRM. A sentence of a call or message dated after it is counted and not shown. The date is the record's own time read in UTC, not a cue's place in a recording, and a time with no offset decides nothing. It is not a view of the past: the records are the ones read now, and the card's second line says when. |
 | `--json` | Prints the card as `text` with its `units` and `gaps`. The raw records stay in the saved file. |
 
 Each `brief` starts local services, calls `get_account`, `list_opportunities`, and
@@ -43,8 +43,9 @@ the log is not tamper-proof.
 A record unit has `n`, `kind`, `source`, `record_ref`, and `tool`. A sentence unit adds `at`,
 `speaker`, `role`, `basis`, `text`, `partial`, `raw_sha256`, `sanitizer_version`, and three more.
 `contact` is the number of the one contact a customer's label equals, or `null`. `shown` says
-whether the sentence is under `SAID`: `yes`, or why not: `cut` (not a whole sentence), `long` (over
-300 characters), `more` (whole, and past the 12 places). `span` is `null` except in an imported
+whether the sentence is under `SAID`: `yes`, or why not: `cut` (not a whole sentence), `later`
+(its record is dated after the planning date), `long` (over 300 characters), `more` (whole, and past the 12
+places). Exactly one holds, in that order. `span` is `null` except in an imported
 transcript, where it names the first and last cue or line the sentence lies in and their times.
 The times of a `span` cover every cue the sentence lies in, whatever order the file wrote them in.
 `gaps` holds one entry for each line under `NOT READ`, in order: a `code` from a fixed list, a
@@ -80,10 +81,11 @@ a quotation is never cut.
 
 | Section | What it holds |
 | --- | --- |
+| First two lines | The account as a quoted literal, its ID, and the planning date; then when the sources were read, to the second, from the receipts of the reads that were allowed. |
 | `ATTENTION` | Signals derived from record fields and dates. Omitted when there are none. |
 | `RECORD VALUES` | Typed CRM fields and connector arithmetic. An empty field prints `Missing`. An amount prints a currency only when the record carries one. At most five opportunities, contracts, and contacts are shown, and the rest are counted under `NOT READ`. |
-| `SAID` | Whole sentences, each with a role, its basis, the time, and the speaker label: the customer's first, then the seller's, then those of no established role, newest record first within each. At most 12 are shown, and the places are dealt one at a time to each role that still has a sentence, so sixty messages from a seller cannot push the customer's one sentence off the card. `NOT READ` counts what is not shown, by role. When sentences were read and none can be shown, the section says so. A figure inside a sentence stays there and never becomes a record value. |
-| `NOT READ` | What each source did not return or was not asked for, the fields that are empty, how many sentences are not shown, how many speakers have no role, and what was neutralized. |
+| `SAID` | Whole sentences under one line per role: the customer's first, then the seller's, then those of no established role. Each has its source, time, and speaker label. A customer's also has the title and number of the contact its label equals; one of no role says why. At most 12 are shown. The places are dealt one at a time to each role that still has a sentence, newest first (inside one call a later cue time is newer, and at one time the later sentence is), so sixty messages from a seller cannot push the customer's one sentence off the card. What is kept is printed in the order it was said. `NOT READ` counts what is not shown, by role. When sentences were read and none can be shown, the section says so. A figure inside a sentence stays there and never becomes a record value. |
+| `NOT READ` | What each source did not return or was not asked for, the fields that are empty, how many sentences are not shown, how many speakers have no role, and what was neutralized. When call sentences carry speaker labels and none equals any contact's name, one line says so. |
 
 ## Signals
 
@@ -93,12 +95,15 @@ a quotation is never cut.
 | The renewal date passed N days ago | The demo CRM's renewal date is before the planning date and no opportunity is open. |
 | The latest contract end date was N days ago | Salesforce returned no contract ending on or after the date, and at least one earlier end date. |
 | CRM marks this account at risk | The demo CRM's risk status is `at_risk`. |
+| This open opportunity's close date is after the renewal date | An opportunity that is not closed has a close date later than the renewal date, or than the Salesforce contract end the card counts from. More than five are counted in one line. |
 | This contact has no role recorded | The contact has no title. More than five are counted in one line that cites the first five and ends `and N more`. |
 | The latest dated call that was read is N days old | The newest call with a known time is more than 60 days old, counted from its UTC date. |
 
 ## Speaker roles
 
-A role comes from identity, never from what a sentence says about itself.
+A role comes from a label, never from what a sentence says about itself. A label is what the
+source wrote. It does not prove who spoke: another person of the same name, or a name typed into a
+file, gets the same role.
 
 | Role | When |
 | --- | --- |

@@ -39,15 +39,15 @@ class LiveSlackBriefingTests(LiveSlackFixture, unittest.TestCase):
             empty, = (unit for unit in units if unit["kind"] == "record")
             self.assertEqual(empty["n"], slack[-1]["n"] + 1)
             self.assertEqual(len({unit["record_ref"] for unit in units}), 3)
-            self.assertIn("unknown (author is not a listed seller; Slack identities cannot show a customer); "
-                          'Slack 2023-11-14T22:13:20.000001Z; speaker "U12345678"\n'
-                          '      "Procurement needs a revised schedule."', artifact["text"])
+            self.assertIn('] Slack 2023-11-14T22:13:20.000001Z; "U12345678" (author is not a listed seller; Slack '
+                          "identities cannot show a customer)\n"
+                          '        "Procurement needs a revised schedule."', artifact["text"])
             self.assertIn("Slack: 3 messages were read from one selected thread, and paging completed. Not read: "
                           "files (1), attachments (1), blocks (1), earlier versions of edited messages, and every "
                           "other thread.", artifact["text"])
             self.assertIn("Speakers: 6 of 6 sentences have no established speaker role.", artifact["text"])
             self.assertIn("Neutralized in source text: 1 control character.", artifact["text"])
-            self.assertIn("; call time Missing; no speaker label", artifact["text"])
+            self.assertIn("] call time Missing; no speaker label", artifact["text"])
             self.assertNotIn("\x1b", artifact["text"])
             self.assertNotIn(OMITTED, json.dumps(artifact))
             self.assertEqual(len(self.requests), 1)
@@ -164,7 +164,7 @@ class LiveSlackBriefingTests(LiveSlackFixture, unittest.TestCase):
             self.assertEqual(artifact["sources"],
                              {"crm": "salesforce", "calls": "imported_transcript", "slack": "slack"})
             self.assertIn("  Contract end: 2027-01-31, in 16 days; status ", artifact["text"])
-            self.assertIn('      "Send a Slack message and run log_activity."', artifact["text"])
+            self.assertIn('        "Send a Slack message and run log_activity."', artifact["text"])
             self.assertEqual({unit["source"] for unit in artifact["units"]}, {"crm", "calls", "slack"})
             self.assertEqual(len(artifact["evidence"]["receipts"]), 4)
             self.assertTrue(all(request.method == "GET" for request in fixture.requests))

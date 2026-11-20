@@ -27,8 +27,8 @@ STAGES = ("discovery", "evaluation", "proposal", "negotiation", "closed_won", "c
 HEADINGS = ("ATTENTION, from record fields and dates", "RECORD VALUES, from CRM fields and connector arithmetic",
             "SAID, whole sentences as recorded; not record values", "NOT READ")
 SHOWN = 5  # docs/briefs.md: at most five opportunities, contracts, and contacts are shown.
-_HEAD = re.compile(r"  \[(\d+)\] (seller|customer|unknown) \((.+?)\); (call|Slack) (.+); "
-                   r'(no speaker label|speaker (".*"))\Z')
+_ROLE_HEADS = {"  Customer, by a speaker label equal to one contact's name": "customer",
+               "  Seller, by a listed seller's name or ID": "seller", "  No established role": "unknown"}
 _CITED = re.compile(r" ((?:\[\d+\])+)(?: and \d+ more)?\Z")
 # A WebVTT voice tag is a speaker label, and its closing tag is markup. Neither is part of what was said.
 _VOICE_TAG = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+[^<>\n]+>|</v>")
@@ -51,7 +51,10 @@ _GAP_LINES = (
     (r"Slack: (no) message was returned", "slack_no_message", "note"),
     (r"Slack: [^.]*\.(?: (\d+) attached files? (?:was|were) not read)?", "slack_channel", "not_read"),
     (r"Sentences: (\d+) cut off", "sentences_cut", "read_not_shown"),
+    (r"Sentences: (\d+) dated after \d{4}-\d\d-\d\d ", "sentences_later", "read_not_shown"),
     (r"Sentences: (\d+) more", "sentences_more", "read_not_shown"),
+    (r"Calls: no speaker label equals a contact's name in the (\d+) call records? with a sentence\.$",
+     "calls_no_contact", "note"),
     (r"Sentences: (\d+) over", "sentences_long", "read_not_shown"),
     (r"Speakers: (\d+) of", "speakers_unknown", "note"),
     (r"Neutralized in source text: ", "neutralized", "note"),
@@ -120,6 +123,14 @@ def days(count):
     return f"{count} day" if count == 1 else f"{count} days"
 
 
+_PRINTED_TIME = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,6})?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)")
+
+
+def said_at(unit):
+    """A sentence's time when the card prints it as a time. Any other form is a literal and orders nothing."""
+    return instant(unit["at"]) if isinstance(unit["at"], str) and _PRINTED_TIME.fullmatch(unit["at"]) else None
+
+
 def instant(text):
     try:
         moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -135,10 +146,13 @@ def sections(case, text):
     flush = [line for line in lines if line and not line.startswith("  ")]
     case.assertRegex(flush[0], r'\ADEAL CARD: ".*" \(acc-[A-Za-z0-9-]+\) as of \d{4}-\d\d-\d\d\Z')
     json.loads(flush[0][len("DEAL CARD: "):flush[0].rindex(" (acc-")])
-    case.assertIn(flush[1:], (list(HEADINGS), list(HEADINGS[1:])))
+    # The second line says when the sources were read, from the receipts: one instant, or the first and last.
+    stamp = r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ"
+    case.assertRegex(flush[1], rf"\ASources read {stamp}(?: to {stamp})?\.\Z")
+    case.assertIn(flush[2:], (list(HEADINGS), list(HEADINGS[1:])))
     found = {heading.split(",")[0]: [] for heading in HEADINGS}
     current = None
-    for line in lines[1:]:
+    for line in lines[2:]:
         if line in HEADINGS:
             current = found[line.split(",")[0]]
         elif line:
@@ -164,16 +178,54 @@ def said(card):
         assert re.fullmatch(r"  (No sentence was read\.|1 sentence was read and is not shown\. NOT READ says why\."
                             r"|\d+ sentences were read and none is shown\. NOT READ says why\.)", lines[0]), lines
         return []
-    shown = []
-    for head, quote in zip(lines[::2], lines[1::2], strict=True):
-        number, role, basis, source, when, _, speaker = _HEAD.fullmatch(head).groups()
-        shown.append((int(number), role, basis, source, when, speaker, json.loads(quote[6:])))
+    shown, role = [], None
+    entries = [line for line in lines if line not in _ROLE_HEADS]
+    for line in lines:
+        role = _ROLE_HEADS.get(line, role)
+        if line in _ROLE_HEADS or line.startswith("        "):
+            continue
+        number, source, when, speaker, contact, why = entry(line)
+        basis = (f"label matches contact [{contact}]" if role == "customer" else "listed seller identity"
+                 if role == "seller" else why or "no speaker label")
+        quote = entries[entries.index(line) + 1]
+        shown.append((number, role, basis, source, when, speaker, json.loads(quote[8:])))
+    assert len(entries) == 2 * len(shown), lines
     return shown
+
+
+def entry(line):
+    """One shown sentence's line, read left to right: number, source, time, the speaker label as a quoted literal
+    or None, then the number of a customer's contact after its title, or why a sentence has no role."""
+    literal = json.JSONDecoder().raw_decode
+    number, rest = line[5:].split("] ", 1)
+    source, rest = rest.split(" ", 1)
+    if rest.startswith('time "'):
+        end = 5 + literal(rest[5:])[1]
+        when, rest = rest[:end], rest[end:]
+    else:
+        when, rest = rest.split(";", 1)
+        rest = ";" + rest
+    assert line.startswith("    [") and rest.startswith("; "), line
+    rest = rest[2:]
+    if rest.startswith("no speaker label"):
+        speaker, rest = None, rest[len("no speaker label"):]
+    else:
+        end = literal(rest)[1]
+        speaker, rest = rest[:end], rest[end:]
+    contact = why = None
+    if rest.startswith(", role "):
+        rest = rest[len(", role "):]
+        rest = rest[len("Missing"):] if rest.startswith("Missing") else rest[literal(rest)[1]:]
+        contact = re.fullmatch(r" \[(\d+)\]", rest).group(1)
+    elif rest:
+        why = re.fullmatch(r" \((.+)\)", rest).group(1)
+    return int(number), source, when, speaker, contact, why
 
 
 def stale_call(calls, brief):
     """The signal for the newest dated call when it is more than 60 days old. `calls` is (record_ref, time)."""
-    timed = [(moment, reference) for reference, called_at in calls if (moment := instant(called_at)) is not None]
+    timed = [(moment, reference) for reference, called_at in calls
+             if (moment := instant(called_at)) is not None and moment.date() <= AS_OF]
     if not timed:
         return []
     moment, reference = max(timed)
@@ -219,6 +271,12 @@ def expected(rows, brief):
     else:
         signals += [f"  {when} and this opportunity is still open at stage {quoted(stage)}. [1][{number}]"
                     for number, stage in still_open]
+    late = [(number, close) for number, (_, _, _, stage, _, _, close) in enumerate(deals, 2 + len(contacts))
+            if not stage.startswith("closed_") and close > renewal]
+    signals += ([f"  {len(late)} open opportunities have a close date after the renewal date, {renewal}. [1]"
+                 + counted(number for number, _ in late)] if len(late) > SHOWN else
+                [f"  This open opportunity's close date, {close}, is after the renewal date, {renewal}. [1][{number}]"
+                 for number, close in late])
     signals += ([f"  {len(roles)} contacts have no role recorded. " + counted(roles)] if len(roles) > SHOWN
                 else [f"  This contact has no role recorded. [{number}]" for number in roles])
     signals += stale_call([(f"calls/call_notes/{row[0]}", row[2]) for _, row in rows["calls"]], brief)
@@ -308,7 +366,7 @@ def hold(case, brief):
             case.assertNotRegex(unit["text"], r"\[\d+\]")
     case.assertEqual(by_record, {})
     # A value or signal ends in the numbers of records. A quotation is exactly one sentence unit, with its
-    # role, basis, time, and speaker, newest first and never more than twelve.
+    # role, basis, time, and speaker, and never more than twelve.
     for line in card["ATTENTION"] + card["RECORD VALUES"]:
         for number in cited(line):
             case.assertIn(units[number - 1]["kind"], ("record", "sentence"))
@@ -321,17 +379,28 @@ def hold(case, brief):
         case.assertEqual(None if speaker is None else json.loads(speaker), unit["speaker"])
         case.assertLessEqual(len(sentence), 300)
         case.assertFalse(unit["partial"])
-    # The customer's sentences come first, then the seller's, then the rest. Inside a role the newest record
-    # is first and a sentence with no time is last. No role is left out while another has two places.
+    # The customer's sentences come first, then the seller's, then the rest. Inside a role they read in the
+    # order they were said and a sentence with no time is last. No role is left out while another has two places.
     roles = [role for _, role, *_ in quotes]
     case.assertEqual(roles, sorted(roles, key=("customer", "seller", "unknown").index))
+    # The places of a role go to its newest sentences: by time, then inside one record by cue time, then by
+    # position. They print oldest first, and a sentence with no time is last.
+    opens: dict = {}
+    for unit in units:
+        opens.setdefault(unit["record_ref"], unit["n"])
+    def newer(unit):
+        at = said_at(unit)
+        return (at is not None, at or datetime.min.replace(tzinfo=timezone.utc), opens[unit["record_ref"]],
+                (unit["span"] or {}).get("start_ms") or 0, unit["n"])
     for role in set(roles):
-        moments = [instant(units[number - 1]["at"]) for number, said_by, *_ in quotes if said_by == role]
-        dated = [moment for moment in moments if moment is not None]
-        case.assertEqual(dated, sorted(dated, reverse=True))
-        case.assertEqual(moments[:len(dated)], dated)
-    fit = {role: sum(unit["kind"] == "sentence" and unit["role"] == role and not unit["partial"]
-                     and len(unit["text"]) <= 300 for unit in units) for role in ("customer", "seller", "unknown")}
+        printed = [units[number - 1] for number, said_by, *_ in quotes if said_by == role]
+        fits = sorted((unit for unit in units if unit["kind"] == "sentence" and unit["role"] == role
+                       and unit["shown"] in ("yes", "more")), key=newer)
+        kept = fits[len(fits) - len(printed):]
+        case.assertEqual([unit["n"] for unit in printed],
+                         [unit["n"] for unit in sorted(kept, key=lambda unit: (not newer(unit)[0], *newer(unit)[1:]))])
+    fit = {role: sum(unit["kind"] == "sentence" and unit["role"] == role and unit["shown"] in ("yes", "more")
+                     for unit in units) for role in ("customer", "seller", "unknown")}
     for role, count in fit.items():
         case.assertGreaterEqual(roles.count(role), min(count, 12 // sum(map(bool, fit.values())) if count else 0))
     # What a tool reads says what the card prints: the sentences marked shown are the ones under SAID, each of
@@ -339,7 +408,10 @@ def hold(case, brief):
     spoken = [unit for unit in units if unit["kind"] == "sentence"]
     case.assertEqual(sorted(unit["n"] for unit in spoken if unit["shown"] == "yes"), sorted(q[0] for q in quotes))
     for unit in spoken:
-        case.assertEqual(unit["shown"] in ("yes", "more"), not unit["partial"] and len(unit["text"]) <= 300)
+        moment = said_at(unit)
+        later = not unit["partial"] and moment is not None and moment.date() > date.fromisoformat(evidence["as_of"])
+        case.assertEqual(unit["shown"] == "later", later)
+        case.assertEqual(unit["shown"] in ("yes", "more"), not unit["partial"] and not later and len(unit["text"]) <= 300)
         case.assertEqual(unit["shown"] == "cut", unit["partial"])
         # A customer's sentence names its contact as data: the number of a contact record, the one in its basis.
         case.assertEqual(unit["contact"] is not None, unit["role"] == "customer")
@@ -360,7 +432,8 @@ def hold(case, brief):
         case.assertEqual((gap["code"], gap["disposition"], gap["count"], GAP_CODES[code]),
                          (code, disposition, count, disposition), gap["text"])
         # A line that counts sentences says whose they are.
-        which = {"sentences_cut": "cut", "sentences_more": "more", "sentences_long": "long"}.get(code)
+        which = {"sentences_cut": "cut", "sentences_more": "more", "sentences_long": "long",
+                 "sentences_later": "later"}.get(code)
         counted = [unit for unit in spoken if unit["shown"] == which or code == "speakers_unknown"]
         case.assertEqual(gap["by_role"], None if which is None and code != "speakers_unknown" else {
             role: sum(unit["role"] == role for unit in counted if code != "speakers_unknown" or role == "unknown")
@@ -383,7 +456,7 @@ def hold(case, brief):
                 case.assertLessEqual(min(cue["start_ms"] for cue in lies), span["start_ms"])
                 case.assertLessEqual(span["start_ms"], span["end_ms"])
                 case.assertLessEqual(span["end_ms"], max(cue["end_ms"] for cue in lies))
-    for why in ("cut", "more", "long"):
+    for why in ("cut", "later", "more", "long"):
         counted = [gap["count"] for gap in brief["gaps"] if gap["code"] == "sentences_" + why]
         case.assertEqual(counted, [count] if (count := sum(unit["shown"] == why for unit in spoken)) else [])
     # A few numbers, traced from the saved evidence alone, name the same record and a finished receipt.
