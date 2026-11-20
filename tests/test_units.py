@@ -384,6 +384,17 @@ class Evidence(unittest.TestCase):
             ("calls_denied", "not_read", None, "Calls: not read. The grant lacks calls:read."),
             ("slack_denied", "not_read", None, "Slack: not read. The grant lacks slack:read.")])
 
+    def test_evidence_nested_deeper_than_python_reads_gives_no_card(self):
+        deep: list = []
+        for _ in range(3000):
+            deep = [deep]
+        for place in ("called_at", "speaker", "body", "id"):
+            source = evidence(notes=[("Dana Ito", "We will sign.")])
+            note = next(row for row in source["records"] if row["record_ref"].startswith("calls/"))
+            note[place] = deep
+            with self.subTest(place=place), self.assertRaises(BriefRejected):
+                build(source)
+
     def test_tampered_evidence_gives_no_card(self):
         def changed(edit, **options):
             source = evidence(**options)

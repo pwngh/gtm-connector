@@ -1009,7 +1009,8 @@ def build(evidence: dict) -> tuple[list[Unit], str, list[Gap]]:
         return _build(evidence)
     except BriefRejected:
         raise
-    except (KeyError, TypeError, ValueError, AttributeError):
+    except (KeyError, TypeError, ValueError, AttributeError, RecursionError):
+        # RecursionError: a saved file can nest a value deeper than Python reads it.
         raise BriefRejected("Evidence contains missing or invalid fields.") from None
 
 
