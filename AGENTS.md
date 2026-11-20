@@ -30,7 +30,8 @@ app. Until the Go CLI ships, the Python package is the product and the reference
 | Commands | `cli.py` |
 
 The Go port is the module at the root, in `internal/`: `unicodetab` (generated from `testdata/oracle/unicode`),
-`strictjson`, and `evidence` (neutralized text and sentences). Its tests check it against `testdata/oracle/`.
+`strictjson`, `evidence` (neutralized text, sentences, the card), `receipts`, `cards` (make, seal, verify, admit)
+and `sources/demo`. Its tests check it against `testdata/oracle/`.
 
 ```sh
 python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r requirements-dev.lock

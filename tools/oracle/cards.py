@@ -6,6 +6,7 @@ from datetime import timedelta
 from decimal import Decimal
 import hashlib
 import importlib
+import inspect
 import json
 import math
 from pathlib import Path
@@ -385,6 +386,67 @@ def cases(cards: Cards) -> None:
         raise AssertionError(f"each case should make one target card: {[row['key'] for row in targets]}")
 
 
+# The tests that hand units.build evidence it must refuse, and evidence it must accept, by module.
+REFUSING = ("tests.test_units", "tests.test_salesforce_briefing", "tests.test_slack_briefing")
+
+
+def evidence_vectors(writer: Writer) -> None:
+    """Every call those tests make to units.build: the evidence in, and the units, card text and gaps, or the
+    BriefRejected message, out. A test method that never calls build is not run. Evidence JSON cannot hold (a
+    nesting deeper than the encoder goes) is not kept. One synthetic vector adds Slack file counts whose sum
+    passes 2**63."""
+    from gtm_connector import units
+    real = units.build
+    vectors: list[dict] = []
+    current = {"test": ""}
+
+    def recording(evidence: Any) -> Any:
+        try:
+            source = json.loads(json.dumps(plain(evidence), allow_nan=False))
+        except (TypeError, ValueError, RecursionError):
+            source = None
+        try:
+            result = real(evidence)
+        except units.BriefRejected as error:
+            if source is not None:
+                vectors.append({"test": current["test"], "evidence": source, "rejected": str(error)})
+            raise
+        if source is not None:
+            vectors.append({"test": current["test"], "evidence": source, "units": result[0], "text": result[1],
+                            "gaps": result[2]})
+        return result
+
+    class Result(unittest.TestResult):
+        def startTest(self, test: unittest.TestCase) -> None:
+            current["test"] = test.id().removeprefix("tests.")
+            super().startTest(test)
+
+    result = Result()
+    for name in REFUSING:
+        module = _test_module(name)
+        tests = [test for test in _tests(unittest.defaultTestLoader.loadTestsFromModule(module))
+                 if "build(" in inspect.getsource(getattr(type(test), test._testMethodName))]
+        with mock.patch.object(module, "build", recording):
+            for test in tests:
+                with freeze.scope(f"evidence/{test.id()}"):
+                    test.run(result)
+    if not result.wasSuccessful():
+        raise AssertionError(f"the evidence tests did not pass under the oracle: {result.errors + result.failures}")
+    helper = _test_module("tests.test_units").evidence
+    source = helper(slack_status="available", messages=[("Morgan Reed", "First file."), ("Quinn Moss", "Second.")])
+    for record in source["records"]:
+        if record["record_ref"].startswith("slack/"):
+            record["files"] = 3 * 2 ** 62
+    current["test"] = "synthetic: two Slack messages whose file counts sum past 2**63"
+    recording(source)
+    writer.lines("cards/evidence.jsonl.gz", vectors)
+    writer.json("cards/evidence_index.json", {
+        "note": ("units.build calls of the tests that refuse evidence: each line holds the test, the evidence, and "
+                 "either units, text and gaps, or the BriefRejected message"),
+        "modules": list(REFUSING), "vectors": len(vectors),
+        "rejected": sum("rejected" in vector for vector in vectors)}, len(vectors))
+
+
 def _tests(suite: unittest.TestSuite) -> Iterator[unittest.TestCase]:
     for test in suite:
         if isinstance(test, unittest.TestSuite):
@@ -403,6 +465,7 @@ def generate(writer: Writer) -> None:
     slack_threads(cards)
     cases(cards)
     cards.write(writer)
+    evidence_vectors(writer)
     writer.json("cards/index.json", {
         "note": ("each line of a family file is one card: key, account, options, the source rows it read, and the "
                  "sealed file's exact text with its SHA-256 and seal receipt; or a refusal with the receipts it left. "

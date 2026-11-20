@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math"
 	"math/big"
 	"strconv"
 	"strings"
@@ -28,7 +27,7 @@ func pyDumps(value any) string {
 		case *big.Int:
 			b.WriteString(v.String())
 		case float64:
-			b.WriteString(pyFloatRepr(v))
+			b.WriteString(FloatRepr(v))
 		case Decimal:
 			b.WriteString(`{"decimal": ` + asciiString(v.String()) + "}")
 		case string:
@@ -61,75 +60,11 @@ func pyDumps(value any) string {
 	return b.String()
 }
 
+// asciiString is json.dumps(text) with ensure_ascii=True.
 func asciiString(s string) string {
 	var b strings.Builder
-	b.WriteByte('"')
-	for _, c := range s {
-		switch c {
-		case '"':
-			b.WriteString(`\"`)
-		case '\\':
-			b.WriteString(`\\`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		case '\b':
-			b.WriteString(`\b`)
-		case '\f':
-			b.WriteString(`\f`)
-		default:
-			switch {
-			case c >= ' ' && c <= '~':
-				b.WriteRune(c)
-			case c > 0xFFFF:
-				c -= 0x10000
-				fmt.Fprintf(&b, `\u%04x\u%04x`, 0xD800+(c>>10), 0xDC00+(c&0x3FF))
-			default:
-				fmt.Fprintf(&b, `\u%04x`, c)
-			}
-		}
-	}
-	b.WriteByte('"')
+	writeString(&b, s, true)
 	return b.String()
-}
-
-// pyFloatRepr is repr(float): the shortest digits, in exponent form when the point would sit more than 16
-// places right or 4 places left of the first digit.
-func pyFloatRepr(f float64) string {
-	if math.IsInf(f, 0) || math.IsNaN(f) {
-		panic("non-finite")
-	}
-	e := strconv.FormatFloat(f, 'e', -1, 64)
-	sign := ""
-	if e[0] == '-' {
-		sign, e = "-", e[1:]
-	}
-	mantissa, exponent, _ := strings.Cut(e, "e")
-	digits := strings.Replace(mantissa, ".", "", 1)
-	exp, _ := strconv.Atoi(exponent)
-	point := exp + 1
-	if point <= -4 || point > 16 {
-		body := digits[:1]
-		if len(digits) > 1 {
-			body += "." + digits[1:]
-		}
-		expSign := "+"
-		if exp < 0 {
-			expSign, exp = "-", -exp
-		}
-		return fmt.Sprintf("%s%se%s%02d", sign, body, expSign, exp)
-	}
-	switch {
-	case point <= 0:
-		return sign + "0." + strings.Repeat("0", -point) + digits
-	case point >= len(digits):
-		return sign + digits + strings.Repeat("0", point-len(digits)) + ".0"
-	default:
-		return sign + digits[:point] + "." + digits[point:]
-	}
 }
 
 type outcome struct {
