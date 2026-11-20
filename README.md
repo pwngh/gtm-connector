@@ -176,6 +176,27 @@ the tested client. Other assistant apps are untested. [Clients](docs/clients.md)
 
 The card shows what the records say, not whether a source is true.
 
+## The Go server (in progress)
+
+The Go program at the root serves a read-only evidence API and the web app over HTTPS, on PostgreSQL.
+It does not read sources yet, so it has no cards of its own. It needs Docker with Compose (Docker
+Desktop, or Colima with `docker-compose`).
+
+```sh
+make dev                        # PostgreSQL in Compose, the server on this machine (needs Go and Node)
+make up                         # PostgreSQL and the server in Compose
+make down                       # stop; the database and credentials are kept
+make backup                     # the database and the credentials folder, into one file
+make restore BACKUP=gtm-....tar.gz   # into an empty database (make clean deletes the database)
+make test                       # go vet and the Go tests against the Compose database
+```
+
+Open `https://127.0.0.1:8443/`. The first run writes `.env` and a private credentials folder,
+`~/.config/gtm-connector/credentials` (mode 0700): the owner secret, the local TLS certificate and
+key, and the demo sign-in in `demo-credentials.json`. Backups go to `~/.config/gtm-connector/backups`.
+A restore needs an empty database, and each credential must be absent or the same as the backup's.
+On Colima, if a port does not answer, the Makefile forwards it with `scripts/colima-forward.sh`.
+
 ## Limits
 
 - Nothing here was tried on a real deal. The cases test correctness on invented data, not usefulness.

@@ -70,6 +70,29 @@ jobs:
   go:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # The pinned PostgreSQL, and the fallback one major version back.
+        postgres:
+          - postgres:19.0-alpine3.24@sha256:8b0ff4cdf221f0c53d7fcda681d3b461be725c492cd881c5ec9c0ad25023f188
+          - postgres:18.7-alpine3.24@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff
+    services:
+      postgres:
+        image: ${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: gtm
+          POSTGRES_DB: gtm
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gtm -d gtm"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      GTM_TEST_DATABASE_URL: postgres://gtm@localhost:5432/gtm?sslmode=disable
+      GTM_REQUIRE_DATABASE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

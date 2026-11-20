@@ -1,0 +1,158 @@
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/pwngh/gtm-connector/internal/authz"
+	"github.com/pwngh/gtm-connector/internal/storage/postgres"
+	httptransport "github.com/pwngh/gtm-connector/internal/transport/http"
+)
+
+func serve(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	c, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	store, creds, err := setUp(ctx, c)
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	certPEM, err := creds.read(tlsCertFile)
+	if err != nil {
+		return err
+	}
+	keyPEM, err := creds.read(tlsKeyFile)
+	if err != nil {
+		return err
+	}
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return fmt.Errorf("TLS key pair: %w", err)
+	}
+	surface, err := httptransport.New(httptransport.Config{
+		PublicOrigin: c.publicOrigin,
+		AllowedHosts: c.allowedHosts,
+		WebDir:       c.webDir,
+	}, store, authz.Evidence{Store: store})
+	if err != nil {
+		return err
+	}
+	defer surface.Close()
+
+	listener, err := net.Listen("tcp", c.listen)
+	if err != nil {
+		return err
+	}
+	server := &http.Server{
+		Handler:           surface,
+		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{pair}},
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelWarn),
+	}
+	go housekeeping(ctx, store, logger)
+	served := make(chan error, 1)
+	go func() { served <- server.ServeTLS(listener, "", "") }()
+	web := c.webDir
+	if web == "" {
+		web = "none (API only)"
+	}
+	logger.Info("serving", "origin", c.publicOrigin, "listen", c.listen, "web", web,
+		"credentials", c.credentialsDir)
+	select {
+	case err := <-served:
+		return err
+	case <-ctx.Done():
+	}
+	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	logger.Info("stopping")
+	return server.Shutdown(shutdown)
+}
+
+// housekeeping finishes receipts whose worker's lease expired and removes
+// ended sessions, once at start and then every 30 seconds.
+func housekeeping(ctx context.Context, store *postgres.Store, logger *slog.Logger) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		if n, err := store.AbandonExpired(ctx, 100); err != nil && ctx.Err() == nil {
+			logger.Warn("finishing interrupted receipts", "error", err)
+		} else if n > 0 {
+			logger.Info("finished interrupted receipts", "count", n)
+		}
+		if _, err := store.DeleteEndedSessions(ctx); err != nil && ctx.Err() == nil {
+			logger.Warn("removing ended sessions", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// health asks the local server's /healthz over TLS, trusting only this
+// install's certificate, with the first allowed Host.
+func health(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("health", flag.ContinueOnError)
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	c, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	creds, err := openCredentials(c.credentialsDir, false)
+	if err != nil {
+		return err
+	}
+	certPEM, err := creds.read(tlsCertFile)
+	if err != nil {
+		return err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(certPEM) {
+		return errors.New("the TLS certificate cannot be read")
+	}
+	_, port, _ := net.SplitHostPort(c.listen)
+	client := &http.Client{Timeout: 4 * time.Second, Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "127.0.0.1", MinVersion: tls.VersionTLS13},
+	}}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://127.0.0.1:"+port+"/healthz", nil)
+	if err != nil {
+		return err
+	}
+	request.Host = c.allowedHosts[0]
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthz answered %d: %s", response.StatusCode, body)
+	}
+	fmt.Printf("%s", body)
+	return nil
+}

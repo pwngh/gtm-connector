@@ -1,0 +1,214 @@
+// Package httptransport is the browser surface of gtm-connector serve: the
+// JSON API under /api/v1, the web app's build with history fallback, and
+// /healthz. Every request's Host must be on a configured list, and every
+// browser write must come from the configured public origin with the
+// session's CSRF token.
+package httptransport
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/pwngh/gtm-connector/internal/authz"
+	"github.com/pwngh/gtm-connector/internal/storage/postgres"
+)
+
+// Config is what the browser surface needs to know about its install.
+type Config struct {
+	// PublicOrigin is the one origin browser writes may come from, such as
+	// https://127.0.0.1:8443. It is configured, never derived from a request.
+	PublicOrigin string
+	// AllowedHosts are the Host header values served, such as
+	// 127.0.0.1:8443 and localhost:8443. Anything else is refused, which
+	// also blocks DNS rebinding.
+	AllowedHosts []string
+	// WebDir holds the web app's build (index.html and assets/). Empty
+	// serves the API without the app.
+	WebDir string
+	// SessionTTL is how long a signed-in session lasts; PreSessionTTL how
+	// long a sign-in CSRF token does.
+	SessionTTL, PreSessionTTL time.Duration
+	// MCP, when set, serves /mcp. It does its own admission checks.
+	MCP http.Handler
+}
+
+// Sessions is the session storage the surface needs.
+type Sessions interface {
+	CreateSession(ctx context.Context, idSHA256 []byte, principal *postgres.Principal, ttl time.Duration) (time.Time, error)
+	LiveSession(ctx context.Context, idSHA256 []byte) (postgres.Session, error)
+	SignIn(ctx context.Context, oldIDSHA256, idSHA256 []byte, principal postgres.Principal, ttl time.Duration) (time.Time, error)
+	RevokeSession(ctx context.Context, idSHA256 []byte) error
+	DemoPrincipalByLogin(ctx context.Context, login string) (postgres.Principal, []byte, error)
+	Ping(ctx context.Context) error
+}
+
+// Server is the browser surface.
+type Server struct {
+	cfg      Config
+	sessions Sessions
+	evidence authz.Evidence
+	hosts    map[string]bool
+	web      *os.Root
+	mux      *http.ServeMux
+}
+
+// New checks cfg and builds the surface.
+func New(cfg Config, sessions Sessions, evidence authz.Evidence) (*Server, error) {
+	origin, err := url.Parse(cfg.PublicOrigin)
+	if err != nil || origin.Scheme != "https" || origin.Host == "" || origin.Path != "" ||
+		origin.RawQuery != "" || origin.Fragment != "" || origin.User != nil {
+		return nil, fmt.Errorf("the public origin must be https://host[:port], not %q", cfg.PublicOrigin)
+	}
+	if len(cfg.AllowedHosts) == 0 {
+		return nil, errors.New("at least one allowed host is required")
+	}
+	if cfg.SessionTTL <= 0 {
+		cfg.SessionTTL = 8 * time.Hour
+	}
+	if cfg.PreSessionTTL <= 0 {
+		cfg.PreSessionTTL = time.Hour
+	}
+	s := &Server{cfg: cfg, sessions: sessions, evidence: evidence, hosts: map[string]bool{}}
+	for _, host := range cfg.AllowedHosts {
+		s.hosts[strings.ToLower(host)] = true
+	}
+	if !s.hosts[strings.ToLower(origin.Host)] {
+		return nil, fmt.Errorf("the public origin's host %s is not an allowed host", origin.Host)
+	}
+	if cfg.WebDir != "" {
+		root, err := os.OpenRoot(cfg.WebDir)
+		if err != nil {
+			return nil, fmt.Errorf("web app folder: %w", err)
+		}
+		s.web = root
+	}
+	s.routes()
+	return s, nil
+}
+
+// Close releases the web app folder.
+func (s *Server) Close() error {
+	if s.web != nil {
+		return s.web.Close()
+	}
+	return nil
+}
+
+func (s *Server) routes() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/session", s.getSession)
+	mux.HandleFunc("POST /api/v1/session", s.signIn)
+	mux.HandleFunc("DELETE /api/v1/session", s.signOut)
+	mux.HandleFunc("GET /api/v1/accounts/{account}/cards", s.signedIn(s.accountCards))
+	mux.HandleFunc("GET /api/v1/cards/{card}", s.signedIn(s.card))
+	mux.HandleFunc("GET /api/v1/cards/{card}/bytes", s.signedIn(s.cardBytes))
+	mux.HandleFunc("GET /api/v1/cards/{card}/units/{n}", s.signedIn(s.unit))
+	mux.HandleFunc("GET /api/v1/receipts/{receipt}", s.signedIn(s.receipt))
+	notFound := func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "not_found", "Not found.")
+	}
+	// Both spellings, so ServeMux never answers with an HTML redirect.
+	for _, pattern := range []string{"/api", "/api/", "/.well-known", "/.well-known/"} {
+		mux.HandleFunc(pattern, notFound)
+	}
+	mux.HandleFunc("/healthz", s.healthz)
+	mcp := s.cfg.MCP
+	if mcp == nil {
+		mcp = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusNotFound, "not_found", "MCP is not served here yet.")
+		})
+	}
+	mux.Handle("/mcp", mcp)
+	mux.Handle("/mcp/", mcp)
+	mux.HandleFunc("/", s.serveApp)
+	s.mux = mux
+}
+
+// ServeHTTP checks the Host, then the origin of any browser write, then routes.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	header := w.Header()
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("Referrer-Policy", "no-referrer")
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("Cross-Origin-Opener-Policy", "same-origin")
+	header.Set("Cross-Origin-Resource-Policy", "same-origin")
+	if !s.hosts[strings.ToLower(r.Host)] {
+		writeError(w, http.StatusMisdirectedRequest, "untrusted_host", "This Host is not served here.")
+		return
+	}
+	if isWrite(r.Method) && !isMCP(r.URL.Path) {
+		if code, message := s.checkOrigin(r); code != "" {
+			writeError(w, http.StatusForbidden, code, message)
+			return
+		}
+	}
+	s.mux.ServeHTTP(w, r)
+}
+
+func isWrite(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	return true
+}
+
+func isMCP(path string) bool { return path == "/mcp" || strings.HasPrefix(path, "/mcp/") }
+
+// checkOrigin requires exactly one Origin header equal to the public origin.
+// A missing or "null" Origin is refused: a write must say where it came from.
+func (s *Server) checkOrigin(r *http.Request) (code, message string) {
+	origins := r.Header.Values("Origin")
+	switch {
+	case len(origins) == 0:
+		return "origin_required", "A write must carry an Origin header."
+	case len(origins) > 1:
+		return "origin_refused", "A write must carry one Origin header."
+	case origins[0] == "null":
+		return "origin_refused", "A write from an opaque origin is refused."
+	case origins[0] != s.cfg.PublicOrigin:
+		return "origin_refused", "A write from another origin is refused."
+	}
+	return "", ""
+}
+
+func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if err := s.sessions.Ping(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "database_unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type apiError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func writeError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]apiError{"error": {code, message}})
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		status, body = http.StatusInternalServerError, []byte(`{"error":{"code":"internal","message":"Internal error."}}`)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	w.Write(append(body, '\n'))
+}
