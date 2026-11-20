@@ -176,6 +176,39 @@ the tested client. Other assistant apps are untested. [Clients](docs/clients.md)
 
 The card shows what the records say, not whether a source is true.
 
+## The Go server (in progress)
+
+The Go program at the root serves a read-only evidence API and the web app over HTTPS, on PostgreSQL.
+It does not read sources yet, so it has no cards of its own. It needs Docker with Compose (Docker
+Desktop, or Colima with `docker-compose`).
+
+```sh
+make dev                        # PostgreSQL in Compose, the server on this machine (needs Go and Node)
+make up                         # PostgreSQL and the server in Compose
+make down                       # stop; the database and credentials are kept
+make backup                     # the database and the credentials folder, into one file
+make restore BACKUP=gtm-....tar.gz   # into an empty database (make clean deletes the database)
+make test                       # go vet and the Go tests against the Compose database
+```
+
+Add `POSTGRES=18.7` to any of these to use the pinned fallback PostgreSQL, on its own volume.
+
+Open `https://127.0.0.1:8443/`; `localhost` redirects there. The first run writes `.env` (mode 0600,
+with random passwords for two database roles) and a private credentials folder,
+`~/.config/gtm-connector/credentials` (mode 0700, files 0600): the owner secret, the session key, the
+local TLS certificate and key, and the demo sign-in in `demo-credentials.json`. Setup, backup and
+restore connect as the database owner; the server connects as an app role that reads and writes rows
+and cannot change the schema or switch off a check. Browsers do not separate cookies by port, so
+another HTTPS server on `127.0.0.1` would see this one's cookies.
+
+Backups go to `~/.config/gtm-connector/backups`. A backup's digests detect corruption only: they
+are stored in the backup itself, so they do not prove who made it. A restore needs an empty
+database, and each credential must be absent or the same as the backup's. It refuses any row the
+server would refuse on writing, such as a card whose seal does not name its bytes. If a restore
+stops after the database is in, run the same command again to finish it; setup and the server wait
+until it is finished. On Colima, if a port does not answer, the Makefile forwards it with
+`scripts/colima-forward.sh`.
+
 ## Limits
 
 - Nothing here was tried on a real deal. The cases test correctness on invented data, not usefulness.

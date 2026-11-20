@@ -31,7 +31,11 @@ app. Until the Go CLI ships, the Python package is the product and the reference
 
 The Go port is the module at the root, in `internal/`: `unicodetab` (generated from `testdata/oracle/unicode`),
 `strictjson`, `evidence` (neutralized text, sentences, the card), `receipts`, `cards` (make, seal, verify, admit)
-and `sources/demo`. Its tests check it against `testdata/oracle/`.
+and `sources/demo`. Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate.
+`storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
+rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
+surface, and `cmd/gtm-connector` `setup`, `serve`, `backup` and `restore`.
+Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
 
 ```sh
 python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r requirements-dev.lock
@@ -39,6 +43,7 @@ python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r req
 .venv/bin/python -m unittest discover -s tests     # about 3 minutes; tests_stateful is separate
 .venv/bin/python -m ruff check . && .venv/bin/python -m mypy
 GOTOOLCHAIN=local go vet ./... && GOTOOLCHAIN=local go test ./...   # the Go port, in seconds
+make test                                          # the same, with PostgreSQL in Compose
 ```
 
 ## How to work

@@ -1,0 +1,240 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"slices"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+)
+
+// backupTables are copied in this order, so every foreign key points at a
+// table, or (for receipts) a row, that is already restored. Sessions are left
+// out: a restore signs everyone out.
+var backupTables = []struct{ name, order string }{
+	{"workspaces", "id"},
+	{"principals", "id"},
+	{"accounts", "workspace_id, ref"},
+	{"account_grants", "workspace_id, principal_id, account_ref"},
+	{"machine_tokens", "id"},
+	{"connections", "id"},
+	{"source_records", "id"},
+	// A parent receipt always starts before its children.
+	{"receipts", "started_at, id"},
+	{"receipt_records", "receipt_id, ordinal"},
+	{"receipt_deliveries", "receipt_id"},
+	{"cards", "id"},
+	{"evidence_units", "card_id, n"},
+	{"gaps", "card_id, ordinal"},
+}
+
+// TableCopy describes one table in a backup.
+type TableCopy struct {
+	Name    string   `json:"name"`
+	Columns []string `json:"columns"`
+	Rows    int64    `json:"rows"`
+}
+
+// Dump writes every table, in PostgreSQL's COPY text format, from one
+// read-only snapshot. open gives the writer for each table. It returns the
+// schema version and what it wrote.
+func (s *Store) Dump(ctx context.Context, open func(table string) (io.WriteCloser, error)) (int, []TableCopy, error) {
+	version, err := s.SchemaVersion(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+	if version != LatestSchemaVersion() {
+		return 0, nil, fmt.Errorf("the database is at schema %d; run serve or setup to migrate it to %d first",
+			version, LatestSchemaVersion())
+	}
+	var copies []TableCopy
+	err = pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
+		func(tx pgx.Tx) error {
+			for _, table := range backupTables {
+				columns, err := tableColumns(ctx, tx, table.name)
+				if err != nil {
+					return err
+				}
+				w, err := open(table.name)
+				if err != nil {
+					return err
+				}
+				tag, err := tx.Conn().PgConn().CopyTo(ctx, w, fmt.Sprintf(
+					"COPY (SELECT %s FROM %s ORDER BY %s) TO STDOUT",
+					quoteColumns(columns), pgx.Identifier{table.name}.Sanitize(), table.order))
+				if closeErr := w.Close(); err == nil {
+					err = closeErr
+				}
+				if err != nil {
+					return fmt.Errorf("%s: %w", table.name, err)
+				}
+				copies = append(copies, TableCopy{table.name, columns, tag.RowsAffected()})
+			}
+			return nil
+		})
+	return version, copies, err
+}
+
+// Restore loads a dump into an empty database. In one transaction it creates
+// the schema at the dump's version, copies every table with the tables' own
+// triggers off, checks the row counts, checks the loaded rows against every
+// rule the triggers enforce (gtm_integrity_violations), and records the
+// restore as waiting for its credentials. Then it migrates to the latest
+// version. FinishRestore records that the credentials are in place.
+func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion int, copies []TableCopy,
+	open func(table string) (io.ReadCloser, error)) error {
+	if schemaVersion < 1 || schemaVersion > LatestSchemaVersion() {
+		return fmt.Errorf("the backup is at schema %d; this binary knows 1 to %d", schemaVersion, LatestSchemaVersion())
+	}
+	if len(copies) != len(backupTables) {
+		return errors.New("the backup does not list the expected tables")
+	}
+	for i, table := range backupTables {
+		if copies[i].Name != table.name {
+			return fmt.Errorf("the backup lists %q where %q belongs", copies[i].Name, table.name)
+		}
+	}
+	list, err := migrations()
+	if err != nil {
+		return err
+	}
+	// One transaction for the schema and the rows: a failed restore leaves
+	// the database empty, so it can be run again.
+	err = s.inTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationLock); err != nil {
+			return err
+		}
+		// Empty means no table, view, sequence or function in the schema at
+		// all, checked under the lock that migrations take.
+		var objects int
+		if err := tx.QueryRow(ctx, `
+			SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+			         WHERE n.nspname = current_schema())
+			     + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+			         WHERE n.nspname = current_schema())`).Scan(&objects); err != nil {
+			return err
+		}
+		if objects != 0 {
+			return errors.New("restore needs an empty database; this one already holds tables or functions")
+		}
+		if _, err := tx.Exec(ctx, createMigrationsTable); err != nil {
+			return err
+		}
+		for _, m := range list[:schemaVersion] {
+			if _, err := tx.Exec(ctx, m.sql); err != nil {
+				return fmt.Errorf("migration %s: %w", m.name, err)
+			}
+			if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, $2, $3)",
+				m.version, m.name, m.sha256); err != nil {
+				return err
+			}
+		}
+		for _, c := range copies {
+			columns, err := tableColumns(ctx, tx, c.Name)
+			if err != nil {
+				return err
+			}
+			if !slices.Equal(columns, c.Columns) {
+				return fmt.Errorf("%s: the backup's columns differ from schema %d", c.Name, schemaVersion)
+			}
+			if _, err := tx.Exec(ctx, "ALTER TABLE "+pgx.Identifier{c.Name}.Sanitize()+" DISABLE TRIGGER USER"); err != nil {
+				return err
+			}
+		}
+		for _, c := range copies {
+			r, err := open(c.Name)
+			if err != nil {
+				return err
+			}
+			tag, err := tx.Conn().PgConn().CopyFrom(ctx, r, fmt.Sprintf("COPY %s (%s) FROM STDIN",
+				pgx.Identifier{c.Name}.Sanitize(), quoteColumns(c.Columns)))
+			if closeErr := r.Close(); err == nil {
+				err = closeErr
+			}
+			if err != nil {
+				return fmt.Errorf("%s: %w", c.Name, err)
+			}
+			if tag.RowsAffected() != c.Rows {
+				return fmt.Errorf("%s: restored %d rows, the backup lists %d", c.Name, tag.RowsAffected(), c.Rows)
+			}
+		}
+		for _, c := range copies {
+			if _, err := tx.Exec(ctx, "ALTER TABLE "+pgx.Identifier{c.Name}.Sanitize()+" ENABLE TRIGGER USER"); err != nil {
+				return err
+			}
+		}
+		// The rows went in with the triggers off: check every rule the
+		// triggers enforce on writing before anything commits.
+		rows, err := tx.Query(ctx, "SELECT v FROM gtm_integrity_violations() v LIMIT 5")
+		if err != nil {
+			return err
+		}
+		violations, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		if len(violations) > 0 {
+			return fmt.Errorf("the backup holds rows the connector would refuse: %s", strings.Join(violations, "; "))
+		}
+		_, err = tx.Exec(ctx, "INSERT INTO restores (archive_sha256) VALUES ($1)", archiveSHA256)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return s.Migrate(ctx)
+}
+
+func tableColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT attname FROM pg_attribute
+		 WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped
+		 ORDER BY attnum`, table)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+func quoteColumns(columns []string) string {
+	quoted := make([]string, len(columns))
+	for i, c := range columns {
+		quoted[i] = pgx.Identifier{c}.Sanitize()
+	}
+	return strings.Join(quoted, ", ")
+}
+
+// PendingRestore gives the archive digest of a restore whose credentials
+// were not installed yet, or "".
+func (s *Store) PendingRestore(ctx context.Context) (string, error) {
+	var exists bool
+	if err := s.pool.QueryRow(ctx, "SELECT to_regclass('restores') IS NOT NULL").Scan(&exists); err != nil || !exists {
+		return "", err
+	}
+	var archive string
+	err := s.pool.QueryRow(ctx, `SELECT archive_sha256 FROM restores WHERE credentials_installed_at IS NULL
+		ORDER BY restored_at DESC LIMIT 1`).Scan(&archive)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return archive, err
+}
+
+// FinishRestore records that a restore's credentials are installed.
+func (s *Store) FinishRestore(ctx context.Context, archiveSHA256 string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE restores SET credentials_installed_at = now()
+		WHERE archive_sha256 = $1 AND credentials_installed_at IS NULL`, archiveSHA256)
+	return err
+}
+
+// BackupTableNames lists the tables a backup holds, in restore order.
+func BackupTableNames() []string {
+	names := make([]string, len(backupTables))
+	for i, table := range backupTables {
+		names[i] = table.name
+	}
+	return names
+}

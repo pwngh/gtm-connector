@@ -1,0 +1,10 @@
+# The image needs go.mod, go.sum, cmd/, internal/ and web/ only.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!web/
+web/node_modules/
+web/dist/
+**/*_test.go

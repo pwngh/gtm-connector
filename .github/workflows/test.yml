@@ -70,6 +70,30 @@ jobs:
   go:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # The pinned PostgreSQL, and the fallback one major version back.
+        postgres:
+          - postgres:19.0-alpine3.24@sha256:8b0ff4cdf221f0c53d7fcda681d3b461be725c492cd881c5ec9c0ad25023f188
+          - postgres:18.7-alpine3.24@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff
+    services:
+      postgres:
+        image: ${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: gtm
+          POSTGRES_DB: gtm
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+        # Trust authentication, so the port answers on the runner's loopback only.
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gtm -d gtm"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      GTM_TEST_DATABASE_URL: postgres://gtm@localhost:5432/gtm?sslmode=disable
+      GTM_REQUIRE_DATABASE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,6 +104,26 @@ jobs:
       - run: |
           go vet ./...
           go test -race ./...
+
+  # Compose startup end to end: the image builds, setup runs as the owner,
+  # the server starts as the app role, and TLS health and demo sign-in work.
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make up
+      - run: scripts/smoke.sh
+      - name: make -n prints no password
+        run: |
+          for key in POSTGRES_PASSWORD GTM_APP_PASSWORD; do
+            secret="$(sed -n "s/^$key=//p" .env)"
+            if make -n dev test up backup restore BACKUP=x | grep -qF "$secret"; then exit 1; fi
+          done
+      - if: failure()
+        run: docker compose logs --no-color
 
   inspector:
     runs-on: ubuntu-latest
