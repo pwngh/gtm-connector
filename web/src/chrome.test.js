@@ -330,6 +330,34 @@ test('a target waiting behind a dialog takes focus only if the dialog returns fo
   }
 });
 
+test('a late Work plan target stays dropped once focus has moved on, even after focus falls back to the body', () => {
+  // From a Work queue link: the heading holds focus, the user moves to Search, then clicks the page background.
+  const item = buildWorklist(initialState).workItems.find(row => row.kind === 'inspection');
+  let page = bench(renewalFixture.paths.workplan + '?' + new URLSearchParams({workItem: item.id}));
+  page.render(); let tree = page.render(); dom.flushFrames();
+  dom.mainHeading.focus(); dom.get('search').focus(); document.activeElement = document.body;
+  const target = element('work-item'); dom.targets.set(item.entryTargetId, target);
+  pageDone(tree, renewalFixture.paths.workplan); page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, document.body);
+  assert.equal(target.calls.length, 0);
+  page.hooks.dispose();
+  // From Evidence: the opener is gone, the heading holds focus, then Search, then the background.
+  dom.targets.clear();
+  const evidence = renewalFixture.paths.evidence, workplan = renewalFixture.paths.workplan;
+  page = bench(evidence); pageDone(page.render(), evidence); tree = page.render();
+  const opener = element('inspect-source'); opener.focus();
+  byClass(tree, 'context-link').props.onClick(); tree = page.render();
+  dialogContent(tree).props.openStep(3);
+  opener.isConnected = false; document.activeElement = document.body;
+  tree = page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, dom.mainHeading);
+  dom.get('search').focus(); document.activeElement = document.body;
+  const step = stepTarget(3);
+  pageDone(tree, workplan); page.render(); dom.flushFrames();
+  assert.equal(document.activeElement, document.body);
+  assert.equal(step.calls.length, 0);
+});
+
 test('View affected task from Evidence focuses the step once the Work plan arrives', () => {
   const evidence = renewalFixture.paths.evidence, workplan = renewalFixture.paths.workplan;
   const page = bench(evidence); pageDone(page.render(), evidence); let tree = page.render();

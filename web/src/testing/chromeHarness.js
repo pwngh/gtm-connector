@@ -44,7 +44,7 @@ export function element(key) {
   return {key, tabIndex: 0, isConnected: true, visible: true, inert: false, calls: [],
     getClientRects() {return this.visible ? [{}] : [];},
     closest(selector) {return this.inert && selector.includes('[inert]') ? this : null;},
-    focus(options) {if (!this.inert && this.visible) {this.calls.push(['focus', options]); document.activeElement = this;}},
+    focus(options) {if (!this.inert && this.visible) {this.calls.push(['focus', options]); document.activeElement = this; document.dispatchEvent?.(new Event('focusin'));}},
     scrollIntoView(options) {this.calls.push(['scroll', options]);},
   };
 }

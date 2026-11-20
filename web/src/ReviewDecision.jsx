@@ -1,7 +1,7 @@
 import {renewalFixture,fixturePeople} from './renewalFixtures.js';
 import React, {useEffect, useId, useRef, useState} from 'react';
 import {FileText, CheckCircle2, Clock, ShieldCheck} from 'lucide-react';
-import {customerAuthorityLabel} from './renewalEvidence.js';
+import {awaitedCounsel, awaitedCounselNote, decisionAuthorityLabel} from './renewalEvidence.js';
 import {ReviewerInput} from './EvidenceNotes.jsx';
 
 // File inspection and the per-document prescription remain distinct
@@ -36,7 +36,7 @@ export default function ReviewDecision({type, state, derived, onCancel, onPerfor
     request: {action: 'request_review', enabled: derived.canRequestReview, label: 'Request review', message: `Review requested from ${fixturePeople.internalReviewer}`},
     review: {action: 'approve_plan', enabled: derived.canApprovePlan, label: state.task ? 'Approve and resume task' : 'Approve and create task', message: state.task ? 'Plan approved. Existing task resumed.' : 'Plan approved. Document task created.'},
     verify: {action: 'verify_document', enabled: derived.canVerifyDocument, label: 'Confirm document matches requirements', message: 'Document version verified'},
-    resolve: {action: 'resolve_requirement', enabled: derived.canResolveRequirement, label: 'Record resolution', message: 'Condition resolved with reviewed evidence'},
+    resolve: {action: 'resolve_requirement', enabled: derived.canResolveRequirement, label: 'Record resolution', message: 'Condition resolved from reviewer input'},
     counselRequest: {action: 'request_customer_review', enabled: derived.canRequestCustomerReview, label: 'Record review request', message: 'Counsel review request recorded'},
   }[type];
   if (!configuration) return null;
@@ -62,14 +62,14 @@ export default function ReviewDecision({type, state, derived, onCancel, onPerfor
       <div className="decision-context"><span className="mini-label">CUSTOMER REVIEW HANDOFF</span><span>Plan version {plan.revision}</span></div>
       <h3 className="decision-title">Ready for customer counsel.</h3>
       <DocumentHandoff document={doc} verified={derived.isDocumentVerified} onInspect={inspect}/>
-      <div className="decision-people"><div><span>For</span><strong>{fixturePeople.customerCounsel}</strong><small>Customer counsel · decision authority {customerAuthorityLabel.toLowerCase()}</small></div><div><span>Recorded by</span><strong>{plan.owner}</strong><small>Document task owner</small></div></div>
+      <div className="decision-people"><div><span>For</span><strong>{awaitedCounsel.label}</strong><small>{awaitedCounselNote}</small></div><div><span>Recorded by</span><strong>{plan.owner}</strong><small>Document task owner</small></div></div>
       <p className="decision-boundary">This records an internal review request. No message is sent. Counsel’s decision and its supporting evidence are recorded in the next step.</p>
     </>}
     {type === 'resolve' && <>
       <div className="decision-context"><span className="mini-label"><ShieldCheck size={14}/> REVIEWER INPUT IN WALKTHROUGH</span><span>{renewalFixture.agreement.label}</span></div>
       <h3 className="decision-title">Resolve the customer condition.</h3>
       <ReviewerInput label="Decision text">{decision?.evidenceText}</ReviewerInput>
-      <div className="decision-people"><div><span>Customer reviewer (reviewer input)</span><strong>{decision?.reviewedBy}</strong><small>Customer decision authority: {customerAuthorityLabel.toLowerCase()}</small></div><div><span>Recorded by</span><strong>{decision?.recordedBy}</strong></div></div>
+      <div className="decision-people"><div><span>Customer reviewer (reviewer input)</span><strong>{decision?.reviewedBy}</strong><small>Customer decision authority: {decisionAuthorityLabel().toLowerCase()}</small></div><div><span>Recorded by</span><strong>{decision?.recordedBy}</strong></div></div>
       <div className="decision-binding"><FileText size={18}/><div><strong>{doc?.title || doc?.name}</strong><p>Document version {decision?.documentVersion} · Plan version {decision?.planRevision}</p></div></div>
       <p className="decision-boundary">This records a walkthrough resolution from typed reviewer input, not an evidence-backed authority finding. Separate work-item outputs and the commercial renewal are unchanged.</p>
     </>}

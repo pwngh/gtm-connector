@@ -1,17 +1,23 @@
 import React from 'react';
 import {CircleDashed, Database, MessageSquare, Phone} from 'lucide-react';
 import {Pill} from './WorkspaceControls.jsx';
-import {customerAuthorityLabel, evidenceCut, sourceCard, sourceReadLabel, speakerRole, workflowNoteText} from './renewalEvidence.js';
+import {decisionAuthorityLabel, evidenceCut, excerptAround, sourceCard, sourceReadLabel, speakerLine, speakerRole} from './renewalEvidence.js';
 
 // Shared evidence labels for Work plan, Evidence and their dialogs. Authored
 // context, typed input and gaps each carry a label, apart from the quotation.
 
-// Compact notes add the speaker's authority. Detailed notes sit beside the full role.
+// Authored for this walkthrough, never said by the speaker. Compact notes keep the meaning only.
+export const workflowNoteLabel = 'Workflow note · applied for this walkthrough';
 export function WorkflowNote({source, detail = false}) {
   return <div className="workflow-note">
-    <span className="note-label">Workflow note</span>
-    {detail ? <><p>{source.meaning}.</p>{source.detail && <p>{source.detail}</p>}</> : <p>{workflowNoteText(source)}</p>}
+    <span className="note-label">{workflowNoteLabel}</span>
+    <p>{source.meaning}.</p>{detail && source.detail && <p>{source.detail}</p>}
   </div>;
+}
+
+// The role, its basis and authority in one caption, for previews beside a quotation.
+export function SpeakerLine({source}) {
+  return <p className="speaker-line">{speakerLine(source)}</p>;
 }
 
 // Only a cut unit gets a label. A whole sentence is shown as it is.
@@ -31,6 +37,18 @@ export function SpeakerRows({source}) {
   </>;
 }
 
+// The text around the cited unit, labelled as context and never shown as the quotation.
+export function SourceExcerpt({source}) {
+  if (!source.context) return null;
+  const around = excerptAround(source);
+  const parts = around ? [['Before', around.before], ['After', around.after]].filter(([, text]) => text) : [['Excerpt', source.context]];
+  if (!parts.length) return null;
+  return <div className="source-excerpt">
+    <span className="note-label">Neighbouring text in the preserved excerpt</span>
+    {parts.map(([place, text]) => <p key={place}><span className="excerpt-place">{place}</span>{text}</p>)}
+  </div>;
+}
+
 export function SpeakerRole({source}) {
   return <dl className="speaker-role"><SpeakerRows source={source}/></dl>;
 }
@@ -40,7 +58,7 @@ export function ReviewerInput({label, children}) {
 }
 
 export function DecisionAuthority() {
-  return <div><dt>Customer decision authority</dt><dd>{customerAuthorityLabel}</dd></div>;
+  return <div><dt>Customer decision authority</dt><dd>{decisionAuthorityLabel()}</dd></div>;
 }
 
 const sourceIcons = {call: Phone, message: MessageSquare, record: Database};
