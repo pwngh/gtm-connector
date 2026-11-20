@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sqlite3
 import tempfile
@@ -33,6 +34,16 @@ _SHAPES = (
 _SEALED = re.compile(r"(briefs/<brief-[0-9]+>/)[0-9a-f]{64}")
 
 
+def _unquoted(text: str, path: str) -> str:
+    """Where the package shell-quotes an argument that holds the path, as shlex.quote does when the path has a
+    space or a quote, the argument is written as it would be without those quotes. So a folder whose name needs
+    quoting normalizes as one that does not."""
+    if shlex.quote(path) == path:
+        return text
+    quoted = re.compile("'" + re.escape(path.replace("'", "'\"'\"'")) + "((?:[^']|'\"'\"')*)'")
+    return quoted.sub(lambda found: path + found[1].replace("'\"'\"'", "'"), text)
+
+
 class Session:
     """Runs commands in process, as a user would, and keeps each one's normalized output and exit code."""
 
@@ -46,6 +57,8 @@ class Session:
         self.count = 0
 
     def normalize(self, text: str) -> str:
+        # The state folder is inside the session folder, so one pass covers both.
+        text = _unquoted(text, str(self.folder))
         text = text.replace(str(self.state), "<state>").replace(str(self.folder), "<folder>")
         found: list[tuple[int, str, str]] = []
         for name, pattern in _SHAPES:
@@ -138,26 +151,31 @@ def _session(folder: Path) -> list[dict]:
     return session.rows
 
 
-def _audit_rows(directory: Path) -> list[dict]:
+def _audit_log(directory: Path) -> dict:
+    """The audit log as a verifier reads it: its schema as sqlite_master holds it, its column names, and its rows."""
     with closing(sqlite3.connect((directory / "audit.sqlite3").as_uri() + "?mode=ro", uri=True)) as database:
-        database.row_factory = sqlite3.Row
-        return [dict(row) for row in database.execute("SELECT * FROM audit_log ORDER BY rowid")]
+        schema = [list(row) for row in database.execute(
+            "SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name")]
+        cursor = database.execute("SELECT * FROM audit_log ORDER BY rowid")
+        columns = [column[0] for column in cursor.description]
+        rows = [dict(zip(columns, row)) for row in cursor]
+    return {"schema": schema, "columns": columns, "rows": rows}
 
 
 def _folder(writer: Writer, name: str, directory: Path, keep: tuple[str, ...]) -> None:
     """A state folder as a verifier reads it: the card files byte for byte, the audit log as a gzip of its SQLite
     file, and its rows as JSON. The SQLite file's bytes depend on the SQLite library, so the manifest digests its
-    rows instead."""
+    schema, column names and rows instead."""
     for folder in keep:
         for path in sorted((directory / folder).glob("*.json")):
             writer.raw(f"folders/{name}/{folder}/{path.name}", path.read_bytes())
     profile = directory / "profile.json"
     if profile.exists():
         writer.raw(f"folders/{name}/profile.json", profile.read_bytes())
-    rows = _audit_rows(directory)
-    writer.lines(f"folders/{name}/audit.jsonl", rows)
-    writer.raw(f"folders/{name}/audit.sqlite3.gz", (directory / "audit.sqlite3").read_bytes(), len(rows),
-               digested=json.dumps(rows, ensure_ascii=True).encode())
+    log = _audit_log(directory)
+    writer.lines(f"folders/{name}/audit.jsonl", log["rows"])
+    writer.raw(f"folders/{name}/audit.sqlite3.gz", (directory / "audit.sqlite3").read_bytes(), len(log["rows"]),
+               digested=json.dumps(log, ensure_ascii=True).encode())
 
 
 def _cli_card(writer: Writer, folder: Path) -> None:
@@ -169,23 +187,83 @@ def _cli_card(writer: Writer, folder: Path) -> None:
     _folder(writer, "cli_card", state, ("briefs",))
 
 
-def _prepared(writer: Writer, folder: Path) -> None:
-    """A brief an assistant prepared in selected mode, with a grant that lacks Slack."""
-    state, path = folder / "prepared", folder / "selection.json"
-    path.write_text(json.dumps({"schema_version": 1, "accounts": [{"account_id": "acc-007", "slack": True}]}))
+def _selection(path: Path, accounts: list[dict]) -> Any:
+    path.write_text(json.dumps({"schema_version": 1, "accounts": accounts}))
     os.chmod(path, 0o600)
-    selection = load_selection(path, crm_backend="sqlite")
-    with freeze.scope("folders/prepared"), Runtime(state, selection=selection) as runtime, \
+    return load_selection(path, crm_backend="sqlite")
+
+
+class _Reads:
+    """read_renewal_brief calls against the prepared brief: each one's change, grant, response and receipts."""
+
+    def __init__(self, brief_id: str) -> None:
+        self.brief_id = brief_id
+        self.rows: list[dict] = []
+
+    def read(self, runtime: Any, owner: Any, label: str, change: str, scopes: list[str],
+             token: str | None = None) -> dict:
+        token = owner.authorize(scopes) if token is None else token
+        before = len(runtime.connector.audit.read())
+        response = owner.call(token, "read_renewal_brief", {"brief_id": self.brief_id})
+        row = {"label": label, "change": change, "scopes": scopes, "arguments": {"brief_id": self.brief_id},
+               "http_status": response.status_code, "response": response.json(),
+               "receipts": runtime.connector.audit.read()[before:]}
+        self.rows.append(row)
+        return row
+
+
+def _prepared(writer: Writer, folder: Path) -> None:
+    """A brief an assistant prepared in selected mode, with a grant that lacks Slack, saved as a verifier admits
+    it. Then read_renewal_brief reads it again, and is refused when its bytes, its selection, its grant or the
+    token's lifetime no longer cover it."""
+    state, scopes = folder / "prepared", ["crm:read", "calls:read"]
+    selection = _selection(folder / "selection.json", [{"account_id": "acc-007", "slack": True}])
+    with freeze.scope("folders/prepared") as scope, Runtime(state, selection=selection) as runtime, \
             LocalClient(runtime.config) as owner:
-        token = owner.authorize(["crm:read", "calls:read"])
+        token = owner.authorize(scopes)
         response = owner.call(token, "prepare_renewal_brief", {"account_id": "acc-007"})
         result = response.json()["result"]
         if response.status_code != 200 or result.get("isError"):
             raise AssertionError(f"the prepared brief was refused: {response.status_code} {response.text[:500]}")
         writer.json("folders/prepared/tool_result.json", {
             "note": "the prepare_renewal_brief result as the assistant received it", "selection": json.loads(
-                path.read_text()), "scopes": ["crm:read", "calls:read"], "result": result["structuredContent"]}, 1)
-    _folder(writer, "prepared", state, ("selected-briefs",))
+                (folder / "selection.json").read_text()), "scopes": scopes, "result": result["structuredContent"]}, 1)
+        # The folder is saved as preparing left it. The reads below add their own receipts, kept in reads.jsonl.
+        _folder(writer, "prepared", state, ("selected-briefs",))
+        brief_id = result["structuredContent"]["brief"]["brief_id"]
+        saved = state / "selected-briefs" / f"{brief_id}.json"
+        payload = saved.read_bytes()
+        reads = _Reads(brief_id)
+        row = reads.read(runtime, owner, "read again", "none", scopes, token)
+        released = row["response"]["result"]["structuredContent"]
+        if (row["http_status"] != 200 or row["response"]["result"].get("isError")
+                or released["records"][0]["record_ref"] != f"briefs/{brief_id}/{hashlib.sha256(payload).hexdigest()}"
+                or released["brief"]["text"] != json.loads(payload)["text"]):
+            raise AssertionError(f"the prepared brief did not read back as saved: {row['response']}")
+        reads.read(runtime, owner, "missing scope", "the grant lacks calls:read, which the brief's call notes need",
+                   ["crm:read"])
+        saved.write_bytes(payload + b"\n")
+        reads.read(runtime, owner, "changed seal", "a newline is appended to the saved brief, so its bytes no "
+                   "longer match the digest its seal receipt names", scopes)
+        saved.write_bytes(payload)
+        # The token's lifetime, by the clock the authority and the gateway read: admitted one second before it
+        # ends, refused at the second it ends.
+        token, lifetime = owner.authorize_with_lifetime(scopes)
+        freeze.CLOCK.advance(lifetime - 1)
+        reads.read(runtime, owner, "token one second before expiry", f"the clock advanced {lifetime - 1} seconds "
+                   "after the token was issued", scopes, token)
+        freeze.CLOCK.advance(1)
+        reads.read(runtime, owner, "token at expiry", f"the clock advanced {lifetime} seconds after the token was "
+                   "issued", scopes, token)
+        receipts = scope.receipts
+    other = _selection(folder / "other-selection.json", [{"account_id": "acc-003", "slack": True}])
+    with freeze.scope("folders/prepared/other selection", receipts=receipts), \
+            Runtime(state, selection=other) as runtime, LocalClient(runtime.config) as owner:
+        reads.read(runtime, owner, "changed selection", "the connector now runs with a selection of acc-003 only",
+                   scopes)
+    if saved.read_bytes() != payload:
+        raise AssertionError("the prepared brief changed while it was read")
+    writer.lines("folders/prepared/reads.jsonl", reads.rows)
 
 
 def generate(writer: Writer) -> None:

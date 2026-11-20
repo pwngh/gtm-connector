@@ -129,9 +129,6 @@ def random_strings(seed: int, count: int, pieces: tuple, *, longest: int = 14) -
 
 # ---- the scanners --------------------------------------------------------------------------------------------
 
-PERCENT = re.compile(r"%(?![0-9a-fA-F]{2})")
-
-
 def _spans(pattern: re.Pattern, text: str) -> list:
     return [[match.start(), match.end()] for match in pattern.finditer(text)]
 
@@ -154,14 +151,49 @@ def _target(text: str) -> int | None:
     return None if found is None else found.end()
 
 
-def _percent(text: str) -> list:
-    """slack_mapping.py and slack_callback.py write this pattern with the hex letters in two orders."""
-    spans = _spans(PERCENT, text)
-    for module in (slack_mapping, slack_callback):
-        source = Path(module.__file__ or "").read_text()
-        if "%(?![0-9a-fA-F]{2})" not in source and "%(?![0-9A-Fa-f]{2})" not in source:
-            raise AssertionError(f"{module.__name__} no longer holds the percent pattern")
-    return spans
+class _SearchRecorder:
+    """The re module as one package module sees it, keeping the compiled pattern of each re.search it makes."""
+
+    def __init__(self) -> None:
+        self.patterns: list[re.Pattern] = []
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(re, name)
+
+    def search(self, pattern: str | re.Pattern, string: str, flags: int = 0) -> re.Match | None:
+        # re.search compiles through the same cache, so this is the object the package's own call uses.
+        compiled = re.compile(pattern, flags)
+        self.patterns.append(compiled)
+        return compiled.search(string)
+
+
+def _searched(module: Any, parse: Callable[[], Any]) -> re.Pattern:
+    """The one pattern a parser path searches with: run the path once on a valid input and keep what it used."""
+    recorder = _SearchRecorder()
+    saved = module.re
+    module.re = recorder
+    try:
+        parse()
+    finally:
+        module.re = saved
+    if len(recorder.patterns) != 1:
+        raise AssertionError(f"{module.__name__} made {len(recorder.patterns)} re.search calls; the oracle expects one")
+    return recorder.patterns[0]
+
+
+def percent_patterns() -> dict[str, re.Pattern]:
+    """The percent patterns as the two parser paths compile them: the thread link's query in
+    parse_thread_selection, and the sign-in callback's query in _callback_fields."""
+    return {
+        "slack_mapping": _searched(slack_mapping, lambda: slack_mapping.parse_thread_selection(
+            thread_url="https://acme.slack.com/archives/C0123ABCD/p1767225600000100?thread_ts=1767225600.000100",
+            workspace_origin="https://acme.slack.com")),
+        "slack_callback": _searched(slack_callback, lambda: slack_callback._callback_fields(
+            b"GET /slack/callback?state=s&code=c HTTP/1.1\r\nHost: localhost:8123", port=8123, state="s")),
+    }
+
+
+PERCENT = percent_patterns()
 
 
 SCANNERS: dict[str, tuple[str, Callable[[str], Any]]] = {
@@ -172,8 +204,14 @@ SCANNERS: dict[str, tuple[str, Callable[[str], Any]]] = {
                            _sentence_end),
     "units_opener": ("units.py:253 _OPENER.match(line, pos) at every pos: [pos, end] where it matches", _opener),
     "units_named": ("units.py:342 _NAMED.match(line): [start, end] of group 1 and the match end, or null", _named),
-    "slack_percent": ("slack_mapping.py:108 and slack_callback.py:163 %(?!hex hex): [start, end] of each match",
-                      _percent),
+    "slack_mapping_percent": (
+        "slack_mapping.py:108 the pattern parse_thread_selection searches a thread link's query with, "
+        f"{PERCENT['slack_mapping'].pattern}: [start, end] of each match",
+        lambda text: _spans(PERCENT["slack_mapping"], text)),
+    "slack_callback_percent": (
+        "slack_callback.py:163 the pattern _callback_fields searches the sign-in callback's query with, "
+        f"{PERCENT['slack_callback'].pattern}: [start, end] of each match",
+        lambda text: _spans(PERCENT["slack_callback"], text)),
 }
 # The searches _continues and _unfinished make with a window. A pattern that opens with ^ must not match at
 # pos > 0, and endpos ends the string as $ and \Z see it.

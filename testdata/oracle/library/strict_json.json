@@ -131,9 +131,21 @@
   },
   {
    "kind": "bytes",
+   "hex": "feff007b002200610022003a00200031007d",
+   "error": "UnicodeDecodeError",
+   "message": "'utf-8' codec can't decode byte 0xfe in position 0: invalid start byte"
+  },
+  {
+   "kind": "bytes",
    "hex": "fffe00007b0000002200000061000000220000003a00000020000000310000007d000000",
    "error": "UnicodeDecodeError",
    "message": "'utf-8' codec can't decode byte 0xff in position 0: invalid start byte"
+  },
+  {
+   "kind": "bytes",
+   "hex": "0000feff0000007b0000002200000061000000220000003a00000020000000310000007d",
+   "error": "UnicodeDecodeError",
+   "message": "'utf-8' codec can't decode byte 0xfe in position 2: invalid start byte"
   },
   {
    "kind": "bytes",

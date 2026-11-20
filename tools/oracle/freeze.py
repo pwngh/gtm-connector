@@ -1,8 +1,9 @@
 """Fixed clocks and IDs for the package's own call sites.
 
-Only calls made from gtm_connector modules get fixed values. Libraries keep the real clock and real random IDs,
-so the HTTPS services and TLS still work. Each card runs in its own scope, named by a key, so its IDs and times
-depend on that key alone and not on what ran before it.
+Only calls made from gtm_connector modules get fixed values, with one exception: the MCP SDK's bearer and token
+checks decide the same expiry as the package's authority, so they read the same clock. Other libraries keep the
+real clock and real random IDs, so the HTTPS services and TLS still work. Each card runs in its own scope, named
+by a key, so its IDs and times depend on that key alone and not on what ran before it.
 """
 
 from contextlib import contextmanager
@@ -22,6 +23,26 @@ EPOCH = datetime(2027, 1, 15, 15, 0, 0, tzinfo=timezone.utc)
 SLACK_EPOCH = datetime(2027, 1, 16, 0, 0, 0, tzinfo=timezone.utc)
 # The monotonic reading every timed package call sees, so every elapsed time is 0.
 MONOTONIC = 1000.0
+
+
+class Clock:
+    """The wall and monotonic readings at every decision point: token and code expiry, the gateway's wall time
+    and rate window, the brief deadlines, and Salesforce's operation budget. They stand still unless a fixture
+    advances them, and each scope starts them at EPOCH and MONOTONIC."""
+
+    def __init__(self) -> None:
+        self.wall = EPOCH.timestamp()
+        self.monotonic = MONOTONIC
+
+    def advance(self, seconds: float) -> None:
+        self.wall += seconds
+        self.monotonic += seconds
+
+    def now(self) -> datetime:
+        return datetime.fromtimestamp(self.wall, timezone.utc)
+
+
+CLOCK = Clock()
 
 _REAL_UUID4 = uuid.uuid4
 _REAL_TOKEN_URLSAFE = secrets.token_urlsafe
@@ -77,10 +98,13 @@ def scope(key: str, *, receipts: int = 0) -> Iterator[Scope]:
         raise ValueError(f"oracle scope used twice: {key}")
     _keys.add(key)
     previous, _current = _current, Scope(key, receipts)
+    readings = CLOCK.wall, CLOCK.monotonic
+    CLOCK.wall, CLOCK.monotonic = EPOCH.timestamp(), MONOTONIC
     try:
         yield _current
     finally:
         _current = previous
+        CLOCK.wall, CLOCK.monotonic = readings
 
 
 def _uuid4() -> uuid.UUID:
@@ -103,11 +127,12 @@ class _ReceiptClock(datetime):
 
 
 class _FixedClock(datetime):
-    """A wall clock that stands still at EPOCH."""
+    """The gateway's and selected briefs' wall clock: CLOCK's reading, EPOCH unless a fixture advances it."""
 
     @classmethod
     def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
-        return EPOCH if tz is not None else EPOCH.replace(tzinfo=None)
+        moment = CLOCK.now()
+        return moment if tz is not None else moment.replace(tzinfo=None)
 
 
 class _SlackClock(datetime):
@@ -119,10 +144,12 @@ class _SlackClock(datetime):
 
 
 def _still_time() -> types.SimpleNamespace:
-    """The time module, with a monotonic clock that does not move."""
+    """The time module, with its wall, monotonic and performance clocks read from CLOCK. sleep stays real."""
     import time
     fields = {name: getattr(time, name) for name in dir(time) if not name.startswith("__")}
-    fields.update(monotonic=lambda: MONOTONIC, perf_counter=lambda: MONOTONIC)
+    fields.update(time=lambda: CLOCK.wall, time_ns=lambda: int(CLOCK.wall * 1e9),
+                  monotonic=lambda: CLOCK.monotonic, monotonic_ns=lambda: int(CLOCK.monotonic * 1e9),
+                  perf_counter=lambda: CLOCK.monotonic, perf_counter_ns=lambda: int(CLOCK.monotonic * 1e9))
     return types.SimpleNamespace(**fields)
 
 
@@ -131,18 +158,25 @@ def install() -> None:
     uuid.uuid4 = _uuid4
     secrets.token_urlsafe = _token_urlsafe
     modules = {name: importlib.import_module(f"gtm_connector.{name}")
-               for name in ("audit", "gateway", "briefing", "selected_briefs", "slack_reader", "slack_auth")}
+               for name in ("audit", "auth", "gateway", "briefing", "selected_briefs", "salesforce", "slack_reader",
+                            "slack_auth")}
     modules["audit"].datetime = _ReceiptClock  # type: ignore[attr-defined]
     for name in ("gateway", "selected_briefs"):
         modules[name].datetime = _FixedClock  # type: ignore[attr-defined]
     for name in ("slack_reader", "slack_auth"):
         modules[name].datetime = _SlackClock  # type: ignore[attr-defined]
         clock = getattr(modules[name], "_Clock")
-        clock.monotonic = staticmethod(lambda: MONOTONIC)
-    for name in ("gateway", "briefing", "selected_briefs"):
+        clock.monotonic = staticmethod(lambda: CLOCK.monotonic)
+    # Authorization codes and tokens expire by auth.py's wall clock, the gateway checks a token against its own,
+    # and a Salesforce read runs on an operation budget.
+    for name in ("auth", "gateway", "briefing", "selected_briefs", "salesforce"):
         modules[name].time = _still_time()  # type: ignore[attr-defined]
+    # The SDK checks the same expiry again on the request path, so it reads the same clock.
+    for name in ("mcp.server.auth.middleware.bearer_auth", "mcp.server.auth.handlers.token"):
+        importlib.import_module(name).time = _still_time()  # type: ignore[attr-defined]
     # The connector's rate and elapsed clock is a default argument, bound when the class was defined.
     connector = getattr(modules["gateway"], "Connector")
     import time
     connector.__init__.__defaults__ = tuple(
-        (lambda: MONOTONIC) if value is time.monotonic else value for value in connector.__init__.__defaults__)
+        (lambda: CLOCK.monotonic) if value is time.monotonic else value
+        for value in connector.__init__.__defaults__)

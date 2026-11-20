@@ -18,7 +18,7 @@ from unittest import mock
 
 import httpx2
 
-from gtm_connector import briefing, slack_auth, slack_reader
+from gtm_connector import briefing, slack_auth, slack_reader, strict_json
 from gtm_connector.audit import read_ids
 from gtm_connector.call_workflow import resolve_call_account
 from gtm_connector.calls_import import CallsImportError, parse_transcript, select_excerpt, store_import
@@ -32,6 +32,16 @@ from oracle.output import Writer
 
 
 CREATE_BRIEF = briefing.create_brief
+BOOKS = Path(__file__).resolve().parents[2] / "tests" / "books"
+
+
+def all_books() -> dict[str, list[dict]]:
+    """Every book in tests/books, by name, read here and not through tests/varied.py, whose BOOKS a test run
+    may narrow with GTM_BOOKS. The oracle always reads them all."""
+    found = {path.stem: strict_json.loads(path.read_bytes())["accounts"] for path in sorted(BOOKS.glob("*.json"))}
+    if not found:
+        raise AssertionError(f"no books in {BOOKS}")
+    return found
 
 
 def _test_module(name: str) -> Any:
@@ -127,8 +137,8 @@ def books_demo(cards: Cards) -> None:
     with _folder() as folder, Runtime(folder / "state") as runtime:
         accounts: list[tuple[str, int, dict, dict]] = []
         number = 300
-        for name in varied.BOOKS:
-            for index, shape in enumerate(varied.read(name)):
+        for name, book in all_books().items():
+            for index, shape in enumerate(book):
                 accounts.append(("books", number, {"book": name, "index": index, "account": shape}, shape))
                 number += 1
         for number, shape in shapes.SHAPES.items():
@@ -154,8 +164,8 @@ def books_salesforce(cards: Cards) -> None:
                                        transport=httpx2.MockTransport(org.respond))
     with _folder() as folder, Runtime(folder / "state", crm_reader=reader) as runtime:
         number = 0
-        for name in varied.BOOKS:
-            for index, account in enumerate(varied.read(name)):
+        for name, book in all_books().items():
+            for index, account in enumerate(book):
                 rows = org_module.org_rows((name, index), account)
                 account_id = org.add(rows)
                 number += 1
@@ -181,8 +191,8 @@ def books_calls(cards: Cards) -> None:
     calls = _test_module("tests.test_books_calls")
     varied = _test_module("tests.varied")
     with _folder() as folder:
-        for name in varied.BOOKS:
-            shapes = dict(enumerate(varied.read(name), 300))
+        for name, book in all_books().items():
+            shapes = dict(enumerate(book, 300))
             carriers = [number for number, shape in shapes.items() if shape.get("transcript")]
             with Runtime(folder / name, calls_backend="imported") as runtime:
                 for number, shape in shapes.items():
@@ -273,8 +283,8 @@ def books_slack(cards: Cards) -> None:
     books = _test_module("tests.test_books_slack")
     varied = _test_module("tests.varied")
     with _folder() as folder:
-        for name in varied.BOOKS:
-            shapes = dict(enumerate(varied.read(name), 300))
+        for name, book in all_books().items():
+            shapes = dict(enumerate(book, 300))
             with ExitStack() as stack:
                 place = _SlackFolder(stack, folder, name, books.Upstream())
                 rows = {number: varied.demo_rows(number, shape) for number, shape in shapes.items()}
@@ -324,15 +334,35 @@ def slack_threads(cards: Cards) -> None:
 
 def cases(cards: Cards) -> None:
     """The ten deals of tests/test_cases.py, run as the tests run them, through the CLI. Each card is kept with
-    the name of the test that made it."""
+    the name of the test that made it. A test's card() seeds the demo stores with a first card of acc-001, inserts
+    its deal's rows, writes sellers.json, and makes the target card; each card's input says which it was."""
     module = _test_module("tests.test_cases")
-    current: dict[str, Any] = {"test": "", "count": 0}
+    current: dict[str, Any] = {"test": "", "count": 0, "deal": None}
+    load = module.card
+
+    def card(test: unittest.TestCase, rows: tuple, *, sellers: tuple = ("Morgan Reed",)) -> dict:
+        account_id, tables = rows
+        current["deal"] = {"account_id": account_id, "rows": plain(tables),
+                           "sellers": {"schema_version": 1, "sellers": list(sellers)}}
+        try:
+            return load(test, rows, sellers=sellers)
+        finally:
+            current["deal"] = None
 
     def capture(runtime: Any, account_id: str, **options: Any) -> dict:
         current["count"] += 1
         key = f"{current['test']}/{current['count']}"
+        deal = current["deal"]
+        if deal is not None and account_id == deal["account_id"]:
+            source = {"target": True, "stores": "cards/demo_book.json, seeded by the card before this one",
+                      "inserted": deal["rows"], "sellers.json": deal["sellers"]}
+        elif deal is not None:
+            source = {"target": False, "stores": "cards/demo_book.json"}
+        else:
+            # A test that makes its card without card(): the demo command's own card.
+            source = {"target": True, "stores": "cards/demo_book.json"}
         with freeze.scope(f"cases/{key}"):
-            row = cards.brief("cases", key, runtime, account_id, None, **options)
+            row = cards.brief("cases", key, runtime, account_id, source, **options)
         if "refused" in row:
             raise AssertionError(f"case {key} was refused: {row['refused']}")
         return json.loads(row["card"])
@@ -344,12 +374,15 @@ def cases(cards: Cards) -> None:
 
     suite = unittest.defaultTestLoader.loadTestsFromModule(module)
     result = Result()
-    with mock.patch.object(briefing, "create_brief", capture):
+    with mock.patch.object(briefing, "create_brief", capture), mock.patch.object(module, "card", card):
         for test in _tests(suite):
             with freeze.scope(f"cases/{test.id()}"):
                 test.run(result)
     if not result.wasSuccessful() or result.testsRun != 10:
         raise AssertionError(f"tests/test_cases.py did not pass under the oracle: {result.errors + result.failures}")
+    targets = [row for row in cards.families["cases"] if row["input"]["target"]]
+    if len(targets) != 10 or len({row["key"].split("/")[0] for row in targets}) != 10:
+        raise AssertionError(f"each case should make one target card: {[row['key'] for row in targets]}")
 
 
 def _tests(suite: unittest.TestSuite) -> Iterator[unittest.TestCase]:
@@ -372,6 +405,8 @@ def generate(writer: Writer) -> None:
     cards.write(writer)
     writer.json("cards/index.json", {
         "note": ("each line of a family file is one card: key, account, options, the source rows it read, and the "
-                 "sealed file's exact text with its SHA-256 and seal receipt; or a refusal with the receipts it left"),
+                 "sealed file's exact text with its SHA-256 and seal receipt; or a refusal with the receipts it left. "
+                 "In cases, input.target marks the card a test checks; a target made by card() lists the rows "
+                 "inserted into the seeded demo stores, table by table in order, and the sellers.json it wrote"),
         "families": {family: len(rows) for family, rows in sorted(cards.families.items())}},
         len(cards.families))

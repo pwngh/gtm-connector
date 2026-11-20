@@ -1,5 +1,5 @@
 {
- "note": "each line of a family file is one card: key, account, options, the source rows it read, and the sealed file's exact text with its SHA-256 and seal receipt; or a refusal with the receipts it left",
+ "note": "each line of a family file is one card: key, account, options, the source rows it read, and the sealed file's exact text with its SHA-256 and seal receipt; or a refusal with the receipts it left. In cases, input.target marks the card a test checks; a target made by card() lists the rows inserted into the seeded demo stores, table by table in order, and the sellers.json it wrote",
  "families": {
   "books_calls": 82,
   "books_demo": 78,

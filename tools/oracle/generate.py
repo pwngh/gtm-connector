@@ -5,6 +5,10 @@ Run from the repository root with the pinned interpreter:
     .venv/bin/python -I tools/oracle/generate.py
 
 --out writes elsewhere. --part runs one part and writes no manifest; the drift test uses it.
+
+The generator runs again under a fixed host: UTF-8 mode, the C locale, UTC, no color, a fixed PATH and terminal
+width, and none of the other variables it was started with. GTM_BOOKS, which narrows the tests' books, is ignored:
+the oracle always reads every book.
 """
 
 import argparse
@@ -22,6 +26,31 @@ ROOT = Path(__file__).resolve().parents[2]
 PYTHON = "3.14.6"
 UNICODE = "16.0.0"
 PARTS = ("unicode", "scanners", "library", "cards", "commands")
+# The only host settings the generator sees. TMPDIR and HOME pass through; output never names either.
+HOST = {"PATH": "/usr/bin:/bin", "LC_ALL": "C", "LANG": "C", "TZ": "UTC", "NO_COLOR": "1", "TERM": "dumb",
+        "COLUMNS": "100", "LINES": "50", "GTM_ORACLE_HOST": "fixed"}
+PASSED = ("HOME", "TMPDIR")
+# Variables that would change what is recorded if the generator kept them. Each one set is named when ignored.
+IGNORED = ("GTM_BOOKS", "FORCE_COLOR", "CLICOLOR_FORCE", "PYTHON_COLORS")
+
+
+def _host() -> dict[str, str]:
+    return {**{name: os.environ[name] for name in PASSED if name in os.environ}, **HOST}
+
+
+def _fix_host(argv: list[str]) -> None:
+    """Start again under the fixed host unless this run already is under it."""
+    if os.environ.get("GTM_ORACLE_HOST") == "fixed":
+        # macOS adds its text encoding variable to every process; nothing the package does reads it.
+        seen = {name: value for name, value in os.environ.items() if name != "__CF_USER_TEXT_ENCODING"}
+        if seen != _host() or not sys.flags.utf8_mode or not sys.flags.isolated:
+            raise SystemExit("the oracle's fixed host was changed after it started")
+        return
+    ignored = [name for name in IGNORED if name in os.environ]
+    if ignored:
+        print(f"Ignored: {', '.join(ignored)}. The oracle reads every book and writes no color.", file=sys.stderr)
+    sys.stderr.flush()
+    os.execve(sys.executable, [sys.executable, "-I", "-X", "utf8", str(Path(__file__).resolve()), *argv], _host())
 
 
 def _package_digest() -> str:
@@ -33,6 +62,7 @@ def _package_digest() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description="Write the oracle fixtures.")
     parser.add_argument("--out", type=Path, help="Write here instead of testdata/oracle/.")
     parser.add_argument("--part", choices=PARTS, action="append",
@@ -45,12 +75,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"The oracle runs on CPython {PYTHON} with Unicode {UNICODE}; this is {sys.implementation.name} "
               f"{version} with Unicode {unicodedata.unidata_version}.", file=sys.stderr)
         return 2
+    _fix_host(argv)
     # The package and the tests' data helpers import from the repository root, and some test modules import
     # each other by their own names; tools/ holds the generator.
     sys.path[:0] = [str(ROOT), str(ROOT / "tools")]
     sys.path.append(str(ROOT / "tests"))
-    # Help text wraps at the terminal width, so it is fixed.
-    os.environ["COLUMNS"] = "100"
     from oracle import cards, commands, freeze, library, scanners, unicode_tables
     from oracle.output import Writer
     freeze.install()
