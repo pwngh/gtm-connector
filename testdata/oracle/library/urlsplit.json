@@ -1176,6 +1176,197 @@
    "host": "a.example"
   },
   {
+   "input": "http://a\uff20b.example/",
+   "urlsplit": {
+    "error": "ValueError",
+    "message": "netloc 'a\uff20b.example' contains invalid characters under NFKC normalization"
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "netloc 'a\uff20b.example' contains invalid characters under NFKC normalization"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "netloc 'a\uff20b.example' contains invalid characters under NFKC normalization"
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a\u2100.example/",
+   "urlsplit": {
+    "error": "ValueError",
+    "message": "netloc 'a\u2100.example' contains invalid characters under NFKC normalization"
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "netloc 'a\u2100.example' contains invalid characters under NFKC normalization"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "netloc 'a\u2100.example' contains invalid characters under NFKC normalization"
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://us\uff0fer@good.example/",
+   "urlsplit": {
+    "error": "ValueError",
+    "message": "netloc 'us\uff0fer@good.example' contains invalid characters under NFKC normalization"
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "netloc 'us\uff0fer@good.example' contains invalid characters under NFKC normalization"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "netloc 'us\uff0fer@good.example' contains invalid characters under NFKC normalization"
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://evil\uff03@good.example/",
+   "urlsplit": {
+    "error": "ValueError",
+    "message": "netloc 'evil\uff03@good.example' contains invalid characters under NFKC normalization"
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "netloc 'evil\uff03@good.example' contains invalid characters under NFKC normalization"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "netloc 'evil\uff03@good.example' contains invalid characters under NFKC normalization"
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://good.example\ufe55443/",
+   "urlsplit": {
+    "error": "ValueError",
+    "message": "netloc 'good.example\ufe55443' contains invalid characters under NFKC normalization"
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "netloc 'good.example\ufe55443' contains invalid characters under NFKC normalization"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "netloc 'good.example\ufe55443' contains invalid characters under NFKC normalization"
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://\ufe56x.example/",
+   "urlsplit": {
+    "error": "ValueError",
+    "message": "netloc '\ufe56x.example' contains invalid characters under NFKC normalization"
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "netloc '\ufe56x.example' contains invalid characters under NFKC normalization"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "netloc '\ufe56x.example' contains invalid characters under NFKC normalization"
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://\u00aa@good.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "\u00aa@good.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "http://user\u00e9@good.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "user\u00e9@good.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "http://\u2460.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "\u2460.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "\u2460.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://\u2474.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "\u2474.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "\u2474.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://x\u2044y.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "x\u2044y.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "x\u2044y.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
    "input": "<https://a.example/x|label>",
    "urlsplit": {
     "ok": [

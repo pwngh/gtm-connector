@@ -29,11 +29,15 @@ app. Until the Go CLI ships, the Python package is the product and the reference
 | Sources | `store.py`, `calls.py`, `slack.py` (demo), `salesforce*.py`, `calls_import.py`, `slack_*.py` |
 | Commands | `cli.py` |
 
+The Go port is the module at the root, in `internal/`: `unicodetab` (generated from `testdata/oracle/unicode`),
+`strictjson`, and `evidence` (neutralized text and sentences). Its tests check it against `testdata/oracle/`.
+
 ```sh
 python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r requirements-dev.lock
 .venv/bin/python -m gtm_connector demo             # the product on invented data
 .venv/bin/python -m unittest discover -s tests     # about 3 minutes; tests_stateful is separate
 .venv/bin/python -m ruff check . && .venv/bin/python -m mypy
+GOTOOLCHAIN=local go vet ./... && GOTOOLCHAIN=local go test ./...   # the Go port, in seconds
 ```
 
 ## How to work

@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+import urllib.parse
 
 from oracle.output import Writer, ranges
 
@@ -106,6 +107,33 @@ def generate(writer: Writer) -> None:
                         "cased": ranges(flag for _, flag in sigma)},
         "strings": strings}, len(lower) + len(strings))
     _nfc(writer)
+    _nfkc_netloc(writer)
+
+
+def _nfkc_netloc(writer: Writer) -> None:
+    """The code points urlsplit refuses in a netloc: those whose NFKC form holds one of / ? # @ :."""
+    marks = "/?#@:"
+    flags = [not 0xD800 <= code <= 0xDFFF and code > 127
+             and any(mark in unicodedata.normalize("NFKC", chr(code)) for mark in marks) for code in range(LAST + 1)]
+    # urlsplit normalizes the whole netloc, so the set is per code point only while none of the marks composes
+    # with a neighbour. Each one is checked against urlsplit's own test.
+    canonical = (unicodedata.decomposition(chr(code)) for code in range(LAST + 1) if not 0xD800 <= code <= 0xDFFF)
+    composing = {part for mapping in canonical if not mapping.startswith("<") for part in mapping.split()}
+    if any(f"{ord(mark):04X}" in composing for mark in marks):
+        raise AssertionError("a netloc mark is part of a canonical decomposition")
+    for code in range(128, LAST + 1):
+        if 0xD800 <= code <= 0xDFFF:
+            continue
+        try:
+            urllib.parse._checknetloc("x" + chr(code))  # type: ignore[attr-defined]
+            refused = False
+        except ValueError:
+            refused = True
+        if refused != flags[code]:
+            raise AssertionError(f"urlsplit's netloc check differs from the NFKC set at U+{code:04X}")
+    writer.json("unicode/nfkc_netloc.json", {
+        "note": "code points whose NFKC form holds one of / ? # @ :, which urlsplit refuses in a non-ASCII netloc",
+        "ranges": ranges(flags)}, sum(flags))
 
 
 def _nfc(writer: Writer) -> None:
