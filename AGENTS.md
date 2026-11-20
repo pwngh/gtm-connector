@@ -118,8 +118,13 @@ work, and keep the history of what resolved it. No model writes text on a card.
    receipts, and runs without the Python fallback.
 
 After each of these, use the product end to end as a stranger and fix what only shows from there.
-The README's first limit stays until the owner has run the connector on five real renewals outside
-the repository. Agents never read those transcripts or results; each parser failure they report
-becomes an invented fixture. A public meeting corpus tests parsing, not usefulness.
+
+Test on real data at every step. Public datasets are fetched into a cache outside the repository,
+checked against a committed manifest of links and digests, and run with `make verify-real`, never
+in CI. Real text goes through Python and Go and must match; real inputs build the same cards once
+imports are ported. Reports hold counts, digests and positions, never text. A public corpus tests
+parsing and scale, not usefulness: the README's first limit stays until the owner has run the
+connector on five real renewals outside the repository. Agents never read those transcripts or
+results; each parser failure they report becomes an invented fixture.
 Later, when a real user needs them: Salesforce task creation, transcript provider adapters,
 Windows, MCP Apps, a second CRM, team deployment.
