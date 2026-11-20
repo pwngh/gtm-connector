@@ -266,6 +266,25 @@ def _prepared(writer: Writer, folder: Path) -> None:
     writer.lines("folders/prepared/reads.jsonl", reads.rows)
 
 
+def _prepared_as_of(writer: Writer, folder: Path) -> None:
+    """A brief prepared with an explicit as_of and every scope: the outer receipt records the arguments as given,
+    and the card counts its dates from that day."""
+    state, scopes = folder / "prepared-as-of", ["crm:read", "calls:read", "slack:read"]
+    selection = _selection(folder / "as-of-selection.json", [{"account_id": "acc-003", "slack": True}])
+    with freeze.scope("folders/prepared_as_of"), Runtime(state, selection=selection) as runtime, \
+            LocalClient(runtime.config) as owner:
+        token = owner.authorize(scopes)
+        response = owner.call(token, "prepare_renewal_brief", {"account_id": "acc-003", "as_of": "2027-01-20"})
+        result = response.json()["result"]
+        if response.status_code != 200 or result.get("isError"):
+            raise AssertionError(f"the prepared brief was refused: {response.status_code} {response.text[:500]}")
+        writer.json("folders/prepared_as_of/tool_result.json", {
+            "note": "the prepare_renewal_brief result as the assistant received it", "selection": json.loads(
+                (folder / "as-of-selection.json").read_text()), "scopes": scopes,
+            "arguments": {"account_id": "acc-003", "as_of": "2027-01-20"}, "result": result["structuredContent"]}, 1)
+        _folder(writer, "prepared_as_of", state, ("selected-briefs",))
+
+
 def generate(writer: Writer) -> None:
     with tempfile.TemporaryDirectory(prefix="oracle-") as name:
         folder = Path(name)
@@ -273,6 +292,7 @@ def generate(writer: Writer) -> None:
         writer.lines("commands/session.jsonl", rows)
         _cli_card(writer, folder)
         _prepared(writer, folder)
+        _prepared_as_of(writer, folder)
         shutil.rmtree(folder / "state", ignore_errors=True)
     writer.json("commands/index.json", {
         "note": ("commands run in order against one demo state folder; IDs, ports, token fingerprints, receipt "

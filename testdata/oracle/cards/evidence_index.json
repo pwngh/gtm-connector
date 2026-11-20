@@ -1,0 +1,10 @@
+{
+ "note": "units.build calls of the tests that refuse evidence: each line holds the test, the evidence, and either units, text and gaps, or the BriefRejected message",
+ "modules": [
+  "tests.test_units",
+  "tests.test_salesforce_briefing",
+  "tests.test_slack_briefing"
+ ],
+ "vectors": 110,
+ "rejected": 66
+}

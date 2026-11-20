@@ -101,10 +101,22 @@ func readTable(value any) (*table, error) {
 	return t, nil
 }
 
+// check refuses a row the stores cannot hold: an ID that is not a string, or a value that is not nil, a
+// string or an integer.
 func check(values []any) error {
+	if len(values) == 0 {
+		return errors.New("demo: a row has no values")
+	}
+	if _, ok := values[0].(string); !ok {
+		return fmt.Errorf("demo: the ID %v is not a string", values[0])
+	}
 	for _, v := range values {
-		switch v.(type) {
-		case nil, string, *big.Int:
+		switch n := v.(type) {
+		case *big.Int:
+			if n == nil {
+				return errors.New("demo: a nil integer")
+			}
+		case nil, string:
 		default:
 			return fmt.Errorf("a value of type %T is not a demo store value", v)
 		}
@@ -126,6 +138,7 @@ func (s *Store) Insert(database, name string, values []any) error {
 	if err := check(values); err != nil {
 		return err
 	}
+
 	for _, row := range t.rows {
 		if row[0] == values[0] {
 			return fmt.Errorf("demo: %s/%s already has %v", database, name, values[0])

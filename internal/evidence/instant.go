@@ -2,31 +2,56 @@ package evidence
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
-// ErrDay refuses a date that is not a real day written YYYY-MM-DD.
+// ErrDay refuses a day that date.fromisoformat reads but that is not written YYYY-MM-DD, such as 20270115
+// or 2027-W03-5 (units._day's BriefRejected).
 var ErrDay = errors.New("Evidence dates must use YYYY-MM-DD.")
 
-// Day is units._day: a real day written exactly YYYY-MM-DD, in years 1 to 9999, at midnight UTC.
-func Day(value string) (time.Time, error) {
-	if len(value) != 10 || value[4] != '-' || value[7] != '-' {
-		return time.Time{}, ErrDay
-	}
-	var parts [3]int
-	for i, field := range [3]string{value[:4], value[5:7], value[8:]} {
-		n, ok := digits(field)
-		if !ok {
-			return time.Time{}, ErrDay
+// ErrNotADay is a text date.fromisoformat refuses, or a day outside the calendar (its ValueError).
+var ErrNotADay = errors.New("evidence: not an ISO date")
+
+// DateError is date.fromisoformat's ValueError, with its message. It is ErrNotADay.
+type DateError struct{ Message string }
+
+func (e *DateError) Error() string        { return e.Message }
+func (e *DateError) Is(target error) bool { return target == ErrNotADay }
+
+// DateFromISO is date.fromisoformat: YYYY-MM-DD, YYYYMMDD, or an ISO week date, at midnight UTC.
+func DateFromISO(value string) (time.Time, error) {
+	n := len(value)
+	if n == 7 || n == 8 || n == 10 {
+		if year, month, day, ok := isoText(value).date(n); ok {
+			switch {
+			case year < 1 || year > 9999:
+				return time.Time{}, &DateError{fmt.Sprintf("year must be in 1..9999, not %d", year)}
+			case month < 1 || month > 12:
+				return time.Time{}, &DateError{fmt.Sprintf("month must be in 1..12, not %d", month)}
+			case day < 1 || day > daysIn(year, month):
+				return time.Time{}, &DateError{fmt.Sprintf("day %d must be in range 1..%d for month %d in year %d",
+					day, daysIn(year, month), month, year)}
+			}
+			return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC), nil
 		}
-		parts[i] = n
 	}
-	if !validDate(parts[0], parts[1], parts[2]) {
+	return time.Time{}, &DateError{"Invalid isoformat string: " + pyRepr([]rune(value))}
+}
+
+// Day is units._day: a real day written exactly YYYY-MM-DD, in years 1 to 9999, at midnight UTC. A text
+// date.fromisoformat reads in another form gives ErrDay; one it refuses gives its DateError.
+func Day(value string) (time.Time, error) {
+	d, err := DateFromISO(value)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if d.Format("2006-01-02") != value {
 		return time.Time{}, ErrDay
 	}
-	return time.Date(parts[0], time.Month(parts[1]), parts[2], 0, 0, 0, 0, time.UTC), nil
+	return d, nil
 }
 
 func digits(s string) (int, bool) {
@@ -126,7 +151,9 @@ func fromISOFormat(text string) (time.Time, bool) {
 		// A date alone has no offset.
 		return time.Time{}, false
 	}
-	t := p[separator+1:]
+	// The separator is any one character, so the time starts after its last byte.
+	_, size := utf8.DecodeRuneInString(string(p[separator:]))
+	t := p[separator+size:]
 	hour, minute, second, micro, offset, offsetMicro, aware, ok := t.time()
 	if !ok || !aware {
 		return time.Time{}, false

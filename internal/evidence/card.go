@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -8,7 +9,6 @@ import (
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/strictjson"
-	u "github.com/pwngh/gtm-connector/internal/unicodetab"
 )
 
 // card is units._Card: units in a fixed order and the lines that cite them.
@@ -79,7 +79,7 @@ func (c *card) record(row *strictjson.Object, table string) int {
 	return len(c.units)
 }
 
-func (c *card) gap(code, text string, count *int, first bool, byRole *RoleCounts) {
+func (c *card) gap(code, text string, count *big.Int, first bool, byRole *RoleCounts) {
 	g := Gap{Code: code, Disposition: GapCodes[code], Count: count, ByRole: byRole, Text: text}
 	if first {
 		c.gaps = append([]Gap{g}, c.gaps...)
@@ -108,30 +108,12 @@ func (c *card) signal(sentence string, more int, numbers ...int) {
 	c.signals = append(c.signals, line)
 }
 
+// num is a count a gap states.
+func num(n int) *big.Int { return big.NewInt(int64(n)) }
+
 func intp(n int) *int { return &n }
 
 // ---- speech ----
-
-// part is one piece of a record's speech: (speaker label, text, start ms, end ms, cue or line).
-type part struct {
-	label      any
-	raw        string
-	start, end *int
-	cue        *int
-}
-
-type piece struct {
-	raw        string
-	cue        *int
-	start, end *int
-}
-
-type run struct {
-	label  *string
-	raw    string
-	end    *int
-	pieces []piece
-}
 
 // label is units._label: a label on one line, or "" when it is not a string.
 func label(value any) string {
@@ -139,13 +121,6 @@ func label(value any) string {
 		return oneLine(s)
 	}
 	return ""
-}
-
-func labelKey(l *string) string {
-	if l == nil {
-		return "\x00"
-	}
-	return "=" + *l
 }
 
 type role struct {
@@ -194,49 +169,11 @@ func speakerRole(value any, sellers []string, contacts []contact, slack bool) ro
 	return role{"unknown", noContact[1], nil}
 }
 
-const closers = "\"')]”’»"
-
-// unfinished is units._unfinished: transcript text that stops mid-sentence.
-func unfinished(text string) bool {
-	s := strip([]rune(text))
-	n := len(s)
-	if _, ok := Ended(s, 0, n); !ok {
-		return true
-	}
-	t := strings.TrimRight(string(s), closers)
-	if strings.HasSuffix(t, "..") || ListMarkerFull(s, 0, n) {
-		return true
-	}
-	_, last := NeverLast(s, max(n-24, 0), n)
-	return last && !NumberSignFull(s, 0, n)
-}
-
-// goesOn is units._goes_on: text that opens with a lower-case letter.
-func goesOn(text string) bool {
-	s := []rune(text)
-	for len(s) > 0 && u.IsSpace(s[0]) {
-		s = s[1:]
-	}
-	return len(s) > 0 && u.IsLower(s[0])
-}
-
-func ended(sentence string) bool {
-	s := []rune(sentence)
-	_, ok := Ended(s, 0, len(s))
-	return ok
-}
-
-func wordsLength(text string) int {
-	n := 0
-	for _, w := range fields([]rune(text)) {
-		n += len(w)
-	}
-	return n
-}
-
-// spoken is _Card.spoken: the units of one record's speech. It returns the number of its first unit.
-func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any, roleOf func(*string) role,
-	transcript, openStart bool) int {
+// spoken is _Card.spoken for a record that is not a transcript: one speaker label and one text, whose
+// sentences are never cut and never joined to another record's. It returns the number of the record's first
+// unit; a record with no sentence still gets one unit, so every record resolves. Transcript runs, cuts and
+// spans come with the transcript port, where its fixtures cover them.
+func (c *card) spoken(row *strictjson.Object, table string, speakerValue, raw, at any, roleOf func(*string) role) int {
 	var shownAt *string
 	if at != nil {
 		if text, ok := at.(string); ok && PlainInstant(text) {
@@ -245,149 +182,42 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			shownAt = &text
 		}
 	}
-	var runs []*run
-	for _, p := range parts {
-		var l *string
-		if text := label(p.label); text != "" {
-			l = &text
-		}
-		var last *run
-		if len(runs) > 0 {
-			last = runs[len(runs)-1]
-		}
-		var gap *int
-		if last != nil && p.start != nil && last.end != nil {
-			gap = intp(*p.start - *last.end)
-		}
-		if last != nil && l != nil && last.label != nil && *last.label == *l && gap != nil &&
-			(abs(*gap) <= runGapMS || 0 < *gap && *gap <= bridgeGapMS && unfinished(last.raw) && goesOn(p.raw)) {
-			last.raw, last.end = last.raw+"\n"+p.raw, p.end
-			tail := &last.pieces[len(last.pieces)-1]
-			if sameCue(tail.cue, p.cue) {
-				tail.raw, tail.end = tail.raw+"\n"+p.raw, p.end
-			} else {
-				last.pieces = append(last.pieces, piece{p.raw, p.cue, p.start, p.end})
-			}
-		} else {
-			runs = append(runs, &run{l, p.raw, p.end, []piece{{p.raw, p.cue, p.start, p.end}}})
-		}
+	var l *string
+	if text := label(speakerValue); text != "" {
+		l = &text
 	}
 	before := len(c.units)
-	body := str(field(row, "body"))
-	rawDigest := digest(body)
-	waiting, heard := map[string]bool{}, map[string]bool{}
-	cut := false
+	// The digest is of the record's text as stored, so it can be checked against the source.
+	rawDigest := digest(str(field(row, "body")))
+	who := roleOf(l)
+	var speaker *string
+	if l != nil {
+		if text := c.line(*l); text != "" {
+			speaker = &text
+		}
+	}
+	if speaker != nil && length(*speaker) > MaxLabel {
+		speaker, who = nil, role{"unknown", fmt.Sprintf("speaker label over %d characters", MaxLabel), nil}
+	}
+	found, err := Sentences(c.lines(raw), table == "messages")
+	if err != nil {
+		panic(invalid)
+	}
 	rule := sourceRules[table]
-	for _, r := range runs {
-		who := roleOf(r.label)
-		var speaker *string
-		if r.label != nil {
-			if text := c.line(*r.label); text != "" {
-				speaker = &text
-			}
+	for _, sentence := range found {
+		shown := "more"
+		if length(sentence) > MaxSentence {
+			shown = "long"
 		}
-		if speaker != nil && length(*speaker) > MaxLabel {
-			speaker, who = nil, role{"unknown", fmt.Sprintf("speaker label over %d characters", MaxLabel), nil}
-		}
-		texts := make([]string, len(r.pieces))
-		for i, p := range r.pieces {
-			texts[i] = c.lines(p.raw)
-		}
-		safe := strings.Join(texts, "\n")
-		found, err := Sentences(safe, table == "messages")
-		if err != nil {
-			panic(invalid)
-		}
-		ends := make([]int, len(texts))
-		total := 0
-		for i, text := range texts {
-			total += wordsLength(text)
-			ends[i] = total
-		}
-		reached, size := 0, 0
-		key := labelKey(r.label)
-		follows := openStart && !heard[key] || waiting[key] || cut && goesOn(safe)
-		if len(found) > 0 {
-			delete(waiting, key)
-			heard[key] = true
-		}
-		for position, sentence := range found {
-			if transcript {
-				if position == len(found)-1 {
-					cut = unfinished(sentence)
-				} else {
-					cut = !ended(sentence)
-				}
-			} else {
-				cut = false
-			}
-			partial := follows || cut
-			follows = cut
-			reached, size = reached+size, wordsLength(sentence)
-			from := sort.Search(len(ends), func(i int) bool { return ends[i] > reached })
-			to := min(sort.Search(len(ends), func(i int) bool { return ends[i] >= reached+size })+1, len(r.pieces))
-			if from >= to {
-				panic(invalid)
-			}
-			lies := r.pieces[from:to]
-			shown := "more"
-			switch {
-			case partial:
-				shown = "cut"
-			case length(sentence) > MaxSentence:
-				shown = "long"
-			}
-			var span *UnitSpan
-			if lies[0].cue != nil {
-				span = &UnitSpan{First: *lies[0].cue, Last: deref(lies[len(lies)-1].cue)}
-				if lies[0].start != nil {
-					span.StartMS = intp(extreme(lies, func(p piece) *int { return p.start }, false))
-				}
-				if lies[0].end != nil {
-					span.EndMS = intp(extreme(lies, func(p piece) *int { return p.end }, true))
-				}
-			}
-			c.units = append(c.units, Unit{N: len(c.units) + 1, Kind: "sentence", Source: rule.system,
-				RecordRef: str(field(row, "record_ref")), Tool: rule.tool, At: shownAt, Speaker: speaker,
-				Role: who.role, Basis: who.basis, Contact: who.contact, Text: sentence, Partial: partial,
-				Shown: shown, Span: span, RawSHA256: rawDigest, SanitizerVersion: SanitizerVersion})
-		}
-		if len(found) > 0 && cut {
-			waiting[key] = true
-		}
+		c.units = append(c.units, Unit{N: len(c.units) + 1, Kind: "sentence", Source: rule.system,
+			RecordRef: str(field(row, "record_ref")), Tool: rule.tool, At: shownAt, Speaker: speaker,
+			Role: who.role, Basis: who.basis, Contact: who.contact, Text: sentence, Shown: shown,
+			RawSHA256: rawDigest, SanitizerVersion: SanitizerVersion})
 	}
 	if len(c.units) == before {
 		c.record(row, table)
 	}
 	return before + 1
-}
-
-func abs(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
-}
-
-func sameCue(a, b *int) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
-
-func deref(p *int) int {
-	if p == nil {
-		panic(invalid)
-	}
-	return *p
-}
-
-// extreme is min or max of one time over the pieces; a missing time among them cannot be compared.
-func extreme(pieces []piece, get func(piece) *int, largest bool) int {
-	best := deref(get(pieces[0]))
-	for _, p := range pieces[1:] {
-		v := deref(get(p))
-		if largest && v > best || !largest && v < best {
-			best = v
-		}
-	}
-	return best
 }
 
 // ---- CRM ----
@@ -405,8 +235,11 @@ func dayOf(value any) time.Time {
 		panic(&Rejected{ErrDay.Error()})
 	}
 	d, err := Day(text)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrDay):
 		panic(&Rejected{ErrDay.Error()})
+	case err != nil:
+		panic(invalid)
 	}
 	return d
 }
@@ -506,7 +339,7 @@ func (c *card) shownRows(rows []*strictjson.Object, one, many string) []*strictj
 			noun, verb = many, "were read and are"
 		}
 		c.gap("crm_more_"+many, fmt.Sprintf("CRM: %d more %s %s not shown (%d in all).", more, noun, verb, len(rows)),
-			intp(more), false, nil)
+			num(more), false, nil)
 		return rows[:ShownRecords]
 	}
 	return rows
@@ -692,7 +525,7 @@ func (c *card) crm(asOf time.Time) []contact {
 			str(field(row, "close_date")), outcome), opportunityNumbers[rowID(row)])
 	}
 	if len(opportunities) == 0 {
-		c.gap("crm_no_opportunity", "CRM: no opportunity was returned for this account.", intp(0), false, nil)
+		c.gap("crm_no_opportunity", "CRM: no opportunity was returned for this account.", num(0), false, nil)
 	}
 	for _, row := range contracts {
 		if end := field(row, "end_date"); end != nil {
@@ -845,9 +678,9 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 	}
 	if len(notes) == 0 {
 		if imported {
-			c.gap("calls_no_transcript", "Calls: no transcript is imported for this account.", intp(0), false, nil)
+			c.gap("calls_no_transcript", "Calls: no transcript is imported for this account.", num(0), false, nil)
 		} else {
-			c.gap("calls_no_record", "Calls: no call record was returned for this account.", intp(0), false, nil)
+			c.gap("calls_no_record", "Calls: no call record was returned for this account.", num(0), false, nil)
 		}
 		return
 	}
@@ -869,8 +702,8 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 	firstUnit := map[string]int{}
 	for _, note := range sorted {
 		speaker, _ := note.Get("speaker")
-		firstUnit[str(field(note, "record_ref"))] = c.spoken(note, "call_notes",
-			[]part{{label: speaker, raw: str(field(note, "body"))}}, field(note, "called_at"), roleOf, false, false)
+		firstUnit[str(field(note, "record_ref"))] = c.spoken(note, "call_notes", speaker,
+			field(note, "body"), field(note, "called_at"), roleOf)
 	}
 	noun := "records were"
 	if len(notes) == 1 {
@@ -944,8 +777,8 @@ func (c *card) slack() {
 			reject("A Slack file count must be a nonnegative integer.")
 		}
 		files.Add(files, attached)
-		first := c.spoken(message, "messages", []part{{label: field(message, "author"), raw: str(field(message, "body"))}},
-			field(message, "sent_at"), roleOf, false, false)
+		first := c.spoken(message, "messages", field(message, "author"), field(message, "body"),
+			field(message, "sent_at"), roleOf)
 		if attached.Sign() != 0 {
 			attachedTo = append(attachedTo, fmt.Sprintf("[%d]", first))
 		}
@@ -956,11 +789,11 @@ func (c *card) slack() {
 	}
 	read := fmt.Sprintf("%d %s read", len(messages), noun)
 	if len(messages) == 0 {
-		c.gap("slack_no_message", "Slack: no message was returned for this account.", intp(0), false, nil)
+		c.gap("slack_no_message", "Slack: no message was returned for this account.", num(0), false, nil)
 		return
 	}
 	attachedText := ""
-	var fileCount *int
+	var fileCount *big.Int
 	if files.Sign() != 0 {
 		where := ""
 		if len(attachedTo) > 0 {
@@ -971,7 +804,7 @@ func (c *card) slack() {
 			word = "file was"
 		}
 		attachedText = fmt.Sprintf(" %s attached %s not read%s.", files, word, where)
-		fileCount = intp(int(files.Int64()))
+		fileCount = files
 	}
 	c.gap("slack_channel", fmt.Sprintf("Slack: %s.%s Other channels were not read.", read, attachedText), fileCount,
 		false, nil)
@@ -1139,7 +972,7 @@ func (c *card) said() []string {
 				parts = append(parts, fmt.Sprintf("%d %s", rc.n, rc.role))
 			}
 		}
-		c.gap("sentences_"+why, line(n, "("+strings.Join(parts, ", ")+")"), intp(n), false, &counts)
+		c.gap("sentences_"+why, line(n, "("+strings.Join(parts, ", ")+")"), num(n), false, &counts)
 	}
 	readNotShown := func(n int) string {
 		if n == 1 {
@@ -1183,7 +1016,7 @@ func (c *card) said() []string {
 			noun = "record"
 		}
 		c.gap("calls_no_contact", fmt.Sprintf("Calls: no speaker label equals a contact's name in the %d call %s "+
-			"with a sentence.", len(records), noun), intp(len(records)), false, nil)
+			"with a sentence.", len(records), noun), num(len(records)), false, nil)
 	}
 	unknown := 0
 	for _, u := range spoken {
@@ -1197,7 +1030,7 @@ func (c *card) said() []string {
 			noun = "sentence has"
 		}
 		c.gap("speakers_unknown", fmt.Sprintf("Speakers: %d of %d %s no established speaker role.", unknown,
-			len(spoken), noun), intp(unknown), false, &RoleCounts{Unknown: unknown})
+			len(spoken), noun), num(unknown), false, &RoleCounts{Unknown: unknown})
 	}
 	return lines
 }
@@ -1233,7 +1066,7 @@ func build(evidence *strictjson.Object) ([]Unit, string, []Gap) {
 		if c.missing != 1 {
 			text = fmt.Sprintf("CRM: %d fields are empty on the record and print as Missing.", c.missing)
 		}
-		c.gap("crm_fields_empty", text, intp(c.missing), true, nil)
+		c.gap("crm_fields_empty", text, num(c.missing), true, nil)
 	}
 	var replaced []string
 	for _, item := range []struct {
@@ -1249,7 +1082,7 @@ func build(evidence *strictjson.Object) ([]Unit, string, []Gap) {
 	}
 	if len(replaced) > 0 {
 		n := c.neutralized.Mentions + c.neutralized.Links + c.neutralized.Controls + c.neutralized.Brackets
-		c.gap("neutralized", "Neutralized in source text: "+strings.Join(replaced, ", ")+".", intp(n), false, nil)
+		c.gap("neutralized", "Neutralized in source text: "+strings.Join(replaced, ", ")+".", num(n), false, nil)
 	}
 	account := v.groups["accounts"][0]
 	safeName, _, err := SafeText(str(field(account, "name")))
@@ -1306,44 +1139,116 @@ func build(evidence *strictjson.Object) ([]Unit, string, []Gap) {
 	return c.units, strings.Join(lines, "\n"), c.gaps
 }
 
-// TraceNumber reports whether number n resolves as units.trace resolves it: to a unit numbered n whose
-// record is in the evidence and in the rows of its read's receipt, and, for a sentence, whose raw_sha256
-// is the digest of the record's stored text.
-func TraceNumber(evidence *strictjson.Object, units []any, n int) (receiptID string, ok bool) {
-	defer func() {
-		if recover() != nil {
-			receiptID, ok = "", false
+// Trace resolves the numbers of one sealed card, as units.trace does, from an index of its evidence built
+// once: the first receipt of each tool, the first record of each reference, and each record's body digest.
+type Trace struct {
+	receipts map[string]int // tool to the position of its first receipt
+	records  map[string]int // record_ref to the position of its first record
+	// Python's next() raises at the first malformed entry it meets, so nothing at or past it resolves.
+	receiptsEnd, recordsEnd int
+	receiptList, recordList []*strictjson.Object
+	rows                    map[int]map[string]bool
+	bodies                  map[int]string
+}
+
+// NewTrace indexes a card's evidence.
+func NewTrace(evidence *strictjson.Object) *Trace {
+	t := &Trace{receipts: map[string]int{}, records: map[string]int{}, rows: map[int]map[string]bool{},
+		bodies: map[int]string{}}
+	receipts, _ := evidence.Get("receipts")
+	list, _ := receipts.([]any)
+	t.receiptsEnd = len(list)
+	for i, value := range list {
+		receipt, ok := value.(*strictjson.Object)
+		tool, hasTool := receipt.Get("tool")
+		if !ok || !hasTool {
+			t.receiptsEnd = i
+			break
 		}
-	}()
+		t.receiptList = append(t.receiptList, receipt)
+		if name, isText := tool.(string); isText {
+			if _, seen := t.receipts[name]; !seen {
+				t.receipts[name] = i
+			}
+		}
+	}
+	records, _ := evidence.Get("records")
+	list, _ = records.([]any)
+	t.recordsEnd = len(list)
+	for i, value := range list {
+		record, ok := value.(*strictjson.Object)
+		ref, hasRef := record.Get("record_ref")
+		if !ok || !hasRef {
+			t.recordsEnd = i
+			break
+		}
+		t.recordList = append(t.recordList, record)
+		if name, isText := ref.(string); isText {
+			if _, seen := t.records[name]; !seen {
+				t.records[name] = i
+			}
+		}
+	}
+	return t
+}
+
+func (t *Trace) inRows(receipt int, ref string) bool {
+	rows, indexed := t.rows[receipt]
+	if !indexed {
+		rows = map[string]bool{}
+		value, _ := t.receiptList[receipt].Get("rows")
+		list, _ := value.([]any)
+		for _, row := range list {
+			if text, ok := row.(string); ok {
+				rows[text] = true
+			}
+		}
+		t.rows[receipt] = rows
+	}
+	return rows[ref]
+}
+
+func (t *Trace) body(record int) (string, bool) {
+	if d, cached := t.bodies[record]; cached {
+		return d, true
+	}
+	value, _ := t.recordList[record].Get("body")
+	text, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	t.bodies[record] = digest(text)
+	return t.bodies[record], true
+}
+
+// Resolve is units.trace's check of number n against the card's units: the unit is numbered n, the first
+// receipt of its tool returned its record, and a sentence's raw_sha256 is the digest of that record's
+// stored text. It gives the receipt and the record.
+func (t *Trace) Resolve(units []any, n int) (receipt, record *strictjson.Object, ok bool) {
 	if n < 1 || n > len(units) {
-		return "", false
+		return nil, nil, false
 	}
-	unit := object(units[n-1])
-	tool := field(unit, "tool")
-	var receipt, record *strictjson.Object
-	for _, value := range list(field(evidence, "receipts")) {
-		if r := object(value); receipt == nil && equal(field(r, "tool"), tool) {
-			receipt = r
+	unit, isObject := units[n-1].(*strictjson.Object)
+	tool, hasTool := unit.Get("tool")
+	ref, hasRef := unit.Get("record_ref")
+	number, hasN := unit.Get("n")
+	toolName, toolText := tool.(string)
+	refText, refIsText := ref.(string)
+	if !isObject || !hasTool || !hasRef || !hasN || !toolText || !refIsText {
+		return nil, nil, false
+	}
+	at, found := t.receipts[toolName]
+	from, recorded := t.records[refText]
+	if !found || at >= t.receiptsEnd || !recorded || from >= t.recordsEnd || !equal(number, n) ||
+		!t.inRows(at, refText) {
+		return nil, nil, false
+	}
+	if kind, _ := unit.Get("kind"); kind == "sentence" {
+		sealed, _ := unit.Get("raw_sha256")
+		body, hasBody := t.body(from)
+		if !hasBody || sealed != body {
+			return nil, nil, false
 		}
 	}
-	reference := field(unit, "record_ref")
-	for _, value := range list(field(evidence, "records")) {
-		if r := object(value); record == nil && equal(field(r, "record_ref"), reference) {
-			record = r
-		}
-	}
-	if !equal(field(unit, "n"), n) || receipt == nil || record == nil {
-		return "", false
-	}
-	inRows := false
-	for _, row := range list(field(receipt, "rows")) {
-		inRows = inRows || equal(row, reference)
-	}
-	if !inRows {
-		return "", false
-	}
-	if field(unit, "kind") == "sentence" && !equal(field(unit, "raw_sha256"), digest(str(field(record, "body")))) {
-		return "", false
-	}
-	return str(field(receipt, "audit_id")), true
+	return t.receiptList[at], t.recordList[from], true
 }

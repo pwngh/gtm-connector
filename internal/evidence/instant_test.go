@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -19,6 +20,7 @@ func TestInstantAndDayOracle(t *testing.T) {
 			Input   string             `json:"input"`
 			Instant map[string]*string `json:"units._instant"`
 			Day     map[string]*string `json:"units._day"`
+			Date    map[string]*string `json:"date.fromisoformat"`
 		} `json:"cases"`
 	}
 	oracletest.JSON(t, "library/datetime.json", &fixture)
@@ -37,11 +39,22 @@ func TestInstantAndDayOracle(t *testing.T) {
 		}
 		day, err := Day(c.Input)
 		wantDay, dayOK := c.Day["ok"]
+		// A BriefRejected is ErrDay; a ValueError from date.fromisoformat is ErrNotADay.
+		var refusal error
+		if kind := c.Day["error"]; kind != nil {
+			refusal = map[string]error{"BriefRejected": ErrDay, "ValueError": ErrNotADay}[*kind]
+		}
 		switch {
 		case dayOK && (err != nil || day.Format("2006-01-02") != *wantDay):
 			mismatches.Add("_day(%q): got %v %v, want %s", c.Input, day, err, *wantDay)
-		case !dayOK && err == nil:
-			mismatches.Add("_day(%q): got %v, want a refusal", c.Input, day)
+		case !dayOK && !errors.Is(err, refusal):
+			mismatches.Add("_day(%q): got %v, want %v", c.Input, err, refusal)
+		}
+		date, err := DateFromISO(c.Input)
+		if want := c.Date["ok"]; want != nil && (err != nil || date.Format("2006-01-02") != *want) ||
+			want == nil && (err == nil || err.Error() != *c.Date["message"]) {
+			mismatches.Add("date.fromisoformat(%q): got %v %v, want %v %v", c.Input, date, err, shown(want),
+				shown(c.Date["message"]))
 		}
 	}
 }

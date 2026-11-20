@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -121,3 +122,21 @@ func (m *Mismatches) Add(format string, args ...any) {
 
 // Count is the number of rows that differ so far.
 func (m *Mismatches) Count() int { return m.total }
+
+// FirstDifference is the first line where two texts differ, for a mismatch report.
+func FirstDifference(got, want string) string {
+	a, b := strings.Split(got, "\n"), strings.Split(want, "\n")
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var x, y string
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			return fmt.Sprintf("line %d: got %q, want %q", i+1, x, y)
+		}
+	}
+	return "no line differs"
+}

@@ -72,7 +72,12 @@ func TestInsert(t *testing.T) {
 	if err := s.Insert("slack", "messages", row[:3]); err == nil {
 		t.Fatal("a short row was inserted")
 	}
-	if err := s.Insert("crm", "accounts", []any{1.5, "", "", "", nil, nil, "", ""}); err == nil {
+	if err := s.Insert("crm", "accounts", []any{"acc-900", "", "", "", 1.5, nil, "", ""}); err == nil {
 		t.Fatal("a float was inserted")
+	}
+	for _, id := range []any{big.NewInt(900), nil} {
+		if err := s.Insert("crm", "accounts", []any{id, "", "", "", nil, nil, "", ""}); err == nil {
+			t.Fatalf("an account with the ID %v was inserted", id)
+		}
 	}
 }

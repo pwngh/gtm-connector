@@ -94,7 +94,7 @@ type UnitSpan struct {
 type Gap struct {
 	Code        string
 	Disposition string
-	Count       *int
+	Count       *big.Int
 	ByRole      *RoleCounts
 	Text        string
 }
@@ -136,7 +136,11 @@ func (g Gap) Value() *strictjson.Object {
 		byRole = strictjson.NewObject("customer", g.ByRole.Customer, "seller", g.ByRole.Seller,
 			"unknown", g.ByRole.Unknown)
 	}
-	return strictjson.NewObject("code", g.Code, "disposition", g.Disposition, "count", optional(g.Count),
+	var count any
+	if g.Count != nil {
+		count = new(big.Int).Set(g.Count)
+	}
+	return strictjson.NewObject("code", g.Code, "disposition", g.Disposition, "count", count,
 		"by_role", byRole, "text", g.Text)
 }
 
@@ -302,22 +306,31 @@ func number(v any) (*big.Float, bool) {
 	return nil, false
 }
 
-// pyStr is str(v) for the values a sort key meets.
-func pyStr(v any) string {
+// PyStr is str(v) for None, a bool, a string or an integer; ok is false for any other value.
+func PyStr(v any) (text string, ok bool) {
 	switch v := v.(type) {
 	case nil:
-		return "None"
+		return "None", true
 	case bool:
 		if v {
-			return "True"
+			return "True", true
 		}
-		return "False"
+		return "False", true
 	case string:
-		return v
-	case *big.Int:
-		return v.String()
+		return v, true
 	}
-	panic(invalid)
+	if n, isInt := isInt(v); isInt {
+		return n.String(), true
+	}
+	return "", false
+}
+
+func pyStr(v any) string {
+	text, ok := PyStr(v)
+	if !ok {
+		panic(invalid)
+	}
+	return text
 }
 
 // less orders two sort keys of one kind, as Python compares them; strings by code point.

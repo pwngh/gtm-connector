@@ -1,5 +1,7 @@
 package strictjson
 
+import "math/big"
+
 // NewObject builds an Object from alternating keys and values, in that order.
 func NewObject(pairs ...any) *Object {
 	o := &Object{}
@@ -48,4 +50,34 @@ func (o *Object) Delete(key string) {
 // Copy is a shallow copy: the members are new, their values shared.
 func (o *Object) Copy() *Object {
 	return &Object{Keys: append([]string(nil), o.Keys...), Values: append([]any(nil), o.Values...)}
+}
+
+// Clone is a deep copy of a JSON value: objects, lists and integers are new, so nothing the copy holds is
+// shared with the original.
+func Clone(value any) any {
+	switch v := value.(type) {
+	case *Object:
+		if v == nil {
+			return v
+		}
+		o := &Object{Keys: append([]string(nil), v.Keys...), Values: make([]any, len(v.Values))}
+		for i, item := range v.Values {
+			o.Values[i] = Clone(item)
+		}
+		return o
+	case []any:
+		l := make([]any, len(v))
+		for i, item := range v {
+			l[i] = Clone(item)
+		}
+		return l
+	case []string:
+		return append([]string(nil), v...)
+	case *big.Int:
+		if v == nil {
+			return v
+		}
+		return new(big.Int).Set(v)
+	}
+	return value
 }

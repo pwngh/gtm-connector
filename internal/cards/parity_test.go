@@ -46,11 +46,25 @@ func (s *scope) clock() time.Time {
 	return time.Date(2027, 1, 15, 15, 0, 0, 0, time.UTC).Add(time.Duration(s.receipts-1) * time.Second)
 }
 
-// maker is a Maker under the scope's IDs and clock, with every elapsed time 0, as the oracle runs.
-func (s *scope) maker(source Source, sources evidence.Sources) (*Maker, *receipts.Memory, MemoryFiles) {
-	store, files := receipts.NewMemory(s.clock, s.uuid), MemoryFiles{}
-	return &Maker{Receipts: store, Source: source, Sources: sources, Files: files, NewID: s.uuid,
-		Stopwatch: func() func() float64 { return func() float64 { return 0 } }}, store, files
+const testWorkspace = "workspace-1"
+
+// still is a clock that stands still, so every elapsed time is 0, as the oracle runs.
+func still() time.Time { return time.Date(2027, 1, 15, 15, 0, 0, 0, time.UTC) }
+
+// maker is a Maker under the scope's IDs and clock, reading through connections at generation 1.
+func (s *scope) maker(source Source, sources evidence.Sources) (*Maker, *receipts.Memory) {
+	store := receipts.NewMemory(s.clock, s.uuid)
+	connections := map[string]string{"crm": "crm-1", "calls": "calls-1", "slack": "slack-1"}
+	for _, id := range connections {
+		store.SetGeneration(id, 1)
+	}
+	return &Maker{Receipts: store, Source: source, Sources: sources, Connections: connections, NewID: s.uuid,
+		Now: still}, store
+}
+
+// owner is the local owner running a command, under the bearer the CLI minted for it.
+func owner(token string, scopes ...string) Principal {
+	return Principal{WorkspaceID: testWorkspace, TokenID: receipts.Fingerprint(token), Scopes: scopes}
 }
 
 // accessToken is the token a card's reads are made under: the scope's fourth token, after the PKCE
@@ -116,16 +130,16 @@ type options struct {
 // brief is create_brief's request for these options: crm:read, calls:read unless left out, and slack:read
 // when Slack is asked for and granted.
 func (o options) brief(accountID, token string) Brief {
-	b := Brief{AccountID: accountID, AsOf: "2027-01-15", Token: token, Scopes: []string{"crm:read"},
-		IncludeSlack: o.IncludeSlack}
+	b := Brief{Principal: owner(token, "crm:read"), OperationID: "brief " + accountID, AccountID: accountID,
+		AsOf: DemoAsOf, IncludeSlack: o.IncludeSlack}
 	if o.AsOf != nil {
 		b.AsOf = *o.AsOf
 	}
 	if o.IncludeCalls == nil || *o.IncludeCalls {
-		b.Scopes = append(b.Scopes, "calls:read")
+		b.Principal.Scopes = append(b.Principal.Scopes, "calls:read")
 	}
 	if o.IncludeSlack && (o.GrantSlack == nil || *o.GrantSlack) {
-		b.Scopes = append(b.Scopes, "slack:read")
+		b.Principal.Scopes = append(b.Principal.Scopes, "slack:read")
 	}
 	return b
 }
@@ -136,23 +150,6 @@ type setup struct {
 	source  Source
 	sources evidence.Sources
 	skip    string // why this card is not built from its recorded inputs
-}
-
-func firstDifference(got, want string) string {
-	a, b := strings.Split(got, "\n"), strings.Split(want, "\n")
-	for i := 0; i < len(a) || i < len(b); i++ {
-		var x, y string
-		if i < len(a) {
-			x = a[i]
-		}
-		if i < len(b) {
-			y = b[i]
-		}
-		if x != y {
-			return fmt.Sprintf("line %d: got %q, want %q", i+1, x, y)
-		}
-	}
-	return "no line differs"
 }
 
 func load(t *testing.T, data []byte) any {
@@ -185,7 +182,7 @@ func runFamily(t *testing.T, family string, prepare func(row fixtureRow, input *
 			t.Fatal(err)
 		}
 		sc := newScope(s.scope)
-		m, _, files := sc.maker(s.source, s.sources)
+		m, store := sc.maker(s.source, s.sources)
 		sealed, err := m.Brief(context.Background(), o.brief(row.AccountID, sc.token(accessToken)))
 		if err != nil {
 			mismatches.Add("%s: no card: %v", row.Key, err)
@@ -194,12 +191,13 @@ func runFamily(t *testing.T, family string, prepare func(row fixtureRow, input *
 		if string(sealed.Payload) == row.Card {
 			identical++
 		} else {
-			mismatches.Add("%s: card text differs at %s", row.Key, firstDifference(string(sealed.Payload), row.Card))
+			mismatches.Add("%s: card text differs at %s", row.Key, oracletest.FirstDifference(string(sealed.Payload), row.Card))
 		}
-		if sealed.SHA256 != row.SHA256 || string(files[sealed.BriefID+".json"]) != row.Card {
+		published, _ := store.Published(sealed.BriefID)
+		if sealed.SHA256 != row.SHA256 || string(published.Bytes) != row.Card {
 			mismatches.Add("%s: digest %s, want %s", row.Key, sealed.SHA256, row.SHA256)
 		}
-		if !evidence.Equal(sealed.Seal.Value(), load(t, row.Seal)) {
+		if seal, err := receipts.Decode(load(t, row.Seal)); err != nil || !sealed.Seal.Same(seal) {
 			got, _ := strictjson.Dumps(sealed.Seal.Value(), strictjson.Quoted)
 			mismatches.Add("%s: seal receipt %s, want %s", row.Key, got, row.Seal)
 		}
