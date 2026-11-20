@@ -64,6 +64,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: ./scripts/demo.sh
+        env:
+          GTM_REQUIRE_ORACLE: ${{ matrix.python-version == '3.14.6' && '1' || '' }}
 
   inspector:
     runs-on: ubuntu-latest

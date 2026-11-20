@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import os
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -17,6 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 ORACLE = ROOT / "testdata" / "oracle"
 PINNED = sys.implementation.name == "cpython" and sys.version_info[:3] == (3, 14, 6) \
     and unicodedata.unidata_version == "16.0.0"
+# CI sets GTM_REQUIRE_ORACLE=1 on its 3.14.6 job, so a mismatched interpreter fails there instead of skipping.
+if os.environ.get("GTM_REQUIRE_ORACLE") == "1" and not PINNED:
+    raise RuntimeError("GTM_REQUIRE_ORACLE=1 needs CPython 3.14.6 with Unicode 16.0.0, not "
+                       f"{sys.implementation.name} {sys.version.split()[0]} "
+                       f"with Unicode {unicodedata.unidata_version}.")
 
 
 def files(folder):
