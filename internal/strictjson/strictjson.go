@@ -242,6 +242,7 @@ type parser struct {
 	text    []rune
 	lone    bool // a lone surrogate was decoded from an escape
 	decimal bool // parse_float=Decimal
+	loose   bool // json.loads itself: non-finite numbers, and the last of duplicate keys wins
 }
 
 // expectingValue is Python's StopIteration from scan_once, which raw_decode reports as "Expecting value".
@@ -394,6 +395,9 @@ func (p *parser) key(i int) (rawString, int, error) {
 
 // closeObject is strict_json._unique, which json calls when an object ends.
 func (p *parser) closeObject(o *rawObject) (any, error) {
+	if p.loose {
+		return lastWins(o), nil
+	}
 	seen := make(map[string]bool, len(o.keys))
 	for _, key := range o.keys {
 		k := string(encodeWTF8(key))
@@ -435,14 +439,23 @@ func (p *parser) scalar(idx int) (any, int, error) {
 		}
 	case 'N':
 		if has("NaN") {
+			if p.loose {
+				return math.NaN(), idx + 3, nil
+			}
 			return nil, 0, &Error{"ValueError", "non-finite JSON number"}
 		}
 	case 'I':
 		if has("Infinity") {
+			if p.loose {
+				return math.Inf(1), idx + 8, nil
+			}
 			return nil, 0, &Error{"ValueError", "non-finite JSON number"}
 		}
 	case '-':
 		if has("-Infinity") {
+			if p.loose {
+				return math.Inf(-1), idx + 9, nil
+			}
 			return nil, 0, &Error{"ValueError", "non-finite JSON number"}
 		}
 	}
@@ -505,7 +518,7 @@ func (p *parser) number(start int) (any, int, error) {
 	}
 	if float {
 		value := parseFloat(literal)
-		if math.IsInf(value, 0) {
+		if math.IsInf(value, 0) && !p.loose {
 			return nil, 0, &Error{"ValueError", "non-finite JSON number"}
 		}
 		return value, idx, nil
