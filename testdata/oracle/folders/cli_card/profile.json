@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "sources": {
+    "calls": {
+      "provider": "demo"
+    },
+    "crm": {
+      "provider": "demo"
+    },
+    "slack": {
+      "provider": "demo"
+    }
+  }
+}

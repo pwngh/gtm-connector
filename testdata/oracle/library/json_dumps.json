@@ -1,0 +1,1059 @@
+{
+ "note": "json.dumps under the options the package uses: default (CLI errors and progress), ascii_false (card quotations), audit (receipt columns), artifact (card files), cli (--json results); a non-finite float is given as its repr",
+ "cases": [
+  {
+   "input": "",
+   "default": {
+    "ok": "\"\""
+   },
+   "ascii_false": {
+    "ok": "\"\""
+   },
+   "audit": {
+    "ok": "\"\""
+   },
+   "artifact": {
+    "ok": "\"\""
+   },
+   "cli": {
+    "ok": "\"\""
+   }
+  },
+  {
+   "input": "plain",
+   "default": {
+    "ok": "\"plain\""
+   },
+   "ascii_false": {
+    "ok": "\"plain\""
+   },
+   "audit": {
+    "ok": "\"plain\""
+   },
+   "artifact": {
+    "ok": "\"plain\""
+   },
+   "cli": {
+    "ok": "\"plain\""
+   }
+  },
+  {
+   "input": "quote \" and backslash \\ and slash /",
+   "default": {
+    "ok": "\"quote \\\" and backslash \\\\ and slash /\""
+   },
+   "ascii_false": {
+    "ok": "\"quote \\\" and backslash \\\\ and slash /\""
+   },
+   "audit": {
+    "ok": "\"quote \\\" and backslash \\\\ and slash /\""
+   },
+   "artifact": {
+    "ok": "\"quote \\\" and backslash \\\\ and slash /\""
+   },
+   "cli": {
+    "ok": "\"quote \\\" and backslash \\\\ and slash /\""
+   }
+  },
+  {
+   "input": "\u0000\u0001\u001f\u007f\u0080\u009f",
+   "default": {
+    "ok": "\"\\u0000\\u0001\\u001f\\u007f\\u0080\\u009f\""
+   },
+   "ascii_false": {
+    "ok": "\"\\u0000\\u0001\\u001f\u007f\u0080\u009f\""
+   },
+   "audit": {
+    "ok": "\"\\u0000\\u0001\\u001f\u007f\u0080\u009f\""
+   },
+   "artifact": {
+    "ok": "\"\\u0000\\u0001\\u001f\u007f\u0080\u009f\""
+   },
+   "cli": {
+    "ok": "\"\\u0000\\u0001\\u001f\u007f\u0080\u009f\""
+   }
+  },
+  {
+   "input": "\t\n\r\u000b\f\b",
+   "default": {
+    "ok": "\"\\t\\n\\r\\u000b\\f\\b\""
+   },
+   "ascii_false": {
+    "ok": "\"\\t\\n\\r\\u000b\\f\\b\""
+   },
+   "audit": {
+    "ok": "\"\\t\\n\\r\\u000b\\f\\b\""
+   },
+   "artifact": {
+    "ok": "\"\\t\\n\\r\\u000b\\f\\b\""
+   },
+   "cli": {
+    "ok": "\"\\t\\n\\r\\u000b\\f\\b\""
+   }
+  },
+  {
+   "input": "\u2028\u2029\u0085",
+   "default": {
+    "ok": "\"\\u2028\\u2029\\u0085\""
+   },
+   "ascii_false": {
+    "ok": "\"\u2028\u2029\u0085\""
+   },
+   "audit": {
+    "ok": "\"\u2028\u2029\u0085\""
+   },
+   "artifact": {
+    "ok": "\"\u2028\u2029\u0085\""
+   },
+   "cli": {
+    "ok": "\"\u2028\u2029\u0085\""
+   }
+  },
+  {
+   "input": "\u00e9\u00df\u4e2d\ud83d\ude42",
+   "default": {
+    "ok": "\"\\u00e9\\u00df\\u4e2d\\ud83d\\ude42\""
+   },
+   "ascii_false": {
+    "ok": "\"\u00e9\u00df\u4e2d\ud83d\ude42\""
+   },
+   "audit": {
+    "ok": "\"\u00e9\u00df\u4e2d\ud83d\ude42\""
+   },
+   "artifact": {
+    "ok": "\"\u00e9\u00df\u4e2d\ud83d\ude42\""
+   },
+   "cli": {
+    "ok": "\"\u00e9\u00df\u4e2d\ud83d\ude42\""
+   }
+  },
+  {
+   "input": "\ufeff\u200b\u202e",
+   "default": {
+    "ok": "\"\\ufeff\\u200b\\u202e\""
+   },
+   "ascii_false": {
+    "ok": "\"\ufeff\u200b\u202e\""
+   },
+   "audit": {
+    "ok": "\"\ufeff\u200b\u202e\""
+   },
+   "artifact": {
+    "ok": "\"\ufeff\u200b\u202e\""
+   },
+   "cli": {
+    "ok": "\"\ufeff\u200b\u202e\""
+   }
+  },
+  {
+   "input": "</script>&<>'",
+   "default": {
+    "ok": "\"</script>&<>'\""
+   },
+   "ascii_false": {
+    "ok": "\"</script>&<>'\""
+   },
+   "audit": {
+    "ok": "\"</script>&<>'\""
+   },
+   "artifact": {
+    "ok": "\"</script>&<>'\""
+   },
+   "cli": {
+    "ok": "\"</script>&<>'\""
+   }
+  },
+  {
+   "input": "\ud83d\ude00",
+   "default": {
+    "ok": "\"\\ud83d\\ude00\""
+   },
+   "ascii_false": {
+    "ok": "\"\ud83d\ude00\""
+   },
+   "audit": {
+    "ok": "\"\ud83d\ude00\""
+   },
+   "artifact": {
+    "ok": "\"\ud83d\ude00\""
+   },
+   "cli": {
+    "ok": "\"\ud83d\ude00\""
+   }
+  },
+  {
+   "input": 0,
+   "default": {
+    "ok": "0"
+   },
+   "ascii_false": {
+    "ok": "0"
+   },
+   "audit": {
+    "ok": "0"
+   },
+   "artifact": {
+    "ok": "0"
+   },
+   "cli": {
+    "ok": "0"
+   }
+  },
+  {
+   "input": -1,
+   "default": {
+    "ok": "-1"
+   },
+   "ascii_false": {
+    "ok": "-1"
+   },
+   "audit": {
+    "ok": "-1"
+   },
+   "artifact": {
+    "ok": "-1"
+   },
+   "cli": {
+    "ok": "-1"
+   }
+  },
+  {
+   "input": 1,
+   "default": {
+    "ok": "1"
+   },
+   "ascii_false": {
+    "ok": "1"
+   },
+   "audit": {
+    "ok": "1"
+   },
+   "artifact": {
+    "ok": "1"
+   },
+   "cli": {
+    "ok": "1"
+   }
+  },
+  {
+   "input": 9007199254740993,
+   "default": {
+    "ok": "9007199254740993"
+   },
+   "ascii_false": {
+    "ok": "9007199254740993"
+   },
+   "audit": {
+    "ok": "9007199254740993"
+   },
+   "artifact": {
+    "ok": "9007199254740993"
+   },
+   "cli": {
+    "ok": "9007199254740993"
+   }
+  },
+  {
+   "input": -9223372036854775808,
+   "default": {
+    "ok": "-9223372036854775808"
+   },
+   "ascii_false": {
+    "ok": "-9223372036854775808"
+   },
+   "audit": {
+    "ok": "-9223372036854775808"
+   },
+   "artifact": {
+    "ok": "-9223372036854775808"
+   },
+   "cli": {
+    "ok": "-9223372036854775808"
+   }
+  },
+  {
+   "input": 18446744073709551616,
+   "default": {
+    "ok": "18446744073709551616"
+   },
+   "ascii_false": {
+    "ok": "18446744073709551616"
+   },
+   "audit": {
+    "ok": "18446744073709551616"
+   },
+   "artifact": {
+    "ok": "18446744073709551616"
+   },
+   "cli": {
+    "ok": "18446744073709551616"
+   }
+  },
+  {
+   "input": 1000000000000000000000000000000,
+   "default": {
+    "ok": "1000000000000000000000000000000"
+   },
+   "ascii_false": {
+    "ok": "1000000000000000000000000000000"
+   },
+   "audit": {
+    "ok": "1000000000000000000000000000000"
+   },
+   "artifact": {
+    "ok": "1000000000000000000000000000000"
+   },
+   "cli": {
+    "ok": "1000000000000000000000000000000"
+   }
+  },
+  {
+   "input": 0.0,
+   "default": {
+    "ok": "0.0"
+   },
+   "ascii_false": {
+    "ok": "0.0"
+   },
+   "audit": {
+    "ok": "0.0"
+   },
+   "artifact": {
+    "ok": "0.0"
+   },
+   "cli": {
+    "ok": "0.0"
+   }
+  },
+  {
+   "input": -0.0,
+   "default": {
+    "ok": "-0.0"
+   },
+   "ascii_false": {
+    "ok": "-0.0"
+   },
+   "audit": {
+    "ok": "-0.0"
+   },
+   "artifact": {
+    "ok": "-0.0"
+   },
+   "cli": {
+    "ok": "-0.0"
+   }
+  },
+  {
+   "input": 0.1,
+   "default": {
+    "ok": "0.1"
+   },
+   "ascii_false": {
+    "ok": "0.1"
+   },
+   "audit": {
+    "ok": "0.1"
+   },
+   "artifact": {
+    "ok": "0.1"
+   },
+   "cli": {
+    "ok": "0.1"
+   }
+  },
+  {
+   "input": 0.5,
+   "default": {
+    "ok": "0.5"
+   },
+   "ascii_false": {
+    "ok": "0.5"
+   },
+   "audit": {
+    "ok": "0.5"
+   },
+   "artifact": {
+    "ok": "0.5"
+   },
+   "cli": {
+    "ok": "0.5"
+   }
+  },
+  {
+   "input": 1.0,
+   "default": {
+    "ok": "1.0"
+   },
+   "ascii_false": {
+    "ok": "1.0"
+   },
+   "audit": {
+    "ok": "1.0"
+   },
+   "artifact": {
+    "ok": "1.0"
+   },
+   "cli": {
+    "ok": "1.0"
+   }
+  },
+  {
+   "input": 2.0,
+   "default": {
+    "ok": "2.0"
+   },
+   "ascii_false": {
+    "ok": "2.0"
+   },
+   "audit": {
+    "ok": "2.0"
+   },
+   "artifact": {
+    "ok": "2.0"
+   },
+   "cli": {
+    "ok": "2.0"
+   }
+  },
+  {
+   "input": 1.5,
+   "default": {
+    "ok": "1.5"
+   },
+   "ascii_false": {
+    "ok": "1.5"
+   },
+   "audit": {
+    "ok": "1.5"
+   },
+   "artifact": {
+    "ok": "1.5"
+   },
+   "cli": {
+    "ok": "1.5"
+   }
+  },
+  {
+   "input": 1e+16,
+   "default": {
+    "ok": "1e+16"
+   },
+   "ascii_false": {
+    "ok": "1e+16"
+   },
+   "audit": {
+    "ok": "1e+16"
+   },
+   "artifact": {
+    "ok": "1e+16"
+   },
+   "cli": {
+    "ok": "1e+16"
+   }
+  },
+  {
+   "input": 1e+17,
+   "default": {
+    "ok": "1e+17"
+   },
+   "ascii_false": {
+    "ok": "1e+17"
+   },
+   "audit": {
+    "ok": "1e+17"
+   },
+   "artifact": {
+    "ok": "1e+17"
+   },
+   "cli": {
+    "ok": "1e+17"
+   }
+  },
+  {
+   "input": 1e-07,
+   "default": {
+    "ok": "1e-07"
+   },
+   "ascii_false": {
+    "ok": "1e-07"
+   },
+   "audit": {
+    "ok": "1e-07"
+   },
+   "artifact": {
+    "ok": "1e-07"
+   },
+   "cli": {
+    "ok": "1e-07"
+   }
+  },
+  {
+   "input": 1e-05,
+   "default": {
+    "ok": "1e-05"
+   },
+   "ascii_false": {
+    "ok": "1e-05"
+   },
+   "audit": {
+    "ok": "1e-05"
+   },
+   "artifact": {
+    "ok": "1e-05"
+   },
+   "cli": {
+    "ok": "1e-05"
+   }
+  },
+  {
+   "input": 0.0001,
+   "default": {
+    "ok": "0.0001"
+   },
+   "ascii_false": {
+    "ok": "0.0001"
+   },
+   "audit": {
+    "ok": "0.0001"
+   },
+   "artifact": {
+    "ok": "0.0001"
+   },
+   "cli": {
+    "ok": "0.0001"
+   }
+  },
+  {
+   "input": 123456789.123,
+   "default": {
+    "ok": "123456789.123"
+   },
+   "ascii_false": {
+    "ok": "123456789.123"
+   },
+   "audit": {
+    "ok": "123456789.123"
+   },
+   "artifact": {
+    "ok": "123456789.123"
+   },
+   "cli": {
+    "ok": "123456789.123"
+   }
+  },
+  {
+   "input": 12.345678,
+   "default": {
+    "ok": "12.345678"
+   },
+   "ascii_false": {
+    "ok": "12.345678"
+   },
+   "audit": {
+    "ok": "12.345678"
+   },
+   "artifact": {
+    "ok": "12.345678"
+   },
+   "cli": {
+    "ok": "12.345678"
+   }
+  },
+  {
+   "input": 1e+22,
+   "default": {
+    "ok": "1e+22"
+   },
+   "ascii_false": {
+    "ok": "1e+22"
+   },
+   "audit": {
+    "ok": "1e+22"
+   },
+   "artifact": {
+    "ok": "1e+22"
+   },
+   "cli": {
+    "ok": "1e+22"
+   }
+  },
+  {
+   "input": 1e+300,
+   "default": {
+    "ok": "1e+300"
+   },
+   "ascii_false": {
+    "ok": "1e+300"
+   },
+   "audit": {
+    "ok": "1e+300"
+   },
+   "artifact": {
+    "ok": "1e+300"
+   },
+   "cli": {
+    "ok": "1e+300"
+   }
+  },
+  {
+   "input": 5e-324,
+   "default": {
+    "ok": "5e-324"
+   },
+   "ascii_false": {
+    "ok": "5e-324"
+   },
+   "audit": {
+    "ok": "5e-324"
+   },
+   "artifact": {
+    "ok": "5e-324"
+   },
+   "cli": {
+    "ok": "5e-324"
+   }
+  },
+  {
+   "input": 1.7976931348623157e+308,
+   "default": {
+    "ok": "1.7976931348623157e+308"
+   },
+   "ascii_false": {
+    "ok": "1.7976931348623157e+308"
+   },
+   "audit": {
+    "ok": "1.7976931348623157e+308"
+   },
+   "artifact": {
+    "ok": "1.7976931348623157e+308"
+   },
+   "cli": {
+    "ok": "1.7976931348623157e+308"
+   }
+  },
+  {
+   "input": 0.30000000000000004,
+   "default": {
+    "ok": "0.30000000000000004"
+   },
+   "ascii_false": {
+    "ok": "0.30000000000000004"
+   },
+   "audit": {
+    "ok": "0.30000000000000004"
+   },
+   "artifact": {
+    "ok": "0.30000000000000004"
+   },
+   "cli": {
+    "ok": "0.30000000000000004"
+   }
+  },
+  {
+   "input": 3e-05,
+   "default": {
+    "ok": "3e-05"
+   },
+   "ascii_false": {
+    "ok": "3e-05"
+   },
+   "audit": {
+    "ok": "3e-05"
+   },
+   "artifact": {
+    "ok": "3e-05"
+   },
+   "cli": {
+    "ok": "3e-05"
+   }
+  },
+  {
+   "input": 100.0,
+   "default": {
+    "ok": "100.0"
+   },
+   "ascii_false": {
+    "ok": "100.0"
+   },
+   "audit": {
+    "ok": "100.0"
+   },
+   "artifact": {
+    "ok": "100.0"
+   },
+   "cli": {
+    "ok": "100.0"
+   }
+  },
+  {
+   "input": 1234.5678,
+   "default": {
+    "ok": "1234.5678"
+   },
+   "ascii_false": {
+    "ok": "1234.5678"
+   },
+   "audit": {
+    "ok": "1234.5678"
+   },
+   "artifact": {
+    "ok": "1234.5678"
+   },
+   "cli": {
+    "ok": "1234.5678"
+   }
+  },
+  {
+   "input": 0.016,
+   "default": {
+    "ok": "0.016"
+   },
+   "ascii_false": {
+    "ok": "0.016"
+   },
+   "audit": {
+    "ok": "0.016"
+   },
+   "artifact": {
+    "ok": "0.016"
+   },
+   "cli": {
+    "ok": "0.016"
+   }
+  },
+  {
+   "input": true,
+   "default": {
+    "ok": "true"
+   },
+   "ascii_false": {
+    "ok": "true"
+   },
+   "audit": {
+    "ok": "true"
+   },
+   "artifact": {
+    "ok": "true"
+   },
+   "cli": {
+    "ok": "true"
+   }
+  },
+  {
+   "input": false,
+   "default": {
+    "ok": "false"
+   },
+   "ascii_false": {
+    "ok": "false"
+   },
+   "audit": {
+    "ok": "false"
+   },
+   "artifact": {
+    "ok": "false"
+   },
+   "cli": {
+    "ok": "false"
+   }
+  },
+  {
+   "input": null,
+   "default": {
+    "ok": "null"
+   },
+   "ascii_false": {
+    "ok": "null"
+   },
+   "audit": {
+    "ok": "null"
+   },
+   "artifact": {
+    "ok": "null"
+   },
+   "cli": {
+    "ok": "null"
+   }
+  },
+  {
+   "input": [],
+   "default": {
+    "ok": "[]"
+   },
+   "ascii_false": {
+    "ok": "[]"
+   },
+   "audit": {
+    "ok": "[]"
+   },
+   "artifact": {
+    "ok": "[]"
+   },
+   "cli": {
+    "ok": "[]"
+   }
+  },
+  {
+   "input": {},
+   "default": {
+    "ok": "{}"
+   },
+   "ascii_false": {
+    "ok": "{}"
+   },
+   "audit": {
+    "ok": "{}"
+   },
+   "artifact": {
+    "ok": "{}"
+   },
+   "cli": {
+    "ok": "{}"
+   }
+  },
+  {
+   "input": [
+    []
+   ],
+   "default": {
+    "ok": "[[]]"
+   },
+   "ascii_false": {
+    "ok": "[[]]"
+   },
+   "audit": {
+    "ok": "[[]]"
+   },
+   "artifact": {
+    "ok": "[\n  []\n]"
+   },
+   "cli": {
+    "ok": "[\n  []\n]"
+   }
+  },
+  {
+   "input": [
+    {}
+   ],
+   "default": {
+    "ok": "[{}]"
+   },
+   "ascii_false": {
+    "ok": "[{}]"
+   },
+   "audit": {
+    "ok": "[{}]"
+   },
+   "artifact": {
+    "ok": "[\n  {}\n]"
+   },
+   "cli": {
+    "ok": "[\n  {}\n]"
+   }
+  },
+  {
+   "input": {
+    "a": []
+   },
+   "default": {
+    "ok": "{\"a\": []}"
+   },
+   "ascii_false": {
+    "ok": "{\"a\": []}"
+   },
+   "audit": {
+    "ok": "{\"a\": []}"
+   },
+   "artifact": {
+    "ok": "{\n  \"a\": []\n}"
+   },
+   "cli": {
+    "ok": "{\n  \"a\": []\n}"
+   }
+  },
+  {
+   "input": {
+    "a": {}
+   },
+   "default": {
+    "ok": "{\"a\": {}}"
+   },
+   "ascii_false": {
+    "ok": "{\"a\": {}}"
+   },
+   "audit": {
+    "ok": "{\"a\": {}}"
+   },
+   "artifact": {
+    "ok": "{\n  \"a\": {}\n}"
+   },
+   "cli": {
+    "ok": "{\n  \"a\": {}\n}"
+   }
+  },
+  {
+   "input": {
+    "b": 1,
+    "a": [
+     1,
+     "x",
+     null,
+     true,
+     0.5
+    ]
+   },
+   "default": {
+    "ok": "{\"b\": 1, \"a\": [1, \"x\", null, true, 0.5]}"
+   },
+   "ascii_false": {
+    "ok": "{\"b\": 1, \"a\": [1, \"x\", null, true, 0.5]}"
+   },
+   "audit": {
+    "ok": "{\"b\": 1, \"a\": [1, \"x\", null, true, 0.5]}"
+   },
+   "artifact": {
+    "ok": "{\n  \"b\": 1,\n  \"a\": [\n    1,\n    \"x\",\n    null,\n    true,\n    0.5\n  ]\n}"
+   },
+   "cli": {
+    "ok": "{\n  \"b\": 1,\n  \"a\": [\n    1,\n    \"x\",\n    null,\n    true,\n    0.5\n  ]\n}"
+   }
+  },
+  {
+   "input": {
+    "\u00e9": "\u00e9",
+    "k\"ey": "v\\al"
+   },
+   "default": {
+    "ok": "{\"\\u00e9\": \"\\u00e9\", \"k\\\"ey\": \"v\\\\al\"}"
+   },
+   "ascii_false": {
+    "ok": "{\"\u00e9\": \"\u00e9\", \"k\\\"ey\": \"v\\\\al\"}"
+   },
+   "audit": {
+    "ok": "{\"\u00e9\": \"\u00e9\", \"k\\\"ey\": \"v\\\\al\"}"
+   },
+   "artifact": {
+    "ok": "{\n  \"\u00e9\": \"\u00e9\",\n  \"k\\\"ey\": \"v\\\\al\"\n}"
+   },
+   "cli": {
+    "ok": "{\n  \"\u00e9\": \"\u00e9\",\n  \"k\\\"ey\": \"v\\\\al\"\n}"
+   }
+  },
+  {
+   "input": [
+    1,
+    [
+     2,
+     [
+      3,
+      [
+       4
+      ]
+     ]
+    ]
+   ],
+   "default": {
+    "ok": "[1, [2, [3, [4]]]]"
+   },
+   "ascii_false": {
+    "ok": "[1, [2, [3, [4]]]]"
+   },
+   "audit": {
+    "ok": "[1, [2, [3, [4]]]]"
+   },
+   "artifact": {
+    "ok": "[\n  1,\n  [\n    2,\n    [\n      3,\n      [\n        4\n      ]\n    ]\n  ]\n]"
+   },
+   "cli": {
+    "ok": "[\n  1,\n  [\n    2,\n    [\n      3,\n      [\n        4\n      ]\n    ]\n  ]\n]"
+   }
+  },
+  {
+   "input": {
+    "nested": {
+     "list": [
+      {
+       "x": -0.0
+      }
+     ],
+     "empty": {}
+    }
+   },
+   "default": {
+    "ok": "{\"nested\": {\"list\": [{\"x\": -0.0}], \"empty\": {}}}"
+   },
+   "ascii_false": {
+    "ok": "{\"nested\": {\"list\": [{\"x\": -0.0}], \"empty\": {}}}"
+   },
+   "audit": {
+    "ok": "{\"nested\": {\"list\": [{\"x\": -0.0}], \"empty\": {}}}"
+   },
+   "artifact": {
+    "ok": "{\n  \"nested\": {\n    \"list\": [\n      {\n        \"x\": -0.0\n      }\n    ],\n    \"empty\": {}\n  }\n}"
+   },
+   "cli": {
+    "ok": "{\n  \"nested\": {\n    \"list\": [\n      {\n        \"x\": -0.0\n      }\n    ],\n    \"empty\": {}\n  }\n}"
+   }
+  },
+  {
+   "input": "nan",
+   "default": {
+    "ok": "NaN"
+   },
+   "ascii_false": {
+    "ok": "NaN"
+   },
+   "audit": {
+    "error": "ValueError",
+    "message": "Out of range float values are not JSON compliant: nan"
+   },
+   "artifact": {
+    "error": "ValueError",
+    "message": "Out of range float values are not JSON compliant: nan"
+   },
+   "cli": {
+    "ok": "NaN"
+   }
+  },
+  {
+   "input": "inf",
+   "default": {
+    "ok": "Infinity"
+   },
+   "ascii_false": {
+    "ok": "Infinity"
+   },
+   "audit": {
+    "error": "ValueError",
+    "message": "Out of range float values are not JSON compliant: inf"
+   },
+   "artifact": {
+    "error": "ValueError",
+    "message": "Out of range float values are not JSON compliant: inf"
+   },
+   "cli": {
+    "ok": "Infinity"
+   }
+  },
+  {
+   "input": "-inf",
+   "default": {
+    "ok": "-Infinity"
+   },
+   "ascii_false": {
+    "ok": "-Infinity"
+   },
+   "audit": {
+    "error": "ValueError",
+    "message": "Out of range float values are not JSON compliant: -inf"
+   },
+   "artifact": {
+    "error": "ValueError",
+    "message": "Out of range float values are not JSON compliant: -inf"
+   },
+   "cli": {
+    "ok": "-Infinity"
+   }
+  }
+ ]
+}

@@ -41,7 +41,7 @@ select = ["E4", "E7", "E9", "F", "E501"]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["gtm_connector"]
+files = ["gtm_connector", "tools"]
 check_untyped_defs = true
 warn_unused_ignores = true
 warn_redundant_casts = true

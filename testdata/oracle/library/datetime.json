@@ -1,0 +1,1218 @@
+{
+ "note": "datetime.fromisoformat (as given and with Z read as +00:00), date.fromisoformat, units._instant, units._day",
+ "cases": [
+  {
+   "input": "2027-01-15",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T00:00:00",
+     null
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T00:00:00",
+     null
+    ]
+   },
+   "date.fromisoformat": {
+    "ok": "2027-01-15"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "ok": "2027-01-15"
+   }
+  },
+  {
+   "input": "2027-02-30",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "day 30 must be in range 1..28 for month 2 in year 2027"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "day 30 must be in range 1..28 for month 2 in year 2027"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "day 30 must be in range 1..28 for month 2 in year 2027"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "day 30 must be in range 1..28 for month 2 in year 2027"
+   }
+  },
+  {
+   "input": "0001-01-01",
+   "datetime.fromisoformat": {
+    "ok": [
+     "0001-01-01T00:00:00",
+     null
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "0001-01-01T00:00:00",
+     null
+    ]
+   },
+   "date.fromisoformat": {
+    "ok": "0001-01-01"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "ok": "0001-01-01"
+   }
+  },
+  {
+   "input": "9999-12-31",
+   "datetime.fromisoformat": {
+    "ok": [
+     "9999-12-31T00:00:00",
+     null
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "9999-12-31T00:00:00",
+     null
+    ]
+   },
+   "date.fromisoformat": {
+    "ok": "9999-12-31"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "ok": "9999-12-31"
+   }
+  },
+  {
+   "input": "2027-1-5",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-1-5'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-1-5'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-1-5'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-1-5'"
+   }
+  },
+  {
+   "input": "2027-01-15T00:00:00Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T00:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T00:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T00:00:00Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T00:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T00:00:00Z'"
+   }
+  },
+  {
+   "input": "0001-01-01T00:00:00+23:59",
+   "datetime.fromisoformat": {
+    "ok": [
+     "0001-01-01T00:00:00+23:59",
+     86340.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "0001-01-01T00:00:00+23:59",
+     86340.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '0001-01-01T00:00:00+23:59'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '0001-01-01T00:00:00+23:59'"
+   }
+  },
+  {
+   "input": "9999-12-31T23:59:59-23:59",
+   "datetime.fromisoformat": {
+    "ok": [
+     "9999-12-31T23:59:59-23:59",
+     -86340.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "9999-12-31T23:59:59-23:59",
+     -86340.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '9999-12-31T23:59:59-23:59'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '9999-12-31T23:59:59-23:59'"
+   }
+  },
+  {
+   "input": "2026-10-03T15:00:00",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2026-10-03T15:00:00",
+     null
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2026-10-03T15:00:00",
+     null
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2026-10-03T15:00:00'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2026-10-03T15:00:00'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00z",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00z'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00z'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00z'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00z'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00+00:00",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+00:00'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+00:00'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00-00:00",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00-00:00'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00-00:00'"
+   }
+  },
+  {
+   "input": "2027-01-15 12:00:00Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15 12:00:00Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15 12:00:00Z'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00Z'"
+   }
+  },
+  {
+   "input": "2027-01-15T12Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12Z'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00.5Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00.500000+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00.500000+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00.5Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00.500000+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00.5Z'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00.123456Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00.123456+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00.123456+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00.123456Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00.123456+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00.123456Z'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00.1234567Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00.123456+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00.123456+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00.1234567Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00.123456+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00.1234567Z'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00,5Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00.500000+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00.500000+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00,5Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00.500000+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00,5Z'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00+0530",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+05:30",
+     19800.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+05:30",
+     19800.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+0530'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T06:30:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+0530'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00+05:30:15",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+05:30:15",
+     19815.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+05:30:15",
+     19815.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+05:30:15'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T06:29:45+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+05:30:15'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00+05:30:15.5",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+05:30:15.500000",
+     19815.5
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+05:30:15.500000",
+     19815.5
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+05:30:15.5'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T06:29:44.500000+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+05:30:15.5'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00+24:00",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not datetime.timedelta(days=1)"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "offset must be a timedelta strictly between -timedelta(hours=24) and timedelta(hours=24), not datetime.timedelta(days=1)"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+24:00'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+24:00'"
+   }
+  },
+  {
+   "input": "2027-01-15T23:59:60Z",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "second must be in 0..59, not 60"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "second must be in 0..59, not 60"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T23:59:60Z'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T23:59:60Z'"
+   }
+  },
+  {
+   "input": "2027-01-15T24:00:00Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-16T00:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-16T00:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T24:00:00Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-16T00:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T24:00:00Z'"
+   }
+  },
+  {
+   "input": "20270115T120000Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '20270115T120000Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '20270115T120000Z'"
+   }
+  },
+  {
+   "input": "2027015",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027015'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027015'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027015'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027015'"
+   }
+  },
+  {
+   "input": "2027-015",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-015'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-015'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-015'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-015'"
+   }
+  },
+  {
+   "input": "2027-W03-5",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-22T00:00:00",
+     null
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-22T00:00:00",
+     null
+    ]
+   },
+   "date.fromisoformat": {
+    "ok": "2027-01-22"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "BriefRejected",
+    "message": "Evidence dates must use YYYY-MM-DD."
+   }
+  },
+  {
+   "input": "2027W035",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-22T00:00:00",
+     null
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-22T00:00:00",
+     null
+    ]
+   },
+   "date.fromisoformat": {
+    "ok": "2027-01-22"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "BriefRejected",
+    "message": "Evidence dates must use YYYY-MM-DD."
+   }
+  },
+  {
+   "input": "2027-W03",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-18T00:00:00",
+     null
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-18T00:00:00",
+     null
+    ]
+   },
+   "date.fromisoformat": {
+    "ok": "2027-01-18"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "BriefRejected",
+    "message": "Evidence dates must use YYYY-MM-DD."
+   }
+  },
+  {
+   "input": "+2027-01-15",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '+2027-01-15'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '+2027-01-15'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '+2027-01-15'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '+2027-01-15'"
+   }
+  },
+  {
+   "input": "2027-01-15T",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T'"
+   }
+  },
+  {
+   "input": " 2027-01-15",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: ' 2027-01-15'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: ' 2027-01-15'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: ' 2027-01-15'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: ' 2027-01-15'"
+   }
+  },
+  {
+   "input": "2027-01-15 ",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15 '"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15 '"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15 '"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15 '"
+   }
+  },
+  {
+   "input": "\uff12\uff10\uff12\uff17-01-15",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '\uff12\uff10\uff12\uff17-01-15'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '\uff12\uff10\uff12\uff17-01-15'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '\uff12\uff10\uff12\uff17-01-15'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '\uff12\uff10\uff12\uff17-01-15'"
+   }
+  },
+  {
+   "input": "\u0662\u0660\u0662\u0667-01-15",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '\u0662\u0660\u0662\u0667-01-15'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '\u0662\u0660\u0662\u0667-01-15'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '\u0662\u0660\u0662\u0667-01-15'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '\u0662\u0660\u0662\u0667-01-15'"
+   }
+  },
+  {
+   "input": "",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: ''"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: ''"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: ''"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: ''"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00ZZ",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00ZZ'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+00:00+00:00'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00ZZ'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00ZZ'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00+00",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+00'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+00'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00Z+00:00",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00Z+00:00'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00+00:00+00:00'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00Z+00:00'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00Z+00:00'"
+   }
+  },
+  {
+   "input": "0000-01-01",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "year must be in 1..9999, not 0"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "year must be in 1..9999, not 0"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "year must be in 1..9999, not 0"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "year must be in 1..9999, not 0"
+   }
+  },
+  {
+   "input": "0001-01-01T00:00:00Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "0001-01-01T00:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "0001-01-01T00:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '0001-01-01T00:00:00Z'"
+   },
+   "units._instant": {
+    "ok": "0001-01-01T00:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '0001-01-01T00:00:00Z'"
+   }
+  },
+  {
+   "input": "9999-12-31T23:59:59.999999-23:59",
+   "datetime.fromisoformat": {
+    "ok": [
+     "9999-12-31T23:59:59.999999-23:59",
+     -86340.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "9999-12-31T23:59:59.999999-23:59",
+     -86340.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '9999-12-31T23:59:59.999999-23:59'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '9999-12-31T23:59:59.999999-23:59'"
+   }
+  },
+  {
+   "input": "2026-11-16T04:30:00+05:00",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2026-11-16T04:30:00+05:00",
+     18000.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2026-11-16T04:30:00+05:00",
+     18000.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2026-11-16T04:30:00+05:00'"
+   },
+   "units._instant": {
+    "ok": "2026-11-15T23:30:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2026-11-16T04:30:00+05:00'"
+   }
+  },
+  {
+   "input": "2026-11-15T23:30:00-05:00",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2026-11-15T23:30:00-05:00",
+     -18000.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2026-11-15T23:30:00-05:00",
+     -18000.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2026-11-15T23:30:00-05:00'"
+   },
+   "units._instant": {
+    "ok": "2026-11-16T04:30:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2026-11-15T23:30:00-05:00'"
+   }
+  },
+  {
+   "input": "last week",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: 'last week'"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: 'last week'"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: 'last week'"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: 'last week'"
+   }
+  },
+  {
+   "input": "2027-01-15T12:00:00.000Z",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2027-01-15T12:00:00+00:00",
+     0.0
+    ]
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00.000Z'"
+   },
+   "units._instant": {
+    "ok": "2027-01-15T12:00:00+00:00"
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "Invalid isoformat string: '2027-01-15T12:00:00.000Z'"
+   }
+  },
+  {
+   "input": "2024-02-29",
+   "datetime.fromisoformat": {
+    "ok": [
+     "2024-02-29T00:00:00",
+     null
+    ]
+   },
+   "datetime.fromisoformat Z": {
+    "ok": [
+     "2024-02-29T00:00:00",
+     null
+    ]
+   },
+   "date.fromisoformat": {
+    "ok": "2024-02-29"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "ok": "2024-02-29"
+   }
+  },
+  {
+   "input": "2023-02-29",
+   "datetime.fromisoformat": {
+    "error": "ValueError",
+    "message": "day 29 must be in range 1..28 for month 2 in year 2023"
+   },
+   "datetime.fromisoformat Z": {
+    "error": "ValueError",
+    "message": "day 29 must be in range 1..28 for month 2 in year 2023"
+   },
+   "date.fromisoformat": {
+    "error": "ValueError",
+    "message": "day 29 must be in range 1..28 for month 2 in year 2023"
+   },
+   "units._instant": {
+    "ok": null
+   },
+   "units._day": {
+    "error": "ValueError",
+    "message": "day 29 must be in range 1..28 for month 2 in year 2023"
+   }
+  }
+ ]
+}

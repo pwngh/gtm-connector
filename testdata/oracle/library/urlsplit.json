@@ -1,0 +1,7401 @@
+{
+ "note": "urlsplit parts, hostname as units._host asks for it, port, and the host a card shows; an error is the exception's type and message",
+ "cases": [
+  {
+   "input": "http://a.example/x",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a.example",
+     "/x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "a.example"
+  },
+  {
+   "input": "http://a\tb.example/x",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "ab.example",
+     "/x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "ab.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "ab.example"
+  },
+  {
+   "input": "http://evil.example\\@good.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "evil.example\\@good.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "https://A.Example:8443/p",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "A.Example:8443",
+     "/p",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a.example"
+   },
+   "port": {
+    "ok": 8443
+   },
+   "host": "a.example"
+  },
+  {
+   "input": "HTTPS://WWW.Example.COM/",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "WWW.Example.COM",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "www.example.com"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "example.com"
+  },
+  {
+   "input": "www.www.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "www.www.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "www.www.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "example"
+  },
+  {
+   "input": "www.",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "www.",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "www."
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "//x.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "x.example",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "x.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "x.example"
+  },
+  {
+   "input": "x.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "x.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "x.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "x.example"
+  },
+  {
+   "input": "mailto:a@b.example",
+   "urlsplit": {
+    "ok": [
+     "mailto",
+     "",
+     "a@b.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "mail"
+  },
+  {
+   "input": "MAILTO:x",
+   "urlsplit": {
+    "ok": [
+     "mailto",
+     "",
+     "x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "mail"
+  },
+  {
+   "input": "ftp://files.example/a",
+   "urlsplit": {
+    "ok": [
+     "ftp",
+     "files.example",
+     "/a",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "files.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "files.example"
+  },
+  {
+   "input": "slack://open",
+   "urlsplit": {
+    "ok": [
+     "slack",
+     "open",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "open"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "open"
+  },
+  {
+   "input": "http://[::1]/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "[::1]",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "::1"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://[v1.x]/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "[v1.x]",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "v1.x"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "v1.x"
+  },
+  {
+   "input": "http://[::1",
+   "urlsplit": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://]x/",
+   "urlsplit": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://user:pass@host.example:99999/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "user:pass@host.example:99999",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "host.example"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "Port out of range 0-65535"
+   },
+   "host": "host.example"
+  },
+  {
+   "input": "http://user@host.example:abc/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "user@host.example:abc",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "host.example"
+   },
+   "port": {
+    "error": "ValueError",
+    "message": "Port could not be cast to integer value as 'abc'"
+   },
+   "host": "host.example"
+  },
+  {
+   "input": "http://%41.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "%41.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "%41.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://xn--bcher-kva.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "xn--bcher-kva.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "xn--bcher-kva.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "xn--bcher-kva.example"
+  },
+  {
+   "input": "http://b\u00fccher.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "b\u00fccher.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b\u00fccher.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a.example\\b/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a.example\\b",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a.example\\b"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a\u3002example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a\u3002example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a\u3002example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a.example.",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a.example.",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a.example."
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "a.example."
+  },
+  {
+   "input": "http://.example",
+   "urlsplit": {
+    "ok": [
+     "http",
+     ".example",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": ".example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": ".example"
+  },
+  {
+   "input": "http://a_b.example",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a_b.example",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a_b.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a b.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a b.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a b.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a\nb.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "ab.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "ab.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "ab.example"
+  },
+  {
+   "input": "http://a\u0000b.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a\u0000b.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a\u0000b.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://@/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "@",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://:80/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     ":80",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": 80
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http:",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "http"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "http"
+  },
+  {
+   "input": "http:/x.example",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "",
+     "/x.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "http"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "http"
+  },
+  {
+   "input": "http:///x",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "",
+     "/x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "https://www.www.example/",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "www.www.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "www.www.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "example"
+  },
+  {
+   "input": "https://wwwx.example/",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "wwwx.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "wwwx.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "wwwx.example"
+  },
+  {
+   "input": "https://x.www.example/",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "x.www.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "x.www.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "//",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "//a",
+   "urlsplit": {
+    "ok": [
+     "",
+     "a",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "a"
+  },
+  {
+   "input": "a//b",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "a//b",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "www.example.com/path?q=1",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "www.example.com/path",
+     "q=1",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "www.example.com"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "example.com"
+  },
+  {
+   "input": "http://\u0130.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "\u0130.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "i\u0307.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://\u212a.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "\u212a.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "k.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "k.example"
+  },
+  {
+   "input": "http://EXAMPLE.\u0130/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "EXAMPLE.\u0130",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "example.i\u0307"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a.example#frag",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a.example",
+     "",
+     "",
+     "frag"
+    ]
+   },
+   "hostname": {
+    "ok": "a.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "a.example"
+  },
+  {
+   "input": "http://a.example?x#y",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a.example",
+     "",
+     "x",
+     "y"
+    ]
+   },
+   "hostname": {
+    "ok": "a.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "a.example"
+  },
+  {
+   "input": "http://\uff21.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "\uff21.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "\uff41.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a\u200bb.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a\u200bb.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a\u200bb.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a.example:0/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a.example:0",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a.example"
+   },
+   "port": {
+    "ok": 0
+   },
+   "host": "a.example"
+  },
+  {
+   "input": "http://a.example:65535/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a.example:65535",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a.example"
+   },
+   "port": {
+    "ok": 65535
+   },
+   "host": "a.example"
+  },
+  {
+   "input": "http://[fe80::1%25en0]/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "[fe80::1%25en0]",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "fe80::1%25en0"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "javascript:alert(1)",
+   "urlsplit": {
+    "ok": [
+     "javascript",
+     "",
+     "alert(1)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "javascript"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "javascript"
+  },
+  {
+   "input": "data:text/html,x",
+   "urlsplit": {
+    "ok": [
+     "data",
+     "",
+     "text/html,x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "data"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "data"
+  },
+  {
+   "input": "http://1.2.3.4/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "1.2.3.4",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "1.2.3.4"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "1.2.3.4"
+  },
+  {
+   "input": "http://0x7f.1/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "0x7f.1",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "0x7f.1"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "0x7f.1"
+  },
+  {
+   "input": "C:\\path",
+   "urlsplit": {
+    "ok": [
+     "c",
+     "",
+     "\\path",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "c"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "c"
+  },
+  {
+   "input": "\\\\server\\share",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "\\\\server\\share",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "\\\\server\\share"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://a.example%2F@b.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a.example%2F@b.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "b.example"
+  },
+  {
+   "input": "http://a.example/@b.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "a.example",
+     "/@b.example/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "a.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "a.example"
+  },
+  {
+   "input": "<https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "https://",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "B.example",
+     "/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "b.example"
+  },
+  {
+   "input": "mailto:",
+   "urlsplit": {
+    "ok": [
+     "mailto",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "mail"
+  },
+  {
+   "input": "[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "slack://x",
+   "urlsplit": {
+    "ok": [
+     "slack",
+     "x",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "x"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "x"
+  },
+  {
+   "input": "ftp://",
+   "urlsplit": {
+    "ok": [
+     "ftp",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "evil.example",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "evil.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "evil.example"
+  },
+  {
+   "input": "://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ":",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ":",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "2027-01-15T00:00:00Z",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "2027-01-15T00:00:00Z",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "2027-01-15t00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "2027-01-15t00"
+  },
+  {
+   "input": "0001-01-01T00:00:00+23:59",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "0001-01-01T00:00:00+23:59",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "0001-01-01t00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "0001-01-01t00"
+  },
+  {
+   "input": "9999-12-31T23:59:59-23:59",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "9999-12-31T23:59:59-23:59",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "9999-12-31t23"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "9999-12-31t23"
+  },
+  {
+   "input": "2026-10-03T15:00:00",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "2026-10-03T15:00:00",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "2026-10-03t15"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "2026-10-03t15"
+  },
+  {
+   "input": "Kind: captions",
+   "urlsplit": {
+    "ok": [
+     "kind",
+     "",
+     " captions",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "kind"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "kind"
+  },
+  {
+   "input": "Language: en-US",
+   "urlsplit": {
+    "ok": [
+     "language",
+     "",
+     " en-US",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "language"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "language"
+  },
+  {
+   "input": "X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "x-timestamp-map=mpegts"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "00:00.000 --> 00:01.000",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "00:00.000 --> 00:01.000",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "00"
+  },
+  {
+   "input": "Kind: 00:00.000 --> 00:01.000",
+   "urlsplit": {
+    "ok": [
+     "kind",
+     "",
+     " 00:00.000 --> 00:01.000",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "kind"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "kind"
+  },
+  {
+   "input": "Dana: this was said.",
+   "urlsplit": {
+    "ok": [
+     "dana",
+     "",
+     " this was said.",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "dana"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "dana"
+  },
+  {
+   "input": "00:00:00.000 --> 00:00:01.000 align:start",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "00:00:00.000 --> 00:00:01.000 align:start",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "00"
+  },
+  {
+   "input": "99:59.999 --> 100:00:00.000",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "99:59.999 --> 100:00:00.000",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "99"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "99"
+  },
+  {
+   "input": "00:00.000 -->  00:01.000",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "00:00.000 -->  00:01.000",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "00"
+  },
+  {
+   "input": "Dana Reyes: Hello.",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "Dana Reyes: Hello.",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "dana reyes"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "WEBVTT\nKind: ",
+   "urlsplit": {
+    "ok": [
+     "webvttkind",
+     "",
+     " ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "webvttkind"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "webvttkind"
+  },
+  {
+   "input": "WEBVTT\n\n00:00.000 --> 00:01.000\nhello\n\nNOTE ",
+   "urlsplit": {
+    "ok": [
+     "webvtt00",
+     "",
+     "00.000 --> 00:01.000helloNOTE ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "webvtt00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "webvtt00"
+  },
+  {
+   "input": "WEBVTT\n\n00:00.000 --> 00:01.000 ",
+   "urlsplit": {
+    "ok": [
+     "webvtt00",
+     "",
+     "00.000 --> 00:01.000 ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "webvtt00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "webvtt00"
+  },
+  {
+   "input": "WEBVTT\n\n00:00.000 ",
+   "urlsplit": {
+    "ok": [
+     "webvtt00",
+     "",
+     "00.000 ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "webvtt00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "webvtt00"
+  },
+  {
+   "input": "WEBVTT\n\n00:00.000 --> 00:01.000\n",
+   "urlsplit": {
+    "ok": [
+     "webvtt00",
+     "",
+     "00.000 --> 00:01.000",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "webvtt00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "webvtt00"
+  },
+  {
+   "input": "00:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "00:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "00"
+  },
+  {
+   "input": "Language: en\n",
+   "urlsplit": {
+    "ok": [
+     "language",
+     "",
+     " en",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "language"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "language"
+  },
+  {
+   "input": "00:00.000 --> 00:01.000\nhi\n\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "00:00.000 --> 00:01.000hi",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "00"
+  },
+  {
+   "input": "1\n00:00.000 --> 00:01.000\nhi\n\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "100:00.000 --> 00:01.000hi",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "100"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "100"
+  },
+  {
+   "input": "\n\n00:00.000 --> 00:01.000\nhello\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "00:00.000 --> 00:01.000hello",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "00"
+  },
+  {
+   "input": "--> 00:01.000\nhello",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "--> 00:01.000hello",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "--> 00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "\n00:00.000 --> 00:01.000\nhello",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "00:00.000 --> 00:01.000hello",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "00"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "00"
+  },
+  {
+   "input": "Seats: 40 -> 55? [crm/accounts/acc-001]",
+   "urlsplit": {
+    "ok": [
+     "seats",
+     "",
+     " 40 -> 55",
+     " [crm/accounts/acc-001]",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "seats"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "seats"
+  },
+  {
+   "input": "- Signal: renewal is in 1 day.",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "- Signal: renewal is in 1 day.",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "- signal"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel><https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel><https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel><mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel><mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<!channel>mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!channel>:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!channel>:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<!channel>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now><https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now><https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now><mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now><mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<!here|now>mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here|now>:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here|now>:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<!here|now>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team><https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team><https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team><mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team><mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "team>mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "team>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123><https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123><https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123><mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123><mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "u0abc123>mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "u0abc123>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana><https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana><https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana><mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana><mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "u0abc123|dana>mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123|dana>:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123|dana>:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "u0abc123|dana>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general><https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general><https://a.example/x|label>"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general><mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general><mailto:a@b.example>"
+    ]
+   },
+   "hostname": {
+    "ok": "<"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>http://"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>https://"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>HTTPS://B.example/y"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>mailto:"
+    ]
+   },
+   "hostname": {
+    "ok": "<"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>[doc](https://c.example/z)"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>slack://x"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>ftp://"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>//evil.example"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>://"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<#C9|general>:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C9|general>:"
+    ]
+   },
+   "hostname": {
+    "ok": "<"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!<https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!<https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!<mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!<mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<!mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<![doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<![doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<!"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@<https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@<https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@<mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@<mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "mailto"
+  },
+  {
+   "input": "<@[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<<https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<<https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<<mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<<mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "><https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "><https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "><mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "><mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": ">mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": ">:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     ">:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": ">"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|<https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|<https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|<mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|<mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "|mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "|:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "|:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "|"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><!channel>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><!channel>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><!here|now>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><!here|now>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><!subteam^S1|@team>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><!subteam^S1|@team>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><@U0ABC123>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><@U0ABC123>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><@U0ABC123|dana>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><@U0ABC123|dana>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><#C9|general>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><",
+     "",
+     "C9|general>"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><!",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><!",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><@",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><@",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>|",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>|",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>[",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>[",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>](",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>](",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label> ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label> ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>? ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>",
+     " ",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>! ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>! ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>Dr. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>Dr. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>.\" ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>.\" ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>e.g. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>e.g. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>No",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>No",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\n  Customer, by a speaker label equal to one contact's name\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>  Customer, by a speaker label equal to one contact's name",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\n    [1] call ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>    [1] call ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\nNOT READ\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>NOT READ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>[1]",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>[1]",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>[22]",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>[22]",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>]",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>]",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>1",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>1",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\uff11",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\uff11",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>www.",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>www.",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>www.evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>www.evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><x|y>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><x|y>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>/",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><v Dana Ito>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><v Dana Ito>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label><v.loud Sam>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label><v.loud Sam>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label></v>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label></v>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>Jan. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>Jan. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>A. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>A. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\n\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\r\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\u202e",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\u202e",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\u200d",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\u200d",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\u00ad",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\u00ad",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\udb40\udc41",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\udb40\udc41",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\u001b",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\u001b",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\u0085",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\u0085",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\u2028",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\u2028",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\u2029",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\u2029",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\t",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\u00a0",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\u00a0",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>\u3000",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>\u3000",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>Their counsel has not approved the rider.",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>Their counsel has not approved the rider.",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>We'll see.",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>We'll see.",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://a.example/x|label>Zo\u00eb",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://a.example/x|label>Zo\u00eb",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><!channel>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><!channel>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example><!channel>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><!here|now>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><!here|now>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example><!here|now>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><!subteam^S1|@team>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><!subteam^S1|@team>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "team>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><@U0ABC123>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><@U0ABC123>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "u0abc123>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><@U0ABC123|dana>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><@U0ABC123|dana>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "u0abc123|dana>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><#C9|general>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><",
+     "",
+     "C9|general>"
+    ]
+   },
+   "hostname": {
+    "ok": "b.example><"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><!",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><!",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example><!"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><@",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><@",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example><"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>|",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>|",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>|"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><https://a.example/x|label>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><https://a.example/x|label>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><mailto:a@b.example>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>http://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>http://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>https://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>https://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>HTTPS://B.example/y",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>HTTPS://B.example/y",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>mailto:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>mailto:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>mailto"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>[doc](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>[doc](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>[",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>[",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>](",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>](",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>)"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example> ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example> ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example> "
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>. "
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>? ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>",
+     " ",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>! ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>! ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>! "
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>Dr. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>Dr. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>dr. "
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>.\" ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>.\" ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>.\" "
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>e.g. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>e.g. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>e.g. "
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>No",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>No",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>no"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\n  Customer, by a speaker label equal to one contact's name\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>  Customer, by a speaker label equal to one contact's name",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>  customer, by a speaker label equal to one contact's name"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\n    [1] call ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>    [1] call ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\nNOT READ\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>NOT READ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>not read"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>[1]",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>[1]",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>[22]",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>[22]",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>]",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>]",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>1",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>1",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>1"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\uff11",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>\uff11",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>\uff11"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>slack://x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>slack://x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>ftp://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>ftp://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>//evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>//evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>www.",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>www.",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>www."
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>www.evil.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>www.evil.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>www.evil.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><x|y>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><x|y>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example><x|y>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>://",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>://",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>/",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>:",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>:",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><v Dana Ito>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><v Dana Ito>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example><v dana ito>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example><v.loud Sam>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example><v.loud Sam>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example><v.loud sam>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example></v>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example></v>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example><"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>Jan. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>Jan. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>jan. "
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>A. ",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>A. ",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>a. "
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\n\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\r\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\u202e",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>\u202e",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>\u202e"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\u200d",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>\u200d",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>\u200d"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\u00ad",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>\u00ad",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>\u00ad"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\udb40\udc41",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>\udb40\udc41",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>\udb40\udc41"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\u001b",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>\u001b",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>\u001b"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<mailto:a@b.example>\u0085",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example>\u0085",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example>\u0085"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<http://a\tb.example/x|deck>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<http://ab.example/x|deck>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<http://evil.example\\@good.example/|deck>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<http://evil.example\\@good.example/|deck>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<https://A.Example:8443/p?q=1#f|Deck>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<https://A.Example:8443/p",
+     "q=1",
+     "f|Deck>"
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "mailto:dana@example.com",
+   "urlsplit": {
+    "ok": [
+     "mailto",
+     "",
+     "dana@example.com",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "example.com"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "mail"
+  },
+  {
+   "input": "<mailto:a@b.example|mail>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<mailto:a@b.example|mail>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "b.example|mail>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "[deck](https://c.example/z)",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "[deck](https://c.example/z)",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "[deck]( http://d.example )",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "[deck]( http://d.example )",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<slack://open|app>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<slack://open|app>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "ftp://files.example/a.",
+   "urlsplit": {
+    "ok": [
+     "ftp",
+     "files.example",
+     "/a.",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "files.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "files.example"
+  },
+  {
+   "input": "<#C123|general>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<",
+     "",
+     "C123|general>"
+    ]
+   },
+   "hostname": {
+    "ok": "<"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<@U0ABC123>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<@U0ABC123>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "u0abc123>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!subteam^S1|@team>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!subteam^S1|@team>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "team>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!here>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!here>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<!here>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<!date^1|x>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<!date^1|x>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<!date^1|x>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<x|y>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<x|y>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<x|y>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "<|>",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "<|>",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "<|>"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "[7]",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "[7]",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "'7' does not appear to be an IPv4 or IPv6 address"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "[\uff11]",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "[\uff11]",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "'\uff11' does not appear to be an IPv4 or IPv6 address"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "[12]x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "[12]x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "error": "ValueError",
+    "message": "Invalid IPv6 URL"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "\r\n",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "\r",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "%",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "%",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "%"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "%4",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "%4",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "%4"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "%41",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "%41",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "%41"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "%zz",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "%zz",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "%zz"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "%%41",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "%%41",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "%%41"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "?q=%E2%82%AC",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "",
+     "q=%E2%82%AC",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": null
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  }
+ ]
+}

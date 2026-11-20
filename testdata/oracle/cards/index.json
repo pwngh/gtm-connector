@@ -1,0 +1,13 @@
+{
+ "note": "each line of a family file is one card: key, account, options, the source rows it read, and the sealed file's exact text with its SHA-256 and seal receipt; or a refusal with the receipts it left",
+ "families": {
+  "books_calls": 82,
+  "books_demo": 78,
+  "books_salesforce": 78,
+  "books_slack": 78,
+  "cases": 19,
+  "demo": 33,
+  "slack_threads": 36,
+  "varied_demo": 46
+ }
+}

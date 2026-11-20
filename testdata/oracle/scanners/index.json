@@ -1,0 +1,14 @@
+{
+ "note": "scanners/inputs.jsonl.gz holds the inputs; each scanner file holds one result per input, in order",
+ "fuzz_inputs": 4767,
+ "random_inputs": 20000,
+ "random_seed": 1,
+ "scanners": {
+  "units_target": "units.py:118 _TARGET as _IS_TARGET.match(text): the end of the match, or null",
+  "units_raw_link": "units.py:122 _RAW_LINK.finditer(text): [start, end] of each match",
+  "units_sentence_end": "units.py:222 _SENTENCE_END.finditer(line): [start, end of group 1, end of group 2]",
+  "units_opener": "units.py:253 _OPENER.match(line, pos) at every pos: [pos, end] where it matches",
+  "units_named": "units.py:342 _NAMED.match(line): [start, end] of group 1 and the match end, or null",
+  "slack_percent": "slack_mapping.py:108 and slack_callback.py:163 %(?!hex hex): [start, end] of each match"
+ }
+}

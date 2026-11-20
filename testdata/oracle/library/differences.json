@@ -1,0 +1,40 @@
+{
+ "note": "Backend plan section 4: what the oracle does where Go will differ on purpose",
+ "safe_text_twice": {
+  "input": "We agree <#<@U1> will not sign> today.",
+  "once": "We agree <#[user U1] will not sign> today.",
+  "twice": "We agree [channel] today."
+ },
+ "sentences": {
+  "sentence_opener_quote": {
+   "input": "They said yes. \"maybe later\" was the reply.",
+   "sentences": [
+    "They said yes.",
+    "\"maybe later\" was the reply."
+   ]
+  },
+  "sentence_opener_accent": {
+   "input": "They said yes. \"\u00e9lan\" was the word.",
+   "sentences": [
+    "They said yes.",
+    "\"\u00e9lan\" was the word."
+   ]
+  },
+  "sentence_unicode_16_letter": {
+   "input": "He agreed. \ud803\udd70xyz goes on.",
+   "sentences": [
+    "He agreed. \ud803\udd70xyz goes on."
+   ]
+  }
+ },
+ "hosts": {
+  "ambiguous_host": {
+   "input": "<http://evil.example\\@good.example/|deck>",
+   "safe_text": "deck [link good.example]"
+  },
+  "control_in_host": {
+   "input": "<http://a\tb.example/x|deck>",
+   "safe_text": "deck [link ab.example]"
+  }
+ }
+}
