@@ -1,21 +1,32 @@
+function visible(element) {
+  if (!element || element.isConnected === false || element.disabled || element.closest?.('[hidden],[inert],[aria-hidden="true"]')) return false;
+  const closed = element.closest?.('details:not([open])');
+  if (closed && !closed.querySelector('summary')?.contains(element)) return false;
+  return !element.getClientRects || element.getClientRects().length > 0;
+}
+
 export function focusReadinessElement(element) {
-  element?.focus({preventScroll: true});
-  element?.scrollIntoView({block: 'nearest', behavior: 'instant'});
+  if (!visible(element) || !element.focus) return false;
+  element.focus({preventScroll: true});
+  if (element.ownerDocument && element.ownerDocument.activeElement !== element) return false;
+  element.scrollIntoView?.({block: 'nearest', behavior: 'instant'});
+  return true;
 }
 
 export function readinessFocusTarget(root, key) {
-  return [...(root?.querySelectorAll('[data-readiness-target]') || [])].find(element => element.dataset.readinessTarget === key);
+  return [...(root?.querySelectorAll('[data-readiness-target]') || [])].find(element => element.dataset.readinessTarget === key && visible(element));
 }
 
 export function restoreReadinessFocus(root, opener, fallback, heading) {
   const candidates = [...(root?.querySelectorAll('[data-readiness-focus]') || [])];
-  focusReadinessElement(candidates.find(element => element.dataset.readinessFocus === opener)
-    || candidates.find(element => element.dataset.readinessFocus === fallback) || heading);
+  for (const target of [candidates.find(element => element.dataset.readinessFocus === opener), candidates.find(element => element.dataset.readinessFocus === fallback), heading]) {
+    if (focusReadinessElement(target)) return;
+  }
 }
 
 export function moveReadinessFocus(event, root) {
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
-  const entries = [...(root?.querySelectorAll('[data-readiness-entry]') || [])];
+  const entries = [...(root?.querySelectorAll('[data-readiness-entry]') || [])].filter(visible);
   const index = entries.indexOf(event.target);
   if (index < 0) return;
   event.preventDefault();

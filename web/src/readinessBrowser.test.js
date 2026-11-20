@@ -64,3 +64,30 @@ test('Escape closes an inspection but does not hijack form controls or handled k
   }
   assert.equal(closes, 1);
 });
+
+test('focus recovery rejects hidden, disconnected, and closed-disclosure targets before falling back', () => {
+  for (const hidden of [
+    {isConnected: false}, {getClientRects: () => []}, {disabled: true},
+    {closest: selector => selector.startsWith('[hidden]') ? {} : null},
+    {closest: selector => selector.startsWith('details') ? {querySelector: () => ({contains: () => false})} : null},
+  ]) {
+    const opener = Object.assign(element('opener'), hidden), fallback = Object.assign(element('fallback'), hidden), heading = element('heading');
+    assert.equal(focusReadinessElement(opener), false);
+    restoreReadinessFocus({querySelectorAll: () => [opener, fallback]}, 'opener', 'fallback', heading);
+    assert.equal(opener.calls.length, 0);
+    assert.equal(fallback.calls.length, 0);
+    assert.equal(heading.calls[0][0], 'focus');
+  }
+  const summary = element('summary');
+  summary.closest = selector => selector.startsWith('details') ? {querySelector: () => ({contains: item => item === summary})} : null;
+  assert.equal(focusReadinessElement(summary), true);
+});
+
+test('keyboard navigation skips entries hidden by a disclosure or removed from the document', () => {
+  const entries = [element('first'), Object.assign(element('hidden'), {getClientRects: () => []}), element('last')];
+  const event = keyboard('ArrowDown', entries[0]);
+  moveReadinessFocus(event, {querySelectorAll: () => entries});
+  assert.equal(event.prevented, true);
+  assert.equal(entries[1].calls.length, 0);
+  assert.equal(entries[2].calls[0][0], 'focus');
+});

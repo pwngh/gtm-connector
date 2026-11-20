@@ -4,7 +4,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
-import {initialState, readinessFixture, renewalEvidence, walkthroughDecisions} from './renewalFixtures.js';
+import {initialState, readinessFixture, readinessEvidenceFixture, renewalEvidence, walkthroughDecisions} from './renewalFixtures.js';
 import {transitionWalkthrough} from './workflow.js';
 import {advanceReadinessJournal, readinessHref, selectReadiness} from './readiness.js';
 
@@ -48,7 +48,9 @@ test('each failed transition renders the complete set of named blockers for that
 test('passed, failed, inapplicable and unevaluated checks have distinct semantic status and no inferred zero', () => {
   let state = transitionWalkthrough(initialState, {type: 'request_review'});
   state = transitionWalkthrough(state, {type: 'approve_plan'});
-  const html = render('', journal(state));
+  const fixture = structuredClone(readinessFixture);
+  fixture.checks.at(-1).id = 'unsupported_rule';
+  const html = render('', journal(state, fixture));
   for (const result of ['passed', 'failed', 'not_applicable', 'not_evaluated']) {
     assert.ok(html.includes(`class="rd-result ${result}" data-check-result="${result}"`));
   }
@@ -65,7 +67,7 @@ test('selected checks render only their own input versions, evaluation time and 
   for (const type of ['request_review', 'approve_plan', 'obtain_document']) state = transitionWalkthrough(state, {type});
   const source = journal(state), check = source.current.checks.find(item => item.id === 'verify_document');
   const html = render('check=verify_document', source);
-  assert.ok(html.includes('tabindex="-1" data-readiness-target="check:verify_document"'));
+  assert.ok(links(html).some(link => link.attributes.includes('data-readiness-target="check:verify_document"') && link.attributes.includes('data-readiness-entry="true"')));
   const details = html.split('class="rd-check-details rd-paper"')[1].split('</section>')[0];
   for (const input of check.inputVersions) if (input.id) assert.ok(details.includes(input.id));
   assert.ok(details.includes(check.evaluatedAt));
@@ -86,7 +88,7 @@ test('requirements render separate owners, awaited roles, authority unknowns, an
   assert.ok(facts.match(/<dt>Customer decision authority<\/dt><dd>([\s\S]*?)<\/dd>/)[1].includes(item.customerAuthorityLabel));
   const actions = links(html).filter(link => link.attributes.includes(`data-readiness-focus="requirement:${item.id}:action"`));
   assert.equal(actions.length, 1);
-  assert.equal(new URL(actions[0].href, 'http://local.test').searchParams.get('workItem'), readinessFixture.worklist.workItems.find(item => item.kind === 'customer_review').id);
+  assert.equal(new URL(actions[0].href, 'http://local.test').searchParams.get('check'), 'customer_authority');
 });
 
 test('the page keeps CRM, requirement readiness and the commercial outcome in separate facts even after resolution', () => {
@@ -97,7 +99,7 @@ test('the page keeps CRM, requirement readiness and the commercial outcome in se
   assert.ok(crm.includes(source.current.crm.stageLabel));
   assert.ok(crm.includes(source.current.crm.readAt));
   assert.ok(commercial.includes(source.current.commercial.label));
-  assert.equal((html.match(/data-check-result="not_evaluated"/g) || []).length, 3);
+  assert.equal((html.match(/data-check-result="failed"/g) || []).length, 3);
   assert.ok(!html.includes('rd-requirement-state passed'));
 });
 
@@ -109,7 +111,8 @@ test('citations render fixture text exactly, distinguish workflow notes, and lin
   for (const unit of readinessFixture.card.units.filter(item => item.kind === 'sentence')) {
     assert.ok(unescape(html).includes(unit.speaker.basis));
     assert.ok(unescape(html).includes(unit.speaker.role));
-    assert.ok(unescape(html).includes(unit.partialReason));
+    assert.equal(unit.partial, false);
+    assert.ok(!html.includes('class="rd-label rd-cut"'));
   }
   const citations = links(html).filter(link => link.attributes.includes(`data-readiness-focus="requirement:${initialState.requirement.id}:unit:`));
   assert.equal(citations.length, 2);
@@ -164,7 +167,7 @@ test('stale results remain visibly retained and expose no current action links o
 });
 
 test('empty requirement views, unknown selections and filter-hidden selections have different rendered structures', () => {
-  const empty = render('', journal(complete()));
+  const empty = render('', journal(complete(), readinessEvidenceFixture));
   assert.ok(empty.includes('class="rd-empty rd-paper"'));
   assert.ok(!empty.includes('data-requirement-id='));
   const missing = render('check=missing');
@@ -183,4 +186,39 @@ test('every local focus key is unique even where the same check or source is cit
   const entries = links(html).filter(link => link.attributes.includes('data-readiness-entry="true"'));
   assert.equal(entries.length, readinessFixture.requirements.length + readinessFixture.checks.length);
   assert.ok(entries.every(link => new URL(link.href, 'http://local.test').pathname === readinessFixture.paths.readiness));
+});
+
+test('comparison rendering retains removed check rows and changed blocker explanations', () => {
+  let state = initialState;
+  for (const type of ['request_review', 'approve_plan', 'obtain_document']) state = transitionWalkthrough(state, {type});
+  const before = journal(state), fixture = structuredClone(readinessFixture);
+  fixture.checks = fixture.checks.filter(check => check.id !== 'verify_document');
+  const removed = advanceReadinessJournal(before, state, fixture);
+  const removedHtml = render('', removed);
+  assert.ok(!ids(removedHtml).includes('verify_document'));
+  const row = removedHtml.split('data-comparison-id="verify_document"')[1].split('</li>')[0];
+  assert.ok(row);
+  assert.ok(unescape(row).includes(removed.changes.checks.find(check => check.id === 'verify_document').beforeLabel));
+  assert.ok(unescape(row).includes(removed.changes.checks.find(check => check.id === 'verify_document').afterLabel));
+
+  const earlier = {...state, document: {...state.document, version: 'outdated'}};
+  const later = {...earlier, document: {...earlier.document, currentVersion: 'replacement'}};
+  const changed = advanceReadinessJournal(journal(earlier), later);
+  const html = render('', changed), comparison = html.split('data-comparison-id="verify_document"')[1].split('</li>')[0];
+  const difference = changed.changes.checks.find(check => check.id === 'verify_document').updated[0];
+  assert.ok(unescape(comparison).includes(difference.before.reason));
+  assert.ok(unescape(comparison).includes(difference.after.reason));
+  assert.equal(changed.current.evaluatedAt, null);
+});
+
+test('failed and recorded checks render different icon shapes, with recorded state separate from evidence failure', () => {
+  const state = transitionWalkthrough(initialState, {type: 'request_review'});
+  const source = journal(state), html = render('', source);
+  const badge = result => html.match(new RegExp(`<span class="rd-result ${result}"[^>]*>([\\s\\S]*?)<\\/span>`))[1];
+  const paths = value => [...value.matchAll(/<path d="([^"]+)"/g)].map(match => match[1]);
+  assert.notDeepEqual(paths(badge('failed')), paths(badge('not_applicable')));
+  const recorded = source.current.checks.find(check => check.recorded);
+  assert.ok(unescape(badge('not_applicable')).includes(recorded.resultLabel));
+  assert.equal(recorded.allowedActions.length, 0);
+  assert.equal(source.current.checks.find(check => check.id === 'customer_authority').result, 'failed');
 });

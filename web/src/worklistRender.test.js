@@ -261,7 +261,7 @@ test('the exact work destination renders only its permitted action, prerequisite
     for (const item of buildWorklist(state).workItems.filter(row => row.mode === 'walkthrough')) {
       const html = renderToStaticMarkup(React.createElement(WorklistStepEntry, {item, onAction() {}}));
       assert.ok(html.includes(`id="${item.entryTargetId}" tabindex="-1"`));
-      assert.equal((html.match(/<button /g) || []).length, item.workflowAction ? 1 : 0);
+      assert.equal((html.match(/<button /g) || []).length, Number(Boolean(item.workflowAction)) + Number(Boolean(item.replacementAction)));
       assert.equal(html.includes('class="wl-step-output"'), Boolean(item.output));
       assert.equal(html.includes('class="wl-step-prerequisites"'), item.blockedReasons.length > 0);
     }
