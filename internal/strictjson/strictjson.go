@@ -1,14 +1,15 @@
 // Package strictjson parses JSON as gtm_connector/strict_json.py does: it refuses duplicate keys,
 // non-finite numbers and lone surrogates, and gives each refusal the type and message Python gives.
 //
-// Values are nil, bool, string, float64, *big.Int, []any and *Object.
+// Values are nil, bool, string, *big.Int, []any, *Object, and for a number with a fraction or an exponent
+// either float64 (Loads and LoadsText, like Python's default) or Decimal (LoadsDecimal, like
+// parse_float=Decimal).
 package strictjson
 
 import (
 	"fmt"
 	"math"
 	"math/big"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -21,7 +22,7 @@ type Object struct {
 
 // Error is a refusal, named by the Python exception type that strict_json raises for it.
 type Error struct {
-	Type    string // ValueError, JSONDecodeError, UnicodeDecodeError or UnicodeEncodeError
+	Type    string // ValueError, JSONDecodeError, UnicodeDecodeError, UnicodeEncodeError or InvalidOperation
 	Message string
 }
 
@@ -31,7 +32,13 @@ func (e *Error) Error() string { return e.Type + ": " + e.Message }
 const maxIntDigits = 4300
 
 // Loads parses one UTF-8 document, after one optional byte-order mark, as strict_json.loads(bytes) does.
-func Loads(document []byte) (any, error) {
+func Loads(document []byte) (any, error) { return loads(document, false) }
+
+// LoadsDecimal is Loads with parse_float=Decimal, as the Salesforce adapter reads amounts: a number with a
+// fraction or an exponent keeps its exact digits and scale, and is never refused as non-finite.
+func LoadsDecimal(document []byte) (any, error) { return loads(document, true) }
+
+func loads(document []byte, decimal bool) (any, error) {
 	data := document
 	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
 		data = data[3:]
@@ -40,13 +47,15 @@ func Loads(document []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parse(text)
+	return parse(text, decimal)
 }
 
 // LoadsText parses text that is already decoded, as strict_json.loads(str) does: a byte-order mark is
 // refused, and a lone surrogate written in the text (as WTF-8) cannot be encoded. Bytes that are neither
 // UTF-8 nor a WTF-8 surrogate are refused as Loads refuses them.
-func LoadsText(text string) (any, error) {
+func LoadsText(text string) (any, error) { return loadsText(text, false) }
+
+func loadsText(text string, decimal bool) (any, error) {
 	runes, err := decodeWTF8(text)
 	if err != nil {
 		return nil, err
@@ -54,14 +63,14 @@ func LoadsText(text string) (any, error) {
 	if err := encodable(runes); err != nil {
 		return nil, err
 	}
-	return parse(runes)
+	return parse(runes, decimal)
 }
 
-func parse(text []rune) (any, error) {
+func parse(text []rune, decimal bool) (any, error) {
 	if len(text) > 0 && text[0] == 0xFEFF {
 		return nil, decodeError(text, "Unexpected UTF-8 BOM (decode using utf-8-sig)", 0)
 	}
-	p := &parser{text: text}
+	p := &parser{text: text, decimal: decimal}
 	value, err := p.document()
 	if err != nil {
 		return nil, err
@@ -230,8 +239,9 @@ type rawObject struct {
 }
 
 type parser struct {
-	text []rune
-	lone bool // a lone surrogate was decoded from an escape
+	text    []rune
+	lone    bool // a lone surrogate was decoded from an escape
+	decimal bool // parse_float=Decimal
 }
 
 // expectingValue is Python's StopIteration from scan_once, which raw_decode reports as "Expecting value".
@@ -486,10 +496,15 @@ func (p *parser) number(start int) (any, int, error) {
 		}
 	}
 	literal := string(text[start:idx])
+	if float && p.decimal {
+		value, err := ParseDecimal(literal)
+		if err != nil {
+			return nil, 0, err
+		}
+		return value, idx, nil
+	}
 	if float {
-		// The literal is well formed, so the only error is a range: infinity, or zero on underflow as
-		// Python gives it.
-		value, _ := strconv.ParseFloat(literal, 64)
+		value := parseFloat(literal)
 		if math.IsInf(value, 0) {
 			return nil, 0, &Error{"ValueError", "non-finite JSON number"}
 		}

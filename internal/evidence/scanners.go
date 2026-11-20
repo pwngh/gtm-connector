@@ -3,7 +3,7 @@ package evidence
 // Hand-written scanners for the patterns in units.py, slack_mapping.py and slack_callback.py. Each one
 // finds exactly what Python's re finds: the same alternative first, the same greedy or lazy extent, and
 // search(line, pos, endpos) where ^ never matches at pos > 0 and \Z matches at endpos. Character classes
-// come from unicodetab. Positions count code points.
+// come from unicodetab. Positions count code points, and a window is clamped to the text as re clamps it.
 
 import u "github.com/pwngh/gtm-connector/internal/unicodetab"
 
@@ -78,6 +78,12 @@ func Target(s []rune) (int, bool) {
 		return 2, true
 	}
 	return 0, false
+}
+
+// clamp limits pos and endpos to the text, as re does for match, search and fullmatch. A window that ends
+// before it starts matches nothing.
+func clamp(s []rune, pos, end int) (int, int) {
+	return min(max(pos, 0), len(s)), min(max(end, 0), len(s))
 }
 
 // Span is one match.
@@ -166,6 +172,7 @@ var openers = []string{"We", "Our", "They", "Their", "He", "She", "It", "Its", "
 // Opener is _OPENER.match(line, pos, endpos) (units.py line 253): the first alternative, in order, that
 // is not followed by a word character, a dot or a hyphen.
 func Opener(s []rune, pos, end int) (int, bool) {
+	pos, end = clamp(s, pos, end)
 	for _, word := range openers {
 		if !literal(s, pos, end, word) {
 			continue
@@ -279,6 +286,7 @@ func letters(s []rune, i, end int) int {
 
 // ListMarkerFull is _LIST_MARKER.fullmatch(s, pos, end).
 func ListMarkerFull(s []rune, pos, end int) bool {
+	pos, end = clamp(s, pos, end)
 	j := pos
 	for j < end && u.ReSpace(s[j]) {
 		j++
@@ -299,6 +307,7 @@ func ListMarkerFull(s []rune, pos, end int) bool {
 // Dotted is _DOTTED.search(s, pos, end): two or more groups of one to six letters and a period, then
 // closing marks. The match ends at end.
 func Dotted(s []rune, pos, end int) (int, bool) {
+	pos, end = clamp(s, pos, end)
 	return searchBefore(s, pos, end, func(b int) bool {
 		groups, j := 0, b
 		for {
@@ -349,6 +358,7 @@ func isForm(run []rune) bool { return len(run) == 1 || forms[string(run)] }
 
 // MayEnd is _MAY_END.search(s, pos, end).
 func MayEnd(s []rune, pos, end int) (int, bool) {
+	pos, end = clamp(s, pos, end)
 	return searchBefore(s, pos, end, func(b int) bool {
 		j := letters(s, b, end)
 		return mayEnd[string(s[b:j])] && after(s, j, end)
@@ -357,6 +367,7 @@ func MayEnd(s []rune, pos, end int) (int, bool) {
 
 // Abbreviation is _ABBREVIATION.search(s, pos, end).
 func Abbreviation(s []rune, pos, end int) (int, bool) {
+	pos, end = clamp(s, pos, end)
 	return searchBefore(s, pos, end, func(b int) bool {
 		j := letters(s, b, end)
 		return j > b && isForm(s[b:j]) && after(s, j, end)
@@ -366,6 +377,7 @@ func Abbreviation(s []rune, pos, end int) (int, bool) {
 // Short is _SHORT.search(s, pos, end): a capital and one to four letters, then a period. It returns the
 // match's start and the span of the short word, its group 1.
 func Short(s []rune, pos, end int) (start, wordStart, wordEnd int, ok bool) {
+	pos, end = clamp(s, pos, end)
 	start, ok = searchBefore(s, pos, end, func(b int) bool {
 		if b >= end || !asciiUpper(s[b]) {
 			return false
@@ -382,6 +394,7 @@ func Short(s []rune, pos, end int) (start, wordStart, wordEnd int, ok bool) {
 
 // ShortNext is _SHORT_NEXT.match(s, pos, end).
 func ShortNext(s []rune, pos, end int) (int, bool) {
+	pos, end = clamp(s, pos, end)
 	j := letters(s, pos, end)
 	if j > pos && isForm(s[pos:j]) && j < end && s[j] == '.' {
 		return j + 1, true
@@ -402,11 +415,13 @@ func numberSignBody(s []rune, b, end int) bool {
 
 // NumberSign is _NUMBER_SIGN.search(s, pos, end).
 func NumberSign(s []rune, pos, end int) (int, bool) {
+	pos, end = clamp(s, pos, end)
 	return searchBefore(s, pos, end, func(b int) bool { return numberSignBody(s, b, end) })
 }
 
 // NumberSignFull is _NUMBER_SIGN.fullmatch(s, pos, end).
 func NumberSignFull(s []rune, pos, end int) bool {
+	pos, end = clamp(s, pos, end)
 	if pos == 0 && numberSignBody(s, 0, end) {
 		return true
 	}
@@ -418,6 +433,7 @@ var neverLast = []string{"Mr", "Mrs", "Ms", "Mx", "Mme", "Mlle", "Messrs", "Dr",
 
 // NeverLast is _NEVER_LAST.search(s, pos, end).
 func NeverLast(s []rune, pos, end int) (int, bool) {
+	pos, end = clamp(s, pos, end)
 	return searchBefore(s, pos, end, func(b int) bool {
 		for _, word := range neverLast {
 			if literal(s, b, end, word) && after(s, b+len(word), end) {
@@ -430,6 +446,7 @@ func NeverLast(s []rune, pos, end int) (int, bool) {
 
 // SectionSign is _SECTION_SIGN.match(s, pos, end).
 func SectionSign(s []rune, pos, end int) (int, bool) {
+	pos, end = clamp(s, pos, end)
 	j := pos
 	for j < end && in(s[j], "\"'([") {
 		j++
@@ -442,6 +459,7 @@ func SectionSign(s []rune, pos, end int) (int, bool) {
 
 // Ended is _ENDED.search(s, pos, end): closing punctuation of any script, then closing marks to the end.
 func Ended(s []rune, pos, end int) (int, bool) {
+	pos, end = clamp(s, pos, end)
 	for i := pos; i < end; i++ {
 		if in(s[i], ".!?。！？।؟۔") &&
 			closersTo(s, i+1, end, "\"')]”’»」）") {

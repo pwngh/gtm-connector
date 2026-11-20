@@ -1,13 +1,23 @@
 // Package evidence is the port of the evidence rules in gtm_connector/units.py: neutralized source text
 // and whole sentences. It matches the Python oracle in testdata/oracle exactly.
+//
+// SafeText and Sentences take valid UTF-8 and refuse anything else with ErrInvalidText. A Python str can
+// hold a lone surrogate, which safe_text would show as [U+D800], but no source can hand the connector one:
+// strict_json refuses them and every decode is strict. So Go refuses such text instead of carrying it or
+// replacing it. The scanners take code points and read any value as Python's re reads that code point.
 package evidence
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	u "github.com/pwngh/gtm-connector/internal/unicodetab"
 )
+
+// ErrInvalidText refuses text that is not valid UTF-8, a lone surrogate included.
+var ErrInvalidText = errors.New("evidence: text is not valid UTF-8")
 
 // Counts is what SafeText replaced.
 type Counts struct {
@@ -28,8 +38,8 @@ func strip(s []rune) []rune {
 
 func hasPrefix(s []rune, prefix string) bool { return literal(s, 0, len(s), prefix) }
 
-// Host is the host a card shows for a link target (units._host).
-func Host(target []rune) string {
+// linkHost is the host a card shows for a link target (units._host).
+func linkHost(target []rune) string {
 	if hasPrefix(u.Lower(target), "mailto:") {
 		return "mail"
 	}
@@ -42,8 +52,8 @@ func Host(target []rune) string {
 		url = append([]rune("//"), target...)
 	}
 	host := []rune{}
-	if parts, err := URLSplit(url); err == nil {
-		host = u.Lower([]rune(Hostname(parts.Netloc)))
+	if parts, err := splitURL(url); err == nil {
+		host = u.Lower([]rune(hostName(parts.Netloc)))
 	}
 	for hasPrefix(host, "www.") {
 		host = host[4:]
@@ -101,9 +111,9 @@ func token(kind rune, target, label, whole []rune, counts *Counts) string {
 		// Slack renders any target|label pair as a link, whatever the target is.
 		counts.Links++
 		if text := strip(label); len(text) > 0 {
-			return string(text) + " [link " + Host(target) + "]"
+			return string(text) + " [link " + linkHost(target) + "]"
 		}
-		return "[link " + Host(target) + "]"
+		return "[link " + linkHost(target) + "]"
 	}
 	return string(whole)
 }
@@ -124,10 +134,12 @@ func substitute(s []rune, match func(i int) (int, string, bool)) []rune {
 	return out
 }
 
-// SafeText neutralizes one source text (units.safe_text) and says what it replaced. The text must be
-// valid UTF-8.
-func SafeText(raw string) (string, Counts) {
+// SafeText neutralizes one source text (units.safe_text) and says what it replaced.
+func SafeText(raw string) (string, Counts, error) {
 	var counts Counts
+	if !utf8.ValidString(raw) {
+		return "", counts, ErrInvalidText
+	}
 	plain := u.NFC([]rune(raw))
 	text := make([]rune, 0, len(plain))
 	for i := 0; i < len(plain); i++ {
@@ -211,7 +223,7 @@ func SafeText(raw string) (string, Counts) {
 			return k + 1, string(text[i : k+1]), true
 		}
 		counts.Links++
-		return k + 1, string(text[i+1:j]) + " [link " + Host(target) + "]", true
+		return k + 1, string(text[i+1:j]) + " [link " + linkHost(target) + "]", true
 	})
 	// _RAW_LINK, with closing punctuation around a link left outside it.
 	links := RawLinks(text)
@@ -227,7 +239,7 @@ func SafeText(raw string) (string, Counts) {
 			kept--
 		}
 		counts.Links++
-		return end, "[link " + Host(link[:kept]) + "]" + string(link[kept:]), true
+		return end, "[link " + linkHost(link[:kept]) + "]" + string(link[kept:]), true
 	})
 
 	visible := make([]rune, 0, len(text))
@@ -259,5 +271,5 @@ func SafeText(raw string) (string, Counts) {
 		counts.Brackets++
 		return j + 1, "(" + string(visible[i+1:j]) + ")", true
 	})
-	return string(result), counts
+	return string(result), counts, nil
 }

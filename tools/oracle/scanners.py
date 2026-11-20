@@ -220,6 +220,11 @@ WINDOWED = ("_LIST_MARKER", "_DOTTED", "_MAY_END", "_ABBREVIATION", "_SECTION_SI
 WINDOW_TEXTS = ("See abcdef.ghijkl.mnopqr.st. Next part.", "No.", "No. 14", "Mr. Lee", "U.S.C.", "28 U.S.C. 1332",
                 "Acme Inc. We", "I. The", "Fig. 2", "e.g. this", "(No.", '"Dr." He', "a. B", "1.", " 12.)",
                 "abc def.", "Pub. L. No. 117-58")
+# The method each windowed pattern is called with.
+WINDOW_METHODS = (("_LIST_MARKER", "fullmatch"), ("_DOTTED", "search"), ("_MAY_END", "search"),
+                  ("_ABBREVIATION", "search"), ("_SECTION_SIGN", "match"), ("_SHORT", "search"),
+                  ("_SHORT_NEXT", "match"), ("_NUMBER_SIGN", "search"), ("_NUMBER_SIGN", "fullmatch"),
+                  ("_OPENER", "match"), ("_ENDED", "search"), ("_NEVER_LAST", "search"))
 
 
 class _Recorder:
@@ -266,6 +271,17 @@ def _windowed(texts: list[str]) -> dict:
                     found = pattern.search(text, start, end)
                     calls.setdefault((name, "search", text, start, end),
                                      None if found is None else [found.start(), found.end()])
+    # Windows outside the text: a negative pos or endpos, either one past the end, and endpos before pos. re clamps
+    # both to the text.
+    for name, method in WINDOW_METHODS:
+        search = getattr(saved[name], method)
+        for text in (*WINDOW_TEXTS, "We", "§ 2"):
+            size = len(text)
+            for start, end in ((-3, 100), (-1, size), (0, size + 5), (size + 2, size + 9), (3, 1), (size, 0),
+                               (-5, -1), (2, -2), (-100, 3), (1, size + 1), (-2, size - 1)):
+                found = search(text, start, end)
+                calls.setdefault((name, method, text, start, end),
+                                 None if found is None else [found.start(), found.end()])
     lines: dict[str, int] = {}
     rows = []
     for (name, method, text, start, end), result in calls.items():

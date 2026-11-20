@@ -1,11 +1,14 @@
 package unicodetab
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
 	"slices"
 	"testing"
 
 	"github.com/pwngh/gtm-connector/internal/oracletest"
+	"github.com/pwngh/gtm-connector/internal/unicodetab/tablegen"
 )
 
 func expand(ranges [][2]int) []bool {
@@ -301,5 +304,20 @@ func TestNFCEquivalence(t *testing.T) {
 		if !slices.Equal(NFD(composed), NFD(text)) || !slices.Equal(NFC(composed), composed) {
 			t.Fatalf("NFC %U = %U is not stable and equivalent", text, composed)
 		}
+	}
+}
+
+// tables.go is what the generator writes from the committed oracle, byte for byte.
+func TestTablesAreGenerated(t *testing.T) {
+	want, err := tablegen.Generate(oracletest.Path(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile("tables.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Error("tables.go differs from what the generator writes; run go generate ./internal/unicodetab")
 	}
 }

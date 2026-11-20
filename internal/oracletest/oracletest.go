@@ -81,11 +81,12 @@ func Lines(t testing.TB, name string) [][]byte {
 
 // Mismatches collects differences and reports the first few, then the total, when the test ends.
 type Mismatches struct {
-	t     testing.TB
-	name  string
-	shown int
-	total int
-	rows  int
+	t      testing.TB
+	name   string
+	shown  int
+	total  int // rows with at least one difference
+	rows   int
+	marked int // the last row counted in total
 }
 
 // NewMismatches starts a count for one fixture family.
@@ -104,15 +105,19 @@ func NewMismatches(t testing.TB, name string) *Mismatches {
 // Row counts one checked row.
 func (m *Mismatches) Row() { m.rows++ }
 
-// Add records one difference. The first ten are printed.
+// Add records one difference in the current row. A row counts once however many differences it has. The
+// first ten differences are printed.
 func (m *Mismatches) Add(format string, args ...any) {
 	m.t.Helper()
-	m.total++
+	if m.marked != m.rows {
+		m.total++
+		m.marked = m.rows
+	}
 	if m.shown < 10 {
 		m.shown++
 		m.t.Errorf(m.name+": "+format, args...)
 	}
 }
 
-// Count is the number of differences so far.
+// Count is the number of rows that differ so far.
 func (m *Mismatches) Count() int { return m.total }

@@ -1,6 +1,10 @@
 package evidence
 
-import u "github.com/pwngh/gtm-connector/internal/unicodetab"
+import (
+	"unicode/utf8"
+
+	u "github.com/pwngh/gtm-connector/internal/unicodetab"
+)
 
 // fields is str.split() with no argument.
 func fields(s []rune) [][]rune {
@@ -49,7 +53,10 @@ func paragraphs(s []rune, lines bool) [][]rune {
 // Sentences splits neutralized text into whole sentences (units.sentences). A line break inside a
 // paragraph is a wrap; only a blank line or closing punctuation ends a sentence. With lines, every line
 // break ends one.
-func Sentences(safe string, lines bool) []string {
+func Sentences(safe string, lines bool) ([]string, error) {
+	if !utf8.ValidString(safe) {
+		return nil, ErrInvalidText
+	}
 	found := []string{}
 	for _, paragraph := range paragraphs([]rune(safe), lines) {
 		var line []rune
@@ -73,7 +80,7 @@ func Sentences(safe string, lines bool) []string {
 			found = append(found, string(line[start:]))
 		}
 	}
-	return found
+	return found, nil
 }
 
 func count(s []rune, c rune, from, to int) int {

@@ -10,15 +10,15 @@ import (
 	u "github.com/pwngh/gtm-connector/internal/unicodetab"
 )
 
-// URLParts is what urlsplit returns.
-type URLParts struct {
+// urlParts is what urlsplit returns.
+type urlParts struct {
 	Scheme, Netloc, Path, Query, Fragment string
 }
 
-// ValueError is a ValueError that the Python library raises, with its message.
-type ValueError struct{ Message string }
+// valueError is a ValueError that the Python library raises, with its message.
+type valueError struct{ Message string }
 
-func (e *ValueError) Error() string { return e.Message }
+func (e *valueError) Error() string { return e.Message }
 
 func index(s []rune, c rune, from int) int {
 	for i := from; i < len(s); i++ {
@@ -54,8 +54,8 @@ func partition(s []rune, c rune, last bool) (head, tail []rune, found bool) {
 
 const schemeChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+-."
 
-// URLSplit is urlsplit(url).
-func URLSplit(url []rune) (URLParts, error) {
+// splitURL is urlsplit(url).
+func splitURL(url []rune) (urlParts, error) {
 	start := 0
 	for start < len(url) && url[start] <= ' ' {
 		start++
@@ -66,7 +66,7 @@ func URLSplit(url []rune) (URLParts, error) {
 			s = append(s, c)
 		}
 	}
-	var parts URLParts
+	var parts urlParts
 	if i := index(s, ':', 0); i > 0 && asciiLetter(s[0]) {
 		scheme := true
 		for _, c := range s[:i] {
@@ -91,11 +91,11 @@ func URLSplit(url []rune) (URLParts, error) {
 		netloc, s = s[2:delim], s[delim:]
 		open, closed := contains(netloc, '['), contains(netloc, ']')
 		if open != closed {
-			return URLParts{}, &ValueError{"Invalid IPv6 URL"}
+			return urlParts{}, &valueError{"Invalid IPv6 URL"}
 		}
 		if open {
 			if err := checkBracketedNetloc(netloc); err != nil {
-				return URLParts{}, err
+				return urlParts{}, err
 			}
 		}
 	}
@@ -108,7 +108,7 @@ func URLSplit(url []rune) (URLParts, error) {
 		s = s[:i]
 	}
 	if err := checkNetloc(netloc); err != nil {
-		return URLParts{}, err
+		return urlParts{}, err
 	}
 	parts.Netloc, parts.Path = string(netloc), string(s)
 	return parts, nil
@@ -120,12 +120,12 @@ func checkBracketedNetloc(netloc []rune) error {
 	var host []rune
 	if open {
 		if len(beforeBracket) > 0 {
-			return &ValueError{"Invalid IPv6 URL"}
+			return &valueError{"Invalid IPv6 URL"}
 		}
 		var port []rune
 		host, port, _ = partition(bracketed, ']', false)
 		if len(port) > 0 && port[0] != ':' {
-			return &ValueError{"Invalid IPv6 URL"}
+			return &valueError{"Invalid IPv6 URL"}
 		}
 	} else {
 		host, _, _ = partition(hostPort, ':', false)
@@ -141,17 +141,17 @@ func checkBracketedHost(host []rune) error {
 			j++
 		}
 		if j == 1 || j >= len(host) || host[j] != '.' || j+1 == len(host) || contains(host[j+1:], '\n') {
-			return &ValueError{"IPvFuture address is invalid"}
+			return &valueError{"IPvFuture address is invalid"}
 		}
 		return nil
 	}
 	switch {
 	case ipv4(host):
-		return &ValueError{"An IPv4 address cannot be in brackets"}
+		return &valueError{"An IPv4 address cannot be in brackets"}
 	case ipv6(host):
 		return nil
 	}
-	return &ValueError{Repr(host) + " does not appear to be an IPv4 or IPv6 address"}
+	return &valueError{pyRepr(host) + " does not appear to be an IPv4 or IPv6 address"}
 }
 
 // checkNetloc is _checknetloc. A netloc's NFKC form gains one of / ? # @ : exactly when the netloc holds a
@@ -159,7 +159,7 @@ func checkBracketedHost(host []rune) error {
 func checkNetloc(netloc []rune) error {
 	for _, c := range netloc {
 		if u.NFKCNetloc(c) {
-			return &ValueError{"netloc '" + string(netloc) + "' contains invalid characters under NFKC normalization"}
+			return &valueError{"netloc '" + string(netloc) + "' contains invalid characters under NFKC normalization"}
 		}
 	}
 	return nil
@@ -269,8 +269,8 @@ func hostInfo(netloc []rune) (host, port []rune) {
 	return host, port
 }
 
-// Hostname is SplitResult.hostname: empty when there is none.
-func Hostname(netloc string) string {
+// hostName is SplitResult.hostname: empty when there is none.
+func hostName(netloc string) string {
 	host, _ := hostInfo([]rune(netloc))
 	if len(host) == 0 {
 		return ""
@@ -282,33 +282,33 @@ func Hostname(netloc string) string {
 	return string(u.Lower(name)) + "%" + string(zone)
 }
 
-// Port is SplitResult.port: -1 when there is none.
-func Port(netloc string) (int, error) {
+// portNumber is SplitResult.port: -1 when there is none.
+func portNumber(netloc string) (int, error) {
 	_, port := hostInfo([]rune(netloc))
 	if len(port) == 0 {
 		return -1, nil
 	}
 	for _, c := range port {
 		if !asciiDigit(c) {
-			return 0, &ValueError{"Port could not be cast to integer value as " + Repr(port)}
+			return 0, &valueError{"Port could not be cast to integer value as " + pyRepr(port)}
 		}
 	}
 	if len(port) > 4300 {
-		return 0, &ValueError{fmt.Sprintf("Exceeds the limit (4300 digits) for integer string conversion: "+
+		return 0, &valueError{fmt.Sprintf("Exceeds the limit (4300 digits) for integer string conversion: "+
 			"value has %d digits; use sys.set_int_max_str_digits() to increase the limit", len(port))}
 	}
 	digits := strings.TrimLeft(string(port), "0")
 	value := 0
 	for _, c := range digits {
 		if value = value*10 + int(c-'0'); value > 65535 {
-			return 0, &ValueError{"Port out of range 0-65535"}
+			return 0, &valueError{"Port out of range 0-65535"}
 		}
 	}
 	return value, nil
 }
 
-// Repr is repr(str).
-func Repr(s []rune) string {
+// pyRepr is repr(str).
+func pyRepr(s []rune) string {
 	quote := '\''
 	if contains(s, '\'') && !contains(s, '"') {
 		quote = '"'

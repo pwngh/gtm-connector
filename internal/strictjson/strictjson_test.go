@@ -1,7 +1,9 @@
 package strictjson
 
 import (
+	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/big"
@@ -27,6 +29,8 @@ func pyDumps(value any) string {
 			b.WriteString(v.String())
 		case float64:
 			b.WriteString(pyFloatRepr(v))
+		case Decimal:
+			b.WriteString(`{"decimal": ` + asciiString(v.String()) + "}")
 		case string:
 			b.WriteString(asciiString(v))
 		case []any:
@@ -128,48 +132,109 @@ func pyFloatRepr(f float64) string {
 	}
 }
 
+type outcome struct {
+	OK      *string `json:"ok"`
+	Error   string  `json:"error"`
+	Message string  `json:"message"`
+}
+
 func TestOracle(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
-			Kind    string  `json:"kind"`
-			Hex     string  `json:"hex"`
-			OK      *string `json:"ok"`
-			Error   string  `json:"error"`
-			Message string  `json:"message"`
+			Kind string `json:"kind"`
+			Hex  string `json:"hex"`
+			outcome
+			Decimal outcome `json:"decimal"`
 		} `json:"cases"`
 	}
 	oracletest.JSON(t, "library/strict_json.json", &fixture)
-	m := oracletest.NewMismatches(t, "strict_json")
+	floats := oracletest.NewMismatches(t, "strict_json")
+	decimals := oracletest.NewMismatches(t, "strict_json with parse_float=Decimal")
 	for _, c := range fixture.Cases {
-		m.Row()
 		raw, err := hex.DecodeString(c.Hex)
 		if err != nil {
 			t.Fatal(err)
-		}
-		var value any
-		if c.Kind == "str" {
-			value, err = LoadsText(string(raw))
-		} else {
-			value, err = Loads(raw)
 		}
 		label := c.Hex
 		if len(label) > 40 {
 			label = label[:40] + "..."
 		}
-		switch {
-		case c.OK != nil && err != nil:
-			m.Add("%s %s: got %v, want %s", c.Kind, label, err, *c.OK)
-		case c.OK != nil:
-			if got := pyDumps(value); got != *c.OK {
-				m.Add("%s %s: got %s, want %s", c.Kind, label, got, *c.OK)
+		for _, mode := range []struct {
+			decimal bool
+			want    outcome
+			m       *oracletest.Mismatches
+		}{{false, c.outcome, floats}, {true, c.Decimal, decimals}} {
+			var value any
+			if c.Kind == "str" {
+				value, err = loadsText(string(raw), mode.decimal)
+			} else {
+				value, err = loads(raw, mode.decimal)
 			}
-		case err == nil:
-			m.Add("%s %s: got %s, want %s: %s", c.Kind, label, pyDumps(value), c.Error, c.Message)
-		default:
-			refusal, ok := err.(*Error)
-			if !ok || refusal.Type != c.Error || refusal.Message != c.Message {
-				m.Add("%s %s: got %v, want %s: %s", c.Kind, label, err, c.Error, c.Message)
-			}
+			mode.m.Row()
+			compare(mode.m, c.Kind+" "+label, mode.want, value, err)
+		}
+	}
+}
+
+func compare(m *oracletest.Mismatches, label string, c outcome, value any, err error) {
+	switch {
+	case c.OK != nil && err != nil:
+		m.Add("%s: got %v, want %.200s", label, err, *c.OK)
+	case c.OK != nil:
+		if got := pyDumps(value); got != *c.OK {
+			m.Add("%s: got %.200s, want %.200s", label, got, *c.OK)
+		}
+	case err == nil:
+		m.Add("%s: got %.200s, want %s: %s", label, pyDumps(value), c.Error, c.Message)
+	default:
+		refusal, ok := err.(*Error)
+		if !ok || refusal.Type != c.Error || refusal.Message != c.Message {
+			m.Add("%s: got %v, want %s: %s", label, err, c.Error, c.Message)
+		}
+	}
+}
+
+// decimal.json: format(Decimal(text), "f"), and the amount the Salesforce adapter keeps from a JSON number
+// read with parse_float=Decimal: at most 28 digits and an exponent within 28 either way.
+func TestDecimal(t *testing.T) {
+	var fixture struct {
+		Cases []struct {
+			Input            string              `json:"input"`
+			FormatF          struct{ OK string } `json:"format_f"`
+			SalesforceAmount struct {
+				OK json.RawMessage `json:"ok"`
+			} `json:"salesforce_amount"`
+		} `json:"cases"`
+	}
+	oracletest.JSON(t, "library/decimal.json", &fixture)
+	m := oracletest.NewMismatches(t, "Decimal format and Salesforce amounts")
+	for _, c := range fixture.Cases {
+		m.Row()
+		d, err := ParseDecimal(c.Input)
+		if err != nil || d.Fixed() != c.FormatF.OK {
+			m.Add("format(Decimal(%q), 'f'): got %q %v, want %q", c.Input, d.Fixed(), err, c.FormatF.OK)
+		}
+		row, err := LoadsDecimal([]byte(`{"Amount": ` + c.Input + `}`))
+		if err != nil {
+			t.Fatalf("%s: %v", c.Input, err)
+		}
+		var amount Decimal
+		switch v := row.(*Object).Values[0].(type) {
+		case Decimal:
+			amount = v
+		case *big.Int:
+			amount = Decimal{Negative: v.Sign() < 0, Coefficient: new(big.Int).Abs(v).String()}
+		}
+		got := `{"refused":"salesforce_invalid_response"}`
+		if len(amount.Coefficient) <= 28 && amount.Exponent >= -28 && amount.Exponent <= 28 {
+			got = strconv.Quote(amount.Fixed())
+		}
+		var want bytes.Buffer
+		if err := json.Compact(&want, c.SalesforceAmount.OK); err != nil {
+			t.Fatal(err)
+		}
+		if got != want.String() {
+			m.Add("Salesforce amount %q: got %s, want %s", c.Input, got, c.SalesforceAmount.OK)
 		}
 	}
 }

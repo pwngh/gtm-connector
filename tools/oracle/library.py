@@ -1,8 +1,9 @@
 """Python library behaviour the evidence rules lean on, recorded as explicit cases."""
 
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, localcontext
 import json
+import sys
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -57,6 +58,35 @@ DECIMALS = (
     "123456789012345678901234567890.12", "1234567890123456789012345678", "12345678901234567890123456789",
     "0.1234567890123456789012345678", "9999999999999999999999999999e28", "1e400", "1e-400", "-1.5e-7",
     "450000.00", "120000", "12.30", "100.000", "5E+2", "-1E+28", "0e5", "0.0e-5", "1.0e0", "-12345.6789e-3")
+
+
+def _halfway() -> tuple[bytes, ...]:
+    """Decimal literals exactly halfway between two doubles at both ends of the range, and just past them."""
+    with localcontext() as context:
+        context.prec = 2000
+        tiny = Decimal(5e-324) / 2
+        top = Decimal(sys.float_info.max) + Decimal(2) ** 970
+        return (f"{tiny:f}".encode(), f"{tiny:f}1".encode(), f"{top:f}.0".encode(), f"{top - 1:f}.0".encode())
+
+
+# Float literals whose digits and exponent cancel: 100,000 leading zeros under an exponent of 100,001, and
+# 100,000 digits under an exponent of -100,000, where a parser that caps the exponent goes wrong; and the overflow
+# and underflow edges.
+_FLOAT_EDGES = (
+    b"[0." + b"0" * 100000 + b"1e100001]", b"[-" + b"1" * 100000 + b".5e-100000]",
+    b"[" + b"9" * 400 + b"e-400]", b"[0." + b"0" * 400 + b"1e400]",
+    b"[1e99999999999999999999]", b"[1e-99999999999999999999]", b"[-1e-99999999999999999999]",
+    b"[0e99999999999999999999]", b"[1e00000000000000000000000001]", b"[-0.0e5]",
+    b"[1.7976931348623157e308, 1.7976931348623158e308]", b"[1.7976931348623159e308]",
+    b"[2.4703282292062327e-324, 2.4703282292062328e-324, 4.9e-324, -2.4703282292062328e-324]",
+    *(b"[" + literal + b"]" for literal in _halfway()))
+# What Decimal accepts: an adjusted exponent up to 999999999999999999 and an exponent down to -1999999999999999997.
+_DECIMAL_EDGES = (
+    b"[1e999999999999999999]", b"[1e1000000000000000000]", b"[123e999999999999999997]",
+    b"[123e999999999999999998]", b"[0.001e1000000000000000002]", b"[0.001e1000000000000000003]",
+    b"[1e-1999999999999999997]", b"[1e-1999999999999999998]", b"[0e999999999999999999]",
+    b"[0e1000000000000000000]", b"[0.0e-1999999999999999996]", b"[0.0e-1999999999999999997]",
+    b'{"Amount": 450000.00, "b": 2, "c": -0, "d": -0.0, "e": 1E400}')
 DOCUMENTS: tuple[bytes | str, ...] = (
     b'{"a": 1}', b'{"a": 1, "a": 2}', b'{"a": 1, "\\u0061": 2}', b'{"a": {"b": 1, "b": 1}}', b'[NaN]',
     b'[Infinity]', b'[-Infinity]', b'[1e999]', b'[-1e999]', b'[1E+400]', b'[9' + b"9" * 400 + b'.0]',
@@ -68,7 +98,8 @@ DOCUMENTS: tuple[bytes | str, ...] = (
     b'{"a": "\xc0\xaf"}', b'["\xf4\x90\x80\x80"]', b'', b' ', b'1', b'-0', b'0.1', b'1e5', b'1.5e-10', b'[1,]',
     b'{"a":1,}', b"{'a': 1}", b'[1] [2]', b'tru', b'true', b'null', b'"\x01"', b'"\\x41"', b'[1.0, 2]',
     b'123456789012345678901234567890', b'1' + b'0' * 4299, b'1' + b'0' * 4300, b'[' * 1000 + b']' * 1000,
-    '{"a": 1}', '\ufeff{"a": 1}', '["\ud800"]', '["\\ud800"]', '{"\u00e9": "\u00e9"}')
+    '{"a": 1}', '\ufeff{"a": 1}', '["\ud800"]', '["\\ud800"]', '{"\u00e9": "\u00e9"}',
+    *_FLOAT_EDGES, *_DECIMAL_EDGES)
 # Section 4 of the backend plan: oracle behaviour the Go port will change on purpose. The cases are recorded here
 # as the oracle gives them; the Go side writes its own reviewed expectations.
 DIFFERENCES = {
@@ -152,7 +183,10 @@ def _document(document: bytes | str) -> dict:
     kind = "str" if isinstance(document, str) else "bytes"
     raw = document.encode("utf-8", "surrogatepass") if isinstance(document, str) else document
     return {"kind": kind, "hex": raw.hex(),
-            **_outcome(lambda: json.dumps(strict_json.loads(document), ensure_ascii=True))}
+            **_outcome(lambda: json.dumps(strict_json.loads(document), ensure_ascii=True)),
+            # With parse_float=Decimal, as the Salesforce adapter reads, each Decimal given as {"decimal": str}.
+            "decimal": _outcome(lambda: json.dumps(strict_json.loads(document, parse_float=Decimal), ensure_ascii=True,
+                                                   default=lambda value: {"decimal": str(value)}))}
 
 
 def generate(writer: Writer) -> None:

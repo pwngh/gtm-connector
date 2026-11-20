@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -105,38 +106,45 @@ func show(value any) string {
 // Each windowed search the sentence rules make, by pattern and method: the match's [start, end].
 var windowed = map[string]func(s []rune, pos, end int) (int, int, bool){
 	"_LIST_MARKER fullmatch": func(s []rune, pos, end int) (int, int, bool) {
-		return pos, end, ListMarkerFull(s, pos, end)
+		ok := ListMarkerFull(s, pos, end)
+		pos, end = clamp(s, pos, end)
+		return pos, end, ok
 	},
 	"_DOTTED search":       atEnd(Dotted),
 	"_MAY_END search":      atEnd(MayEnd),
 	"_ABBREVIATION search": atEnd(Abbreviation),
 	"_SHORT search": func(s []rune, pos, end int) (int, int, bool) {
 		start, _, _, ok := Short(s, pos, end)
+		_, end = clamp(s, pos, end)
 		return start, end, ok
 	},
 	"_NUMBER_SIGN search": atEnd(NumberSign),
 	"_NEVER_LAST search":  atEnd(NeverLast),
 	"_ENDED search":       atEnd(Ended),
 	"_NUMBER_SIGN fullmatch": func(s []rune, pos, end int) (int, int, bool) {
-		return pos, end, NumberSignFull(s, pos, end)
+		ok := NumberSignFull(s, pos, end)
+		pos, end = clamp(s, pos, end)
+		return pos, end, ok
 	},
 	"_SECTION_SIGN match": fromPos(SectionSign),
 	"_SHORT_NEXT match":   fromPos(ShortNext),
 	"_OPENER match":       fromPos(Opener),
 }
 
-// atEnd is a search whose pattern ends at \Z, so its match ends at endpos.
+// atEnd is a search whose pattern ends at \Z, so its match ends at endpos, clamped to the text.
 func atEnd(search func([]rune, int, int) (int, bool)) func([]rune, int, int) (int, int, bool) {
 	return func(s []rune, pos, end int) (int, int, bool) {
 		start, ok := search(s, pos, end)
+		_, end = clamp(s, pos, end)
 		return start, end, ok
 	}
 }
 
-// fromPos is a match, which starts at pos.
+// fromPos is a match, which starts at pos, clamped to the text.
 func fromPos(match func([]rune, int, int) (int, bool)) func([]rune, int, int) (int, int, bool) {
 	return func(s []rune, pos, end int) (int, int, bool) {
 		found, ok := match(s, pos, end)
+		pos, _ = clamp(s, pos, end)
 		return pos, found, ok
 	}
 }
@@ -190,7 +198,10 @@ func TestSafeTextCorpus(t *testing.T) {
 		decode(t, raw[1], &row.text)
 		decode(t, raw[2], &row.counts)
 		m.Row()
-		text, counts := SafeText(row.input)
+		text, counts, err := SafeText(row.input)
+		if err != nil {
+			t.Fatal(err)
+		}
 		got := [4]int{counts.Mentions, counts.Links, counts.Controls, counts.Brackets}
 		if text != row.text || got != row.counts {
 			m.Add("%q: got %q %v, want %q %v", row.input, text, got, row.text, row.counts)
@@ -214,10 +225,10 @@ func TestSentencesCorpus(t *testing.T) {
 		}
 		split.Row()
 		byLine.Row()
-		if got := Sentences(input, false); !reflect.DeepEqual(got, want) {
+		if got, _ := Sentences(input, false); !reflect.DeepEqual(got, want) {
 			split.Add("%q: got %q, want %q", input, got, want)
 		}
-		if got := Sentences(input, true); !reflect.DeepEqual(got, wantLines) {
+		if got, _ := Sentences(input, true); !reflect.DeepEqual(got, wantLines) {
 			byLine.Add("%q: got %q, want %q", input, got, wantLines)
 		}
 	}
@@ -231,8 +242,12 @@ type outcome struct {
 
 func (o outcome) check(got any, err error) string {
 	if err != nil {
-		if o.Error != "ValueError" || o.Message != err.Error() {
-			return fmt.Sprintf("got ValueError %q, want %s %s %q", err, o.OK, o.Error, o.Message)
+		var refusal *valueError
+		if !errors.As(err, &refusal) {
+			return fmt.Sprintf("got %T %q, which is not a ValueError", err, err)
+		}
+		if o.Error != "ValueError" || o.Message != refusal.Message {
+			return fmt.Sprintf("got ValueError %q, want %s %s %q", refusal.Message, o.OK, o.Error, o.Message)
 		}
 		return ""
 	}
@@ -269,7 +284,7 @@ func TestURLSplit(t *testing.T) {
 			}
 		}
 		input := []rune(c.Input)
-		parts, err := URLSplit(input)
+		parts, err := splitURL(input)
 		var got any
 		if err == nil {
 			got = []string{parts.Scheme, parts.Netloc, parts.Path, parts.Query, parts.Fragment}
@@ -280,7 +295,7 @@ func TestURLSplit(t *testing.T) {
 		var port any
 		if err == nil {
 			var number int
-			if number, err = Port(parts.Netloc); err == nil && number >= 0 {
+			if number, err = portNumber(parts.Netloc); err == nil && number >= 0 {
 				port = number
 			}
 		}
@@ -297,16 +312,16 @@ func TestURLSplit(t *testing.T) {
 			target = append([]rune("//"), input...)
 		}
 		var hostname any
-		parts, err = URLSplit(target)
+		parts, err = splitURL(target)
 		if err == nil {
-			if name := Hostname(parts.Netloc); name != "" {
+			if name := hostName(parts.Netloc); name != "" {
 				hostname = name
 			}
 		}
 		if problem := c.Hostname.check(hostname, err); problem != "" {
 			m.Add("hostname of %q: %s", c.Input, problem)
 		}
-		if got := Host(input); got != c.Host {
+		if got := linkHost(input); got != c.Host {
 			m.Add("_host(%q): got %q, want %q", c.Input, got, c.Host)
 		}
 	}
@@ -318,7 +333,7 @@ func TestURLSplit(t *testing.T) {
 
 // nonASCIINetloc is whether a link's netloc holds a non-ASCII character.
 func nonASCIINetloc(input string) bool {
-	parts, err := URLSplit([]rune(input))
+	parts, err := splitURL([]rune(input))
 	if err != nil {
 		_, rest, ok := strings.Cut(input, "//")
 		netloc, _, _ := strings.Cut(rest, "/")
@@ -342,19 +357,51 @@ func TestDifferencesStillMatchOracle(t *testing.T) {
 		} `json:"hosts"`
 	}
 	oracletest.JSON(t, "library/differences.json", &fixture)
-	once, _ := SafeText(fixture.SafeTextTwice.Input)
-	twice, _ := SafeText(once)
+	once, _, _ := SafeText(fixture.SafeTextTwice.Input)
+	twice, _, _ := SafeText(once)
 	if once != fixture.SafeTextTwice.Once || twice != fixture.SafeTextTwice.Twice {
 		t.Errorf("safe_text twice: got %q then %q", once, twice)
 	}
 	for name, c := range fixture.Sentences {
-		if got := Sentences(c.Input, false); !reflect.DeepEqual(got, c.Sentences) {
+		if got, _ := Sentences(c.Input, false); !reflect.DeepEqual(got, c.Sentences) {
 			t.Errorf("%s: got %q, want %q", name, got, c.Sentences)
 		}
 	}
 	for name, c := range fixture.Hosts {
-		if got, _ := SafeText(c.Input); got != c.SafeText {
+		if got, _, _ := SafeText(c.Input); got != c.SafeText {
 			t.Errorf("%s: got %q, want %q", name, got, c.SafeText)
 		}
+	}
+}
+
+// Text that is not valid UTF-8 is refused, whether its bytes are malformed or encode a lone surrogate.
+func TestInvalidText(t *testing.T) {
+	for name, text := range map[string]string{
+		"a stray continuation byte": "We sign \x80 today.",
+		"a cut sequence":            "We sign today \xc3",
+		"an overlong slash":         "<http://a\xc0\xafb.example|deck>",
+		"a lone surrogate":          "We sign \xed\xa0\x80 today.",
+		"a low surrogate":           "\xed\xb0\x80",
+	} {
+		if _, _, err := SafeText(text); !errors.Is(err, ErrInvalidText) {
+			t.Errorf("SafeText with %s: got %v", name, err)
+		}
+		for _, lines := range []bool{false, true} {
+			if _, err := Sentences(text, lines); !errors.Is(err, ErrInvalidText) {
+				t.Errorf("Sentences with %s: got %v", name, err)
+			}
+		}
+	}
+}
+
+// The scanners take code points, so a surrogate reaches them as Python's re sees it. Each expected value was
+// read from CPython 3.14.6.
+func TestScannersCarrySurrogates(t *testing.T) {
+	text := []rune{'h', 't', 't', 'p', ':', '/', '/', 'a', 0xD800, 'b', ' ', 'W', 'e', '.', ' ', 0xDC00, 'X'}
+	if got := spans(RawLinks(text)); !reflect.DeepEqual(got, [][2]int{{0, 10}}) {
+		t.Errorf("RawLinks: got %v", got)
+	}
+	if got := SentenceEnds(text); !reflect.DeepEqual(got, []SentenceEnd{{13, 14, 15}}) {
+		t.Errorf("SentenceEnds: got %v", got)
 	}
 }
