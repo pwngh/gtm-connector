@@ -5,8 +5,6 @@
   --ops-shell:#111b2b; --ops-shell-line:#2e3b52; --ops-shell-text:#ecf2ff;
   color:var(--ops-ink); min-width:0;
 }
-.main-content:has(.ops-page)>.page-heading {margin-bottom:13px}
-.main-content:has(.ops-page)>.page-heading .page-description {margin-top:8px}
 .ops-page button {touch-action:manipulation}
 .ops-page .button,.ops-page .text-button {min-height:44px;font-size:.875rem;line-height:1.45}
 .ops-page .text-button {color:var(--ops-muted);white-space:normal;text-align:left}

@@ -1,3 +1,4 @@
+import {eagerRouteModules, expandRouteContent} from './testing/routeModules.js';
 import test, {before, after, beforeEach, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
@@ -9,7 +10,7 @@ import {advanceReadinessJournal, readinessHref, readinessStorageKey, selectReadi
 let server, Readiness, App, CustomerDecisionForm;
 const hookNames = ['useState', 'useReducer', 'useRef', 'useId', 'useEffect', 'useLayoutEffect', 'useMemo'];
 before(async () => {
-  server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [{
+  server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [eagerRouteModules(), {
     name: 'readiness-handlers', enforce: 'pre',
     resolveId(id) {if (id.startsWith('virtual:rd-hooks-')) return `\0${id}`;},
     load(id) {
@@ -77,7 +78,7 @@ class Hooks {
   useLocation() {const url = new URL(this.entries[this.index], 'http://local.test'); return {pathname: url.pathname, search: url.search, hash: url.hash, ...this.metadata[this.index]};}
   useSearchParams() {return [new URLSearchParams(this.useLocation().search), this.setParams];}
   useNavigate() {return this.navigate;}
-  render(Component, props) {this.cursor = 0; this.pending = {layout: [], effect: []}; globalThis.__readinessHooks = this; return Component(props);}
+  render(Component, props) {this.cursor = 0; this.pending = {layout: [], effect: []}; globalThis.__readinessHooks = this; return expandRouteContent(Component(props));}
   flush() {for (const kind of ['layout', 'effect']) for (const callback of this.pending[kind].splice(0)) callback();}
   back() {if (this.index) this.index--;}
   forward() {if (this.index < this.entries.length - 1) this.index++;}

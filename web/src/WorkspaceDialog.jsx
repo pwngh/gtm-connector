@@ -18,7 +18,7 @@ export default function WorkspaceDialog({title, children, onClose, wide=false, d
     const previous=returnFocusRef?.current||document.activeElement;
     // Opening a form does not summon a phone keyboard or scroll its page.
     // Search is the intentional exception: its input is the requested action.
-    (command?ref.current?.querySelector('input'):ref.current)?.focus({preventScroll:true});
+    ((command&&ref.current?.querySelector('input'))||ref.current)?.focus({preventScroll:true});
     const handler=event=>{
       if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close.current();return;}
       if(event.key!=='Tab')return;

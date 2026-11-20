@@ -1,14 +1,8 @@
+import {visibleElement as visible} from './focusElement.js';
 import {focusReadinessElement, closeReadinessOnEscape} from './readinessBrowser.js';
 
 export const focusHistoryElement = focusReadinessElement;
 export const closeHistoryOnEscape = closeReadinessOnEscape;
-
-function visible(element) {
-  if (!element || element.isConnected === false || element.disabled || element.closest?.('[hidden],[inert],[aria-hidden="true"]')) return false;
-  const closed = element.closest?.('details:not([open])');
-  if (closed && !closed.querySelector('summary')?.contains(element)) return false;
-  return !element.getClientRects || element.getClientRects().length > 0;
-}
 
 export function historyFocusTarget(root, key) {
   return [...(root?.querySelectorAll('[data-history-target]') || [])].find(element => element.dataset.historyTarget === key && visible(element));

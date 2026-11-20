@@ -1,3 +1,4 @@
+import {eagerRouteModules} from './testing/routeModules.js';
 import test, {before, after} from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -11,7 +12,7 @@ import {buildWorklist, worklistHref} from './worklist.js';
 
 let server, Worklists, WorklistStepEntry, ReviewDecision, App;
 before(async () => {
-  server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error'});
+  server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [eagerRouteModules()]});
   const module = await server.ssrLoadModule('/src/Worklists.jsx');
   Worklists = module.default; WorklistStepEntry = module.WorklistStepEntry;
   ReviewDecision = (await server.ssrLoadModule('/src/ReviewDecision.jsx')).default;

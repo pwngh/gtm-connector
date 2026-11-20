@@ -1,3 +1,5 @@
+import {historyHref} from './historyLocation.js';
+export {historySearch, historyHref, safeHistoryReturn} from './historyLocation.js';
 import {historyFixture} from './renewalFixtures.js';
 import {derive, transition, workflowTransitionChecks} from './workflow.js';
 import {compareReadinessChecks, evaluateReadiness, readinessHref, resolveEvidenceReference} from './readiness.js';
@@ -345,20 +347,6 @@ export function readHistoryLocation(search = '', fixture = historyFixture) {
   };
 }
 
-export function historySearch(search, changes) {
-  const params = new URLSearchParams(search);
-  for (const [key, value] of Object.entries(changes)) {
-    params.delete(key);
-    if (value != null && value !== '') params.set(key, String(value));
-  }
-  return params;
-}
-
-export function historyHref(search = '', changes = {}, paths = historyFixture.paths) {
-  const params = historySearch(search, changes);
-  return `${paths.history}${params.size ? `?${params}` : ''}`;
-}
-
 export function historyActionHref(href, search, paths = historyFixture.paths) {
   const [address, hash] = href.split('#'), [path, query = ''] = address.split('?');
   const params = new URLSearchParams(query), location = readHistoryLocation(search);
@@ -367,10 +355,6 @@ export function historyActionHref(href, search, paths = historyFixture.paths) {
   return `${path}?${params}${hash ? `#${hash}` : ''}`;
 }
 
-export function safeHistoryReturn(search, paths = historyFixture.paths) {
-  const value = new URLSearchParams(search).get('historyReturn');
-  return value && !value.includes('#') && value.split('?')[0] === paths.history ? value : null;
-}
 
 function boundHistory(events, location, fixture) {
   const baseline = fixture.baseline;
