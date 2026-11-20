@@ -9,7 +9,7 @@ import {renewalEvidence, renewalFixture, fixturePeople} from './renewalFixtures.
 
 // Run real component handlers with controlled hooks, not a layout or browser emulator.
 let server, Playbooks, App;
-const hookNames = ['useState', 'useReducer', 'useRef', 'useId', 'useEffect', 'useLayoutEffect'];
+const hookNames = ['useState', 'useReducer', 'useRef', 'useId', 'useEffect', 'useLayoutEffect', 'useMemo'];
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [{
     name: 'playbooks-handler-harness', enforce: 'pre',
@@ -79,6 +79,13 @@ class Hooks {
     slot.reducer = reducer;
     slot.dispatch ||= action => {slot.value = slot.reducer(slot.value, action);};
     return [slot.value, slot.dispatch];
+  }
+  useMemo(create, deps) {
+    const slot = this.slot('memo', () => ({}));
+    if (!slot.deps || deps.some((value, index) => !Object.is(value, slot.deps[index]))) {
+      slot.value = create(); slot.deps = deps;
+    }
+    return slot.value;
   }
   useRef(value) {return this.slot('ref', () => ({ref: {current: value}})).ref;}
   useId() {return this.slot('id', () => ({id: `test-id-${this.cursor}`})).id;}

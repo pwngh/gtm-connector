@@ -37,7 +37,8 @@ test('the full workflow resolves legal work while keeping renewal unconfirmed', 
   assert.equal(approved.customerReview.recordedBy, 'Alex Chen');
   const state = act(approved, 'resolve_requirement');
   assert.equal(state.requirement.status, 'resolved');
-  assert.equal(state.task.status, 'complete');
+  assert.deepEqual(state.task, approved.task);
+  assert.equal(state.task.status, 'open');
   assert.equal(derive(state).taskStage, 'complete');
   assert.equal(state.commercial.status, 'not_confirmed');
   assert.equal(state.commercial.label, 'Renewal not confirmed');
@@ -215,4 +216,20 @@ test('reopening requires a new counsel review and reset restores the clean demo'
   assert.deepEqual(exportedHistory.find(event => event.type === 'record_customer_approval').evidenceSnapshot, approvalEvent.evidenceSnapshot);
   assert.equal(initialState.history.length, 0);
   assert.deepEqual(act(reopened, 'reset'), initialState);
+});
+
+test('resolution preserves the stored task and commercial records for every task status', () => {
+  const approved = approveCustomer();
+  for (const status of ['open', 'blocked', 'complete']) {
+    const state = {...approved, task: {...approved.task, status}};
+    const result = act(state, 'resolve_requirement');
+    assert.equal(result.error, null);
+    assert.equal(result.requirement.status, 'resolved');
+    assert.equal(result.task, state.task);
+    assert.equal(result.commercial, state.commercial);
+    assert.equal(result.customerReview, state.customerReview);
+    assert.equal(result.document, state.document);
+  }
+  const noTask = {...approved, task: null};
+  assert.equal(act(noTask, 'resolve_requirement').task, null);
 });

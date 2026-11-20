@@ -1,5 +1,5 @@
 import {worklistFixture, worklistResponseExamples} from './renewalFixtures.js';
-import {derive} from './workflow.js';
+import {derive, workflowTransitionChecks} from './workflow.js';
 
 const day = 86400000;
 const stages = {negotiation: 'Negotiation', proposal: 'Proposal'};
@@ -87,7 +87,7 @@ function walkthroughWork(item, state, d, fixture) {
     command = d.isDocumentVerified ? 'inspect_document' : d.canVerifyDocument ? 'verify_document' : null;
     output = d.isDocumentVerified ? `Inspection recorded for ${state.document.version} by ${state.document.verifiedBy || 'an unrecorded reviewer'}. A separate current-version basis is not recorded.` : null;
     outputAt = d.isDocumentVerified ? state.document.verifiedAt : null;
-    if (status === 'blocked') reason = {action: 'inspect_document', code: state.document ? 'plan_approval' : 'document_receipt', reason: state.document ? 'The current plan revision needs internal approval.' : 'Receive the document before inspecting its version.'};
+    if (status === 'blocked') reason = d.transitions.verify_document.blockedReasons.find(item => item.code === (!state.document ? 'document_receipt' : d.needsReplacement ? 'document_current_version' : 'plan_approval')) || d.transitions.verify_document.blockedReasons[0] || null;
   } else if (item.kind === 'customer_review') {
     events = ['request_customer_review', 'record_customer_approval', 'obtain_document', 'save_plan', 'reopen_requirement'];
     const decision = state.customerReview?.status === 'approved' && state.customerReview.documentId === state.document?.id && state.customerReview.documentVersion === state.document?.version;
@@ -107,11 +107,17 @@ function walkthroughWork(item, state, d, fixture) {
   }
   const unavailable = ['independent_reviewer', 'owner_missing'].includes(reason?.code);
   const allowedActions = unavailable ? [] : [stepAction(item, fixture.walkthrough.paths, ['blocked', 'planned'].includes(status) ? 'Inspect walkthrough step' : label, ['ready', 'waiting'].includes(status) ? 'continue' : 'inspect')];
+  const readinessCommand = command || (item.kind === 'plan_review' ? d.nextCommand : null);
+  const readinessCheckId = workflowTransitionChecks[readinessCommand] || (status === 'complete' ? null : item.readinessCheckId);
   return {
     ...item, title: item.kind === 'collection' ? state.task?.title || state.plan.title || item.title : item.title,
     ...ownerFields(owner), status, waitingOn, waitingReason, output, outputTimeLabel: output ? formatWorklistTime(outputAt) : null,
     planRevision: String(state.plan.revision), entryTargetId: `work-item-${item.id}`,
     workflowAction: command && !unavailable ? {command, label} : null,
+    readinessCheckId,
+    readinessAction: readinessCheckId ? {id: 'inspect_readiness', label: 'Inspect this transition’s readiness', href: `${fixture.walkthrough.paths.root}/readiness?${new URLSearchParams({check: readinessCheckId})}`}
+      : status === 'complete' ? stepAction(item, fixture.walkthrough.paths, 'Inspect the recorded output', 'inspect') : null,
+    replacementAction: item.kind === 'collection' && d.canReplaceDocument ? {command: 'obtain_document', label: 'Attach a replacement document'} : null,
     revision: revisionFor(state, events, item.revision), lastChangedAt: lastEvent(state, events)?.at || item.lastChangedAt,
     allowedActions, blockedReasons: reason ? [reason] : [],
     nextActionLabel: ['ready', 'waiting', 'complete'].includes(status) && allowedActions.length ? label : 'Inspect work item',
@@ -127,7 +133,7 @@ export function buildWorklist(state, fixture = worklistFixture) {
   const requirements = fixture.requirements.map(item => {
     const interactive = item.renewalId === walkthrough.renewalId;
     const status = interactive ? state.requirement.status : item.status;
-    const allowedActions = interactive ? [{id: 'open_requirement', label: status === 'resolved' ? 'Inspect resolution' : d.canResolveRequirement ? 'Review requirement resolution' : 'Inspect resolution criteria', intent: 'inspect', href: `${walkthrough.paths.workplan}?${new URLSearchParams({requirement: item.id})}`} ] : [];
+    const allowedActions = interactive ? [{id: 'open_requirement', label: 'Inspect requirement readiness', intent: 'inspect', href: `${walkthrough.paths.root}/readiness?${new URLSearchParams({requirement: item.id})}`} ] : [];
     return {
       ...item, status, kindLabel: requirementKinds[item.kind] || item.kind, selectionKey: keyFor('requirement', item.id),
       ...ownerFields(person(people, item.ownerId)),

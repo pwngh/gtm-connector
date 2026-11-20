@@ -7,7 +7,7 @@ import {fixturePeople, initialState, renewalFixture, worklistFixture} from './re
 
 // Real handlers with controlled hooks; layout is not emulated.
 let server, Worklists, App;
-const hookNames = ['useState', 'useReducer', 'useRef', 'useId', 'useEffect', 'useLayoutEffect'];
+const hookNames = ['useState', 'useReducer', 'useRef', 'useId', 'useEffect', 'useLayoutEffect', 'useMemo'];
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [{
     name: 'worklist-handlers', enforce: 'pre',
@@ -57,6 +57,13 @@ class Hooks {
   slot(kind, init) {const index = this.cursor++; this.slots[index] ||= {kind, ...init()}; assert.equal(this.slots[index].kind, kind); return this.slots[index];}
   useState(initial) {const slot = this.slot('state', () => ({value: typeof initial === 'function' ? initial() : initial})); return [slot.value, value => {slot.value = typeof value === 'function' ? value(slot.value) : value;}];}
   useReducer(reducer, initial, init) {const slot = this.slot('reducer', () => ({value: init ? init(initial) : initial})); return [slot.value, action => {slot.value = reducer(slot.value, action);}];}
+  useMemo(create, deps) {
+    const slot = this.slot('memo', () => ({}));
+    if (!slot.deps || deps.some((value, index) => !Object.is(value, slot.deps[index]))) {
+      slot.value = create(); slot.deps = deps;
+    }
+    return slot.value;
+  }
   useRef(value) {return this.slot('ref', () => ({ref: {current: value}})).ref;}
   useId() {return this.slot('id', () => ({id: `wl-test-${this.cursor}`})).id;}
   effect(kind, callback, deps) {

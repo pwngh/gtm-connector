@@ -64,12 +64,12 @@ export default function ReviewDecision({type, state, derived, onCancel, onPerfor
       <p className="decision-boundary">This records an internal review request. No message is sent. Counsel’s decision and its supporting evidence are recorded in the next step.</p>
     </>}
     {type === 'resolve' && <>
-      <div className="decision-context"><span className="mini-label"><ShieldCheck size={14}/> SUPPORTED DECISION</span><span>{renewalFixture.agreement.label}</span></div>
+      <div className="decision-context"><span className="mini-label"><ShieldCheck size={14}/> REVIEWER INPUT IN WALKTHROUGH</span><span>{renewalFixture.agreement.label}</span></div>
       <h3 className="decision-title">Resolve the customer condition.</h3>
-      <blockquote className="decision-evidence-quote">“{decision?.evidenceText}”</blockquote>
-      <div className="decision-people"><div><span>Customer counsel</span><strong>{decision?.reviewedBy}</strong></div><div><span>Recorded by</span><strong>{decision?.recordedBy}</strong></div></div>
+      <p className="decision-evidence-quote">{decision?.evidenceText}</p>
+      <div className="decision-people"><div><span>Customer reviewer (reviewer input)</span><strong>{decision?.reviewedBy}</strong></div><div><span>Recorded by</span><strong>{decision?.recordedBy}</strong></div></div>
       <div className="decision-binding"><FileText size={18}/><div><strong>{doc?.title || doc?.name}</strong><p>Document version {decision?.documentVersion} · Plan version {decision?.planRevision}</p></div></div>
-      <p className="decision-boundary">This resolves the requirement supported by the recorded approval. The commercial renewal remains unconfirmed.</p>
+      <p className="decision-boundary">This records a walkthrough resolution from typed reviewer input, not an evidence-backed authority finding. Separate work-item outputs and the commercial renewal are unchanged.</p>
     </>}
     {type === 'review' && requestingChanges ? <form className="review-changes" onSubmit={event => {event.preventDefault(); if (reason.trim()) onPerform('request_changes', {note: reason.trim()}, 'Changes requested');}}>
       <label className="field" htmlFor={reasonId}>Changes needed <span className="field-required">(required)</span><span className="field-hint">Tell the task owner what needs to change before this plan can be approved.</span></label>

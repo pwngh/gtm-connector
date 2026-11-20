@@ -31,11 +31,11 @@ export function DecisionEvidence({state, onHistory}) {
   const decision=state.customerReview;
   if(decision?.status!=='approved')return <div className="dialog-body"><h3>No customer approval recorded.</h3><p>The current document still needs a supported decision from customer counsel.</p></div>;
   return <div className="dialog-body decision-evidence">
-    <span className="context-overline"><ShieldCheck size={16}/> RECORDED CUSTOMER DECISION</span>
-    <h3>Approval, with its basis.</h3>
-    <blockquote className="full-quote">“{decision.evidenceText}”</blockquote>
-    <dl className="detail-list"><div><dt>Customer counsel</dt><dd>{decision.reviewedBy}</dd></div><div><dt>Recorded by</dt><dd>{decision.recordedBy}</dd></div><div><dt>Document</dt><dd>{state.document.title} · {decision.documentVersion}</dd></div><div><dt>Applies to</dt><dd>{renewalFixture.agreement.label} · Plan version {decision.planRevision}</dd></div></dl>
-    <div className="interpretation"><strong>What this establishes</strong><p>Customer approval for this document version. The commercial renewal outcome remains unconfirmed.</p></div>
+    <span className="context-overline"><ShieldCheck size={16}/> RECORDED REVIEWER INPUT</span>
+    <h3>Walkthrough decision input.</h3>
+    <p className="full-quote">{decision.evidenceText}</p>
+    <dl className="detail-list"><div><dt>Customer reviewer (reviewer input)</dt><dd>{decision.reviewedBy}</dd></div><div><dt>Recorded by</dt><dd>{decision.recordedBy}</dd></div><div><dt>Document</dt><dd>{state.document.title} · {decision.documentVersion}</dd></div><div><dt>Applies to</dt><dd>{renewalFixture.agreement.label} · Plan version {decision.planRevision}</dd></div></dl>
+    <div className="interpretation"><strong>What this establishes</strong><p>Typed reviewer input for this document version, not a cited receipt or an authority finding. The commercial renewal outcome remains unconfirmed.</p></div>
     <button className="button" onClick={onHistory}>View decision history</button>
   </div>;
 }

@@ -8,7 +8,7 @@ export const renewalRecords=[{id:'thornfield',name:'Thornfield Wren LLP',initial
 
 export const renewalEvidence = [
   {
-    id: 'E-017', binding: 'customer_statement', emphasis: 'only after our counsel approves', type: 'Customer call', speaker: 'Rachel Ellis',
+    id: 'E-017', binding: 'customer_statement', partial: false, readStatus: 'read', emphasis: 'only after our counsel approves', type: 'Customer call', speaker: 'Rachel Ellis',
     role: 'Customer · Operations director', time: 'Nov 18 · 04:12',
     quote: 'We can proceed only after our counsel approves the current AI rider.',
     context: 'We’re comfortable with the proposed renewal. We can proceed only after our counsel approves the current AI rider. Could you send the version that applies to this agreement?',
@@ -17,7 +17,7 @@ export const renewalEvidence = [
     agreement: 'Agreement A-17', tone: 'blue',
   },
   {
-    id: 'E-042', binding: 'comparison_statement', type: 'Internal Slack', speaker: 'Morgan Reed',
+    id: 'E-042', binding: 'comparison_statement', partial: false, readStatus: 'read', type: 'Internal Slack', speaker: 'Morgan Reed',
     role: 'Internal · Account owner', time: 'Nov 19 · 09:24',
     quote: 'We expect signature on Friday.',
     context: 'The renewal call went well. We expect signature on Friday. Rachel still needs the latest rider for their counsel to review.',
@@ -176,25 +176,25 @@ export const worklistFixture = {
   workItems: [
     {
       id: 'work-plan-review-ai-terms', revision: '1', renewalId: renewalFixture.id,
-      requirementId: renewalFixture.requirementId, kind: 'plan_review', title: 'Review the document work plan',
+      requirementId: renewalFixture.requirementId, kind: 'plan_review', title: 'Review the document work plan', readinessCheckId: 'submit_plan',
       dueAt: null, step: 1, lastChangedAt: '2026-11-19T14:30:00.000Z',
       completionRule: 'A separate reviewer approves the scoped plan revision. This is internal work approval, not customer approval.',
     },
     {
       id: renewalFixture.taskId, revision: '1', renewalId: renewalFixture.id,
-      requirementId: renewalFixture.requirementId, kind: 'collection', title: 'Obtain the current AI terms document',
+      requirementId: renewalFixture.requirementId, kind: 'collection', title: 'Obtain the current AI terms document', readinessCheckId: 'receive_document',
       dueAt: null, step: 2, lastChangedAt: '2026-11-19T14:30:00.000Z',
       completionRule: 'Collection has an output when the document is received. Inspection, customer review, and requirement resolution are separate.',
     },
     {
       id: 'work-inspect-ai-terms', revision: '1', renewalId: renewalFixture.id,
-      requirementId: renewalFixture.requirementId, kind: 'inspection', title: 'Inspect the received document version',
+      requirementId: renewalFixture.requirementId, kind: 'inspection', title: 'Inspect the received document version', readinessCheckId: 'verify_document',
       dueAt: null, step: 2, lastChangedAt: '2026-11-19T14:30:00.000Z',
       completionRule: 'Inspect the received version and its applicability to the agreement. Receipt alone does not complete inspection.',
     },
     {
       id: 'work-review-ai-terms', revision: '1', renewalId: renewalFixture.id,
-      requirementId: renewalFixture.requirementId, kind: 'customer_review', title: 'Obtain customer counsel review',
+      requirementId: renewalFixture.requirementId, kind: 'customer_review', title: 'Obtain customer counsel review', readinessCheckId: 'request_customer_review',
       dueAt: null, step: 3, lastChangedAt: '2026-11-19T14:30:00.000Z',
       awaitedParty: {id: null, label: 'Customer counsel · unidentified', basis: 'The customer statement identifies a role, not a decision owner.'},
       completionRule: 'Record the customer decision for the reviewed document. Completing this item does not resolve the requirement or confirm a renewal.',
@@ -236,3 +236,176 @@ export const worklistResponseExamples = [
   {id: 'loading', label: 'Loading preview', status: 'loading',
     title: 'Waiting for a list response.', message: 'This is a paused loading example, not a running request. Return to available records to continue.'},
 ];
+
+// Readiness projects the existing story, not a new connected source read.
+export const renewalSourceBoundaries = [
+  {code: 'calls_outside_records', title: 'Calls outside the records',
+    text: 'Calls outside the recorded excerpts were not read. Their contents and any conditions they contain are unknown.', count: null},
+];
+const readinessCardId = 'card-thornfield-walkthrough';
+const readinessReadAt = worklistFixture.asOf;
+export const readinessFixture = {
+  id: 'readiness-thornfield', revision: '2', renewalId: renewalFixture.id, agreement: renewalFixture.agreement,
+  initialEvaluationAt: renewalFixture.workflowClockStart,
+  paths: {...renewalFixture.paths, readiness: `${renewalFixture.paths.root}/readiness`},
+  worklist: worklistFixture,
+  policyVersion: 'walkthrough-2',
+  scope: 'Existing local workflow rules. No real access, approval, or source connection.',
+  policyBoundary: 'Transition checks never offer a step the demonstration reducer refuses. Decision recording and resolution also require evidence checks to pass. The demonstration can still accept typed input without that evidence; real use would refuse it. No check grants real authority.',
+  documentVersionBasis: renewalFixture.documentVersionBasis,
+  customerAuthority: null,
+  decisionReceipt: null,
+  contacts: [],
+  artifactReceipts: [],
+  card: {
+    id: readinessCardId, revision: '1', label: 'Walkthrough source card', readAt: readinessReadAt,
+    provenance: 'Numbered projection of the existing invented excerpts and CRM snapshot. This is not a new source read or the connector demo card.',
+    units: [
+      {
+        id: 'unit-customer-condition', cardId: readinessCardId, n: '1', kind: 'sentence',
+        text: renewalEvidence[0].quote, legacyId: renewalEvidence[0].id,
+        sourceId: 'source-customer-call', sourceLabel: renewalEvidence[0].type,
+        eventAt: renewalEvidence[0].time, readAt: readinessReadAt, shown: true, partial: renewalEvidence[0].partial,
+        speaker: {name: renewalEvidence[0].speaker, role: renewalEvidence[0].role,
+          basis: `Synthetic contact match: the speaker label matches ${fixturePeople.customerContact}, the customer operations contact in the existing fixture.`,
+          authority: 'unidentified'},
+        receipt: {id: 'receipt-call-excerpt', status: 'Local excerpt preserved', readAt: readinessReadAt},
+        neighbours: [],
+      },
+      {
+        id: 'unit-seller-expectation', cardId: readinessCardId, n: '2', kind: 'sentence',
+        text: renewalEvidence[1].quote, legacyId: renewalEvidence[1].id,
+        sourceId: 'source-internal-slack', sourceLabel: renewalEvidence[1].type,
+        eventAt: renewalEvidence[1].time, readAt: readinessReadAt, shown: true, partial: renewalEvidence[1].partial,
+        speaker: {name: renewalEvidence[1].speaker, role: renewalEvidence[1].role,
+          basis: `Synthetic principal match: the speaker label matches ${fixturePeople.accountOwner}, the account owner in the existing fixture.`,
+          authority: 'not_customer_authority'},
+        receipt: {id: 'receipt-slack-excerpt', status: 'Local excerpt preserved', readAt: readinessReadAt},
+        neighbours: [],
+      },
+      {
+        id: 'unit-crm-renewal', cardId: readinessCardId, n: '3', kind: 'record',
+        sourceId: 'source-crm-snapshot', sourceLabel: worklistFixture.renewals[0].crm.source,
+        eventAt: null, readAt: worklistFixture.renewals[0].crm.readAt, shown: true, partial: false,
+        fields: [
+          {label: 'Account', value: renewalFixture.account.name},
+          {label: 'Opportunity', value: renewalFixture.renewal.id},
+          {label: 'CRM stage', value: worklistFixture.renewals[0].crm.stage},
+        ],
+        receipt: {id: 'receipt-crm-snapshot', status: 'Local record preserved', readAt: worklistFixture.renewals[0].crm.readAt},
+        neighbours: [],
+      },
+    ],
+    sources: [
+      {id: 'source-crm-snapshot', label: 'CRM snapshot', kind: 'record', status: 'read', readAt: worklistFixture.renewals[0].crm.readAt,
+        scope: 'Account and opportunity fields only. The agreement is a separate workflow-side record.', unitNumbers: ['3']},
+      {id: 'source-customer-call', label: renewalEvidence[0].type, kind: 'call', status: renewalEvidence[0].readStatus, readAt: readinessReadAt,
+        scope: 'The preserved customer excerpt only, not every call.', unitNumbers: ['1']},
+      {id: 'source-internal-slack', label: renewalEvidence[1].type, kind: 'message', status: renewalEvidence[1].readStatus, readAt: readinessReadAt,
+        scope: 'The preserved seller message only, not every channel message.', unitNumbers: ['2']},
+    ],
+    gaps: renewalSourceBoundaries,
+  },
+  requirementsRecorded: true,
+  requirements: [
+    {
+      id: renewalFixture.requirementId, revision: '1', renewalId: renewalFixture.id,
+      title: initialState.requirement.title, kind: 'customer_approval', kindLabel: 'Customer approval',
+      binding: 'workflow_requirement', status: 'open', ownerId: worklistFixture.walkthrough.reviewerId,
+      resolutionCriteria: [
+        'Review customer counsel approval for the applicable document under the workflow-side agreement.',
+        'Keep the approving contact, their authority basis, and the cited decision evidence distinct from the person recording it.',
+        'Record an explicit requirement resolution. It is not a work-item completion or a commercial outcome.',
+      ],
+      citations: [
+        {cardId: readinessCardId, n: '1', context: 'Workflow context: this customer condition is cited by the requirement.'},
+        {cardId: readinessCardId, n: '2', context: 'Workflow context: this seller expectation is comparison evidence, not customer approval.'},
+      ],
+      awaitedParty: worklistFixture.workItems[3].awaitedParty,
+      checkIds: ['submit_plan', 'approve_plan', 'receive_document', 'verify_document', 'request_customer_review', 'record_customer_decision', 'resolve_requirement'],
+      evidenceCheckIds: ['current_version_basis', 'customer_authority', 'decision_citation'],
+    },
+  ],
+  checks: [
+    {id: 'submit_plan', kind: 'transition', title: 'Submit the plan', command: 'request_review', workKind: 'plan_review',
+      actionLabel: 'Open plan submission', inputKinds: ['plan', 'policy'],
+      scope: 'Submit the current revision for an independent internal review. A missing document does not block this step.'},
+    {id: 'approve_plan', kind: 'transition', title: 'Approve the work plan', command: 'approve_plan', workKind: 'plan_review',
+      actionLabel: 'Open submitted plan review', inputKinds: ['plan', 'policy'],
+      scope: 'Internal approval releases document work only. It cannot approve the customer terms.'},
+    {id: 'receive_document', kind: 'transition', title: 'Receive the document', command: 'obtain_document', workKind: 'collection',
+      actionLabel: 'Open document collection', inputKinds: ['plan', 'document', 'inspection_work_item', 'policy'],
+      replacementTitle: 'Receive a replacement document', replacementActionLabel: 'Open replacement collection',
+      scope: 'Receipt produces a collection output. A replacement can be received under the approved plan. Inspection and customer review remain separate.'},
+    {id: 'verify_document', kind: 'transition', title: 'Verify the document', command: 'verify_document', workKind: 'inspection',
+      actionLabel: 'Open version verification', inputKinds: ['plan', 'document', 'inspection_work_item', 'policy'],
+      scope: 'Open the existing walkthrough inspection. Its verification flag is not an independently sourced current-version fact.'},
+    {id: 'request_customer_review', kind: 'transition', title: 'Request customer review', command: 'request_customer_review', workKind: 'customer_review',
+      actionLabel: 'Open customer review request', inputKinds: ['plan', 'document', 'customer_decision', 'customer_review_work_item', 'policy'],
+      scope: 'Prepare a local review request for the inspected document. No message is sent and no authority is inferred.'},
+    {id: 'record_customer_decision', kind: 'transition', title: 'Record the customer decision', command: 'record_customer_approval', workKind: 'customer_review',
+      actionLabel: 'Open decision recording', inputKinds: ['plan', 'document', 'customer_decision', 'customer_review_work_item', 'authority', 'decision_receipt', 'version_basis', 'card', 'policy'],
+      scope: 'The existing form records a simulated decision. Typed text is not a cited receipt or an authority basis.'},
+    {id: 'resolve_requirement', kind: 'transition', title: 'Resolve the requirement', command: 'resolve_requirement',
+      actionLabel: 'Open requirement resolution', inputKinds: ['plan', 'document', 'customer_decision', 'customer_review_work_item', 'requirement', 'authority', 'decision_receipt', 'version_basis', 'card', 'policy'],
+      scope: 'Review the local recorded decision before explicit resolution. This check does not confirm a signed renewal or complete separate work items.'},
+    {id: 'current_version_basis', kind: 'evidence', title: 'Independent current-version basis', inputKinds: ['document', 'version_basis', 'card'],
+      correctiveLabel: 'Identify the current version with independent evidence',
+      guidance: 'A read source or inspected receipt independent of the file must identify its current version for the agreement. This prototype has no evidence-recording command for that basis.',
+      scope: 'The file cannot identify itself as the current version. A separate source must identify the applicable version for this agreement.'},
+    {id: 'customer_authority', kind: 'evidence', title: 'Customer decision authority', inputKinds: ['authority', 'card'],
+      correctiveLabel: 'Record who decides, with evidence',
+      guidance: 'Identify the approving contact and cite a read source unit or inspected receipt establishing their authority for this agreement. This browser-only prototype cannot record that evidence-backed authority. A typed name will not clear this check.',
+      scope: 'A customer role or a typed counsel name does not establish authority to approve this agreement.'},
+    {id: 'decision_citation', kind: 'evidence', title: 'Cited customer decision', inputKinds: ['document', 'customer_decision', 'decision_receipt', 'authority', 'card'],
+      correctiveLabel: 'Cite the customer decision for this version',
+      guidance: 'The accepted decision must cite an available unit or inspected receipt and bind the agreement, document version, and supported approving contact. Typed reviewer input is not that citation.',
+      scope: 'The approval needs a cited source unit or an inspected artifact receipt for the applicable document and agreement.'},
+  ],
+  responses: [
+    {id: 'current', label: 'Current evaluation', status: 'ready'},
+    {id: 'not-evaluated', label: 'Not evaluated example', status: 'not_evaluated',
+      title: 'No evaluation in this example.', message: 'Results and actions are withheld, not marked as passed. The underlying walkthrough and its saved evaluations are unchanged.'},
+    {id: 'stale', label: 'Failed refresh example', status: 'stale',
+      title: 'Refresh failed. The last result is retained.', message: 'This local failure example keeps the last complete evaluation and source card. Its actions are withheld until you return to the current evaluation. No external request was made.'},
+  ],
+};
+
+// Isolated validation examples, never added to the walkthrough automatically.
+export const readinessEvidenceExample = {
+  source: {id: 'source-version-example', label: 'Separate version message example', kind: 'message', status: 'read',
+    readAt: readinessReadAt, scope: 'Isolated evidence-check example.', unitNumbers: ['4']},
+  unit: {id: 'unit-version-example', cardId: readinessCardId, n: '4', kind: 'sentence',
+    sourceId: 'source-version-example', sourceLabel: 'Separate version message example', shown: true, partial: false,
+    text: `The current document for ${renewalFixture.agreement.label} is AI Terms ${fixtureEvidence[2].version}.`,
+    readAt: readinessReadAt, eventAt: readinessReadAt, neighbours: []},
+  contact: {id: 'contact-counsel-example', displayName: fixturePeople.customerCounsel, status: 'active', recordedAt: readinessReadAt},
+  receipt: {id: 'receipt-decision-example', artifactId: 'artifact-counsel-decision-example', status: 'received',
+    receivedAt: readinessReadAt, inspection: {status: 'accepted', at: readinessReadAt}},
+  documentVersionBasis: {id: 'version-basis-example', revision: '1', recordedAt: readinessReadAt,
+    agreementId: renewalFixture.agreement.id, documentId: fixtureEvidence[2].id, version: fixtureEvidence[2].version,
+    source: {kind: 'source', id: 'source-version-example'}},
+  customerAuthority: {id: 'authority-example', revision: '1', recordedAt: readinessReadAt, status: 'accepted',
+    agreementId: renewalFixture.agreement.id, contactId: 'contact-counsel-example', evidenceRef: {kind: 'receipt', id: 'receipt-decision-example'}},
+  decisionReceipt: {id: 'decision-example', revision: '1', recordedAt: readinessReadAt, status: 'accepted', outcome: 'approved',
+    agreementId: renewalFixture.agreement.id, documentId: fixtureEvidence[2].id, documentVersion: fixtureEvidence[2].version,
+    contactId: 'contact-counsel-example', evidenceRef: {kind: 'receipt', id: 'receipt-decision-example'}},
+};
+
+export const walkthroughDocumentExamples = {
+  outdated: {...fixtureEvidence[2], version: 'v2'},
+  replacement: {...fixtureEvidence[2], id: 'terms-v4', name: 'AI Terms · Version 4', version: 'v4', currentVersion: 'v4'},
+  replacementDecision: {reviewedBy: walkthroughDecisions.reviewedBy,
+    evidenceText: `Reviewer input: customer counsel approved AI Terms v4 for ${renewalFixture.agreement.label}.`},
+};
+
+export const readinessEvidenceFixture = {
+  ...readinessFixture,
+  card: {...readinessFixture.card,
+    sources: [...readinessFixture.card.sources, readinessEvidenceExample.source],
+    units: [...readinessFixture.card.units, readinessEvidenceExample.unit]},
+  contacts: [readinessEvidenceExample.contact], artifactReceipts: [readinessEvidenceExample.receipt],
+  documentVersionBasis: readinessEvidenceExample.documentVersionBasis,
+  customerAuthority: readinessEvidenceExample.customerAuthority,
+  decisionReceipt: readinessEvidenceExample.decisionReceipt,
+};

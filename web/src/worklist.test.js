@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {advanceReadinessJournal, selectReadiness} from './readiness.js';
 import {derive, initialState, transition, transitionWalkthrough} from './workflow.js';
 import {fixturePeople, renewalFixture, renewalRecords, worklistFixture, worklistPeople, worklistResponseExamples} from './renewalFixtures.js';
 import {
@@ -316,7 +317,11 @@ test('each walkthrough deep link opens its own item rather than whichever action
     }
     const requirement = result.requirements.find(row => row.renewalId === first.id);
     const url = new URL(requirement.allowedActions[0].href, 'http://local.test');
-    assert.equal(resolveWorklistEntry(result, url.pathname, url.search).step, 4);
+    assert.equal(url.pathname, `${renewalFixture.paths.root}/readiness`);
+    const selection = selectReadiness(advanceReadinessJournal(null, state), url.search).selection;
+    assert.equal(selection.kind, 'requirement');
+    assert.equal(selection.resource.id, requirement.id);
+    assert.equal(resolveWorklistEntry(result, renewalFixture.paths.workplan, url.search).step, 4);
   }
   assert.equal(resolveWorklistEntry(data(), renewalFixture.paths.workplan, '?workItem=missing').status, 'not_found');
   assert.equal(resolveWorklistEntry(data(), renewalFixture.paths.workplan, `?workItem=${worklistFixture.workItems.at(-1).id}`).status, 'not_found');
