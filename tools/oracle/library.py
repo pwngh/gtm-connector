@@ -25,7 +25,12 @@ HOSTS = (
     "http://\u212a.example/", "http://EXAMPLE.\u0130/", "http://a.example#frag", "http://a.example?x#y",
     "http://\uff21.example/", "http://a\u200bb.example/", "http://a.example:0/", "http://a.example:65535/",
     "http://[fe80::1%25en0]/", "javascript:alert(1)", "data:text/html,x", "http://1.2.3.4/", "http://0x7f.1/",
-    "C:\\path", "\\\\server\\share", "http://a.example%2F@b.example/", "http://a.example/@b.example/")
+    "C:\\path", "\\\\server\\share", "http://a.example%2F@b.example/", "http://a.example/@b.example/",
+    # A netloc whose NFKC form gains / ? # @ or : is refused; other non-ASCII netlocs are read.
+    "http://a\uff20b.example/", "http://a\u2100.example/", "http://us\uff0fer@good.example/",
+    "http://evil\uff03@good.example/", "http://good.example\ufe55443/", "http://\ufe56x.example/",
+    "http://\u00aa@good.example/", "http://user\u00e9@good.example/", "http://\u2460.example/",
+    "http://\u2474.example/", "http://x\u2044y.example/")
 JSON_VALUES: tuple[Any, ...] = (
     "", "plain", 'quote " and backslash \\ and slash /', "\x00\x01\x1f\x7f\x80\x9f", "\t\n\r\x0b\x0c\x08",
     "\u2028\u2029\u0085", "\u00e9\u00df\u4e2d\U0001f642", "\ufeff\u200b\u202e", "</script>&<>'", "\ud83d\ude00",
