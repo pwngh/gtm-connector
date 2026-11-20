@@ -10,17 +10,17 @@ client can prepare a [Deal card](briefs.md) with its own grant and read it again
 
 ```sh
 chmod 600 selection.json
-gtm-connector serve --state-dir var/selected --selection selection.json
+gtm-connector serve --selection selection.json
 ```
 
-- `accounts` lists 1 to 100 distinct accounts. Use `acc-007` style IDs with the fixture CRM and
+- `serve` reads the sources its state folder is [connected](cli.md) to.
+- `accounts` lists 1 to 100 distinct accounts. Use `acc-007` style IDs with the demo CRM and
   `acc-sf-` plus the 18-character ID with Salesforce.
-- `slack: true` selects the account's Slack thread. In live Slack mode it must already be mapped
-  with `slack map`, or the server refuses to start.
+- `slack: true` selects the account's Slack thread. With live Slack connected it must already be
+  mapped with `slack map`, or the server refuses to start.
 - The file must be a regular file you own that others cannot write, at most 64 KiB. Unknown keys,
   repeated keys or accounts, and non-finite numbers refuse.
 - To change the selection, restart `serve`. A restart also replaces every grant.
-- `--selection` cannot be combined with `--salesforce-demo-binding`.
 
 ## Tools
 
@@ -56,7 +56,7 @@ receipt and three read receipts, or four with Slack. The reads write no `serve` 
 ## Errors
 
 A bad selection file stops `serve` with exit `2`, and an unmapped Slack thread with exit `3`. Tools
-return these codes as tool errors, or a failed source's own code, such as `calls_not_imported`.
+return these codes as tool errors, or a failed source's own code, such as `calls_not_connected`.
 
 | Code | Cause | Fix |
 | --- | --- | --- |

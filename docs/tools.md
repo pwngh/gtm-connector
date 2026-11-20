@@ -22,8 +22,8 @@ SQLite store of invented records.
 - `serve --selection FILE` limits reads to the selected accounts and replaces `log_activity` with
   `prepare_renewal_brief` and `read_renewal_brief`, which return a [Deal card](briefs.md) as `text`
   with its numbered `units` and its `gaps`. See [selection](selection.md).
-- `serve --crm-backend salesforce` reads CRM from Salesforce and omits `log_activity`. See
-  [Salesforce](salesforce.md).
+- `serve` in a folder connected to Salesforce reads CRM from Salesforce and omits `log_activity`.
+  See [Salesforce](salesforce.md).
 
 ## Fixtures
 
@@ -44,10 +44,10 @@ Reseeding keeps record IDs, edits, activities, and accounts added beside the boo
 fixture set is rejected, and so are a combined CRM and calls database and a database without the
 currency, speaker, or file-count column. Nothing is migrated, so use a fresh `--state-dir`.
 
-`seed`, `accounts --query 'Alder Vale'`, and `account acc-003` read the SQLite file directly,
-outside MCP authorization. `--db PATH` selects the file, and only `seed` creates it. The account
-view leaves out opportunities and call notes. With `--crm-backend salesforce`, `accounts` and
-`account` read through the scoped, audited gateway instead.
+In a folder connected to the demo data, `accounts --query 'Alder Vale'` and `account acc-003` read
+`crm.sqlite3` in the state folder directly, outside MCP authorization, and the first read writes the
+demo book there. The account view leaves out opportunities and call notes. In a folder connected to
+Salesforce, `accounts` and `account` read through the scoped, audited gateway instead.
 
 ## Run the guarantee checks
 

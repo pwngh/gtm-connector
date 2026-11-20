@@ -4,20 +4,25 @@ A Deal card is what the connector prints about one account before a renewal conv
 connector writes every character of it. No model takes part.
 
 ```sh
-.venv/bin/python -m gtm_connector brief acc-003 --with-slack
+.venv/bin/python -m gtm_connector connect demo
+.venv/bin/python -m gtm_connector brief acc-003
 .venv/bin/python -m gtm_connector trace brief-REPLACE_WITH_ID 5
 ```
+
+A card reads the sources its state folder is [connected](cli.md) to, and `brief` takes no source
+option.
 
 | Option | Meaning |
 | --- | --- |
 | `--without-calls` | Omits the `calls:read` grant. The card says calls were not read. |
-| `--with-slack` | Adds a fourth read under `slack:read`. See [Slack context](slack.md). |
 | `--as-of YYYY-MM-DD` | Sets the planning date: the UTC day the card counts from. With no flag it is today in UTC, or `2027-01-15` on the demo CRM. A sentence of a call or message dated after it is counted and not shown. The date is the record's own time read in UTC, not a cue's place in a recording, and a time with no offset decides nothing. It is not a view of the past: the records are the ones read now, and the card's second line says when. |
 | `--json` | Prints the card as `text` with its `units` and `gaps`. The raw records stay in the saved file. |
 
-Each `brief` starts local services, calls `get_account`, `list_opportunities`, and
-`read_call_notes` in that order, then stops the services. It requests `crm:read` and `calls:read`,
-never `crm:write`.
+Each `brief` starts local services, calls `get_account` and `list_opportunities`, then
+`read_call_notes` and `read_slack_messages` for each of the two that is connected, in that order,
+and stops the services. It requests `crm:read`, `calls:read`, and `slack:read`, never `crm:write`.
+A source that is not connected is never called, and the card says "Calls: not connected." or
+"Slack: not connected."
 
 ## Units
 
@@ -107,7 +112,7 @@ file, gets the same role.
 
 | Role | When |
 | --- | --- |
-| `seller` | The speaker label or Slack author equals an entry in `sellers.json` in the state folder: `{"schema_version": 1, "sellers": ["a name or Slack ID"]}`. Demo calls and demo Slack also count the demo's own invented sellers. An imported transcript or live Slack never does. |
+| `seller` | The speaker label or Slack author equals a seller you listed with `--seller NAME` on `connect salesforce`, `connect calls`, or `connect slack`. The list is saved as `sellers.json` in the state folder: `{"schema_version": 1, "sellers": ["a name or Slack ID"]}`, at most 200 entries of 1 to 200 characters. Demo calls and demo Slack also count the demo's own invented sellers. An imported transcript or live Slack never does. |
 | `customer` | A call's speaker label equals the name of exactly one contact of the account, and no listed seller. Slack authors are never customers. |
 | `unknown` | Everything else: no label, a label that matches nobody, two contacts with the name, or a name shared by a seller and a contact. |
 
@@ -133,7 +138,7 @@ SHA-256 of the record's stored text. The account name in the heading is a quoted
 
 ## Saved result
 
-Each card and its evidence are saved in `var/v2/briefs/<brief_id>.json`, with `schema_version`
+Each card and its evidence are saved in `briefs/<brief_id>.json` in the state folder, with `schema_version`
 (`3`), `brief_id`, `account_id`, `as_of`, `status`, `rules_version`, `sealed_by`, `sources`, `text`,
 `units`, `gaps`, and `evidence`.
 `brief --json` prints every key but `evidence`, which holds the raw records and one receipt per

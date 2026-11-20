@@ -13,7 +13,7 @@ lists the seals.
 
 ```sh
 gtm-connector audit --brief brief-REPLACE_WITH_ID --state-dir var/renewal-demo
-gtm-connector audit --state-dir var/session --caller anonymous --follow --json
+gtm-connector audit --caller anonymous --follow --json
 ```
 
 | Flag | Selects |
