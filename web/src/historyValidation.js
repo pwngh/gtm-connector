@@ -8,9 +8,9 @@ const fields = (value, names, check = string) => names.every(key => optional(val
 const identity = value => object(value) && string(value.id) && Boolean(value.id);
 const strings = (value, names) => object(value) && fields(value, names.split(' '));
 const ref = value => object(value) && string(value.kind) && fields(value, ['id', 'cardId']) && optional(value.n, revision);
-const inspection = value => strings(value, 'status at recordedAt recordedBy');
-const receipt = value => identity(value) && strings(value, 'status artifactId documentId documentVersion receivedAt readAt recordedAt recordedBy')
-  && optional(value.inspection, inspection);
+const inspection = value => strings(value, 'status at recordedAt recordedBy recordedById reason');
+const receipt = value => identity(value) && strings(value, 'status artifactId documentId documentVersion receivedAt readAt recordedAt recordedBy uploadedBy uploadedById')
+  && optional(value.inspection, inspection) && optional(value.inspections, items => list(items, inspection));
 const speaker = value => strings(value, 'name role basis authority');
 const source = value => identity(value) && strings(value, 'label kind status readAt recordedAt scope documentId artifactId')
   && optional(value.unitNumbers, values => list(values, revision));
@@ -31,7 +31,7 @@ const agreement = value => identity(value) && strings(value, 'label title displa
 const validators = {
   plan: value => strings(value, 'id title owner specifications instructions status requestedAt approvedAt approver reviewNote authoredBy')
     && fields(value, ['revision', 'approvedRevision'], revision),
-  document: value => strings(value, 'id title name version currentVersion source status receivedAt verifiedAt verifiedBy'),
+  document: value => strings(value, 'id title name version source status receivedAt verifiedAt verifiedBy uploadedBy uploadedById'),
   customerReview: value => strings(value, 'status requestedAt requestedBy documentId documentVersion reviewedBy recordedBy evidenceText approvedAt')
     && optional(value.planRevision, revision),
   requirement: value => strings(value, 'id title status resolvedAt openedAt'),

@@ -4,8 +4,9 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
-import {approvalLetters, historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughDocumentExamples} from './renewalFixtures.js';
-import {walkthroughCommands, walkthroughFields} from './customerDecision.js';
+import {approvalLetters, historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughActors, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {walkthroughCommands} from './customerDecision.js';
+import {typedInputs, walkthroughInputs} from './testing/walkthroughInputs.js';
 import {transitionWalkthrough} from './workflow.js';
 import {historyHref, selectHistory} from './history.js';
 import {hydrateHistoryRecord} from './historyRecording.js';
@@ -19,8 +20,9 @@ after(async () => {await server?.close();});
 const unescape = value => value.replaceAll('&amp;', '&').replaceAll('&#x27;', "'").replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>');
 const links = html => [...html.matchAll(/<a ([^>]+)>([\s\S]*?)<\/a>/g)].map(match => ({attributes: match[1], href: unescape(match[1].match(/href="([^"]+)"/)[1]), content: match[2]}));
 const ids = html => [...html.matchAll(/data-history-id="([^"]+)"/g)].map(match => unescape(match[1]));
-const act = (state, type, extra = {}) => transitionWalkthrough(state, {type, ...extra});
-const complete = () => walkthroughCommands.reduce((state, type) => act(state, type, walkthroughFields(state, type)), initialState);
+// Document inspection needs the reason the operator types; tests supply it here.
+const act = (state, type, extra = {}) => transitionWalkthrough(state, {type, ...(type === 'verify_document' ? typedInputs.verify_document : {}), ...extra});
+const complete = () => walkthroughCommands.reduce((state, type) => act(state, type, walkthroughInputs(state, type)), initialState);
 function render(search = '', state = initialState) {
   return renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: [historyHref(search)]}, React.createElement(History, {state, onExport() {}})));
 }
@@ -119,7 +121,7 @@ test('derived outputs, requirement resolutions and the commercial result have in
 
 test('document and work-item inspection links keep historical version values and use the exact current destination', () => {
   const original = complete(), receipt = original.history.find(event => event.type === 'obtain_document');
-  const state = act(original, 'obtain_document', {document: walkthroughDocumentExamples.replacement});
+  const state = act(original, 'obtain_document', {document: walkthroughDocumentExamples.replacement, actorId: walkthroughActors.acquisitionId});
   const query = new URLSearchParams({entry: receipt.id, as_of: receipt.id, category: 'document'}), html = render(query, state);
   const version = html.split('data-history-field="document.version"')[1].split('</dd>')[0];
   assert.ok(version.includes(original.document.version));
@@ -148,7 +150,7 @@ test('unknown entries, invalid points and empty category results expose differen
 });
 
 test('open and closed intervals render measured endpoints and exact transition links without making up an opening time', () => {
-  const state = act(complete(), 'reopen_requirement', {reason: historyTestRecords.editReason}), view = selectHistory(state), html = render('', state);
+  const state = act(complete(), 'reopen_requirement', {reason: historyTestRecords.editReason, actorId: walkthroughActors.reviewerId}), view = selectHistory(state), html = render('', state);
   const intervals = view.intervals[0].intervals;
   assert.deepEqual([...html.matchAll(/data-interval-status="([^"]+)"/g)].map(match => match[1]), ['closed', 'open']);
   assert.equal((html.match(/data-interval-id=/g) || []).length, intervals.length);
@@ -180,10 +182,10 @@ test('every history focus key stays unique across repeated references, corrected
 });
 
 test('readiness effects render the selector’s actual invalidated checks, not success styling from resolution', () => {
-  const state = act(complete(), 'save_plan', {specifications: historyTestRecords.revisedSpecifications}), id = state.history.at(-1).id;
+  const state = act(complete(), 'save_plan', {specifications: historyTestRecords.revisedSpecifications, actorId: walkthroughActors.acquisitionId}), id = state.history.at(-1).id;
   const view = selectHistory(state, new URLSearchParams({entry: id})), html = render(new URLSearchParams({entry: id}), state);
   assert.deepEqual([...html.matchAll(/data-effect="([^"]+)" data-effect-status="invalidated"/g)].map(match => match[1]), view.selection.resource.impacts.effects.filter(effect => effect.status === 'invalidated').map(effect => effect.id));
-  // The authority record and the letter's version basis survive a plan edit; the cleared decision does not.
+  // The authority record and the agreement record's version basis survive a specifications edit; the decision marked for re-review does not.
   assert.equal((html.match(/data-evidence-result="failed"/g) || []).length, 1);
   assert.equal((html.match(/data-evidence-result="passed"/g) || []).length, 2);
 });

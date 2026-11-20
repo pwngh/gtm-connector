@@ -6,6 +6,7 @@ import {compareReadinessChecks, evaluateReadiness, readinessHref, resolveEvidenc
 import {buildWorklist, formatWorklistTime, safeWorklistReturn} from './worklist.js';
 import {compactHistoryState, historyEvidenceSnapshot, historyEventActor, historyWorkflowSnapshot, hydrateHistoryRecord} from './historyRecording.js';
 import {partialHistoryContext, partialHistorySnapshot, validHistoryChanges, validHistoryContext, validHistorySnapshot} from './historyValidation.js';
+import {latestInspection, receiptInspections} from './evidenceChecks.js';
 
 const copy = value => value == null ? value : JSON.parse(JSON.stringify(value));
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
@@ -29,7 +30,8 @@ const kinds = {
   reject_document: ['document', 'Document inspection', 'inspection'],
   request_customer_review: ['customer', 'Customer review request', 'customer_review'], record_customer_approval: ['customer', 'Customer decision', 'customer_review'],
   upload_approval_letter: ['customer', 'Approval letter receipt', 'customer_review'], inspect_approval_letter: ['customer', 'Approval letter inspection', 'customer_review'],
-  record_customer_authority: ['customer', 'Authority record', 'customer_review'],
+  record_customer_authority: ['customer', 'Authority record', 'customer_review'], withdraw_customer_authority: ['customer', 'Authority withdrawal', 'customer_review'],
+  restore_policy: ['requirement', 'Rules change on restore', null],
   resolve_requirement: ['requirement', 'Requirement resolution', null], reopen_requirement: ['requirement', 'Requirement reopening', null],
   requirement_transition: ['requirement', 'Requirement transition', null], work_item_output: ['output', 'Work-item output', null],
   authority_observation: ['customer', 'Authority observation', 'customer_review'],
@@ -46,7 +48,8 @@ const contextFor = (context, fixture) => ({...fixture.readiness, ...context, con
 const requirementsIn = snapshot => Array.isArray(snapshot?.requirements) ? snapshot.requirements : snapshot?.requirement ? [snapshot.requirement] : [];
 const basisKinds = {
   obtain_document: ['version'], verify_document: ['version'], reject_document: ['version'], authority_observation: ['authority', 'decision'],
-  upload_approval_letter: ['letter'], inspect_approval_letter: ['letter', 'version'], record_customer_authority: ['letter', 'authority'],
+  upload_approval_letter: ['letter'], inspect_approval_letter: ['letter'], record_customer_authority: ['letter', 'authority'],
+  withdraw_customer_authority: ['authority', 'decision'], restore_policy: ['authority', 'decision', 'version'],
   record_customer_approval: ['authority', 'decision', 'version'], resolve_requirement: ['authority', 'decision', 'version'],
   reopen_requirement: ['authority', 'decision', 'version'], requirement_transition: ['authority', 'decision', 'version'],
 };
@@ -71,8 +74,11 @@ function referenceDetails(value) {
   const details = Object.entries(labels).filter(([key]) => value[key] != null).map(([key, label]) => ({key, label,
     type: key.endsWith('At') ? 'time' : ['evidenceRef', 'source'].includes(key) ? 'citation' : 'text',
     value: copy(value[key]), display: displayValue(['evidenceRef', 'source'].includes(key) ? 'citation' : 'text', value[key])}));
-  if (value.inspection) details.push({key: 'inspection.status', label: 'Receipt inspection', type: 'text', value: value.inspection.status ?? null, display: value.inspection.status || 'not recorded'},
-    {key: 'inspection.at', label: 'Inspection recorded time', type: 'time', value: value.inspection.at ?? null});
+  const inspection = latestInspection(value);
+  if (inspection) details.push({key: 'inspection.status', label: 'Receipt inspection', type: 'text', value: inspection.status ?? null, display: inspection.status || 'not recorded'},
+    {key: 'inspection.at', label: 'Inspection recorded time', type: 'time', value: inspection.at ?? null},
+    {key: 'inspection.reason', label: 'Inspection reason', type: 'text', value: inspection.reason ?? null, display: inspection.reason || 'not recorded'},
+    ...(receiptInspections(value).length > 1 ? [{key: 'inspection.count', label: 'Inspections kept on this receipt', type: 'text', value: String(receiptInspections(value).length), display: String(receiptInspections(value).length)}] : []));
   return details;
 }
 
@@ -127,7 +133,7 @@ function valuesFor(event, snapshot, context, actor = null) {
     values.push(typed('document.status', 'Walkthrough inspection state', 'enum', doc?.status, documentScope));
     values.push(typed('document.verifiedBy', 'Verified by record', 'person', doc?.verifiedBy, documentScope, origin('document.verifiedBy')));
     if (event.type === 'verify_document') values.push(typed('plan.specifications', 'Specifications inspected against', 'text', plan?.specifications, {...planScope, ...documentScope}, {kind: 'reviewer_input', actor: text(plan?.authoredBy)}));
-    values.push(typed('document.versionBasis', 'Independent version basis', 'reference', context?.documentVersionBasis, documentScope, {kind: 'evidence_record', actor: text(context?.documentVersionBasis?.recordedBy)}));
+    values.push(typed('document.versionBasis', 'Independent version basis (agreement record)', 'reference', context?.documentVersionBasis, documentScope, {kind: 'evidence_record', actor: text(context?.documentVersionBasis?.recordedBy)}));
   }
   if (category === 'customer' || category === 'requirement') {
     if (category === 'requirement') values.push(typed('requirement.status', 'Requirement state', 'enum', requirement?.status, {agreementId, requirementId: id(requirement?.id)}));
@@ -135,7 +141,14 @@ function valuesFor(event, snapshot, context, actor = null) {
     values.push(typed('decision.document', 'Document record', 'id', review?.documentId, decisionScope));
     values.push(typed('decision.version', 'Reviewed version', 'text', review?.documentVersion, decisionScope));
     values.push(typed('decision.planRevision', 'Walkthrough plan binding', 'revision', review?.planRevision, decisionScope));
-    values.push(typed('decision.reviewer', 'Approving contact (authority record)', 'person', review?.reviewedBy, decisionScope, recordedContact));
+    // The approver comes from the decision's stable contact ID. A typed name from earlier rules is labelled as such.
+    const approver = review?.contactId ? (Array.isArray(context?.contacts) ? context.contacts : []).find(item => item?.id === review.contactId) : null;
+    const contactsRetained = Array.isArray(context?.contacts);
+    if (review?.contactId) values.push(typed('decision.reviewer', 'Approving contact (authority record)', 'person', approver ? `${approver.displayName}${approver.role ? ` · ${approver.role}` : ''}`
+      : !contactsRetained && text(review.reviewedBy) ? `${review.reviewedBy} · recorded name, contact record not retained` : `${review.contactId} · not a recorded contact`, decisionScope, recordedContact));
+    else if (text(review?.reviewedBy)) values.push(typed('decision.reviewer', 'Typed approver name (earlier rules, not an authority record)', 'person', review.reviewedBy, decisionScope, input));
+    else values.push(typed('decision.reviewer', 'Approving contact (authority record)', 'person', null, decisionScope, recordedContact));
+    if (review?.reReview) values.push(typed('decision.reReview', 'Marked for re-review', 'text', review.reReview.reason, decisionScope, {kind: 'workflow_record', actor: text(review.reReview.actor)}));
     values.push(typed('decision.requestedBy', 'Requested by record', 'person', review?.requestedBy, decisionScope, origin('customerReview.requestedBy')));
     values.push(typed('decision.recordedBy', 'Recorded by record', 'person', review?.recordedBy, decisionScope, origin('customerReview.recordedBy')));
     // Typed decision text is kept only where an older recording has it. It is never the decision.
@@ -146,8 +159,7 @@ function valuesFor(event, snapshot, context, actor = null) {
         && (!doc || item.approves?.documentId === doc.id && item.approves?.version === doc.version)).at(-1) || null;
       const letterScope = {...decisionScope, documentId: id(letter?.approves?.documentId), documentVersion: id(letter?.approves?.version)};
       values.push(typed('letter.receipt', 'Signed letter receipt', 'reference', letter, letterScope, {kind: 'evidence_record', actor: text(letter?.uploadedBy)}));
-      values.push(typed('letter.inspection', 'Letter inspection', 'enum', letter?.inspection?.status, letterScope, {kind: 'evidence_record', actor: text(letter?.inspection?.recordedBy)}));
-      if ((basisKinds[event.type] || []).includes('version')) values.push(typed('letter.versionBasis', 'Version basis from the letter', 'reference', context?.documentVersionBasis, letterScope, {kind: 'evidence_record', actor: text(context?.documentVersionBasis?.recordedBy)}));
+      values.push(typed('letter.inspection', 'Letter inspection', 'enum', latestInspection(letter)?.status, letterScope, {kind: 'evidence_record', actor: text(latestInspection(letter)?.recordedBy)}));
       if ((basisKinds[event.type] || []).includes('authority')) {
         const contact = (Array.isArray(context?.contacts) ? context.contacts : []).find(item => item?.id === context?.customerAuthority?.contactId) || null;
         values.push(typed('authority.contact', 'Recorded contact', 'person', contact ? `${contact.displayName}${contact.role ? ` · ${contact.role}` : ''}` : null, letterScope, {kind: 'evidence_record', actor: text(contact?.recordedBy)}));
@@ -297,7 +309,13 @@ function evidenceAt(context, ceiling) {
   if (!context || ceiling === null) return context;
   const known = (record, key) => record && timestamp(record[key]) !== null && timestamp(record[key]) <= ceiling
     && ['recordedAt', 'receivedAt', 'readAt'].every(field => record[field] == null || timestamp(record[field]) !== null && timestamp(record[field]) <= ceiling);
-  const inspectionAt = record => record && Object.hasOwn(record, 'inspection') ? {...record, inspection: known(record.inspection, 'at') ? record.inspection : null} : record;
+  const inspectionAt = record => {
+    if (!record) return record;
+    let result = record;
+    if (Object.hasOwn(record, 'inspection')) result = {...result, inspection: known(record.inspection, 'at') ? record.inspection : null};
+    if (Array.isArray(record.inspections)) result = {...result, inspections: record.inspections.filter(item => known(item, 'at'))};
+    return result;
+  };
   const result = copy(context);
   for (const key of ['documentVersionBasis', 'customerAuthority', 'decisionReceipt']) result[key] = known(result[key], 'recordedAt') ? inspectionAt(result[key]) : null;
   result.contacts = (result.contacts || []).filter(record => known(record, 'recordedAt'));
@@ -332,6 +350,19 @@ function correctedEntry(target, correction, bound) {
   if (!completeRecord(record)) return null;
   record.defaultsAfter = (record.defaultsAfter || []).filter(path => {const [resource, field] = path.split('.'); return !Object.hasOwn(patch.after?.[resource] || {}, field);});
   record.contextAfter = evidenceAt(record.contextAfter, evidenceCeiling(correction.recordedAt, bound));
+  // A corrected decision is checked against the authority records. If they no longer agree, the effective
+  // decision is marked for review; the original entry keeps what it recorded.
+  const review = record.after?.customerReview;
+  if (patch.after?.customerReview && review?.status === 'approved') {
+    const contexts = [record.contextAfter, record.after?.evidence].filter(Boolean);
+    const authority = record.after?.evidence?.customerAuthority || record.contextAfter?.customerAuthority;
+    const contact = contexts.flatMap(item => Array.isArray(item.contacts) ? item.contacts : []).find(item => item?.id === review.contactId);
+    const issue = !review.contactId ? 'The corrected decision names no contact.'
+      : !contact ? `The corrected decision names ${review.contactId}, which is not a recorded contact.`
+      : authority?.status !== 'accepted' || authority.contactId !== review.contactId ? `The corrected decision names ${contact.displayName}, whom no accepted authority record supports.`
+      : review.authorityRef && (review.authorityRef.id !== authority.id || review.authorityRef.revision !== authority.revision) ? 'The corrected decision relies on an authority record that is not current.' : null;
+    if (issue) record.after = {...record.after, customerReview: {...review, status: 'needs_re_review', reReview: {at: correction.recordedAt, reason: `${issue} The decision and any resolution resting on it need review.`, cause: 'correction', actor: correction.actor}}};
+  }
   return {...target, record, eventAt: Object.hasOwn(patch, 'eventAt') ? patch.eventAt : target.eventAt,
     correctionIds: [...target.correctionIds, correction.id]};
 }
@@ -453,8 +484,9 @@ function recordReferences(event, entries, fixture) {
     references.push({kind: 'document', id: id(doc.id), version: id(doc.version), label: `Document ${doc.id} · ${doc.version}`, entryId: receipt?.id || null,
       note: 'Received version only. Its independent current-version basis is checked separately.'});
   }
-  if (review?.status === 'approved') {
-    const decision = eligible.filter(row => row.type === 'record_customer_approval' && same(row.record.after?.customerReview, review)).at(-1);
+  // A decision marked for re-review still points to the recording that made it, by its stable decision ID.
+  if (review?.status === 'approved' || review?.status === 'needs_re_review') {
+    const decision = eligible.filter(row => row.type === 'record_customer_approval' && (review.id ? row.record.after?.customerReview?.id === review.id : same(row.record.after?.customerReview, review))).at(-1);
     if (decision && decision.id !== event.id) references.push({kind: 'review', id: decision.id, label: 'Customer review record used here', entryId: decision.id});
   }
   const plan = snapshot?.plan || before?.plan;
@@ -559,7 +591,11 @@ function projectEntries(events, baseline, location, fixture, bound) {
     const supersededBy = original.filter(item => corrections.get(item.id)?.targetId === event.id).map(item => summary(item.id));
     const upstreamCorrections = effective.get(event.id).dependencyCorrectionIds.map(summary);
     const provenance = correction?.targetId ? originals.get(correction.targetId) : originalEvent;
-    const row = {...event, category, kindLabel, values, authorityRelevant: values.some(value => value.field === 'decision.authority'), differences: event.type === 'opening_snapshot' ? [] : changedFields,
+    const effectiveReview = resource.record?.after?.customerReview;
+    const correctionNeedsReview = (location.view === 'effective' || event.type === 'correction') && effectiveReview?.reReview?.cause === 'correction'
+      && ['record_customer_approval', 'resolve_requirement', 'correction'].includes(event.type) ? effectiveReview.reReview.reason : null;
+    const row = {...event, category, kindLabel, values, authorityRelevant: values.some(value => value.field === 'decision.authority'),
+      policyVersion: text(originalEvent.record?.contextAfter?.policyVersion) || null, currentPolicyVersion: fixture.readiness.policyVersion, correctionNeedsReview, differences: event.type === 'opening_snapshot' ? [] : changedFields,
       comparisonEntryId, comparisonLabel: correction?.targetId ? 'Compared with the superseded record' : usePrevious ? 'Compared with the previous record for this subject and decision kind' : event.complete ? 'Compared with inputs immediately before this event' : 'Earlier input snapshot not recorded',
       impacts, recordedImpacts, trigger, transitions, projectedTransitions: requirementTransitions(event, fixture),
       recordedRecord: originalEvent.record, recordedSnapshotsKnown: originalEvent.snapshotsKnown,

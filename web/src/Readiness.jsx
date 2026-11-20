@@ -76,6 +76,7 @@ function Requirement({item, selected, outside, entryLink, unitLink, action, onCl
       </article>) : <p>No cited units are recorded. This is not evidence that a condition is absent.</p>}
     </section>
     {item.recordedDecision && <section className="rd-section rd-recorded-decision"><h4>{item.recordedDecision.label}</h4>
+      {item.recordedDecision.reReviewReason && <p className="rd-notice">Not current. {item.recordedDecision.reReviewReason}</p>}
       <dl className="rd-inputs"><div><dt>Approving contact</dt><dd>{item.recordedDecision.contact || 'Not recorded'}</dd></div><div><dt>Cited evidence</dt><dd>{item.recordedDecision.citation || 'Not recorded'}</dd></div><div><dt>Recorded by</dt><dd>{item.recordedDecision.recordedBy || 'Not recorded'}</dd></div><div><dt>Decision time</dt><dd><Time value={item.recordedDecision.recordedAt}/></dd></div><div><dt>Document version</dt><dd>{item.recordedDecision.documentVersion || 'Not recorded'}</dd></div></dl>
       <p>The decision is a record bound to its citation. It is not a source quotation, and its evidence checks are listed above.</p>
     </section>}

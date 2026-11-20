@@ -1,4 +1,4 @@
-import {renewalFixture,fixturePeople} from './renewalFixtures.js';
+import {renewalFixture,fixturePeople,walkthroughPrincipals} from './renewalFixtures.js';
 import React from 'react';
 import PlanChanges from './PlanChanges';
 import {FileText, Pencil} from 'lucide-react';
@@ -16,7 +16,7 @@ export function WorkPrescriptionFields({edit, setEdit, revision, currentPlan, on
     <p>Define the document and the work needed to prepare it for review.</p>
     <fieldset className="form-group"><legend>The work and its owner</legend><div className="form-grid">
       <label className="field"><span className="field-title">Document task <span className="field-required">(required)</span></span><input required maxLength={160} value={edit.title||''} onChange={e=>field('title',e.target.value)}/></label>
-      <label className="field"><span className="field-title">Document task owner <span className="field-required">(required)</span></span><select required value={edit.owner||''} onChange={e=>field('owner',e.target.value)}>{[fixturePeople.accountOwner,fixturePeople.internalReviewer,fixturePeople.otherAccountOwner].map(n=><option key={n}>{n}</option>)}</select></label>
+      <label className="field"><span className="field-title">Document task owner <span className="field-required">(required)</span></span><select required value={walkthroughPrincipals.find(p=>p.displayName===edit.owner)?.id||''} onChange={e=>{const principal=walkthroughPrincipals.find(p=>p.id===e.target.value);setEdit({...edit,owner:principal?.displayName||'',ownerId:principal?.id||null})}}>{[fixturePeople.accountOwner,fixturePeople.internalReviewer,fixturePeople.otherAccountOwner].map(n=>walkthroughPrincipals.find(p=>p.displayName===n)).map(p=><option key={p.id} value={p.id}>{p.displayName}</option>)}</select></label>
     </div></fieldset>
     <fieldset className="form-group"><legend>Document requirements</legend>
       <label className="field"><span className="field-title">Document specifications <span className="field-required">(required)</span></span><span className="field-hint">What must be true of the document you receive?</span><textarea required maxLength={1200} rows={3} value={edit.specifications||''} onChange={e=>field('specifications',e.target.value)}/></label>

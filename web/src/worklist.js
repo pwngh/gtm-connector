@@ -84,14 +84,15 @@ function walkthroughWork(item, state, d, fixture) {
     if (!state.document && !d.isPlanApproved) reason = {action: 'obtain_document', code: 'plan_approval', reason: 'The current plan revision needs internal approval before collection can start.'};
   } else if (item.kind === 'inspection') {
     events = ['obtain_document', 'verify_document', 'reject_document', 'save_plan'];
-    status = d.isDocumentVerified ? 'complete' : d.canVerifyDocument ? 'ready' : 'blocked';
-    label = d.isDocumentVerified ? 'Inspect verification record' : 'Verify document version';
-    command = d.isDocumentVerified ? 'inspect_document' : d.canVerifyDocument ? 'verify_document' : null;
-    output = d.isDocumentVerified ? `Inspection recorded for ${state.document.version} by ${state.document.verifiedBy || 'an unrecorded reviewer'}. A separate current-version basis is not recorded.` : null;
+    // A version the agreement record does not name can still be rejected with a reason.
+    status = d.isDocumentVerified ? 'complete' : d.canVerifyDocument || d.canRejectDocument ? 'ready' : 'blocked';
+    label = d.isDocumentVerified ? 'Inspect the inspection record' : d.canVerifyDocument ? 'Inspect the document version' : d.canRejectDocument ? 'Reject the version with a reason' : 'Inspect the document version';
+    command = d.isDocumentVerified ? 'inspect_document' : d.canVerifyDocument ? 'verify_document' : d.canRejectDocument ? 'reject_document' : null;
+    output = d.isDocumentVerified ? `Version ${state.document.version} accepted at inspection by ${state.document.verifiedBy || 'an unrecorded reviewer'} as the version ${fixture.walkthrough.agreementLabel} names. Which version applies comes from the agreement record.` : null;
     outputAt = d.isDocumentVerified ? state.document.verifiedAt : null;
-    if (status === 'blocked') reason = d.transitions.verify_document.blockedReasons.find(item => item.code === (!state.document ? 'document_receipt' : d.documentRejected ? 'document_not_rejected' : d.needsReplacement ? 'document_current_version' : 'plan_approval')) || d.transitions.verify_document.blockedReasons[0] || null;
+    if (status === 'blocked') reason = d.transitions.verify_document.blockedReasons.find(item => item.code === (!state.document ? 'document_receipt' : d.documentRejected ? 'document_not_rejected' : d.needsReplacement ? 'document_applies' : 'plan_approval')) || d.transitions.verify_document.blockedReasons[0] || null;
   } else if (item.kind === 'customer_review') {
-    events = ['request_customer_review', 'upload_approval_letter', 'inspect_approval_letter', 'record_customer_authority', 'record_customer_approval', 'obtain_document', 'save_plan', 'reopen_requirement'];
+    events = ['request_customer_review', 'upload_approval_letter', 'inspect_approval_letter', 'record_customer_authority', 'record_customer_approval', 'obtain_document', 'save_plan', 'reopen_requirement', 'withdraw_customer_authority', 'restore_policy'];
     const decision = d.hasCustomerApproval;
     // After the request, the customer's signed letter is awaited; its receipt, inspection and the authority record follow.
     const steps = [
@@ -146,12 +147,13 @@ export function buildWorklist(state, fixture = worklistFixture) {
   const asOf = new Date(Math.max(...knownTimes)).toISOString();
   const requirements = fixture.requirements.map(item => {
     const interactive = item.renewalId === walkthrough.renewalId;
-    const status = interactive ? state.requirement.status : item.status;
+    // One effective status: a recorded resolution counts only while its evidence still supports it.
+    const status = interactive ? d.requirementStatus : item.status;
     const allowedActions = interactive ? [{id: 'open_requirement', label: 'Inspect requirement readiness', intent: 'inspect', href: `${walkthrough.paths.root}/readiness?${new URLSearchParams({requirement: item.id})}`} ] : [];
     return {
-      ...item, status, kindLabel: requirementKinds[item.kind] || item.kind, selectionKey: keyFor('requirement', item.id),
+      ...item, status, ...(interactive ? {recordedStatus: state.requirement.status, needsReview: d.resolutionNeedsReview} : {}), kindLabel: requirementKinds[item.kind] || item.kind, selectionKey: keyFor('requirement', item.id),
       ...ownerFields(person(people, item.ownerId)),
-      revision: interactive ? revisionFor(state, ['resolve_requirement', 'reopen_requirement', 'save_plan', 'obtain_document'], item.revision) : item.revision,
+      revision: interactive ? revisionFor(state, ['resolve_requirement', 'reopen_requirement', 'save_plan', 'obtain_document', 'withdraw_customer_authority', 'restore_policy'], item.revision) : item.revision,
       allowedActions, blockedReasons: interactive ? [] : [illustrativeBlock],
     };
   });

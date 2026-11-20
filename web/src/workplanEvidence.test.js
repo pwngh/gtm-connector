@@ -7,7 +7,8 @@ import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
 import {MessageSquare, Phone} from 'lucide-react';
 import {approvalLetters, fixturePeople, initialState, readinessEvidenceFixture, readinessFixture, renewalEvidence, renewalSourceBoundaries} from './renewalFixtures.js';
-import {walkthroughCommands, walkthroughFields} from './customerDecision.js';
+import {walkthroughCommands} from './customerDecision.js';
+import {walkthroughInputs} from './testing/walkthroughInputs.js';
 import {derive, transitionWalkthrough} from './workflow.js';
 import {advanceReadinessJournal, customerAuthorityLabel, evaluateReadiness, readinessHref} from './readiness.js';
 
@@ -30,7 +31,7 @@ const text = html => html.replace(/<[^>]+>/g, ' ').replaceAll('&amp;', '&').repl
 
 function walk(steps) {
   let state = initialState;
-  for (const type of steps) state = transitionWalkthrough(state, {type, ...walkthroughFields(state, type)});
+  for (const type of steps) state = transitionWalkthrough(state, {type, ...walkthroughInputs(state, type)});
   return state;
 }
 const allSteps = walkthroughCommands;
@@ -228,8 +229,8 @@ test('Evidence, Sources checked and Readiness use the same source and gap wordin
 test('the recorded decision cites its receipt and names the contact from the authority record wherever it appears', () => {
   const resolved = states[3], approved = states[2], receiptId = approved.customerReview.evidenceRef.id;
   const decision = text(dialog({type: 'decision'}, resolved));
-  assert.ok(decision.includes(`Cited evidence Receipt ${receiptId}, inspected signed letter`));
-  assert.ok(decision.includes(`Approving contact ${counselName}`));
+  assert.ok(decision.includes(`Cited evidence Receipt ${receiptId}, accepted signed letter`));
+  assert.ok(decision.includes(`Approving contact ${counselName} · General counsel`));
   assert.ok(decision.includes(`Customer decision authority ${counselName}`));
   assert.ok(!decision.includes('reviewer input'));
   assert.ok(!dialog({type: 'decision'}, resolved).includes('class="full-quote"'));
@@ -242,7 +243,7 @@ test('the recorded decision cites its receipt and names the contact from the aut
   assert.ok(receipt.includes(`Customer decision authority ${counselName}`));
   // The flow names the awaited party as unidentified, then the recorded contact with the letter it cites.
   assert.ok(text(evidencePage(initialState)).includes('Customer counsel · unidentified'));
-  assert.ok(text(evidencePage(approved)).includes(`${counselName} · cites the inspected signed letter`));
+  assert.ok(text(evidencePage(approved)).includes(`${counselName} · cites the accepted signed letter`));
   const operations = text(renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: ['/operations?reason=condition&view=all']},
     React.createElement(FollowUpReport, {state: approved, derived: derive(approved), evidence, onTask: noop, onHistory: noop, onSource: noop, onDocument: noop, onDecision: noop, onScope: noop}))));
   assert.ok(operations.includes(`Approving contact (authority record): ${counselName} · Cites receipt ${receiptId}`));
@@ -253,14 +254,18 @@ test('the customer counsel stays unidentified until the authority record names t
   const request = renderToStaticMarkup(React.createElement(ReviewDecision, {type: 'counselRequest', state: counsel, derived: derive(counsel), onPerform: noop}));
   assert.ok(text(request).includes('For Customer counsel · unidentified Unidentified until a reviewer records who decides, with evidence'));
   for (const html of [request, dialog({type: 'context'}), dialog({type: 'context'}, counsel), dialog({type: 'context'}, inspected)]) {
-    assert.ok(!html.includes(fixturePeople.customerCounsel));
+    assert.ok(!html.includes(counselName));
     assert.ok(text(html).toLowerCase().includes('unidentified until a reviewer records who decides, with evidence'));
   }
-  // The letter is received and accepted, yet nothing before the authority record shows its signatory.
-  for (const html of [workPlan(inspected, 3), evidencePage(inspected), dialog({type: 'letterDetail'}, inspected), dialog({type: 'authority'}, inspected), dialog({type: 'letterInspect'}, walk(allSteps.slice(0, 6)))]) {
+  // The letter is received and accepted, yet no page, contact or awaited party names its signatory before the authority record.
+  for (const html of [workPlan(inspected, 3), evidencePage(inspected), dialog({type: 'letterDetail'}, inspected)]) {
     assert.ok(!html.includes(counselName));
   }
-  assert.ok(text(dialog({type: 'authority'}, inspected)).includes('The letter’s signatory'));
+  // The inspection and authority dialogs show the letter's own text, which names its signatory, labelled as letter text.
+  for (const html of [dialog({type: 'authority'}, inspected), dialog({type: 'letterInspect'}, walk(allSteps.slice(0, 6)))]) {
+    assert.ok(text(html).includes(`LETTER TEXT · SYNTHETIC EXCERPT Re: Agreement A-17, AI service terms. We approve AI rider version 4 for use under Agreement A-17. Signed: ${counselName}, General counsel.`));
+  }
+  assert.ok(text(dialog({type: 'authority'}, inspected)).includes('Contact to record The letter’s signatory'));
   const named = walk(allSteps.slice(0, allSteps.indexOf('record_customer_authority') + 1));
   assert.ok(text(dialog({type: 'context'}, named)).includes(`${counselName}, general counsel, decides for Agreement A-17. The authority record cites the inspected signed letter.`));
   assert.ok(text(workPlan(named, 3)).replaceAll(' ,', ',').includes(`Signed by ${counselName}, general counsel. Recorded as a contact from this letter’s receipt.`));
@@ -273,8 +278,8 @@ test('a resolution records the cited decision, not a verified outcome', () => {
   assert.doesNotMatch(plan, /resolved with (reviewed )?evidence/i);
   assert.ok(library.includes('RESOLUTION RECORDED Customer condition Recorded from the cited decision'));
   assert.ok(!library.includes('VERIFIED OUTCOME'));
-  assert.ok(library.includes(`${counselName} · cites the inspected signed letter`));
-  assert.ok(library.includes(`${counselName} is recorded as the contact who decides, from this receipt.`));
+  assert.ok(library.includes(`${counselName} · cites the accepted signed letter`));
+  assert.ok(library.includes(`${counselName} is recorded as the contact who decides.`));
   // The toast for the resolve action.
   assert.ok(readFileSync(new URL('./ReviewDecision.jsx', import.meta.url), 'utf8').includes("message: 'Condition resolved from the cited decision'"));
 });
@@ -306,10 +311,12 @@ test('the source dialog quotes the cited unit and labels the text around it as c
 test('decision authority comes from the Readiness projection', () => {
   assert.equal(renewalEvidenceModule.decisionAuthorityLabel(), customerAuthorityLabel(readinessFixture));
   assert.equal(customerAuthorityLabel(readinessFixture), 'Unidentified');
-  // With accepted authority evidence the same projection names the supported contact.
-  const supported = customerAuthorityLabel(readinessEvidenceFixture);
+  // With accepted authority evidence for the document under review, the same projection names the supported contact.
+  const received = walk(allSteps.slice(0, 3));
+  assert.equal(customerAuthorityLabel(readinessEvidenceFixture), 'Unidentified', 'authority is bound to a document version');
+  const supported = customerAuthorityLabel(readinessEvidenceFixture, received);
   assert.equal(supported, readinessEvidenceFixture.contacts[0].displayName);
-  const requirement = evaluateReadiness(initialState, readinessEvidenceFixture).requirements.find(item => item.binding === 'workflow_requirement');
+  const requirement = evaluateReadiness(received, readinessEvidenceFixture).requirements.find(item => item.binding === 'workflow_requirement');
   assert.equal(requirement.customerAuthorityLabel, supported);
   // The walkthrough's own authority record names the letter's signatory through the same projection.
   assert.equal(renewalEvidenceModule.decisionAuthorityLabel(states[2]), counselName);

@@ -1,7 +1,7 @@
 import {historyEventActor} from './historyRecording.js';
 import {readinessFixture} from './renewalFixtures.js';
 import {derive, transitionEvidenceChecks} from './workflow.js';
-import {evaluateEvidenceCheck, workflowEvidence} from './evidenceChecks.js';
+import {decisionContact, evaluateEvidenceCheck, workflowEvidence} from './evidenceChecks.js';
 export {resolveEvidenceReference} from './evidenceChecks.js';
 import {buildWorklist, formatWorklistTime, safeWorklistReturn, worklistActionHref} from './worklist.js';
 
@@ -67,7 +67,7 @@ function inputVersions(state, fixture, worklist) {
   const resource = (kind, label, value, extra = {}) => ({kind, label, id: value?.id ?? null, recorded: Boolean(value), revision: value?.revision == null ? null : String(value.revision), ...extra});
   return [
     resource('plan', 'Work plan', state.plan, {workItemRevision: work('plan_review')?.revision ?? null}),
-    resource('document', 'Received document', state.document, {version: state.document?.version ?? null}),
+    resource('document', 'Received document', state.document, {version: state.document?.version ?? null, receipt: state.document?.receiptId ?? null}),
     resource('inspection_work_item', 'Inspection work item', work('inspection')),
     resource('customer_decision', 'Customer review record', state.customerReview, {version: state.customerReview?.documentVersion ?? null}),
     resource('customer_review_work_item', 'Customer review work item', work('customer_review')),
@@ -161,7 +161,8 @@ export function evaluateReadiness(state, fixtureInput = readinessFixture, previo
     const related = checks.filter(check => record.checkIds.includes(check.id));
     const evidenceChecks = checks.filter(check => record.evidenceCheckIds.includes(check.id));
     const evidenceOpen = record.evidenceCheckIds.some(id => checks.find(check => check.id === id)?.result !== 'passed');
-    const status = recordedStatus === 'resolved' && evidenceOpen ? 'open' : recordedStatus;
+    // The same effective status every view shows: a recorded resolution counts only while its evidence supports it.
+    const status = bound ? d.requirementStatus : recordedStatus === 'resolved' && evidenceOpen ? 'open' : recordedStatus;
     const authority = evidenceChecks.find(check => check.id === 'customer_authority');
     const resolution = related.find(check => check.command === 'resolve_requirement');
     const nextCheck = related.find(check => check.command === d.nextCommand);
@@ -193,8 +194,9 @@ export function evaluateReadiness(state, fixtureInput = readinessFixture, previo
       actionUnavailableReason: !bound ? 'No executable workflow is recorded for this requirement.' : status === 'open' && !nextAction ? d.planReviewBlockedReason || 'No corrective transition is currently permitted by the local workflow.' : null,
       inspectAction: bound && recordedStatus === 'open' && !nextAction && planWork ? {id: 'inspect_prerequisite', label: 'Inspect review prerequisites', intent: 'inspect', href: `${fixture.paths.workplan}?${new URLSearchParams({workItem: planWork.id})}#${planWork.entryTargetId}`} : null,
       citations: record.citations.map(citation => ({...citation, unit: fixture.card?.units.find(unit => unit.cardId === citation.cardId && unit.n === citation.n) || null})),
-      recordedDecision: bound && state.customerReview?.status === 'approved' ? {
-        label: 'Recorded customer decision', contact: state.customerReview.reviewedBy || null,
+      recordedDecision: bound && ['approved', 'needs_re_review'].includes(state.customerReview?.status) && state.customerReview.evidenceRef ? {
+        label: d.hasCustomerApproval ? 'Recorded customer decision' : 'Recorded customer decision · needs re-review', current: d.hasCustomerApproval,
+        reReviewReason: state.customerReview.reReview?.reason || null, contact: decisionContact(state)?.displayName || null,
         citation: state.customerReview.evidenceRef?.kind === 'receipt' ? `Receipt ${state.customerReview.evidenceRef.id}` : state.customerReview.evidenceRef?.kind === 'unit' ? `Card ${state.customerReview.evidenceRef.cardId} · Unit ${state.customerReview.evidenceRef.n}` : null,
         recordedBy: state.customerReview.recordedBy || null, recordedAt: state.customerReview.approvedAt || null,
         documentVersion: state.customerReview.documentVersion || null,
@@ -256,7 +258,7 @@ function compareRequirements(before, after) {
     const kinds = [...new Set([...(old?.inputVersions || []), ...(next?.inputVersions || [])].map(input => input.kind))];
     for (const kind of kinds) {
       const prior = old?.inputVersions?.find(item => item.kind === kind), input = next?.inputVersions?.find(item => item.kind === kind);
-      const describe = value => !value?.recorded ? 'Not recorded' : `${value.id || 'Record ID not recorded'} · Revision ${value.revision ?? 'not recorded'}${value.workItemRevision ? ` · Work-item revision ${value.workItemRevision}` : ''}${value.version ? ` · Version ${value.version}` : ''}`;
+      const describe = value => !value?.recorded ? 'Not recorded' : `${value.id || 'Record ID not recorded'} · Revision ${value.revision ?? 'not recorded'}${value.workItemRevision ? ` · Work-item revision ${value.workItemRevision}` : ''}${value.version ? ` · Version ${value.version}` : ''}${value.receipt ? ` · Receipt ${value.receipt}` : ''}`;
       if (describe(prior) !== describe(input)) differences.push({field: `input:${kind}`, label: `${input?.label || prior.label} input`, before: describe(prior), after: describe(input)});
     }
     if (old?.title !== next?.title) differences.push({field: 'title', label: 'Requirement title', before: old?.title || 'Not recorded', after: next?.title || 'Not recorded'});

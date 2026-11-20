@@ -3,7 +3,8 @@ import test, {before, after, beforeEach, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
 import {approvalLetters, fixturePeople, initialState, readinessFixture, readinessEvidenceFixture, walkthroughDocumentExamples} from './renewalFixtures.js';
-import {walkthroughCommands, walkthroughFields} from './customerDecision.js';
+import {walkthroughCommands} from './customerDecision.js';
+import {walkthroughInputs} from './testing/walkthroughInputs.js';
 import {transitionWalkthrough} from './workflow.js';
 import {advanceReadinessJournal, readinessHref, readinessStorageKey, selectReadiness} from './readiness.js';
 
@@ -147,7 +148,7 @@ const checks = tree => [...nodes(tree)].filter(node => node.props['data-check-id
 
 function complete() {
   let state = initialState;
-  for (const type of walkthroughCommands) state = transitionWalkthrough(state, {type, ...walkthroughFields(state, type)});
+  for (const type of walkthroughCommands) state = transitionWalkthrough(state, {type, ...walkthroughInputs(state, type)});
   return state;
 }
 
@@ -336,8 +337,9 @@ test('the resolved walkthrough offers a reopen form, and separately from an evid
   button.props.onClick();
   assert.deepEqual(page.commands, ['reopen_requirement']);
   assert.equal(page.source().current.requirements[0].status, 'resolved');
-  const withdrawn = {...readinessFixture, customerAuthority: {...state.evidence.customerAuthority, status: 'withdrawn'}};
-  const contested = bench('requirements=all', state, null, withdrawn); tree = contested.render();
+  // A fixture cannot override the walkthrough's own authority record; a recorded resolution whose own authority is withdrawn is the contested case.
+  const withdrawn = {...state, evidence: {...state.evidence, customerAuthority: {...state.evidence.customerAuthority, status: 'withdrawn'}}};
+  const contested = bench('requirements=all', withdrawn); tree = contested.render();
   const reopen = focusLink(tree, `requirement:${initialState.requirement.id}:reopen`);
   assert.equal(reopen.type, 'button');
   reopen.props.onClick();
@@ -410,18 +412,19 @@ test('comparison and header jumps focus their sections without creating hash his
   assert.equal(hooks.useLocation().hash, '');
 });
 
-test('the authority corrective step selects its missing check, preserves filters, and executes no decision', () => {
+test('an evidence corrective step selects its missing check, preserves filters, and executes no decision', () => {
   const state = complete();
-  // A decision whose authority record is missing: resolution is blocked on evidence alone.
-  const page = bench('check=resolve_requirement&order=blockers&checkState=failed', {...state, evidence: {...state.evidence, customerAuthority: null}, requirement: {...state.requirement, status: 'open', resolvedAt: null}});
+  // A recorded decision whose version basis is missing: resolution is blocked on evidence alone. A missing authority
+  // record is no longer an evidence-only gap, because recording it from the accepted letter is a permitted step.
+  const page = bench('check=resolve_requirement&order=blockers&checkState=failed', {...state, requirement: {...state.requirement, status: 'open', resolvedAt: null}}, null, {...readinessFixture, documentVersionBasis: null});
   let tree = page.render();
   const action = focusLink(tree, 'next-action');
   assert.equal(new URL(action.props.to, 'http://local.test').pathname, readinessFixture.paths.readiness);
   open(page.hooks, action); tree = page.render();
-  assert.equal(page.hooks.useSearchParams()[0].get('check'), 'customer_authority');
+  assert.equal(page.hooks.useSearchParams()[0].get('check'), 'current_version_basis');
   assert.equal(page.hooks.useSearchParams()[0].get('order'), 'blockers');
   assert.equal(page.hooks.useSearchParams()[0].get('checkState'), 'failed');
-  assert.equal(globalThis.document.activeElement, targetElement(page.hooks, 'check:customer_authority'));
+  assert.equal(globalThis.document.activeElement, targetElement(page.hooks, 'check:current_version_basis'));
   assert.equal(page.source().current.requirements[0].waitingOn, null);
   assert.deepEqual(page.commands, []);
   escape(tree); page.render();
@@ -431,7 +434,7 @@ test('the authority corrective step selects its missing check, preserves filters
 // A pending review whose signed letter is inspected and whose authority record exists.
 function authorizedReview() {
   let state = initialState;
-  for (const type of walkthroughCommands.slice(0, walkthroughCommands.indexOf('record_customer_approval'))) state = transitionWalkthrough(state, {type, ...walkthroughFields(state, type)});
+  for (const type of walkthroughCommands.slice(0, walkthroughCommands.indexOf('record_customer_approval'))) state = transitionWalkthrough(state, {type, ...walkthroughInputs(state, type)});
   return state;
 }
 
@@ -534,19 +537,19 @@ test('evidence checks are a sibling section, not counted or nested as transition
   assert.equal(checks(evidence).length, 3);
 });
 
-test('a replacement version waits on the recorded contact and offers no decision until a letter covers it', () => {
+test('a replacement version the agreement record does not name offers no decision and names nobody for it', () => {
   let state = complete();
-  state = transitionWalkthrough(state, {type: 'obtain_document', document: walkthroughDocumentExamples.replacement});
-  for (const type of ['verify_document', 'request_customer_review']) state = transitionWalkthrough(state, {type});
+  state = transitionWalkthrough(state, {...walkthroughInputs(state, 'obtain_document'), type: 'obtain_document', document: walkthroughDocumentExamples.replacement});
+  assert.match(transitionWalkthrough(state, {type: 'verify_document', ...walkthroughInputs(state, 'verify_document')}).error, /names version v4/);
   const reviewItem = readinessFixture.worklist.workItems.find(item => item.kind === 'customer_review');
   storage.set('gtm-workflow-demo-v1', JSON.stringify(state));
   const hooks = new Hooks(`${readinessFixture.paths.workplan}?workItem=${reviewItem.id}`); let tree = hooks.render(App); hooks.flush();
   tree = hooks.render(App); hooks.flush();
   const primary = find(find(tree, node => node.props.className === 'action-buttons'), node => node.props.primary);
-  assert.equal(primary.props.disabled, true);
-  assert.equal(primary.props.children, 'Awaiting the signed letter');
+  assert.equal(primary.props.disabled, undefined);
+  assert.equal(primary.props.children, 'Attach replacement document');
   const entry = named(tree, 'WorklistStepEntry');
-  assert.equal(entry.props.item.status, 'waiting');
+  assert.equal(entry.props.item.status, 'blocked');
   assert.equal(entry.props.item.workflowAction, null);
-  assert.ok(entry.props.item.waitingLabel.startsWith(approvalLetters[0].signatory.name));
+  assert.ok(!entry.props.item.waitingLabel.includes(approvalLetters[0].signatory.name));
 });

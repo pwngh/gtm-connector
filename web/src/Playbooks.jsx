@@ -59,7 +59,7 @@ function Responsibility({context}) {
     <dl className="pb-records">
       <div><dt>Action owner</dt><dd>{context.roles.actionOwner || 'Unassigned; identify an owner before releasing work'}</dd></div>
       <div><dt>Internal reviewer</dt><dd>{context.roles.internalReviewer || 'Unassigned'}<span className="pb-detail">Must be independent of the action owner. A proposed reviewer does not record a review or act for the customer.</span></dd></div>
-      <div><dt>Customer authority</dt><dd>{context.roles.customerAuthority ? `${context.roles.customerAuthority} · deliberately selected walkthrough fixture` : 'Unidentified'}<span className="pb-detail">Record who decides, with evidence. A name or role is not an authority basis or a recorded approval.</span></dd></div>
+      <div><dt>Customer authority</dt><dd>{context.roles.customerAuthority ? `${context.roles.customerAuthority} · recorded contact (authority record)` : 'Unidentified'}<span className="pb-detail">Record who decides, with evidence. A name or role is not an authority basis or a recorded approval.</span></dd></div>
     </dl>
   </section>;
 }
@@ -162,9 +162,9 @@ function ConfirmContext({template, workflowState, evidence, onPrepare, onBack, h
         <p className={roleError ? 'pb-field-error' : 'pb-field-hint'} id={`${id}-reviewer-hint`}>{roleError || 'Choose someone other than the action owner, or leave the reviewer unassigned. No review or authorization is recorded here.'}</p>
         <label htmlFor={`${id}-authority`}>Customer decision authority</label>
         <select id={`${id}-authority`} name="customerAuthority" value={authority} onChange={event => setAuthority(event.target.value)} aria-describedby={`${id}-authority-hint`}>
-          <option value="">Unidentified</option>{context.roleOptions.customerAuthorityOptions.map(name => <option key={name} value={name}>{name} · walkthrough fixture, authority unconfirmed</option>)}
+          <option value="">Unidentified</option>{context.roleOptions.customerAuthorityOptions.map(name => <option key={name} value={name}>{name} · recorded contact (authority record)</option>)}
         </select>
-        <p className="pb-field-hint" id={`${id}-authority-hint`}>Record who decides, with evidence. Selecting a fixture deliberately does not establish an authority basis.</p>
+        <p className="pb-field-hint" id={`${id}-authority-hint`}>Only a contact recorded from an accepted signed letter is offered. Record who decides, with evidence, in the Work plan.</p>
       </fieldset>
       <label className="pb-confirm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} required/><span>I confirm this invented {context.agreement.label} context. Preparing a separate draft will not change the existing plan or send anything.</span></label>
       <div className="pb-actions"><button type="button" className="pb-button" onClick={onBack}>Back to template</button><button type="submit" className="pb-button pb-primary" disabled={!confirmed || Boolean(roleError)} aria-describedby={`${id}-prepare-hint`}>Prepare separate draft</button></div>

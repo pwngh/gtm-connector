@@ -1,7 +1,7 @@
 // Invented walkthrough records. No identity here grants authority.
 export const fixturePeople = {
   accountOwner: 'Morgan Reed', internalReviewer: 'Alex Chen', customerContact: 'Rachel Ellis',
-  customerCounsel: 'Nina Patel', otherAccountOwner: 'Maya Chen', workspaceProfile: 'Preston Neal',
+  otherAccountOwner: 'Maya Chen', workspaceProfile: 'Preston Neal',
 };
 
 export const renewalRecords=[{id:'thornfield',name:'Thornfield Wren LLP',initials:'TW',owner:'Morgan Reed',days:24,value:'$84,000',state:'Document needed',next:'Obtain the current AI terms document',tone:'amber'}, {id:'calder',name:'Calder Vale Partners',initials:'CV',owner:'Maya Chen',days:8,value:'$42,000',state:'Review pending',next:'Review the commercial exception',tone:'blue'}, {id:'ashbourne',name:'Ashbourne Legal Group',initials:'AL',owner:'Daniel Reed',days:15,value:'$126,000',state:'Ready for review',next:'Review the complete renewal package',tone:'green'}, {id:'mercer',name:'Mercer Hollow Advisory',initials:'MH',owner:null,days:null,value:'$36,000',state:'Owner needed',next:'Confirm the customer decision owner',tone:'neutral'}];
@@ -31,7 +31,10 @@ export const renewalFixture = {
   id: 'thornfield-a17',
   account: renewalRecords[0],
   renewal: {id: '003'},
-  agreement: {id: 'A-17', label: 'Agreement A-17', title: 'AI service terms', displayTitle: 'AI service agreement', provenance: 'Invented workflow-side agreement for this walkthrough.'},
+  // The workflow-side agreement record. It, not the document or the letter, states which rider version applies.
+  agreement: {id: 'A-17', label: 'Agreement A-17', title: 'AI service terms', displayTitle: 'AI service agreement', provenance: 'Invented workflow-side agreement for this walkthrough.',
+    applicableRider: {documentId: 'rider-v4', version: 'v4', recordedAt: '2026-11-19T14:30:00.000Z',
+      provenance: 'Invented workflow-side agreement record. It names the rider version that applies to Agreement A-17. It is not a source read.'}},
   requirementId: 'req-ai-counsel',
   bindings: {
     agreement: 'A-17', requirement: 'req-ai-counsel',
@@ -40,13 +43,11 @@ export const renewalFixture = {
   roles: {
     actionOwners: [fixturePeople.accountOwner, fixturePeople.internalReviewer],
     internalReviewers: [fixturePeople.internalReviewer, fixturePeople.accountOwner],
-    customerAuthorityOptions: [fixturePeople.customerCounsel],
   },
   paths: {
     root: '/renewals/thornfield', history: '/renewals/thornfield/history',
     evidence: '/renewals/thornfield/evidence', workplan: '/renewals/thornfield/workplan',
   },
-  documentVersionBasis: null,
   taskId: 'task-obtain-ai-terms',
   workflowClockStart: '2026-11-19T16:30:00.000Z',
 };
@@ -70,18 +71,32 @@ export const fixtureEvidence = [
   },
 ];
 
-// The signed approval letter is walkthrough data, keyed to the version it approves.
-// It is the only source that names the general counsel. Pages show that name only
-// after a reviewer records the signatory as a contact, with this letter's receipt as the basis.
+// The signed approval letters are walkthrough data, keyed to the version they approve. They are
+// the only source that names the general counsel. Pages show that name as a contact only after a
+// reviewer records the signatory, with an accepted letter's receipt as the basis. The second file is a
+// distinct replacement the customer supplies if the first is rejected or its authority is withdrawn.
+const letterSignatory = {name: 'Helen Okafor', role: 'General counsel'};
 export const approvalLetters = [{
   artifactId: 'artifact-approval-letter-v4', kind: 'approval_letter', title: 'Signed approval letter',
   name: 'Signed approval letter · AI rider v4',
   source: 'Rachel Ellis · Customer-supplied walkthrough file',
   checksum: 'sha256:51d0a7e3c96b24f8',
   approves: {agreementId: 'A-17', documentId: 'rider-v4', version: 'v4'},
-  signatory: {name: 'Helen Okafor', role: 'General counsel'},
+  signatory: letterSignatory,
   contactId: 'contact-general-counsel',
   summary: 'The customer’s general counsel signs to approve AI rider version 4 for Agreement A-17.',
+  excerpt: ['Re: Agreement A-17, AI service terms.', 'We approve AI rider version 4 for use under Agreement A-17.', `Signed: ${letterSignatory.name}, ${letterSignatory.role}.`],
+  provenance: 'Invented walkthrough letter. It is not a source read, a real signature, or legal advice.',
+}, {
+  artifactId: 'artifact-approval-letter-v4-resigned', kind: 'approval_letter', title: 'Signed approval letter (second copy)',
+  name: 'Signed approval letter · AI rider v4 · second copy',
+  source: 'Rachel Ellis · Customer-supplied walkthrough file',
+  checksum: 'sha256:8c3f61b0d2a9e475',
+  approves: {agreementId: 'A-17', documentId: 'rider-v4', version: 'v4'},
+  signatory: letterSignatory,
+  contactId: 'contact-general-counsel',
+  summary: 'A second signed copy of the customer’s approval of AI rider version 4 for Agreement A-17.',
+  excerpt: ['Re: Agreement A-17, AI service terms. Second signed copy.', 'We approve AI rider version 4 for use under Agreement A-17.', `Signed: ${letterSignatory.name}, ${letterSignatory.role}.`],
   provenance: 'Invented walkthrough letter. It is not a source read, a real signature, or legal advice.',
 }];
 
@@ -90,6 +105,7 @@ export const initialState = {
     id: 'plan-ai-terms',
     title: 'Obtain the current AI terms document',
     owner: 'Morgan Reed',
+    ownerId: 'principal-portfolio-1',
     specifications: 'Confirm the current document applies to Agreement A-17 and preserve its source and version.',
     instructions: 'Obtain the document from Rachel Ellis. Verify the version before requesting customer counsel review. Record who decides only from a signed, inspected source.',
     revision: 3,
@@ -103,7 +119,7 @@ export const initialState = {
   task: null,
   document: null,
   customerReview: null,
-  evidence: {artifactReceipts: [], contacts: [], customerAuthority: null, documentVersionBasis: null},
+  evidence: {artifactReceipts: [], contacts: [], customerAuthority: null},
   requirement: {
     id: 'req-ai-counsel',
     title: 'Customer counsel approves current AI terms',
@@ -115,13 +131,21 @@ export const initialState = {
     label: 'Renewal not confirmed',
     note: 'Resolving this legal requirement does not confirm a signed renewal.',
   },
+  policyVersion: 'walkthrough-3',
   history: [],
   error: null,
 };
 
-// The signed-in demo principal for walkthrough commands. Actors are explicit on every command.
+// The current-version basis the checks read: the agreement record, independent of the document and of the letter.
+export const agreementVersionBasis = {id: `version-basis-agreement-${renewalFixture.agreement.id}`, revision: '1', status: 'accepted',
+  recordedAt: renewalFixture.agreement.applicableRider.recordedAt, recordedBy: null, agreementId: renewalFixture.agreement.id,
+  documentId: renewalFixture.agreement.applicableRider.documentId, version: renewalFixture.agreement.applicableRider.version,
+  source: {kind: 'agreement', id: renewalFixture.agreement.id}};
+
+// The signed-in demo principals. Actors are explicit on every command, and duties are compared by these IDs.
 export const walkthroughActors = {
   acquisition: fixturePeople.accountOwner, reviewer: fixturePeople.internalReviewer,
+  acquisitionId: 'principal-portfolio-1', reviewerId: 'principal-reviewer',
 };
 
 // Worklist snapshots stay separate from the executable walkthrough.
@@ -129,12 +153,14 @@ export const worklistPeople = [
   ...renewalRecords.flatMap((record, index) => record.owner ? [{id: `principal-portfolio-${index + 1}`, displayName: record.owner}] : []),
   {id: 'principal-reviewer', displayName: fixturePeople.internalReviewer},
 ];
+// Internal principals only. A customer contact is never a principal, so an approver can never record.
+export const walkthroughPrincipals = worklistPeople;
 
 export const worklistFixture = {
   revision: '1',
   asOf: renewalFixture.workflowClockStart,
   people: worklistPeople,
-  walkthrough: {renewalId: renewalFixture.id, reviewerId: 'principal-reviewer', paths: renewalFixture.paths},
+  walkthrough: {renewalId: renewalFixture.id, reviewerId: 'principal-reviewer', paths: renewalFixture.paths, agreementLabel: renewalFixture.agreement.label},
   renewals: [
     {
       id: renewalFixture.id, revision: '1', accountId: renewalFixture.account.id,
@@ -264,10 +290,10 @@ export const readinessFixture = {
   initialEvaluationAt: renewalFixture.workflowClockStart,
   paths: {...renewalFixture.paths, readiness: `${renewalFixture.paths.root}/readiness`},
   worklist: worklistFixture,
-  policyVersion: 'walkthrough-2',
+  policyVersion: initialState.policyVersion,
   scope: 'Existing local workflow rules. No real access, approval, or source connection.',
-  policyBoundary: 'Transition checks never offer a step the walkthrough reducer refuses, and the reducer refuses a decision or resolution that its evidence checks do not support. Typed text is never accepted as a decision. No check grants real authority.',
-  documentVersionBasis: renewalFixture.documentVersionBasis,
+  policyBoundary: 'Transition checks never offer a step the walkthrough reducer refuses, and the reducer refuses a decision or resolution that its evidence checks do not support. A decision cites the accepted signed letter for the exact agreement, document and version; typed text and source units are not accepted as a decision. The letter inspector, the authority recorder and the decision recorder are each a different principal from the plan owner and the letter’s uploader. No check grants real authority.',
+  documentVersionBasis: agreementVersionBasis,
   customerAuthority: null,
   decisionReceipt: null,
   contacts: [],
@@ -362,29 +388,29 @@ export const readinessFixture = {
       actionLabel: 'Open letter upload', inputKinds: ['plan', 'document', 'customer_decision', 'customer_review_work_item', 'artifact_receipts', 'policy'],
       scope: 'Upload the customer’s signed letter for the version under review. The upload records a receipt only. Nobody is named until a reviewer records who decides.'},
     {id: 'inspect_approval_letter', kind: 'transition', title: 'Inspect the approval letter', command: 'inspect_approval_letter', workKind: 'customer_review',
-      actionLabel: 'Open letter inspection', inputKinds: ['artifact_receipts', 'version_basis', 'customer_review_work_item', 'policy'],
-      scope: 'Accept or reject the received letter with a reason. An accepted letter records which version it approves for the agreement, independently of the document file.'},
+      actionLabel: 'Open letter inspection', inputKinds: ['artifact_receipts', 'customer_review_work_item', 'policy'],
+      scope: 'Accept or reject the received letter with a typed reason. Each inspection is appended to the receipt. The inspector is neither the plan owner nor the letter’s uploader.'},
     {id: 'record_customer_authority', kind: 'transition', title: 'Record who decides', command: 'record_customer_authority', workKind: 'customer_review',
       actionLabel: 'Open authority recording', inputKinds: ['artifact_receipts', 'authority', 'customer_review_work_item', 'policy'],
-      scope: 'Record the letter’s signatory as a contact, with the inspected letter receipt as the authority basis for this agreement.'},
+      scope: 'Record the letter’s signatory as a contact, with the accepted letter receipt as the authority basis for this agreement, document and version. The recorder is neither the plan owner nor the letter’s uploader.'},
     {id: 'record_customer_decision', kind: 'transition', title: 'Record the customer decision', command: 'record_customer_approval', workKind: 'customer_review',
       actionLabel: 'Open decision recording', inputKinds: ['plan', 'document', 'customer_decision', 'customer_review_work_item', 'authority', 'decision_receipt', 'version_basis', 'card', 'policy'],
-      scope: 'Record a decision that cites an inspected receipt or a unit, names the contact from the authority record, and binds the version under review. Typed text is not accepted.'},
+      scope: 'Record a decision that cites the accepted signed letter for this agreement, document and version, names the contact from the authority record, and records which authority record it relied on. Typed text and source units are not accepted.'},
     {id: 'resolve_requirement', kind: 'transition', title: 'Resolve the requirement', command: 'resolve_requirement',
       actionLabel: 'Open requirement resolution', inputKinds: ['plan', 'document', 'customer_decision', 'customer_review_work_item', 'requirement', 'authority', 'decision_receipt', 'version_basis', 'card', 'policy'],
       scope: 'Review the local recorded decision before explicit resolution. This check does not confirm a signed renewal or complete separate work items.'},
     {id: 'current_version_basis', kind: 'evidence', title: 'Independent current-version basis', inputKinds: ['document', 'version_basis', 'card'],
       correctiveLabel: 'Identify the current version with independent evidence',
-      guidance: 'A read source or inspected receipt independent of the file must identify its current version for the agreement. Inspecting a signed approval letter records the version it names.',
-      scope: 'The file cannot identify itself as the current version. A separate source must identify the applicable version for this agreement.'},
+      guidance: 'The workflow-side agreement record names the rider version that applies. Neither the document file nor the approval letter establishes it.',
+      scope: 'The file cannot identify itself as the current version, and a letter approving a version does not make it current. A separate record must identify the applicable version for this agreement.'},
     {id: 'customer_authority', kind: 'evidence', title: 'Customer decision authority', inputKinds: ['authority', 'card'],
       correctiveLabel: 'Record who decides, with evidence',
-      guidance: 'Identify the approving contact and cite a read source unit or inspected receipt establishing their authority for this agreement. Record who decides from an inspected signed letter. A typed name will not clear this check.',
-      scope: 'A customer role or a typed counsel name does not establish authority to approve this agreement.'},
+      guidance: 'Record who decides from an accepted signed letter. The authority record carries the agreement, document, version and signatory from that receipt, and covers only that version. A typed name will not clear this check.',
+      scope: 'A customer role or a typed counsel name does not establish authority to approve this agreement. Authority for one version does not carry over to another.'},
     {id: 'decision_citation', kind: 'evidence', title: 'Cited customer decision', inputKinds: ['document', 'customer_decision', 'decision_receipt', 'authority', 'card'],
       correctiveLabel: 'Cite the customer decision for this version',
-      guidance: 'The accepted decision must cite an available unit or inspected receipt and bind the agreement, document version, and supported approving contact. Typed text is not that citation.',
-      scope: 'The approval needs a cited source unit or an inspected artifact receipt for the applicable document and agreement.'},
+      guidance: 'The accepted decision must cite the accepted signed-letter receipt for this agreement, document and version, and name the contact and authority record that receipt supports. Typed text is not that citation, and a source unit cannot establish an approval until units carry a speaker-to-authority binding and a reviewer label.',
+      scope: 'The approval needs the accepted signed-letter receipt for the applicable document and agreement.'},
   ],
   responses: [
     {id: 'current', label: 'Current evaluation', status: 'ready'},
@@ -395,7 +421,9 @@ export const readinessFixture = {
   ],
 };
 
-// Isolated validation examples, never added to the walkthrough automatically.
+// Isolated validation examples, never added to the walkthrough automatically. The example contact is
+// an invented name for this check only. It is not the walkthrough's counsel and signs nothing there.
+const exampleSignatory = {name: 'Iris Calloway', role: 'Example signatory'};
 export const readinessEvidenceExample = {
   source: {id: 'source-version-example', label: 'Separate version message example', kind: 'message', status: 'read',
     readAt: readinessReadAt, scope: 'Isolated evidence-check example.', unitNumbers: ['4']},
@@ -403,22 +431,28 @@ export const readinessEvidenceExample = {
     sourceId: 'source-version-example', sourceLabel: 'Separate version message example', shown: true, partial: false,
     text: `The current document for ${renewalFixture.agreement.label} is AI rider ${fixtureEvidence[2].version}.`,
     readAt: readinessReadAt, eventAt: readinessReadAt, neighbours: []},
-  contact: {id: 'contact-counsel-example', displayName: fixturePeople.customerCounsel, status: 'active', recordedAt: readinessReadAt},
-  receipt: {id: 'receipt-decision-example', artifactId: 'artifact-counsel-decision-example', status: 'received',
-    receivedAt: readinessReadAt, inspection: {status: 'accepted', at: readinessReadAt}},
+  contact: {id: 'contact-counsel-example', displayName: exampleSignatory.name, role: exampleSignatory.role, status: 'active', recordedAt: readinessReadAt,
+    exampleLabel: 'Invented example contact for an isolated check. Not the walkthrough’s counsel.'},
+  receipt: {id: 'receipt-decision-example', artifactId: 'artifact-counsel-decision-example', kind: 'approval_letter', status: 'received',
+    approves: {agreementId: renewalFixture.agreement.id, documentId: fixtureEvidence[2].id, version: fixtureEvidence[2].version},
+    signatory: exampleSignatory, contactId: 'contact-counsel-example',
+    receivedAt: readinessReadAt, inspections: [{status: 'accepted', at: readinessReadAt, reason: 'Example inspection for an isolated check.'}]},
   documentVersionBasis: {id: 'version-basis-example', revision: '1', recordedAt: readinessReadAt,
     agreementId: renewalFixture.agreement.id, documentId: fixtureEvidence[2].id, version: fixtureEvidence[2].version,
     source: {kind: 'source', id: 'source-version-example'}},
   customerAuthority: {id: 'authority-example', revision: '1', recordedAt: readinessReadAt, status: 'accepted',
-    agreementId: renewalFixture.agreement.id, contactId: 'contact-counsel-example', evidenceRef: {kind: 'receipt', id: 'receipt-decision-example'}},
+    agreementId: renewalFixture.agreement.id, documentId: fixtureEvidence[2].id, version: fixtureEvidence[2].version, signatory: exampleSignatory,
+    contactId: 'contact-counsel-example', evidenceRef: {kind: 'receipt', id: 'receipt-decision-example'}},
   decisionReceipt: {id: 'decision-example', revision: '1', recordedAt: readinessReadAt, status: 'accepted', outcome: 'approved',
     agreementId: renewalFixture.agreement.id, documentId: fixtureEvidence[2].id, documentVersion: fixtureEvidence[2].version,
-    contactId: 'contact-counsel-example', evidenceRef: {kind: 'receipt', id: 'receipt-decision-example'}},
+    contactId: 'contact-counsel-example', authorityRef: {id: 'authority-example', revision: '1'}, evidenceRef: {kind: 'receipt', id: 'receipt-decision-example'}},
 };
 
 export const walkthroughDocumentExamples = {
   outdated: {...fixtureEvidence[2], id: 'rider-v3', name: 'AI rider · Version 3', version: 'v3', checksum: 'sha256:0b7d2e94f1a6c358'},
   replacement: {...fixtureEvidence[2], id: 'rider-v5', name: 'AI rider · Version 5', version: 'v5', currentVersion: 'v5', checksum: 'sha256:c2f8a1d04e7b9365'},
+  // The same version, scanned again. A distinct file the customer supplies after a rejected copy.
+  rescan: {...fixtureEvidence[2], name: 'AI rider · Version 4 · new scan', checksum: 'sha256:4a6e2c90b17fd853'},
 };
 
 export const readinessEvidenceFixture = {
@@ -440,47 +474,43 @@ export const historyFixture = {
     title: 'Opening walkthrough snapshot', state: initialState,
     note: 'This fixed opening fixture already contains the plan and open requirement. Their original creation times and authors were not recorded. It is not a reconstructed earlier decision.'},
   scope: 'Synthetic, browser-only history. No real authorization, customer message, or connected source read.',
-  policyBoundary: 'Effects follow the existing Work plan rules and Readiness checks. The walkthrough still clears customer review on any plan edit. A decision is recorded only with a cited receipt or unit and an authority record.',
+  policyBoundary: 'Effects follow the Work plan rules and Readiness checks of the policy version each entry records. A title or owner edit keeps the customer decision; a specifications edit, a replacement document or a withdrawn authority marks it for re-review and reopens a resolved requirement with a reason and an actor. A decision is recorded only with the accepted signed letter and an authority record for that version.',
   filename: `${renewalFixture.account.id}-history-view.json`,
   examples: [
     {id: 'walkthrough', label: 'Your walkthrough', mode: 'live'},
-    {id: 'correction', label: 'Correction example (inspect only)', mode: 'example',
+    {id: 'correction', label: 'Correction example (not your walkthrough)', mode: 'example',
       title: 'A correction and its original record',
-      description: 'Inspect a separate invented history with source dates, later recordings, and typed attribution changes. Its records never change your walkthrough.',
+      description: 'This is a separate invented history, not your walkthrough. Its letter names its signatory; your walkthrough names nobody until you record who decides. Inspect its source dates, later recordings, and typed attribution changes. Its records never change your walkthrough.',
       steps: [
         {id: 'example-plan-request', action: {type: 'request_review', actor: fixturePeople.accountOwner, at: '2026-11-19T16:31:00.000Z'}},
         {id: 'example-plan-approval', action: {type: 'approve_plan', approver: fixturePeople.internalReviewer, at: '2026-11-19T16:32:00.000Z'}},
-        {id: 'example-document-receipt', action: {type: 'obtain_document', actor: fixturePeople.accountOwner,
+        {id: 'example-document-receipt', action: {type: 'obtain_document', actorId: walkthroughActors.acquisitionId,
           eventAt: '2026-11-18T14:00:00.000Z', at: '2026-11-19T16:33:00.000Z'}},
-        {id: 'example-inspection', action: {type: 'verify_document', verifiedBy: fixturePeople.accountOwner, at: '2026-11-19T16:34:00.000Z'}},
+        {id: 'example-inspection', action: {type: 'verify_document', verifiedBy: fixturePeople.accountOwner, actorId: walkthroughActors.acquisitionId,
+          reason: 'Version 4 matches the version Agreement A-17 names, and the file meets the specifications.', at: '2026-11-19T16:34:00.000Z'}},
         {id: 'example-customer-request', action: {type: 'request_customer_review', at: '2026-11-19T16:35:00.000Z'}},
-        {id: 'example-letter-receipt', action: {type: 'upload_approval_letter', actor: fixturePeople.accountOwner,
+        {id: 'example-letter-receipt', action: {type: 'upload_approval_letter', actorId: walkthroughActors.acquisitionId,
           eventAt: '2026-11-19T15:00:00.000Z', at: '2026-11-19T16:35:15.000Z'}},
-        {id: 'example-letter-inspection', action: {type: 'inspect_approval_letter', outcome: 'accepted', actor: fixturePeople.internalReviewer,
+        {id: 'example-letter-inspection', action: {type: 'inspect_approval_letter', outcome: 'accepted', actorId: walkthroughActors.reviewerId,
           reason: 'Signed and legible. It names Agreement A-17 and rider v4.', at: '2026-11-19T16:35:30.000Z'}},
-        {id: 'example-authority', action: {type: 'record_customer_authority', actor: fixturePeople.internalReviewer, at: '2026-11-19T16:35:45.000Z'}},
-        {id: 'example-customer-decision', action: {type: 'record_customer_approval', actor: fixturePeople.internalReviewer,
+        {id: 'example-authority', action: {type: 'record_customer_authority', actorId: walkthroughActors.reviewerId, at: '2026-11-19T16:35:45.000Z'}},
+        {id: 'example-customer-decision', action: {type: 'record_customer_approval', actorId: walkthroughActors.reviewerId,
           evidenceRef: {kind: 'receipt', id: 'receipt-approval-letter-v4-1'}, contactId: approvalLetters[0].contactId,
           eventAt: '2026-11-19T15:00:00.000Z', at: '2026-11-19T16:36:00.000Z'}},
-        {id: 'example-resolution', action: {type: 'resolve_requirement', actor: fixturePeople.internalReviewer, at: '2026-11-19T16:37:00.000Z'}},
+        {id: 'example-resolution', action: {type: 'resolve_requirement', actorId: walkthroughActors.reviewerId, at: '2026-11-19T16:37:00.000Z'}},
         {id: 'example-correction', correction: {
           type: 'correction', title: 'Customer decision attribution corrected',
           at: '2026-11-19T16:40:00.000Z', eventAt: '2026-11-19T15:05:00.000Z', actor: fixturePeople.internalReviewer,
           reason: 'The earlier entry named the wrong approving contact. The document scope and separate evidence records are unchanged.',
           supersedes: 'example-customer-decision',
-          changes: {after: {customerReview: {reviewedBy: fixturePeople.customerContact}}},
+          changes: {after: {customerReview: {contactId: 'contact-operations-director'}}},
         }},
-        {id: 'example-authority-withdrawal', observation: {
-          type: 'authority_observation', title: 'Separate authority record withdrawn', at: '2026-11-19T16:41:00.000Z',
-          actor: fixturePeople.internalReviewer, reason: 'The separate authority basis needs new supporting evidence.',
-          contextAfter: {customerAuthority: {id: 'authority-general-counsel', revision: '2', status: 'withdrawn', recordedAt: '2026-11-19T16:41:00.000Z',
-            recordedBy: fixturePeople.internalReviewer, agreementId: renewalFixture.agreement.id, contactId: approvalLetters[0].contactId,
-            evidenceRef: {kind: 'receipt', id: 'receipt-approval-letter-v4-1'}}},
-        }},
-        {id: 'example-reopening', action: {type: 'reopen_requirement', actor: fixturePeople.internalReviewer,
+        {id: 'example-reopening', action: {type: 'reopen_requirement', actorId: walkthroughActors.reviewerId,
           reason: 'The corrected decision does not support the recorded resolution. Obtain a supported customer decision for the applicable version.',
-          at: '2026-11-19T16:42:00.000Z'}},
-        {id: 'example-plan-revision', action: {type: 'save_plan', actor: fixturePeople.accountOwner,
+          at: '2026-11-19T16:41:00.000Z'}},
+        {id: 'example-authority-withdrawal', action: {type: 'withdraw_customer_authority', actorId: walkthroughActors.reviewerId,
+          reason: 'The authority basis needs new supporting evidence.', at: '2026-11-19T16:42:00.000Z'}},
+        {id: 'example-plan-revision', action: {type: 'save_plan', actorId: walkthroughActors.acquisitionId,
           specifications: 'Preserve the agreement reference, version, and independent source identifying the current document.',
           instructions: 'Re-inspect the received file and request a supported customer decision for that version.',
           at: '2026-11-19T16:44:00.000Z'}},
@@ -514,11 +544,11 @@ export const historyReviewTestRecords = {
   laterRecording: '2026-11-19T17:30:00.000Z',
   earlierRecording: '2026-11-19T16:31:00.000Z',
   lateReceipt: {...readinessEvidenceExample.receipt, id: 'receipt-late-history', artifactId: 'artifact-late-history', receivedAt: '2026-11-19T17:30:00.000Z',
-    inspection: {status: 'accepted', at: '2026-11-19T17:31:00.000Z'}},
-  sameVersionReplacement: {...fixtureEvidence[2], id: 'rider-v4-replacement'},
+    inspections: [{status: 'accepted', at: '2026-11-19T17:31:00.000Z'}]},
+  sameVersionReplacement: {...fixtureEvidence[2], id: 'rider-v4-replacement', checksum: 'sha256:7d15e0c3a92b4f68'},
   resolutionCorrection: {id: 'history-resolution-correction', type: 'correction', title: 'Resolution status corrected',
     at: '2026-11-19T16:43:00.000Z', actor: fixturePeople.internalReviewer,
     reason: 'The resolution state was recorded incorrectly. Retain the original recording for comparison.',
     changes: {after: {requirement: {status: 'open', resolvedAt: null}}}},
-  contextChange: {...readinessEvidenceFixture, policyVersion: 'walkthrough-3'},
+  contextChange: {...readinessEvidenceFixture, policyVersion: 'walkthrough-changed-example'},
 };

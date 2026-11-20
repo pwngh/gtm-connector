@@ -3,17 +3,19 @@ import assert from 'node:assert/strict';
 import {advanceReadinessJournal, selectReadiness} from './readiness.js';
 import {derive, initialState, transition, transitionWalkthrough} from './workflow.js';
 import {fixturePeople, renewalFixture, renewalRecords, worklistFixture, worklistPeople, worklistResponseExamples} from './renewalFixtures.js';
-import {customerDecisionSteps, walkthroughFields} from './customerDecision.js';
+import {customerDecisionSteps} from './customerDecision.js';
+import {typedInputs, walkthroughInputs} from './testing/walkthroughInputs.js';
 import {
   buildWorklist, clearWorklistSearch, daysUntil, formatWorklistTime, readWorklistLocation, resolveWorklistEntry,
   resolveWorklistSelection, safeWorklistReturn, selectWorklist, updateWorklistSearch, worklistAccountHref, worklistActionHref, worklistHref,
 } from './worklist.js';
 
-const act = (state, type, fields = {}) => transition(state, {type, ...fields});
+// Document inspection needs the reason the operator types; tests supply it here.
+const act = (state, type, fields = {}) => transition(state, {type, ...(type === 'verify_document' ? typedInputs.verify_document : {}), ...fields});
 const authorize = () => act(act(initialState, 'request_review'), 'approve_plan');
 const received = () => act(authorize(), 'obtain_document');
 const verified = () => act(received(), 'verify_document');
-const reviewed = () => customerDecisionSteps.reduce((state, type) => act(state, type, walkthroughFields(state, type)), act(verified(), 'request_customer_review'));
+const reviewed = () => customerDecisionSteps.reduce((state, type) => act(state, type, walkthroughInputs(state, type)), act(verified(), 'request_customer_review'));
 const primary = data => data.renewals.find(row => row.id === renewalFixture.id);
 const work = (data, kind) => data.workItems.find(row => row.renewalId === renewalFixture.id && row.kind === kind);
 const ids = result => result.rows.map(row => row.id);
@@ -189,7 +191,7 @@ test('resolving a requirement changes neither work-item completions nor the CRM 
 
 test('replacements reopen inspection and customer review but not the already-received collection output', () => {
   const prior = reviewed();
-  const next = act(prior, 'obtain_document', {document: {...prior.document, version: `${prior.document.version}-replacement`, currentVersion: `${prior.document.version}-replacement`}});
+  const next = act(prior, 'obtain_document', {...walkthroughInputs(prior, 'obtain_document'), document: {...prior.document, checksum: undefined, version: `${prior.document.version}-replacement`, currentVersion: `${prior.document.version}-replacement`}});
   const result = buildWorklist(next);
   assert.equal(work(result, 'collection').status, 'complete');
   assert.equal(work(result, 'inspection').status, 'ready');
@@ -566,11 +568,11 @@ test('the customer review item waits on the unidentified counsel, then moves thr
   assert.equal(item.ownerLabel, fixturePeople.internalReviewer);
   for (const [type, command, check] of [['upload_approval_letter', 'inspect_approval_letter', 'inspect_approval_letter'],
     ['inspect_approval_letter', 'record_customer_authority', 'record_customer_authority'], ['record_customer_authority', 'record_customer_approval', 'record_customer_decision']]) {
-    state = act(state, type, walkthroughFields(state, type));
+    state = act(state, type, walkthroughInputs(state, type));
     item = work(buildWorklist(state), 'customer_review');
     assert.deepEqual([item.status, item.waitingOn, item.workflowAction.command, item.readinessCheckId], ['ready', null, command, check]);
   }
-  state = act(state, 'record_customer_approval', walkthroughFields(state, 'record_customer_approval'));
+  state = act(state, 'record_customer_approval', walkthroughInputs(state, 'record_customer_approval'));
   item = work(buildWorklist(state), 'customer_review');
   assert.equal(item.status, 'complete');
   assert.match(item.output, /citing receipt receipt-approval-letter-v4-1/);

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {initialState, derive, transition} from './workflow.js';
 import {renewalEvidence, renewalFixture, fixturePeople, walkthroughDocumentExamples} from './renewalFixtures.js';
-import {customerDecisionSteps, walkthroughFields} from './customerDecision.js';
+import {customerDecisionSteps} from './customerDecision.js';
+import {typedInputs, walkthroughInputs} from './testing/walkthroughInputs.js';
 import {getPlaybookTemplate, playbookTemplates} from './playbookTemplates.js';
 import {
   buildPlaybookContext, buildTemplateWork, changedDraftFields, createPlaybooksSession, createPlaybooksSessionId,
@@ -16,10 +17,11 @@ const templateIds = ['obtain_current_rider', 'review_renewal_condition', 'reconc
 const at = '2026-11-20T06:00:00.000Z';
 const context = (state = initialState, evidence = renewalEvidence, roles = {}) => buildPlaybookContext(state, evidence, roles);
 const prepare = (templateId = templateIds[0], target = context()) => preparePlaybookDraft({templateId, context: target, confirmed: true, id: `test-${templateId}`, at});
-const act = (state, type, extra = {}) => transition(state, {type, ...extra});
+// Document inspection needs the reason the operator types; tests supply it here.
+const act = (state, type, extra = {}) => transition(state, {type, ...(type === 'verify_document' ? typedInputs.verify_document : {}), ...extra});
 const authorized = () => act(act(structuredClone(initialState), 'request_review'), 'approve_plan');
 const verified = () => act(act(authorized(), 'obtain_document'), 'verify_document');
-const completed = () => act(customerDecisionSteps.reduce((state, type) => act(state, type, walkthroughFields(state, type)), act(verified(), 'request_customer_review')), 'resolve_requirement');
+const completed = () => act(customerDecisionSteps.reduce((state, type) => act(state, type, walkthroughInputs(state, type)), act(verified(), 'request_customer_review')), 'resolve_requirement');
 const start = (session = createPlaybooksSession('test-session'), templateId = templateIds[0], target = context()) => playbooksSessionReducer(session, {type: 'prepare', templateId, context: target, confirmed: true, at});
 const save = session => playbooksSessionReducer(session, {type: 'save_revision', expectedRevision: session.editorRevision, at});
 const item = (work, id) => work.items.find(item => item.id === id);
@@ -209,10 +211,12 @@ test('the authority and reviewer defaults remain unknown even after a legacy cus
     assert.equal(item(draft, 'confirm_authority').completionProof.kind, 'unit');
     assert.match(item(draft, 'confirm_authority').title, /Record who decides, with evidence/);
   }
-  const chosen = prepare(templateIds[0], context(initialState, renewalEvidence, {customerAuthority: fixturePeople.customerCounsel})).draft;
-  assert.equal(chosen.contextSnapshot.roles.customerAuthority, fixturePeople.customerCounsel);
+  // Only the contact a walkthrough authority record supports can be chosen; no fixture name is offered.
+  const counsel = completed().evidence.contacts[0].displayName;
+  assert.equal(prepare(templateIds[0], context(initialState, renewalEvidence, {customerAuthority: counsel})).draft.contextSnapshot.roles.customerAuthority, null);
+  const chosen = prepare(templateIds[0], context(completed(), renewalEvidence, {customerAuthority: counsel})).draft;
+  assert.equal(chosen.contextSnapshot.roles.customerAuthority, counsel);
   assert.equal(chosen.contextSnapshot.roles.authorityBasis, null);
-  assert.equal(chosen.contextSnapshot.customerReview, null);
 });
 
 test('owners from another account are not offered or silently adopted as the proposed owner', () => {

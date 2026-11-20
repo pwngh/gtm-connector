@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {initialState,transition} from './workflow.js';
 import {buildOperations} from './operations.js';
-import {customerDecisionSteps,walkthroughFields} from './customerDecision.js';
+import {customerDecisionSteps} from './customerDecision.js';
+import {walkthroughInputs} from './testing/walkthroughInputs.js';
 import {approvalLetters,walkthroughDocumentExamples} from './renewalFixtures.js';
 
 const act=(state,type,fields={})=>transition(state,{type,...fields});
-const step=(state,type)=>act(state,type,walkthroughFields(state,type));
+const step=(state,type,fields={})=>act(state,type,{...walkthroughInputs(state,type),...fields});
 const authorize=state=>act(act(state,'request_review'),'approve_plan');
-const verified=()=>act(act(authorize(initialState),'obtain_document'),'verify_document');
+const verified=()=>step(step(authorize(initialState),'obtain_document'),'verify_document');
 const approved=()=>customerDecisionSteps.reduce(step,act(verified(),'request_customer_review'));
 const completed=()=>act(approved(),'resolve_requirement');
 const row=(report,id)=>report.rows.find(item=>item.id===id);
@@ -53,10 +54,10 @@ test('the full workflow moves the next action to its responsible person and keep
   state=act(state,'obtain_document');
   report=buildOperations(state);
   assert.equal(report.next.id,'document');
-  assert.equal(report.next.status,'Verification needed');
+  assert.equal(report.next.status,'Inspection needed');
   assert.equal(report.next.step,2);
 
-  state=act(state,'verify_document');
+  state=step(state,'verify_document');
   report=buildOperations(state);
   assert.deepEqual(report.counts,{ready:1,blocked:0,waiting:0,done:2});
   assert.equal(report.next.id,'condition');
@@ -87,7 +88,7 @@ test('the full workflow moves the next action to its responsible person and keep
   assert.deepEqual(report.counts,{ready:0,blocked:0,waiting:0,done:3});
   assert.equal(report.next,null);
   assert.equal(row(report,'condition').action,'View resolution');
-  assert.match(row(report,'condition').reason,/inspected signed letter, an authority record and an independent version basis/);
+  assert.match(row(report,'condition').reason,/accepted signed letter, an authority record for that version and the agreement record’s version basis/);
   assert.equal(row(report,'condition').step,4);
   assert.equal(state.commercial.status,'not_confirmed');
 });
@@ -98,13 +99,14 @@ test('plan-only changes retain verified document work while specification change
   const ownerEdit=act(resolved,'save_plan',{owner:'Maya Chen'});
   const ownerReport=buildOperations(ownerEdit);
   assertPartition(ownerReport);
-  assert.deepEqual(ownerReport.counts,{ready:1,blocked:1,waiting:0,done:1});
+  // An owner edit keeps the customer decision and the resolution; only the plan needs review again.
+  assert.deepEqual(ownerReport.counts,{ready:1,blocked:0,waiting:0,done:2});
   assert.equal(ownerReport.next.id,'plan');
   assert.equal(ownerReport.next.owner,'Maya Chen');
   assert.equal(row(ownerReport,'document').bucket,'done');
-  assert.equal(row(ownerReport,'condition').dependency.id,'plan');
+  assert.equal(row(ownerReport,'condition').status,'Resolved');
 
-  const specEdit=act(resolved,'save_plan',{specifications:'Confirm Agreement A-17 and retain the source timestamp.'});
+  const specEdit=step(resolved,'save_plan',{specifications:'Confirm Agreement A-17 and retain the source timestamp.'});
   const specReport=buildOperations(specEdit);
   assertPartition(specReport);
   assert.deepEqual(specReport.counts,{ready:1,blocked:2,waiting:0,done:0});
@@ -119,26 +121,30 @@ test('plan-only changes retain verified document work while specification change
 
 test('replacement and reopening expose the actual recovery action instead of inheriting a prior resolution',()=>{
   const state=completed();
-  const replaced=buildOperations(act(state,'obtain_document',{document:{id:'terms-v4',version:'v4',currentVersion:'v4'}}));
+  const replaced=buildOperations(step(state,'obtain_document',{document:{id:'terms-v4',version:'v4',currentVersion:'v4'}}));
   assertPartition(replaced);
   assert.deepEqual(replaced.counts,{ready:1,blocked:1,waiting:0,done:1});
   assert.equal(replaced.next.id,'document');
   assert.equal(replaced.next.step,2);
   assert.equal(row(replaced,'condition').dependency.id,'document');
-  const reopened=buildOperations(act(state,'reopen_requirement',{reason:'Customer requested another review.'}));
+  const reopened=buildOperations(step(state,'reopen_requirement',{reason:'Customer requested another review.'}));
   assertPartition(reopened);
   assert.deepEqual(reopened.counts,{ready:1,blocked:0,waiting:0,done:2});
   assert.equal(reopened.next.id,'condition');
-  assert.equal(reopened.next.owner,'Morgan Reed');
+  // The decision is kept for re-review, so the reviewer records it again; no new request is needed.
+  assert.equal(reopened.next.owner,'Alex Chen');
+  assert.equal(reopened.next.action,'Record the cited decision');
   assert.equal(reopened.next.step,3);
   assert.equal(reopened.next.waitingOn,null);
 });
 
-test('the awaited counsel is a role until the authority record exists, then the recorded contact',()=>{
+test('the awaited counsel stays a role; a withdrawn authority or another version never names the recorded contact',()=>{
   const pending=act(verified(),'request_customer_review');
   assert.equal(buildOperations(pending).next.waitingOn,'Customer counsel · unidentified');
-  const replaced=act(act(completed(),'obtain_document',{document:walkthroughDocumentExamples.replacement}),'verify_document');
-  const report=buildOperations(act(replaced,'request_customer_review'));
-  assert.equal(report.next.bucket,'waiting');
-  assert.equal(report.next.waitingOn,`${approvalLetters[0].signatory.name} · General counsel (authority record)`);
+  const withdrawn=buildOperations(step(completed(),'withdraw_customer_authority',{reason:'The authority basis was contradicted.'}));
+  assert.equal(withdrawn.next.bucket,'waiting');
+  assert.equal(withdrawn.next.waitingOn,'Customer counsel · unidentified');
+  const replaced=buildOperations(step(completed(),'obtain_document',{document:walkthroughDocumentExamples.replacement}));
+  assert.equal(row(replaced,'condition').waitingOn,null);
+  assert.ok(!JSON.stringify(replaced.rows).includes(approvalLetters[0].signatory.name));
 });

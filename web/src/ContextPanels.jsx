@@ -4,6 +4,7 @@ import {FileText, Link2, ShieldCheck, Info} from 'lucide-react';
 import {DecisionAuthority} from './EvidenceNotes.jsx';
 import {awaitedCounselNote} from './renewalEvidence.js';
 import {derive} from './workflow.js';
+import {decisionContact} from './evidenceChecks.js';
 
 export function RecordContext({state, onTask}) {
   const contact = derive(state).authorityContact;
@@ -32,14 +33,17 @@ export function PlanVersionHelp({state}) {
 }
 
 export function DecisionEvidence({state, onHistory}) {
-  const decision=state.customerReview, authority=state.evidence?.customerAuthority, basis=state.evidence?.documentVersionBasis;
-  if(decision?.status!=='approved')return <div className="dialog-body"><h3>No customer approval recorded.</h3><p>The current document still needs a supported decision from customer counsel.</p></div>;
-  const citation=decision.evidenceRef?.kind==='receipt'?`Receipt ${decision.evidenceRef.id}, inspected signed letter`:decision.evidenceRef?.kind==='unit'?`Card ${decision.evidenceRef.cardId} · Unit ${decision.evidenceRef.n}`:'Not recorded';
+  const decision=state.customerReview, authority=state.evidence?.customerAuthority, rider=renewalFixture.agreement.applicableRider, contact=decisionContact(state);
+  const retained=(decision?.priorDecisions||[]).filter(item=>item.legacy);
+  const hasDecision=decision&&(decision.status==='approved'||decision.status==='needs_re_review'&&decision.evidenceRef);
+  if(!hasDecision)return <div className="dialog-body"><h3>No current customer decision.</h3><p>The current document still needs a supported decision from customer counsel.</p>{retained.map((item,index)=><div className="interpretation" key={index}><strong>Retained record from earlier rules · not a decision</strong><p>Saved under {item.policyVersion||'an earlier policy without a recorded version'} as typed text, with no cited letter or authority record. It is kept for History and does not count.</p></div>)}{decision?.reReview&&<p className="decision-boundary">{decision.reReview.reason}</p>}</div>;
+  const citation=decision.evidenceRef?.kind==='receipt'?`Receipt ${decision.evidenceRef.id}, accepted signed letter`:decision.evidenceRef?.kind==='unit'?`Card ${decision.evidenceRef.cardId} · Unit ${decision.evidenceRef.n}`:'Not recorded';
   return <div className="dialog-body decision-evidence">
-    <span className="context-overline"><ShieldCheck size={16}/> RECORDED CUSTOMER DECISION</span>
+    <span className="context-overline"><ShieldCheck size={16}/> {decision.status==='approved'?'RECORDED CUSTOMER DECISION':'CUSTOMER DECISION · NEEDS RE-REVIEW'}</span>
     <h3>A decision bound to its evidence.</h3>
-    <dl className="detail-list"><div><dt>Cited evidence</dt><dd>{citation}</dd></div><div><dt>Approving contact</dt><dd>{decision.reviewedBy || 'Not recorded'}</dd></div><DecisionAuthority state={state}/><div><dt>Authority basis</dt><dd>{authority?`Authority record ${authority.id}, from receipt ${authority.evidenceRef?.id}`:'Not recorded'}</dd></div><div><dt>Version basis</dt><dd>{basis?`Version ${basis.version}, named by receipt ${basis.source?.id}`:'Not recorded'}</dd></div><div><dt>Recorded by</dt><dd>{decision.recordedBy}</dd></div><div><dt>Document</dt><dd>{state.document.title} · {decision.documentVersion}</dd></div><div><dt>Applies to</dt><dd>{renewalFixture.agreement.label} · Plan version {decision.planRevision}</dd></div></dl>
-    <div className="interpretation"><strong>What this establishes</strong><p>The customer’s decision on this document version, cited to an inspected receipt and the contact recorded from it. The commercial renewal outcome remains unconfirmed.</p></div>
+    {decision.reReview&&<p className="decision-boundary">Not current. {decision.reReview.reason} Marked {decision.reReview.actor?`by ${decision.reReview.actor}`:'by the walkthrough rules'}.</p>}
+    <dl className="detail-list"><div><dt>Cited evidence</dt><dd>{citation}</dd></div><div><dt>Approving contact</dt><dd>{contact?`${contact.displayName} · ${contact.role||'role not recorded'}`:decision.contactId?`${decision.contactId} · not a recorded contact`:'Not recorded'}</dd></div><DecisionAuthority state={state}/><div><dt>Authority record relied on</dt><dd>{decision.authorityRef?`${decision.authorityRef.id}, revision ${decision.authorityRef.revision}${authority?.id===decision.authorityRef.id&&authority.revision===decision.authorityRef.revision?'':` (current: revision ${authority?.revision||'none'}, ${authority?.status||'not recorded'})`}`:'Not recorded'}</dd></div><div><dt>Authority basis</dt><dd>{authority?`Receipt ${authority.evidenceRef?.id}, covering ${authority.documentId||'no recorded document'} ${authority.version||''}`:'Not recorded'}</dd></div><div><dt>Version basis</dt><dd>{renewalFixture.agreement.label} names {rider.documentId} {rider.version} (agreement record)</dd></div><div><dt>Recorded by</dt><dd>{decision.recordedBy}</dd></div><div><dt>Document</dt><dd>{state.document?.title||'Not recorded'} · {decision.documentVersion}</dd></div><div><dt>Applies to</dt><dd>{renewalFixture.agreement.label}</dd></div></dl>
+    <div className="interpretation"><strong>What this establishes</strong><p>The customer’s decision on this document version, cited to the accepted signed letter and the contact recorded from it. It is not tied to our plan’s revision. The commercial renewal outcome remains unconfirmed.</p></div>
     <button className="button" onClick={onHistory}>View decision history</button>
   </div>;
 }

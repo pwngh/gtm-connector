@@ -1,5 +1,6 @@
 import {getPlaybookTemplate, playbookTemplates} from './playbookTemplates.js';
 import {renewalFixture} from './renewalFixtures.js';
+import {derive} from './workflow.js';
 
 export const draftFields = Object.freeze({
   title: {label: 'Draft title', maxLength: 160},
@@ -16,6 +17,9 @@ const reviewEvents = ['request_review', 'request_changes', 'approve_plan'];
 // Read-only adapter. Role choices never grant authority.
 export function buildPlaybookContext(workflow, evidence = [], roles = {}) {
   const fixture = renewalFixture;
+  // Customer authority is offered only as the contact a walkthrough authority record supports. No fixture name is offered.
+  const recorded = workflow?.plan ? derive(workflow).authorityContact : null;
+  const roleOptions = {...clone(fixture.roles), customerAuthorityOptions: recorded ? [recorded.displayName] : []};
   return {
     schemaVersion: 2, synthetic: true, id: fixture.id, accountName: fixture.account.name,
     refs: {accountId: fixture.account.id, renewalId: fixture.renewal.id, agreementId: fixture.agreement.id, requirementId: workflow.requirement.id},
@@ -25,16 +29,16 @@ export function buildPlaybookContext(workflow, evidence = [], roles = {}) {
     existingPlan: pick(workflow.plan, ['id', 'title', 'revision', 'status', 'approvedRevision', 'owner', 'specifications', 'instructions', 'reviewNote', 'requestedAt', 'reviewedAt', 'approvedAt', 'approver']),
     planReviews: (workflow.history || []).filter(event => reviewEvents.includes(event.type)).map(event => pick(event, ['id', 'type', 'at', 'title', 'detail', 'actor', 'revision'])),
     document: workflow.document ? pick(workflow.document, ['id', 'title', 'name', 'version', 'source', 'status', 'receivedAt', 'verifiedAt', 'verifiedBy']) : null,
-    documentVersionBasis: clone(workflow.documentVersionBasis ?? fixture.documentVersionBasis),
+    documentVersionBasis: clone(workflow.documentVersionBasis ?? null),
     customerReview: workflow.customerReview ? pick(workflow.customerReview, ['status', 'planRevision', 'documentId', 'documentVersion', 'reviewedBy', 'recordedBy', 'evidenceText', 'requestedAt', 'requestedBy', 'approvedAt']) : null,
     commercialStatus: workflow.commercial.status,
     evidence: evidence.filter(record => Object.values(fixture.bindings).includes(record.id)).map(record => pick(record,
       ['id', 'binding', 'type', 'speaker', 'role', 'time', 'quote', 'context', 'meaning', 'detail', 'agreement'])),
-    roleOptions: clone(fixture.roles),
+    roleOptions,
     roles: {
       actionOwner: eligible(Object.hasOwn(roles, 'actionOwner') ? roles.actionOwner : workflow.plan.owner, fixture.roles.actionOwners),
       internalReviewer: eligible(roles.internalReviewer, fixture.roles.internalReviewers),
-      customerAuthority: eligible(roles.customerAuthority, fixture.roles.customerAuthorityOptions),
+      customerAuthority: eligible(roles.customerAuthority, roleOptions.customerAuthorityOptions),
       authorityBasis: null,
     },
   };
@@ -96,7 +100,7 @@ export function buildTemplateWork(templateId, context, removedItemIds = []) {
   }
   const authorityItem = items.find(item => item.id === 'confirm_authority');
   authorityItem.inputs.push({ref: 'customer_authority', mode: 'allowed', label: context.roles.customerAuthority
-    ? `${context.roles.customerAuthority}: deliberately selected walkthrough fixture; authority basis not recorded`
+    ? `${context.roles.customerAuthority}: recorded contact from the walkthrough authority record; the record is checked separately`
     : 'Unidentified decision owner. Record who decides, with evidence.'});
 
   const sourceNeed = (id, label) => {
@@ -114,7 +118,7 @@ export function buildTemplateWork(templateId, context, removedItemIds = []) {
       state: document.currentVersion ? 'available' : 'missing', status: document.currentVersion ? `Sourced version: ${document.currentVersion}` : 'Basis not recorded',
       detail: document.versionSource ? `Version source: ${document.versionSource}. Inspect its applicability to the agreement.` : 'Locate a separate source stating which version is current. The file cannot establish this by itself.'},
     customer_authority: {id: 'customer_authority', label: 'Customer decision authority', ref: null, state: 'unknown',
-      status: context.roles.customerAuthority ? 'Walkthrough fixture selected; basis not recorded' : 'Unidentified',
+      status: context.roles.customerAuthority ? 'Recorded contact selected; its authority record is checked separately' : 'Unidentified',
       detail: 'Record who decides, with evidence. A typed name, contact role, or internal review does not establish customer authority.'},
   };
   const recovery = id => items.some(item => item.id === id) ? id : null;
