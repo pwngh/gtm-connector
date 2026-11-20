@@ -7,6 +7,7 @@ import {
 } from './readiness.js';
 import {closeReadinessOnEscape, focusReadinessElement, moveReadinessFocus, readinessFocusTarget, restoreReadinessFocus} from './readinessBrowser.js';
 import {historyHref} from './historyLocation.js';
+import {sourceReadLabel} from './renewalEvidence.js';
 import './readiness.css';
 
 const icons = {passed: CheckCircle2, failed: CircleX, not_evaluated: CircleDashed, not_applicable: MinusCircle};
@@ -132,7 +133,7 @@ function Coverage({coverage, document, unitLink}) {
     {!coverage ? <p className="rd-notice">No source card is recorded. Coverage has not been evaluated.</p> : <>
       <p className="rd-label">{coverage.label} · {coverage.id} · Revision {coverage.revision}</p><p className="rd-provenance">{coverage.provenance}</p>
       <div className="rd-coverage-grid"><section><h3>What was read</h3><ul className="rd-sources">{coverage.sources.map(source => <li key={source.id} data-source-id={source.id}>
-        <div><strong>{source.label}</strong><span className="rd-label">{source.status === 'read' ? 'Bounded local read' : 'Not read'}</span></div>
+        <div><strong>{source.label}</strong><span className="rd-label">{sourceReadLabel(source.status)}</span></div>
         <p>{source.scope}</p><p className="rd-label">Local read time: <Time value={source.readAt}/></p>
         <div className="rd-source-links">{source.unitNumbers.map(n => unitLink({cardId: coverage.id, n}, `source:${source.id}:unit:${n}`, `Inspect unit ${n}`))}</div>
       </li>)}</ul></section>

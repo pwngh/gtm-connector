@@ -1,6 +1,7 @@
 import {renewalFixture,fixturePeople} from './renewalFixtures.js';
 import React from 'react';
 import {FileText, Link2, ShieldCheck, Info} from 'lucide-react';
+import {DecisionAuthority, ReviewerInput} from './EvidenceNotes.jsx';
 
 export function RecordContext({state, onTask}) {
   return <div className="dialog-body context-body">
@@ -33,8 +34,8 @@ export function DecisionEvidence({state, onHistory}) {
   return <div className="dialog-body decision-evidence">
     <span className="context-overline"><ShieldCheck size={16}/> RECORDED REVIEWER INPUT</span>
     <h3>Walkthrough decision input.</h3>
-    <p className="full-quote">{decision.evidenceText}</p>
-    <dl className="detail-list"><div><dt>Customer reviewer (reviewer input)</dt><dd>{decision.reviewedBy}</dd></div><div><dt>Recorded by</dt><dd>{decision.recordedBy}</dd></div><div><dt>Document</dt><dd>{state.document.title} · {decision.documentVersion}</dd></div><div><dt>Applies to</dt><dd>{renewalFixture.agreement.label} · Plan version {decision.planRevision}</dd></div></dl>
+    <ReviewerInput label="Decision text">{decision.evidenceText}</ReviewerInput>
+    <dl className="detail-list"><div><dt>Customer reviewer (reviewer input)</dt><dd>{decision.reviewedBy}</dd></div><DecisionAuthority/><div><dt>Recorded by</dt><dd>{decision.recordedBy}</dd></div><div><dt>Document</dt><dd>{state.document.title} · {decision.documentVersion}</dd></div><div><dt>Applies to</dt><dd>{renewalFixture.agreement.label} · Plan version {decision.planRevision}</dd></div></dl>
     <div className="interpretation"><strong>What this establishes</strong><p>Typed reviewer input for this document version, not a cited receipt or an authority finding. The commercial renewal outcome remains unconfirmed.</p></div>
     <button className="button" onClick={onHistory}>View decision history</button>
   </div>;
