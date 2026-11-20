@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixturePeople, historyFixture, historyTestRecords, initialState, readinessFixture, readinessEvidenceFixture, walkthroughDecisions, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {approvalLetters, fixturePeople, historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {customerDecisionSteps, walkthroughFields} from './customerDecision.js';
+import {workflowEvidence} from './evidenceChecks.js';
 import {derive, transition, transitionWalkthrough} from './workflow.js';
 import {compareReadinessChecks, evaluateReadiness, selectReadiness, advanceReadinessJournal} from './readiness.js';
 import {buildWorklist, resolveWorklistEntry} from './worklist.js';
@@ -12,7 +14,11 @@ const chain = (...steps) => steps.reduce((state, step) => act(state, typeof step
 const approved = () => chain('request_review', 'approve_plan');
 const verified = () => act(act(approved(), 'obtain_document'), 'verify_document');
 const requested = () => act(verified(), 'request_customer_review');
-const decided = () => act(requested(), 'record_customer_approval', {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step});
+// The letter, its inspection and the authority record carry explicit actors; the decision leaves its recorder to the walkthrough default.
+const decide = (state, extra = {actor: undefined}) => customerDecisionSteps.reduce((current, type) => act(current, type, {...walkthroughFields(current, type), ...(type === 'record_customer_approval' ? extra : {})}), state);
+const redecide = (state, extra = {actor: undefined}) => act(state, 'record_customer_approval', {...walkthroughFields(state, 'record_customer_approval'), ...extra});
+const decided = () => decide(requested());
+const counsel = approvalLetters[0].signatory.name;
 const resolved = () => act(decided(), 'resolve_requirement');
 const byId = (view, id) => view.entries.find(entry => entry.id === id);
 const primary = view => view.entries.filter(entry => !entry.derived && entry.type !== 'opening_snapshot');
@@ -59,7 +65,8 @@ test('recording metadata captures immutable before and after inputs without chan
   next.plan.title = historyTestRecords.revisedTitle;
   assert.equal(event.historyRecord.after.plan.title, before.plan.title);
   assert.equal(event.historyRecord.before.plan.title, before.plan.title);
-  assert.deepEqual(hydrateHistoryRecord(event.historyRecord, next.historyContexts).contextBefore, historyEvidenceSnapshot());
+  assert.deepEqual(hydrateHistoryRecord(event.historyRecord, next.historyContexts).contextBefore, historyEvidenceSnapshot(workflowEvidence(state)));
+  assert.deepEqual(hydrateHistoryRecord(event.historyRecord, next.historyContexts).contextAfter, historyEvidenceSnapshot(workflowEvidence(next)));
   assert.ok(!('history' in event.historyRecord.before));
   assert.ok(!('error' in event.historyRecord.after));
 });
@@ -179,29 +186,38 @@ test('replacement comparisons keep the old receipt, typed versions and approval 
   assert.equal(entry.impacts.effects.find(effect => effect.id === 'isPlanApproved').status, 'kept');
 });
 
-test('identical decision text is a typed change when its attribution or scope changes', () => {
+test('the same approving contact is a typed change when its recorder changes', () => {
   const first = decided();
   let state = act(act(first, 'resolve_requirement'), 'reopen_requirement', {reason: historyTestRecords.editReason});
   state = act(state, 'request_customer_review');
-  state = act(state, 'record_customer_approval', {reviewedBy: fixturePeople.customerContact, recordedBy: fixturePeople.accountOwner, evidenceText: first.customerReview.evidenceText});
-  const entry = last(state), difference = entry.differences.find(change => change.field === 'decision.text');
+  state = redecide(state, {actor: fixturePeople.accountOwner});
+  const entry = last(state), difference = entry.differences.find(change => change.field === 'decision.reviewer');
   assert.equal(difference.valueChanged, false);
   assert.equal(difference.attributionChanged, true);
-  assert.equal(difference.before.value, difference.after.value);
+  assert.equal(difference.before.value, counsel);
+  assert.equal(difference.after.attribution.kind, 'evidence_record');
   assert.equal(difference.after.attribution.actor, fixturePeople.accountOwner);
-  assert.equal(difference.after.attribution.attributedTo, fixturePeople.customerContact);
   assert.equal(entry.comparisonEntryId, first.history.at(-1).id);
+  assert.equal(Object.keys(values(entry)).includes('decision.text'), false);
   const corrected = byId(exampleView('view=effective'), exampleId('record_customer_approval'));
-  assert.equal(values(corrected)['decision.text'].value, first.customerReview.evidenceText);
-  assert.equal(values(corrected)['decision.text'].scope.documentVersion, first.document.version);
+  assert.equal(values(corrected)['decision.reviewer'].value, fixturePeople.customerContact);
+  assert.equal(values(corrected)['decision.reviewer'].scope.documentVersion, first.document.version);
 });
 
-test('authority, citation and version effects are evaluated by Readiness, not inferred from typed approval', () => {
-  const view = selectHistory(decided()), decision = primary(view).find(row => row.type === 'record_customer_approval');
-  assert.equal(values(decision)['decision.authority'].value, null);
-  assert.equal(values(decision)['decision.authority'].display, 'unidentified');
-  assert.equal(values(decision)['decision.citation'].value, null);
-  assert.ok(decision.impacts.evidenceChecks.every(check => check.result === 'failed'));
+test('authority, citation and version effects are evaluated by Readiness from recorded evidence, never typed approval', () => {
+  const pending = requested(), typed = act(pending, 'record_customer_approval', {reviewedBy: counsel, evidenceText: 'Approved.'});
+  assert.equal(typed.history.length, pending.history.length);
+  const state = decided(), view = selectHistory(state), decision = primary(view).find(row => row.type === 'record_customer_approval');
+  assert.equal(values(decision)['decision.authority'].value.id, state.evidence.customerAuthority.id);
+  assert.deepEqual(values(decision)['decision.citation'].value, state.customerReview.evidenceRef);
+  assert.equal(values(decision)['decision.citedReceipt'].value.inspection.status, 'accepted');
+  assert.ok(decision.impacts.evidenceChecks.every(check => check.result === 'passed'));
+  const authority = primary(view).find(row => row.type === 'record_customer_authority');
+  assert.equal(values(authority)['authority.contact'].value, `${counsel} · General counsel`);
+  assert.equal(authority.impacts.evidenceChecks.find(check => check.id === 'customer_authority').result, 'passed');
+  const letter = primary(view).find(row => row.type === 'upload_approval_letter');
+  assert.equal(values(letter)['letter.receipt'].value.inspection, null);
+  assert.equal(JSON.stringify(letter.values).includes(counsel), false);
   const document = primary(view).find(row => row.type === 'verify_document');
   assert.equal(values(document)['document.versionBasis'].value, null);
   assert.equal(Object.keys(values(document)).includes('document.currentVersion'), false);
@@ -229,7 +245,7 @@ test('source, recording and later outcome clocks remain distinct, including late
 test('as-recorded preserves the original, and as-effective applies only corrections known by the point', () => {
   const recorded = exampleView(), effective = exampleView('view=effective'), decisionId = exampleId('record_customer_approval'), correctionId = exampleId('correction');
   const original = byId(recorded, decisionId), corrected = byId(effective, decisionId), correction = byId(recorded, correctionId);
-  assert.equal(values(original)['decision.reviewer'].value, walkthroughDecisions.reviewedBy);
+  assert.equal(values(original)['decision.reviewer'].value, counsel);
   assert.equal(values(corrected)['decision.reviewer'].value, fixturePeople.customerContact);
   assert.equal(original.correctionIds.length, 0);
   assert.equal(original.supersededBy[0].id, correctionId);
@@ -318,7 +334,7 @@ test('requirement intervals track resolution, explicit reopening and a later res
   let state = act(first, 'reopen_requirement', {reason: historyTestRecords.editReason, actor: fixturePeople.internalReviewer});
   const reopening = state.history.at(-1);
   state = act(state, 'request_customer_review');
-  state = act(state, 'record_customer_approval', {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step});
+  state = redecide(state);
   state = act(state, 'resolve_requirement');
   const view = selectHistory(state), intervals = view.intervals[0].intervals;
   assert.equal(intervals.length, 2);
@@ -364,7 +380,7 @@ test('partial legacy records show only saved fields, with unknown metadata rathe
   assert.equal(view.intervals[0].incomplete, true);
   assert.equal(view.intervals[0].intervals[0].resolvedAt, state.requirement.resolvedAt);
   const knownDecision = primary(view).find(row => row.type === 'record_customer_approval');
-  assert.equal(values(knownDecision)['decision.text'].value, state.customerReview.evidenceText);
+  assert.equal(values(knownDecision)['decision.reviewer'].value, state.customerReview.reviewedBy);
   assert.equal(knownDecision.actor, 'not recorded');
 });
 
@@ -567,7 +583,7 @@ test('cited source text compares speaker attribution even when the card, number 
   const first = decided();
   let state = act(act(first, 'resolve_requirement'), 'reopen_requirement', {reason: historyTestRecords.editReason});
   state = act(state, 'request_customer_review');
-  state = act(state, 'record_customer_approval', {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step});
+  state = redecide(state);
   const decisions = state.history.filter(event => event.type === 'record_customer_approval');
   for (const event of decisions) {
     event.historyRecord.contextAfter = structuredClone(hydrateHistoryRecord(event.historyRecord, state.historyContexts).contextAfter);
@@ -589,10 +605,11 @@ test('cited source text compares speaker attribution even when the card, number 
 test('authority and receipt comparisons expose structured scope, contact, reference and inspection fields', () => {
   const decision = byId(exampleView(), exampleId('record_customer_approval'));
   const authority = values(decision)['decision.authority'], receipt = values(decision)['decision.citedReceipt'];
-  assert.equal(authority.details.find(detail => detail.key === 'contactId').value, readinessEvidenceFixture.customerAuthority.contactId);
-  assert.deepEqual(authority.details.find(detail => detail.key === 'evidenceRef').value, readinessEvidenceFixture.customerAuthority.evidenceRef);
-  assert.equal(receipt.details.find(detail => detail.key === 'inspection.status').value, readinessEvidenceFixture.artifactReceipts[0].inspection.status);
-  assert.equal(receipt.details.find(detail => detail.key === 'inspection.at').value, readinessEvidenceFixture.artifactReceipts[0].inspection.at);
+  const inspection = sample.steps.find(step => step.action?.type === 'inspect_approval_letter').action;
+  assert.equal(authority.details.find(detail => detail.key === 'contactId').value, approvalLetters[0].contactId);
+  assert.deepEqual(authority.details.find(detail => detail.key === 'evidenceRef').value, {kind: 'receipt', id: 'receipt-approval-letter-v4-1'});
+  assert.equal(receipt.details.find(detail => detail.key === 'inspection.status').value, 'accepted');
+  assert.equal(receipt.details.find(detail => detail.key === 'inspection.at').value, inspection.at);
 });
 
 test('malformed retained evidence does not invent a check result or crash the historical inspector', () => {

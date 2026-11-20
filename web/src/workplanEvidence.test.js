@@ -6,7 +6,8 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
 import {MessageSquare, Phone} from 'lucide-react';
-import {fixturePeople, initialState, readinessEvidenceFixture, readinessFixture, renewalEvidence, renewalSourceBoundaries, walkthroughDecisions} from './renewalFixtures.js';
+import {approvalLetters, fixturePeople, initialState, readinessEvidenceFixture, readinessFixture, renewalEvidence, renewalSourceBoundaries} from './renewalFixtures.js';
+import {walkthroughCommands, walkthroughFields} from './customerDecision.js';
 import {derive, transitionWalkthrough} from './workflow.js';
 import {advanceReadinessJournal, customerAuthorityLabel, evaluateReadiness, readinessHref} from './readiness.js';
 
@@ -29,11 +30,12 @@ const text = html => html.replace(/<[^>]+>/g, ' ').replaceAll('&amp;', '&').repl
 
 function walk(steps) {
   let state = initialState;
-  for (const type of steps) state = transitionWalkthrough(state, {type, reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step});
+  for (const type of steps) state = transitionWalkthrough(state, {type, ...walkthroughFields(state, type)});
   return state;
 }
-const allSteps = ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review', 'record_customer_approval', 'resolve_requirement'];
-const states = [initialState, walk(allSteps.slice(0, 3)), walk(allSteps.slice(0, 6)), walk(allSteps)];
+const allSteps = walkthroughCommands;
+const states = [initialState, walk(allSteps.slice(0, 3)), walk(allSteps.slice(0, -1)), walk(allSteps)];
+const counselName = approvalLetters[0].signatory.name;
 
 function workPlan(state, selectedStep = 1, records = evidence) {
   return renderToStaticMarkup(React.createElement(WorkPlan, {
@@ -223,49 +225,58 @@ test('Evidence, Sources checked and Readiness use the same source and gap wordin
   assert.ok(text(library).includes('What was not read or not shown'));
 });
 
-test('typed reviewer input is labelled wherever it appears and unknown authority is unidentified', () => {
-  const resolved = states[3], approved = states[2];
-  const decision = dialog({type: 'decision'}, resolved);
-  assert.ok(decision.includes(`<span class="note-label">Decision text (reviewer input)</span><p>${walkthroughDecisions.step}</p>`));
-  assert.ok(!decision.includes('class="full-quote"'));
-  assert.ok(text(decision).includes('Customer decision authority Unidentified'));
-  const resolve = renderToStaticMarkup(React.createElement(ReviewDecision, {type: 'resolve', state: approved, derived: derive(approved), onPerform: noop}));
-  assert.ok(resolve.includes(`Decision text (reviewer input)</span><p>${walkthroughDecisions.step}</p>`));
-  assert.ok(!resolve.includes('decision-evidence-quote'));
-  assert.ok(text(resolve).includes('Customer decision authority: unidentified'));
+test('the recorded decision cites its receipt and names the contact from the authority record wherever it appears', () => {
+  const resolved = states[3], approved = states[2], receiptId = approved.customerReview.evidenceRef.id;
+  const decision = text(dialog({type: 'decision'}, resolved));
+  assert.ok(decision.includes(`Cited evidence Receipt ${receiptId}, inspected signed letter`));
+  assert.ok(decision.includes(`Approving contact ${counselName}`));
+  assert.ok(decision.includes(`Customer decision authority ${counselName}`));
+  assert.ok(!decision.includes('reviewer input'));
+  assert.ok(!dialog({type: 'decision'}, resolved).includes('class="full-quote"'));
+  const resolve = text(renderToStaticMarkup(React.createElement(ReviewDecision, {type: 'resolve', state: approved, derived: derive(approved), onPerform: noop})));
+  assert.ok(resolve.includes(`Approving contact ${counselName}`));
+  assert.ok(resolve.includes(`Cites receipt ${receiptId}`));
+  assert.ok(!resolve.includes('Decision text'));
   const receipt = text(workPlan(resolved, 4));
-  assert.ok(receipt.includes(`Customer reviewer (reviewer input) ${walkthroughDecisions.reviewedBy}`));
-  assert.ok(receipt.includes('Customer decision authority Unidentified'));
-  // The flow names the awaited party as unidentified, then the typed reviewer as input.
+  assert.ok(receipt.includes(`Approving contact ${counselName}`));
+  assert.ok(receipt.includes(`Customer decision authority ${counselName}`));
+  // The flow names the awaited party as unidentified, then the recorded contact with the letter it cites.
   assert.ok(text(evidencePage(initialState)).includes('Customer counsel · unidentified'));
-  assert.ok(text(evidencePage(approved)).includes(`${walkthroughDecisions.reviewedBy} · reviewer input · authority unidentified`));
-  // Operations attributes the typed name to reviewer input too.
+  assert.ok(text(evidencePage(approved)).includes(`${counselName} · cites the inspected signed letter`));
   const operations = text(renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: ['/operations?reason=condition&view=all']},
     React.createElement(FollowUpReport, {state: approved, derived: derive(approved), evidence, onTask: noop, onHistory: noop, onSource: noop, onDocument: noop, onDecision: noop, onScope: noop}))));
-  assert.ok(operations.includes(`Customer reviewer (reviewer input): ${walkthroughDecisions.reviewedBy}`));
+  assert.ok(operations.includes(`Approving contact (authority record): ${counselName} · Cites receipt ${receiptId}`));
 });
 
-test('the customer counsel stays unidentified until a decision is recorded', () => {
-  const counsel = walk(allSteps.slice(0, 4));
+test('the customer counsel stays unidentified until the authority record names them from the letter', () => {
+  const counsel = walk(allSteps.slice(0, 4)), inspected = walk(allSteps.slice(0, allSteps.indexOf('record_customer_authority')));
   const request = renderToStaticMarkup(React.createElement(ReviewDecision, {type: 'counselRequest', state: counsel, derived: derive(counsel), onPerform: noop}));
   assert.ok(text(request).includes('For Customer counsel · unidentified Unidentified until a reviewer records who decides, with evidence'));
-  for (const html of [request, dialog({type: 'context'}), dialog({type: 'context'}, counsel)]) {
+  for (const html of [request, dialog({type: 'context'}), dialog({type: 'context'}, counsel), dialog({type: 'context'}, inspected)]) {
     assert.ok(!html.includes(fixturePeople.customerCounsel));
     assert.ok(text(html).toLowerCase().includes('unidentified until a reviewer records who decides, with evidence'));
   }
+  // The letter is received and accepted, yet nothing before the authority record shows its signatory.
+  for (const html of [workPlan(inspected, 3), evidencePage(inspected), dialog({type: 'letterDetail'}, inspected), dialog({type: 'authority'}, inspected), dialog({type: 'letterInspect'}, walk(allSteps.slice(0, 6)))]) {
+    assert.ok(!html.includes(counselName));
+  }
+  assert.ok(text(dialog({type: 'authority'}, inspected)).includes('The letter’s signatory'));
+  const named = walk(allSteps.slice(0, allSteps.indexOf('record_customer_authority') + 1));
+  assert.ok(text(dialog({type: 'context'}, named)).includes(`${counselName}, general counsel, decides for Agreement A-17. The authority record cites the inspected signed letter.`));
+  assert.ok(text(workPlan(named, 3)).replaceAll(' ,', ',').includes(`Signed by ${counselName}, general counsel. Recorded as a contact from this letter’s receipt.`));
 });
 
-test('a resolution from typed reviewer input is recorded, not verified', () => {
+test('a resolution records the cited decision, not a verified outcome', () => {
   const resolved = states[3];
   const plan = text(workPlan(resolved, 4)), library = text(evidencePage(resolved));
-  assert.ok(plan.includes('Condition resolved from reviewer input'));
+  assert.ok(plan.includes('Condition resolved from the cited decision'));
   assert.doesNotMatch(plan, /resolved with (reviewed )?evidence/i);
-  assert.ok(library.includes('RESOLUTION RECORDED Customer condition Recorded from reviewer input'));
+  assert.ok(library.includes('RESOLUTION RECORDED Customer condition Recorded from the cited decision'));
   assert.ok(!library.includes('VERIFIED OUTCOME'));
-  // The map puts the unidentified authority next to the typed reviewer.
-  assert.ok(library.includes(`${walkthroughDecisions.reviewedBy} · reviewer input · authority unidentified`));
+  assert.ok(library.includes(`${counselName} · cites the inspected signed letter`));
+  assert.ok(library.includes(`${counselName} is recorded as the contact who decides, from this receipt.`));
   // The toast for the resolve action.
-  assert.ok(readFileSync(new URL('./ReviewDecision.jsx', import.meta.url), 'utf8').includes("message: 'Condition resolved from reviewer input'"));
+  assert.ok(readFileSync(new URL('./ReviewDecision.jsx', import.meta.url), 'utf8').includes("message: 'Condition resolved from the cited decision'"));
 });
 
 test('the Evidence map shows the records the page shows, with their labels', () => {
@@ -300,6 +311,9 @@ test('decision authority comes from the Readiness projection', () => {
   assert.equal(supported, readinessEvidenceFixture.contacts[0].displayName);
   const requirement = evaluateReadiness(initialState, readinessEvidenceFixture).requirements.find(item => item.binding === 'workflow_requirement');
   assert.equal(requirement.customerAuthorityLabel, supported);
+  // The walkthrough's own authority record names the letter's signatory through the same projection.
+  assert.equal(renewalEvidenceModule.decisionAuthorityLabel(states[2]), counselName);
+  assert.equal(renewalEvidenceModule.decisionAuthorityLabel(states[1]), 'Unidentified');
 });
 
 const px = value => String(value).split(/\s+/).map(part => parseFloat(part) || 0);

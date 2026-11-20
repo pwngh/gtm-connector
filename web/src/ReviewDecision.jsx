@@ -1,17 +1,27 @@
 import {renewalFixture,fixturePeople} from './renewalFixtures.js';
 import React, {useEffect, useId, useRef, useState} from 'react';
-import {FileText, CheckCircle2, Clock, ShieldCheck} from 'lucide-react';
-import {awaitedCounsel, awaitedCounselNote, decisionAuthorityLabel} from './renewalEvidence.js';
-import {ReviewerInput} from './EvidenceNotes.jsx';
+import {FileText, CheckCircle2, Clock, ShieldCheck, XCircle} from 'lucide-react';
+import {awaitedCounsel, awaitedCounselNote} from './renewalEvidence.js';
+import {ReceiptFacts} from './CustomerEvidence.jsx';
 
 // File inspection and the per-document prescription remain distinct
 // from the human decision that follows them.
+// The upload's receipt, with the inspection that accepted or rejected it.
+export function documentReceipt(document) {
+  if (!document) return null;
+  const inspection = document.status === 'verified' ? {status: 'accepted', at: document.verifiedAt, recordedBy: document.verifiedBy}
+    : document.status === 'rejected' ? {status: 'rejected', at: document.rejectedAt, recordedBy: document.rejectedBy, reason: document.rejectionReason} : null;
+  return {id: document.receiptId || 'Not recorded', uploadedBy: document.uploadedBy, receivedAt: document.receivedAt, checksum: document.checksum, inspection};
+}
+
 export function DocumentHandoff({document, verified = false, onInspect}) {
   if (!document) return <article className="handoff-card" data-status="missing"><div className="handoff-header"><FileText size={18}/><strong>Document not received</strong></div><p>The task needs the applicable document before it can be verified.</p></article>;
-  return <article className="handoff-card" data-status={verified ? 'verified' : 'received'}>
-    <div className="handoff-header"><span className="mini-label">RECEIVED DOCUMENT</span><span className="handoff-state">{verified ? <CheckCircle2 size={14}/> : <Clock size={14}/>} {verified ? 'Version verified' : 'Needs verification'}</span></div>
+  const rejected = document.status === 'rejected';
+  return <article className="handoff-card" data-status={verified ? 'verified' : rejected ? 'rejected' : 'received'}>
+    <div className="handoff-header"><span className="mini-label">RECEIVED DOCUMENT</span><span className="handoff-state">{verified ? <CheckCircle2 size={14}/> : rejected ? <XCircle size={14}/> : <Clock size={14}/>} {verified ? 'Version verified' : rejected ? 'Rejected at inspection' : 'Needs verification'}</span></div>
     <div className="handoff-file"><FileText size={24}/><div><strong>{document.title || document.name}</strong><span>Version {document.version} · {renewalFixture.agreement.label}</span></div></div>
     <div className="handoff-meta"><span>Source</span><p>{document.source}</p></div>
+    <ReceiptFacts receipt={documentReceipt(document)} version={document.version}/>
     {onInspect && <div className="handoff-actions"><button type="button" className="button" onClick={onInspect}>Inspect document</button></div>}
   </article>;
 }
@@ -25,18 +35,22 @@ function PlanScope({plan}) {
 
 export default function ReviewDecision({type, state, derived, onCancel, onPerform, onInspectDocument}) {
   const [requestingChanges, setRequestingChanges] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const changesButton = useRef(null), wasRequestingChanges=useRef(false);
   useEffect(()=>{if(!requestingChanges&&wasRequestingChanges.current)changesButton.current?.focus();wasRequestingChanges.current=requestingChanges},[requestingChanges]);
+  const rejectButton = useRef(null), wasRejecting = useRef(false);
+  useEffect(()=>{if(!rejecting&&wasRejecting.current)rejectButton.current?.focus();wasRejecting.current=rejecting},[rejecting]);
   const reasonId = useId();
   const plan = state.plan;
   const doc = state.document;
   const decision = state.customerReview;
+  const authority = state.evidence?.customerAuthority, basis = state.evidence?.documentVersionBasis;
   const configuration = {
     request: {action: 'request_review', enabled: derived.canRequestReview, label: 'Request review', message: `Review requested from ${fixturePeople.internalReviewer}`},
     review: {action: 'approve_plan', enabled: derived.canApprovePlan, label: state.task ? 'Approve and resume task' : 'Approve and create task', message: state.task ? 'Plan approved. Existing task resumed.' : 'Plan approved. Document task created.'},
     verify: {action: 'verify_document', enabled: derived.canVerifyDocument, label: 'Confirm document matches requirements', message: 'Document version verified'},
-    resolve: {action: 'resolve_requirement', enabled: derived.canResolveRequirement, label: 'Record resolution', message: 'Condition resolved from reviewer input'},
+    resolve: {action: 'resolve_requirement', enabled: derived.canResolveRequirement, label: 'Record resolution', message: 'Condition resolved from the cited decision'},
     counselRequest: {action: 'request_customer_review', enabled: derived.canRequestCustomerReview, label: 'Record review request', message: 'Counsel review request recorded'},
   }[type];
   if (!configuration) return null;
@@ -56,29 +70,34 @@ export default function ReviewDecision({type, state, derived, onCancel, onPerfor
       <h3 className="decision-title">Check the file against the requirements.</h3>
       <DocumentHandoff document={doc} verified={derived.isDocumentVerified} onInspect={inspect}/>
       <PlanScope plan={plan}/>
-      <p className="decision-boundary">Recorded as checked by <strong>{plan.owner}</strong>. Confirm the current version applies to {renewalFixture.agreement.label} and meets these specifications. Customer approval is a separate decision.</p>
+      <p className="decision-boundary">Recorded as checked by <strong>{plan.owner}</strong>. Accept the version if it applies to {renewalFixture.agreement.label} and meets these specifications, or reject it with a reason. A rejected version is kept. Customer approval is a separate decision.</p>
     </>}
     {type === 'counselRequest' && <>
       <div className="decision-context"><span className="mini-label">CUSTOMER REVIEW HANDOFF</span><span>Plan version {plan.revision}</span></div>
       <h3 className="decision-title">Ready for customer counsel.</h3>
       <DocumentHandoff document={doc} verified={derived.isDocumentVerified} onInspect={inspect}/>
-      <div className="decision-people"><div><span>For</span><strong>{awaitedCounsel.label}</strong><small>{awaitedCounselNote}</small></div><div><span>Recorded by</span><strong>{plan.owner}</strong><small>Document task owner</small></div></div>
-      <p className="decision-boundary">This records an internal review request. No message is sent. Counsel’s decision and its supporting evidence are recorded in the next step.</p>
+      <div className="decision-people"><div><span>For</span><strong>{derived.authorityContact ? derived.authorityContact.displayName : awaitedCounsel.label}</strong><small>{derived.authorityContact ? 'Recorded contact (authority record)' : awaitedCounselNote}</small></div><div><span>Recorded by</span><strong>{plan.owner}</strong><small>Document task owner</small></div></div>
+      <p className="decision-boundary">This records an internal review request. No message is sent. The customer’s signed letter, its inspection and the authority record come next.</p>
     </>}
     {type === 'resolve' && <>
-      <div className="decision-context"><span className="mini-label"><ShieldCheck size={14}/> REVIEWER INPUT IN WALKTHROUGH</span><span>{renewalFixture.agreement.label}</span></div>
+      <div className="decision-context"><span className="mini-label"><ShieldCheck size={14}/> CITED DECISION</span><span>{renewalFixture.agreement.label}</span></div>
       <h3 className="decision-title">Resolve the customer condition.</h3>
-      <ReviewerInput label="Decision text">{decision?.evidenceText}</ReviewerInput>
-      <div className="decision-people"><div><span>Customer reviewer (reviewer input)</span><strong>{decision?.reviewedBy}</strong><small>Customer decision authority: {decisionAuthorityLabel().toLowerCase()}</small></div><div><span>Recorded by</span><strong>{decision?.recordedBy}</strong></div></div>
-      <div className="decision-binding"><FileText size={18}/><div><strong>{doc?.title || doc?.name}</strong><p>Document version {decision?.documentVersion} · Plan version {decision?.planRevision}</p></div></div>
-      <p className="decision-boundary">This records a walkthrough resolution from typed reviewer input, not an evidence-backed authority finding. Separate work-item outputs and the commercial renewal are unchanged.</p>
+      <div className="decision-people"><div><span>Approving contact</span><strong>{decision?.reviewedBy || 'Unidentified'}</strong><small>Authority record from receipt {authority?.evidenceRef?.id || 'not recorded'}</small></div><div><span>Recorded by</span><strong>{decision?.recordedBy}</strong><small>Signed-in demo principal</small></div></div>
+      <div className="decision-binding"><FileText size={18}/><div><strong>{doc?.title || doc?.name}</strong><p>Document version {decision?.documentVersion} · Plan version {decision?.planRevision} · Cites receipt {decision?.evidenceRef?.id || 'not recorded'}</p><p>Version basis: {basis ? `the inspected letter names ${basis.version} for ${renewalFixture.agreement.label}` : 'not recorded'}</p></div></div>
+      <p className="decision-boundary">Resolution records that the cited decision, the authority record and the independent version basis support this condition. Separate work-item outputs and the commercial renewal are unchanged.</p>
     </>}
-    {type === 'review' && requestingChanges ? <form className="review-changes" onSubmit={event => {event.preventDefault(); if (reason.trim()) onPerform('request_changes', {note: reason.trim()}, 'Changes requested');}}>
+    {type === 'verify' && rejecting ? <form className="review-changes" onSubmit={event => {event.preventDefault(); if (reason.trim()) onPerform('reject_document', {reason: reason.trim(), actor: plan.owner}, 'Version rejected. Its receipt is kept.');}}>
+      <label className="field" htmlFor={reasonId}>Reason for rejecting <span className="field-required">(required)</span><span className="field-hint">The rejected version and its receipt are kept with this reason. Acquisition reopens for a replacement.</span></label>
+      <textarea id={reasonId} className="review-reason" autoFocus required maxLength={1200} rows={3} value={reason} onChange={event => setReason(event.target.value)}/>
+      <div className="dialog-actions"><button type="button" className="button ghost" onClick={() => setRejecting(false)}>Keep inspecting</button><button type="submit" className="button primary" disabled={!reason.trim() || !derived.canRejectDocument}>Reject this version</button></div>
+    </form> : type === 'review' && requestingChanges ? <form className="review-changes" onSubmit={event => {event.preventDefault(); if (reason.trim()) onPerform('request_changes', {note: reason.trim()}, 'Changes requested');}}>
       <label className="field" htmlFor={reasonId}>Changes needed <span className="field-required">(required)</span><span className="field-hint">Tell the task owner what needs to change before this plan can be approved.</span></label>
       <textarea id={reasonId} className="review-reason" autoFocus required maxLength={1200} rows={4} value={reason} onChange={event => setReason(event.target.value)}/>
       <div className="dialog-actions"><button type="button" className="button ghost" onClick={() => setRequestingChanges(false)}>Keep reviewing</button><button type="submit" className="button primary" disabled={!reason.trim() || !derived.canRequestChanges}>Send back for changes</button></div>
     </form> : <div className="dialog-actions decision-actions">
-      {type === 'review' ? <button ref={changesButton} type="button" className="button ghost" disabled={!derived.canRequestChanges} onClick={() => setRequestingChanges(true)}>Request changes</button> : <button type="button" className="button ghost" onClick={onCancel}>Cancel</button>}
+      {type === 'review' ? <button ref={changesButton} type="button" className="button ghost" disabled={!derived.canRequestChanges} onClick={() => setRequestingChanges(true)}>Request changes</button>
+        : type === 'verify' ? <button ref={rejectButton} type="button" className="button ghost" disabled={!derived.canRejectDocument} onClick={() => setRejecting(true)}>Reject with a reason</button>
+        : <button type="button" className="button ghost" onClick={onCancel}>Cancel</button>}
       <button type="button" className="button primary" disabled={!configuration.enabled} onClick={perform}>{configuration.label}</button>
     </div>}
   </div>;

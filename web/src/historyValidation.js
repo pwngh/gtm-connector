@@ -37,6 +37,8 @@ const validators = {
   requirement: value => strings(value, 'id title status resolvedAt openedAt'),
   task: value => strings(value, 'id title owner status createdAt') && optional(value.planRevision, revision),
   commercial: value => strings(value, 'status label note'),
+  evidence: value => object(value) && optional(value.artifactReceipts, items => list(items, receipt)) && optional(value.contacts, items => list(items, contact))
+    && optional(value.customerAuthority, basis) && optional(value.documentVersionBasis, basis),
 };
 validators.requirements = value => list(value, item => validators.requirement(item) && identity(item) && string(item.status));
 const contextValidators = {

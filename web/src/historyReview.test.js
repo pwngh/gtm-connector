@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixturePeople, historyFixture, historyReviewTestRecords as records, historyTestRecords, initialState, readinessEvidenceFixture, readinessFixture, walkthroughDecisions, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {approvalLetters, fixturePeople, historyFixture, historyReviewTestRecords as records, historyTestRecords, initialState, readinessEvidenceFixture, readinessFixture, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {customerDecisionSteps, walkthroughFields} from './customerDecision.js';
 import {transition, transitionWalkthrough} from './workflow.js';
 import {advanceReadinessJournal} from './readiness.js';
 import {buildWorklist, resolveWorklistEntry} from './worklist.js';
@@ -13,8 +14,10 @@ const approved = () => act(act(initialState, 'request_review'), 'approve_plan');
 const received = () => act(approved(), 'obtain_document');
 const verified = () => act(received(), 'verify_document');
 const requested = () => act(verified(), 'request_customer_review');
-const decisionInput = {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step};
-const decided = () => act(requested(), 'record_customer_approval', decisionInput);
+// The letter, its inspection and the authority record; the decision itself carries no actor unless a test adds one.
+const authorized = () => customerDecisionSteps.slice(0, -1).reduce((state, type) => act(state, type, walkthroughFields(state, type)), requested());
+const decisionInput = () => {const {actor, ...fields} = walkthroughFields(authorized(), 'record_customer_approval'); return fields;};
+const decided = () => act(authorized(), 'record_customer_approval', decisionInput());
 const resolved = () => act(decided(), 'resolve_requirement');
 const entry = (view, id) => view.entries.find(item => item.id === id);
 const last = state => entry(selectHistory(state), state.history.at(-1).id);
@@ -90,11 +93,12 @@ test('future contacts and source reads are withheld even when the log snapshot w
 });
 
 test('only explicit action actors become event actors; default people remain separately typed record fields', () => {
-  for (const [state, type, extra, field, expected] of [
+  // The decision's explicit actor is its recorder, the signed-in demo principal; other actors leave their fields alone.
+  for (const [state, type, extra, field, expected, explicitValue = expected] of [
     [act(initialState, 'request_review'), 'approve_plan', {}, 'plan.approver', fixturePeople.internalReviewer],
     [received(), 'verify_document', {}, 'document.verifiedBy', initialState.plan.owner],
     [verified(), 'request_customer_review', {}, 'decision.requestedBy', initialState.plan.owner],
-    [requested(), 'record_customer_approval', decisionInput, 'decision.recordedBy', fixturePeople.internalReviewer],
+    [authorized(), 'record_customer_approval', decisionInput(), 'decision.recordedBy', fixturePeople.internalReviewer, fixturePeople.otherAccountOwner],
   ]) {
     const next = act(state, type, extra), row = last(next);
     assert.equal(next.history.at(-1).actor, null);
@@ -105,7 +109,7 @@ test('only explicit action actors become event actors; default people remain sep
     assert.equal(journal.changes.cause.actor, null);
     const explicit = act(state, type, {...extra, actor: fixturePeople.otherAccountOwner});
     assert.equal(last(explicit).actor, fixturePeople.otherAccountOwner);
-    assert.equal(values(last(explicit))[field].value, expected);
+    assert.equal(values(last(explicit))[field].value, explicitValue);
   }
 });
 
@@ -113,15 +117,15 @@ test('explicit typed approver, inspector and recorder fields do not imply an eve
   for (const [state, type, extra, field] of [
     [act(initialState, 'request_review'), 'approve_plan', {approver: fixturePeople.internalReviewer}, 'plan.approver'],
     [received(), 'verify_document', {verifiedBy: fixturePeople.accountOwner}, 'document.verifiedBy'],
-    [requested(), 'record_customer_approval', {...decisionInput, recordedBy: fixturePeople.internalReviewer}, 'decision.recordedBy'],
+    [authorized(), 'record_customer_approval', {...decisionInput(), recordedBy: fixturePeople.internalReviewer}, 'decision.recordedBy'],
   ]) {
     const row = last(act(state, type, extra));
     assert.equal(row.actor, 'not recorded');
     assert.equal(values(row)[field].origin, 'recorded_field');
   }
-  const row = last(act(requested(), 'record_customer_approval', {...decisionInput, actor: '  '}));
+  const row = last(act(authorized(), 'record_customer_approval', {...decisionInput(), actor: '  '}));
   assert.equal(row.actor, 'not recorded');
-  assert.equal(values(row)['decision.text'].attribution.actor, null);
+  assert.equal(values(row)['decision.reviewer'].attribution.actor, null);
 });
 
 test('older schema actors without explicit-action provenance are not promoted from reducer defaults', () => {
@@ -148,7 +152,7 @@ test('effective dependents retain original decision provenance and flag correcte
   }
   const resolution = entry(effective, exampleId('resolve_requirement'));
   assert.equal(values(resolution)['decision.reviewer'].value, fixturePeople.customerContact);
-  assert.equal(resolution.recordedValues.find(item => item.field === 'decision.reviewer').value, walkthroughDecisions.reviewedBy);
+  assert.equal(resolution.recordedValues.find(item => item.field === 'decision.reviewer').value, approvalLetters[0].signatory.name);
   assert.deepEqual(original.entries.map(item => item.id), effective.entries.map(item => item.id));
 });
 
@@ -365,8 +369,8 @@ test('the correction example changes attribution only and keeps authority withdr
   assert.deepEqual(decision.record.after.document, recorded.record.after.document);
   assert.equal(values(decision)['decision.version'].value, recorded.record.after.document.version);
   assert.equal(values(decision)['decision.document'].value, recorded.record.after.document.id);
-  assert.equal(values(decision)['decision.text'].value, values(recorded)['decision.text'].value);
-  assert.ok(correction.differences.every(item => ['decision.reviewer', 'decision.text'].includes(item.field)));
+  assert.deepEqual(values(decision)['decision.citation'].value, values(recorded)['decision.citation'].value);
+  assert.ok(correction.differences.every(item => item.field === 'decision.reviewer'));
   assert.deepEqual(decision.record.contextAfter, recorded.record.contextAfter);
   assert.equal(withdrawal.record.contextAfter.customerAuthority.status, 'withdrawn');
   assert.deepEqual(withdrawal.record.contextAfter.decisionReceipt, recorded.record.contextAfter.decisionReceipt);
@@ -381,8 +385,11 @@ test('authority, decision and version bases appear only on entries that use thos
     assert.equal(row.references.some(item => item.kind === 'basis'), false);
     assert.equal(row.values.some(item => ['decision.authority', 'decision.citation'].includes(item.field)), false);
   }
+  // The version basis comes from the inspected letter, so the earlier document inspection has none.
   const inspection = entry(result, exampleId('verify_document'));
-  assert.deepEqual(inspection.references.filter(item => item.kind === 'basis').map(item => item.id), [readinessEvidenceFixture.documentVersionBasis.id]);
+  assert.deepEqual(inspection.references.filter(item => item.kind === 'basis').map(item => item.id), []);
+  const letter = entry(result, exampleId('inspect_approval_letter'));
+  assert.deepEqual(letter.references.filter(item => item.kind === 'basis').map(item => item.id), ['version-basis-receipt-approval-letter-v4-1']);
   assert.equal(entry(result, exampleId('record_customer_approval')).references.filter(item => item.kind === 'basis').length, 3);
 });
 

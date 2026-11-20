@@ -4,7 +4,8 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
-import {historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughDecisions, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {approvalLetters, historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {walkthroughCommands, walkthroughFields} from './customerDecision.js';
 import {transitionWalkthrough} from './workflow.js';
 import {historyHref, selectHistory} from './history.js';
 import {hydrateHistoryRecord} from './historyRecording.js';
@@ -19,7 +20,7 @@ const unescape = value => value.replaceAll('&amp;', '&').replaceAll('&#x27;', "'
 const links = html => [...html.matchAll(/<a ([^>]+)>([\s\S]*?)<\/a>/g)].map(match => ({attributes: match[1], href: unescape(match[1].match(/href="([^"]+)"/)[1]), content: match[2]}));
 const ids = html => [...html.matchAll(/data-history-id="([^"]+)"/g)].map(match => unescape(match[1]));
 const act = (state, type, extra = {}) => transitionWalkthrough(state, {type, ...extra});
-const complete = () => ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review', 'record_customer_approval', 'resolve_requirement'].reduce((state, type) => act(state, type, {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step}), initialState);
+const complete = () => walkthroughCommands.reduce((state, type) => act(state, type, walkthroughFields(state, type)), initialState);
 function render(search = '', state = initialState) {
   return renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: [historyHref(search)]}, React.createElement(History, {state, onExport() {}})));
 }
@@ -67,14 +68,14 @@ test('a known-by cutoff withholds future details and their outcomes even when a 
   assert.ok(!outcomes.includes('<a'));
 });
 
-test('typed reviewer input renders as attributed scoped values, never as a source quotation', () => {
+test('the recorded decision renders as attributed scoped values, never as a source quotation or typed text', () => {
   const state = complete(), id = state.history.find(row => row.type === 'record_customer_approval').id, html = render(new URLSearchParams({entry: id}), state);
   const quotes = [...html.matchAll(/<blockquote class="hs-source-text">([\s\S]*?)<\/blockquote>/g)].map(match => unescape(match[1]));
   assert.deepEqual(quotes, readinessFixture.requirements[0].citations.map(citation => readinessFixture.card.units.find(unit => unit.n === citation.n).text));
-  assert.ok(!quotes.includes(state.customerReview.evidenceText));
-  const decision = html.split('data-history-field="decision.text"')[1].split('</dd>')[0];
-  assert.ok(unescape(decision).includes(state.customerReview.evidenceText));
-  assert.ok(!unescape(decision).includes(state.customerReview.recordedBy));
+  assert.ok(!html.includes('data-history-field="decision.text"'));
+  const decision = html.split('data-history-field="decision.reviewer"')[1].split('</dd>')[0];
+  assert.ok(unescape(decision).includes(state.customerReview.reviewedBy));
+  assert.ok(unescape(decision).includes('Evidence record'));
   const recorder = html.split('data-history-field="decision.recordedBy"')[1].split('</dd>')[0];
   assert.ok(unescape(recorder).includes(state.customerReview.recordedBy));
   assert.ok(unescape(decision).includes(state.customerReview.reviewedBy));
@@ -89,14 +90,14 @@ test('corrections render supersedes links and typed attribution changes while th
   const supersedes = links(correction).find(link => link.attributes.includes(`data-history-focus="supersedes:${correctionId}"`));
   assert.equal(new URL(supersedes.href, 'http://local.test').searchParams.get('entry'), decisionId);
   assert.ok(correction.includes('data-diff-field="decision.reviewer"'));
-  assert.ok(correction.includes('data-diff-field="decision.text"'));
+  assert.ok(!correction.includes('data-diff-field="decision.text"'));
   assert.ok(!correction.includes('data-diff-field="decision.authority"'));
   assert.ok(!correction.includes('data-diff-field="decision.citation"'));
   assert.ok(!correction.includes('data-diff-field="source.eventAt"'));
   const effective = render(new URLSearchParams({example: example.id, entry: decisionId, view: 'effective'}));
   const original = effective.split('class="hs-disclosure hs-original"')[1].split('</details>')[0];
-  assert.ok(unescape(original).includes(walkthroughDecisions.reviewedBy));
-  assert.ok(unescape(original).includes(walkthroughDecisions.step));
+  assert.ok(unescape(original).includes(approvalLetters[0].signatory.name));
+  assert.ok(unescape(original).includes('receipt-approval-letter-v4-1'));
   assert.ok(links(effective).some(link => link.attributes.includes(`data-history-focus="applied:${decisionId}:${correctionId}"`)));
 });
 
@@ -182,8 +183,9 @@ test('readiness effects render the selector’s actual invalidated checks, not s
   const state = act(complete(), 'save_plan', {specifications: historyTestRecords.revisedSpecifications}), id = state.history.at(-1).id;
   const view = selectHistory(state, new URLSearchParams({entry: id})), html = render(new URLSearchParams({entry: id}), state);
   assert.deepEqual([...html.matchAll(/data-effect="([^"]+)" data-effect-status="invalidated"/g)].map(match => match[1]), view.selection.resource.impacts.effects.filter(effect => effect.status === 'invalidated').map(effect => effect.id));
-  assert.equal((html.match(/data-evidence-result="failed"/g) || []).length, 3);
-  assert.ok(!html.includes('data-evidence-result="passed"'));
+  // The authority record and the letter's version basis survive a plan edit; the cleared decision does not.
+  assert.equal((html.match(/data-evidence-result="failed"/g) || []).length, 1);
+  assert.equal((html.match(/data-evidence-result="passed"/g) || []).length, 2);
 });
 
 

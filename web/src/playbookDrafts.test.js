@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {initialState, derive, transition} from './workflow.js';
-import {renewalEvidence, renewalFixture, fixturePeople} from './renewalFixtures.js';
+import {renewalEvidence, renewalFixture, fixturePeople, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {customerDecisionSteps, walkthroughFields} from './customerDecision.js';
 import {getPlaybookTemplate, playbookTemplates} from './playbookTemplates.js';
 import {
   buildPlaybookContext, buildTemplateWork, changedDraftFields, createPlaybooksSession, createPlaybooksSessionId,
@@ -18,9 +19,7 @@ const prepare = (templateId = templateIds[0], target = context()) => preparePlay
 const act = (state, type, extra = {}) => transition(state, {type, ...extra});
 const authorized = () => act(act(structuredClone(initialState), 'request_review'), 'approve_plan');
 const verified = () => act(act(authorized(), 'obtain_document'), 'verify_document');
-const completed = () => act(act(act(verified(), 'request_customer_review'), 'record_customer_approval', {
-  reviewedBy: fixturePeople.customerCounsel, evidenceText: 'Synthetic approval of the current terms.',
-}), 'resolve_requirement');
+const completed = () => act(customerDecisionSteps.reduce((state, type) => act(state, type, walkthroughFields(state, type)), act(verified(), 'request_customer_review')), 'resolve_requirement');
 const start = (session = createPlaybooksSession('test-session'), templateId = templateIds[0], target = context()) => playbooksSessionReducer(session, {type: 'prepare', templateId, context: target, confirmed: true, at});
 const save = session => playbooksSessionReducer(session, {type: 'save_revision', expectedRevision: session.editorRevision, at});
 const item = (work, id) => work.items.find(item => item.id === id);
@@ -291,7 +290,7 @@ test('a separate version fact can expose mismatches without changing the legacy 
   assert.equal(describeDocument(state.document, currentBasis).state, 'verified');
   assert.equal(describeDocument({...state.document, status: 'received'}, currentBasis).state, 'received');
   assert.equal(describeDocument({...state.document, id: null}, currentBasis).state, 'unknown');
-  const target = context({...state, documentVersionBasis: basis(state.document, 'v4')});
+  const target = context({...state, documentVersionBasis: basis(state.document, walkthroughDocumentExamples.replacement.version)});
   for (const templateId of templateIds) {
     const draft = prepare(templateId, target).draft;
     assert.equal(draft.evidenceNeeds.find(need => need.id === 'current_document').state, 'stale');

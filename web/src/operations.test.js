@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {initialState,transition} from './workflow.js';
 import {buildOperations} from './operations.js';
+import {customerDecisionSteps,walkthroughFields} from './customerDecision.js';
+import {approvalLetters,walkthroughDocumentExamples} from './renewalFixtures.js';
 
 const act=(state,type,fields={})=>transition(state,{type,...fields});
+const step=(state,type)=>act(state,type,walkthroughFields(state,type));
 const authorize=state=>act(act(state,'request_review'),'approve_plan');
 const verified=()=>act(act(authorize(initialState),'obtain_document'),'verify_document');
-const approved=()=>act(act(verified(),'request_customer_review'),'record_customer_approval',{
-  reviewedBy:'Nina Patel, customer counsel',recordedBy:'Alex Chen',evidenceText:'Written approval of the current terms for Agreement A-17.',
-});
+const approved=()=>customerDecisionSteps.reduce(step,act(verified(),'request_customer_review'));
 const completed=()=>act(approved(),'resolve_requirement');
 const row=(report,id)=>report.rows.find(item=>item.id===id);
 
@@ -66,10 +67,16 @@ test('the full workflow moves the next action to its responsible person and keep
   report=buildOperations(state);
   assert.deepEqual(report.counts,{ready:0,blocked:0,waiting:1,done:2});
   assert.equal(report.next.owner,'Alex Chen');
-  assert.equal(report.next.waitingOn,'Nina Patel · Customer counsel');
+  assert.equal(report.next.waitingOn,'Customer counsel · unidentified');
   assert.equal(report.next.step,3);
 
-  state=act(state,'record_customer_approval',{reviewedBy:'Nina Patel',evidenceText:'Approved for Agreement A-17.'});
+  // The letter, its inspection and the authority record are the reviewer's work, not a wait on the customer.
+  for(const type of customerDecisionSteps.slice(0,-1)) {
+    state=step(state,type);
+    report=buildOperations(state);
+    assert.deepEqual([report.next.id,report.next.bucket,report.next.owner,report.next.waitingOn],['condition','ready','Alex Chen',null]);
+  }
+  state=step(state,'record_customer_approval');
   report=buildOperations(state);
   assert.equal(report.next.bucket,'ready');
   assert.equal(report.next.step,4);
@@ -80,6 +87,7 @@ test('the full workflow moves the next action to its responsible person and keep
   assert.deepEqual(report.counts,{ready:0,blocked:0,waiting:0,done:3});
   assert.equal(report.next,null);
   assert.equal(row(report,'condition').action,'View resolution');
+  assert.match(row(report,'condition').reason,/inspected signed letter, an authority record and an independent version basis/);
   assert.equal(row(report,'condition').step,4);
   assert.equal(state.commercial.status,'not_confirmed');
 });
@@ -124,4 +132,13 @@ test('replacement and reopening expose the actual recovery action instead of inh
   assert.equal(reopened.next.owner,'Morgan Reed');
   assert.equal(reopened.next.step,3);
   assert.equal(reopened.next.waitingOn,null);
+});
+
+test('the awaited counsel is a role until the authority record exists, then the recorded contact',()=>{
+  const pending=act(verified(),'request_customer_review');
+  assert.equal(buildOperations(pending).next.waitingOn,'Customer counsel · unidentified');
+  const replaced=act(act(completed(),'obtain_document',{document:walkthroughDocumentExamples.replacement}),'verify_document');
+  const report=buildOperations(act(replaced,'request_customer_review'));
+  assert.equal(report.next.bucket,'waiting');
+  assert.equal(report.next.waitingOn,`${approvalLetters[0].signatory.name} · General counsel (authority record)`);
 });

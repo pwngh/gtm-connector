@@ -26,7 +26,10 @@ const kinds = {
   save_plan: ['plan', 'Plan revision', 'plan_review'], request_review: ['plan', 'Internal review request', 'plan_review'],
   approve_plan: ['plan', 'Internal review decision', 'plan_review'], request_changes: ['plan', 'Internal review decision', 'plan_review'],
   obtain_document: ['document', 'Document receipt', 'collection'], verify_document: ['document', 'Document inspection', 'inspection'],
+  reject_document: ['document', 'Document inspection', 'inspection'],
   request_customer_review: ['customer', 'Customer review request', 'customer_review'], record_customer_approval: ['customer', 'Customer decision', 'customer_review'],
+  upload_approval_letter: ['customer', 'Approval letter receipt', 'customer_review'], inspect_approval_letter: ['customer', 'Approval letter inspection', 'customer_review'],
+  record_customer_authority: ['customer', 'Authority record', 'customer_review'],
   resolve_requirement: ['requirement', 'Requirement resolution', null], reopen_requirement: ['requirement', 'Requirement reopening', null],
   requirement_transition: ['requirement', 'Requirement transition', null], work_item_output: ['output', 'Work-item output', null],
   authority_observation: ['customer', 'Authority observation', 'customer_review'],
@@ -42,7 +45,8 @@ const unknownImpacts = () => ({known: false, effects: [], checks: [], evidenceCh
 const contextFor = (context, fixture) => ({...fixture.readiness, ...context, contacts: context?.contacts || [], artifactReceipts: context?.artifactReceipts || []});
 const requirementsIn = snapshot => Array.isArray(snapshot?.requirements) ? snapshot.requirements : snapshot?.requirement ? [snapshot.requirement] : [];
 const basisKinds = {
-  obtain_document: ['version'], verify_document: ['version'], authority_observation: ['authority', 'decision'],
+  obtain_document: ['version'], verify_document: ['version'], reject_document: ['version'], authority_observation: ['authority', 'decision'],
+  upload_approval_letter: ['letter'], inspect_approval_letter: ['letter', 'version'], record_customer_authority: ['letter', 'authority'],
   record_customer_approval: ['authority', 'decision', 'version'], resolve_requirement: ['authority', 'decision', 'version'],
   reopen_requirement: ['authority', 'decision', 'version'], requirement_transition: ['authority', 'decision', 'version'],
 };
@@ -100,6 +104,7 @@ function valuesFor(event, snapshot, context, actor = null) {
   const defaults = event.record?.[snapshot === event.record.after ? 'defaultsAfter' : 'defaultsBefore'] || [];
   const origin = field => ({kind: defaults.includes(field) ? 'walkthrough_default' : 'workflow_record', actor: null});
   const input = {kind: 'reviewer_input', actor: defaults.includes('customerReview.recordedBy') ? null : text(review?.recordedBy), attributedTo: text(review?.reviewedBy)};
+  const recordedContact = {kind: 'evidence_record', actor: defaults.includes('customerReview.recordedBy') ? null : text(review?.recordedBy)};
   const category = kinds[event.type]?.[0];
   const values = [];
   if (category === 'plan' || category === 'context') {
@@ -115,6 +120,9 @@ function valuesFor(event, snapshot, context, actor = null) {
   if (category === 'document') {
     values.push(typed('document.id', 'Document record', 'id', doc?.id, documentScope));
     values.push(typed('document.version', 'Received version', 'text', doc?.version, documentScope));
+    values.push(typed('document.receipt', 'Upload receipt', 'id', doc?.receiptId, documentScope));
+    values.push(typed('document.checksum', 'Recorded checksum (synthetic)', 'text', doc?.checksum, documentScope));
+    values.push(typed('document.uploadedBy', 'Uploaded by', 'person', doc?.uploadedBy, documentScope));
     values.push(typed('document.source', 'Recorded supplier', 'text', doc?.source, documentScope));
     values.push(typed('document.status', 'Walkthrough inspection state', 'enum', doc?.status, documentScope));
     values.push(typed('document.verifiedBy', 'Verified by record', 'person', doc?.verifiedBy, documentScope, origin('document.verifiedBy')));
@@ -127,10 +135,25 @@ function valuesFor(event, snapshot, context, actor = null) {
     values.push(typed('decision.document', 'Document record', 'id', review?.documentId, decisionScope));
     values.push(typed('decision.version', 'Reviewed version', 'text', review?.documentVersion, decisionScope));
     values.push(typed('decision.planRevision', 'Walkthrough plan binding', 'revision', review?.planRevision, decisionScope));
-    values.push(typed('decision.reviewer', 'Customer reviewer (reviewer input)', 'person', review?.reviewedBy, decisionScope, input));
+    values.push(typed('decision.reviewer', 'Approving contact (authority record)', 'person', review?.reviewedBy, decisionScope, recordedContact));
     values.push(typed('decision.requestedBy', 'Requested by record', 'person', review?.requestedBy, decisionScope, origin('customerReview.requestedBy')));
     values.push(typed('decision.recordedBy', 'Recorded by record', 'person', review?.recordedBy, decisionScope, origin('customerReview.recordedBy')));
-    values.push(typed('decision.text', 'Decision text (reviewer input)', 'text', review?.evidenceText, decisionScope, input));
+    // Typed decision text is kept only where an older recording has it. It is never the decision.
+    if (text(review?.evidenceText)) values.push(typed('decision.text', 'Decision text (reviewer input)', 'text', review.evidenceText, decisionScope, input));
+    if ((basisKinds[event.type] || []).includes('letter')) {
+      const doc = snapshot?.document;
+      const letter = (Array.isArray(context?.artifactReceipts) ? context.artifactReceipts : []).filter(item => item?.kind === 'approval_letter'
+        && (!doc || item.approves?.documentId === doc.id && item.approves?.version === doc.version)).at(-1) || null;
+      const letterScope = {...decisionScope, documentId: id(letter?.approves?.documentId), documentVersion: id(letter?.approves?.version)};
+      values.push(typed('letter.receipt', 'Signed letter receipt', 'reference', letter, letterScope, {kind: 'evidence_record', actor: text(letter?.uploadedBy)}));
+      values.push(typed('letter.inspection', 'Letter inspection', 'enum', letter?.inspection?.status, letterScope, {kind: 'evidence_record', actor: text(letter?.inspection?.recordedBy)}));
+      if ((basisKinds[event.type] || []).includes('version')) values.push(typed('letter.versionBasis', 'Version basis from the letter', 'reference', context?.documentVersionBasis, letterScope, {kind: 'evidence_record', actor: text(context?.documentVersionBasis?.recordedBy)}));
+      if ((basisKinds[event.type] || []).includes('authority')) {
+        const contact = (Array.isArray(context?.contacts) ? context.contacts : []).find(item => item?.id === context?.customerAuthority?.contactId) || null;
+        values.push(typed('authority.contact', 'Recorded contact', 'person', contact ? `${contact.displayName}${contact.role ? ` · ${contact.role}` : ''}` : null, letterScope, {kind: 'evidence_record', actor: text(contact?.recordedBy)}));
+        values.push(typed('decision.authority', 'Authority basis', 'authority', context?.customerAuthority, decisionScope, {kind: 'evidence_record', actor: text(context?.customerAuthority?.recordedBy)}));
+      }
+    }
     if ((basisKinds[event.type] || []).includes('decision')) {
       values.push(typed('decision.authority', 'Authority basis', 'authority', context?.customerAuthority, decisionScope, {kind: 'evidence_record', actor: text(context?.customerAuthority?.recordedBy)}));
       values.push(typed('decision.citation', 'Cited decision evidence', 'citation', context?.decisionReceipt?.evidenceRef, decisionScope, {kind: 'evidence_record', actor: text(context?.decisionReceipt?.recordedBy)}));
@@ -165,7 +188,7 @@ export function historyImpacts(before, after, contextBefore, contextAfter, fixtu
   if (!completeSnapshot(before) || !completeSnapshot(after) || !validContext(contextBefore) || !validContext(contextAfter)) return unknownImpacts();
   if (contextBefore.policyVersion !== fixture.readiness.policyVersion || contextAfter.policyVersion !== fixture.readiness.policyVersion) return unknownImpacts();
   const oldState = stateFor(before), newState = stateFor(after);
-  const previous = derive(oldState), next = derive(newState);
+  const previous = derive(oldState, undefined, contextFor(contextBefore, fixture)), next = derive(newState, undefined, contextFor(contextAfter, fixture));
   const definitions = [
     ['isPlanApproved', 'approve_plan', 'Plan approval', 'Plan needs internal re-review', 'Current plan approved in the walkthrough'],
     ['isDocumentVerified', 'verify_document', 'Document inspection', 'Document needs re-inspection', 'Inspection recorded for the received version'],
@@ -198,25 +221,30 @@ export function historyImpacts(before, after, contextBefore, contextAfter, fixtu
   };
 }
 
+// Example evidence comes from the commands themselves; an observation changes it from then on.
 export function buildHistoryExample(example, fixture = historyFixture) {
   let state = copy(fixture.baseline.state);
-  let context = historyEvidenceSnapshot(example.evidence || fixture.readiness);
+  const base = example.evidence ? historyEvidenceSnapshot(example.evidence) : null;
+  let observed = {};
+  const evidenceFor = (record, side, contexts = state.historyContexts) => ({...(base || hydrateHistoryRecord(record, contexts)[side]), ...copy(observed)});
   for (const step of example.steps || []) {
     if (step.correction) state = {...state, history: [...state.history, {...copy(step.correction), id: step.id}]};
     else if (step.observation) {
-      const after = {...context, ...copy(step.observation.contextAfter)};
+      const recorded = state.history.findLast(event => event.historyRecord)?.historyRecord;
+      const context = recorded ? evidenceFor(recorded, 'contextAfter') : {...historyEvidenceSnapshot(fixture.readiness), ...copy(observed)};
+      observed = {...observed, ...copy(step.observation.contextAfter)};
       const snapshot = historyWorkflowSnapshot(state), prior = state.history.at(-1)?.historyRecord;
       state = {...state, history: [...state.history, {...copy(step.observation), id: step.id,
-        historyRecord: {schema: '2', before: snapshot, after: copy(snapshot), contextBefore: context, contextAfter: after,
+        historyRecord: {schema: '2', before: snapshot, after: copy(snapshot), contextBefore: context, contextAfter: {...context, ...copy(step.observation.contextAfter)},
           defaultsBefore: prior?.defaultsAfter || [], defaultsAfter: prior?.defaultsAfter || [], receiptBeforeId: prior?.receiptAfterId, receiptAfterId: prior?.receiptAfterId}}]};
-      context = after;
     } else {
       const next = transition(state, step.action);
       if (next.error || next.history.length !== state.history.length + 1) throw new Error('The local history example has an invalid transition.');
       const recorded = next.history.at(-1);
+      const record = {...recorded.historyRecord, contextBefore: evidenceFor(recorded.historyRecord, 'contextBefore', next.historyContexts), contextAfter: evidenceFor(recorded.historyRecord, 'contextAfter', next.historyContexts)};
+      delete record.contextBeforeId; delete record.contextAfterId;
       state = {...next, history: [...state.history, {...recorded, id: step.id,
-        historyRecord: {...recorded.historyRecord, receiptAfterId: recorded.historyRecord.receiptAfterId === recorded.id ? step.id : recorded.historyRecord.receiptAfterId,
-          contextBefore: copy(context), contextAfter: copy(context)}}]};
+        historyRecord: {...record, receiptAfterId: recorded.historyRecord.receiptAfterId === recorded.id ? step.id : recorded.historyRecord.receiptAfterId}}]};
     }
   }
   return compactHistoryState(state);
@@ -258,7 +286,7 @@ function normalizeEvent(event, index, contexts) {
 function mergeSnapshot(before, patch) {
   if (!patch || !before) return copy(before);
   const result = copy(before);
-  for (const key of ['plan', 'document', 'customerReview', 'requirement', 'requirements', 'task', 'commercial']) {
+  for (const key of ['plan', 'document', 'customerReview', 'evidence', 'requirement', 'requirements', 'task', 'commercial']) {
     if (!(key in patch)) continue;
     result[key] = patch[key] === null || Array.isArray(patch[key]) || typeof patch[key] !== 'object' ? copy(patch[key]) : {...before[key], ...copy(patch[key])};
   }
@@ -535,7 +563,7 @@ function projectEntries(events, baseline, location, fixture, bound) {
       comparisonEntryId, comparisonLabel: correction?.targetId ? 'Compared with the superseded record' : usePrevious ? 'Compared with the previous record for this subject and decision kind' : event.complete ? 'Compared with inputs immediately before this event' : 'Earlier input snapshot not recorded',
       impacts, recordedImpacts, trigger, transitions, projectedTransitions: requirementTransitions(event, fixture),
       recordedRecord: originalEvent.record, recordedSnapshotsKnown: originalEvent.snapshotsKnown,
-      title: event.title || kindLabel, reasonRequired: ['request_changes', 'reopen_requirement', 'correction'].includes(event.type) || transitions.some(item => item.before === 'resolved' && item.after === 'open'),
+      title: event.title || kindLabel, reasonRequired: ['request_changes', 'reject_document', 'reopen_requirement', 'correction'].includes(event.type) || transitions.some(item => item.before === 'resolved' && item.after === 'open'),
       reasonLabel: 'Recorded reason', correctionError: correction?.error || null, supersedesRoot: correction?.targetId || null,
       appliedCorrections: appliedIds.map(summary), correctedProjection: location.view === 'effective' && appliedIds.length > 0,
       supersededBy, upstreamCorrections,

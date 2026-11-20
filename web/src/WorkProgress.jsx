@@ -7,8 +7,8 @@ export default function WorkProgress({state,derived:d,selected,onSelect}){
   const resolved=state.requirement.status==='resolved';
   const stages=[
     {id:1,label:'Plan',sub:d.isPlanApproved?'Approved':state.plan.status==='in_review'?'In review':state.plan.status==='changes_requested'?'Changes needed':'Draft to review',done:d.isPlanApproved,icon:ClipboardCheck},
-    {id:2,label:'Document',sub:d.isDocumentVerified?'Verified':state.document?'Check required':'Not received',done:d.isDocumentVerified,icon:FileText},
-    {id:3,label:'Counsel',sub:d.hasCustomerApproval?'Decision recorded':state.customerReview?.status==='pending'?'Awaiting decision':d.canRequestCustomerReview?'Ready to request':!d.isDocumentVerified?'Needs verified document':'Needs plan approval',done:d.hasCustomerApproval,icon:ShieldCheck},
+    {id:2,label:'Document',sub:d.isDocumentVerified?'Verified':d.documentRejected?'Rejected':state.document?'Check required':'Not received',done:d.isDocumentVerified,icon:FileText},
+    {id:3,label:'Counsel',sub:d.hasCustomerApproval?'Decision recorded':d.customerReviewIsCurrent?({upload_approval_letter:'Awaiting letter',inspect_approval_letter:'Inspect letter',record_customer_authority:'Record authority'})[d.nextCommand]||'Record decision':d.canRequestCustomerReview?'Ready to request':!d.isDocumentVerified?'Needs verified document':'Needs plan approval',done:d.hasCustomerApproval,icon:ShieldCheck},
     {id:4,label:'Resolution',sub:resolved?'Recorded':d.canResolveRequirement?'Ready to confirm':'Evidence required',done:resolved,icon:CheckCheck},
   ];
   return <section className="workflow-progress" aria-label="Workflow progress">

@@ -2,7 +2,8 @@ import {eagerRouteModules, expandRouteContent} from './testing/routeModules.js';
 import test, {before, after, beforeEach, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {createServer} from 'vite';
-import {historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughDecisions, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {historyFixture, historyTestRecords, initialState, readinessFixture, walkthroughDocumentExamples} from './renewalFixtures.js';
+import {walkthroughCommands, walkthroughFields} from './customerDecision.js';
 import {transitionWalkthrough} from './workflow.js';
 import {advanceReadinessJournal, readinessHref} from './readiness.js';
 import {historyHref, selectHistory} from './history.js';
@@ -142,7 +143,7 @@ const eventIds = tree => [...nodes(tree)].filter(node => node.props['data-histor
 function escape(tree, target = null) {const event = {key: 'Escape', target, preventDefault() {this.prevented = true;}, stopPropagation() {this.stopped = true;}}; tree.props.onKeyDown(event); return event;}
 const act = (state, type, extra = {}) => transitionWalkthrough(state, {type, ...extra});
 function complete() {
-  return ['request_review', 'approve_plan', 'obtain_document', 'verify_document', 'request_customer_review', 'record_customer_approval', 'resolve_requirement'].reduce((state, type) => act(state, type, {reviewedBy: walkthroughDecisions.reviewedBy, evidenceText: walkthroughDecisions.step}), initialState);
+  return walkthroughCommands.reduce((state, type) => act(state, type, walkthroughFields(state, type)), initialState);
 }
 const example = historyFixture.examples.find(item => item.mode === 'example');
 const exampleId = type => example.steps.find(step => step.action?.type === type || step.correction?.type === type).id;

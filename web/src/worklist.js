@@ -73,33 +73,47 @@ function walkthroughWork(item, state, d, fixture) {
       reason = {action: 'review_plan', code: 'independent_reviewer', reason: d.planReviewBlockedReason};
     }
   } else if (item.kind === 'collection') {
-    events = ['save_plan', 'approve_plan', 'obtain_document'];
-    status = state.document ? 'complete' : d.canObtainDocument ? 'ready' : state.task ? 'blocked' : 'planned';
-    label = state.document ? 'Inspect received document' : 'Add current document';
-    command = state.document ? 'inspect_document' : d.canObtainDocument ? 'obtain_document' : null;
-    output = state.document ? `Received document ${state.document.version}. Inspection is separate.` : null;
-    outputAt = state.document?.receivedAt;
+    events = ['save_plan', 'approve_plan', 'obtain_document', 'reject_document'];
+    // A rejected version reopens acquisition; its receipt stays recorded.
+    const received = state.document && !d.documentRejected;
+    status = received ? 'complete' : d.canObtainDocument || d.documentRejected && d.canReplaceDocument ? 'ready' : state.task ? 'blocked' : 'planned';
+    label = received ? 'Inspect received document' : d.documentRejected ? 'Attach a replacement document' : 'Add current document';
+    command = received ? 'inspect_document' : d.canObtainDocument || d.documentRejected && d.canReplaceDocument ? 'obtain_document' : null;
+    output = received ? `Received document ${state.document.version} as receipt ${state.document.receiptId || 'not recorded'}. Inspection is separate.` : null;
+    outputAt = received ? state.document.receivedAt : null;
     if (!state.document && !d.isPlanApproved) reason = {action: 'obtain_document', code: 'plan_approval', reason: 'The current plan revision needs internal approval before collection can start.'};
   } else if (item.kind === 'inspection') {
-    events = ['obtain_document', 'verify_document', 'save_plan'];
+    events = ['obtain_document', 'verify_document', 'reject_document', 'save_plan'];
     status = d.isDocumentVerified ? 'complete' : d.canVerifyDocument ? 'ready' : 'blocked';
     label = d.isDocumentVerified ? 'Inspect verification record' : 'Verify document version';
     command = d.isDocumentVerified ? 'inspect_document' : d.canVerifyDocument ? 'verify_document' : null;
     output = d.isDocumentVerified ? `Inspection recorded for ${state.document.version} by ${state.document.verifiedBy || 'an unrecorded reviewer'}. A separate current-version basis is not recorded.` : null;
     outputAt = d.isDocumentVerified ? state.document.verifiedAt : null;
-    if (status === 'blocked') reason = d.transitions.verify_document.blockedReasons.find(item => item.code === (!state.document ? 'document_receipt' : d.needsReplacement ? 'document_current_version' : 'plan_approval')) || d.transitions.verify_document.blockedReasons[0] || null;
+    if (status === 'blocked') reason = d.transitions.verify_document.blockedReasons.find(item => item.code === (!state.document ? 'document_receipt' : d.documentRejected ? 'document_not_rejected' : d.needsReplacement ? 'document_current_version' : 'plan_approval')) || d.transitions.verify_document.blockedReasons[0] || null;
   } else if (item.kind === 'customer_review') {
-    events = ['request_customer_review', 'record_customer_approval', 'obtain_document', 'save_plan', 'reopen_requirement'];
-    const decision = state.customerReview?.status === 'approved' && state.customerReview.documentId === state.document?.id && state.customerReview.documentVersion === state.document?.version;
-    status = decision ? 'complete' : d.canRecordCustomerApproval ? 'waiting' : d.canRequestCustomerReview ? 'ready' : 'blocked';
-    owner = decision || status === 'waiting' ? reviewer : planOwner;
-    waitingOn = status === 'waiting' ? item.awaitedParty : null;
-    label = decision ? 'Inspect recorded decision' : status === 'waiting' ? 'Record supported customer decision' : 'Request counsel review';
-    command = decision ? 'inspect_decision' : d.canRecordCustomerApproval ? 'record_customer_approval' : d.canRequestCustomerReview ? 'request_customer_review' : null;
-    output = decision ? `Customer decision recorded for ${state.customerReview.documentVersion} in the local walkthrough. This does not resolve the requirement.` : null;
+    events = ['request_customer_review', 'upload_approval_letter', 'inspect_approval_letter', 'record_customer_authority', 'record_customer_approval', 'obtain_document', 'save_plan', 'reopen_requirement'];
+    const decision = d.hasCustomerApproval;
+    // After the request, the customer's signed letter is awaited; its receipt, inspection and the authority record follow.
+    const steps = [
+      ['upload_approval_letter', d.canUploadApprovalLetter, 'Add the signed approval letter'],
+      ['inspect_approval_letter', d.canInspectApprovalLetter, 'Inspect the approval letter'],
+      ['record_customer_authority', d.canRecordCustomerAuthority, 'Record who decides, with evidence'],
+      ['record_customer_approval', d.canRecordCustomerApproval, 'Record the cited customer decision'],
+    ];
+    const step = steps.find(([, allowed]) => allowed);
+    const awaitingLetter = !decision && d.customerReviewIsCurrent && d.nextCommand === 'upload_approval_letter';
+    status = decision ? 'complete' : awaitingLetter ? 'waiting' : step ? 'ready' : d.canRequestCustomerReview ? 'ready' : 'blocked';
+    owner = decision || d.customerReviewIsCurrent ? reviewer : planOwner;
+    waitingOn = awaitingLetter ? d.authorityContact ? {id: d.authorityContact.id, label: `${d.authorityContact.displayName} · ${d.authorityContact.role || 'recorded contact'}`, basis: 'Contact recorded from the inspected signed letter.'} : item.awaitedParty : null;
+    label = decision ? 'Inspect recorded decision' : step ? step[2] : awaitingLetter ? 'Inspect the review request' : 'Request counsel review';
+    command = decision ? 'inspect_decision' : step ? step[0] : d.canRequestCustomerReview ? 'request_customer_review' : null;
+    output = decision ? `Customer decision recorded for ${state.customerReview.documentVersion}, citing ${state.customerReview.evidenceRef?.kind === 'receipt' ? `receipt ${state.customerReview.evidenceRef.id}` : 'a source unit'}. This does not resolve the requirement.` : null;
     outputAt = decision ? state.customerReview.approvedAt : null;
     if (status === 'blocked') reason = {action: 'request_customer_review', code: 'inspection', reason: 'Approve the work plan and inspect the received version before requesting customer review.'};
-    if (status === 'waiting') waitingReason = 'The customer decision is awaited. Recording it requires supporting evidence; the action owner is not the customer approver.';
+    if (status === 'waiting') {
+      waitingReason = d.canUploadApprovalLetter ? 'The customer’s signed letter is awaited. When it arrives, its receipt and inspection come before anyone is recorded as the decision owner.'
+        : d.transitions.upload_approval_letter.blockedReasons.find(reason => reason.code === 'letter_available')?.reason || 'The customer’s signed letter is awaited.';
+    }
   }
   if (!owner && status !== 'complete') {
     status = 'blocked';

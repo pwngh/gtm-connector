@@ -1,15 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initialState, transition, derive } from './workflow.js';
+import { customerDecisionSteps, walkthroughFields } from './customerDecision.js';
+import { approvalLetters, walkthroughDocumentExamples } from './renewalFixtures.js';
 
 const act = (state, type, fields = {}) => transition(state, { type, ...fields });
+const step = (state, type) => act(state, type, walkthroughFields(state, type));
 const authorize = () => act(act(initialState, 'request_review'), 'approve_plan');
 const verify = () => act(act(authorize(), 'obtain_document'), 'verify_document');
-const approveCustomer = () => act(act(verify(), 'request_customer_review'), 'record_customer_approval', {
-  reviewedBy: 'Nina Patel, customer counsel',
-  recordedBy: 'Alex Chen',
-  evidenceText: 'Demo written approval of AI Terms version v3.',
-});
+const requested = () => act(verify(), 'request_customer_review');
+const through = (state, last) => customerDecisionSteps.slice(0, customerDecisionSteps.indexOf(last) + 1).reduce(step, state);
+const approveCustomer = () => through(requested(), 'record_customer_approval');
+const counsel = approvalLetters[0].signatory.name;
 
 test('a missing document does not block review and acquisition authorization', () => {
   const state = authorize();
@@ -33,8 +35,9 @@ test('the requirement cannot resolve at any stage before customer approval', () 
 test('the full workflow resolves legal work while keeping renewal unconfirmed', () => {
   const approved = approveCustomer();
   assert.equal(derive(approved).canResolveRequirement, true);
-  assert.equal(approved.customerReview.reviewedBy, 'Nina Patel, customer counsel');
+  assert.equal(approved.customerReview.reviewedBy, counsel);
   assert.equal(approved.customerReview.recordedBy, 'Alex Chen');
+  assert.deepEqual(approved.customerReview.evidenceRef, {kind: 'receipt', id: derive(approved).approvalLetter.id});
   const state = act(approved, 'resolve_requirement');
   assert.equal(state.requirement.status, 'resolved');
   assert.deepEqual(state.task, approved.task);
@@ -142,26 +145,103 @@ test('duplicate approval and repeated attachment do not duplicate tasks or evide
 });
 
 test('an outdated document cannot be verified or sent to customer review', () => {
-  const oldDocument = act(authorize(), 'obtain_document', { document: { version: 'v2', currentVersion: 'v3' } });
+  const oldDocument = act(authorize(), 'obtain_document', { document: { version: 'v3', currentVersion: 'v4' } });
   const failedVerification = act(oldDocument, 'verify_document');
   assert.equal(failedVerification.document.status, 'received');
   assert.match(failedVerification.error, /not current/);
   assert.equal(derive(failedVerification).canRequestCustomerReview, false);
   const replaced = act(failedVerification, 'obtain_document');
   const verified = act(replaced, 'verify_document');
-  assert.equal(verified.document.version, 'v3');
+  assert.equal(verified.document.version, 'v4');
   assert.equal(derive(verified).isDocumentVerified, true);
 });
 
-test('customer approval requires a review request and explicit reviewer evidence', () => {
-  const premature = act(verify(), 'record_customer_approval', { reviewedBy: 'Nina Patel', evidenceText: 'Approved.' });
+test('customer approval requires a review request, an authority record and a cited receipt, never typed text', () => {
+  const premature = act(verify(), 'record_customer_approval', { reviewedBy: counsel, evidenceText: 'Approved.' });
   assert.equal(premature.customerReview, null);
-  const pending = act(verify(), 'request_customer_review');
-  for (const fields of [{}, { reviewedBy: 'Nina Patel' }, { reviewedBy: ' ', evidenceText: 'Approved.' }]) {
+  const pending = requested();
+  for (const fields of [{}, { reviewedBy: counsel }, { reviewedBy: ' ', evidenceText: 'Approved.' }]) {
     const invalid = act(pending, 'record_customer_approval', fields);
     assert.equal(invalid.customerReview.status, 'pending');
     assert.match(invalid.error, /approval evidence/);
   }
+  const blockers = derive(pending).transitions.record_customer_approval.blockedReasons.map(reason => reason.code);
+  assert.deepEqual(blockers, ['customer_authority', 'current_version_basis']);
+  const authorized = through(pending, 'record_customer_authority');
+  assert.equal(derive(authorized).canRecordCustomerApproval, true);
+  const typed = act(authorized, 'record_customer_approval', { reviewedBy: counsel, evidenceText: 'Counsel approved rider v4.' });
+  assert.match(typed.error, /Typed text is not a customer decision/);
+  assert.equal(typed.customerReview.status, 'pending');
+  const fields = walkthroughFields(authorized, 'record_customer_approval');
+  const ownReceipt = act(authorized, 'record_customer_approval', { ...fields, evidenceRef: { kind: 'receipt', id: authorized.document.receiptId } });
+  assert.match(ownReceipt.error, /document receipt cannot record/);
+  assert.match(act(authorized, 'record_customer_approval', { ...fields, contactId: 'contact-unknown' }).error, /authority record/);
+  assert.match(act(authorized, 'record_customer_approval', { ...fields, actor: counsel }).error, /cannot be its approver/);
+  assert.match(act(authorized, 'record_customer_approval', { ...fields, documentVersion: 'v3' }).error, /version under review/);
+  assert.equal(act(authorized, 'record_customer_approval', fields).customerReview.status, 'approved');
+});
+
+test('an upload records a receipt, inspection rejects with a reason, and a replacement never overwrites it', () => {
+  const received = act(authorize(), 'obtain_document', { actor: 'Morgan Reed' });
+  const [receipt] = received.evidence.artifactReceipts;
+  assert.deepEqual({ id: receipt.id, version: receipt.documentVersion, uploadedBy: receipt.uploadedBy, receivedAt: receipt.receivedAt, inspection: receipt.inspection },
+    { id: received.document.receiptId, version: 'v4', uploadedBy: 'Morgan Reed', receivedAt: received.document.receivedAt, inspection: null });
+  assert.match(receipt.checksum, /^sha256:/);
+  assert.equal(derive(received).canRequestCustomerReview, false);
+  assert.match(act(received, 'reject_document', { reason: ' ' }).error, /reason/);
+  const rejectedVersion = act(received, 'reject_document', { actor: 'Morgan Reed', reason: 'The file is unsigned.' });
+  assert.equal(rejectedVersion.document.status, 'rejected');
+  assert.deepEqual(rejectedVersion.evidence.artifactReceipts[0].inspection, { status: 'rejected', at: rejectedVersion.history.at(-1).at, recordedBy: 'Morgan Reed', reason: 'The file is unsigned.' });
+  assert.equal(derive(rejectedVersion).canVerifyDocument, false);
+  assert.equal(derive(rejectedVersion).nextCommand, 'obtain_document');
+  const again = act(rejectedVersion, 'obtain_document', { actor: 'Morgan Reed' });
+  assert.equal(again.evidence.artifactReceipts.length, 2);
+  assert.notEqual(again.document.receiptId, receipt.id);
+  assert.deepEqual(again.evidence.artifactReceipts[0], rejectedVersion.evidence.artifactReceipts[0]);
+  const accepted = act(again, 'verify_document');
+  assert.equal(accepted.evidence.artifactReceipts[1].inspection.status, 'accepted');
+  assert.equal(derive(accepted).isDocumentVerified, true);
+});
+
+test('the counsel is named only by the authority record, attributed to the inspected letter', () => {
+  const pending = requested();
+  assert.equal(derive(pending).nextCommand, 'upload_approval_letter');
+  assert.equal(act(pending, 'record_customer_authority').error !== null, true);
+  const received = step(pending, 'upload_approval_letter');
+  assert.equal(derive(received).nextCommand, 'inspect_approval_letter');
+  assert.match(act(received, 'inspect_approval_letter', { outcome: 'rejected' }).error, /reason/);
+  const inspected = step(received, 'inspect_approval_letter');
+  const letter = derive(inspected).approvalLetter;
+  assert.equal(letter.inspection.status, 'accepted');
+  assert.deepEqual(inspected.evidence.documentVersionBasis.source, { kind: 'receipt', id: letter.id });
+  assert.equal(inspected.evidence.documentVersionBasis.version, 'v4');
+  assert.equal(derive(inspected).evidenceChecks.current_version_basis.result, 'passed');
+  for (const state of [pending, received, inspected]) assert.equal(JSON.stringify(state).includes(counsel), false);
+  const recorded = step(inspected, 'record_customer_authority');
+  const [contact] = recorded.evidence.contacts;
+  assert.deepEqual({ name: contact.displayName, recordedBy: contact.recordedBy, sourceRef: contact.sourceRef }, { name: counsel, recordedBy: 'Alex Chen', sourceRef: { kind: 'receipt', id: letter.id } });
+  assert.deepEqual(recorded.evidence.customerAuthority.evidenceRef, { kind: 'receipt', id: letter.id });
+  assert.equal(recorded.evidence.customerAuthority.agreementId, 'A-17');
+  assert.equal(derive(recorded).authorityContact.displayName, counsel);
+  assert.equal(derive(recorded).nextCommand, 'record_customer_approval');
+});
+
+test('resolution needs the authority record, the cited decision and an independent version basis', () => {
+  const approved = approveCustomer();
+  const blockers = state => derive(state).transitions.resolve_requirement.blockedReasons.map(reason => reason.code);
+  assert.deepEqual(blockers(approved), []);
+  const withoutBasis = { ...approved, evidence: { ...approved.evidence, documentVersionBasis: null } };
+  assert.deepEqual(blockers(withoutBasis), ['current_version_basis']);
+  assert.match(act(withoutBasis, 'resolve_requirement').error, /approval evidence/);
+  const withoutAuthority = { ...approved, evidence: { ...approved.evidence, customerAuthority: null } };
+  assert.deepEqual(blockers(withoutAuthority), ['customer_authority', 'decision_citation']);
+  const replaced = act(act(act(approved, 'resolve_requirement'), 'obtain_document', { document: walkthroughDocumentExamples.replacement }), 'verify_document');
+  const reviewed = act(replaced, 'request_customer_review');
+  assert.equal(derive(reviewed).canUploadApprovalLetter, false);
+  assert.match(derive(reviewed).transitions.upload_approval_letter.refusal, /has not supplied a signed approval letter for version v5/);
+  assert.equal(derive(reviewed).evidenceChecks.current_version_basis.result, 'failed');
+  assert.equal(derive(reviewed).authorityContact.displayName, counsel);
+  assert.equal(act(reviewed, 'record_customer_approval', walkthroughFields(reviewed, 'record_customer_approval')).customerReview.status, 'pending');
 });
 
 test('replacing an approved document reopens work and invalidates customer approval', () => {
@@ -189,11 +269,12 @@ test('reopening requires a new counsel review and reset restores the clean demo'
   const completed = act(approveCustomer(), 'resolve_requirement');
   const approvalEvent = completed.history.find(event => event.type === 'record_customer_approval');
   assert.deepEqual(approvalEvent.evidenceSnapshot, {
-    evidenceText: completed.customerReview.evidenceText,
-    reviewedBy: 'Nina Patel, customer counsel',
+    reviewedBy: counsel,
+    contactId: approvalLetters[0].contactId,
     recordedBy: 'Alex Chen',
+    evidenceRef: completed.customerReview.evidenceRef,
     documentId: completed.document.id,
-    documentVersion: 'v3',
+    documentVersion: 'v4',
     planRevision: 3,
     approvedAt: completed.customerReview.approvedAt,
   });
@@ -232,4 +313,16 @@ test('resolution preserves the stored task and commercial records for every task
   }
   const noTask = {...approved, task: null};
   assert.equal(act(noTask, 'resolve_requirement').task, null);
+});
+
+test('a typed decision saved by the earlier walkthrough is not a decision and does not strand the review', () => {
+  const pending = requested();
+  const saved = { ...pending, customerReview: { ...pending.customerReview, status: 'approved', reviewedBy: counsel, recordedBy: 'Alex Chen', evidenceText: 'Approved.', approvedAt: pending.customerReview.requestedAt } };
+  assert.equal(derive(saved).hasCustomerApproval, false);
+  assert.equal(derive(saved).canResolveRequirement, false);
+  assert.equal(derive(saved).nextCommand, 'upload_approval_letter');
+  const decided = through(saved, 'record_customer_approval');
+  assert.equal(decided.error, null);
+  assert.equal(decided.customerReview.evidenceText, null);
+  assert.equal(derive(decided).hasCustomerApproval, true);
 });

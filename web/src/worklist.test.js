@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {advanceReadinessJournal, selectReadiness} from './readiness.js';
 import {derive, initialState, transition, transitionWalkthrough} from './workflow.js';
 import {fixturePeople, renewalFixture, renewalRecords, worklistFixture, worklistPeople, worklistResponseExamples} from './renewalFixtures.js';
+import {customerDecisionSteps, walkthroughFields} from './customerDecision.js';
 import {
   buildWorklist, clearWorklistSearch, daysUntil, formatWorklistTime, readWorklistLocation, resolveWorklistEntry,
   resolveWorklistSelection, safeWorklistReturn, selectWorklist, updateWorklistSearch, worklistAccountHref, worklistActionHref, worklistHref,
@@ -12,7 +13,7 @@ const act = (state, type, fields = {}) => transition(state, {type, ...fields});
 const authorize = () => act(act(initialState, 'request_review'), 'approve_plan');
 const received = () => act(authorize(), 'obtain_document');
 const verified = () => act(received(), 'verify_document');
-const reviewed = () => act(act(verified(), 'request_customer_review'), 'record_customer_approval', {reviewedBy: fixturePeople.customerCounsel, evidenceText: 'Local walkthrough decision.'});
+const reviewed = () => customerDecisionSteps.reduce((state, type) => act(state, type, walkthroughFields(state, type)), act(verified(), 'request_customer_review'));
 const primary = data => data.renewals.find(row => row.id === renewalFixture.id);
 const work = (data, kind) => data.workItems.find(row => row.renewalId === renewalFixture.id && row.kind === kind);
 const ids = result => result.rows.map(row => row.id);
@@ -556,4 +557,29 @@ test('account palette links preserve the current worklist or its return path wit
     assert.equal(worklistAccountHref(path, query, 'renewal:mercer-renewal'), expected);
     assert.equal(worklistAccountHref(renewalFixture.paths.evidence, new URLSearchParams({returnTo: `${path}?${query}`}), 'renewal:mercer-renewal'), expected);
   }
+});
+
+test('the customer review item waits on the unidentified counsel, then moves through the letter, its inspection and the authority record', () => {
+  let state = act(verified(), 'request_customer_review');
+  let item = work(buildWorklist(state), 'customer_review');
+  assert.deepEqual([item.status, item.waitingLabel, item.workflowAction.command, item.readinessCheckId], ['waiting', 'Customer counsel · unidentified', 'upload_approval_letter', 'receive_approval_letter']);
+  assert.equal(item.ownerLabel, fixturePeople.internalReviewer);
+  for (const [type, command, check] of [['upload_approval_letter', 'inspect_approval_letter', 'inspect_approval_letter'],
+    ['inspect_approval_letter', 'record_customer_authority', 'record_customer_authority'], ['record_customer_authority', 'record_customer_approval', 'record_customer_decision']]) {
+    state = act(state, type, walkthroughFields(state, type));
+    item = work(buildWorklist(state), 'customer_review');
+    assert.deepEqual([item.status, item.waitingOn, item.workflowAction.command, item.readinessCheckId], ['ready', null, command, check]);
+  }
+  state = act(state, 'record_customer_approval', walkthroughFields(state, 'record_customer_approval'));
+  item = work(buildWorklist(state), 'customer_review');
+  assert.equal(item.status, 'complete');
+  assert.match(item.output, /citing receipt receipt-approval-letter-v4-1/);
+});
+
+test('a rejected version reopens collection with a replacement action and keeps inspection blocked on it', () => {
+  const rejected = act(received(), 'reject_document', {reason: 'The file is unsigned.'});
+  const result = buildWorklist(rejected);
+  assert.deepEqual([work(result, 'collection').status, work(result, 'collection').workflowAction.command], ['ready', 'obtain_document']);
+  assert.equal(work(result, 'inspection').status, 'blocked');
+  assert.equal(work(result, 'inspection').blockedReasons[0].code, 'document_not_rejected');
 });
