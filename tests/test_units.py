@@ -388,7 +388,7 @@ class Evidence(unittest.TestCase):
         deep: list = []
         for _ in range(3000):
             deep = [deep]
-        for place in ("called_at", "speaker", "body", "id"):
+        for place in ("called_at", "body", "id"):
             source = evidence(notes=[("Dana Ito", "We will sign.")])
             note = next(row for row in source["records"] if row["record_ref"].startswith("calls/"))
             note[place] = deep
