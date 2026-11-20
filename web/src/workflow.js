@@ -1,7 +1,10 @@
 import {fixtureEvidence, initialState, fixturePeople, renewalFixture} from './renewalFixtures.js';
 export {fixtureEvidence, initialState} from './renewalFixtures.js';
 
-export function derive(state) {
+export function derive(state, reviewer = fixturePeople.internalReviewer) {
+  const isReviewerEligible = Boolean(reviewer && state.plan.owner?.trim() && state.plan.owner.trim() !== reviewer);
+  const planReviewBlockedReason = isReviewerEligible ? null
+    : 'An independent reviewer is needed. The plan owner cannot review their own work.';
   const isPlanApproved = state.plan.status === 'approved'
     && state.plan.approvedRevision === state.plan.revision;
   const isDocumentVerified = Boolean(state.document
@@ -38,9 +41,11 @@ export function derive(state) {
     isPlanApproved,
     isDocumentVerified,
     hasCustomerApproval,
-    canRequestReview: ['draft', 'changes_requested'].includes(state.plan.status),
-    canApprovePlan: state.plan.status === 'in_review',
-    canRequestChanges: state.plan.status === 'in_review',
+    isReviewerEligible,
+    planReviewBlockedReason,
+    canRequestReview: isReviewerEligible && ['draft', 'changes_requested'].includes(state.plan.status),
+    canApprovePlan: isReviewerEligible && state.plan.status === 'in_review',
+    canRequestChanges: isReviewerEligible && state.plan.status === 'in_review',
     canObtainDocument: isPlanApproved && !state.document,
     canVerifyDocument: isPlanApproved && Boolean(state.document) && !isDocumentVerified,
     canRequestCustomerReview: isPlanApproved && isDocumentVerified && !customerReviewIsCurrent,
@@ -64,6 +69,12 @@ export function derive(state) {
       complete: 'Requirement resolved',
     })[taskStage],
   };
+}
+
+// Walkthrough commands never use the device clock.
+export function transitionWalkthrough(state, action) {
+  const at = new Date(Date.parse(renewalFixture.workflowClockStart) + state.history.length * 60000).toISOString();
+  return transition(state, {...action, at});
 }
 
 function rejected(state, message) {
@@ -116,12 +127,12 @@ export function transition(state, action) {
       }, `Plan saved as revision ${state.plan.revision + 1}`, 'Changes require acquisition reapproval and a new customer counsel review.', null, { changedFields, planSnapshot: planSnapshot(plan) });
     }
     case 'request_review':
-      if (!ready.canRequestReview) return rejected(state, 'This plan is already in review or approved.');
+      if (!ready.canRequestReview) return rejected(state, ready.planReviewBlockedReason || 'This plan is already in review or approved.');
       return changed(state, action, {
         plan: { ...state.plan, status: 'in_review', requestedAt: at, reviewNote: '' },
       }, `Revision ${state.plan.revision} submitted for review`, 'Review authorizes obtaining the document. The document may still be missing.');
     case 'approve_plan':
-      if (!ready.canApprovePlan) return rejected(state, 'Submit the current revision for review before approving it.');
+      if (!ready.canApprovePlan) return rejected(state, ready.planReviewBlockedReason || 'Submit the current revision for review before approving it.');
       return changed(state, action, {
         plan: { ...state.plan, status: 'approved', approvedRevision: state.plan.revision, approvedAt: at, approver: action.approver?.trim() || fixturePeople.internalReviewer },
         task: state.task
@@ -129,7 +140,7 @@ export function transition(state, action) {
           : { id: renewalFixture.taskId, title: state.plan.title, owner: state.plan.owner, status: 'open', createdAt: at, planRevision: state.plan.revision },
       }, `Acquisition authorized for revision ${state.plan.revision}`, state.task ? 'The existing acquisition task is ready to continue.' : 'One acquisition task was created. Customer approval remains outstanding.', null, { planSnapshot: planSnapshot(state.plan) });
     case 'request_changes':
-      if (!ready.canRequestChanges) return rejected(state, 'Changes can be requested while the plan is in review.');
+      if (!ready.canRequestChanges) return rejected(state, ready.planReviewBlockedReason || 'Changes can be requested while the plan is in review.');
       return changed(state, action, {
         plan: { ...state.plan, status: 'changes_requested', approvedRevision: null, reviewNote: action.note?.trim() || 'Clarify the acquisition owner and the document source.' },
       }, 'Reviewer requested changes', action.note?.trim() || 'Clarify the acquisition owner and the document source.');
