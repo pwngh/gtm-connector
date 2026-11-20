@@ -147,6 +147,25 @@
    "bytes": 7692,
    "records": 1
   },
+  "folders/prepared_no_slack/audit.jsonl": {
+   "sha256": "1246984e747e116ae613e4313a015ceb73cfb28248dfce44568896483084ca20",
+   "bytes": 2106,
+   "records": 4
+  },
+  "folders/prepared_no_slack/audit.sqlite3.gz": {
+   "sha256_of_rows": "94976b437804e7ab0792e6c2fbfc2135264dac51b9ceb1b0d0e39b4d3683d5c4",
+   "records": 4
+  },
+  "folders/prepared_no_slack/selected-briefs/brief-2aee567d000040008000000000000002.json": {
+   "sha256": "3f12799273a6ed18dae85458bd44d710d3024ffd98e42558d6d9cffe03594700",
+   "bytes": 7356,
+   "records": 1
+  },
+  "folders/prepared_no_slack/tool_result.json": {
+   "sha256": "f5edecf1245b9bf0324534f36042a36aa42273283c35a628efaa1ca0b1d8171a",
+   "bytes": 5005,
+   "records": 1
+  },
   "library/datetime.json": {
    "sha256": "60c0fdf70cb5ee30d9a75c5d47ffe9d76a7d99f6e217279289e4e8e1c6d8598a",
    "bytes": 30907,

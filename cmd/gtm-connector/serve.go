@@ -19,6 +19,41 @@ import (
 	httptransport "github.com/pwngh/gtm-connector/internal/transport/http"
 )
 
+// openAppStore connects as the app role, as serve and demo do. It refuses a
+// role that owns the tables, a database setup has not migrated, and one
+// whose restore has not installed its credentials.
+func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
+	if c.databaseURL == "" {
+		return nil, errors.New("set GTM_DATABASE_URL to the app role's PostgreSQL URL")
+	}
+	store, err := openStore(ctx, c.databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	check := func() error {
+		if err := store.CheckAppRole(ctx); err != nil {
+			return err
+		}
+		if version, err := store.SchemaVersion(ctx); err != nil {
+			return err
+		} else if version != postgres.LatestSchemaVersion() {
+			return fmt.Errorf("the database is at schema %d, not %d; run setup first", version,
+				postgres.LatestSchemaVersion())
+		}
+		if pending, err := store.PendingRestore(ctx); err != nil {
+			return err
+		} else if pending != "" {
+			return errors.New("a restore has not installed its credentials; run restore again with the same backup")
+		}
+		return nil
+	}
+	if err := check(); err != nil {
+		store.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
 // serve runs the HTTPS server as the app role. It refuses to start before
 // setup has run, while a restore is unfinished, or as a role that owns the
 // tables.
@@ -31,28 +66,12 @@ func serve(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if c.databaseURL == "" {
-		return errors.New("set GTM_DATABASE_URL to the app role's PostgreSQL URL")
-	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	store, err := openStore(ctx, c.databaseURL)
+	store, err := openAppStore(ctx, c)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
-	if err := store.CheckAppRole(ctx); err != nil {
-		return err
-	}
-	if version, err := store.SchemaVersion(ctx); err != nil {
-		return err
-	} else if version != postgres.LatestSchemaVersion() {
-		return fmt.Errorf("the database is at schema %d, not %d; run setup first", version, postgres.LatestSchemaVersion())
-	}
-	if pending, err := store.PendingRestore(ctx); err != nil {
-		return err
-	} else if pending != "" {
-		return errors.New("a restore has not installed its credentials; run restore again with the same backup")
-	}
 	creds, err := openCredentials(c.credentialsDir, false)
 	if err != nil {
 		return fmt.Errorf("%w (run setup first)", err)

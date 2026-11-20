@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/authz"
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
@@ -126,6 +127,31 @@ func readFailed(w http.ResponseWriter, err error) {
 	default:
 		internal(w)
 	}
+}
+
+type accountView struct {
+	Account string `json:"account"`
+	Name    string `json:"name"`
+}
+
+// accounts lists the accounts the principal may read, by reference.
+func (s *Server) accounts(w http.ResponseWriter, r *http.Request, p authz.Principal) {
+	accounts, err := s.evidence.Accounts(r.Context(), p)
+	if err != nil {
+		readFailed(w, err)
+		return
+	}
+	views := make([]accountView, len(accounts))
+	for i, a := range accounts {
+		// A display name is source text: neutralized before anything shows it.
+		name, _, err := evidence.SafeText(a.DisplayName)
+		if err != nil {
+			internal(w)
+			return
+		}
+		views[i] = accountView{a.Ref, name}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"accounts": views})
 }
 
 func (s *Server) accountCards(w http.ResponseWriter, r *http.Request, p authz.Principal) {

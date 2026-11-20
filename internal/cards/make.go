@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,6 +115,9 @@ type Sealed struct {
 	Text    string
 }
 
+// rulesVersion is the version of the rules a card's text is made under.
+var rulesVersion = strconv.Itoa(evidence.SanitizerVersion)
+
 // The scopes the reads need.
 var scopes = map[string]string{"get_account": "crm:read", "list_opportunities": "crm:read",
 	"read_call_notes": "calls:read", "read_slack_messages": "slack:read"}
@@ -184,6 +188,34 @@ func versions(records []*strictjson.Object) ([]receipts.RecordVersion, error) {
 		out[i] = receipts.RecordVersion{Source: parts[0], Table: parts[1], RecordID: parts[2], Body: []byte(body)}
 	}
 	return out, nil
+}
+
+// replayed is the committed outcome of a read whose start found its receipt already there: its work ran,
+// or is running, under the first start, so it does not run again. A pending read is another worker's
+// (ErrInProgress); a finished one gives back what it bound.
+func (m *Maker) replayed(ctx context.Context, r reading) (records []any, bound []receipts.RecordVersion, outcome string, err error) {
+	started := r.started
+	switch {
+	case started.Status == "pending":
+		return nil, nil, "", fmt.Errorf("%s: %w", r.tool, receipts.ErrInProgress)
+	case started.Status == "ok":
+		bound, err = m.Receipts.Records(ctx, started.WorkspaceID, started.AuditID)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		records = make([]any, len(bound))
+		for i, v := range bound {
+			if records[i], err = strictjson.Loads(v.Body); err != nil {
+				return nil, nil, "", err
+			}
+		}
+		return records, bound, "ok", nil
+	case started.Error != nil && *started.Error == "request_failed" && *started.HTTPStatus == 403:
+		return nil, nil, "denied", nil
+	case started.Error != nil && *started.Error == "request_failed" && *started.HTTPStatus == 200:
+		return nil, nil, "not_selected", nil
+	}
+	return nil, nil, "", fmt.Errorf("%s: %w", r.tool, ErrBriefing)
 }
 
 // reading is one read's receipt, started by the caller; read runs it.
@@ -268,8 +300,13 @@ func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, 
 		}
 		c.ids = append(c.ids, started.AuditID)
 		c.receiptOf[p.tool] = started.AuditID
-		records, bound, outcome, err := m.read(ctx, reading{tool: p.tool, system: p.system, accountID: accountID,
-			principal: principal, started: started, deadline: deadline})
+		r := reading{tool: p.tool, system: p.system, accountID: accountID, principal: principal, started: started,
+			deadline: deadline}
+		run := m.read
+		if started.Replay {
+			run = m.replayed
+		}
+		records, bound, outcome, err := run(ctx, r)
 		if err != nil {
 			return c, err
 		}
@@ -357,8 +394,10 @@ func (m *Maker) publish(ctx context.Context, p receipts.Publication, units []evi
 // Brief is briefing.create_brief: the card a person asks for with brief or demo. Each read is its own
 // tool call, numbered as the CLI numbers its JSON-RPC requests; the save_brief receipt seals the card.
 type Brief struct {
-	Principal    Principal
-	OperationID  string // the same across retries of the command
+	Principal Principal
+	// OperationID is the same across retries of the command. The n-th read's operation is OperationID/n
+	// and the seal's OperationID/seal.
+	OperationID  string
 	AccountID    string
 	AsOf         string
 	IncludeSlack bool
@@ -376,7 +415,7 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	c, err := m.collect(ctx, plan(m.Sources, b.IncludeSlack), b.AccountID, p, time.Time{}, b.IncludeSlack,
 		func(n int, read planned) (receipts.Receipt, error) {
 			return m.Receipts.Start(ctx, receipts.Start{WorkspaceID: p.WorkspaceID,
-				OperationID: fmt.Sprintf("%s#%d", b.OperationID, n), PrincipalID: p.PrincipalID, TokenID: p.TokenID,
+				OperationID: fmt.Sprintf("%s/%d", b.OperationID, n), PrincipalID: p.PrincipalID, TokenID: p.TokenID,
 				Tool: read.tool, Scope: scopes[read.tool], AccountRef: b.AccountID,
 				ConnectionID: m.connection(read.system), Arguments: strictjson.NewObject("account_id", b.AccountID),
 				RequestID: receipts.RPC(n), BriefID: &id})
@@ -392,10 +431,13 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	if err != nil {
 		return nil, fmt.Errorf("brief %s rejected; no card published: %w", id, err)
 	}
-	seal, err := m.Receipts.Start(ctx, receipts.Start{WorkspaceID: p.WorkspaceID, OperationID: b.OperationID + "#seal",
-		PrincipalID: p.PrincipalID, TokenID: p.TokenID, Tool: "save_brief", AccountRef: b.AccountID,
+	seal, err := m.Receipts.Start(ctx, receipts.Start{WorkspaceID: p.WorkspaceID, OperationID: b.OperationID + "/seal",
+		PrincipalID: p.PrincipalID, TokenID: p.TokenID, Tool: receipts.SaveBrief, AccountRef: b.AccountID,
 		Arguments: strictjson.NewObject("account_id", b.AccountID, "brief_id", id), RequestID: receipts.Null()})
 	if err != nil {
+		return nil, err
+	}
+	if err := ownStart(seal); err != nil {
 		return nil, err
 	}
 	elapsed := m.stopwatch()
@@ -411,7 +453,7 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 		return nil, err
 	}
 	return m.publish(ctx, receipts.Publication{WorkspaceID: p.WorkspaceID, AccountRef: b.AccountID, BriefID: id,
-		PrincipalID: p.PrincipalID, Seal: seal.Ticket(), Kind: "card", SchemaVersion: 3, Bytes: []byte(encoded),
+		PrincipalID: p.PrincipalID, Seal: seal.Ticket(), Kind: "card", SchemaVersion: 3, RulesVersion: rulesVersion, Bytes: []byte(encoded),
 		Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c, receipts.Failed(500, "brief_save_failed"))
 }
 
@@ -455,6 +497,10 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 		PrincipalID: principal.PrincipalID, TokenID: principal.TokenID, Tool: receipts.Composite, Scope: "crm:read",
 		AccountRef: accountID, Arguments: p.Arguments, RequestID: p.RequestID})
 	if err != nil {
+		return nil, err
+	}
+	// Only the worker whose start committed the call runs it and settles it.
+	if err := ownStart(outer); err != nil {
 		return nil, err
 	}
 	elapsed, deadline := m.stopwatch(), m.now().Add(BriefDeadline)
@@ -516,9 +562,21 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 		return fail(ErrInvalidToken)
 	}
 	return m.publish(ctx, receipts.Publication{WorkspaceID: principal.WorkspaceID, AccountRef: accountID, BriefID: id,
-		PrincipalID: principal.PrincipalID, Seal: outer.Ticket(), Kind: "selected_brief", SchemaVersion: 3,
+		PrincipalID: principal.PrincipalID, Seal: outer.Ticket(), Kind: "selected_brief", SchemaVersion: 3, RulesVersion: rulesVersion,
 		Bytes: []byte(encoded), Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c,
 		receipts.Failed(200, "request_failed"))
+}
+
+// ownStart refuses to run work whose receipt another start committed: it is running under that start
+// (ErrInProgress), or it finished there (receipts.ErrFinished), and its outcome stands.
+func ownStart(r receipts.Receipt) error {
+	switch {
+	case !r.Replay:
+		return nil
+	case r.Status == "pending":
+		return fmt.Errorf("%s %s: %w", r.Tool, r.AuditID, receipts.ErrInProgress)
+	}
+	return fmt.Errorf("%s %s finished as %s: %w", r.Tool, r.AuditID, r.Status, receipts.ErrFinished)
 }
 
 // bindings is a prepared brief's record of the sources it was read from.

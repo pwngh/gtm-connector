@@ -56,7 +56,7 @@ func (s *scope) maker(source Source, sources evidence.Sources) (*Maker, *receipt
 	store := receipts.NewMemory(s.clock, s.uuid)
 	connections := map[string]string{"crm": "crm-1", "calls": "calls-1", "slack": "slack-1"}
 	for _, id := range connections {
-		store.SetGeneration(id, 1)
+		store.SetGeneration(testWorkspace, id, 1)
 	}
 	return &Maker{Receipts: store, Source: source, Sources: sources, Connections: connections, NewID: s.uuid,
 		Now: still}, store
@@ -161,8 +161,65 @@ func load(t *testing.T, data []byte) any {
 	return value
 }
 
-func runFamily(t *testing.T, family string, prepare func(row fixtureRow, input *strictjson.Object) setup) {
+// cardStore is where a family's cards are built and published.
+type cardStore interface {
+	// maker is the Maker for one card, reading through connections at generation 1, and the request it makes.
+	maker(t *testing.T, sc *scope, s setup, row fixtureRow, b Brief) (*Maker, Brief)
+	// published checks what the store holds for a card the maker sealed, and gives the bytes, digest and seal
+	// to compare with the oracle's.
+	published(t *testing.T, sealed *Sealed, s setup, row fixtureRow, mismatches *oracletest.Mismatches) (
+		payload []byte, sha string, seal receipts.Receipt)
+}
+
+// memoryCards builds each card on its own Memory store, under the scope's IDs and clock, as the oracle did.
+type memoryCards struct{ stores map[string]*receipts.Memory }
+
+func newMemoryCards(*testing.T) cardStore { return &memoryCards{stores: map[string]*receipts.Memory{}} }
+
+func (c *memoryCards) maker(_ *testing.T, sc *scope, s setup, _ fixtureRow, b Brief) (*Maker, Brief) {
+	m, store := sc.maker(s.source, s.sources)
+	c.stores[s.scope] = store
+	return m, b
+}
+
+func (c *memoryCards) published(_ *testing.T, sealed *Sealed, s setup, row fixtureRow,
+	mismatches *oracletest.Mismatches) ([]byte, string, receipts.Receipt) {
+	published, _ := c.stores[s.scope].Published(testWorkspace, sealed.BriefID)
+	if string(published.Bytes) != string(sealed.Payload) {
+		mismatches.Add("%s: the published bytes are not the sealed ones", row.Key)
+	}
+	// The published projections, type for type, are the oracle card's units and gaps.
+	want, err := receipts.ParsePayload([]byte(row.Card))
+	if err != nil || len(published.Units) != len(want.Units) || len(published.Gaps) != len(want.Gaps) {
+		mismatches.Add("%s: %d units and %d gaps published", row.Key, len(published.Units), len(published.Gaps))
+		return sealed.Payload, sealed.SHA256, sealed.Seal
+	}
+	for i, u := range published.Units {
+		value, err := strictjson.Loads(u.Value)
+		if err != nil || !sameJSON(value, want.Units[i]) {
+			mismatches.Add("%s: published unit %d is not the oracle's", row.Key, i+1)
+		}
+	}
+	for i, g := range published.Gaps {
+		var count, byRole any
+		if g.Count != nil {
+			count = g.Count
+		}
+		if g.ByRole != nil {
+			byRole, _ = strictjson.Loads(g.ByRole)
+		}
+		if !sameJSON(strictjson.NewObject("code", g.Code, "disposition", g.Disposition, "count", count,
+			"by_role", byRole, "text", g.Text), want.Gaps[i]) {
+			mismatches.Add("%s: published gap %d is not the oracle's", row.Key, i+1)
+		}
+	}
+	return sealed.Payload, sealed.SHA256, sealed.Seal
+}
+
+func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStore,
+	prepare func(row fixtureRow, input *strictjson.Object) setup) {
 	mismatches := oracletest.NewMismatches(t, "cards/"+family)
+	var cards cardStore
 	checked, identical, skipped := 0, 0, map[string]int{}
 	for _, line := range oracletest.Lines(t, "cards/"+family+".jsonl.gz") {
 		var row fixtureRow
@@ -181,28 +238,31 @@ func runFamily(t *testing.T, family string, prepare func(row fixtureRow, input *
 		if err := json.Unmarshal(row.Options, &o); err != nil {
 			t.Fatal(err)
 		}
+		if cards == nil {
+			cards = newStore(t)
+		}
 		sc := newScope(s.scope)
-		m, store := sc.maker(s.source, s.sources)
-		sealed, err := m.Brief(context.Background(), o.brief(row.AccountID, sc.token(accessToken)))
+		m, b := cards.maker(t, sc, s, row, o.brief(row.AccountID, sc.token(accessToken)))
+		sealed, err := m.Brief(context.Background(), b)
 		if err != nil {
 			mismatches.Add("%s: no card: %v", row.Key, err)
 			continue
 		}
-		if string(sealed.Payload) == row.Card {
+		payload, sha, sealReceipt := cards.published(t, sealed, s, row, mismatches)
+		if string(payload) == row.Card {
 			identical++
 		} else {
-			mismatches.Add("%s: card text differs at %s", row.Key, oracletest.FirstDifference(string(sealed.Payload), row.Card))
+			mismatches.Add("%s: card text differs at %s", row.Key, oracletest.FirstDifference(string(payload), row.Card))
 		}
-		published, _ := store.Published(sealed.BriefID)
-		if sealed.SHA256 != row.SHA256 || string(published.Bytes) != row.Card {
-			mismatches.Add("%s: digest %s, want %s", row.Key, sealed.SHA256, row.SHA256)
+		if sha != row.SHA256 {
+			mismatches.Add("%s: digest %s, want %s", row.Key, sha, row.SHA256)
 		}
-		if seal, err := receipts.Decode(load(t, row.Seal)); err != nil || !sealed.Seal.Same(seal) {
-			got, _ := strictjson.Dumps(sealed.Seal.Value(), strictjson.Quoted)
+		if seal, err := receipts.Decode(load(t, row.Seal)); err != nil || !sealReceipt.Same(seal) {
+			got, _ := strictjson.Dumps(sealReceipt.Value(), strictjson.Quoted)
 			mismatches.Add("%s: seal receipt %s, want %s", row.Key, got, row.Seal)
 		}
 		want := load(t, []byte(row.Card)).(*strictjson.Object)
-		if !evidence.Equal(load(t, sealed.Payload), want) {
+		if !evidence.Equal(load(t, payload), want) {
 			mismatches.Add("%s: card JSON differs as values", row.Key)
 		}
 		if units, _ := want.Get("units"); !evidence.Equal(evidence.UnitValues(sealed.Units), units) {
@@ -226,7 +286,12 @@ var builtCards = map[string]int{
 	"books_slack": 0, "slack_threads": 0, "books_salesforce": 0,
 }
 
-func TestCardsFromDemoStores(t *testing.T) {
+func TestCardsFromDemoStores(t *testing.T) { demoStoreFamilies(t, newMemoryCards) }
+
+func TestCardsFromRecordedInputs(t *testing.T) { recordedInputFamilies(t, newMemoryCards) }
+
+// demoStoreFamilies builds the families whose cards read the demo stores, as seeded or with rows inserted.
+func demoStoreFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 	book := oracletest.Read(t, "cards/demo_book.json")
 	fresh := func() *demo.Store {
 		store, err := demo.Load(book)
@@ -236,14 +301,14 @@ func TestCardsFromDemoStores(t *testing.T) {
 		return store
 	}
 	t.Run("demo", func(t *testing.T) {
-		runFamily(t, "demo", func(row fixtureRow, _ *strictjson.Object) setup {
+		runFamily(t, "demo", newStore, func(row fixtureRow, _ *strictjson.Object) setup {
 			// "acc-003 without calls" was made in the scope "demo/acc-003/without calls".
 			return setup{scope: "demo/" + strings.Replace(row.Key, " ", "/", 1), source: fresh(), sources: demoSources(nil)}
 		})
 	})
 	for family, prefix := range map[string]string{"books_demo": "books", "varied_demo": "varied"} {
 		t.Run(family, func(t *testing.T) {
-			runFamily(t, family, func(row fixtureRow, input *strictjson.Object) setup {
+			runFamily(t, family, newStore, func(row fixtureRow, input *strictjson.Object) setup {
 				store := fresh()
 				rows, _ := input.Get("rows")
 				insert(t, store, rows.(*strictjson.Object), "crm", "calls", "slack")
@@ -252,7 +317,7 @@ func TestCardsFromDemoStores(t *testing.T) {
 		})
 	}
 	t.Run("cases", func(t *testing.T) {
-		runFamily(t, "cases", func(row fixtureRow, input *strictjson.Object) setup {
+		runFamily(t, "cases", newStore, func(row fixtureRow, input *strictjson.Object) setup {
 			store, sellers := fresh(), []string(nil)
 			if inserted, ok := input.Get("inserted"); ok {
 				insert(t, store, inserted.(*strictjson.Object), "crm", "calls", "slack")
@@ -267,12 +332,12 @@ func TestCardsFromDemoStores(t *testing.T) {
 	})
 }
 
-// TestCardsFromRecordedInputs builds the cards of the other families whose recorded inputs hold every row
-// the card reads. The rest need a source adapter that is not ported yet, and are counted by reason.
-func TestCardsFromRecordedInputs(t *testing.T) {
+// recordedInputFamilies builds the cards of the other families whose recorded inputs hold every row the card
+// reads. The rest need a source adapter that is not ported yet, and are counted by reason.
+func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 	book := oracletest.Read(t, "cards/demo_book.json")
 	t.Run("books_calls", func(t *testing.T) {
-		runFamily(t, "books_calls", func(row fixtureRow, input *strictjson.Object) setup {
+		runFamily(t, "books_calls", newStore, func(row fixtureRow, input *strictjson.Object) setup {
 			if _, ok := input.Get("transcript"); ok {
 				return setup{skip: "imported transcript: needs the transcript parser and import store"}
 			}
@@ -307,7 +372,9 @@ func TestCardsFromRecordedInputs(t *testing.T) {
 	}
 	for family, reason := range reasons {
 		t.Run(family, func(t *testing.T) {
-			runFamily(t, family, func(_ fixtureRow, input *strictjson.Object) setup { return setup{skip: reason(input)} })
+			runFamily(t, family, newStore, func(_ fixtureRow, input *strictjson.Object) setup {
+				return setup{skip: reason(input)}
+			})
 		})
 	}
 }

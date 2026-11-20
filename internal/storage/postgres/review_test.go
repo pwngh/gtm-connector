@@ -28,37 +28,34 @@ func TestPublishChecksEveryUnitsProvenance(t *testing.T) {
 
 	t.Run("a pending receipt", func(t *testing.T) {
 		pub, _ := publication(t, f, "prov-pending")
-		pending := child(t, f, parentOf(t, f, pub), 1, time.Minute)
+		pending := child(t, f, parentOf(t, f, pub), 2, time.Minute)
 		pub.Units[0].ReceiptID, pub.Units[0].SourceRecordID = pending.ID, ""
-		pub.Kind, pub.ReadReceiptIDs = "cli", nil
 		refuse(t, f, pub)
 	})
 	t.Run("a read of another account", func(t *testing.T) {
 		pub, _ := publication(t, f, "prov-account")
-		start := childStart(f, parentOf(t, f, pub), 1, time.Minute)
+		start := childStart(f, parentOf(t, f, pub), 2, time.Minute)
 		start.AccountRef = "acc-004"
 		other, _, err := f.Store.RunChildRead(ctx, start, func(context.Context) ([]postgres.RecordVersion, error) {
 			return records("acc-004"), nil
 		})
 		ok(t, err)
 		pub.Units[0].ReceiptID, pub.Units[0].SourceRecordID = other.ID, ""
-		pub.Kind, pub.ReadReceiptIDs = "cli", nil
 		refuse(t, f, pub)
 	})
 	t.Run("a read under another brief", func(t *testing.T) {
 		pub, _ := publication(t, f, "prov-parent")
 		elsewhere := parent(t, f, "prov-parent-elsewhere", time.Minute)
-		read, _, err := f.Store.RunChildRead(ctx, childStart(f, elsewhere, 0, time.Minute),
+		read, _, err := f.Store.RunChildRead(ctx, childStart(f, elsewhere, 1, time.Minute),
 			func(context.Context) ([]postgres.RecordVersion, error) { return records("elsewhere"), nil })
 		ok(t, err)
 		pub.Units[0].ReceiptID, pub.Units[0].SourceRecordID = read.ID, ""
-		pub.Kind, pub.ReadReceiptIDs = "cli", nil
 		refuse(t, f, pub)
 	})
 	t.Run("a record version its receipt never returned", func(t *testing.T) {
 		pub, _ := publication(t, f, "prov-record")
 		elsewhere := parent(t, f, "prov-record-elsewhere", time.Minute)
-		read, _, err := f.Store.RunChildRead(ctx, childStart(f, elsewhere, 0, time.Minute),
+		read, _, err := f.Store.RunChildRead(ctx, childStart(f, elsewhere, 1, time.Minute),
 			func(context.Context) ([]postgres.RecordVersion, error) { return records("never"), nil })
 		ok(t, err)
 		var stranger string
@@ -66,6 +63,21 @@ func TestPublishChecksEveryUnitsProvenance(t *testing.T) {
 			&stranger, read.ID))
 		pub.Units[0].SourceRecordID = stranger
 		refuse(t, f, pub)
+	})
+	// Only cards made here publish, each sealed by its own brief receipt.
+	t.Run("a card of kind cli or prepared", func(t *testing.T) {
+		for _, kind := range []string{"cli", "prepared"} {
+			pub, _ := publication(t, f, "prov-kind-"+kind)
+			pub.Kind = kind
+			_, err := f.Store.PublishCard(ctx, pub)
+			is(t, err, postgres.ErrSealMismatch)
+		}
+	})
+	t.Run("a brief receipt other than the seal", func(t *testing.T) {
+		pub, _ := publication(t, f, "prov-parent-seal")
+		pub.ParentReceiptID = f.Parent.ID
+		_, err := f.Store.PublishCard(ctx, pub)
+		is(t, err, postgres.ErrSealMismatch)
 	})
 	t.Run("a stale generation on a unit's receipt", func(t *testing.T) {
 		pub, _ := publication(t, f, "prov-stale")
@@ -147,11 +159,11 @@ func TestProjectionsNeverChangeAfterPublication(t *testing.T) {
 func TestSourceReadsClaimOnlyWhatTheyBound(t *testing.T) {
 	f := postgrestest.New(t)
 	p := parent(t, f, "claims", time.Minute)
-	c := child(t, f, p, 0, time.Minute)
+	c := child(t, f, p, 1, time.Minute)
 	if _, err := f.Store.FinishReceipt(ctx, finishOK(c, "crm/accounts/acc-003")); err == nil {
 		t.Fatal("FinishReceipt finished a source read ok without bindings")
 	}
-	c2 := child(t, f, p, 1, time.Minute)
+	c2 := child(t, f, p, 2, time.Minute)
 	err := sql(t, f, `UPDATE receipts SET status = 'ok', http_status = 200, rows = '["crm/accounts/acc-003"]',
 		row_count = 1, finished_at = now(), finishing_lease = lease_token WHERE id = $1`, c2.ID)
 	if err == nil {
@@ -172,7 +184,7 @@ func TestSourceReadsClaimOnlyWhatTheyBound(t *testing.T) {
 		t.Fatal("a receipt was inserted finished")
 	}
 	// A CRM read cannot return a calls record.
-	c3 := child(t, f, p, 2, time.Minute)
+	c3 := child(t, f, p, 3, time.Minute)
 	wrong := []postgres.RecordVersion{{Source: "calls", Table: "call_notes", RecordID: "note-1", Body: []byte("x")}}
 	if _, err := f.Store.FinishRead(ctx, c3.ID, c3.LeaseToken, wrong, 1); err == nil {
 		t.Fatal("a crm:read receipt bound a calls record")
@@ -201,7 +213,7 @@ func TestTheLeaseHolderIsEnforcedByTheDatabase(t *testing.T) {
 func TestAGenerationBumpWaitsForAFinishingRead(t *testing.T) {
 	f := postgrestest.New(t)
 	p := parent(t, f, "bump-wait", time.Minute)
-	c := child(t, f, p, 0, time.Minute)
+	c := child(t, f, p, 1, time.Minute)
 	paused, release := make(chan struct{}), make(chan struct{})
 	postgres.SetCrash(f.Store, func(at string) error {
 		if at == "read:bound" {
@@ -296,7 +308,7 @@ func TestConcurrentCallbacksReadOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			f.Store.RunChildRead(ctx, childStart(f, p, 0, time.Minute),
+			f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute),
 				func(context.Context) ([]postgres.RecordVersion, error) {
 					reads.Add(1)
 					time.Sleep(100 * time.Millisecond)
@@ -314,10 +326,10 @@ func TestConcurrentCallbacksReadOnce(t *testing.T) {
 func TestAnExpiredPendingRetryDoesNotReadAgain(t *testing.T) {
 	f := postgrestest.New(t)
 	p := parent(t, f, "expired-retry", time.Minute)
-	child(t, f, p, 0, 200*time.Millisecond) // the worker that stopped
+	child(t, f, p, 1, 200*time.Millisecond) // the worker that stopped
 	time.Sleep(300 * time.Millisecond)
 	reads := 0
-	r, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 0, time.Minute),
+	r, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { reads++; return records("again"), nil })
 	if reads != 0 || err == nil {
 		t.Fatalf("the retry read again (reads %d, err %v, receipt %+v)", reads, err, r)
@@ -328,9 +340,9 @@ func TestRecoveryAfterPublicationCommits(t *testing.T) {
 	f := postgrestest.New(t)
 	// The fixture's brief has finished. Its read, retried, is the committed one.
 	reads := 0
-	r, versions, err := f.Store.RunChildRead(ctx, postgres.ChildReadStart{ParentID: f.Parent.ID, Ordinal: 0,
-		Tool: "get_account", Scope: "crm:read", ConnectionID: f.Connection.ID,
-		Arguments: json.RawMessage(`{"account_id":"acc-003"}`), Lease: time.Minute},
+	r, versions, err := f.Store.RunChildRead(ctx, postgres.ChildReadStart{ParentID: f.Parent.ID, Ordinal: 1,
+		Tool: "get_account", Scope: "crm:read", ConnectionID: f.Connection.ID, BriefID: "brief-1",
+		Arguments: json.RawMessage(`{"account_id": "acc-003"}`), Lease: time.Minute},
 		func(context.Context) ([]postgres.RecordVersion, error) { reads++; return nil, nil })
 	ok(t, err)
 	if reads != 0 || r.ID != f.Read.ID || len(versions) != 2 {
@@ -358,13 +370,13 @@ func TestReplayMatchesTheWholeRequest(t *testing.T) {
 		}
 	}
 	p := parent(t, f, "child-identity", time.Minute)
-	child(t, f, p, 0, time.Minute)
-	scoped := childStart(f, p, 0, time.Minute)
+	child(t, f, p, 1, time.Minute)
+	scoped := childStart(f, p, 1, time.Minute)
 	scoped.Scope = "calls:read"
 	if _, err := f.Store.StartChildRead(ctx, scoped); err == nil {
 		t.Error("a child replay with another scope was accepted")
 	}
-	accounted := childStart(f, p, 0, time.Minute)
+	accounted := childStart(f, p, 1, time.Minute)
 	ok(t, f.Store.EnsureAccount(ctx, f.Workspace.ID, "acc-004", "Other"))
 	accounted.AccountRef = "acc-004"
 	if _, err := f.Store.StartChildRead(ctx, accounted); err == nil {
@@ -401,14 +413,14 @@ func TestVersionConflictsAndLeaseErrors(t *testing.T) {
 	p := parent(t, f, "conflict", time.Minute)
 	v := []postgres.RecordVersion{{Source: "crm", Table: "accounts", RecordID: "acc-003", ContentVersion: "1",
 		Body: []byte("a")}}
-	_, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 0, time.Minute),
+	_, _, err := f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return v, nil })
 	ok(t, err)
 	v[0].Body = []byte("b")
-	_, _, err = f.Store.RunChildRead(ctx, childStart(f, p, 1, time.Minute),
+	_, _, err = f.Store.RunChildRead(ctx, childStart(f, p, 2, time.Minute),
 		func(context.Context) ([]postgres.RecordVersion, error) { return v, nil })
 	is(t, err, postgres.ErrVersionConflict)
-	c, err := f.Store.ReceiptByOperation(ctx, p.OperationID+"#1")
+	c, err := f.Store.ReceiptByOperation(ctx, f.Workspace.ID, p.OperationID+"#2")
 	ok(t, err)
 	if c.Status != "error" || c.HTTPStatus == nil || *c.HTTPStatus != 409 || *c.Error != "version_conflict" {
 		t.Fatalf("conflicted read %+v", c)

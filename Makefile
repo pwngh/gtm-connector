@@ -2,6 +2,7 @@
 #
 #   make dev                  PostgreSQL in Compose, the connector on this machine
 #   make up                   everything in Compose
+#   make demo                 publish a card for each demo account that holds none
 #   make down                 stop; the database and credentials are kept
 #   make backup               back up the database and the credentials folder
 #   make restore BACKUP=NAME  restore a backup into an empty database
@@ -37,7 +38,7 @@ GTM_DB_PORT = $(shell sed -n 's/^GTM_DB_PORT=//p' .env 2>/dev/null)
 WEB_SOURCES := $(shell find web/src web/public web/index.html web/vite.config.js web/package.json web/package-lock.json -type f 2>/dev/null)
 GO_SOURCES := go.mod go.sum $(shell find cmd internal -name '*.go' -o -name '*.sql')
 
-.PHONY: help env dev up down db backup restore test vet psql logs clean require-compose state
+.PHONY: help env dev up down db demo backup restore test vet psql logs clean require-compose state
 
 help: ## List the targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  %-10s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -76,6 +77,10 @@ up: require-compose state ## Build and start PostgreSQL and the connector in Com
 	$(COMPOSE) up -d --wait app
 	@scripts/colima-forward.sh ensure $(GTM_DB_PORT) $(GTM_PORT)
 	@echo "Open https://127.0.0.1:$(GTM_PORT)/ (local certificate in $(GTM_HOME)/credentials/tls.pem)"
+
+demo: db build/gtm-connector ## Publish a card for each demo account that holds none, for the demo sign-in
+	scripts/host.sh setup
+	scripts/host.sh demo
 
 down: require-compose ## Stop everything; the database volume and credentials are kept
 	$(COMPOSE) --profile tools down --remove-orphans

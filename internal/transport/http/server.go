@@ -128,6 +128,7 @@ func (s *Server) routes() {
 	mux.HandleFunc("GET /api/v1/session", s.getSession)
 	mux.HandleFunc("POST /api/v1/session", s.signIn)
 	mux.HandleFunc("DELETE /api/v1/session", s.signOut)
+	mux.HandleFunc("GET /api/v1/accounts", s.signedIn(s.accounts))
 	mux.HandleFunc("GET /api/v1/accounts/{account}/cards", s.signedIn(s.accountCards))
 	mux.HandleFunc("GET /api/v1/cards/{card}", s.signedIn(s.card))
 	mux.HandleFunc("GET /api/v1/cards/{card}/bytes", s.signedIn(s.cardBytes))

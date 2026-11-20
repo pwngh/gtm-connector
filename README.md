@@ -185,6 +185,7 @@ Desktop, or Colima with `docker-compose`).
 ```sh
 make dev                        # PostgreSQL in Compose, the server on this machine (needs Go and Node)
 make up                         # PostgreSQL and the server in Compose
+make demo                       # a card for each demo account, read by the demo sign-in
 make down                       # stop; the database and credentials are kept
 make backup                     # the database and the credentials folder, into one file
 make restore BACKUP=gtm-....tar.gz   # into an empty database (make clean deletes the database)
@@ -200,6 +201,16 @@ local TLS certificate and key, and the demo sign-in in `demo-credentials.json`. 
 restore connect as the database owner; the server connects as an app role that reads and writes rows
 and cannot change the schema or switch off a check. Browsers do not separate cookies by port, so
 another HTTPS server on `127.0.0.1` would see this one's cookies.
+
+`make demo` (or `gtm-connector demo` after setup, as the app role) loads the invented demo book into the
+demo workspace, grants the demo sign-in its 30 accounts, and makes and publishes each account's card
+through the Go card maker on PostgreSQL, under receipts. Each card is the one the Python package makes for
+that account, apart from its brief and receipt IDs, its token fingerprint and its read times. A run
+publishes only for accounts that hold no card, so running it again finishes a run that stopped part way;
+`demo --again` publishes another card for every account. Cards and receipts are never deleted. A grant
+someone revoked stays revoked, and its account gets no card. Signed in, the server lists the accounts at
+`/api/v1/accounts` and their cards at `/api/v1/accounts/ACCOUNT/cards`. Demo data and a real source never
+share a workspace: the database refuses a real connection in the demo workspace.
 
 Backups go to `~/.config/gtm-connector/backups`. A backup's digests detect corruption only: they
 are stored in the backup itself, so they do not prove who made it. A restore needs an empty

@@ -116,7 +116,7 @@ func TestDumpAndRestoreKeepState(t *testing.T) {
 		t.Fatal("state was lost")
 	}
 	// The triggers are back on after the restore.
-	_, err = fresh.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: f.Seal.ID, LeaseToken: f.Seal.LeaseToken,
+	_, err = fresh.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: f.Seal.ID, LeaseToken: f.SealLease,
 		Status: "error", HTTPStatus: 500})
 	is(t, err, postgres.ErrAlreadyFinished)
 

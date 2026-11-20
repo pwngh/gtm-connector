@@ -8,9 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/pwngh/gtm-connector/internal/receipts"
 )
 
 var (
@@ -21,6 +24,8 @@ var (
 	ErrProvenance = errors.New("a unit cites a read the card may not rest on")
 	// ErrProjection: the units and gaps are not exactly the card bytes' own.
 	ErrProjection = errors.New("the units and gaps differ from the card's bytes")
+	// ErrSealMismatch: the seal receipt is of another account or brief.
+	ErrSealMismatch = errors.New("the seal receipt names another account or brief")
 )
 
 // Card is a stored card: its bytes, their digest, and how it was sealed.
@@ -59,42 +64,50 @@ type Gap struct {
 // CardPublication is everything step 3 writes together.
 type CardPublication struct {
 	WorkspaceID, AccountRef, BriefID string
-	// ParentReceiptID is the brief's receipt: every read a unit cites is its
-	// child. It may be the seal itself (a prepared brief).
+	// ParentReceiptID is the brief's receipt, and is the seal: a card made
+	// here is sealed by its own brief receipt (receipts.CheckSeal).
 	ParentReceiptID string
 	// PrincipalID, when set, must be the seal's principal. The actor is
 	// always the seal's principal; a seal without one is the local owner's.
 	PrincipalID string
 	// The seal receipt, started (pending) before the card existed.
 	SealReceiptID, SealLeaseToken string
-	Kind                          string
-	SchemaVersion                 int
-	RulesVersion                  *string
-	// Bytes is a JSON object whose "units" and "gaps" arrays are exactly
-	// Units' bodies and Gaps.
-	Bytes []byte
-	Units []Unit
-	Gaps  []Gap
-	// ReadReceiptIDs are further reads the card rests on, beside those its
-	// units cite. Each must have finished ok, for the card's account, under
-	// the brief, at its connection's current generation.
+	// Kind is "go": only cards made here are published until admission of
+	// Python cards exists.
+	Kind          string
+	SchemaVersion int
+	RulesVersion  *string
+	// Bytes is the card. Its "units" and "gaps" arrays are exactly Units'
+	// bodies and Gaps, and its evidence.receipts embeds exactly the reads in
+	// ReadReceiptIDs, in order.
+	Bytes          []byte
+	Units          []Unit
+	Gaps           []Gap
 	ReadReceiptIDs []string
 	ElapsedMS      float64
 }
 
 // PublishCard is step 3, one transaction. Under the locked seal it checks
-// the seal's principal (its live grant, or the owner when it has none), the
-// projection of the bytes, and every read the card rests on; then it writes
-// the card bytes and digest, the unit and gap projections, and finishes the
-// seal naming the digest. The database checks the same at commit.
+// the seal (receipts.CheckSeal), the seal principal's live grant (or the
+// owner when it has none), the bytes against everything the store holds for
+// them (receipts.CheckPublication), and the generation of every read, holding
+// share locks on the grant, the reads and their connections until commit.
+// Then it writes the card bytes and digest, the unit and gap projections and
+// the read set, and finishes the seal naming the digest. The database checks
+// the same again at commit.
 //
-// If a check fails it writes no card, finishes the seal as an error and
-// returns ErrNotPermitted (403), ErrSourceChanged (409), ErrProvenance or
-// ErrProjection (422). A retry after a lost acknowledgement returns the card.
+// A seal that cannot seal this card gives ErrSealMismatch and stays pending.
+// A failed check writes no card, finishes the seal as an error and returns
+// ErrNotPermitted (403), ErrSourceChanged (409), ErrProvenance or
+// ErrProjection (422). A retry after a lost acknowledgement, by the holder of
+// the seal's lease, returns the card.
 func (s *Store) PublishCard(ctx context.Context, in CardPublication) (Card, error) {
-	if !validUUID(in.WorkspaceID) || !validUUID(in.SealReceiptID) || !validUUID(in.SealLeaseToken) ||
-		!validUUID(in.ParentReceiptID) {
+	if !validUUID(in.WorkspaceID) || !validUUID(in.SealReceiptID) || !validUUID(in.SealLeaseToken) {
 		return Card{}, ErrNotFound
+	}
+	if in.Kind != "go" || in.ParentReceiptID != in.SealReceiptID {
+		return Card{}, fmt.Errorf("%w: a card made here is of kind go, sealed by its own brief receipt",
+			ErrSealMismatch)
 	}
 	digest := sha256.Sum256(in.Bytes)
 	seal := ReceiptFinish{ReceiptID: in.SealReceiptID, LeaseToken: in.SealLeaseToken, Status: "ok",
@@ -105,27 +118,29 @@ func (s *Store) PublishCard(ctx context.Context, in CardPublication) (Card, erro
 		ParentReceiptID: in.ParentReceiptID, SealReceiptID: in.SealReceiptID}
 	var refused error
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		var status, account, brief string
-		var principal *string
-		var leaseHeld bool
-		err := tx.QueryRow(ctx, `
-			SELECT status, coalesce(account_ref, ''), coalesce(brief_id, ''), principal_id,
-			       lease_token = $3 AND lease_expires_at > clock_timestamp()
-			  FROM receipts WHERE id = $1 AND workspace_id = $2 AND parent_id IS NULL FOR UPDATE`,
-			in.SealReceiptID, in.WorkspaceID, in.SealLeaseToken).Scan(&status, &account, &brief, &principal, &leaseHeld)
+		var live bool
+		sealed, err := scanReceiptWith(tx.QueryRow(ctx, `SELECT `+receiptColumns+`,
+			r.lease_expires_at > clock_timestamp()
+			FROM receipts r WHERE r.id = $1 AND r.workspace_id = $2 FOR UPDATE OF r`,
+			in.SealReceiptID, in.WorkspaceID), &live)
 		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			return ErrNotFound
 		case err != nil:
 			return err
-		case status != "pending":
-			return errNotPending
-		case !leaseHeld:
+		case sealed.LeaseToken != in.SealLeaseToken:
 			return ErrLeaseLost
-		case account != in.AccountRef || brief != in.BriefID:
-			return errors.New("the seal receipt names another account or brief")
+		case sealed.Status != "pending":
+			return errNotPending
+		case !live:
+			return ErrLeaseLost
 		}
-		refused, err = s.recheck(ctx, tx, in, principal)
+		view, err := converted(sealed, nil)
+		if err != nil {
+			return err
+		}
+		if err := receipts.CheckSeal(view, in.view(nil)); err != nil {
+			return fmt.Errorf("%w: %w", ErrSealMismatch, err)
+		}
+		refused, err = s.recheck(ctx, tx, in, view)
 		if err != nil {
 			return err
 		}
@@ -148,32 +163,43 @@ func (s *Store) PublishCard(ctx context.Context, in CardPublication) (Card, erro
 		}
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-				card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, sha256($7), $8, $9, $10, $11)
+				card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, sha256($7), $8, $9, $10, $11, $12)
 			RETURNING id, published_at`,
 			in.WorkspaceID, in.AccountRef, in.BriefID, in.Kind, in.SchemaVersion, in.RulesVersion,
-			in.Bytes, in.ParentReceiptID, in.SealReceiptID, len(in.Units), len(in.Gaps)).
+			in.Bytes, in.ParentReceiptID, in.SealReceiptID, len(in.Units), len(in.Gaps), len(in.ReadReceiptIDs)).
 			Scan(&card.ID, &card.PublishedAt); err != nil {
 			return err
 		}
+		// One round trip for the projections and the read set.
+		batch := &pgx.Batch{}
 		for _, u := range in.Units {
-			if _, err := tx.Exec(ctx, `
+			batch.Queue(`
 				INSERT INTO evidence_units (workspace_id, card_id, n, kind, record_ref, tool, shown,
 					receipt_id, source_record_id, body)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
 				in.WorkspaceID, card.ID, u.N, u.Kind, u.RecordRef, u.Tool, nullable(u.Shown),
-				nullable(u.ReceiptID), nullable(u.SourceRecordID), u.Body); err != nil {
-				return fmt.Errorf("unit %d: %w", u.N, err)
-			}
+				nullable(u.ReceiptID), nullable(u.SourceRecordID), u.Body)
 		}
 		for i, g := range in.Gaps {
-			if _, err := tx.Exec(ctx, `
+			batch.Queue(`
 				INSERT INTO gaps (workspace_id, card_id, ordinal, code, disposition, count, by_role, text)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-				in.WorkspaceID, card.ID, i, g.Code, g.Disposition, g.Count, nullJSON(g.ByRole),
-				g.Text); err != nil {
-				return fmt.Errorf("gap %s: %w", g.Code, err)
+				in.WorkspaceID, card.ID, i, g.Code, g.Disposition, g.Count, nullJSON(g.ByRole), g.Text)
+		}
+		for i, id := range in.ReadReceiptIDs {
+			batch.Queue(`INSERT INTO card_reads (workspace_id, card_id, ordinal, receipt_id) VALUES ($1, $2, $3, $4)`,
+				in.WorkspaceID, card.ID, i, id)
+		}
+		results := tx.SendBatch(ctx, batch)
+		for range batch.Len() {
+			if _, err := results.Exec(); err != nil {
+				results.Close()
+				return fmt.Errorf("projections: %w", err)
 			}
+		}
+		if err := results.Close(); err != nil {
+			return err
 		}
 		if err := s.at("publish:written"); err != nil {
 			return err
@@ -201,21 +227,43 @@ func (s *Store) PublishCard(ctx context.Context, in CardPublication) (Card, erro
 	return card, nil
 }
 
-// recheck holds share locks on the actor's grant, the brief receipt, the
-// cited reads and their connections until commit, so neither a revocation
-// nor a source change can land in between. It returns a refusal, or nil.
-func (s *Store) recheck(ctx context.Context, tx pgx.Tx, in CardPublication, principal *string) (refusal, err error) {
-	if in.PrincipalID != "" && (principal == nil || *principal != in.PrincipalID) {
+// view is the publication as receipts' rules read it. versions gives each
+// unit's content version by its record version ID.
+func (in CardPublication) view(versions map[string]string) receipts.Publication {
+	p := receipts.Publication{WorkspaceID: in.WorkspaceID, AccountRef: in.AccountRef, BriefID: in.BriefID,
+		PrincipalID: in.PrincipalID, Kind: "card", Bytes: in.Bytes, Reads: in.ReadReceiptIDs}
+	if payload, err := receipts.ParsePayload(in.Bytes); err == nil && payload.Prepared {
+		p.Kind = "selected_brief"
+	}
+	for _, u := range in.Units {
+		p.Units = append(p.Units, receipts.UnitRow{N: u.N, Kind: u.Kind, RecordRef: u.RecordRef, Tool: u.Tool,
+			Shown: u.Shown, ReceiptID: u.ReceiptID, ContentVersion: versions[u.SourceRecordID], Value: u.Body})
+	}
+	for _, g := range in.Gaps {
+		row := receipts.GapRow{Code: g.Code, Disposition: g.Disposition, Text: g.Text, ByRole: g.ByRole}
+		if g.Count != nil {
+			row.Count = big.NewInt(int64(*g.Count))
+		}
+		p.Gaps = append(p.Gaps, row)
+	}
+	return p
+}
+
+// recheck holds share locks on the actor's grant, the reads the bytes embed
+// and their connections until commit, so neither a revocation nor a source
+// change can land in between. It returns a refusal, or nil.
+func (s *Store) recheck(ctx context.Context, tx pgx.Tx, in CardPublication, seal receipts.Receipt) (refusal, err error) {
+	if in.PrincipalID != "" && seal.PrincipalID != in.PrincipalID {
 		return ErrNotPermitted, nil
 	}
-	if principal != nil {
+	if seal.PrincipalID != "" {
 		var granted bool
 		err := tx.QueryRow(ctx, `
 			SELECT true FROM account_grants g
 			  JOIN principals p ON p.workspace_id = g.workspace_id AND p.id = g.principal_id
 			 WHERE g.workspace_id = $1 AND g.principal_id = $2 AND g.account_ref = $3
 			   AND g.revoked_at IS NULL AND p.disabled_at IS NULL
-			   FOR SHARE OF g, p`, in.WorkspaceID, *principal, in.AccountRef).Scan(&granted)
+			   FOR SHARE OF g, p`, in.WorkspaceID, seal.PrincipalID, in.AccountRef).Scan(&granted)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotPermitted, nil
 		}
@@ -223,123 +271,101 @@ func (s *Store) recheck(ctx context.Context, tx pgx.Tx, in CardPublication, prin
 			return nil, err
 		}
 	}
-	var parentFits bool
-	err = tx.QueryRow(ctx, `
-		SELECT account_ref IS NOT DISTINCT FROM $3 AND principal_id IS NOT DISTINCT FROM $4
-		  FROM receipts WHERE id = $1 AND workspace_id = $2 AND parent_id IS NULL FOR SHARE`,
-		in.ParentReceiptID, in.WorkspaceID, in.AccountRef, principal).Scan(&parentFits)
-	if errors.Is(err, pgx.ErrNoRows) || err == nil && !parentFits {
-		return ErrProvenance, nil
+	if err := s.at("publish:granted"); err != nil {
+		return nil, err
 	}
+	payload, err := receipts.ParsePayload(in.Bytes)
+	if err != nil {
+		return refusalOf(err), nil
+	}
+	var ids []string
+	for _, id := range payload.ReadIDs {
+		if validUUID(id) {
+			ids = append(ids, id)
+		}
+	}
+	reads, current := map[string]receipts.Receipt{}, map[string]bool{}
+	rows, err := tx.Query(ctx, `SELECT `+receiptColumns+`, c.generation = r.connection_generation
+		  FROM receipts r JOIN connections c ON c.id = r.connection_id
+		 WHERE r.id = ANY($1::uuid[]) AND r.workspace_id = $2
+		   FOR SHARE OF r, c`, ids, in.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkProjection(in.Bytes, in.Units, in.Gaps); err != nil {
-		return err, nil
-	}
-	reads := map[string]bool{}
-	for _, id := range in.ReadReceiptIDs {
-		reads[id] = true
-	}
-	for _, u := range in.Units {
-		if u.ReceiptID != "" {
-			reads[u.ReceiptID] = true
-		} else if in.Kind == "go" || u.SourceRecordID != "" {
-			return ErrProvenance, nil
-		}
-		if in.Kind == "go" && u.SourceRecordID == "" {
-			return ErrProvenance, nil
-		}
-	}
-	for id := range reads {
-		if !validUUID(id) {
-			return ErrProvenance, nil
-		}
-		var fits, current bool
-		err := tx.QueryRow(ctx, `
-			SELECT r.status = 'ok' AND r.account_ref IS NOT DISTINCT FROM $3 AND r.parent_id = $4,
-			       c.generation = r.connection_generation
-			  FROM receipts r JOIN connections c ON c.id = r.connection_id
-			 WHERE r.id = $1 AND r.workspace_id = $2
-			   FOR SHARE OF r, c`, id, in.WorkspaceID, in.AccountRef, in.ParentReceiptID).Scan(&fits, &current)
-		if errors.Is(err, pgx.ErrNoRows) || err == nil && !fits {
-			return ErrProvenance, nil
-		}
+	for rows.Next() {
+		var fresh bool
+		r, err := scanReceiptWith(rows, &fresh)
 		if err != nil {
+			rows.Close()
 			return nil, err
 		}
-		if !current {
+		r.LeaseToken = ""
+		if reads[r.ID], err = converted(r, nil); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		current[r.ID] = fresh
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	bound, versions, err := boundVersions(ctx, tx, in.WorkspaceID, ids)
+	if err != nil {
+		return nil, err
+	}
+	if err := receipts.CheckPublication(in.view(versions), payload, seal, reads, bound); err != nil {
+		return refusalOf(err), nil
+	}
+	// Each unit's record version is the one its read bound, under its reference.
+	for _, u := range in.Units {
+		found := false
+		for _, v := range bound[u.ReceiptID] {
+			found = found || versions[u.SourceRecordID] != "" && v.Version() == versions[u.SourceRecordID] &&
+				v.Ref() == u.RecordRef
+		}
+		if !found {
+			return fmt.Errorf("%w: unit %d", ErrProvenance, u.N), nil
+		}
+	}
+	for _, fresh := range current {
+		if !fresh {
 			return ErrSourceChanged, nil
-		}
-	}
-	for _, u := range in.Units {
-		if u.SourceRecordID == "" {
-			continue
-		}
-		if !validUUID(u.SourceRecordID) {
-			return ErrProvenance, nil
-		}
-		var ref string
-		err := tx.QueryRow(ctx, `
-			SELECT v.source || '/' || v.record_table || '/' || v.record_id
-			  FROM receipt_records b JOIN source_records v ON v.id = b.source_record_id
-			 WHERE b.workspace_id = $1 AND b.receipt_id = $2 AND b.source_record_id = $3`,
-			in.WorkspaceID, u.ReceiptID, u.SourceRecordID).Scan(&ref)
-		if errors.Is(err, pgx.ErrNoRows) || err == nil && ref != u.RecordRef {
-			return ErrProvenance, nil
-		}
-		if err != nil {
-			return nil, err
 		}
 	}
 	return nil, nil
 }
 
-// checkProjection requires the units and gaps to be exactly the card
-// bytes' "units" and "gaps": unit n is element n-1, and its kind, record_ref,
-// tool and shown columns are its body's.
-func checkProjection(raw []byte, units []Unit, gaps []Gap) error {
-	var doc struct {
-		Units []json.RawMessage `json:"units"`
-		Gaps  []json.RawMessage `json:"gaps"`
+// refusalOf is receipts' refusal in this package's terms.
+func refusalOf(err error) error {
+	if errors.Is(err, receipts.ErrProjection) {
+		return fmt.Errorf("%w: %w", ErrProjection, err)
 	}
-	if err := json.Unmarshal(raw, &doc); err != nil || doc.Units == nil || doc.Gaps == nil {
-		return fmt.Errorf("%w: the bytes are not a JSON object with units and gaps", ErrProjection)
+	return fmt.Errorf("%w: %w", ErrProvenance, err)
+}
+
+// boundVersions gives, for each read, the versions it bound in order, and
+// each version's content version by its record version ID.
+func boundVersions(ctx context.Context, q querier, workspaceID string, reads []string) (
+	map[string][]receipts.RecordVersion, map[string]string, error) {
+	rows, err := q.Query(ctx, `
+		SELECT b.receipt_id::text, v.id::text, v.source, v.record_table, v.record_id, v.content_version, v.raw_body
+		  FROM receipt_records b JOIN source_records v ON v.workspace_id = b.workspace_id AND v.id = b.source_record_id
+		 WHERE b.workspace_id = $1 AND b.receipt_id = ANY($2::uuid[])
+		 ORDER BY b.receipt_id, b.ordinal`, workspaceID, reads)
+	if err != nil {
+		return nil, nil, err
 	}
-	if len(doc.Units) != len(units) || len(doc.Gaps) != len(gaps) {
-		return fmt.Errorf("%w: counts differ", ErrProjection)
-	}
-	for _, u := range units {
-		if u.N < 1 || u.N > len(units) || !sameJSON(doc.Units[u.N-1], u.Body) {
-			return fmt.Errorf("%w: unit %d", ErrProjection, u.N)
-		}
-		var fields struct {
-			Kind, RecordRef, Tool, Shown *string
-		}
-		var body map[string]json.RawMessage
-		if json.Unmarshal(u.Body, &body) != nil {
-			return fmt.Errorf("%w: unit %d", ErrProjection, u.N)
-		}
-		for key, target := range map[string]**string{"kind": &fields.Kind, "record_ref": &fields.RecordRef,
-			"tool": &fields.Tool, "shown": &fields.Shown} {
-			var value string
-			if raw, ok := body[key]; ok && json.Unmarshal(raw, &value) == nil {
-				*target = &value
-			}
-		}
-		if deref(fields.Kind) != u.Kind || deref(fields.RecordRef) != u.RecordRef || deref(fields.Tool) != u.Tool ||
-			(u.Kind == "sentence" && deref(fields.Shown) != u.Shown) {
-			return fmt.Errorf("%w: unit %d's columns differ from its body", ErrProjection, u.N)
-		}
-	}
-	for i, g := range gaps {
-		want, _ := json.Marshal(map[string]any{"code": g.Code, "disposition": g.Disposition, "count": g.Count,
-			"by_role": nullJSON(g.ByRole), "text": g.Text})
-		if !sameJSON(doc.Gaps[i], want) {
-			return fmt.Errorf("%w: gap %s", ErrProjection, g.Code)
-		}
-	}
-	return nil
+	bound, versions := map[string][]receipts.RecordVersion{}, map[string]string{}
+	var receipt, id string
+	var v receipts.RecordVersion
+	_, err = pgx.ForEachRow(rows, []any{&receipt, &id, &v.Source, &v.Table, &v.RecordID, &v.ContentVersion, &v.Body},
+		func() error {
+			bound[receipt] = append(bound[receipt], receipts.RecordVersion{Source: v.Source, Table: v.Table,
+				RecordID: v.RecordID, ContentVersion: v.ContentVersion, Body: append([]byte(nil), v.Body...)})
+			versions[id] = v.ContentVersion
+			return nil
+		})
+	return bound, versions, err
 }
 
 func nullJSON(raw json.RawMessage) any {

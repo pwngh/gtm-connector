@@ -5,33 +5,42 @@
 //
 //   - A receipt is committed as pending, in its own transaction, before the work it records starts. If
 //     Start fails, the work does not happen. A start names its workspace, principal, scope and an
-//     operation ID; one that names a source connection records the connection's generation at commit.
-//     Starting the same operation again gives back the receipt the first start made.
-//   - A receipt goes from pending to finished once. Only the holder of its lease finishes it. Finishing it
-//     again with the same outcome, as a retry after a lost acknowledgement does, returns the finished
-//     receipt; another outcome is refused with ErrFinished.
+//     operation ID without '#', unique in its workspace; one that names a source connection is a source read
+//     and records the connection's generation at commit.
+//   - Starting the same operation again, with the same request, gives back the receipt the first start made,
+//     with its lease and Replay set: the operation ID is the caller's claim on it. Another request under the
+//     operation is refused with ErrOperationReused. ByOperation finds the receipt without its lease.
+//   - A receipt goes from pending to finished once. Only the holder of its lease finishes it, before and
+//     after it finished. Finishing it again with the same outcome, as a retry after a lost acknowledgement
+//     does, returns the finished receipt; another outcome is refused with ErrFinished.
 //   - A source read finishes through FinishRead, which stores the immutable record versions it returned,
-//     binds exactly those to the receipt and finishes it with their references, all at once. If the
-//     connection's generation changed after the read started, nothing is stored and the receipt finishes
-//     as error/409 source_changed.
+//     binds exactly those to the receipt, in order, and finishes it with their references, all at once. If
+//     the connection's generation changed after the read started, nothing is stored and the receipt finishes
+//     as error/409 source_changed. A version that arrives with two bodies, in one read or two, stores
+//     nothing and finishes the read as error/409 version_conflict.
+//   - Only a source read claims record rows (crm/, calls/, slack/), and only through FinishRead.
 //   - token_id is the SHA-256 fingerprint of the bearer credential, or "anonymous". No store sees a raw
 //     credential.
 //   - request_id takes four forms: a JSON-RPC id (an integer or a string), null, "<invalid>" for an id of
 //     any other JSON type, and {"kind": "brief_child", "parent_audit_id", "ordinal"} for a read inside a
 //     composite call. A child read starts only under a pending top-level prepare_renewal_brief receipt of its
-//     workspace, takes its principal and token from it, and (parent, ordinal) is unique.
+//     workspace, takes its principal and token from it, names its connection, and (parent, ordinal) is
+//     unique. Its operation ID is the parent's, "#" and the ordinal. Starting it again gives back the
+//     finished child without its lease, or ErrInProgress while it is pending: a read runs at most once.
 //   - Only an "ok" receipt carries rows. A scope denial finishes as error/403 and a source with no selection
 //     for the account as error/200, both with no rows (Denied, NotSelected).
-//   - Publish writes a card's bytes and digest, its unit and gap projections, and finishes its seal receipt
-//     with the digest, all at once, after rechecking the principal's grant on the account and the
-//     generation of every read the card rests on. A failed recheck writes nothing and finishes the seal as
-//     error/403 not_permitted or error/409 source_changed.
+//   - Publish writes a card's bytes and digest, its unit and gap projections, and the reads it rests on, and
+//     finishes its seal receipt with the digest, all at once. It first applies the rules in publication.go:
+//     the seal is the card's own (CheckSeal); the actor is the seal's principal, whose live grant on the
+//     account is rechecked; the reads are exactly those the bytes embed, each embedded as stored and made
+//     for this brief; every unit rests on one of them and on the version it bound (CheckPublication); and
+//     every read is at its connection's current generation. A failed recheck writes nothing and finishes
+//     the seal as error/403 not_permitted, 422 provenance or projection, or 409 source_changed.
 //   - Receipts handed in are copied, and receipts handed out are copies: no caller can change a committed
 //     receipt through a value it holds.
 //
-// Memory keeps all of this in process, and its tests show it. A PostgreSQL store must keep the same
-// contract: the single finish by a guarded UPDATE ... WHERE status = 'pending' and a trigger, the child
-// uniqueness by a unique index on (parent, ordinal), and FinishRead and Publish each as one transaction.
+// Memory keeps all of this in process; postgres.ReceiptStore keeps it on PostgreSQL, where triggers enforce
+// it again for any writer. receiptstest runs the same tests on both.
 package receipts
 
 import (
@@ -67,9 +76,11 @@ type Store interface {
 	Publish(ctx context.Context, publication Publication) (Card, error)
 	// Read returns exactly these receipts of the workspace, in this order, or ErrNotFound.
 	Read(ctx context.Context, workspaceID string, auditIDs []string) ([]Receipt, error)
-	// ByOperation finds the receipt an operation started, with its lease, so a caller that lost an
-	// acknowledgement can learn what was committed and finish it.
-	ByOperation(ctx context.Context, operationID string) (Receipt, error)
+	// Records returns the record versions a read of the workspace bound, in order.
+	Records(ctx context.Context, workspaceID, auditID string) ([]RecordVersion, error)
+	// ByOperation finds the receipt an operation of the workspace started, without its lease, so a caller
+	// that lost an acknowledgement can learn what was committed. Starting the operation again gives the lease.
+	ByOperation(ctx context.Context, workspaceID, operationID string) (Receipt, error)
 }
 
 // Errors a Store returns.
@@ -84,6 +95,7 @@ var (
 	ErrSourceChanged   = errors.New("receipts: the source changed after the read started")
 	ErrVersionConflict = errors.New("receipts: a record version already exists with a different body")
 	ErrNotPermitted    = errors.New("receipts: the principal holds no grant on the account")
+	ErrInProgress      = errors.New("receipts: another worker holds this pending receipt")
 )
 
 // Anonymous is the token_id of a call that carried no credential.
@@ -237,6 +249,21 @@ type Start struct {
 	BriefID      *string
 }
 
+// Check is what every Store refuses before it commits anything: a start without its workspace, operation,
+// tool or token fingerprint, an operation ID holding '#' (which joins a parent's to a child's ordinal), a
+// child request ID, and arguments that are not JSON.
+func (s Start) Check() error {
+	if s.WorkspaceID == "" || s.OperationID == "" || strings.Contains(s.OperationID, "#") || s.Tool == "" ||
+		!validTokenID(s.TokenID) {
+		return fmt.Errorf("%w: a receipt needs a workspace, an operation without '#', a tool and a token fingerprint",
+			ErrInvalid)
+	}
+	if _, _, isChild := s.RequestID.Parent(); isChild {
+		return fmt.Errorf("%w: a child read starts with StartChild", ErrInvalid)
+	}
+	return checkArguments(s.Arguments)
+}
+
 // ChildStart is what a child read records before the read. The workspace, principal and token are the
 // parent's.
 type ChildStart struct {
@@ -248,6 +275,15 @@ type ChildStart struct {
 	AccountRef   string
 	Arguments    any
 	BriefID      *string
+}
+
+// Check is what every Store refuses before it commits a child read: one without its parent, an ordinal from
+// 1, a tool or a connection, or with arguments that are not JSON.
+func (s ChildStart) Check() error {
+	if s.Parent == "" || s.Ordinal < 1 || s.Tool == "" || s.ConnectionID == "" {
+		return fmt.Errorf("%w: a child read needs its parent, an ordinal from 1, a tool and a connection", ErrInvalid)
+	}
+	return checkArguments(s.Arguments)
 }
 
 // Ticket is what finishes a receipt: its ID and the lease only its starter holds.
@@ -275,7 +311,9 @@ func NotSelected() Outcome { return failed(200, "request_failed") }
 // Failed finishes work that failed with this HTTP status and error code, with no rows.
 func Failed(status int, code string) Outcome { return failed(status, code) }
 
-func (o Outcome) check() error {
+// Check refuses an outcome no receipt can finish with: a status other than ok or error, rows on an error, or
+// an HTTP status outside 100 to 599.
+func (o Outcome) Check() error {
 	switch {
 	case o.Status != "ok" && o.Status != "error":
 		return fmt.Errorf("%w: a final status is ok or error", ErrInvalid)
@@ -331,8 +369,11 @@ type Receipt struct {
 	WorkspaceID, OperationID, PrincipalID string
 	Scope, AccountRef, ConnectionID       string
 	Generation                            int64
-	// Lease finishes the receipt. Start, StartChild and ByOperation give it; Read does not.
+	// Lease finishes the receipt. Start and a new StartChild give it; Read and ByOperation do not.
 	Lease string
+	// Replay is set when Start or StartChild found the receipt committed already: its work ran, or is
+	// running, under the first start.
+	Replay bool
 }
 
 // Ticket is what finishes this receipt.
@@ -517,16 +558,19 @@ type GapRow struct {
 // Publication is everything Publish writes together.
 type Publication struct {
 	WorkspaceID, AccountRef, BriefID string
-	// PrincipalID's grant on the account is rechecked; empty when the local owner publishes.
+	// PrincipalID, when set, must be the seal's. The actor is always the seal's principal, whose grant on
+	// the account is rechecked; a seal with none is the local owner's.
 	PrincipalID   string
 	Seal          Ticket // started, pending, before the card existed
 	Kind          string // "card" or "selected_brief"
 	SchemaVersion int
+	RulesVersion  string // the rules the card's text was made under
 	Bytes         []byte
-	Units         []UnitRow
-	Gaps          []GapRow
-	Reads         []string // the read receipts the card rests on
-	ElapsedMS     float64
+	Units         []UnitRow // exactly the bytes' units, in order
+	Gaps          []GapRow  // exactly the bytes' gaps, in order
+	// Reads are the read receipts the card rests on: exactly those its evidence.receipts embeds, in order.
+	Reads     []string
+	ElapsedMS float64
 }
 
 // Card is a published card.
@@ -571,13 +615,13 @@ type Memory struct {
 	newID       func() string
 	order       []string
 	byID        map[string]*Receipt
-	byOperation map[string]string
-	children    map[string]string // parent and ordinal, to the child
-	generations map[string]int64  // by connection
+	byOperation map[[2]string]string // workspace and operation, to the receipt
+	children    map[string]string    // parent and ordinal, to the child
+	generations map[[2]string]int64  // by workspace and connection
 	grants      map[[3]string]bool
 	versions    map[[5]string][]byte
 	bound       map[string][]RecordVersion
-	cards       map[string]Card
+	cards       map[[2]string]Card // workspace and brief
 }
 
 // NewMemory makes an empty store. A nil clock reads the wall clock to the microsecond; nil IDs are random
@@ -589,9 +633,9 @@ func NewMemory(now func() time.Time, newID func() string) *Memory {
 	if newID == nil {
 		newID = RandomID
 	}
-	return &Memory{now: now, newID: newID, byID: map[string]*Receipt{}, byOperation: map[string]string{},
-		children: map[string]string{}, generations: map[string]int64{}, grants: map[[3]string]bool{},
-		versions: map[[5]string][]byte{}, bound: map[string][]RecordVersion{}, cards: map[string]Card{}}
+	return &Memory{now: now, newID: newID, byID: map[string]*Receipt{}, byOperation: map[[2]string]string{},
+		children: map[string]string{}, generations: map[[2]string]int64{}, grants: map[[3]string]bool{},
+		versions: map[[5]string][]byte{}, bound: map[string][]RecordVersion{}, cards: map[[2]string]Card{}}
 }
 
 // RandomID is a random version 4 UUID in its usual text form.
@@ -606,11 +650,11 @@ func RandomID() string {
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }
 
-// SetGeneration sets a connection's generation; a change of source bumps it.
-func (m *Memory) SetGeneration(connectionID string, generation int64) {
+// SetGeneration sets the generation of a connection of the workspace; a change of source bumps it.
+func (m *Memory) SetGeneration(workspaceID, connectionID string, generation int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.generations[connectionID] = generation
+	m.generations[[2]string{workspaceID, connectionID}] = generation
 }
 
 // Grant gives a principal a grant on an account; Revoke takes it back.
@@ -633,11 +677,9 @@ func checkArguments(arguments any) error {
 	return nil
 }
 
-func sameJSON(a, b any) bool {
-	x, errA := strictjson.Dumps(a, strictjson.Prepared)
-	y, errB := strictjson.Dumps(b, strictjson.Prepared)
-	return errA == nil && errB == nil && x == y
-}
+func sameJSON(a, b any) bool { return sameValue(a, b) }
+
+func samePointer(a, b *string) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
 
 // commit stores a copy of a new pending receipt, so nothing the caller handed in is shared. The caller
 // holds the lock.
@@ -648,7 +690,7 @@ func (m *Memory) commit(r Receipt) (Receipt, error) {
 	}
 	r.AuditID, r.StartedAt, r.Status, r.Rows, r.Lease = id, m.now(), "pending", []string{}, RandomID()
 	if r.ConnectionID != "" {
-		generation, known := m.generations[r.ConnectionID]
+		generation, known := m.generations[[2]string{r.WorkspaceID, r.ConnectionID}]
 		if !known {
 			return Receipt{}, fmt.Errorf("%w: unknown connection", ErrNotFound)
 		}
@@ -657,31 +699,27 @@ func (m *Memory) commit(r Receipt) (Receipt, error) {
 	stored := r.clone()
 	m.byID[id] = &stored
 	m.order = append(m.order, id)
-	m.byOperation[r.OperationID] = id
+	m.byOperation[[2]string{r.WorkspaceID, r.OperationID}] = id
 	return stored.clone(), nil
 }
 
 func (m *Memory) Start(_ context.Context, s Start) (Receipt, error) {
-	if s.WorkspaceID == "" || s.OperationID == "" || s.Tool == "" || !validTokenID(s.TokenID) {
-		return Receipt{}, fmt.Errorf("%w: a receipt needs a workspace, an operation, a tool and a token fingerprint",
-			ErrInvalid)
-	}
-	if _, _, isChild := s.RequestID.Parent(); isChild {
-		return Receipt{}, fmt.Errorf("%w: a child read starts with StartChild", ErrInvalid)
-	}
-	if err := checkArguments(s.Arguments); err != nil {
+	if err := s.Check(); err != nil {
 		return Receipt{}, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if id, found := m.byOperation[s.OperationID]; found {
+	if id, found := m.byOperation[[2]string{s.WorkspaceID, s.OperationID}]; found {
 		existing := m.byID[id]
-		if existing.WorkspaceID != s.WorkspaceID || existing.PrincipalID != s.PrincipalID ||
-			existing.TokenID != s.TokenID || existing.Tool != s.Tool || existing.AccountRef != s.AccountRef ||
-			!sameJSON(existing.Arguments, s.Arguments) {
+		if existing.PrincipalID != s.PrincipalID || existing.TokenID != s.TokenID || existing.Tool != s.Tool ||
+			existing.Scope != s.Scope || existing.AccountRef != s.AccountRef ||
+			existing.ConnectionID != s.ConnectionID || !samePointer(existing.BriefID, s.BriefID) ||
+			!sameJSON(existing.RequestID.Value(), s.RequestID.Value()) || !sameJSON(existing.Arguments, s.Arguments) {
 			return Receipt{}, ErrOperationReused
 		}
-		return existing.clone(), nil
+		replay := existing.clone()
+		replay.Replay = true
+		return replay, nil
 	}
 	return m.commit(Receipt{TokenID: s.TokenID, Tool: s.Tool, Arguments: s.Arguments,
 		RequestID: s.RequestID, BriefID: s.BriefID, WorkspaceID: s.WorkspaceID,
@@ -690,10 +728,7 @@ func (m *Memory) Start(_ context.Context, s Start) (Receipt, error) {
 }
 
 func (m *Memory) StartChild(_ context.Context, s ChildStart) (Receipt, error) {
-	if s.Parent == "" || s.Ordinal < 1 || s.Tool == "" {
-		return Receipt{}, fmt.Errorf("%w: a child read needs its parent, an ordinal from 1 and a tool", ErrInvalid)
-	}
-	if err := checkArguments(s.Arguments); err != nil {
+	if err := s.Check(); err != nil {
 		return Receipt{}, err
 	}
 	m.mu.Lock()
@@ -705,20 +740,27 @@ func (m *Memory) StartChild(_ context.Context, s ChildStart) (Receipt, error) {
 	if _, _, parentIsChild := parent.RequestID.Parent(); parent.Tool != Composite || parentIsChild {
 		return Receipt{}, ErrParent
 	}
-	operation := fmt.Sprintf("%s#%d", parent.OperationID, s.Ordinal)
-	if id, taken := m.byOperation[operation]; taken {
-		existing := m.byID[id]
-		if existing.Tool != s.Tool || existing.ConnectionID != s.ConnectionID || !sameJSON(existing.Arguments, s.Arguments) {
-			return Receipt{}, ErrDuplicateChild
-		}
-		return existing.clone(), nil
-	}
-	if parent.Status != "pending" {
-		return Receipt{}, ErrParent
-	}
 	account := s.AccountRef
 	if account == "" {
 		account = parent.AccountRef
+	}
+	operation := fmt.Sprintf("%s#%d", parent.OperationID, s.Ordinal)
+	if id, taken := m.byOperation[[2]string{parent.WorkspaceID, operation}]; taken {
+		existing := m.byID[id]
+		if existing.Tool != s.Tool || existing.Scope != s.Scope || existing.ConnectionID != s.ConnectionID ||
+			existing.AccountRef != account || !samePointer(existing.BriefID, s.BriefID) ||
+			!sameJSON(existing.Arguments, s.Arguments) {
+			return Receipt{}, ErrDuplicateChild
+		}
+		if existing.Status == "pending" {
+			return Receipt{}, ErrInProgress
+		}
+		finished := existing.clone()
+		finished.Lease, finished.Replay = "", true
+		return finished, nil
+	}
+	if parent.Status != "pending" {
+		return Receipt{}, ErrParent
 	}
 	r, err := m.commit(Receipt{TokenID: parent.TokenID, Tool: s.Tool, Arguments: s.Arguments,
 		RequestID: Child(parent.AuditID, s.Ordinal), BriefID: s.BriefID,
@@ -763,7 +805,7 @@ func (m *Memory) finish(r *Receipt, o Outcome) Receipt {
 }
 
 func (m *Memory) Finish(_ context.Context, t Ticket, o Outcome) (Receipt, error) {
-	if err := o.check(); err != nil {
+	if err := o.Check(); err != nil {
 		return Receipt{}, err
 	}
 	m.mu.Lock()
@@ -775,9 +817,18 @@ func (m *Memory) Finish(_ context.Context, t Ticket, o Outcome) (Receipt, error)
 	if r.Status != "pending" {
 		return settle(r, o)
 	}
+	if r.ConnectionID != "" && o.Status == "ok" {
+		return Receipt{}, fmt.Errorf("%w: a source read finishes ok only through FinishRead", ErrInvalid)
+	}
+	for _, row := range o.Rows {
+		if IsRecordRow(row) {
+			return Receipt{}, fmt.Errorf("%w: only a source read claims a record row", ErrInvalid)
+		}
+	}
 	if r.Tool == Composite {
 		for operation, id := range m.children {
-			if m.byID[id].Status == "pending" && strings.HasPrefix(operation, r.OperationID+"#") {
+			if m.byID[id].Status == "pending" && strings.HasPrefix(operation, r.OperationID+"#") &&
+				m.byID[id].WorkspaceID == r.WorkspaceID {
 				return Receipt{}, fmt.Errorf("%w: a child read is still pending", ErrInvalid)
 			}
 		}
@@ -785,7 +836,10 @@ func (m *Memory) Finish(_ context.Context, t Ticket, o Outcome) (Receipt, error)
 	return m.finish(r, o), nil
 }
 
-var sourceChanged = Failed(409, "source_changed")
+var (
+	sourceChanged   = Failed(409, "source_changed")
+	versionConflict = Failed(409, "version_conflict")
+)
 
 func (m *Memory) FinishRead(_ context.Context, t Ticket, versions []RecordVersion, elapsedMS float64) (Receipt, error) {
 	refs := make([]string, len(versions))
@@ -802,33 +856,47 @@ func (m *Memory) FinishRead(_ context.Context, t Ticket, versions []RecordVersio
 	if err != nil {
 		return Receipt{}, err
 	}
+	if r.ConnectionID == "" {
+		return Receipt{}, fmt.Errorf("%w: this receipt reads no source", ErrInvalid)
+	}
 	if r.Status != "pending" {
-		if _, err := settle(r, sourceChanged); err == nil {
-			return Receipt{}, ErrSourceChanged
+		for outcome, refusal := range map[*Outcome]error{&sourceChanged: ErrSourceChanged,
+			&versionConflict: ErrVersionConflict} {
+			if _, err := settle(r, *outcome); err == nil {
+				return Receipt{}, refusal
+			}
 		}
 		finished, err := settle(r, ok)
 		if err != nil {
 			return Receipt{}, err
 		}
-		bound := m.bound[r.AuditID]
-		for i, v := range bound {
+		for i, v := range m.bound[r.AuditID] {
 			if v.Version() != versions[i].Version() || !bytes.Equal(v.Body, versions[i].Body) {
 				return Receipt{}, ErrFinished
 			}
 		}
 		return finished, nil
 	}
-	if r.ConnectionID != "" && m.generations[r.ConnectionID] != r.Generation {
-		changed := sourceChanged
-		changed.ElapsedMS = elapsedMS
-		m.finish(r, changed)
-		return Receipt{}, ErrSourceChanged
+	refuse := func(o Outcome, err error) (Receipt, error) {
+		o.ElapsedMS = elapsedMS
+		m.finish(r, o)
+		return Receipt{}, err
 	}
+	if m.generations[[2]string{r.WorkspaceID, r.ConnectionID}] != r.Generation {
+		return refuse(sourceChanged, ErrSourceChanged)
+	}
+	// One version with two bodies, against what earlier reads stored or within this read.
+	given := map[[5]string][]byte{}
 	for _, v := range versions {
 		key := [5]string{r.WorkspaceID, v.Source, v.Table, v.RecordID, v.Version()}
-		if body, found := m.versions[key]; found && !bytes.Equal(body, v.Body) {
-			return Receipt{}, ErrVersionConflict
+		body, found := m.versions[key]
+		if !found {
+			body, found = given[key]
 		}
+		if found && !bytes.Equal(body, v.Body) {
+			return refuse(versionConflict, ErrVersionConflict)
+		}
+		given[key] = v.Body
 	}
 	stored := make([]RecordVersion, len(versions))
 	for i, v := range versions {
@@ -839,8 +907,7 @@ func (m *Memory) FinishRead(_ context.Context, t Ticket, versions []RecordVersio
 	return m.finish(r, ok), nil
 }
 
-// Records is the record versions bound to a read receipt, in order.
-func (m *Memory) Records(workspaceID, auditID string) ([]RecordVersion, error) {
+func (m *Memory) Records(_ context.Context, workspaceID, auditID string) ([]RecordVersion, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, found := m.byID[auditID]
@@ -863,17 +930,20 @@ func (m *Memory) Publish(_ context.Context, p Publication) (Card, error) {
 	if err != nil {
 		return Card{}, err
 	}
-	if seal.WorkspaceID != p.WorkspaceID || seal.AccountRef != p.AccountRef {
-		return Card{}, fmt.Errorf("%w: the seal receipt names another workspace or account", ErrInvalid)
-	}
+	key := [2]string{p.WorkspaceID, p.BriefID}
 	if seal.Status != "pending" {
-		card, published := m.cards[p.BriefID]
-		if _, err := settle(seal, ok); err != nil || !published || !bytes.Equal(card.Bytes, p.Bytes) {
+		// A retry after a lost acknowledgement: the committed card, if these are its bytes.
+		card, published := m.cards[key]
+		if _, err := settle(seal, ok); err != nil || !published || card.Seal.AuditID != seal.AuditID ||
+			!bytes.Equal(card.Bytes, p.Bytes) {
 			return Card{}, ErrFinished
 		}
 		return card.clone(), nil
 	}
-	if _, taken := m.cards[p.BriefID]; taken {
+	if err := CheckSeal(seal.clone(), p); err != nil {
+		return Card{}, err
+	}
+	if _, taken := m.cards[key]; taken {
 		return Card{}, fmt.Errorf("%w: brief %s is published already", ErrInvalid, p.BriefID)
 	}
 	refuse := func(o Outcome, err error) (Card, error) {
@@ -881,31 +951,45 @@ func (m *Memory) Publish(_ context.Context, p Publication) (Card, error) {
 		m.finish(seal, o)
 		return Card{}, err
 	}
-	if p.PrincipalID != "" && !m.grants[[3]string{p.WorkspaceID, p.PrincipalID, p.AccountRef}] {
+	if p.PrincipalID != "" && p.PrincipalID != seal.PrincipalID ||
+		seal.PrincipalID != "" && !m.grants[[3]string{p.WorkspaceID, seal.PrincipalID, p.AccountRef}] {
 		return refuse(Failed(403, "not_permitted"), ErrNotPermitted)
 	}
-	for _, id := range p.Reads {
-		read, found := m.byID[id]
-		if !found || read.WorkspaceID != p.WorkspaceID || read.Status == "pending" {
-			return Card{}, fmt.Errorf("%w: read %s is not a finished read of this workspace", ErrInvalid, id)
+	payload, err := ParsePayload(p.Bytes)
+	reads, bound := map[string]Receipt{}, map[string][]RecordVersion{}
+	if err == nil {
+		for _, id := range payload.ReadIDs {
+			if r, found := m.byID[id]; found && r.WorkspaceID == p.WorkspaceID {
+				reads[id], bound[id] = r.clone(), m.bound[id]
+			}
 		}
-		if read.ConnectionID != "" && m.generations[read.ConnectionID] != read.Generation {
+		err = CheckPublication(p, payload, seal.clone(), reads, bound)
+	}
+	switch {
+	case errors.Is(err, ErrProjection):
+		return refuse(Failed(422, "projection"), err)
+	case err != nil:
+		return refuse(Failed(422, "provenance"), err)
+	}
+	for _, r := range reads {
+		if m.generations[[2]string{r.WorkspaceID, r.ConnectionID}] != r.Generation {
 			return refuse(sourceChanged, ErrSourceChanged)
 		}
 	}
 	card := Card{WorkspaceID: p.WorkspaceID, AccountRef: p.AccountRef, BriefID: p.BriefID, Kind: p.Kind,
 		Bytes: p.Bytes, SHA256: reference[len(reference)-64:], Units: p.Units, Gaps: p.Gaps}
 	card.Seal = m.finish(seal, ok)
+	card.Seal.Lease = ""
 	stored := card.clone()
-	m.cards[p.BriefID] = stored
+	m.cards[key] = stored
 	return stored.clone(), nil
 }
 
-// Published is a card Publish wrote, by brief ID.
-func (m *Memory) Published(briefID string) (Card, bool) {
+// Published is a card Publish wrote, by workspace and brief ID.
+func (m *Memory) Published(workspaceID, briefID string) (Card, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	card, found := m.cards[briefID]
+	card, found := m.cards[[2]string{workspaceID, briefID}]
 	return card.clone(), found
 }
 
@@ -925,14 +1009,16 @@ func (m *Memory) Read(_ context.Context, workspaceID string, auditIDs []string) 
 	return found, nil
 }
 
-func (m *Memory) ByOperation(_ context.Context, operationID string) (Receipt, error) {
+func (m *Memory) ByOperation(_ context.Context, workspaceID, operationID string) (Receipt, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	id, found := m.byOperation[operationID]
+	id, found := m.byOperation[[2]string{workspaceID, operationID}]
 	if !found {
 		return Receipt{}, ErrNotFound
 	}
-	return m.byID[id].clone(), nil
+	out := m.byID[id].clone()
+	out.Lease = ""
+	return out, nil
 }
 
 // All is every receipt in the order it was started, without leases.

@@ -108,7 +108,7 @@ func (s *Store) CheckAppRole(ctx context.Context) error {
 		return err
 	}
 	if powerful {
-		return errors.New("serve connects as the app role, which owns no table; " +
+		return errors.New("the server and demo connect as the app role, which owns no table; " +
 			"GTM_DATABASE_URL names the owner or a superuser")
 	}
 	return nil

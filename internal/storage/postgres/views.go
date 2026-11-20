@@ -177,3 +177,51 @@ func (s *Store) ViewAccountCards(ctx context.Context, v Viewer, accountRef strin
 	})
 	return cards, err
 }
+
+// AccountView is an account a principal holds a live grant on. Its display
+// name comes from a source and is shown only after neutralizing.
+type AccountView struct {
+	Ref, DisplayName string
+}
+
+// ViewAccounts lists the accounts the principal holds a live grant on, by
+// reference. A principal that is unknown, of another workspace, or disabled
+// gets ErrNotPermitted; one with no grant gets none.
+func (s *Store) ViewAccounts(ctx context.Context, v Viewer) ([]AccountView, error) {
+	if !validUUID(v.WorkspaceID) || !validUUID(v.PrincipalID) {
+		return nil, ErrNotPermitted
+	}
+	var accounts []AccountView
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		var live bool
+		err := tx.QueryRow(ctx, `SELECT true FROM principals WHERE workspace_id = $1 AND id = $2
+			AND disabled_at IS NULL FOR SHARE`, v.WorkspaceID, v.PrincipalID).Scan(&live)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotPermitted
+		}
+		if err != nil {
+			return err
+		}
+		// The share lock on each listed grant holds a revocation off until
+		// the list is read, as the other views hold the one grant they need.
+		rows, err := tx.Query(ctx, `
+			SELECT a.ref, a.display_name FROM account_grants g
+			  JOIN accounts a ON a.workspace_id = g.workspace_id AND a.ref = g.account_ref
+			 WHERE g.workspace_id = $1 AND g.principal_id = $2 AND g.revoked_at IS NULL
+			 ORDER BY a.ref
+			   FOR SHARE OF g`, v.WorkspaceID, v.PrincipalID)
+		if err != nil {
+			return err
+		}
+		accounts, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (AccountView, error) {
+			var a AccountView
+			err := row.Scan(&a.Ref, &a.DisplayName)
+			return a, err
+		})
+		if err != nil {
+			return err
+		}
+		return s.at("view:accounts")
+	})
+	return accounts, err
+}

@@ -127,12 +127,12 @@ func TestAUnitOnAnotherAccountsReadClosesTheCard(t *testing.T) {
 		t.Fatal(err)
 	}
 	brief, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
-		OperationID: "other-brief", TokenID: "anonymous", Tool: "brief", AccountRef: "acc-004",
+		OperationID: "other-brief", TokenID: "anonymous", Tool: postgres.Composite, AccountRef: "acc-004",
 		Arguments: json.RawMessage(`{}`), Lease: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	read, _, err := f.Store.RunChildRead(ctx, postgres.ChildReadStart{ParentID: brief.ID, Tool: "get_account",
+	read, _, err := f.Store.RunChildRead(ctx, postgres.ChildReadStart{ParentID: brief.ID, Ordinal: 1, Tool: "get_account",
 		Scope: "crm:read", ConnectionID: f.Connection.ID, Arguments: json.RawMessage(`{}`), Lease: time.Minute},
 		func(context.Context) ([]postgres.RecordVersion, error) {
 			return []postgres.RecordVersion{{Source: "crm", Table: "accounts", RecordID: "acc-004", Body: []byte("{}")}}, nil

@@ -1,0 +1,135 @@
+{
+ "note": "the prepare_renewal_brief result as the assistant received it",
+ "selection": {
+  "schema_version": 1,
+  "accounts": [
+   {
+    "account_id": "acc-003",
+    "slack": false
+   }
+  ]
+ },
+ "scopes": [
+  "crm:read",
+  "calls:read",
+  "slack:read"
+ ],
+ "arguments": {
+  "account_id": "acc-003"
+ },
+ "result": {
+  "source": "brief",
+  "records": [
+   {
+    "id": "brief-2aee567d000040008000000000000002",
+    "record_ref": "briefs/brief-2aee567d000040008000000000000002/3f12799273a6ed18dae85458bd44d710d3024ffd98e42558d6d9cffe03594700"
+   }
+  ],
+  "untrusted_data": true,
+  "brief": {
+   "brief_id": "brief-2aee567d000040008000000000000002",
+   "account_id": "acc-003",
+   "as_of": "2027-01-15",
+   "text": "DEAL CARD: \"Thornfield Wren LLP\" (acc-003) as of 2027-01-15\nSources read 2027-01-15T15:00:01Z to 2027-01-15T15:00:03Z.\n\nATTENTION, from record fields and dates\n  The renewal is in 24 days and this opportunity is still open at stage \"negotiation\". [1][3]\n\nRECORD VALUES, from CRM fields and connector arithmetic\n  Renewal date: 2027-02-08, in 24 days [1]\n  Annual recurring revenue: USD 450,000.00 [1]\n  CRM risk: healthy [1]\n  Account: \"Thornfield Wren LLP\"; industry \"Legal services\" [1]\n  Opportunity: \"Thornfield Wren LLP 2027 renewal\"; stage \"negotiation\"; amount USD 450,000.00; close date 2027-02-01 [3]\n  Contact: \"Marian Holt\"; role \"Deputy general counsel\"; email \"marian@thornfield-wren.example\" [2]\n\nSAID, whole sentences as recorded; not record values\n  Customer, by a speaker label equal to one contact's name\n    [5] call 2027-01-12T15:00:00Z; \"Marian Holt\", role \"Deputy general counsel\" [2]\n        \"Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved.\"\n    [6] call 2027-01-12T15:00:00Z; \"Marian Holt\", role \"Deputy general counsel\" [2]\n        \"Please do not put a date on the order form.\"\n  Seller, by a listed seller's name or ID\n    [4] call 2027-01-12T15:00:00Z; \"Morgan Reed\"\n        \"We will have the order form countersigned by January 30.\"\n\nNOT READ\n  Calls: 2 call records were read. Recordings and anything outside those records were not read.\n  Slack: not requested for this card.\n",
+   "units": [
+    {
+     "n": 1,
+     "kind": "record",
+     "source": "crm",
+     "record_ref": "crm/accounts/acc-003",
+     "tool": "get_account"
+    },
+    {
+     "n": 2,
+     "kind": "record",
+     "source": "crm",
+     "record_ref": "crm/contacts/con-003",
+     "tool": "get_account"
+    },
+    {
+     "n": 3,
+     "kind": "record",
+     "source": "crm",
+     "record_ref": "crm/opportunities/opp-003",
+     "tool": "list_opportunities"
+    },
+    {
+     "n": 4,
+     "kind": "sentence",
+     "source": "calls",
+     "record_ref": "calls/call_notes/note-003",
+     "tool": "read_call_notes",
+     "at": "2027-01-12T15:00:00Z",
+     "speaker": "Morgan Reed",
+     "role": "seller",
+     "basis": "listed seller identity",
+     "contact": null,
+     "text": "We will have the order form countersigned by January 30.",
+     "partial": false,
+     "shown": "yes",
+     "span": null,
+     "raw_sha256": "cd9f71f0d55ca555213d323b12ba37b926009574c2d0ea0095a3575361765796",
+     "sanitizer_version": 3
+    },
+    {
+     "n": 5,
+     "kind": "sentence",
+     "source": "calls",
+     "record_ref": "calls/call_notes/note-003b",
+     "tool": "read_call_notes",
+     "at": "2027-01-12T15:00:00Z",
+     "speaker": "Marian Holt",
+     "role": "customer",
+     "basis": "label matches contact [2]",
+     "contact": 2,
+     "text": "Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved.",
+     "partial": false,
+     "shown": "yes",
+     "span": null,
+     "raw_sha256": "105807d242e8f55965e938a24bc94a445f157178cbb28569e9b5ce4234bc100c",
+     "sanitizer_version": 3
+    },
+    {
+     "n": 6,
+     "kind": "sentence",
+     "source": "calls",
+     "record_ref": "calls/call_notes/note-003b",
+     "tool": "read_call_notes",
+     "at": "2027-01-12T15:00:00Z",
+     "speaker": "Marian Holt",
+     "role": "customer",
+     "basis": "label matches contact [2]",
+     "contact": 2,
+     "text": "Please do not put a date on the order form.",
+     "partial": false,
+     "shown": "yes",
+     "span": null,
+     "raw_sha256": "105807d242e8f55965e938a24bc94a445f157178cbb28569e9b5ce4234bc100c",
+     "sanitizer_version": 3
+    }
+   ],
+   "gaps": [
+    {
+     "code": "calls_outside_records",
+     "disposition": "not_read",
+     "count": null,
+     "by_role": null,
+     "text": "Calls: 2 call records were read. Recordings and anything outside those records were not read."
+    },
+    {
+     "code": "slack_not_requested",
+     "disposition": "not_read",
+     "count": null,
+     "by_role": null,
+     "text": "Slack: not requested for this card."
+    }
+   ],
+   "sources": {
+    "crm": "demo_fixture",
+    "calls": "demo_fixture"
+   },
+   "notes_status": "available",
+   "slack_status": "not_requested"
+  }
+ }
+}
