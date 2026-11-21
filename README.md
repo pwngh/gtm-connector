@@ -62,11 +62,11 @@ flowchart LR
     U --> C(["Deal card<br/>every character written by the connector"])
 ```
 
-A unit is one numbered piece of evidence. A CRM record is one unit, and call and Slack text is one
-unit for each whole sentence. A receipt is the saved audit row of one tool attempt and its outcome.
-Every number on a card resolves to its record and the receipt of the read that returned it. Saving a
-card commits one more receipt, its seal, which holds the SHA-256 of the saved file. A saved card has
-a brief ID, `brief-…`, which the `brief` command prints.
+Every figure and sentence on a card carries a number. The number is a unit: one CRM record, or one
+sentence of a call or a Slack message. Each resolves to its record and to the receipt of the read
+that returned it, a receipt being one row of the audit log. When `brief` saves a card it adds one
+more receipt, which names the SHA-256 of the saved file. That receipt is the card's seal. The saved
+card gets a brief ID, `brief-…`, printed under it.
 `gtm-connector inspect brief-…` lists every unit of the card, one per line, and a number shows one:
 
 ```text
@@ -103,8 +103,8 @@ Neutralizer version   3
 
 ## Try it
 
-It needs Python 3.11 or later and pipx. The demo runs on invented data, with no model and no
-external service.
+The command below uses pipx and Python 3.11 or later. The demo runs on invented data, with no model
+and no external service.
 
 ```sh
 pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo
@@ -173,8 +173,9 @@ the tested client. Other assistant apps are untested. [Clients](docs/clients.md)
 
 ## What it guarantees
 
-A scope is the access a tool requires, such as `crm:read`. A grant is a bearer token issued for a
-list of scopes.
+Access is by scope and grant. A scope is what a tool requires, such as `crm:read`, and a grant is a
+bearer token issued for a list of scopes. In the Go server section below, a grant gives one sign-in
+one account.
 
 | Guarantee | Tests |
 | --- | --- |

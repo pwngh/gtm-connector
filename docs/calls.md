@@ -2,7 +2,7 @@
 
 Import a UTF-8 TXT, WebVTT, or SRT export and associate it with one account. The
 [Deal card](briefs.md) then shows a selected excerpt as whole sentences. The excerpt is the
-selected range of lines or cues. The connector does not record, transcribe, connect to a call
+selected range of lines or cues, with one adjacent line or cue on each side where there is one. The connector does not record, transcribe, connect to a call
 provider, or summarize. The original bytes stay in private local state.
 
 ## Commands

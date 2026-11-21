@@ -1,8 +1,10 @@
 # Serve selected accounts
 
-A selection limits a connected [client](clients.md) to the accounts you name. It also adds two
-tools, so the client can prepare a [Deal card](briefs.md) with its own [grant](tools.md) and read
-it again later. A card prepared this way is saved as a prepared brief.
+A selection is a file you write that lists the accounts a connected [client](clients.md) may read,
+and whether each account's Slack thread is included. Each read still requires its scope. A server
+started with a selection also serves two more tools: one saves a [Deal card](briefs.md) with its
+evidence under the client's own [grant](tools.md), as a prepared brief, and the other reads it back
+after checking the client's access again.
 
 ```json
 {"schema_version": 1, "accounts": [

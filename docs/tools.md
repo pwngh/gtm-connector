@@ -1,7 +1,7 @@
 # Tools and source data
 
-The connector serves six tools over CRM, calls, and Slack. On demo data each source is its own local
-SQLite store of invented records. A scope is the access a tool requires. A grant is a bearer token
+The connector serves six tools over CRM, calls, and Slack. `connect demo` gives each of the three sources its
+own local SQLite store of invented records. A scope is the access a tool requires. A grant is a bearer token
 issued for a list of scopes.
 
 | Tool | Scope | Returns |
@@ -55,8 +55,9 @@ Salesforce, `accounts` and `inspect` read the account through the scoped, audite
 
 ## Run the guarantee checks
 
-`debug verify` checks the guarantees on the fixtures. It creates one fixture activity, so keep its
-state folder apart from the demo's.
+`debug verify` checks scope refusals, source text that asks for a write, idempotent activity writes,
+rate limits and card receipts, on demo data. It creates one demo activity, so keep its state folder
+apart from the demo's.
 
 ```sh
 .venv/bin/python -m gtm_connector debug verify --state-dir var/verification --json

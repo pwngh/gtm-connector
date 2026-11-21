@@ -18,7 +18,9 @@ folder that `--state-dir` selects, and a new one has no connected source. Daily 
 
 ## Scopes
 
-A scope is the access a tool requires. A grant is a bearer token issued for a list of scopes.
+A scope is the access a tool requires. A grant is a bearer token that the connector's authorization
+server issues for a list of scopes. A Slack scope and a Slack grant are what Slack gave the sign-in,
+and they are neither of these.
 
 | Scope | Allowed tools |
 | --- | --- |
@@ -90,9 +92,9 @@ each read's budget. An `sf` that outlasts its limit is stopped and reported as
 | Sign-in | `debug slack connect` authorizes an existing PKCE public app in the system browser. It requests only user history scopes (`channels:history`, optionally `groups:history`), validates the exact granted set, and verifies the returned workspace and user. Authentication does not enable a source or grant a caller `slack:read`. `connect slack` enables the source for a state folder, and only where a sign-in is saved. The authentication commands call no message endpoint and create no tool receipts. |
 | Browser flow | Fresh state and S256 PKCE. Only the exact registered localhost Host, port, and path are accepted. The code, state, and verifier stay in memory and out of results, progress, and browser HTML. |
 | Storage | Tokens and identity sit in one private credential file in its own folder, `slack-connection` inside the state folder, pinned to app, workspace, and user. `profile.json` holds none of them. A lock serializes processes. Symlinks, hard links, and unsafe modes are rejected. |
-| Credential states | `ready` is released to reads only with its stored grants and expected identity. `refresh_pending` marks an ambiguous exchange, identity mismatch, or rejected credential unusable. `identity_unchecked` allows a check-only retry and is never released to reads. |
+| Credential states | `ready` is released to reads only with its stored Slack grants and expected identity. `refresh_pending` marks an ambiguous exchange, identity mismatch, or rejected credential unusable. `identity_unchecked` allows a check-only retry and is never released to reads. |
 | Provider calls | Four fixed Slack methods: exchange, refresh, identity, and explicit revoke. No redirects, no ambient proxy, and bounded response bytes and HTTP time. Status, errors, and browser output omit tokens, provider IDs, and workspace details. |
-| Disconnect | Local disconnect makes no request. `--revoke` reports only the access-token outcome and local deletion. It never claims app or full-grant removal. |
+| Disconnect | Local disconnect makes no request. `--revoke` reports only the access-token outcome and local deletion. It never claims removal of the app or of the whole Slack grant. |
 | `debug slack map` | Resolves one account through the audited `crm:read` tool and saves one thread mapping without reading messages. A copied thread URL must match the saved workspace origin. It never supplies an HTTP destination or chooses credentials. |
 | `read_slack_messages` | Keeps its `slack:read` check and commits its pending receipt before mapping, credential, or provider work. The source makes only fixed GET `conversations.replies` requests with verified TLS, no redirect, and no environment proxy. The scope permits any mapped account, limited by `--selection` when set. There is no query or channel-search tool, and live Slack has no fixture fallback. No tool starts the browser flow, sends a message, or broadens a grant. |
 | Read budget | Ten HTTP attempts, 1 MiB of response bytes, and a 20-second deadline per read, covering pages, authentication, failures, and retries. One rate-limit retry, with a valid delay of at most five seconds. Only exact token expiry permits one retry, with at most one local refresh. An ambiguous refresh is not retried and then requires browser login. |
@@ -102,8 +104,9 @@ each read's budget. An `sf` that outlasts its limit is stopped and reported as
 
 ## Selected sources and prepared briefs
 
-A selection names the accounts and Slack threads a client may read, in a file the operator writes.
-A prepared brief is one a client makes with `prepare_renewal_brief`.
+A selection is a file the operator writes. It limits which accounts the server lets clients read,
+and which of those accounts include Slack. Each read still requires its scope. A prepared brief is
+the card and evidence a successful `prepare_renewal_brief` call saves under the caller's grant.
 
 | Area | Behavior |
 | --- | --- |
@@ -120,7 +123,7 @@ A prepared brief is one a client makes with `prepare_renewal_brief`.
 - An operator who rewrites snapshots and receipts can alter all evidence. Local records are neither
   tamper-proof nor billing data.
 - Other processes with the operator's authority are not isolated. Anyone who can read the Slack
-  credential file can use the saved grant.
+  credential file can use the saved Slack grant.
 - Retention is manual. There is no power-loss durability guarantee and no cross-file transaction.
 - The rate limit is not a distributed quota. Credential filesystem proof is POSIX only.
 - A card does not relate one record to another, so it flags no contradiction. A number attributes

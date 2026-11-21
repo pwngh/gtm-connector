@@ -148,7 +148,7 @@ token. With `--json`, the first line is `ready`, shown with placeholders:
 | `ready` | `selection` | With `--selection`: `accounts` and `slack_accounts` counts and the seven `tools` names, without account IDs. |
 | `tool_call` | `time`, `duration_ms` | UTC ISO 8601 completion time, and a number that includes the audit write. |
 | `tool_call` | `tool` | The tool name. A name outside the catalog is `"<unknown>"`. |
-| `tool_call` | `caller` | A complete SHA-256 fingerprint of the presented bearer token, or `"anonymous"`. It does not identify a person or prove a valid grant. |
+| `tool_call` | `caller` | A complete SHA-256 fingerprint of the presented bearer token, of the header value when it holds no parseable bearer token, or `"anonymous"` when the header is absent or empty. It does not identify a person or prove a valid grant. |
 | `tool_call` | `decision` | `"allowed"`, `"refused"`, or `"failed"`. |
 | `tool_call` | `receipt_id`, `reason` | String or `null`. A failed audit write can leave the receipt ID `null`. A refusal includes its reason. |
 

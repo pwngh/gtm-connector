@@ -7,8 +7,10 @@ read never falls back to invented messages. The tests use invented responses.
 
 ## Sign in
 
-A sign-in is the Slack credential that `debug slack connect` saves in the
-[state folder](cli.md). The app needs:
+A Slack sign-in is what `debug slack connect` saves in the [state folder](cli.md): the Slack user
+credentials and the identity they were verified for.
+
+The Slack app needs:
 
 - [PKCE](https://docs.slack.dev/authentication/using-pkce/) enabled as a public client.
 - The exact redirect `http://localhost:PORT/slack/callback` registered, `PORT` from 1024 to 65535.
@@ -165,7 +167,7 @@ card. It uses no Slack account, token, or network request.
 .venv/bin/python -m gtm_connector demo --state-dir var/renewal-demo   # always includes Slack
 ```
 
-- `read_slack_messages` requires `slack:read`. A Slack-only grant cannot read CRM or call notes.
+- `read_slack_messages` requires `slack:read`. A grant that holds only `slack:read` cannot read CRM or call notes.
 - A card with Slack makes four audited reads and never requests `crm:write`.
 - Messages live in `slack.sqlite3`: 29 of them, `msg-001` through `msg-030` without `msg-005`.
   Each has an author name and a count of attached files that were not read. On demo data the
