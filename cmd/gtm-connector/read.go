@@ -15,7 +15,6 @@ import (
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
-	"github.com/pwngh/gtm-connector/internal/sources/demo"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 	"github.com/pwngh/gtm-connector/internal/unicodetab"
@@ -24,7 +23,7 @@ import (
 // The read commands, as gtm_connector/cli.py runs them: accounts, brief, inspect and audit. They are the
 // commands of the person who runs the install, so they connect as the app role and read a whole workspace.
 // A card they make is the owner's: its receipts name no principal, and a bearer made for the run, never
-// stored or shown, gives them their token ID.
+// stored or shown, gives them their token ID. What a workspace reads comes from sources.go.
 
 // defaultWorkspace is the workspace a command reads without --state-dir: the one setup makes.
 const defaultWorkspace = "demo"
@@ -48,83 +47,7 @@ func workspaceSlug(name string) string {
 	return "dir-" + hex.EncodeToString(digest[:16])
 }
 
-// errNotConnected is a workspace with no CRM: there is nothing to read an account from.
-var errNotConnected = errors.New("no CRM is connected")
-
-// unportedSource is a source the read commands do not read yet.
-type unportedSource struct{ source string }
-
-func (e *unportedSource) Error() string {
-	return "This workspace is connected to " + e.source + ", which this command does not read yet."
-}
-
-// reads is what a workspace's cards are read from: the kind of each source, each source's connection, and
-// the demo book.
-type reads struct {
-	sources     evidence.Sources
-	connections map[string]string
-	book        *demo.Store
-}
-
-// workspaceReads reads what a workspace is connected to. Only demo data is read here: a workspace with no
-// CRM gives errNotConnected, and one connected to any other source is refused as not ported.
-func workspaceReads(ctx context.Context, store *postgres.Store, workspace postgres.Workspace) (reads, error) {
-	r := reads{sources: demoSources, connections: map[string]string{}}
-	connections, err := store.Connections(ctx, workspace.ID)
-	if err != nil {
-		return r, err
-	}
-	modes := map[string]string{}
-	for _, c := range connections {
-		modes[c.Source] = c.Mode
-		r.connections[c.Source] = c.ID
-	}
-	names := map[string]string{"sf": "Salesforce", "env_token": "Salesforce", "imported": "imported transcripts",
-		"slack": "a Slack thread"}
-	backend := func(source string) (string, error) {
-		switch mode := modes[source]; mode {
-		case "demo", "fixture":
-			return "fixture", nil
-		case "", "none":
-			return "none", nil
-		default:
-			return "", &unportedSource{names[mode]}
-		}
-	}
-	crm, err := backend("crm")
-	switch {
-	case err != nil:
-		return r, err
-	case crm == "none":
-		return r, errNotConnected
-	}
-	if r.sources.CallsBackend, err = backend("calls"); err != nil {
-		return r, err
-	}
-	if r.sources.SlackBackend, err = backend("slack"); err != nil {
-		return r, err
-	}
-	r.book, err = demo.Seeded()
-	return r, err
-}
-
-// maker makes cards from these sources on PostgreSQL.
-func (r reads) maker(store *postgres.Store) *cards.Maker {
-	return &cards.Maker{Receipts: &postgres.ReceiptStore{Store: store}, Source: r.book, Sources: r.sources,
-		Connections: r.connections}
-}
-
-// sourcesLine names what a card reads, once, on stderr.
-func (r reads) sourcesLine() string {
-	word := map[string]string{"fixture": "demo data", "none": "not connected"}
-	calls, slack := word[r.sources.CallsBackend], word[r.sources.SlackBackend]
-	if calls == "demo data" && slack == "demo data" {
-		return "Sources: CRM, calls, and Slack are demo data."
-	}
-	return "Sources: CRM is demo data; calls are " + calls + "; Slack is " + slack + "."
-}
-
-// run is one read command with its arguments.
+// run is one command with its arguments.
 type run struct {
 	command string
 	args    parsed
@@ -160,7 +83,8 @@ func (r *run) here() string {
 func (r *run) open(ctx context.Context) error {
 	c, err := loadConfig()
 	if err != nil {
-		return err
+		// loadConfig's errors are this program's own sentences about the settings it was given.
+		return local("%s", err)
 	}
 	if r.store, err = openAppStore(ctx, c); err != nil {
 		return err
@@ -173,10 +97,17 @@ func (r *run) open(ctx context.Context) error {
 	return err
 }
 
+// announce names what a command reads, once, on stderr. A JSON result keeps stderr for its one error.
+func (r *run) announce(line string) {
+	if line != "" && !r.screen.json {
+		fmt.Fprintln(r.screen.err, line)
+	}
+}
+
 // reads is what the workspace is connected to. A workspace that does not exist has no CRM.
-func (r *run) reads(ctx context.Context) (reads, error) {
+func (r *run) reads(ctx context.Context) (*reads, error) {
 	if !r.exists {
-		return reads{}, errNotConnected
+		return nil, errNotConnected
 	}
 	return workspaceReads(ctx, r.store, r.workspace)
 }
@@ -187,9 +118,9 @@ func (r *run) noAuditLog() *failure {
 		next: "gtm-connector demo" + r.folder()}
 }
 
-// runRead runs one read command and gives its exit code.
-func runRead(ctx context.Context, command string, tokens []string, s screen) int {
-	spec := readCommands[command]
+// runCommand runs one command and gives its exit code.
+func runCommand(ctx context.Context, command string, tokens []string, s screen) int {
+	spec := commands[command]
 	args, err := spec.parse(tokens)
 	if err != nil {
 		return s.fail(command, refused("%s", err))
@@ -247,9 +178,9 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 		return &failure{code: 130, message: "Interrupted. Completed local writes are retained.",
 			next: "gtm-connector audit --help"}
 	case errors.Is(err, errNotConnected):
-		return &failure{code: 2, next: "gtm-connector connect --help",
-			message: "No CRM is connected. Run gtm-connector connect salesforce --org ALIAS" + r.here() +
-				", or gtm-connector connect demo" + r.here() + " for invented data."}
+		return r.notConnected()
+	case errors.Is(err, postgres.ErrPinned):
+		return pinnedElsewhere
 	case errors.As(err, &unported):
 		return &failure{code: 3, message: unported.Error()}
 	case errors.As(err, &request):
@@ -264,8 +195,22 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 		return &failure{code: 5, message: read.Tool + ": invalid or failed tool result; no brief generated"}
 	case errors.Is(err, cards.ErrBriefing):
 		return &failure{code: 5, message: "required evidence could not be collected; no brief generated"}
+	case errors.Is(err, receipts.ErrSourceChanged):
+		return &failure{code: 3, message: "A source of this workspace was connected again while it was read; " +
+			"nothing was published. Run the command again."}
 	}
-	return &failure{code: 1, message: err.Error()}
+	return &failure{code: 1, message: plain(err)}
+}
+
+// notConnected is the refusal of a workspace with no CRM, with what this build connects. When Salesforce
+// can be attached, it is the Python CLI's own advice.
+func (r *run) notConnected() *failure {
+	advice := "Run gtm-connector connect demo" + r.here() + " for invented data."
+	if kindsNamed("salesforce")[0].attach != nil {
+		advice = "Run gtm-connector connect salesforce --org ALIAS" + r.here() + ", or gtm-connector connect demo" +
+			r.here() + " for invented data."
+	}
+	return &failure{code: 2, next: "gtm-connector connect --help", message: "No CRM is connected. " + advice}
 }
 
 func (r *run) result(ctx context.Context) (any, error) {
@@ -276,6 +221,10 @@ func (r *run) result(ctx context.Context) (any, error) {
 		return r.brief(ctx)
 	case "inspect":
 		return r.inspect(ctx)
+	case "connect":
+		return r.connect(ctx)
+	case "demo":
+		return r.demo(ctx)
 	}
 	return r.audit(ctx)
 }
@@ -290,8 +239,15 @@ func (r *run) accounts(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := from.open(ctx, "crm"); err != nil {
+		return nil, err
+	}
+	r.announce(from.crmLine())
 	query, _ := r.args.text("--query")
-	found, more := from.book.SearchAccounts(query)
+	found, more, err := from.searchAccounts(ctx, query)
+	if err != nil {
+		return nil, err
+	}
 	rows := make([]any, len(found))
 	for i, row := range found {
 		rows[i] = row
@@ -316,25 +272,29 @@ func (r *run) brief(ctx context.Context) (any, error) {
 	account := r.args.positionals[0]
 	asOf, given := r.args.text("--as-of")
 	if !given {
-		asOf = cards.DemoAsOf
+		asOf = from.day()
 	}
-	if !r.screen.json {
-		fmt.Fprintln(r.screen.err, from.sourcesLine())
+	// The card reads the CRM, Slack, and the calls unless its grant leaves them out. A source it will read
+	// and this build cannot is refused here, before anything is read or written. One it will not read is
+	// not opened.
+	scopes, reading := []string{"crm:read", "calls:read", "slack:read"}, []string{"crm", "calls", "slack"}
+	if _, without := r.args.text("--without-calls"); without {
+		scopes, reading = []string{"crm:read", "slack:read"}, []string{"crm", "slack"}
+	}
+	if err := from.open(ctx, reading...); err != nil {
+		return nil, err
+	}
+	r.announce(from.sourcesLine())
+	// The maker's own checks of the request come before any lookup or write: an account ID that is not of
+	// this workspace's CRM, or a day that is not one, is refused with nothing read and nothing written.
+	if err := cards.CheckRequest(from.sources(), account, asOf); err != nil {
+		return nil, err
 	}
 	// A card belongs to an account of its workspace, so an account the CRM holds is listed there first.
-	// A day that does not exist is refused by the maker below, and nothing is written for it.
-	_, dayErr := time.Parse("2006-01-02", asOf)
-	if row, ok := from.book.GetAccount(account); ok && dayErr == nil {
-		name, _ := get(row, "name").(string)
-		if err := r.store.EnsureAccount(ctx, r.workspace.ID, account, name); err != nil {
-			return nil, err
-		}
+	if err := from.list(ctx, account); err != nil {
+		return nil, err
 	}
-	scopes := []string{"crm:read", "calls:read", "slack:read"}
-	if _, without := r.args.text("--without-calls"); without {
-		scopes = []string{"crm:read", "slack:read"}
-	}
-	sealed, err := from.maker(r.store).Brief(ctx, cards.Brief{
+	sealed, err := from.maker().Brief(ctx, cards.Brief{
 		Principal: cards.Principal{WorkspaceID: r.workspace.ID, TokenID: receipts.Fingerprint(randomToken()),
 			Scopes: scopes},
 		OperationID: "brief-" + receipts.RandomID(), AccountID: account, AsOf: asOf, IncludeSlack: true})
@@ -415,7 +375,7 @@ func (r *run) inspect(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	card, err := r.sealed(ctx, target, from.sources)
+	card, err := r.sealed(ctx, target, from.sources())
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +403,14 @@ func (r *run) account(ctx context.Context, id string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	found, ok := from.book.GetAccount(id)
+	if err := from.open(ctx, "crm"); err != nil {
+		return nil, err
+	}
+	r.announce(from.crmLine())
+	found, ok, err := from.account(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		return nil, &failure{code: 2, message: "account not found: " + id, next: "gtm-connector accounts" + r.folder()}
 	}
@@ -458,7 +425,7 @@ func (r *run) account(ctx context.Context, id string) (any, error) {
 	}
 	var newest any
 	for _, brief := range briefs {
-		if card, err := r.sealed(ctx, brief, from.sources); err == nil && get(card, "account_id") == id {
+		if card, err := r.sealed(ctx, brief, from.sources()); err == nil && get(card, "account_id") == id {
 			newest = brief
 			break
 		}

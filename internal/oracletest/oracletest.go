@@ -80,6 +80,25 @@ func Lines(t testing.TB, name string) [][]byte {
 	return lines
 }
 
+// ReadmeBlock is the text block of README.md that opens with the given words, up to its closing fence. A
+// page with no such block fails the test, so a moved or renamed fence cannot pass as nothing to compare.
+func ReadmeBlock(t testing.TB, opening string) string {
+	t.Helper()
+	page, err := os.ReadFile(filepath.Join(Path(t, ""), "..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, after, opened := strings.Cut(string(page), "```text\n"+opening)
+	if !opened {
+		t.Fatalf("README.md has no text block that opens with %q", opening)
+	}
+	block, _, closed := strings.Cut(after, "```")
+	if !closed {
+		t.Fatalf("the README.md block that opens with %q has no closing fence", opening)
+	}
+	return opening + block
+}
+
 // Mismatches collects differences and reports the first few, then the total, when the test ends.
 type Mismatches struct {
 	t      testing.TB
