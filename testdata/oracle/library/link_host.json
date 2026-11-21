@@ -1,0 +1,2465 @@
+{
+ "note": "the host a card shows for a link target, and for a www. address the host it shows in running text",
+ "cases": [
+  {
+   "input": "http://a.example/x",
+   "host": "a.example",
+   "running_text": null
+  },
+  {
+   "input": "http://a\tb.example/x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://evil.example\\@good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://A.Example:8443/p",
+   "host": "a.example",
+   "running_text": null
+  },
+  {
+   "input": "HTTPS://WWW.Example.COM/",
+   "host": "example.com",
+   "running_text": null
+  },
+  {
+   "input": "www.www.example",
+   "host": "unknown host",
+   "running_text": "example"
+  },
+  {
+   "input": "www.",
+   "host": "unknown host",
+   "running_text": "unknown host"
+  },
+  {
+   "input": "//x.example",
+   "host": "x.example",
+   "running_text": null
+  },
+  {
+   "input": "x.example",
+   "host": "x.example",
+   "running_text": null
+  },
+  {
+   "input": "mailto:a@b.example",
+   "host": "mail",
+   "running_text": null
+  },
+  {
+   "input": "MAILTO:x",
+   "host": "mail",
+   "running_text": null
+  },
+  {
+   "input": "ftp://files.example/a",
+   "host": "files.example",
+   "running_text": null
+  },
+  {
+   "input": "slack://open",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://[::1]/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://[v1.x]/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://[::1",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://]x/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://user:pass@host.example:99999/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://user@host.example:abc/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://%41.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://xn--bcher-kva.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://b\u00fccher.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a.example\\b/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a\u3002example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a.example.",
+   "host": "a.example.",
+   "running_text": null
+  },
+  {
+   "input": "http://.example",
+   "host": ".example",
+   "running_text": null
+  },
+  {
+   "input": "http://a_b.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a b.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a\nb.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a\u0000b.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://@/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://:80/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http:/x.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http:///x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://www.www.example/",
+   "host": "example",
+   "running_text": null
+  },
+  {
+   "input": "https://wwwx.example/",
+   "host": "wwwx.example",
+   "running_text": null
+  },
+  {
+   "input": "https://x.www.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "//",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "//a",
+   "host": "a",
+   "running_text": null
+  },
+  {
+   "input": "a//b",
+   "host": "a",
+   "running_text": null
+  },
+  {
+   "input": "www.example.com/path?q=1",
+   "host": "unknown host",
+   "running_text": "example.com"
+  },
+  {
+   "input": "http://\u0130.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://\u212a.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://EXAMPLE.\u0130/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a.example#frag",
+   "host": "a.example",
+   "running_text": null
+  },
+  {
+   "input": "http://a.example?x#y",
+   "host": "a.example",
+   "running_text": null
+  },
+  {
+   "input": "http://\uff21.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a\u200bb.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a.example:0/",
+   "host": "a.example",
+   "running_text": null
+  },
+  {
+   "input": "http://a.example:65535/",
+   "host": "a.example",
+   "running_text": null
+  },
+  {
+   "input": "http://[fe80::1%25en0]/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "javascript:alert(1)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "data:text/html,x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://1.2.3.4/",
+   "host": "1.2.3.4",
+   "running_text": null
+  },
+  {
+   "input": "http://0x7f.1/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "C:\\path",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "\\\\server\\share",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a.example%2F@b.example/",
+   "host": "b.example",
+   "running_text": null
+  },
+  {
+   "input": "http://a.example/@b.example/",
+   "host": "a.example",
+   "running_text": null
+  },
+  {
+   "input": "http://a\uff20b.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://a\u2100.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://us\uff0fer@good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://evil\uff03@good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://good.example\ufe55443/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://\ufe56x.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://\u00aa@good.example/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "http://user\u00e9@good.example/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "http://\u2460.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://\u2474.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://x\u2044y.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "//evil.example\\@good.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "evil.example\\@good.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://good.example:80\\@evil.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://user\u0000@good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "ht\ttp://good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "\u0001http://good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://good\u007f.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://\u009f@good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http:/\t/evil.example\\@good.example/x//",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://good.example/a\\b",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "http://good.example/a\tb",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "http://good.example?a\\@b",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "http://good.example#a\\@b",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "http://user@good.example:8443/x",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "https:good.example/x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https:/good.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "HTTP:8080",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "tel:5551234",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "good.example:8443/x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "user:pass@good.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https:good.example/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a//x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "www.good.example:8443/x",
+   "host": "unknown host",
+   "running_text": "good.example"
+  },
+  {
+   "input": "WWW.good.example:8443",
+   "host": "unknown host",
+   "running_text": "good.example"
+  },
+  {
+   "input": "wwww.example:8443",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "//good.example:8443/x",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "good.example/a:b",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "1.example:8443",
+   "host": "1.example",
+   "running_text": null
+  },
+  {
+   "input": "www.good.example",
+   "host": "unknown host",
+   "running_text": "good.example"
+  },
+  {
+   "input": "www.user:pass@good.example/x",
+   "host": "unknown host",
+   "running_text": "good.example"
+  },
+  {
+   "input": "WWW.user@good.example:8443/a//b",
+   "host": "good.example",
+   "running_text": "good.example"
+  },
+  {
+   "input": "www.good.example/a//b",
+   "host": "unknown host",
+   "running_text": "good.example"
+  },
+  {
+   "input": "https://www.good.example/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "https://good.www.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "good.example/a//b",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example/a//b",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "//WWW.www.good.example:8443/x",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "https://www.192.0.2.1/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://www./",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://www.good.example./x",
+   "host": "good.example.",
+   "running_text": null
+  },
+  {
+   "input": "https://www.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "running_text": null
+  },
+  {
+   "input": "https://www.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://0xc0000201/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://0XC0000201/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://3221225985/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://0300.0.2.1/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://192.0.513/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://192.0.2.1./",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://192.0.2.01/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://192.0.2.1/",
+   "host": "192.0.2.1",
+   "running_text": null
+  },
+  {
+   "input": "http://192.0.2.256/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://1.2.3.4.5/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://good.example.0x1/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://good.example.7/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://good.0x/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://0x10.good.example/",
+   "host": "0x10.good.example",
+   "running_text": null
+  },
+  {
+   "input": "http://255.255.255.255/",
+   "host": "255.255.255.255",
+   "running_text": null
+  },
+  {
+   "input": "http://0.0.0.0/",
+   "host": "0.0.0.0",
+   "running_text": null
+  },
+  {
+   "input": "http://00.0.0.0/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "1.2.3",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "0x7f000001",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example:65536/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example:65535/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example:80a/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example:80:80/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example:/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example:-1/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example:0000000000000000000080/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example:99999999999999999999/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example:\u0668\u0660/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://[v1.good.example]/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://[::1]:8443/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://good.example]/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "file://C:/x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "FILE://good.example/x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example./x",
+   "host": "good.example.",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example.",
+   "host": "good.example.",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example..",
+   "host": "good.example..",
+   "running_text": null
+  },
+  {
+   "input": "http://./",
+   "host": ".",
+   "running_text": null
+  },
+  {
+   "input": "http://-/",
+   "host": "-",
+   "running_text": null
+  },
+  {
+   "input": "https:///good.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://user@@good.example/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "https://good.example@/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "custom://UPPER.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "ws://good.example/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "WSS://good.example/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "ssh://good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://xn--bcher-kva.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://good.XN--p1ai/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://axn--b.example/",
+   "host": "axn--b.example",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "HTTPS://B.example/y",
+   "host": "b.example",
+   "running_text": null
+  },
+  {
+   "input": "mailto:",
+   "host": "mail",
+   "running_text": null
+  },
+  {
+   "input": "[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "//evil.example",
+   "host": "evil.example",
+   "running_text": null
+  },
+  {
+   "input": "://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ":",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "2027-01-15T00:00:00Z",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "0001-01-01T00:00:00+23:59",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "9999-12-31T23:59:59-23:59",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "2026-10-03T15:00:00",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "Kind: captions",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "Language: en-US",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "00:00.000 --> 00:01.000",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "Kind: 00:00.000 --> 00:01.000",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "Dana: this was said.",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "00:00:00.000 --> 00:00:01.000 align:start",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "99:59.999 --> 100:00:00.000",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "00:00.000 -->  00:01.000",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "Dana Reyes: Hello.",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "WEBVTT\nKind: ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "WEBVTT\n\n00:00.000 --> 00:01.000\nhello\n\nNOTE ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "WEBVTT\n\n00:00.000 --> 00:01.000 ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "WEBVTT\n\n00:00.000 ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "WEBVTT\n\n00:00.000 --> 00:01.000\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "00:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "Language: en\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "00:00.000 --> 00:01.000\nhi\n\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "1\n00:00.000 --> 00:01.000\nhi\n\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "\n\n00:00.000 --> 00:01.000\nhello\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "--> 00:01.000\nhello",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "\n00:00.000 --> 00:01.000\nhello",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "Seats: 40 -> 55? [crm/accounts/acc-001]",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "- Signal: renewal is in 1 day.",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel><https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel><mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!channel>:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now><https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now><mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here|now>:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team><https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team><mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123><https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123><mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana><https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana><mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123|dana>:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general><https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general><mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<#C9|general>:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!<https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!<mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<![doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@<https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@<mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@http://",
+   "host": "http",
+   "running_text": null
+  },
+  {
+   "input": "<@https://",
+   "host": "https",
+   "running_text": null
+  },
+  {
+   "input": "<@HTTPS://B.example/y",
+   "host": "https",
+   "running_text": null
+  },
+  {
+   "input": "<@mailto:",
+   "host": "mailto",
+   "running_text": null
+  },
+  {
+   "input": "<@[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@slack://x",
+   "host": "slack",
+   "running_text": null
+  },
+  {
+   "input": "<@ftp://",
+   "host": "ftp",
+   "running_text": null
+  },
+  {
+   "input": "<@//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<<https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<<mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "><https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "><mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": ">:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|<https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|<mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "|:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><!channel>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><!here|now>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><!subteam^S1|@team>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><@U0ABC123>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><@U0ABC123|dana>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><#C9|general>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><!",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><@",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>|",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>[",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>](",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label> ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>? ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>! ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>Dr. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>.\" ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>e.g. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>No",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\n  Customer, by a speaker label equal to one contact's name\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\n    [1] call ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\nNOT READ\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>[1]",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>[22]",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>]",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>1",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\uff11",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>www.",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>www.evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><x|y>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><v Dana Ito>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label><v.loud Sam>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label></v>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>Jan. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>A. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\n\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\r\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\u202e",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\u200d",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\u00ad",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\udb40\udc41",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\u001b",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\u0085",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\u2028",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\u2029",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\t",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\u00a0",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>\u3000",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>Their counsel has not approved the rider.",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>We'll see.",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://a.example/x|label>Zo\u00eb",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><!channel>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><!here|now>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><!subteam^S1|@team>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><@U0ABC123>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><@U0ABC123|dana>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><#C9|general>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><!",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><@",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>|",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><https://a.example/x|label>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><mailto:a@b.example>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>http://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>https://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>HTTPS://B.example/y",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>mailto:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>[doc](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>[",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>](",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example> ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>? ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>! ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>Dr. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>.\" ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>e.g. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>No",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\n  Customer, by a speaker label equal to one contact's name\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\n    [1] call ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\nNOT READ\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>[1]",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>[22]",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>]",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>1",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\uff11",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>slack://x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>ftp://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>//evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>www.",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>www.evil.example",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><x|y>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>://",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>:",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><v Dana Ito>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example><v.loud Sam>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example></v>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>Jan. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>A. ",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\n\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\r\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\u202e",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\u200d",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\u00ad",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\udb40\udc41",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\u001b",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example>\u0085",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<http://a\tb.example/x|deck>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<http://evil.example\\@good.example/|deck>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<https://A.Example:8443/p?q=1#f|Deck>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "mailto:dana@example.com",
+   "host": "mail",
+   "running_text": null
+  },
+  {
+   "input": "<mailto:a@b.example|mail>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "[deck](https://c.example/z)",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "[deck]( http://d.example )",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<slack://open|app>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "ftp://files.example/a.",
+   "host": "files.example",
+   "running_text": null
+  },
+  {
+   "input": "<#C123|general>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<@U0ABC123>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!subteam^S1|@team>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!here>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<!date^1|x>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<x|y>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "<|>",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "[7]",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "[\uff11]",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "[12]x",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "\r\n",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "\r",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "%",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "%4",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "%41",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "%zz",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "%%41",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "?q=%E2%82%AC",
+   "host": "unknown host",
+   "running_text": null
+  }
+ ]
+}

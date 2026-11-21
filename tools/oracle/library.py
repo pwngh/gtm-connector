@@ -2,10 +2,10 @@
 
 from datetime import date, datetime
 from decimal import Decimal, localcontext
+from html.entities import html5
 import json
 import sys
 from typing import Any
-from urllib.parse import urlsplit
 
 from gtm_connector import strict_json, units
 from gtm_connector.salesforce import SalesforceReadError, SalesforceReadOnlyAdapter
@@ -42,7 +42,36 @@ HOSTS = (
     "https:good.example/x", "https:/good.example", "HTTP:8080", "tel:5551234", "good.example:8443/x",
     "user:pass@good.example", "a" * 40 + "://good.example/", "https:good.example" + "/a" * 20 + "//x",
     "www.good.example:8443/x", "WWW.good.example:8443", "wwww.example:8443", "//good.example:8443/x",
-    "good.example/a:b", "1.example:8443")
+    "good.example/a:b", "1.example:8443",
+    # A www. address is a host in running text only. A leading www. is not shown after // or in running text,
+    # and a host that still holds www. is not shown at all. Two slashes in a path start no host.
+    "www.good.example", "www.user:pass@good.example/x", "WWW.user@good.example:8443/a//b", "www.good.example/a//b",
+    "https://www.good.example/", "https://good.www.example/", "good.example/a//b", "https://good.example/a//b",
+    "//WWW.www.good.example:8443/x", "https://www.192.0.2.1/", "https://www./", "https://www.good.example./x",
+    "https://www." + "a" * 80, "https://www." + "a" * 81,
+    # A host a browser reads as a number and rewrites or refuses. Four plain decimal parts stay as written.
+    "http://0xc0000201/", "http://0XC0000201/", "http://3221225985/", "http://0300.0.2.1/", "http://192.0.513/",
+    "http://192.0.2.1./", "http://192.0.2.01/", "http://192.0.2.1/", "http://192.0.2.256/", "http://1.2.3.4.5/",
+    "http://good.example.0x1/", "http://good.example.7/", "http://good.0x/", "http://0x10.good.example/",
+    "http://255.255.255.255/", "http://0.0.0.0/", "http://00.0.0.0/", "1.2.3", "0x7f000001",
+    # A port a browser refuses, a bracketed host, a file link, a scheme of 32 and of 33 characters.
+    "https://good.example:65536/", "https://good.example:65535/", "https://good.example:80a/",
+    "https://good.example:80:80/", "https://good.example:/", "https://good.example:-1/",
+    "https://good.example:" + "0" * 20 + "80/", "https://good.example:" + "9" * 20 + "/",
+    "https://good.example:\u0668\u0660/", "http://[v1.good.example]/", "http://[::1]:8443/", "http://good.example]/",
+    "file://C:/x", "FILE://good.example/x", "a" * 32 + "://good.example/", "a" * 33 + "://good.example/",
+    # A dot that ends the host is part of it. A host of dots or hyphens, an empty host, and a second @.
+    "https://good.example./x", "https://good.example.", "https://good.example..", "http://./", "http://-/",
+    "https:///good.example", "https://user@@good.example/", "https://good.example@/",
+    # A scheme a browser does not know keeps its host opaque, and no host with an xn-- label is shown.
+    "custom://UPPER.example/", "ws://good.example/", "WSS://good.example/", "ssh://good.example/",
+    "https://xn--bcher-kva.example/", "https://good.XN--p1ai/", "https://axn--b.example/")
+# Markdown destinations with escapes and character references, read with escapes and without them.
+REFERENCES = (
+    "https://good.example&sol;@evil.example/", "&#104;ttps:&sol;&sol;good.example/", "https\\:/good.example",
+    "a&#X2f;b&#47;c&#x2F;", "&#0;&#1114112;&#xD800;&#x110000;&#1234567;&#12345678;&#x1234567;", "&amp;&amp",
+    "&nosuch;&AMP;&ampx;&semi;&NotNestedGreaterGreater;&CounterClockwiseContourIntegral;", "&#;&#x;&;",
+    "\\!\\\\\\a\\ \\", "&lt;&gt;&quot;&apos;&nbsp;&copy;&fjlig;", "\\&amp;")
 JSON_VALUES: tuple[Any, ...] = (
     "", "plain", 'quote " and backslash \\ and slash /', "\x00\x01\x1f\x7f\x80\x9f", "\t\n\r\x0b\x0c\x08",
     "\u2028\u2029\u0085", "\u00e9\u00df\u4e2d\U0001f642", "\ufeff\u200b\u202e", "</script>&<>'", "\ud83d\ude00",
@@ -117,7 +146,6 @@ DOCUMENTS: tuple[bytes | str, ...] = (
 # Section 4 of the backend plan: oracle behaviour the Go port will change on purpose. The cases are recorded here
 # as the oracle gives them; the Go side writes its own reviewed expectations.
 DIFFERENCES = {
-    "safe_text_twice": "We agree <#<@U1> will not sign> today.",
     "sentence_opener_quote": 'They said yes. "maybe later" was the reply.',
     "sentence_opener_accent": 'They said yes. "\u00e9lan" was the word.',
     "sentence_unicode_16_letter": "He agreed. \U00010d70xyz goes on.",
@@ -131,18 +159,10 @@ def _outcome(function, *arguments) -> dict:
         return {"error": type(error).__name__, "message": str(error)}
 
 
-def _split(target: str) -> dict:
-    def parts():
-        found = urlsplit(target)
-        return [found.scheme, found.netloc, found.path, found.query, found.fragment]
-
-    def hostname():
-        return urlsplit(target if "//" in target[:40] else "//" + target).hostname
-
-    def port():
-        return urlsplit(target).port
-    return {"input": target, "urlsplit": _outcome(parts), "hostname": _outcome(hostname), "port": _outcome(port),
-            "host": units._host(target)}
+def _link_host(target: str) -> dict:
+    # A www. address is read another way in running text than as a link target.
+    return {"input": target, "host": units._host(target),
+            "running_text": units._host(target, bare=True) if target[:4].lower() == "www." else None}
 
 
 def _dumps(value: Any) -> dict:
@@ -204,10 +224,17 @@ def _document(document: bytes | str) -> dict:
 def generate(writer: Writer) -> None:
     targets = list(dict.fromkeys(HOSTS + tuple(text for text in fuzz_corpus() if "//" in text or ":" in text)[:300]
                                  + LINK_PIECES))
-    writer.json("library/urlsplit.json", {
-        "note": ("urlsplit parts, hostname as units._host asks for it, port, and the host a card shows; an error is "
-                 "the exception's type and message"),
-        "cases": [_split(target) for target in targets]}, len(targets))
+    writer.json("library/link_host.json", {
+        "note": ("the host a card shows for a link target, and for a www. address the host it shows in running "
+                 "text"),
+        "cases": [_link_host(target) for target in targets]}, len(targets))
+    entities = {name[:-1]: value for name, value in sorted(html5.items()) if name.endswith(";")}
+    writer.json("library/references.json", {
+        "note": ("the HTML5 named references a Markdown destination reads, by name without its ;, and units._unescape "
+                 "of each case, with escapes and without them"),
+        "entities": entities,
+        "cases": [{"input": text, "escapes": units._unescape(text), "references": units._unescape(text, False)}
+                  for text in REFERENCES]}, len(entities) + len(REFERENCES))
     values = JSON_VALUES + NON_FINITE
     writer.json("library/json_dumps.json", {
         "note": ("json.dumps under the options the package uses: default (CLI errors and progress), ascii_false "
@@ -225,11 +252,8 @@ def generate(writer: Writer) -> None:
     writer.json("library/strict_json.json", {
         "note": "strict_json.loads of each document (hex of its bytes, or of a str's UTF-8): the value, or the refusal",
         "cases": [_document(document) for document in DOCUMENTS]}, len(DOCUMENTS))
-    once = units.safe_text(DIFFERENCES["safe_text_twice"])[0]
     writer.json("library/differences.json", {
         "note": "Backend plan section 4: what the oracle does where Go will differ on purpose",
-        "safe_text_twice": {"input": DIFFERENCES["safe_text_twice"], "once": once,
-                            "twice": units.safe_text(once)[0]},
         "sentences": {name: {"input": DIFFERENCES[name], "sentences": units.sentences(DIFFERENCES[name])}
                       for name in ("sentence_opener_quote", "sentence_opener_accent", "sentence_unicode_16_letter")}},
         len(DIFFERENCES))

@@ -9,12 +9,12 @@ once, here, before anything displays it.
 from bisect import bisect_left, bisect_right
 from datetime import date, datetime, timezone
 import hashlib
+from html.entities import html5
 from itertools import accumulate
 import json
 import re
 from typing import Any, Literal, TypedDict, cast
 import unicodedata
-from urllib.parse import urlsplit
 
 
 class BriefRejected(ValueError):
@@ -111,22 +111,45 @@ _SOURCES: dict[str, tuple[Source, str, str]] = {
 
 # Slack wraps mentions, channels, and links in angle brackets. Each becomes a bracketed word that no
 # client renders as a mention or a link. The destination of a link is reduced to its host.
-_SLACK_TOKEN = re.compile(r"<([!@#]?)([^<>|\n]*)(?:\|([^<>\n]*))?>")
 # A mention that was never closed is still neutralized, so no output holds the start of one.
 _OPEN_MENTION = re.compile(r"<([!@])([A-Za-z0-9^_-]*)()")
 # A link is any scheme, a scheme-relative //host, mailto:, or a bare www. address.
 _TARGET = r"(?:[a-z][a-z0-9+.-]*://|mailto:|www\.|//(?=[a-z0-9]))"
-_MARKDOWN_LINK = re.compile(r"\[([^\[\]\n]*)\]\(\s*([^\s()]+)\s*\)")
 # In running text a scheme or mailto: is a link wherever it starts. A bare www. or // is one only at the
-# start of a word, so a path such as a//b is left alone.
-_RAW_LINK = re.compile(r"(?:[a-z][a-z0-9+.-]{0,31}://|mailto:|(?<![a-z0-9])www\.|(?<![a-z0-9:/])//(?=[a-z0-9]))"
-                       r"[^\s<>\"']*", re.IGNORECASE)
+# start of a word, so a path such as a//b is left alone. The group is set for a www. address.
+# The link runs, as a GitHub Markdown client reads it, up to a space or a <. A word the connector wrote for a
+# Slack token, which started with a <, ends it too.
+_RAW_LINK = re.compile(r"(?:[a-z][a-z0-9+.-]{0,31}://|mailto:|(?<![a-z0-9])(www\.)|(?<![a-z0-9:/])//(?=[a-z0-9]))"
+                       r"(?:[^\s<\[]|\[(?!(?:link|mention) |(?:user|channel)[ \]]))*", re.IGNORECASE)
 _IS_TARGET = re.compile(_TARGET, re.IGNORECASE)
-# A browser reads a backslash before a link's path as a slash and drops a tab or a line break, so urlsplit and a
-# browser can name different hosts. A link with a backslash or a control character there is shown with no host.
+_SCHEME_HEAD = re.compile(r"[a-z][a-z0-9+.-]{0,31}://", re.IGNORECASE)
+# A browser reads a backslash before a link's path as a slash and drops a tab or a line break, so the host
+# written and the host opened can differ. A link with a backslash or a control character there is shown with no host.
 _AMBIGUOUS = re.compile(r"[\x00-\x1f\x7f-\x9f\\]")
-# A scheme at the start of a target: a name and a colon. A www. address is a host, and a colon in it starts a port.
-_SCHEME = re.compile(r"(?![Ww]{3}\.)[A-Za-z][A-Za-z0-9+.-]*:")
+# A scheme at the start of a link target: a name and a colon.
+_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
+# The schemes whose host a browser reads. Any other scheme's host is opaque to it.
+_SPECIAL = ("http:", "https:", "ftp:", "ws:", "wss:")
+# What a backslash escapes in Markdown, and a character reference: a hexadecimal or a decimal number, or a name.
+_PUNCTUATION = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+_ASCII_LETTERS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+_REFERENCE = re.compile(r"&(?:#[xX]([0-9A-Fa-f]{1,6})|#([0-9]{1,7})|([A-Za-z][A-Za-z0-9]{0,31}));")
+# What a Markdown client still reads as a link in the finished text. An angle-bracket link: a scheme of 2 to 32
+# characters, a colon, and no space up to the closing bracket, or a mail address.
+_AUTOLINK = re.compile(r"<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^ \n<>]*)>|<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+                       r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>")
+# A line that a Markdown client reads as a heading, a rule, a setext underline or a code fence. The line after
+# one starts a paragraph.
+_BLOCK = re.compile(r" {0,3}(?:#{1,6}(?: .*)?|(?:(?:\* *){3,}|(?:- *){3,}|(?:_ *){3,}|=+ *)|`{3,}.*|~{3,}.*)")
+# A list item's marker, after at most three spaces.
+_ITEM = re.compile(r" {0,3}(?:[-+*]|[0-9]{1,9}[.)])(?: +|\Z)")
+# A last label that makes a browser read the whole host as a number, and the one address form it leaves as written.
+_NUMBER = re.compile(r"[0-9]+|0x[0-9a-f]*")
+_OCTET = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
+_IPV4 = re.compile(rf"{_OCTET}(?:\.{_OCTET}){{3}}")
+# A browser drops a tab or a line break from a link, so a link cut by one goes on in what follows unless that
+# is a space, the end of the text, or the start of a path, a query or a fragment.
+_CONTINUES = re.compile(r"[\t\n\r]+[^\s/?#]")
 # The longest speaker label a card shows. A longer one is no label.
 MAX_LABEL = 200
 # A time in this form is shown as given. Any other time is source text and is shown as a neutralized literal.
@@ -151,25 +174,298 @@ _CITATION = re.compile(r"\[(\d+)\]")
 _ENDED = re.compile(r"""[.!?\u3002\uff01\uff1f\u0964\u061f\u06d4]["')\]\u201d\u2019\u00bb\u300d\uff09]*\Z""")
 
 
-def _host(target):
+def _authority(target, bare):
+    """The part of a link target that names its host, whether the target ends inside it, and whether the part
+    is an authority: what follows //, or a www. address in running text. The part is None when a browser reads
+    no host there. A bare target is a www. address in running text, which a client opens as a web address, so
+    a colon in it starts a port. Any other target that starts with a name and a colon has a scheme."""
+    start = 0
+    scheme = None if bare else _SCHEME.match(target)
+    if scheme:
+        # A browser reads https:files.example and https:/files.example as https://files.example, a file link as
+        # a path on the reader's computer, and the host of a scheme it does not know as an opaque name. A scheme
+        # longer than _RAW_LINK reads names no host either.
+        if not target.startswith("//", scheme.end()) or scheme.end() > 33 or scheme.group().lower() not in _SPECIAL:
+            return None, False, False
+        start = scheme.end() + 2
+    elif not bare and target.startswith("//"):
+        start = 2
+    authority = re.split("[/?#]", target[start:], maxsplit=1)[0]
+    return authority, start + len(authority) == len(target), bare or start > 0
+
+
+def _host(target, bare=False):
+    """The host a browser opens for a link target, read as the URL Standard reads it, or "unknown host" when a
+    browser would open another host, or none."""
     if target.lower().startswith("mailto:"):
         return "mail"
-    link = target if "//" in target[:40] else "//" + target
-    # A browser reads https:files.example as https://files.example, and urlsplit would give https as the host.
-    if link != target and _SCHEME.match(target):
+    authority, _, named = _authority(target, bare)
+    # A bracketed address is never shown. A character whose compatibility form is one of / ? # @ : gives no host.
+    if authority is None or _AMBIGUOUS.search(authority) or "[" in authority or "]" in authority or any(
+            mark in unicodedata.normalize("NFKC", character) for character in re.findall(r"[^\x00-\x7f]", authority)
+            for mark in "/?#@:"):
         return "unknown host"
-    # The scheme and the authority: what comes before the first //, and after it up to the next /, ? or #.
-    scheme, _, rest = link.partition("//")
-    if _AMBIGUOUS.search(scheme + re.split("[/?#]", rest, maxsplit=1)[0]):
+    # The host follows the last @ and ends at the first colon. A browser refuses a port that is not a number
+    # up to 65535.
+    host, _, port = authority.rpartition("@")[2].partition(":")
+    if not re.fullmatch("[0-9]*", port) or len(port.lstrip("0")) > 5 or int(port.lstrip("0") or "0") > 65535:
         return "unknown host"
-    try:
-        host = (urlsplit(link).hostname or "").lower()
-    except ValueError:
-        host = ""
-    # A host is shown without a leading www., which a client would turn back into a link.
-    while host.startswith("www."):
-        host = host[4:]
-    return host if re.fullmatch(r"[a-z0-9.-]{1,80}", host) and "www." not in host else "unknown host"
+    if not re.fullmatch(r"[A-Za-z0-9.-]+", host):
+        return "unknown host"
+    host = host.lower()
+    # A browser reads a host whose last label is a number as an address and rewrites or refuses it: 0xc0000201
+    # and 3221225985 both open 192.0.2.1. Only four plain decimal parts stay as written.
+    labels = host.split(".")
+    last = labels[-2] if len(labels) > 1 and not labels[-1] else labels[-1]
+    if _NUMBER.fullmatch(last) and not _IPV4.fullmatch(host):
+        return "unknown host"
+    # A browser refuses an xn-- label that does not decode to a valid name, which takes the IDNA tables to
+    # check, so no such host is shown.
+    if any(label.startswith("xn--") for label in labels):
+        return "unknown host"
+    # The host of an authority is shown without a leading www., which a client would turn back into a link:
+    # files.example names the site of www.files.example. A host that still holds www. is not shown.
+    if named:
+        host = re.sub(r"\A(?:www\.)+", "", host)
+    return host if 1 <= len(host) <= 80 and "www." not in host else "unknown host"
+
+
+def _unescape(destination, escapes=True):
+    """A Markdown destination as CommonMark reads it: a character reference stands for the character it names,
+    and, with escapes, a backslash before ASCII punctuation for that character."""
+    out, i = [], 0
+    while i < len(destination):
+        character = destination[i]
+        reference = _REFERENCE.match(destination, i) if character == "&" else None
+        if escapes and character == "\\" and i + 1 < len(destination) and destination[i + 1] in _PUNCTUATION:
+            out.append(destination[i + 1])
+            i += 2
+        elif reference and reference.group(3) is None:
+            code = int(reference.group(1), 16) if reference.group(1) else int(reference.group(2))
+            out.append(chr(code) if 0 < code <= 0x10FFFF and not 0xD800 <= code <= 0xDFFF else "�")
+            i = reference.end()
+        elif reference and reference.group(3) + ";" in html5:
+            out.append(html5[reference.group(3) + ";"])
+            i = reference.end()
+        else:
+            out.append(character)
+            i += 1
+    return "".join(out)
+
+
+def _is_link(target):
+    """Whether a client opens a Markdown destination, read as CommonMark reads it, as a link of its own rather
+    than as a path on the page that shows it: one with a scheme, // or www. at its start."""
+    return bool(_SCHEME.match(target)) or target.startswith("//") or target[:4].lower() == "www."
+
+
+def _spaces(text, i):
+    """Where the spaces and at most one line break from text[i] end."""
+    while i < len(text) and text[i] == " ":
+        i += 1
+    if i < len(text) and text[i] == "\n":
+        i += 1
+        while i < len(text) and text[i] == " ":
+            i += 1
+    return i
+
+
+def _blank(text, i):
+    """Whether the line from text[i] holds nothing but spaces."""
+    while i < len(text) and text[i] == " ":
+        i += 1
+    return i == len(text) or text[i] == "\n"
+
+
+def _title_end(text, i):
+    """Where a link title that opens at text[i] ends, past its closing mark, or None when it does not close
+    before a blank line."""
+    closer = ")" if text[i] == "(" else text[i]
+    i += 1
+    while i < len(text):
+        if text[i] == "\\" and i + 1 < len(text) and text[i + 1] in _PUNCTUATION:
+            i += 2
+            continue
+        if text[i] == closer:
+            return i + 1
+        if closer == ")" and text[i] == "(" or text[i] == "\n" and _blank(text, i + 1):
+            return None
+        i += 1
+    return None
+
+
+def _destination(text, i, inline):
+    """Where a link destination that starts at text[i] ends, as CommonMark reads one, or None. An inline link's
+    destination ends at a ) that closes no ( of its own, and may be empty."""
+    if i < len(text) and text[i] == "<":
+        i += 1
+        while i < len(text) and text[i] not in "<>\n":
+            i += 2 if text[i] == "\\" else 1
+        return i + 1 if i < len(text) and text[i] == ">" else None
+    start, depth = i, 0
+    while i < len(text):
+        if text[i] == "\\" and i + 1 < len(text) and text[i + 1] in _PUNCTUATION:
+            i += 2
+            continue
+        if text[i] == "(":
+            depth += 1
+            if depth > 32:
+                return None
+        elif text[i] == ")":
+            if not depth:
+                break
+            depth -= 1
+        elif text[i] <= " " or text[i] == "\x7f":
+            break
+        i += 1
+    if depth or inline and i == len(text) or not inline and i == start:
+        return None
+    return i
+
+
+def _target(destination):
+    """What a browser opens for a link destination as written: inside its angle brackets, with its escapes and
+    character references read and the spaces a browser drops gone."""
+    if destination.startswith("<"):
+        destination = destination[1:-1]
+    return _unescape(destination).strip(" ")
+
+
+def _links(text, counts):
+    """CommonMark's inline links in the finished text. Each one whose destination opens a link of its own becomes
+    its label and a marker. Brackets pair innermost first, as a client pairs them, so a link that a replaced one
+    leaves around it is read too, and so is a marker followed by a destination."""
+    out, openers, marker, i = list[str](), list[int](), list[str](), 0
+    while marker or i < len(text):
+        if marker:
+            character = marker.pop()
+        else:
+            character, i = text[i], i + 1
+            if character == "\\" and i < len(text) and text[i] in _PUNCTUATION:
+                out += (character, text[i])
+                i += 1
+                continue
+            if character == "\n" and _blank(text, i):
+                # A blank line ends a paragraph, and no link spans one.
+                openers.clear()
+        if character == "[":
+            openers.append(len(out))
+        elif character == "]" and openers:
+            start = openers.pop()
+            if not marker and i < len(text) and text[i] == "(":
+                begin = _spaces(text, i + 1)
+                end = _destination(text, begin, True)
+                after = None if end is None else _spaces(text, end)
+                if after is not None and after > end and after < len(text) and text[after] in "\"'(":
+                    title = _title_end(text, after)
+                    after = None if title is None else _spaces(text, title)
+                if after is not None and after < len(text) and text[after] == ")":
+                    target = _target(text[begin:end])
+                    if _is_link(target):
+                        counts["links"] += 1
+                        del out[start]
+                        out.append(" ")
+                        marker = list(f"[link {_host(target)}]")[::-1]
+                        i = after + 1
+                        continue
+        out.append(character)
+    return "".join(out)
+
+
+def _autolinks(text, counts):
+    """CommonMark's angle-bracket links in the finished text, each replaced by a marker."""
+    def autolink(match):
+        counts["links"] += 1
+        return "[link mail]" if match.group(1) is None else f"[link {_host(_unescape(match.group(1), False))}]"
+    return _AUTOLINK.sub(autolink, text)
+
+
+def _definition(text, i):
+    """A reference definition that starts at text[i], as CommonMark reads one: where its destination starts and
+    ends, and where its last line ends. None when there is none. A title must close, and nothing but spaces may
+    follow the destination or the title on its line."""
+    j = i
+    while j < len(text) and j - i < 3 and text[j] == " ":
+        j += 1
+    if j >= len(text) or text[j] != "[":
+        return None
+    label = j = j + 1
+    while j < len(text) and text[j] not in "[]":
+        if text[j] == "\\" and j + 1 < len(text):
+            j += 1
+        elif text[j] == "\n" and _blank(text, j + 1):
+            return None
+        j += 1
+    if not text.startswith("]:", j) or j - label > 999 or not text[label:j].strip(" \n"):
+        return None
+    start = _spaces(text, j + 2)
+    end = _destination(text, start, False)
+    if end is None:
+        return None
+    after = _spaces(text, end)
+    if after > end and after < len(text) and text[after] in "\"'(":
+        title = _title_end(text, after)
+        if title is not None:
+            while title < len(text) and text[title] == " ":
+                title += 1
+            if title == len(text) or text[title] == "\n":
+                return start, end, title
+    after = end
+    while after < len(text) and text[after] == " ":
+        after += 1
+    return (start, end, after) if after == len(text) or text[after] == "\n" else None
+
+
+def _definitions(text, counts):
+    """The destination of each reference definition in the finished text becomes a marker when it opens a link
+    of its own or is written in angle brackets. A definition starts a paragraph: at the start of the text, after
+    a blank line, a heading, a rule or a code fence, at the start of a block quote or a list item, or on the line
+    after another definition. It is read inside a block quote with the quote's markers left out."""
+    lines = text.split("\n")
+    # The text of every line after its block-quote markers, joined, and where each character of it is in text.
+    stream: list[str] = []
+    origin: list[int] = []
+    starts, depths, items = [], [], []
+    position = 0
+    for number, line in enumerate(lines):
+        depth = i = 0
+        while True:
+            j = i
+            while j < len(line) and j - i < 3 and line[j] == " ":
+                j += 1
+            if j == len(line) or line[j] != ">":
+                break
+            depth += 1
+            i = j + 2 if line.startswith("> ", j) else j + 1
+        if number:
+            stream.append("\n")
+            origin.append(position - 1)
+        item = _ITEM.match(line, i)
+        starts.append(len(stream))
+        depths.append(depth)
+        items.append(item.end() - i if item else -1)
+        stream.extend(line[i:])
+        origin.extend(range(position + i, position + len(line)))
+        position += len(line) + 1
+    joined = "".join(stream)
+    out, done, number, follows = list[str](), 0, 0, False
+    while number < len(lines):
+        content = joined[starts[number - 1]:starts[number] - 1] if number else ""
+        if (follows or not number or items[number] >= 0 or depths[number] > depths[number - 1]
+                or not content.strip(" ") or _BLOCK.fullmatch(content)):
+            found = _definition(joined, starts[number] + max(items[number], 0))
+            if found:
+                start, end, last = found
+                target = _target(joined[start:end])
+                if joined[start] == "<" or _is_link(target):
+                    counts["links"] += 1
+                    out += (text[done:origin[start]], f"[link {_host(target)}]")
+                    done = origin[end - 1] + 1
+                number, follows = bisect_right(starts, last), True
+                continue
+        number, follows = number + 1, False
+    out.append(text[done:])
+    return "".join(out)
 
 
 def safe_text(raw: object) -> tuple[str, dict[str, int]]:
@@ -177,9 +473,59 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
     if not isinstance(raw, str):
         raise BriefRejected("Evidence text fields must be strings.")
     counts = {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}
+    text = raw
+    # A step can leave a form that an earlier one reads, so the steps run again until a round changes nothing.
+    while True:
+        neutral = _neutralize(text, counts)
+        if neutral == text:
+            return neutral, counts
+        text = neutral
 
-    def token(match):
-        kind, target, label = match.group(1), match.group(2).strip(), (match.group(3) or "").strip()
+
+def _slack_tokens(text, token, markdown):
+    """Each Slack <...> token replaced by what token(kind, target, label) gives, or kept when that is None. A token
+    holds no < or >, and a line break only when it has a | part. Tokens are read innermost first, so a token that
+    forms around a replaced one is read too. With markdown, a link target in angle brackets right after ]( is
+    left for the Markdown link it may end."""
+    out: list[str] = []
+    # Where each open < is in out, and whether a < or > it does not close is left after it.
+    openers: list[list] = []
+    for character in text:
+        if character == "<":
+            openers.append([len(out), False])
+        elif character == ">" and openers:
+            start, held = openers.pop()
+            inner = "".join(out[start + 1:])
+            kind = inner[0] if inner[:1] in ("!", "@", "#") else ""
+            target, bar, label = inner[len(kind):].partition("|")
+            kept = held or not bar and "\n" in target or markdown and not kind and _opens_target(out, start)
+            replacement = None if kept else token(kind, target, label if bar else None)
+            if replacement is not None:
+                del out[start:]
+                out += replacement
+                continue
+            if openers:
+                openers[-1][1] = True
+        out.append(character)
+    return "".join(out)
+
+
+def _opens_target(out, start):
+    """Whether out[start] follows a ]( and the spaces and at most one line break a Markdown link allows there."""
+    i = start - 1
+    while i >= 0 and out[i] == " ":
+        i -= 1
+    if i >= 0 and out[i] == "\n":
+        i -= 1
+        while i >= 0 and out[i] == " ":
+            i -= 1
+    return i >= 1 and out[i] == "(" and out[i - 1] == "]"
+
+
+def _neutralize(raw, counts):
+    """One round of safe_text."""
+    def token(kind, target, label):
+        target, text = target.strip(), (label or "").strip()
         if kind == "!":
             counts["mentions"] += 1
             word = target.split("^")[0]
@@ -190,23 +536,39 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
         if kind == "#":
             counts["mentions"] += 1
             return f"[channel {target}]" if _ID.fullmatch(target) else "[channel]"
-        if _IS_TARGET.match(target) or match.group(3) is not None:
-            # Slack renders any target|label pair as a link, whatever the target is.
+        if _IS_TARGET.match(target) or label is not None:
+            # Slack renders any target|label pair as a link, whatever the target is. A Markdown client reads the
+            # character references in it, and if that changes the host, neither host is shown.
             counts["links"] += 1
-            return f"{label} [link {_host(target)}]" if label else f"[link {_host(target)}]"
-        return match.group(0)
-
-    def markdown(match):
-        if not _IS_TARGET.match(match.group(2)):
-            return match.group(0)
-        counts["links"] += 1
-        return f"{match.group(1)} [link {_host(match.group(2))}]"
+            host = _host(target)
+            if _host(_unescape(target, False)) != host:
+                host = "unknown host"
+            return f"{text} [link {host}]" if text else f"[link {host}]"
+        return None
 
     def raw_link(match):
-        # Punctuation that closes the sentence around a link is not part of the link.
-        link = match.group(0).rstrip(".,;:!?)]}'\"")
+        whole, bare = match.group(0), match.group(1) is not None
+        link = _trimmed(whole)
+        # A client takes the scheme of a link in running text to be the letters right before its ://, so in
+        # "see...https://files.example" it links https://files.example and leaves the words before it.
+        start = head.end() - 3 if (head := _SCHEME_HEAD.match(whole)) else 0
+        while start and whole[start - 1] in _ASCII_LETTERS:
+            start -= 1
+        if not head or whole[start:head.end() - 2].lower() not in _SPECIAL:
+            start = 0
+        target = link[start:]
+        host = _host(target, bare)
+        # A client that ends the link at a quote or a >, or reads its escapes and character references, opens
+        # another host, or none, if the host changes there.
+        # A dot right after the host or its port may end the link or the sentence, and a browser opens a different
+        # host for each, or none. A link cut by a tab or a line break before its host ends goes on in a browser,
+        # to another host.
+        if (_host(re.split("[>\"']", target, maxsplit=1)[0], bare) != host or _host(_unescape(target), bare) != host
+                or whole.startswith(".", len(link)) and _host(target + ".", bare) != host
+                or _authority(whole[start:], bare)[1] and _CONTINUES.match(match.string, match.end())):
+            host = "unknown host"
         counts["links"] += 1
-        return f"[link {_host(link)}]" + match.group(0)[len(link):]
+        return f"{whole[:start]}[link {host}]{whole[len(link):]}"
 
     def citation(match):
         counts["brackets"] += 1
@@ -214,8 +576,11 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
 
     # A Windows line ending is a line break, not a control character to show.
     plain = unicodedata.normalize("NFC", raw).replace("\r\n", "\n")
-    text = _OPEN_MENTION.sub(token, _SLACK_TOKEN.sub(token, plain))
-    text = _RAW_LINK.sub(raw_link, _MARKDOWN_LINK.sub(markdown, text))
+    text = _slack_tokens(plain, token, True)
+    text = _OPEN_MENTION.sub(lambda match: token(match.group(1), match.group(2), ""), text)
+    # A Markdown link goes before a link in running text, so one inside its target is read with it, and a Slack
+    # token left in a target that ended no link is read after it.
+    text = _RAW_LINK.sub(raw_link, _slack_tokens(_links(text, counts), token, False))
     visible = []
     for character in text:
         code = ord(character)
@@ -228,7 +593,29 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
             visible.append(f"[U+{code:04X}]")
         else:
             visible.append(character)
-    return _CITATION.sub(citation, "".join(visible)), counts
+    # The finished text is read once more as a Markdown client reads it.
+    text = _links(_CITATION.sub(citation, "".join(visible)), counts)
+    return _definitions(_autolinks(text, counts), counts)
+
+
+def _trimmed(link):
+    """A link in running text less what a GitHub Markdown client leaves out of it: closing punctuation at its end,
+    a ) that closes no ( in the link, and a character reference at its end."""
+    opened, closed, end = link.count("("), link.count(")"), len(link)
+    while end:
+        last = link[end - 1]
+        if last == ")" and closed > opened:
+            closed, end = closed - 1, end - 1
+        elif last in "?!.,:*\"'_~":
+            end -= 1
+        elif last == ";":
+            start = end - 2
+            while start > 0 and link[start] in _ASCII_LETTERS:
+                start -= 1
+            end = start if start < end - 2 and link[start] == "&" else end - 1
+        else:
+            break
+    return link[:end]
 
 
 # A sentence may end at closing punctuation followed by a token that does not start in lower case.
