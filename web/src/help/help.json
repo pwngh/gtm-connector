@@ -13,7 +13,7 @@
   },
   "role.customer": {
     "title": "the customer role",
-    "text": "A contact of this account, named by the speaker's Slack profile, the call's attendee list, an alias, or the label as a name, the strongest first. The title is that contact's title in the CRM. A Slack author's name is compared with sellers only, so it never makes a customer. A role comes from who the speaker is, never from wording.",
+    "text": "A contact of this account, named by the speaker's Slack profile, the call's attendee list, an alias, the label as a name, or a name variant of a person the attendee list names, the strongest first. The title is that contact's title in the CRM. A Slack author's name is compared with sellers only, so it never makes a customer. A role comes from who the speaker is, never from wording.",
     "guide": {"label": "Deal cards, Speaker roles", "path": "docs/cards.md#speaker-roles"}
   },
   "role.seller": {
