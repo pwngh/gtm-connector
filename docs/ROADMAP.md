@@ -110,6 +110,7 @@ RevOps covers every renewal and sees which have no current card.
 
 - `gtm.yaml`, previewed and activated by exact revision ([setting it up](config.md)).
 - Field mapping, watch rules, transcript folders, Slack channel windows, Gong and Zoom.
+- Threads and channels of any size: today a Slack read over 100 messages is refused whole. Read live below a size the operator sets and sync in the background above it, keep every message, show a bounded set on the card, and say how far a read got.
 - A participant directory that matches speakers to contacts by email or phone first.
 - The five flags, with thresholds and a preview ([what flags a deal](deals.md#what-flags-a-deal)).
 - Scheduled reads under leases, each as a named service identity.
