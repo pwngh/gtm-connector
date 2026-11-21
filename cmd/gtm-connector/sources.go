@@ -286,6 +286,9 @@ type reads struct {
 	bindings  map[string]*strictjson.Object // each row's binding, read
 	sellers   []string
 	speakers  speakerSettings
+	// gate, when set, keeps a card's reads of imported calls and live Slack threads to those matched to the
+	// deal the card is read for.
+	gate *matchGate
 	// The reads opened so far.
 	crmReads   crmSource
 	callsReads callsSource
@@ -523,6 +526,10 @@ func (s cardSource) Read(ctx context.Context, tool, accountID string) (string, [
 		if err != nil {
 			return "calls", nil, err
 		}
+		if s.gate != nil && s.backend("calls") == "imported" {
+			records, err := s.gate.callNotes(ctx, calls, accountID)
+			return "calls", records, err
+		}
 		records, err := calls.CallNotes(ctx, accountID)
 		return "calls", records, err
 	case "read_slack_messages":
@@ -531,7 +538,7 @@ func (s cardSource) Read(ctx context.Context, tool, accountID string) (string, [
 		if err != nil {
 			return "slack", nil, err
 		}
-		messages, _, _, err := slack.Messages(ctx, accountID)
+		messages, _, _, err := s.thread(ctx, slack, accountID)
 		return "slack", messages, err
 	}
 	return "", nil, fmt.Errorf("no source has a read named %q", tool)
@@ -544,8 +551,17 @@ func (s cardSource) ReadThread(ctx context.Context, accountID string) ([]*strict
 	if err != nil {
 		return nil, nil, err
 	}
-	messages, members, snapshot, err := slack.Messages(ctx, accountID)
+	messages, members, snapshot, err := s.thread(ctx, slack, accountID)
 	return append(messages, members...), snapshot, err
+}
+
+// thread is the account's Slack read, through the match gate when the card is read for a deal.
+func (s cardSource) thread(ctx context.Context, slack slackSource, accountID string) (messages,
+	members []*strictjson.Object, snapshot *strictjson.Object, err error) {
+	if s.gate != nil && s.backend("slack") == "slack" {
+		return s.gate.messages(ctx, slack, accountID)
+	}
+	return slack.Messages(ctx, accountID)
 }
 
 // A read a command makes outside a card.

@@ -37,6 +37,7 @@ var GapCodes = map[string]string{
 	"calls_outside_records": "not_read", "slack_not_requested": "not_read", "slack_denied": "not_read",
 	"slack_thread": "not_read", "slack_channel": "not_read", "calls_not_connected": "not_read",
 	"slack_not_connected": "not_read", "slack_not_selected": "not_read",
+	"calls_not_matched": "not_read", "slack_not_matched": "not_read",
 	"crm_more_opportunities": "read_not_shown", "crm_more_contracts": "read_not_shown",
 	"crm_more_contacts": "read_not_shown", "sentences_cut": "read_not_shown", "sentences_more": "read_not_shown",
 	"sentences_long": "read_not_shown", "sentences_later": "read_not_shown",
@@ -489,11 +490,12 @@ func validate(evidence *strictjson.Object) validated {
 	notesStatus, slackStatus := field(evidence, "notes_status"), field(evidence, "slack_status")
 	if !oneOf(crm, "sqlite", "salesforce") || !oneOf(calls, "fixture", "imported", "none") ||
 		!oneOf(slack, "fixture", "slack", "none") ||
-		!oneOf(notesStatus, "available", "denied", "not_connected") ||
-		!oneOf(slackStatus, "available", "denied", "not_requested", "not_connected", "not_selected") ||
+		!oneOf(notesStatus, "available", "denied", "not_connected", "not_matched") ||
+		!oneOf(slackStatus, "available", "denied", "not_requested", "not_connected", "not_selected", "not_matched") ||
 		(calls == "none") != (notesStatus == "not_connected") ||
 		(slack == "none") != (slackStatus == "not_connected") ||
-		slackStatus == "not_selected" && slack != "slack" {
+		slackStatus == "not_selected" && slack != "slack" ||
+		notesStatus == "not_matched" && calls != "imported" || slackStatus == "not_matched" && slack != "slack" {
 		reject("Evidence names an unknown source or outcome.")
 	}
 	salesforce, imported := crm == "salesforce", calls == "imported"
@@ -506,7 +508,7 @@ func validate(evidence *strictjson.Object) validated {
 		}
 	}
 	withCalls := calls != "none"
-	withSlack := oneOf(slackStatus, "available", "denied", "not_selected")
+	withSlack := oneOf(slackStatus, "available", "denied", "not_selected", "not_matched")
 	liveSlack := withSlack && slack == "slack"
 	crmBinding, callsBinding := field(evidence, "crm_binding"), field(evidence, "calls_binding")
 	if imported && (!ValidBinding(callsBinding, "crm_backend", crm.(string)) || !equal(crmBinding, callsBinding)) {
@@ -660,7 +662,8 @@ func validate(evidence *strictjson.Object) validated {
 		}
 		denied := toolName == "read_call_notes" && notesStatus == "denied" ||
 			toolName == "read_slack_messages" && slackStatus == "denied"
-		unselected := toolName == "read_slack_messages" && slackStatus == "not_selected" ||
+		unselected := toolName == "read_slack_messages" && oneOf(slackStatus, "not_selected", "not_matched") ||
+			toolName == "read_call_notes" && notesStatus == "not_matched" ||
 			toolName == "list_users" && usersStatus == UsersNotRead
 		status, code := "ok", 200
 		switch {

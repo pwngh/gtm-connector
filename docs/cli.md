@@ -268,7 +268,10 @@ its receipt, and the card says "Calls: not read. The grant lacks calls:read."
 
 When the account has an open [deal](#deal), the card belongs to it, and text output names it on
 stderr, after the sources line: `Deal: thornfield-2027-2e3hke.` With none, the card is the account's own and
-belongs to no deal, as before deals existed. The card is the same either way.
+belongs to no deal, as before deals existed. A deal's card reads the account's imported call and mapped
+Slack thread only when they are matched to the deal ([setting it up](config.md#what-is-built-today)),
+and says when one is not. A card that read a call or thread for no deal, while a deal was registered for
+the account, is not published and exits `3`; run `brief` again.
 
 ```text
 Sources: CRM, calls, and Slack are demo data.          (stderr)
@@ -305,10 +308,12 @@ which `--json` prints as the routes give it.
 
 | Command | What it does |
 | --- | --- |
-| `deal new ACCOUNT_ID [--as-of YYYY-MM-DD]` | Lists the account in the workspace, as `brief` does, then reads the account and its opportunities from the connected CRM, each as a tool call under its own receipt (on the demo book too), and registers the deal on what they returned. `--as-of` sets the day the contract is chosen from: by default `2027-01-15` on the demo book and today's UTC date on Salesforce. |
+| `deal new ACCOUNT_ID [--as-of YYYY-MM-DD]` | Lists the account in the workspace, as `brief` does, then reads the account and its opportunities from the connected CRM, each as a tool call under its own receipt (on the demo book too), and registers the deal on what they returned. It then matches the account's imported call and mapped thread ([setting it up](config.md#what-is-built-today)). `--as-of` sets the day the contract is chosen from: by default `2027-01-15` on the demo book and today's UTC date on Salesforce. |
 | `deal list` | Lists the workspace's deals, the open ones first: ID, account, name, state and the day it renews. |
-| `deal show DEAL_ID` | Shows the deal's bindings, then its newest card as `brief` prints it, verified against its seal as `inspect` verifies one. `--json` gives `{"deal": DEAL, "card": CARD}`, the card without its evidence, or `null` before `brief` has made one. |
+| `deal show DEAL_ID` | Shows the deal's bindings, then its newest card as `brief` prints it, verified against its seal as `inspect` verifies one. A `Read call` or `Read thread` row names each call and thread that card read, by its match, with `decided again` when a later decision replaced it. `--json` gives `{"deal": DEAL, "card": CARD, "matches": [MATCH, ...]}`, the card without its evidence or `null` before `brief` has made one, and the matches as [the API](api.md#matches) gives them. |
 | `deal close DEAL_ID` | Closes the deal. Its cards and receipts are kept, and the account's next card is its own again. Closing a closed deal prints it as it is. |
+| `deal matches [--all]` | Lists the matches that wait for a person on a call or thread a card could still read: ID, kind, item, account, state, deal and candidate deals. `--all` lists every call's and thread's current decision, and marks a stale one, whose item is no longer the account's current import or mapping. |
+| `deal decide MATCH_ID (--deal DEAL_ID \| --reject)` | Decides a match as the owner: onto one deal of its account, or off every card. The decision gets a `decide_match` receipt and supersedes the match. |
 
 ```text
 $ gtm-connector deal new acc-003
@@ -325,7 +330,9 @@ Renews       2027-02-08
 An account has one open deal at a time: `deal new` for an account with one exits `3`, and names
 `deal list`. An account the CRM does not hold exits `2` with `account not found: ACCOUNT_ID`, and an
 ID of the wrong form for the CRM exits `2`, as `brief` does. `deal show` and `deal close` of an ID the
-workspace does not hold exit `2`. Each action takes `--state-dir NAME`, `--json` and `--help`.
+workspace does not hold exit `2`. `deal decide` of an unknown match, or onto a deal of another
+account, exits `2`, and of a match a later decision superseded exits `3`. Each action takes
+`--state-dir NAME`, `--json` and `--help`.
 
 ### `inspect`
 

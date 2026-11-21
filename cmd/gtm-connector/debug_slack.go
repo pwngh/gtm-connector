@@ -455,6 +455,7 @@ func (r *run) slackMap(ctx context.Context) (*strictjson.Object, error) {
 	case err != nil:
 		return nil, err
 	}
+	settleMatches(ctx, r.store, r.workspace.ID, account)
 	status := "unchanged"
 	if changed {
 		status = "saved"

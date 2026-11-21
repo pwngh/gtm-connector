@@ -260,6 +260,7 @@ func (r *run) importTranscript(ctx context.Context) (*strictjson.Object, error) 
 	if err != nil {
 		return nil, err
 	}
+	settleMatches(ctx, r.store, r.workspace.ID, account)
 	r.announce(from.sourcesLine())
 	return result, nil
 }
