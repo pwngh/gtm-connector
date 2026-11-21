@@ -1,7 +1,7 @@
 // Invented walkthrough records. No identity here grants authority.
 export const fixturePeople = {
   accountOwner: 'Morgan Reed', internalReviewer: 'Alex Chen', customerContact: 'Rachel Ellis',
-  otherAccountOwner: 'Maya Chen', workspaceProfile: 'Preston Neal',
+  otherAccountOwner: 'Maya Chen', workspaceProfile: 'Quinn Harlow',
 };
 
 export const renewalRecords=[{id:'thornfield',name:'Thornfield Wren LLP',initials:'TW',owner:'Morgan Reed',days:24,value:'$84,000',state:'Document needed',next:'Obtain the current AI terms document',tone:'amber'}, {id:'calder',name:'Calder Vale Partners',initials:'CV',owner:'Maya Chen',days:8,value:'$42,000',state:'Review pending',next:'Review the commercial exception',tone:'blue'}, {id:'ashbourne',name:'Ashbourne Legal Group',initials:'AL',owner:'Daniel Reed',days:15,value:'$126,000',state:'Ready for review',next:'Review the complete renewal package',tone:'green'}, {id:'mercer',name:'Mercer Hollow Advisory',initials:'MH',owner:null,days:null,value:'$36,000',state:'Owner needed',next:'Confirm the customer decision owner',tone:'neutral'}];

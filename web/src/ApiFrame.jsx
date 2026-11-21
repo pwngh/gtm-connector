@@ -5,7 +5,7 @@ import {formatUtc, sessionExpired} from './api.js';
 import {checkCard, resolveAccount, resolveCard} from './selection.js';
 import {useServer} from './ServerSwitch.jsx';
 import {focusElement} from './focusElement.js';
-import {renewalFixture} from './renewalFixtures.js';
+import {serverPaths} from './app/routes.js';
 import {Pill} from './WorkspaceControls.jsx';
 
 // Shared by the Evidence and Readiness pages when the Go server serves the
@@ -22,7 +22,7 @@ export function refusalText(error) {
     case 'not_permitted': return {title: 'Not permitted.', detail: 'The signed-in principal holds no grant for this, or nothing by this ID is visible to it. This is a refusal, not an empty result.'};
     case 'signed_out': return {title: 'Your session ended.', detail: 'Sign in again to read from the server.'};
     case 'not_found': return {title: 'Not found.', detail: 'The server has nothing at this address.'};
-    case 'unreachable': return {title: 'The server did not answer.', detail: 'Nothing was read. No walkthrough data is shown in its place.'};
+    case 'unreachable': return {title: 'The server did not answer.', detail: 'Nothing was read, and nothing is shown in its place.'};
     case 'server': return {title: 'The server could not answer.', detail: 'Nothing was read. Try again in a moment.'};
     case 'host': return {title: 'This address is not served.', detail: 'Open the app at the server’s configured address.'};
     case 'redirect': return {title: 'The server redirected this request.', detail: 'The redirect was not followed, and nothing was read.'};
@@ -243,7 +243,6 @@ export function CardFacts({card}) {
 }
 
 export const gapsTarget = {evidence: 'api-evidence-gaps', readiness: 'api-readiness-gaps'};
-const readinessPath = `${renewalFixture.paths.root}/readiness`;
 
 // The query that keeps the chosen account and open card across the two server pages.
 export function keepQuery(account, cardId) {
@@ -260,7 +259,7 @@ export function ApiRenewalHeader({page, selection}) {
   const {account, verified, invalid, accountName, cardId} = selection;
   const card = selection.card.status === 'ready' ? selection.card.data : null;
   const query = keepQuery(account, cardId);
-  const tabs = [['readiness', 'Readiness', readinessPath + query], ['evidence', 'Evidence', renewalFixture.paths.evidence + query]];
+  const tabs = [['readiness', 'Readiness', serverPaths.readiness + query], ['evidence', 'Evidence', serverPaths.evidence + query]];
   const heading = verified ? accountName || account : account ? 'Account not verified' : 'No account chosen';
   return <header className="api-renewal-header">
     <div className="page-heading api-heading"><div><div className="eyebrow">RENEWAL WORKSPACE <span> / </span> READ FROM THE SERVER</div>

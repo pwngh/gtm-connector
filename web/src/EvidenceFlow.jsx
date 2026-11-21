@@ -4,7 +4,6 @@ import {workflowNoteLabel} from './EvidenceNotes.jsx';
 import React, {useId, useState} from 'react';
 import {motion, useReducedMotion} from 'motion/react';
 import {Phone, FileText, MessageSquare, ShieldCheck, CheckCheck, Link2, Check, CircleDashed} from 'lucide-react';
-import './evidence-flow.css';
 
 // Original relationship map. It describes the evidence in this walkthrough;
 // the lines are relationships, never a claim that an integration is running.
