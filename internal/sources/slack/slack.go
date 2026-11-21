@@ -67,7 +67,12 @@ type Error struct {
 func (e *Error) Error() string { return e.Code }
 
 // ExitCode is the exit code of a command that stops for this reason, or 0 for a code a read never gives.
-func (e *Error) ExitCode() int { return exitCodes[e.Code] }
+func (e *Error) ExitCode() int {
+	if exit, known := exitCodes[e.Code]; known {
+		return exit
+	}
+	return signInExits[e.Code]
+}
 
 func refuse(code string) error { return &Error{Code: code} }
 
