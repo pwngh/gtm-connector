@@ -25,6 +25,18 @@ const (
 	maxCueLabel      = 200
 )
 
+// NamedCue is one line or cue of a transcript that declares speaker names, as NamedLine reads it, held to
+// one label: the name is the speaker of every word after it. In a WebVTT cue a voice tag names a speaker
+// too, so a cue whose words hold one is not a named cue, and no card can take a role from the tag where the
+// file stated the name.
+func NamedCue(text, format string) (name, words string, ok bool) {
+	name, words, ok = NamedLine(text)
+	if ok && format == "vtt" && len(VoiceTags([]rune(words))) > 0 {
+		return "", "", false
+	}
+	return name, words, ok
+}
+
 // voice is one span of a WebVTT cue: its speaker label, nil for none, and its text.
 type voice struct {
 	label any
@@ -347,15 +359,20 @@ func CueTiming(line string, vtt bool) (start, end int64, settings string, ok boo
 	return start, end, line[rest:], true
 }
 
-// CueText is calls_import._cue_text: no line of a cue's text may be a timing line, which a missing blank
-// line would have merged into the cue.
-func CueText(lines []string, format string) bool {
-	for _, line := range lines {
-		if format == "vtt" {
-			if strings.Contains(line, "-->") {
-				return false
-			}
-		} else if _, _, _, timing := CueTiming(line, false); timing {
+// CueLine is calls_import._cue_text for one line of a cue's text: the line may not be a timing line, which
+// a missing blank line would have merged into the cue.
+func CueLine(line string, vtt bool) bool {
+	if vtt {
+		return !strings.Contains(line, "-->")
+	}
+	_, _, _, timing := CueTiming(line, false)
+	return !timing
+}
+
+// cueText is whether every line of a cue's text may be one.
+func cueText(text, format string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		if !CueLine(line, format == "vtt") {
 			return false
 		}
 	}
@@ -414,7 +431,7 @@ func validCue(unit *strictjson.Object, index int64, format string, declared bool
 		return false
 	}
 	if declared && len(strip([]rune(text))) > 0 {
-		if _, _, ok := NamedLine(text); !ok {
+		if _, _, ok := NamedCue(text, format); !ok {
 			return false
 		}
 	}
@@ -424,7 +441,7 @@ func validCue(unit *strictjson.Object, index int64, format string, declared bool
 	}
 	from, okFrom := intIn(start, 0, maxCueMS)
 	to, okTo := intIn(end, 0, maxCueMS)
-	if !okFrom || !okTo || to < from || strings.Contains(text, "\r") || !CueText(strings.Split(text, "\n"), format) {
+	if !okFrom || !okTo || to < from || strings.Contains(text, "\r") || !cueText(text, format) {
 		return false
 	}
 	if id == nil {

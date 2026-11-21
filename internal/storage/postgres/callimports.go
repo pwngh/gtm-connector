@@ -22,6 +22,9 @@ type CallImports struct {
 
 var _ calls.Imports = CallImports{}
 
+// Workspace is the workspace whose imports these are.
+func (c CallImports) Workspace() string { return c.WorkspaceID }
+
 // callsError gives a failure of the database as calls.ErrIO, with its cause. A refusal passes as it is.
 func callsError(err error) error {
 	var refusal *calls.Error
@@ -76,7 +79,9 @@ func (c CallImports) bound(ctx context.Context, q queries, binding *strictjson.O
 // request, and the pointers that make it the account's active import. The same bytes, account, call time and
 // range find the revision saved before and change nothing. Bytes, or an AccountNumber, that belong to another
 // account are refused unless the import reassigns them, and an account the workspace does not hold is refused.
-// The result is what debug calls import prints.
+// So is an association whose receipt is not this workspace's own finished read of the CRM that returned the
+// account: get_account for the account, or search_accounts for an AccountNumber. The result is what debug
+// calls import prints.
 func (c CallImports) Import(ctx context.Context, in calls.Import) (*strictjson.Object, error) {
 	if err := in.Check(); err != nil {
 		return nil, err
@@ -96,6 +101,22 @@ func (c CallImports) Import(ctx context.Context, in calls.Import) (*strictjson.O
 		}
 		if !known {
 			return calls.ErrAccountNotFound
+		}
+		// A read through a connection finishes ok claiming exactly the records it bound, so rows names the
+		// account only if the read returned it.
+		tool := map[string]string{"account_id": "get_account", "account_number": "search_accounts"}[a.Method]
+		resolved := false
+		if validUUID(a.ResolutionReceiptID) {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (
+				SELECT 1 FROM receipts r JOIN connections c ON c.workspace_id = r.workspace_id AND c.id = r.connection_id
+				 WHERE r.workspace_id = $1 AND r.id = $2 AND r.status = 'ok' AND r.tool = $3 AND c.source = 'crm'
+				   AND (r.tool <> 'get_account' OR r.account_ref = $4) AND r.rows ? ('crm/accounts/' || $4))`,
+				c.WorkspaceID, a.ResolutionReceiptID, tool, a.AccountID).Scan(&resolved); err != nil {
+				return err
+			}
+		}
+		if !resolved {
+			return calls.ErrAssociationInvalid
 		}
 		// The row of the workspace's binding is locked until commit, so imports run one at a time.
 		if _, err := tx.Exec(ctx, `INSERT INTO call_import_stores (workspace_id, crm_binding) VALUES ($1, $2)
@@ -152,11 +173,11 @@ func (c CallImports) Import(ctx context.Context, in calls.Import) (*strictjson.O
 			}
 		}
 		key := in.RequestKey(generation)
-		revision := calls.Revision{RequestKey: key, ContentSHA256: digest, Raw: raw}
+		revision := calls.Revision{RequestKey: key, Raw: raw}
 		var manifest *strictjson.Object
-		err = tx.QueryRow(ctx, `SELECT import_id, account_ref, manifest FROM call_import_revisions
+		err = tx.QueryRow(ctx, `SELECT import_id, content_sha256, account_ref, manifest FROM call_import_revisions
 			WHERE workspace_id = $1 AND request_key = $2`, c.WorkspaceID, key).
-			Scan(&revision.ImportID, &revision.AccountID, &revision.Manifest)
+			Scan(&revision.ImportID, &revision.ContentSHA256, &revision.AccountID, &revision.Manifest)
 		created := errors.Is(err, pgx.ErrNoRows)
 		switch {
 		case created:
@@ -170,6 +191,9 @@ func (c CallImports) Import(ctx context.Context, in calls.Import) (*strictjson.O
 			}
 		case err != nil:
 			return err
+		case revision.ContentSHA256 != digest:
+			// The revision saved under this key is of other bytes than the request's.
+			return calls.ErrCorrupt
 		default:
 			// The revision saved before is read back as any read reads it, against the bytes just compared.
 			opened, err := revision.Open(a.CRMBinding)

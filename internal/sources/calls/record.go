@@ -63,7 +63,9 @@ type Import struct {
 }
 
 // Check is what calls_import.store_import checks before it opens its store: the association, the times,
-// and that the parsed file and its excerpt are what its own bytes give.
+// and that the parsed file and its excerpt are what its own bytes give. The bytes are parsed again as a new
+// import, under every rule Parse holds a file to, so no field of Parsed that a caller set by hand is taken
+// on trust: an import that is saved is one Parse made.
 func (i Import) Check() error {
 	if err := i.Association.check(); err != nil {
 		return err
@@ -72,7 +74,7 @@ func (i Import) Check() error {
 		i.Excerpt == nil {
 		return ErrInvalid
 	}
-	reparsed, err := parse(i.Parsed.Raw, i.Parsed.Format, i.Parsed.SpeakerNames, true)
+	reparsed, err := Parse(i.Parsed.Raw, i.Parsed.Format, i.Parsed.SpeakerNames)
 	if err != nil {
 		return err
 	}
@@ -192,9 +194,11 @@ func integer(value any) int64 {
 }
 
 // snapshot reads the manifest and makes its record, checked as calls_import.validate_imported_record checks
-// a saved record: against itself, the account and the CRM binding, without the file's bytes.
+// a saved record: against itself, the account and the CRM binding, without the file's bytes. The ID is the
+// digest of the manifest's text exactly as stored, and that text is the manifest's canonical encoding, so a
+// manifest written any other way does not pass under the ID of the canonical one.
 func (r Revision) snapshot(binding *strictjson.Object) (record, manifest *strictjson.Object, err error) {
-	if len(r.Manifest) > evidence.MaxRecordBytes {
+	if len(r.Manifest) > evidence.MaxRecordBytes || r.ImportID != "note-"+digest(r.Manifest) {
 		return nil, nil, ErrCorrupt
 	}
 	value, err := strictjson.LoadsText(r.Manifest)
@@ -204,6 +208,9 @@ func (r Revision) snapshot(binding *strictjson.Object) (record, manifest *strict
 	manifest, _ = value.(*strictjson.Object)
 	record, ok := evidence.ImportedRecord(manifest)
 	if !ok {
+		return nil, nil, ErrCorrupt
+	}
+	if encoded, err := strictjson.Dumps(manifest, strictjson.Prepared); err != nil || encoded != r.Manifest {
 		return nil, nil, ErrCorrupt
 	}
 	accountID, ok := member(record, "account_id").(string)

@@ -176,8 +176,19 @@ func sameOrder(a, b any) bool {
 }
 
 // heldImport is a store of imports that holds the one revision an import makes of content no account held
-// before, at its first generation. The memory families read through it, with no database.
-type heldImport struct{ active *calls.Active }
+// before, at its first generation. The memory families read through it, with no database. It is the test
+// workspace's store unless it names another.
+type heldImport struct {
+	active    *calls.Active
+	workspace string
+}
+
+func (h *heldImport) Workspace() string {
+	if h.workspace == "" {
+		return testWorkspace
+	}
+	return h.workspace
+}
 
 func (h *heldImport) save(made calls.Import) (*strictjson.Object, error) {
 	if err := made.Check(); err != nil {

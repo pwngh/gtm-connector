@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -59,8 +62,49 @@ func imports(t *testing.T, f *postgrestest.Fixture) postgres.CallImports {
 	return postgres.CallImports{Store: f.Store, WorkspaceID: f.Workspace.ID}
 }
 
-// made is the import a test describes, parsed and selected as debug calls import does before it saves.
-func made(t *testing.T, i importing) calls.Import {
+// resolutions numbers the reads that resolve accounts, so each has an operation of its own.
+var resolutions atomic.Int64
+
+// resolved commits the read an import's association names, and gives its ID: a get_account read of the
+// workspace's CRM that returned the account, or a search_accounts read for an AccountNumber. change alters
+// the read before it starts.
+func resolved(t *testing.T, store postgres.CallImports, account, number string, change func(*postgres.ReceiptStart)) postgres.Receipt {
+	t.Helper()
+	workspace, err := store.Store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace")
+	ok(t, err)
+	crm, err := store.Store.EnsureConnection(ctx, workspace, "crm", "demo")
+	ok(t, err)
+	start := postgres.ReceiptStart{WorkspaceID: store.WorkspaceID, TokenID: postgres.TokenID("raw-token"),
+		OperationID: fmt.Sprintf("resolve-%d", resolutions.Add(1)), Tool: "get_account", Scope: "crm:read",
+		AccountRef: account, ConnectionID: crm.ID, Arguments: json.RawMessage(`{"account_id":"` + account + `"}`),
+		Lease: time.Minute}
+	if number != "" {
+		start.Tool, start.AccountRef = "search_accounts", ""
+		start.Arguments = json.RawMessage(`{"account_number":"` + number + `"}`)
+	}
+	if change != nil {
+		change(&start)
+	}
+	read, err := store.Store.StartReceipt(ctx, start)
+	ok(t, err)
+	return read
+}
+
+// returned finishes a read that resolves an account as returning these accounts.
+func returned(t *testing.T, store postgres.CallImports, read postgres.Receipt, accounts ...string) string {
+	t.Helper()
+	records := make([]postgres.RecordVersion, len(accounts))
+	for i, account := range accounts {
+		records[i] = postgrestest.Record("accounts", account, "id", account)
+	}
+	_, err := store.Store.FinishRead(ctx, read.ID, read.LeaseToken, records, 0)
+	ok(t, err)
+	return read.ID
+}
+
+// made is the import a test describes, parsed and selected as debug calls import does before it saves. An
+// import with no receipt named gets the receipt of a read that resolved its account.
+func made(t *testing.T, store postgres.CallImports, i importing) calls.Import {
 	t.Helper()
 	if i.raw == "" {
 		i.raw = "Invented renewal discussion.\nNext steps remain proposed."
@@ -74,11 +118,11 @@ func made(t *testing.T, i importing) calls.Import {
 	if i.now == "" {
 		i.now = importedNow
 	}
-	if i.receipt == "" {
-		i.receipt = "invented-receipt-one"
-	}
 	if i.binding == nil {
 		i.binding = demoBinding
+	}
+	if i.receipt == "" {
+		i.receipt = returned(t, store, resolved(t, store, i.account, i.number, nil), i.account)
 	}
 	parsed, err := calls.Parse([]byte(i.raw), i.format, i.speakers)
 	ok(t, err)
@@ -98,14 +142,14 @@ func made(t *testing.T, i importing) calls.Import {
 
 func publish(t *testing.T, store postgres.CallImports, i importing) *strictjson.Object {
 	t.Helper()
-	result, err := store.Import(ctx, made(t, i))
+	result, err := store.Import(ctx, made(t, store, i))
 	ok(t, err)
 	return result
 }
 
 func refusedImport(t *testing.T, store postgres.CallImports, i importing, want *calls.Error) {
 	t.Helper()
-	if _, err := store.Import(ctx, made(t, i)); !errors.Is(err, want) {
+	if _, err := store.Import(ctx, made(t, store, i)); !errors.Is(err, want) {
 		t.Fatalf("the import ended with %v, want %v", err, want)
 	}
 }
@@ -189,11 +233,12 @@ func TestARepeatedImportIsTheSameRevisionAndAChangedOneIsNew(t *testing.T) {
 		t.Fatalf("the import ID %v is not the digest of its manifest", at(first, "import_id"))
 	}
 
+	second := returned(t, store, resolved(t, store, "acc-007", "", nil), "acc-007")
 	retry := publish(t, store, importing{raw: raw, format: "vtt", span: &calls.Range{First: 1, Last: 1}, now: importedLater,
-		receipt: "invented-receipt-two"})
+		receipt: second})
 	if at(retry, "import_id") != at(first, "import_id") || at(retry, "created") != false ||
 		at(retry, "status") != "unchanged" || at(retry, "imported_at") != importedNow ||
-		at(retry, "resolution_receipt_id") != "invented-receipt-two" {
+		at(retry, "resolution_receipt_id") != second || at(first, "resolution_receipt_id") == second {
 		t.Fatalf("the repeated import returned %s", text(t, retry))
 	}
 	if again := text(t, note(t, store, "acc-007")); again != saved {
@@ -307,11 +352,13 @@ func TestAnImportIsRefusedBeforeAnyRowIsWritten(t *testing.T) {
 	f := postgrestest.New(t)
 	store := imports(t, f)
 	empty := importRows(t, f)
-	refusedImport(t, store, importing{account: "acc-099"}, calls.ErrAccountNotFound)
+	receipt := returned(t, store, resolved(t, store, "acc-007", "", nil), "acc-007")
+	refusedImport(t, store, importing{account: "acc-099", receipt: "00000000-0000-4000-8000-000000000001"},
+		calls.ErrAccountNotFound)
 	elsewhere := postgres.CallImports{Store: f.Store, WorkspaceID: "00000000-0000-4000-8000-000000000000"}
-	refusedImport(t, elsewhere, importing{}, calls.ErrAccountNotFound)
+	refusedImport(t, elsewhere, importing{receipt: "00000000-0000-4000-8000-000000000001"}, calls.ErrAccountNotFound)
 
-	in := made(t, importing{raw: "Original."})
+	in := made(t, store, importing{raw: "Original."})
 	forged := *in.Parsed
 	forged.Units = append([]calls.Unit(nil), forged.Units...)
 	forged.Units[0].Text = "Forged."
@@ -319,7 +366,7 @@ func TestAnImportIsRefusedBeforeAnyRowIsWritten(t *testing.T) {
 	if _, err := store.Import(ctx, in); !errors.Is(err, calls.ErrInvalid) {
 		t.Fatalf("a forged parse ended with %v", err)
 	}
-	in = made(t, importing{raw: "Original."})
+	in = made(t, store, importing{raw: "Original."})
 	shortened := *in.Excerpt
 	shortened.Body = "Forged."
 	in.Excerpt = &shortened
@@ -327,14 +374,15 @@ func TestAnImportIsRefusedBeforeAnyRowIsWritten(t *testing.T) {
 		t.Fatalf("a forged excerpt ended with %v", err)
 	}
 	for _, stamp := range []string{"2026-11-18", "2026-11-18T12:00:00", "2026-11-18T12:00:00+01:00", "2026-13-18T12:00:00Z"} {
-		refusedImport(t, store, importing{calledAt: stamp}, calls.ErrInvalid)
-		refusedImport(t, store, importing{now: stamp}, calls.ErrInvalid)
+		refusedImport(t, store, importing{calledAt: stamp, receipt: receipt}, calls.ErrInvalid)
+		refusedImport(t, store, importing{now: stamp, receipt: receipt}, calls.ErrInvalid)
 	}
-	for _, bad := range []importing{{receipt: " "}, {account: "acc-sf-001000000000001AAA"}, {number: "INVENTED-1"},
-		{binding: crmBinding("other", "a")}} {
+	for _, bad := range []importing{{receipt: " "}, {account: "acc-sf-001000000000001AAA", receipt: receipt},
+		{number: "INVENTED-1", receipt: receipt}, {binding: crmBinding("other", "a"), receipt: receipt}} {
 		refusedImport(t, store, bad, calls.ErrAssociationInvalid)
 	}
-	long := importing{binding: salesforceBinding, account: "acc-sf-001000000000001AAA", number: strings.Repeat("9", 41)}
+	long := importing{binding: salesforceBinding, account: "acc-sf-001000000000001AAA", number: strings.Repeat("9", 41),
+		receipt: receipt}
 	refusedImport(t, store, long, calls.ErrAssociationInvalid)
 	if importRows(t, f) != empty {
 		t.Fatalf("a refused import wrote rows:\n%s", importRows(t, f))
@@ -372,11 +420,11 @@ func TestAFailedImportLeavesEveryRowAsItWas(t *testing.T) {
 		}
 		return nil
 	})
-	_, err := store.Import(ctx, made(t, importing{raw: "A second file.", account: "acc-008"}))
+	_, err := store.Import(ctx, made(t, store, importing{raw: "A second file.", account: "acc-008"}))
 	if !errors.Is(err, calls.ErrIO) {
 		t.Fatalf("an import that stopped ended with %v", err)
 	}
-	if _, err := store.Import(ctx, made(t, importing{account: "acc-008", reassign: true})); !errors.Is(err, calls.ErrIO) {
+	if _, err := store.Import(ctx, made(t, store, importing{account: "acc-008", reassign: true})); !errors.Is(err, calls.ErrIO) {
 		t.Fatalf("a reassignment that stopped ended with %v", err)
 	}
 	postgres.SetCrash(f.Store, nil)
@@ -472,7 +520,7 @@ func repeated(line string, n int) []string {
 func TestTheSameImportAtOnceIsSavedOnce(t *testing.T) {
 	f := postgrestest.New(t)
 	store := imports(t, f)
-	in := made(t, importing{})
+	in := made(t, store, importing{})
 	type outcome struct {
 		result *strictjson.Object
 		err    error
@@ -580,5 +628,92 @@ func TestTheAppRoleImportsAndReads(t *testing.T) {
 	publish(t, store, importing{account: "acc-008", reassign: true})
 	if len(notes(t, store, demoBinding, "acc-007")) != 0 || at(note(t, store, "acc-008"), "account_id") != "acc-008" {
 		t.Fatal("the app role did not move the import")
+	}
+}
+
+// An import's association names the read that resolved its account. The store takes it only when it is this
+// workspace's own finished read of the CRM that returned the account.
+func TestAnImportNeedsTheReadThatResolvedItsAccount(t *testing.T) {
+	f := postgrestest.New(t)
+	store := imports(t, f)
+	empty := importRows(t, f)
+	sf, one, two := salesforceBinding, "acc-sf-001000000000001AAA", "acc-sf-001000000000002AAA"
+
+	other, err := f.Store.EnsureWorkspace(ctx, "other", "demo", "Another workspace")
+	ok(t, err)
+	ok(t, f.Store.EnsureAccount(ctx, other.ID, "acc-007", "Invented account"))
+	crm, err := f.Store.EnsureConnection(ctx, other, "crm", "demo")
+	ok(t, err)
+	calling, err := f.Store.EnsureConnection(ctx, f.Workspace, "calls", "demo")
+	ok(t, err)
+	failed := resolved(t, store, "acc-007", "", nil)
+	_, err = f.Store.FailRead(ctx, failed.ID, failed.LeaseToken, 200, "request_failed", 0)
+	ok(t, err)
+	refused, err := f.Store.RecordRefusal(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID, OperationID: "refused",
+		TokenID: postgres.TokenID("raw-token"), Tool: "get_account", AccountRef: "acc-007",
+		Arguments: json.RawMessage(`{"account_id":"acc-007"}`), Lease: time.Minute}, 403, "insufficient_scope")
+	ok(t, err)
+
+	for name, c := range map[string]struct {
+		receipt string
+		in      importing
+	}{
+		"a receipt that is not an ID":            {"invented-receipt-one", importing{}},
+		"an ID that names no receipt":            {"00000000-0000-4000-8000-000000000001", importing{}},
+		"a read that is still running":           {resolved(t, store, "acc-007", "", nil).ID, importing{}},
+		"a read that failed":                     {failed.ID, importing{}},
+		"a call refused before any read":         {refused.ID, importing{}},
+		"a read of another account":              {returned(t, store, resolved(t, store, "acc-008", "", nil), "acc-008"), importing{}},
+		"a read that did not return the account": {returned(t, store, resolved(t, store, "acc-007", "", nil)), importing{}},
+		"another tool's read of the account": {returned(t, store, resolved(t, store, "acc-007", "", func(s *postgres.ReceiptStart) {
+			s.Tool = "list_opportunities"
+		}), "acc-007"), importing{}},
+		"a read of the calls source": {returned(t, store, resolved(t, store, "acc-007", "", func(s *postgres.ReceiptStart) {
+			s.Scope, s.ConnectionID = "calls:read", calling.ID
+		})), importing{}},
+		"another workspace's read": {returned(t, store, resolved(t, store, "acc-007", "", func(s *postgres.ReceiptStart) {
+			s.WorkspaceID, s.ConnectionID = other.ID, crm.ID
+		}), "acc-007"), importing{}},
+		"a search for an account ID": {returned(t, store, resolved(t, store, "acc-007", "INVENTED-1", nil), "acc-007"),
+			importing{}},
+		"a get_account for an AccountNumber": {returned(t, store, resolved(t, store, one, "", nil), one),
+			importing{binding: sf, account: one, number: "INVENTED-1"}},
+		"a search that returned another account": {returned(t, store, resolved(t, store, one, "INVENTED-1", nil), two),
+			importing{binding: sf, account: one, number: "INVENTED-1"}},
+	} {
+		c.in.receipt = c.receipt
+		if _, err := store.Import(ctx, made(t, store, c.in)); !errors.Is(err, calls.ErrAssociationInvalid) {
+			t.Errorf("%s: the import ended with %v", name, err)
+		}
+	}
+	if importRows(t, f) != empty {
+		t.Fatalf("a refused import wrote rows:\n%s", importRows(t, f))
+	}
+	// The read that resolved the account is taken, and so is a search that returned it for its number.
+	receipt := returned(t, store, resolved(t, store, "acc-007", "", nil), "acc-007")
+	if result := publish(t, store, importing{receipt: receipt}); at(result, "resolution_receipt_id") != receipt {
+		t.Fatalf("the import returned %s", text(t, result))
+	}
+}
+
+// A revision found by its request key is of the bytes its row names. One that points at other bytes than
+// the request's is corrupt, and the request does not become its repeat.
+func TestARevisionOfOtherBytesIsNotARepeat(t *testing.T) {
+	f := postgrestest.New(t)
+	store := imports(t, f)
+	publish(t, store, importing{raw: "Other bytes."})
+	in := made(t, store, importing{raw: "The file of the request."})
+	revision, _, err := in.Revision(1)
+	ok(t, err)
+	// A row no import writes: the request's own manifest and key, over the bytes of the other file.
+	ok(t, sql(t, f, `INSERT INTO call_import_revisions (workspace_id, import_id, request_key, content_sha256, account_ref,
+		manifest) SELECT workspace_id, $1, $2, content_sha256, account_ref, $3 FROM call_import_contents`,
+		revision.ImportID, revision.RequestKey, revision.Manifest))
+	before := importRows(t, f)
+	if _, err := store.Import(ctx, in); !errors.Is(err, calls.ErrCorrupt) {
+		t.Fatalf("the import ended with %v", err)
+	}
+	if importRows(t, f) != before {
+		t.Fatal("the refused import changed rows")
 	}
 }

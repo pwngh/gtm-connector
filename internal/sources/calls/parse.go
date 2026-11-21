@@ -52,19 +52,24 @@ func parse(raw []byte, format string, speakerNames, stored bool) (*Parsed, error
 	if !ok {
 		return nil, ErrInvalid
 	}
-	lines := splitLines(strings.TrimPrefix(text, "\ufeff"))
+	text = strings.TrimPrefix(text, "\ufeff")
 	var units []Unit
 	if format == "txt" {
-		if len(lines) > evidence.MaxTotalUnits {
-			return nil, ErrTooLarge
-		}
-		units = make([]Unit, len(lines))
-		for i, line := range lines {
-			units[i] = Unit{Index: i + 1, Text: line}
+		// A unit is counted as its line is read, so a file of line breaks is refused at the limit and not
+		// after every one of its lines is held.
+		for lines := (lineCursor{text: text}); ; {
+			line, more := lines.next()
+			if !more {
+				break
+			}
+			if len(units) == evidence.MaxTotalUnits {
+				return nil, ErrTooLarge
+			}
+			units = append(units, Unit{Index: len(units) + 1, Text: line})
 		}
 	} else {
 		var err error
-		if units, err = cues(lines, format == "vtt"); err != nil {
+		if units, err = cues(text, format == "vtt"); err != nil {
 			return nil, err
 		}
 	}
@@ -82,7 +87,8 @@ func parse(raw []byte, format string, speakerNames, stored bool) (*Parsed, error
 			}
 			// A name holds no sentence end ("We have signed. Dana Crest: ..."), so words never leave a
 			// quotation to become a label.
-			name, _, named := evidence.NamedLine(unit.Text)
+			// The name is the one label of the cue: a WebVTT voice tag after it would name a second speaker.
+			name, _, named := evidence.NamedCue(unit.Text, format)
 			if !named {
 				return nil, ErrSpeakerNamesMissing
 			}
@@ -96,25 +102,36 @@ func parse(raw []byte, format string, speakerNames, stored bool) (*Parsed, error
 		Units: units}, nil
 }
 
-// splitLines is calls_import._lines: the lines of a text, ended by CR LF, CR or LF. A line break that ends
-// the text starts no line after it.
-func splitLines(text string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(text); i++ {
-		if text[i] != '\r' && text[i] != '\n' {
-			continue
-		}
-		lines = append(lines, text[start:i])
-		if text[i] == '\r' && i+1 < len(text) && text[i+1] == '\n' {
-			i++
-		}
-		start = i + 1
+// lineCursor reads the lines of a text one at a time, as calls_import._lines splits them: a line ends at
+// CR LF, CR or LF, and a line break that ends the text starts no line after it. A copy of a cursor reads on
+// from the same place, so a reader looks ahead by reading a copy.
+type lineCursor struct {
+	text    string
+	at      int
+	started bool
+}
+
+// next is the next line, and false once there is none.
+func (c *lineCursor) next() (string, bool) {
+	n := len(c.text)
+	if c.at > n || c.at == n && c.started {
+		return "", false
 	}
-	if start < len(text) || len(lines) == 0 {
-		lines = append(lines, text[start:])
+	c.started = true
+	i := c.at
+	for i < n && c.text[i] != '\r' && c.text[i] != '\n' {
+		i++
 	}
-	return lines
+	line := c.text[c.at:i]
+	switch {
+	case i == n:
+		c.at = n + 1
+	case c.text[i] == '\r' && i+1 < n && c.text[i+1] == '\n':
+		c.at = i + 2
+	default:
+		c.at = i + 1
+	}
+	return line, true
 }
 
 // blank is whether text.strip() is empty.
@@ -130,91 +147,176 @@ func blank(text string) bool {
 // spaces is whether a line holds nothing but spaces and tabs.
 func spaces(line string) bool { return strings.Trim(line, " \t") == "" }
 
-// cues reads the cues of a WebVTT or SRT file, in file order.
-func cues(lines []string, vtt bool) ([]Unit, error) {
-	format, body := "srt", -1
-	if vtt {
-		// Exporters write these metadata lines under the signature. Any other text there could be speech.
-		format, body = "vtt", 1
-		for body < len(lines) && vttHeader(lines[body]) {
-			body++
+// block is one block of a WebVTT or SRT file, read a line at a time: a cue, or a comment, STYLE or REGION
+// block of WebVTT, which holds no speech.
+type block struct {
+	vtt        bool
+	lines      int
+	skipped    bool
+	id         *string
+	timed      bool
+	start, end int64
+	settings   string // what follows the end time
+	payload    int
+	one        string          // the cue's text while it is one line
+	more       strings.Builder // the cue's text once it has more
+}
+
+// add takes the next line of the block. spoken is how many cues the file has given so far.
+func (b *block) add(line string, spoken int) error {
+	b.lines++
+	arrow := strings.Contains(line, "-->")
+	switch {
+	case b.skipped:
+		if arrow {
+			return ErrInvalid
 		}
-		signed := lines[0] == "WEBVTT" || strings.HasPrefix(lines[0], "WEBVTT ") || strings.HasPrefix(lines[0], "WEBVTT\t")
-		if len(lines) <= body || !signed || strings.Contains(lines[0], "-->") || lines[body] != "" {
+	case b.lines == 1:
+		head := strings.TrimRight(line, " \t")
+		comment := line == "NOTE" || strings.HasPrefix(line, "NOTE ") || strings.HasPrefix(line, "NOTE\t")
+		if display := head == "STYLE" || head == "REGION"; b.vtt && (comment || display) {
+			if arrow || display && spoken > 0 {
+				return ErrInvalid
+			}
+			b.skipped = true
+			return nil
+		}
+		if b.time(line) {
+			return nil
+		}
+		if b.timed {
+			return ErrInvalid
+		}
+		// Some exports put the speaker's name here, so an identifier may repeat. SRT only numbers its cues.
+		if _, ok := evidence.SourceText(line, evidence.MaxRawBytes, true); arrow || !ok || !b.vtt && !all(line, digit) {
+			return ErrInvalid
+		}
+		// The line is copied so that only an identifier is kept, and no other line of the file.
+		id := line
+		b.id = &id
+	case !b.timed:
+		if !b.time(line) {
+			return ErrInvalid
+		}
+	default:
+		if !evidence.CueLine(line, b.vtt) {
+			return ErrInvalid
+		}
+		switch b.payload++; b.payload {
+		case 1:
+			b.one = line
+		case 2:
+			b.more.WriteString(b.one)
+			fallthrough
+		default:
+			b.more.WriteByte('\n')
+			b.more.WriteString(line)
+		}
+	}
+	return nil
+}
+
+// time reads a timing line into the block and reports whether the line is one the block may have.
+// Auto-captions repeat and reorder start times and end a cue where it starts, and none of that loses text.
+// A cue that ends before it starts, or anything after the end time but cue settings, is refused.
+func (b *block) time(line string) bool {
+	b.start, b.end, b.settings, b.timed = evidence.CueTiming(line, b.vtt)
+	return b.timed && placing(b.settings, b.vtt) && b.end >= b.start
+}
+
+// close ends the block and adds its cue, if it is one, to the units. The cue that passes the limit is
+// refused there, before any later block is read.
+func (b *block) close(units []Unit) ([]Unit, error) {
+	lines, skipped, timed, id, start, end, text := b.lines, b.skipped, b.timed, b.id, b.start, b.end, b.one
+	if b.payload > 1 {
+		text = b.more.String()
+	}
+	*b = block{vtt: b.vtt}
+	if lines == 0 || skipped {
+		return units, nil
+	}
+	if !timed {
+		return nil, ErrInvalid
+	}
+	units = append(units, Unit{Index: len(units) + 1, Text: text, CueID: id, StartMS: &start, EndMS: &end})
+	if len(units) > evidence.MaxTotalUnits {
+		return nil, ErrTooLarge
+	}
+	return units, nil
+}
+
+// cues reads the cues of a WebVTT or SRT file, in file order, in one pass over its lines. It holds one block
+// at a time, so what it allocates grows with the cues it keeps and not with the lines of the file.
+func cues(text string, vtt bool) ([]Unit, error) {
+	lines := lineCursor{text: text}
+	if vtt {
+		signature, _ := lines.next()
+		// Exporters write these metadata lines under the signature. Any other text there could be speech.
+		line, more := lines.next()
+		for more && vttHeader(line) {
+			line, more = lines.next()
+		}
+		signed := signature == "WEBVTT" || strings.HasPrefix(signature, "WEBVTT ") || strings.HasPrefix(signature, "WEBVTT\t")
+		if !more || !signed || strings.Contains(signature, "-->") || line != "" {
 			return nil, ErrInvalid
 		}
 	}
-	rest := lines[body+1:]
-	timing := func(at int) bool {
-		if at >= len(rest) {
-			return false
-		}
-		_, _, _, ok := evidence.CueTiming(rest[at], vtt)
-		return ok
-	}
-	// An empty line ends a block. A run of lines of spaces does too, but only where a cue, an empty line, or
-	// the end of the file follows it. Anywhere else the run is part of a cue's text. A cue starts with its
-	// timing line, or with one identifier line above it.
-	separates := make([]bool, len(rest)+1)
-	separates[len(rest)] = true
-	for at := len(rest) - 1; at >= 0; at-- {
-		if spaces(rest[at]) {
-			separates[at] = rest[at] == "" || separates[at+1] || timing(at+1) || timing(at+2)
-		}
-	}
-	var blocks [][]string
-	var block []string
-	for at, line := range rest {
-		if !separates[at] {
-			block = append(block, line)
-		} else if len(block) > 0 {
-			blocks, block = append(blocks, block), nil
-		}
-	}
-	if len(block) > 0 {
-		blocks = append(blocks, block)
+	timing := func(line string, is bool) bool {
+		_, _, _, ok := evidence.CueTiming(line, vtt)
+		return is && ok
 	}
 	var units []Unit
-	for _, block := range blocks {
-		first := block[0]
-		comment := vtt && (first == "NOTE" || strings.HasPrefix(first, "NOTE ") || strings.HasPrefix(first, "NOTE\t"))
-		display := vtt && (strings.TrimRight(first, " \t") == "STYLE" || strings.TrimRight(first, " \t") == "REGION")
-		if comment || display {
-			if display && len(units) > 0 {
-				return nil, ErrInvalid
+	var err error
+	current := block{vtt: vtt}
+	for {
+		here := lines
+		line, more := lines.next()
+		if !more {
+			break
+		}
+		if !spaces(line) {
+			if err = current.add(line, len(units)); err != nil {
+				return nil, err
 			}
-			for _, line := range block {
-				if strings.Contains(line, "-->") {
-					return nil, ErrInvalid
+			continue
+		}
+		// An empty line ends a block. A run of lines of spaces does too, but only where a cue, an empty line,
+		// or the end of the file follows it. Anywhere else the run is part of a cue's text. A cue starts
+		// with its timing line, or with one identifier line above it. So the run is read ahead to its end:
+		// where a cue or the end follows, all of it separates; if not, it separates up to its last empty
+		// line, and the lines of spaces after that are text.
+		run, end, afterEmpty, empty := here, here, here, false
+		var next, second string
+		var isNext, isSecond bool
+		for {
+			end = run
+			if next, isNext = run.next(); !isNext || !spaces(next) {
+				second, isSecond = run.next()
+				break
+			}
+			if next == "" {
+				afterEmpty, empty = run, true
+			}
+		}
+		switch {
+		case !isNext || timing(next, true) || timing(second, isSecond):
+			lines = end
+		case empty:
+			lines = afterEmpty
+		default:
+			for lines = here; lines.at != end.at; {
+				spaced, _ := lines.next()
+				if err = current.add(spaced, len(units)); err != nil {
+					return nil, err
 				}
 			}
 			continue
 		}
-		var cueID *string
-		start, end, settings, timed := evidence.CueTiming(first, vtt)
-		payload := block[1:]
-		if !timed {
-			if strings.Contains(first, "-->") || len(block) < 2 {
-				return nil, ErrInvalid
-			}
-			// Some exports put the speaker's name here, so an identifier may repeat. SRT only numbers its cues.
-			if _, ok := evidence.SourceText(first, evidence.MaxRawBytes, true); !ok || !vtt && !all(first, digit) {
-				return nil, ErrInvalid
-			}
-			cueID, payload = &first, block[2:]
-			start, end, settings, timed = evidence.CueTiming(block[1], vtt)
-		}
-		// Auto-captions repeat and reorder start times and end a cue where it starts. None of that loses text.
-		if !timed || !evidence.CueText(payload, format) || !placing(settings, vtt) || end < start {
-			return nil, ErrInvalid
-		}
-		units = append(units, Unit{Index: len(units) + 1, Text: strings.Join(payload, "\n"), CueID: cueID,
-			StartMS: &start, EndMS: &end})
-		if len(units) > evidence.MaxTotalUnits {
-			return nil, ErrTooLarge
+		if units, err = current.close(units); err != nil {
+			return nil, err
 		}
 	}
-	return units, nil
+	return current.close(units)
 }
 
 // all is whether text is not empty and every byte of it passes.

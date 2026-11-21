@@ -396,3 +396,59 @@ func TestExcerptEdgeCutsASentence(t *testing.T) {
 		}
 	}
 }
+
+// In an import that states speaker names, the name is the one label of a cue. A WebVTT cue whose words
+// after the name hold a voice tag would give the card a second speaker to take the role from, so a saved
+// record of that shape is refused, remade whole so that nothing else about it is wrong.
+func TestAStatedNameIsTheOnlyLabelOfACue(t *testing.T) {
+	for words, want := range map[string]string{
+		"These words are changed.":                           "",
+		"<v Dorian Pike>We approved the renewal.</v>":        otherRevision,
+		"We approved the renewal.</v>":                       otherRevision,
+		"We approved. <v.loud Dorian Pike>And we signed it.": otherRevision,
+	} {
+		evidence := sealedEvidence(t, "books_calls", namedExport)
+		record := recordOf(evidence, "calls/call_notes")
+		unit := memberObject(record, "manifest", "units", 0)
+		spoken := member(unit, "text").(string)
+		name, _, named := NamedLine(spoken)
+		if !named || member(record, "manifest", "format") != "vtt" {
+			t.Fatalf("%s does not open with a name in a WebVTT cue", namedExport)
+		}
+		changed := name + ": " + words
+		unit.Set("text", changed)
+		record.Set("body", strings.Replace(member(record, "body").(string), spoken, changed, 1))
+		remake(t, evidence)
+		_, _, _, err := Build(evidence)
+		if want == "" && err != nil || want != "" && (err == nil || err.Error() != want) {
+			t.Errorf("%q after the name: %v, want %q", words, err, want)
+		}
+	}
+}
+
+// The scan for voice tags reads each run of class characters once. A cue of tags that open and never close
+// has one such run through all of them, and none of them is a tag: a scan from every one of them would read
+// the run to its end each time, 600 million characters for the 60,000 here.
+func TestVoiceTagsAreFoundInLinearTime(t *testing.T) {
+	const starts = 20_000
+	for _, c := range []struct{ start, end string }{{"<v.", ""}, {"<v.", ">said"}, {"<v.loud.fast", "\nsaid"},
+		{"<v.<c.", ""}} {
+		text := []rune(strings.Repeat(c.start, starts) + c.end)
+		scanned := 0
+		if found := voiceTags(text, &scanned); len(found) != 0 {
+			t.Errorf("%d tags found in %d starts of %q", len(found), starts, c.start)
+		}
+		if scanned > 2*len(text) {
+			t.Errorf("%d characters read by the class scans of %d, want at most twice the text", scanned, len(text))
+		}
+	}
+	// What the scan finds is unchanged: every tag of a cue with classes, names and a closing tag.
+	text := []rune("<v.a.b Dana>one</v> two <v Morgan Reed>three <v.x>four<v  >five")
+	var names []string
+	for _, tag := range VoiceTags(text) {
+		names = append(names, string(text[tag.NameStart:tag.NameEnd]))
+	}
+	if got := strings.Join(names, "|"); got != "Dana||Morgan Reed| " {
+		t.Errorf("the tags name %q", got)
+	}
+}

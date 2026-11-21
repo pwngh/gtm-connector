@@ -1,6 +1,7 @@
 package calls
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -303,6 +305,138 @@ func TestStatedSpeakerNamesAreCheckedAgainstTheWholeFile(t *testing.T) {
 	}
 }
 
+// The stated name is the one label of a cue. A WebVTT voice tag in the words after it would name a second
+// speaker, and a card would take the role from the tag, so the cue is refused: when the file is imported,
+// when a stored import is read, and when a record of that shape is checked. In a TXT or SRT file a tag is
+// text, and without stated names a voice tag is the label it always was.
+func TestAVoiceTagAfterAStatedNameIsRefused(t *testing.T) {
+	cue := func(words string) []byte { return []byte("WEBVTT\n\n00:00.000 --> 00:01.000\n" + words + "\n") }
+	voiced := "Morgan Reed: <v Dana Crest>We approved the renewal.</v>"
+	for _, words := range []string{voiced, "Morgan Reed: We approved the renewal.</v>", "Morgan Reed: Yes. <v.loud Dana>No."} {
+		for _, stored := range []bool{false, true} {
+			if _, err := parse(cue(words), "vtt", true, stored); err != ErrSpeakerNamesMissing {
+				t.Errorf("%q with stated names (stored %v) ended with %v", words, stored, err)
+			}
+		}
+	}
+	if _, err := Parse(cue(voiced), "vtt", false); err != nil {
+		t.Errorf("the cue without stated names ended with %v", err)
+	}
+	if _, err := Parse(cue("Morgan Reed: We <i>approved</i> the renewal."), "vtt", true); err != nil {
+		t.Errorf("a styling tag after a stated name ended with %v", err)
+	}
+	if _, err := Parse([]byte(voiced+"\n"), "txt", true); err != nil {
+		t.Errorf("the line of a TXT file ended with %v", err)
+	}
+	if _, err := Parse([]byte("1\n00:00:00,000 --> 00:00:01,000\n"+voiced+"\n"), "srt", true); err != nil {
+		t.Errorf("the cue of an SRT file ended with %v", err)
+	}
+	// A record of that shape, made without the parser, does not pass the check a card makes.
+	in := imported(t, string(cue(voiced)), "vtt", nil)
+	stated := *in.Parsed
+	stated.SpeakerNames = true
+	in.Parsed = &stated
+	if _, _, err := in.Revision(1); err != ErrCorrupt {
+		t.Errorf("a record with a voice tag after a stated name was made: %v", err)
+	}
+	if err := in.Check(); err != ErrSpeakerNamesMissing {
+		t.Errorf("the import was checked with %v", err)
+	}
+}
+
+// allocated is how many bytes a call allocates.
+func allocated(call func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	call()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// What parsing allocates grows with the units it keeps, not with the lines of the file: a file is read a
+// line at a time, a TXT file is refused at its 10,001st line, and a timed file at its 10,001st cue, before
+// the rest is read. Each file here is 2 MiB, and the copy of it as text is 2 MiB of what is allocated. The
+// parser that held every line and every block before it counted allocated 40 MiB to 170 MiB for these files.
+func TestParsingAllocatesForTheUnitsItKeeps(t *testing.T) {
+	const mib = 1 << 20
+	size := evidence.MaxRawBytes
+	cue := "00:00.000 --> 00:00.000\nx\n\n"
+	tail := "\n00:00.000 --> 00:00.000\nsaid\n"
+	for name, c := range map[string]struct {
+		raw    string
+		format string
+		want   error
+		units  int
+		bound  uint64
+	}{
+		"a TXT file of line breaks": {"x" + strings.Repeat("\n", size-1), "txt", ErrTooLarge, 0, 6 * mib},
+		"a WebVTT file of line breaks before its one cue": {"WEBVTT\n" + strings.Repeat("\n", size-len("WEBVTT\n")-len(tail)) + tail,
+			"vtt", nil, 1, 3 * mib},
+		"a WebVTT file of cues past the limit": {"WEBVTT\n\n" + strings.Repeat(cue, (size-8)/len(cue)), "vtt", ErrTooLarge, 0, 6 * mib},
+		"an SRT file of cues past the limit": {strings.Repeat("7\n00:00:00,000 --> 00:00:00,000\nx\n\n", size/35), "srt",
+			ErrTooLarge, 0, 6 * mib},
+		"a WebVTT cue of a million lines of spaces": {"WEBVTT\n\n00:00.000 --> 00:00.000\nsaid" +
+			strings.Repeat("\n ", (size-60)/2) + "\nand more\n", "vtt", nil, 1, 16 * mib},
+	} {
+		raw := []byte(c.raw)
+		var parsed *Parsed
+		var err error
+		used := allocated(func() { parsed, err = Parse(raw, c.format, false) })
+		if err != c.want || err == nil && len(parsed.Units) != c.units {
+			t.Errorf("%s: parsed with %v", name, err)
+		}
+		if used > c.bound {
+			t.Errorf("%s: %d bytes allocated for %d bytes of file, want at most %d", name, used, len(raw), c.bound)
+		}
+	}
+}
+
+// countdown is a context that is done after its Err has been read a number of times.
+type countdown struct {
+	context.Context
+	left int
+}
+
+func (c *countdown) Err() error {
+	if c.left == 0 {
+		return context.Canceled
+	}
+	c.left--
+	return nil
+}
+
+// oneImport is a store that holds one active import for every account.
+type oneImport struct{ active *Active }
+
+func (o oneImport) Workspace() string { return "workspace-1" }
+
+func (o oneImport) ActiveImport(context.Context, *strictjson.Object, string) (*Active, error) {
+	return o.active, nil
+}
+
+// The read's context bounds the store's query, and parsing the file again cannot be stopped part way. So
+// the context is read once the row is there and again before the record is returned: a read whose context
+// is done by either time gives the context's error and no record.
+func TestAReadWhoseContextIsDoneGivesNoRecord(t *testing.T) {
+	in := imported(t, webVTT, "vtt", nil)
+	revision, _, err := in.Revision(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := oneImport{&Active{Revision: revision, ContentAccount: "acc-007", ContentGeneration: 1}}
+	for left, want := range map[int]error{0: context.Canceled, 1: context.Canceled, 2: nil} {
+		records, err := CallNotes(&countdown{context.Background(), left}, store, testBinding, "acc-007")
+		if err != want || (want == nil) != (len(records) == 1) {
+			t.Errorf("a context done after %d readings gave %d records and %v", left, len(records), err)
+		}
+	}
+	source := Source{Imports: store, CRMBinding: testBinding}
+	if system, records, err := source.Read(context.Background(), "read_call_notes", "acc-007"); err != nil ||
+		system != "calls" || len(records) != 1 || source.Workspace() != "workspace-1" {
+		t.Errorf("the source read %d records from %q (%v)", len(records), system, err)
+	}
+}
+
 func TestTheCommandLineChoicesOfAnImport(t *testing.T) {
 	for path, format := range map[string]string{"meeting.txt": "txt", "a/b.c/Meeting.VTT": "vtt", "x.tar.SrT": "srt",
 		"a..txt": "txt"} {
@@ -474,6 +608,17 @@ func TestARevisionIsNamedByItsManifestAndOpensOnlyUnchanged(t *testing.T) {
 		"a manifest that is not an object": func(r *Revision) { r.Manifest, r.ImportID = "[]", "note-"+digest("[]") },
 		"a manifest that is not JSON":      func(r *Revision) { r.Manifest = "{" },
 		"a manifest over the record limit": func(r *Revision) { r.Manifest = strings.Repeat(" ", evidence.MaxRecordBytes) + r.Manifest },
+		// The ID is the digest of the stored text itself, and the stored text is the canonical one.
+		"other spacing under the same ID": func(r *Revision) { r.Manifest += " " },
+		"other spacing under its own ID": func(r *Revision) {
+			r.Manifest = strings.Replace(r.Manifest, `","`, `", "`, 1)
+			r.ImportID = "note-" + digest(r.Manifest)
+		},
+		"other key order under its own ID": func(r *Revision) {
+			r.Manifest = `{"units":` + strings.TrimSuffix(strings.SplitN(r.Manifest, `,"units":`, 2)[1], "}") + "," +
+				strings.SplitN(r.Manifest, `,"units":`, 2)[0][1:] + "}"
+			r.ImportID = "note-" + digest(r.Manifest)
+		},
 	}
 	for name, change := range changes {
 		changed := revision
@@ -539,5 +684,14 @@ func TestAnImportIsCheckedBeforeItIsSaved(t *testing.T) {
 		if err := changed.Check(); !errors.Is(err, c.want) || (c.want == nil) != (err == nil) {
 			t.Errorf("%s: checked with %v, want %v", name, err, c.want)
 		}
+	}
+	// A file parsed without speaker names is not saved as one that states them by setting the field: the
+	// check parses the bytes as a new import, and this name holds a sentence end.
+	flipped := imported(t, "We have signed. Dana Crest: yes.", "txt", nil)
+	stated := *flipped.Parsed
+	stated.SpeakerNames = true
+	flipped.Parsed = &stated
+	if err := flipped.Check(); err != ErrSpeakerNamesMissing {
+		t.Errorf("a file with the speaker names field set by hand was checked with %v", err)
 	}
 }
