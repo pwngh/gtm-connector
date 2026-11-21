@@ -191,7 +191,7 @@ they have reached. With `--json`, each progress line is one object with a single
 | --- | --- |
 | No command | Object with `description`, `try` (an array of three commands) and `help`. |
 | `--version` | Object with `version`. Text: `gtm-connector 0.1.0`. |
-| [`accounts`](#accounts) | Array of account objects, or an object with `accounts` and `has_more`. |
+| [`accounts`](#accounts) | Object with `accounts` and `has_more`. |
 | [`brief`](#brief) | The saved card, without its evidence. |
 | [`inspect`](#inspect) | One of four results, by the ID given. |
 | [`audit`](#audit) | Array of receipts. |
@@ -213,9 +213,10 @@ ID       ACCOUNT              INDUSTRY        RENEWAL
 acc-003  Thornfield Wren LLP  Legal services  2027-02-08
 ```
 
-`--json` gives an array of account objects as the CRM returns them, or `[]`. When more than 100
-accounts match, it gives an object with `accounts`, the first 100, and `has_more: true`, and text
-output adds one line on stderr that says so. Names are neutralized as a card's text is.
+`--json` gives one object, with or without `--query`: `accounts`, an array of at most 100 account
+objects as the CRM returns them, and `has_more`, which is `true` when more accounts match and
+`false` otherwise. Text output then adds one line on stderr that says more match. Names are
+neutralized as a card's text is.
 
 On the demo book the search is no tool call. On any other CRM it is a `search_accounts` call under a
 receipt that `audit` lists.

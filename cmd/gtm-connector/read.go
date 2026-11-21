@@ -157,7 +157,7 @@ func runCommand(ctx context.Context, command string, tokens []string, s screen) 
 		return 0
 	}
 	fmt.Fprintln(s.out, r.human(result))
-	if cut, ok := result.(*strictjson.Object); ok && command == "accounts" {
+	if cut, ok := result.(*strictjson.Object); ok && command == "accounts" && get(cut, "has_more") == true {
 		// On stderr, so piped rows stay rows.
 		listed, _ := get(cut, "accounts").([]any)
 		fmt.Fprintf(s.err, "Showing the first %d accounts. More match; narrow the search with --query.\n", len(listed))
@@ -263,10 +263,10 @@ func (r *run) accounts(ctx context.Context) (any, error) {
 		rows[i] = row
 	}
 	shown, err := neutral(rows)
-	if err != nil || !more {
-		return shown, err
+	if err != nil {
+		return nil, err
 	}
-	return strictjson.NewObject("accounts", shown, "has_more", true), nil
+	return strictjson.NewObject("accounts", shown, "has_more", more), nil
 }
 
 // brief reads one account through the card maker and publishes its card. The raw records stay in the

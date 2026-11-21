@@ -45,7 +45,7 @@ var commands = map[string]arguments{
 		{name: "--caller", value: true}, {name: "--status", value: true, choices: []string{"ok", "error", "pending"}},
 		{name: "--since", value: true}, {name: "--until", value: true}, {name: "--follow"}}, help: auditHelp},
 	"connect": {options: []option{
-		{name: "--scope", value: true, repeat: true, choices: []string{"crm:read", "calls:read", "crm:write", "slack:read"}},
+		{name: "--scope", value: true, repeat: true, choices: []string{"crm:read", "calls:read", "slack:read"}},
 		{name: "--org", value: true}, {name: "--token-env"},
 		{name: "--environment", value: true, choices: []string{"developer", "sandbox", "production"}},
 		{name: "--seller", value: true, repeat: true}, {name: "--remove"},
@@ -365,7 +365,7 @@ Example: gtm-connector audit --tool save_brief
 `
 
 const connectHelp = `usage: gtm-connector connect [-h] [--json] [--state-dir STATE_DIR]
-                             [--scope {crm:read,calls:read,crm:write,slack:read}]
+                             [--scope {crm:read,calls:read,slack:read}]
                              [--org ORG] [--token-env]
                              [--environment {developer,sandbox,production}]
                              [--seller SELLER] [--remove]
@@ -387,7 +387,7 @@ options:
   --json                Write the documented JSON result for scripts.
   --state-dir STATE_DIR
                         Use this workspace (default: demo).
-  --scope {crm:read,calls:read,crm:write,slack:read}
+  --scope {crm:read,calls:read,slack:read}
                         With an app: grant this scope. Repeat for each.
   --org ORG             With salesforce: read credentials from this signed-in
                         sf CLI alias.

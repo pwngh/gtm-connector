@@ -593,3 +593,57 @@ func TestACancelEndsTheSFProcessGroup(t *testing.T) {
 		t.Errorf("the cancelled connect made its workspace: %v", err)
 	}
 }
+
+// accounts gives one object with or without --query, on demo data and on Salesforce: the accounts and
+// has_more, which is true only when more than the 100 listed match. Text output then says so on stderr.
+func TestAccountsGivesOneShapeWithAndWithoutAQuery(t *testing.T) {
+	d := setUpDemo(t)
+	if err := d.demo(t, d.appURL); err != nil {
+		t.Fatal(err)
+	}
+	org, _, _ := inventedSalesforce(t)
+	for i := range 101 {
+		// An ID of digits only has the check suffix AAA.
+		rows, err := strictjson.LoadsText(fmt.Sprintf(`{"Account": [{"Id": "001%012dAAA", "Name": "Overflow account %03d",
+			"Industry": "Testing", "AccountNumber": null}], "Contact": [], "Opportunity": [], "Contract": []}`, i+1, i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		org.Add(rows.(*strictjson.Object))
+	}
+	where := []string{"--state-dir", "invented-books"}
+	if code, _, stderr := d.read(t, append([]string{"connect", "salesforce", "--org", salesforcetest.Alias,
+		"--environment", "production"}, where...)...); code != 0 {
+		t.Fatalf("connect: exit %d\n%s", code, stderr)
+	}
+	for _, c := range []struct {
+		tokens []string
+		listed int
+		more   bool
+	}{
+		{[]string{"accounts"}, 30, false},
+		{[]string{"accounts", "--query", "Thorn"}, 1, false},
+		{[]string{"accounts", "--query", "%_"}, 0, false},
+		{append([]string{"accounts"}, where...), 100, true},
+		{append([]string{"accounts", "--query", "Overflow"}, where...), 100, true},
+		{append([]string{"accounts", "--query", "Gemini export 0"}, where...), 1, false},
+	} {
+		code, stdout, stderr := d.read(t, append(c.tokens, "--json")...)
+		var page map[string]json.RawMessage
+		if code != 0 || stderr != "" || json.Unmarshal([]byte(stdout), &page) != nil || len(page) != 2 {
+			t.Errorf("%v: exit %d, not an object of two fields\n%s%s", c.tokens, code, stdout, stderr)
+			continue
+		}
+		var accounts []map[string]any
+		var more bool
+		if json.Unmarshal(page["accounts"], &accounts) != nil || json.Unmarshal(page["has_more"], &more) != nil ||
+			len(accounts) != c.listed || more != c.more {
+			t.Errorf("%v: %d accounts and has_more %s, not %d and %t", c.tokens, len(accounts), page["has_more"],
+				c.listed, c.more)
+		}
+		_, _, stderr = d.read(t, c.tokens...)
+		if said := strings.Contains(stderr, "Showing the first 100 accounts. More match"); said != c.more {
+			t.Errorf("%v as text: stderr %q", c.tokens, stderr)
+		}
+	}
+}
