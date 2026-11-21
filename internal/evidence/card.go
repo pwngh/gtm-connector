@@ -896,8 +896,44 @@ func (c *card) slack() {
 		c.gap("slack_denied", "Slack: not read. The grant lacks slack:read.", nil, false, nil)
 		return
 	}
+	roleOf := func(l *string) role {
+		var v any
+		if l != nil {
+			v = *l
+		}
+		return speakerRole(v, sellers, nil, true)
+	}
+	read := func(n int) string {
+		if n == 1 {
+			return "1 message was read"
+		}
+		return fmt.Sprintf("%d messages were read", n)
+	}
 	if field(c.evidence, "slack_backend") == "slack" {
-		panic(ErrNotPorted) // validate refuses a live thread with messages before this
+		// A live thread is read in the order Slack gave it, and its speaker is the author's user ID.
+		for _, message := range c.groups["messages"] {
+			speaker, _ := field(object(field(message, "slack_message")), "user_id").(string)
+			var label any
+			if speaker != "" {
+				label = speaker
+			}
+			c.spoken(message, "messages", whole(label, field(message, "body")), field(message, "sent_at"), roleOf,
+				false, false)
+		}
+		counts := object(field(object(field(c.evidence, "thread_snapshot")), "counts"))
+		left, total := map[string]*big.Int{}, new(big.Int)
+		for _, key := range omitted {
+			n, ok := isInt(field(counts, "omitted_"+key))
+			if !ok {
+				panic(invalid)
+			}
+			left[key] = n
+			total.Add(total, n)
+		}
+		c.gap("slack_thread", fmt.Sprintf("Slack: %s from one selected thread, and paging completed. Not read: "+
+			"files (%s), attachments (%s), blocks (%s), earlier versions of edited messages, and every other thread.",
+			read(len(c.groups["messages"])), left["files"], left["attachments"], left["blocks"]), total, false, nil)
+		return
 	}
 	messages := append([]*strictjson.Object(nil), c.groups["messages"]...)
 	sort.SliceStable(messages, func(i, j int) bool {
@@ -909,13 +945,6 @@ func (c *card) slack() {
 	})
 	files := new(big.Int)
 	var attachedTo []string
-	roleOf := func(l *string) role {
-		var v any
-		if l != nil {
-			v = *l
-		}
-		return speakerRole(v, sellers, nil, true)
-	}
 	for _, message := range messages {
 		attached, ok := isInt(field(message, "files"))
 		if !ok || attached.Sign() < 0 {
@@ -928,11 +957,6 @@ func (c *card) slack() {
 			attachedTo = append(attachedTo, fmt.Sprintf("[%d]", first))
 		}
 	}
-	noun := "messages were"
-	if len(messages) == 1 {
-		noun = "message was"
-	}
-	read := fmt.Sprintf("%d %s read", len(messages), noun)
 	if len(messages) == 0 {
 		c.gap("slack_no_message", "Slack: no message was returned for this account.", num(0), false, nil)
 		return
@@ -951,8 +975,8 @@ func (c *card) slack() {
 		attachedText = fmt.Sprintf(" %s attached %s not read%s.", files, word, where)
 		fileCount = files
 	}
-	c.gap("slack_channel", fmt.Sprintf("Slack: %s.%s Other channels were not read.", read, attachedText), fileCount,
-		false, nil)
+	c.gap("slack_channel", fmt.Sprintf("Slack: %s.%s Other channels were not read.", read(len(messages)),
+		attachedText), fileCount, false, nil)
 }
 
 // ---- SAID ----

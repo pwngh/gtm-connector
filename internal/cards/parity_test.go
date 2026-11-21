@@ -115,6 +115,69 @@ func (s transcripts) Read(tool, accountID string) (string, []*strictjson.Object,
 	return s.Store.Read(tool, accountID)
 }
 
+// thread is the live Slack source of a folder: the messages of the thread mapped to the account and the
+// snapshot of their read, as the oracle card's evidence records them, or no thread mapped. The Slack reader
+// that made them is not ported yet, so they are served as recorded.
+type thread struct {
+	Source
+	messages []*strictjson.Object
+	snapshot *strictjson.Object // nil when no thread is mapped to the account
+}
+
+func (s thread) ReadThread(string) ([]*strictjson.Object, *strictjson.Object, error) {
+	if s.snapshot == nil {
+		return nil, nil, ErrNotSelected
+	}
+	return s.messages, s.snapshot, nil
+}
+
+// recordedThread is the live Slack source of one oracle card, over the store its other reads go to. The
+// Slack connection's binding is recorded only in the card's evidence, so the folder's sources take it from
+// there. served is the recorded input: the thread's messages as the Slack API returned them, each of which
+// must be the message the card holds at its place.
+func recordedThread(t *testing.T, row fixtureRow, input *strictjson.Object, store Source, served any,
+	sources *evidence.Sources) Source {
+	t.Helper()
+	card, _ := load(t, []byte(row.Card)).(*strictjson.Object)
+	sealed := get(card, "evidence").(*strictjson.Object)
+	sources.SlackBinding = get(sealed, "slack_binding")
+	messages := recordedRows(t, row, "slack/messages")
+	snapshot, _ := get(sealed, "thread_snapshot").(*strictjson.Object)
+	api, _ := served.([]any)
+	if len(api) != len(messages) || (snapshot == nil) != (len(api) == 0) ||
+		snapshot != nil && get(snapshot, "cutoff_ts") != get(input, "cutoff") {
+		t.Fatalf("%s: the card does not hold the thread its inputs record", row.Key)
+	}
+	for i, message := range messages {
+		given := api[i].(*strictjson.Object)
+		if get(get(message, "slack_message").(*strictjson.Object), "ts") != get(given, "ts") ||
+			get(message, "body") != get(given, "text") {
+			t.Fatalf("%s: message %d is not the one its inputs record", row.Key, i+1)
+		}
+	}
+	return thread{store, messages, snapshot}
+}
+
+// liveFolder is a folder whose Slack is live: the demo CRM and calls with the account's rows, and the thread
+// the card recorded.
+func liveFolder(t *testing.T, row fixtureRow, input, rows *strictjson.Object, served any, tables ...string) setup {
+	t.Helper()
+	store := demoBook(t)
+	insert(t, store, rows, tables...)
+	sources := demoSources(nil)
+	sources.SlackBackend = "slack"
+	return setup{source: recordedThread(t, row, input, store, served, &sources), sources: sources}
+}
+
+// slackThread is how one card of the slack_threads family is made. Its thread was mapped in the card's own
+// scope, which spent three IDs, one receipt time and four tokens there, resolving the account.
+func slackThread(t *testing.T, row fixtureRow, input *strictjson.Object) setup {
+	t.Helper()
+	s := liveFolder(t, row, input, strictjson.NewObject("crm", get(input, "crm")), get(input, "rows"), "crm")
+	s.scope, s.ids, s.receipts, s.tokens = "slack_threads/"+row.Key, 3, 1, 4
+	return s
+}
+
 // recordedRows are the records of one source table that an oracle card's evidence holds, in their order.
 func recordedRows(t *testing.T, row fixtureRow, table string) []*strictjson.Object {
 	t.Helper()
@@ -308,7 +371,7 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 // builtCards pins how many cards of each family Go builds. Raise a count when a port builds more.
 var builtCards = map[string]int{
 	"demo": 33, "books_demo": 78, "varied_demo": 46, "cases": 19, "books_calls": 82,
-	"books_slack": 0, "slack_threads": 0, "books_salesforce": 0,
+	"books_slack": 78, "slack_threads": 36, "books_salesforce": 0,
 }
 
 func TestCardsFromDemoStores(t *testing.T) { demoStoreFamilies(t, newMemoryCards) }
@@ -357,8 +420,10 @@ func demoStoreFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 	})
 }
 
-// recordedInputFamilies builds the cards of the other families whose recorded inputs hold every row the card
-// reads. The rest need a source adapter that is not ported yet, and are counted by reason.
+// recordedInputFamilies builds the cards of the other families. A card that read an imported transcript or a
+// live Slack thread reads the records its recorded evidence holds, checked against its recorded inputs. The
+// Salesforce cards need the adapter that maps the org's rows, which is not ported yet, and are counted as
+// skipped.
 func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 	book := oracletest.Read(t, "cards/demo_book.json")
 	t.Run("books_calls", func(t *testing.T) {
@@ -390,28 +455,23 @@ func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 				ids: 2, receipts: 1, tokens: 4}
 		})
 	})
-	// What each skipped card lacks among its recorded inputs.
-	reasons := map[string]func(input *strictjson.Object) string{
-		"books_salesforce": func(*strictjson.Object) string {
-			return "CRM records: org_rows are Salesforce API rows, which only the Salesforce adapter maps"
-		},
-		"books_slack": func(input *strictjson.Object) string {
-			if thread, _ := input.Get("thread"); thread == nil {
-				return "no thread mapped: the Slack connection's binding (identity_sha256) is not recorded"
-			}
-			return "Slack records and thread_snapshot: thread holds API messages, which only the Slack reader maps"
-		},
-		"slack_threads": func(*strictjson.Object) string {
-			return "Slack records and thread_snapshot: rows are API messages, which only the Slack reader maps"
-		},
-	}
-	for family, reason := range reasons {
-		t.Run(family, func(t *testing.T) {
-			runFamily(t, family, newStore, func(_ fixtureRow, input *strictjson.Object) setup {
-				return setup{skip: reason(input)}
-			})
+	t.Run("books_slack", func(t *testing.T) {
+		runFamily(t, "books_slack", newStore, func(row fixtureRow, input *strictjson.Object) setup {
+			s := liveFolder(t, row, input, get(input, "rows").(*strictjson.Object), get(input, "thread"), "crm", "calls")
+			s.scope = fmt.Sprintf("books/slack/%s/%d", get(input, "book"), 300+intOf(get(input, "index")))
+			return s
 		})
-	}
+	})
+	t.Run("slack_threads", func(t *testing.T) {
+		runFamily(t, "slack_threads", newStore, func(row fixtureRow, input *strictjson.Object) setup {
+			return slackThread(t, row, input)
+		})
+	})
+	t.Run("books_salesforce", func(t *testing.T) {
+		runFamily(t, "books_salesforce", newStore, func(fixtureRow, *strictjson.Object) setup {
+			return setup{skip: "CRM records: org_rows are Salesforce API rows, which only the Salesforce adapter maps"}
+		})
+	})
 }
 
 func intOf(v any) int {

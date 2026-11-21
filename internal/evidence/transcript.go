@@ -189,6 +189,14 @@ func hasKeys(o *strictjson.Object, keys ...string) bool {
 	return true
 }
 
+// withKey is the keys, and one more when present is set.
+func withKey(keys []string, key string, present bool) []string {
+	if present {
+		return append(append([]string(nil), keys...), key)
+	}
+	return keys
+}
+
 // intIn is calls_import._int: an integer, never a bool, from lo to hi.
 func intIn(v any, lo, hi int64) (int64, bool) {
 	n, ok := isInt(v)
@@ -386,21 +394,15 @@ func validImportedRecord(record *strictjson.Object, accountID string, binding an
 		}
 	}()
 	// A record may carry its reference, and a manifest says speaker_names only when its import declared them.
-	with := func(keys []string, key string, present bool) []string {
-		if present {
-			return append(append([]string(nil), keys...), key)
-		}
-		return keys
-	}
 	_, referenced := record.Get("record_ref")
 	backend, bound := crmBackend(binding)
-	if !hasKeys(record, with(recordKeys, "record_ref", referenced)...) || !bound ||
+	if !hasKeys(record, withKey(recordKeys, "record_ref", referenced)...) || !bound ||
 		!ValidAccountID(accountID, backend == "salesforce") {
 		return false
 	}
 	manifest := object(field(record, "manifest"))
 	stated, declared := manifest.Get("speaker_names")
-	if declared && stated != true || !hasKeys(manifest, with(manifestKeys, "speaker_names", declared)...) {
+	if declared && stated != true || !hasKeys(manifest, withKey(manifestKeys, "speaker_names", declared)...) {
 		return false
 	}
 	format := field(manifest, "format")
@@ -472,6 +474,6 @@ func validImportedRecord(record *strictjson.Object, accountID string, binding an
 	saved := strictjson.NewObject("id", id, "account_id", accountID, "record_kind", "imported_transcript",
 		"record_version", recordVersion, "called_at", calledAt, "body", body, "manifest", manifest,
 		"record_ref", reference)
-	encoded, err := strictjson.Dumps(saved, strictjson.DumpOptions{EnsureASCII: true, SortKeys: true, Compact: true})
+	encoded, err := strictjson.Dumps(saved, canonicalASCII)
 	return err == nil && len(body) <= maxQuoteBytes && len(encoded) <= maxRecordBytes
 }

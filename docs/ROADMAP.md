@@ -24,15 +24,15 @@ Access is by grant. Today that is a bearer token issued for one or more scopes, 
 one source, and in the Go server it is also one signed-in person's access to one account.
 
 `testdata/oracle/` is the reference. With the recorded clocks and IDs, card text must match byte
-for byte, and units and gaps must match as values. The parity tests build 258 of the 450 recorded
-cards today: every card from the demo book, the varied demo books and the test cases, and the 82
-call-book cards. The 50 of those that read an imported transcript read the record the Python import
-made, because Go does not import a transcript yet.
+for byte, and units and gaps must match as values. The parity tests build 372 of the 450 recorded
+cards today: every card but the 78 that read Salesforce. The 50 cards that read an imported
+transcript and the 104 that read a live Slack thread read the records the Python import and the
+Python Slack reader made, because Go does not import a transcript or read Slack yet.
 
 | Step | What it will do | On main today | Done when |
 | --- | --- | --- | --- |
-| Gate | Confirm that Go matches Python on what is ported so far | The parity tests pass at 258 of 450. `make verify-real` compares Python and Go on public text and JSON. | Both pass at the final head, the time to publish a card is measured, and a cold Compose start reaches sign-in and a sealed card read |
-| Evidence | Port the checks for live Slack messages. Use one fixed JSON nesting limit. Show `[link unknown host]` for a link with an ambiguous host; that fix goes into Python first, so card text still matches. | Evidence with live Slack messages is refused as not ported | Live Slack evidence is accepted when valid and refused when invalid, and real text still matches |
+| Gate | Confirm that Go matches Python on what is ported so far | The parity tests pass at 372 of 450. `make verify-real` compares Python and Go on public text and JSON. | Both pass at the final head, the time to publish a card is measured, and a cold Compose start reaches sign-in and a sealed card read |
+| Evidence | Use one fixed JSON nesting limit. Show `[link unknown host]` for a link with an ambiguous host; that fix goes into Python first, so card text still matches. | Go checks imported transcripts and live Slack threads as Python does. Go sets no nesting limit. | The nesting limit and the link fix are in, and real text still matches |
 | Sources | Port transcript import (one TXT, VTT or SRT file, with an excerpt), one mapped Slack thread per account, and Salesforce through the `sf` CLI or a token given to the container | Go reads only the demo book | Go builds all 450 recorded cards, in memory and on PostgreSQL. Recorded source requests and responses replay offline. A cancelled read ends the `sf` process group and publishes no card. |
 | Commands and MCP | Port the seven commands and `debug` to PostgreSQL, where `--state-dir` names a workspace. Serve MCP over HTTPS and stdio with the read tools, under the same Host, scope, selection and expiry checks. One outer receipt per tool call, plus one per read inside a prepared brief. | Go has `setup`, `serve`, `demo`, `backup`, `restore`, `health` and `version`. The MCP gate is written but not served: `/mcp` answers 404. | The recorded command session replays against the binary, and source and client setup work through it. The recorded request vectors pass on both transports, except the write vectors, which are refused with a receipt. The Inspector runs against the binary. |
 | Existing cards | Open the cards and receipts the Python package made. They are verified and kept byte for byte, never rebuilt. | Go verifies both kinds of Python card in tests. No command admits them yet. | The four recorded card folders are admitted and inspected, a changed byte is refused, and admitting twice adds nothing |
