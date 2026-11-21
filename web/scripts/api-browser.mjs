@@ -4,11 +4,11 @@
 // Coverage, blocked browser storage, a session that expires, hostile text in
 // names, gaps and receipts, a static host's answer, and wrong addresses. The
 // frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
-// and dark, Coverage at 320, 390 and 1440, and the Deal card's ledger and Text
-// tab at 320, 390 and 1440: tab order, target sizes, focus outlines, Escape,
-// overflow, text contrast and what browser storage holds. The Text tab is
-// also read and copied for every recorded card, and shown for a card whose
-// bytes do not match its seal.
+// and dark, Coverage at 320, 390 and 1440, the Deal card's ledger and Text
+// tab at 320, 390 and 1440, and its proof drawer at 390, 1100 and 1440: tab
+// order, target sizes, focus outlines, Escape, overflow, text contrast and what
+// browser storage holds. The Text tab is also read and copied for every
+// recorded card, and shown for a card whose bytes do not match its seal.
 // The stub keeps the Go server's shapes: the session view, the {"error":
 // {code, message}} envelope, the CSRF header and Origin checks, 403
 // not_permitted for an ungranted account, the /healthz answers, and the
@@ -19,7 +19,7 @@
 // It drives the installed Chrome, so it is not part of `npm test`. To run it:
 //   npm run build
 //   npm run test:browser [-- --channel chrome --screenshots DIR --contrast]
-// With --screenshots, the frame's matrix, Coverage and the Deal card save one picture per
+// With --screenshots, the frame's matrix, Coverage, the Deal card and its drawer save one picture per
 // width and theme in DIR; with --contrast, it prints the lowest contrast of
 // each text colour.
 // The exit code is 1 when any check fails.
@@ -1212,7 +1212,7 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
     const focus = await ring(tab);
     const sizes = await tab.$$eval('.dc-cite', els => els.map(el => el.getBoundingClientRect()).map(box => [box.width, box.height]));
     check(fits(focus) && focus.name.startsWith('Source') && sizes.every(([w, h]) => w >= 44 && h >= 44), `${at}: each of ${sizes.length} numbers is at least 44 by 44, and focus shows a ${focus.outline}px ring`);
-    check(facts.local.every(key => ['gtm-connector-theme', 'gtm-connector-deals-hint'].includes(key)) && facts.session.length === 0,
+    check(facts.local.every(key => ['gtm-connector-theme', 'gtm-connector-deals-hint', 'gtm-connector-proof-seen'].includes(key)) && facts.session.length === 0,
       `${at}: storage holds only display keys (local ${facts.local.join()}; session ${facts.session.join()})`);
     if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `deal-card-${width}-${scheme}.png`), fullPage: true});
     check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
@@ -1220,17 +1220,144 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
   });
 }
 
-await scenario('deal card: a number opens the unit in full', async () => {
-  const tab = await page({width: 1440});
+// 17. The proof drawer: a number opens the unit behind it, and ?unit= in the address opens the same drawer.
+const unitText = n => dealCard.units.find(unit => unit.n === n).body.text;
+const drawerFacts = tab => tab.evaluate(() => {
+  const dialog = document.querySelector('[role=dialog]'), box = dialog.getBoundingClientRect(), close = document.querySelector('.ui-dialog__close').getBoundingClientRect();
+  const card = document.querySelector('.dc').getBoundingClientRect(), style = getComputedStyle(dialog);
+  return {title: document.querySelector('.ui-dialog__title').textContent, focus: document.activeElement === document.querySelector('.ui-dialog__title'), modal: dialog.getAttribute('aria-modal'),
+    quote: dialog.querySelector('blockquote')?.textContent ?? null, quoteChildren: dialog.querySelector('blockquote')?.children.length ?? null, quotes: dialog.querySelectorAll('blockquote').length,
+    text: dialog.querySelector('.ui-dialog__body').innerText.replace(/\s+/g, ' ').trim(), read: dialog.querySelector('.dc-proof__read')?.textContent ?? null,
+    injected: Boolean(window.__injected) || Boolean(dialog.querySelector('img')), unit: new URL(location.href).searchParams.get('unit'),
+    box: {left: box.left, top: box.top, width: box.width, height: box.height}, close: {width: close.width, height: close.height},
+    background: style.backgroundColor, shadow: style.boxShadow, cardRight: card.right, cardWidth: card.width, viewport: {width: innerWidth, height: innerHeight},
+    rail: Boolean(document.querySelector('.deals-rail')?.getClientRects().length),
+    local: Object.keys(localStorage), session: Object.keys(sessionStorage)};
+});
+const atCite = (tab, n) => until(tab, number => document.activeElement?.matches(`.dc-line__n > .dc-cite[data-cite="${number}"]`), String(n));
+for (const [width, scheme] of [[390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+  await scenario(`proof drawer ${width} ${scheme}`, async () => {
+    const at = `proof drawer ${width} ${scheme}`;
+    const tab = await page({width, scheme});
+    await tab.goto(`${thornfield}?unit=5`, {waitUntil: 'networkidle'});
+    await signIn(tab);
+    await tab.waitForSelector('[role=dialog] [data-proof="unit"]');
+    await until(tab, () => document.activeElement?.matches('.ui-dialog__title'));
+    const facts = await drawerFacts(tab);
+    check(facts.title === 'Source [5]' && facts.focus && facts.quote === unitText(5) && facts.quoteChildren === 0 && facts.quotes === 1,
+      `${at}: /deals/acc-003?unit=5 opens the drawer on the recorded sentence of unit 5, character for character, with focus on the head (${facts.title})`);
+    check(!facts.injected && facts.text.includes(`Marian Holt ${hostile}`) && facts.text.includes('Customer (label matches contact [2])') && facts.text.includes('On the card'),
+      `${at}: the hostile speaker name renders as text, with the role and its basis as recorded`);
+    check(facts.read === 'Read 15 Jan 2027, 15:00:00 UTC from calls' && !/receipt-|read_call_notes|op-|calls:read|[0-9a-f]{64}/.test(facts.text),
+      `${at}: the read line gives the read's start and source, and no receipt ID, digest or tool name (${facts.read})`);
+    check(/After \[6\] Please do not put a date on the order form\./.test(facts.text) && !facts.text.includes('Before'), `${at}: Around it shows unit 6 after it and nothing before it`);
+    if (width < 720) {
+      check(facts.box.left === 0 && facts.box.top === 0 && facts.box.width === facts.viewport.width && facts.box.height === facts.viewport.height && facts.close.width >= 44 && facts.close.height >= 44 && facts.modal === 'true',
+        `${at}: the sheet covers the viewport (${facts.box.width}x${facts.box.height}) and its close button is ${facts.close.width}x${facts.close.height}`);
+    } else {
+      check(facts.box.width === 480 && facts.box.height === facts.viewport.height && facts.box.left + facts.box.width === facts.viewport.width && facts.shadow !== 'none' && facts.modal === 'false',
+        `${at}: a panel 480 wide on the right, full height, with the shadow, beside the card (${facts.box.width}x${facts.box.height})`);
+      check(facts.cardRight <= facts.box.left && facts.cardWidth >= 760 && !facts.rail, `${at}: the list rail steps aside and the card, ${Math.round(facts.cardWidth)} wide, ends at ${Math.round(facts.cardRight)}, left of the drawer at ${facts.box.left}`);
+    }
+    const measured = await measure(tab, `${cardParts}, [role=dialog]`);
+    check(healthy(measured), `${at}: ${reported(at, measured)}`);
+    check(facts.local.includes('gtm-connector-proof-seen') && facts.local.every(key => ['gtm-connector-theme', 'gtm-connector-deals-hint', 'gtm-connector-proof-seen'].includes(key)) && facts.session.length === 0,
+      `${at}: opening a drawer is kept as a display choice, and storage holds only display keys (${facts.local.join()})`);
+    if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `proof-${width}-${scheme}.png`)});
+    // Escape closes it, removes ?unit= and puts focus back on the [5] box.
+    await tab.keyboard.press('Escape');
+    await tab.waitForSelector('[role=dialog]', {state: 'detached'});
+    await atCite(tab, 5);
+    check(!new URL(tab.url()).searchParams.has('unit'), `${at}: Escape closes the drawer, removes ?unit= and returns focus to the [5] box`);
+    check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+    await tab.context().close();
+  });
+}
+
+await scenario('proof drawer at 1100: pressing numbers, Left and Right, Before and After, and the close button', async () => {
+  const tab = await page({width: 1100});
   await tab.goto(thornfield, {waitUntil: 'networkidle'});
   await signIn(tab);
   await tab.waitForSelector('.dc-ledger');
-  await tab.click('.dc-people .dc-cite');
-  await until(tab, () => location.pathname === '/ops/evidence' && document.querySelector('.api-unit-detail .api-receipt-full'));
-  const opened = new URL(tab.url());
-  check(opened.searchParams.get('account') === 'acc-003' && opened.searchParams.get('card') === 'card-acc-003' && opened.searchParams.get('unit') === '5',
-    `the first quotation's number opens that unit of that card in full (${opened.search})`);
+  const hint = await tab.evaluate(() => ({text: document.querySelector('.dc-proof-hint')?.textContent,
+    above: document.querySelector('.dc-proof-hint')?.getBoundingClientRect().bottom <= document.querySelector('.dc-ledger').getBoundingClientRect().top}));
+  check(hint.text === 'Select a number to see its source.' && hint.above, 'before any drawer is opened, one line above the ledger says what a number does');
+  await tab.click('.dc-line__n > .dc-cite[data-cite="5"]');
+  await tab.waitForSelector('[role=dialog] [data-proof="unit"]');
+  await until(tab, () => document.activeElement?.matches('.ui-dialog__title'));
+  check(new URL(tab.url()).searchParams.get('unit') === '5' && await tab.locator('.dc-proof-hint').count() === 0 && await tab.locator('.dc-cite[data-open]').count() === 1,
+    'pressing [5] puts ?unit=5 in the address, opens the drawer with focus on its head, marks [5] and drops the hint');
+  const beside = await tab.evaluate(() => ({card: document.querySelector('.dc').getBoundingClientRect().toJSON(), drawer: document.querySelector('[role=dialog]').getBoundingClientRect().left}));
+  check(beside.card.right <= beside.drawer && beside.card.width >= 520, `at 1100 the card, ${Math.round(beside.card.width)} wide, stays readable left of the drawer`);
+  const walk = [];
+  for (const [key, n] of [['ArrowRight', 6], ['ArrowRight', 7], ['ArrowLeft', 6]]) {
+    await tab.keyboard.press(key);
+    await until(tab, number => new URL(location.href).searchParams.get('unit') === number && document.querySelector('.ui-dialog__title')?.textContent === `Source [${number}]`
+      && document.querySelector('[role=dialog] [data-proof="unit"]'), String(n));
+    walk.push(`${new URL(tab.url()).searchParams.get('unit')}:${await tab.textContent('.ui-dialog__title')}`);
+  }
+  check(walk.join() === '6:Source [6],7:Source [7],6:Source [6]', `Right, Right, Left move through the card's units and the address follows (${walk.join(', ')})`);
+  await tab.click('[role=dialog] [data-near="before"] a');
+  await until(tab, () => new URL(location.href).searchParams.get('unit') === '5' && document.querySelector('[role=dialog] [data-proof="unit"] blockquote[data-unit="5"]'));
+  check(await tab.textContent('[role=dialog] blockquote') === unitText(5), 'Before shows unit 5 in place');
+  // Beside the card, pressing another number on the card replaces the content and keeps the drawer open.
+  await tab.click('.dc-line__n > .dc-cite[data-cite="8"]');
+  await until(tab, () => new URL(location.href).searchParams.get('unit') === '8' && document.querySelector('[role=dialog] [data-proof="unit"] blockquote[data-unit="8"]'));
+  check(await tab.textContent('[role=dialog] blockquote') === unitText(8) && await tab.locator('[role=dialog]').count() === 1, 'pressing [8] on the card shows unit 8 in the same drawer');
+  // A record: its reference and the line on its fields.
+  await tab.click('.dc-line__n > .dc-cite[data-cite="2"]');
+  await until(tab, () => document.querySelector('[role=dialog] .dc-proof__record'));
+  const record = (await tab.innerText('[role=dialog] [data-proof="unit"]')).replace(/\s+/g, ' ').trim();
+  check(record === 'Record crm/contacts/con-003 This server returns a record’s reference, not its fields yet. On the card Read 15 Jan 2027, 15:00:00 UTC from the CRM',
+    `a record unit shows its reference and says its fields are not served yet (${record})`);
+  await tab.click('.ui-dialog__close');
+  await tab.waitForSelector('[role=dialog]', {state: 'detached'});
+  await atCite(tab, 2);
+  check(!new URL(tab.url()).searchParams.has('unit'), 'the close button closes it, removes ?unit= and returns focus to the number last pressed');
+  await tab.reload({waitUntil: 'networkidle'});
+  await tab.waitForSelector('.dc-ledger');
+  check(await tab.locator('.dc-proof-hint').count() === 0, 'after a drawer has been opened, the hint stays away across a reload');
+  check(tab.errors.length === 0 && violations(tab).length === 0, `no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
   await tab.context().close();
+});
+
+await scenario('proof drawer: a unit the card lacks, reading, and refusals', async () => {
+  const tab = await page({width: 390});
+  await tab.goto(`${thornfield}?unit=12`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('[role=dialog] [data-proof="missing"]');
+  await apiSettled();
+  const missing = await tab.evaluate(() => ({text: document.querySelector('[role=dialog] .ui-dialog__body').innerText.trim(), quotes: document.querySelectorAll('[role=dialog] blockquote, [role=dialog] .dc-ref').length}));
+  check(missing.text === 'This card has no unit 12. No other unit is shown in its place.' && missing.quotes === 0 && !stub.log.some(entry => entry.includes('/units/')),
+    `a number the card lacks says so, shows no other unit and reads nothing (${missing.text})`);
+  await tab.context().close();
+  // While the unit is read, the drawer says so.
+  stub.steer = (method, path) => path.endsWith('/units/5') ? {delay: 1500} : null;
+  const slow = await page({width: 1440});
+  await slow.goto(`${thornfield}?unit=5`, {waitUntil: 'domcontentloaded'});
+  await signIn(slow);
+  await slow.waitForSelector('[role=dialog] [data-proof="reading"]');
+  check((await slow.innerText('[role=dialog] [data-proof="reading"]')).trim() === 'Reading unit 5', 'while the unit is read, the drawer says Reading unit 5');
+  await slow.waitForSelector('[role=dialog] [data-proof="unit"]');
+  await slow.context().close();
+  // A read refused as not permitted: the unit the card holds shows, and the read line alone says so.
+  stub.steer = (method, path) => path.endsWith('/units/5') ? {status: 403, code: 'not_permitted'} : null;
+  const denied = await page({width: 1440});
+  await denied.goto(`${thornfield}?unit=5`, {waitUntil: 'networkidle'});
+  await signIn(denied);
+  await denied.waitForSelector('[role=dialog] [data-read="refused"]');
+  const refusedRead = await denied.evaluate(() => ({read: document.querySelector('.dc-proof__read').textContent, quote: document.querySelector('[role=dialog] blockquote')?.textContent, refusal: document.querySelectorAll('[role=dialog] [data-refusal]').length}));
+  check(refusedRead.read === 'Read Not permitted' && refusedRead.quote === unitText(5) && refusedRead.refusal === 0, `a refused read shows the unit with Not permitted on the read line only (${refusedRead.read})`);
+  await denied.context().close();
+  // Any other refusal is shown as a refusal with the server's code.
+  stub.steer = (method, path) => path.endsWith('/units/5') ? {status: 500, code: 'internal'} : null;
+  const failed = await page({width: 1440});
+  await failed.goto(`${thornfield}?unit=5`, {waitUntil: 'networkidle'});
+  await signIn(failed);
+  await failed.waitForSelector('[role=dialog] [data-refusal="server"]');
+  check((await failed.innerText('[role=dialog] [data-refusal]')).includes('Server code: internal') && await failed.locator('[role=dialog] blockquote').count() === 0,
+    'a server error is a refusal with its code, and no unit');
+  await failed.context().close();
 });
 
 await scenario('deal card: a card of another account in ?card= is not read', async () => {

@@ -1,3 +1,4 @@
+import {useSyncExternalStore} from 'react';
 import {ApiError} from '../../api/client.ts';
 import type {Outcome} from '../../api/reads.ts';
 import type {AccountCards, AccountView, CardView} from '../../api/types.ts';
@@ -7,6 +8,22 @@ import type {AccountCards, AccountView, CardView} from '../../api/types.ts';
 // ranks, groups or dates a deal beyond what the server sent.
 
 export const dealsPath = '/deals';
+
+/** At this width and wider the list is a rail beside the open deal. */
+export const wideQuery = '(min-width: 1100px)';
+
+/** Whether a media query matches, following it as it changes. False without a window. */
+export function useMedia(query: string): boolean {
+  return useSyncExternalStore(
+    notify => {
+      const media = window.matchMedia(query);
+      media.addEventListener('change', notify);
+      return () => media.removeEventListener('change', notify);
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
+}
 
 /** A deal's tabs: the card at the deal's own address, and its plain text at /text below it. */
 export type DealTab = 'card' | 'text';

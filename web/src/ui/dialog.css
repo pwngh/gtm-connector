@@ -18,6 +18,12 @@
   padding: 0;
 }
 
+/* A dialog that is not modal: the page beside it stays visible and in use. */
+.ui-dialog-backdrop--modeless {
+  background: transparent;
+  pointer-events: none;
+}
+
 .ui-dialog {
   box-sizing: border-box;
   display: flex;
@@ -35,6 +41,10 @@
 .ui-dialog:focus-visible {
   outline: var(--gc-focus);
   outline-offset: -3px;
+}
+
+.ui-dialog-backdrop--modeless > .ui-dialog {
+  pointer-events: auto;
 }
 
 .ui-dialog--drawer {
@@ -68,6 +78,11 @@
   font: var(--gc-label);
   font-size: 1rem;
   letter-spacing: 0;
+}
+
+.ui-dialog__title:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
 }
 
 .ui-dialog__close {

@@ -1,5 +1,5 @@
 import {ArrowLeft} from 'lucide-react';
-import {type KeyboardEvent, type ReactNode, type RefObject, useEffect, useRef, useState, useSyncExternalStore} from 'react';
+import {type KeyboardEvent, type ReactNode, type RefObject, useEffect, useRef, useState} from 'react';
 import {Link, useLocation, useSearchParams} from 'react-router';
 import {demoAccount, formatUtc} from '../../api/client.ts';
 import {readsFor, useRead, useServer} from '../../api/reads.ts';
@@ -9,26 +9,12 @@ import {Field} from '../../ui/Field.tsx';
 import {Refusal, refusalText} from '../../ui/Refusal.tsx';
 import {displayStorage} from '../../ui/theme.ts';
 import DealCard from './card/DealCard.tsx';
-import {byName, cardReadLimit, dealAt, dealHref, dealsPath, hintKey, matching, type RowRead, readInTurn, rowFrom} from './deals.ts';
+import {byName, cardReadLimit, dealAt, dealHref, dealsPath, hintKey, matching, type RowRead, readInTurn, rowFrom, useMedia, wideQuery} from './deals.ts';
 
 // Deals: every account the server grants the signed-in person, by name, each
 // with the time of its newest card. At 1100 and wider the list is a rail and
 // the open deal is beside it; narrower, the list and the deal are each the
 // whole page. The open deal is its Deal card.
-
-const wideQuery = '(min-width: 1100px)';
-
-function useWide(): boolean {
-  return useSyncExternalStore(
-    notify => {
-      const media = window.matchMedia(wideQuery);
-      media.addEventListener('change', notify);
-      return () => media.removeEventListener('change', notify);
-    },
-    () => window.matchMedia(wideQuery).matches,
-    () => false,
-  );
-}
 
 const readAccounts = 'accounts';
 const cardsKey = (account: string) => `cards:${account}`;
@@ -419,7 +405,7 @@ function OpenDeal({account, wide}: {account: string; wide: boolean}) {
 
 export default function Deals() {
   const {pathname} = useLocation();
-  const wide = useWide();
+  const wide = useMedia(wideQuery);
   const open = dealAt(pathname);
   if (!wide) {
     return (

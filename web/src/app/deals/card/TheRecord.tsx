@@ -4,7 +4,7 @@ import type {SectionProps} from './sections.ts';
 
 // The record units the card read: each one's number and its reference. The
 // values are not shown here.
-export function TheRecord({account, card}: SectionProps) {
+export function TheRecord({card}: SectionProps) {
   const records = recordsOf(card);
   return (
     <section
@@ -26,11 +26,7 @@ export function TheRecord({account, card}: SectionProps) {
               data-record-unit={record.n}
             >
               <span className="dc-line__n">
-                <Cite
-                  account={account}
-                  card={card.id}
-                  n={record.n}
-                />
+                <Cite n={record.n} />
               </span>
               <div className="dc-line__body">
                 <span className="dc-ref">{record.recordRef}</span>
