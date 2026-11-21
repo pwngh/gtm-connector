@@ -7,6 +7,13 @@ it ships with its test. The last section lists statements in the other docs that
 The goal is the renewal workflow: find what blocks a renewal in the evidence, turn it into reviewed
 work, and keep the history of what resolved it. No model writes text on a card.
 
+**Terms used on this page.**
+- A **unit** is one numbered record or whole sentence on a card.
+- A **gap** is something the card states it did not read or show.
+- A **receipt** is the stored record of one read or tool call, committed before it runs.
+- A **sealed card** is a card whose stored bytes are named by a receipt's digest, so a changed byte is detected.
+- A **grant** is what lets one person or token read one source, for selected accounts.
+
 ## v0.1.0: one Go binary replaces the Python package (in progress)
 
 It runs on PostgreSQL, reads the same sources and writes nothing back to any source. It ports what
@@ -51,7 +58,7 @@ approves what goes on it, and the operator registers the deal and grants it.
 
 - **A deal is one renewal of an account.** Today a card is for an account.
   - A person with the Ops grant registers the deal by hand, with a command or an API call, and grants it to named people.
-  - One handle binds the deal's Salesforce account, opportunity and contacts, its Slack threads, and the transcripts imported for it.
+  - One handle binds the deal's Salesforce account, opportunity, contract and contacts, its Slack threads, and the transcripts imported for it.
   - It reads the standard opportunity fields. A renewal field the org keeps elsewhere shows as a gap until milestone 2.
 - **Sign-in.**
   - Named people sign in, and every action is recorded under that sign-in.
@@ -72,7 +79,7 @@ approves what goes on it, and the operator registers the deal and grants it.
     - unknown: a source was not read, or the last refresh failed;
     - green: no open blocker, shown only when every source was read. Until readiness rules run, green does not say the renewal is on track.
 
-    A badge at the top counts the calls and threads waiting for this person's approval, and opens them.
+    A deal shows its most urgent band, and still says when a source was not read. A badge at the top counts the calls and threads waiting for this person's approval, and opens them.
   - **The deal card,** in the main pane: what changed comes first, then the risks and blockers. It also shows:
     - days to renewal, and the recurring revenue when the source supplies it;
     - buyer quotes with names and titles;
@@ -80,10 +87,11 @@ approves what goes on it, and the operator registers the deal and grants it.
     - the sources that were not read.
   - **The proof drawer.** Any line opens its record and field, or its whole sentence with the speaker, time and source. The read's receipt is not shown here: `inspect` and `audit` show it, and Ops does from milestone 2.
   - **Communications.** The deal's approved calls and Slack threads in time order, each opening its sentences.
+  - **Help in place.** Each label and status carries its definition, and what it leads to, beside the value.
 - **Marks.**
   - A rep marks one whole, uncut sentence as a blocker or as a seller's commitment. The label comes from a fixed list and is checked against the speaker's role, and a mark holds no free text.
   - A mark records who made it and the sentence it cites. It is stored beside the sealed card, not in it. It follows its sentence across refreshes, and comes back for review if that sentence changes or is withdrawn.
-  - Resolving a blocker needs later proof and a person's decision. The resolved blocker stays in the deal's history with its proof, who decided and when.
+  - Resolving a blocker needs later proof, a person's decision and a reason from a fixed list, such as resolved or no longer applies. The resolved blocker stays in the deal's history with its proof, who decided and when.
   - Wording alone never makes a blocker, because source text decides nothing.
 - **What changed:** the units, record versions and gaps that differ between the current card and the one this reader last saw. Each person's position is their own, so one rep reading a card does not clear a teammate's amber.
 - **Refresh.** A button, a command and an API call read every approved source again, under the caller's grants, with a receipt before each read.
@@ -118,7 +126,7 @@ RevOps covers every renewal, not one, and sees which have no current card.
 - **One size cap on every card,** stated on the card when it leaves evidence unshown.
 - **The Ops area.** Three screens:
   - **Coverage,** the home screen. Every renewal a watch rule proposed or a person registered is listed with one state: proposed, paused, closing, no current card, or current card. Each gap opens the pending match or the failed read behind it.
-  - **Setup.** Each source's health and last read, and the active configuration beside a draft, with the preview and the activation.
+  - **Setup.** Each source's state (not connected, denied, partial, failed, stale or current), its last read and what to do about it. The active configuration sits beside a draft, with the preview and the activation.
   - **Activity.** What ran and whether it is safe to retry: reads, approvals, refusals and refreshes, each with its receipt. A seal can be rechecked here.
 - **Pause.** RevOps pauses a deal, which stops its scheduled reads, and resumes it.
 
@@ -136,7 +144,7 @@ A rep hears about a new risk in Slack, and a team's scripts and assistants read 
   - a risk changed;
   - a card changed;
   - a deal closed.
-- **Every delivery.** The audience and its grants are checked again before each attempt. A temporary failure is retried, a refused credential stops delivery, and Activity shows each attempt.
+- **Every delivery.** The audience and its grants are checked again before each attempt. A temporary failure is retried, and a refused credential stops delivery. An attempt whose outcome is unknown is shown as uncertain, and is not sent again until it is checked. Activity shows each attempt.
 - **Tokens for scripts and assistants.** A token is limited to selected deals and scopes, and expires.
 - **A feed of flagged deals.** The deal list's route, filtered to red and unknown, with links, so a team's own bot or script can post them.
 - **The API, described.** A published OpenAPI description of the deal, card, change, proof and refresh routes.
@@ -153,7 +161,7 @@ An engineer sends in records the built-in sources do not read, and RevOps report
   - Rows from another CRM, a spreadsheet, email, SMS or product usage come in this way. HTML email is turned into text first.
 - **A customer's own database.** Read through a read-only connection and an approved view, with an ordered cursor and explicit deletions. Its records are staged and approved like pushed ones.
 - **Retractions.** A record entered by mistake is retracted by a new version. Later cards stop citing it, and its history stays.
-- **Read-only SQL.** Views over cards, units, gaps, receipts and readiness that never expose credentials or sign-ins. They answer, for example:
+- **Read-only SQL.** Views over cards, units, gaps, receipts and readiness that never expose credentials or sign-ins. Each view states what it counts, its time basis and its as-of time, and each row leads back to its records. They answer, for example:
   - how often close dates slip;
   - how long customers go silent before renewal;
   - how often blockers recur;
