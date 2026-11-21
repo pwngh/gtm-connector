@@ -59,8 +59,8 @@ the web app. The API takes the session cookie and nothing else.
 | `DELETE /api/v1/session` | Signs out |
 | `GET /api/v1/accounts` | The accounts the person may read, each with its neutralized name |
 | `GET /api/v1/accounts/{account}/cards` | The account's published cards: ID, brief ID, SHA-256, size, seal receipt and when it was published |
-| `GET /api/v1/cards/{card}` | The card as JSON: its head, `as_of`, `sources`, `units`, `gaps` and `lines` |
-| `GET /api/v1/cards/{card}/text` | The text card whole, as `text/plain` |
+| `GET /api/v1/cards/{card}` | The card as JSON: its head, `as_of`, `sources`, `units`, `gaps` and `lines`. A unit sealed under an older neutralizer version has its text and speaker neutralized again. |
+| `GET /api/v1/cards/{card}/text` | The text card whole, exactly as sealed, as `text/plain`, so a reader can check it against the seal |
 | `GET /api/v1/cards/{card}/bytes` | The sealed bytes exactly, with their SHA-256 in `X-Content-SHA256`, so a client can hash them again |
 | `GET /api/v1/cards/{card}/units/{n}` | One unit and the receipt of the read that returned it |
 | `GET /api/v1/receipts/{receipt}` | One receipt |

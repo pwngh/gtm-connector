@@ -340,15 +340,9 @@ func prepared(t *testing.T, folder string) (*mounted, recordedBrief, []auditRow,
 	return m, recorded, rows, bearer
 }
 
-// recordedVersion is the neutralizer version a unit of a recorded brief was sealed under.
-// It is matched as JSON writes it, and as the text content holds that JSON in a string.
-var recordedVersion = regexp.MustCompile(`(\\?"sanitizer_version\\?":\s*)3\b`)
-
 // todaysRules is a recorded result as a brief made now gives it. The recorded briefs were sealed under
-// neutralizer version 3, and the rules since change nothing in them but the version their units state.
-func todaysRules(result []byte) []byte {
-	return recordedVersion.ReplaceAll(result, []byte(fmt.Sprintf("${1}%d", evidence.SanitizerVersion)))
-}
+// rules version 3.
+func todaysRules(result []byte) []byte { return oracletest.TodaysRules(result, evidence.SanitizerVersion) }
 
 // The three recorded prepare_renewal_brief calls (folders/prepared, prepared_as_of and prepared_no_slack),
 // made at the mounted endpoint: the result the assistant received, as todaysRules gives it, and one outer

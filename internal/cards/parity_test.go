@@ -447,9 +447,11 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 	signalLines, valueLines := 0, 0
 	golden := oracletest.NewGolden(t, "cards/"+family+".jsonl.gz", strictjson.Canonical.Dumps)
 	changes := renewal{members: map[string]int{}}
-	if oracletest.Update() {
-		defer func() { t.Logf("-update: cards/%s.jsonl.gz: %s", family, changes) }()
-	}
+	defer func() {
+		if changes.of > 0 {
+			t.Logf("-update: cards/%s.jsonl.gz: %s", family, changes)
+		}
+	}()
 	for i, line := range golden.Lines() {
 		var row fixtureRow
 		if err := json.Unmarshal(line, &row); err != nil {

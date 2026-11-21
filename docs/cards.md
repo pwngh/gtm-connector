@@ -91,6 +91,17 @@ older version of the neutralizer rules (`sanitizer_version` below 4) has its tex
 neutralized again under today's before `inspect`, the web API or a brief tool shows it. The card's
 bytes stay as sealed, so it still verifies, and the sentence keeps the version it was sealed under.
 
+A card's text goes where it is read in one of two forms:
+
+- As sealed, exactly: the web app's Text tab, its copy, and `GET /api/v1/cards/{card}/text` and
+  `/bytes`. These are where a reader checks the card against its seal, and the browser shows the
+  text as inert text.
+- Rendered for a model or a terminal: the `text` the brief tools return and the card the CLI prints.
+  A card made under today's rules is its sealed text exactly. A card with a sentence sealed under an
+  older neutralizer version is rendered again, with a first line that says so: each quotation under
+  `SAID` from its unit, neutralized again; `NOT READ` from its gaps; and every other quoted literal,
+  such as a speaker or a record value, neutralized again. Its sealed text stays in its bytes.
+
 ### Unit keys
 
 A record unit has `n`, `kind` (`record`), `source` (`crm`, `calls` or `slack`), `record_ref` and
@@ -105,6 +116,7 @@ A record unit has `n`, `kind` (`record`), `source` (`crm`, `calls` or `slack`), 
 | `contact` | The number of the one contact a customer's label equals, or `null`. |
 | `text` | The sentence, neutralized. |
 | `partial` | `true` when the sentence is not whole. |
+| `quoted` | `true` when the sentence is in a block quote of a Slack message: words its author quoted, with `role` `unknown` and `basis` `quoted by the message's author`. A card sealed under rules version 3 has no `quoted` key. |
 | `shown` | `yes`, or why the sentence is not under `SAID` (below). |
 | `span` | `null`, except in an imported transcript: `first` and `last`, the cues or lines the sentence lies in, and `start_ms` and `end_ms`, which cover every cue it lies in, whatever order the file wrote them in. Lines have no times, so both are `null` for a TXT file. |
 | `raw_sha256` | The SHA-256 of the record's text as stored. |
@@ -203,9 +215,21 @@ Name a gap by its `code`, never by its text.
 A sentence ends at closing punctuation or at a blank line.
 
 - A single line break is a wrap, so a sentence written over two lines stays whole.
-- In a Slack message a line break also ends a sentence before a list item: a line that starts with
-  `-`, `+`, `*`, `•`, `◦` or `▪` and a space, or a number with `.` or `)` and a space. A line that
-  ends in closing punctuation ends its sentence there as anywhere else.
+- In a Slack message a line break also ends a sentence before each of these, which starts a block of
+  its own:
+  - a list item: after any spaces, `-`, `+`, `*`, `•`, `◦` or `▪`, or a number with `.` or `)`, then
+    any space;
+  - a speaker label: one to three capitalized words, at most 40 characters, a colon and a space, as in
+    `Dana Reyes: we can sign`;
+  - a block quote: a run of lines that start with `>` or `&gt;`. Its sentences are marked `quoted`:
+    the author quoted them, so the author's role is not theirs, and the card shows them under no
+    established role, as quoted by the message's author;
+  - a code block, from the line that opens a ```` ``` ```` fence to the line that closes it. The line
+    after a block quote or a code block starts a new block too.
+- A line that ends in closing punctuation ends its sentence there as anywhere else.
+- In a call note or a Slack message, a sentence without closing punctuation that more of the record
+  follows is not whole. It is counted as `cut` and never shown as a quotation. The end of the record
+  is an end, so a one-line message with no punctuation is whole.
 - A period after a title, a legal or state short form, a list marker, or a dotted short form such as
   "e.g." does not end a sentence, so "28 U.S.C. § 1332" and "Fed. R. Civ. P. 26(b)(3)" stay in one
   piece.

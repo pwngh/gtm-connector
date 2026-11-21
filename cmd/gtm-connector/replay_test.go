@@ -397,20 +397,40 @@ func (r *replay) run(t *testing.T, s step, compared func(string) string) (string
 	return strings.Join(differs, "\n"), out, errs
 }
 
-// renewed is a recorded text with each line the binary prints differently taken from the binary's output.
-// A line that differs only where compared leaves it out, such as what the recorder's clock decided, keeps
-// the recording's. It is false when the two texts do not have the same number of lines.
-func renewed(printed, recorded string, compared func(string) string) (string, bool) {
+// renewed is the binary's output with each of its lines that the recording holds, by the longest common run
+// of lines alike where compared, taken from the recording. A line that differs only where compared leaves it
+// out, such as what the recorder's clock decided, so keeps the recording's; every other line is the binary's.
+func renewed(printed, recorded string, compared func(string) string) string {
 	got, want := strings.Split(printed, "\n"), strings.Split(recorded, "\n")
-	if len(got) != len(want) {
-		return "", false
+	alike := func(i, j int) bool { return compared(got[i]) == compared(want[j]) }
+	// common[i][j] is the length of the longest common run of got[i:] and want[j:].
+	common := make([][]int, len(got)+1)
+	for i := range common {
+		common[i] = make([]int, len(want)+1)
 	}
-	for i := range want {
-		if compared(got[i]) != compared(want[i]) {
-			want[i] = got[i]
+	for i := len(got) - 1; i >= 0; i-- {
+		for j := len(want) - 1; j >= 0; j-- {
+			if alike(i, j) {
+				common[i][j] = common[i+1][j+1] + 1
+			} else {
+				common[i][j] = max(common[i+1][j], common[i][j+1])
+			}
 		}
 	}
-	return strings.Join(want, "\n"), true
+	out := make([]string, 0, len(got))
+	for i, j := 0, 0; i < len(got); {
+		switch {
+		case j < len(want) && alike(i, j):
+			out = append(out, want[j])
+			i, j = i+1, j+1
+		case j < len(want) && common[i][j+1] >= common[i+1][j]:
+			j++
+		default:
+			out = append(out, got[i])
+			i++
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // rerecord writes a step's output again in the recording from what the binary printed, and its stdout parsed
@@ -425,11 +445,7 @@ func rerecord(t *testing.T, golden *oracletest.Golden, i int, out, errs string, 
 	line := old.Copy()
 	for key, printed := range map[string]string{"stdout": out, "stderr": errs} {
 		recorded, _ := old.Get(key)
-		text, ok := renewed(printed, recorded.(string), compared)
-		if !ok {
-			t.Fatalf("%s does not have the recorded lines; the recording cannot be written again", key)
-		}
-		line.Set(key, text)
+		line.Set(key, renewed(printed, recorded.(string), compared))
 	}
 	if parsed, ok := old.Get("json"); ok {
 		recorded, _ := old.Get("stdout")

@@ -101,13 +101,8 @@ func prepareOf(token string, account string, slack bool, arguments *strictjson.O
 }
 
 // todaysRules is a folder card or brief as Go makes it under today's rules. The folders hold cards sealed
-// under rules version 3, which stay as sealed so that an old card is still admitted; the rules since change
-// nothing on these cards but the version they state.
-func todaysRules(payload []byte) []byte {
-	return []byte(strings.NewReplacer(`"rules_version": 3,`, `"rules_version": 4,`,
-		`"sanitizer_version": 3`, `"sanitizer_version": 4`, `"sanitizer_version":3`, `"sanitizer_version":4`).
-		Replace(string(payload)))
-}
+// under rules version 3, which stay as sealed so that an old card is still admitted.
+func todaysRules(payload []byte) []byte { return oracletest.TodaysRules(payload, evidence.SanitizerVersion) }
 
 // TestGoMakesTheFolderCards makes the folder cards in Go, under the oracle's scopes, and compares the bytes
 // and every receipt: the CLI card's JSON-RPC reads and save_brief seal, and each prepared brief's outer

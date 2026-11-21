@@ -30,6 +30,20 @@ func RefuseNarrowRun(t testing.TB) {
 	}
 }
 
+var (
+	recordedRules = regexp.MustCompile(`(\\?"(?:rules|sanitizer)_version\\?":\s*)3\b`)
+	recordedUnit  = regexp.MustCompile(`(\\?")partial(\\?":\s*)(true|false),((?:\\n)?\s*)`)
+)
+
+// TodaysRules is a card, a brief or a reply that holds one, recorded under rules version 3, as Go writes it
+// under version: the version it states, and each sentence unit's quoted member, false, after its partial
+// member. It reads the JSON as written, and as a JSON string holds it. The recorded folders keep the cards
+// as sealed; this is what Go makes of the same inputs, where the rules since change nothing else.
+func TodaysRules(recorded []byte, version int) []byte {
+	out := recordedRules.ReplaceAll(recorded, []byte(fmt.Sprintf("${1}%d", version)))
+	return recordedUnit.ReplaceAll(out, []byte("${1}partial${2}${3},${4}${1}quoted${2}false,${4}"))
+}
+
 // Encoder writes one fixture value in the file's own encoding.
 type Encoder func(value any) (string, error)
 
