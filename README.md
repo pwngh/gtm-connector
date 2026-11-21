@@ -10,8 +10,7 @@ figure, date, name, and quotation on the card points to a stored record. Each se
 with who said it and on what basis, and the card says what it did not read. The connector writes
 every character. No model does.
 
-Some of what this page describes is still being built. The [roadmap](docs/ROADMAP.md) says which
-parts.
+> **In active development.** Parts of what this page and the guides describe are still being built. The [roadmap](docs/ROADMAP.md) tracks which.
 
 | No model | Cited | Sealed | Tested | Surfaces |
 | --- | --- | --- | --- | --- |
@@ -232,8 +231,13 @@ The card shows what the records say, not whether a source is true.
 
 ## More
 
-- **Daily use:** [commands and output](docs/cli.md), [Deal cards](docs/briefs.md), [clients](docs/clients.md).
-- **Access and audit:** [tools, scopes, and protocol](docs/tools.md), [audit](docs/audit.md), [security review](SECURITY_REVIEW.md).
-- **Where it is going:** [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
+- **Sales and CS:** [working a deal](docs/deals.md), [reading a Deal card](docs/briefs.md).
+- **RevOps and GTM engineers:** [setting it up](docs/config.md), [the API](docs/api.md), [audit receipts](docs/audit.md).
+- **Operators:** [running it](docs/operations.md), [security review](SECURITY_REVIEW.md).
+- **The project:** [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
+
+Until the cutover, the Python package's guides stay in `docs/`: [commands](docs/cli.md),
+[Salesforce](docs/salesforce.md), [calls](docs/calls.md), [Slack](docs/slack.md),
+[selection](docs/selection.md), [clients](docs/clients.md) and [tools](docs/tools.md).
 
 All checked-in companies, people, and records are invented. MIT licensed.
