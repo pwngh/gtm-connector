@@ -167,9 +167,10 @@ func TestBackupAndRestoreKeepState(t *testing.T) {
 	}
 }
 
-// A backup carries the credential files setup makes and leaves a workspace's Slack sign-in and its lock out:
-// Slack spends a refresh token once, so a restored copy would be a sign-in Slack no longer accepts. A restore
-// puts no sign-in back.
+// A backup carries the credential files setup makes and leaves a workspace's Slack sign-in and its lock out.
+// A copy of the sign-in could still be valid, a live Slack credential in a file that is copied and kept; and
+// Slack spends a refresh token once, so a restored copy could as well be one Slack no longer accepts. A
+// restore puts no sign-in back.
 func TestABackupLeavesTheSlackSignInOut(t *testing.T) {
 	f := postgrestest.New(t)
 	source := privateDir(t)

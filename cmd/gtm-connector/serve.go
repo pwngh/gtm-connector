@@ -217,18 +217,20 @@ func newServer(handler http.Handler, pair tls.Certificate, logger *slog.Logger) 
 }
 
 // housekeeping finishes receipts whose worker's lease expired and removes
-// ended sessions, once at start and then every 30 seconds.
+// ended sessions, once at start and then every 30 seconds. A failure is
+// logged by its fixed line, as a command prints one, never by the driver's
+// own text, which can name a table, a role or a host.
 func housekeeping(ctx context.Context, store *postgres.Store, logger *slog.Logger) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
 		if n, err := store.AbandonExpired(ctx, 100); err != nil && ctx.Err() == nil {
-			logger.Warn("finishing interrupted receipts", "error", err)
+			logger.Warn("finishing interrupted receipts", "error", plain(err))
 		} else if n > 0 {
 			logger.Info("finished interrupted receipts", "count", n)
 		}
 		if _, err := store.DeleteEndedSessions(ctx); err != nil && ctx.Err() == nil {
-			logger.Warn("removing ended sessions", "error", err)
+			logger.Warn("removing ended sessions", "error", plain(err))
 		}
 		select {
 		case <-ctx.Done():

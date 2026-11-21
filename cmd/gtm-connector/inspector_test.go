@@ -26,8 +26,9 @@ import (
 
 // TestInspector runs the pinned Inspector CLI against the binary, as a person sets it up: setup, demo and
 // token new, then serve, with the Inspector calling /mcp over HTTPS with each token, and then starting mcp
-// stdio itself. It checks discovery, the five tools and their schemas, the three source reads, the six
-// cross-source denials, an unknown bearer, one finished receipt for each tool call, and that no token
+// stdio itself. It checks discovery, the five tools and their schemas, a read by each of the five tools over
+// HTTPS and by get_account, read_call_notes and read_slack_messages over stdio, each marked untrusted data,
+// the six cross-source denials, an unknown bearer, one finished receipt for each tool call, and that no token
 // reaches the Inspector's output, the audit log or serve's log. It needs Node 22, npx and PostgreSQL, and may
 // download the Inspector, so it runs only when GTM_INSPECTOR=1.
 func TestInspector(t *testing.T) {
@@ -170,7 +171,11 @@ func TestInspector(t *testing.T) {
 		arguments := []string{"--config", config, "--server", "gtm-connector", "--format", "json", "--stored-auth-only",
 			"--quiet", "--method", method}
 		if tool != "" {
-			arguments = append(arguments, "--tool-name", tool, "--tool-arg", "account_id=acc-003")
+			argument := "account_id=acc-003"
+			if tool == "search_accounts" {
+				argument = "query=Thornfield"
+			}
+			arguments = append(arguments, "--tool-name", tool, "--tool-arg", argument)
 		}
 		code, stdout, stderr := invoke(60*time.Second, arguments...)
 		for _, token := range issued {
@@ -223,6 +228,8 @@ func TestInspector(t *testing.T) {
 	overHTTPS(issued["crm:read"])
 	discover()
 	account := run("tools/call", "get_account", true)
+	search := run("tools/call", "search_accounts", true)
+	opportunities := run("tools/call", "list_opportunities", true)
 	denied("read_call_notes", "calls:read")
 	overHTTPS(issued["calls:read"])
 	notes := run("tools/call", "read_call_notes", true)
@@ -257,6 +264,8 @@ func TestInspector(t *testing.T) {
 		refs   []string
 	}{
 		{account, "crm", []string{"crm/accounts/acc-003", "crm/contacts/con-003"}},
+		{search, "crm", []string{"crm/accounts/acc-003"}},
+		{opportunities, "crm", []string{"crm/opportunities/opp-003"}},
 		{notes, "calls", []string{"calls/call_notes/note-003", "calls/call_notes/note-003b"}},
 		{messages, "slack", []string{"slack/messages/msg-003"}},
 		{stdioAccount, "crm", []string{"crm/accounts/acc-003", "crm/contacts/con-003"}},
@@ -308,12 +317,13 @@ func TestInspector(t *testing.T) {
 			ok = append(ok, row.AuditID)
 		}
 	}
-	if want := []int{200, 403, 200, 403, 403, 403, 200, 403, 403, 200, 403, 200, 200, 403}; !reflect.DeepEqual(statuses, want) ||
-		!reflect.DeepEqual(counts, []int{2, 0, 2, 0, 0, 0, 1, 0, 0, 2, 0, 2, 1, 0}) {
+	if want := []int{200, 200, 200, 403, 200, 403, 403, 403, 200, 403, 403, 200, 403, 200, 200, 403}; !reflect.DeepEqual(statuses, want) ||
+		!reflect.DeepEqual(counts, []int{2, 1, 1, 0, 2, 0, 0, 0, 1, 0, 0, 2, 0, 2, 1, 0}) {
 		t.Fatalf("receipts: %v %v", statuses, counts)
 	}
 	var released []string
-	for _, result := range []map[string]any{account, notes, messages, stdioAccount, stdioNotes, stdioMessages} {
+	for _, result := range []map[string]any{account, search, opportunities, notes, messages, stdioAccount, stdioNotes,
+		stdioMessages} {
 		released = append(released, fmt.Sprint(dig(result, "_meta", "gtm.demo/auditId")))
 	}
 	if !reflect.DeepEqual(ok, released) {

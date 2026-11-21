@@ -810,3 +810,32 @@ func TestDemoCallNotesAndImportsNeverShareAWorkspace(t *testing.T) {
 		t.Errorf("%s demo call rows were bound beside imported calls", rows)
 	}
 }
+
+// A restore loads its rows with the triggers off, so it checks this rule itself: an archive edited so that a
+// workspace which read a demo call note has its calls connected to imports is refused whole, however its
+// row counts are made to agree, and the database is left empty.
+func TestARestoreRefusesImportsBesideReadDemoCallNotes(t *testing.T) {
+	f := postgrestest.New(t)
+	read, note := demoNoteRead(t, f, "demo-note-restored")
+	_, err := f.Store.FinishRead(ctx, read.ID, read.LeaseToken, []postgres.RecordVersion{note}, 0)
+	ok(t, err)
+	files := dump(t, f)
+	edited := map[string]string{}
+	for table, data := range files.data {
+		edited[table] = data
+	}
+	edited["connections"] = strings.Replace(files.data["connections"], "\tcalls\tdemo\t", "\tcalls\timported\t", 1)
+	if edited["connections"] == files.data["connections"] {
+		t.Fatal("the dump holds no demo calls connection to edit")
+	}
+	fresh := freshStore(t)
+	err = fresh.Restore(ctx, strings.Repeat("d", 64), files.version, recount(files.copies, edited), opener(edited))
+	if err == nil || !strings.Contains(err.Error(), "connects imported calls where a read returned a demo call note") {
+		t.Fatalf("a restore of imports beside a read demo call note: %v", err)
+	}
+	if v, _ := fresh.SchemaVersion(ctx); v != 0 {
+		t.Fatal("a refused restore left a schema")
+	}
+	// The archive as it was dumped restores.
+	ok(t, freshStore(t).Restore(ctx, strings.Repeat("d", 64), files.version, files.copies, opener(files.data)))
+}

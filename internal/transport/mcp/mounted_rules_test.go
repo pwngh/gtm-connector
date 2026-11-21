@@ -3,6 +3,7 @@ package mcp_test
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/mcptools"
 	"github.com/pwngh/gtm-connector/internal/receipts"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 	"github.com/pwngh/gtm-connector/internal/transport/mcp"
 )
 
@@ -507,6 +509,65 @@ func TestMountedHostAndOriginChecks(t *testing.T) {
 	}
 	if len(m.outer()) != calls {
 		t.Fatalf("requests that are no call left %d receipts", len(m.outer())-calls)
+	}
+}
+
+// Rule five, at the direct reads. Each of the five returns the records as its source gave them, with their
+// text not neutralized: a Slack mention and a Slack link stay as the message wrote them. The result is marked
+// untrusted_data, and its text block repeats it.
+func TestMountedDirectReadsReturnTheRecordsAsTheSourceGaveThem(t *testing.T) {
+	m := mount(t, nil, nil)
+	m.fixture()
+	var accounts []string
+	for _, account := range m.book.Accounts() {
+		accounts = append(accounts, account.ID)
+	}
+	for id, c := range []struct{ tool, source string }{{"search_accounts", "crm"}, {"get_account", "crm"},
+		{"list_opportunities", "crm"}, {"read_call_notes", "calls"}, {"read_slack_messages", "slack"}} {
+		// The demo book's own answer, asked of it directly, so that no read of it is noted.
+		arguments := map[string]any{"account_id": "acc-003"}
+		var given []*strictjson.Object
+		if c.tool == "search_accounts" {
+			arguments = map[string]any{"query": "thornfield"}
+			given, _ = m.book.Store.Search("thornfield", accounts)
+		} else {
+			_, read, err := m.book.Store.Read(ctx, c.tool, "acc-003")
+			must(t, err)
+			given = read
+		}
+		rows := make([]any, len(given))
+		for i, record := range given {
+			rows[i] = record
+		}
+		want, err := strictjson.Dumps(rows, strictjson.Quoted)
+		must(t, err)
+
+		response, _ := m.call(id+1, c.tool, arguments, bearer("read"))
+		records(t, response)
+		result := at(decode(t, response.Body.Bytes()), "result")
+		structured := at(result, "structuredContent")
+		released, err := json.Marshal(at(structured, "records"))
+		must(t, err)
+		if len(given) == 0 || !sameJSON(t, released, []byte(want)) {
+			t.Errorf("%s released %s; the source gave %s", c.tool, released, want)
+		}
+		if at(structured, "source") != c.source || at(structured, "untrusted_data") != true {
+			t.Errorf("%s: the envelope %v", c.tool, structured)
+		}
+		content, _ := at(result, "content").([]any)
+		if len(content) != 1 {
+			t.Fatalf("%s: %d content blocks", c.tool, len(content))
+		}
+		text, _ := at(content[0], "text").(string)
+		repeated, err := json.Marshal(structured)
+		must(t, err)
+		if !sameJSON(t, []byte(text), repeated) {
+			t.Errorf("%s: the text block is not the result: %.300s", c.tool, text)
+		}
+		if body, _ := at(at(structured, "records").([]any)[0], "body").(string); c.tool == "read_slack_messages" &&
+			(!strings.Contains(body, "Heads up <!channel>:") || !strings.Contains(body, "|rider redline v4>")) {
+			t.Errorf("the Slack message lost its mention or its link: %s", body)
+		}
 	}
 }
 
