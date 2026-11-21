@@ -74,11 +74,19 @@ export function refusal(status: number, body: unknown): ApiError {
   return new ApiError({status, kind, code, message});
 }
 
-type Body = {kind: 'json'; value: unknown} | {kind: 'other'; type: string} | {kind: 'broken'};
+type Body = {kind: 'json'; value: unknown} | {kind: 'other'; type: string} | {kind: 'bytes'; value: Uint8Array<ArrayBuffer>} | {kind: 'broken'};
 
 // What a response's body is: JSON that was read, a body that is not JSON, or
-// a body declared JSON that could not be read (cut off, or malformed).
-async function readBody(response: Response): Promise<Body> {
+// a body declared JSON that could not be read (cut off, or malformed). When
+// bytes are asked for, an answer that is not a refusal is read whole as bytes.
+async function readBody(response: Response, bytes = false): Promise<Body> {
+  if (bytes && response.ok) {
+    try {
+      return {kind: 'bytes', value: new Uint8Array(await response.arrayBuffer())};
+    } catch {
+      return {kind: 'broken'};
+    }
+  }
   const type = response.headers?.get?.('Content-Type') || '';
   if (!/^application\/json\b/i.test(type)) {
     return {kind: 'other', type};
@@ -111,6 +119,13 @@ export interface ReadOptions {
   signal?: AbortSignal;
 }
 
+/** A card's stored file exactly as the server holds it, and the digest the server sent with it. */
+export interface CardBytes {
+  bytes: Uint8Array<ArrayBuffer>;
+  /** The X-Content-SHA256 header, or null when there is none. */
+  sha256: string | null;
+}
+
 export interface Probe {
   mode: 'api' | 'static' | 'unreachable';
   session: SessionView | null;
@@ -125,6 +140,8 @@ export interface Api {
   accounts(options?: ReadOptions): Promise<AccountList>;
   accountCards(account: string, options?: ReadOptions): Promise<AccountCards>;
   card(id: string, options?: ReadOptions): Promise<CardDetail>;
+  cardBytes(id: string, options?: ReadOptions): Promise<CardBytes>;
+  cardText(id: string, options?: ReadOptions): Promise<string>;
   unit(card: string, n: number, options?: ReadOptions): Promise<UnitView>;
   receipt(id: string, options?: ReadOptions): Promise<ReceiptView>;
   health(options?: ReadOptions): Promise<Health>;
@@ -134,6 +151,8 @@ interface SendOptions {
   csrf?: string | null | undefined;
   body?: Json | undefined;
   signal?: AbortSignal | undefined;
+  /** Read an answer that is not a refusal as bytes, whatever its type. */
+  bytes?: boolean;
 }
 
 interface Sent {
@@ -148,7 +167,7 @@ export function createApiClient(fetchImpl: Fetch = defaultFetch, {timeoutMs = re
   // Every request has a deadline, and a redirect is refused rather than
   // followed, so the cookie and the CSRF token never go anywhere else. A
   // caller's signal stops it too, as "aborted", which no page shows.
-  async function send(method: string, path: string, {csrf, body, signal}: SendOptions = {}): Promise<Sent> {
+  async function send(method: string, path: string, {csrf, body, signal, bytes = false}: SendOptions = {}): Promise<Sent> {
     const headers: Record<string, string> = {Accept: 'application/json'};
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
@@ -177,7 +196,7 @@ export function createApiClient(fetchImpl: Fetch = defaultFetch, {timeoutMs = re
       if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
         return {response, body: null, redirect: true};
       }
-      return {response, body: await readBody(response), redirect: false};
+      return {response, body: await readBody(response, bytes), redirect: false};
     } catch {
       throw new ApiError({kind: signal?.aborted ? 'aborted' : 'unreachable'});
     } finally {
@@ -201,6 +220,22 @@ export function createApiClient(fetchImpl: Fetch = defaultFetch, {timeoutMs = re
       throw new ApiError({status: response.status, kind: 'unexpected'});
     }
     return json as T;
+  }
+
+  // A card's stored file, or its text, as bytes. Anything but a 2xx is the
+  // server's refusal, read as any other.
+  async function cardFile(id: string, file: 'bytes' | 'text', signal: AbortSignal | undefined) {
+    const {response, body, redirect} = await send('GET', `/api/v1/cards/${segment(id)}/${file}`, {signal, bytes: true});
+    if (redirect || body === null) {
+      throw new ApiError({status: response.status, kind: 'redirect'});
+    }
+    if (body.kind === 'broken') {
+      throw new ApiError({status: response.status, kind: 'unreachable'});
+    }
+    if (body.kind !== 'bytes') {
+      throw refusal(response.status, body.kind === 'json' ? body.value : null);
+    }
+    return {response, bytes: body.value};
   }
 
   async function session(): Promise<SessionView> {
@@ -264,6 +299,23 @@ export function createApiClient(fetchImpl: Fetch = defaultFetch, {timeoutMs = re
     },
     async card(id, {signal} = {}) {
       return request('GET', `/api/v1/cards/${segment(id)}`, {signal});
+    },
+    // The sealed file exactly, with the digest the server sent beside it.
+    async cardBytes(id, {signal} = {}) {
+      const {response, bytes} = await cardFile(id, 'bytes', signal);
+      return {bytes, sha256: response.headers?.get?.('X-Content-SHA256') ?? null};
+    },
+    // The plain-text card as the server serves it: UTF-8 text/plain, or it is not read.
+    async cardText(id, {signal} = {}) {
+      const {response, bytes} = await cardFile(id, 'text', signal);
+      if (!/^text\/plain\b/i.test(response.headers?.get?.('Content-Type') || '')) {
+        throw new ApiError({status: response.status, kind: 'unexpected'});
+      }
+      try {
+        return new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes);
+      } catch {
+        throw new ApiError({status: response.status, kind: 'unexpected'});
+      }
     },
     async unit(card, n, {signal} = {}) {
       if (!Number.isInteger(n) || n < 1) {

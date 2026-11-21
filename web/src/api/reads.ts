@@ -144,6 +144,8 @@ const detachedStore: ServerStore = {
     accounts: nothing,
     accountCards: nothing,
     card: nothing,
+    cardBytes: nothing,
+    cardText: nothing,
     unit: nothing,
     receipt: nothing,
     health: nothing,

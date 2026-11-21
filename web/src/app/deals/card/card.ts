@@ -1,6 +1,5 @@
 import {gapDispositions, notShownReasons, type UnitFacts, unitFacts} from '../../../api/client.ts';
 import type {CardDetail, CardView, GapView} from '../../../api/types.ts';
-import {serverPaths} from '../../routes.ts';
 
 // The Deal card's own logic, kept apart from its sections so it can be tested
 // without a browser. Everything here is read from the card's units and gaps;
@@ -154,11 +153,6 @@ export function orderedGaps(card: CardDetail): GapView[] {
 
 /** A gap's disposition in words. */
 export const dispositionWords = (disposition: string): string => gapDispositions[disposition] ?? disposition;
-
-/** The address that shows one unit of a card in full, until the proof drawer exists. */
-export function unitHref(account: string, card: string, n: number): string {
-  return `${serverPaths.evidence}?${new URLSearchParams({account, card, unit: String(n)})}`;
-}
 
 /** The card the deal shows and whether it is the newest, from the account's card list. */
 export interface Pinned {

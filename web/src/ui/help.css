@@ -1,0 +1,91 @@
+/* A help panel. The button is a 16px circled "i" inside a 44 by 44 target
+   with the 3px focus ring. At 720 and wider the panel opens below its line;
+   narrower, it opens in the flow under its line, full width, on the sunken
+   surface. */
+.ui-help {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.ui-help__button {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--gc-target);
+  height: var(--gc-target);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--gc-radius-control);
+  background: transparent;
+  color: var(--gc-ink-2);
+  cursor: pointer;
+}
+
+.ui-help__button:hover,
+.ui-help__button[aria-expanded="true"] {
+  color: var(--gc-accent);
+}
+
+.ui-help__button:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: -3px;
+}
+
+.ui-help__panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  box-sizing: border-box;
+  display: grid;
+  gap: var(--gc-space-1);
+  width: max-content;
+  max-width: min(22rem, 80vw);
+  padding: var(--gc-space-3);
+  border: var(--gc-rule-width) solid var(--gc-rule);
+  border-radius: var(--gc-radius-panel);
+  background: var(--gc-sunken);
+  box-shadow: var(--gc-shadow);
+  color: var(--gc-ink);
+  font: var(--gc-meta);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ui-help__panel[hidden] {
+  display: none;
+}
+
+.ui-help__guide {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: var(--gc-target);
+  color: var(--gc-accent);
+  font: var(--gc-body);
+  font-weight: 600;
+}
+
+.ui-help__guide:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 719px) {
+  .ui-help {
+    display: contents;
+  }
+
+  .ui-help__panel {
+    position: static;
+    flex: 1 0 100%;
+    width: 100%;
+    max-width: none;
+    box-shadow: none;
+  }
+}

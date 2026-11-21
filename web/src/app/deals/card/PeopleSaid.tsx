@@ -1,14 +1,17 @@
 import type {ReactNode} from 'react';
 import {basisCounts, groupOf, groups, newestFirst, onCard, plural, sentencesOf} from './card.ts';
+import {linesOf, titlesOf} from './lines.ts';
 import {SentenceLine} from './Sentence.tsx';
 import type {SectionProps} from './sections.ts';
 
 // What people said, by who said it: buyer quotes, then sentences whose
 // speaker has no established role, then your side. Only the sentences the
-// card shows, each whole, newest first.
-export function PeopleSaid({account, card}: SectionProps) {
+// card shows, each whole, newest first. A buyer quote carries the title from
+// the line of the contact its speaker matched.
+export function PeopleSaid({card}: SectionProps) {
   const sentences = sentencesOf(card);
   const shown = sentences.filter(onCard);
+  const titles = titlesOf(linesOf(card));
   let body: ReactNode;
   if (!sentences.length) {
     body = <p className="dc-empty">No sentence was read.</p>;
@@ -43,9 +46,8 @@ export function PeopleSaid({account, card}: SectionProps) {
               {list.map(sentence => (
                 <SentenceLine
                   key={sentence.n}
-                  account={account}
-                  card={card.id}
                   sentence={sentence}
+                  title={group.id === 'customer' && sentence.contact !== null ? (titles.get(sentence.contact) ?? null) : null}
                   mark="quote"
                 />
               ))}

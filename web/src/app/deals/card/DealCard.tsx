@@ -1,27 +1,32 @@
 import type {ReactNode} from 'react';
-import {Link, useSearchParams} from 'react-router';
-import {type Read, useRead} from '../../../api/reads.ts';
+import {Link, useLocation, useSearchParams} from 'react-router';
+import {type Read, useRead, useServer} from '../../../api/reads.ts';
+import type {Sealed} from '../../../api/sealed.ts';
 import {checkCard, resolveAccount, resolveCard} from '../../../api/selection.ts';
 import type {AccountCards, AccountList, CardDetail, CardView} from '../../../api/types.ts';
 import {Placeholder} from '../../../ui/Placeholder.tsx';
 import {Refusal} from '../../../ui/Refusal.tsx';
-import {dealHref} from '../deals.ts';
+import {type DealTab, dealHref, tabAt} from '../deals.ts';
+import {DealTabs} from './DealTabs.tsx';
+import {PlainText} from './PlainText.tsx';
+import {SealFailed} from './SealFailed.tsx';
+import {checkSeal} from './sealCheck.ts';
 import {type Area, type SectionProps, sections} from './sections.ts';
 import {type Named, Title} from './Title.tsx';
 
 // The Deal card of one account: its newest published card, or the one the
 // address pins when that card is one of the account's. It is laid out from
-// the card's units and gaps: the record on one side, the words on the other,
-// a numbered spine between them. A card of another account is not read.
+// the card's units, gaps and lines: the record on one side, the words on the other,
+// a numbered spine between them. Its Text tab shows the plain-text card. A
+// card of another account is not read, and a card whose bytes do not match
+// its seal shows nothing on either tab.
 
-/** Where the countdown and ARR are, until this page shows them. */
-export const valuesNote = 'The countdown and ARR are on the plain-text card. This page does not show them yet.';
-
-/** The three reads a deal needs: the account list, the account's cards, and the open card. */
+/** The four reads a deal needs: the account list, the account's cards, the open card and its seal check. */
 export interface DealReads {
   accounts: Read<AccountList>;
   cards: Read<AccountCards>;
   card: Read<CardDetail>;
+  sealed: Read<Sealed>;
 }
 
 /** Which account and card the address opens, from what the server has answered so far. */
@@ -43,14 +48,21 @@ export function dealOf(asked: string, pinned: string | null, accounts: DealReads
 
 // The reads, each started once what it depends on is known. The card is
 // read only when it is one of the account's cards, and the card the server
-// returns must be that card of that account.
+// returns must be that card of that account. Its seal is checked once the
+// card is read, against the sha256 the card's JSON holds.
 function useDealReads(asked: string, pinned: string | null): DealReads {
+  const {store, state} = useServer();
   const accounts = useRead<AccountList>('accounts', (api, signal) => api.accounts({signal}));
   const first = dealOf(asked, pinned, accounts, {status: 'idle'});
   const cards = useRead<AccountCards>(first.account ? `cards:${first.account}` : null, (api, signal) => api.accountCards(first.account as string, {signal}));
   const {account, cardId} = dealOf(asked, pinned, accounts, cards);
   const read = useRead<CardDetail>(cardId ? `card:${account}:${cardId}` : null, (api, signal) => api.card(cardId as string, {signal}));
-  return {accounts, cards, card: cardId ? checkCard(read, account, cardId) : read};
+  const card = cardId ? checkCard(read, account, cardId) : read;
+  const open = card.status === 'ready' ? {id: card.data.id, sha256: card.data.sha256} : null;
+  const sealed = useRead<Sealed>(open ? `sealed:${account}:${open.id}:${open.sha256}` : null, (api, signal) =>
+    checkSeal(store, state.generation, api, open as {id: string; sha256: string}, signal),
+  );
+  return {accounts, cards, card, sealed};
 }
 
 function Areas({props, area}: {props: SectionProps; area: Area}) {
@@ -101,12 +113,14 @@ export interface DealViewProps {
   pinned: string | null;
   /** The deal list's filter, kept on links back to this deal. */
   query: string;
+  /** The tab the address opens. */
+  tab?: DealTab;
   reads: DealReads;
 }
 
-/** A deal as its reads stand: the title, then the card, a refusal, or what is being read. */
-export function DealView({asked, pinned, query, reads}: DealViewProps) {
-  const {cards, card} = reads;
+/** A deal as its reads stand: the title, then the open tab, a refusal, or what is being read. */
+export function DealView({asked, pinned, query, tab = 'card', reads}: DealViewProps) {
+  const {cards, card, sealed} = reads;
   const {account, named, listed, mismatch} = dealOf(asked, pinned, reads.accounts, cards);
   let body: ReactNode = null;
   let shown = false;
@@ -150,6 +164,33 @@ export function DealView({asked, pinned, query, reads}: DealViewProps) {
     );
   } else if (card.status !== 'ready') {
     body = <Placeholder status="Reading the card" />;
+  } else if (sealed.status === 'failed') {
+    body = (
+      <Refusal
+        error={sealed.error}
+        retry={sealed.retry}
+      />
+    );
+  } else if (sealed.status !== 'ready') {
+    body = <Placeholder status="Reading the card" />;
+  } else if (sealed.data.outcome !== 'verified') {
+    body = (
+      <SealFailed
+        account={account}
+        card={card.data}
+        listed={listed}
+        query={query}
+        tab={tab}
+      />
+    );
+  } else if (tab === 'text') {
+    shown = true;
+    body = (
+      <PlainText
+        key={card.data.id}
+        text={sealed.data.text}
+      />
+    );
   } else {
     shown = true;
     body = (
@@ -166,7 +207,15 @@ export function DealView({asked, pinned, query, reads}: DealViewProps) {
       className="dc"
       aria-labelledby="dc-title"
     >
-      <Title named={named}>{shown && <p className="dc-values-note">{valuesNote}</p>}</Title>
+      <Title named={named} />
+      {shown && account && (
+        <DealTabs
+          account={account}
+          pinned={pinned}
+          query={query}
+          open={tab}
+        />
+      )}
       {body}
     </article>
   );
@@ -174,12 +223,14 @@ export function DealView({asked, pinned, query, reads}: DealViewProps) {
 
 export default function DealCard({account}: {account: string}) {
   const [params] = useSearchParams();
+  const {pathname} = useLocation();
   const pinned = params.get('card');
   return (
     <DealView
       asked={account}
       pinned={pinned}
       query={params.get('q') ?? ''}
+      tab={tabAt(pathname)}
       reads={useDealReads(account, pinned)}
     />
   );

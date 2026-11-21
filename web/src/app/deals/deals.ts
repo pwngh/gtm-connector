@@ -1,3 +1,4 @@
+import {useSyncExternalStore} from 'react';
 import {ApiError} from '../../api/client.ts';
 import type {Outcome} from '../../api/reads.ts';
 import type {AccountCards, AccountView, CardView} from '../../api/types.ts';
@@ -8,15 +9,48 @@ import type {AccountCards, AccountView, CardView} from '../../api/types.ts';
 
 export const dealsPath = '/deals';
 
-/** The address of one deal. */
-export function dealHref(account: string, query = ''): string {
-  const q = query.trim() ? `?${new URLSearchParams({q: query})}` : '';
-  return `${dealsPath}/${encodeURIComponent(account)}${q}`;
+/** At this width and wider the list is a rail beside the open deal. */
+export const wideQuery = '(min-width: 1100px)';
+
+/** Whether a media query matches, following it as it changes. False without a window. */
+export function useMedia(query: string): boolean {
+  return useSyncExternalStore(
+    notify => {
+      const media = window.matchMedia(query);
+      media.addEventListener('change', notify);
+      return () => media.removeEventListener('change', notify);
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
 }
 
-/** The deal an address opens: the one segment after /deals/, or null. */
+/** A deal's tabs: the card at the deal's own address, and its plain text at /text below it. */
+export type DealTab = 'card' | 'text';
+
+/** The address of one deal on one of its tabs, with a pinned card and the list's filter kept. */
+export function dealHref(account: string, query = '', {tab = 'card', card = null}: {tab?: DealTab; card?: string | null} = {}): string {
+  const params = new URLSearchParams();
+  if (card) {
+    params.set('card', card);
+  }
+  if (query.trim()) {
+    params.set('q', query);
+  }
+  const search = params.size ? `?${params}` : '';
+  return `${dealsPath}/${encodeURIComponent(account)}${tab === 'text' ? '/text' : ''}${search}`;
+}
+
+const dealPath = /^\/deals\/([^/]+)(\/text)?$/;
+
+/** The tab a deal's address opens. */
+export function tabAt(pathname: string): DealTab {
+  return dealPath.exec(pathname)?.[2] ? 'text' : 'card';
+}
+
+/** The deal an address opens: the one segment after /deals/, on the card or at /text, or null. */
 export function dealAt(pathname: string): string | null {
-  const match = /^\/deals\/([^/]+)$/.exec(pathname);
+  const match = dealPath.exec(pathname);
   if (!match?.[1]) {
     return null;
   }

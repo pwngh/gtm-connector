@@ -1,0 +1,128 @@
+/* The proof drawer: a panel 480 wide on the right at full height, on the
+   surface with the one shadow; a full-screen sheet under 720. At 1100 and
+   wider it is not modal and the card makes room for it. */
+.fr .dc-proof-hint {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-body);
+}
+
+/* The number whose unit is open: accent fill. */
+.dc-cite[data-open] .dc-cite__box {
+  border-color: var(--gc-accent);
+  background: var(--gc-accent);
+  color: var(--gc-on-accent);
+}
+
+.dc-proof [data-proof] {
+  padding: var(--gc-space-4);
+}
+
+.dc-proof__unit {
+  display: grid;
+  gap: var(--gc-space-5);
+  min-width: 0;
+}
+
+.dc-proof__thing,
+.dc-proof__record {
+  display: grid;
+  gap: var(--gc-space-1);
+  min-width: 0;
+}
+
+.fr .dc-proof .dc-attr {
+  padding-left: calc(var(--gc-space-3) + 3px);
+}
+
+.fr .dc-proof__label {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-label);
+}
+
+.fr .dc-proof__record .dc-ref {
+  margin: 0;
+}
+
+.fr .dc-proof__record .dc-meta {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+}
+
+.fr .dc-proof__place,
+.fr .dc-proof__read,
+.fr .dc-proof__state {
+  margin: 0;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  overflow-wrap: anywhere;
+}
+
+.dc-proof__around {
+  display: grid;
+  gap: var(--gc-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dc-proof__near {
+  display: grid;
+  gap: var(--gc-space-1);
+  min-width: 0;
+}
+
+/* A neighbour: its number and its first line, one 44-high control. */
+.dc-proof__step {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--gc-space-3);
+  min-height: var(--gc-target);
+  padding: var(--gc-space-2) var(--gc-space-2) var(--gc-space-2) 0;
+  border-radius: var(--gc-radius-control);
+  color: var(--gc-ink);
+  text-decoration: none;
+}
+
+.dc-proof__step:hover .dc-cite__box {
+  border-color: var(--gc-accent);
+}
+
+.dc-proof__step:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
+.dc-proof__line {
+  font: var(--gc-body);
+  overflow-wrap: anywhere;
+}
+
+.fr .dc-proof__read {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--gc-space-2);
+  padding-top: var(--gc-space-3);
+  border-top: var(--gc-rule-width) solid var(--gc-rule);
+}
+
+/* Beside the card: while the drawer is open the list rail steps aside, and the
+   card ends where the drawer begins, so the card stays readable at 1100. */
+@media (min-width: 1100px) {
+  .deals--split:has(.ui-dialog-backdrop--modeless) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .deals--split:has(.ui-dialog-backdrop--modeless) > .deals-rail {
+    display: none;
+  }
+
+  .dc:has(.ui-dialog-backdrop--modeless) {
+    margin-right: 480px;
+  }
+}
