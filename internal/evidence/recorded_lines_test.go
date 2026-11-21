@@ -46,6 +46,7 @@ func TestRecordedLinesFile(t *testing.T) {
 	path := filepath.Join(filepath.Dir(filepath.Dir(oracletest.Path(t, "manifest.json"))), "card_lines.jsonl.gz")
 	want := recordedLinesFile(t)
 	if oracletest.Update() {
+		oracletest.RefuseNarrowRun(t)
 		var zipped bytes.Buffer
 		writer := gzip.NewWriter(&zipped)
 		if _, err := writer.Write(want); err != nil {

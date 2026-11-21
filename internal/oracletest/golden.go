@@ -19,6 +19,17 @@ var update = flag.Bool("update", false, "write the golden files in testdata/orac
 // from what Go makes, instead of failing where they differ.
 func Update() bool { return *update }
 
+// RefuseNarrowRun fails a test that would write a golden file under -update in a run narrowed by -run or
+// -skip: a golden file is written only by a run of every test that checks it.
+func RefuseNarrowRun(t testing.TB) {
+	t.Helper()
+	for _, name := range []string{"test.run", "test.skip"} {
+		if f := flag.Lookup(name); Update() && f != nil && f.Value.String() != "" {
+			t.Fatalf("-update writes golden files only in a run of the whole package; drop -%s", name[len("test."):])
+		}
+	}
+}
+
 // Encoder writes one fixture value in the file's own encoding.
 type Encoder func(value any) (string, error)
 
@@ -35,6 +46,7 @@ type Golden struct {
 // when the test ends, and the file's entry in manifest.json with them.
 func NewGolden(t testing.TB, name string, encode Encoder) *Golden {
 	t.Helper()
+	RefuseNarrowRun(t)
 	g := &Golden{t: t, name: name, encode: encode, lines: Lines(t, name)}
 	t.Cleanup(func() {
 		if g.changed == 0 || t.Failed() {
@@ -80,6 +92,7 @@ func (g *Golden) Set(i int, old, value any) {
 // bytes.
 func Write(t testing.TB, name string, content []byte) {
 	t.Helper()
+	RefuseNarrowRun(t)
 	data := content
 	if strings.HasSuffix(name, ".gz") {
 		var b bytes.Buffer

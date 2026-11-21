@@ -8,6 +8,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/postgrestest"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // sealedUnderVersion3 is a sentence a card sealed under neutralizer version 3 holds: version 3 left a mail
@@ -62,5 +63,14 @@ func TestAUnitSavedUnderOlderRulesIsShownUnderTodays(t *testing.T) {
 	sealed := reader.do(http.MethodGet, "/api/v1/cards/"+card.ID+"/bytes", nil, nil)
 	if !bytes.Equal(sealed.raw, pub.Bytes) || !bytes.Contains(sealed.raw, []byte("<jovan.mercer@quarrystream.example>")) {
 		t.Error("the card's bytes are not the sealed ones")
+	}
+	// The text route is where a reader checks the card against its seal, so it gives the sealed text exactly.
+	document, err := strictjson.Loads(pub.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := document.(*strictjson.Object).Get("text")
+	if text := reader.do(http.MethodGet, "/api/v1/cards/"+card.ID+"/text", nil, nil); string(text.raw) != want {
+		t.Errorf("the text route gives %q, not the sealed text", text.raw)
 	}
 }

@@ -26,6 +26,9 @@ const (
 	staleDays        = 60
 	runGapMS         = 2000
 	bridgeGapMS      = 10_000
+	// QuotedBasis is the basis of a sentence in a block quote of a Slack message: the author quoted it, so
+	// the author's role is not its speaker's.
+	QuotedBasis = "quoted by the message's author"
 )
 
 // GapCodes is every line NOT READ can print, by code, with its disposition.
@@ -70,6 +73,7 @@ type Unit struct {
 	Contact          *int
 	Text             string
 	Partial          bool
+	Quoted           bool   // in a block quote of a Slack message: words the author quoted, not their own
 	Shown            string // "yes", "cut", "later", "long" or "more"
 	Span             *UnitSpan
 	RawSHA256        string
@@ -113,7 +117,7 @@ func (u Unit) Value() *strictjson.Object {
 			"start_ms", optional(u.Span.StartMS), "end_ms", optional(u.Span.EndMS))
 	}
 	for _, kv := range [][2]any{{"at", optional(u.At)}, {"speaker", optional(u.Speaker)}, {"role", u.Role},
-		{"basis", u.Basis}, {"contact", optional(u.Contact)}, {"text", u.Text}, {"partial", u.Partial},
+		{"basis", u.Basis}, {"contact", optional(u.Contact)}, {"text", u.Text}, {"partial", u.Partial}, {"quoted", u.Quoted},
 		{"shown", u.Shown}, {"span", span}, {"raw_sha256", u.RawSHA256},
 		{"sanitizer_version", u.SanitizerVersion}} {
 		o.Set(kv[0].(string), kv[1])
@@ -151,35 +155,6 @@ func GapValues(gaps []Gap) []any {
 		out[i] = g.Value()
 	}
 	return out
-}
-
-// AsShown is a saved unit as anything shows it. A unit sealed under today's rules is shown as sealed. One
-// sealed under other rules has its text and speaker neutralized again, so it shows nothing that today's
-// rules replace; the unit given, and the bytes it was sealed in, stay as they are. A unit that neutralizing
-// again leaves as it is is given back itself.
-func AsShown(unit *strictjson.Object) (*strictjson.Object, error) {
-	if version, _ := unit.Get("sanitizer_version"); Equal(version, SanitizerVersion) {
-		return unit, nil
-	}
-	shown := unit
-	for _, key := range []string{"text", "speaker"} {
-		value, _ := unit.Get(key)
-		text, ok := value.(string)
-		if !ok {
-			continue
-		}
-		safe, _, err := SafeText(text)
-		if err != nil {
-			return nil, err
-		}
-		if safe != text {
-			if shown == unit {
-				shown = unit.Copy()
-			}
-			shown.Set(key, safe)
-		}
-	}
-	return shown, nil
 }
 
 // Build checks the evidence and returns its numbered units, the card, the lines of NOT READ, and the lines

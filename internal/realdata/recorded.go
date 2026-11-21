@@ -172,18 +172,54 @@ func (rec *recorder) finish(itemsSHA256 string) *Recorded {
 	return &rec.r
 }
 
-// WriteRecorded writes the block digests a comparison against recorded digests made, as the dataset's
-// recorded digests, into dir. A comparison where Go decodes an item differently is refused, so that only what
-// a function gives can change.
-func (r *Report) WriteRecorded(dir string) error {
-	if r.made == nil || r.Decoding.Differences > 0 {
+// failedOutputs are the outputs the Go port gives for a function that returned an error or panicked.
+var failedOutputs = func() map[string]bool {
+	set := map[string]bool{}
+	for _, kind := range []string{"go error", "go panic"} {
+		encoded, _ := canonical(failed(kind))
+		set[encoded] = true
+	}
+	return set
+}()
+
+// WriteRecorded writes, into dir, the dataset's recorded digests with the block digests and item counts of
+// the named functions taken from what this comparison made, and every other function's kept as recorded. It
+// refuses a comparison where Go decodes an item differently, a function it does not know, and a function
+// whose output is an error or a panic for any item, so that only what a function gives can change.
+func (r *Report) WriteRecorded(dir string, functions []string) error {
+	if r.made == nil || r.recorded == nil || r.Decoding.Differences > 0 {
 		return fmt.Errorf("%s: only a comparison whose items all decode alike writes recorded digests", r.Run)
 	}
-	data, err := json.MarshalIndent(r.made, "", " ")
+	written := *r.recorded
+	written.Functions = slices.Clone(r.recorded.Functions)
+	for _, name := range functions {
+		named := func(f RecordedFunction) bool { return f.Function == name }
+		i, j := slices.IndexFunc(written.Functions, named), slices.IndexFunc(r.made.Functions, named)
+		if i < 0 || j < 0 {
+			return fmt.Errorf("%s: no function %q", r.Run, name)
+		}
+		if n := r.failed[name]; n > 0 {
+			return fmt.Errorf("%s: %s gives an error or a panic for %d items, which is never recorded", r.Run, name, n)
+		}
+		written.Functions[i] = r.made.Functions[j]
+	}
+	data, err := json.MarshalIndent(written, "", " ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, r.made.Dataset+".json"), append(data, '\n'), 0o644)
+	return os.WriteFile(filepath.Join(dir, written.Dataset+".json"), append(data, '\n'), 0o644)
+}
+
+// Kept is the differences of a comparison outside these functions: of the items' decoding and of every
+// other function. WriteRecorded leaves those as they were.
+func (r *Report) Kept(functions []string) int {
+	total := r.Decoding.Differences
+	for _, f := range r.Functions {
+		if !slices.Contains(functions, f.Function) {
+			total += f.Differences
+		}
+	}
+	return total
 }
 
 // CompareRecorded runs the Go port over a dataset run's items and compares its block digests with the
@@ -210,7 +246,7 @@ func CompareRecorded(run Run, want *Recorded) (*Report, error) {
 	defer items.Close()
 	report := &Report{Run: run.Name, Against: "recorded digests", Python: want.Python,
 		PackageSHA256: want.PackageSHA256, ItemsSHA256: want.ItemsSHA256, Decoding: FunctionCount{Function: "item"},
-		Differences: []Difference{}}
+		Differences: []Difference{}, recorded: want, failed: map[string]int{}}
 	got := newRecorder(want.Dataset)
 	tally := map[string]*FunctionCount{}
 	for _, f := range got.r.Functions {
@@ -259,6 +295,9 @@ func CompareRecorded(run Run, want *Recorded) (*Report, error) {
 		sums := map[string]string{}
 		for i, name := range names {
 			sums[name] = Digest(encoded[i])
+			if failedOutputs[encoded[i]] {
+				report.failed[name]++
+			}
 			count := tally[name]
 			count.Items++
 			kind.Outputs++

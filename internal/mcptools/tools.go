@@ -330,9 +330,13 @@ func member(object *strictjson.Object, key string) any {
 	return value
 }
 
-// released is what both brief tools return of a saved brief: its text and gaps as saved, and its units as
-// evidence.AsShown gives them.
+// released is what both brief tools return of a saved brief: its gaps as saved, and its text and units as
+// evidence.AsShownText and evidence.AsShown give them. The brief's sealed bytes are its record.
 func released(id string, artifact *strictjson.Object) (*strictjson.Object, error) {
+	text, err := evidence.AsShownText(artifact)
+	if err != nil {
+		return nil, err
+	}
 	saved, _ := member(artifact, "units").([]any)
 	units := make([]any, len(saved))
 	for i, value := range saved {
@@ -346,7 +350,7 @@ func released(id string, artifact *strictjson.Object) (*strictjson.Object, error
 		}
 	}
 	return strictjson.NewObject("brief_id", id, "account_id", member(artifact, "account_id"),
-		"as_of", member(artifact, "as_of"), "text", member(artifact, "text"), "units", units,
+		"as_of", member(artifact, "as_of"), "text", text, "units", units,
 		"gaps", member(artifact, "gaps"), "sources", member(artifact, "sources")), nil
 }
 

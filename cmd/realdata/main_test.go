@@ -211,7 +211,7 @@ func TestCacheOutsideRepository(t *testing.T) {
 // A panic is reported by its type alone, with exit 2: its value could hold an item's text.
 func TestPanicShowsTypeOnly(t *testing.T) {
 	saved := dispatchCommand
-	dispatchCommand = func(context.Context, string, []string, string, bool) (int, error) {
+	dispatchCommand = func(context.Context, string, []string, string, []string) (int, error) {
 		panic(fmt.Errorf("while reading %q", secret))
 	}
 	defer func() { dispatchCommand = saved }()

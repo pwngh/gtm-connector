@@ -84,3 +84,30 @@ func TestACardSealedUnderOlderRulesVerifiesAndShows(t *testing.T) {
 		t.Error("showing the card changed its bytes")
 	}
 }
+
+// The CLI prints a card sealed under an older neutralizer version rendered again, with a first line that
+// says so: a quotation that version left as written is printed as today's rules show it.
+func TestTheCLIPrintsAnOlderCardRenderedAgain(t *testing.T) {
+	const brief = "brief-2430d066000040008000000000000001"
+	folder, err := cards.OpenTrustedExport(oracletest.Path(t, "folders/cli_card"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := strictjson.Loads(folder.Cards[brief])
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := value.(*strictjson.Object)
+	unit := get(card, "units").([]any)[7].(*strictjson.Object)
+	sealed := "Write to <renewals@example.test> for the order form."
+	card.Set("text", strings.Replace(get(card, "text").(string), strictjson.Quote(get(unit, "text").(string)),
+		strictjson.Quote(sealed), 1))
+	unit.Set("text", sealed)
+	printed := (&run{command: "brief", screen: screen{terminal: true}}).human(card)
+	first, _, _ := strings.Cut(printed, "\n")
+	if !strings.Contains(first, "rendered again under neutralizer version 4") ||
+		!strings.Contains(printed, `"Write to [link mail] for the order form."`) ||
+		strings.Contains(printed, "renewals@example.test") || !strings.Contains(printed, "Brief: "+brief) {
+		t.Errorf("the CLI prints the older card as:\n%s", printed)
+	}
+}
