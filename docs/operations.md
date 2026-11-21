@@ -108,7 +108,67 @@ gtm mcp stdio --scope crm:read --state-dir gtm-de
 - `mcp stdio --state-dir NAME` and `serve`'s `/mcp` serve the workspace's CRM to MCP clients. `serve`
   answers each token in the workspace it was issued in. A token reads the accounts the workspace
   holds, which `brief` lists there.
-- A token handed to the container instead of `sf` is not read yet.
+
+### Without `sf`: a token handed to the container
+
+The container has no `sf`. Give it the org's address and an access token instead, and connect with
+`--token-env`:
+
+| Variable | Holds |
+| --- | --- |
+| `SALESFORCE_INSTANCE_URL` | The org's HTTPS My Domain origin, `https://NAME.my.salesforce.com`. |
+| `SALESFORCE_ACCESS_TOKEN_FILE` | The path of a file that holds the token on one line. |
+| `SALESFORCE_ACCESS_TOKEN` | The token itself, in place of the file. Set one of the two, never both. |
+
+- `connect salesforce --token-env --state-dir NAME` makes the checks `--org` makes, with the same
+  `--environment` and `--seller`, and pins the workspace to the same identity an `sf` login of that
+  org and user would be pinned to. The row holds `{"credentials":"environment","environment":...}`:
+  no token, address, org ID or user.
+- Each command reads the variables on its first read, as it would run `sf`. Missing or invalid
+  variables fail with `salesforce_invalid_configuration` and exit 2, in one fixed line that names
+  the variables and never their values.
+- When the org refuses the token (HTTP 401), the read reads the variables, and the file, once more.
+  A new token of the same org and user is checked and kept, and the read goes on. The same token, a
+  token of another org or user, or variables that are now missing fail with
+  `salesforce_auth_required` and exit 5: `The token expired or was refused; give the container a
+  new one of the same org and user.` The connector never asks for a token itself.
+- A running `serve` sees a new token only through the file: the variables of a process do not change
+  while it runs.
+
+In Docker Compose, keep the token in a folder of its own outside the repository and outside
+`GTM_HOME`, so that no backup holds it, and mount that folder read-only with a Compose file of your
+own that is also kept outside the repository:
+
+```sh
+mkdir -p ~/.config/gtm-connector/salesforce && chmod 700 ~/.config/gtm-connector/salesforce
+(umask 077 && cat > ~/.config/gtm-connector/salesforce/token)   # paste the token, then Ctrl-D
+```
+
+```yaml
+# ~/.config/gtm-connector/salesforce.yaml
+services:
+  app: &salesforce
+    environment:
+      SALESFORCE_INSTANCE_URL: https://NAME.my.salesforce.com
+      SALESFORCE_ACCESS_TOKEN_FILE: /run/salesforce/token
+    volumes:
+      - ${HOME}/.config/gtm-connector/salesforce:/run/salesforce:ro
+  admin: *salesforce
+```
+
+```sh
+export COMPOSE_FILE=compose.yaml:$HOME/.config/gtm-connector/salesforce.yaml
+docker compose run --rm admin connect salesforce --token-env --environment production --state-dir acme
+docker compose up -d app
+```
+
+- The token is never in `compose.yaml`, `.env`, the image or the container's environment:
+  `docker inspect` shows the file's path and the folder that is mounted, not the token.
+- To rotate the token, write the new one to a file in the same folder and rename it over `token`
+  (`mv token.new token`). The folder is mounted, not the file, so the running container sees the
+  new file, and its next HTTP 401 takes it.
+- `SALESFORCE_ACCESS_TOKEN` is for a process started by hand. In a container it shows in
+  `docker inspect`, so Compose uses the file.
 
 ## Health
 

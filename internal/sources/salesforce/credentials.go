@@ -155,6 +155,11 @@ func newCredentials(alias string, runner Runner) (*credentials, error) {
 	return &credentials{alias: alias, runner: runner, commandTime: commandTime, loginTime: loginTime}, nil
 }
 
+// loginSource gives a login: sf for an alias, or the variables of the process.
+type loginSource interface {
+	read(ctx context.Context) (login, error)
+}
+
 // login is what one login read gives, held in memory: the origin, the org's ID, the user sf signed in as,
 // and the token.
 type login struct {

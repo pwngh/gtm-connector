@@ -46,7 +46,7 @@ var commands = map[string]arguments{
 		{name: "--since", value: true}, {name: "--until", value: true}, {name: "--follow"}}, help: auditHelp},
 	"connect": {options: []option{
 		{name: "--scope", value: true, repeat: true, choices: []string{"crm:read", "calls:read", "crm:write", "slack:read"}},
-		{name: "--org", value: true},
+		{name: "--org", value: true}, {name: "--token-env"},
 		{name: "--environment", value: true, choices: []string{"developer", "sandbox", "production"}},
 		{name: "--seller", value: true, repeat: true}, {name: "--remove"},
 		{name: "--transport", value: true, choices: []string{"http", "stdio"}}, {name: "--config-file", value: true}},
@@ -331,7 +331,7 @@ Example: gtm-connector audit --tool save_brief
 
 const connectHelp = `usage: gtm-connector connect [-h] [--json] [--state-dir STATE_DIR]
                              [--scope {crm:read,calls:read,crm:write,slack:read}]
-                             [--org ORG]
+                             [--org ORG] [--token-env]
                              [--environment {developer,sandbox,production}]
                              [--seller SELLER] [--remove]
                              [--transport {http,stdio}]
@@ -356,6 +356,11 @@ options:
                         With an app: grant this scope. Repeat for each.
   --org ORG             With salesforce: read credentials from this signed-in
                         sf CLI alias.
+  --token-env           With salesforce: read the instance address and the
+                        token from SALESFORCE_INSTANCE_URL and
+                        SALESFORCE_ACCESS_TOKEN or
+                        SALESFORCE_ACCESS_TOKEN_FILE, as in a container
+                        with no sf.
   --environment {developer,sandbox,production}
                         With salesforce: require this environment (default:
                         developer).

@@ -132,6 +132,8 @@ type attaching struct {
 
 // attached is what a source's row is saved with.
 type attached struct {
+	// mode is the row's mode when it is not the kind's own, as env_token is of the salesforce kind.
+	mode string
 	// binding is what the operator chose. connect status shows it. Nil is the empty object.
 	binding *strictjson.Object
 	// identity is the SHA-256 of the identity the source is pinned to, or "" for a source with none.
@@ -184,9 +186,10 @@ var sourceKinds = []*sourceKind{
 	{provider: "demo", source: "slack", mode: "demo", shown: "demo", title: "Demo data", detail: "demo data",
 		backend: "fixture", described: demoData, attach: attachDemo, slack: demoSlack},
 	// An org signed in with sf, read by internal/sources/salesforce (source_salesforce.go). The mode
-	// env_token, a token handed to the container, is of this kind and is not read in this build.
+	// env_token, a token handed to the process, is of this kind: attachSalesforce saves it for
+	// --token-env, and openSalesforce reads both.
 	{provider: "salesforce", source: "crm", mode: "sf", shown: "salesforce", title: "Salesforce",
-		detail: "Salesforce", live: true, options: []string{"--org", "--environment", "--seller"},
+		detail: "Salesforce", live: true, options: []string{"--org", "--token-env", "--environment", "--seller"},
 		backend: "salesforce", bound: func(row postgres.Connection, _ any) any {
 			return pinnedBinding("crm_backend", "salesforce", row)
 		},

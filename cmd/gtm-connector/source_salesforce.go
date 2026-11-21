@@ -22,6 +22,11 @@ import (
 // Salesforce as a workspace's CRM: an org signed in with sf under an alias, read by internal/sources/salesforce
 // (gtm_connector/salesforce.py, sf_credentials.py and salesforce_check.py).
 //
+// connect salesforce --token-env takes the instance address and the token from the variables of the
+// process instead (salesforce.InstanceVariable, TokenVariable and TokenFileVariable), for a connector that
+// runs where there is no sf, such as a container. Its row's mode is env_token and its binding names no
+// alias. Every check is the same, and a first HTTP 401 reads the variables again once in place of sf.
+//
 // connect salesforce --org ALIAS signs in through sf, checks the org against --environment and, outside
 // Developer Edition, the four objects' fields, and saves the alias and the environment with the digest of
 // the org's identity: its address, its ID and its environment. The row holds no token, address or ID. Every
@@ -105,10 +110,44 @@ var salesforceFailures = map[string][2]string{
 // salesforceNext is the command a Salesforce failure names next.
 const salesforceNext = "gtm-connector debug salesforce check --help"
 
-// salesforceFailure is a failed read as a command reports it: its code and what it means, exit 2 for a
-// configuration that is not one, 3 for an org of another environment and 5 for any other. An account the
-// org does not hold is errAccountNotFound. Any other error, such as a cancel, is returned as it is.
-func salesforceFailure(err error) error {
+// tokenFailures are what the codes that name sf mean and how to fix them, for a token handed to the
+// process. They name the variables and never their values.
+var tokenFailures = map[string][2]string{
+	"salesforce_invalid_configuration": {
+		"SALESFORCE_INSTANCE_URL, and SALESFORCE_ACCESS_TOKEN or SALESFORCE_ACCESS_TOKEN_FILE, are missing or invalid.",
+		"Give the process an HTTPS My Domain origin in SALESFORCE_INSTANCE_URL, and the token in " +
+			"SALESFORCE_ACCESS_TOKEN or in a file named by SALESFORCE_ACCESS_TOKEN_FILE, not both."},
+	"salesforce_auth_required": {
+		"The token expired or was refused; give the container a new one of the same org and user.",
+		"Replace the token in the file SALESFORCE_ACCESS_TOKEN_FILE names, or start the container again with a new " +
+			"SALESFORCE_ACCESS_TOKEN."},
+	"salesforce_edition_required": {
+		"The org of the token did not report Developer Edition.",
+		"Give a token of a Developer Edition org, or connect with the intended --environment."},
+	"salesforce_environment_mismatch": {
+		"The org of the token does not match the expected Salesforce environment.",
+		"Check the org of the token and connect again with the intended --environment."},
+	"salesforce_schema_unavailable": {
+		"The org of the token does not expose all required standard fields.",
+		"Run gtm-connector debug salesforce check --state-dir NAME to see the missing fields."},
+	"salesforce_timeout": {
+		"The Salesforce read exceeded its time limit.",
+		"Check connectivity, then repeat the check."},
+	"salesforce_unavailable": {
+		"The Salesforce endpoint could not be reached.",
+		"Check connectivity, then repeat the check."},
+	"source_identity_mismatch": {
+		"The org or user of this token is not the one this workspace is pinned to, by its address, ID, " +
+			"environment or user.",
+		"Give the container a token of the pinned org and user, or connect this one in a workspace of its own " +
+			"with --state-dir NAME."},
+}
+
+// failureAs is a failed read as a command reports it: its code and what it means, exit 2 for a
+// configuration that is not one, 3 for an org of another environment and 5 for any other. token words it
+// for a token handed to the process. An account the org does not hold is errAccountNotFound. Any other
+// error, such as a cancel, is returned as it is.
+func failureAs(err error, token bool) error {
 	var failed *salesforce.Error
 	switch {
 	case errors.Is(err, salesforce.ErrAccountNotFound):
@@ -126,13 +165,23 @@ func salesforceFailure(err error) error {
 	if _, known := salesforceFailures[code]; !known {
 		code = "check_failed"
 	}
-	return &failure{code: exit, message: code + ": " + salesforceFailures[code][0], next: salesforceNext}
+	return &failure{code: exit, message: code + ": " + failureText(code, token)[0], next: salesforceNext}
 }
 
-// orgElsewhere refuses an org whose identity is not the one the workspace is pinned to.
-var orgElsewhere = &failure{code: 3, next: "gtm-connector connect --help",
-	message: "source_identity_mismatch: " + salesforceFailures["source_identity_mismatch"][0] + " " +
-		salesforceFailures["source_identity_mismatch"][1] + " Nothing was read."}
+// failureText is what a code means and how to fix it, for an sf login or for a token handed to the process.
+func failureText(code string, token bool) [2]string {
+	if text, own := tokenFailures[code]; token && own {
+		return text
+	}
+	return salesforceFailures[code]
+}
+
+// identityElsewhere refuses an org whose identity is not the one the workspace is pinned to.
+func identityElsewhere(token bool) *failure {
+	text := failureText("source_identity_mismatch", token)
+	return &failure{code: 3, next: "gtm-connector connect --help",
+		message: "source_identity_mismatch: " + text[0] + " " + text[1] + " Nothing was read."}
+}
 
 // failureCode is the code a Salesforce failure opens with, or "" for any other error.
 func failureCode(err error) string {
@@ -150,12 +199,15 @@ func failureCode(err error) string {
 // orgAlias is the refusal of a missing --org, or of one that cannot be an sf alias, such as a username or
 // an access token. What was given is not repeated.
 const orgAlias = "connect salesforce needs --org ALIAS, the alias of an org signed in with sf org login web " +
-	"--alias ALIAS: 1 to 64 letters, digits, dots, hyphens or underscores. A username or a token is not an alias."
+	"--alias ALIAS: 1 to 64 letters, digits, dots, hyphens or underscores. A username or a token is not an alias. " +
+	"Where there is no sf, give --token-env instead."
 
 // salesforceCRM is one org as a workspace's CRM. It signs in on its first read and counts the sf commands it
 // runs and the requests it sends.
 type salesforceCRM struct {
 	alias, environment string
+	// token is a token handed to the process, read from its variables, in place of the alias's sf login.
+	token bool
 	// pinned is the identity digest of the workspace's row, or "" while connect attaches it.
 	pinned string
 
@@ -166,14 +218,20 @@ type salesforceCRM struct {
 	commands, requests atomic.Int64
 }
 
-// openSalesforce is the opener of the salesforce kind. It reads the row and nothing else. A row of a token
-// handed to the container (env_token) is not read in this build.
+// openSalesforce is the opener of the salesforce kind: an sf alias (mode sf) or a token handed to the
+// process (mode env_token). It reads the row and nothing else, and no variable: those are read on the
+// first read, as sf is run then.
 func openSalesforce(_ context.Context, o opening) (crmSource, error) {
-	if o.connection.Mode != "sf" {
-		return nil, &unportedSource{"a Salesforce token handed to the container"}
+	environment, _ := get(o.binding, "environment").(string)
+	if o.connection.Mode == "env_token" {
+		if get(o.binding, "credentials") != "environment" || !validEnvironment(environment) ||
+			o.connection.IdentitySHA256 == "" {
+			return nil, local("This workspace's Salesforce connection names no environment or identity. " +
+				"Connect it again with gtm-connector connect salesforce --token-env.")
+		}
+		return &salesforceCRM{token: true, environment: environment, pinned: o.connection.IdentitySHA256}, nil
 	}
 	alias, _ := get(o.binding, "org").(string)
-	environment, _ := get(o.binding, "environment").(string)
 	if alias == "" || !validEnvironment(environment) || o.connection.IdentitySHA256 == "" {
 		return nil, local("This workspace's Salesforce connection names no sf alias, environment or identity. " +
 			"Connect it again with gtm-connector connect salesforce.")
@@ -189,9 +247,16 @@ func validEnvironment(environment string) bool {
 // Developer Edition, the four objects' fields. It reads no record. The row is saved with the alias and the
 // environment, and pinned to the org's identity and the user it reads as. The alias is saved, and so shown,
 // only once sf has named a login under it.
+//
+// With --token-env the instance address and the token are the variables of the process, and the row is
+// saved as env_token with no alias. The values are never saved or shown.
 func attachSalesforce(ctx context.Context, a attaching) (attached, error) {
 	alias, given := a.args.text("--org")
-	if !given || !salesforce.ValidAlias(alias) {
+	_, token := a.args.text("--token-env")
+	switch {
+	case given && token:
+		return attached{}, refused("--org and --token-env are two ways to sign in. Give one.")
+	case !token && (!given || !salesforce.ValidAlias(alias)):
 		return attached{}, refused(orgAlias)
 	}
 	if _, named := a.args.text("--state-dir"); !named {
@@ -202,10 +267,14 @@ func attachSalesforce(ctx context.Context, a attaching) (attached, error) {
 	if chosen, given := a.args.text("--environment"); given {
 		environment = chosen
 	}
-	crm := &salesforceCRM{alias: alias, environment: environment}
+	crm := &salesforceCRM{alias: alias, environment: environment, token: token}
 	identity, err := crm.identify(ctx, true)
-	if err != nil {
+	switch {
+	case err != nil:
 		return attached{}, err
+	case token:
+		return attached{mode: "env_token", binding: strictjson.NewObject("credentials", "environment",
+			"environment", environment), identity: identity}, nil
 	}
 	return attached{binding: strictjson.NewObject("org", alias, "environment", environment), identity: identity}, nil
 }
@@ -225,7 +294,10 @@ func (c *salesforceCRM) options() salesforce.Options {
 	return o
 }
 
-// signIn reads the alias's login through sf, once.
+// failed is a failed read as a command reports it, worded for how this CRM signs in.
+func (c *salesforceCRM) failed(err error) error { return failureAs(err, c.token) }
+
+// signIn reads the login once: the alias's through sf, or the token handed to the process.
 func (c *salesforceCRM) signIn(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -236,9 +308,15 @@ func (c *salesforceCRM) signInLocked(ctx context.Context) error {
 	if c.login != nil {
 		return nil
 	}
-	login, err := salesforce.FromSF(ctx, c.alias, c.options())
+	var login *salesforce.Reader
+	var err error
+	if c.token {
+		login, err = salesforce.FromEnvironment(ctx, c.options())
+	} else {
+		login, err = salesforce.FromSF(ctx, c.alias, c.options())
+	}
 	if err != nil {
-		return salesforceFailure(err)
+		return c.failed(err)
 	}
 	c.login = login
 	return nil
@@ -260,11 +338,11 @@ func (c *salesforceCRM) identify(ctx context.Context, fields bool) (string, erro
 	}
 	identity, err := check(ctx)
 	if err != nil {
-		return "", salesforceFailure(err)
+		return "", c.failed(err)
 	}
 	pin := identity.Pin()
 	if c.pinned != "" && pin != c.pinned {
-		return "", orgElsewhere
+		return "", identityElsewhere(c.token)
 	}
 	c.reader = c.login
 	return pin, nil
@@ -292,7 +370,7 @@ func (c *salesforceCRM) Read(ctx context.Context, tool, accountID string) ([]*st
 		return nil, err
 	}
 	_, records, err := reader.Read(ctx, tool, accountID)
-	return records, salesforceFailure(err)
+	return records, c.failed(err)
 }
 
 func (c *salesforceCRM) SearchAccounts(ctx context.Context, query string) ([]*strictjson.Object, bool, error) {
@@ -301,7 +379,7 @@ func (c *salesforceCRM) SearchAccounts(ctx context.Context, query string) ([]*st
 		return nil, false, err
 	}
 	accounts, more, err := reader.SearchAccounts(ctx, query, nil, nil)
-	return accounts, more, salesforceFailure(err)
+	return accounts, more, c.failed(err)
 }
 
 // Search is the MCP tools' search_accounts: the accounts among these whose name holds the query, or with
@@ -316,7 +394,7 @@ func (c *salesforceCRM) Search(ctx context.Context, query string, number *string
 		return nil, false, err
 	}
 	found, more, err := reader.SearchAccounts(ctx, query, number, accounts)
-	return referenced(found), more, salesforceFailure(err)
+	return referenced(found), more, c.failed(err)
 }
 
 // Opportunities is the MCP tools' list_opportunities with no account: the opportunities of these accounts.
@@ -334,7 +412,7 @@ func (c *salesforceCRM) Opportunities(ctx context.Context, accounts []string) ([
 		records[i] = opportunity.Copy()
 		records[i].Set("record_ref", "crm/opportunities/"+cellText(get(opportunity, "id")))
 	}
-	return records, salesforceFailure(err)
+	return records, c.failed(err)
 }
 
 // countedRunner counts the sf commands a reader runs, and countedTransport the requests it sends.
@@ -558,8 +636,8 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 					code = "check_failed"
 				}
 				row.Set("code", code)
-				row.Set("message", salesforceFailures[code][0])
-				row.Set("fix", salesforceFailures[code][1])
+				row.Set("message", failureText(code, crm.token)[0])
+				row.Set("fix", failureText(code, crm.token)[1])
 			}
 		}
 		elapsed, _ := strconv.ParseFloat(strconv.FormatFloat(float64(time.Since(started).Microseconds())/1000, 'f', 3, 64), 64)
@@ -601,7 +679,7 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 					if err == nil && len(missing) > 0 {
 						return &missingFields{object, missing}
 					}
-					return salesforceFailure(err)
+					return crm.failed(err)
 				})
 			return mapped, "Required " + object + " fields are exposed by describe.", err
 		})
@@ -724,7 +802,7 @@ func (c *checkRun) renewalCandidate(ctx context.Context, crm *salesforceCRM, asO
 			}
 			contract, err := reader.RenewalCandidate(ctx, asOf)
 			if err != nil || contract == nil {
-				return []*strictjson.Object{}, salesforceFailure(err)
+				return []*strictjson.Object{}, crm.failed(err)
 			}
 			return []*strictjson.Object{contract}, nil
 		})
