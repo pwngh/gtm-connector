@@ -121,13 +121,13 @@ RevOps covers every renewal and sees which have no current card.
 - Sending Slack alerts and signed webhooks for the three events: the destination and its secret, retries, the delivery log, alert rules, and the Slack link summary in a configured channel. The bodies and the signature are built ([what a delivery holds](api.md#what-a-delivery-holds)), from a deal status and rule results that the five flags will give.
 - Tokens for scripts and assistants, the flagged-deals feed, and the OpenAPI file.
 - `setup` printing the MCP configuration for each assistant client.
-- An MCP tool that resolves one number on a card to its record and its receipt. Clients are named in the docs only after a live test: Claude Desktop, Claude Code, ChatGPT, Codex and Cursor are untested today.
+- MCP tools that read deals, cards and proof. Clients are named in the docs only after a live test: Claude Desktop, Claude Code, ChatGPT, Codex and Cursor are untested today.
 
 ### 4. Your own data
 
 - The push API, `POST /v1/deals/{id}/sources`, and retractions ([pushing your own data](api.md#pushing-your-own-data)).
 - A read-only view of a customer's database as a source.
-- Reporting views of gaps and of the five flags' results.
+- Read-only SQL views for reporting.
 - A retention period, and deletion on request with a receipt.
 
 ### 5. The council and measurement
@@ -162,6 +162,7 @@ integrations use HTTP or MCP.
 - Should slippage count changes from before the connector's first read, using the CRM's field history?
 - Should Slack authors be matched to contacts, so that silence can count Slack?
 - A call or thread that fits two deals of one account. A deal with no CRM record. A closed opportunity that reopens.
+- Reporting SQL through a database role that BI tools connect to, or through the API with a receipt for each query?
 - Is a grant enough to see Ops, or is it a separate role?
 
 ## Checks the docs still need
