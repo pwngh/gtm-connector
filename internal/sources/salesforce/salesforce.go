@@ -9,7 +9,8 @@
 // operation asks sf for credentials once more, confirms the org is the same one, and retries.
 //
 // A failure is an *Error holding one fixed code. It never holds an upstream message, a URL or a credential.
-// A read whose context ends returns that context's error, and ends sf with anything sf started.
+// An answer that holds a token of the read is refused whole, so a token never becomes a record. A read whose
+// context ends returns that context's error, and ends sf with anything sf started.
 package salesforce
 
 import (
@@ -19,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"net/http"
 	"regexp"
 	"sort"
@@ -28,6 +28,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
+	"github.com/pwngh/gtm-connector/internal/sources/echo"
+	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 	"github.com/pwngh/gtm-connector/internal/unicodetab"
 )
@@ -202,7 +204,8 @@ func validAccountSearch(query string, accountNumber *string) bool {
 
 // configure checks an instance address and a token, and gives the origin every request goes to. The address
 // must be an HTTPS My Domain origin ending in .my.salesforce.com, with no path, query, credentials or
-// nonstandard port.
+// nonstandard port. The token must be 20 to 4,096 characters, each a printable ASCII character other than a space:
+// a shorter one would be found in every answer the org gives.
 func configure(instanceURL, accessToken string) (origin string, err error) {
 	if utf8.RuneCountInString(instanceURL) > 512 {
 		return "", refuse(invalidConfiguration)
@@ -218,13 +221,8 @@ func configure(instanceURL, accessToken string) (origin string, err error) {
 	if !found || len(host) > 253 || !hostPattern.MatchString(host) {
 		return "", refuse(invalidConfiguration)
 	}
-	if len(accessToken) < 1 || len(accessToken) > 4096 {
+	if !echo.Usable(accessToken, 4096) {
 		return "", refuse(invalidConfiguration)
-	}
-	for i := 0; i < len(accessToken); i++ {
-		if accessToken[i] < 33 || accessToken[i] > 126 {
-			return "", refuse(invalidConfiguration)
-		}
 	}
 	return "https://" + host, nil
 }
@@ -240,7 +238,8 @@ type Options struct {
 	Environment string
 	// Runner runs sf. Nil is Exec{}, the sf on PATH.
 	Runner Runner
-	// Transport carries the HTTPS requests. Nil dials the instance with certificate checks and no proxy.
+	// Transport carries the HTTPS requests. Nil dials the instance with certificate checks and no proxy, over
+	// HTTP/1.1 with one connection a request.
 	Transport http.RoundTripper
 	// Now is the clock the operation budget is read from. Nil is time.Now.
 	Now func() time.Time
@@ -292,9 +291,7 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 	}
 	transport := o.Transport
 	if transport == nil {
-		transport = &http.Transport{DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
-			TLSHandshakeTimeout: 3 * time.Second, DisableCompression: true, ForceAttemptHTTP2: true,
-			IdleConnTimeout: 30 * time.Second}
+		transport = sourcehttp.Transport(sourcehttp.Direct, nil)
 	}
 	now := o.Now
 	if now == nil {
@@ -317,6 +314,7 @@ func (r *Reader) operation(ctx context.Context, run func(o *operation) error) er
 	}
 	defer func() { <-r.turn }()
 	o := &operation{reader: r, ctx: ctx, token: r.accessToken, deadline: r.now().Add(operationTime)}
+	o.tokens.Add(r.accessToken)
 	if !r.editionVerified {
 		organization, err := o.query(organizationQuery, 1)
 		if err != nil {

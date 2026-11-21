@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"io"
 	"net"
@@ -13,14 +14,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/sources/echo"
+	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The network timeouts of one request, each cut to the time the read has left.
-const (
-	connectTimeout = 3 * time.Second
-	readTimeout    = 5 * time.Second // for the response to start, and between two reads of its body
-)
+// readTimeout is how long a response may take to start, and how long may pass between two reads of its
+// body. A connection may take sourcehttp.ConnectTime to open, and its handshake as long. Each is cut to
+// the time the read has left.
+const readTimeout = 5 * time.Second
 
 // budget is the one deadline and the cumulative counters of a read. The requests that keep the sign-in
 // usable draw on the same budget as the pages.
@@ -34,6 +36,16 @@ type budget struct {
 	responseBytes, authBytes, messageBytes      int
 	refreshAttempts                             int
 	tokenRetried, rateRetried                   bool
+
+	// tokens are every access and refresh token the read has loaded or been given. A pair that a refresh
+	// replaced stays among them to the end of the read.
+	tokens echo.Tokens
+}
+
+// hold puts a sign-in's tokens among those the read looks for in what Slack sends back.
+func (b *budget) hold(document *Credentials) {
+	b.tokens.Add(document.AccessToken.Reveal())
+	b.tokens.Add(document.RefreshToken.Reveal())
 }
 
 func newBudget(clock Clock) *budget {
@@ -48,6 +60,29 @@ func (b *budget) remaining() (time.Duration, error) {
 		return 0, refuse("slack_timeout")
 	}
 	return left, nil
+}
+
+// store runs one call to a store under a context that ends when the read's time does. A call that returns
+// after that time is refused as slack_timeout whatever it returned: a store that gave up waiting may
+// answer as if it had found nothing. The caller's own cancel stays what it is.
+func (b *budget) store(ctx context.Context, call func(context.Context) error) error {
+	left, err := b.remaining()
+	if err != nil {
+		return err
+	}
+	limited, cancel := context.WithTimeout(ctx, left)
+	defer cancel()
+	err = call(limited)
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return err
+	}
+	if limited.Err() != nil {
+		return refuse("slack_timeout")
+	}
+	if _, late := b.remaining(); late != nil {
+		return late
+	}
+	return err
 }
 
 // beginRequest counts one HTTP attempt, of a page ("messages") or of the sign-in ("auth").
@@ -66,6 +101,9 @@ func (b *budget) beginRequest(kind string) error {
 	}
 	return nil
 }
+
+// room is how many response bytes the read may still take.
+func (b *budget) room() int { return maxResponseBytes - b.responseBytes }
 
 // addBytes counts response bytes as they arrive, so an oversized body is refused before it is held.
 func (b *budget) addBytes(amount int, kind string) error {
@@ -98,17 +136,17 @@ func (b *budget) beginRefresh() error {
 	return nil
 }
 
-var ownTransport = sync.OnceValue(func() http.RoundTripper {
-	return &http.Transport{
-		Proxy:                 nil, // never a proxy from the environment
-		DialContext:           (&net.Dialer{Timeout: connectTimeout}).DialContext,
-		TLSHandshakeTimeout:   connectTimeout,
-		ResponseHeaderTimeout: readTimeout,
-		// One connection per request. On a reused connection that closes before it answers, the
-		// transport sends a GET again by itself, and that second send would not be counted.
-		DisableKeepAlives: true,
-	}
-})
+var ownTransport = sync.OnceValue(func() http.RoundTripper { return newTransport(sourcehttp.Direct, nil) })
+
+// newTransport is the reader's own transport, the one the Salesforce reader makes too: verified TLS, no
+// proxy, HTTP/1.1 only, and nothing a server sends unasked in the process log. It makes one connection a
+// request. On a reused connection that closes before it answers, net/http sends a GET again by itself, and
+// that second send would not be counted.
+func newTransport(open sourcehttp.Dial, roots *x509.CertPool) *http.Transport {
+	transport := sourcehttp.Transport(open, roots)
+	transport.ResponseHeaderTimeout = readTimeout
+	return transport
+}
 
 func (r *Reader) transport() http.RoundTripper {
 	if r.Transport != nil {
@@ -193,6 +231,8 @@ func (r *Reader) send(ctx context.Context, b *budget, kind string, build func(co
 	if err != nil {
 		return nil, refuse("slack_unavailable")
 	}
+	// The connection is not kept for another request, whatever transport carries this one.
+	request.Close = true
 	response, err := r.transport().RoundTrip(request)
 	if err != nil {
 		if stopped := failed(); stopped != nil {
@@ -204,7 +244,12 @@ func (r *Reader) send(ctx context.Context, b *budget, kind string, build func(co
 		}
 		return nil, refuse("slack_unavailable")
 	}
-	defer response.Body.Close()
+	// The request is ended before its body is closed. net/http reads up to 256 KiB more of a body that is
+	// closed early on a connection it means to keep, and those bytes would be in no count.
+	defer func() {
+		cancel()
+		_ = response.Body.Close()
+	}()
 
 	length, stated := response.Header["Content-Length"]
 	if lowerASCII(headerValue(response.Header, "Content-Encoding", "identity")) != "identity" {
@@ -216,10 +261,12 @@ func (r *Reader) send(ctx context.Context, b *budget, kind string, build func(co
 			return nil, refuse("slack_response_invalid")
 		}
 		size, _ := strconv.Atoi(value)
+		// A body stated to be larger than the read may still take is refused before any of it is read,
+		// for a sign-in answer as for a page.
 		switch {
 		case kind == "auth" && size > maxAuthResponseBytes:
 			return nil, refuse("slack_response_invalid")
-		case kind != "auth" && size > maxResponseBytes-b.responseBytes:
+		case size > b.room():
 			return nil, refuse("slack_resource_limit")
 		}
 	}
@@ -237,7 +284,13 @@ func (r *Reader) send(ctx context.Context, b *budget, kind string, build func(co
 	chunk := make([]byte, 32<<10)
 	for {
 		idle.Reset(pause)
-		n, readErr := response.Body.Read(chunk)
+		// No read takes more than one byte past what is left, of the read's bytes or of a sign-in answer's
+		// own. That one byte is the refusal.
+		most := min(len(chunk), b.room()+1)
+		if kind == "auth" {
+			most = min(most, maxAuthResponseBytes-len(body)+1)
+		}
+		n, readErr := response.Body.Read(chunk[:most])
 		if n > 0 {
 			if err := b.addBytes(n, kind); err != nil {
 				return nil, err
@@ -264,14 +317,20 @@ func (r *Reader) send(ctx context.Context, b *budget, kind string, build func(co
 	return &answer{response.StatusCode, response.Header, body}, nil
 }
 
-// decode parses a response body as strict JSON and requires an object.
-func decode(body []byte) (*strictjson.Object, error) {
+// decode parses a response body as strict JSON and requires an object. A body that holds one of tokens,
+// byte for byte, is refused unparsed: a token Slack sends back as text or as a cursor never becomes a record
+// or part of the next request. So is one whose parsed text holds a token, or would once a card composes it
+// or lowers its case. Nil tokens looks for none.
+func decode(body []byte, tokens *echo.Tokens) (*strictjson.Object, error) {
+	if tokens != nil && tokens.InBytes(body) {
+		return nil, refuse("slack_response_invalid")
+	}
 	value, err := strictjson.LoadsText(string(body))
 	if err != nil {
 		return nil, refuse("slack_response_invalid")
 	}
 	document, isObject := value.(*strictjson.Object)
-	if !isObject || document == nil {
+	if !isObject || document == nil || tokens != nil && tokens.InValue(document) {
 		return nil, refuse("slack_response_invalid")
 	}
 	return document, nil
@@ -311,7 +370,7 @@ func providerResult(document *strictjson.Object) error {
 }
 
 // replies gets one page of the thread: the fixed endpoint, never a URL the source gave.
-func (r *Reader) replies(ctx context.Context, b *budget, token Secret, channel, parent, latest string, cursor *string, limit int) (*strictjson.Object, error) {
+func (r *Reader) replies(ctx context.Context, b *budget, held *access, channel, parent, latest string, cursor *string, limit int) (*strictjson.Object, error) {
 	query := "channel=" + url.QueryEscape(channel) + "&ts=" + url.QueryEscape(parent) +
 		"&latest=" + url.QueryEscape(latest) + "&inclusive=true&limit=" + strconv.Itoa(limit)
 	if cursor != nil {
@@ -322,7 +381,7 @@ func (r *Reader) replies(ctx context.Context, b *budget, token Secret, channel, 
 		if err != nil {
 			return nil, err
 		}
-		request.Header.Set("Authorization", "Bearer "+string(token))
+		request.Header.Set("Authorization", "Bearer "+held.Token.Reveal())
 		request.Header.Set("Accept", "application/json")
 		request.Header.Set("Accept-Encoding", "identity")
 		return request, nil
@@ -346,7 +405,7 @@ func (r *Reader) replies(ctx context.Context, b *budget, token Secret, channel, 
 		return nil, refuse("slack_unavailable")
 	case got.status == http.StatusUnauthorized:
 		// Only the exact token_expired answer leads to a refresh. Any other 401 is refused.
-		document, err := decode(got.body)
+		document, err := decode(got.body, &b.tokens)
 		if err != nil {
 			return nil, err
 		}
@@ -359,7 +418,7 @@ func (r *Reader) replies(ctx context.Context, b *budget, token Secret, channel, 
 	case got.status != http.StatusOK:
 		return nil, refuse("slack_response_invalid")
 	}
-	document, err := decode(got.body)
+	document, err := decode(got.body, &b.tokens)
 	if err != nil {
 		return nil, err
 	}
