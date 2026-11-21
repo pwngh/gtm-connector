@@ -4,6 +4,7 @@ import {formatUtc, unitFacts} from '../../../api/client.ts';
 import {type Read, useRead} from '../../../api/reads.ts';
 import type {CardDetail, UnitView} from '../../../api/types.ts';
 import {Dialog} from '../../../ui/Dialog.tsx';
+import {Help} from '../../../ui/Help.tsx';
 import {Placeholder} from '../../../ui/Placeholder.tsx';
 import {Refusal} from '../../../ui/Refusal.tsx';
 import {displayStorage} from '../../../ui/theme.ts';
@@ -62,7 +63,7 @@ function RecordProof({unit}: {unit: UnitView}) {
   );
 }
 
-/** How the unit was read: the start of its read and the source, or the refusal of the read alone. */
+/** How the unit was read: the start of its read and the source, with the receipt's help, or the refusal of the read alone. */
 function ReadLine({unit, refused}: {unit: UnitView; refused: boolean}) {
   const receipt = refused ? null : unit.receipt;
   let read: ReactNode = 'Not recorded';
@@ -82,7 +83,8 @@ function ReadLine({unit, refused}: {unit: UnitView; refused: boolean}) {
       className="dc-proof__read"
       data-read={refused ? 'refused' : receipt ? 'read' : 'none'}
     >
-      <span className="dc-proof__label">Read</span> <span>{read}</span>
+      <span className="dc-proof__label">Read</span>
+      {receipt && <Help term="ops.receipt" />} <span>{read}</span>
     </p>
   );
 }

@@ -1,4 +1,5 @@
 import type {ReactNode} from 'react';
+import {Help} from '../../../ui/Help.tsx';
 import {basisCounts, groupOf, groups, newestFirst, onCard, plural, sentencesOf} from './card.ts';
 import {linesOf, titlesOf} from './lines.ts';
 import {SentenceLine} from './Sentence.tsx';
@@ -7,7 +8,8 @@ import type {SectionProps} from './sections.ts';
 // What people said, by who said it: buyer quotes, then sentences whose
 // speaker has no established role, then your side. Only the sentences the
 // card shows, each whole, newest first. A buyer quote carries the title from
-// the line of the contact its speaker matched.
+// the line of the contact its speaker matched. The first line of each group
+// carries the help for its role word.
 export function PeopleSaid({card}: SectionProps) {
   const sentences = sentencesOf(card);
   const shown = sentences.filter(onCard);
@@ -43,10 +45,11 @@ export function PeopleSaid({card}: SectionProps) {
           )}
           {list.length ? (
             <ol className="dc-lines">
-              {list.map(sentence => (
+              {list.map((sentence, at) => (
                 <SentenceLine
                   key={sentence.n}
                   sentence={sentence}
+                  help={at === 0}
                   title={group.id === 'customer' && sentence.contact !== null ? (titles.get(sentence.contact) ?? null) : null}
                   mark="quote"
                 />
@@ -64,12 +67,15 @@ export function PeopleSaid({card}: SectionProps) {
       className="dc-section dc-people"
       aria-labelledby="dc-people-title"
     >
-      <h2
-        id="dc-people-title"
-        className="dc-section__title"
-      >
-        People said
-      </h2>
+      <div className="ui-help-head">
+        <h2
+          id="dc-people-title"
+          className="dc-section__title"
+        >
+          People said
+        </h2>
+        <Help term="quotation" />
+      </div>
       {body}
     </section>
   );
