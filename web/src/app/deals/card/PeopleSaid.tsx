@@ -6,7 +6,7 @@ import type {SectionProps} from './sections.ts';
 // What people said, by who said it: buyer quotes, then sentences whose
 // speaker has no established role, then your side. Only the sentences the
 // card shows, each whole, newest first.
-export function PeopleSaid({account, card}: SectionProps) {
+export function PeopleSaid({card}: SectionProps) {
   const sentences = sentencesOf(card);
   const shown = sentences.filter(onCard);
   let body: ReactNode;
@@ -43,8 +43,6 @@ export function PeopleSaid({account, card}: SectionProps) {
               {list.map(sentence => (
                 <SentenceLine
                   key={sentence.n}
-                  account={account}
-                  card={card.id}
                   sentence={sentence}
                   mark="quote"
                 />

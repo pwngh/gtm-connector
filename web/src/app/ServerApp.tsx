@@ -13,6 +13,7 @@ import '../api.css';
 import '../ui/tokens.css';
 import './deals/deals.css';
 import './deals/card/card.css';
+import './deals/card/proof.css';
 import './deals/card/text.css';
 import './ops/coverage.css';
 import {Frame} from './frame/Frame.tsx';

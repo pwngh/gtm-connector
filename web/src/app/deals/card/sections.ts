@@ -4,6 +4,7 @@ import {MoreRead} from './MoreRead.tsx';
 import {Notices} from './Notices.tsx';
 import {NotRead} from './NotRead.tsx';
 import {PeopleSaid} from './PeopleSaid.tsx';
+import {Proof} from './Proof.tsx';
 import {Seal} from './Seal.tsx';
 import {TheRecord} from './TheRecord.tsx';
 
@@ -34,6 +35,7 @@ export interface Section {
 // its section here, in its own file.
 export const sections: Section[] = [
   {id: 'notices', area: 'top', Section: Notices},
+  {id: 'proof', area: 'top', Section: Proof},
   {id: 'people-said', area: 'words', Section: PeopleSaid},
   {id: 'more-read', area: 'words', Section: MoreRead},
   {id: 'the-record', area: 'record', Section: TheRecord},

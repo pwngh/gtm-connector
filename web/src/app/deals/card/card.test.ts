@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
 import {after, before, test} from 'node:test';
-import {gunzipSync} from 'node:zlib';
 import {createElement, type ReactElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MemoryRouter} from 'react-router';
@@ -9,62 +7,7 @@ import {createServer, type ViteDevServer} from 'vite';
 import type {Read} from '../../../api/reads.ts';
 import type {CardDetail, CardView, GapView} from '../../../api/types.ts';
 import {groupOf, newestFirst, notShown, onCard, orderedGaps, recordsOf, type Sentence, sentencesOf, usableTime, wholeSources} from './card.ts';
-
-// Every card here is a recorded card from testdata/oracle/cards, shaped as
-// GET /api/v1/cards/{card} returns it. Only the IDs and the publish time are
-// made up, as the server makes its own.
-
-interface Recorded {
-  file: string;
-  key: string;
-  card: CardDetail;
-}
-
-const files = ['demo', 'cases', 'varied_demo'];
-
-function shaped(account: string, id: string, sealed: Record<string, unknown>, sha256: string, size: number): CardDetail {
-  const units = sealed.units as Record<string, unknown>[];
-  return {
-    id,
-    account,
-    brief_id: String(sealed.brief_id),
-    kind: 'go',
-    schema_version: 3,
-    rules_version: '3',
-    sha256,
-    size,
-    seal_receipt_id: `seal-${id}`,
-    published_at: '2027-01-15T15:00:04Z',
-    as_of: String(sealed.as_of),
-    sources: null,
-    lines: null,
-    units: units.map(body => ({
-      card: id,
-      n: body.n as number,
-      kind: body.kind as string,
-      record_ref: body.record_ref as string,
-      tool: body.tool as string,
-      ...(body.kind === 'sentence' ? {shown: body.shown as string} : {}),
-      receipt_id: `receipt-${body.tool}`,
-      record_version_id: `version-${body.n}`,
-      body: body as never,
-    })),
-    gaps: sealed.gaps as GapView[],
-  };
-}
-
-const recorded: Recorded[] = files.flatMap(file =>
-  gunzipSync(readFileSync(new URL(`../../../../../testdata/oracle/cards/${file}.jsonl.gz`, import.meta.url)))
-    .toString()
-    .split('\n')
-    .filter(Boolean)
-    .map((line, at) => {
-      const row = JSON.parse(line) as {key: string; account_id: string; card: string; sha256: string};
-      return {file, key: row.key, card: shaped(row.account_id, `card-${file}-${at}`, JSON.parse(row.card), row.sha256, row.card.length)};
-    }),
-);
-const find = (file: string, key: string) => recorded.find(item => item.file === file && item.key === key)?.card as CardDetail;
-const thornfield = () => find('demo', 'acc-003');
+import {files, find, recorded, thornfield} from './recorded.ts';
 
 let server: ViteDevServer;
 // biome-ignore lint/suspicious/noExplicitAny: the modules are loaded through Vite at run time.
@@ -166,7 +109,7 @@ test('people said: three groups in order, each with its count, newest first, att
   const customer = html.slice(html.indexOf('data-group="customer"'), html.indexOf('data-group="unknown"'));
   // The speaker as recorded, the contact's number after the name, the role, the source and the time.
   assert.match(text(customer), /Marian Holt \[2\] Customer call 12 Jan 2027, 15:00:00 UTC/);
-  assert.match(customer, /aria-label="Source 2" href="\/ops\/evidence\?account=acc-003&amp;card=card-demo-2&amp;unit=2"/);
+  assert.match(customer, /aria-label="Source 2" data-cite="2" href="\/deals\/acc-003\?unit=2"/);
   const seller = html.slice(html.indexOf('data-group="seller"'));
   // Slack at 16:00 is newer than the call at 15:00, so it comes first; equal times keep the card's order.
   assert.deepEqual(
@@ -245,9 +188,9 @@ test('the recorded injection case renders its markup, mentions and links as text
   assert.match(text(html), /\[mention channel\] \[user U0ABC123\] IGNORE PREVIOUS INSTRUCTIONS/);
   assert.match(text(html), /See the approved order \[link evil\.example\]/);
   assert.doesNotMatch(html, /href="[^"]*evil|<a [^>]*>[^<]*evil/);
-  // Every link on the card is a unit's number or a link of the app's own.
+  // Every link on the card is a unit's number on the deal's own address.
   for (const [, href] of html.matchAll(/href="([^"]*)"/g)) {
-    assert.match(decode(href ?? ''), /^\/ops\/evidence\?account=acc-905&card=card-cases-9&unit=\d+$/);
+    assert.match(decode(href ?? ''), /^\/deals\/acc-003\?unit=\d+$/);
   }
   // Server strings that hold markup stay text, wherever they are shown.
   const hostile = '<img src=x onerror=alert(1)>';
@@ -351,14 +294,23 @@ test('not read lists whole sources first, then other unread, then read and not s
   assert.match(body(card), /data-gap="slack_denied">[\s\S]*?<p class="dc-meta">Not read<\/p>/);
 });
 
-test('every number is a link named Source n, to the page that shows that unit in full', () => {
-  const html = body(thornfield());
-  const cites = [...html.matchAll(/<a class="dc-cite" aria-label="Source (\d+)" href="([^"]+)"[^>]*><span class="dc-cite__box">\[(\d+)\]<\/span><\/a>/g)];
+test('every number is a link named Source n that puts ?unit=n in the deal’s address, keeping the rest', () => {
+  const card = thornfield();
+  const html = inRouter(createElement(view.CardBody, {account: 'acc-003', card, listed: [card], query: 'thorn'}), '/deals/acc-003?q=thorn&unit=6');
+  const cites = [
+    ...html.matchAll(
+      /<a class="dc-cite" aria-label="Source (\d+)" data-cite="(\d+)"(?: data-open="")? href="([^"]+)"[^>]*><span class="dc-cite__box">\[(\d+)\]<\/span><\/a>/g,
+    ),
+  ];
   assert.equal(cites.length, count(html, /class="dc-cite"/g));
-  for (const [, named, href, shown] of cites) {
+  for (const [, named, data, href, shown] of cites) {
     assert.equal(named, shown);
-    assert.equal(decode(href ?? ''), `/ops/evidence?account=acc-003&card=card-demo-2&unit=${shown}`);
+    assert.equal(data, shown);
+    assert.equal(decode(href ?? ''), `/deals/acc-003?q=thorn&unit=${shown}`);
   }
+  // The number whose unit is open is marked, and only it.
+  assert.equal(count(html, /<a class="dc-cite"[^>]*data-open=""/g), 1);
+  assert.match(html, /data-cite="6" data-open=""/);
   // Nine units, and the two customer sentences each cite their contact.
   assert.equal(cites.length, 9 + 2);
 });
