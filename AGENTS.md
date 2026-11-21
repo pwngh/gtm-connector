@@ -49,6 +49,12 @@ source is wired into those commands. `postgres.ReceiptStore` runs the card maker
 and `mcp stdio` serves on stdin and stdout.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
 
+The guides in `docs/` describe the Go binary: `cli.md` (commands, workspaces, output, exit codes),
+`cards.md` (how a card is built and read), `audit.md` (receipts), `sources.md` (Salesforce, call
+transcripts, Slack, the demo book), `mcp.md` (tools, scopes, tokens, selections), `operations.md`
+(install, setup, health, backup) and `api.md`. `docs/python/` holds the Python package's guides and
+goes with the package.
+
 ```sh
 python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r requirements-dev.lock
 .venv/bin/python -m gtm_connector demo             # the product on invented data
@@ -80,8 +86,9 @@ make verify-real                                   # real public text, Python ag
 - State things plainly. Give a reason only when it is concrete. Never explain by history.
 - The repository holds code, tests, user docs, and this page. No logs, results, or review notes.
 - The README states the product as designed. `docs/ROADMAP.md` lists every part of it that is not
-  built yet. Every other doc claims only what a test shows. Keep "No live org has been verified."
-  on the roadmap until one has been.
+  built yet. Every other doc claims only what a test shows, and the roadmap's "Checks the docs still
+  need" lists each guide statement no test asserts yet. Keep "No live org has been verified." on the
+  roadmap until one has been.
 - `tests/test_cases.py` holds ten invented deals, one property each. A change to cards keeps them
   passing. A case that waits for a feature says which assertion does not hold yet and why.
 - Live checks use the development org and workspace only. Never create or edit a Slack app. Never
