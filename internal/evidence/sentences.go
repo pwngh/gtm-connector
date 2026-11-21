@@ -142,13 +142,13 @@ func listItem(line []rune) bool {
 	return j == len(line) || u.IsSpace(line[j])
 }
 
-// speakerLabel is whether a line starts with a speaker label, as a pasted exchange writes one: one to
-// three words of letters, the first capitalized and all of them at most 40 characters, then a colon, a
-// space and more, as in "Dana Reyes: we can sign".
+// speakerLabel is whether a line starts with a speaker label, as a pasted exchange writes one: a name of one
+// to three capitalized words of letters, at most 40 characters in all, then a colon, a space and more, as in
+// "Dana Reyes: we can sign".
 func speakerLabel(line []rune) bool {
 	i := 0
 	for range 3 {
-		if i >= len(line) || !u.IsAlpha(line[i]) || i == 0 && !u.IsUpper(line[i]) {
+		if i >= len(line) || !u.IsUpper(line[i]) {
 			return false
 		}
 		for i < len(line) && (u.IsAlpha(line[i]) || in(line[i], "'’.-")) {

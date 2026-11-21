@@ -11,18 +11,18 @@
    "records": 82
   },
   "cards/books_demo.jsonl.gz": {
-   "sha256": "96b475013ef791a74e2effd0a1e2828335953c51bdbdff1f281da9f7b1e8c750",
-   "bytes": 2255509,
+   "sha256": "4ba14bb0e164174a46ba9ac97aecf6dc90ce48576a711a74f5c3d41f7bc83f31",
+   "bytes": 2253727,
    "records": 78
   },
   "cards/books_salesforce.jsonl.gz": {
-   "sha256": "e4b9d6c4f31d694a8399c294792e3e1ad77e5dc5f6eff2bcd7d5bf0be462daa4",
-   "bytes": 2172374,
+   "sha256": "fa1ef3265304a1ed51b81ee54dffada327a1ee16d6f314c737929edbe0838f0e",
+   "bytes": 2170592,
    "records": 78
   },
   "cards/books_slack.jsonl.gz": {
-   "sha256": "505da4de03d5a5ca37f93d51c64c86a7642809cb4e674e515edc3628f314a4cf",
-   "bytes": 2233496,
+   "sha256": "b8d3dc1fdc70103d51fb166010613a5ea8f4ac825985fb37f08ebaebee47baf6",
+   "bytes": 2231714,
    "records": 78
   },
   "cards/cases.jsonl.gz": {
@@ -56,13 +56,13 @@
    "records": 8
   },
   "cards/slack_threads.jsonl.gz": {
-   "sha256": "0d29cb3f9bc3d685a0a75005e1caf8a1fa7d8308736906b9f7926dfcecf009ae",
-   "bytes": 794233,
+   "sha256": "028393910f4326b5398c53b66855bc0fdcc84f70a3a7742e959f71df68445e3c",
+   "bytes": 793357,
    "records": 36
   },
   "cards/varied_demo.jsonl.gz": {
-   "sha256": "189bd210783ab5fb0f7044d122ced7e138bfeafdcfe7210b4fc2b75b22b3e616",
-   "bytes": 2283608,
+   "sha256": "e398cea1c1e4c0266e695f54c719c6cadad4324a830c86205dbfe062bfb4ad13",
+   "bytes": 2281326,
    "records": 46
   },
   "commands/index.json": {

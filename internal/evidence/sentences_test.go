@@ -51,6 +51,8 @@ var slackCases = []struct {
 	// A line that starts with a speaker label starts a block.
 	{"Pasted from the call\nDana: we can sign\nMorgan Reed: then send it",
 		[]string{"Pasted from the call", "Dana: we can sign", "Morgan Reed: then send it"}, []int{1, 2}, []int{0, 1}},
+	// A heading of words that are not all capitalized is no speaker label.
+	{"Our numbers\nJune renewal math: 90 seats.", []string{"Our numbers June renewal math: 90 seats."}, nil, nil},
 	// A dash or a number that is no list marker is a wrap.
 	{"Seats go to\n-5 from 40", []string{"Seats go to -5 from 40"}, nil, nil},
 	{"Renewal is\n*not* blocked", []string{"Renewal is *not* blocked"}, nil, nil},
