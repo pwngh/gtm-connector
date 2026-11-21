@@ -6,14 +6,15 @@ import (
 	"slices"
 )
 
-// debug is the Python CLI's group of commands that work on one source by hand. This build runs debug slack;
-// each other command of the group is refused by name.
+// debug is the Python CLI's group of commands that work on one source by hand. This build runs debug calls
+// (calls.go) and debug slack; each other command of the group is refused by name.
 
 // debugCommands are the commands under debug, as the Python CLI lists them.
 var debugCommands = []string{"serve", "doctor", "verify", "completion", "salesforce", "calls", "slack"}
 
 // debugInBuild are the commands under debug this build runs, each with its runner.
-var debugInBuild = map[string]func(ctx context.Context, tokens []string, s screen) int{"slack": debugSlack}
+var debugInBuild = map[string]func(ctx context.Context, tokens []string, s screen) int{
+	"calls": runCalls, "slack": debugSlack}
 
 const debugHelp = `usage: gtm-connector debug [-h] [--json] COMMAND ...
 
@@ -21,6 +22,8 @@ Serve over HTTPS, check the setup, and work on one source by hand.
 
 positional arguments:
   COMMAND
+    calls     Import and inspect private transcript exports without
+              contacting a call provider.
     slack     Manage Slack authentication, select a thread, or check its
               audited read.
 
@@ -28,7 +31,7 @@ options:
   -h, --help  show this help message and exit
   --json      Write the documented JSON result for scripts.
 
-Not in this build: serve, doctor, verify, completion, salesforce, calls.
+Not in this build: serve, doctor, verify, completion, salesforce.
 
 Example: gtm-connector debug slack status
 `

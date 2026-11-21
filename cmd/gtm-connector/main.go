@@ -14,6 +14,7 @@
 //	                                 serve MCP on stdin and stdout, for an assistant app that starts it
 //	gtm-connector token new --scope SCOPE
 //	                                 make a bearer token for an MCP client; also token list and token revoke ID
+//	gtm-connector debug calls ACTION import, list or inspect call transcript exports
 //	gtm-connector debug slack ACTION sign in to Slack, map a thread to an account, check its read
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
@@ -64,8 +65,9 @@ const description = "Build a Deal card for a renewal from scoped CRM, call, and 
 var firstCommands = []string{"gtm-connector demo", "gtm-connector connect demo", "gtm-connector brief acc-007"}
 
 // listedCommands are the commands the refusal of an unknown command names: the Python CLI's own. This
-// binary answers each by name, debug with a refusal until it is ported. setup, serve, token, backup,
-// restore, health and version are this binary's besides, and --help lists them all.
+// binary answers each by name; debug refuses those of its own commands that are not ported (debug.go).
+// setup, serve, token, backup, restore, health and version are this binary's besides, and --help lists
+// them all.
 var listedCommands = []string{"demo", "connect", "accounts", "brief", "inspect", "audit", "mcp", "debug"}
 
 var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
@@ -83,14 +85,15 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   audit                       list the receipts of the audit log
   mcp stdio --scope SCOPE     serve MCP on stdin and stdout, for an assistant app that starts it
   token new --scope SCOPE     make a bearer token for an MCP client; also token list and token revoke ID
+  debug calls ACTION          import a call transcript export for an account, list imports, inspect one
   debug slack ACTION          sign in to Slack, map a thread to an account, or check its read
   backup --out FILE           write PostgreSQL and the credentials folder to FILE
   restore --in FILE           restore FILE into an empty database and credentials folder
   health                      check that the local server answers
   version                     print the commit this binary was built from
 
-demo, connect, accounts, brief, inspect, audit, mcp, token and debug slack take --json, --state-dir WORKSPACE
-and --help. Not in this build: every debug command but debug slack.
+demo, connect, accounts, brief, inspect, audit, mcp, token, debug calls and debug slack take --json,
+--state-dir WORKSPACE and --help. Not in this build: every other debug command.
 `
 
 func main() {

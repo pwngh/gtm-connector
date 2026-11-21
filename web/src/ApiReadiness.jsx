@@ -1,10 +1,10 @@
 import React, {useId} from 'react';
 import {Link} from 'react-router';
 import {ArrowUpRight, CircleDashed, Clock, GitBranch, ShieldCheck} from 'lucide-react';
-import {gapDispositions, unitFacts} from './api.js';
+import {gapDispositions, unitFacts} from './api/client.ts';
 import {ApiFrame, ApiRenewalHeader, AccountPicker, CardList, Refusal, Time, gapsTarget, keepQuery, useCardSelection} from './ApiFrame.jsx';
-import {useServer} from './ServerSwitch.jsx';
-import {serverPaths} from './app/routes.js';
+import {useServer} from './api/reads.ts';
+import {serverPaths} from './app/routes.ts';
 
 // Readiness when the Go server serves the app, from one card's gaps and units
 // only. The server has no workflow rules yet, so none is listed or evaluated:

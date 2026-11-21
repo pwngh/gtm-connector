@@ -1,4 +1,4 @@
-import {lazyPage} from './app/lazyPage.js';
+import {lazyPage} from './app/lazyPage.ts';
 
 // The server's pages. Each loads on its own, after the app's shell.
 export const pageLoaders = {

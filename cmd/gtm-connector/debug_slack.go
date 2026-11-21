@@ -19,6 +19,7 @@ import (
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
+	"github.com/pwngh/gtm-connector/internal/sources/calls"
 	"github.com/pwngh/gtm-connector/internal/sources/slack"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -338,10 +339,19 @@ func (r *run) slackMap(ctx context.Context) (*strictjson.Object, error) {
 	r.slackProgress("preparing_state", "running")
 	r.announce(from.sourcesLine())
 	r.slackProgress("resolving_account", "running")
-	receipt, err := from.resolveAccount(ctx, account)
-	if err != nil {
+	// The account is found as an import finds it: one get_account read under a receipt committed first.
+	association, err := from.resolveAccount(ctx, account)
+	switch {
+	case errors.Is(err, calls.ErrAccountNotFound):
+		return nil, slackRefusal("slack_account_not_found")
+	case errors.Is(err, calls.ErrAssociationInvalid):
+		return nil, slackRefusal("slack_association_invalid")
+	case errors.Is(err, calls.ErrAssociationFailed):
+		return nil, slackRefusal("slack_association_failed")
+	case err != nil:
 		return nil, err
 	}
+	receipt := association.ResolutionReceiptID
 	r.slackProgress("saving_selection", "running")
 	manifest := strictjson.NewObject("schema_version", 1, "account_id", account, "crm_binding", from.bound("crm"),
 		"slack_binding", from.bound("slack"), "channel_id", selection[0], "thread_ts", selection[1],
@@ -383,44 +393,6 @@ func (r *run) slackMap(ctx context.Context) (*strictjson.Object, error) {
 	return strictjson.NewObject("schema_version", 1, "status", status, "selection", "saved",
 		"thread_access", "unchecked", "counts", strictjson.NewObject("selected_threads", 1),
 		"duration_ms", roundTo3(durationMS(time.Since(started))), "next", "gtm-connector debug slack check --help"), nil
-}
-
-// resolveAccount reads the account from the CRM as get_account, under a receipt committed first, lists it in
-// the workspace, and gives the receipt's ID, which the mapping keeps.
-func (r *reads) resolveAccount(ctx context.Context, accountID string) (string, error) {
-	crm, err := r.crm(ctx)
-	if err != nil {
-		return "", err
-	}
-	var account *strictjson.Object
-	finished, _, err := r.call(ctx, toolCall{token: receipts.Fingerprint(randomToken()), scopes: []string{"crm:read"},
-		run: "import-" + strings.ReplaceAll(receipts.RandomID(), "-", ""), request: 1, tool: "get_account",
-		arguments: strictjson.NewObject("account_id", accountID), account: accountID},
-		func(ctx context.Context) ([]*strictjson.Object, error) {
-			records, err := crm.Read(ctx, "get_account", accountID)
-			if err == nil {
-				account, err = accountOf(records, accountID, r.backend("crm") != "sqlite")
-			}
-			return records, err
-		})
-	var known *failure
-	switch {
-	case errors.Is(err, errAccountNotFound):
-		return "", slackRefusal("slack_account_not_found")
-	case errors.Is(err, errNoAccountData):
-		return "", slackRefusal("slack_association_invalid")
-	case errors.Is(err, receipts.ErrSourceChanged), errors.Is(err, context.Canceled), errors.As(err, &known):
-		return "", err
-	case err != nil:
-		return "", slackRefusal("slack_association_failed")
-	case finished.Status != "ok" || account == nil:
-		return "", slackRefusal("slack_association_invalid")
-	}
-	name, _ := get(account, "name").(string)
-	if err := r.store.EnsureAccount(ctx, r.workspace.ID, accountID, name); err != nil {
-		return "", err
-	}
-	return finished.AuditID, nil
 }
 
 // threadAsked is the thread a map was given: a link, or a channel with a timestamp.
