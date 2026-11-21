@@ -99,31 +99,45 @@ gtm serve
 | `GTM_OIDC_CLIENT_ID` | The client's ID at the provider. |
 | `GTM_OIDC_WORKSPACE` | The workspace people sign in to. It must exist. |
 | `GTM_OIDC_ALLOWED_DOMAINS` | The email domains that may sign in, separated by commas. A person needs an email in one of them that the provider marked verified. |
-| `GTM_OIDC_TENANT_CLAIM`, `GTM_OIDC_TENANT` | A claim, `hd` or `tid`, and the value it must have, for a provider that vouches for its tenant rather than for emails. Set this, the domains, or both. |
+| `GTM_OIDC_TENANT_CLAIM`, `GTM_OIDC_TENANT` | A claim, `hd` or `tid`, and the value it must have, for a provider that vouches for its tenant. Set this, the domains, or both. |
 | `GTM_OIDC_REDIRECT_URL` | The redirect URL, if you set it: it must be the public origin followed by `/api/v1/session/oidc/callback`, which is the default. |
 | `GTM_OIDC_SESSION_MINUTES` | How long a session lasts, from 5 to 720 minutes. The default is 60. |
 | `GTM_DEMO_SIGN_IN` | `on`, the default, or `off`. |
 
+For Google Workspace, set `GTM_OIDC_TENANT_CLAIM=hd` and `GTM_OIDC_TENANT` to your domain; for
+Microsoft Entra ID, set `tid` and your tenant's ID. Use them rather than the domains alone: the tenant
+claim says the account is your organization's, where an email domain says only what the account's email
+is.
+
 `gtm serve` checks every setting before it listens, and refuses one it cannot serve with one line that
 does not repeat the issuer. It refuses the demo sign-in beside a provider that signs in a workspace of
-real sources: set `GTM_DEMO_SIGN_IN=off`. The line it prints when it starts names the sign-ins it offers.
+real sources: set `GTM_DEMO_SIGN_IN=off`. The line it prints when it starts names the sign-ins it offers,
+and it logs each sign-in through the provider, kept or refused, in one line with no token, code, secret
+or email. A sign-in gets no receipt.
 
 A person appears in the workspace the first time they sign in, found by the provider's issuer and
-subject, never by their email, and with no grant. Grant them accounts the workspace holds:
+subject, never by their email, and with no grant. Grant them accounts the workspace holds, with
+`GTM_OIDC_ISSUER` set as `serve` has it, since the grant commands name only that issuer's people:
 
 ```sh
 gtm grants --state-dir acme                         # who has signed in, and what each reads
 gtm grant acc-sf-001000000000000AAA --to dana@invented.example --state-dir acme
-gtm grant acc-sf-001000000000000AAA --to dana@invented.example --state-dir acme --revoke
+gtm grant acc-sf-001000000000000AAA --subject 00u-dana --state-dir acme --revoke
+gtm grant --disable --to dana@invented.example --state-dir acme
 ```
 
-`--to` takes an email the provider verified, or the subject `grants` lists. An email two people share,
-or one the provider did not verify, names nobody: give the subject. Each change gets a receipt, and so
-does a refused person or account. [The command line](cli.md#grant-and-grants) gives each command's
-output.
+`--to` takes an email the provider verified, and `--subject` the subject `grants` lists. An email the
+provider did not verify names nobody, and one two people share is refused with the subjects it matched:
+give the subject. `--disable` ends the person's sessions at once and refuses their sign-ins, and keeps
+their grants for `--enable`. Each change gets a receipt, and so does a refused person or account.
+[The command line](cli.md#grant-and-grants) gives each command's output.
 
-A person the provider disables keeps the session they hold until it expires. Signing out ends the
-session here, and offers the provider's own sign-out page when the provider publishes one.
+A grant also opens the Ops pages: Coverage and Activity show only the deals, cards and receipts of the
+accounts a person is granted, as Deals does. Grant someone every account and they see the whole book.
+
+A person the provider disables keeps the session they hold until it expires, 60 minutes by default, or
+until `grant --disable`. Signing out ends the session here and offers the provider's own sign-out page
+when the provider publishes one. It leaves the provider's own session as it is.
 
 ## Health
 

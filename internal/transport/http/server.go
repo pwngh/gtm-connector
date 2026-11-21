@@ -121,6 +121,9 @@ func New(cfg Config, sessions Sessions, evidence authz.Evidence) (*Server, error
 		switch {
 		case o.Client == nil || o.Workspace.ID == "":
 			return nil, errors.New("sign-in through an identity provider needs its client and its workspace")
+		case o.Workspace.Kind != "demo" && !cfg.DemoSignInOff:
+			return nil, fmt.Errorf("the demo sign-in is on beside sign-in through the identity provider for the "+
+				"live workspace %s; set GTM_DEMO_SIGN_IN=off", o.Workspace.Slug)
 		case o.Client.RedirectURL() != cfg.PublicOrigin+OIDCCallbackPath:
 			return nil, fmt.Errorf("the identity provider's redirect URL must be the public origin followed by %s",
 				OIDCCallbackPath)

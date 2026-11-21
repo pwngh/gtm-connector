@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/pwngh/gtm-connector/internal/authz"
 	"github.com/pwngh/gtm-connector/internal/oidc"
 	"github.com/pwngh/gtm-connector/internal/oidc/oidctest"
@@ -234,6 +236,8 @@ func (s *companySite) people(t *testing.T) int {
 // they read nothing until the operator grants them an account, and then that account alone.
 func TestASignInThroughTheProvider(t *testing.T) {
 	s := companySiteFor(t)
+	receipts := func() int { return rowCount(t, &site{Fixture: s.Fixture}, "SELECT count(*) FROM receipts") }
+	before := receipts()
 	dana := s.person(t)
 	first := dana.session()
 	if ways, _ := first["sign_in"].(map[string]any); ways["oidc"] != true || ways["demo"] != true {
@@ -282,8 +286,22 @@ func TestASignInThroughTheProvider(t *testing.T) {
 			t.Fatal("the browser was given the ID token or the secret")
 		}
 	}
+	// The sign-in is one line of the log, naming the principal and the workspace, and no token, code,
+	// secret or email.
+	logged := s.logs.String()
+	if want := `msg="signed in through the identity provider" principal=` + principal["id"].(string) + " workspace=demo"; !strings.Contains(logged, want) {
+		t.Fatalf("the log does not say %q:\n%s", want, logged)
+	}
+	for _, held := range []string{s.provider.LastToken(), oidcSecret, "code=", "dana@invented.example"} {
+		if strings.Contains(logged, held) {
+			t.Fatalf("the log holds %q", held)
+		}
+	}
 	if n := s.people(t); n != 1 {
 		t.Fatalf("%d people", n)
+	}
+	if n := receipts(); n != before {
+		t.Fatalf("a sign-in left %d receipts", n-before)
 	}
 
 	if r := dana.get("/api/v1/accounts"); r.status != 200 || r.raw != `{"accounts":[]}`+"\n" {
@@ -495,7 +513,7 @@ func TestSignInsThatAreRefused(t *testing.T) {
 			t.Errorf("the log does not say %q", want)
 		}
 	}
-	for _, secret := range []string{oidcSecret, s.provider.LastToken(), "code="} {
+	for _, secret := range []string{oidcSecret, s.provider.LastToken(), "code=", "dana@invented.example", "pat@other.example"} {
 		if secret != "" && strings.Contains(logged, secret) {
 			t.Errorf("the log holds %q", secret)
 		}
@@ -524,7 +542,62 @@ func mustParse(t *testing.T, address string) *url.URL {
 	return u
 }
 
-// A sign-in returns only to a page of this app: any other address returns to "/".
+// Ops needs no role of its own. What Coverage and Activity read, the account list, an account's cards, a
+// card, a receipt and the deals, holds the accounts a person is granted and no other, as Deals does, and a
+// person granted every account reads the whole book.
+func TestOpsReadsOnlyWhatAPersonIsGranted(t *testing.T) {
+	s := companySiteFor(t)
+	other := postgrestest.Publish(t, s.Fixture, "acc-004", s.Reader.ID, "brief-other")
+	postgrestest.RegisterDeal(t, s.Fixture, postgrestest.Account, s.Reader.ID, "renewal")
+	postgrestest.RegisterDeal(t, s.Fixture, "acc-004", s.Reader.ID, "renewal")
+	dana := s.person(t)
+	dana.signIn("")
+	id := dana.session()["principal"].(map[string]any)["id"].(string)
+	deals := func() string {
+		t.Helper()
+		listed := dana.get("/v1/deals")
+		if listed.status != 200 {
+			t.Fatalf("deals: %d %s", listed.status, listed.raw)
+		}
+		var accounts []string
+		for _, deal := range listed.body["deals"].([]any) {
+			accounts = append(accounts, deal.(map[string]any)["account"].(string))
+		}
+		return strings.Join(accounts, ",")
+	}
+	if got := deals(); got != "" {
+		t.Fatalf("deals with no grant: %q", got)
+	}
+	if err := s.Store.GrantAccount(t.Context(), s.Workspace.ID, id, postgrestest.Account); err != nil {
+		t.Fatal(err)
+	}
+	if got := deals(); got != postgrestest.Account {
+		t.Fatalf("deals with one grant: %q", got)
+	}
+	if r := dana.get("/api/v1/accounts"); !strings.Contains(r.raw, postgrestest.Account) || strings.Contains(r.raw, "acc-004") {
+		t.Fatalf("accounts with one grant: %s", r.raw)
+	}
+	for _, path := range []string{"/api/v1/accounts/acc-004/cards", "/api/v1/cards/" + other.Card.ID,
+		"/api/v1/receipts/" + other.Read.ID, "/api/v1/receipts/" + other.Seal.ID} {
+		if r := dana.get(path); r.status != 403 {
+			t.Errorf("%s with no grant on its account: %d", path, r.status)
+		}
+	}
+	if err := s.Store.GrantAccount(t.Context(), s.Workspace.ID, id, "acc-004"); err != nil {
+		t.Fatal(err)
+	}
+	if got := deals(); got != postgrestest.Account+",acc-004" && got != "acc-004,"+postgrestest.Account {
+		t.Fatalf("deals with every account granted: %q", got)
+	}
+	for _, path := range []string{"/api/v1/accounts/acc-004/cards", "/api/v1/cards/" + other.Card.ID,
+		"/api/v1/receipts/" + other.Read.ID} {
+		if r := dana.get(path); r.status != 200 {
+			t.Errorf("%s with every account granted: %d", path, r.status)
+		}
+	}
+}
+
+// A sign-in returns only to a page of the app: any other address returns to "/".
 func TestASignInReturnsOnlyToThisApp(t *testing.T) {
 	s := companySiteFor(t)
 	for asked, want := range map[string]string{
@@ -596,15 +669,24 @@ func TestSigningOutOffersTheProvidersSignOut(t *testing.T) {
 // nobody in and a demo session opens nothing.
 func TestSessionsFollowTheSignInsOffered(t *testing.T) {
 	f := postgrestest.New(t)
-	short := companySiteOn(t, f, func(c *httptransport.Config) { c.OIDC.SessionTTL = 400 * time.Millisecond })
+	short := companySiteOn(t, f, func(c *httptransport.Config) { c.OIDC.SessionTTL = 7 * time.Minute })
 	p := short.person(t)
 	p.signIn("")
 	session := p.session()
 	expires, _ := time.Parse(time.RFC3339, session["expires_at"].(string))
-	if signedInAs(session) != "Dana Reed" || time.Until(expires) > 2*time.Second {
-		t.Fatalf("a short session: %v", session)
+	if signedInAs(session) != "Dana Reed" || time.Until(expires) < 6*time.Minute || time.Until(expires) > 8*time.Minute {
+		t.Fatalf("a session configured for seven minutes: %v", session)
 	}
-	time.Sleep(600 * time.Millisecond)
+	// The database's clock decides expiry: the session's times are moved past its end rather than waited for.
+	conn, err := pgx.Connect(t.Context(), f.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(t.Context())
+	if _, err := conn.Exec(t.Context(), `UPDATE sessions SET created_at = created_at - interval '8 minutes',
+		expires_at = expires_at - interval '8 minutes' WHERE id_sha256 = $1`, digestOf(p.cookie("__Host-gtm-session"))); err != nil {
+		t.Fatal(err)
+	}
 	if name := signedInAs(p.session()); name != "" {
 		t.Fatal("a session outlived its lifetime")
 	}
@@ -670,6 +752,29 @@ func TestWithoutAProviderItsPathsAreNotFound(t *testing.T) {
 	}
 }
 
+// The surface itself refuses the demo sign-in beside a provider that signs in a workspace of real sources.
+func TestTheDemoSignInIsRefusedBesideAProviderOfALiveWorkspace(t *testing.T) {
+	client, err := oidc.New(oidc.Config{Issuer: oidctest.Issuer, ClientID: oidcClientID,
+		RedirectURL: "https://127.0.0.1:8443" + httptransport.OIDCCallbackPath, AllowedDomains: []string{"invented.example"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := func(kind string, demoOff bool) httptransport.Config {
+		return httptransport.Config{PublicOrigin: "https://127.0.0.1:8443", AllowedHosts: []string{"127.0.0.1:8443"},
+			SessionKey: testKey, DemoSignInOff: demoOff,
+			OIDC: &httptransport.OIDC{Client: client, Workspace: postgres.Workspace{ID: "w", Slug: "acme", Kind: kind}}}
+	}
+	if _, err := httptransport.New(config("live", false), noSessions{}, authz.Evidence{}); err == nil ||
+		!strings.Contains(err.Error(), "GTM_DEMO_SIGN_IN=off") {
+		t.Fatalf("the demo sign-in beside a live workspace's provider: %v", err)
+	}
+	for _, c := range []httptransport.Config{config("live", true), config("demo", false)} {
+		if _, err := httptransport.New(c, noSessions{}, authz.Evidence{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // The redirect the provider is registered with must be this origin's callback.
 func TestTheRedirectMustBeThisOriginsCallback(t *testing.T) {
 	client, err := oidc.New(oidc.Config{Issuer: oidctest.Issuer, ClientID: oidcClientID,
@@ -679,7 +784,7 @@ func TestTheRedirectMustBeThisOriginsCallback(t *testing.T) {
 	}
 	_, err = httptransport.New(httptransport.Config{PublicOrigin: "https://127.0.0.1:8443",
 		AllowedHosts: []string{"127.0.0.1:8443"}, SessionKey: testKey,
-		OIDC: &httptransport.OIDC{Client: client, Workspace: postgres.Workspace{ID: "w"}}}, noSessions{}, authz.Evidence{})
+		OIDC: &httptransport.OIDC{Client: client, Workspace: postgres.Workspace{ID: "w", Kind: "demo"}}}, noSessions{}, authz.Evidence{})
 	if err == nil || !strings.Contains(err.Error(), httptransport.OIDCCallbackPath) {
 		t.Fatalf("got %v", err)
 	}

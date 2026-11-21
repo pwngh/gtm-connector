@@ -113,8 +113,9 @@ between two cards of a deal open the same way.
 People sign in through your company's identity provider. The connector stores no password for
 them. A person starts with no grant. A grant names an account, and a person reads each deal of an
 account they are granted and no other deal: a deal is one renewal of one account, so it opens through
-that account's grant. Whether a grant also shows Ops is open. A script or an assistant gets a token
-limited to selected deals and scopes, and the token expires.
+that account's grant. Ops takes no role of its own: Coverage and Activity show only the deals, cards and
+receipts of the accounts a person is granted, and a person granted every account sees the whole book. A
+script or an assistant gets a token limited to selected deals and scopes, and the token expires.
 [Running it](operations.md#sign-in-through-your-identity-provider) says how to set the sign-in up and
 give grants.
 

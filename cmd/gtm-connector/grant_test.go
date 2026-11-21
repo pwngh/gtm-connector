@@ -118,6 +118,14 @@ func (b *browserFor) do(method, address string, body []byte, header map[string]s
 // signIn goes through the provider and comes back signed in, to the page it started from.
 func (b *browserFor) signIn() {
 	b.t.Helper()
+	if location := b.trySignIn(); location != b.origin+"/" {
+		b.t.Fatalf("the sign-in came back to %q", location)
+	}
+}
+
+// trySignIn goes through the provider and gives where the sign-in sends the browser back to.
+func (b *browserFor) trySignIn() string {
+	b.t.Helper()
 	location := httptransport.OIDCStartPath
 	for range 3 {
 		status, next, _ := b.do(http.MethodGet, location, nil, nil)
@@ -126,9 +134,7 @@ func (b *browserFor) signIn() {
 		}
 		location = next
 	}
-	if location != b.origin+"/" {
-		b.t.Fatalf("the sign-in came back to %q", location)
-	}
+	return location
 }
 
 func (b *browserFor) accounts() string {
@@ -200,7 +206,7 @@ func TestGrantsThroughTheCommandOpenAccountsInTheBrowser(t *testing.T) {
 		t.Fatalf("after the grant: %s", got)
 	}
 	var again grantResult
-	d.result(t, &again, "grant", liveAccount, "--to", "00u-dana", "--state-dir", "acme")
+	d.result(t, &again, "grant", liveAccount, "--subject", "00u-dana", "--state-dir", "acme")
 	if again.Changed || again.State != "live" {
 		t.Fatalf("a grant held already: %+v", again)
 	}
@@ -229,7 +235,7 @@ func TestGrantsThroughTheCommandOpenAccountsInTheBrowser(t *testing.T) {
 		args    []string
 		message string
 	}{
-		{[]string{"grant", liveAccount, "--to", "nobody@invented.example"}, "No person of this workspace has that email or subject."},
+		{[]string{"grant", liveAccount, "--to", "nobody@invented.example"}, "No person of this workspace has that verified email."},
 		{[]string{"grant", "acc-sf-001000000000000ZZZ", "--to", "dana@invented.example"}, "This workspace holds no account by that ID."},
 	} {
 		if _, message, _ := d.refusal(t, 2, append(c.args, "--state-dir", "acme")...); !strings.HasPrefix(message, c.message) {
@@ -245,6 +251,7 @@ func TestGrantsThroughTheCommandOpenAccountsInTheBrowser(t *testing.T) {
 	for _, args := range [][]string{
 		{"grant", liveAccount, "--to", "two words"},
 		{"grant", "not-an-account", "--to", "dana@invented.example"},
+		{"grant", "--to", "dana@invented.example"},
 		{"grant", liveAccount},
 		{"grants", "--to", "line\nbreak"},
 	} {
@@ -278,7 +285,8 @@ func TestGrantsThroughTheCommandOpenAccountsInTheBrowser(t *testing.T) {
 	// each. An email the provider did not verify names nobody.
 	p.SetAccount(oidctest.Account{Subject: "00u-dana-2", Email: "dana@invented.example", Name: "Dana Two", EmailVerified: true})
 	newBrowserFor(t, s, p).signIn()
-	if _, message, _ := d.refusal(t, 2, "grant", liveAccount, "--to", "dana@invented.example", "--state-dir", "acme"); !strings.HasPrefix(message, "More than one person") {
+	if _, message, _ := d.refusal(t, 2, "grant", liveAccount, "--to", "dana@invented.example", "--state-dir", "acme"); message !=
+		"More than one person of this workspace has that verified email: the subjects 00u-dana and 00u-dana-2. Name one with --subject." {
 		t.Fatalf("an ambiguous email: %s", message)
 	}
 	if last := receipts()[len(receipts())-1]; last.Tool != "grant_account" || last.Status != "error" ||
@@ -290,23 +298,18 @@ func TestGrantsThroughTheCommandOpenAccountsInTheBrowser(t *testing.T) {
 	if nobody == nil || len(nobody) != 0 {
 		t.Fatalf("grants of a workspace no one signed in to: %v", nobody)
 	}
-	d.result(t, &listed, "grants", "--to", "00u-dana-2", "--state-dir", "acme")
+	d.result(t, &listed, "grants", "--subject", "00u-dana-2", "--state-dir", "acme")
 	if len(listed) != 1 || listed[0].Name != "Dana Two" {
 		t.Fatalf("grants of one person: %+v", listed)
 	}
-	d.result(t, &granted, "grant", liveAccount, "--to", "00u-dana-2", "--state-dir", "acme")
+	d.result(t, &granted, "grant", liveAccount, "--subject", "00u-dana-2", "--state-dir", "acme")
 	if granted.Person.Name != "Dana Two" || !granted.Changed {
 		t.Fatalf("by subject: %+v", granted)
 	}
-	flow := sha256.Sum256([]byte("an invented flow"))
-	session2 := sha256.Sum256([]byte("an invented session"))
-	if _, _, err := d.owner.SignInPerson(ctx, postgres.Admission{PreSession: true, IDSHA256: flow[:],
-		ExpiresAt: time.Now().Add(time.Minute)}, session2[:], w, postgres.PersonIdentity{Issuer: oidctest.Issuer,
-		Subject: "00u-lee", Email: "lee@invented.example", DisplayName: "Lee"}, time.Minute, nil); err != nil {
-		t.Fatal(err)
-	}
+	signedInPerson(t, d, w, postgres.PersonIdentity{Issuer: oidctest.Issuer, Subject: "00u-lee",
+		Email: "lee@invented.example", DisplayName: "Lee"})
 	d.refusal(t, 2, "grant", liveAccount, "--to", "lee@invented.example", "--state-dir", "acme")
-	d.result(t, &granted, "grant", liveAccount, "--to", "00u-lee", "--state-dir", "acme")
+	d.result(t, &granted, "grant", liveAccount, "--subject", "00u-lee", "--state-dir", "acme")
 	if granted.Person.Email == nil || *granted.Person.Email != "lee@invented.example" {
 		t.Fatalf("an unverified email, by subject: %+v", granted)
 	}
@@ -318,16 +321,152 @@ func TestGrantsThroughTheCommandOpenAccountsInTheBrowser(t *testing.T) {
 	}
 }
 
+// signedInPerson makes a person of a workspace as their first sign-in does, outside any server.
+func signedInPerson(t *testing.T, d *demoDatabase, w postgres.Workspace, who postgres.PersonIdentity) {
+	t.Helper()
+	flow := sha256.Sum256([]byte("an invented flow of " + who.Issuer + " " + who.Subject))
+	session := sha256.Sum256([]byte("an invented session of " + who.Issuer + " " + who.Subject))
+	if who.DisplayName == "" {
+		who.DisplayName = who.Subject
+	}
+	if _, _, err := d.owner.SignInPerson(ctx, postgres.Admission{PreSession: true, IDSHA256: flow[:],
+		ExpiresAt: time.Now().Add(time.Minute)}, session[:], w, who, time.Minute, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// grant names a person of the issuer serve signs in through: by an email that issuer verified with --to,
+// or by subject with --subject. A subject given as --to names nobody, a person of another issuer is never
+// named, an email two people share says which subjects it matched, and without GTM_OIDC_ISSUER grant
+// names no one.
+func TestGrantNamesOnlyAPersonOfServesIssuer(t *testing.T) {
+	d := setUpDemo(t)
+	w := liveWorkspace(t, d)
+	for name, value := range oidcEnv {
+		t.Setenv(name, value)
+	}
+	signedInPerson(t, d, w, postgres.PersonIdentity{Issuer: oidctest.Issuer, Subject: "00u-dana",
+		Email: "dana@invented.example", EmailVerified: true, DisplayName: "Dana Reed"})
+	signedInPerson(t, d, w, postgres.PersonIdentity{Issuer: "https://login.other.example", Subject: "00u-other",
+		Email: "dana@invented.example", EmailVerified: true, DisplayName: "Dana Elsewhere"})
+
+	if _, message, _ := d.refusal(t, 2, "grant", liveAccount, "--to", "00u-dana", "--state-dir", "acme"); message !=
+		"No person of this workspace has that verified email. Name a person by subject with --subject: gtm-connector grants lists them." {
+		t.Fatalf("a subject given as --to: %s", message)
+	}
+	var granted grantResult
+	d.result(t, &granted, "grant", liveAccount, "--subject", "00u-dana", "--state-dir", "acme")
+	if granted.Person.Subject != "00u-dana" || !granted.Changed {
+		t.Fatalf("by subject: %+v", granted)
+	}
+	d.result(t, &granted, "grant", liveAccount, "--to", "DANA@invented.example", "--revoke", "--state-dir", "acme")
+	if granted.Person.Subject != "00u-dana" || !granted.Changed || granted.State != "revoked" {
+		t.Fatalf("an email another issuer's person shares: %+v", granted)
+	}
+	d.refusal(t, 2, "grant", liveAccount, "--subject", "00u-other", "--state-dir", "acme")
+	var listed []struct{ Subject string }
+	d.result(t, &listed, "grants", "--state-dir", "acme")
+	if len(listed) != 1 || listed[0].Subject != "00u-dana" {
+		t.Fatalf("grants lists people of another issuer: %+v", listed)
+	}
+
+	signedInPerson(t, d, w, postgres.PersonIdentity{Issuer: oidctest.Issuer, Subject: "00u-dana-2",
+		Email: "Dana@Invented.example", EmailVerified: true})
+	if _, message, _ := d.refusal(t, 2, "grant", liveAccount, "--to", "dana@invented.example", "--state-dir", "acme"); message !=
+		"More than one person of this workspace has that verified email: the subjects 00u-dana and 00u-dana-2. Name one with --subject." {
+		t.Fatalf("an email two people share: %s", message)
+	}
+	for _, args := range [][]string{{"grant", liveAccount}, {"grant", liveAccount, "--to", "dana@invented.example",
+		"--subject", "00u-dana"}, {"grants", "--to", "dana@invented.example", "--subject", "00u-dana"}} {
+		if _, message, _ := d.refusal(t, 2, append(args, "--state-dir", "acme")...); message != "Name one person: --to EMAIL or --subject SUBJECT." {
+			t.Errorf("%v: %s", args, message)
+		}
+	}
+
+	t.Setenv("GTM_OIDC_ISSUER", "")
+	for _, args := range [][]string{{"grant", liveAccount, "--subject", "00u-dana"}, {"grants"}} {
+		if _, message, _ := d.refusal(t, 1, append(args, "--state-dir", "acme")...); message !=
+			"set GTM_OIDC_ISSUER to the issuer serve signs people in through; its people are the ones named" {
+			t.Errorf("%v without the issuer: %s", args, message)
+		}
+	}
+}
+
+// grant --disable ends a person's sessions at once and refuses their sign-ins, with their grants kept, and
+// --enable lets them in again with those grants. Each is a receipt of its own, through the grant command's
+// receipts.
+func TestDisablingAPersonEndsTheirSessionsAtOnce(t *testing.T) {
+	d := setUpDemo(t)
+	liveWorkspace(t, d)
+	s, p := companyServe(t, d)
+	b := newBrowserFor(t, s, p)
+	b.signIn()
+	d.succeeded(t, "grant", liveAccount, "--to", "dana@invented.example", "--state-dir", "acme")
+	if got := b.accounts(); !strings.Contains(got, liveAccount) {
+		t.Fatalf("before: %s", got)
+	}
+
+	var disabled struct {
+		Person        struct{ ID, State string }
+		Changed       bool
+		SessionsEnded int    `json:"sessions_ended"`
+		ReceiptID     string `json:"receipt_id"`
+	}
+	d.result(t, &disabled, "grant", "--disable", "--to", "dana@invented.example", "--state-dir", "acme")
+	if disabled.Person.State != "disabled" || !disabled.Changed || disabled.SessionsEnded != 1 || disabled.ReceiptID == "" {
+		t.Fatalf("--disable: %+v", disabled)
+	}
+	if status, _, _ := b.do(http.MethodGet, "/api/v1/accounts", nil, nil); status != http.StatusUnauthorized {
+		t.Fatalf("the session after --disable: %d", status)
+	}
+	if back := newBrowserFor(t, s, p).trySignIn(); back != b.origin+"/?sign_in_error=disabled" {
+		t.Fatalf("a sign-in after --disable came back to %q", back)
+	}
+	stdout, _ := d.succeeded(t, "grant", "--disable", "--subject", "00u-dana", "--state-dir", "acme")
+	if !strings.HasPrefix(stdout, "Dana Reed (dana@invented.example) was disabled already; 0 of their sessions ended. Receipt ") {
+		t.Fatalf("--disable again: %s", stdout)
+	}
+	var listed []struct{ State string }
+	d.result(t, &listed, "grants", "--state-dir", "acme")
+	if len(listed) != 1 || listed[0].State != "disabled" {
+		t.Fatalf("grants of a disabled person: %+v", listed)
+	}
+
+	stdout, _ = d.succeeded(t, "grant", "--enable", "--to", "dana@invented.example", "--state-dir", "acme")
+	if !strings.HasPrefix(stdout, "Enabled Dana Reed (dana@invented.example). They can sign in again, with the grants they hold. Receipt ") {
+		t.Fatalf("--enable: %s", stdout)
+	}
+	again := newBrowserFor(t, s, p)
+	again.signIn()
+	if got := again.accounts(); !strings.Contains(got, liveAccount) {
+		t.Fatalf("after --enable the grant is kept: %s", got)
+	}
+
+	var rows []receiptRow
+	d.result(t, &rows, "audit", "--state-dir", "acme")
+	var people []string
+	for _, r := range rows {
+		if r.Tool == "disable_person" || r.Tool == "enable_person" {
+			people = append(people, r.Tool+" "+r.Status+" "+strings.Join(r.Rows, ","))
+		}
+	}
+	row := "people/" + disabled.Person.ID
+	if strings.Join(people, "\n") != strings.Join([]string{"disable_person ok " + row, "disable_person ok " + row,
+		"enable_person ok " + row}, "\n") {
+		t.Fatalf("the receipts:\n%s", strings.Join(people, "\n"))
+	}
+	for _, args := range [][]string{{"grant", "--disable", "--enable", "--subject", "00u-dana"},
+		{"grant", "--disable", "--revoke", "--subject", "00u-dana"}, {"grant", liveAccount, "--disable", "--subject", "00u-dana"}} {
+		d.refusal(t, 2, append(args, "--state-dir", "acme")...)
+	}
+}
+
 // In the demo workspace, an account of the demo book can be granted before any command has read it.
 func TestADemoBookAccountCanBeGrantedAtOnce(t *testing.T) {
 	d := setUpDemo(t)
-	flow := sha256.Sum256([]byte("an invented flow"))
-	session := sha256.Sum256([]byte("an invented session"))
-	if _, _, err := d.owner.SignInPerson(ctx, postgres.Admission{PreSession: true, IDSHA256: flow[:],
-		ExpiresAt: time.Now().Add(time.Minute)}, session[:], d.workspace, postgres.PersonIdentity{Issuer: oidctest.Issuer,
-		Subject: "00u-dana", Email: "dana@invented.example", EmailVerified: true, DisplayName: "Dana Reed"}, time.Minute, nil); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("GTM_OIDC_ISSUER", oidctest.Issuer)
+	signedInPerson(t, d, d.workspace, postgres.PersonIdentity{Issuer: oidctest.Issuer, Subject: "00u-dana",
+		Email: "dana@invented.example", EmailVerified: true, DisplayName: "Dana Reed"})
 	stdout, _ := d.succeeded(t, "grant", "acc-007", "--to", "dana@invented.example")
 	if !strings.HasPrefix(stdout, "Granted acc-007 (") {
 		t.Fatalf("grant: %s", stdout)

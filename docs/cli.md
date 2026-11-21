@@ -565,24 +565,29 @@ its calls. [MCP](mcp.md) covers scopes, grants, lifetimes and both transports.
 
 ### `grant` and `grants`
 
-`grant ACCOUNT --to PERSON` gives a person who signs in through the identity provider read access to one
-account the workspace holds, and `--revoke` ends it. `grants` lists the people who have signed in to the
-workspace and every grant each holds or held, and `--to PERSON` lists one of them. A person is listed
-from their first sign-in, with no grant. [Running it](operations.md#sign-in-through-your-identity-provider)
-covers the sign-in.
+`grant ACCOUNT` gives a person who signs in through the identity provider read access to one account the
+workspace holds, and `--revoke` ends it. `grant --disable` takes no account: it ends the person's
+sessions at once and refuses their sign-ins, and keeps their grants, until `grant --enable`. `grants`
+lists the people who have signed in to the workspace and every grant each holds or held, or one person.
+A person is listed from their first sign-in, with no grant.
+[Running it](operations.md#sign-in-through-your-identity-provider) covers the sign-in.
 
-`--to` takes an email the person's provider verified, in any case, or their subject. In the `demo`
-workspace, an account of the demo book can be granted before any command has read it.
+Every form names one person: `--to EMAIL` by an email their provider verified, in any case, or
+`--subject SUBJECT`. The people are those of the issuer in `GTM_OIDC_ISSUER`, set as `serve` has it;
+without it the commands exit `1`. In the `demo` workspace, an account of the demo book can be granted
+before any command has read it.
 
 | Command | JSON result |
 | --- | --- |
-| `grant` | Object with `account`, `account_name`, `person`, `state` (`live`, or `revoked` with `--revoke`), `changed` (false when the grant already stood so) and `receipt_id`. |
+| `grant ACCOUNT` | Object with `account`, `account_name`, `person`, `state` (`live`, or `revoked` with `--revoke`), `changed` (false when the grant already stood so) and `receipt_id`. |
+| `grant --disable`, `grant --enable` | Object with `person` (its `state` the new one), `changed`, `sessions_ended` and `receipt_id`. |
 | `grants` | Array of people, first signed in first, each with `id`, `name`, `email`, `email_verified`, `subject`, `state` (`enabled` or `disabled`), `first_signed_in` and `grants`, each grant with `account`, `account_name`, `state`, `granted_at` and `revoked_at`. `[]` when no one has signed in. |
 
-`grant` exits `2` for an ACCOUNT that is not an account ID, a `--to` that is not one line of printable
-text, a workspace that does not exist, a person or an account the workspace does not have, and an email
-two people share. A refused person or account, and an email two people share, keep their receipt,
-finished as an error. See [audit](audit.md#what-each-command-adds).
+`grant` exits `2` for an ACCOUNT that is not an account ID, none where one is due or one with `--disable`
+or `--enable`, both or neither of `--to` and `--subject`, a value that is not one line of printable
+text, a workspace no one has signed in to, a person or an account the workspace does not have, and an
+email two people share, which names the subjects it matched. A refused person or account, and an email
+two people share, keep their receipt, finished as an error. See [audit](audit.md#what-each-command-adds).
 
 ### Debug commands
 

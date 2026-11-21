@@ -97,28 +97,35 @@ func (s *Server) newFlow(back string) (string, []byte, time.Time) {
 		base64.RawURLEncoding.EncodeToString(s.flowMAC(payload)), payload[8:40], expires
 }
 
-// flowOf reads the request's flow cookie: its value, its flow ID, the page it returns to and its expiry,
-// when its HMAC is the session key's and it has not expired.
-func (s *Server) flowOf(r *http.Request) (cookie string, flow []byte, back string, expires time.Time, ok bool) {
+// flowOf reads the request's flow cookie: its flow ID, the page it returns to and its expiry, when its
+// HMAC is the session key's and it has not expired. Its parts are read strictly, so a used flow cannot
+// come back under another spelling of the same bytes.
+func (s *Server) flowOf(r *http.Request) (flow []byte, back string, expires time.Time, ok bool) {
 	found, err := r.Cookie(flowCookieName)
 	if err != nil {
-		return "", nil, "", time.Time{}, false
+		return nil, "", time.Time{}, false
 	}
 	parts := strings.Split(found.Value, ".")
 	if len(parts) != 3 || parts[0] != "o1" {
-		return "", nil, "", time.Time{}, false
+		return nil, "", time.Time{}, false
 	}
-	payload, err1 := base64.RawURLEncoding.DecodeString(parts[1])
-	mac, err2 := base64.RawURLEncoding.DecodeString(parts[2])
+	payload, err1 := cookieBase64.DecodeString(parts[1])
+	mac, err2 := cookieBase64.DecodeString(parts[2])
 	if err1 != nil || err2 != nil || len(payload) < 40 || len(payload) > 40+maxReturn ||
 		!hmac.Equal(mac, s.flowMAC(payload)) {
-		return "", nil, "", time.Time{}, false
+		return nil, "", time.Time{}, false
 	}
 	expires = time.Unix(int64(binary.BigEndian.Uint64(payload)), 0)
 	if !time.Now().Before(expires) {
-		return "", nil, "", time.Time{}, false
+		return nil, "", time.Time{}, false
 	}
-	return found.Value, payload[8:40], s.returnPath(string(payload[40:])), expires, true
+	return payload[8:40], s.returnPath(string(payload[40:])), expires, true
+}
+
+// flowDigest is what a used flow is recorded by: the digest of its flow ID, whatever its cookie's spelling.
+func flowDigest(flow []byte) []byte {
+	sum := sha256.Sum256(append([]byte("gtm-connector oidc flow\x00"), flow...))
+	return sum[:]
 }
 
 // returnPath is the page of the app a sign-in returns to: a client route of this origin, with its query,
@@ -180,7 +187,7 @@ func (s *Server) finishOIDC(w http.ResponseWriter, r *http.Request) {
 	}
 	// A flow is used once, whatever comes of it.
 	clearCookie(w, flowCookieName)
-	cookie, flow, back, expires, ok := s.flowOf(r)
+	flow, back, expires, ok := s.flowOf(r)
 	if !ok {
 		s.refuseSignIn(w, r, "/", refusedExpired, errFlow)
 		return
@@ -211,7 +218,7 @@ func (s *Server) finishOIDC(w http.ResponseWriter, r *http.Request) {
 		s.refuseSignIn(w, r, back, refusalOf(err), err)
 		return
 	}
-	admitted := postgres.Admission{PreSession: true, IDSHA256: digest(cookie), ExpiresAt: expires}
+	admitted := postgres.Admission{PreSession: true, IDSHA256: flowDigest(flow), ExpiresAt: expires}
 	switch used, err := s.sessions.PreSessionUsed(r.Context(), admitted.IDSHA256); {
 	case err != nil:
 		s.refuseSignIn(w, r, back, refusedFailed, errors.New("the flow could not be looked up"))
@@ -230,7 +237,7 @@ func (s *Server) finishOIDC(w http.ResponseWriter, r *http.Request) {
 		previous = digest(token)
 	}
 	next := newToken()
-	_, until, err := s.sessions.SignInPerson(r.Context(), admitted, digest(next), s.cfg.OIDC.Workspace,
+	principal, until, err := s.sessions.SignInPerson(r.Context(), admitted, digest(next), s.cfg.OIDC.Workspace,
 		personOf(who), s.cfg.OIDC.SessionTTL, previous)
 	switch {
 	case errors.Is(err, postgres.ErrSessionUsed):
@@ -242,6 +249,12 @@ func (s *Server) finishOIDC(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		s.refuseSignIn(w, r, back, refusedFailed, errors.New("the session could not be stored"))
 		return
+	}
+	// A sign-in is one line of the log, as a refusal is, by the principal and the workspace: no token,
+	// code, secret or email.
+	if s.cfg.Log != nil {
+		s.cfg.Log.Info("signed in through the identity provider", "principal", principal.ID,
+			"workspace", s.cfg.OIDC.Workspace.Slug)
 	}
 	setCookie(w, cookieName, next, until)
 	http.Redirect(w, r, s.cfg.PublicOrigin+back, http.StatusSeeOther)

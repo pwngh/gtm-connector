@@ -438,6 +438,74 @@ func TestWhoMaySignIn(t *testing.T) {
 	}
 }
 
+// email_verified sent as the text "true" or "false", as some providers send it, is read as that answer; any
+// other value of it refuses the token.
+func TestEmailVerifiedSentAsText(t *testing.T) {
+	for verified, want := range map[any]error{"true": nil, "false": oidc.ErrNotAllowed, "yes": oidc.ErrToken, 1: oidc.ErrToken} {
+		p := provider(t, secret)
+		p.SetAccount(oidctest.Account{Subject: "s", Email: "dana@invented.example",
+			Claims: map[string]any{"email_verified": verified}})
+		c := client(t, p)
+		_, err := start(t, p, c).finish(c)
+		if (want == nil) != (err == nil) || (want != nil && !errors.Is(err, want)) {
+			t.Errorf("email_verified %v: %v", verified, err)
+		}
+	}
+}
+
+// A key the provider publishes with the fully specified name Ed25519 verifies an EdDSA token, and a token
+// that names its algorithm Ed25519.
+func TestAKeyPublishedAsEd25519VerifiesEdDSA(t *testing.T) {
+	p := provider(t, secret)
+	k := p.Rotate(t, "k-ed", "Ed25519")
+	c := client(t, p)
+	if _, err := start(t, p, c).finish(c); err != nil {
+		t.Fatalf("a token named Ed25519: %v", err)
+	}
+	p.Mint = func(claims map[string]any) string {
+		return oidctest.SignWith(k, map[string]any{"alg": "EdDSA", "kid": "k-ed"}, claims)
+	}
+	if _, err := start(t, p, c).finish(c); err != nil {
+		t.Fatalf("a token named EdDSA: %v", err)
+	}
+}
+
+// A provider whose discovery document or key set fails is asked again only after five seconds, so sign-ins
+// do not wait on it one after another.
+func TestAFailingProviderIsAskedAgainAfterFiveSeconds(t *testing.T) {
+	p := provider(t, secret)
+	clock := time.Now()
+	c := client(t, p, func(cfg *oidc.Config) { cfg.Now = func() time.Time { return clock } })
+	p.Discovery = func(d map[string]any) { d["issuer"] = "https://login.other.example" }
+	for range 3 {
+		if _, err := c.AuthorizationURL(context.Background(), randomText(), randomText(), randomText()); !errors.Is(err, oidc.ErrUnavailable) {
+			t.Fatal(err)
+		}
+	}
+	if n := p.Counts().Discovery; n != 1 {
+		t.Fatalf("a failed discovery was read %d times within five seconds", n)
+	}
+	clock = clock.Add(6 * time.Second)
+	p.Discovery = nil
+	p.FailKeys = true
+	if _, err := c.AuthorizationURL(context.Background(), randomText(), randomText(), randomText()); err != nil || p.Counts().Discovery != 2 {
+		t.Fatalf("after five seconds: %v, %d reads", err, p.Counts().Discovery)
+	}
+	for range 2 {
+		if _, err := start(t, p, c).finish(c); !errors.Is(err, oidc.ErrUnavailable) {
+			t.Fatal(err)
+		}
+	}
+	if n := p.Counts().Keys; n != 1 {
+		t.Fatalf("a failed key set was read %d times within five seconds", n)
+	}
+	clock = clock.Add(6 * time.Second)
+	p.FailKeys = false
+	if _, err := start(t, p, c).finish(c); err != nil || p.Counts().Keys != 2 {
+		t.Fatalf("after five seconds: %v, %d reads", err, p.Counts().Keys)
+	}
+}
+
 func TestAConfigurationThatCannotSignInSafelyIsRefused(t *testing.T) {
 	good := oidc.Config{Issuer: oidctest.Issuer, ClientID: clientID, RedirectURL: redirect, AllowedDomains: []string{"invented.example"}}
 	if _, err := oidc.New(good); err != nil {

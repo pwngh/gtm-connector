@@ -81,6 +81,8 @@ type Provider struct {
 	Discovery func(document map[string]any)
 	// KeysMaxAge is the max-age the key set is served with, in seconds.
 	KeysMaxAge int
+	// FailKeys answers the key set with HTTP 503.
+	FailKeys bool
 }
 
 // Counts are the requests each endpoint has answered.
@@ -184,7 +186,7 @@ func NewKey(t testing.TB, id, alg string) *Key {
 		private, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	case alg == "ES512":
 		private, err = ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
-	case alg == "EdDSA":
+	case alg == "EdDSA", alg == "Ed25519":
 		_, private, err = ed25519.GenerateKey(rand.Reader)
 	default:
 		t.Fatalf("no key for %s", alg)
@@ -335,6 +337,11 @@ func (p *Provider) discovery(w http.ResponseWriter) {
 func (p *Provider) keys(w http.ResponseWriter) {
 	p.mu.Lock()
 	p.counts.Keys++
+	if p.FailKeys {
+		p.mu.Unlock()
+		http.Error(w, "the key set is unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	keys := make([]any, len(p.published))
 	for i, k := range p.published {
 		keys[i] = k.JWK()

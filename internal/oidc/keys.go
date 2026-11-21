@@ -41,6 +41,14 @@ var algorithms = map[string]algorithm{
 	"ES384": {kty: "EC", crv: "P-384", hash: crypto.SHA384, size: 48},
 	"ES512": {kty: "EC", crv: "P-521", hash: crypto.SHA512, size: 66},
 	"EdDSA": {kty: "OKP", crv: "Ed25519"},
+	// RFC 9864's fully specified name of EdDSA over Ed25519.
+	"Ed25519": {kty: "OKP", crv: "Ed25519"},
+}
+
+// sameAlgorithm is whether two names are one algorithm: EdDSA over an Ed25519 key is also named Ed25519.
+func sameAlgorithm(a, b string) bool {
+	ed := func(name string) bool { return name == "EdDSA" || name == "Ed25519" }
+	return a == b || ed(a) && ed(b)
 }
 
 // curves are the elliptic curves of the EC keys, by their JWK names.
@@ -58,7 +66,7 @@ type key struct {
 // fits is whether the key may verify a token signed with alg: of the algorithm's type and curve, and, when
 // the set pins the key to an algorithm, to that one.
 func (k key) fits(alg string, a algorithm) bool {
-	return k.kty == a.kty && k.crv == a.crv && (k.alg == "" || k.alg == alg)
+	return k.kty == a.kty && k.crv == a.crv && (k.alg == "" || sameAlgorithm(k.alg, alg))
 }
 
 func digestOf(h crypto.Hash, data []byte) []byte {
@@ -226,9 +234,10 @@ const (
 
 // keySet is the provider's keys as last read.
 type keySet struct {
-	keys   []key
-	until  time.Time // when the set is read again before use; zero before the first read
-	readAt time.Time // when the set was last asked for, read or not
+	keys    []key
+	until   time.Time // when the set is read again before use; zero before the first read
+	readAt  time.Time // when the set was last asked for, read or not
+	failure failure   // the last failed read, held for failureHold
 }
 
 // keyLife is how long a key set is kept, from its answer's Cache-Control.
@@ -244,18 +253,23 @@ func keyLife(cacheControl string) time.Duration {
 	return keyLifeMost
 }
 
-// readKeys reads the key set at address and keeps it. The caller holds c.mu.
+// readKeys reads the key set at address and keeps it. A read that failed less than failureHold ago is
+// not tried again. The caller holds c.mu.
 func (c *Client) readKeys(ctx context.Context, address string) ([]key, error) {
+	if err := c.keys.failure.held(c.now()); err != nil {
+		return nil, err
+	}
 	c.keys.readAt = c.now()
 	body, cacheControl, err := c.get(ctx, address, maxKeySet)
+	var keys []key
+	if err == nil {
+		keys, err = parseKeySet(body)
+	}
 	if err != nil {
+		c.keys.failure.remember(err, c.now())
 		return nil, err
 	}
-	keys, err := parseKeySet(body)
-	if err != nil {
-		return nil, err
-	}
-	c.keys.keys, c.keys.until = keys, c.now().Add(keyLife(cacheControl))
+	c.keys.keys, c.keys.until, c.keys.failure = keys, c.now().Add(keyLife(cacheControl)), failure{}
 	return keys, nil
 }
 

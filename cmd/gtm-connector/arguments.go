@@ -55,9 +55,9 @@ var commands = map[string]arguments{
 	"demo": {options: []option{{name: "--again"}}, help: demoHelp},
 	"admit": {options: []option{{name: "--from-org", value: true, required: true},
 		{name: "--export-sha256", value: true, required: true}}, required: "FOLDER", help: admitHelp},
-	"grant": {options: []option{{name: "--to", value: true, required: true}, {name: "--revoke"}}, required: "ACCOUNT",
-		help: grantHelp},
-	"grants": {options: []option{{name: "--to", value: true}}, help: grantsHelp},
+	"grant": {options: []option{{name: "--to", value: true}, {name: "--subject", value: true}, {name: "--revoke"},
+		{name: "--disable"}, {name: "--enable"}}, optional: "ACCOUNT", help: grantHelp},
+	"grants": {options: []option{{name: "--to", value: true}, {name: "--subject", value: true}}, help: grantsHelp},
 }
 
 // parsed is one command line, read.
@@ -151,7 +151,7 @@ func (a arguments) parse(tokens []string) (parsed, error) {
 		switch {
 		case literal || !isOption:
 			// The argument with fixed values is checked where it stands, before what follows it.
-			if a.optional != "" && len(p.positionals) == 0 && !slices.Contains(a.choices, token) {
+			if a.optional != "" && a.choices != nil && len(p.positionals) == 0 && !slices.Contains(a.choices, token) {
 				return p, usageError("argument " + a.optional + ": invalid choice (choose from " +
 					quotedChoices(a.choices) + ")")
 			}

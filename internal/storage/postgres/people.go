@@ -99,17 +99,17 @@ type Grant struct {
 	RevokedAt               *time.Time
 }
 
-// People lists the people of a workspace who sign in through an identity provider, in the order they
-// first signed in, each with their grants by account.
-func (s *Store) People(ctx context.Context, workspaceID string) ([]Person, error) {
+// People lists the people of a workspace who sign in through the identity provider with this issuer, in
+// the order they first signed in, each with their grants by account.
+func (s *Store) People(ctx context.Context, workspaceID, issuer string) ([]Person, error) {
 	if !validUUID(workspaceID) {
 		return nil, ErrNotFound
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, workspace_id, workspace_kind, display_name, oidc_issuer, oidc_subject, coalesce(email, ''),
 		       email_verified, disabled_at IS NOT NULL, created_at
-		  FROM principals WHERE workspace_id = $1 AND oidc_subject IS NOT NULL
-		 ORDER BY created_at, id`, workspaceID)
+		  FROM principals WHERE workspace_id = $1 AND oidc_issuer = $2
+		 ORDER BY created_at, id`, workspaceID, issuer)
 	if err != nil {
 		return nil, err
 	}
@@ -131,8 +131,8 @@ func (s *Store) People(ctx context.Context, workspaceID string) ([]Person, error
 		  FROM account_grants g
 		  JOIN accounts a ON a.workspace_id = g.workspace_id AND a.ref = g.account_ref
 		  JOIN principals p ON p.workspace_id = g.workspace_id AND p.id = g.principal_id
-		 WHERE g.workspace_id = $1 AND p.oidc_subject IS NOT NULL
-		 ORDER BY g.account_ref`, workspaceID)
+		 WHERE g.workspace_id = $1 AND p.oidc_issuer = $2
+		 ORDER BY g.account_ref`, workspaceID, issuer)
 	if err != nil {
 		return nil, err
 	}
@@ -210,4 +210,53 @@ func (s *Store) ChangeGrant(ctx context.Context, started Receipt, began time.Tim
 		return false, Receipt{}, ErrLeaseLost
 	}
 	return changed, finished, err
+}
+
+// PersonRow is the reference a person's change names on its receipt: people/PRINCIPAL.
+func PersonRow(principalID string) string { return "people/" + principalID }
+
+// ChangePerson disables a person, or with disable false enables them again, under a receipt the caller
+// started at began and holds the lease of, and finishes that receipt ok, naming PersonRow, in the same
+// transaction. Disabling ends each of the person's live sessions at once, and from its commit the person's
+// grants open nothing and their sign-ins are refused; enabling lets them sign in again, with the grants
+// they hold. It reports whether the person changed and how many sessions it ended.
+func (s *Store) ChangePerson(ctx context.Context, started Receipt, began time.Time, workspaceID, principalID string,
+	disable bool) (bool, int64, Receipt, error) {
+	if !validUUID(workspaceID) || !validUUID(principalID) || !validUUID(started.ID) {
+		return false, 0, Receipt{}, ErrNotFound
+	}
+	var changed bool
+	var ended int64
+	var finished Receipt
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
+		set := `UPDATE principals SET disabled_at = NULL WHERE workspace_id = $1 AND id = $2 AND disabled_at IS NOT NULL`
+		if disable {
+			set = `UPDATE principals SET disabled_at = now() WHERE workspace_id = $1 AND id = $2 AND disabled_at IS NULL`
+		}
+		tag, err := tx.Exec(ctx, set, workspaceID, principalID)
+		if err != nil {
+			return err
+		}
+		changed = tag.RowsAffected() == 1
+		if disable {
+			if tag, err = tx.Exec(ctx, `
+				UPDATE sessions SET revoked_at = now()
+				 WHERE workspace_id = $1 AND principal_id = $2 AND revoked_at IS NULL AND expires_at > now()`,
+				workspaceID, principalID); err != nil {
+				return err
+			}
+			ended = tag.RowsAffected()
+		}
+		finished, err = finishLocked(ctx, tx, ReceiptFinish{ReceiptID: started.ID, LeaseToken: started.LeaseToken,
+			Status: "ok", HTTPStatus: 200, Rows: []string{PersonRow(principalID)},
+			ElapsedMS: float64(time.Since(began).Microseconds()) / 1000}, false)
+		return err
+	})
+	if errors.Is(err, errNotPending) {
+		return false, 0, Receipt{}, ErrLeaseLost
+	}
+	return changed, ended, finished, err
 }

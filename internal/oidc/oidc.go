@@ -71,6 +71,10 @@ const requestTime = 10 * time.Second
 // metadataLife is how long a discovery document is kept before it is read again.
 const metadataLife = time.Hour
 
+// failureHold is how long a failed read of the discovery document or of the key set is given again
+// without asking the provider, so sign-ins do not wait on a failing provider one after another.
+const failureHold = 5 * time.Second
+
 // Config is a sign-in's configuration. Issuer, ClientID and RedirectURL are required, and at least one of
 // AllowedDomains and Tenant.
 type Config struct {
@@ -110,10 +114,32 @@ type Client struct {
 	http *http.Client
 	now  func() time.Time
 
-	mu        sync.Mutex
-	meta      *metadata
-	metaUntil time.Time
-	keys      keySet
+	mu          sync.Mutex
+	meta        *metadata
+	metaUntil   time.Time
+	metaFailure failure
+	keys        keySet
+}
+
+// failure is the last failed read of a document, given again until failureHold has passed.
+type failure struct {
+	err error
+	at  time.Time
+}
+
+// held is the failure while it is held, or nil.
+func (f failure) held(now time.Time) error {
+	if f.err != nil && now.Sub(f.at) < failureHold {
+		return f.err
+	}
+	return nil
+}
+
+// remember keeps a failure of the provider's own; an interrupted request is not one.
+func (f *failure) remember(err error, now time.Time) {
+	if errors.Is(err, ErrUnavailable) {
+		f.err, f.at = err, now
+	}
 }
 
 // New checks a configuration and makes its client. It contacts nothing.
@@ -217,15 +243,19 @@ func (c *Client) discovered(ctx context.Context) (*metadata, error) {
 	if c.meta != nil && c.now().Before(c.metaUntil) {
 		return c.meta, nil
 	}
+	if err := c.metaFailure.held(c.now()); err != nil {
+		return nil, err
+	}
 	body, _, err := c.get(ctx, strings.TrimSuffix(c.cfg.Issuer, "/")+"/.well-known/openid-configuration", maxDocument)
+	var meta *metadata
+	if err == nil {
+		meta, err = c.readMetadata(body)
+	}
 	if err != nil {
+		c.metaFailure.remember(err, c.now())
 		return nil, err
 	}
-	meta, err := c.readMetadata(body)
-	if err != nil {
-		return nil, err
-	}
-	c.meta, c.metaUntil = meta, c.now().Add(metadataLife)
+	c.meta, c.metaUntil, c.metaFailure = meta, c.now().Add(metadataLife), failure{}
 	return meta, nil
 }
 
@@ -468,7 +498,11 @@ func (c *Client) admit(claims *strictjson.Object) (Identity, error) {
 		who.Email = email
 	}
 	if value, present := claims.Get("email_verified"); present {
+		// Some providers send the answer as the text "true" or "false".
 		verified, ok := value.(bool)
+		if text, isText := value.(string); isText && (text == "true" || text == "false") {
+			verified, ok = text == "true", true
+		}
 		if !ok {
 			return Identity{}, fmt.Errorf("%w: its email_verified is not true or false", ErrToken)
 		}

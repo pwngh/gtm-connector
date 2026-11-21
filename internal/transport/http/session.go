@@ -72,6 +72,11 @@ func (s *Server) newPreSession() (string, time.Time) {
 		base64.RawURLEncoding.EncodeToString(s.preMAC(payload)), expires
 }
 
+// cookieBase64 reads a signed cookie's parts: unpadded base64url whose
+// unused bits are zero, so each part has one spelling and a cookie that is
+// used up cannot come back respelled.
+var cookieBase64 = base64.RawURLEncoding.Strict()
+
 // preSession checks a pre-session token's signature and expiry.
 func (s *Server) preSession(r *http.Request) (string, time.Time, bool) {
 	cookie, err := r.Cookie(preCookieName)
@@ -82,8 +87,8 @@ func (s *Server) preSession(r *http.Request) (string, time.Time, bool) {
 	if len(parts) != 3 || parts[0] != "p1" {
 		return "", time.Time{}, false
 	}
-	payload, err1 := base64.RawURLEncoding.DecodeString(parts[1])
-	mac, err2 := base64.RawURLEncoding.DecodeString(parts[2])
+	payload, err1 := cookieBase64.DecodeString(parts[1])
+	mac, err2 := cookieBase64.DecodeString(parts[2])
 	if err1 != nil || err2 != nil || len(payload) != 24 || !hmac.Equal(mac, s.preMAC(payload)) {
 		return "", time.Time{}, false
 	}

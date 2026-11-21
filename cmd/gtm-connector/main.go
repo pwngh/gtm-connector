@@ -15,8 +15,9 @@
 //	                                 serve MCP on stdin and stdout, for an assistant app that starts it
 //	gtm-connector token new --scope SCOPE
 //	                                 make a bearer token for an MCP client; also token list and token revoke ID
-//	gtm-connector grant ACCOUNT --to PERSON [--revoke]
-//	                                 give a person who signs in through the identity provider one account, or end it
+//	gtm-connector grant ACCOUNT --to EMAIL [--revoke]
+//	                                 give a person who signs in through the identity provider one account, or end it;
+//	                                 grant --disable --to EMAIL ends their sessions and sign-ins until --enable
 //	gtm-connector grants             list the people who sign in through the identity provider, and their grants
 //	gtm-connector debug calls ACTION import, list or inspect call transcript exports
 //	gtm-connector debug salesforce check
@@ -99,7 +100,8 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   admit FOLDER                admit the cards and receipts a Python state folder holds
   mcp stdio --scope SCOPE     serve MCP on stdin and stdout, for an assistant app that starts it
   token new --scope SCOPE     make a bearer token for an MCP client; also token list and token revoke ID
-  grant ACCOUNT --to PERSON   give a person who signs in through the identity provider one account; --revoke ends it
+  grant ACCOUNT --to EMAIL    give a person who signs in through the identity provider one account; --revoke ends it,
+                              and grant --disable --to EMAIL ends their sessions and sign-ins until --enable
   grants                      list the people who sign in through the identity provider, and their grants
   debug calls ACTION          import a call transcript export for an account, list imports, inspect one
   debug salesforce check      check a Salesforce sign-in, its fields and its renewal dates
