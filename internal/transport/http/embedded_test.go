@@ -76,15 +76,18 @@ func TestTheEmbeddedFixtureIsTheFolderFixture(t *testing.T) {
 
 // clientPaths get the app's HTML. otherPaths never do: reserved prefixes,
 // missing and hidden files, non-canonical spellings, and paths outside the
-// client routes. Both lists hold every path the folder tests ask for.
+// client routes. Of those, notFoundPaths get the build's 404.html. The lists
+// hold every path the folder tests ask for.
 var (
-	clientPaths = []string{"/", "/index.html", "/renewals/r-1/evidence", "/operations", "/queue", "/playbooks"}
-	otherPaths  = []string{"/api", "/api/", "/api/v1", "/api/v1/unknown", "/api/v1/session", "/api/v1/cards/x",
-		"/api/v1/nope", "/mcp", "/mcp/", "/mcp/anything", "/.well-known/", "/.well-known/oauth-protected-resource",
-		"/healthz", "/healthz/", "/assets", "/assets/", "/assets/missing.js", "/assets/.hidden", "/missing.png",
-		"/favicon.ico", "/.env", "/renewals/.env", "/index.html/x.js", "/random", "/renewalsx", "/admin/x",
-		"/renewals/x.png", "/api/v1//session", "/api//", "/API/v1/session", "/mcp/../api", "/Healthz",
-		"/api/v1/./session", "/renewals//x", "/assets/app.js", "/robots.txt"}
+	clientPaths   = []string{"/", "/index.html", "/ops", "/ops/evidence", "/ops/readiness", "/ops/nothing", "/deals", "/deals/x"}
+	notFoundPaths = []string{"/history", "/random", "/opsx", "/admin/x", "/renewals", "/renewals/x",
+		"/renewals/r-1/evidence", "/queue", "/playbooks", "/operations"}
+	otherPaths = slices.Concat(notFoundPaths, []string{"/api", "/api/", "/api/v1", "/api/v1/unknown", "/api/v1/session",
+		"/api/v1/cards/x", "/api/v1/nope", "/mcp", "/mcp/", "/mcp/anything", "/.well-known/",
+		"/.well-known/oauth-protected-resource", "/healthz", "/healthz/", "/assets", "/assets/", "/assets/missing.js",
+		"/assets/.hidden", "/missing.png", "/favicon.ico", "/.env", "/ops/.env", "/index.html/x.js", "/ops/x.png",
+		"/api/v1//session", "/api//", "/API/v1/session", "/mcp/../api", "/Healthz", "/api/v1/./session", "/ops//evidence",
+		"/assets/app.js", "/robots.txt"})
 )
 
 // An embedded build answers every path as the folder does: the same status,
@@ -115,11 +118,14 @@ func TestAnEmbeddedBuildIsServedAsAFolderIs(t *testing.T) {
 	for _, path := range slices.Concat(clientPaths, otherPaths) {
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
 			w := compare(method, path, "127.0.0.1:8443", nil)
-			client := slices.Contains(clientPaths, path)
+			client, missing := slices.Contains(clientPaths, path), slices.Contains(notFoundPaths, path)
 			html := strings.HasPrefix(w.Header().Get("Content-Type"), "text/html")
-			if client != html || client != (w.Code == http.StatusOK && w.Header().Get("Cache-Control") == "no-cache") ||
-				(method == http.MethodGet && client != strings.Contains(w.Body.String(), appMarker)) {
-				t.Errorf("%s %s: %d %q, the app's HTML: %t", method, path, w.Code, w.Header().Get("Content-Type"), html)
+			body := w.Body.String()
+			if client != (html && w.Code == http.StatusOK && w.Header().Get("Cache-Control") == "no-cache") ||
+				missing != (html && w.Code == http.StatusNotFound) ||
+				(method == http.MethodGet && (client != strings.Contains(body, appMarker) || missing != strings.Contains(body, notFoundMarker))) {
+				t.Errorf("%s %s: %d %q, the app's HTML: %t, the not-found page: %t", method, path, w.Code,
+					w.Header().Get("Content-Type"), client, missing)
 			}
 		}
 	}
@@ -133,11 +139,11 @@ func TestAnEmbeddedBuildIsServedAsAFolderIs(t *testing.T) {
 		http.Header{"Range": {"bytes=0-6"}}); w.Code != http.StatusPartialContent || w.Body.String() != "console" {
 		t.Errorf("a range of an asset: %d %q", w.Code, w.Body.String())
 	}
-	if w := compare(http.MethodPost, "/renewals/x", "127.0.0.1:8443",
+	if w := compare(http.MethodPost, "/ops/evidence", "127.0.0.1:8443",
 		http.Header{"Origin": {"https://127.0.0.1:8443"}}); w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST to a client route: %d", w.Code)
 	}
-	compare(http.MethodGet, "/renewals/x?tab=2", "localhost:8443", nil)
+	compare(http.MethodGet, "/ops/evidence?account=acc-003", "localhost:8443", nil)
 	if w := compare(http.MethodGet, "/", "evil.example", nil); w.Code != http.StatusMisdirectedRequest {
 		t.Errorf("a foreign Host: %d", w.Code)
 	}
@@ -197,7 +203,7 @@ func TestTheBuildInTheBinaryIsServed(t *testing.T) {
 		!strings.Contains(page.Header().Get("Content-Security-Policy"), "script-src 'self' 'sha256-") {
 		t.Errorf("the page's inline script is not in the policy %q", page.Header().Get("Content-Security-Policy"))
 	}
-	deep := send(s, http.MethodGet, "/renewals/r-1/evidence", "127.0.0.1:8443", nil)
+	deep := send(s, http.MethodGet, "/ops/evidence", "127.0.0.1:8443", nil)
 	if deep.Code != http.StatusOK || deep.Body.String() != page.Body.String() {
 		t.Errorf("a deep link: %d", deep.Code)
 	}
@@ -218,6 +224,14 @@ func TestTheBuildInTheBinaryIsServed(t *testing.T) {
 		if w.Code != http.StatusNotFound || strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
 			t.Errorf("%s: %d %q", path, w.Code, w.Header().Get("Content-Type"))
 		}
+	}
+	// A wrong address gets the build's own not-found page, which runs no script.
+	missing := send(s, http.MethodGet, "/history", "127.0.0.1:8443", nil)
+	if body := missing.Body.String(); missing.Code != http.StatusNotFound ||
+		missing.Header().Get("Content-Type") != "text/html; charset=utf-8" ||
+		!strings.Contains(body, "There is no page at this address.") || !strings.Contains(body, `href="/"`) ||
+		strings.Contains(body, "<script") || strings.Contains(body, `<div id="root">`) {
+		t.Errorf("/history: %d %q", missing.Code, missing.Header().Get("Content-Type"))
 	}
 	if w := send(s, http.MethodGet, "/healthz", "127.0.0.1:8443", nil); w.Code != http.StatusOK ||
 		w.Header().Get("Content-Type") != "application/json" {

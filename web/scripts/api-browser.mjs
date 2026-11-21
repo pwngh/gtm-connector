@@ -1,7 +1,7 @@
 // Browser tests for the app in API mode, against the built app (web/dist) and
 // a stub of /api/v1 that each test steers: delayed and refused answers, two
 // accounts, blocked browser storage, a session that expires, hostile text in
-// names, gaps and receipts, and a static host's answer. The stub keeps the Go server's
+// names, gaps and receipts, a static host's answer, and wrong addresses. The stub keeps the Go server's
 // shapes: the session view, the {"error": {code, message}} envelope, the CSRF
 // header and Origin checks, 403 not_permitted for an ungranted account, and the
 // security headers on every response, with the Content-Security-Policy built
@@ -148,10 +148,19 @@ const server = createServer(async (request, response) => {
     stub.pending++;
     try {return await api(request, response, path);} finally {stub.pending--;}
   }
+  // As serveApp on the Go server: a reserved path is the API's 404, a file of
+  // the build is served, "/" and the client routes get the app, any other path
+  // without an extension outside /assets gets 404.html, and the rest plain text.
+  if (/^\/(mcp|\.well-known|healthz)(\/|$)/.test(path)) return refuse(response, 404, 'not_found');
   const file = normalize(join(dist, path));
   const found = file.startsWith(dist) && existsSync(file) && statSync(file).isFile();
-  // As on the Go server, a missing file is not found and only a path without an extension gets the app.
-  if (!found && extname(path)) {response.writeHead(404, {...securityHeaders, 'Content-Type': 'text/plain; charset=utf-8'}); response.end('Not found.'); return;}
+  const client = path === '/' || path === '/index.html' || (/^\/(deals|ops)(\/|$)/.test(path) && !extname(path));
+  if (!found && !client) {
+    const page = !extname(path) && !/^\/assets(\/|$)/.test(path) && existsSync(join(dist, '404.html'));
+    response.writeHead(404, {...securityHeaders, 'Content-Type': `text/${page ? 'html' : 'plain'}; charset=utf-8`, ...(page ? {'Cache-Control': 'no-cache'} : {})});
+    response.end(page ? readFileSync(join(dist, '404.html')) : 'Not found.\n');
+    return;
+  }
   const target = found ? file : join(dist, 'index.html');
   stub.files.push(basename(target));
   response.writeHead(200, {...securityHeaders, 'Content-Type': types[extname(target)] || 'application/octet-stream'});
@@ -159,7 +168,7 @@ const server = createServer(async (request, response) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 base = `http://127.0.0.1:${server.address().port}`;
-const evidence = `${base}/renewals/thornfield/evidence`, readiness = `${base}/renewals/thornfield/readiness`;
+const evidence = `${base}/ops/evidence`, readiness = `${base}/ops/readiness`;
 
 // Checks.
 const results = [];
@@ -469,13 +478,82 @@ await scenario('a static host', async () => {
   stub.steer = (method, path) => path === '/api/v1/session' ? {status: 404, type: 'text/html', raw: '<html>Not found</html>'} : null;
   const tab = await page({width: 390});
   const seen = [];
-  for (const path of ['/', new URL(evidence).pathname, '/queue']) {
+  for (const path of ['/', new URL(evidence).pathname, '/ops/nothing']) {
     await tab.goto(base + path, {waitUntil: 'networkidle'});
     await tab.waitForSelector('.route-error');
     seen.push((await tab.evaluate(() => document.body.innerText)).trim());
   }
   check(seen.every(shown => shown === needsServer) && tab.errors.length === 0 && violations(tab).length === 0,
     `a static host's answer shows only that the page needs its server (${seen.join(' | ')}; ${tab.errors.join(' | ')})`);
+  await tab.context().close();
+});
+
+// 13. Addresses: "/" and /ops open Evidence; a wrong address inside the app
+// says so with one link back; any other address gets the static page, 404.
+await scenario('home addresses', async () => {
+  const tab = await page();
+  for (const path of ['/', '/ops', '/?account=acc-003']) {
+    await tab.goto(base + path, {waitUntil: 'networkidle'});
+    await tab.waitForSelector('.api-signin');
+    check(new URL(tab.url()).pathname === '/ops/evidence', `${path} opens Evidence (${new URL(tab.url()).pathname})`);
+  }
+  await tab.context().close();
+});
+await scenario('a wrong address in the app', async () => {
+  const tab = await page({width: 390});
+  await tab.goto(`${base}/ops/nothing`, {waitUntil: 'networkidle'});
+  await tab.waitForSelector('main h1');
+  const shown = await tab.evaluate(() => ({heading: document.querySelector('main h1').textContent,
+    links: [...document.querySelectorAll('main a')].map(link => `${link.textContent} ${link.getAttribute('href')}`)}));
+  check(shown.heading === 'There is no page at this address.' && shown.links.join() === 'Go to Evidence /ops/evidence',
+    `/ops/nothing shows the in-app page and its one link (${shown.heading}; ${shown.links.join(', ')})`);
+  await tab.click('main a');
+  await tab.waitForSelector('.api-signin');
+  check(new URL(tab.url()).pathname === '/ops/evidence' && tab.errors.length === 0, `its link leads to Evidence (${tab.url()}; ${tab.errors.join(' | ')})`);
+  await tab.context().close();
+});
+for (const scheme of ['light', 'dark']) {
+  await scenario(`a wrong address on the server ${scheme}`, async () => {
+    const tab = await page({width: 320, scheme});
+    const answer = await tab.goto(`${base}/history`, {waitUntil: 'networkidle'});
+    const headers = answer.headers();
+    check(answer.status() === 404 && headers['content-type'] === 'text/html; charset=utf-8' && headers['x-frame-options'] === 'DENY' &&
+      headers['content-security-policy'] === securityHeaders['Content-Security-Policy'],
+      `${scheme}: /history answers ${answer.status()} ${headers['content-type']} with the security headers`);
+    const facts = await tab.evaluate(() => {
+      const luminance = rgb => {const [r, g, b] = rgb.match(/\d+/g).slice(0, 3).map(Number).map(v => {v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;}); return .2126 * r + .7152 * g + .0722 * b;};
+      const background = el => {while (el) {const color = getComputedStyle(el).backgroundColor; if (color && !/rgba\(.*, 0\)|transparent/.test(color)) return color; el = el.parentElement;} return 'rgb(255,255,255)';};
+      const contrast = el => {const a = luminance(getComputedStyle(el).color), b = luminance(background(el)); return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);};
+      const texts = [...document.querySelectorAll('h1, p, a')];
+      const link = document.querySelector('a'), box = link.getBoundingClientRect();
+      return {heading: document.querySelector('h1').textContent, body: document.body.innerText, scripts: document.scripts.length, root: Boolean(document.getElementById('root')),
+        link: `${link.textContent} ${link.getAttribute('href')}`, links: document.querySelectorAll('a').length, size: [box.width, box.height],
+        smallest: Math.min(...texts.map(el => parseFloat(getComputedStyle(el).fontSize))), contrast: Math.min(...texts.map(contrast)),
+        overflow: document.documentElement.scrollWidth - innerWidth};
+    });
+    check(facts.heading === 'There is no page at this address.' && facts.body.includes('gtm-connector') && facts.link === 'Go to Evidence /' && facts.links === 1 &&
+      facts.scripts === 0 && !facts.root, `${scheme}: the static page names the product, says there is no page and links to / (${facts.link}), with no script`);
+    check(facts.size[0] >= 44 && facts.size[1] >= 44 && facts.smallest >= 14 && facts.contrast >= 4.5 && facts.overflow <= 0,
+      `${scheme} 320: link ${facts.size.map(Math.round).join('x')}, smallest text ${facts.smallest}px, lowest contrast ${facts.contrast.toFixed(2)}:1, overflow ${facts.overflow}px`);
+    await tab.keyboard.press('Tab');
+    const ring = await tab.evaluate(() => {const el = document.activeElement, style = getComputedStyle(el); return {tag: el.tagName, outline: style.outlineStyle, width: parseFloat(style.outlineWidth)};});
+    check(ring.tag === 'A' && ring.outline !== 'none' && ring.width >= 2, `${scheme}: the link shows keyboard focus (${ring.tag} ${ring.outline} ${ring.width}px)`);
+    await tab.keyboard.press('Enter');
+    await tab.waitForSelector('.api-signin');
+    check(new URL(tab.url()).pathname === '/ops/evidence' && violations(tab).length === 0 && tab.errors.length === 0,
+      `${scheme}: the link leads back to Evidence (${tab.url()}; ${violations(tab).join(' | ')})`);
+    await tab.context().close();
+  });
+}
+await scenario('answers that keep their form', async () => {
+  const tab = await page();
+  const seen = [];
+  for (const path of ['/mcp/x', '/assets/missing.js', '/missing.png', '/healthz/x']) {
+    const answer = await tab.request.get(base + path);
+    seen.push(`${path} ${answer.status()} ${answer.headers()['content-type']}`);
+  }
+  check(seen.join() === ['/mcp/x 404 application/json', '/assets/missing.js 404 text/plain; charset=utf-8', '/missing.png 404 text/plain; charset=utf-8',
+    '/healthz/x 404 application/json'].join(), `a reserved path, a missing asset and a missing file keep their answers (${seen.join(', ')})`);
   await tab.context().close();
 });
 

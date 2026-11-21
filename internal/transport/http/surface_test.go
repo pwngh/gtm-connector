@@ -23,6 +23,9 @@ import (
 
 const appMarker = "APP-HTML-MARKER"
 
+// notFoundMarker is in the fixture build's 404.html.
+const notFoundMarker = "NOT-FOUND-PAGE"
+
 const themeScript = `try{document.documentElement.dataset.theme="dark"}catch{}`
 
 // noSessions answers the health check and fails every session lookup.
@@ -48,6 +51,7 @@ func webDir(t *testing.T) string {
 	files := map[string]string{
 		"index.html": "<!doctype html><script>" + themeScript + "</script><title>" + appMarker +
 			"</title><script type=module src=/assets/app.js></script>",
+		"404.html":       "<!doctype html><title>" + notFoundMarker + "</title><p>There is no page at this address.",
 		"assets/app.js":  "console.log(1)",
 		"robots.txt":     "User-agent: *",
 		".env":           "SECRET=1",
@@ -97,7 +101,7 @@ func TestWrongHostIsRefused(t *testing.T) {
 	s := surface(t)
 	for _, host := range []string{"evil.example", "evil.example:8443", "127.0.0.1:9999", "127.0.0.1",
 		"rebind.example:8443", "127.0.0.1:8443.evil.example", ""} {
-		for _, path := range []string{"/", "/renewals/x", "/api/v1/session", "/healthz", "/mcp"} {
+		for _, path := range []string{"/", "/ops/evidence", "/api/v1/session", "/healthz", "/mcp"} {
 			w := send(s, http.MethodGet, path, host, nil)
 			if w.Code != http.StatusMisdirectedRequest || strings.Contains(w.Body.String(), appMarker) ||
 				!strings.Contains(w.Body.String(), "untrusted_host") {
@@ -125,9 +129,9 @@ func TestWrongHostIsRefused(t *testing.T) {
 func TestOtherAllowedHostsGoToThePublicOrigin(t *testing.T) {
 	s := surface(t)
 	for _, host := range []string{"localhost:8443", "LOCALHOST:8443"} {
-		w := send(s, http.MethodGet, "/renewals/x?tab=2", host, nil)
+		w := send(s, http.MethodGet, "/ops/evidence?account=acc-003", host, nil)
 		if w.Code != http.StatusPermanentRedirect ||
-			w.Header().Get("Location") != "https://127.0.0.1:8443/renewals/x?tab=2" {
+			w.Header().Get("Location") != "https://127.0.0.1:8443/ops/evidence?account=acc-003" {
 			t.Errorf("%s: %d %q", host, w.Code, w.Header().Get("Location"))
 		}
 	}
@@ -138,7 +142,7 @@ func TestReservedPathsNeverServeTheApp(t *testing.T) {
 	for _, path := range []string{"/api", "/api/", "/api/v1", "/api/v1/unknown", "/api/v1/session",
 		"/api/v1/cards/x", "/mcp", "/mcp/", "/mcp/anything", "/.well-known/", "/.well-known/oauth-protected-resource",
 		"/healthz", "/healthz/", "/assets", "/assets/", "/assets/missing.js", "/assets/.hidden", "/missing.png",
-		"/favicon.ico", "/.env", "/renewals/.env", "/index.html/x.js"} {
+		"/favicon.ico", "/.env", "/ops/.env", "/index.html/x.js"} {
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
 			w := send(s, method, path, "127.0.0.1:8443", nil)
 			if strings.Contains(w.Body.String(), appMarker) || strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
@@ -149,8 +153,8 @@ func TestReservedPathsNeverServeTheApp(t *testing.T) {
 			}
 		}
 	}
-	for _, path := range []string{"/", "/renewals/r-1/evidence", "/operations", "/index.html", "/queue",
-		"/playbooks"} {
+	for _, path := range []string{"/", "/ops/evidence", "/ops/readiness", "/ops", "/ops/nothing", "/deals",
+		"/deals/x", "/index.html"} {
 		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), appMarker) ||
 			!strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
@@ -159,14 +163,15 @@ func TestReservedPathsNeverServeTheApp(t *testing.T) {
 	}
 	// Item 12: only client routes fall back; non-canonical spellings of a
 	// reserved path get the API's JSON 404.
-	for _, path := range []string{"/random", "/renewalsx", "/admin/x", "/renewals/x.png"} {
+	for _, path := range []string{"/random", "/opsx", "/admin/x", "/ops/x.png", "/renewals/x", "/queue",
+		"/playbooks", "/operations"} {
 		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
 		if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), appMarker) {
 			t.Errorf("not a client route %s: %d", path, w.Code)
 		}
 	}
 	for _, path := range []string{"/api/v1//session", "/api//", "/API/v1/session", "/mcp/../api", "/Healthz",
-		"/api/v1/./session", "/renewals//x"} {
+		"/api/v1/./session", "/ops//evidence"} {
 		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
 		if w.Code != http.StatusNotFound || w.Header().Get("Content-Type") != "application/json" {
 			t.Errorf("non-canonical %s: %d %q", path, w.Code, w.Header().Get("Content-Type"))
@@ -177,9 +182,51 @@ func TestReservedPathsNeverServeTheApp(t *testing.T) {
 		!strings.Contains(w.Header().Get("Content-Type"), "javascript") {
 		t.Errorf("asset: %d %q", w.Code, w.Header().Get("Content-Type"))
 	}
-	if w := send(s, http.MethodPost, "/renewals/x", "127.0.0.1:8443",
+	if w := send(s, http.MethodPost, "/ops/evidence", "127.0.0.1:8443",
 		http.Header{"Origin": {"https://127.0.0.1:8443"}}); w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("POST to a client route: %d", w.Code)
+	}
+}
+
+// A wrong address gets the build's 404.html with status 404 and the headers
+// of every response. A reserved path, a missing asset and a path with a file
+// extension keep their own answers, and a build without 404.html keeps the
+// plain text.
+func TestAWrongAddressGetsTheNotFoundPage(t *testing.T) {
+	s := surface(t)
+	for _, path := range []string{"/history", "/random", "/renewals/x", "/queue", "/opsx", "/admin/x"} {
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			w := send(s, method, path, "127.0.0.1:8443", nil)
+			body := w.Body.String()
+			if w.Code != http.StatusNotFound || w.Header().Get("Content-Type") != "text/html; charset=utf-8" ||
+				w.Header().Get("X-Frame-Options") != "DENY" || w.Header().Get("X-Content-Type-Options") != "nosniff" ||
+				!strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") ||
+				strings.Contains(body, appMarker) || (method == http.MethodGet) != strings.Contains(body, notFoundMarker) {
+				t.Errorf("%s %s: %d %q %q", method, path, w.Code, w.Header().Get("Content-Type"), body)
+			}
+		}
+	}
+	for path, kind := range map[string]string{"/api/v1/nope": "application/json", "/assets/missing.js": "text/plain; charset=utf-8",
+		"/assets": "text/plain; charset=utf-8", "/missing.png": "text/plain; charset=utf-8", "/ops/x.png": "text/plain; charset=utf-8",
+		"/ops/.env": "text/plain; charset=utf-8", "/mcp/x": "application/json", "/.well-known/x": "application/json"} {
+		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
+		if w.Code != http.StatusNotFound || w.Header().Get("Content-Type") != kind || strings.Contains(w.Body.String(), notFoundMarker) {
+			t.Errorf("%s: %d %q %q", path, w.Code, w.Header().Get("Content-Type"), w.Body.String())
+		}
+	}
+	dir := webDir(t)
+	if err := os.Remove(filepath.Join(dir, "404.html")); err != nil {
+		t.Fatal(err)
+	}
+	bare, err := httptransport.New(httptransport.Config{PublicOrigin: "https://127.0.0.1:8443",
+		AllowedHosts: []string{"127.0.0.1:8443"}, WebDir: dir, SessionKey: testKey}, noSessions{}, authz.Evidence{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bare.Close()
+	if w := send(bare, http.MethodGet, "/history", "127.0.0.1:8443", nil); w.Code != http.StatusNotFound ||
+		w.Header().Get("Content-Type") != "text/plain; charset=utf-8" || w.Body.String() != "Not found.\n" {
+		t.Errorf("without 404.html: %d %q %q", w.Code, w.Header().Get("Content-Type"), w.Body.String())
 	}
 }
 
