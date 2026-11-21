@@ -175,8 +175,10 @@ func TestAnUpgradeFrom0001KeepsItsData(t *testing.T) {
 			t.Fatalf("%s: %s after one restore, %s after two", query, a, b)
 		}
 	}
-	// The restored database takes new reads under the same brief call's rules.
-	ok(t, last.Ping(ctx))
+	// The restored database answers, and holds exactly this binary's migrations.
+	if current, err := last.MigrationsCurrent(ctx); err != nil || !current {
+		t.Fatalf("the restored database's migrations are current: %v (%v)", current, err)
+	}
 }
 
 func TestAnUpgradeFrom0001RefusesRowsItCannotKeep(t *testing.T) {

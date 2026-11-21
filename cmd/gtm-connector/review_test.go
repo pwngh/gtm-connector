@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
@@ -283,10 +282,6 @@ func TestServeListensOnLoopbackOnly(t *testing.T) {
 	}
 }
 
-type pingOnly struct{ httptransport.Sessions }
-
-func (pingOnly) Ping(context.Context) error { return nil }
-
 // Item 12: "OPTIONS *" reaches the Host check.
 func TestOptionsStarMeetsTheHostCheck(t *testing.T) {
 	dir := privateDir(t)
@@ -300,7 +295,7 @@ func TestOptionsStarMeetsTheHostCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	surface, err := httptransport.New(httptransport.Config{PublicOrigin: "https://127.0.0.1:8443",
-		AllowedHosts: []string{"127.0.0.1:8443"}, SessionKey: key}, pingOnly{}, authz.Evidence{})
+		AllowedHosts: []string{"127.0.0.1:8443"}, SessionKey: key}, schema{current: true}, authz.Evidence{})
 	if err != nil {
 		t.Fatal(err)
 	}

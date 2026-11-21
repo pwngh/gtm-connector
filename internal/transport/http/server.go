@@ -49,13 +49,14 @@ type Config struct {
 // prefixes, each with anything below it.
 var DefaultClientRoutes = []string{"/renewals", "/queue", "/playbooks", "/operations"}
 
-// Sessions is the session storage the surface needs.
+// Sessions is the storage the surface needs: sessions, and for /healthz
+// whether the applied migrations are this binary's.
 type Sessions interface {
 	LiveSession(ctx context.Context, idSHA256 []byte) (postgres.Session, error)
 	SignIn(ctx context.Context, admitted postgres.Admission, idSHA256 []byte, principal postgres.Principal, ttl time.Duration) (time.Time, error)
 	RevokeSession(ctx context.Context, idSHA256 []byte) error
 	DemoPrincipalByLogin(ctx context.Context, login string) (postgres.Principal, []byte, error)
-	Ping(ctx context.Context) error
+	MigrationsCurrent(ctx context.Context) (bool, error)
 }
 
 // Server is the browser surface.
@@ -273,6 +274,9 @@ func (s *Server) checkOrigin(r *http.Request) (code, message string) {
 	return "", ""
 }
 
+// healthz answers ok when the database answers and its applied migrations
+// are this binary's. Otherwise it answers 503 with one of two fixed
+// statuses, never with the error, which can name the database.
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET.")
@@ -280,11 +284,13 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	if err := s.sessions.Ping(ctx); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "database_unavailable"})
-		return
+	code, status := http.StatusOK, "ok"
+	if current, err := s.sessions.MigrationsCurrent(ctx); err != nil {
+		code, status = http.StatusServiceUnavailable, "database_unavailable"
+	} else if !current {
+		code, status = http.StatusServiceUnavailable, "migrations_not_current"
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, code, map[string]string{"status": status})
 }
 
 type apiError struct {
