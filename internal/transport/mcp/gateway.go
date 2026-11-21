@@ -105,6 +105,13 @@ func (a answer) write(w http.ResponseWriter, head bool) {
 
 var withheld = jsonAnswer(http.StatusServiceUnavailable, []byte(`{"error":"execution_or_audit_unavailable; no result released"}`), nil)
 
+// auditUnavailable answers a call whose receipt could not be committed: nothing ran.
+var auditUnavailable = jsonAnswer(http.StatusServiceUnavailable, []byte(`{"error":"audit_unavailable; call was not executed"}`), nil)
+
+// AuditUnavailable answers a request as the gate answers a call whose receipt could not be committed. It is
+// for a request that no gate can take, as one whose workspace cannot be read.
+func AuditUnavailable(w http.ResponseWriter) { auditUnavailable.write(w, false) }
+
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/.well-known/oauth-protected-resource" || r.URL.Path == "/.well-known/oauth-protected-resource"+g.path:
@@ -224,7 +231,7 @@ func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 			}
 			auditID, err := g.start(ctx, Start{Token: callerToken, Tool: tool, Arguments: unparsed(body)})
 			if err != nil {
-				jsonAnswer(http.StatusServiceUnavailable, []byte(`{"error":"audit_unavailable; call was not executed"}`), nil).write(w, false)
+				auditUnavailable.write(w, false)
 				return
 			}
 			if !g.refuseCall(ctx, auditID, invalidJSON.status, started) {
@@ -308,7 +315,7 @@ func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 		}
 		if auditID, err = g.start(ctx, Start{Token: callerToken, Tool: recordedTool, Arguments: recorded, RequestID: receiptID,
 			BriefID: recordedBrief}); err != nil {
-			jsonAnswer(http.StatusServiceUnavailable, []byte(`{"error":"audit_unavailable; call was not executed"}`), nil).write(w, false)
+			auditUnavailable.write(w, false)
 			return
 		}
 	}
