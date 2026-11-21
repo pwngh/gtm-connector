@@ -73,7 +73,7 @@ One rep or CSM reads a real renewal before a call, and one RevOps person approve
 
     A badge at the top counts the calls and threads waiting for this person's approval.
   - **The deal card,** in the main pane: what changed comes first, then the risks and blockers. It also shows:
-    - days to renewal, and the recurring revenue when a mapped field supplies it;
+    - days to renewal, and the recurring revenue when the source supplies it;
     - buyer quotes with names and titles;
     - the seller's commitments;
     - the sources that were not read.
@@ -90,7 +90,7 @@ One rep or CSM reads a real renewal before a call, and one RevOps person approve
 - **Close.** When the opportunity reaches Closed Won or Closed Lost, the reads stop and the deal is closing. It is archived once its final card verifies. Its cards, receipts and history stay readable to those allowed.
 
 **The trial.** A rep finds the status, the change, who said what, the commitment and the blocker,
-with proof, in 30 seconds, on real renewals the team consents to. Each parser failure becomes an
+with proof, in 30 seconds, on five real renewals the team consents to. Each parser failure becomes an
 invented test fixture. The README's first limit, that nothing was tried on a real deal, changes
 only then.
 
@@ -123,6 +123,8 @@ RevOps covers every renewal, not one, and sees which have no current card.
   - **Setup.** The active configuration and a draft side by side, with the preview and the activation.
   - **Activity.** What ran and whether it is safe to retry: reads, approvals, refusals, refreshes and deliveries, each with its receipt. A seal can be rechecked here.
 - **Pause.** RevOps pauses a deal, which stops its scheduled reads and alerts, and resumes it.
+
+**A deal's lifecycle:** proposed, active, paused, closing, archived. Risk and freshness are not lifecycle states.
 
 ### 3. Delivery
 
@@ -158,7 +160,7 @@ RevOps covers every renewal, not one, and sees which have no current card.
 ### 5. A model proposes, a person decides
 
 - **No model is needed to build a card.** Model assistance is opt-in, and it can run on a local model so that no source text leaves the machine. A hosted model receives source text only when the operator chooses one.
-- **Proposals.** A model proposes units, labels and a playbook through two assistant tools on one sealed card.
+- **Proposals.** A model proposes units and labels through two assistant tools on one sealed card.
   - The evidence tool returns numbered units.
   - The submit tool accepts unit numbers, a label from a fixed list checked against each speaker's role, and pairs marked in tension. A cut sentence, an unknown label or a unit of another account is refused with a receipt.
   - A person reviews every proposal.
@@ -202,7 +204,6 @@ Each of these differs from the Python package on purpose, so each waits until af
 - each unit binds to the receipt of the read that returned it, even when one tool reads twice;
 - a Slack message keeps one identity across reads, and an edit or a verified deletion supersedes the version it changes;
 - an import stays readable after a parser upgrade, and a reparse is a new revision;
-- a bad unit is refused alone, and the card says how many were;
 - HTML email is turned into text;
 - one size cap on every card, stated on the card;
 - an idempotent display for units sealed under older rules, labelled when it differs from the stored text.
