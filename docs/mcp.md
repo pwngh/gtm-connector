@@ -91,6 +91,7 @@ text `Error executing tool TOOL: CODE`. Its receipt is finished as an error.
 | `invalid_token` | A deal's card or a saved brief is released only while the bearer still verifies, and it no longer does. |
 | `crm_not_connected`, `calls_not_connected`, `slack_not_connected` | The workspace has no such source connected at the moment of the call. |
 | `crm_not_served` | The workspace's CRM is one the MCP tools do not serve in this build. |
+| `calls_not_matched`, `slack_not_matched` | The account's imported call, or its mapped thread, waits for a person in the matches queue or was kept off every card ([setting it up](config.md#what-is-built-today)). |
 | `account_number_requires_salesforce` | `search_accounts` was given `account_number` on the demo CRM, which has no account numbers. |
 | A source's own code, such as `source_identity_mismatch` | The source refused the read. See [sources](sources.md). |
 
@@ -327,6 +328,9 @@ bytes.
 prepare_renewal_brief ──▶ get_account ──▶ list_opportunities ──▶ read_call_notes ──▶ read_slack_messages ──▶ card saved and sealed
      (receipt)              (child 1)         (child 2)             (child 3)            (child 4)
 ```
+
+On Salesforce, a `list_users` read of the org's users, under `crm:read`, comes after
+`list_opportunities` as one more child read. `list_users` is a read of a card only, and no tool.
 
 Both brief tools answer with `structuredContent` holding `source: "brief"`, one record (the brief, with a
 `record_ref` of `briefs/BRIEF_ID/` and the SHA-256 of its bytes), `untrusted_data: true`, and `brief`.

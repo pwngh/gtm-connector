@@ -143,38 +143,55 @@ func TestAHandshakeThatIsStoppedClosesItsSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	closed := make(chan int64, 1)
+	began, closed := make(chan struct{}), make(chan struct{})
 	go func() {
+		defer close(closed)
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
 		defer conn.Close()
-		// The server takes the client's first message and never answers it. The copy ends when the client
-		// closes its side.
-		taken, _ := io.Copy(io.Discard, conn)
-		closed <- taken
+		// The server takes the client's first message and never answers it. It says so once the first bytes
+		// of the handshake have come, and the copy ends when the client closes its side.
+		if n, _ := conn.Read(make([]byte, 1)); n == 0 {
+			return
+		}
+		close(began)
+		_, _ = io.Copy(io.Discard, conn)
 	}()
 	_, roots := sourcehttptest.Identity(t, host)
 	transport := sourcehttp.Transport(sourcehttptest.To(listener.Addr().String()), roots)
 	// net/http gives a dial a context of its own, which it ends when no request wants the connection. The
-	// dial is called here as net/http calls it, with a context that ends while the server is silent.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// dial is called here as net/http calls it, with a context that ends while the server is silent: once the
+	// handshake has begun.
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	started := time.Now()
-	conn, err := transport.DialTLSContext(ctx, "tcp", net.JoinHostPort(host, "443"))
-	if err == nil {
-		_ = conn.Close()
-		t.Fatal("a handshake the server never answered gave a connection")
+	dialed := make(chan error, 1)
+	go func() {
+		conn, err := transport.DialTLSContext(ctx, "tcp", net.JoinHostPort(host, "443"))
+		if err == nil {
+			_ = conn.Close()
+		}
+		dialed <- err
+	}()
+	select {
+	case <-began:
+	case err := <-dialed:
+		t.Fatalf("the dial returned before the handshake began: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the handshake never began")
 	}
-	if waited := time.Since(started); waited > 2*time.Second {
-		t.Fatalf("the dial returned %v after its context ended", waited)
+	cancel()
+	select {
+	case err := <-dialed:
+		if err == nil {
+			t.Fatal("a handshake the server never answered gave a connection")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the dial did not return within 2s of its context ending")
 	}
 	select {
-	case taken := <-closed:
-		if taken == 0 {
-			t.Fatal("the handshake never began")
-		}
+	case <-closed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("the socket was left open")
 	}

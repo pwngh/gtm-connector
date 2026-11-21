@@ -69,8 +69,8 @@ Units are numbered in a fixed order:
 On demo data, two times written with different UTC offsets sort by their text, not by the moment
 they name. An imported transcript stores its time in UTC.
 
-`inspect BRIEF_ID` lists every unit, one per line. `--role customer`, `seller` or `unknown` lists
-one role's sentences.
+`inspect BRIEF_ID` lists every unit, one per line. `--role` with `customer`,
+`customer_side_not_in_crm`, `seller`, `other_party` or `unknown` lists one role's sentences.
 
 ```text
 1  record  accounts  acc-003
@@ -82,7 +82,8 @@ that returned its record (`audit_id`, `tool`, `status` and `http_status`), and `
 
 A record also gets its `fields`, each neutralized and on one line. A sentence gives its text, its
 speaker and role, whether it is on the card, and `raw_sha256`, the SHA-256 of the record's text as
-stored. `next_by_speaker` is the number of the next whole sentence under the same speaker label in
+stored. A sentence sealed under the speaker rules also gives the rung that decided its role and the
+identifier that decided it, with the receipt of the read that returned that identifier's record. `next_by_speaker` is the number of the next whole sentence under the same speaker label in
 the same record, or `null`.
 
 `inspect` answers from the sealed units and evidence, never from the card's text, and rebuilds
@@ -111,9 +112,9 @@ A record unit has `n`, `kind` (`record`), `source` (`crm`, `calls` or `slack`), 
 | --- | --- |
 | `at` | The record's time as the source wrote it, or `null`. |
 | `speaker` | The speaker label, neutralized and on one line, or `null`. |
-| `role` | `customer`, `seller` or `unknown`. See [speaker roles](#speaker-roles). |
-| `basis` | Why it has that role, such as `label matches contact [2]` or `listed seller identity`. |
-| `contact` | The number of the one contact a customer's label equals, or `null`. |
+| `role` | `customer`, `customer_side_not_in_crm`, `seller`, `other_party` or `unknown`. See [speaker roles](#speaker-roles). |
+| `basis` | How the role was decided, in the words the card prints, such as `by attendee list` or `names no listed seller, contact or user`. A unit sealed before the speaker rules keeps its own, such as `label matches contact [2]`. |
+| `contact` | The number of the contact a customer is, or `null`. |
 | `text` | The sentence, neutralized. |
 | `partial` | `true` when the sentence is not whole. |
 | `quoted` | `true` when the sentence is in a block quote or a speaker's turn of a Slack message: words its author relayed, with `role` `unknown` and `basis` `quoted by the message's author`. A card sealed under rules version 3 has no `quoted` key. |
@@ -121,6 +122,9 @@ A record unit has `n`, `kind` (`record`), `source` (`crm`, `calls` or `slack`), 
 | `span` | `null`, except in an imported transcript: `first` and `last`, the cues or lines the sentence lies in, and `start_ms` and `end_ms`, which cover every cue it lies in, whatever order the file wrote them in. Lines have no times, so both are `null` for a TXT file. |
 | `raw_sha256` | The SHA-256 of the record's text as stored. |
 | `sanitizer_version` | The version of the neutralizer rules, `5`. |
+| `speaker_rules` | The version of the speaker rules the role was decided under, `1`. A unit sealed before them has no `speaker_rules`, `rung` or `matched`, and shows its role and basis as sealed. |
+| `rung` | The rung of the ladder that decided, `1` to `5`, or `0` when none did. |
+| `matched` | The identifier that decided, or `null`: `kind` (`email`, `slack_user`, `salesforce_contact`, `salesforce_user`, `name`, `listed_seller` or `alias`), `value`, neutralized, and `record_ref`, the record it came from, or `null` for a listed seller or an alias. |
 
 | `shown` | Why the sentence is not shown |
 | --- | --- |
@@ -190,7 +194,7 @@ with the account and brief in its `arguments`, and [receipts](audit.md) says how
 | `text` | The card. |
 | `units` | The [units](#units). |
 | `gaps` | The [gaps](#gaps). |
-| `evidence` | The records as read, one receipt per read, each source's binding and the seller list. |
+| `evidence` | The records as read, one receipt per read, each source's binding, the seller list and the `people` object: `rules_version`, the workspace's `company_domains` and its `aliases`, and `users`, whether the org's users were read (`read`, `not_read`, or `none` beside a CRM other than Salesforce). |
 
 `brief --json` prints every key but `evidence`. The evidence keeps the records read when the card
 was made, not later CRM changes.
@@ -205,7 +209,7 @@ the card prints them.
 | `code` | One of a fixed list: the keys of `GapCodes` in `internal/evidence/units.go`. The database's `gaps` table accepts only these codes. |
 | `disposition` | `not_read`, `read_not_shown` or `note`. Each code has one. |
 | `count` | How many records or sentences the line says were read and are not shown, how many its note is about, or how many files, attachments and blocks of a Slack read it says were not read. It is `null` when the line gives no such number. |
-| `by_role` | That count by speaker role (`customer`, `seller`, `unknown`), for a line that counts sentences, or `null`. |
+| `by_role` | That count by side (`customer`, which counts customers and customer-side speakers not in the CRM, `seller`, `other_party` and `unknown`), for a line that counts sentences, or `null`. A card sealed before the speaker rules has no `other_party`. |
 | `text` | The line itself. |
 
 Name a gap by its `code`, never by its text.
@@ -271,28 +275,34 @@ decides nothing.
 | First two lines | `DEAL CARD:`, the account name as a quoted literal, its ID and the planning date. Then `Sources read` and the time, to the second, from the start times of the reads that finished `ok`: one time, or the first and last. |
 | `ATTENTION` | The [signals](#signals). Left out when there are none. |
 | `RECORD VALUES` | Typed CRM fields and connector arithmetic. An empty field prints `Missing`. An amount prints its currency code when the record carries one, and `(currency Missing)` when it does not. At most five opportunities, five contracts and five contacts are shown, and the rest are counted under `NOT READ`. |
-| `SAID` | Whole sentences under one heading per role: the customer's first, then the seller's, then those of no established role. At most 12 are shown. |
+| `SAID` | Whole sentences under one heading per side: `Customer side`, `Seller side`, `Other party`, then `No established role`. At most 12 are shown. |
 | `NOT READ` | What each source did not return or was not asked for, how many fields are empty, how many sentences are not shown and why, how many have no speaker role, and what was neutralized. When call sentences carry speaker labels and none equals a contact's name, one line says so. |
 
 The demo CRM gives `Renewal date`, `Annual recurring revenue` and `CRM risk`. Salesforce gives
 `Contract end`: the contract that ends first on or after the planning date, and its status, marked
 `a planning candidate, not activated` unless it is activated. With no such contract the line says
 `Missing: no contract ends on or after` the date. On Salesforce a `NOT READ` line always says annual
-recurring revenue and renewal risk are not mapped from standard Salesforce fields.
+recurring revenue and renewal risk are not mapped from standard Salesforce fields, and another says
+when the org's users were not read because it holds more than 50,000 Standard users. A live Slack
+thread's line says which authors' profiles were not read: for a scope the sign-in lacks, past the
+read's limit, or because Slack could not give one.
 
 Open opportunities come first, by close date, then closed ones, latest first.
 
 Under `SAID`:
 
-- Each sentence has its number, its source (`call` or `Slack`), its time and its speaker label. A
-  customer's also has the title and number of the contact its label equals. A labelled sentence of
-  no role says why in parentheses.
-- The 12 places are dealt one at a time to each role that still has a sentence, newest first, so
+- Each sentence has its number, its source (`call` or `Slack`), its time and its speaker label, then
+  how its role was decided. A customer's also has the contact's title, the day the account was read,
+  and the contact's number, as in `"Marian Holt", role "Deputy general counsel" read 2027-01-15 [2], by
+  name`. A title that is `Missing` prints with no day. A labelled sentence of no role says why in
+  parentheses.
+- The 12 places are dealt one at a time to each side that still has a sentence, in the order above,
+  newest first, so
   sixty messages from a seller cannot push the customer's one sentence off the card. Inside one call
   a later cue time is newer, and at one time the later sentence is. A sentence with no time is
   dealt last.
-- Under each role the kept sentences print oldest first, and one with no time prints last.
-  `NOT READ` counts what is not shown, by role.
+- Under each side the kept sentences print oldest first, and one with no time prints last.
+  `NOT READ` counts what is not shown, by side.
 - When sentences were read and none can be shown, the section says so, and `NOT READ` says why.
 - A figure inside a sentence stays there and never becomes a record value.
 
@@ -316,18 +326,83 @@ On Salesforce, the first signal and the close date signal say "contract end" whe
 
 ## Speaker roles
 
-A role comes from a label, never from what a sentence says about itself. A label is what the source
-wrote. It does not prove who spoke: another person of the same name, or a name typed into a file,
-gets the same role.
+A role comes from who the speaker is, never from what a sentence says. The card names the person by
+the strongest identifier its evidence holds for the speaker, and the role is that person's side.
 
-| Role | When |
+| Rung | Identifier | `basis` |
+| ---: | --- | --- |
+| 1 | A live Slack author's user ID in the signed-in workspace, or the profile email Slack gave for it ([Slack](sources.md#reading-a-thread)) | `by Slack profile` |
+| 2 | The row of the call's attendee list under the speaker's label: its email ([attendees](sources.md#attendees)) | `by attendee list` |
+| 3 | An alias of the label, set with `connect --alias` ([the CLI](cli.md#speaker-settings)) | `by alias` |
+| 4 | The label equals a contact's name or a seller list entry, each on one line | `by name` |
+| 5 | The label, without a title, a suffix, a device name or the bracketed organization, and with "Last, First" turned around, equals the name of exactly one person the call's attendee list names by email: a contact, or an active Salesforce user | `by name variant on the attendee list` |
+
+The first rung that finds exactly one person decides, and no weaker rung is read after it. So the
+attendee list's email beats the label: a label that equals a listed seller's name is the customer when
+the attendee list gives that label a contact's address. A rung that finds two or more people decides
+the role is unknown, as `N people match by name`, or `N people on both sides match by name`.
+
+A person's side comes from their records:
+
+| Role | The person |
 | --- | --- |
-| `seller` | The speaker label or Slack author equals a name or ID on the workspace's seller list. |
-| `customer` | A call's speaker label equals the name of exactly one contact of the account, and no listed seller. Slack authors are never customers. |
-| `unknown` | Everything else: no label, a label that matches nobody, two or more contacts with the name, a name shared by a seller and a contact, or a label over 200 characters. |
+| `customer` | A contact of the account. |
+| `seller` | A Salesforce user of the org (a `Standard` user, active or not), known by user ID and email, or an entry of the workspace's seller list. |
+| `unknown` | A contact who is also a user or a listed seller. |
 
-A report of what someone else said keeps the role of the person reporting it, because the role
-comes from the label.
+A Slack author is a seller when the author's user ID equals a name or ID on the workspace's seller list.
+A Slack author's name is compared with sellers only, so it never makes a customer: only a profile
+email that a contact holds does. A call's label is compared with contacts and sellers. A Salesforce
+user's name is never compared with a label on its own: only rung 5 reads an active user's name, for a
+user the call's attendee list names by email, so a customer who shares a name with someone in the org
+is not made a seller.
+
+Records of one person are one person: a contact and a user with the same email address, and a seller
+list entry that equals the name of exactly one user.
+
+An email that names no person still shows a side by its domain, and the sentence names the domain:
+
+| Role | The address is on | `basis` |
+| --- | --- | --- |
+| `seller` | One of the company's domains (`connect --company-domain`). In Slack only an author of the signed-in workspace counts. | `seller side by domain D` |
+| `customer_side_not_in_crm` | One of the account's domains. The person is not a contact. | `customer side by domain D, not a contact` |
+| `other_party` | Any other domain | `other party by domain D` |
+
+The account's domains are the domain its Salesforce Website names, and each email domain that at least
+two of its contacts hold. One contact alone never makes a domain the account's. A Website that is a
+page on a shared host, such as a site builder or a social network, names none. A domain is never the
+account's when it is a free or shared mail domain, one of the company's domains, a Salesforce user's
+domain or a seller list entry's.
+
+A free or shared mail domain, such as `gmail.com`, never shows a side, and neither does a domain on
+both the company's list and the account's. A member of the signed-in Slack workspace is never put on
+the customer side by a domain. The domain a sentence names is neutralized as any source text is, and
+`matched` for a person outside the CRM holds that domain alone, never the full address. A person a weaker rung names must be on the side a domain
+showed, or the role is unknown. A label under several rows of the attendee list is several people
+behind one microphone, such as a meeting room: it takes a side only when every one of them is on it.
+
+The role is unknown for no label, a label that matches nobody, two or more contacts with the name, a
+name shared by a seller and a contact, or a label over 200 characters, and for the other reasons
+below. `unknown` says why in its `basis`:
+
+| `basis` | Why |
+| --- | --- |
+| `no speaker label` | The sentence has no label. |
+| `names no listed seller, contact or user` | No rung found anyone. |
+| `anonymous label with no alias for this call` | A label such as `Speaker 2`, which names no one, and no alias for that call. Only an alias for the one call gives it a person. |
+| `Slack author not identified; a Slack name never shows a customer` | A Slack author no profile, alias or seller entry names. |
+| `email on a free or shared domain shows no side` | The only email is on such a domain. |
+| `N people match by ...`, `N people on both sides match by ...` | The deciding rung found more than one person: two or more contacts with the name, or a name shared by a seller and a contact. |
+| `speaker label over 200 characters` | The label is too long to print, so no rule reads it. |
+| `a stronger identifier puts the speaker on another side, by ...` | A domain showed one side and the person a weaker rung named is on the other. |
+| `the email's domain contradicts the person's side, by ...` | A contact's address is on the company's domain, or a seller's on the account's. |
+| `the person is both a contact and a seller, by ...` | The person is a contact and also a user or a listed seller. |
+| `the attendees behind this label are on different sides` | The rows of the attendee list under the label are not all on one side. |
+
+A label is what the source wrote, and an attendee list or an alias is what the operator gave. Neither
+proves who spoke: another person of the same name, or a name typed into a file, gets the same role. A
+report of what someone else said keeps the role of the person reporting it, because the role comes
+from the speaker.
 
 In a WebVTT transcript the label is a voice tag, or a cue identifier that is not a number. A cue
 with two voice tags gives each span its own speaker, and text after a closing tag belongs to the
@@ -353,6 +428,14 @@ evidence.
 
 Demo calls and demo Slack also count the demo's own invented sellers: Morgan Reed, Quinn Moss and
 Avery Linden. An imported transcript or live Slack never does.
+
+The company's domains and the aliases are the workspace's speaker settings, kept beside the seller
+list and set by the same `connect` forms with `--company-domain` and `--alias` ([the
+CLI](cli.md#speaker-settings)). Every card seals them in its evidence's `people` object, with the
+version of the speaker rules. Evidence with no `people` object, made before the speaker rules, is read
+with what it holds: its records and its seller list. A Salesforce card's evidence also holds the org's users, as
+`crm/users/usr-sf-ID` records of the `list_users` read, and a live Slack card's the thread's authors,
+as `slack/members/mem-USER` records of the `read_slack_messages` read. Neither is a unit.
 
 ## Neutralized text
 

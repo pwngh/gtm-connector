@@ -1,4 +1,4 @@
 {
  "note": "commands run in order against one demo state folder; IDs, ports, token fingerprints, receipt times and the folder are numbered placeholders by first appearance; a seal's digest is <sha256>",
- "commands": 33
+ "commands": 30
 }

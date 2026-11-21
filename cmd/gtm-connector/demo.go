@@ -165,7 +165,7 @@ func (r *run) renewal(ctx context.Context) (any, error) {
 	from, err := r.reads(ctx)
 	if errors.Is(err, errNotConnected) {
 		// A workspace that reads nothing yet is connected to the demo data, as connect demo connects it.
-		if _, _, err = r.attach(ctx, kindsNamed("demo"), nil); err == nil {
+		if _, _, err = r.attach(ctx, kindsNamed("demo"), nil, ""); err == nil {
 			from, err = r.reads(ctx)
 		}
 	}

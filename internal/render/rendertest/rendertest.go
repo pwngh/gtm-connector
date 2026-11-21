@@ -18,7 +18,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// Families is every file of recorded cards: 450 cards in all.
+// Families is every file of recorded cards. Cards gives the golden ones, the rows that hold their card.
 var Families = []string{"books_calls", "books_demo", "books_salesforce", "books_slack", "cases", "demo",
 	"slack_threads", "varied_demo"}
 
@@ -45,7 +45,8 @@ func shown(record *strictjson.Object, key string) string {
 	return strings.Join(strings.Fields(safe), " ")
 }
 
-// Cards is the recorded cards of one family, each published at 15:00:04 UTC on its as_of day.
+// Cards is the golden cards of one family, each published at 15:00:04 UTC on its as_of day. A row that holds
+// inputs alone is left out.
 func Cards(t testing.TB, family string) []Recorded {
 	t.Helper()
 	var out []Recorded
@@ -57,6 +58,9 @@ func Cards(t testing.TB, family string) []Recorded {
 		}
 		if err := json.Unmarshal(line, &row); err != nil {
 			t.Fatal(err)
+		}
+		if row.Card == "" {
+			continue
 		}
 		value, err := strictjson.LoadsText(row.Card)
 		if err != nil {

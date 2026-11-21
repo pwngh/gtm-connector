@@ -8,8 +8,8 @@
     "previous_status": "amber"
   },
   "card": {
-    "id": "card-61c9379456b6",
-    "sha256": "61c9379456b6b316db563adfd39fbbf9ad6bf60b3217b5da2b8a9905f791cc59",
+    "id": "card-57cd9ebb3076",
+    "sha256": "57cd9ebb30764ed288a555d91246646a1242f0536ebfee093cc7e5ff0b503110",
     "as_of": "2027-01-15"
   },
   "renewal": {
@@ -66,7 +66,7 @@
   ],
   "changes": null,
   "links": {
-    "card": "https://gtm.example.internal/deals/acc-003?card=card-61c9379456b6",
-    "api": "https://gtm.example.internal/api/v1/cards/card-61c9379456b6"
+    "card": "https://gtm.example.internal/deals/acc-003?card=card-57cd9ebb3076",
+    "api": "https://gtm.example.internal/api/v1/cards/card-57cd9ebb3076"
   }
 }

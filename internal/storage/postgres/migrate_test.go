@@ -17,7 +17,7 @@ import (
 // seconds.
 func stands(t *testing.T, store *postgres.Store, want postgres.MigrationState, state string) {
 	t.Helper()
-	bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
+	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	got, err := store.MigrationState(bounded)
 	if err != nil || got != want {

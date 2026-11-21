@@ -14,8 +14,8 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// Source is the reads a card makes, one per tool: get_account, list_opportunities, read_call_notes and
-// read_slack_messages. It returns the source system the records come from and the records with their
+// Source is the reads a card makes, one per tool: get_account, list_opportunities, list_users (a Salesforce
+// CRM only), read_call_notes and read_slack_messages. It returns the source system the records come from and the records with their
 // record_ref. ctx carries the caller's cancellation and the card's deadline, and a read returns once it is
 // done. demo.Store is one.
 type Source interface {
@@ -37,8 +37,13 @@ type WorkspaceSource interface {
 }
 
 // ErrNotSelected is a Source's answer when the account has no selection in that source, such as a Slack
-// thread that was never mapped. The read finishes as error/200 and the card states it.
+// thread that was never mapped, or when an org's users are more than a card reads. The read finishes as
+// error/200 and the card states it.
 var ErrNotSelected = errors.New("cards: no selection for this account in this source")
+
+// ErrNotMatched is a Source's answer when the account's imported call or mapped Slack thread is not matched
+// to the deal the card is read for. The read finishes as error/200 and the card states it.
+var ErrNotMatched = errors.New("cards: the account's item in this source is not matched to the card's deal")
 
 // ErrOtherWorkspace is a read through a source that states another workspace than the caller's.
 var ErrOtherWorkspace = errors.New("cards: the source reads another workspace than the caller's")
@@ -246,13 +251,20 @@ var rulesVersion = strconv.Itoa(evidence.SanitizerVersion)
 
 // The scopes the reads need.
 var scopes = map[string]string{"get_account": "crm:read", "list_opportunities": "crm:read",
-	"read_call_notes": "calls:read", "read_slack_messages": "slack:read"}
+	"list_users": "crm:read", "read_call_notes": "calls:read", "read_slack_messages": "slack:read"}
+
+// ReadScope is the scope a card's read needs, or "" for a name that is no read of a card.
+func ReadScope(tool string) string { return scopes[tool] }
 
 type planned struct{ tool, system string }
 
-// plan is the reads a card makes: CRM always, calls when connected, Slack when asked for and connected.
+// plan is the reads a card makes: CRM always, with the org's users for a Salesforce CRM, calls when
+// connected, Slack when asked for and connected.
 func plan(s evidence.Sources, includeSlack bool) []planned {
 	reads := []planned{{"get_account", "crm"}, {"list_opportunities", "crm"}}
+	if s.CRMBackend == "salesforce" {
+		reads = append(reads, planned{"list_users", "crm"})
+	}
 	if s.CallsBackend != "none" {
 		reads = append(reads, planned{"read_call_notes", "calls"})
 	}
@@ -375,7 +387,7 @@ func (m *Maker) source(ctx context.Context, tool, accountID string) (system stri
 
 // read runs one read whose receipt is committed. The scope, the credential and the deadline are checked
 // first; then the source is read, and its records are released only once FinishRead has bound their
-// versions to the receipt. The outcome is "ok", "denied" or "not_selected". A live Slack read also gives the
+// versions to the receipt. The outcome is "ok", "denied", "not_selected" or "not_matched". A live Slack read also gives the
 // thread's snapshot.
 //
 // The source reads under the caller's context, bounded by the time left to the deadline. A read whose
@@ -425,6 +437,8 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 			finish(receipts.Failed(200, "request_failed")))
 	case errors.Is(readErr, ErrNotSelected):
 		return nil, nil, nil, "not_selected", finish(receipts.NotSelected())
+	case errors.Is(readErr, ErrNotMatched):
+		return nil, nil, nil, "not_matched", finish(receipts.NotSelected())
 	case errors.Is(readErr, ErrSourcePanicked):
 		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool}, ErrSourcePanicked,
 			finish(receipts.Failed(200, "request_failed")))
@@ -465,14 +479,18 @@ type collected struct {
 	receiptOf                map[string]string // tool to its read receipt
 	versionOf                map[string]string // record_ref to its content version
 	notesStatus, slackStatus string
-	threadSnapshot           any // of a live Slack read that returned messages
+	usersStatus              string // the org's users read: evidence.UsersNone, UsersRead or UsersNotRead
+	threadSnapshot           any    // of a live Slack read that returned messages
 }
 
 // collect makes the planned reads. start commits the receipt of the n-th read, from 1.
 func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, principal Principal,
 	deadline time.Time, includeSlack bool, start func(n int, p planned) (receipts.Receipt, error)) (collected, error) {
 	c := collected{records: []any{}, receiptOf: map[string]string{}, versionOf: map[string]string{},
-		notesStatus: "available", slackStatus: "not_requested"}
+		notesStatus: "available", slackStatus: "not_requested", usersStatus: evidence.UsersNone}
+	if m.Sources.CRMBackend == "salesforce" {
+		c.usersStatus = evidence.UsersRead
+	}
 	if m.Sources.CallsBackend == "none" {
 		c.notesStatus = "not_connected"
 	}
@@ -517,7 +535,17 @@ func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, 
 		case outcome == "not_selected" && p.tool == "read_slack_messages" && m.Sources.SlackBackend == "slack":
 			c.slackStatus = "not_selected"
 			continue
+		case outcome == "not_selected" && p.tool == "list_users":
+			// The org holds more users than a card reads: the card is made without them, and says so.
+			c.usersStatus = evidence.UsersNotRead
+			continue
 		case outcome == "not_selected":
+			return c, &ReadError{Tool: p.tool}
+		case outcome == "not_matched" && (p.tool == "read_call_notes" && m.Sources.CallsBackend == "imported" ||
+			p.tool == "read_slack_messages" && m.Sources.SlackBackend == "slack"):
+			*status = "not_matched"
+			continue
+		case outcome == "not_matched":
 			return c, &ReadError{Tool: p.tool}
 		}
 		for _, v := range bound {
@@ -580,7 +608,7 @@ func (m *Maker) evidence(ctx context.Context, workspaceID, id, accountID, asOf s
 	for i, r := range read {
 		values[i] = r.Value()
 	}
-	return evidence.Assemble(id, accountID, asOf, c.records, values, c.notesStatus, c.slackStatus, c.threadSnapshot,
+	return evidence.Assemble(id, accountID, asOf, c.records, values, c.notesStatus, c.slackStatus, c.usersStatus, c.threadSnapshot,
 		m.Sources), nil
 }
 

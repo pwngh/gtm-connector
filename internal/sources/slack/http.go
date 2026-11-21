@@ -34,6 +34,7 @@ type budget struct {
 
 	httpAttempts, authAttempts, messageAttempts int
 	responseBytes, authBytes, messageBytes      int
+	profileAttempts, profileBytes               int
 	refreshAttempts                             int
 	tokenRetried, rateRetried                   bool
 
@@ -85,10 +86,18 @@ func (b *budget) store(ctx context.Context, call func(context.Context) error) er
 	return err
 }
 
-// beginRequest counts one HTTP attempt, of a page ("messages") or of the sign-in ("auth").
+// beginRequest counts one HTTP attempt, of a page ("messages"), of the sign-in ("auth") or of an author's
+// profile ("profile"). Profile requests have a cap of their own, maxProfileRequests.
 func (b *budget) beginRequest(kind string) error {
 	if _, err := b.remaining(); err != nil {
 		return err
+	}
+	if kind == "profile" {
+		if b.profileAttempts >= maxProfileRequests {
+			return refuse("slack_resource_limit")
+		}
+		b.profileAttempts++
+		return nil
 	}
 	if b.httpAttempts >= maxRequests {
 		return refuse("slack_resource_limit")
@@ -108,9 +117,12 @@ func (b *budget) room() int { return maxResponseBytes - b.responseBytes }
 // addBytes counts response bytes as they arrive, so an oversized body is refused before it is held.
 func (b *budget) addBytes(amount int, kind string) error {
 	b.responseBytes += amount
-	if kind == "auth" {
+	switch kind {
+	case "auth":
 		b.authBytes += amount
-	} else {
+	case "profile":
+		b.profileBytes += amount
+	default:
 		b.messageBytes += amount
 	}
 	if b.responseBytes > maxResponseBytes {
@@ -389,44 +401,5 @@ func (r *Reader) replies(ctx context.Context, b *budget, held *access, channel, 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := b.remaining(); err != nil {
-		return nil, err
-	}
-	switch {
-	case got.status == http.StatusTooManyRequests:
-		limited := &Error{Code: "slack_rate_limited"}
-		if after := headerValue(got.header, "Retry-After", ""); digits(after, 4) {
-			if seconds, _ := strconv.Atoi(after); seconds <= 3600 {
-				limited.retry = seconds + 1
-			}
-		}
-		return nil, limited
-	case got.status >= 500:
-		return nil, refuse("slack_unavailable")
-	case got.status == http.StatusUnauthorized:
-		// Only the exact token_expired answer leads to a refresh. Any other 401 is refused.
-		document, err := decode(got.body, &b.tokens)
-		if err != nil {
-			return nil, err
-		}
-		if err := providerResult(document); err != nil {
-			return nil, err
-		}
-		return nil, refuse("slack_response_invalid")
-	case got.status == http.StatusForbidden:
-		return nil, refuse("slack_forbidden")
-	case got.status != http.StatusOK:
-		return nil, refuse("slack_response_invalid")
-	}
-	document, err := decode(got.body, &b.tokens)
-	if err != nil {
-		return nil, err
-	}
-	if err := providerResult(document); err != nil {
-		return nil, err
-	}
-	if _, err := b.remaining(); err != nil {
-		return nil, err
-	}
-	return document, nil
+	return answered(got, b)
 }

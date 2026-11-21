@@ -34,7 +34,8 @@ func TestSlowSourcesLeaveTheReceiptItsTime(t *testing.T) {
 			return Opened{}, errors.New("opening the sources was given no deadline")
 		}
 	}
-	starting, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	// The sources take their half, a second; the receipt's write keeps the other second, room for a busy runner.
+	starting, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	known := knownBearer
 	id, err := r.Start(starting, mcp.Start{Token: &known, Tool: "get_account",

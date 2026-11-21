@@ -139,9 +139,9 @@ func recordedImport(t *testing.T, row fixtureRow, transcript *strictjson.Object,
 }
 
 // source is the folder's source over a store of imports, after the import the oracle made is saved by save.
-// What the import returns is what the Python import returned, and what read_call_notes then returns for the
-// account is the record the oracle card's evidence holds, member for member in the same order: the imported
-// transcript, or nothing.
+// What the import returns is the recorded import, and read_call_notes then returns the imported transcript
+// for the account, or nothing. For a golden card it is the record the card's evidence holds, member for
+// member in the same order.
 func (f *importedCalls) source(t *testing.T, row fixtureRow, imports calls.Imports,
 	save func(calls.Import) (*strictjson.Object, error)) Source {
 	t.Helper()
@@ -158,9 +158,15 @@ func (f *importedCalls) source(t *testing.T, row fixtureRow, imports calls.Impor
 	}
 	source := calls.Source{Reads: f.reads, Imports: imports, CRMBinding: evidence.FixtureCRMBinding()}
 	_, read, err := source.Read(context.Background(), "read_call_notes", row.AccountID)
+	if err != nil || f.made == nil && len(read) != 0 || f.made != nil && len(read) != 1 {
+		t.Fatalf("%s: read_call_notes returned %d records (%v)", row.Key, len(read), err)
+	}
+	if row.Card == "" {
+		return source
+	}
 	recorded := recordedRows(t, row, "calls/call_notes")
-	if err != nil || len(read) != len(recorded) || f.made == nil && len(read) != 0 || f.made != nil && len(read) != 1 {
-		t.Fatalf("%s: read_call_notes returned %d records (%v), the card holds %d", row.Key, len(read), err, len(recorded))
+	if len(read) != len(recorded) {
+		t.Fatalf("%s: read_call_notes returned %d records, the card holds %d", row.Key, len(read), len(recorded))
 	}
 	for i, record := range read {
 		if !sameOrder(record, recorded[i]) {
@@ -227,22 +233,25 @@ func (s thread) ReadThread(context.Context, string) ([]*strictjson.Object, *stri
 	return s.messages, s.snapshot, nil
 }
 
-// recordedThread is the live Slack source of one oracle card, over the store its other reads go to. The
-// Slack connection's binding is recorded only in the card's evidence, so the folder's sources take it from
-// there. served is the recorded input: the thread's messages as the Slack API returned them, each of which
-// must be the message the card holds at its place.
+// recordedThread is the live Slack source of one fixture card, over the store its other reads go to. Its
+// input "read" holds what the Slack reader gives for the thread (the slack package's replay test reads the
+// same threads to it): the connection's binding, the thread's snapshot and its messages as records. served
+// is the recorded input: the thread's messages as the Slack API returned them, each of which must be the
+// message the read holds at its place.
 func recordedThread(t *testing.T, row fixtureRow, input *strictjson.Object, store Source, served any,
 	sources *evidence.Sources) Source {
 	t.Helper()
-	card, _ := load(t, []byte(row.Card)).(*strictjson.Object)
-	sealed := get(card, "evidence").(*strictjson.Object)
-	sources.SlackBinding = get(sealed, "slack_binding")
-	messages := recordedRows(t, row, "slack/messages")
-	snapshot, _ := get(sealed, "thread_snapshot").(*strictjson.Object)
+	read := get(input, "read").(*strictjson.Object)
+	sources.SlackBinding = get(read, "binding")
+	var messages []*strictjson.Object
+	for _, value := range get(read, "messages").([]any) {
+		messages = append(messages, value.(*strictjson.Object))
+	}
+	snapshot, _ := get(read, "snapshot").(*strictjson.Object)
 	api, _ := served.([]any)
 	if len(api) != len(messages) || (snapshot == nil) != (len(api) == 0) ||
 		snapshot != nil && get(snapshot, "cutoff_ts") != get(input, "cutoff") {
-		t.Fatalf("%s: the card does not hold the thread its inputs record", row.Key)
+		t.Fatalf("%s: the read does not hold the thread its inputs record", row.Key)
 	}
 	for i, message := range messages {
 		given := api[i].(*strictjson.Object)
@@ -439,11 +448,16 @@ func storedLines(t *testing.T, rows []receipts.LineRow, recorded string, mismatc
 	return len(printedSignals), len(printedValues)
 }
 
+// runFamily builds every card of a family from its inputs. On the memory store, the one that makes a card
+// under the fixture's IDs and clock, each card is checked by cardProperties and its features counted in cov;
+// a golden card is also compared with its row byte for byte. A store that gives receipts IDs and times of
+// its own, as PostgreSQL does, builds the golden cards only and compares them with their rows.
 func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStore,
-	prepare func(row fixtureRow, input *strictjson.Object) setup) {
+	prepare func(row fixtureRow, input *strictjson.Object) setup, cov *coverage) {
 	mismatches := oracletest.NewMismatches(t, "cards/"+family)
+	properties := oracletest.NewMismatches(t, "properties of cards/"+family)
 	var cards cardStore
-	checked, identical, skipped := 0, 0, map[string]int{}
+	checked, compared, identical, skipped := 0, 0, 0, map[string]int{}
 	signalLines, valueLines := 0, 0
 	golden := oracletest.NewGolden(t, "cards/"+family+".jsonl.gz", strictjson.Canonical.Dumps)
 	changes := renewal{members: map[string]int{}}
@@ -452,10 +466,21 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 			t.Logf("-update: cards/%s.jsonl.gz: %s", family, changes)
 		}
 	}()
+	var goldenKeys []string
 	for i, line := range golden.Lines() {
 		var row fixtureRow
 		if err := json.Unmarshal(line, &row); err != nil {
 			t.Fatal(err)
+		}
+		if row.Card != "" {
+			goldenKeys = append(goldenKeys, row.Key)
+		}
+		if cards == nil {
+			cards = newStore(t)
+		}
+		memory, inMemory := cards.(*memoryCards)
+		if !inMemory && row.Card == "" {
+			continue
 		}
 		input, _ := load(t, row.Input).(*strictjson.Object)
 		s := prepare(row, input)
@@ -469,22 +494,36 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 		if err := json.Unmarshal(row.Options, &o); err != nil {
 			t.Fatal(err)
 		}
-		if cards == nil {
-			cards = newStore(t)
+		build := func(cards cardStore, s setup) (*Sealed, error) {
+			sc := newScope(s.scope)
+			sc.ids, sc.receipts = s.ids, s.receipts
+			m, b := cards.maker(t, sc, s, row, o.brief(row.AccountID, sc.token(s.tokens+accessToken)))
+			return m.Brief(context.Background(), b)
 		}
-		sc := newScope(s.scope)
-		sc.ids, sc.receipts = s.ids, s.receipts
-		m, b := cards.maker(t, sc, s, row, o.brief(row.AccountID, sc.token(s.tokens+accessToken)))
-		sealed, err := m.Brief(context.Background(), b)
+		sealed, err := build(cards, s)
 		if err != nil {
 			mismatches.Add("%s: no card: %v", row.Key, err)
 			continue
 		}
-		// Only the memory store makes a card under the recorder's IDs, so only it writes the fixture again.
-		if memory, ok := cards.(*memoryCards); ok && oracletest.Update() {
+		if inMemory {
+			properties.Row()
 			log := StoreLog{Store: memory.stores[s.scope], WorkspaceID: testWorkspace}
-			row = renewed(t, golden, i, line, row, sealed, log, s.sources, &changes)
+			again, _ := build(newMemoryCards(t), prepare(row, input))
+			cardProperties(t, row.Key, sealed, again, log, s.sources, properties)
+			cov.add(family, row.Key, load(t, sealed.Payload).(*strictjson.Object), isGolden(family, row.Key))
+			// Only the memory store makes a card under the fixture's IDs, so only it writes the fixture again:
+			// the card of a golden row, and no card in any other.
+			switch {
+			case oracletest.Update() && isGolden(family, row.Key):
+				row = renewed(t, golden, i, line, row, sealed, log, s.sources, &changes)
+			case oracletest.Update() && row.Card != "":
+				row = stripped(t, golden, i, line, row)
+			}
 		}
+		if row.Card == "" {
+			continue
+		}
+		compared++
 		payload, sha, sealReceipt := cards.published(t, sealed, s, row, mismatches)
 		if string(payload) == row.Card {
 			identical++
@@ -511,13 +550,33 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 		signals, values := storedLines(t, cards.lines(t, sealed, s), row.Card, mismatches, row.Key)
 		signalLines, valueLines = signalLines+signals, valueLines+values
 	}
-	t.Logf("%s: %d cards checked, %d byte-identical, %d differ; not built from inputs: %v", family, checked,
-		identical, mismatches.Count(), skipped)
-	t.Logf("%s: the stored lines render the recorded text's %d signal and %d value lines", family, signalLines,
+	t.Logf("%s: %d cards built, %d golden compared, %d byte-identical, %d differ; not built from inputs: %v",
+		family, checked, compared, identical, mismatches.Count(), skipped)
+	t.Logf("%s: the stored lines render the golden text's %d signal and %d value lines", family, signalLines,
 		valueLines)
-	if want := builtCards[family]; checked != want {
+	want := builtCards[family]
+	if _, inMemory := cards.(*memoryCards); !inMemory {
+		want = len(goldenKeys)
+	}
+	if checked != want {
 		t.Errorf("%s: %d cards built, want %d; a card that stops being built must not pass as skipped", family,
 			checked, want)
+	}
+	if oracletest.Update() {
+		return
+	}
+	for _, key := range goldenKeys {
+		if !isGolden(family, key) {
+			t.Errorf("%s %s holds a card and is not golden; run -update to take it out", family, key)
+		}
+	}
+	for _, key := range goldenSample[family] {
+		if !slices.Contains(goldenKeys, key) {
+			t.Errorf("%s %s is golden and holds no card; run -update to write it", family, key)
+		}
+	}
+	if wholeFamilies[family] && len(goldenKeys) != builtCards[family] {
+		t.Errorf("%s: %d of %d cards are golden; every one must be", family, len(goldenKeys), builtCards[family])
 	}
 }
 
@@ -545,6 +604,11 @@ func (r *renewal) add(was, now *strictjson.Object) {
 		return
 	}
 	r.cards++
+	if len(was.Keys) == 0 {
+		// A row that held its inputs alone, now golden.
+		r.members["card added"]++
+		return
+	}
 	for _, key := range now.Keys {
 		if a, b := get(was, key), get(now, key); !evidence.Equal(a, b) && key != "units" {
 			r.members["card "+key]++
@@ -595,10 +659,24 @@ func renewed(t *testing.T, golden *oracletest.Golden, i int, line []byte, row fi
 	if err := renewable(sealed, log, sources); err != nil {
 		t.Fatalf("%s: the card made now fails its own checks, so it is not written: %v", row.Key, err)
 	}
-	changes.add(load(t, []byte(row.Card)).(*strictjson.Object), load(t, sealed.Payload).(*strictjson.Object))
+	was := strictjson.NewObject()
+	if row.Card != "" {
+		was = load(t, []byte(row.Card)).(*strictjson.Object)
+	}
+	changes.add(was, load(t, sealed.Payload).(*strictjson.Object))
 	old := load(t, line).(*strictjson.Object)
-	// The seal names the card by its digest, in its one row.
-	seal := strings.ReplaceAll(string(row.Seal), row.SHA256, sealed.SHA256)
+	// The seal names the card by its digest, in its one row. A row that held no card, or a card that reads more
+	// than it did and so seals later under a later ID, takes the seal made now.
+	seal, err := strictjson.Dumps(sealed.Seal.Value(), strictjson.Quoted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Card != "" {
+		replaced := strings.ReplaceAll(string(row.Seal), row.SHA256, sealed.SHA256)
+		if recorded, err := receipts.Decode(load(t, []byte(replaced))); err == nil && sealed.Seal.Same(recorded) {
+			seal = replaced
+		}
+	}
 	value := old.Copy()
 	value.Set("sha256", sealed.SHA256)
 	value.Set("card", string(sealed.Payload))
@@ -608,18 +686,26 @@ func renewed(t *testing.T, golden *oracletest.Golden, i int, line []byte, row fi
 	return row
 }
 
-// builtCards pins how many cards of each family Go builds. Raise a count when a port builds more.
+// builtCards pins how many cards of each family Go builds from their inputs. Raise a count when a port
+// builds more.
 var builtCards = map[string]int{
 	"demo": 33, "books_demo": 78, "varied_demo": 46, "cases": 19, "books_calls": 82,
 	"books_slack": 78, "slack_threads": 36, "books_salesforce": 78,
 }
 
-func TestCardsFromDemoStores(t *testing.T) { demoStoreFamilies(t, newMemoryCards) }
-
-func TestCardsFromRecordedInputs(t *testing.T) { recordedInputFamilies(t, newMemoryCards) }
+// TestCardsFromInputs builds every card of every family from its inputs: each holds cardProperties, each
+// golden card is its row byte for byte, and the golden cards show every feature any card shows.
+func TestCardsFromInputs(t *testing.T) {
+	cov := newCoverage()
+	demoStoreFamilies(t, newMemoryCards, cov)
+	recordedInputFamilies(t, newMemoryCards, cov)
+	if !t.Failed() {
+		cov.check(t)
+	}
+}
 
 // demoStoreFamilies builds the families whose cards read the demo stores, as seeded or with rows inserted.
-func demoStoreFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
+func demoStoreFamilies(t *testing.T, newStore func(*testing.T) cardStore, cov *coverage) {
 	book := oracletest.Read(t, "cards/demo_book.json")
 	fresh := func() *demo.Store {
 		store, err := demo.Load(book)
@@ -632,16 +718,17 @@ func demoStoreFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 		runFamily(t, "demo", newStore, func(row fixtureRow, _ *strictjson.Object) setup {
 			// "acc-003 without calls" was made in the scope "demo/acc-003/without calls".
 			return setup{scope: "demo/" + strings.Replace(row.Key, " ", "/", 1), source: fresh(), sources: demoSources(nil)}
-		})
+		}, cov)
 	})
-	for family, prefix := range map[string]string{"books_demo": "books", "varied_demo": "varied"} {
+	for _, family := range []string{"books_demo", "varied_demo"} {
+		prefix := map[string]string{"books_demo": "books", "varied_demo": "varied"}[family]
 		t.Run(family, func(t *testing.T) {
 			runFamily(t, family, newStore, func(row fixtureRow, input *strictjson.Object) setup {
 				store := fresh()
 				rows, _ := input.Get("rows")
 				insert(t, store, rows.(*strictjson.Object), "crm", "calls", "slack")
 				return setup{scope: prefix + "/demo/" + row.Key, source: store, sources: demoSources(nil)}
-			})
+			}, cov)
 		})
 	}
 	t.Run("cases", func(t *testing.T) {
@@ -656,22 +743,22 @@ func demoStoreFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 				}
 			}
 			return setup{scope: "cases/" + row.Key, source: store, sources: demoSources(sellers)}
-		})
+		}, cov)
 	})
 }
 
-// importedTranscripts is how many books_calls cards read a transcript the oracle imported. Each recorded
-// file is in the card's inputs, so every one of them is parsed, imported and read back here.
+// importedTranscripts is how many books_calls cards read a transcript their inputs hold. Each file is in
+// the card's inputs, so every one of them is parsed, imported and read back here.
 const importedTranscripts = 50
 
 // recordedInputFamilies builds the cards of the other families. A card of books_calls reads the calls source
 // over the import made here from its recorded file. A card that read a live Slack thread reads the records
-// its recorded evidence holds, checked against its recorded inputs. A Salesforce card reads its recorded rows
-// through the Go reader, served by an invented org.
-func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
+// its inputs hold, checked against the thread the Slack API served. A Salesforce card reads its recorded
+// rows through the Go reader, served by an invented org.
+func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore, cov *coverage) {
 	book := oracletest.Read(t, "cards/demo_book.json")
 	t.Run("books_calls", func(t *testing.T) {
-		imported := 0
+		imported := map[string]bool{}
 		runFamily(t, "books_calls", newStore, func(row fixtureRow, input *strictjson.Object) setup {
 			store, err := demo.Load(book)
 			if err != nil {
@@ -689,13 +776,13 @@ func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 			}
 			// The import ran in the card's scope and spent two IDs, one receipt time and four tokens there,
 			// resolving the account.
-			imported++
+			imported[row.Key] = true
 			scopeName := "books/calls/" + row.Key
 			folder.made, folder.result = recordedImport(t, row, transcript, scopeName), get(transcript, "import").(*strictjson.Object)
 			return setup{scope: scopeName, calls: folder, sources: sources, ids: 2, receipts: 1, tokens: 4}
-		})
-		if imported != importedTranscripts {
-			t.Errorf("%d recorded transcripts imported, want %d", imported, importedTranscripts)
+		}, cov)
+		if cov != nil && len(imported) != importedTranscripts {
+			t.Errorf("%d recorded transcripts imported, want %d", len(imported), importedTranscripts)
 		}
 	})
 	t.Run("books_slack", func(t *testing.T) {
@@ -703,14 +790,14 @@ func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 			s := liveFolder(t, row, input, get(input, "rows").(*strictjson.Object), get(input, "thread"), "crm", "calls")
 			s.scope = fmt.Sprintf("books/slack/%s/%d", get(input, "book"), 300+intOf(get(input, "index")))
 			return s
-		})
+		}, cov)
 	})
 	t.Run("slack_threads", func(t *testing.T) {
 		runFamily(t, "slack_threads", newStore, func(row fixtureRow, input *strictjson.Object) setup {
 			return slackThread(t, row, input)
-		})
+		}, cov)
 	})
-	t.Run("books_salesforce", func(t *testing.T) { salesforceBooks(t, newStore, book) })
+	t.Run("books_salesforce", func(t *testing.T) { salesforceBooks(t, newStore, book, cov) })
 }
 
 func intOf(v any) int {

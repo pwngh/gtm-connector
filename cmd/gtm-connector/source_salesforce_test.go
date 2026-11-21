@@ -195,7 +195,7 @@ func TestSalesforceIsReadByEveryCommand(t *testing.T) {
 		"connect_salesforce_describe_contract:ok:200: "+
 		"search_accounts:ok:200: get_account:ok:200: "+
 		"get_account:error:200:request_failed get_account:ok:200: get_account:ok:200: list_opportunities:ok:200: "+
-		"save_brief:ok:200:" {
+		"list_users:ok:200: save_brief:ok:200:" {
 		t.Errorf("the receipts: %s", got)
 	}
 
@@ -380,10 +380,10 @@ func TestConnectSalesforceRefusesWhatItCannotPin(t *testing.T) {
 	}
 }
 
-// Every recorded Salesforce card is made again by brief from the same org rows: the account, its contract,
-// its contacts and its opportunities read the same and print the same. The recording read calls and Slack
-// from demo data beside Salesforce, which this build never does, so those parts of each card differ: beside
-// a real CRM, calls and Slack are not connected here.
+// Every recorded Salesforce book is read by brief from its org rows, and each card shows the account's CRM.
+// For a golden row, the account, its contract, its contacts and its opportunities read and print as in the
+// card the row holds. That card read calls and Slack from demo data beside Salesforce, which this build never
+// does, so those parts differ: beside a real CRM, calls and Slack are not connected here.
 func TestBriefMakesTheRecordedSalesforceCards(t *testing.T) {
 	d := setUpDemo(t)
 	_, _, books := inventedSalesforce(t)
@@ -446,13 +446,21 @@ func TestBriefMakesTheRecordedSalesforceCards(t *testing.T) {
 		}
 		return strings.Join(shown, "\n"), units, gaps
 	}
-	signals := 0
+	signals, golden := 0, 0
 	for _, book := range books {
 		var recorded, made card
+		d.result(t, &made, append([]string{"brief", book.AccountID, "--as-of", book.Options.AsOf}, where...)...)
+		if book.Card == "" {
+			// A row of inputs alone: the card shows the account's CRM.
+			if _, units, _ := crmOf(made); len(units) == 0 {
+				t.Errorf("%s: the card shows no CRM unit", book.Key)
+			}
+			continue
+		}
+		golden++
 		if err := json.Unmarshal([]byte(book.Card), &recorded); err != nil {
 			t.Fatal(err)
 		}
-		d.result(t, &made, append([]string{"brief", book.AccountID, "--as-of", book.Options.AsOf}, where...)...)
 		wantText, wantUnits, wantGaps := crmOf(recorded)
 		gotText, gotUnits, gotGaps := crmOf(made)
 		if gotText != wantText || !reflect.DeepEqual(gotUnits, wantUnits) || !reflect.DeepEqual(gotGaps, wantGaps) ||
@@ -463,8 +471,8 @@ func TestBriefMakesTheRecordedSalesforceCards(t *testing.T) {
 			signals++
 		}
 	}
-	if signals != 31 {
-		t.Errorf("%d recorded cards have CRM signals, not 31", signals)
+	if signals != 4 || golden != 4 {
+		t.Errorf("%d golden cards, %d of them with CRM signals; want 4 and 4", golden, signals)
 	}
 	if saved := d.count(t, `SELECT count(*) FROM cards c JOIN workspaces w ON w.id = c.workspace_id
 		WHERE w.slug = 'invented-books'`); saved != len(books) || len(books) != 78 {

@@ -82,10 +82,11 @@ function cardOf(account, row = oracle[account], id = `card-${account}`, lines = 
     gaps: sealed.gaps.map(gap => ({...gap, text: `${gap.text} ${hostile}`}))};
 }
 const cards = Object.fromEntries(Object.keys(oracle).filter(key => /^acc-\d+$/.test(key)).map(key => [key, cardOf(key)]));
-// Every recorded card in testdata/oracle/cards, each family the index lists, as cards of one more account.
+// Every golden card in testdata/oracle/cards, each family the index lists, as cards of one more account. A row
+// that holds inputs alone has no card.
 const families = Object.keys(JSON.parse(readFileSync(new URL('../../testdata/oracle/cards/index.json', import.meta.url), 'utf8')).families);
 const recorded = families.flatMap(file => gunzipSync(readFileSync(new URL(`../../testdata/oracle/cards/${file}.jsonl.gz`, import.meta.url))).toString()
-  .split('\n').filter(Boolean).map(line => ({file, row: JSON.parse(line)})))
+  .split('\n').filter(Boolean).map(line => ({file, row: JSON.parse(line)})).filter(({row}) => row.card !== undefined))
   .map(({file, row}, at) => cardOf('acc-900', row, `rec-${at}`, recordedLines.get(`${file} ${row.key}`) ?? null));
 // Serves the recorded cards under acc-900, newest first in file order.
 function serveRecorded() {
@@ -1377,7 +1378,7 @@ for (const [width, scheme] of [[390, 'light'], [1440, 'light'], [390, 'dark'], [
     const facts = await drawerFacts(tab);
     check(facts.title === 'Source [5]' && facts.focus && facts.quote === unitText(5) && facts.quoteChildren === 0 && facts.quotes === 1,
       `${at}: /deals/acc-003?unit=5 opens the drawer on the recorded sentence of unit 5, character for character, with focus on the head (${facts.title})`);
-    check(!facts.injected && facts.text.includes(`Marian Holt ${hostile}`) && facts.text.includes('Customer (label matches contact [2])') && facts.text.includes('On the card'),
+    check(!facts.injected && facts.text.includes(`Marian Holt ${hostile}`) && facts.text.includes('Customer (by name)') && facts.text.includes('On the card'),
       `${at}: the hostile speaker name renders as text, with the role and its basis as recorded`);
     check(facts.read === 'Read 15 Jan 2027, 15:00:00 UTC from calls' && !/receipt-|read_call_notes|op-|calls:read|[0-9a-f]{64}/.test(facts.text),
       `${at}: the read line gives the read's start and source, and no receipt ID, digest or tool name (${facts.read})`);
@@ -1646,7 +1647,7 @@ await scenario('text tab: every recorded card byte for byte, and copied the same
     const copied = await tab.evaluate(() => navigator.clipboard.readText());
     if (shown !== text || copied !== text || said !== 'Copied') wrong.push(card.id);
   }
-  check(recorded.length === 450 && wrong.length === 0, `each of ${recorded.length} recorded cards shows its sealed text byte for byte and copies the same string (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
+  check(recorded.length === 90 && wrong.length === 0, `each of ${recorded.length} golden cards shows its sealed text byte for byte and copies the same string (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
   check(tab.errors.length === 0 && violations(tab).length === 0, `recorded cards: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
   await tab.context().close();
 });
@@ -1981,8 +1982,8 @@ await scenario('communications: every recorded card lists each sentence unit onc
       await tab.screenshot({path: join(options.screenshots, 'deal-communications-recorded-390.png'), fullPage: true});
     }
   }
-  check(recorded.length === 450 && wrong.length === 0 && untimedCards > 0 && hidden > 0,
-    `each of ${recorded.length} recorded cards lists its ${units} sentence units once (${hidden} not on the card), groups oldest first, ${untimedCards} cards with groups under No time recorded (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
+  check(recorded.length === 90 && wrong.length === 0 && untimedCards > 0 && hidden > 0,
+    `each of ${recorded.length} golden cards lists its ${units} sentence units once (${hidden} not on the card), groups oldest first, ${untimedCards} cards with groups under No time recorded (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
   check(tab.errors.length === 0 && violations(tab).length === 0, `recorded cards: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
   await tab.context().close();
 });

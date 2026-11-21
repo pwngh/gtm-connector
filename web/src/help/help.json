@@ -13,12 +13,17 @@
   },
   "role.customer": {
     "title": "the customer role",
-    "text": "A call's speaker label equals the name of exactly one contact of this account, and no listed seller. The title is that contact's title in the CRM. Slack authors are never customers. A role comes from a label, never from wording.",
+    "text": "A contact of this account, named by the speaker's Slack profile, the call's attendee list, an alias, or the label as a name, the strongest first. The title is that contact's title in the CRM. A Slack author's name is compared with sellers only, so it never makes a customer. A role comes from who the speaker is, never from wording.",
     "guide": {"label": "Deal cards, Speaker roles", "path": "docs/cards.md#speaker-roles"}
   },
   "role.seller": {
     "title": "the seller role",
-    "text": "The speaker label or Slack author equals a name or ID on the workspace's seller list."
+    "text": "A Salesforce user of the org, or a speaker whose label or Slack author equals a name or ID on the workspace's seller list. An address on one of the company's domains shows the seller side."
+  },
+  "role.other_party": {
+    "title": "the other party role",
+    "text": "A speaker the evidence names who is on neither side: their address is on another organisation's domain, which the line shows. The basis says other party by domain and names it.",
+    "guide": {"label": "Deal cards, Speaker roles", "path": "docs/cards.md#speaker-roles"}
   },
   "role.unknown": {
     "title": "the unknown role",

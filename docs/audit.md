@@ -156,6 +156,7 @@ A tool name that is not 1 to 100 characters is recorded as `<invalid>`.
 | A call of `demo --state-dir` outside the card | The run ID, `demo-` and 32 hex digits. The demo prints it as `audit.run_id`. |
 | A read by `accounts` or `inspect ACCOUNT_ID` on a real CRM | `inspect-` and 32 hex digits. |
 | A read that registers a deal, by `deal new` or `POST /v1/deals` | `deal-` and 32 hex digits. |
+| A decision of a match, by the connector, `deal decide` or `POST /v1/matches/{id}` | `match-` and 32 hex digits. |
 | The account lookup of `debug calls import` and `debug slack map` | `import-` and 32 hex digits. |
 | A step of `debug salesforce check` | `check-` and 32 hex digits. |
 | The read of `debug slack check` | `slack-check-` and 32 hex digits. |
@@ -163,7 +164,8 @@ A tool name that is not 1 to 100 characters is recorded as `<invalid>`.
 | A seal | `null`. |
 
 So `audit --brief BRIEF_ID` lists the four reads of a demo card: `get_account`,
-`list_opportunities`, `read_call_notes` and `read_slack_messages`. `audit --brief RUN_ID` lists the
+`list_opportunities`, `read_call_notes` and `read_slack_messages`. A Salesforce card adds
+`list_users`, the org's users, after `list_opportunities`. `audit --brief RUN_ID` lists the
 demo's lookup and its refused read.
 
 ## The seal
@@ -191,12 +193,14 @@ reads inside it are its child receipts, whose `request_id` is
 
 | Command | Receipts |
 | --- | --- |
-| `brief` | One per read: `get_account`, `list_opportunities`, and `read_call_notes` and `read_slack_messages` when calls and Slack are connected. Then the seal. `--without-calls` keeps the call read, refused as error/403. On a real CRM, one `get_account` comes first, in an `inspect-` run, to list the account in the workspace. |
+| `brief` | One per read: `get_account`, `list_opportunities`, `list_users` on Salesforce, and `read_call_notes` and `read_slack_messages` when calls and Slack are connected. Then the seal. `--without-calls` keeps the call read, refused as error/403. On a real CRM, one `get_account` comes first, in an `inspect-` run, to list the account in the workspace. |
 | `demo --state-dir NAME` | Seven: the lookup, the refused call read, the card's four reads, and the seal. |
 | `demo` | Five for each card it publishes. |
 | `accounts`, `inspect ACCOUNT_ID` | One on a real CRM. None on the demo book, which is read without a tool call. |
 | `deal new`, `POST /v1/deals` | Two in a `deal-` run, also on the demo book: `get_account`, then `list_opportunities`. On a real CRM, `deal new` makes one `get_account` first, in an `inspect-` run, to list the account in the workspace. Through the API both name the signed-in principal, the grant is checked again just before each, and a read made without a live grant is refused as error/403, with no read after it. An API registration refused before any source is opened has one `get_account` receipt, refused as error/403 with no connection. |
-| `deal list`, `deal show`, `deal close` | None. |
+| `deal list`, `deal show`, `deal close`, `deal matches` | None. |
+| `deal decide`, `POST /v1/matches/{id}` | One `decide_match`, naming the match, the decision, the deal, and for a known match its kind, item and account. Through the API it names the signed-in principal. A refused decision is finished as an error: error/403 naming no account for an unknown or ungranted match, error/403 naming the account for a grant revoked while the decision commits, error/400 `invalid_deal` for a deal of another account, error/409 `already_decided` for a superseded match. |
+| The connector's own decisions | One `decide_match` per call or thread it decides, naming no principal, when `deal new`, `POST /v1/deals`, `debug calls import`, `debug slack map` or `brief` finds an undecided one while its account has an open deal. |
 | `debug calls import`, `debug slack map` | One `get_account` in an `import-` run, also on the demo book. On a real CRM, one more in an `inspect-` run before it. |
 | `grant` | One: `grant_account`, `revoke_grant` with `--revoke`, `disable_person` with `--disable` or `enable_person` with `--enable`, whose arguments are the account and the `to` or `subject` given. It finishes ok with the row `grants/PRINCIPAL_ID/ACCOUNT_ID`, or `people/PRINCIPAL_ID` for a person, in the transaction that makes the change, or as an error that changes nothing: `person_not_found` or `account_not_found` (404), or `person_ambiguous` (409). |
 | `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `connect`, `grants` | None. |

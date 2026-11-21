@@ -32,11 +32,14 @@ func session(t *testing.T, url string) *pgx.Conn {
 // A publication that waits on a lock another session holds gives up at its lock timeout, and at its
 // statement timeout when that comes first. It writes no card and leaves its seal pending, so the same
 // publication goes through once the lock is gone. The reader's grant is the lock: a publication checks it
-// under a share lock.
+// under a share lock. The lock timeout counts only time spent waiting on a lock, so it can be short. The
+// statement timeout also bounds each statement of the receipt writes that prepare the publication, and of the
+// publication once the lock is gone, which a busy runner can take more than a few hundred milliseconds over,
+// so it is two seconds.
 func TestAPublicationGivesUpOnALock(t *testing.T) {
 	for name, limits := range map[string][2]time.Duration{
 		"at the lock timeout":      {200 * time.Millisecond, time.Minute},
-		"at the statement timeout": {time.Minute, 200 * time.Millisecond},
+		"at the statement timeout": {time.Minute, 2 * time.Second},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := postgrestest.New(t)
@@ -189,7 +192,8 @@ func TestTheMakerIsToldWhenTheDatabaseGivesUpOnAPublication(t *testing.T) {
 	}
 }
 
-// answered is a store that keeps what its first publication answered, under a context of two seconds.
+// answered is a store that keeps what its first publication answered, under a context of ten seconds: room
+// for the five seconds the test's own step inside the publication may wait, and for its statements.
 type answered struct {
 	receipts.Store
 	calls int
@@ -197,7 +201,7 @@ type answered struct {
 }
 
 func (a *answered) Publish(ctx context.Context, p receipts.Publication) (receipts.Card, error) {
-	bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
+	bounded, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	card, err := a.Store.Publish(bounded, p)
 	if a.calls++; a.calls == 1 {

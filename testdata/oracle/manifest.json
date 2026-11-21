@@ -6,33 +6,33 @@
  "generator": "tools/oracle/generate.py",
  "files": {
   "cards/books_calls.jsonl.gz": {
-   "sha256": "ae1025582875fdfd4a8605bf750461ab9d82921a9a5004781bf83783bea1cda4",
-   "bytes": 2549764,
+   "sha256": "c85bac330b0f075235f5f3827b057a6065f3f56ba3aa8ee3b5540c5e95732796",
+   "bytes": 776678,
    "records": 82
   },
   "cards/books_demo.jsonl.gz": {
-   "sha256": "96b475013ef791a74e2effd0a1e2828335953c51bdbdff1f281da9f7b1e8c750",
-   "bytes": 2255509,
+   "sha256": "628c057e5d1b509d5da1175c9790274c5bd9e7ac06223c7a13aab4ea68c835dc",
+   "bytes": 654170,
    "records": 78
   },
   "cards/books_salesforce.jsonl.gz": {
-   "sha256": "e4b9d6c4f31d694a8399c294792e3e1ad77e5dc5f6eff2bcd7d5bf0be462daa4",
-   "bytes": 2172374,
+   "sha256": "a8f0f380c61b6470a47be3113bd1f7f32c36e9ebfda9300e4fa033d514631845",
+   "bytes": 430407,
    "records": 78
   },
   "cards/books_slack.jsonl.gz": {
-   "sha256": "505da4de03d5a5ca37f93d51c64c86a7642809cb4e674e515edc3628f314a4cf",
-   "bytes": 2233496,
+   "sha256": "f207817a683ec2be28b26e7049331f7ef094d554e942c2f6fc3179f7c1606fe8",
+   "bytes": 505522,
    "records": 78
   },
   "cards/cases.jsonl.gz": {
-   "sha256": "bc42c0fbbd3cfae91537bbb15b8227d52df7a25c61656b28c9af0ea85da89ab2",
-   "bytes": 1614377,
+   "sha256": "13b514c0b6c43f14b2727778bb2ea6091ef9ed77d2c9ac6158f03030d861ccab",
+   "bytes": 1837722,
    "records": 19
   },
   "cards/demo.jsonl.gz": {
-   "sha256": "9a3469c374e1d3893975e864db978c386efef3258aaa6a398a55b6b4eb1a20b5",
-   "bytes": 355531,
+   "sha256": "74aaf44f5d455f7557747a521570bb6178877307dc6a59969a35797856fbc43d",
+   "bytes": 372896,
    "records": 33
   },
   "cards/demo_book.json": {
@@ -41,8 +41,8 @@
    "records": 3
   },
   "cards/evidence.jsonl.gz": {
-   "sha256": "08d180da9fc61fa179d18a97a8fbd1f7c963283056e49f2367fe2fbdfbd2ec05",
-   "bytes": 510723,
+   "sha256": "7dc2fa54ab0e18d55beba45de5b966dacd0e5e8ac7d02eabb54902e0f7eee331",
+   "bytes": 532357,
    "records": 110
   },
   "cards/evidence_index.json": {
@@ -51,29 +51,29 @@
    "records": 110
   },
   "cards/index.json": {
-   "sha256": "4b829717f225f7c129133cf73b6b38a96f25f08de580f0bb02c03bd6867ace6d",
-   "bytes": 575,
+   "sha256": "9ce56789831b9e850400cb703cc980e17f0cd716d996c58571c3d9648d97f333",
+   "bytes": 713,
    "records": 8
   },
   "cards/slack_threads.jsonl.gz": {
-   "sha256": "9edeaf498ecd731f7ca6b06d90f8357a70511d9115f5579132a892d0b77b4e19",
-   "bytes": 792790,
+   "sha256": "637e45ce66ecf6643d1282614c4bd7d15e26944361eb6d44db3dc68e20919b3a",
+   "bytes": 359684,
    "records": 36
   },
   "cards/varied_demo.jsonl.gz": {
-   "sha256": "c1ba8ee977981be8044bef62b1374725fd898c129d3b67c11a4a4857891da677",
-   "bytes": 2273430,
+   "sha256": "b5a6526b1e77f0ec005c7a56344b8d7e45dcafd6e2f40518a3db4893c64985da",
+   "bytes": 994775,
    "records": 46
   },
   "commands/index.json": {
-   "sha256": "d76eb948d8a4bede32804b2a3289f479dc0ac8a00d3000c8470bfa9b5339bb34",
+   "sha256": "fdc2c9605f22014b5e6eb4af078ed5bc4d8d329123ec8936ebe19cc6764afe71",
    "bytes": 221,
    "records": 33
   },
   "commands/session.jsonl": {
-   "sha256": "ed5c1b67b6fde7ca396d8d31e66f2d677d8eae386092db0758f55cd2196c7fba",
-   "bytes": 123719,
-   "records": 33
+   "sha256": "e581be0e78d01933d4789d89069ef9a17a78c640f8376e66690cd34f16dcb6f1",
+   "bytes": 89728,
+   "records": 30
   },
   "corpora/patterns.json": {
    "sha256": "7f299fb7af2b397e5d366c49f4b2c60d3c31a2c5d5fa4162203a9f81a0eec2ff",
@@ -81,13 +81,13 @@
    "records": 30
   },
   "corpora/safe_text.jsonl.gz": {
-   "sha256": "5e165c00e8fa7df8d5cf9cd6f37c6ffdbf5ec737858e1b6678e009f7f156b1e8",
-   "bytes": 10829083,
+   "sha256": "43909b10e57174926367d52b247c2573557ef6a1bd5008c4c235eddcc503e86b",
+   "bytes": 5343964,
    "records": 104767
   },
   "corpora/sentences.jsonl.gz": {
-   "sha256": "65ffb695cff975900d3a2273c736740e56d230aca012cb093212f9cac5301aea",
-   "bytes": 8146622,
+   "sha256": "2f827d75b45034739a09ea01bd1051f4d0c11121a2c73253cbccf327099e4ecd",
+   "bytes": 4018339,
    "records": 100000
   },
   "folders/cli_card/audit.jsonl": {

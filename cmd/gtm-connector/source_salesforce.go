@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce"
@@ -388,6 +389,10 @@ func (c *salesforceCRM) Read(ctx context.Context, tool, accountID string) ([]*st
 		return nil, err
 	}
 	_, records, err := reader.Read(ctx, tool, accountID)
+	if errors.Is(err, salesforce.ErrTooManyUsers) {
+		// An org with more users than a card reads gives a card without them, which says so.
+		return nil, cards.ErrNotSelected
+	}
 	return records, c.failed(err)
 }
 

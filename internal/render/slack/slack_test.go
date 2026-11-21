@@ -213,7 +213,7 @@ func TestAnEventThatDoesNotHoldTogetherIsRefused(t *testing.T) {
 	}
 }
 
-// For every recorded card, every message built from it is within Slack's limits, gives the same bytes
+// For every golden card, every message built from it is within Slack's limits, gives the same bytes
 // twice, and holds none of its sentences and none of its contacts' names, titles or emails, in any string.
 func TestNoRecordedCardLeaksASentenceOrAContact(t *testing.T) {
 	cards := 0
@@ -247,8 +247,8 @@ func TestNoRecordedCardLeaksASentenceOrAContact(t *testing.T) {
 			}
 		}
 	}
-	if cards != 450 {
-		t.Errorf("%d recorded cards, want 450", cards)
+	if cards != 90 {
+		t.Errorf("%d golden cards, want 90", cards)
 	}
 }
 

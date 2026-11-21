@@ -10,7 +10,7 @@ import {type SealedCard, sealedCards} from '../../../api/sealedCards.ts';
 import type {CardView} from '../../../api/types.ts';
 import {dealAt, dealHref, tabAt} from '../deals.ts';
 
-// The deal's Text tab and its seal check, rendered for every recorded card in
+// The deal's Text tab and its seal check, rendered for every golden card in
 // testdata/oracle/cards. The card's JSON here holds only what the list sends;
 // the IDs and times are made up, as the server makes its own.
 
@@ -82,14 +82,14 @@ const plain = (html: string) => {
 };
 const words = (html: string) => decode(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ');
 
-test('for every recorded card the Text tab holds the sealed text byte for byte, as one text node', () => {
+test('for every golden card the Text tab holds the sealed text byte for byte, as one text node', () => {
   let compared = 0;
   for (const sealed of sealedCards) {
     const html = deal({card: cardOf(sealed, 'card-1'), sealed: ready({outcome: 'verified', text: sealed.text})});
     assert.equal(plain(html), sealed.text, `${sealed.file} ${sealed.key}`);
     compared += 1;
   }
-  assert.equal(compared, 450);
+  assert.equal(compared, 90);
 });
 
 test('the Text tab has the copy button and an empty status line, and none of the card tab', () => {

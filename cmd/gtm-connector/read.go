@@ -205,6 +205,9 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 	case errors.Is(err, receipts.ErrSourceChanged):
 		return &failure{code: 3, message: "A source of this workspace was connected again while it was read; " +
 			"nothing was published. Run the command again."}
+	case errors.Is(err, postgres.ErrDealChanged):
+		return &failure{code: 3, message: "The account's deal, or the match of its call or thread, changed while " +
+			"it was read; nothing was published. Run the command again."}
 	case errors.Is(err, postgres.ErrDealOpen):
 		return &failure{code: 3, next: "gtm-connector deal list" + r.here(), message: "This account already has " +
 			"an open deal. An account has one open deal at a time; close it first with gtm-connector deal close ID."}
@@ -312,9 +315,19 @@ func (r *run) brief(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	// The card belongs to the deal open for the account when it is published, found in its publication. A
-	// card of an account with none is the account's own.
+	// card of an account with none is the account's own. The account's calls and threads are matched first,
+	// and the card reads only those matched to the deal open now.
+	from.gate = &matchGate{store: r.store, workspace: r.workspace.ID}
+	if deal, open, err := r.store.OpenDeal(ctx, r.workspace.ID, account); err != nil {
+		return nil, err
+	} else if open {
+		if _, err := r.store.MatchAccount(ctx, r.workspace.ID, account); err != nil {
+			return nil, err
+		}
+		from.gate.read.Ref = deal.Ref
+	}
 	maker := from.maker()
-	maker.Receipts = &postgres.ReceiptStore{Store: r.store, OpenDeal: true}
+	maker.Receipts = &postgres.ReceiptStore{Store: r.store, OpenDeal: &from.gate.read}
 	sealed, err := maker.Brief(ctx, cards.Brief{
 		Principal: cards.Principal{WorkspaceID: r.workspace.ID, TokenID: receipts.Fingerprint(randomToken()),
 			Scopes: scopes},
@@ -564,6 +577,19 @@ func traces(card *strictjson.Object, brief string, numbers []string) (any, error
 		}
 		if unit, err = evidence.AsShown(unit); err != nil {
 			return nil, err
+		}
+		// The identifier that decided the speaker, with the receipt of the read that returned its record.
+		if matched, ok := get(unit, "matched").(*strictjson.Object); ok {
+			if ref, isRef := get(matched, "record_ref").(string); isRef {
+				from, bound := trace.Source(ref)
+				if !bound {
+					return nil, refused("Number %d names a speaker's record that its own card does not hold.", n)
+				}
+				matched = matched.Copy()
+				matched.Set("receipt", strictjson.NewObject("audit_id", get(from, "audit_id"), "tool",
+					get(from, "tool"), "status", get(from, "status"), "http_status", get(from, "http_status")))
+				unit.Set("matched", matched)
+			}
 		}
 		var following any
 		if speaker, labelled := get(sealed, "speaker").(string); get(sealed, "kind") == "sentence" && labelled &&

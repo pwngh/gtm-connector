@@ -203,7 +203,9 @@ func (s *stuck) Read(ctx context.Context, tool, accountID string) (string, []*st
 	return s.Source.Read(context.WithoutCancel(ctx), tool, accountID)
 }
 
-// within gives what run returned, or fails the test when run has not returned in five seconds.
+// within gives what run returned, or fails the test when run has not returned in ten seconds. That leaves a
+// maker held at a test's settle limit (short) room on a busy runner, and stays under SettleLimit, so a maker
+// that waited out a step it should have given up still fails the test.
 func within(t *testing.T, run func() (*Sealed, error)) (*Sealed, error) {
 	t.Helper()
 	type result struct {
@@ -218,7 +220,7 @@ func within(t *testing.T, run func() (*Sealed, error)) (*Sealed, error) {
 	select {
 	case r := <-done:
 		return r.sealed, r.err
-	case <-time.After(5 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("the maker is still waiting for the read")
 		return nil, nil
 	}

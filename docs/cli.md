@@ -108,7 +108,7 @@ while `connect` ran, it exits `1`, saves nothing, and asks you to run it again.
 ### The seller list
 
 `--seller NAME` lists a seller's name or Slack user ID, which decides who a card quotes as the seller
-(see [speaker roles](cards.md)). Repeat it for each seller. It is taken with `salesforce`, `calls` and
+(see [speaker roles](cards.md#speaker-roles)). Repeat it for each seller. It is taken with `salesforce`, `calls` and
 `slack`, never with `demo`.
 
 The list replaces the saved one, so name every seller each time. A `connect` without `--seller` keeps
@@ -121,11 +121,47 @@ each; a longer one exits `2`.
 | `--org ALIAS` | `salesforce` | An `sf` alias: 1 to 64 letters, digits, dots, hyphens or underscores. A username or a token is refused before `sf` runs. |
 | `--environment` | `salesforce` | `developer` (the default), `sandbox` or `production`. The org must be of this kind. |
 | `--seller NAME` | `salesforce`, `calls`, `slack` | A seller's name or Slack user ID. Repeat for each. |
+| `--alias [CONTENT_SHA256:]LABEL=TARGET` | `salesforce`, `calls`, `slack` | Maps a speaker label to a person. Repeat for each. See [speaker settings](#speaker-settings). |
+| `--company-domain DOMAIN` | `salesforce`, `calls`, `slack` | One of your company's own mail domains. Repeat for each. |
 | `--remove` | `demo`, `salesforce`, `calls`, `slack` | Detach the source. It takes no other option. |
 | `--scope`, `--transport`, `--config-file` | an assistant app | Accepted by the parser for the app forms, which are not in this build. |
 
 An option the named form does not take exits `2` and names it, as in "connect demo does not take
 --seller."
+
+### Speaker settings
+
+The speaker settings are the workspace's company domains and aliases. They decide, with the seller
+list, who a card quotes for which side (see [speaker roles](cards.md#speaker-roles)). `connect
+salesforce`, `connect calls` and `connect slack` take them, never `connect demo`.
+
+```sh
+gtm-connector connect calls --state-dir renewals --company-domain northwind.example \
+  --alias 'M. Reed=morgan@northwind.example' \
+  --alias '3f1c...64 HEX DIGITS...:Speaker 1=dana@acme.example'
+```
+
+- `--company-domain DOMAIN` names one of your company's own mail domains: lower-case letters, digits
+  and hyphens, with at least one dot. An address on it shows the seller side. At most 50.
+- `--alias LABEL=TARGET` maps a speaker label to a person in every call. `TARGET` is an email address,
+  which names the contact or Salesforce user who holds it, or an entry of the seller list. The label
+  and the target are split at the last `=`. At most 200.
+- `--alias CONTENT_SHA256:LABEL=TARGET` maps the label in one call only: the transcript whose
+  `content_sha256` `debug calls import` printed. A label that names no one, such as `Speaker 1`,
+  takes only this form.
+- An alias whose target names no person of the account's card changes nothing.
+
+Each list replaces the saved one when it is given, so name every entry each time. A `connect` without
+`--company-domain` keeps the saved domains, and one without `--alias` keeps the saved aliases.
+`connect status` shows both when they are set.
+
+| Refusal (exit `2`) | When |
+| --- | --- |
+| `A --company-domain is a mail domain in lower case, such as example.com.` | A domain of another form. |
+| `Name at most 50 company domains with --company-domain.` | More than 50. |
+| `An --alias is LABEL=EMAIL or LABEL=SELLER, with CONTENT_SHA256: before the label for one call's transcript. The label and a seller have 1 to 200 characters.` | An alias of another form. |
+| `Name at most 200 aliases with --alias.` | More than 200. |
+| `The speaker settings would take N bytes, and a workspace holds at most 65536. Name fewer or shorter aliases. Nothing was saved.` | The domains and aliases together, encoded, are over 64 KiB. |
 
 ## Output
 
@@ -233,7 +269,10 @@ its receipt, and the card says "Calls: not read. The grant lacks calls:read."
 
 When the account has an open [deal](#deal), the card belongs to it, and text output names it on
 stderr, after the sources line: `Deal: thornfield-2027-2e3hke.` With none, the card is the account's own and
-belongs to no deal, as before deals existed. The card is the same either way.
+belongs to no deal, as before deals existed. A deal's card reads the account's imported call and mapped
+Slack thread only when they are matched to the deal ([setting it up](config.md#what-is-built-today)),
+and says when one is not. A card that read a call or thread for no deal, while a deal was registered for
+the account, is not published and exits `3`; run `brief` again.
 
 ```text
 Sources: CRM, calls, and Slack are demo data.          (stderr)
@@ -270,10 +309,12 @@ which `--json` prints as the routes give it.
 
 | Command | What it does |
 | --- | --- |
-| `deal new ACCOUNT_ID [--as-of YYYY-MM-DD]` | Lists the account in the workspace, as `brief` does, then reads the account and its opportunities from the connected CRM, each as a tool call under its own receipt (on the demo book too), and registers the deal on what they returned. `--as-of` sets the day the contract is chosen from: by default `2027-01-15` on the demo book and today's UTC date on Salesforce. |
+| `deal new ACCOUNT_ID [--as-of YYYY-MM-DD]` | Lists the account in the workspace, as `brief` does, then reads the account and its opportunities from the connected CRM, each as a tool call under its own receipt (on the demo book too), and registers the deal on what they returned. It then matches the account's imported call and mapped thread ([setting it up](config.md#what-is-built-today)). `--as-of` sets the day the contract is chosen from: by default `2027-01-15` on the demo book and today's UTC date on Salesforce. |
 | `deal list` | Lists the workspace's deals, the open ones first: ID, account, name, state and the day it renews. |
-| `deal show DEAL_ID` | Shows the deal's bindings, then its newest card as `brief` prints it, verified against its seal as `inspect` verifies one. `--json` gives `{"deal": DEAL, "card": CARD}`, the card without its evidence, or `null` before `brief` has made one. |
+| `deal show DEAL_ID` | Shows the deal's bindings, then its newest card as `brief` prints it, verified against its seal as `inspect` verifies one. A `Read call` or `Read thread` row names each call and thread that card read, by its match, with `decided again` when a later decision replaced it. `--json` gives `{"deal": DEAL, "card": CARD, "matches": [MATCH, ...]}`, the card without its evidence or `null` before `brief` has made one, and the matches as [the API](api.md#matches) gives them. |
 | `deal close DEAL_ID` | Closes the deal. Its cards and receipts are kept, and the account's next card is its own again. Closing a closed deal prints it as it is. |
+| `deal matches [--all]` | Lists the matches that wait for a person on a call or thread a card could still read: ID, kind, item, account, state, deal and candidate deals. `--all` lists every call's and thread's current decision, and marks a stale one, whose item is no longer the account's current import or mapping. |
+| `deal decide MATCH_ID (--deal DEAL_ID \| --reject)` | Decides a match as the owner: onto one deal of its account, or off every card. The decision gets a `decide_match` receipt and supersedes the match. |
 
 ```text
 $ gtm-connector deal new acc-003
@@ -290,7 +331,9 @@ Renews       2027-02-08
 An account has one open deal at a time: `deal new` for an account with one exits `3`, and names
 `deal list`. An account the CRM does not hold exits `2` with `account not found: ACCOUNT_ID`, and an
 ID of the wrong form for the CRM exits `2`, as `brief` does. `deal show` and `deal close` of an ID the
-workspace does not hold exit `2`. Each action takes `--state-dir NAME`, `--json` and `--help`.
+workspace does not hold exit `2`. `deal decide` of an unknown match, or onto a deal of another
+account, exits `2`, and of a match a later decision superseded exits `3`. Each action takes
+`--state-dir NAME`, `--json` and `--help`.
 
 ### `inspect`
 
@@ -336,7 +379,8 @@ An account the CRM does not hold exits `2` with `account not found: ID`, and nam
 
 `--json` gives an object with `brief_id`, `account_id` and `units`: every unit of the card as sealed,
 in number order. A unit sealed under older neutralizing rules shows its text and speaker neutralized
-again by today's. `--role customer`, `seller` or `unknown` keeps only the sentences of that role. Text
+again by today's. `--role` with `customer`, `customer_side_not_in_crm`, `seller`, `other_party` or
+`unknown` keeps only the sentences whose role is exactly that one. Text
 output is one line per unit, never cut or wrapped:
 
 ```text
@@ -363,8 +407,11 @@ once for all of them. A number outside the card exits `2` with "This card has nu
 `--json` gives an array with one object per number, in the order given. Each has `brief_id`,
 `account_id`, the unit's own keys as `inspect BRIEF_ID` lists them (`n`, `kind`, `source`,
 `record_ref`, and for a sentence `at`, `speaker`, `role`, `basis`, `contact`, `text`, `partial`,
-`shown`, `span`, `raw_sha256` and `sanitizer_version`), then `receipt` (`audit_id`, `tool`, `status`,
-`http_status`) and `next_by_speaker`. A record adds `fields`, its plain values by name.
+`shown`, `span`, `raw_sha256` and `sanitizer_version`, and for a sentence sealed under the speaker
+rules `speaker_rules`, `rung` and `matched`), then `receipt` (`audit_id`, `tool`, `status`,
+`http_status`) and `next_by_speaker`. A record adds `fields`, its plain values by name. A `matched`
+that names a record adds the `receipt` of the read that returned that record, with the same keys. A
+number whose `matched` names a record the card's evidence does not hold exits `2`.
 
 `next_by_speaker` is the number of the next whole sentence under the same speaker label in the same
 record, or `null`. It is `null` for a record, for a sentence with no label, and for a label that holds
@@ -378,19 +425,26 @@ FIELD                 VALUE
 Number                5
 Kind                  sentence
 Record                calls/call_notes/note-003b
-Receipt               1e875f11-307e-4174-b70a-6c3699b855a1 (read_call_notes, ok)
+Receipt               b63a52fb-… (read_call_notes, ok)
 Text                  "Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved."
 Speaker               "Marian Holt"
 Next by this speaker  6
-Role                  customer (label matches contact [2])
+Role                  customer (by name)
 Time                  2027-01-12T15:00:00Z
 On the card           yes
 Source text SHA-256   105807d242e8f55965e938a24bc94a445f157178cbb28569e9b5ce4234bc100c
 Neutralizer version   5
+Speaker rules         1
+Rung                  4
+Matched               name "Marian Holt"
+Matched from          crm/contacts/con-003, receipt 5e0c41d7-… (get_account, ok)
 ```
 
-A sentence in an imported transcript adds a `Cues or lines` row. A record's table lists its fields by
-name after `Receipt`: a text as a quoted literal, a number as it is, and an empty value as `Missing`.
+A sentence in an imported transcript adds a `Cues or lines` row. A sentence sealed under the speaker
+rules adds `Speaker rules`, `Rung`, and, when an identifier decided, `Matched` (its kind and value) and
+`Matched from` (the record and its read's receipt, or the workspace's aliases). A record's table lists
+its fields by name after `Receipt`: a text as a quoted literal, a number as it is, and an empty value
+as `Missing`. The example shortens the receipt IDs and the digest, which inspect prints whole.
 
 #### `inspect RECEIPT_ID`
 
@@ -530,12 +584,15 @@ and the MCP tools show only the cards and receipts made here.
 
 | Command | JSON result |
 | --- | --- |
-| `connect status`, or `connect` alone | Object with `schema_version: 1`, `sources` and `sellers`. |
+| `connect status`, or `connect` alone | Object with `schema_version: 1`, `sources` and `sellers`, then `company_domains` and `aliases` when they are set. |
 | `connect demo`, `salesforce`, `calls`, `slack`, with or without `--remove` | Object with `schema_version: 1`, `provider` (the name given), `status` and `sources`. |
 
 `sources` holds each connected source by name, `crm`, `calls` or `slack`, with its `provider`:
 `"demo"`, `"salesforce"`, `"imported"` or `"slack"`. Salesforce adds `environment` and `org`, the alias.
 A source that is not connected is absent. `sellers` is the saved seller list, or `[]`.
+`company_domains` is the saved list of domains, and `aliases` the saved aliases, each with `label`,
+`call` (a `content_sha256`, or `null` for every call) and `target`. Text output ends with
+`Sellers:`, then `Company domains:` and `Aliases:`, one alias a line, when they are set.
 
 `status` is `"connected"`, `"removed"`, or `"not_connected"` when `--remove` named a source that was
 not connected. Text output opens with one line, such as `Demo data connected.`, `Call transcripts
@@ -595,11 +652,11 @@ These work on one source by hand. [Sources](sources.md) covers each in full.
 
 | Command | Options | JSON result |
 | --- | --- | --- |
-| `debug calls import FILE` | `--account ID`, `--called-at TIMESTAMP`, `--speaker-names`, `--cues FIRST:LAST` or `--lines FIRST:LAST`, `--reassign` | Import metadata: `schema_version`, `source`, `status`, `created`, `selected`, `reassigned`, `resolution_receipt_id`, `import_id`, `account_id`, `format`, `called_at`, `imported_at`, `content_sha256`, `requested_range`, `cited_range`, `total_units`, `unit_kind`, `selection_mode`, `speaker_names`. No transcript text. |
+| `debug calls import FILE` | `--account ID`, `--called-at TIMESTAMP`, `--speaker-names`, `--attendees FILE`, `--cues FIRST:LAST` or `--lines FIRST:LAST`, `--reassign` | Import metadata: `schema_version`, `source`, `status`, `created`, `selected`, `reassigned`, `resolution_receipt_id`, `import_id`, `account_id`, `format`, `called_at`, `imported_at`, `content_sha256`, `requested_range`, `cited_range`, `total_units`, `unit_kind`, `selection_mode`, `speaker_names`, and with `--attendees` the number of `attendees`. No transcript text, label or email. |
 | `debug calls list` | `--account ID`, `--after IMPORT_ID` | Object with `schema_version`, `source`, `imports` and `next_after`, a cursor or `null`. |
 | `debug calls inspect IMPORT_ID` | `--full` | Object with `schema_version`, `source`, `import`, `body` and `units`. `--full` adds `original_text`. |
 | `debug salesforce check` | `--sf-org ALIAS`, `--sf-environment`, `--as-of YYYY-MM-DD` | Object with `schema_version`, `status` (`passed` or `failed`), `as_of`, `steps`, `api_calls`, `sf_cli_invocations` and their definitions. No record. |
-| `debug slack connect` | `--client-id ID`, `--redirect-uri URI`, `--user-scope`, `--team-id` | The sign-in's status, as `debug slack status` gives it. |
+| `debug slack connect` | `--client-id ID`, `--redirect-uri URI`, `--user-scope` (`channels:history`, `groups:history`, `users:read`, `users:read.email`; repeat for each), `--team-id` | The sign-in's status, as `debug slack status` gives it. |
 | `debug slack status` | `--check` | Object with `schema_version`, `configured`, `credential_state`, `verification`, `verified_component`, `requested_scopes`, `granted_scopes`, `rotation`, `access_expires_at`, `last_verified_at` and `needs_login`. No token and no identity. |
 | `debug slack disconnect` | `--revoke` | Object with `schema_version`, `status: "disconnected"`, `local_credentials_removed`, `remote_revoke_requested`, `remote_access_token_revoked` and `revocation_error`. |
 | `debug slack map` | `--account ID`, `--thread-url URL` or `--channel ID --thread-ts TS`, `--replace`, `--reassign` | Object with `schema_version`, `status`, `selection`, `thread_access`, `counts`, `duration_ms`, `next`. |

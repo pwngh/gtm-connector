@@ -1,7 +1,7 @@
 import {formatUtc} from '../../../api/client.ts';
 import {Help} from '../../../ui/Help.tsx';
 import {Cite} from './Cite.tsx';
-import {groupOf, roleWords} from './card.ts';
+import {groupOf, roleOf} from './card.ts';
 import {countsOf, reasonOf, type Talk, talksOf, talkWord} from './communications.ts';
 import {Proof} from './Proof.tsx';
 import {Words} from './Sentence.tsx';
@@ -53,8 +53,7 @@ function TalkGroup({talk, level, helped}: {talk: Talk; level: 'h3' | 'h4'; helpe
                 <p className="dc-attr">
                   <span className="dc-attr__part dc-attr__speaker">{sentence.speaker || 'No speaker label'}</span>
                   <span className="dc-attr__part">
-                    {roleWords[group]}
-                    {group === 'unknown' && ` (${sentence.basis ?? 'basis not recorded'})`}
+                    {roleOf(sentence)}
                     {helped.has(sentence.n) && <Help term={`role.${group}`} />}
                   </span>
                 </p>

@@ -464,7 +464,8 @@ func ValidImportedRecord(record *strictjson.Object, accountID string, binding an
 			valid = false
 		}
 	}()
-	// A record may carry its reference, and a manifest says speaker_names only when its import declared them.
+	// A record may carry its reference, and a manifest says speaker_names only when its import declared them,
+	// and holds attendees only when its import was given an attendee list.
 	_, referenced := record.Get("record_ref")
 	backend, bound := CRMBackend(binding)
 	if !hasKeys(record, withKey(recordKeys, "record_ref", referenced)...) || !bound ||
@@ -473,7 +474,9 @@ func ValidImportedRecord(record *strictjson.Object, accountID string, binding an
 	}
 	manifest := object(field(record, "manifest"))
 	stated, declared := manifest.Get("speaker_names")
-	if declared && stated != true || !hasKeys(manifest, withKey(manifestKeys, "speaker_names", declared)...) {
+	attendees, listed := manifest.Get("attendees")
+	if declared && stated != true || listed && !ValidAttendees(attendees) ||
+		!hasKeys(manifest, withKey(withKey(manifestKeys, "speaker_names", declared), "attendees", listed)...) {
 		return false
 	}
 	format := field(manifest, "format")
@@ -547,4 +550,73 @@ func ValidImportedRecord(record *strictjson.Object, accountID string, binding an
 		"record_ref", reference)
 	encoded, err := strictjson.Dumps(saved, CanonicalASCII)
 	return err == nil && len(body) <= MaxQuoteBytes && len(encoded) <= MaxRecordBytes
+}
+
+// The bounds of a call's attendee list.
+const (
+	MaxAttendees      = 200
+	maxAttendeeLabel  = 200
+	maxEmailBytes     = 254
+	maxEmailLocalPart = 64
+)
+
+// ValidAttendees is whether a value is an attendee list as an import's manifest holds it: 1 to MaxAttendees
+// objects, each with exactly a label and an email, and no row twice. A label is source text that is not
+// empty on one line and has at most 200 characters. An email is one ValidEmail accepts.
+func ValidAttendees(value any) bool {
+	rows, ok := value.([]any)
+	if !ok || len(rows) < 1 || len(rows) > MaxAttendees {
+		return false
+	}
+	seen := map[[2]string]bool{}
+	for _, value := range rows {
+		row, isObject := value.(*strictjson.Object)
+		if !isObject || !hasKeys(row, "label", "email") {
+			return false
+		}
+		label, isLabel := SourceText(field(row, "label"), 4*maxAttendeeLabel, true)
+		email, isEmail := field(row, "email").(string)
+		if !isLabel || oneLine(label) == "" || length(label) > maxAttendeeLabel || !isEmail || !ValidEmail(email) {
+			return false
+		}
+		pair := [2]string{label, email}
+		if seen[pair] {
+			return false
+		}
+		seen[pair] = true
+	}
+	return true
+}
+
+// ValidEmail is whether a text is an email address as an attendee list may hold it: at most 254 bytes, one
+// "@", a local part of 1 to 64 printable ASCII characters with no space, quote, angle bracket, comma,
+// semicolon or backslash, and a domain of lower-case ASCII labels of letters, digits and hyphens, with at
+// least one dot.
+func ValidEmail(email string) bool {
+	local, domain, found := strings.Cut(email, "@")
+	if !found || len(email) > maxEmailBytes || len(local) < 1 || len(local) > maxEmailLocalPart ||
+		strings.Contains(domain, "@") {
+		return false
+	}
+	for i := 0; i < len(local); i++ {
+		c := local[i]
+		if c <= ' ' || c >= 0x7f || strings.IndexByte("\"'<>,;\\", c) >= 0 {
+			return false
+		}
+	}
+	labels := strings.Split(domain, ".")
+	if len(labels) < 2 {
+		return false
+	}
+	for _, label := range labels {
+		if len(label) < 1 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			if c := label[i]; !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }

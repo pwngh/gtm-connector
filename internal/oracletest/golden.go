@@ -101,9 +101,24 @@ func (g *Golden) Set(i int, old, value any) {
 	}
 }
 
-// Write replaces a fixture's content, compressed when the name ends in .gz, and the content's size and
-// SHA-256 in manifest.json. A compressed file is written with no name and no time, so the same content gives the same
-// bytes.
+// manifestEntry is manifest.json with the entry of one fixture stating its content: its SHA-256, its size,
+// and for a JSON Lines file its number of lines.
+func manifestEntry(manifest []byte, name string, content []byte) ([]byte, error) {
+	entry := regexp.MustCompile(`(?s)("` + regexp.QuoteMeta(name) + `": \{\s*"sha256": ")[0-9a-f]{64}(",\s*"bytes": )\d+(,\s*"records": )(\d+)`)
+	if len(entry.FindAllIndex(manifest, -1)) != 1 {
+		return nil, fmt.Errorf("manifest.json has no one entry for %s", name)
+	}
+	sum := sha256.Sum256(content)
+	records := "${4}"
+	if strings.Contains(name, ".jsonl") {
+		records = fmt.Sprint(bytes.Count(content, []byte("\n")))
+	}
+	return entry.ReplaceAll(manifest, []byte(fmt.Sprintf("${1}%s${2}%d${3}%s", hex.EncodeToString(sum[:]), len(content),
+		records))), nil
+}
+
+// Write replaces a fixture's content, compressed when the name ends in .gz, and its entry in manifest.json.
+// A compressed file is written with no name and no time, so the same content gives the same bytes.
 func Write(t testing.TB, name string, content []byte) {
 	t.Helper()
 	RefuseNarrowRun(t)
@@ -129,12 +144,10 @@ func Write(t testing.TB, name string, content []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := regexp.MustCompile(`(?s)("` + regexp.QuoteMeta(name) + `": \{\s*"sha256": ")[0-9a-f]{64}(",\s*"bytes": )\d+`)
-	if len(entry.FindAllIndex(manifest, -1)) != 1 {
-		t.Fatalf("manifest.json has no one entry for %s", name)
+	manifest, err = manifestEntry(manifest, name, content)
+	if err != nil {
+		t.Fatal(err)
 	}
-	sum := sha256.Sum256(content)
-	manifest = entry.ReplaceAll(manifest, []byte(fmt.Sprintf("${1}%s${2}%d", hex.EncodeToString(sum[:]), len(content))))
 	if err := os.WriteFile(Path(t, "manifest.json"), manifest, 0o644); err != nil {
 		t.Fatal(err)
 	}

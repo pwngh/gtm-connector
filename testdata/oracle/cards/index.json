@@ -1,5 +1,5 @@
 {
- "note": "each line of a family file is one card: key, account, options, the source rows it read, and the sealed file's exact text with its SHA-256 and seal receipt; or a refusal with the receipts it left. In cases, input.target marks the card a test checks; a target made by card() lists the rows inserted into the seeded demo stores, table by table in order, and the sellers.json it wrote",
+ "note": "each line of a family file is one card: key, account, options and the source rows it reads, and for a golden card (every card of cases and demo, and the sample internal/cards/golden_test.go names) the sealed file's exact text with its SHA-256 and seal receipt. A Slack card's input.read is what the Slack reader gives for its thread. In cases, input.target marks the card a test checks; a target made by card() lists the rows inserted into the seeded demo stores, table by table in order, and the sellers.json it wrote",
  "families": {
   "books_calls": 82,
   "books_demo": 78,

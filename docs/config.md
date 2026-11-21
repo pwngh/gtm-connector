@@ -34,32 +34,67 @@ flowchart LR
 2. **The connector discovers** matching calls and Slack messages by those emails and domains. In Slack it looks in a dedicated internal or Slack Connect channel, such as `#deal-thornfield` or `#ext-thornfield`, and in threads of shared channels, such as `#renewals` or `#deal-desk`, that mention the account's name or domain. No thread is hard-coded.
 3. **Each match joins its deal.** Nobody clicks.
 
-A match can fit more than one deal, and there are two cases:
+Each call and thread belongs to one deal at most. Matching never puts evidence on a card it may not
+belong to: what fits more than one deal waits for a person and reaches no card until one decides.
 
 | The match fits | What happens | Why |
 | --- | --- | --- |
-| Two deals of the same account, such as a renewal and an expansion | It goes on both cards, marked as shared with the other deal | It is the same customer, so nothing is misattributed, and leaving it off would empty the card |
-| Deals of two different accounts | It goes on neither card, and both say so under what was not read | One customer's words must never reach another customer's card |
+| One deal | It joins that deal's card | Nobody clicks |
+| Two deals of the same account, such as last year's renewal and this one | It waits in the matches queue and goes on neither card | Last year's words must not be read as this year's |
+| Deals of two different accounts | It waits in the matches queue and goes on neither card, and both say so under what was not read | One customer's words must never reach another customer's card |
 
-Nobody is asked to settle either case. Coverage counts the second kind by rule, so you can fix the
-rule that produces them, for example by excluding a domain two accounts share.
+### What is built today
 
-## The matches queue is off
+Discovery by email, domain and channel is not built. Today a call is imported for one account
+(`debug calls import --account`) and a thread is mapped to one account (`debug slack map --account`),
+and the connector matches each to a deal of that account:
 
-Matching is automatic, and that is the point: nobody trains the connector by confirming its work.
-The queue exists for a team that wants a person in the loop, and the engineer chooses how much.
+- **The item's time decides.** A call's time is its `--called-at`, and a thread's is the time of its
+  parent message. The deals of an account follow each other, and each holds the times from its own
+  registration to the next deal's registration: the account's first deal also holds every earlier
+  time, and its last-registered deal every later one. A call or thread joins the deal that holds its
+  time, so a call made after a deal closed and before the next deal was registered belongs to the closed
+  deal.
+- **A call with no time** fits every deal of its account. While the account has had one deal, that
+  deal takes it. Once it has had two, the call waits for a person.
+- **When it is decided:** as a deal is registered, as a call is imported or a thread mapped while the
+  account has an open deal, and before `brief` reads the account. Each item is decided once, and a
+  person may decide it again.
+- **What a deal's card reads:** the account's current call and thread only when they are matched to
+  that deal. Otherwise the card says `Calls: not read. The account's transcript is not matched to this
+  card.` or `Slack: not read. The account's thread is not matched to this card.` Every other card,
+  made while the account has no open deal or through MCP, reads them unless they wait for a person or
+  were rejected, and says the same when they do; an MCP read of them is refused as `calls_not_matched` or
+  `slack_not_matched`.
+- **A stale match** is one whose call or thread is no longer the account's current import or mapping.
+  It leaves the queue, since no card can read it, and the full lists mark it `stale`.
+- **Every decision has a receipt.** A `decide_match` receipt names the item, the decision and the deal,
+  and the person who decided, or none for the connector. The decision and the receipt's finish commit
+  together.
+- **The card says what it read.** A deal's card names the match of each call and thread it read, and
+  the database refuses a card that names a match it did not read for its deal. A card whose reads were
+  made for another deal than the one open when it was published is not published.
+
+Demo call notes and demo Slack messages belong to their account in the demo book and need no match.
+
+## The matches queue
+
+The queue holds every match that fits more than one deal. It is always on: such a match reaches no
+card until a person decides it, through `GET /v1/matches` and `POST /v1/matches/{id}` ([the
+API](api.md#matches)) or `deal matches` and `deal decide` ([the CLI](cli.md#deal)). A person puts it on
+one deal of its account, or keeps it off every card.
+
+The design adds a setting for a team that wants a person to confirm more. It is not built: there is no
+`gtm.yaml` yet.
 
 | `approval` in `gtm.yaml` | What waits for a person |
 | --- | --- |
-| `off`, the default | Nothing |
-| `ambiguous` | Only a match that fits deals of two different accounts |
+| `ambiguous`, the default | Only a match that fits more than one deal |
 | `all` | Every match, before it reaches a card |
 
-The setting can also be given per source, for example `all` for pushed records and `off` for the CRM.
-
-The engineer turns it on in two steps: set it in `gtm.yaml`, then sign in and confirm the change when
-the draft is previewed. Until both are done, the queue stays off. The web app only reads this
-setting. It shows the queue and its badge when the setting is on, and has no switch of its own.
+The setting can also be given per source, for example `all` for pushed records and `ambiguous` for the
+CRM. The engineer turns it on in two steps: set it in `gtm.yaml`, then sign in and confirm the change
+when the draft is previewed. The web app only reads this setting and has no switch of its own.
 
 A deal can also be registered by hand, with the IDs it binds. See [the API](api.md).
 
@@ -93,7 +128,7 @@ Under the hood:
 
 - **Whole-sentence splitter.** A quotation is one whole sentence.
 - **HTML and link neutralizer.** Mentions, links and control characters become inert words before anything shows them.
-- **Speaker and role matching.** Sellers come from your list, buyers from the account's contacts. Anyone else is unknown.
+- **Speaker and role matching.** A speaker is matched to a person by the strongest identifier the source carries: a Slack profile, the call's attendee list, an alias, then the name. Sellers are your Salesforce users and your list, buyers the account's contacts, and an email's domain shows a side for anyone else. Two candidates, or none, leave the role unknown.
 - **Versioned PostgreSQL store with audit receipts.** A read gets its receipt before it runs.
 - **Risk and diff rules.** Silence, slippage and conflicts, computed by the connector.
 
@@ -101,7 +136,7 @@ Under the hood:
 
 | Screen | What it answers |
 | --- | --- |
-| Coverage | Which deals have a current card, which do not, and why. It also counts, by rule, the matches left off because they fit two accounts. |
+| Coverage | Which deals have a current card, which do not, and why. It also counts, by rule, the matches waiting because they fit more than one deal. |
 | Setup | Each source's state and last read, and the active file beside a draft |
 | Activity | What ran, with its receipt, and whether it is safe to retry |
 
