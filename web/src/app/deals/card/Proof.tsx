@@ -10,6 +10,7 @@ import {displayStorage} from '../../../ui/theme.ts';
 import {useMedia, wideQuery} from '../deals.ts';
 import {groupOf, roleWords, type Sentence, sourceWord, usableTime} from './card.ts';
 import {type Asked, answers, around, askedUnit, firstLine, placeOf, proofSeenKey, readFrom, stepFrom, unitOf, unitParam, unitSearch} from './proof.ts';
+import {Words} from './Sentence.tsx';
 import type {SectionProps} from './sections.ts';
 
 // The proof drawer: the one record or the one whole sentence behind a number
@@ -23,22 +24,9 @@ const phoneQuery = '(max-width: 719.98px)';
 function SentenceProof({unit}: {unit: UnitView}) {
   const sentence = unitFacts(unit) as Sentence;
   const time = usableTime(sentence.at);
-  const whole = !sentence.partial && typeof sentence.text === 'string';
   return (
     <>
-      {whole ? (
-        <blockquote
-          className="dc-quote"
-          data-unit={unit.n}
-        >
-          {sentence.text}
-        </blockquote>
-      ) : (
-        <p className="dc-cut">
-          <span className="dc-cut__label">{sentence.partial ? 'Cut, not a whole quotation' : 'Text not recorded'}</span>
-          {sentence.partial && sentence.text !== null && <span className="dc-cut__text">{sentence.text}</span>}
-        </p>
-      )}
+      <Words sentence={sentence} />
       <p className="dc-attr">
         <span className="dc-attr__part dc-attr__speaker">{sentence.speaker || 'No speaker label'}</span>
         <span className="dc-attr__part">{`${roleWords[groupOf(sentence)]} (${sentence.basis ?? 'basis not recorded'})`}</span>

@@ -56,14 +56,17 @@ too: their saved entries start the Python package, which is no longer here. `tok
 HTTPS client its token, and `mcp stdio` is the command an assistant app starts.
 
 The web app the binary serves shows the deal list at `/deals`, which `/` opens, each deal's card at
-`/deals/{account}`, its plain-text card at `/deals/{account}/text`, and the Ops pages Coverage and
+`/deals/{account}`, every sentence the card read at `/deals/{account}/communications`, its plain-text
+card at `/deals/{account}/text`, and the Ops pages Coverage and
 Evidence at `/ops/coverage` and `/ops/evidence`, which `/ops` opens with Coverage. It shows nothing
 else after sign-in. A deal's card shows, under its title, the days to the renewal or contract end
 and the ARR line, then the card's fixed signals under Flags, what people said with each buyer's
 title, the record values in the card's order, and what the card did not read. A card published
 before lines were kept says its countdown, ARR and record values are on the plain-text card and
-links to it. The Text tab shows the plain-text card whole and copies it. The browser hashes the
-card's sealed bytes first, and a card whose bytes do not match its seal shows nothing on either
+links to it. The Communications tab lists every sentence unit of the card, those it does not show
+with the reason, one group per call or Slack message, oldest first, the groups with no usable time
+last. The Text tab shows the plain-text card whole and copies it. The browser hashes the
+card's sealed bytes first, and a card whose bytes do not match its seal shows nothing on any
 tab, only that it failed its seal check. Coverage lists each granted deal with its newest card time
 and number of cards, counts the deals with a card and with none, and says whether `/healthz`
 answers. Any other address shows a page that says there is no page there and links back. Served

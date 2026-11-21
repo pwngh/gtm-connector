@@ -7,6 +7,7 @@ import type {AccountCards, AccountList, CardDetail, CardView} from '../../../api
 import {Placeholder} from '../../../ui/Placeholder.tsx';
 import {Refusal} from '../../../ui/Refusal.tsx';
 import {type DealTab, dealHref, tabAt} from '../deals.ts';
+import {Communications} from './Communications.tsx';
 import {DealTabs} from './DealTabs.tsx';
 import {PlainText} from './PlainText.tsx';
 import {SealFailed} from './SealFailed.tsx';
@@ -17,9 +18,10 @@ import {type Named, Title} from './Title.tsx';
 // The Deal card of one account: its newest published card, or the one the
 // address pins when that card is one of the account's. It is laid out from
 // the card's units, gaps and lines: the record on one side, the words on the other,
-// a numbered spine between them. Its Text tab shows the plain-text card. A
-// card of another account is not read, and a card whose bytes do not match
-// its seal shows nothing on either tab.
+// a numbered spine between them. Its Communications tab lists every sentence
+// it read, and its Text tab shows the plain-text card. A card of another
+// account is not read, and a card whose bytes do not match its seal shows
+// nothing on any tab.
 
 /** The four reads a deal needs: the account list, the account's cards, the open card and its seal check. */
 export interface DealReads {
@@ -181,6 +183,16 @@ export function DealView({asked, pinned, query, tab = 'card', reads}: DealViewPr
         listed={listed}
         query={query}
         tab={tab}
+      />
+    );
+  } else if (tab === 'communications') {
+    shown = true;
+    body = (
+      <Communications
+        account={account}
+        card={card.data}
+        listed={listed}
+        query={query}
       />
     );
   } else if (tab === 'text') {
