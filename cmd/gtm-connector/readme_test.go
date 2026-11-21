@@ -21,26 +21,32 @@ const (
 	shownNumber  = "5"
 	shownCommand = "$ gtm-connector inspect brief-… 5"
 	shownReceipt = "b63a52fb-…"
+	// shownMatched is the receipt of the read that returned the record the speaker was matched by.
+	shownMatched = "5e0c41d7-…"
 )
 
 // asShownInReadme is what inspect printed for one number, with its receipt's ID and its digest written as
 // the README shortens them.
 func asShownInReadme(t *testing.T, printed string) string {
 	t.Helper()
-	var receipt, digest string
+	var receipt, matched, digest string
 	for _, line := range strings.Split(printed, "\n") {
 		field, value, _ := strings.Cut(line, "  ")
 		switch value = strings.TrimLeft(value, " "); field {
 		case "Receipt":
 			receipt, _, _ = strings.Cut(value, " ")
+		case "Matched from":
+			_, after, _ := strings.Cut(value, ", receipt ")
+			matched, _, _ = strings.Cut(after, " ")
 		case "Source text SHA-256":
 			digest = value
 		}
 	}
-	if !receiptID.MatchString(receipt) || len(digest) != 64 {
+	if !receiptID.MatchString(receipt) || !receiptID.MatchString(matched) || len(digest) != 64 {
 		t.Fatalf("inspect printed no receipt and digest:\n%s", printed)
 	}
 	printed = strings.Replace(printed, receipt, shownReceipt, 1)
+	printed = strings.Replace(printed, matched, shownMatched, 1)
 	return shownCommand + "\n" + strings.Replace(printed, digest, digest[:8]+"…", 1) + "\n"
 }
 

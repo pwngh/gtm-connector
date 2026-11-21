@@ -63,6 +63,8 @@ type SourceUpdate struct {
 	Changes []SourceChange
 	// Sellers replaces the workspace's seller list. Nil keeps the saved one.
 	Sellers []string
+	// Speakers replaces the workspace's speaker settings, a JSON object. Empty keeps the saved one.
+	Speakers string
 }
 
 // UpdateSources changes what a workspace's sources are connected to, one
@@ -127,6 +129,11 @@ func (s *Store) UpdateSources(ctx context.Context, w Workspace,
 				return err
 			}
 		}
+		if update.Speakers != "" {
+			if _, err := tx.Exec(ctx, `UPDATE workspaces SET speakers = $2 WHERE id = $1`, w.ID, update.Speakers); err != nil {
+				return err
+			}
+		}
 		after, err = connections(ctx, tx, w.ID)
 		return err
 	})
@@ -145,6 +152,19 @@ func (s *Store) Sellers(ctx context.Context, workspaceID string) ([]string, erro
 		return nil, ErrNotFound
 	}
 	return sellers, err
+}
+
+// Speakers is the workspace's speaker settings as saved: a JSON object, "{}" when none are set.
+func (s *Store) Speakers(ctx context.Context, workspaceID string) (string, error) {
+	if !validUUID(workspaceID) {
+		return "", ErrNotFound
+	}
+	var speakers string
+	err := s.pool.QueryRow(ctx, `SELECT speakers FROM workspaces WHERE id = $1`, workspaceID).Scan(&speakers)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return speakers, err
 }
 
 // CardByBrief reads the card with this brief ID, with its bytes.

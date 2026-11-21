@@ -460,7 +460,8 @@ func TestArgumentsAreRefusedAsTheRecordedParserRefusesThem(t *testing.T) {
 		{"audit", "--status bad", "argument --status: invalid choice (choose from 'ok', 'error', 'pending')"},
 		{"audit", "--s ok", "ambiguous option, which could match --state-dir, --status, --since"},
 		{"audit", "--stat ok", "ambiguous option, which could match --state-dir, --status"},
-		{"inspect", "x --role nobody", "argument --role: invalid choice (choose from 'customer', 'seller', 'unknown')"},
+		{"inspect", "x --role nobody", "argument --role: invalid choice (choose from 'customer', " +
+			"'customer_side_not_in_crm', 'seller', 'other_party', 'unknown')"},
 		{"inspect", "x 1 2x", "argument N: a number printed on the card, such as 5"},
 		{"inspect", "x --role seller y", "argument N: a number printed on the card, such as 5"},
 	} {

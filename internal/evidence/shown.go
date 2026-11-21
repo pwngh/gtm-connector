@@ -42,6 +42,26 @@ func AsShown(unit *strictjson.Object) (*strictjson.Object, error) {
 			shown.Set(key, safe)
 		}
 	}
+	// The identifier that decided a speaker holds a name or an address from a record.
+	if matched, ok := unit.Get("matched"); ok {
+		if m, isObject := matched.(*strictjson.Object); isObject && m != nil {
+			value, _ := m.Get("value")
+			if text, isText := value.(string); isText {
+				safe, _, err := SafeText(text)
+				if err != nil {
+					return nil, err
+				}
+				if safe != text {
+					renewed := m.Copy()
+					renewed.Set("value", safe)
+					if shown == unit {
+						shown = unit.Copy()
+					}
+					shown.Set("matched", renewed)
+				}
+			}
+		}
+	}
 	return shown, nil
 }
 

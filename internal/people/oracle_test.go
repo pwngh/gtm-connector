@@ -5,7 +5,6 @@ import (
 	"math/big"
 	"regexp"
 	"sort"
-	"strconv"
 	"testing"
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
@@ -82,61 +81,48 @@ func shown(raw string) string {
 	return people.Label(safe)
 }
 
-var (
-	matchesContact  = regexp.MustCompile(`^label matches contact \[(\d+)\]$`)
-	matchesContacts = regexp.MustCompile(`^label matches (\d+) contacts$`)
-	overLimit       = regexp.MustCompile(`^speaker label over \d+ characters$`)
-)
+var overLimit = regexp.MustCompile(`^speaker label over \d+ characters$`)
 
-// equivalent says whether a result is the resolver's form of a recorded role and basis. contactKey maps a
-// contact's unit number to its person key.
-func equivalent(role, basis string, contact *int, r people.Result, contactKey map[int]string) error {
-	if string(r.Role) != role {
-		return fmt.Errorf("role %s, recorded %s", r.Role, role)
-	}
-	want := func(rung people.Rung, b people.Basis, reason people.Reason) error {
-		if r.Rung != rung || r.Basis != b || r.Reason != reason {
-			return fmt.Errorf("rung %d basis %s reason %q, want rung %d basis %s reason %q", r.Rung, r.Basis,
-				r.Reason, rung, b, reason)
-		}
-		return nil
-	}
-	switch {
-	case basis == "listed seller identity":
-		if r.Person == nil || contact != nil {
-			return fmt.Errorf("no listed seller")
-		}
-		return want(people.RungName, people.ByName, people.NoReason)
-	case matchesContact.MatchString(basis):
-		n, _ := strconv.Atoi(matchesContact.FindStringSubmatch(basis)[1])
-		if contact == nil || *contact != n || r.Person == nil || r.Person.Key != contactKey[n] {
-			return fmt.Errorf("person %v, recorded contact [%d]", r.Person, n)
-		}
-		return want(people.RungName, people.ByName, people.NoReason)
-	case matchesContacts.MatchString(basis):
-		n, _ := strconv.Atoi(matchesContacts.FindStringSubmatch(basis)[1])
-		if len(r.Candidates) != n {
-			return fmt.Errorf("%d candidates, recorded %d contacts", len(r.Candidates), n)
-		}
-		return want(people.RungName, people.ByName, people.SeveralCandidates)
-	case basis == "label matches a listed seller and a contact":
-		return want(people.RungName, people.ByName, people.CandidatesOnBothSides)
-	case basis == "author is not a listed seller; Slack identities cannot show a customer":
-		return want(people.NoRung, people.NoBasis, people.SlackAuthorUnidentified)
-	case basis == "label matches no listed seller and no contact":
-		if r.Reason == people.AnonymousLabel {
-			return want(people.NoRung, people.NoBasis, people.AnonymousLabel)
-		}
-		return want(people.NoRung, people.NoBasis, people.NoMatch)
-	case basis == "no speaker label":
-		return want(people.NoRung, people.NoBasis, people.NoLabel)
-	}
-	return fmt.Errorf("unrecognized recorded basis %q", basis)
+// reasonWords are the bases a card prints for the reasons the recorded evidence can give.
+var reasonWords = map[people.Reason]string{
+	people.NoLabel:                 "no speaker label",
+	people.NoMatch:                 "names no listed seller, contact or user",
+	people.AnonymousLabel:          "anonymous label with no alias for this call",
+	people.SlackAuthorUnidentified: "Slack author not identified; a Slack name never shows a customer",
 }
 
-// TestRecordedCards feeds the resolver, for every sentence of the recorded cards, only what today's rule
-// sees: the label, the account's contacts and the listed sellers, with no emails, no aliases and rung 5
-// off. Each result must be the recorded role with an equivalent basis.
+// equivalent says whether a sealed unit's role, basis, rung and contact are the resolver's result.
+// contactKey maps a contact's unit number to its person key.
+func equivalent(role, basis string, rung int, contact *int, r people.Result, contactKey map[int]string) error {
+	if string(r.Role) != role || int(r.Rung) != rung {
+		return fmt.Errorf("role %s by rung %d, sealed %s by rung %d", r.Role, r.Rung, role, rung)
+	}
+	if r.Role == people.Customer {
+		if contact == nil || r.Person == nil || r.Person.Key != contactKey[*contact] {
+			return fmt.Errorf("person %v, sealed contact %v", r.Person, contact)
+		}
+	} else if contact != nil {
+		return fmt.Errorf("a %s with contact [%d]", role, *contact)
+	}
+	want := "by name"
+	switch {
+	case r.Reason == people.SeveralCandidates:
+		want = fmt.Sprintf("%d people match by name", len(r.Candidates))
+	case r.Reason == people.CandidatesOnBothSides:
+		want = fmt.Sprintf("%d people on both sides match by name", len(r.Candidates))
+	case r.Role == people.Unknown:
+		want = reasonWords[r.Reason]
+	}
+	if basis != want {
+		return fmt.Errorf("basis %q, the resolver's %q", basis, want)
+	}
+	return nil
+}
+
+// TestRecordedCards feeds the resolver, for every sentence of the recorded cards, what their evidence holds
+// of people: the label, the account's contacts and the listed sellers. The evidence holds no attendee
+// list, Slack profile, alias or user, so only the name rung can decide. Each result must be the role, basis,
+// rung and contact the card sealed.
 func TestRecordedCards(t *testing.T) {
 	var index struct {
 		Families map[string]int `json:"families"`
@@ -223,6 +209,7 @@ func TestRecordedCards(t *testing.T) {
 				}
 				sentences++
 				role, basis := text(get(unit, "role")), text(get(unit, "basis"))
+				rung, _ := number(get(unit, "rung"))
 				if overLimit.MatchString(basis) {
 					// The card replaces the role of a label it cannot print before any rule reads it.
 					cut++
@@ -259,8 +246,8 @@ func TestRecordedCards(t *testing.T) {
 					contact = &n
 				}
 				r := people.Resolve(byTable[text(get(unit, "source"))], people.Ref{Source: source, Label: label})
-				if err := equivalent(role, basis, contact, r, contactKey); err != nil {
-					m.Add("%s %s %q: %v (recorded %q)", family, refName, label, err, basis)
+				if err := equivalent(role, basis, rung, contact, r, contactKey); err != nil {
+					m.Add("%s %s %q: %v (sealed %q)", family, refName, label, err, basis)
 					continue
 				}
 				roles[role]++

@@ -30,7 +30,7 @@ type besideDemo struct {
 }
 
 func (s besideDemo) Read(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, error) {
-	if tool == "get_account" || tool == "list_opportunities" {
+	if tool == "get_account" || tool == "list_opportunities" || tool == "list_users" {
 		return s.crm.Read(ctx, tool, accountID)
 	}
 	return s.demo.Read(ctx, tool, accountID)

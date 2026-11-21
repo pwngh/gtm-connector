@@ -79,14 +79,17 @@ func recordedBooks(t *testing.T) map[string]*demo.Store {
 
 // The clock of a card is the recorder's in the recording and this program's here, so the line that names
 // when the sources were read is compared without its times. It names one time when the first and last read
-// fall in one second, which the clock decides too.
+// fall in one second, which the clock decides too. The day a contact's title was read is that clock's day.
 var (
 	sourcesRead = regexp.MustCompile(`(?m)^Sources read ` + instant + `(?: to ` + instant + `)?\.$`)
 	readTime    = regexp.MustCompile(instant)
+	titleRead   = regexp.MustCompile(` read [0-9]{4}-[0-9]{2}-[0-9]{2} \[`)
 )
 
-// withoutTimes is a card's text with the times of its sources line left out.
+// withoutTimes is a card's text with the times of its sources line, and the day its titles were read, left
+// out.
 func withoutTimes(text string) string {
+	text = titleRead.ReplaceAllString(text, " read <day> [")
 	return sourcesRead.ReplaceAllStringFunc(text, func(line string) string {
 		return strings.Replace(readTime.ReplaceAllString(line, "<time>"), "<time> to <time>", "<time>", 1)
 	})
@@ -307,8 +310,8 @@ func TestDebugCallsBesideTheDemoCRM(t *testing.T) {
 
 	// brief quotes it, under the roles the contact and the listed seller give.
 	stdout, stderr = d.succeeded(t, with("brief", "acc-007")...)
-	if !strings.Contains(stdout, "  Customer, by a speaker label equal to one contact's name\n"+
-		"    [4] call time Missing; \"Dana Crest\", role Missing [2]\n        \"We will sign the renewal this quarter.\"\n") ||
+	if !strings.Contains(stdout, "  Customer side\n"+
+		"    [4] call time Missing; \"Dana Crest\", role Missing [2], by name\n        \"We will sign the renewal this quarter.\"\n") ||
 		!strings.Contains(stdout, "\n  Calls: one transcript excerpt was read, cues 1 to 2 of 2. Every other call was not read.\n") ||
 		!strings.HasPrefix(stderr, "Sources: CRM is demo data; calls are imported transcripts") {
 		t.Errorf("brief:\n%s%s", stdout, stderr)

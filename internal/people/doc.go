@@ -2,7 +2,7 @@
 // and one speaker reference, and returns the person or none, a role, the rung that decided, a basis code,
 // and for an unknown role a reason code. Codes are fixed strings; this package never writes text for a
 // card. Resolve reads nothing but its arguments: no I/O, no clock, no globals, and the order of any list
-// in its input never changes its result. Nothing calls it yet.
+// in its input never changes its result. internal/evidence calls it for every sentence of a card.
 //
 // # People
 //

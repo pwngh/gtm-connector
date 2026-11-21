@@ -42,8 +42,14 @@ export const groups: {id: GroupId; title: string}[] = [
   {id: 'seller', title: 'Your side'},
 ];
 
-/** The group a sentence belongs to. A role that is not customer or seller is not established. */
-export const groupOf = (sentence: Sentence): GroupId => (sentence.role === 'customer' || sentence.role === 'seller' ? sentence.role : 'unknown');
+/** The group a sentence belongs to. A customer-side speaker who is not a contact is with the buyers; any
+ * other role that is not customer or seller is not on either side. */
+export function groupOf(sentence: Sentence): GroupId {
+  if (sentence.role === 'customer' || sentence.role === 'customer_side_not_in_crm') {
+    return 'customer';
+  }
+  return sentence.role === 'seller' ? 'seller' : 'unknown';
+}
 
 /** The role in a word. */
 export const roleWords: Record<GroupId, string> = {customer: 'Customer', seller: 'Seller', unknown: 'Unknown'};

@@ -96,7 +96,7 @@ test('unit 5 of the README’s deal: the recorded sentence character for charact
   const quote = html.match(/<blockquote class="dc-quote" data-unit="5">([^<]*)<\/blockquote>/);
   assert.equal(decode(quote?.[1] ?? ''), sentence.text);
   assert.equal(sentence.text, 'Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved.');
-  assert.match(text(html), /approved\. Marian Holt Customer \(label matches contact \[2\]\) 12 Jan 2027, 15:00:00 UTC call On the card/);
+  assert.match(text(html), /approved\. Marian Holt Customer \(by name\) 12 Jan 2027, 15:00:00 UTC call On the card/);
   // Around it: unit 6 is the next unit of the same call note; nothing of that note comes before 5.
   assert.doesNotMatch(html, /data-near="before"/);
   assert.match(html, /data-near="after"><span class="dc-proof__label">After<\/span><a class="dc-proof__step" href="\/deals\/acc-003\?unit=6"/);

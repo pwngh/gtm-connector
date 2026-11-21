@@ -529,6 +529,19 @@ func traces(card *strictjson.Object, brief string, numbers []string) (any, error
 		if unit, err = evidence.AsShown(unit); err != nil {
 			return nil, err
 		}
+		// The identifier that decided the speaker, with the receipt of the read that returned its record.
+		if matched, ok := get(unit, "matched").(*strictjson.Object); ok {
+			if ref, isRef := get(matched, "record_ref").(string); isRef {
+				from, bound := trace.Source(ref)
+				if !bound {
+					return nil, refused("Number %d names a speaker's record that its own card does not hold.", n)
+				}
+				matched = matched.Copy()
+				matched.Set("receipt", strictjson.NewObject("audit_id", get(from, "audit_id"), "tool",
+					get(from, "tool"), "status", get(from, "status"), "http_status", get(from, "http_status")))
+				unit.Set("matched", matched)
+			}
+		}
 		var following any
 		if speaker, labelled := get(sealed, "speaker").(string); get(sealed, "kind") == "sentence" && labelled &&
 			!replaced(speaker) {

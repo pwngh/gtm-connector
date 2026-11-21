@@ -101,9 +101,34 @@ func prepareOf(token string, account string, slack bool, arguments *strictjson.O
 }
 
 // todaysRules is a folder card or brief as Go makes it under today's rules. The folders hold cards sealed
-// under rules version 3, which stay as sealed so that an old card is still admitted.
+// under rules version 3 and before the speaker rules, which stay as sealed so that an old card is still
+// admitted. Go makes the same reads, receipts and evidence, and seals the workspace's speaker settings in
+// the evidence: none, in a demo workspace. Its text, units and gaps are what Build makes of that evidence,
+// so a speaker's role and its basis are the speaker rules', and everything else is the oracle's.
 func todaysRules(payload []byte) []byte {
-	return oracletest.TodaysRules(payload, evidence.SanitizerVersion)
+	value, err := strictjson.Loads(oracletest.TodaysRules(payload, evidence.SanitizerVersion))
+	if err != nil {
+		panic(err)
+	}
+	card := value.(*strictjson.Object)
+	snapshot := get(card, "evidence").(*strictjson.Object)
+	snapshot.Set("people", evidence.Sources{}.People())
+	units, text, gaps, _, err := evidence.Build(snapshot)
+	if err != nil {
+		panic(err)
+	}
+	card.Set("text", text)
+	card.Set("units", evidence.UnitValues(units))
+	card.Set("gaps", evidence.GapValues(gaps))
+	options := strictjson.Artifact
+	if get(card, "kind") == "selected_brief" {
+		options = strictjson.Prepared
+	}
+	encoded, err := strictjson.Dumps(card, options)
+	if err != nil {
+		panic(err)
+	}
+	return []byte(encoded)
 }
 
 // TestGoMakesTheFolderCards makes the folder cards in Go, under the oracle's scopes, and compares the bytes

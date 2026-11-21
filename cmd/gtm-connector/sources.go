@@ -77,9 +77,10 @@ import (
 
 // crmSource is a workspace's CRM.
 type crmSource interface {
-	// Read is one of the two CRM reads, "get_account" or "list_opportunities", for one account: its
-	// records, each with its record_ref. get_account gives the account, then its contacts, then its
-	// contracts when the CRM has contracts. An account the CRM does not hold is errAccountNotFound.
+	// Read is one of the CRM reads of a card for one account: its records, each with its record_ref.
+	// get_account gives the account, then its contacts, then its contracts when the CRM has contracts;
+	// list_opportunities its opportunities; and list_users, which only a CRM with users is asked for, the
+	// org's users a speaker can be. An account the CRM does not hold is errAccountNotFound.
 	Read(ctx context.Context, tool, accountID string) ([]*strictjson.Object, error)
 	// SearchAccounts gives the accounts whose name holds the query as literal text, the first hundred by
 	// name and then ID, and whether more match.
@@ -99,9 +100,11 @@ type callsSource interface {
 // slackSource is a workspace's Slack.
 type slackSource interface {
 	// Messages is the read_slack_messages read of a card: the account's messages, each with its
-	// record_ref, and for a live thread the snapshot of the read they are checked against. An account
-	// with no thread selected gives cards.ErrNotSelected.
-	Messages(ctx context.Context, accountID string) (records []*strictjson.Object, snapshot *strictjson.Object, err error)
+	// record_ref; for a live thread, the members who wrote them, each with its record_ref, and the
+	// snapshot of the read the messages are checked against. An account with no thread selected gives
+	// cards.ErrNotSelected.
+	Messages(ctx context.Context, accountID string) (messages, members []*strictjson.Object,
+		snapshot *strictjson.Object, err error)
 }
 
 // opening is what an opener is given.
@@ -189,7 +192,8 @@ var sourceKinds = []*sourceKind{
 	// env_token, a token handed to the process, is of this kind: attachSalesforce saves it for
 	// --token-env, and openSalesforce reads both.
 	{provider: "salesforce", source: "crm", mode: "sf", shown: "salesforce", title: "Salesforce",
-		detail: "Salesforce", live: true, options: []string{"--org", "--token-env", "--environment", "--seller"},
+		detail: "Salesforce", live: true,
+		options: append([]string{"--org", "--token-env", "--environment"}, speakerOptions...),
 		backend: "salesforce", bound: func(row postgres.Connection, _ any) any {
 			return pinnedBinding("crm_backend", "salesforce", row)
 		},
@@ -199,14 +203,14 @@ var sourceKinds = []*sourceKind{
 		attach: attachSalesforce, crm: openSalesforce},
 	// Imports are bound to their CRM, and may sit beside the demo CRM (source_calls.go).
 	{provider: "calls", source: "calls", mode: "imported", shown: "imported", title: "Call transcripts", plural: true,
-		detail: "imported transcripts", live: true, besideDemo: true, options: []string{"--seller"},
+		detail: "imported transcripts", live: true, besideDemo: true, options: speakerOptions,
 		backend: "imported", bound: func(_ postgres.Connection, crm any) any { return crm },
 		described: func(*strictjson.Object) string {
 			return "imported transcripts, whose provider and statements are unverified"
 		}, attach: attachTranscripts, calls: openTranscripts},
 	// source_slack.go opens it: the mapped thread of an account, read through internal/sources/slack.
 	{provider: "slack", source: "slack", mode: "slack", shown: "slack", title: "Slack",
-		detail: "the saved Slack sign-in", live: true, options: []string{"--seller"},
+		detail: "the saved Slack sign-in", live: true, options: speakerOptions,
 		backend: "slack", bound: func(row postgres.Connection, _ any) any {
 			return pinnedBinding("provider", "slack", row)
 		},
@@ -278,6 +282,7 @@ type reads struct {
 	kinds     map[string]*sourceKind
 	bindings  map[string]*strictjson.Object // each row's binding, read
 	sellers   []string
+	speakers  speakerSettings
 	// The reads opened so far.
 	crmReads   crmSource
 	callsReads callsSource
@@ -308,7 +313,14 @@ func workspaceReads(ctx context.Context, store *postgres.Store, workspace postgr
 	if _, connected := r.rows["crm"]; !connected {
 		return nil, errNotConnected
 	}
-	r.sellers, err = store.Sellers(ctx, workspace.ID)
+	if r.sellers, err = store.Sellers(ctx, workspace.ID); err != nil {
+		return nil, err
+	}
+	saved, err := store.Speakers(ctx, workspace.ID)
+	if err != nil {
+		return nil, err
+	}
+	r.speakers, err = readSpeakers(saved)
 	return r, err
 }
 
@@ -347,7 +359,8 @@ func (r *reads) bound(source string) any {
 func (r *reads) sources() evidence.Sources {
 	return evidence.Sources{CRMBackend: r.backend("crm"), CRMBinding: r.bound("crm"),
 		CallsBackend: r.backend("calls"), CallsBinding: r.bound("calls"),
-		SlackBackend: r.backend("slack"), SlackBinding: r.bound("slack"), Sellers: r.sellers}
+		SlackBackend: r.backend("slack"), SlackBinding: r.bound("slack"), Sellers: r.sellers,
+		CompanyDomains: r.speakers.domains, Aliases: r.speakers.aliases}
 }
 
 // connections is each connected source's connection ID, and generations the generation of its row when
@@ -495,7 +508,7 @@ type cardSource struct{ *reads }
 
 func (s cardSource) Read(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, error) {
 	switch tool {
-	case "get_account", "list_opportunities":
+	case "get_account", "list_opportunities", "list_users":
 		crm, err := s.crm(ctx)
 		if err != nil {
 			return "crm", nil, err
@@ -510,19 +523,26 @@ func (s cardSource) Read(ctx context.Context, tool, accountID string) (string, [
 		records, err := calls.CallNotes(ctx, accountID)
 		return "calls", records, err
 	case "read_slack_messages":
-		records, _, err := s.ReadThread(ctx, accountID)
-		return "slack", records, err
+		// The tool gives the messages alone; a card reads their authors too, through ReadThread.
+		slack, err := s.slack(ctx)
+		if err != nil {
+			return "slack", nil, err
+		}
+		messages, _, _, err := slack.Messages(ctx, accountID)
+		return "slack", messages, err
 	}
 	return "", nil, fmt.Errorf("no source has a read named %q", tool)
 }
 
-// ReadThread is the Slack read, with the snapshot the maker checks a live thread's messages against.
+// ReadThread is the Slack read of a card: the messages and their authors, with the snapshot the maker
+// checks a live thread's messages against.
 func (s cardSource) ReadThread(ctx context.Context, accountID string) ([]*strictjson.Object, *strictjson.Object, error) {
 	slack, err := s.slack(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	return slack.Messages(ctx, accountID)
+	messages, members, snapshot, err := slack.Messages(ctx, accountID)
+	return append(messages, members...), snapshot, err
 }
 
 // A read a command makes outside a card.
@@ -760,9 +780,10 @@ func (d demoBook) CallNotes(ctx context.Context, accountID string) ([]*strictjso
 	return d.Read(ctx, "read_call_notes", accountID)
 }
 
-func (d demoBook) Messages(ctx context.Context, accountID string) ([]*strictjson.Object, *strictjson.Object, error) {
-	records, err := d.Read(ctx, "read_slack_messages", accountID)
-	return records, nil, err
+func (d demoBook) Messages(ctx context.Context, accountID string) (messages, members []*strictjson.Object,
+	snapshot *strictjson.Object, err error) {
+	messages, err = d.Read(ctx, "read_slack_messages", accountID)
+	return messages, nil, nil, err
 }
 
 func demoData(*strictjson.Object) string { return "demo data" }

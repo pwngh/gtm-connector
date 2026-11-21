@@ -14,8 +14,8 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// Source is the reads a card makes, one per tool: get_account, list_opportunities, read_call_notes and
-// read_slack_messages. It returns the source system the records come from and the records with their
+// Source is the reads a card makes, one per tool: get_account, list_opportunities, list_users (a Salesforce
+// CRM only), read_call_notes and read_slack_messages. It returns the source system the records come from and the records with their
 // record_ref. ctx carries the caller's cancellation and the card's deadline, and a read returns once it is
 // done. demo.Store is one.
 type Source interface {
@@ -246,13 +246,20 @@ var rulesVersion = strconv.Itoa(evidence.SanitizerVersion)
 
 // The scopes the reads need.
 var scopes = map[string]string{"get_account": "crm:read", "list_opportunities": "crm:read",
-	"read_call_notes": "calls:read", "read_slack_messages": "slack:read"}
+	"list_users": "crm:read", "read_call_notes": "calls:read", "read_slack_messages": "slack:read"}
+
+// ReadScope is the scope a card's read needs, or "" for a name that is no read of a card.
+func ReadScope(tool string) string { return scopes[tool] }
 
 type planned struct{ tool, system string }
 
-// plan is the reads a card makes: CRM always, calls when connected, Slack when asked for and connected.
+// plan is the reads a card makes: CRM always, with the org's users for a Salesforce CRM, calls when
+// connected, Slack when asked for and connected.
 func plan(s evidence.Sources, includeSlack bool) []planned {
 	reads := []planned{{"get_account", "crm"}, {"list_opportunities", "crm"}}
+	if s.CRMBackend == "salesforce" {
+		reads = append(reads, planned{"list_users", "crm"})
+	}
 	if s.CallsBackend != "none" {
 		reads = append(reads, planned{"read_call_notes", "calls"})
 	}

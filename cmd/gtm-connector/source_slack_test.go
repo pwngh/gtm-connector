@@ -323,6 +323,15 @@ func withoutReadTimes(text string) string {
 	return strings.Join(lines, "\n")
 }
 
+// profilesNotRead is what a card made through a sign-in without users:read says after its thread's line.
+// The recorded cards were made from the thread alone, with no authors' profiles to read.
+const profilesNotRead = " Authors' profiles were not read: the Slack sign-in lacks users:read and users:read.email."
+
+// withoutProfileNote is a live card's text without that sentence, and whether it stated it once.
+func withoutProfileNote(text string) (string, bool) {
+	return strings.Replace(text, profilesNotRead, "", 1), strings.Count(text, profilesNotRead) == 1
+}
+
 // seedSignIn saves a sign-in for a workspace, obtained at the given time, as debug slack connect leaves it
 // when state is "ready".
 func seedSignIn(t *testing.T, folder, slug string, at time.Time, state string) {
@@ -390,7 +399,14 @@ func TestBriefReadsAMappedThreadAsTheRecordedCard(t *testing.T) {
 		if err := json.Unmarshal([]byte(stdout), &made); code != 0 || err != nil {
 			t.Fatalf("%s: brief: exit %d\n%s", c.key, code, stderr)
 		}
-		if got, want := withoutReadTimes(made.Text), withoutReadTimes(get(c.card, "text").(string)); got != want {
+		got, want := withoutReadTimes(made.Text), withoutReadTimes(get(c.card, "text").(string))
+		if c.thread != nil {
+			var stated bool
+			if got, stated = withoutProfileNote(got); !stated {
+				t.Errorf("%s: the card does not say its authors' profiles were not read", c.key)
+			}
+		}
+		if got != want {
 			t.Errorf("%s: the card\n%s\nis not the recorded card\n%s", c.key, got, want)
 			continue
 		}
@@ -651,8 +667,9 @@ func TestSlackFromSignInToACard(t *testing.T) {
 	// The card is the recorded card.
 	code, stdout, stderr = printed.line(t, d, append([]string{"brief", card.account, "--as-of", "2027-01-15", "--json"}, where...)...)
 	var made cardResult
-	if err := json.Unmarshal([]byte(stdout), &made); code != 0 || err != nil ||
-		withoutReadTimes(made.Text) != withoutReadTimes(get(card.card, "text").(string)) {
+	err = json.Unmarshal([]byte(stdout), &made)
+	text, stated := withoutProfileNote(withoutReadTimes(made.Text))
+	if code != 0 || err != nil || !stated || text != withoutReadTimes(get(card.card, "text").(string)) {
 		t.Fatalf("brief: exit %d\n%s%s", code, stdout, stderr)
 	}
 	for _, argv := range [][]string{{"audit"}, {"audit", "--json"}, {"inspect", made.BriefID}, {"inspect", made.BriefID, "--json"},
