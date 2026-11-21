@@ -4,38 +4,86 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Nightly: the fallback PostgreSQL and every browser at every width.
+  schedule:
+    - cron: '23 5 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # What a pull request changes, against the main it merges into: the web and Inspector jobs run only
+  # when their parts change, and the browser matrix is full only when web/ changes. A push to main, the
+  # nightly run and a manual run test everything.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      web: ${{ steps.diff.outputs.web }}
+      inspector: ${{ steps.diff.outputs.inspector }}
+      browsers: ${{ steps.diff.outputs.browsers }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # A pull request checks out its merge into main, whose first parent is main.
+          fetch-depth: 2
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          workflow='^\.github/workflows/test\.yml$'
+          if [ "$EVENT" = pull_request ]; then
+            changed="$(git diff --name-only HEAD^1 HEAD)"
+          else
+            changed='every file'
+          fi
+          printf 'Changed:\n%s\n' "$changed"
+          touches() { [ "$EVENT" != pull_request ] || grep -qE "$1" <<<"$changed"; }
+          web=false; inspector=false
+          if touches "^web/|^internal/transport/http/|^\.nvmrc$|$workflow"; then web=true; fi
+          if touches "^internal/transport/mcp/|^internal/mcptools/|^cmd/gtm-connector/|^pins\.json$|^\.nvmrc$|^go\.(mod|sum)$|$workflow"; then inspector=true; fi
+          all='320,390,768,1440'
+          if touches '^web/'; then
+            browsers="[{\"browser\":\"chromium\",\"widths\":\"$all\"},{\"browser\":\"firefox\",\"widths\":\"$all\"},{\"browser\":\"webkit\",\"widths\":\"$all\"}]"
+          else
+            browsers='[{"browser":"chromium","widths":"390,1440"}]'
+          fi
+          { echo "web=$web"; echo "inspector=$inspector"; echo "browsers=$browsers"; } | tee -a "$GITHUB_OUTPUT"
+
   go:
+    name: go (${{ matrix.postgres }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        # The pinned PostgreSQL, and the fallback one major version back.
+        # The pinned PostgreSQL, and the fallback one major version back, which runs nightly and by hand.
         postgres:
           - postgres:19.0-alpine3.24@sha256:8b0ff4cdf221f0c53d7fcda681d3b461be725c492cd881c5ec9c0ad25023f188
           - postgres:18.7-alpine3.24@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff
+        run:
+          - ${{ contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event_name) && 'nightly' || 'change' }}
+        exclude:
+          - run: change
+            postgres: postgres:18.7-alpine3.24@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff
     services:
       postgres:
         image: ${{ matrix.postgres }}
         env:
           POSTGRES_USER: gtm
           POSTGRES_DB: gtm
-          POSTGRES_HOST_AUTH_METHOD: trust
+          # Password authentication, as a real server checks it. The server answers on the runner's loopback only.
+          POSTGRES_PASSWORD: gtm-ci-password
           POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
-        # Trust authentication, so the port answers on the runner's loopback only.
         ports:
           - 127.0.0.1:5432:5432
         options: >-
           --health-cmd "pg_isready -U gtm -d gtm"
           --health-interval 2s --health-timeout 3s --health-retries 30
     env:
-      GTM_TEST_DATABASE_URL: postgres://gtm@localhost:5432/gtm?sslmode=disable
+      GTM_TEST_DATABASE_URL: postgres://gtm:gtm-ci-password@localhost:5432/gtm?sslmode=disable
       GTM_REQUIRE_DATABASE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -49,7 +97,7 @@ jobs:
           go vet ./...
           go test -race -count=1 ./...
 
-  # Compose end to end, on the pinned PostgreSQL and the fallback: the image
+  # Compose end to end, on the pinned PostgreSQL, and nightly on the fallback: the image
   # builds with its commit, setup runs as the owner, the server starts as the
   # app role, TLS health and demo sign-in work, and a published card keeps
   # its digest across a restart and across a backup, clean and restore.
@@ -60,6 +108,12 @@ jobs:
       fail-fast: false
       matrix:
         postgres: ['19.0', '18.7']
+        run:
+          - ${{ contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event_name) && 'nightly' || 'change' }}
+        exclude:
+          - run: change
+            postgres: '18.7'
+    name: smoke (${{ matrix.postgres }})
     env:
       POSTGRES: ${{ matrix.postgres }}
     steps:
@@ -96,6 +150,8 @@ jobs:
   # serve's /mcp over HTTPS with each token, and mcp stdio started by the Inspector. The same sequence runs
   # against the gate in process.
   inspector:
+    needs: changes
+    if: needs.changes.outputs.inspector == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -104,16 +160,16 @@ jobs:
         env:
           POSTGRES_USER: gtm
           POSTGRES_DB: gtm
-          POSTGRES_HOST_AUTH_METHOD: trust
+          # Password authentication, as a real server checks it. The server answers on the runner's loopback only.
+          POSTGRES_PASSWORD: gtm-ci-password
           POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
-        # Trust authentication, so the port answers on the runner's loopback only.
         ports:
           - 127.0.0.1:5432:5432
         options: >-
           --health-cmd "pg_isready -U gtm -d gtm"
           --health-interval 2s --health-timeout 3s --health-retries 30
     env:
-      GTM_TEST_DATABASE_URL: postgres://gtm@localhost:5432/gtm?sslmode=disable
+      GTM_TEST_DATABASE_URL: postgres://gtm:gtm-ci-password@localhost:5432/gtm?sslmode=disable
       GTM_REQUIRE_DATABASE: '1'
       GTM_INSPECTOR: '1'
     steps:
@@ -130,6 +186,8 @@ jobs:
       - run: go test -count=1 -run '^TestInspector$' -v ./cmd/gtm-connector ./internal/transport/mcp
 
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -158,12 +216,19 @@ jobs:
         working-directory: .
         run: make release
 
-  # The browser checks against the build and a stub of the API, in the Chromium build pinned by
-  # playwright-core: every page at 320, 390, 768 and 1440 wide, light and dark. Any failed check fails
-  # the job, and its screenshots are kept.
+  # The browser checks against the build and a stub of the API, in the browser builds pinned by
+  # playwright-core. A pull request runs Chromium at 390 and 1440 wide, light and dark; one that changes
+  # web/, a push to main and the nightly run add Firefox and WebKit, at every width the checks use. Any
+  # failed check fails the job, and its screenshots are kept.
   browser:
+    needs: changes
+    name: browser (${{ matrix.browser }} ${{ matrix.widths }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.browsers) }}
     defaults:
       run:
         working-directory: web
@@ -182,14 +247,21 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium
-      - name: Install the pinned Chromium and the system libraries it needs
-        run: node node_modules/playwright-core/cli.js install --with-deps --no-shell chromium
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-${{ matrix.browser }}
+      - name: Install the pinned browser and the system libraries it needs
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: |
+          if [ "$BROWSER" = chromium ]; then shell=--no-shell; else shell=; fi
+          node node_modules/playwright-core/cli.js install --with-deps $shell "$BROWSER"
       - name: The browser checks, every page at each width and theme
-        run: npm run test:browser -- --channel chromium --screenshots "$RUNNER_TEMP/screenshots"
+        env:
+          BROWSER: ${{ matrix.browser }}
+          WIDTHS: ${{ matrix.widths }}
+        run: npm run test:browser -- --browser "$BROWSER" --channel chromium --widths "$WIDTHS" --screenshots "$RUNNER_TEMP/screenshots"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
-          name: browser-screenshots
+          name: browser-screenshots-${{ matrix.browser }}
           path: ${{ runner.temp }}/screenshots
           retention-days: 7
