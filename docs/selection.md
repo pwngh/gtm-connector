@@ -1,7 +1,10 @@
 # Serve selected accounts
 
-A selection limits a connected client to the accounts you name. It also adds two tools, so the
-client can prepare a [Deal card](briefs.md) with its own grant and read it again later.
+A selection is a file you write that lists the accounts a connected [client](clients.md) may read,
+and whether each account's Slack thread is included. Each read still requires its scope. A server
+started with a selection also serves two more tools: one saves a [Deal card](briefs.md) with its
+evidence under the client's own [grant](tools.md), as a prepared brief, and the other reads it back
+after checking the client's access again.
 
 ```json
 {"schema_version": 1, "accounts": [
@@ -13,7 +16,7 @@ chmod 600 selection.json
 gtm-connector debug serve --selection selection.json
 ```
 
-- `debug serve` reads the sources its state folder is [connected](cli.md) to.
+- `debug serve` reads the sources its [state folder](cli.md) is connected to.
 - `accounts` lists 1 to 100 distinct accounts. Use `acc-007` style IDs with the demo CRM and
   `acc-sf-` plus the 18-character ID with Salesforce.
 - `slack: true` selects the account's Slack thread. With live Slack connected it must already be
@@ -29,7 +32,7 @@ gtm-connector debug serve --selection selection.json
 | `search_accounts`, `list_opportunities` | `crm:read` | The selected IDs are part of the query, before ordering and the result limit, so a search never reports more matches than the selection holds. |
 | `get_account`, `list_opportunities` with an account | `crm:read` | An unselected account is refused and not looked up. |
 | `read_call_notes`, `read_slack_messages` | `calls:read`, `slack:read` | They read selected accounts only, and Slack only where `slack` is `true`. To withhold call notes, grant no `calls:read`. |
-| `prepare_renewal_brief(account_id, as_of)` | `crm:read` | Reads the account, its opportunities, its call notes, and its Slack thread when selected. Each read checks its own scope. A grant without `calls:read` or `slack:read` gets a card that says the source was not read. `as_of` is optional and uses `YYYY-MM-DD`. The fixture CRM defaults to 2027-01-15 and Salesforce defaults to today. |
+| `prepare_renewal_brief(account_id, as_of)` | `crm:read` | Reads the account, its opportunities, its call notes, and its Slack thread when selected. Each read checks its own scope. A grant without `calls:read` or `slack:read` gets a card that says the source was not read. `as_of` is optional and uses `YYYY-MM-DD`. The demo CRM defaults to 2027-01-15 and Salesforce defaults to today. |
 | `read_renewal_brief(brief_id)` | `crm:read`, plus the scopes the brief's content needs | Returns a saved brief without calling any source system. |
 
 ## Prepared briefs
@@ -58,8 +61,11 @@ connected is never called, and the card and `sources` name it as not connected. 
 
 ## Errors
 
-A bad selection file stops `debug serve` with exit `2`, and an unmapped Slack thread with exit `3`. Tools
-return these codes as tool errors, or a failed source's own code, such as `calls_not_connected`.
+A bad selection file stops `debug serve` with exit `2`, and an unmapped Slack thread with exit `3`. A
+selected server offers no write tool. A `log_activity` call that passes the token, rate and scope
+checks is refused with HTTP 403 and `crm_write_disabled`. A rate or token failure at admission is
+HTTP 429 or 401; during a prepared brief, or at a saved brief's final token check, it is a tool error.
+The other codes are tool errors, or a failed source's own code, such as `calls_not_connected`.
 
 | Code | Cause | Fix |
 | --- | --- | --- |

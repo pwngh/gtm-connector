@@ -1,5 +1,7 @@
 # Connect a client
 
+A client is an assistant app, or the Inspector, that calls the connector's tools over MCP.
+
 ```sh
 gtm-connector connect demo --state-dir var/clients    # or connect salesforce --org ALIAS
 gtm-connector debug serve --state-dir var/clients     # keep it running in one terminal
@@ -7,12 +9,15 @@ gtm-connector debug doctor --state-dir var/clients    # second terminal, same di
 gtm-connector connect inspector --state-dir var/clients --scope crm:read
 ```
 
-An assistant app needs `debug serve` running in its state folder, for the HTTP transport and for the
-local bridge. `debug serve` serves the sources its state folder is [connected](cli.md) to.
+An assistant app needs `debug serve` running in its [state folder](cli.md), for the HTTP transport
+and for the [local bridge](#a-local-bridge-for-assistant-apps). `debug serve` serves the sources its
+state folder is [connected](cli.md) to.
 `connect APP` prints the setup commands and limits for one client. It does not launch an
-application. With `--scope`, it requests a local grant and saves it in `APP.json` in the state
-folder, mode 0600, without printing the bearer token. Without `--scope`, it previews the setup and
-creates nothing. Repeat `--scope` for each of `crm:read`, `calls:read`, `slack:read`, and
+application. A grant is a bearer token issued for a list of [scopes](tools.md). With `--scope`, an
+HTTP client (Inspector, Claude Code or Cursor) gets a local grant,
+saved in `APP.json` in the state folder, mode 0600, without printing the bearer token. Claude Desktop
+gets none over HTTP, and a stdio entry holds no grant (below). Without `--scope`, HTTP setup previews
+the instructions and creates nothing; stdio setup requires explicit scopes. Repeat `--scope` for each of `crm:read`, `calls:read`, `slack:read`, and
 `crm:write`.
 
 | `APP` | Status | `REST_OF_COMMAND` |
@@ -22,8 +27,8 @@ creates nothing. Repeat `--scope` for each of `crm:read`, `calls:read`, `slack:r
 | `cursor` | Untested. The configuration follows Cursor's [MCP guide](https://cursor.com/docs/mcp). Protocol and local certificate compatibility are unverified. | `cursor .` First merge only the `gtm-connector` entry from `cursor.json` into your project's `.cursor/mcp.json`, keep the other entries, and quit Cursor completely. |
 | `claude-desktop` | Untested in the app. It starts local servers as processes, so it uses the [local bridge](#a-local-bridge-for-assistant-apps). Its [remote connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) need public HTTPS on port 443 and cannot reach `127.0.0.1`. | None over HTTP. With `--transport stdio`, restart the app after `connect` writes its entry. |
 
-The printed commands use absolute paths for the state folder. Each starts with the same
-environment, shown here with `$PWD/var/clients`:
+The printed commands use absolute paths for the state folder. Start the HTTP clients below with
+this environment, shown here with `$PWD/var/clients`:
 
 ```sh
 NODE_EXTRA_CA_CERTS="$PWD/var/clients/tls.pem" \
@@ -38,8 +43,9 @@ proxies. TLS verification stays on.
 
 ## A local bridge for assistant apps
 
-Some apps start a local MCP server as a process and speak to it on stdin and stdout. For those,
-`connect` writes an entry that starts the connector's bridge:
+Some apps start a local MCP server as a process and speak to it on stdin and stdout. The local
+bridge is that process: it forwards each call to the `debug serve` already running. For those apps,
+`connect` writes an entry that starts the bridge:
 
 ```sh
 gtm-connector debug serve --state-dir var/clients     # keep it running
@@ -57,7 +63,7 @@ gtm-connector connect claude-desktop --transport stdio --scope crm:read --scope 
   Python starts isolated (`-I`), so a folder the app runs in cannot stand in for the connector.
 - A call the bridge would refuse for its shape is still sent to the gateway, which records it and
   refuses it.
-- The app starts `gtm-connector mcp stdio --state-dir DIR --scope ...`. The bridge attaches to the
+- The app starts that Python, isolated with `-I`, running the connector's `mcp stdio --state-dir DIR --scope ...`. The bridge attaches to the
   `debug serve` already running in that folder, obtains a grant for exactly those scopes, keeps it in
   memory, and renews only those scopes. Every call still goes through the HTTPS gateway, with its
   scope check, rate limit, and audit receipt. A call outside the scopes is refused.
@@ -79,7 +85,7 @@ it.
 - The local authorization server registers only `gtm-demo-cli`, with callback
   `http://127.0.0.1:8767/callback`, and requires the local owner header. An assistant app cannot
   complete its own interactive login. See [authorization](tools.md).
-- The configuration files hold bearer credentials. Keep `inspector.json`, `claude-code.json`,
+- The configuration files hold bearer tokens. Keep `inspector.json`, `claude-code.json`,
   `cursor.json`, `.cursor/mcp.json`, and the state folder out of commits, transcripts, and model
   prompts, and readable only by their owner. This repository's `.gitignore` covers them. Add the
   same rules in another project.
@@ -117,7 +123,7 @@ inspect --method tools/call --tool-name get_account --tool-arg account_id=acc-00
 | `tools/list` | Any | All six tools, with input and output schemas and required-scope metadata. |
 | `get_account` | `crm:read` | `result.structuredContent.records` with `crm/accounts/acc-003` and `crm/contacts/con-003`. |
 | `read_call_notes` | `crm:read` only | HTTP 403. Inspector exits 1 with empty stdout and reports `Insufficient scope: required "calls:read"` in its stderr JSON error. |
-| `read_call_notes` | `calls:read` | `calls/call_notes/note-003`, marked as untrusted data. |
+| `read_call_notes` | `calls:read` | `calls/call_notes/note-003` and `calls/call_notes/note-003b`, marked as untrusted data. |
 | `read_slack_messages` | `slack:read` | `slack/messages/msg-003`. A Slack-only grant cannot read CRM or call notes. |
 
 Rerun `connect` with other `--scope` values to replace the grant while the server runs.

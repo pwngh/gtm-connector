@@ -11,7 +11,8 @@ make verify-real LOCAL=/path/to/messages.jsonl    # a private file, see below
 ```
 
 It needs Go, git, and the pinned CPython 3.14.6 with Unicode 16.0.0 (`PYTHON=`, as for the oracle fixtures;
-the default is `.venv/bin/python`).
+the default is `.venv/bin/python`). The oracle fixtures are the reference outputs in `testdata/oracle/`,
+which `tools/oracle/` writes from the Python package.
 
 ## What it does
 
@@ -26,9 +27,9 @@ the default is `.venv/bin/python`).
 3. **Oracle.** `tools/oracle/real.py` runs the Python package over the items, under `-I`, and records each
    output and its SHA-256. It refuses a package that differs from the one `testdata/oracle/` was made from.
 4. **Compare.** The Go port runs over the same items, and each output's SHA-256 is compared with Python's.
-   The records are checked first: they must come from CPython 3.14.6 with Unicode 16.0.0 and the frozen
-   package, name exactly each item's functions, hold only SHA-256 digests, and, when Python's outputs are
-   there, be the digests of those outputs. Records that fail any check are refused, never compared.
+   The records are checked first: they must come from CPython 3.14.6 with Unicode 16.0.0 and the package
+   `testdata/oracle/` was made from, name exactly each item's functions, hold only SHA-256 digests, and,
+   when Python's outputs are there, be the digests of those outputs. Records that fail any check are refused, never compared.
 
 | Input | Functions |
 | --- | --- |

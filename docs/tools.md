@@ -1,15 +1,16 @@
 # Tools and source data
 
-The connector serves six tools over CRM, calls, and Slack. By default each source is its own local
-SQLite store of invented records.
+The connector serves six tools over CRM, calls, and Slack. `connect demo` gives each of the three sources its
+own local SQLite store of invented records. A scope is the access a tool requires. A grant is a bearer token
+issued for a list of scopes.
 
 | Tool | Scope | Returns |
 | --- | --- | --- |
 | `search_accounts` | `crm:read` | The first 100 accounts whose name contains the literal query, ordered by name and then ID, or at most two exact Salesforce AccountNumber matches. Salesforce orders names by the user's locale, and the demo CRM ignores ASCII case. |
 | `get_account` | `crm:read` | One account, its contacts, and with Salesforce its standard Contracts. |
 | `list_opportunities` | `crm:read` | Opportunities, for one account when given. |
-| `read_call_notes` | `calls:read` | Fixture notes, or the selected excerpt of an [imported transcript](calls.md). |
-| `read_slack_messages` | `slack:read` | Fixture messages, or the mapped [live thread](slack.md). |
+| `read_call_notes` | `calls:read` | Demo call notes, or the selected excerpt of an [imported transcript](calls.md). |
+| `read_slack_messages` | `slack:read` | Demo Slack messages, or the mapped [live thread](slack.md). |
 | `log_activity` | `crm:write` | The activity created, or the existing one for that idempotency key. |
 
 - Each tool declares its scope in `gtm.demo/requiredScope` metadata, and a call without it gets
@@ -22,12 +23,13 @@ SQLite store of invented records.
 - `debug serve --selection FILE` limits reads to the selected accounts and replaces `log_activity` with
   `prepare_renewal_brief` and `read_renewal_brief`, which return a [Deal card](briefs.md) as `text`
   with its numbered `units` and its `gaps`. See [selection](selection.md).
-- `debug serve` in a folder connected to Salesforce reads CRM from Salesforce and omits `log_activity`.
+- `debug serve` in a [state folder](cli.md) connected to Salesforce reads CRM from Salesforce and omits `log_activity`.
   See [Salesforce](salesforce.md).
 
 ## Fixtures
 
-Every company, person, and message is invented, with `.example` email domains. `crm.sqlite3` holds
+The fixtures are the records of the demo data. The JSON value `"demo_fixture"` names them as a
+source. Every company, person, and message is invented, with `.example` email domains. `crm.sqlite3` holds
 30 accounts, 30 contacts, and 30 opportunities, each amount with a currency. `calls.sqlite3` holds
 30 notes, and `slack.sqlite3` holds 29 messages. The fixed demo date is `2027-01-15`.
 
@@ -53,7 +55,9 @@ Salesforce, `accounts` and `inspect` read the account through the scoped, audite
 
 ## Run the guarantee checks
 
-`debug verify` creates one fixture activity, so keep its state apart from the demo's.
+`debug verify` checks scope refusals, source text that asks for a write, idempotent activity writes,
+rate limits and card receipts, on demo data. It creates one demo activity, so keep its state folder
+apart from the demo's.
 
 ```sh
 .venv/bin/python -m gtm_connector debug verify --state-dir var/verification --json

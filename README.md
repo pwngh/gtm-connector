@@ -2,11 +2,27 @@
 
 [![Tests](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml?query=branch%3Amain)
 
-A Deal card for a renewal, built from Salesforce, call transcripts, and Slack. It prints no figure,
-date, name, or quotation it cannot point to in a stored record. It labels who said each sentence and
-on what basis, and it says what it did not read. No model writes any of it.
+**See what the CRM says about a renewal and what people actually said, side by side, with a source
+behind every line.**
 
-`gtm-connector demo`, on an invented law firm whose CRM record looks healthy:
+gtm-connector builds a Deal card for a renewal from Salesforce, call transcripts, and Slack. Every
+figure, date, name, and quotation on the card points to a stored record. Each sentence is labelled
+with who said it and on what basis, and the card says what it did not read. The connector writes
+every character. No model does.
+
+| No model | Cited | Sealed | Tested | Protocol |
+| --- | --- | --- | --- | --- |
+| **0** model calls on a card | every figure and quotation numbered to its record | **SHA-256** seal on each saved card | **8 of 10** invented hard cases pass | CLI and **MCP** `2026-07-28` |
+
+### The demo
+
+Here is the demo, on an invented law firm. Its CRM record says healthy. Three days earlier, on a
+call, the customer's deputy general counsel said their general counsel will not sign until a rider
+is approved. The card shows both, and where each came from.
+
+```sh
+pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo
+```
 
 ```text
 DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15
@@ -45,6 +61,8 @@ NOT READ
   Neutralized in source text: 1 mention, 1 link.
 ```
 
+### How to read it
+
 - **Record values** come from typed CRM fields and connector arithmetic. The seller's "January 30"
   and the second-hand "USD 300,000" are sentences someone said, so they stay under SAID.
 - **A speaker role** comes from a label, never from wording. A seller is a name or ID the operator
@@ -55,13 +73,24 @@ NOT READ
 - **Source text is data.** The channel mention and the link were neutralized before anything
   displayed them, and the card says how many were.
 
+### How the card is built
+
 ```mermaid
 flowchart LR
     S["Salesforce · transcripts · Slack"] -->|"scoped read, receipt first"| U["Numbered units<br/>typed fields · whole sentences · speaker roles"]
     U --> C(["Deal card<br/>every character written by the connector"])
+    C -->|"brief saves it"| B["Saved card<br/>sealed by a receipt naming its SHA-256"]
 ```
 
-Every number on a card resolves to its record and the receipt of the read that returned it.
+Every figure and sentence on a card carries a number. The number is a unit: one CRM record, or one
+sentence of a call or a Slack message. Each resolves to its record and to the receipt of the read
+that returned it, a receipt being one row of the audit log.
+
+When `brief` saves a card it adds one more receipt, which names the SHA-256 of the saved file. That
+receipt is the card's seal. The saved card gets a brief ID, `brief-…`, printed under it.
+
+### Trace any number
+
 `gtm-connector inspect brief-…` lists every unit of the card, one per line, and a number shows one:
 
 ```text
@@ -81,6 +110,35 @@ Source text SHA-256   105807d2…
 Neutralizer version   3
 ```
 
+> **A changed card is refused.** `inspect` checks a saved card against its seal first, and refuses
+> one that was changed or copied from another folder.
+
+## For sales reps and CSMs
+
+Before a renewal call:
+
+1. **Get the card.** `gtm-connector brief ACCOUNT_ID` prints it, or ask an assistant app over MCP.
+2. **Read the record values first,** then who said what. A seller's promise and a customer's condition sit under their own speaker, never in the record values.
+3. **Check what was not read.** The card says which sources and files it left out.
+4. **Trace a line.** `gtm-connector inspect brief-… 5` shows the record and the read behind number 5.
+
+On the [roadmap](docs/ROADMAP.md): a Deals page with your deals sorted by urgency, what changed
+since you last looked, the proof behind any line in one click, and a Slack alert when a renewal
+turns risky.
+
+## For RevOps and GTM engineers
+
+To set it up and keep it honest:
+
+1. **Connect each source once.** `connect salesforce --org ALIAS --seller NAME`, `connect calls`, `connect slack`.
+2. **Add the conversations.** `debug calls import meeting.vtt --account acc-007` for a transcript, `debug slack map` for a thread.
+3. **Limit what a client reads.** `debug serve --selection selection.json` serves only the accounts you list, under the client's own grant.
+4. **Audit every read.** `gtm-connector audit --tool get_account --follow` shows each tool attempt and its receipt.
+
+On the [roadmap](docs/ROADMAP.md): field mapping for your own CRM fields, watch rules that propose
+renewals, a coverage view of which renewals have no current card, scheduled reads, a push API,
+read-only SQL, and webhooks.
+
 ## What it is tested against
 
 [Ten invented deals](tests/test_cases.py), each built to break one property. These pass today:
@@ -98,11 +156,8 @@ Neutralizer version   3
 
 ## Try it
 
-Python 3.11 or later and pipx. Invented data, no model, no external service.
-
-```sh
-pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo
-```
+The demo command at the top uses pipx and Python 3.11 or later. It runs on invented data, with no
+model and no external service.
 
 `pipx install` with the same source keeps the command on your PATH. From a checkout,
 `./scripts/demo.sh` installs the pinned dependencies, runs the tests, and runs the demo.
@@ -111,9 +166,10 @@ after a command, gives [stable output](docs/cli.md).
 
 ## Use your own sources
 
-Connect each source once. Every other command then reads what is connected and takes no source
-option. A source you have not connected is stated as not connected on the card, and nothing falls
-back to demo data.
+Connect each source once. `connect` saves what a state folder reads. A state folder is the private
+folder that `--state-dir` selects. Every other command then reads what is connected and takes no
+source option. A source you have not connected is stated as not connected on the card, and nothing
+falls back to demo data.
 
 ```sh
 gtm-connector connect salesforce --org ALIAS --seller 'Morgan Reed'
@@ -132,8 +188,8 @@ gtm-connector brief ACCOUNT_ID
 | Selected accounts for a client | `debug serve --selection selection.json` | [Selection](docs/selection.md) |
 | Invented data | `connect demo` | [Commands](docs/cli.md) |
 
-Transcripts and Slack threads are added with `debug calls import` and `debug slack map` until a later
-change lets `connect calls FOLDER` and `connect slack --channel` do it.
+Transcripts and Slack threads are added one at a time with `debug calls import` and `debug slack map`.
+Transcript folders and a Slack channel window are on the [roadmap](docs/ROADMAP.md).
 
 Salesforce uses an existing `sf` CLI login. Slack uses an existing public PKCE app. Tests use
 invented provider responses. No live org has been verified.
@@ -150,8 +206,9 @@ gtm-connector inspect acc-003                       # the account and its newest
 gtm-connector audit --tool get_account --follow
 ```
 
-An assistant app needs `debug serve` running in its folder, for the HTTP transport and for the stdio
-bridge. One process holds a folder at a time, so while it runs, connect a second folder for `brief`:
+An assistant app needs `debug serve` running in its state folder, for the HTTP transport and for the
+local bridge. One process holds a state folder at a time, so while `debug serve` runs, connect a
+second folder for `brief`:
 
 ```sh
 gtm-connector debug serve
@@ -164,6 +221,10 @@ gtm-connector debug doctor
 the tested client. Other assistant apps are untested. [Clients](docs/clients.md)
 
 ## What it guarantees
+
+Access is by scope and grant. A scope is what a tool requires, such as `crm:read`, and a grant is a
+bearer token issued for a list of scopes. In the Go server section below, a grant gives one sign-in
+one account.
 
 | Guarantee | Tests |
 | --- | --- |
@@ -179,8 +240,9 @@ The card shows what the records say, not whether a source is true.
 ## The Go server (in progress)
 
 The Go program at the root serves a read-only evidence API and the web app over HTTPS, on PostgreSQL.
-It does not read sources yet, so it has no cards of its own. It needs Docker with Compose (Docker
-Desktop, or Colima with `docker-compose`).
+It reads only the invented demo book so far: its `demo` command publishes those cards. It needs Docker
+with Compose (Docker Desktop, or Colima with `docker-compose`). The [roadmap](docs/ROADMAP.md) lists
+what is left before it replaces the Python package.
 
 ```sh
 make dev                        # PostgreSQL in Compose, the server on this machine (needs Go and Node)
@@ -194,43 +256,69 @@ make test                       # go vet and the Go tests against the Compose da
 
 Add `POSTGRES=18.7` to any of these to use the pinned fallback PostgreSQL, on its own volume.
 
-`make dev` and `make test` need Go 1.27.4, and `make dev` Node 22.23.4 (`nvm use` reads `.nvmrc`); both
-refuse other versions. `pins.json` lists every pinned version and digest, from the toolchains and images
-to the CI actions, and a test fails when the Dockerfile, `compose.yaml`, the Makefile or CI uses another.
-`gtm-connector version` prints the commit a binary was built from. An image that `make up` builds carries
-it as the label `org.opencontainers.image.revision`, ending in `-modified` if the checkout had changes.
+`make dev` and `make test` need Go 1.27.4, and `make dev` needs Node 22.23.4 (`nvm use` reads
+`.nvmrc`). Both refuse other versions.
 
-`make verify-real` downloads public meeting, call, chat and CRM datasets into `~/.cache/gtm-connector/real`
-and checks them against pinned digests, then runs every utterance and message through the Python package
-and the Go port and compares their sentences, neutralized text, scanners and JSON parsing. It reports
-counts, positions and digests, never text. Nothing real is committed, and CI never runs it.
-[Real data](docs/real-data.md)
+`pins.json` lists every pinned version and digest, from the toolchains and images to the CI actions.
+A test fails when the Dockerfile, `compose.yaml`, the Makefile or CI uses another. `gtm-connector
+version` prints the commit a binary was built from. An image that `make up` builds carries that
+commit as the label `org.opencontainers.image.revision`, ending in `-modified` if the checkout had
+changes.
 
-Open `https://127.0.0.1:8443/`; `localhost` redirects there. The first run writes `.env` (mode 0600,
-with random passwords for two database roles) and a private credentials folder,
-`~/.config/gtm-connector/credentials` (mode 0700, files 0600): the owner secret, the session key, the
-local TLS certificate and key, and the demo sign-in in `demo-credentials.json`. Setup, backup and
-restore connect as the database owner; the server connects as an app role that reads and writes rows
-and cannot change the schema or switch off a check. Browsers do not separate cookies by port, so
-another HTTPS server on `127.0.0.1` would see this one's cookies.
+### First run
 
-`make demo` (or `gtm-connector demo` after setup, as the app role) loads the invented demo book into the
-demo workspace, grants the demo sign-in its 30 accounts, and makes and publishes each account's card
-through the Go card maker on PostgreSQL, under receipts. Each card is the one the Python package makes for
-that account, apart from its brief and receipt IDs, its token fingerprint and its read times. A run
-publishes only for accounts that hold no card, so running it again finishes a run that stopped part way;
-`demo --again` publishes another card for every account. Cards and receipts are never deleted. A grant
-someone revoked stays revoked, and its account gets no card. Signed in, the server lists the accounts at
-`/api/v1/accounts` and their cards at `/api/v1/accounts/ACCOUNT/cards`. Demo data and a real source never
-share a workspace: the database refuses a real connection in the demo workspace.
+Open `https://127.0.0.1:8443/`. `localhost` redirects there.
 
-Backups go to `~/.config/gtm-connector/backups`. A backup's digests detect corruption only: they
-are stored in the backup itself, so they do not prove who made it. A restore needs an empty
-database, and each credential must be absent or the same as the backup's. It refuses any row the
-server would refuse on writing, such as a card whose seal does not name its bytes. If a restore
-stops after the database is in, run the same command again to finish it; setup and the server wait
-until it is finished. On Colima, if a port does not answer, the Makefile forwards it with
-`scripts/colima-forward.sh`.
+The first run writes `.env` (mode 0600, with random passwords for two database roles) and a private
+credentials folder, `~/.config/gtm-connector/credentials` (mode 0700, files 0600). The folder holds
+the owner secret, the session key, the local TLS certificate and key, and the demo sign-in in
+`demo-credentials.json`.
+
+Setup, backup and restore connect as the database owner. The server connects as an app role that
+reads and writes rows and cannot change the schema or switch off a check.
+
+Browsers do not separate cookies by port, so another HTTPS server on `127.0.0.1` would see this
+one's cookies.
+
+### The demo book
+
+`make demo` (or `gtm-connector demo` after setup, as the app role) loads the invented demo book into
+the demo workspace and grants the demo sign-in its 30 accounts. It then makes and publishes each
+account's card through the Go card maker on PostgreSQL, under receipts. Each card is the one the
+Python package makes for that account, apart from its brief and receipt IDs, its token fingerprint
+and its read times.
+
+A run publishes only for accounts that hold no card, so running it again finishes a run that stopped
+part way. `demo --again` publishes another card for every account. Cards and receipts are never
+deleted. A grant someone revoked stays revoked, and its account gets no card.
+
+Signed in, the server lists the accounts at `/api/v1/accounts` and their cards at
+`/api/v1/accounts/ACCOUNT/cards`. Demo data and a real source never share a workspace: the database
+refuses a real connection in the demo workspace.
+
+### Backup and restore
+
+Backups go to `~/.config/gtm-connector/backups`. A backup's digests detect corruption only. They are
+stored in the backup itself, so they do not prove who made it.
+
+A restore needs an empty database, and each credential must be absent or the same as the backup's.
+It refuses any row the server would refuse on writing, such as a card whose seal does not name its
+bytes.
+
+If a restore stops after the database is in, run the same command again to finish it. Until then,
+setup, the server and `demo` refuse to start and say to run `restore` again with the same backup.
+
+On Colima, if a port does not answer, the Makefile forwards it with `scripts/colima-forward.sh`.
+
+### Real public text
+
+`make verify-real` downloads public meeting, call, chat and CRM datasets into
+`~/.cache/gtm-connector/real` and checks them against pinned digests. It then runs every utterance
+and message through the Python package and the Go port, and compares their sentences, neutralized
+text, scanners and JSON parsing.
+
+It reports counts, positions and digests, never text. Nothing real is committed, and CI never runs
+it. [Real data](docs/real-data.md)
 
 ## Limits
 
@@ -246,14 +334,16 @@ until it is finished. On Colima, if a port does not answer, the Makefile forward
 - `web/` is a prototype of the renewal workflow on invented data. Served by the Go server, its
   Evidence and Readiness pages sign in a demo principal and read sealed cards from `/api/v1`; Readiness
   shows the sources a card did not read or show as open items, and the server has no workflow rules yet.
-  `scripts/api-browser.mjs` tests both pages in a browser against a stub of the API. Everything else, and every page
+  `web/scripts/api-browser.mjs` tests both pages in a browser against a stub of the API. Everything else, and every page
   when it runs alone, is a walkthrough whose state lives in the browser, and whose reviews and
   approvals are demonstrations, not authorization. Run it alone with `npm ci`, `npm test`, and
   `npm run dev` inside `web/`.
 
-More: [commands and output](docs/cli.md), [tools, scopes, and protocol](docs/tools.md),
-[Deal cards](docs/briefs.md), [audit](docs/audit.md),
-[clients and Inspector](docs/clients.md), [working on the code](AGENTS.md).
+## More
+
+- **Daily use:** [commands and output](docs/cli.md), [Deal cards](docs/briefs.md), [clients and Inspector](docs/clients.md).
+- **Access and audit:** [tools, scopes, and protocol](docs/tools.md), [audit](docs/audit.md), [security review](SECURITY_REVIEW.md).
+- **Where it is going:** [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
 
 MCP revision 2026-07-28, Python SDK 2.3.0. All checked-in companies, people, and records are
 invented. MIT licensed.

@@ -7,7 +7,10 @@ read never falls back to invented messages. The tests use invented responses.
 
 ## Sign in
 
-The app needs:
+A Slack sign-in is what `debug slack connect` saves in the [state folder](cli.md): the Slack user
+credentials and the identity they were verified for.
+
+The Slack app needs:
 
 - [PKCE](https://docs.slack.dev/authentication/using-pkce/) enabled as a public client.
 - The exact redirect `http://localhost:PORT/slack/callback` registered, `PORT` from 1024 to 65535.
@@ -16,7 +19,7 @@ The app needs:
 | Command | What it does | Slack requests |
 | --- | --- | ---: |
 | `debug slack connect --client-id PUBLIC_CLIENT_ID --redirect-uri http://localhost:REGISTERED_PORT/slack/callback` | Opens the browser, waits up to ten minutes for approval, exchanges the code with PKCE, checks the identity, and saves the credentials. | At most 2 |
-| `debug slack status` | Reads the saved file. A missing connection exits 0. A corrupt file is an error. | 0 |
+| `debug slack status` | Reads the saved file. A missing sign-in exits 0. A corrupt file is an error. | 0 |
 | `debug slack status --check` | Verifies authentication and refreshes an expiring token once. It does not show that a thread is readable. | 1 or 2 |
 | `debug slack disconnect` | Removes local credentials. Repeating it succeeds. | 0 |
 | `debug slack disconnect --revoke` | Asks Slack to revoke the saved access token, then removes local credentials. If Slack does not confirm, it exits 5. Remove the app itself in Slack settings. | At most 1 |
@@ -45,15 +48,16 @@ gtm-connector debug slack check --account acc-007
 gtm-connector brief acc-007
 ```
 
-Slack threads are added with `debug slack map` until a later change lets `connect slack --channel` do it.
+Slack threads are added one at a time with `debug slack map`. A Slack channel window is on the
+[roadmap](ROADMAP.md).
 
 | Command or flag | Rule |
 | --- | --- |
 | `connect slack` | Connects the sign-in saved in the folder, beside Salesforce or beside the demo CRM. With no saved sign-in it exits `2` and names `debug slack connect`. With one that needs a new login it exits `3`. It contacts nobody. `connect slack --remove` detaches Slack and keeps the sign-in. |
-| `debug slack map` | Requires Slack connected and a `ready` sign-in, makes one audited CRM lookup, and saves the selection. It fetches no messages. |
+| `debug slack map` | Requires Slack connected and a `ready` sign-in, makes one audited CRM lookup, and saves the mapping: one thread for one account. It fetches no messages. |
 | `debug slack check` | Reads the mapped thread through `read_slack_messages` and validates its receipt. It reads no CRM or calls data. |
 | `--thread-url` | The saved workspace's HTTPS origin and the path `/archives/CHANNEL/pTIMESTAMP`. A reply link names its parent through `thread_ts`. An optional `cid` must match. Other query fields, fragments, and other workspaces are refused. |
-| `--channel` with `--thread-ts` | Needed when the saved connection has no workspace origin. The timestamp is whole seconds, a dot, and exactly six digits. |
+| `--channel` with `--thread-ts` | Needed when the saved sign-in has no workspace origin. The timestamp is whole seconds, a dot, and exactly six digits. |
 | `--account`, `--account-number` | The CRM account ID: `acc-007`, or the `acc-sf-` form with Salesforce. Or, Salesforce only, a number that matches exactly one account. |
 | `--replace`, `--reassign` | Needed when the account already has another thread, and when the thread belongs to another account. |
 
@@ -77,12 +81,12 @@ Slack threads are added with `debug slack map` until a later change lets `connec
 | All unique message text | 64 KiB of UTF-8 |
 | Normalized result | 256 KiB of ASCII JSON |
 | One cursor | 2,048 UTF-8 bytes |
-| Selections in one state folder | 100, one thread per account and one account per thread |
+| Mappings in one state folder | 100, one thread per account and one account per thread |
 | Retries | One after `token_expired`, with at most one refresh. One after HTTP 429 when its delay is at most five seconds. Nothing else retries, and a read never starts a login. |
 | Accepted messages | Plain messages, `bot_message`, `me_message`, `file_share`, `thread_broadcast`, and, as the selected parent only, the `tombstone` that Slack's system user leaves for a deleted message |
 | Refuse the whole read | Other hidden messages, edit or delete wrappers, other subtypes, and missing text |
 | Counted and left out | Files, attachments, and blocks |
-| Speaker on a card | The raw Slack user ID. A message from an app, a deleted message, or one with no user has no speaker label. |
+| Speaker on a card | The raw Slack user ID the message carries. A deleted parent carries `USLACKBOT`, which becomes its label. A message with no user, such as some app messages, has no speaker label. |
 | Role on a card | `seller` when that user ID is listed in `sellers.json`, otherwise `unknown`. A Slack author is never a customer. |
 | Slack's rate policy | Slack limits some commercially distributed apps outside its Marketplace to one request per minute and 15 messages per request on this method. The connector cannot tell which [policy](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps/) applies. |
 
@@ -109,9 +113,9 @@ is never included. `connect` and `status` return:
 
 | Result | Fields |
 | --- | --- |
-| `debug slack map` | `schema_version`, `status` (`saved` or `unchanged`), `selection`, `thread_access: "unchecked"`, `counts`, `duration_ms`, and `next`. |
+| `debug slack map` | `schema_version`, `status` (`saved` or `unchanged`), `selection`, `thread_access: "unchecked"`, `counts` with `selected_threads`, `duration_ms`, and `next`. |
 | `debug slack check` | `schema_version: 1`, `status` (`passed` or `failed`), `crm_access_checked: false`, `calls_access_checked: false`, `duration_ms`, `api_calls`, `response_bytes`, `counts`, `steps`, and `next`, the first failed step's recovery command. Request and byte counts are `null` when unknown. |
-| `counts` | `auth_calls`, `message_calls`, `pages`, `raw_rows`, `messages`, `duplicates`, `refresh_attempts`, `token_retries`, `rate_retries`. |
+| `counts` of `debug slack check` | `auth_calls`, `message_calls`, `pages`, `raw_rows`, `messages`, `duplicates`, `refresh_attempts`, `token_retries`, `rate_retries`. |
 | `steps` | `private_state`, `mapping`, `credential_binding`, `thread_read`, `receipt`. Each has `name`, `status` (`pass`, `fail`, `not_run`), `count`, `duration_ms`, `api_calls`, `response_bytes`, `code`, `message`, `next`. |
 
 The check report holds no IDs, names, timestamps, message text, URLs, tokens, or paths. Tool results
@@ -163,11 +167,11 @@ card. It uses no Slack account, token, or network request.
 .venv/bin/python -m gtm_connector demo --state-dir var/renewal-demo   # always includes Slack
 ```
 
-- `read_slack_messages` requires `slack:read`. A Slack-only token cannot read CRM or call notes.
+- `read_slack_messages` requires `slack:read`. A grant that holds only `slack:read` cannot read CRM or call notes.
 - A card with Slack makes four audited reads and never requests `crm:write`.
 - Messages live in `slack.sqlite3`: 29 of them, `msg-001` through `msg-030` without `msg-005`.
-  Each has an author name, which is a seller only when `sellers.json` lists it, and a count of
-  attached files that were not read.
+  Each has an author name and a count of attached files that were not read. On demo data the
+  demo's own sellers are sellers without a `sellers.json`.
 
 | Case | What the card says |
 | --- | --- |

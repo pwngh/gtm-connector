@@ -7,7 +7,8 @@ presented bearer token, even a rejected one, or `anonymous`. `rows` holds record
 `inspect BRIEF_ID N` shows the receipt behind any number on a [Deal card](briefs.md), and
 `inspect RECEIPT_ID` shows one receipt with its arguments and the rows it returned.
 
-Saving a card adds one receipt that is not a tool attempt: `save_brief`, the card's seal. Its
+Saving a card adds one receipt that is not a tool attempt: `save_brief`, the card's
+[seal](briefs.md). Its
 `arguments` name the account and the card, its `rows` hold `briefs/<brief_id>/<SHA-256 of the saved
 file>`, and its `brief_id` is empty, so `--brief ID` lists the card's reads only. `--tool save_brief`
 lists the seals.
@@ -19,7 +20,7 @@ gtm-connector audit --caller anonymous --follow --json
 
 | Flag | Selects |
 | --- | --- |
-| `--state-dir PATH` | The state folder. The default is `var/v2`. |
+| `--state-dir PATH` | The [state folder](cli.md). The default is `var/v2`. |
 | `--brief ID`, `--tool NAME` | One card's reads or one run, or one exact tool name. |
 | `--caller VALUE` | A complete lowercase SHA-256 fingerprint from a receipt, or `anonymous`. Never a bearer token. |
 | `--status` | `ok`, `error`, or `pending`. |
@@ -32,14 +33,15 @@ database or receipt table is an error.
 
 ## What is recorded
 
-For each recognizable `tools/call` attempt, the gateway commits one `pending` row before the tool
-runs. Success or rejection finalizes that same row.
+The gateway is the service every tool call passes through. For each recognizable `tools/call`
+attempt, it commits one `pending` receipt before the tool runs. Success or rejection finalizes that
+same receipt.
 
 - If the first audit write fails, the tool does not run and the response is HTTP 503.
-- If finalizing fails, the response is HTTP 503 and no result is released. The row stays `pending`
-  if the error cannot be recorded either.
+- If finalizing fails, the response is HTTP 503 and no result is released. The receipt stays
+  `pending` if the error cannot be recorded either.
 - After a 503 on `log_activity`, the activity may already exist. Retry with the same idempotency
-  key and reconcile any pending row.
+  key and reconcile any pending receipt.
 - Unparseable traffic with no tool-call marker and requests that disconnect before execution get
   no receipt.
 

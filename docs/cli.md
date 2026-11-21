@@ -1,5 +1,8 @@
 # Use the command line
 
+A person uses the connector through the `gtm-connector` command. This page gives its commands, what
+each prints, and its exit codes.
+
 ```sh
 gtm-connector demo                         # invented data, in its own folder
 gtm-connector connect demo                 # connect the state folder to the invented data
@@ -16,6 +19,8 @@ The top level has seven commands: `demo`, `connect`, `accounts`, `brief`, `inspe
 
 ## Connect the sources
 
+A state folder is the private folder that holds one connector's files, and `--state-dir` selects
+it. Where this page says "the folder", it means a state folder.
 `connect` saves what a state folder reads in its `profile.json`. `brief`, `accounts`,
 `inspect ACCOUNT_ID`, `mcp`, `debug serve`, `debug calls import`, and `debug slack map` read that file
 and take no source option. In a
@@ -93,7 +98,7 @@ default.
 | `inspect BRIEF_ID N [N ...]` | Array with one object per number, in the order given: `brief_id`, `account_id`, `n`, `kind` (`"record"` or `"sentence"`), `source`, `record_ref`, `receipt` (`audit_id`, `tool`, `status`, `http_status`), and `next_by_speaker`. A record adds `fields`. A sentence adds `text`, `speaker`, `role`, `basis`, `contact`, `at`, `partial`, `shown`, `span`, `raw_sha256`, and `sanitizer_version`. `next_by_speaker` is the number of the next whole sentence under the same speaker label in the same record, or `null`; it is `null` for a record, for a sentence with no label, and for a label that holds what neutralizing put there, such as `(5)`, because two labels can then print alike. Text output is one table per number, separated by a blank line. |
 | `inspect RECEIPT_ID` | The receipt object, as `audit` gives it, with the text in its `arguments` neutralized as a card's is. Text output is its `audit` row, then its arguments and the rows it returned. |
 | `audit` | Array of receipts in stored order. `--follow` prints one JSON line per changed receipt until Ctrl-C, which exits `130`. See [audit](audit.md). |
-| `demo` | One law-firm renewal on invented data. Object with `schema_version: 2`, `status: "accepted"`, `workflow: "renewal-demo"`, `data_mode: "demo"`, `sources` (each `"demo_fixture"`), `account`, `lookup` (`query`, `matches`, `receipt_id`), `denied_read` (`read_call_notes`, status `403`, required scope `calls:read`), `brief` (`brief_id`, `account_id`, `as_of`, `text`, `units`, and `gaps`, copied from the saved artifact), `audit` (`run_id`, `rows: 7`), and `activities_created: 0`. Each run adds one saved card and seven receipts, the last of which seals the card, and creates no activity. An older or edited book in the folder exits `4`. |
+| `demo` | One law-firm renewal on invented data. Object with `schema_version: 2`, `status: "accepted"`, `workflow: "renewal-demo"`, `data_mode: "demo"`, `sources` (each `"demo_fixture"`), `account`, `lookup` (`query`, `matches`, `receipt_id`), `denied_read` (`read_call_notes`, status `403`, required scope `calls:read`), `brief` (`brief_id`, `account_id`, `as_of`, `text`, `units`, and `gaps`, copied from the saved card), `audit` (`run_id`, `rows: 7`), and `activities_created: 0`. Each run adds one saved card and seven receipts, the last of which seals the card, and creates no activity. An older or edited book in the folder exits `4`. |
 | `debug verify` | Object with the connector checks, `briefs`, receipt counts, and `injection_brief`. `--with-slack` adds `slack` and `workflow`. It runs on invented data, in a folder that is connected to nothing or to the demo data only. See [tools](tools.md). |
 | `debug serve` | One `ready` line, then one `tool_call` line per tool attempt. See the server output below. |
 | `connect status` | Object with `schema_version: 1`, `sources`, and `sellers`. `sources` is the `sources` object of `profile.json`: each of `crm`, `calls`, and `slack` that is connected, with its `provider` (`"demo"`, `"salesforce"`, `"imported"`, or `"slack"`) and, for Salesforce, `org` and `environment`. `sellers` is the saved seller list, or `[]`. |
@@ -110,8 +115,8 @@ default.
 `inspect ACCOUNT_ID` reads the account as `accounts` does: the demo book's file directly, or
 Salesforce through the local services and the audited tools, which commit a receipt. The other forms
 read only the saved cards and the audit log of the folder. On the demo CRM, and in every other form,
-`inspect` writes nothing. A saved card is read only when the file is the one its seal
-receipt names and every number on it resolves to its record and receipt, so a changed card, or one
+`inspect` writes nothing. A saved card is read only when the file is the one its [seal](briefs.md)
+names and every number on it resolves to its record and receipt, so a changed card, or one
 copied from another folder, exits `2`. A brief prepared by an assistant with `prepare_renewal_brief`
 is read with `read_renewal_brief`, not with `inspect`, and `inspect` says so. The numbers are the
 digits printed on the card, given together after the brief ID. An ID that is none of the four forms, numbers
@@ -130,7 +135,7 @@ See [selection](selection.md).
 `gtm-connector debug serve` runs until Ctrl-C, which exits `0`. Startup text on
 stderr gives the address, the sources, the state folder, and the connection command. No scope is
 granted at startup. Stdout gets one line per tool attempt, with no arguments, source text, or bearer
-credential. With `--json`, the first line is `ready`, shown with placeholders:
+token. With `--json`, the first line is `ready`, shown with placeholders:
 
 ```json
 {"type":"ready","resource":"https://127.0.0.1:PORT/mcp","issuer":"https://127.0.0.1:PORT","crm_backend":"sqlite","owner_config":"/STATE/owner.json","state_dir":"/STATE","granted_scopes":[],"sources":{"crm":"demo_fixture","calls":"demo_fixture","slack":"demo_fixture"}}
@@ -143,7 +148,7 @@ credential. With `--json`, the first line is `ready`, shown with placeholders:
 | `ready` | `selection` | With `--selection`: `accounts` and `slack_accounts` counts and the seven `tools` names, without account IDs. |
 | `tool_call` | `time`, `duration_ms` | UTC ISO 8601 completion time, and a number that includes the audit write. |
 | `tool_call` | `tool` | The tool name. A name outside the catalog is `"<unknown>"`. |
-| `tool_call` | `caller` | A complete SHA-256 fingerprint of the presented credential, or `"anonymous"`. It does not identify a person or prove a valid grant. |
+| `tool_call` | `caller` | A complete SHA-256 fingerprint of the presented bearer token, of the header value when it holds no parseable bearer token, or `"anonymous"` when the header is absent or empty. It does not identify a person or prove a valid grant. |
 | `tool_call` | `decision` | `"allowed"`, `"refused"`, or `"failed"`. |
 | `tool_call` | `receipt_id`, `reason` | String or `null`. A failed audit write can leave the receipt ID `null`. A refusal includes its reason. |
 

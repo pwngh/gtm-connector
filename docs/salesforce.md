@@ -10,7 +10,7 @@ No live org has been verified.
 ## Commands
 
 Sign in with [`sf`](https://developer.salesforce.com/tools/salesforcecli) under an alias, then
-connect a state folder to it once:
+connect a [state folder](cli.md) to it once:
 
 ```sh
 sf org login web --alias gtm-de
@@ -63,7 +63,8 @@ no other command does. No default CLI org is ever selected. The instance address
 ## Cards
 
 A [Deal card](briefs.md) for a Salesforce account plans from the Contract with the earliest non-null
-`EndDate` on or after the planning date, breaking ties by Contract ID. Its status category must be
+`EndDate` on or after the planning date, the UTC day the card counts from, breaking ties by
+Contract ID. Its status category must be
 `Draft`, `InApproval`, or `Activated`. The connector uses the `EndDate` that Salesforce returns and
 never calculates one. Salesforce fills `EndDate` from `StartDate` and `ContractTerm` only when the
 org's automatic calculation setting is on.
