@@ -32,7 +32,8 @@ app. Until the Go CLI ships, the Python package is the product and the reference
 The Go port is the module at the root, in `internal/`: `unicodetab` (generated from `testdata/oracle/unicode`),
 `strictjson`, `evidence` (neutralized text, sentences, the card), `receipts` (the contract, the publication
 rules every store applies, and `receiptstest`, which every store runs), `cards` (make, seal, verify, admit),
-`sources/demo` and `sources/salesforce` (the `sf` login and the REST reads, with an invented org in
+`sources/demo`, `sources/calls` (the transcript parser, the excerpt and the record of an import, kept by
+`postgres.CallImports`) and `sources/salesforce` (the `sf` login and the REST reads, with an invented org in
 `salesforcetest`). Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser

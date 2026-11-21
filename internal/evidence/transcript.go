@@ -13,14 +13,14 @@ import (
 
 // The bounds of an imported transcript, as calls_import.py names them.
 const (
-	maxRawBytes      = 2 * 1024 * 1024
-	maxTotalUnits    = 10_000
-	maxQuoteBytes    = 16 * 1024
-	maxReturnedUnits = 256
-	maxRecordBytes   = 128 * 1024
-	defaultUnits     = 20
-	parserVersion    = 2
-	recordVersion    = 2
+	MaxRawBytes      = 2 * 1024 * 1024
+	MaxTotalUnits    = 10_000
+	MaxQuoteBytes    = 16 * 1024
+	MaxReturnedUnits = 256
+	MaxRecordBytes   = 128 * 1024
+	DefaultUnits     = 20
+	ParserVersion    = 2
+	RecordVersion    = 2
 	maxCueMS         = 3_600_000_000_000_000
 	maxCueLabel      = 200
 )
@@ -54,9 +54,9 @@ func voices(text string, label any) []voice {
 	return found
 }
 
-// named is units.named: one line or cue of a transcript that declares speaker names, as the name and the
+// NamedLine is units.named: one line or cue of a transcript that declares speaker names, as the name and the
 // words after it. A cue of two lines is not one, and neither is a line whose name starts in lower case.
-func named(text string) (name, words string, ok bool) {
+func NamedLine(text string) (name, words string, ok bool) {
 	var lines [][]rune
 	for _, line := range strings.Split(text, "\n") {
 		if runes := []rune(line); len(strip(runes)) > 0 {
@@ -133,7 +133,7 @@ func cues(manifest *strictjson.Object) []part {
 		text := str(field(cue, "text"))
 		var speaker any
 		if declared {
-			if name, words, ok := named(text); ok {
+			if name, words, ok := NamedLine(text); ok {
 				speaker, text = name, words
 			}
 		} else if id, ok := field(cue, "cue_id").(string); ok && !allDigits(id) {
@@ -206,9 +206,9 @@ func intIn(v any, lo, hi int64) (int64, bool) {
 	return n.Int64(), true
 }
 
-// sourceText is calls_import._text: a string UTF-8 can encode in at most maximum bytes, with no control
+// SourceText is calls_import._text: a string UTF-8 can encode in at most maximum bytes, with no control
 // character but tab, line feed and carriage return, and with something other than whitespace when nonempty.
-func sourceText(v any, maximum int, nonempty bool) (string, bool) {
+func SourceText(v any, maximum int, nonempty bool) (string, bool) {
 	s, ok := v.(string)
 	if !ok || !utf8.ValidString(s) || len(s) > maximum {
 		return "", false
@@ -223,9 +223,9 @@ func sourceText(v any, maximum int, nonempty bool) (string, bool) {
 	return s, !(nonempty && blank)
 }
 
-// utcStamp is whether a time is written as its own isoformat in UTC, with Z for the offset
+// UTCStamp is whether a time is written as its own isoformat in UTC, with Z for the offset
 // (calls_import._time): YYYY-MM-DDTHH:MM:SSZ, or with six digits of a fraction that is not zero.
-func utcStamp(value string) bool {
+func UTCStamp(value string) bool {
 	const form = "0000-00-00T00:00:00"
 	if len(value) != len(form)+1 && len(value) != len(form)+8 || value[len(value)-1] != 'Z' {
 		return false
@@ -249,8 +249,8 @@ func utcStamp(value string) bool {
 		number(17, 19) <= 59
 }
 
-// crmBackend is calls_import._valid_binding: the CRM a binding names, when it is a binding of one.
-func crmBackend(binding any) (string, bool) {
+// CRMBackend is calls_import._valid_binding: the CRM a binding names, when it is a binding of one.
+func CRMBackend(binding any) (string, bool) {
 	for _, backend := range []string{"sqlite", "salesforce"} {
 		if ValidBinding(binding, "crm_backend", backend) {
 			return backend, true
@@ -259,16 +259,16 @@ func crmBackend(binding any) (string, bool) {
 	return "", false
 }
 
-// validAssociation is calls_import._validate_public_association: how a transcript was bound to its account,
+// ValidAssociation is calls_import._validate_public_association: how a transcript was bound to its account,
 // with no private CRM selector.
-func validAssociation(v any) bool {
+func ValidAssociation(v any) bool {
 	association, ok := v.(*strictjson.Object)
 	if !ok || !hasKeys(association, associationKeys...) {
 		return false
 	}
-	backend, bound := crmBackend(field(association, "crm_binding"))
+	backend, bound := CRMBackend(field(association, "crm_binding"))
 	account, isText := field(association, "account_id").(string)
-	_, receipt := sourceText(field(association, "resolution_receipt_id"), 128, true)
+	_, receipt := SourceText(field(association, "resolution_receipt_id"), 128, true)
 	method := field(association, "method")
 	return bound && isText && ValidAccountID(account, backend == "salesforce") && receipt &&
 		(method == "account_id" || method == "account_number" && backend == "salesforce")
@@ -285,60 +285,86 @@ func unitRange(v any, total int64) (first, last int64, ok bool) {
 	return first, last, okFirst && okLast && first <= last
 }
 
-// srtStamp is where [0-9]{2,9}:[0-5][0-9]:[0-5][0-9][,.][0-9]{3} ends from i.
-func srtStamp(s string, i int) (int, bool) {
+// timingStamp reads one time of a timing line from i: where it ends and its milliseconds
+// (calls_import._milliseconds). A WebVTT time is (?:[0-9]{2,9}:)?[0-5][0-9]:[0-5][0-9]\.[0-9]{3}. An SRT time
+// always has its hours and may write a comma before the milliseconds.
+func timingStamp(s string, i int, vtt bool) (end int, ms int64, ok bool) {
+	// clock is [0-5][0-9]:[0-5][0-9], the separator and [0-9]{3} from j, in milliseconds.
+	clock := func(j int) (int, int64, bool) {
+		if j+9 > len(s) || s[j] < '0' || s[j] > '5' || !isDigit(s[j+1]) || s[j+2] != ':' || s[j+3] < '0' ||
+			s[j+3] > '5' || !isDigit(s[j+4]) || s[j+5] != '.' && (vtt || s[j+5] != ',') || !isDigit(s[j+6]) ||
+			!isDigit(s[j+7]) || !isDigit(s[j+8]) {
+			return 0, 0, false
+		}
+		minutes, _ := digits(s[j : j+2])
+		seconds, _ := digits(s[j+3 : j+5])
+		millis, _ := digits(s[j+6 : j+9])
+		return j + 9, int64(minutes*60+seconds)*1000 + int64(millis), true
+	}
 	hours := i
-	for hours < len(s) && hours-i < 9 && isDigit(s[hours]) {
+	for hours < len(s) && hours-i < 10 && isDigit(s[hours]) {
 		hours++
 	}
-	j := hours
-	if hours-i < 2 || j+10 > len(s) || s[j] != ':' || s[j+1] < '0' || s[j+1] > '5' || !isDigit(s[j+2]) || s[j+3] != ':' ||
-		s[j+4] < '0' || s[j+4] > '5' || !isDigit(s[j+5]) || s[j+6] != ',' && s[j+6] != '.' || !isDigit(s[j+7]) ||
-		!isDigit(s[j+8]) || !isDigit(s[j+9]) {
-		return 0, false
+	if n := hours - i; n >= 2 && n <= 9 && hours < len(s) && s[hours] == ':' {
+		if end, rest, ok := clock(hours + 1); ok {
+			count, _ := digits(s[i:hours])
+			return end, int64(count)*3_600_000 + rest, true
+		}
 	}
-	return j + 10, true
+	if !vtt {
+		return 0, 0, false
+	}
+	return clock(i)
 }
 
-// srtTiming is calls_import._SRT_TIMING.fullmatch(line) for a line with no line break: two stamps with an
-// arrow between them, then nothing, or a space and anything.
-func srtTiming(line string) bool {
+// CueTiming is calls_import._TIMING.fullmatch(line) for a WebVTT cue, or _SRT_TIMING for an SRT cue, on a
+// line with no line break: two times with an arrow between them, then nothing, or a space and anything. It
+// gives the times in milliseconds and what follows the end time.
+func CueTiming(line string, vtt bool) (start, end int64, settings string, ok bool) {
 	blanks := func(i int) int {
 		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
 			i++
 		}
 		return i
 	}
-	i, ok := srtStamp(line, 0)
+	i, start, ok := timingStamp(line, 0, vtt)
 	if !ok {
-		return false
+		return 0, 0, "", false
 	}
 	arrow := blanks(i)
 	if arrow == i || !strings.HasPrefix(line[arrow:], "-->") {
-		return false
+		return 0, 0, "", false
 	}
 	second := blanks(arrow + 3)
 	if second == arrow+3 {
-		return false
+		return 0, 0, "", false
 	}
-	end, ok := srtStamp(line, second)
-	return ok && (end == len(line) || line[end] == ' ' || line[end] == '\t')
+	i, end, ok = timingStamp(line, second, vtt)
+	rest := blanks(i)
+	if !ok || rest == i && i < len(line) {
+		return 0, 0, "", false
+	}
+	return start, end, line[rest:], true
 }
 
-// cueText is calls_import._cue_text: no line of a cue's text may be a timing line, which a missing blank
+// CueText is calls_import._cue_text: no line of a cue's text may be a timing line, which a missing blank
 // line would have merged into the cue.
-func cueText(text, format string) bool {
-	for _, line := range strings.Split(text, "\n") {
-		if format == "vtt" && strings.Contains(line, "-->") || format != "vtt" && srtTiming(line) {
+func CueText(lines []string, format string) bool {
+	for _, line := range lines {
+		if format == "vtt" {
+			if strings.Contains(line, "-->") {
+				return false
+			}
+		} else if _, _, _, timing := CueTiming(line, false); timing {
 			return false
 		}
 	}
 	return true
 }
 
-// quotedUnits is calls_import._quoted: the units' text as a record's body. A short identifier with a space
+// QuotedUnits is calls_import._quoted: the units' text as a record's body. A short identifier with a space
 // in it names the speaker, so it stays above its cue.
-func quotedUnits(units []*strictjson.Object) string {
+func QuotedUnits(units []*strictjson.Object) string {
 	lines := make([]string, len(units))
 	for i, unit := range units {
 		lines[i] = str(field(unit, "text"))
@@ -349,18 +375,46 @@ func quotedUnits(units []*strictjson.Object) string {
 	return strings.Join(lines, "\n")
 }
 
+// ImportedRecord is calls_import._make_record: the record a manifest makes, named by the digest of the
+// manifest's canonical encoding. It is false for a manifest that lacks a field the record is made from.
+func ImportedRecord(manifest *strictjson.Object) (record *strictjson.Object, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, rejected := r.(*Rejected); !rejected {
+				panic(r)
+			}
+			record, ok = nil, false
+		}
+	}()
+	if manifest == nil {
+		return nil, false
+	}
+	canonical, err := strictjson.Dumps(manifest, strictjson.Prepared)
+	if err != nil {
+		return nil, false
+	}
+	var units []*strictjson.Object
+	for _, unit := range list(field(manifest, "units")) {
+		units = append(units, object(unit))
+	}
+	return strictjson.NewObject("id", "note-"+digest(canonical),
+		"account_id", field(object(field(manifest, "association")), "account_id"),
+		"record_kind", "imported_transcript", "record_version", RecordVersion,
+		"called_at", field(manifest, "called_at"), "body", QuotedUnits(units), "manifest", manifest), true
+}
+
 // validCue is the check of one selected line or cue: its place in the transcript, its text and, for a cue,
 // its times and identifier.
 func validCue(unit *strictjson.Object, index int64, format string, declared bool) bool {
 	if !hasKeys(unit, cueKeys...) {
 		return false
 	}
-	text, isText := sourceText(field(unit, "text"), maxRawBytes, false)
+	text, isText := SourceText(field(unit, "text"), MaxRawBytes, false)
 	if _, placed := intIn(field(unit, "index"), index, index); !placed || !isText {
 		return false
 	}
 	if declared && len(strip([]rune(text))) > 0 {
-		if _, _, ok := named(text); !ok {
+		if _, _, ok := NamedLine(text); !ok {
 			return false
 		}
 	}
@@ -370,21 +424,21 @@ func validCue(unit *strictjson.Object, index int64, format string, declared bool
 	}
 	from, okFrom := intIn(start, 0, maxCueMS)
 	to, okTo := intIn(end, 0, maxCueMS)
-	if !okFrom || !okTo || to < from || strings.Contains(text, "\r") || !cueText(text, format) {
+	if !okFrom || !okTo || to < from || strings.Contains(text, "\r") || !CueText(strings.Split(text, "\n"), format) {
 		return false
 	}
 	if id == nil {
 		return true
 	}
-	name, ok := sourceText(id, maxRawBytes, true)
+	name, ok := SourceText(id, MaxRawBytes, true)
 	return ok && !strings.ContainsAny(name, "\r\n") && !strings.Contains(name, "-->") &&
 		(format != "srt" || allDigits(name))
 }
 
-// validImportedRecord is calls_import.validate_imported_record: whether a saved transcript record is the
+// ValidImportedRecord is calls_import.validate_imported_record: whether a saved transcript record is the
 // one its own manifest makes, for this account under this CRM binding. It checks the selected snapshot
 // against itself and reads no stored bytes. A field that is missing or of another type fails the check.
-func validImportedRecord(record *strictjson.Object, accountID string, binding any) (valid bool) {
+func ValidImportedRecord(record *strictjson.Object, accountID string, binding any) (valid bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			if _, rejected := r.(*Rejected); !rejected {
@@ -395,7 +449,7 @@ func validImportedRecord(record *strictjson.Object, accountID string, binding an
 	}()
 	// A record may carry its reference, and a manifest says speaker_names only when its import declared them.
 	_, referenced := record.Get("record_ref")
-	backend, bound := crmBackend(binding)
+	backend, bound := CRMBackend(binding)
 	if !hasKeys(record, withKey(recordKeys, "record_ref", referenced)...) || !bound ||
 		!ValidAccountID(accountID, backend == "salesforce") {
 		return false
@@ -407,27 +461,27 @@ func validImportedRecord(record *strictjson.Object, accountID string, binding an
 	}
 	format := field(manifest, "format")
 	_, okSchema := intIn(field(manifest, "schema_version"), 1, 1)
-	_, okParser := intIn(field(manifest, "parser_version"), parserVersion, parserVersion)
+	_, okParser := intIn(field(manifest, "parser_version"), ParserVersion, ParserVersion)
 	if !okSchema || !okParser || field(manifest, "source") != "user_supplied_export" ||
 		!oneOf(format, "txt", "vtt", "srt") {
 		return false
 	}
 	digestText, isDigest := field(manifest, "content_sha256").(string)
-	_, okBytes := intIn(field(manifest, "raw_byte_count"), 1, maxRawBytes)
+	_, okBytes := intIn(field(manifest, "raw_byte_count"), 1, MaxRawBytes)
 	_, okGeneration := intIn(field(manifest, "association_generation"), 1, 1<<63-1)
 	calledAt := field(manifest, "called_at")
 	called, calledIsText := calledAt.(string)
 	imported, importedIsText := field(manifest, "imported_at").(string)
 	if !isDigest || !lowerHex64(digestText) || !okBytes || !okGeneration ||
-		calledAt != nil && !(calledIsText && utcStamp(called)) || !importedIsText || !utcStamp(imported) {
+		calledAt != nil && !(calledIsText && UTCStamp(called)) || !importedIsText || !UTCStamp(imported) {
 		return false
 	}
 	association := field(manifest, "association")
-	if !validAssociation(association) || !equal(field(object(association), "crm_binding"), binding) ||
+	if !ValidAssociation(association) || !equal(field(object(association), "crm_binding"), binding) ||
 		field(object(association), "account_id") != accountID {
 		return false
 	}
-	total, okTotal := intIn(field(manifest, "total_units"), 1, maxTotalUnits)
+	total, okTotal := intIn(field(manifest, "total_units"), 1, MaxTotalUnits)
 	mode := field(manifest, "selection_mode")
 	if !okTotal || !oneOf(mode, "default", "explicit") {
 		return false
@@ -435,7 +489,7 @@ func validImportedRecord(record *strictjson.Object, accountID string, binding an
 	requestedFirst, requestedLast, okRequested := unitRange(field(manifest, "requested_range"), total)
 	citedFirst, citedLast, okCited := unitRange(field(manifest, "cited_range"), total)
 	if !okRequested || !okCited || citedFirst != max(1, requestedFirst-1) || citedLast != min(total, requestedLast+1) ||
-		mode == "default" && (requestedFirst != 1 || requestedLast > defaultUnits) {
+		mode == "default" && (requestedFirst != 1 || requestedLast > DefaultUnits) {
 		return false
 	}
 	kind := "cues"
@@ -443,7 +497,7 @@ func validImportedRecord(record *strictjson.Object, accountID string, binding an
 		kind = "lines"
 	}
 	units, isList := field(manifest, "units").([]any)
-	if field(manifest, "unit_kind") != kind || !isList || len(units) < 1 || len(units) > maxReturnedUnits ||
+	if field(manifest, "unit_kind") != kind || !isList || len(units) < 1 || len(units) > MaxReturnedUnits ||
 		int64(len(units)) != citedLast-citedFirst+1 {
 		return false
 	}
@@ -460,8 +514,8 @@ func validImportedRecord(record *strictjson.Object, accountID string, binding an
 	if err != nil {
 		return false
 	}
-	id, body := "note-"+digest(canonical), quotedUnits(cues)
-	_, isVersion := intIn(field(record, "record_version"), recordVersion, recordVersion)
+	id, body := "note-"+digest(canonical), QuotedUnits(cues)
+	_, isVersion := intIn(field(record, "record_version"), RecordVersion, RecordVersion)
 	if field(record, "id") != id || field(record, "account_id") != accountID ||
 		field(record, "record_kind") != "imported_transcript" || !isVersion ||
 		field(record, "called_at") != calledAt || field(record, "body") != body {
@@ -472,8 +526,8 @@ func validImportedRecord(record *strictjson.Object, accountID string, binding an
 		return false
 	}
 	saved := strictjson.NewObject("id", id, "account_id", accountID, "record_kind", "imported_transcript",
-		"record_version", recordVersion, "called_at", calledAt, "body", body, "manifest", manifest,
+		"record_version", RecordVersion, "called_at", calledAt, "body", body, "manifest", manifest,
 		"record_ref", reference)
-	encoded, err := strictjson.Dumps(saved, canonicalASCII)
-	return err == nil && len(body) <= maxQuoteBytes && len(encoded) <= maxRecordBytes
+	encoded, err := strictjson.Dumps(saved, CanonicalASCII)
+	return err == nil && len(body) <= MaxQuoteBytes && len(encoded) <= MaxRecordBytes
 }

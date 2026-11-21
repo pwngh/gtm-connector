@@ -18,6 +18,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/receipts"
+	"github.com/pwngh/gtm-connector/internal/sources/calls"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/pgtest"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -86,9 +87,30 @@ func newPostgresCards(t *testing.T) cardStore {
 	return c
 }
 
+// imports is the store of imports of one book. The oracle kept a state folder for each book, and the books
+// number their accounts alike, so each book's imports are in a workspace of their own.
+func (c *postgresCards) imports(t *testing.T, book, accountID string) postgres.CallImports {
+	t.Helper()
+	ctx := context.Background()
+	workspace, err := c.store.EnsureWorkspace(ctx, "calls-"+book, "demo", "Imports of "+book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.store.EnsureAccount(ctx, workspace.ID, accountID, "Invented account"); err != nil {
+		t.Fatal(err)
+	}
+	return postgres.CallImports{Store: c.store, WorkspaceID: workspace.ID}
+}
+
 func (c *postgresCards) maker(t *testing.T, sc *scope, s setup, row fixtureRow, b Brief) (*Maker, Brief) {
 	if err := c.store.EnsureAccount(context.Background(), c.workspace, row.AccountID, "Invented account"); err != nil {
 		t.Fatal(err)
+	}
+	if s.calls != nil {
+		imports := c.imports(t, s.calls.book, row.AccountID)
+		s.source = s.calls.source(t, row, imports, func(made calls.Import) (*strictjson.Object, error) {
+			return imports.Import(context.Background(), made)
+		})
 	}
 	b.Principal.WorkspaceID = c.workspace
 	// Operation IDs are unique in a workspace; the oracle's are per scope.

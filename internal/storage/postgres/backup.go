@@ -43,6 +43,12 @@ var backupTables = []struct {
 	{"evidence_units", "card_id, n", 1},
 	{"gaps", "card_id, ordinal", 1},
 	{"card_reads", "card_id, ordinal", 2},
+	// An import's bytes come before the revisions made from them, and a revision before the account that reads it.
+	{"call_import_stores", "workspace_id", 4},
+	{"call_import_contents", "workspace_id, content_sha256", 4},
+	{"call_import_revisions", "workspace_id, import_id", 4},
+	{"call_import_numbers", "workspace_id, account_number", 4},
+	{"call_import_active", "workspace_id, account_ref", 4},
 }
 
 // TableCopy describes one table in a backup.

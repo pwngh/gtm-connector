@@ -13,6 +13,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/receipts"
+	"github.com/pwngh/gtm-connector/internal/sources/calls"
 	"github.com/pwngh/gtm-connector/internal/sources/demo"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
@@ -100,19 +101,101 @@ func insert(t *testing.T, store *demo.Store, rows *strictjson.Object, databases 
 	}
 }
 
-// transcripts is the imported calls source of a folder: the transcript imported for the account, as the
-// oracle card's evidence records it, or none. The transcript parser and the import store that made the
-// record are not ported yet, so the record is served as recorded.
-type transcripts struct {
-	*demo.Store
-	notes []*strictjson.Object
+// importedCalls is a folder whose calls are imported transcripts: the book whose state folder the oracle
+// kept the imports in, the store its other reads go to, and the import the oracle made in the card's scope,
+// with what that import returned. An account with no transcript has no import.
+type importedCalls struct {
+	book   string
+	reads  *demo.Store
+	made   *calls.Import
+	result *strictjson.Object
 }
 
-func (s transcripts) Read(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, error) {
-	if tool == "read_call_notes" {
-		return "calls", s.notes, nil
+// recordedImport is the import the oracle made before one card, from its recorded inputs: the file's text
+// through the parser and the default excerpt, bound to the account under the scope's second ID, which is the
+// receipt of the read that resolved the account.
+func recordedImport(t *testing.T, row fixtureRow, transcript *strictjson.Object, scopeName string) *calls.Import {
+	t.Helper()
+	parsed, err := calls.Parse([]byte(get(transcript, "text").(string)), get(transcript, "format").(string),
+		get(transcript, "speaker_names").(bool))
+	if err != nil {
+		t.Fatalf("%s: the recorded transcript does not parse: %v", row.Key, err)
 	}
-	return s.Store.Read(ctx, tool, accountID)
+	excerpt, err := calls.SelectExcerpt(parsed, nil)
+	if err != nil {
+		t.Fatalf("%s: the recorded transcript has no excerpt: %v", row.Key, err)
+	}
+	resolved := newScope(scopeName)
+	resolved.uuid()
+	made := &calls.Import{Parsed: parsed, Excerpt: excerpt, ImportedAt: get(transcript, "imported_at").(string),
+		Association: calls.Association{CRMBinding: evidence.FixtureCRMBinding(), AccountID: row.AccountID,
+			Method: "account_id", ResolutionReceiptID: resolved.uuid()}}
+	if called, ok := get(transcript, "called_at").(string); ok {
+		made.CalledAt = &called
+	}
+	return made
+}
+
+// source is the folder's source over a store of imports, after the import the oracle made is saved by save.
+// What the import returns is what the Python import returned, and what read_call_notes then returns for the
+// account is the record the oracle card's evidence holds, member for member in the same order: the imported
+// transcript, or nothing.
+func (f *importedCalls) source(t *testing.T, row fixtureRow, imports calls.Imports,
+	save func(calls.Import) (*strictjson.Object, error)) Source {
+	t.Helper()
+	if f.made != nil {
+		result, err := save(*f.made)
+		if err != nil {
+			t.Fatalf("%s: the recorded transcript is not imported: %v", row.Key, err)
+		}
+		if !sameOrder(result, f.result) {
+			got, _ := strictjson.Dumps(result, strictjson.Quoted)
+			want, _ := strictjson.Dumps(f.result, strictjson.Quoted)
+			t.Fatalf("%s: the import returned %s, the recorded import %s", row.Key, got, want)
+		}
+	}
+	source := calls.Source{Reads: f.reads, Imports: imports, CRMBinding: evidence.FixtureCRMBinding()}
+	_, read, err := source.Read(context.Background(), "read_call_notes", row.AccountID)
+	recorded := recordedRows(t, row, "calls/call_notes")
+	if err != nil || len(read) != len(recorded) || f.made == nil && len(read) != 0 || f.made != nil && len(read) != 1 {
+		t.Fatalf("%s: read_call_notes returned %d records (%v), the card holds %d", row.Key, len(read), err, len(recorded))
+	}
+	for i, record := range read {
+		if !sameOrder(record, recorded[i]) {
+			t.Fatalf("%s: the record of the import is not the one the card's evidence holds", row.Key)
+		}
+	}
+	return source
+}
+
+// sameOrder compares two JSON values type for type, with the members of every object in the same order.
+func sameOrder(a, b any) bool {
+	x, errA := strictjson.Dumps(a, strictjson.Quoted)
+	y, errB := strictjson.Dumps(b, strictjson.Quoted)
+	return errA == nil && errB == nil && x == y
+}
+
+// heldImport is a store of imports that holds the one revision an import makes of content no account held
+// before, at its first generation. The memory families read through it, with no database.
+type heldImport struct{ active *calls.Active }
+
+func (h *heldImport) save(made calls.Import) (*strictjson.Object, error) {
+	if err := made.Check(); err != nil {
+		return nil, err
+	}
+	revision, manifest, err := made.Revision(1)
+	if err != nil {
+		return nil, err
+	}
+	h.active = &calls.Active{Revision: revision, ContentAccount: revision.AccountID, ContentGeneration: 1}
+	return calls.Result(manifest, revision.ImportID, true, false, made.Association.ResolutionReceiptID), nil
+}
+
+func (h *heldImport) ActiveImport(_ context.Context, _ *strictjson.Object, accountID string) (*calls.Active, error) {
+	if h.active == nil || h.active.AccountID != accountID {
+		return nil, nil
+	}
+	return h.active, nil
 }
 
 // thread is the live Slack source of a folder: the messages of the thread mapped to the account and the
@@ -234,6 +317,9 @@ type setup struct {
 	source  Source
 	sources evidence.Sources
 	skip    string // why this card is not built from its recorded inputs
+	// calls is set for a folder of imported transcripts. Its source is made by the card store, which holds
+	// the imports.
+	calls *importedCalls
 	// What the scope spent before the card, on work the oracle did in it first: IDs, receipt times and
 	// tokens. An import of a transcript resolves its account under a receipt of its own.
 	ids, receipts, tokens int
@@ -263,7 +349,11 @@ type memoryCards struct{ stores map[string]*receipts.Memory }
 
 func newMemoryCards(*testing.T) cardStore { return &memoryCards{stores: map[string]*receipts.Memory{}} }
 
-func (c *memoryCards) maker(_ *testing.T, sc *scope, s setup, _ fixtureRow, b Brief) (*Maker, Brief) {
+func (c *memoryCards) maker(t *testing.T, sc *scope, s setup, row fixtureRow, b Brief) (*Maker, Brief) {
+	if s.calls != nil {
+		held := &heldImport{}
+		s.source = s.calls.source(t, row, held, held.save)
+	}
 	m, store := sc.maker(s.source, s.sources)
 	c.stores[s.scope] = store
 	return m, b
@@ -420,40 +510,43 @@ func demoStoreFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 	})
 }
 
-// recordedInputFamilies builds the cards of the other families. A card that read an imported transcript or a
-// live Slack thread reads the records its recorded evidence holds, checked against its recorded inputs. The
-// Salesforce cards need the adapter that maps the org's rows, which is not ported yet, and are counted as
-// skipped.
+// importedTranscripts is how many books_calls cards read a transcript the oracle imported. Each recorded
+// file is in the card's inputs, so every one of them is parsed, imported and read back here.
+const importedTranscripts = 50
+
+// recordedInputFamilies builds the cards of the other families. A card of books_calls reads the calls source
+// over the import made here from its recorded file. A card that read a live Slack thread reads the records
+// its recorded evidence holds, checked against its recorded inputs. A Salesforce card reads its recorded rows
+// through the Go reader, served by an invented org.
 func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 	book := oracletest.Read(t, "cards/demo_book.json")
 	t.Run("books_calls", func(t *testing.T) {
+		imported := 0
 		runFamily(t, "books_calls", newStore, func(row fixtureRow, input *strictjson.Object) setup {
 			store, err := demo.Load(book)
 			if err != nil {
 				t.Fatal(err)
 			}
-			rows, _ := input.Get("rows")
-			insert(t, store, rows.(*strictjson.Object), "crm")
-			name, _ := input.Get("book")
-			index, _ := input.Get("index")
+			insert(t, store, get(input, "rows").(*strictjson.Object), "crm")
+			name := get(input, "book").(string)
 			sources := demoSources(nil)
 			sources.CallsBackend, sources.CallsBinding = "imported", evidence.FixtureCRMBinding()
-			transcript, imported := input.Get("transcript")
-			if !imported {
-				return setup{scope: fmt.Sprintf("books/calls/%s/%d", name, 300+intOf(index)),
-					source: transcripts{store, nil}, sources: sources}
+			folder := &importedCalls{book: name, reads: store}
+			transcript, _ := get(input, "transcript").(*strictjson.Object)
+			if transcript == nil {
+				return setup{scope: fmt.Sprintf("books/calls/%s/%d", name, 300+intOf(get(input, "index"))), calls: folder,
+					sources: sources}
 			}
-			// The card reads the record the recorded import made. The import ran in the card's scope and
-			// spent two IDs, one receipt time and four tokens there, resolving the account.
-			notes := recordedRows(t, row, "calls/call_notes")
-			result, _ := transcript.(*strictjson.Object).Get("import")
-			id, _ := result.(*strictjson.Object).Get("import_id")
-			if len(notes) != 1 || get(notes[0], "id") != id {
-				t.Fatalf("%s: the card does not hold the transcript its import recorded", row.Key)
-			}
-			return setup{scope: "books/calls/" + row.Key, source: transcripts{store, notes}, sources: sources,
-				ids: 2, receipts: 1, tokens: 4}
+			// The import ran in the card's scope and spent two IDs, one receipt time and four tokens there,
+			// resolving the account.
+			imported++
+			scopeName := "books/calls/" + row.Key
+			folder.made, folder.result = recordedImport(t, row, transcript, scopeName), get(transcript, "import").(*strictjson.Object)
+			return setup{scope: scopeName, calls: folder, sources: sources, ids: 2, receipts: 1, tokens: 4}
 		})
+		if imported != importedTranscripts {
+			t.Errorf("%d recorded transcripts imported, want %d", imported, importedTranscripts)
+		}
 	})
 	t.Run("books_slack", func(t *testing.T) {
 		runFamily(t, "books_slack", newStore, func(row fixtureRow, input *strictjson.Object) setup {
