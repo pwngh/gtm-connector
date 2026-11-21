@@ -27,10 +27,14 @@ const receipt = tool => ({id: readId(tool), operation_id: 'op#1', parent_id: 're
   row_count: 2, rows: [], elapsed_ms: 1, error: null, started_at: '2027-01-15T15:00:00Z', finished_at: '2027-01-15T15:00:01.25Z', delivered_at: null});
 const principal = {id: 'p-1', display_name: 'Demo reviewer', kind: 'person', workspace_id: 'w-1', workspace_kind: 'demo', demo: true};
 
-let server, App, ServerContext, evidence, readiness, frame;
+let server, App, ServerShell, ServerPalette, ServerContext, boot, RouteError, CommandPalette, evidence, readiness, frame;
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error'});
   App = (await server.ssrLoadModule('/src/main.jsx')).App;
+  ({ServerShell, ServerPalette} = await server.ssrLoadModule('/src/app/ServerApp.jsx'));
+  ({boot} = await server.ssrLoadModule('/src/app/boot.jsx'));
+  ({RouteError} = await server.ssrLoadModule('/src/RouteContent.jsx'));
+  CommandPalette = (await server.ssrLoadModule('/src/CommandPalette.jsx')).default;
   ServerContext = (await server.ssrLoadModule('/src/ServerSwitch.jsx')).ServerContext;
   evidence = await server.ssrLoadModule('/src/ApiEvidence.jsx');
   readiness = await server.ssrLoadModule('/src/ApiReadiness.jsx');
@@ -42,13 +46,16 @@ function storeOf(state, settle = state) {
   let current = state;
   return {api: {}, subscribe: () => () => {}, getSnapshot: () => current, start: () => Promise.resolve().then(() => {current = settle; return current;})};
 }
-async function renderApp(path, store) {
+async function render(path, store, shell) {
   const {prelude} = await prerenderToNodeStream(React.createElement(ServerContext, {value: store},
-    React.createElement(MemoryRouter, {initialEntries: [path]}, React.createElement(App))));
+    React.createElement(MemoryRouter, {initialEntries: [path]}, React.createElement(shell))));
   let html = '';
   for await (const chunk of prelude) html += chunk;
   return html;
 }
+// The walkthrough, which a static host serves, and the app the server serves.
+const renderApp = (path, store) => render(path, store, App);
+const renderServer = (path, store) => render(path, store, ServerShell);
 const inRouter = (element, path = renewalFixture.paths.evidence) => renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: [path]}, element));
 const text = html => html.replace(/<[^>]+>/g, ' ').replaceAll('&#x27;', '\'').replaceAll('&quot;', '"').replaceAll('&amp;', '&').replace(/\s+/g, ' ');
 
@@ -64,32 +71,31 @@ test('walkthrough mode: a static build keeps the walkthrough Evidence and Readin
 
 test('API mode: Evidence and Readiness read from the server and show no walkthrough evidence', async () => {
   const session = {signed_in: true, principal, csrf_token: 't', expires_at: '2027-01-15T23:00:00Z'};
-  const store = storeOf({mode: 'probing', session: null, error: null}, {mode: 'api', session, error: null, ended: false});
-  const page = await renderApp(renewalFixture.paths.evidence, store);
+  const page = await renderServer(renewalFixture.paths.evidence, storeOf({mode: 'api', session, error: null, ended: false}));
   assert.match(page, /class="plain-panel evidence-library api-evidence"/);
   assert.match(text(page), /Signed in as a demo principal Demo reviewer Demo principal · demo workspace/);
   // Without ?account= the page waits for the principal's accounts before it reads any cards.
   assert.match(text(page), /Reading your accounts…/);
   assert.doesNotMatch(text(page), /Reading cards for/);
   assert.doesNotMatch(page, /class="evidence-flow|data-record-id|library-row/);
-  const rd = await renderApp(renewalFixture.paths.root + '/readiness?account=acc-001', storeOf({mode: 'api', session, error: null, ended: false}));
+  const rd = await renderServer(renewalFixture.paths.root + '/readiness?account=acc-001', storeOf({mode: 'api', session, error: null, ended: false}));
   assert.match(rd, /class="rd-page api-readiness"/);
   assert.match(text(rd), /Reading your accounts… Reading cards for acc-001/);
   assert.doesNotMatch(rd, /data-check-result="(passed|failed)"/);
 });
 
 test('API mode: signed out, ended, and unreachable states never fall back to walkthrough data', async () => {
-  const out = await renderApp(renewalFixture.paths.evidence, storeOf({mode: 'api', session: {signed_in: false, principal: null, csrf_token: 'p'}, error: null, ended: false}));
+  const out = await renderServer(renewalFixture.paths.evidence, storeOf({mode: 'api', session: {signed_in: false, principal: null, csrf_token: 'p'}, error: null, ended: false}));
   assert.match(out, /name="login"/);
   assert.match(out, /type="password"/);
   assert.match(out, /autoComplete="current-password"|autocomplete="current-password"/);
   assert.doesNotMatch(out, /ended or was revoked|library-row/);
-  const ended = await renderApp(renewalFixture.paths.evidence, storeOf({mode: 'api', session: {signed_in: false, principal: null, csrf_token: 'p'}, error: null, ended: true}));
+  const ended = await renderServer(renewalFixture.paths.evidence, storeOf({mode: 'api', session: {signed_in: false, principal: null, csrf_token: 'p'}, error: null, ended: true}));
   assert.match(text(ended), /Your session ended or was revoked. You are signed out./);
-  const gone = await renderApp(renewalFixture.paths.evidence, storeOf({mode: 'unreachable', session: null, error: {kind: 'unreachable'}}));
-  assert.match(text(gone), /The server did not answer. Nothing was read. No walkthrough data is shown in its place./);
+  const gone = await renderServer(renewalFixture.paths.evidence, storeOf({mode: 'unreachable', session: null, error: {kind: 'unreachable'}}));
+  assert.match(text(gone), /The server did not answer. Nothing was read, and nothing is shown in its place./);
   assert.doesNotMatch(gone, /library-row|name="login"/);
-  const refused = await renderApp(renewalFixture.paths.root + '/readiness', storeOf({mode: 'api', session: null, error: {kind: 'server', code: 'internal'}}));
+  const refused = await renderServer(renewalFixture.paths.root + '/readiness', storeOf({mode: 'api', session: null, error: {kind: 'server', code: 'internal'}}));
   assert.match(text(refused), /The server could not answer. .* Server code: internal/);
 });
 
@@ -164,7 +170,7 @@ const apiStates = {
 
 for (const [page, path] of [['evidence', renewalFixture.paths.evidence], ['readiness', renewalFixture.paths.root + '/readiness']]) {
   for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${page}, ${name}: the shell shows only what the server supports`, async () => {
-    const html = await renderApp(path + returns, storeOf(state));
+    const html = await renderServer(path + returns, storeOf(state));
     const shown = text(html);
     assert.doesNotMatch(html, /class="nav-count"|save-failure-notice|wl-return-context|rd-return-context|hs-return-context/);
     assert.doesNotMatch(html, />Evidence<span>\d/);
@@ -190,18 +196,22 @@ function shell(html) {
   const between = (open, close) => html.slice(html.indexOf(open)).split(close)[0];
   const sidebar = between('id="workspace-navigation"', '</aside>');
   const links = [...between('<nav aria-label="Workspace"', '</nav>').matchAll(/<a [^>]*href="([^"]+)"[^>]*>.*?<span>([^<]+)<\/span>/g)].map(match => [match[2], match[1].replaceAll('&amp;', '&')]);
-  return {label: sidebar.match(/class="nav-label">([^<]*)</)[1], links, brand: sidebar.match(/<a [^>]*class="brand[^"]*"[^>]*>/)[0].match(/href="([^"]+)"/)[1],
+  const brand = sidebar.match(/<a [^>]*class="brand[^"]*"[^>]*>[\s\S]*?<\/a>/)[0];
+  return {label: sidebar.match(/class="nav-label">([^<]*)</)[1], links, brand: brand.match(/href="([^"]+)"/)[1], name: brand.replace(/<[^>]+>/g, ''),
+    beforeNav: text(sidebar.slice(sidebar.indexOf(brand) + brand.length).split('<nav')[0]).trim(),
     belowNav: text(sidebar.split('</nav>')[1]).trim(), crumbs: text(between('class="breadcrumbs', '</div>').split('</button>')[1]).trim(),
-    profile: between('class="workspace-toolbar"', '</header>').match(/class="profile"[^>]*aria-label="([^"]+)"/)[1], footer: html.match(/<span>([^<]*)<\/span><\/footer>/)[1]};
+    profile: between('class="workspace-toolbar"', '</header>').match(/class="profile"[^>]*aria-label="([^"]+)"/)[1], footer: html.match(/<span>([^<]*)<\/span><\/footer>/)[1],
+    site: text(between('<footer', '</footer>').replace(/^[^>]*>/, '')).trim()};
 }
-// The whole of it when the server serves the app: the two server pages and the signed-in principal.
-const serverShell = (state, crumbs, query = '') => ({label: 'READ FROM THE SERVER', brand: renewalFixture.paths.evidence, belowNav: '', crumbs, footer: 'Read from the server',
+// The whole of it when the server serves the app: its own name, the two server pages and the signed-in principal.
+const serverShell = (state, crumbs, query = '') => ({label: 'READ FROM THE SERVER', brand: renewalFixture.paths.evidence, name: 'gtm-connector', beforeNav: 'READ FROM THE SERVER',
+  belowNav: '', crumbs, footer: 'Read from the server', site: 'gtm-connector Read from the server',
   links: [['Evidence', renewalFixture.paths.evidence + query], ['Readiness', renewalFixture.paths.root + '/readiness' + query]],
   profile: state.session?.signed_in ? `Signed in as ${principal.display_name}` : 'Not signed in'});
 
 for (const [path] of walkthroughRoutes) {
   for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${path}, ${name}: not available here, with a link home and no walkthrough page, account or count`, async () => {
-    const html = await renderApp(path + '?selection=work-item%3Aexample&returnTo=%2Fqueue', storeOf(state));
+    const html = await renderServer(path + '?selection=work-item%3Aexample&returnTo=%2Fqueue', storeOf(state));
     const main = html.slice(html.indexOf('<main'));
     assert.match(main, /<h1>Not available here<span class="company-dot">/);
     assert.match(text(main), name === 'unreachable' ? /The server did not answer, so nothing is shown\. Reload the page to ask it again\./ : /The server does not provide this page, so nothing is shown\. It provides Evidence and Readiness\./);
@@ -209,29 +219,69 @@ for (const [path] of walkthroughRoutes) {
     assert.doesNotMatch(html, walkthroughContent);
     assert.doesNotMatch(html, /api-frame|name="login"|api-renewal-header/);
     assert.ok(!text(html).includes(renewalFixture.account.name) && !text(html).includes(fixturePeople.workspaceProfile.split(' ')[0]));
-    assert.doesNotMatch(text(html), /Demo workspace|Invented|walkthrough|Work queue|Playbooks|Operations|Work plan|History/i);
+    assert.doesNotMatch(text(html), /Revenue Workflow Lab|prototype|Demo workspace|Invented|walkthrough|Work queue|Playbooks|Operations|Work plan|History/i);
     assert.deepEqual(shell(html), serverShell(state, 'Not available here'));
   });
 }
 
 test('API mode: a path that only resembles a server page is not available either', async () => {
   for (const path of [renewalFixture.paths.evidence + '/extra', '/queue/evidence', renewalFixture.paths.root + '/readiness/']) {
-    const html = await renderApp(path, storeOf(signedIn));
+    const html = await renderServer(path, storeOf(signedIn));
     assert.match(html, /<h1>Not available here</, path);
     assert.doesNotMatch(html, walkthroughContent, path);
     assert.doesNotMatch(html, /api-frame/, path);
   }
 });
 
-test('while the server is being asked, no page and no navigation shows: only the loading state', () => {
-  const asking = {api: {}, subscribe: () => () => {}, getSnapshot: () => ({mode: 'probing', session: null, error: null}), start: () => new Promise(() => {})};
-  for (const [path] of [...walkthroughRoutes, [renewalFixture.paths.evidence], [renewalFixture.paths.root + '/readiness']]) {
-    const html = renderToStaticMarkup(React.createElement(ServerContext, {value: asking}, React.createElement(MemoryRouter, {initialEntries: [path]}, React.createElement(App))));
-    assert.match(html, /class="route-loading" role="status"/, path);
-    assert.doesNotMatch(html, walkthroughContent, path);
-    assert.doesNotMatch(html, /class="nav-item|Not available here|api-frame|<h1/, path);
-    assert.ok(!text(html).includes(renewalFixture.account.name), path);
+// The entry asks the server once. Until it answers, only the loading state
+// shows; then the server's app mounts, or, for a static host only, the walkthrough loads.
+function booting(mode) {
+  let answer;
+  const store = {start: () => new Promise(resolve => {answer = () => resolve({mode});})};
+  const shown = [], loads = [];
+  const done = boot({store, show: view => shown.push(view), loadWalkthrough: () => {loads.push(mode); return Promise.resolve({default: App});}});
+  return {store, shown, loads, done, answer: () => answer()};
+}
+for (const mode of ['api', 'unreachable', 'walkthrough']) test(`the entry shows only the loading state while it asks, then mounts the app for ${mode}`, async () => {
+  const run = booting(mode);
+  assert.equal(run.shown.length, 1);
+  const html = renderToStaticMarkup(run.shown[0]);
+  assert.match(html, /^<div class="route-loading" role="status"[^>]*><p>Loading page…<\/p><\/div>$/);
+  run.answer();
+  assert.equal(await run.done, mode === 'walkthrough' ? 'walkthrough' : 'server');
+  assert.equal(run.shown.length, 2);
+  if (mode === 'walkthrough') {
+    assert.deepEqual(run.loads, ['walkthrough']);
+    assert.equal(run.shown[1].type, App);
+  } else {
+    assert.deepEqual(run.loads, [], 'the walkthrough is never loaded');
+    assert.equal(run.shown[1].props.store, run.store);
   }
+});
+
+test('the entry says so when the walkthrough cannot load', async () => {
+  const shown = [];
+  const result = await boot({store: {start: () => Promise.resolve({mode: 'walkthrough'})}, show: view => shown.push(view), loadWalkthrough: () => Promise.reject(new Error('offline'))});
+  assert.equal(result, 'failed');
+  assert.match(renderToStaticMarkup(shown.at(-1)), /role="alert">This page could not load\. Reload the page to try again\./);
+});
+
+test('the server app names itself, and its palette and page failure use its own words', () => {
+  const palette = renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: [renewalFixture.paths.evidence + '?account=acc-003']},
+    React.createElement(ServerContext, {value: storeOf(signedIn)}, React.createElement(ServerPalette, {onClose() {}, opener: {current: null}}))));
+  assert.match(palette, /<h2 id="[^"]+">Go to<\/h2>/);
+  assert.match(palette, /aria-label="Find a page"[^>]*placeholder="Find a page"/);
+  assert.deepEqual([...palette.matchAll(/<strong>([^<]+)<\/strong>/g)].map(match => match[1]), ['Evidence', 'Readiness']);
+  assert.doesNotMatch(text(palette), /record|walkthrough|Revenue Workflow Lab/i);
+  const empty = renderToStaticMarkup(React.createElement(CommandPalette, {items: [], placeholder: 'Find a page', inputLabel: 'Find a page', empty: React.createElement('h3', null, 'No page matches.')}));
+  assert.match(text(empty), /No page matches\./);
+  assert.doesNotMatch(text(empty), /No matching records/);
+  const walkthroughEmpty = renderToStaticMarkup(React.createElement(CommandPalette, {items: []}));
+  assert.match(text(walkthroughEmpty), /No matching records/);
+  assert.match(walkthroughEmpty, /placeholder="Find a record, source, or action…"/);
+  const failed = new RouteError({failure: 'This page could not load. Nothing was lost.', children: null});
+  Object.assign(failed.state, RouteError.getDerivedStateFromError(new Error('offline')));
+  assert.match(text(renderToStaticMarkup(failed.render())), /^ ?This page could not load\. Nothing was lost\. Try again ?$/);
 });
 
 for (const [path, marker] of walkthroughRoutes) test(`the static build still shows the walkthrough at ${path}`, async () => {

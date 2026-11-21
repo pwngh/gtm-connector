@@ -8,7 +8,6 @@ import {
   isDraftContextCurrent, playbookSearch, preparedDraftLocation, readPlaybookLocation,
 } from './playbookDrafts.js';
 import {confirmDraftNavigation, focusFirstDraftError, focusInView} from './playbooksBrowser.js';
-import './playbooks.css';
 
 const icons = {obtain_current_rider: FileText, review_renewal_condition: ShieldCheck, reconcile_approval_conflict: GitBranch};
 const roleLabels = {actionOwner: 'Action owner', internalReviewer: 'Internal reviewer', customerAuthority: 'Customer authority'};
