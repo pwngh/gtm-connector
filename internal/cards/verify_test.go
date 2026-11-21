@@ -398,7 +398,7 @@ func TestVerifyRefuses(t *testing.T) {
 		if _, err := VerifyPrepared(ctx, deep, folders[1].brief, f.Log, demoSources(nil)); !errors.Is(err, ErrBriefInvalid) {
 			t.Fatalf("got %v", err)
 		}
-		if _, err := ReadTrustedRows(deep); !errors.Is(err, strictjson.ErrTooDeep) {
+		if _, err := ReadTrustedRows(bytes.NewReader(deep)); !errors.Is(err, strictjson.ErrTooDeep) {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -427,7 +427,8 @@ func TestVerifyRefuses(t *testing.T) {
 	t.Run("an export that holds one audit ID twice", func(t *testing.T) {
 		data := oracletest.Read(t, "folders/cli_card/audit.jsonl")
 		first := data[:bytes.IndexByte(data, '\n')+1]
-		if _, err := ReadTrustedRows(append(append([]byte(nil), data...), first...)); !errors.Is(err, ErrDuplicateReceipt) {
+		twice := bytes.NewReader(append(append([]byte(nil), data...), first...))
+		if _, err := ReadTrustedRows(twice); !errors.Is(err, ErrDuplicateReceipt) {
 			t.Fatalf("got %v", err)
 		}
 	})

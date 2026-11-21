@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // A backup is one gzip'd tar file, written with mode 0600:
@@ -58,6 +59,11 @@ type tableEntry struct {
 
 // maxBackupFile bounds each file read back from an archive.
 const maxBackupFile = 4 << 30
+
+// maxManifestBytes bounds the manifest, which is read whole before anything
+// else. A manifest names each table with its columns and each credential: a
+// few KiB at this schema, so the bound leaves room for many times the tables.
+const maxManifestBytes = 256 << 10
 
 func backupCommand(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("backup", flag.ContinueOnError)
@@ -388,14 +394,15 @@ func unpack(in, work string) (manifest, string, error) {
 			return manifest{}, "", fmt.Errorf("%s holds an entry that is not a regular file: %q", in, header.Name)
 		}
 		if i == 0 {
-			if header.Name != "manifest.json" || header.Size > 1<<20 {
+			if header.Name != "manifest.json" || header.Size > maxManifestBytes {
 				return manifest{}, "", fmt.Errorf("%s does not start with its manifest", in)
 			}
 			raw, err := io.ReadAll(archive)
 			if err != nil {
 				return manifest{}, "", err
 			}
-			if err := json.Unmarshal(raw, &m); err != nil || m.Format != backupFormat || m.Version != 1 {
+			// The manifest is read as the strict reader reads it, with exactly the fields backup writes.
+			if err := strictjson.Decode(raw, &m); err != nil || m.Format != backupFormat || m.Version != 1 {
 				return manifest{}, "", fmt.Errorf("%s is not a version 1 gtm-connector backup", in)
 			}
 			if err := exactEntries(m); err != nil {
@@ -446,7 +453,7 @@ func unpack(in, work string) (manifest, string, error) {
 }
 
 // exactEntries requires the manifest to list exactly this version's tables
-// and credentials, in order.
+// and credentials, in order, and no credential larger than one is read.
 func exactEntries(m manifest) error {
 	var tables, files []string
 	for _, table := range m.Tables {
@@ -456,6 +463,9 @@ func exactEntries(m manifest) error {
 		tables = append(tables, table.Table)
 	}
 	for _, entry := range m.Credentials {
+		if entry.Size > maxCredentialBytes {
+			return fmt.Errorf("%s is larger than a credential file (%d bytes)", entry.Name, maxCredentialBytes)
+		}
 		files = append(files, entry.Name)
 	}
 	want := make([]string, len(credentialFiles))

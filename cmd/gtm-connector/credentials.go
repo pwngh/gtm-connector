@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // The private credentials folder: the owner secret, the demo credential, the
@@ -43,6 +45,11 @@ const (
 
 // credentialFiles are the files a backup carries, in order.
 var credentialFiles = []string{ownerSecretFile, demoFile, sessionKeyFile, tlsKeyFile, tlsCertFile}
+
+// maxCredentialBytes is the largest credential file read, from the folder or
+// from a backup. The files written here are under 1 KiB each; the largest an
+// operator may put in place is a certificate with its chain, a few KiB.
+const maxCredentialBytes = 64 << 10
 
 // credentials holds a descriptor of the folder, checked when it was opened.
 // Every later read and write goes through that descriptor, so swapping the
@@ -127,7 +134,8 @@ func validName(name string) error {
 }
 
 // read gives a file's bytes, or fs.ErrNotExist. The checks run on the
-// opened descriptor, so they describe the file actually read.
+// opened descriptor, so they describe the file actually read. A file over
+// maxCredentialBytes is refused by its size, before any of it is read.
 func (c *credentials) read(name string) ([]byte, error) {
 	if err := validName(name); err != nil {
 		return nil, err
@@ -145,7 +153,15 @@ func (c *credentials) read(name string) ([]byte, error) {
 	if err := private(stat, false); err != nil {
 		return nil, fmt.Errorf("the credential %s %w", name, err)
 	}
-	return io.ReadAll(io.LimitReader(file, 1<<20))
+	if stat.Size > maxCredentialBytes {
+		return nil, fmt.Errorf("%s is larger than a credential file (%d bytes)", filepath.Join(c.dir, name),
+			maxCredentialBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxCredentialBytes+1))
+	if err == nil && len(data) > maxCredentialBytes {
+		return nil, fmt.Errorf("%s grew while it was read", filepath.Join(c.dir, name))
+	}
+	return data, err
 }
 
 // staged writes data to a new private temporary file in the folder and
@@ -261,9 +277,13 @@ func (c *credentials) setUp(hosts []string) (demoCredential, error) {
 	return demo, nil
 }
 
+// parseDemo reads the demo credential as the strict reader reads it: one
+// object of at most maxCredentialBytes with exactly the two fields setUp
+// writes, each named once.
 func parseDemo(raw []byte) (demoCredential, error) {
 	var demo demoCredential
-	if err := json.Unmarshal(raw, &demo); err != nil || demo.Login == "" || len(demo.Password) < 32 {
+	if len(raw) > maxCredentialBytes || strictjson.Decode(raw, &demo) != nil || demo.Login == "" ||
+		len(demo.Password) < 32 {
 		return demoCredential{}, errors.New("not a demo credential")
 	}
 	return demo, nil
