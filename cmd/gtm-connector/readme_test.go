@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,14 +14,14 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// README.md shows one traced number of the demo card, as inspect prints it on a terminal. The README
-// shortens three values of the trace. A card's ID and a receipt's ID are random in every run, so the
+// README.md shows one traced number of the demo card: the inspect command in a shell block, then what
+// inspect prints on a terminal in a text block of its own. The README shortens three values of the trace. A card's ID and a receipt's ID are random in every run, so the
 // README's own spelling of them is the reference. The digest is the traced one, cut to its first eight
 // characters.
 const (
 	shownAccount = "acc-003"
 	shownNumber  = "5"
-	shownCommand = "$ gtm-connector inspect brief-… 5"
+	shownCommand = "gtm-connector inspect brief-… 5"
 	shownReceipt = "b63a52fb-…"
 	// shownMatched is the receipt of the read that returned the record the speaker was matched by.
 	shownMatched = "5e0c41d7-…"
@@ -47,13 +49,33 @@ func asShownInReadme(t *testing.T, printed string) string {
 	}
 	printed = strings.Replace(printed, receipt, shownReceipt, 1)
 	printed = strings.Replace(printed, matched, shownMatched, 1)
-	return shownCommand + "\n" + strings.Replace(printed, digest, digest[:8]+"…", 1) + "\n"
+	return strings.Replace(printed, digest, digest[:8]+"…", 1) + "\n"
+}
+
+// readmeTrace is the README's trace: the shell block that runs inspect for the shown number, which the
+// text block of what it prints must follow.
+func readmeTrace(t *testing.T) string {
+	t.Helper()
+	page, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := "```sh\n" + shownCommand + "\n```"
+	before, after, found := strings.Cut(string(page), command)
+	if !found || strings.Count(before+after, command) != 0 {
+		t.Fatalf("README.md does not show %q once, in a shell block", shownCommand)
+	}
+	shown := oracletest.ReadmeBlock(t, "FIELD ")
+	if !strings.Contains(after, "```text\n"+shown) {
+		t.Fatal("README.md's inspect output does not follow its inspect command")
+	}
+	return shown
 }
 
 // The block is compared with what inspect prints for the same number of the demo card: the card is made
 // from the demo book through the maker the commands use, and traced and laid out by inspect's own code.
 func TestReadmeShowsATracedNumber(t *testing.T) {
-	shown := oracletest.ReadmeBlock(t, "$ gtm-connector inspect")
+	shown := readmeTrace(t)
 	// The demo workspace as its three rows describe it, with its receipts kept in memory.
 	from := &reads{rows: map[string]postgres.Connection{}, kinds: map[string]*sourceKind{},
 		bindings: map[string]*strictjson.Object{}}
@@ -88,7 +110,7 @@ func TestReadmeShowsATracedNumber(t *testing.T) {
 
 // The same block, against the command itself: brief saves the card in PostgreSQL and inspect reads it back.
 func TestReadmeShowsWhatTheInspectCommandPrints(t *testing.T) {
-	shown := oracletest.ReadmeBlock(t, "$ gtm-connector inspect")
+	shown := readmeTrace(t)
 	d := setUpDemo(t)
 	d.connectDemo(t, defaultWorkspace)
 	var card savedCard

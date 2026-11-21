@@ -2,33 +2,49 @@
 
 [![Tests](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml?query=branch%3Amain)
 
-**See what the CRM says about a renewal and what people actually said, side by side, with a source
-behind every line.**
+**Contrast what a CRM reports about a renewal with what participants actually said, side by side, with a verifiable source behind every line.**
 
-gtm-connector builds a Deal card for a renewal from Salesforce, call transcripts, and Slack. Every
-figure, date, name, and quotation on the card points to a stored record. Each sentence is labelled
-with who said it and on what basis, and the card says what it did not read. The connector writes
-every character. No model does.
+**It allows revenue teams to audit renewal health in 30 seconds, catch unrecorded deal risks before they stall a close, and trace every claim back to its exact source without trusting an AI summary.**
 
-> **In active development.** Parts of what this page and the guides describe are still being built. The [roadmap](docs/ROADMAP.md) tracks which.
+`gtm-connector` compiles a **Deal card** for an upcoming renewal from Salesforce records, call
+transcripts, and Slack messages. Every figure, date, name, and quotation resolves to the stored
+record it came from and to the write-once receipt of the read that returned it. Each sentence is
+attributed to an identity-resolved speaker, marked `unknown` when two candidates match or none does,
+and every card declares what it did not read. **The connector writes every character
+deterministically. No language model writes the card.**
 
-| No model | Cited | Sealed | Tested | Surfaces |
-| --- | --- | --- | --- | --- |
-| **0** model calls on a card | every figure and quotation numbered to its record | **SHA-256** seal on each card | **10 of 10** invented hard cases pass | web app, CLI, HTTP API, **MCP** `2026-07-28` |
+> [!NOTE]
+> **In active development.** Parts of this page and the linked guides describe subsystems still
+> being built. The [roadmap](docs/ROADMAP.md) tracks which.
 
-### The demo
+| Architectural property | Specification |
+| :--- | :--- |
+| **Zero-model compilation** | **0** language-model calls assemble a Deal card |
+| **Line-level provenance** | Every figure and quotation is numbered to its source record and the receipt of the read that returned it |
+| **Tamper-evident sealing** | Each published card's **SHA-256** digest is recorded in its seal receipt, and a card with a changed byte is refused |
+| **Adversarial cases** | **10 of 10** invented hard cases rebuilt byte for byte |
+| **Access interfaces** | Web app, CLI, HTTP API, and **MCP** (`2026-07-28`) |
 
-Here is the demo, on an invented law firm. Its CRM record says healthy. Three days earlier, on a
-call, the customer's deputy general counsel said their general counsel will not sign until a rider
-is approved. The card shows both, and where each came from.
+---
 
-```sh
-make up      # PostgreSQL and the server, in Docker Compose
-make demo    # a sealed card for each account of the demo book, for the demo sign-in
-```
+## Demonstration
 
-Open `https://127.0.0.1:8443/` and sign in with the demo sign-in. It runs on invented data, with no
-model and no external service.
+The demonstration models a renewal for an invented law firm, **Thornfield Wren LLP**. Its CRM risk
+reads `healthy`. Three days earlier, on a call, the customer's deputy general counsel said their
+general counsel will not sign until a rider is approved. The Deal card shows both facts side by
+side and cites where each came from.
+
+1. **Start the database and the server, and make the demo cards:**
+
+   ```sh
+   make up      # PostgreSQL and the server, in Docker Compose
+   make demo    # a sealed Deal card for each account of the invented demo book
+   ```
+
+2. **Open the cards:** go to `https://127.0.0.1:8443/` and sign in with the demo sign-in. It runs
+   locally on invented data, with no external service and no model.
+
+The card for Thornfield Wren LLP:
 
 ```text
 DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15
@@ -67,40 +83,58 @@ NOT READ
   Neutralized in source text: 1 mention, 1 link.
 ```
 
-### How to read it
+### Anatomy of a Deal Card
 
-- **Record values** come from typed CRM fields and connector arithmetic. The seller's "January 30"
-  and the second-hand "USD 300,000" are sentences someone said, so they stay under SAID.
-- **A speaker role** comes from who the speaker is, never from wording. The connector names the
-  person by the strongest identifier the source carries: a Slack author's profile, the call's
-  attendee list, an alias, then the label as a name. A seller is a Salesforce user or a listed
-  seller; a customer is a contact of the account, and the card prints that contact's title with the
-  day it was read. Each sentence says how its speaker was matched, here by name. Two candidates, or
-  none, leave the role unknown.
-- **A quotation** is one whole sentence. A sentence too long to show is counted, never cut.
-- **Source text is data.** The channel mention and the link were neutralized before anything
-  displayed them, and the card says how many were.
+- **Structured values vs. reported speech:** `RECORD VALUES` come from typed CRM fields and
+  connector arithmetic, nothing else. Figures spoken in conversation, such as the seller's "January
+  30" or the second-hand "USD 300,000", stay under `SAID`, so a spoken claim is never mistaken for a
+  system-of-record fact.
+- **Identity-resolved speakers:** a role comes from who the speaker is, never from wording.
+  - **Resolution order:** Slack author profile → call attendee list → configured alias → the label
+    matched as a name. The strongest identifier the source carries wins.
+  - **Roles:** a seller is a Salesforce user or a listed seller. A customer is a contact of the
+    account, printed with that contact's title and the day the record was read.
+  - **Explicit uncertainty:** each line names how its speaker was matched, here `by name`. Two
+    candidates, or none, leave the role `unknown`.
+- **Whole sentences:** every quotation is one complete sentence. A sentence too long to show is
+  counted, never cut.
+- **Untrusted input isolation:** source text is data. Mentions and links are neutralized before
+  anything displays them, and the `NOT READ` footer states what was not read and how many items
+  were neutralized.
 
-### How the card is built
+---
+
+## Architecture & Provenance
 
 ```mermaid
 flowchart LR
     S["Salesforce · transcripts · Slack · your own data"] -->|"scoped read, receipt first"| M["Matched to a deal<br/>by your rules"]
     M --> U["Numbered units<br/>typed fields · whole sentences · speaker roles"]
     U --> C(["Deal card, sealed<br/>every character written by the connector"])
-    C --> O["Deals · Ops · API · MCP · alerts"]
+    C --> O["Web app · CLI · API · MCP · alerts"]
 ```
 
-Every figure and sentence on a card carries a number. The number is a unit: one CRM record, or one
-sentence of a call or a Slack message. Each resolves to its record and to the receipt of the read
-that returned it, a receipt being one row of the audit log.
+- **Numbered units (`[1]`, `[2]`, …):** every figure and quotation on a card is a unit: one CRM
+  record, or one sentence of a call or a Slack message.
+- **Write-once receipts:** each unit resolves to its stored record and to the **receipt** of the
+  read that returned it. A receipt is one row of the audit log: it is committed before the read
+  runs, finished once, keeps the rows the read returned, and is never deleted.
+- **Tamper-evident sealing:** a card is sealed when it is published: a receipt names the SHA-256 of
+  its bytes.
 
-A card is sealed when it is published: a receipt names the SHA-256 of its bytes.
+### Tracing Any Citation
 
-### Trace any number
+Use `inspect` to trace any number to its source record, the receipt of its read, and the rule that
+resolved its speaker:
+
+```sh
+gtm-connector inspect brief-… 5
+```
+
+<details>
+<summary><strong>Sample <code>inspect</code> output for number 5</strong></summary>
 
 ```text
-$ gtm-connector inspect brief-… 5
 FIELD                 VALUE
 Number                5
 Kind                  sentence
@@ -120,82 +154,116 @@ Matched               name "Marian Holt"
 Matched from          crm/contacts/con-003, receipt 5e0c41d7-… (get_account, ok)
 ```
 
-> **A changed card is refused.** `inspect` checks a card against its seal first, and refuses one
-> that was changed.
+</details>
 
-## For sales and CS teams
+> [!IMPORTANT]
+> **A changed card is refused.** Before printing anything, `inspect` checks the card's bytes
+> against its SHA-256 seal, and refuses a card that was changed.
 
-1. **Your calls and Slack threads find the deal.** You do nothing.
-2. **Slack alerts you when a renewal turns risky,** and says [what flagged it](docs/deals.md#what-flags-a-deal).
-3. **Refresh before your call,** if you want the last few minutes.
-4. **Read the Deal card,** your 30-second renewal snapshot. Click any line for its source proof, track blockers on the checklist and playbook, or ask the council what is blocking the renewal.
-5. **The deal closes.** It is archived with its final card.
+---
 
-A call or thread that fits more than one deal waits for your OK first, and reaches no card until then.
-More in [working a deal](docs/deals.md).
+## Workflows by Role
 
-## For RevOps and GTM engineers
+### Sales & Customer Success
 
-1. **Write one config file,** `gtm.yaml`. It connects Salesforce, Slack, calls, and SQL or webhook push.
-2. **Set auto-watch rules,** such as all open renewal opportunities closing in the next 90 days.
-3. **Let the matches join their deals.** Scheduled pulls and pushed data are matched by email, domain and channel.
-4. **Leave the rest to deterministic parsing and guardrails.** Whole sentences, neutralized text, speaker roles, receipts, and risk and diff rules.
-5. **Auto-stop and archive.** On Closed Won or Closed Lost, polling halts and the final card is sealed.
+1. **Passive ingestion:** your calls and Slack threads find their deal. You do nothing.
+2. **Risk alerts:** Slack alerts you when a renewal turns risky, and says [what flagged it](docs/deals.md#what-flags-a-deal).
+3. **Pre-call refresh:** refresh the card before a customer call to pick up the last few minutes.
+4. **Thirty-second read:** read the Deal card as your renewal snapshot. Click any line for its
+   source proof, track blockers on the checklist and playbook, or ask the council what is blocking
+   the renewal.
+5. **Archive on close:** when the deal closes, it is archived with its final sealed card.
+
+A call or thread that fits more than one deal waits for a person's confirmation, and reaches no card
+until then. More in [working a deal](docs/deals.md).
+
+### RevOps & GTM Engineering
+
+1. **Declarative configuration:** one `gtm.yaml` connects Salesforce, Slack, call recordings, and
+   SQL or webhook push.
+2. **Auto-watch rules:** for example, every open renewal opportunity closing in the next 90 days.
+3. **Rule-based matching:** scheduled pulls and pushed data join their deals by email, domain and
+   channel rules.
+4. **Deterministic processing:** whole sentences, neutralized text, speaker roles, receipts, and risk
+   and diff rules, all by fixed code.
+5. **Lifecycle end:** on Closed Won or Closed Lost, polling stops and the final card is sealed.
 
 One deal ID gets the card from the REST API, the MCP server, a webhook, a Slack alert or the web
 app. More in [setting it up](docs/config.md) and [the API](docs/api.md).
 
-## For operators
+### Infrastructure Operators
 
-Download one binary, or run the Docker image, and give it a PostgreSQL URL. The web app is inside
-the binary. More in [running it](docs/operations.md).
+Download one binary, which has the web app inside it, or run the container image, and give it a
+PostgreSQL URL. More in [running it](docs/operations.md).
 
-## What it is tested against
+---
 
-Ten invented deals, each built to break one property. Each card was checked against its property when
-it was recorded in [`testdata/oracle/cards/cases.jsonl.gz`](testdata/oracle/cards/cases.jsonl.gz), and the
-[parity test](internal/cards/parity_test.go) builds every one of them byte for byte:
+## Adversarial Test Suite
 
-| Deal | The card must |
-| --- | --- |
-| Contradiction | show the CRM amount and the amount a message reports, and blend neither |
-| Speaker trap | keep a seller's promised date, and a seller's retelling, as the seller's |
-| Missing data | print Missing for an empty field and no currency the record lacks |
-| Injection | show mentions, links, and control characters as inert text, and keep a message's figure out of the record values |
-| Long sentence | show a sentence whole or not at all |
-| Name collision | call a speaker unknown when a seller and a contact share the name |
-| Foreign number | resolve a number only inside its own card |
-| Buried blocker | put a marked blocker first, above routine messages |
-| Channel over the cap | count what was not read and say that more exists |
-| Law-firm renewal | equal the card above, byte for byte |
+Ten invented deals, each built to break one property. Each card was checked against its property
+when it was recorded in [`testdata/oracle/cards/cases.jsonl.gz`](testdata/oracle/cards/cases.jsonl.gz),
+and the [parity test](internal/cards/parity_test.go) rebuilds every one of them byte for byte. The
+rules that enforce two of the properties, marked blockers and the channel cap, are still on the
+[roadmap](docs/ROADMAP.md).
 
-## What it guarantees
+| Case | Property it guards |
+| :--- | :--- |
+| **Contradiction** | Shows the CRM amount and the amount a message reports, and blends neither |
+| **Speaker trap** | Keeps a seller's promised date, and a seller's retelling of a price, as the seller's |
+| **Missing data** | Prints Missing for an empty field, and no currency the record lacks |
+| **Injection** | Shows mentions, links, and control characters as inert text, and keeps a message's figure out of the record values |
+| **Long sentence** | Shows a sentence whole, or omits and counts it; never cuts one |
+| **Name collision** | Calls a speaker unknown when a seller and a contact share a name |
+| **Foreign number** | Resolves a number only inside its own card |
+| **Buried blocker** | Puts a marked blocker first, above routine messages |
+| **Channel over the cap** | Counts what was not read, and says that more exists |
+| **Law-firm renewal** | Equals the card above, byte for byte |
 
-- A tool runs only after its receipt is committed. A refused call still gets a receipt.
-- One source's grant does not open another, and a person reads only the deals granted to them.
-- A call or thread joins a deal only by a rule you configured. One that fits two accounts joins neither card, and both cards say so.
-- A card is built only from checked evidence. Evidence that fails a check gives no card.
-- A note cannot direct the workflow. An instruction inside one appears quoted and creates nothing.
-- The connector writes nothing to the CRM. Alerts and webhooks are off until you configure them.
-- A repeated push with the same key returns the same result.
+---
 
-The card shows what the records say, not whether a source is true.
+## System Guarantees
 
-## Limits
+- **Receipt-first execution:** a tool runs only after its receipt is committed. A refused call still
+  gets a receipt.
+- **Privilege isolation:** one source's grant never opens another, and a person reads only the deals
+  granted to them.
+- **Unambiguous deal binding:** a call or thread joins a deal only by a rule you configured. One that
+  fits two accounts joins neither card, and both cards say so.
+- **Fail-closed evidence:** a card is built only from checked evidence. Evidence that fails a check
+  gives no card.
+- **Untrusted input isolation:** source text never chooses a tool, a grant, or a write. An
+  instruction inside a note appears as quoted text and creates nothing.
+- **Read-only CRM, opt-in delivery:** the connector writes nothing to the CRM. Alerts and webhooks
+  are off until you configure them.
+- **Idempotent pushes:** a repeated push with the same key returns the same result.
 
-- The trial on five real renewals: its counts go here once it has run.
-- The card shows up to twelve sentences, dealt by speaker role and by time, and counts the rest. Every sentence read is in `inspect` and in the proof drawer.
-- A person, not wording, decides what is a blocker. A readiness rule reports what it observed in the sources it read, and unknown when a read is missing.
-- A model only proposes marks. A person accepts or rejects each one.
-- No live org has been verified.
-- macOS and Linux. One CRM: Salesforce.
+> [!NOTE]
+> **Epistemic boundary:** a Deal card certifies what the records say, not whether a statement in
+> them is true.
 
-## More
+---
 
-- **Sales and CS:** [working a deal](docs/deals.md), [reading a Deal card](docs/cards.md).
-- **Daily use:** [the command line](docs/cli.md), [connecting Salesforce, calls and Slack](docs/sources.md).
-- **RevOps and GTM engineers:** [setting it up](docs/config.md), [the API](docs/api.md), [MCP](docs/mcp.md), [audit receipts](docs/audit.md).
-- **Operators:** [running it](docs/operations.md), [security review](SECURITY_REVIEW.md).
-- **The project:** [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
+## Known Limitations & Scope
+
+- **Real-renewal trial:** the counts from a trial on five real renewals go here once it has run.
+- **What a card shows:** up to twelve sentences, dealt by speaker role and by time, with the rest
+  counted. Every sentence read is in `inspect` and in the web app's proof drawer.
+- **People decide blockers:** a person, not wording, marks a blocker. A readiness rule reports what
+  it observed in the sources it read, and unknown when a read is missing. A model only proposes
+  marks, and a person accepts or rejects each one.
+- **Live verification:** No live org has been verified.
+- **Platforms:** macOS and Linux. One CRM: Salesforce.
+
+---
+
+## Reference Documentation
+
+- **Sales & CS:** [working a deal](docs/deals.md) · [reading a Deal card](docs/cards.md)
+- **Daily use:** [the command line](docs/cli.md) · [connecting Salesforce, calls and Slack](docs/sources.md)
+- **RevOps & GTM engineering:** [setting it up (`gtm.yaml`)](docs/config.md) · [HTTP API](docs/api.md) · [MCP server](docs/mcp.md) · [audit receipts](docs/audit.md)
+- **Infrastructure & security:** [running it](docs/operations.md) · [security review](SECURITY_REVIEW.md)
+- **Project:** [roadmap](docs/ROADMAP.md) · [working on the code](AGENTS.md)
+
+---
 
 All checked-in companies, people, and records are invented. MIT licensed.
