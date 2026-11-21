@@ -267,6 +267,12 @@
   padding: var(--gc-space-6) 0;
 }
 
+.fr-nopage__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gc-space-3);
+}
+
 /* The phone menu. */
 .fr-menu {
   display: grid;

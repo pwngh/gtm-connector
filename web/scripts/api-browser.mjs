@@ -1,7 +1,8 @@
 // Browser tests for the app in API mode, against the built app (web/dist) and
 // a stub of /api/v1 that each test steers: delayed and refused answers, two
-// accounts, blocked browser storage, a session that expires, hostile text in
-// names, gaps and receipts, a static host's answer, and wrong addresses. The
+// accounts, the demo book's thirty accounts on Deals, blocked browser storage,
+// a session that expires, hostile text in names, gaps and receipts, a static
+// host's answer, and wrong addresses. The
 // frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
 // and dark: tab order, target sizes, focus outlines, Escape, overflow, text
 // contrast and what browser storage holds. The stub keeps the Go server's
@@ -58,16 +59,25 @@ function cardOf(account) {
       receipt_id: `receipt-${account}-${body.tool}`, record_version_id: `version-${body.n}`, body: {...body, speaker: body.speaker && `${body.speaker} ${hostile}`}})),
     gaps: sealed.gaps.map(gap => ({...gap, text: `${gap.text} ${hostile}`}))};
 }
-const cards = {'acc-002': cardOf('acc-002'), 'acc-003': cardOf('acc-003'), 'acc-001': cardOf('acc-001')};
+const cards = Object.fromEntries(Object.keys(oracle).filter(key => /^acc-\d+$/.test(key)).map(key => [key, cardOf(key)]));
+// The demo book's thirty accounts with their recorded names, by ID as the server lists them.
+const book = JSON.parse(readFileSync(new URL('../../testdata/oracle/cards/demo_book.json', import.meta.url), 'utf8')).crm.accounts.rows
+  .map(([account, name]) => ({account, name})).sort((a, b) => a.account < b.account ? -1 : 1);
+// In the book each account's card has its own day, so a row can only show its own time.
+const bookTime = account => `2027-01-${account.slice(-2)}T15:00:04Z`;
 const receiptOf = (id, account, tool) => ({id, operation_id: `op-${id}`, parent_id: 'brief', ordinal: 1, principal_id: 'p-1', token_id: 't', tool, scope: `${tool.includes('call') ? 'calls' : tool.includes('slack') ? 'slack' : 'crm'}:read`,
   account, connection_generation: 1, arguments: {}, request_id: null, brief_id: null, status: 'ok', http_status: 200, row_count: 1, rows: [`row ${hostile}`],
   elapsed_ms: 1, error: `note ${hostile}`, started_at: '2027-01-15T15:00:00Z', finished_at: '2027-01-15T15:00:01Z', delivered_at: null});
 const principal = {id: 'p-1', display_name: `Demo reviewer ${hostile}`, kind: 'person', workspace_id: 'w-1', workspace_kind: 'demo', demo: true};
+const customer = {...principal, id: 'p-3', display_name: 'Customer reader', workspace_kind: 'customer', demo: false};
 const elsewhere = {...principal, id: 'p-2', display_name: 'Another principal'};
 const login = 'demo-reviewer', password = 'stub-password-for-browser-tests';
 
 // The stub. `stub.steer` answers a request before the stub's own routes when it returns an answer.
-const stub = {sessions: new Map(), pre: new Set(), ttlMs: 3600_000, steer: null, log: [], files: [], pending: 0, granted: new Set(['acc-002', 'acc-003'])};
+// `stub.accounts` is the account list it serves, `stub.times` the publish time of each card it
+// lists, `stub.empty` the accounts with no card, and `stub.principal` who signs in.
+const stub = {sessions: new Map(), pre: new Set(), ttlMs: 3600_000, steer: null, log: [], files: [], pending: 0, granted: new Set(['acc-002', 'acc-003']),
+  accounts, times: null, empty: new Set(), principal, cardLists: 0, mostCardLists: 0};
 let base = '';
 // Resolves once no API request has been open for 300 ms.
 async function apiSettled() {
@@ -76,7 +86,12 @@ async function apiSettled() {
     quiet = stub.pending ? 0 : quiet + 1;
   }
 }
-function reset() {stub.sessions.clear(); stub.pre.clear(); stub.ttlMs = 3600_000; stub.steer = null; stub.log = []; stub.files = []; stub.granted = new Set(['acc-002', 'acc-003']);}
+function reset() {
+  stub.sessions.clear(); stub.pre.clear(); stub.ttlMs = 3600_000; stub.steer = null; stub.log = []; stub.files = []; stub.granted = new Set(['acc-002', 'acc-003']);
+  stub.accounts = accounts; stub.times = null; stub.empty = new Set(); stub.principal = principal; stub.cardLists = 0; stub.mostCardLists = 0;
+}
+// Serves the demo book: thirty granted accounts, each card on its own day.
+function serveBook() {stub.accounts = book; stub.granted = new Set(book.map(item => item.account)); stub.times = bookTime;}
 const token = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 const cookies = request => Object.fromEntries((request.headers.cookie || '').split(';').map(part => part.trim().split('=')).filter(([key]) => key));
 const live = request => {const id = cookies(request).stub_session, session = id && stub.sessions.get(id); return session && session.expires > Date.now() ? [id, session] : [null, null];};
@@ -118,17 +133,18 @@ async function api(request, response, path) {
     const given = JSON.parse(body || '{}');
     if (given.login !== login || given.password !== password) return refuse(response, 401, 'sign_in_refused');
     stub.pre.delete(pre); if (id) stub.sessions.delete(id);
-    const next = token(); stub.sessions.set(next, {principal, expires: Date.now() + stub.ttlMs});
+    const next = token(); stub.sessions.set(next, {principal: stub.principal, expires: Date.now() + stub.ttlMs});
     return send(response, 200, view(next, stub.sessions.get(next)), {'Set-Cookie': `stub_session=${next}; Path=/; HttpOnly; SameSite=Lax`});
   }
   if (!session) return refuse(response, 401, 'sign_in_required');
   let match;
-  if (path === '/api/v1/accounts') return send(response, 200, {accounts: accounts.filter(item => stub.granted.has(item.account))});
+  if (path === '/api/v1/accounts') return send(response, 200, {accounts: stub.accounts.filter(item => stub.granted.has(item.account))});
   if ((match = path.match(/^\/api\/v1\/accounts\/([^/]+)\/cards$/))) {
     const account = decodeURIComponent(match[1]);
     if (!stub.granted.has(account) || !cards[account]) return refuse(response, 403, 'not_permitted');
     const {units, gaps, ...head} = cards[account];
-    return send(response, 200, {account, cards: [head]});
+    if (stub.empty.has(account)) return send(response, 200, {account, cards: []});
+    return send(response, 200, {account, cards: [{...head, published_at: stub.times?.(account) ?? head.published_at}]});
   }
   const cardFor = cardId => Object.values(cards).find(card => card.id === cardId && stub.granted.has(card.account));
   if ((match = path.match(/^\/api\/v1\/cards\/([^/]+)$/))) {
@@ -152,7 +168,10 @@ const server = createServer(async (request, response) => {
   if (path.startsWith('/api/')) {
     stub.log.push(`${request.method} ${path}`);
     stub.pending++;
-    try {return await api(request, response, path);} finally {stub.pending--;}
+    // How many card lists are open at once, at most.
+    const cardList = /^\/api\/v1\/accounts\/[^/]+\/cards$/.test(path);
+    if (cardList) {stub.cardLists++; stub.mostCardLists = Math.max(stub.mostCardLists, stub.cardLists);}
+    try {return await api(request, response, path);} finally {stub.pending--; if (cardList) stub.cardLists--;}
   }
   // As serveApp on the Go server: a reserved path is the API's 404, a file of
   // the build is served, "/" and the client routes get the app, any other path
@@ -222,7 +241,7 @@ const focused = tab => tab.evaluate(() => {const el = document.activeElement; re
 // first opaque background behind it, the smallest text, every control smaller
 // than 44 by 44 or without a name, and how far the page scrolls sideways.
 const frameParts = '.fr-chrome, .fr-signin, .fr-nopage, [role=dialog]';
-const measure = tab => tab.evaluate(parts => {
+const measure = (tab, measured = frameParts) => tab.evaluate(parts => {
   const luminance = rgb => {const [r, g, b] = rgb.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => {v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;}); return .2126 * r + .7152 * g + .0722 * b;};
   const background = el => {while (el) {const color = getComputedStyle(el).backgroundColor; if (color && !/rgba\(.*, 0\)|transparent/.test(color)) return color; el = el.parentElement;} return 'rgb(255,255,255)';};
   const contrast = el => {const a = luminance(getComputedStyle(el).color), b = luminance(background(el)); return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);};
@@ -243,7 +262,7 @@ const measure = tab => tab.evaluate(parts => {
     .filter(el => !(el.getAttribute('aria-label') || el.textContent.trim() || [...(el.labels ?? [])].some(label => label.textContent.trim()))).map(el => el.outerHTML.slice(0, 80));
   return {colours, lowest: Math.min(...Object.values(colours)), smallest: Math.min(...texts.map(el => parseFloat(getComputedStyle(el).fontSize))), small, unnamed,
     overflow: document.documentElement.scrollWidth - innerWidth};
-}, frameParts);
+}, measured);
 // What has focus: its name, its size and its outline.
 const ring = tab => tab.evaluate(() => {
   const el = document.activeElement, box = el.getBoundingClientRect(), style = getComputedStyle(el);
@@ -475,9 +494,11 @@ for (const [width, scheme] of [[320, 'light'], [1440, 'light'], [320, 'dark'], [
     check(sizes.overflow <= 1, `${width} ${scheme}: no horizontal overflow (${sizes.overflow}px)`);
     await tab.keyboard.press('Control+k');
     await tab.waitForSelector('.ui-palette__option');
+    await tab.waitForSelector('.ui-palette__group:has-text("Deals")');
     const groups = await tab.locator('.ui-palette__group').allTextContents();
     const options = await tab.locator('.ui-palette__label').allTextContents();
-    check(groups.join() === 'Ops' && options.join() === 'Evidence,Readiness', `${width} ${scheme}: the palette offers the server pages only (${options.join()})`);
+    check(groups.join() === 'Deals,Ops' && options.join('|') === `Second ${hostile} Co.|Third Account Co.|Evidence|Readiness`,
+      `${width} ${scheme}: the palette lists the deals by name, as text, then the Ops pages (${groups.join()}: ${options.join('|')})`);
     await tab.locator('.ui-palette__option', {hasText: 'Readiness'}).first().click();
     await until(tab, () => location.pathname.endsWith('/readiness') && new URL(location.href).searchParams.get('account') === 'acc-003');
     check(tab.errors.length === 0, `${width} ${scheme}: no page errors (${tab.errors.join(' | ')})`);
@@ -509,7 +530,7 @@ for (const width of [390, 1440]) {
     await tab.keyboard.type('nothing like this');
     await tab.waitForSelector('.ui-palette__empty');
     const empty = await tab.textContent('.ui-palette__empty');
-    check(palette.title === 'Find a page' && palette.placeholder === 'Evidence or Readiness' && empty === 'No page matches.', `${width}: the palette is titled ${palette.title}, suggests ${palette.placeholder} and says ${empty}`);
+    check(palette.title === 'Find a deal' && palette.placeholder === 'A deal’s name, or Evidence' && empty === 'No deal or page matches.', `${width}: the palette is titled ${palette.title}, suggests ${palette.placeholder} and says ${empty}`);
     check(violations(tab).length === 0, `${width}: no policy violation (${violations(tab).join(' | ')})`);
     check(tab.errors.length === 0, `${width}: no page errors (${tab.errors.join(' | ')})`);
     // The icons the page links, and the one a browser asks for by default, answer with an image.
@@ -542,14 +563,14 @@ await scenario('a static host', async () => {
   await tab.context().close();
 });
 
-// 13. Addresses: "/" and /ops open Evidence; a wrong address inside the app
-// says so with one link back; any other address gets the static page, 404.
+// 13. Addresses: "/" opens Deals and /ops opens Evidence; a wrong address inside the app
+// says so with links to both; any other address gets the static page, 404.
 await scenario('home addresses', async () => {
   const tab = await page();
-  for (const path of ['/', '/ops', '/?account=acc-003']) {
+  for (const [path, opens] of [['/', '/deals'], ['/ops', '/ops/evidence'], ['/?account=acc-003', '/deals']]) {
     await tab.goto(base + path, {waitUntil: 'networkidle'});
     await tab.waitForSelector('.fr-signin');
-    check(new URL(tab.url()).pathname === '/ops/evidence', `${path} opens Evidence (${new URL(tab.url()).pathname})`);
+    check(new URL(tab.url()).pathname === opens, `${path} opens ${opens} (${new URL(tab.url()).pathname})`);
   }
   await tab.context().close();
 });
@@ -561,11 +582,11 @@ await scenario('a wrong address in the app', async () => {
   await tab.waitForSelector('main h1.fr-nopage__title');
   const shown = await tab.evaluate(() => ({heading: document.querySelector('main h1').textContent,
     links: [...document.querySelectorAll('main a')].map(link => `${link.textContent} ${link.getAttribute('href')}`)}));
-  check(shown.heading === 'There is no page at this address.' && shown.links.join() === 'Go to Evidence /ops/evidence',
-    `/ops/nothing shows the in-app page and its one link (${shown.heading}; ${shown.links.join(', ')})`);
+  check(shown.heading === 'There is no page at this address.' && shown.links.join() === 'Go to Deals /deals,Go to Ops /ops/evidence',
+    `/ops/nothing shows the in-app page and its links (${shown.heading}; ${shown.links.join(', ')})`);
   await tab.click('main a');
-  await tab.waitForSelector('.api-renewal-header');
-  check(new URL(tab.url()).pathname === '/ops/evidence' && tab.errors.length === 0, `its link leads to Evidence (${tab.url()}; ${tab.errors.join(' | ')})`);
+  await tab.waitForSelector('.deals-list');
+  check(new URL(tab.url()).pathname === '/deals' && tab.errors.length === 0, `its first link leads to Deals (${tab.url()}; ${tab.errors.join(' | ')})`);
   await tab.context().close();
 });
 for (const scheme of ['light', 'dark']) {
@@ -587,7 +608,7 @@ for (const scheme of ['light', 'dark']) {
         smallest: Math.min(...texts.map(el => parseFloat(getComputedStyle(el).fontSize))), contrast: Math.min(...texts.map(contrast)),
         overflow: document.documentElement.scrollWidth - innerWidth};
     });
-    check(facts.heading === 'There is no page at this address.' && facts.body.includes('gtm-connector') && facts.link === 'Go to Evidence /' && facts.links === 1 &&
+    check(facts.heading === 'There is no page at this address.' && facts.body.includes('gtm-connector') && facts.link === 'Go to Deals /' && facts.links === 1 &&
       facts.scripts === 0 && !facts.root, `${scheme}: the static page names the product, says there is no page and links to / (${facts.link}), with no script`);
     check(facts.size[0] >= 44 && facts.size[1] >= 44 && facts.smallest >= 14 && facts.contrast >= 4.5 && facts.overflow <= 0,
       `${scheme} 320: link ${facts.size.map(Math.round).join('x')}, smallest text ${facts.smallest}px, lowest contrast ${facts.contrast.toFixed(2)}:1, overflow ${facts.overflow}px`);
@@ -596,8 +617,8 @@ for (const scheme of ['light', 'dark']) {
     check(ring.tag === 'A' && ring.outline !== 'none' && ring.width >= 2, `${scheme}: the link shows keyboard focus (${ring.tag} ${ring.outline} ${ring.width}px)`);
     await tab.keyboard.press('Enter');
     await tab.waitForSelector('.fr-signin');
-    check(new URL(tab.url()).pathname === '/ops/evidence' && violations(tab).length === 0 && tab.errors.length === 0,
-      `${scheme}: the link leads back to Evidence (${tab.url()}; ${violations(tab).join(' | ')})`);
+    check(new URL(tab.url()).pathname === '/deals' && violations(tab).length === 0 && tab.errors.length === 0,
+      `${scheme}: the link leads back to Deals (${tab.url()}; ${violations(tab).join(' | ')})`);
     await tab.context().close();
   });
 }
@@ -666,11 +687,11 @@ for (const width of [320, 390, 768, 1440]) {
       await tab.reload({waitUntil: 'networkidle'});
       await tab.waitForSelector('.api-unit');
       const order = [];
-      for (let i = 0; i < (phone ? 2 : 5); i++) {
+      for (let i = 0; i < (phone ? 2 : 6); i++) {
         await tab.keyboard.press('Tab');
         order.push(await ring(tab));
       }
-      const expected = phone ? 'Skip to content,Menu' : 'Skip to content,Ops,Find a page,Dark theme,Sign out';
+      const expected = phone ? 'Skip to content,Menu' : 'Skip to content,Deals,Ops,Find a deal,Dark theme,Sign out';
       check(order.map(focus => focus.name).join() === expected && order.every(fits),
         `${at}: Tab order is ${order.map(focus => `${focus.name} ${Math.round(focus.width)}x${Math.round(focus.height)} ${focus.outline}px`).join(', ')}`);
       // Escape closes the palette and focus goes back to what opened it.
@@ -697,7 +718,7 @@ for (const width of [320, 390, 768, 1440]) {
         }
         const box = await tab.locator('[role=dialog]').boundingBox();
         facts = await measure(tab);
-        check(items.join() === 'Ops,Evidence,Readiness,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.width === width,
+        check(items.join() === 'Deals,Ops,Evidence,Readiness,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.width === width,
           `${at}: the menu fills the screen with ${items.join(', ')}, and Tab stays in it (${trapped.map(focus => focus.name).join(', ')})`);
         check(healthy(facts), `${at}: the menu, ${reported(`${at} menu`, facts)}`);
         if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `menu-${width}-${scheme}.png`)});
@@ -725,6 +746,251 @@ for (const width of [320, 390, 768, 1440]) {
       await tab.waitForSelector('.fr-signin');
       await until(tab, () => document.activeElement?.id === 'fr-signin-title');
       check(await tab.locator('.api-frame, .api-renewal-header, [role=dialog]').count() === 0, `${at}: after sign-out focus is on the sign-in heading and nothing read is on screen`);
+      check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+      await tab.context().close();
+    });
+  }
+}
+
+// 15. Deals: the granted accounts by name, each row with its own newest card
+// time, read four at a time; refusals per list and per row; the empty states;
+// the first-run hint; the keys and the filter; and the layout at every width.
+const collator = new Intl.Collator('en', {sensitivity: 'base', numeric: true});
+const byName = list => [...list].sort((a, b) => collator.compare(a.name, b.name) || collator.compare(a.account, b.account));
+// A time as the page writes it: the day and the time to the second, in UTC.
+const utc = value => `${new Date(value).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC'})}, ${value.slice(11, 19)} UTC`;
+const rowFacts = tab => tab.$$eval('.deals-row', rows => rows.map(row => {
+  const box = row.getBoundingClientRect(), who = row.querySelector('.deals-row__who').getBoundingClientRect(), card = row.querySelector('.deals-row__card').getBoundingClientRect();
+  const name = row.querySelector('.deals-row__name').getBoundingClientRect(), id = row.querySelector('.deals-row__id').getBoundingClientRect();
+  return {account: row.dataset.account, name: row.querySelector('.deals-row__name').textContent, id: row.querySelector('.deals-row__id').textContent,
+    card: row.querySelector('.deals-row__card').innerText.replace(/\s+/g, ' ').trim(), href: row.getAttribute('href'), height: box.height, width: box.width,
+    current: row.getAttribute('aria-current'), tabIndex: row.tabIndex, cardBelow: card.top >= who.bottom - 1, oneLine: Math.abs(name.top - id.top) < 8 || Math.abs(name.bottom - id.bottom) < 8};
+}));
+const dealParts = '.fr-chrome, .deals-list, .deals-choose';
+
+await scenario('deals: thirty accounts in name order, each opening its address', async () => {
+  serveBook();
+  stub.empty = new Set(['acc-030']);
+  stub.steer = (method, path) => path.endsWith('/cards') ? {delay: 120} : null;
+  const tab = await page({width: 1440});
+  await tab.goto(`${base}/`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await until(tab, () => location.pathname === '/deals' && document.querySelectorAll('.deals-row').length === 30 && ![...document.querySelectorAll('.deals-row__card')].some(card => card.textContent === 'Reading'));
+  const rows = await rowFacts(tab);
+  const expected = byName(book);
+  check(rows.map(row => row.account).join() === expected.map(row => row.account).join() && rows.every((row, i) => row.name === expected[i].name && row.id === row.account && row.href === `/deals/${row.account}`),
+    `"/" opens Deals with 30 rows in name order, each named and linked as the server sent it (${rows.slice(0, 3).map(row => row.name).join(', ')}, ...)`);
+  const wrong = rows.filter(row => row.card !== (row.account === 'acc-030' ? 'No card' : `Card published ${utc(bookTime(row.account))}`));
+  check(wrong.length === 0, `each row shows its own newest card time in UTC, or No card (${wrong.map(row => `${row.account}: ${row.card}`).join('; ') || rows[0].card})`);
+  check(rows.every(row => row.height >= 56), `every row is at least 56 high (lowest ${Math.min(...rows.map(row => row.height))})`);
+  const lists = stub.log.filter(entry => /\/cards$/.test(entry)).length;
+  check(lists === 30 && stub.mostCardLists <= 4 && stub.mostCardLists >= 2, `the 30 card lists are read with at most four in flight (${lists} reads, ${stub.mostCardLists} at once at most)`);
+  const head = await tab.evaluate(() => {
+    const list = document.querySelector('.deals-rail .deals-rows');
+    return {title: document.querySelector('.deals-head__title').textContent, tag: document.querySelector('.deals-head__title').tagName, meta: document.querySelector('.deals-head__meta').textContent,
+      choose: document.querySelector('.deals-choose')?.textContent, rail: document.querySelector('.deals-rail').getBoundingClientRect().width,
+      overflow: getComputedStyle(list).overflowY, scrolls: list.scrollHeight > list.clientHeight, tabbable: [...document.querySelectorAll('.deals-row')].filter(row => row.tabIndex === 0).length};
+  });
+  check(head.title === 'Deals30' && head.tag === 'H1' && head.meta === 'Listed by name. This server does not rank deals yet.' && head.choose === 'Choose a deal.',
+    `1440: the title and count, the line under it, and "Choose a deal." beside the list (${head.title}, ${head.meta}, ${head.choose})`);
+  check(head.rail === 336 && head.overflow === 'auto' && head.scrolls && head.tabbable === 1, `1440: the list is a rail ${head.rail} wide whose rows scroll on their own, with one row in the Tab order`);
+  stub.steer = null;
+  let opened = 0;
+  for (const row of rows) {
+    await tab.click(`.deals-row[data-account="${row.account}"]`);
+    await until(tab, ([href, name]) => location.pathname === href && document.querySelector('.deals-row[aria-current="page"]')?.getAttribute('href') === href &&
+      document.querySelector('.deals-pane .api-renewal-header h1')?.textContent.startsWith(name), [row.href, row.name]);
+    opened++;
+  }
+  const open = await tab.evaluate(() => ({rail: document.querySelector('.deals-head__title').tagName, heading: document.activeElement?.closest('.deals-pane') !== null, rows: document.querySelectorAll('.deals-row').length}));
+  check(opened === 30 && open.rows === 30 && open.rail === 'H2', `each of the 30 rows opens its address beside the rail, which stays (${opened} opened; the rail title is ${open.rail})`);
+  check(tab.errors.length === 0 && violations(tab).length === 0, `no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+  await tab.context().close();
+});
+
+await scenario('deals: a slow card list', async () => {
+  serveBook();
+  stub.steer = (method, path) => path === '/api/v1/accounts/acc-003/cards' ? {delay: 1000} : null;
+  const tab = await page({width: 768});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await until(tab, () => document.querySelectorAll('.deals-row').length === 30);
+  const row = '.deals-row[data-account="acc-003"] .deals-row__card';
+  const seen = new Set();
+  for (let i = 0; i < 60; i++) {
+    seen.add((await tab.innerText(row)).replace(/\s+/g, ' ').trim());
+    if (![...seen].at(-1).startsWith('Reading') && i > 0) break;
+    await tab.waitForTimeout(50);
+  }
+  const others = (await rowFacts(tab)).filter(item => item.account !== 'acc-003');
+  check([...seen].join('|') === `Reading|Card published ${utc(bookTime('acc-003'))}`, `the slow row says Reading, then only its own time (${[...seen].join(' | ')})`);
+  check(others.every(item => item.card === `Card published ${utc(bookTime(item.account))}`), 'every other row shows its own time');
+  await tab.context().close();
+});
+
+await scenario('deals: reading', async () => {
+  stub.steer = (method, path) => path === '/api/v1/accounts' ? {delay: 1500} : null;
+  const tab = await page({width: 390});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.deals-reading');
+  const shown = await tab.evaluate(() => ({placeholders: document.querySelectorAll('.deals-placeholder').length, status: document.querySelector('.deals-reading [role=status]')?.textContent,
+    rows: document.querySelectorAll('.deals-row').length}));
+  check(shown.placeholders === 6 && shown.status === 'Reading your deals' && shown.rows === 0, `while the list is read: ${shown.placeholders} placeholder rows and "${shown.status}"`);
+  await tab.waitForSelector('.deals-row');
+  await tab.context().close();
+});
+
+await scenario('deals: a refused account list', async () => {
+  stub.steer = (method, path) => path === '/api/v1/accounts' ? {status: 403, code: 'not_permitted'} : null;
+  const tab = await page({width: 390});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.deals-list [data-refusal="not_permitted"]');
+  const shown = await tab.evaluate(() => ({text: document.querySelector('.deals-list').innerText, rows: document.querySelectorAll('.deals-row, .deals-placeholder').length}));
+  check(shown.text.includes('Not permitted.') && shown.text.includes('Server code: not_permitted') && shown.rows === 0 && !/No deal/.test(shown.text),
+    `a refused account list shows "Not permitted" with its code and no row (${shown.rows} rows)`);
+  await tab.context().close();
+});
+
+await scenario('deals: one refused card list', async () => {
+  serveBook();
+  stub.steer = (method, path) => path === '/api/v1/accounts/acc-005/cards' ? {status: 403, code: 'not_permitted'} : null;
+  const tab = await page({width: 1440});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await until(tab, () => document.querySelectorAll('.deals-row').length === 30 && ![...document.querySelectorAll('.deals-row__card')].some(card => card.textContent === 'Reading'));
+  const rows = await rowFacts(tab);
+  const refused = rows.find(row => row.account === 'acc-005');
+  check(refused.card === 'Not permitted Server code: not_permitted' && rows.filter(row => row.card.startsWith('Card published')).length === 29,
+    `a refused card list shows "Not permitted" on that row only (${refused.card})`);
+  await tab.context().close();
+});
+
+await scenario('deals: empty for a demo principal, then read again', async () => {
+  stub.accounts = [];
+  const tab = await page({width: 390});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.deals-empty');
+  const text = (await tab.innerText('.deals-empty')).replace(/\s+/g, ' ').trim();
+  check(text === 'No deals yet. This demo install has no cards. Run make demo, then read again. Read again', `a demo principal with no deals is told to run make demo (${text})`);
+  await tab.evaluate(() => {window.__sameDocument = true;});
+  const before = stub.log.filter(entry => entry === 'GET /api/v1/accounts').length;
+  serveBook();
+  await tab.click('.deals-empty button');
+  await until(tab, () => document.querySelectorAll('.deals-row').length === 30);
+  const after = stub.log.filter(entry => entry === 'GET /api/v1/accounts').length;
+  check(after === before + 1 && await tab.evaluate(() => window.__sameDocument === true), `Read again reads the list once more without reloading, and the rows appear (${before} then ${after} reads)`);
+  await tab.context().close();
+});
+
+await scenario('deals: empty for any other principal', async () => {
+  stub.accounts = [];
+  stub.principal = customer;
+  const tab = await page({width: 390});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.deals-empty');
+  const text = (await tab.innerText('.deals-empty')).replace(/\s+/g, ' ').trim();
+  check(text === 'No deals are granted to you. A grant names the deals a person reads.' && await tab.locator('.fr-demo:visible').count() === 0,
+    `a principal that is not a demo one with no deals is told what a grant is (${text})`);
+  await tab.context().close();
+});
+
+await scenario('deals: the first-run hint', async () => {
+  const named = `Wren ${hostile} LLP`;
+  stub.accounts = [{account: 'acc-002', name: `Second ${hostile} Co.`}, {account: 'acc-003', name: named}];
+  const tab = await page({width: 390});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.deals-hint');
+  const hint = await tab.evaluate(() => ({text: document.querySelector('.deals-hint__text').textContent, link: document.querySelector('.deals-hint__link').textContent,
+    href: document.querySelector('.deals-hint__link').getAttribute('href'), injected: Boolean(window.__injected) || Boolean(document.querySelector('main img')),
+    above: document.querySelector('.deals-hint').getBoundingClientRect().bottom <= document.querySelector('.deals-rows').getBoundingClientRect().top}));
+  check(hint.text === `New here? Open ${named}, the deal the README walks through.` && hint.link === named && hint.href === '/deals/acc-003' && !hint.injected && hint.above,
+    `the hint names the README's deal by the server's string, as text, above the rows (${hint.text})`);
+  const facts = await measure(tab, dealParts);
+  check(healthy(facts), `390: the list with the hint, ${reported('390 hint', facts)}`);
+  await tab.click('.deals-hint__dismiss');
+  await tab.waitForSelector('.deals-hint', {state: 'detached'});
+  await tab.reload({waitUntil: 'networkidle'});
+  await tab.waitForSelector('.deals-row');
+  const kept = await tab.evaluate(() => ({hint: document.querySelectorAll('.deals-hint').length, local: Object.keys(localStorage), session: Object.keys(sessionStorage)}));
+  check(kept.hint === 0 && kept.local.join() === 'gtm-connector-deals-hint' && kept.session.length === 0,
+    `Dismiss hides the hint across a reload, and storage holds only that display key (local ${kept.local.join()}; session ${kept.session.join()})`);
+  await tab.context().close();
+  stub.principal = customer;
+  const other = await page({width: 390});
+  await other.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(other);
+  await other.waitForSelector('.deals-row');
+  check(await other.locator('.deals-hint').count() === 0, 'a principal with demo false sees no hint');
+  await other.context().close();
+});
+
+await scenario('deals: keys and the filter', async () => {
+  serveBook();
+  const tab = await page({width: 768});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await until(tab, () => document.querySelectorAll('.deals-row').length === 30);
+  const names = byName(book).map(item => item.account);
+  const at = () => tab.evaluate(() => document.activeElement?.dataset.account ?? document.activeElement?.tagName);
+  await tab.focus('input[name=q]');
+  const moves = [];
+  for (const key of ['ArrowDown', 'ArrowDown', 'End', 'ArrowDown', 'Home', 'ArrowUp']) {
+    await tab.keyboard.press(key);
+    moves.push(await at());
+  }
+  check(moves.join() === [names[0], names[1], names[29], names[29], names[0], names[0]].join(), `Down, End, Home and Up move between rows (${moves.join(', ')})`);
+  await tab.keyboard.press('ArrowDown');
+  const focus = await ring(tab);
+  const row = await tab.evaluate(() => document.activeElement.getBoundingClientRect().width);
+  check(focus.height >= 56 && focus.outline >= 3 && row >= 600, `focus shows on the whole row (${Math.round(row)}x${Math.round(focus.height)}, ${focus.outline}px outline)`);
+  await tab.keyboard.press('Enter');
+  await until(tab, href => location.pathname === href && document.querySelector('.api-renewal-header h1'), `/deals/${names[1]}`);
+  check(await tab.locator('.deals-back').isVisible() && await tab.locator('.deals-row').count() === 0, 'Enter opens the row; under 1100 the deal is the whole page, with a link back');
+  await tab.click('.deals-back');
+  await until(tab, () => location.pathname === '/deals' && document.querySelectorAll('.deals-row').length === 30);
+  await tab.focus('input[name=q]');
+  await tab.keyboard.type('thorn');
+  await until(tab, () => document.querySelectorAll('.deals-row').length === 1);
+  const narrowed = await tab.evaluate(() => ({q: new URL(location.href).searchParams.get('q'), value: document.querySelector('input[name=q]').value, count: document.querySelector('.deals-head__count').textContent,
+    name: document.querySelector('.deals-row__name').textContent, href: document.querySelector('.deals-row').getAttribute('href')}));
+  check(narrowed.q === 'thorn' && narrowed.value === 'thorn' && narrowed.count === '1 of 30' && narrowed.name === 'Thornfield Wren LLP' && narrowed.href === '/deals/acc-003?q=thorn',
+    `typing narrows the rows as typed and keeps the filter in the address (?q=${narrowed.q}, ${narrowed.count}, ${narrowed.name})`);
+  await tab.click('.fr-areas .fr-link:has-text("Deals")');
+  await until(tab, () => !location.search && document.querySelector('input[name=q]').value === '' && document.querySelectorAll('.deals-row').length === 30);
+  check(true, 'the Deals link in the top bar opens the list unfiltered, and the field follows the address');
+  await tab.fill('input[name=q]', 'no deal by this name');
+  await tab.waitForSelector('.deals-empty');
+  const none = (await tab.innerText('.deals-empty')).replace(/\s+/g, ' ').trim();
+  await tab.click('.deals-empty button');
+  await until(tab, () => document.querySelectorAll('.deals-row').length === 30);
+  const cleared = await tab.evaluate(() => ({q: new URL(location.href).searchParams.has('q'), focus: document.activeElement?.name}));
+  check(none === 'No deal matches. Clear the filter' && !cleared.q && cleared.focus === 'q', `a filter that matches nothing says so, and Clear the filter brings the rows back (${none})`);
+  check(tab.errors.length === 0, `no page errors (${tab.errors.join(' | ')})`);
+  await tab.context().close();
+});
+
+for (const width of [320, 390, 768, 1440]) {
+  for (const scheme of ['light', 'dark']) {
+    await scenario(`deals layout ${width} ${scheme}`, async () => {
+      serveBook();
+      const at = `deals ${width} ${scheme}`;
+      const tab = await page({width, scheme});
+      await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
+      await signIn(tab);
+      await until(tab, () => document.querySelectorAll('.deals-row').length === 30 && ![...document.querySelectorAll('.deals-row__card')].some(card => card.textContent === 'Reading'));
+      const facts = await measure(tab, dealParts);
+      check(healthy(facts), `${at}: ${reported(at, facts)}`);
+      const rows = await rowFacts(tab);
+      const readme = rows.find(row => row.account === 'acc-003');
+      if (width < 720) check(rows.every(row => row.cardBelow) && readme.oneLine, `${at}: a row is two lines, the name and ID, then the card time`);
+      else if (width < 1100) check(rows.every(row => !row.cardBelow), `${at}: a row holds the card time at its right`);
+      else check(rows.every(row => row.cardBelow && row.width <= 336), `${at}: in the rail a row is two lines`);
+      if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `deals-${width}-${scheme}.png`)});
       check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
       await tab.context().close();
     });
