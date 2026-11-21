@@ -540,18 +540,41 @@ func TestAnExportIsReadThroughNoLinkAndUnchanged(t *testing.T) {
 	if _, err := readExport(filepath.Join(linked, "call.txt"), swapped); err != ErrInvalid {
 		t.Errorf("a folder swapped after it was resolved ended with %v", err)
 	}
+	// Removed and written again: a file system may give the new file the old inode, so the new one has
+	// another size, which the check also compares.
 	replaced := func(stage string) {
 		if stage == "checked" {
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(path, []byte("We will not sign.\n"), 0o600); err != nil {
+			if err := os.WriteFile(path, []byte("We will not sign it this year.\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	if _, err := readExport(path, replaced); err != ErrInvalid {
 		t.Errorf("a file replaced after its check ended with %v", err)
+	}
+	// A replacement of the same size, while the old file is still kept elsewhere so its inode cannot be
+	// reused: the inode tells them apart.
+	sameSize := func(stage string) {
+		if stage == "checked" {
+			if err := os.Rename(path, path+".old"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("We will not sig.\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(path, []byte("We will not sign.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readExport(path, sameSize); err != ErrInvalid {
+		t.Errorf("a file of the same size replaced after its check ended with %v", err)
+	}
+	if err := os.Remove(path + ".old"); err != nil {
+		t.Fatal(err)
 	}
 	rewritten := func(stage string) {
 		if stage == "read" {

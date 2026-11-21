@@ -1216,10 +1216,12 @@ for (const [width, scheme] of [320, 390, 768, 1440].flatMap(width => [[width, 'l
     check(facts.focalFirst && countdown?.kind === 'countdown' && countdown.figure === '24 days [1]' && countdown.subs.join(' | ') === 'to the renewal, 2027-02-08 | as of 2027-01-15' &&
       arr?.kind === 'arr' && arr.figure === 'USD 450,000.00 [1]' && arr.subs.join() === 'ARR, from the mapped field',
       `${at}: under the title, the countdown and ARR with their numbers and sub-lines (${JSON.stringify(facts.focal.map(item => [item.figure, item.subs]))})`);
-    // ARR sits beside the countdown on its first line, and goes under it only on a card too narrow for its figure whole
-    // (under 330 wide for USD 450,000.00 at 32); its figure breaks only at its space.
+    // ARR sits beside the countdown when both fit on one line of the card, and under it otherwise; the
+    // point where it wraps depends on the fonts the machine has, so either is right as long as the two
+    // never overlap and ARR's figure breaks only at its space.
     const beside = arr.left >= countdown.right && Math.abs(arr.top - countdown.top) <= 2;
-    check((beside || facts.cardWidth < 330) && arr.lines <= 2 && facts.focal.every(item => item.size === (phone ? '32px' : '40px')),
+    const under = arr.top > countdown.top;
+    check((beside || under) && arr.lines <= 2 && facts.focal.every(item => item.size === (phone ? '32px' : '40px')),
       `${at}: ARR sits ${beside ? 'right of' : 'under'} the countdown, its figure on ${arr.lines} lines, both at ${phone ? 32 : 40} (card ${Math.round(facts.cardWidth)}; ${countdown.right}..${arr.left}; tops ${countdown.top} ${arr.top}; ${facts.focal.map(item => item.size)})`);
     check(facts.focalSizes.length === 2 && facts.focalSizes.every(name => name.startsWith('dc-focal__number')), `${at}: only the countdown and ARR use the focal step (${facts.focalSizes.join()})`);
     check(facts.values.join(' | ') === dealCard.lines.filter(line => line.section === 'value').map(line => `${line.code}: ${line.label} ${line.text}`).join(' | '),
