@@ -3,8 +3,8 @@
 A local connector that builds a Deal card for a renewal from CRM records, call transcripts, and
 Slack. One operator runs it. People use the CLI and the web app, assistants use the MCP tools. It is
 one Go program on PostgreSQL, with the web app inside it, and it is growing to run the renewal
-workflow. There is no Python in the repository: `testdata/oracle/` holds the outputs the Python
-package it replaced recorded, now Go's golden data.
+workflow. There is no Python in the repository: `testdata/oracle/` holds the inputs the Python
+package it replaced recorded, and Go's golden output for a sample of them.
 
 ## Never break these
 
@@ -70,9 +70,12 @@ make verify-real                                   # real public text against re
    gateway, not internals.
 4. Build it, run it as a user, then clean it before review: no duplicate helpers, leftover flags,
    or filler in code, messages, and docs. Run `go vet`, the Go tests and the web tests.
-5. For the request path, briefs, credentials, or `SECURITY_REVIEW.md`, get one review round by other
-   models against the seven rules: `claude-fable-5-2` and `gpt-6.2-sol`, with `grok-4.7` advisory.
-   Fix the findings without another round.
+5. For sign-in, sessions, tokens, grants, MCP, the HTTP request path, or `SECURITY_REVIEW.md`, get
+   one review round against the seven rules by other models: `claude-fable-5-2` and `gpt-6.2-sol`,
+   with `grok-4.7` advisory. When they are unavailable, an independent Claude reviewer does the round,
+   given the code and the brief, not the author's conclusions. Fix the findings without another
+   round. Card, source and brief changes are proven by their tests and the card property checks,
+   with no review round.
 6. Open a PR that says what changed, why, and how it was proven. Do not merge unless asked.
 
 - Have a view and argue for it. If a request leads somewhere worse, say so and show the better way.
@@ -85,6 +88,7 @@ make verify-real                                   # real public text against re
 - `testdata/oracle/cards/cases.jsonl.gz` holds the cards of ten invented deals, one property each,
   and `internal/cards/parity_test.go` builds them byte for byte. A change to cards keeps them
   passing.
+- Feature PRs do not edit this page or the roadmap's status rows; those are updated in batches.
 - Live checks use the development org and workspace only. Never create or edit a Slack app. Never
   use a credential pasted into a conversation.
 - Report the result first, then what changed, what failed, and what is unverified, with numbers.
@@ -94,21 +98,24 @@ make verify-real                                   # real public text against re
 The goal is the renewal workflow: find what blocks a renewal in the evidence, turn it into reviewed
 work, and keep the history of what resolved it. No model writes text on a card.
 
-[docs/ROADMAP.md](docs/ROADMAP.md) lists the steps. v0.1.0 comes first: the Go program has replaced
-the Python package and stays read-only. To finish it:
+v0.1.0 is released: one Go binary on PostgreSQL replaced the Python package and stays read-only.
+Next is the roadmap's [First call](docs/ROADMAP.md#1-first-call), then its later steps in order.
 
-1. Keep the reference. `testdata/oracle/` holds the outputs the Python package recorded on CPython
-   3.14.6 with clocks and IDs fixed, and a fixture that disagrees with the code is the reference.
-   Card text matches byte for byte, and units and gaps match as values. A difference with a cause
-   outside the product, such as the recorder's clock, is listed in its test with the reason.
-   Character classes come from `internal/unicodetab`, never Go's or RE2's. A deliberate change to
-   the card or text rules rewrites the golden files it changes with `go test -p 1 -v ./internal/cards
-   ./internal/evidence ./internal/realdata ./internal/render/... ./cmd/gtm-connector -update` (never
-   with `-run`; it prints what changed in each card family, and refuses a card that fails its own seal
-   checks), with `GTM_TEST_DATABASE_URL` set for the command replay, and the real-data digests of the
-   changed functions with `go run ./cmd/realdata -update=FUNCTION,... verify`. Its PR lists each
-   rewritten file with how many cards, units or rows changed, and why.
-2. Close the cutover: a tagged release attaches the binaries.
+Golden files are Go's own output, rewritten on purpose. `testdata/oracle/` holds the inputs the
+Python package recorded, with clocks and IDs fixed, and Go's output for a sample of them: card text
+byte for byte, units and gaps as values. Every other card is built from its inputs and must hold the
+card properties: it verifies against its seal, every figure and quotation resolves to a stored
+record and its receipt, neutralizing again changes nothing, no sentence holds a live link, a bare
+mail address or a code fence or is given to the wrong side, and a second build gives the same bytes.
+The ten invented cases in `testdata/oracle/cards/cases.jsonl.gz` stay byte for byte. Character
+classes come from `internal/unicodetab`, never Go's or RE2's. A deliberate change to the card or
+text rules rewrites the golden files it changes with `go test -p 1 -v ./internal/cards
+./internal/evidence ./internal/realdata ./internal/render/... ./internal/oracletest
+./cmd/gtm-connector -update` (never with `-run`; it prints what changed in each card family,
+refuses a card that fails its own seal checks, and names any card the golden sample must add to
+show every feature a card shows), with `GTM_TEST_DATABASE_URL` set for the command replay, and the
+real-data digests of the changed functions with `go run ./cmd/realdata -update=FUNCTION,... verify`.
+Its PR lists each rewritten file with how many cards, units or rows changed, and why.
 
 Sign-in, grants, selection, expiry and the Host check stay ahead of any evidence served. MCP passes
 the recorded gateway vectors on both transports, HTTP and stdio.

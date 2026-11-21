@@ -19,8 +19,10 @@ import (
 // and a limit does. No receipt is left pending by a cancel, a store that does not answer, a lost
 // acknowledgement or a source that panics.
 
-// short is the limit these tests give the maker in place of SettleLimit.
-const short = 200 * time.Millisecond
+// short is the limit these tests give the maker in place of SettleLimit. It also bounds each receipt write
+// that must go through before the step a test holds, which a busy runner can take more than a few hundred
+// milliseconds to commit on PostgreSQL; a second leaves those writes room and still ends the held step.
+const short = time.Second
 
 // stalled is a store that does not answer, as a database behind a lock does: its publication, or its
 // finishing of a receipt, waits until the context it was given ends. With refusal set its publication fails
@@ -206,9 +208,7 @@ func TestAPublicationBehindALockIsGivenUpOnPostgreSQL(t *testing.T) {
 			w.hold(t, "SELECT 1 FROM account_grants WHERE principal_id = $1 FOR UPDATE", w.principal)
 			store := &watched{Store: w.store}
 			m := w.maker(t, store, demoBook(t))
-			// The limit also bounds each receipt write before the publication, which a busy runner can take
-			// more than short to commit; a second leaves those writes room and still gives the lock up.
-			m.limit = time.Second
+			m.limit = short
 			sealed, err := within(t, func() (*Sealed, error) { return run(context.Background(), m, w, "locked") })
 			if sealed != nil || err != ErrNotPublished || store.published != 1 {
 				t.Fatalf("a card: %t; %v; %d publications", sealed != nil, err, store.published)

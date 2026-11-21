@@ -183,8 +183,9 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 			}()
 			return nil
 		}
+		// The wait lasts until both requests are answered: a second, room for a busy runner.
 		saved := loginTime
-		loginTime = 300 * time.Millisecond
+		loginTime = time.Second
 		err := receiveConsent(context.Background(), cfg, func(state string) string { return "https://slack.com/x?state=" + state },
 			open, func(context.Context, string) error { t.Error("a callback was taken"); return nil })
 		loginTime = saved

@@ -68,9 +68,10 @@ func (u *upstream) RoundTrip(request *http.Request) (*http.Response, error) {
 		Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
 }
 
-// TestRecordedThreadsReplay reads every thread the oracle recorded through the reader, offline. The
+// TestRecordedThreadsReplay reads every thread the card fixtures record through the reader, offline. The
 // requests are the ones the Python reader made, in its order, and the messages and the snapshot are the
-// ones its card's evidence holds, digests and response byte counts included.
+// ones the row's "read" holds, which the card tests serve as the thread: digests and response byte counts
+// included.
 func TestRecordedThreadsReplay(t *testing.T) {
 	// The recorder's reader clock stood at 2027-01-16T00:00:00Z, and its sign-in did not rotate.
 	wall := time.Date(2027, 1, 16, 0, 0, 0, 0, time.UTC)
@@ -82,8 +83,8 @@ func TestRecordedThreadsReplay(t *testing.T) {
 			key := fmt.Sprintf("%s %s", family, member(t, row, "key"))
 			accountID := member(t, row, "account_id").(string)
 			input := member(t, row, "input")
-			evidence := member(t, parse(t, member(t, row, "card").(string)), "evidence")
-			if got := member(t, evidence, "slack_binding"); !sameJSON(got, bound) {
+			recorded := member(t, input, "read")
+			if got := member(t, recorded, "binding"); !sameJSON(got, bound) {
 				t.Fatalf("%s: the recorded folder is connected to another identity", key)
 			}
 			clock := &testClock{wall: wall, tick: time.Duration(number) * time.Second}
@@ -91,7 +92,7 @@ func TestRecordedThreadsReplay(t *testing.T) {
 			reader := &Reader{Connection: saved, Binding: bound, Clock: clock.clock()}
 
 			served, isThread := member(t, input, rowsKey).([]any)
-			snapshot, isRead := member(t, evidence, "thread_snapshot").(*strictjson.Object)
+			snapshot, isRead := member(t, recorded, "snapshot").(*strictjson.Object)
 			if isThread != (isRead && snapshot != nil) {
 				t.Fatalf("%s: the recorded thread and snapshot disagree", key)
 			}
@@ -122,12 +123,7 @@ func TestRecordedThreadsReplay(t *testing.T) {
 			if got, want := dump(t, read.Snapshot), dump(t, snapshot); got != want {
 				t.Errorf("%s: snapshot\n got %s\nwant %s", key, got, want)
 			}
-			var want []any
-			for _, record := range member(t, evidence, "records").([]any) {
-				if ref, _ := member(t, record, "record_ref").(string); strings.HasPrefix(ref, "slack/messages/") {
-					want = append(want, record)
-				}
-			}
+			want := member(t, recorded, "messages").([]any)
 			got := make([]any, len(read.Records))
 			for i, record := range withRefs(read.Records) {
 				got[i] = record

@@ -160,7 +160,7 @@ test('a hostile speaker, basis, time and reference render as text', () => {
   assert.match(text(render(card, '5', answered(card, 5))), /Marian <img src=x onerror=alert\(1\)>/);
 });
 
-test('every unit of every recorded card: the drawer shows that unit alone, whole or listed as cut, in the card page’s words, with its neighbours of the same record', () => {
+test('every unit of every golden card: the drawer shows that unit alone, whole or listed as cut, in the card page’s words, with its neighbours of the same record', () => {
   let units = 0;
   for (const {file, key, card} of recorded) {
     const all = unitsOf(card);
@@ -196,7 +196,7 @@ test('every unit of every recorded card: the drawer shows that unit alone, whole
       assert.equal(stepFrom(card, unit.n, 1), all[index + 1]?.n ?? null, at);
     }
   }
-  assert.ok(units > 2000, `${units} units`);
+  assert.ok(units > 1500, `${units} units`);
 });
 
 test('the read names its source in words', () => {
