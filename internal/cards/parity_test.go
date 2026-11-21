@@ -473,7 +473,8 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 			mismatches.Add("%s: no card: %v", row.Key, err)
 			continue
 		}
-		if oracletest.Update() {
+		// Only the memory store makes a card under the recorder's IDs, so only it writes the fixture again.
+		if _, memory := cards.(*memoryCards); memory && oracletest.Update() {
 			row = renewed(t, golden, i, line, row, sealed)
 		}
 		payload, sha, sealReceipt := cards.published(t, sealed, s, row, mismatches)
