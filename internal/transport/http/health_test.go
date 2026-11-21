@@ -145,22 +145,22 @@ func TestHealthzOnPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close(ctx)
-	if _, err := conn.Exec(ctx, "DELETE FROM schema_migrations WHERE version = $1",
-		postgres.LatestSchemaVersion()); err != nil {
+	names := postgres.MigrationNames()
+	if _, err := conn.Exec(ctx, "DELETE FROM schema_migrations WHERE name = $1", names[len(names)-1]); err != nil {
 		t.Fatal(err)
 	}
 	healthz(t, s, http.StatusServiceUnavailable, "migrations_behind", "one migration behind")
 
 	// A migration this binary does not hold is applied, as a newer binary's
-	// setup leaves it. Its version is whatever follows the embedded ones.
-	if _, err := conn.Exec(ctx, "INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, 'later.sql', 'x')",
-		postgres.LatestSchemaVersion()+1); err != nil {
+	// setup leaves it.
+	if _, err := conn.Exec(ctx,
+		"INSERT INTO schema_migrations (name, sha256) VALUES ('29991231T2359_later.sql', 'x')"); err != nil {
 		t.Fatal(err)
 	}
 	healthz(t, s, http.StatusServiceUnavailable, "migrations_ahead", "one migration ahead")
 
 	// The first migration's recorded digest is not this binary's file's.
-	if _, err := conn.Exec(ctx, "UPDATE schema_migrations SET sha256 = 'changed' WHERE version = 1"); err != nil {
+	if _, err := conn.Exec(ctx, "UPDATE schema_migrations SET sha256 = 'changed' WHERE name = $1", names[0]); err != nil {
 		t.Fatal(err)
 	}
 	healthz(t, s, http.StatusServiceUnavailable, "migrations_changed", "a migration that changed")

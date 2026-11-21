@@ -26,7 +26,7 @@ import (
 
 // A backup is one gzip'd tar file, written with mode 0600:
 //
-//	manifest.json        format, schema version, and each file's size and SHA-256
+//	manifest.json        format, applied migrations, and each file's size and SHA-256
 //	credentials/<name>   every file of the credentials folder
 //	tables/<name>.copy   each table in PostgreSQL's COPY text format
 //
@@ -35,13 +35,25 @@ import (
 // restore still refuses any row the connector would refuse on writing.
 const backupFormat = "gtm-connector backup"
 
+// A version 2 manifest names the applied migrations. A version 1 manifest,
+// which binaries with numbered migrations wrote, gives the number of the last
+// one as schema_version instead.
 type manifest struct {
 	Format        string       `json:"format"`
 	Version       int          `json:"version"`
 	CreatedAt     string       `json:"created_at"`
-	SchemaVersion int          `json:"schema_version"`
+	SchemaVersion int          `json:"schema_version,omitempty"`
+	Migrations    []string     `json:"migrations,omitempty"`
 	Tables        []tableEntry `json:"tables"`
 	Credentials   []fileEntry  `json:"credentials"`
+}
+
+// applied names the migrations the backed-up database held.
+func (m manifest) applied() ([]string, error) {
+	if m.Version == 1 {
+		return postgres.NumberedMigrations(m.SchemaVersion)
+	}
+	return m.Migrations, nil
 }
 
 type fileEntry struct {
@@ -112,7 +124,7 @@ func backup(ctx context.Context, store *postgres.Store, creds *credentials, out 
 	}
 	defer os.RemoveAll(work)
 	digests := map[string]*fileEntry{}
-	version, copies, err := store.Dump(ctx, func(table string) (io.WriteCloser, error) {
+	applied, copies, err := store.Dump(ctx, func(table string) (io.WriteCloser, error) {
 		file, err := os.OpenFile(filepath.Join(work, table+".copy"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return nil, err
@@ -124,8 +136,8 @@ func backup(ctx context.Context, store *postgres.Store, creds *credentials, out 
 	if err != nil {
 		return err
 	}
-	m := manifest{Format: backupFormat, Version: 1, CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		SchemaVersion: version}
+	m := manifest{Format: backupFormat, Version: 2, CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Migrations: applied}
 	for _, table := range copies {
 		m.Tables = append(m.Tables, tableEntry{table.Name, table.Columns, table.Rows, *digests[table.Name]})
 	}
@@ -335,7 +347,11 @@ func restore(ctx context.Context, store *postgres.Store, credentialsDir, in stri
 		for i, table := range m.Tables {
 			copies[i] = postgres.TableCopy{Name: table.Table, Columns: table.Columns, Rows: table.Rows}
 		}
-		err = store.Restore(ctx, archive, m.SchemaVersion, copies, func(table string) (io.ReadCloser, error) {
+		applied, err := m.applied()
+		if err != nil {
+			return err
+		}
+		err = store.Restore(ctx, archive, applied, copies, func(table string) (io.ReadCloser, error) {
 			return os.Open(filepath.Join(work, "tables", table+".copy"))
 		})
 		if err != nil {
@@ -402,8 +418,10 @@ func unpack(in, work string) (manifest, string, error) {
 				return manifest{}, "", err
 			}
 			// The manifest is read as the strict reader reads it, with exactly the fields backup writes.
-			if err := strictjson.Decode(raw, &m); err != nil || m.Format != backupFormat || m.Version != 1 {
-				return manifest{}, "", fmt.Errorf("%s is not a version 1 gtm-connector backup", in)
+			// Version 1 gives a schema number and version 2 the migrations, never both.
+			if err := strictjson.Decode(raw, &m); err != nil || m.Format != backupFormat ||
+				!(m.Version == 1 && len(m.Migrations) == 0 || m.Version == 2 && m.SchemaVersion == 0 && len(m.Migrations) > 0) {
+				return manifest{}, "", fmt.Errorf("%s is not a version 1 or 2 gtm-connector backup", in)
 			}
 			if err := exactEntries(m); err != nil {
 				return manifest{}, "", fmt.Errorf("%s: %w", in, err)
@@ -452,9 +470,14 @@ func unpack(in, work string) (manifest, string, error) {
 	return m, hex.EncodeToString(whole.Sum(nil)), nil
 }
 
-// exactEntries requires the manifest to list exactly this version's tables
-// and credentials, in order, and no credential larger than one is read.
+// exactEntries requires the manifest to list exactly the tables of its
+// migrations and the credentials, in order, and no credential larger than one
+// is read.
 func exactEntries(m manifest) error {
+	applied, err := m.applied()
+	if err != nil {
+		return err
+	}
 	var tables, files []string
 	for _, table := range m.Tables {
 		if table.File.Name != "tables/"+table.Table+".copy" {
@@ -475,7 +498,7 @@ func exactEntries(m manifest) error {
 	// A backup of an earlier setup lists the unused owner secret first. Its digest is checked as it is
 	// unpacked, and it is not installed.
 	earlier := append([]string{"credentials/" + unusedSecretFile}, want...)
-	if !slices.Equal(tables, postgres.BackupTableNames(m.SchemaVersion)) ||
+	if !slices.Equal(tables, postgres.BackupTableNames(applied)) ||
 		!slices.Equal(files, want) && !slices.Equal(files, earlier) {
 		return errors.New("the manifest does not list exactly the expected tables and credentials")
 	}

@@ -141,7 +141,7 @@ func TestRestoreRefusesEditedArchives(t *testing.T) {
 			if err := restore(ctx, fresh, target, edited); err == nil {
 				t.Fatal("restored")
 			}
-			if v, _ := fresh.SchemaVersion(ctx); v != 0 {
+			if v, _ := fresh.AppliedMigrations(ctx); len(v) != 0 {
 				t.Fatal("a refused restore left a schema")
 			}
 			if entries, _ := os.ReadDir(target); len(entries) != 0 {
