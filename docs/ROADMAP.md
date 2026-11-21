@@ -82,12 +82,14 @@ own grant opens that source; otherwise the card will show the source as not read
 review covers one operator today. It will be redone for more than one person before real people
 sign in.
 
-**Approval.** A call or a Slack thread proposed for a deal is a match, and nothing joins a deal
-until someone approves it. A match will wait for a person who may see both the deal and the source. An approval
-will cover exactly what was shown: one transcript revision, or the messages of a thread up to the
-last one displayed. If a message is added or edited afterwards, then it will come back for review,
-and until it is reviewed the card will count it as not read. Approving a match for one deal will
-not approve it for the account's other deals. A rejected match will add nothing to any card.
+**Matching.** A call or a Slack thread that fits a deal by the rules in the configuration is a
+match, and it will join the deal on its own. Nobody has to click. A match that fits more than one
+deal will wait for a person. A match will cover exactly what was read: one transcript revision, or
+the messages of a thread up to the last one read. If a message is added or edited afterwards, then
+the next read will pick it up.
+
+A team will be able to turn approval on. Then every match will wait for a person who may see both
+the deal and the source, and a rejected match will add nothing to any card.
 
 This needs two things the Python package does not have. A Slack message will keep one identity
 across reads, with an edit or a verified deletion superseding the version it changes. An import
@@ -104,7 +106,7 @@ The deal list will sit on the left, sorted by urgency, nearest renewal first wit
 
 A deal whose source was not read, or whose last refresh failed, will say so on its row and will
 not show green. Until the readiness rules run, red will mean a sentence someone marked as a blocker
-and has not resolved. A badge at the top will count
+and has not resolved. When approval is on, a badge at the top will count
 the matches waiting for this person, and open them.
 
 The deal card will fill the main pane. What changed will come first, then the risks and blockers.
@@ -117,7 +119,7 @@ clear a teammate's amber.
 Any line will open the proof drawer: the record and field behind a figure, or the whole sentence
 with its speaker, time and source behind a quote. The drawer will not show the read's receipt.
 `inspect` and `audit` show it today, and Ops will from milestone 2. Communications will list the
-deal's approved calls and Slack threads in time order, each opening its sentences. Each label and
+deal's calls and Slack threads in time order, each opening its sentences. Each label and
 status will carry its definition, and what it leads to, beside the value.
 
 **Marks.** A mark is a person's label on a sentence, and it is how a blocker gets onto a deal. A
@@ -133,7 +135,7 @@ blocker will stay in the deal's history with its proof, who decided and when.
 **The checklist.** The card will carry a renewal checklist: its open blockers, tracked until each
 is resolved. Playbooks, in milestone 6, add plans and reviews to it.
 
-**Refresh.** A button, a command and an API call will read every approved source again, under the
+**Refresh.** A button, a command and an API call will read every source of the deal again, under the
 caller's grants, with a receipt before each read. If the refresh finds new evidence, versions or
 gaps, then it will publish a new sealed card. If it finds none, then it will record the time and
 publish nothing. If a read fails or the evidence fails its checks, then no card will be published:
@@ -164,7 +166,7 @@ typed fields or objects. Setup will refuse an ambiguous or mistyped mapping. Opp
 will never stand in for recurring revenue.
 
 **Finding deals and evidence.** A watch rule will propose deals on its own, for example open
-renewals closing within a set number of days. A person will still approve each one. Setup will set
+renewals closing within a set number of days. A proposed deal will be watched at once. Setup will set
 how far back the first read goes, and the card will say where its history begins. A folder of
 transcripts will be connected once, replacing one-file imports and hand-picked excerpts. A bounded
 window of a Slack channel will be read, replacing one mapped thread per account; the card will
@@ -206,7 +208,7 @@ credential. It will be kept in Git, previewed, and activated by exact revision.
 
 - Coverage will be the home screen. It will list every deal a watch rule proposed or a person registered, each in one state: proposed, paused, closing, no current card, or current card. A deal with no current card will open the pending match or the failed read behind it.
 - Setup will show each source's state (not connected, denied, partial, failed, stale or current), its last read, and what to do about it. The active configuration will sit beside a draft, with the preview and the activation.
-- Activity will show what ran and whether it is safe to retry: reads, approvals, refusals and refreshes, each with its receipt. A seal will be rechecked here.
+- Activity will show what ran and whether it is safe to retry: reads, matches, refusals and refreshes, each with its receipt. A seal will be rechecked here.
 
 RevOps will be able to pause a deal, which stops its scheduled reads, and resume it. A deal's
 lifecycle will be proposed, active, paused, closing, archived. Risk and freshness will not be
@@ -248,12 +250,12 @@ is stored.
 stable key and a revision. Each push will get a receipt before it is staged or refused. If a push
 repeats a key with the same content, then it will get the same result. If it repeats a key with
 different content, then it will be refused. A cursor will track progress. A pushed record will
-name its deal by the handle, or by a key the handle binds, and it will join the deal only when a
-person approves it. Rows from another CRM, a spreadsheet, email, SMS or product usage will come in
+name its deal by the handle, or by a key the handle binds, and it will join that deal on its own, or wait for a
+person when approval is on. Rows from another CRM, a spreadsheet, email, SMS or product usage will come in
 this way, and HTML email will be turned into text first.
 
 **A customer's own database** will be read through a read-only connection and an approved view,
-with an ordered cursor and explicit deletions. Its records will be staged and approved like pushed
+with an ordered cursor and explicit deletions. Its records will join their deals like pushed
 ones.
 
 **Retractions.** A record entered by mistake will be retracted by a new version. Later cards will
