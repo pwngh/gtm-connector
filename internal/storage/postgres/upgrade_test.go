@@ -176,8 +176,8 @@ func TestAnUpgradeFrom0001KeepsItsData(t *testing.T) {
 		}
 	}
 	// The restored database answers, and holds exactly this binary's migrations.
-	if current, err := last.MigrationsCurrent(ctx); err != nil || !current {
-		t.Fatalf("the restored database's migrations are current: %v (%v)", current, err)
+	if state, err := last.MigrationState(ctx); err != nil || state != postgres.MigrationsCurrent {
+		t.Fatalf("the restored database's migrations are %q (%v)", state, err)
 	}
 }
 

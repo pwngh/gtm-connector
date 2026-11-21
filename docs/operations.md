@@ -76,15 +76,21 @@ gtm brief acc-007 --state-dir renewals
 ## Health
 
 `/healthz` answers 200 `{"status":"ok"}` when the database is reachable and its applied migrations
-are exactly the ones the binary carries. Otherwise it answers 503 with one of two statuses:
+are exactly the ones the binary carries. Otherwise it answers 503 with one of four statuses:
 
 | Status | Meaning |
 | --- | --- |
-| `migrations_not_current` | The database answers, but its schema is behind the binary, ahead of it, or from other migration files. |
+| `migrations_behind` | A migration the binary carries is not applied. Run `gtm setup`. |
+| `migrations_ahead` | A migration is applied that the binary does not carry. The binary is older than the database. |
+| `migrations_changed` | An applied migration's contents differ from the binary's file of that number. |
 | `database_unavailable` | The database did not answer within three seconds. |
 
 `gtm health` asks the same question from a terminal. It exits 1 with the status unless the answer
 is ok.
+
+`gtm serve` asks it before it starts. On a database that is behind, ahead or changed it does not
+start, and it prints one line that says which. `gtm setup` migrates a database that is behind, and
+refuses one that is ahead or changed with the same line.
 
 ## MCP clients
 
