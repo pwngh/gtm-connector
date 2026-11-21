@@ -2,12 +2,18 @@
 // non-finite numbers and lone surrogates, and gives each refusal the type and message Python gives.
 // Nesting past MaxDepth is refused with ErrTooDeep, whose message is its own.
 //
+// A document is read from its bytes, with no decoded copy of it. Before anything is built, one pass over
+// the bytes counts the nesting and a second checks the encoding, so a document that is too deep or is not
+// UTF-8 is refused for the cost of reading it. A reader sets no limit on a document's size: the caller
+// checks that before it loads the bytes.
+//
 // Values are nil, bool, string, *big.Int, []any, *Object, and for a number with a fraction or an exponent
 // either float64 (Loads and LoadsText, like Python's default) or Decimal (LoadsDecimal, like
 // parse_float=Decimal).
 package strictjson
 
 import (
+	"bytes"
 	"fmt"
 	"math"
 	"math/big"
@@ -56,11 +62,13 @@ func loads(document []byte, decimal bool) (any, error) {
 	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
 		data = data[3:]
 	}
-	text, err := decodeUTF8(data)
-	if err != nil {
+	if tooDeep(data) {
+		return nil, ErrTooDeep
+	}
+	if err := checkUTF8(data, false); err != nil {
 		return nil, err
 	}
-	return parse(text, decimal)
+	return parse(data, decimal)
 }
 
 // LoadsText parses text that is already decoded, as strict_json.loads(str) does: a byte-order mark is
@@ -69,18 +77,57 @@ func loads(document []byte, decimal bool) (any, error) {
 func LoadsText(text string) (any, error) { return loadsText(text, false) }
 
 func loadsText(text string, decimal bool) (any, error) {
-	runes, err := decodeWTF8(text)
-	if err != nil {
+	if tooDeep(text) {
+		return nil, ErrTooDeep
+	}
+	data := []byte(text)
+	if err := checkUTF8(data, true); err != nil {
 		return nil, err
 	}
-	if err := encodable(runes); err != nil {
+	if err := encodable(data); err != nil {
 		return nil, err
 	}
-	return parse(runes, decimal)
+	return parse(data, decimal)
 }
 
-func parse(text []rune, decimal bool) (any, error) {
-	if len(text) > 0 && text[0] == 0xFEFF {
+// tooDeep reports whether a document opens more than MaxDepth arrays and objects at once, counting the
+// brackets outside strings. It reads bytes and allocates nothing, so a document of any size that is too
+// deep is refused before it is decoded or built. Up to the parser's first refusal it counts exactly as the
+// parser does, and a document that is too deep past another fault is refused as too deep. A closing
+// bracket with nothing open is a fault the parser reports, so the count stops there.
+func tooDeep[T string | []byte](text T) bool {
+	depth, inString := 0, false
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		if inString {
+			switch c {
+			case '\\':
+				i++
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '[', '{':
+			if depth++; depth > MaxDepth {
+				return true
+			}
+		case ']', '}':
+			if depth == 0 {
+				return false
+			}
+			depth--
+		}
+	}
+	return false
+}
+
+// parse reads text that is UTF-8.
+func parse(text []byte, decimal bool) (any, error) {
+	if bytes.HasPrefix(text, []byte("\xEF\xBB\xBF")) {
 		return nil, decodeError(text, "Unexpected UTF-8 BOM (decode using utf-8-sig)", 0)
 	}
 	p := &parser{text: text, decimal: decimal}
@@ -93,28 +140,45 @@ func parse(text []rune, decimal bool) (any, error) {
 			return nil, err
 		}
 	}
-	return finish(value), nil
+	return finish(value, false), nil
 }
 
-// decodeUTF8 is bytes.decode("utf-8") with CPython's error positions and reasons.
-func decodeUTF8(data []byte) ([]rune, error) {
-	out := make([]rune, 0, len(data))
+// checkUTF8 is bytes.decode("utf-8") with CPython's error positions and reasons, keeping nothing. With
+// surrogates it is the surrogatepass decoder, which also reads a lone surrogate written as three bytes.
+func checkUTF8(data []byte, surrogates bool) error {
 	for i := 0; i < len(data); {
-		c := data[i]
-		if c < 0x80 {
-			out = append(out, rune(c))
+		if data[i] < 0x80 {
 			i++
+			continue
+		}
+		if surrogates && surrogateAt(data, i) {
+			i += 3
 			continue
 		}
 		width, valid, reason := utf8Sequence(data[i:])
 		if reason != "" {
-			return nil, utf8Error(data, i, i+valid, reason)
+			return utf8Error(data, i, i+valid, reason)
 		}
-		r, _ := utf8.DecodeRune(data[i : i+width])
-		out = append(out, r)
 		i += width
 	}
-	return out, nil
+	return nil
+}
+
+// surrogateAt is whether the three bytes of a lone surrogate start at i.
+func surrogateAt(data []byte, i int) bool {
+	return i+2 < len(data) && data[i] == 0xED && data[i+1] >= 0xA0 && data[i+1] < 0xC0 &&
+		data[i+2] >= 0x80 && data[i+2] < 0xC0
+}
+
+// characters counts the characters of UTF-8 or WTF-8 text: every byte that does not continue a sequence.
+func characters(text []byte) int {
+	n := 0
+	for _, c := range text {
+		if c&0xC0 != 0x80 {
+			n++
+		}
+	}
+	return n
 }
 
 // utf8Sequence reads one multi-byte sequence as CPython's decoder does. It returns the sequence's width,
@@ -181,70 +245,45 @@ func utf8Error(data []byte, start, end int, reason string) error {
 		"'utf-8' codec can't decode bytes in position %d-%d: %s", start, end-1, reason)}
 }
 
-// decodeWTF8 reads text whose lone surrogates are written as three-byte sequences, as Python's
-// surrogatepass writes them.
-func decodeWTF8(text string) ([]rune, error) {
-	data := []byte(text)
-	out := make([]rune, 0, len(data))
-	for i := 0; i < len(data); {
-		if data[i] == 0xED && i+2 < len(data) && data[i+1] >= 0xA0 && data[i+1] < 0xC0 &&
-			data[i+2] >= 0x80 && data[i+2] < 0xC0 {
-			out = append(out, 0xD000|rune(data[i+1]&0x3F)<<6|rune(data[i+2]&0x3F))
-			i += 3
-			continue
-		}
-		if data[i] < 0x80 {
-			out = append(out, rune(data[i]))
-			i++
-			continue
-		}
-		width, valid, reason := utf8Sequence(data[i:])
-		if reason != "" {
-			return nil, utf8Error(data, i, i+valid, reason)
-		}
-		r, _ := utf8.DecodeRune(data[i : i+width])
-		out = append(out, r)
-		i += width
-	}
-	return out, nil
-}
-
 func surrogate(c rune) bool { return c >= 0xD800 && c <= 0xDFFF }
 
-// encodable is str.encode("utf-8"): the first run of surrogates is refused.
-func encodable(s []rune) error {
-	for i, c := range s {
-		if !surrogate(c) {
+// encodable is str.encode("utf-8") of text held as WTF-8: the first run of surrogates is refused, at its
+// position in characters.
+func encodable(s []byte) error {
+	for i := 0; i < len(s); i++ {
+		if !surrogateAt(s, i) {
 			continue
 		}
-		end := i + 1
-		for end < len(s) && surrogate(s[end]) {
-			end++
+		start, run := characters(s[:i]), 1
+		for surrogateAt(s, i+3*run) {
+			run++
 		}
-		if end-i == 1 {
+		if run == 1 {
+			c := 0xD000 | rune(s[i+1]&0x3F)<<6 | rune(s[i+2]&0x3F)
 			return &Error{"UnicodeEncodeError", fmt.Sprintf(
-				"'utf-8' codec can't encode character '\\u%04x' in position %d: surrogates not allowed", c, i)}
+				"'utf-8' codec can't encode character '\\u%04x' in position %d: surrogates not allowed", c, start)}
 		}
 		return &Error{"UnicodeEncodeError", fmt.Sprintf(
-			"'utf-8' codec can't encode characters in position %d-%d: surrogates not allowed", i, end-1)}
+			"'utf-8' codec can't encode characters in position %d-%d: surrogates not allowed", start, start+run-1)}
 	}
 	return nil
 }
 
-func decodeError(text []rune, message string, pos int) error {
-	line, column := 1, pos+1
-	for i := 0; i < pos && i < len(text); i++ {
-		if text[i] == '\n' {
-			line++
-			column = pos - i
-		}
+// decodeError is a JSONDecodeError at a byte of the text, reported as Python reports it: by line, column
+// and character.
+func decodeError(text []byte, message string, pos int) error {
+	before := text[:min(pos, len(text))]
+	char := characters(before)
+	line, column := 1+bytes.Count(before, []byte("\n")), char+1
+	if newline := bytes.LastIndexByte(before, '\n'); newline >= 0 {
+		column = characters(before[newline+1:]) + 1
 	}
-	return &Error{"JSONDecodeError", fmt.Sprintf("%s: line %d column %d (char %d)", message, line, column, pos)}
+	return &Error{"JSONDecodeError", fmt.Sprintf("%s: line %d column %d (char %d)", message, line, column, char)}
 }
 
-// Inside the parser, a string is kept as runes so that a lone surrogate survives until the final check,
+// Inside the parser, a string is kept as WTF-8 so that a lone surrogate survives until the final check,
 // and an object keeps its keys in that form until its duplicates are checked.
-type rawString []rune
+type rawString string
 
 type rawObject struct {
 	keys   []rawString
@@ -252,7 +291,7 @@ type rawObject struct {
 }
 
 type parser struct {
-	text    []rune
+	text    []byte
 	lone    bool // a lone surrogate was decoded from an escape
 	decimal bool // parse_float=Decimal
 	loose   bool // json.loads itself: non-finite numbers, and the last of duplicate keys wins
@@ -263,7 +302,7 @@ type expectingValue struct{ pos int }
 
 func (e expectingValue) Error() string { return "expecting value" }
 
-func whitespace(c rune) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+func whitespace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
 
 func (p *parser) skip(i int) int {
 	for i < len(p.text) && whitespace(p.text[i]) {
@@ -306,7 +345,8 @@ func (p *parser) value(idx int) (any, int, error) {
 		if idx >= len(p.text) {
 			return nil, 0, expectingValue{idx}
 		}
-		// An array or object that opens here is one level inside every open frame.
+		// An array or object that opens here is one level inside every open frame. tooDeep has refused a
+		// document this deep already, and the parser holds the limit itself all the same.
 		if (p.text[idx] == '[' || p.text[idx] == '{') && len(stack) >= MaxDepth {
 			return nil, 0, ErrTooDeep
 		}
@@ -352,7 +392,7 @@ func (p *parser) value(idx int) (any, int, error) {
 				top.object.values = append(top.object.values, result)
 			}
 			i := p.skip(end)
-			closer := rune('}')
+			closer := byte('}')
 			if top.isArray {
 				closer = ']'
 			}
@@ -396,15 +436,15 @@ func (p *parser) value(idx int) (any, int, error) {
 // key reads a member's name and its ':' delimiter, and returns where its value starts.
 func (p *parser) key(i int) (rawString, int, error) {
 	if i >= len(p.text) || p.text[i] != '"' {
-		return nil, 0, decodeError(p.text, "Expecting property name enclosed in double quotes", i)
+		return "", 0, decodeError(p.text, "Expecting property name enclosed in double quotes", i)
 	}
 	key, i, err := p.str(i + 1)
 	if err != nil {
-		return nil, 0, err
+		return "", 0, err
 	}
 	i = p.skip(i)
 	if i >= len(p.text) || p.text[i] != ':' {
-		return nil, 0, decodeError(p.text, "Expecting ':' delimiter", i)
+		return "", 0, decodeError(p.text, "Expecting ':' delimiter", i)
 	}
 	return key, p.skip(i + 1), nil
 }
@@ -414,33 +454,26 @@ func (p *parser) closeObject(o *rawObject) (any, error) {
 	if p.loose {
 		return lastWins(o), nil
 	}
-	seen := make(map[string]bool, len(o.keys))
+	seen := make(map[rawString]bool, len(o.keys))
 	for _, key := range o.keys {
-		k := string(encodeWTF8(key))
-		if seen[k] {
+		if seen[key] {
 			return nil, &Error{"ValueError", "duplicate JSON key"}
 		}
-		seen[k] = true
+		seen[key] = true
 	}
 	return o, nil
 }
 
 func (p *parser) scalar(idx int) (any, int, error) {
 	text := p.text
-	has := func(word string) bool {
-		if idx+len(word) > len(text) {
-			return false
-		}
-		for i, c := range word {
-			if text[idx+i] != c {
-				return false
-			}
-		}
-		return true
-	}
+	has := func(word string) bool { return bytes.HasPrefix(text[idx:], []byte(word)) }
 	switch text[idx] {
 	case '"':
-		return p.str(idx + 1)
+		value, end, err := p.str(idx + 1)
+		if err != nil {
+			return nil, 0, err
+		}
+		return value, end, nil
 	case 'n':
 		if has("null") {
 			return nil, idx + 4, nil
@@ -478,7 +511,7 @@ func (p *parser) scalar(idx int) (any, int, error) {
 	return p.number(idx)
 }
 
-func digit(c rune) bool { return c >= '0' && c <= '9' }
+func digit(c byte) bool { return c >= '0' && c <= '9' }
 
 // number is _match_number_unicode, with strict_json's float rule and CPython's int digit limit.
 func (p *parser) number(start int) (any, int, error) {
@@ -548,45 +581,52 @@ func (p *parser) number(start int) (any, int, error) {
 	return value, idx, nil
 }
 
-func hexDigit(c rune) (rune, bool) {
+func hexDigit(c byte) (rune, bool) {
 	switch {
 	case c >= '0' && c <= '9':
-		return c - '0', true
+		return rune(c - '0'), true
 	case c >= 'a' && c <= 'f':
-		return c - 'a' + 10, true
+		return rune(c-'a') + 10, true
 	case c >= 'A' && c <= 'F':
-		return c - 'A' + 10, true
+		return rune(c-'A') + 10, true
 	}
 	return 0, false
 }
 
 // str is scanstring_unicode from Modules/_json.c in strict mode. begin is just past the opening quote.
+// Every byte it looks for is ASCII, which no byte of a longer sequence equals, so it reads bytes where
+// Python reads characters. Where fewer than four characters follow a \u, fewer than four bytes do, or a
+// byte among the first four is no hex digit, so both refuse the escape, and at the same place.
 func (p *parser) str(begin int) (rawString, int, error) {
 	text := p.text
-	var out []rune
+	var out []byte
 	end := begin
 	for {
 		next := end
-		var c rune
+		var c byte
 		for ; next < len(text); next++ {
 			c = text[next]
 			if c == '"' || c == '\\' {
 				break
 			}
 			if c <= 0x1f {
-				return nil, 0, decodeError(text, "Invalid control character at", next)
+				return "", 0, decodeError(text, "Invalid control character at", next)
 			}
 		}
 		if next >= len(text) {
-			return nil, 0, decodeError(text, "Unterminated string starting at", begin-1)
+			return "", 0, decodeError(text, "Unterminated string starting at", begin-1)
+		}
+		if c == '"' && out == nil {
+			// A string with no escape is its own bytes.
+			return rawString(text[end:next]), next + 1, nil
 		}
 		out = append(out, text[end:next]...)
 		if c == '"' {
-			return out, next + 1, nil
+			return rawString(out), next + 1, nil
 		}
 		next++
 		if next == len(text) {
-			return nil, 0, decodeError(text, "Unterminated string starting at", begin-1)
+			return "", 0, decodeError(text, "Unterminated string starting at", begin-1)
 		}
 		c = text[next]
 		if c != 'u' {
@@ -604,7 +644,7 @@ func (p *parser) str(begin int) (rawString, int, error) {
 			case 't':
 				c = '\t'
 			default:
-				return nil, 0, decodeError(text, "Invalid \\escape", end-2)
+				return "", 0, decodeError(text, "Invalid \\escape", end-2)
 			}
 			out = append(out, c)
 			continue
@@ -612,50 +652,46 @@ func (p *parser) str(begin int) (rawString, int, error) {
 		next++
 		end = next + 4
 		if end >= len(text) {
-			return nil, 0, decodeError(text, "Invalid \\uXXXX escape", next-1)
+			return "", 0, decodeError(text, "Invalid \\uXXXX escape", next-1)
 		}
-		c = 0
+		var r rune
 		for ; next < end; next++ {
 			d, ok := hexDigit(text[next])
 			if !ok {
-				return nil, 0, decodeError(text, "Invalid \\uXXXX escape", end-5)
+				return "", 0, decodeError(text, "Invalid \\uXXXX escape", end-5)
 			}
-			c = c<<4 | d
+			r = r<<4 | d
 		}
-		if c >= 0xD800 && c <= 0xDBFF && end+6 < len(text) && text[next] == '\\' && text[next+1] == 'u' {
+		if r >= 0xD800 && r <= 0xDBFF && end+6 < len(text) && text[next] == '\\' && text[next+1] == 'u' {
 			next += 2
 			end += 6
-			var c2 rune
+			var r2 rune
 			for ; next < end; next++ {
 				d, ok := hexDigit(text[next])
 				if !ok {
-					return nil, 0, decodeError(text, "Invalid \\uXXXX escape", end-5)
+					return "", 0, decodeError(text, "Invalid \\uXXXX escape", end-5)
 				}
-				c2 = c2<<4 | d
+				r2 = r2<<4 | d
 			}
-			if c2 >= 0xDC00 && c2 <= 0xDFFF {
-				c = 0x10000 + (c-0xD800)<<10 + (c2 - 0xDC00)
+			if r2 >= 0xDC00 && r2 <= 0xDFFF {
+				r = 0x10000 + (r-0xD800)<<10 + (r2 - 0xDC00)
 			} else {
 				end -= 6
 			}
 		}
-		if surrogate(c) {
+		if surrogate(r) {
 			p.lone = true
 		}
-		out = append(out, c)
+		out = appendWTF8(out, r)
 	}
 }
 
-func encodeWTF8(s []rune) []byte {
-	out := make([]byte, 0, len(s))
-	for _, c := range s {
-		if surrogate(c) {
-			out = append(out, 0xED, byte(0x80|(c>>6)&0x3F), byte(0x80|c&0x3F))
-		} else {
-			out = utf8.AppendRune(out, c)
-		}
+// appendWTF8 appends a character as UTF-8, and a surrogate as the three bytes surrogatepass writes.
+func appendWTF8(out []byte, c rune) []byte {
+	if surrogate(c) {
+		return append(out, 0xED, byte(0x80|(c>>6)&0x3F), byte(0x80|c&0x3F))
 	}
-	return out
+	return utf8.AppendRune(out, c)
 }
 
 // checkStrings is strict_json's walk over every string after a document with an escape: the first
@@ -667,7 +703,7 @@ func checkStrings(value any) error {
 		pending = pending[:len(pending)-1]
 		switch v := v.(type) {
 		case rawString:
-			if err := encodable(v); err != nil {
+			if err := encodable([]byte(v)); err != nil {
 				return err
 			}
 		case *rawObject:
@@ -683,7 +719,20 @@ func checkStrings(value any) error {
 }
 
 // finish turns the parser's strings and objects into the package's values. It has no recursion either.
-func finish(value any) any {
+// Only LoadsLoose keeps lone surrogates, and there each becomes U+FFFD, which is as long in bytes.
+func finish(value any, surrogates bool) any {
+	text := func(s rawString) string {
+		if !surrogates || !strings.Contains(string(s), "\xED") {
+			return string(s)
+		}
+		b := []byte(s)
+		for i := range b {
+			if surrogateAt(b, i) {
+				copy(b[i:], "�")
+			}
+		}
+		return string(b)
+	}
 	type slot struct {
 		value any
 		set   func(any)
@@ -695,11 +744,11 @@ func finish(value any) any {
 		pending = pending[:len(pending)-1]
 		switch v := s.value.(type) {
 		case rawString:
-			s.set(string(v))
+			s.set(text(v))
 		case *rawObject:
 			o := &Object{Keys: make([]string, len(v.keys)), Values: make([]any, len(v.values))}
 			for i, key := range v.keys {
-				o.Keys[i] = string(key)
+				o.Keys[i] = text(key)
 				i := i
 				pending = append(pending, slot{v.values[i], func(x any) { o.Values[i] = x }})
 			}
