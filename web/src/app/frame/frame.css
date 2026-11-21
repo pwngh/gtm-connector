@@ -1,0 +1,376 @@
+/* The frame: a top bar 56 high on the surface with one rule under it, the
+   area's pages under that, and the page on the canvas. No sidebar. */
+.fr {
+  min-height: 100dvh;
+  background: var(--gc-canvas);
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.fr-skip {
+  position: absolute;
+  top: var(--gc-space-2);
+  left: var(--gc-space-2);
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  min-width: var(--gc-target);
+  min-height: var(--gc-target);
+  padding: 0 var(--gc-space-4);
+  border-radius: var(--gc-radius-control);
+  background: var(--gc-accent);
+  color: var(--gc-on-accent);
+  font: var(--gc-body);
+  font-weight: 600;
+  transform: translateY(-200%);
+}
+
+.fr-skip:focus-visible {
+  outline: var(--gc-focus);
+  outline-color: var(--gc-ink);
+  outline-offset: 2px;
+  transform: none;
+}
+
+.fr-announce,
+.fr-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.fr-bar {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--gc-space-2);
+  height: 56px;
+  padding: 0 var(--gc-space-4);
+  border-bottom: var(--gc-rule-width) solid var(--gc-rule);
+  background: var(--gc-surface);
+}
+
+.fr-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--gc-space-2);
+  margin-right: var(--gc-space-3);
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  font-weight: 600;
+}
+
+.fr-mark__symbol {
+  flex-shrink: 0;
+  color: var(--gc-accent);
+}
+
+.fr-areas {
+  display: flex;
+  align-self: stretch;
+}
+
+.fr-link {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  min-width: var(--gc-target);
+  min-height: var(--gc-target);
+  padding: 0 var(--gc-space-3);
+  border-bottom: 2px solid transparent;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  text-decoration: none;
+}
+
+.fr-areas .fr-link {
+  height: 100%;
+}
+
+.fr-link[aria-current="page"] {
+  border-bottom-color: var(--gc-accent);
+  font-weight: 600;
+}
+
+.fr-link:hover {
+  color: var(--gc-accent);
+}
+
+.fr-link:focus-visible,
+.fr-menu-button:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: -3px;
+}
+
+.fr-demo {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  padding: 2px var(--gc-space-2);
+  border: var(--gc-rule-width) solid var(--gc-control);
+  border-radius: var(--gc-radius-control);
+  color: var(--gc-ink);
+  font: var(--gc-label);
+  white-space: nowrap;
+}
+
+.fr-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--gc-space-2);
+  min-width: 0;
+  margin-left: auto;
+}
+
+.fr-find,
+.fr-tools .ui-button {
+  flex-shrink: 0;
+  padding: 0 var(--gc-space-3);
+}
+
+.fr-tools .fr-icon-button {
+  padding: 0;
+}
+
+.fr-who {
+  min-width: 0;
+  max-width: 14rem;
+  overflow: hidden;
+  color: var(--gc-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fr-area-name,
+.fr-menu-button,
+.fr-demo-row {
+  display: none;
+}
+
+.fr-menu-button {
+  align-items: center;
+  justify-content: center;
+  width: var(--gc-target);
+  height: var(--gc-target);
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: var(--gc-rule-width) solid var(--gc-control);
+  border-radius: var(--gc-radius-control);
+  background: var(--gc-surface);
+  color: var(--gc-ink);
+  cursor: pointer;
+}
+
+.fr-pages {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 0 var(--gc-space-4);
+  border-bottom: var(--gc-rule-width) solid var(--gc-rule);
+  background: var(--gc-surface);
+}
+
+.fr-main {
+  display: block;
+  min-width: 0;
+}
+
+.fr-main:focus-visible {
+  outline: none;
+}
+
+.fr-page {
+  min-width: 0;
+}
+
+.fr-page > .ui-refusal {
+  margin-bottom: var(--gc-space-5);
+}
+
+/* Sign-in: one column 400 wide on the page's left grid edge. */
+.fr-signin {
+  box-sizing: content-box;
+  display: grid;
+  gap: var(--gc-space-4);
+  max-width: 400px;
+  padding: var(--gc-space-6) var(--gc-space-4) var(--gc-space-7);
+  overflow-wrap: anywhere;
+}
+
+/* Scoped under .fr so the older sheets' heading colours do not reach these. */
+.fr .fr-signin__title,
+.fr .fr-nopage__title {
+  margin: 0;
+  color: var(--gc-ink);
+  font: var(--gc-title);
+  letter-spacing: 0;
+  text-shadow: none;
+}
+
+.fr-signin__title:focus-visible,
+.fr-nopage__title:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
+.fr-signin__lead,
+.fr-signin__text,
+.fr-nopage__text {
+  margin: 0;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+}
+
+.fr-signin__text {
+  color: var(--gc-ink-2);
+}
+
+.fr-signin__notice {
+  display: grid;
+  justify-items: start;
+  gap: var(--gc-space-2);
+  margin: 0;
+  padding: var(--gc-space-3) var(--gc-space-4);
+  border-left: 4px solid var(--gc-ink);
+  background: var(--gc-surface);
+  color: var(--gc-ink);
+}
+
+.fr-signin__form {
+  display: grid;
+  justify-items: stretch;
+  gap: var(--gc-space-4);
+}
+
+.fr-signin__form > .ui-button {
+  justify-self: start;
+}
+
+.fr-code {
+  font-family: var(--gc-face-reference);
+  font-size: 1rem;
+  color: var(--gc-ink);
+}
+
+.fr-nopage {
+  display: grid;
+  justify-items: start;
+  gap: var(--gc-space-4);
+  max-width: 40rem;
+  padding: var(--gc-space-6) 0;
+}
+
+/* The phone menu. */
+.fr-menu {
+  display: grid;
+  gap: var(--gc-space-5);
+  padding: var(--gc-space-4);
+}
+
+.fr-menu__group {
+  display: grid;
+  gap: var(--gc-space-1);
+}
+
+.fr-menu__label {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-label);
+}
+
+.fr-menu__who {
+  margin: 0 0 var(--gc-space-2);
+  overflow-wrap: anywhere;
+}
+
+.fr-menu__item {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--gc-space-2);
+  width: 100%;
+  min-height: var(--gc-target);
+  padding: 0 var(--gc-space-3);
+  border-left: 2px solid transparent;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  text-decoration: none;
+}
+
+.fr-menu__item[aria-current="page"] {
+  border-left-color: var(--gc-accent);
+  font-weight: 600;
+}
+
+.fr-menu__item:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: -3px;
+}
+
+@media (min-width: 720px) {
+  .fr-bar,
+  .fr-pages {
+    padding: 0 var(--gc-space-5);
+  }
+
+  .fr-signin {
+    padding-inline: var(--gc-space-5);
+  }
+}
+
+/* Between 720 and 1100 the product name is kept for assistive technology only. */
+@media (min-width: 720px) and (max-width: 1099.98px) {
+  .fr-mark__name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .fr-who {
+    max-width: 8rem;
+  }
+}
+
+@media (max-width: 719.98px) {
+  .fr-mark__name,
+  .fr-areas,
+  .fr-tools,
+  .fr-demo--bar,
+  .fr-pages {
+    display: none;
+  }
+
+  .fr-area-name {
+    display: inline;
+    font-weight: 600;
+  }
+
+  .fr-menu-button {
+    display: inline-flex;
+  }
+
+  .fr-demo-row {
+    display: flex;
+    margin: 0;
+    padding: var(--gc-space-2) var(--gc-space-4);
+    border-bottom: var(--gc-rule-width) solid var(--gc-rule);
+    background: var(--gc-surface);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fr-skip {
+    transition: none;
+  }
+}

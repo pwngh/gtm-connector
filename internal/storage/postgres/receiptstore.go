@@ -170,24 +170,41 @@ func (rs *ReceiptStore) Publish(ctx context.Context, p receipts.Publication) (re
 	if p.Kind != "card" && p.Kind != "selected_brief" {
 		return receipts.Card{}, fmt.Errorf("%w: a publication is a card or a selected_brief", receipts.ErrInvalid)
 	}
-	card, err := rs.Store.PublishCard(ctx, CardPublication{WorkspaceID: p.WorkspaceID, AccountRef: p.AccountRef,
+	// The card is read back inside the publication's own transaction. A read
+	// that fails there publishes nothing, and once the commit has succeeded
+	// nothing is left that can fail: the caller gets the card.
+	var out receipts.Card
+	written := false
+	card, err := rs.Store.publishCard(ctx, CardPublication{WorkspaceID: p.WorkspaceID, AccountRef: p.AccountRef,
 		BriefID: p.BriefID, ParentReceiptID: p.Seal.AuditID, PrincipalID: p.PrincipalID,
 		SealReceiptID: p.Seal.AuditID, SealLeaseToken: ticketLease(p.Seal), Kind: "go",
 		SchemaVersion: p.SchemaVersion, RulesVersion: rules, Bytes: p.Bytes, Units: units, Gaps: gaps, Lines: lines,
-		ReadReceiptIDs: p.Reads, ElapsedMS: p.ElapsedMS})
+		ReadReceiptIDs: p.Reads, ElapsedMS: p.ElapsedMS},
+		func(tx pgx.Tx, card Card, seal Receipt) error {
+			var err error
+			out, err = committed(ctx, tx, card, seal)
+			written = err == nil
+			return err
+		})
 	if err != nil {
 		return receipts.Card{}, receiptError(err)
 	}
-	return rs.committed(ctx, card)
-}
-
-// committed is a published card as the store holds it: its bytes, its seal,
-// and its projections as written, whatever a retry sent.
-func (rs *ReceiptStore) committed(ctx context.Context, card Card) (receipts.Card, error) {
+	if written {
+		return out, nil
+	}
+	// A retry after a lost acknowledgement: an earlier transaction wrote the
+	// card, and it is read as stored.
 	seal, err := rs.Store.Receipt(ctx, card.WorkspaceID, card.SealReceiptID)
 	if err != nil {
 		return receipts.Card{}, receiptError(err)
 	}
+	return committed(ctx, rs.Store.pool, card, seal)
+}
+
+// committed is a published card as the store holds it: its bytes, its seal,
+// and its projections as written, whatever a retry sent. q reads the
+// projections: the publication's transaction, or the pool for a retry.
+func committed(ctx context.Context, q querier, card Card, seal Receipt) (receipts.Card, error) {
 	sealed, err := converted(seal, nil)
 	if err != nil {
 		return receipts.Card{}, err
@@ -202,7 +219,7 @@ func (rs *ReceiptStore) committed(ctx context.Context, card Card) (receipts.Card
 	}
 	out := receipts.Card{WorkspaceID: card.WorkspaceID, AccountRef: card.AccountRef, BriefID: card.BriefID,
 		Kind: kind, Bytes: append([]byte(nil), card.Bytes...), SHA256: hex.EncodeToString(card.SHA256), Seal: sealed}
-	rows, err := rs.Store.pool.Query(ctx, `
+	rows, err := q.Query(ctx, `
 		SELECT u.n, u.kind, u.record_ref, u.tool, coalesce(u.shown, ''), coalesce(u.receipt_id::text, ''),
 		       coalesce(v.content_version, '')
 		  FROM evidence_units u LEFT JOIN source_records v ON v.id = u.source_record_id
@@ -229,7 +246,7 @@ func (rs *ReceiptStore) committed(ctx context.Context, card Card) (receipts.Card
 		}
 		out.Units[i].Value = []byte(value)
 	}
-	stored, err := gaps(ctx, rs.Store.pool, card.WorkspaceID, card.ID)
+	stored, err := gaps(ctx, q, card.WorkspaceID, card.ID)
 	if err != nil {
 		return receipts.Card{}, err
 	}
@@ -243,7 +260,7 @@ func (rs *ReceiptStore) committed(ctx context.Context, card Card) (receipts.Card
 		}
 		out.Gaps = append(out.Gaps, row)
 	}
-	held, err := lines(ctx, rs.Store.pool, card.WorkspaceID, card.ID)
+	held, err := lines(ctx, q, card.WorkspaceID, card.ID)
 	if err != nil {
 		return receipts.Card{}, err
 	}
@@ -393,6 +410,7 @@ func receiptError(err error) error {
 		{ErrSealMismatch, receipts.ErrInvalid},
 		{ErrInvalidArguments, receipts.ErrInvalid},
 		{ErrRecordRows, receipts.ErrInvalid},
+		{ErrPublishTimeout, receipts.ErrTimeout},
 	} {
 		if errors.Is(err, pair.ours) {
 			return fmt.Errorf("%w: %w", pair.theirs, err)

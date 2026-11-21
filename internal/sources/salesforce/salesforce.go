@@ -257,9 +257,15 @@ type Reader struct {
 	accessToken     string
 	editionVerified bool
 	organizationID  string
-	// signedInTo is the org ID sf org display named for the alias. The token must open that org.
-	signedInTo string
-	checked    map[string]bool
+	// signedInTo is the org ID sf org display named for the alias, and username the user it named. The token
+	// must open that org as that user.
+	signedInTo, username string
+	// userID is the ID of the user the first token read as. Every later token must read as the same user.
+	userID  string
+	checked map[string]bool
+	// tokens are every token this Reader has held or been given, for as long as it lives. An answer that
+	// holds any of them is refused.
+	tokens echo.Tokens
 }
 
 // FromSF captures the credentials of an existing sf login, by its alias, and makes the Reader of that org.
@@ -280,33 +286,44 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	instanceURL, organizationID, accessToken, err := login.read(ctx)
+	given, err := login.read(ctx)
 	if err != nil {
 		return nil, err
 	}
-	origin, err := configure(instanceURL, accessToken)
-	if err != nil {
+	origin, err := configure(given.instanceURL, given.accessToken)
+	if err != nil || !plainLabel(given.username) {
 		// What sf gave is not a usable login.
 		return nil, refuse(authRequired)
 	}
 	transport := o.Transport
 	if transport == nil {
-		transport = sourcehttp.Transport(sourcehttp.Direct, nil)
+		transport = DefaultTransport()
 	}
 	now := o.Now
 	if now == nil {
 		now = time.Now
 	}
-	return &Reader{environment: environment, instanceURL: origin, accessToken: accessToken, credentials: login,
-		signedInTo: organizationID,
-		now:        now, turn: make(chan struct{}, 1), checked: map[string]bool{},
+	r := &Reader{environment: environment, instanceURL: origin, accessToken: given.accessToken, credentials: login,
+		signedInTo: given.organizationID, username: given.username,
+		now: now, turn: make(chan struct{}, 1), checked: map[string]bool{},
 		client: &http.Client{Transport: transport,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	r.tokens.Add(given.accessToken)
+	return r, nil
 }
+
+// DefaultTransport is the transport a Reader makes when it is given none: sourcehttp's, which dials out
+// only in a process whose main allowed it (sourcehttp.Live).
+func DefaultTransport() http.RoundTripper { return sourcehttp.Transport(sourcehttp.Direct, nil) }
 
 // operation runs one bounded read, after the checks every first read makes: the org against the selected
 // environment, and outside Developer Edition the four objects' fields.
 func (r *Reader) operation(ctx context.Context, run func(o *operation) error) error {
+	return r.bounded(ctx, true, run)
+}
+
+// bounded is operation, with the fields of the four objects checked or not.
+func (r *Reader) bounded(ctx context.Context, capabilities bool, run func(o *operation) error) error {
 	select {
 	case r.turn <- struct{}{}:
 	case <-ctx.Done():
@@ -314,7 +331,6 @@ func (r *Reader) operation(ctx context.Context, run func(o *operation) error) er
 	}
 	defer func() { <-r.turn }()
 	o := &operation{reader: r, ctx: ctx, token: r.accessToken, deadline: r.now().Add(operationTime)}
-	o.tokens.Add(r.accessToken)
 	if !r.editionVerified {
 		organization, err := o.query(organizationQuery, 1)
 		if err != nil {
@@ -323,13 +339,16 @@ func (r *Reader) operation(ctx context.Context, run func(o *operation) error) er
 		if err := r.validateEnvironment(organization); err != nil {
 			return err
 		}
+		if err := o.checkUser(); err != nil {
+			return err
+		}
 		// A token sf gave during this first check is kept only now that it has proved the org.
 		if o.unproved != "" {
 			r.accessToken, o.unproved = o.unproved, ""
 		}
 		r.editionVerified = true
 	}
-	if r.environment != "developer" {
+	if capabilities && r.environment != "developer" {
 		if err := o.checkCapabilities(); err != nil {
 			return err
 		}
@@ -386,11 +405,25 @@ func plainLabel(name string) bool {
 	return true
 }
 
-// Identity is what pins a folder to one Salesforce connection.
+// Identity is what pins a folder to one Salesforce connection: the org, and the user it is read as.
 type Identity struct {
 	InstanceURL    string
 	OrganizationID string
 	Environment    string
+	UserID         string
+}
+
+// Pin is what a workspace is pinned to: the SHA-256 of the identity with the ID of the user it is read as,
+// in the canonical encoding. Another user of the same org has another pin.
+func (i Identity) Pin() string {
+	value := i.Value()
+	value.Set("user_id", i.UserID)
+	canonical, err := strictjson.Dumps(value, strictjson.Prepared)
+	if err != nil {
+		panic(err)
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:])
 }
 
 // Value is the identity as crm-connection.json holds it.
@@ -411,14 +444,98 @@ func (i Identity) Binding() *strictjson.Object {
 		"identity_sha256", hex.EncodeToString(sum[:]))
 }
 
+// identity is the org and the user this Reader has checked.
+func (r *Reader) identity() Identity {
+	return Identity{InstanceURL: r.instanceURL, OrganizationID: r.organizationID, Environment: r.environment,
+		UserID: r.userID}
+}
+
 // PrepareConnection gives the org's identity once the environment and schema checks pass. It reads no record.
 func (r *Reader) PrepareConnection(ctx context.Context) (Identity, error) {
 	var identity Identity
 	err := r.operation(ctx, func(*operation) error {
-		identity = Identity{InstanceURL: r.instanceURL, OrganizationID: r.organizationID, Environment: r.environment}
+		identity = r.identity()
 		return nil
 	})
 	return identity, err
+}
+
+// CheckEnvironment gives the org's identity once it is checked against the selected environment. It
+// describes no object and reads no record, so that the fields of each object can be checked apart.
+func (r *Reader) CheckEnvironment(ctx context.Context) (Identity, error) {
+	var identity Identity
+	err := r.bounded(ctx, false, func(*operation) error {
+		identity = r.identity()
+		return nil
+	})
+	return identity, err
+}
+
+// Objects are the four objects the reader maps, in the order they are checked.
+func Objects() []string {
+	names := make([]string, len(required))
+	for i, object := range required {
+		names[i] = object.object
+	}
+	return names
+}
+
+// MissingFields describes one of the four objects and gives how many fields of it are mapped, and those it
+// does not expose, in the order they are mapped. An object that is not queryable is salesforce_forbidden.
+func (r *Reader) MissingFields(ctx context.Context, object string) (mapped int, missing []string, err error) {
+	err = r.bounded(ctx, false, func(o *operation) error {
+		for _, each := range required {
+			if each.object != object {
+				continue
+			}
+			names, err := o.describe(object)
+			if err != nil {
+				return err
+			}
+			mapped, missing = len(each.fields), []string{}
+			for _, field := range each.fields {
+				if !names[field] {
+					missing = append(missing, field)
+				}
+			}
+			return nil
+		}
+		return refuse(invalidArguments)
+	})
+	return mapped, missing, err
+}
+
+// RenewalCandidate reads the Contract with the earliest EndDate on or after the day, among Draft,
+// InApproval and Activated contracts, ties broken by ID: the contract a card of its account plans from,
+// with its record_ref. It is nil when the org holds none.
+func (r *Reader) RenewalCandidate(ctx context.Context, asOf string) (*strictjson.Object, error) {
+	if _, err := evidence.Day(asOf); err != nil {
+		return nil, refuse(invalidArguments)
+	}
+	var candidate *strictjson.Object
+	err := r.operation(ctx, func(o *operation) error {
+		rows, err := o.query("SELECT "+contractFields+" FROM Contract WHERE EndDate >= "+asOf+
+			" AND StatusCode IN ('Draft', 'InApproval', 'Activated') ORDER BY EndDate, Id LIMIT 1", 1)
+		if err != nil || len(rows) == 0 {
+			return err
+		}
+		related, _ := rows[0].Get("AccountId")
+		account, err := nativeID(related)
+		if err != nil {
+			return err
+		}
+		record, err := contractRecord(rows[0], account)
+		if err != nil {
+			return err
+		}
+		ends, _ := record.Get("end_date")
+		if end, _ := ends.(string); end == "" || end < asOf {
+			return refuse(invalidResponse)
+		}
+		candidate = referenced("contracts", []*strictjson.Object{record})[0]
+		return nil
+	})
+	return candidate, err
 }
 
 // Account is one account with its contacts and its contracts, each ordered by ID.

@@ -119,18 +119,25 @@ func (s *server) read(ctx context.Context, view Opened, call mcp.Call, arguments
 	if err := ctx.Err(); err != nil {
 		return nil, err // the caller has gone: nothing is read
 	}
+	var refusal mcp.ToolError
 	switch call.Tool {
 	case "search_accounts":
 		query, _ := arguments.Get("query")
 		text, _ := query.(string)
-		if number, _ := arguments.Get("account_number"); number != nil {
-			return nil, mcp.ToolError("account_number_requires_salesforce")
+		var number *string
+		if asked, _ := arguments.Get("account_number"); asked != nil {
+			exact, _ := asked.(string)
+			number = &exact
 		}
 		accounts, err := s.readable(ctx, call.Invocation)
 		if err != nil {
 			return nil, err
 		}
-		records, more = view.Source.Search(text, accounts)
+		if records, more, err = view.Source.Search(ctx, text, number, accounts); errors.As(err, &refusal) {
+			return nil, refusal
+		} else if err != nil {
+			return nil, err
+		}
 	case "list_opportunities":
 		if !given || account == nil {
 			// With no account, the grants and the selection limit the list itself.
@@ -138,7 +145,11 @@ func (s *server) read(ctx context.Context, view Opened, call mcp.Call, arguments
 			if err != nil {
 				return nil, err
 			}
-			records = view.Source.Opportunities(accounts)
+			if records, err = view.Source.Opportunities(ctx, accounts); errors.As(err, &refusal) {
+				return nil, refusal
+			} else if err != nil {
+				return nil, err
+			}
 			break
 		}
 		fallthrough
@@ -156,7 +167,6 @@ func (s *server) read(ctx context.Context, view Opened, call mcp.Call, arguments
 			return nil, mcp.ToolError("slack_not_connected")
 		}
 		system, found, err := view.Source.Read(ctx, call.Tool, accountID)
-		var refusal mcp.ToolError
 		switch {
 		case errors.Is(err, demo.ErrAccountNotFound):
 			return nil, mcp.ToolError("account not found")

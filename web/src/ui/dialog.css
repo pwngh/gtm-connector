@@ -1,0 +1,108 @@
+.ui-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--gc-space-7) var(--gc-space-4);
+  background: rgb(15 20 26 / 0.5);
+}
+
+.ui-dialog-backdrop--drawer {
+  justify-content: flex-end;
+  padding: 0;
+}
+
+.ui-dialog-backdrop--sheet {
+  padding: 0;
+}
+
+.ui-dialog {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 2 * var(--gc-space-7));
+  border: var(--gc-rule-width) solid var(--gc-rule);
+  border-radius: var(--gc-radius-panel);
+  background: var(--gc-surface);
+  color: var(--gc-ink);
+  box-shadow: var(--gc-shadow);
+  font: var(--gc-body);
+}
+
+.ui-dialog:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: -3px;
+}
+
+.ui-dialog--drawer {
+  width: min(480px, 100%);
+  height: 100dvh;
+  max-height: none;
+  border-radius: var(--gc-radius-panel) 0 0 var(--gc-radius-panel);
+  animation: ui-dialog-slide 160ms ease-out;
+}
+
+.ui-dialog--sheet {
+  width: 100%;
+  height: 100dvh;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.ui-dialog__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gc-space-3);
+  padding: var(--gc-space-2) var(--gc-space-2) var(--gc-space-2) var(--gc-space-4);
+  border-bottom: var(--gc-rule-width) solid var(--gc-rule);
+}
+
+.ui-dialog__title {
+  margin: 0;
+  font: var(--gc-label);
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.ui-dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--gc-target);
+  height: var(--gc-target);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--gc-radius-control);
+  background: transparent;
+  color: var(--gc-ink);
+  cursor: pointer;
+}
+
+.ui-dialog__close:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: -3px;
+}
+
+.ui-dialog__body {
+  min-height: 0;
+  overflow: auto;
+}
+
+@keyframes ui-dialog-slide {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-dialog--drawer {
+    animation: none;
+  }
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/sources/demo"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce/salesforcetest"
+	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -94,9 +95,11 @@ func salesforceBooks(t *testing.T, newStore func(*testing.T) cardStore, book []b
 
 // waitingSF writes an invented sf program that answers the two login commands until the file "expired"
 // stands beside it. From then on it never answers: it starts a child, writes both process IDs to "waiting",
-// and waits.
+// and waits. salesforce.Exec runs only in a live process, so the test lets it run this program until it ends.
 func waitingSF(t *testing.T) (program, folder string) {
 	t.Helper()
+	sourcehttp.Live.Store(true)
+	t.Cleanup(func() { sourcehttp.Live.Store(false) })
 	folder = t.TempDir()
 	program = filepath.Join(folder, "sf")
 	script := `#!/bin/sh
@@ -107,7 +110,7 @@ if [ -e "$folder/expired" ]; then
   wait
 fi
 case "$2" in
-  display) echo '{"status": 0, "result": {"id": "` + salesforcetest.OrganizationID + `", "instanceUrl": "` + salesforcetest.Instance + `"}}' ;;
+  display) echo '{"status": 0, "result": {"id": "` + salesforcetest.OrganizationID + `", "instanceUrl": "` + salesforcetest.Instance + `", "username": "` + salesforcetest.Username + `", "alias": "` + salesforcetest.Alias + `"}}' ;;
   auth) echo '{"status": 0, "result": {"accessToken": "` + salesforcetest.Token + `"}}' ;;
 esac
 `

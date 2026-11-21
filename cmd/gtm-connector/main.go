@@ -14,6 +14,9 @@
 //	                                 serve MCP on stdin and stdout, for an assistant app that starts it
 //	gtm-connector token new --scope SCOPE
 //	                                 make a bearer token for an MCP client; also token list and token revoke ID
+//	gtm-connector debug calls ACTION import, list or inspect call transcript exports
+//	gtm-connector debug salesforce check
+//	                                 check a Salesforce sign-in, its fields and its renewal dates
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
 //	gtm-connector health             check that the local server answers
@@ -50,6 +53,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
@@ -64,8 +68,10 @@ const description = "Build a Deal card for a renewal from scoped CRM, call, and 
 var firstCommands = []string{"gtm-connector demo", "gtm-connector connect demo", "gtm-connector brief acc-007"}
 
 // listedCommands are the commands the refusal of an unknown command names: the Python CLI's own. This
-// binary answers each by name, debug with a refusal until it is ported. setup, serve, token, backup,
-// restore, health and version are this binary's besides, and --help lists them all.
+// binary answers each by name, debug with a refusal until it is ported, except debug calls (calls.go) and
+// debug salesforce check (source_salesforce.go).
+// setup, serve, token, backup, restore, health and version are this binary's besides, and --help lists
+// them all.
 var listedCommands = []string{"demo", "connect", "accounts", "brief", "inspect", "audit", "mcp", "debug"}
 
 // notInBuild are the commands among them that this binary does not run yet. Each is refused by name, here
@@ -87,16 +93,21 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   audit                       list the receipts of the audit log
   mcp stdio --scope SCOPE     serve MCP on stdin and stdout, for an assistant app that starts it
   token new --scope SCOPE     make a bearer token for an MCP client; also token list and token revoke ID
+  debug calls ACTION          import a call transcript export for an account, list imports, inspect one
+  debug salesforce check      check a Salesforce sign-in, its fields and its renewal dates
   backup --out FILE           write PostgreSQL and the credentials folder to FILE
   restore --in FILE           restore FILE into an empty database and credentials folder
   health                      check that the local server answers
   version                     print the commit this binary was built from
 
-demo, connect, accounts, brief, inspect, audit, mcp and token take --json, --state-dir WORKSPACE and --help.
-Not in this build: ` + strings.Join(notInBuild, ", ") + ".\n"
+demo, connect, accounts, brief, inspect, audit, mcp, token, debug calls and debug salesforce take --json,
+--state-dir WORKSPACE and --help.
+Not in this build: ` + strings.Join(notInBuild, ", ") + ", except debug calls and debug salesforce check.\n"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// The program itself reaches real sources. Its tests never set this, so none of them can.
+	sourcehttp.Live.Store(true)
 	code := dispatch(ctx, os.Args[1:], newScreen())
 	stop()
 	os.Exit(code)
@@ -131,11 +142,17 @@ func dispatch(ctx context.Context, argv []string, s screen) int {
 		}
 	}
 	name, args := tokens[0], tokens[1:]
+	if name == "debug" && len(args) > 0 && args[0] == "calls" {
+		return runCalls(ctx, args[1:], s)
+	}
 	if _, known := commands[name]; known {
 		return runCommand(ctx, name, args, s)
 	}
 	if runClient, client := clientCommands[name]; client {
 		return runClient(ctx, args, s)
+	}
+	if name == "debug" && len(args) > 0 && args[0] == "salesforce" {
+		return debugSalesforce(ctx, args[1:], s)
 	}
 	var err error
 	switch name {

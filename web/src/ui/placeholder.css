@@ -1,0 +1,34 @@
+.ui-placeholder {
+  display: grid;
+  gap: var(--gc-space-4);
+  padding: var(--gc-space-5) 0;
+}
+
+.ui-placeholder__shape {
+  display: grid;
+  gap: var(--gc-space-3);
+}
+
+.ui-placeholder__line {
+  display: block;
+  height: var(--gc-space-4);
+  background: var(--gc-sunken);
+}
+
+.ui-placeholder__line:nth-child(1) {
+  width: 60%;
+}
+
+.ui-placeholder__line:nth-child(2) {
+  width: 90%;
+}
+
+.ui-placeholder__line:nth-child(3) {
+  width: 75%;
+}
+
+.ui-placeholder__status {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+}

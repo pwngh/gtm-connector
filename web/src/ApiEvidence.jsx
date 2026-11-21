@@ -1,9 +1,9 @@
 import React, {useEffect, useRef} from 'react';
 import {Link} from 'react-router';
 import {CircleDashed, Database, Info, MessageSquare, Phone, X} from 'lucide-react';
-import {gapDispositions, unitFacts} from './api.js';
-import {ApiFrame, ApiRenewalHeader, AccountPicker, CardFacts, CardList, Refusal, Time, gapsTarget, selectionHref, useApiRead, useCardSelection} from './ApiFrame.jsx';
-import {useServer} from './ServerSwitch.jsx';
+import {gapDispositions, unitFacts} from './api/client.ts';
+import {ApiFrame, ApiRenewalHeader, AccountPicker, CardFacts, CardList, Refusal, Time, gapsTarget, selectionHref, useCardSelection} from './ApiFrame.jsx';
+import {useRead, useServer} from './api/reads.ts';
 import {Pill} from './WorkspaceControls.jsx';
 import {focusElement} from './focusElement.js';
 
@@ -60,7 +60,7 @@ export function UnitBody({unit}) {
 // One unit read in full, with its receipt. Opening it, from its link or from
 // a shared URL, brings its heading into view and puts focus there.
 function UnitDetail({account, cardId, n, params}) {
-  const unit = useApiRead(`unit:${account}:${cardId}:${n}`, api => api.unit(cardId, n));
+  const unit = useRead(`unit:${account}:${cardId}:${n}`, (api, signal) => api.unit(cardId, n, {signal}));
   useEffect(() => {focusElement(document.getElementById(`api-unit-${n}-detail`), {block: 'start'});}, [cardId, n]);
   return <UnitDetailView n={n} cardId={cardId} params={params} unit={unit}/>;
 }
@@ -104,8 +104,8 @@ export function UnitRow({unit, receipt, open, params, account, cardId}) {
 // Each distinct receipt once, read separately so one refusal stays with its units.
 function useReceipts(card) {
   const ids = card ? [...new Set(card.units?.map(unit => unit.receipt_id).filter(Boolean))] : [];
-  const read = useApiRead(card ? `receipts:${card.account}:${card.id}:${ids.join(',')}` : null, async api => {
-    const results = await Promise.all(ids.map(id => api.receipt(id).then(data => [id, {status: 'ready', data}], error => [id, {status: 'failed', error}])));
+  const read = useRead(card ? `receipts:${card.account}:${card.id}:${ids.join(',')}` : null, async (api, signal) => {
+    const results = await Promise.all(ids.map(id => api.receipt(id, {signal}).then(data => [id, {status: 'ready', data}], error => [id, {status: 'failed', error}])));
     const ended = results.find(([, result]) => result.error?.kind === 'signed_out');
     if (ended) throw ended[1].error;
     return Object.fromEntries(results);

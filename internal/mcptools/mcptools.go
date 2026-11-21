@@ -41,11 +41,14 @@ type Storage interface {
 }
 
 // Book is a source that also answers the two CRM reads no card makes: a search, and the opportunities of
-// every account. accounts, when not nil, limits either to those IDs. demo.Store is one.
+// every account. accounts limits either to those IDs. A search with a number looks an exact AccountNumber
+// up, which only a CRM that has account numbers answers; another refuses it with a tool error. Each record
+// carries its record_ref.
 type Book interface {
 	cards.Source
-	Search(query string, accounts []string) (records []*strictjson.Object, more bool)
-	Opportunities(accounts []string) []*strictjson.Object
+	Search(ctx context.Context, query string, number *string, accounts []string) (records []*strictjson.Object,
+		more bool, err error)
+	Opportunities(ctx context.Context, accounts []string) ([]*strictjson.Object, error)
 }
 
 // Config is one workspace's tools and how its callers are checked.
