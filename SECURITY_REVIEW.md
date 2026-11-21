@@ -242,6 +242,9 @@ show source text as it is stored, for checking a seal or tracing a read.
 | The five direct MCP reads | Data for the client: each record as its source adapter returned it, marked `untrusted_data: true` (see the [limits](#known-limits)) | A token with the tool's scope and a grant on the account | `TestMountedDirectReadsReturnTheRecordsAsTheSourceGaveThem` (`transport/mcp`), `TestOneRequestAndTheMessagesAsGiven` (`sources/slack`) |
 | A backup | Export: every row and the credential files `setup` makes | Whoever can read the file | `TestABackupRestoresEveryRow` (`storage/postgres`), `TestBackupAndRestoreKeepState` (`cmd/gtm-connector`) |
 
+Whoever holds the app role's URL also reads all of it straight from the tables, as
+[who holds authority](#who-holds-authority) says.
+
 ## 6. Real sources are opt-in and never fall back to demo data
 
 **A workspace is made for the invented demo book or for real sources, and keeps that. A real source is
