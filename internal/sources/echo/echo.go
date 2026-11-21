@@ -23,16 +23,16 @@ import (
 // answers, a one-letter token in the name of a member, and every answer would be refused.
 const MinLength = 20
 
-// Usable reports whether a credential is MinLength to most characters, each an ASCII letter, a digit or one
-// of marks. A reader refuses any other credential when it is given one.
-func Usable(token string, most int, marks string) bool {
+// Usable reports whether a credential is MinLength to most characters, each a printable ASCII character
+// other than a space. A reader refuses any other credential when it is given one. The rule names no
+// narrower set, because a service may change what its tokens are made of, and a real token refused here
+// would be a sign-in that cannot be used.
+func Usable(token string, most int) bool {
 	if len(token) < MinLength || len(token) > most {
 		return false
 	}
 	for i := 0; i < len(token); i++ {
-		c := token[i]
-		letter := c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9'
-		if !letter && strings.IndexByte(marks, c) < 0 {
+		if c := token[i]; c <= ' ' || c >= 0x7f {
 			return false
 		}
 	}

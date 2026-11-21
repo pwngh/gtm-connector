@@ -202,13 +202,9 @@ func validAccountSearch(query string, accountNumber *string) bool {
 	return !blank
 }
 
-// tokenMarks are the characters a Salesforce access token holds besides ASCII letters and digits: the mark
-// after the org ID of a session ID, and those of base64 in either alphabet with the dots of a signed token.
-const tokenMarks = "!._-+/="
-
 // configure checks an instance address and a token, and gives the origin every request goes to. The address
 // must be an HTTPS My Domain origin ending in .my.salesforce.com, with no path, query, credentials or
-// nonstandard port. The token must be 20 to 4,096 characters, each a letter, a digit or one of tokenMarks:
+// nonstandard port. The token must be 20 to 4,096 characters, each a printable ASCII character other than a space:
 // a shorter one would be found in every answer the org gives.
 func configure(instanceURL, accessToken string) (origin string, err error) {
 	if utf8.RuneCountInString(instanceURL) > 512 {
@@ -225,7 +221,7 @@ func configure(instanceURL, accessToken string) (origin string, err error) {
 	if !found || len(host) > 253 || !hostPattern.MatchString(host) {
 		return "", refuse(invalidConfiguration)
 	}
-	if !echo.Usable(accessToken, 4096, tokenMarks) {
+	if !echo.Usable(accessToken, 4096) {
 		return "", refuse(invalidConfiguration)
 	}
 	return "https://" + host, nil

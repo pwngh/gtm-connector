@@ -531,17 +531,16 @@ func TestStoreFailures(t *testing.T) {
 	})
 }
 
-// A token that an answer could hold by chance, or that is not made of what a Slack token is made of, is no
-// credential: saved, it is an invalid sign-in that sends nothing, and in a refresh answer it is refused.
+// A token that an answer could hold by chance, or that holds a space, a control character or anything
+// outside ASCII, is no credential: saved, it is an invalid sign-in that sends nothing, and in a refresh answer it is refused.
 func TestATokenAnAnswerCouldHoldByChanceIsNoCredential(t *testing.T) {
 	twenty := strings.Repeat("x", 20)
 	for name, token := range map[string]string{
 		"one letter, as in the member ok": "o",
 		"nineteen characters":             twenty[1:],
-		"a quotation mark":                twenty + `"`,
-		"a brace":                         twenty + "{",
-		"a colon":                         twenty + ":",
-		"a slash":                         twenty + "/",
+		"a space":                         twenty + " x",
+		"a control character":             twenty + "\x7f",
+		"a letter outside ASCII":          twenty + "é",
 	} {
 		for field, change := range map[string]func(*Credentials){
 			"access":  func(c *Credentials) { c.AccessToken = NewSecret(token) },

@@ -117,21 +117,20 @@ func TestEveryTokenHeldIsLookedFor(t *testing.T) {
 	}
 }
 
-// A credential is refused when an answer could hold it by chance, or when it is not made of what a
-// service's tokens are made of.
+// A credential is refused when an answer could hold it by chance, or when it holds a space, a control
+// character or anything outside ASCII. Any printable ASCII mark is allowed, because a service may change
+// what its tokens are made of.
 func TestACredentialMustBeLongAndPlain(t *testing.T) {
 	twenty := strings.Repeat("x", MinLength)
 	for token, want := range map[string]bool{
 		twenty: true, "Abc123._-" + twenty: true, strings.Repeat("x", 64): true,
+		twenty + "!": true, twenty + `"`: true, twenty + "{": true, twenty + ":": true, twenty + "~": true,
 		"": false, "o": false, "ok": false, "records": false, twenty[1:]: false, strings.Repeat("x", 65): false,
-		twenty + "!": false, twenty + " ": false, twenty + `"`: false, twenty + "{": false, twenty + ":": false,
-		twenty + "é": false, twenty + "\x00": false,
+		twenty + " ": false, twenty + "\t": false, twenty + "\x7f": false, twenty + "é": false,
+		twenty + "\x00": false,
 	} {
-		if got := Usable(token, 64, "._-"); got != want {
+		if got := Usable(token, 64); got != want {
 			t.Errorf("a credential of %d bytes: usable %t, want %t", len(token), got, want)
 		}
-	}
-	if !Usable(twenty+"!", 64, "!") {
-		t.Error("a mark the service uses was refused")
 	}
 }

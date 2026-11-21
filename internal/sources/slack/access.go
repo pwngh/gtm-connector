@@ -180,15 +180,12 @@ func isInt(value any, want int) bool {
 	return ok && n == want
 }
 
-// tokenMarks are the characters a Slack token holds besides ASCII letters and digits.
-const tokenMarks = "._-"
-
-// validToken reports whether a token is 20 to 8,192 characters, each a letter, a digit or one of
-// tokenMarks. A shorter one would be found in every answer Slack gives: a one-letter token is in the name
+// validToken reports whether a token is 20 to 8,192 characters, each a printable ASCII character other
+// than a space. A shorter one would be found in every answer Slack gives: a one-letter token is in the name
 // of the member "ok".
 func validToken(value any) (Secret, bool) {
 	s, isText := value.(string)
-	if !isText || !echo.Usable(s, 8192, tokenMarks) {
+	if !isText || !echo.Usable(s, 8192) {
 		return Secret{}, false
 	}
 	return NewSecret(s), true

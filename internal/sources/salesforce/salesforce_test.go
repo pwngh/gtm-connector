@@ -768,9 +768,10 @@ func TestTheInstanceAndTokenAreChecked(t *testing.T) {
 		// Short enough to be found in any answer: "o" is in the name of the member "records".
 		"": false, "o": false, "t": false, "records": false, strings.Repeat("x", 19): false,
 		strings.Repeat("x", 4097): false,
-		// Outside what a Salesforce token is made of.
-		twenty + " b": false, twenty + "é": false, twenty + "\x7f": false, twenty + `"`: false, twenty + "{": false,
-		twenty + ":": false, twenty + `\`: false, twenty + "~": false,
+		// Any printable ASCII mark is allowed: a service may change what its tokens are made of.
+		twenty + `"`: true, twenty + "{": true, twenty + ":": true, twenty + `\`: true, twenty + "~": true,
+		// A space, a control character or anything outside ASCII is not.
+		twenty + " b": false, twenty + "é": false, twenty + "\x7f": false, twenty + "\t": false,
 	} {
 		if _, err := configure(salesforcetest.Instance, token); (err == nil) != accepted {
 			t.Errorf("a token of %d bytes: accepted %t, want %t", len(token), err == nil, accepted)
@@ -780,7 +781,7 @@ func TestTheInstanceAndTokenAreChecked(t *testing.T) {
 	for _, change := range []func(*salesforcetest.SF){
 		func(sf *salesforcetest.SF) { sf.Instance = "https://invented-books.my.salesforce.com/services" },
 		func(sf *salesforcetest.SF) { sf.Token = "o" },
-		func(sf *salesforcetest.SF) { sf.Token = twenty + ":" },
+		func(sf *salesforcetest.SF) { sf.Token = twenty + " x" },
 	} {
 		sf := salesforcetest.NewSF()
 		change(sf)
