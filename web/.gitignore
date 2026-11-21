@@ -1,5 +1,7 @@
 node_modules/
-dist/
+# The build is ignored. dist/.gitkeep is kept, so embed.go compiles without one.
+dist/*
+!dist/.gitkeep
 .DS_Store
 .openai/*.log
 

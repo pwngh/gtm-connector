@@ -15,7 +15,8 @@
 //	GTM_CREDENTIALS_DIR     the private credentials folder
 //	GTM_LISTEN              a loopback host:port (default 127.0.0.1:8443)
 //	GTM_CONTAINER_LISTEN    inside a container only: the address to listen on instead
-//	GTM_PUBLIC_ORIGIN, GTM_ALLOWED_HOSTS, GTM_WEB_DIR
+//	GTM_PUBLIC_ORIGIN, GTM_ALLOWED_HOSTS
+//	GTM_WEB_DIR             a folder to serve the web app from, instead of the build inside the binary
 package main
 
 import (
@@ -150,11 +151,6 @@ func loadConfig() (config, error) {
 	for _, host := range strings.Split(hosts, ",") {
 		if host = strings.TrimSpace(host); host != "" {
 			c.allowedHosts = append(c.allowedHosts, host)
-		}
-	}
-	if c.webDir == "" {
-		if info, err := os.Stat(filepath.Join("web", "dist", "index.html")); err == nil && info.Mode().IsRegular() {
-			c.webDir = filepath.Join("web", "dist")
 		}
 	}
 	return c, nil

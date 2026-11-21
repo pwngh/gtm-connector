@@ -3,10 +3,11 @@ package httptransport
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
-	"os"
 	"path"
 	"regexp"
 	"strings"
@@ -24,9 +25,9 @@ var inlineScript = regexp.MustCompile(`(?is)<script(\s[^>]*)?>(.*?)</script>`)
 
 // policyFor allows each inline script of the build's index.html by its
 // SHA-256, so the shell's theme script runs and no other inline script does.
-func policyFor(root *os.Root) (string, error) {
-	file, err := root.Open("index.html")
-	if os.IsNotExist(err) {
+func policyFor(web fs.FS) (string, error) {
+	file, err := web.Open("index.html")
+	if errors.Is(err, fs.ErrNotExist) {
 		return fmt.Sprintf(basePolicy, ""), nil
 	}
 	if err != nil {
@@ -124,9 +125,9 @@ func (s *Server) clientRoute(clean string) bool {
 	return false
 }
 
-// serveFile serves one regular file from the build, through os.Root so no
-// path or link leads outside it, with a content type from the fixed table.
-// It reports whether it served the file.
+// serveFile serves one regular file from the build, with a content type
+// from the fixed table. A folder is read through os.Root, so no path or link
+// leads outside it. It reports whether it served the file.
 func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) bool {
 	file, err := s.web.Open(name)
 	if err != nil {
@@ -134,7 +135,8 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) 
 	}
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
+	content, seekable := file.(io.ReadSeeker)
+	if err != nil || !info.Mode().IsRegular() || !seekable {
 		return false
 	}
 	kind, ok := contentTypes[strings.ToLower(path.Ext(name))]
@@ -147,6 +149,6 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) 
 		// Vite names assets by their content's hash.
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
-	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+	http.ServeContent(w, r, info.Name(), info.ModTime(), content)
 	return true
 }
