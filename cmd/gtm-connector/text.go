@@ -30,6 +30,8 @@ func (r *run) human(result any) string {
 		return r.auditTable(result.([]any))
 	case "connect":
 		return r.connectText(result.(*strictjson.Object))
+	case "admit":
+		return r.admitText(result.(*strictjson.Object))
 	case "demo":
 		renewal := result.(*strictjson.Object)
 		return fmt.Sprintf("Call-note access was refused (HTTP %s) for a grant without calls:read.\n"+
@@ -37,6 +39,14 @@ func (r *run) human(result any) string {
 			cellText(get(get(renewal, "denied_read").(*strictjson.Object), "status")),
 			r.cardText(get(renewal, "brief").(*strictjson.Object)))
 	}
+	if r.admitted != nil {
+		return r.admittedLine() + "\n" + r.inspectText(result)
+	}
+	return r.inspectText(result)
+}
+
+// inspectText is inspect's result as text, by the form it was given.
+func (r *run) inspectText(result any) string {
 	switch r.action {
 	case "account":
 		return r.accountText(result.(*strictjson.Object))
@@ -81,6 +91,28 @@ func (r *run) cardText(card *strictjson.Object) string {
 	return fmt.Sprintf("%s\nBrief: %s\n%s\n%s", text, brief,
 		oneLine("List every unit: gtm-connector inspect "+brief+r.folder()),
 		oneLine("Resolve a number: gtm-connector inspect "+brief+" N"+r.folder()))
+}
+
+// admitText is a table of the folder's cards, whether each was added or already admitted, the counts, and
+// the command that lists a card's units in this workspace.
+func (r *run) admitText(result *strictjson.Object) string {
+	listed := get(result, "cards").([]any)
+	rows := make([][]any, len(listed))
+	for i, entry := range listed {
+		card := entry.(*strictjson.Object)
+		kind, status := "saved by brief or demo", "already admitted"
+		if get(card, "kind") == "prepared" {
+			kind = "prepared by an assistant"
+		}
+		if get(card, "added") == true {
+			status = "added"
+		}
+		rows[i] = []any{get(card, "brief_id"), get(card, "account_id"), kind, status}
+	}
+	return fmt.Sprintf("%s\n%d cards and %d receipts added.\n%s",
+		r.screen.table([]string{"BRIEF", "ACCOUNT", "KIND", "STATUS"}, rows),
+		get(result, "cards_added"), get(result, "receipts_added"),
+		oneLine("List every unit: gtm-connector inspect BRIEF_ID"+r.folder()))
 }
 
 // connectText is what connect did, then each source as connected or not, then the seller list when the
