@@ -122,29 +122,74 @@ func TestProfileRequestsHaveACapOfTheirOwn(t *testing.T) {
 	}
 }
 
-func TestAProfileAnswerThatIsNotTheUserRefusesTheRead(t *testing.T) {
+// An author whose profile cannot be read is marked so, and the thread is still read: an answer for no user,
+// another user, a team of no form, a user Slack does not find or show, or a malformed answer.
+func TestAnUnreadableProfileMarksOnlyItsAuthor(t *testing.T) {
 	answers := map[string]reply{
-		"another user":         profileAnswer(otherUser, "T12345678", ""),
-		"no team":              ok(`{"ok":true,"user":{"id":"U12345678"}}`),
-		"a team of no form":    profileAnswer("U12345678", "team-1", ""),
-		"no user":              ok(`{"ok":true}`),
-		"a flag of no type":    ok(`{"ok":true,"user":{"id":"U12345678","team_id":"T12345678","deleted":"no"}}`),
-		"an email of no form":  profileAnswer("U12345678", "T12345678", "two words@seller.example"),
-		"a profile of no type": ok(`{"ok":true,"user":{"id":"U12345678","team_id":"T12345678","profile":[]}}`),
+		"another user":          profileAnswer(otherUser, "T12345678", ""),
+		"no team":               ok(`{"ok":true,"user":{"id":"U12345678"}}`),
+		"a team of no form":     profileAnswer("U12345678", "team-1", ""),
+		"no user":               ok(`{"ok":true}`),
+		"a flag of no type":     ok(`{"ok":true,"user":{"id":"U12345678","team_id":"T12345678","deleted":"no"}}`),
+		"a profile of no type":  ok(`{"ok":true,"user":{"id":"U12345678","team_id":"T12345678","profile":[]}}`),
+		"user_not_found":        ok(`{"ok":false,"error":"user_not_found"}`),
+		"user_not_visible":      ok(`{"ok":false,"error":"user_not_visible"}`),
+		"a scope named nowhere": ok(`{"ok":false,"error":"missing_scope","needed":"admin"}`),
 	}
 	for name, answer := range answers {
 		b := newBench(t)
 		b.withScopes("channels:history", "users:read", "users:read.email")
-		b.slack.profiles = []reply{answer}
-		b.refuses("slack_response_invalid", []reply{page(msg(parentTS))})
-		if b.last().Phase != "profiles" {
-			t.Errorf("%s: phase %q", name, b.last().Phase)
+		// The first author's profile cannot be read; the second's is read as usual.
+		b.slack.profiles = []reply{answer, profileAnswer(otherUser, "T87654321", "dana@buyer.example")}
+		read := b.reads(twoAuthors())
+		if got := dump(t, read.Members[0]); got != `{"id":"mem-U12345678","account_id":"acc-001","user_id":"U12345678",`+
+			`"team_id":null,"home":false,"email":null,"profile":"not_read","missing_scopes":[]}` {
+			t.Errorf("%s: member %s", name, got)
+		}
+		if member(t, read.Members[1], "profile") != "read" || member(t, read.Members[1], "email") != "dana@buyer.example" {
+			t.Errorf("%s: the next author %s", name, dump(t, read.Members[1]))
 		}
 	}
+}
+
+// Slack's missing_scope answer marks the author with the profile scopes it names, and the read goes on.
+func TestAMissingScopeAnswerMarksItsAuthor(t *testing.T) {
 	b := newBench(t)
-	b.withScopes("channels:history", "users:read")
-	b.slack.profiles = []reply{ok(`{"ok":false,"error":"missing_scope"}`)}
-	b.refuses("slack_forbidden", []reply{page(msg(parentTS))})
+	b.withScopes("channels:history", "users:read", "users:read.email")
+	b.slack.profiles = []reply{ok(`{"ok":false,"error":"missing_scope","needed":"users:read.email","provided":"users:read"}`),
+		profileAnswer(otherUser, "T87654321", "")}
+	read := b.reads(twoAuthors())
+	if got := dump(t, read.Members[0]); got != `{"id":"mem-U12345678","account_id":"acc-001","user_id":"U12345678",`+
+		`"team_id":null,"home":false,"email":null,"profile":"missing_scope","missing_scopes":["users:read.email"]}` {
+		t.Fatalf("member %s", got)
+	}
+	if member(t, read.Members[1], "profile") != "read" {
+		t.Fatalf("the next author %s", dump(t, read.Members[1]))
+	}
+}
+
+// A profile email is kept only when it is an address the card can compare: its domain in lower case, and
+// valid by evidence.ValidEmail. Any other email is dropped and the profile is still read.
+func TestAProfileEmailIsKeptOnlyWhenValid(t *testing.T) {
+	for given, kept := range map[string]any{
+		"Morgan@Seller.EXAMPLE":             "Morgan@seller.example",
+		"two words@seller.example":          nil,
+		"kim@[click](https://evil.example)": nil,
+		"kim@<!channel>":                    nil,
+		"kim@<https://evil.example|verify>": nil,
+		"kim@localhost":                     nil,
+		"kim@Kelvin.example":                nil, // a Kelvin sign lowers to an ASCII k outside ASCII
+
+		"kim@www.evil.example": "kim@www.evil.example",
+	} {
+		b := newBench(t)
+		b.withScopes("channels:history", "users:read", "users:read.email")
+		b.slack.profiles = []reply{profileAnswer("U12345678", "T12345678", given)}
+		read := b.reads([]reply{page(msg(parentTS))})
+		if m := read.Members[0]; member(t, m, "email") != kept || member(t, m, "profile") != "read" {
+			t.Errorf("%q: member %s", given, dump(t, m))
+		}
+	}
 }
 
 func TestAProfileRequestRetriesOnceAfterA429(t *testing.T) {
