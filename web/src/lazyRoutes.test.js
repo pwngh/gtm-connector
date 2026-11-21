@@ -132,7 +132,7 @@ const startupBytesBefore = 737_028;
 // The modules the server's app starts with.
 const serverStartup = ['entry.tsx', 'app/boot.tsx', 'app/ServerApp.tsx', 'app/routes.ts', 'app/lazyPage.ts', 'lazyPages.js',
   'app/frame/Frame.tsx', 'app/frame/SignIn.tsx', 'app/frame/NoPage.tsx', 'app/frame/pages.ts', 'app/frame/frame.css',
-  'app/deals/deals.ts', 'app/deals/deals.css', 'app/deals/card/card.css', 'app/deals/card/text.css', 'app/deals/card/proof.css',
+  'app/deals/deals.ts', 'app/deals/deals.css', 'app/deals/card/card.css', 'app/deals/card/text.css', 'app/deals/card/lines.css', 'ui/help.css', 'app/deals/card/proof.css',
   'api/client.ts', 'api/session.ts', 'api/reads.ts', 'RouteContent.jsx', 'focusElement.js',
   'ui/Button.tsx', 'ui/Field.tsx', 'ui/Refusal.tsx', 'ui/Placeholder.tsx', 'ui/Dialog.tsx', 'ui/Palette.tsx', 'ui/theme.ts',
   'ui/tokens.css', 'app/ops/coverage.css', 'ui/button.css', 'ui/field.css', 'ui/refusal.css', 'ui/placeholder.css', 'ui/dialog.css', 'ui/palette.css',
@@ -140,8 +140,8 @@ const serverStartup = ['entry.tsx', 'app/boot.tsx', 'app/ServerApp.tsx', 'app/ro
 // The modules the server's pages load after it.
 const serverPages = ['app/deals/Deals.tsx', 'app/ops/Coverage.tsx', 'app/ops/coverageRows.ts', 'app/ops/pooledReads.ts', 'ApiEvidence.jsx', 'ApiFrame.jsx', 'api/selection.ts', 'api/sealed.ts', 'WorkspaceControls.jsx',
   ...['DealCard.tsx', 'Title.tsx', 'sections.ts', 'card.ts', 'Cite.tsx', 'Sentence.tsx', 'Notices.tsx', 'PeopleSaid.tsx', 'MoreRead.tsx', 'TheRecord.tsx', 'NotRead.tsx', 'Seal.tsx',
-    'DealTabs.tsx', 'PlainText.tsx', 'SealFailed.tsx', 'sealCheck.ts', 'Proof.tsx', 'proof.ts']
-    .map(name => `app/deals/card/${name}`)];
+    'DealTabs.tsx', 'PlainText.tsx', 'SealFailed.tsx', 'sealCheck.ts', 'Proof.tsx', 'proof.ts', 'Focal.tsx', 'Flags.tsx', 'lines.ts']
+    .map(name => `app/deals/card/${name}`), 'ui/Help.tsx', 'help/help.json'];
 
 test('production chunks: the server app starts with its shell alone, and each page loads on its own', async t => {
   const previous = process.env.NODE_ENV;

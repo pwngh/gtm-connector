@@ -1,5 +1,7 @@
 import type {ComponentType} from 'react';
 import type {CardDetail, CardView} from '../../../api/types.ts';
+import {Flags} from './Flags.tsx';
+import {Focal} from './Focal.tsx';
 import {MoreRead} from './MoreRead.tsx';
 import {Notices} from './Notices.tsx';
 import {NotRead} from './NotRead.tsx';
@@ -34,7 +36,9 @@ export interface Section {
 // The card's sections, in reading order within each area. A later slice adds
 // its section here, in its own file.
 export const sections: Section[] = [
+  {id: 'focal', area: 'top', Section: Focal},
   {id: 'notices', area: 'top', Section: Notices},
+  {id: 'flags', area: 'top', Section: Flags},
   {id: 'proof', area: 'top', Section: Proof},
   {id: 'people-said', area: 'words', Section: PeopleSaid},
   {id: 'more-read', area: 'words', Section: MoreRead},
