@@ -9,7 +9,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/transport/mcp"
 )
 
-// The read commands' results as text, in the forms gtm_connector/cli.py prints them. The wording can
+// The read commands' results as text, in the forms the recorded Python CLI printed them. The wording can
 // change; scripts read --json.
 
 // human is a result as text.

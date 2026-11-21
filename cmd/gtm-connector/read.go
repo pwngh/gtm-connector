@@ -21,7 +21,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/unicodetab"
 )
 
-// The read commands, as gtm_connector/cli.py runs them: accounts, brief, inspect and audit. They are the
+// The read commands: accounts, brief, inspect and audit. They are the
 // commands of the person who runs the install, so they connect as the app role and read a whole workspace.
 // A card they make is the owner's: its receipts name no principal, and a bearer made for the run, never
 // stored or shown, gives them their token ID. What a workspace reads comes from sources.go.

@@ -1,4 +1,4 @@
-// Package evidence is the port of the evidence rules in gtm_connector/units.py and briefing.py: neutralized
+// Package evidence is the port of the Python package's evidence rules: neutralized
 // source text, whole sentences, and the Deal card built from one evidence snapshot. It matches the Python
 // oracle in testdata/oracle exactly.
 //

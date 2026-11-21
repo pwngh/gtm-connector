@@ -1,6 +1,5 @@
-// Package slack reads one mapped Slack thread for an account through Slack's Web API, as
-// gtm_connector/slack_reader.py does for read_slack_messages, and keeps the saved user sign-in usable as
-// gtm_connector/slack_auth.py does during a read.
+// Package slack reads one mapped Slack thread for an account through Slack's Web API for
+// read_slack_messages, and keeps the saved user sign-in usable during a read.
 //
 // A read is one operation. It asks the fixed endpoint conversations.replies for the selected thread up to
 // the moment the read began, follows cursors to the end, and returns every message or none. Its requests,
@@ -25,7 +24,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The limits table of docs/python/slack.md.
+// The limits table of docs/sources.md.
 const (
 	operationTime        = 20 * time.Second
 	maxRequests          = 10
@@ -44,7 +43,7 @@ const repliesURL = "https://slack.com/api/conversations.replies"
 // supportedSubtypes are the message subtypes a read accepts. A message with no subtype is accepted too.
 var supportedSubtypes = []string{"bot_message", "me_message", "file_share", "thread_broadcast", "tombstone"}
 
-// exitCodes gives each reason a read can stop for the exit code docs/python/slack.md lists for it.
+// exitCodes gives each reason a read can stop for the exit code docs/sources.md lists for it.
 var exitCodes = map[string]int{
 	"slack_selection_invalid": 2, "slack_mapping_missing": 3, "slack_mapping_conflict": 3,
 	"slack_source_mismatch": 3, "slack_mapping_invalid": 4, "slack_snapshot_invalid": 4,

@@ -1,5 +1,5 @@
 {
- "note": "Item lines both readers must accept or refuse alike: tools/oracle/real.py and internal/realdata/items.go. Each line is hex.",
+ "note": "Item lines internal/realdata/items.go accepts or refuses as the oracle's reader did. Each line is hex.",
  "lines": [
   {
    "why": "a text item",

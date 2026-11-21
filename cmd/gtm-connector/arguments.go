@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// The commands take their arguments as gtm_connector/cli.py's argparse parser does, and refuse them with
+// The commands take their arguments as the recorded Python CLI's argparse parser did, and refuse them with
 // its messages. What was typed is never repeated back: it may be a URL or a username.
 
 // option is one option of a command.

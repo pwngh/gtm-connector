@@ -1,18 +1,18 @@
-// Command realdata runs real public text through the Python oracle and the Go port and compares them (R0 in
-// the backend plan). It downloads datasets, so it is opt-in and never part of the tests or CI.
+// Command realdata runs real public text through the Go port and compares its outputs with the digests the
+// Python oracle recorded for the same text. It downloads datasets, so it is opt-in and never part of the
+// tests or CI.
 //
 //	realdata fetch [DATASET...]          download each pinned public dataset into the cache and check it
 //	realdata convert [DATASET...]        turn each fetched dataset into items
-//	realdata compare [DATASET...]        compare Go's outputs with what the oracle recorded
-//	realdata verify [DATASET...]         all of it: fetch, convert, run the oracle, compare
+//	realdata compare [DATASET...]        compare Go's outputs with the recorded digests
+//	realdata verify [DATASET...]         all of it: fetch, convert, compare
 //	realdata pin DATASET...              fetch a dataset's files the first time and record their digests
 //
 // With no dataset named, a command takes every dataset that is not opt-in. pin writes the pins into
-// internal/realdata/pins, which are committed.
+// internal/realdata/pins, and the recorded digests are in internal/realdata/recorded; both are committed.
 //
-// -python names the pinned CPython for verify; -python ” compares against the recorded digests without
-// running Python. -local FILE runs verify or compare on a private JSON Lines file of {"id", "text"} items
-// instead of the datasets, with its results in FILE.r0 beside it.
+// -local FILE runs verify or compare on a private JSON Lines file of {"id", "text"} items instead of the
+// datasets, against the oracle's records an earlier run left in FILE.r0 beside it.
 //
 // The cache is $GTM_REAL_CACHE, or ~/.cache/gtm-connector/real. Nothing it prints holds an item's text.
 package main
@@ -23,7 +23,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -37,8 +36,8 @@ const usage = `usage: realdata [flags] fetch|convert|compare|verify|pin [DATASET
 
   fetch     download each pinned public dataset into the cache and check it against its pins
   convert   turn each fetched dataset into items
-  compare   compare the Go port's outputs with what the oracle recorded
-  verify    fetch, convert, run the Python oracle, compare
+  compare   compare the Go port's outputs with the digests the oracle recorded
+  verify    fetch, convert, compare
   pin       fetch a dataset's files the first time and record their digests in internal/realdata/pins
 
 flags:
@@ -58,7 +57,6 @@ func run(args []string) (code int) {
 		}
 	}()
 	flags := flag.NewFlagSet("realdata", flag.ContinueOnError)
-	python := flags.String("python", ".venv/bin/python", "the pinned CPython 3.14.6 that runs the oracle; '' to compare against recorded digests")
 	local := flags.String("local", "", "a private JSON Lines file of {\"id\", \"text\"} items, outside the repository")
 	flags.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
@@ -74,7 +72,7 @@ func run(args []string) (code int) {
 	command, names := flags.Arg(0), flags.Args()[1:]
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	differences, err := dispatchCommand(ctx, command, names, *python, *local)
+	differences, err := dispatchCommand(ctx, command, names, *local)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "realdata: %v\n", err)
 		return 2
@@ -86,8 +84,8 @@ func run(args []string) (code int) {
 }
 
 type state struct {
-	cache, root, python string
-	explicit            bool // the datasets were named
+	cache, root string
+	explicit    bool // the datasets were named
 }
 
 // runnable says why a dataset cannot be compared, if it cannot.
@@ -101,30 +99,30 @@ func runnable(d realdata.Dataset) error {
 	case !d.Pinned():
 		return fmt.Errorf("%s is not pinned yet; `realdata pin %s` fetches it and records its digests", d.ID, d.ID)
 	}
+	if _, err := realdata.LoadRecorded(d.ID); err != nil {
+		return err
+	}
 	return nil
 }
 
-func dispatch(ctx context.Context, command string, names []string, python, local string) (int, error) {
+func dispatch(ctx context.Context, command string, names []string, local string) (int, error) {
 	root, err := repository()
 	if err != nil {
 		return 0, err
 	}
-	s := state{root: root, python: python}
+	s := state{root: root}
 	if local != "" {
 		if len(names) > 0 {
 			return 0, errors.New("-local runs one file; name no dataset with it")
+		}
+		if command != "verify" && command != "compare" {
+			return 0, fmt.Errorf("-local goes with verify or compare, not %s", command)
 		}
 		r, err := realdata.LocalRun(local, root)
 		if err != nil {
 			return 0, err
 		}
-		switch command {
-		case "verify":
-			return s.verify(ctx, []realdata.Run{r})
-		case "compare":
-			return compare([]realdata.Run{r})
-		}
-		return 0, fmt.Errorf("-local goes with verify or compare, not %s", command)
+		return compare([]realdata.Run{r})
 	}
 	if s.cache, err = realdata.CacheDir(); err != nil {
 		return 0, err
@@ -145,7 +143,7 @@ func dispatch(ctx context.Context, command string, names []string, python, local
 	s.explicit = len(names) > 0
 	if s.explicit && (command == "verify" || command == "convert" || command == "compare") {
 		for _, d := range datasets {
-			if err := runnable(d); err != nil {
+			if err := runnable(d); err != nil && (command != "convert" || !errors.Is(err, realdata.ErrNotRecorded)) {
 				return 0, err
 			}
 		}
@@ -180,7 +178,7 @@ func dispatch(ctx context.Context, command string, names []string, python, local
 		if err != nil {
 			return 0, err
 		}
-		differences, err := s.verify(ctx, runs)
+		differences, err := compare(runs)
 		fmt.Printf("verify-real took %.1f s in all\n", time.Since(started).Seconds())
 		return differences, err
 	}
@@ -257,54 +255,21 @@ func (s state) convert(datasets []realdata.Dataset) ([]realdata.Run, error) {
 	return runs, nil
 }
 
-// verify runs the oracle on each run, then compares. With no Python it compares against what an earlier run
-// recorded. A run that fails is reported, and the others go on.
-func (s state) verify(ctx context.Context, runs []realdata.Run) (int, error) {
-	if s.python == "" {
-		logf("oracle: no Python given; comparing against the digests recorded earlier")
-		return compare(runs)
-	}
-	// A bare name is looked up on PATH; a relative path is from the repository.
-	python, err := exec.LookPath(s.python)
-	if strings.ContainsRune(s.python, filepath.Separator) && !filepath.IsAbs(s.python) {
-		python, err = exec.LookPath(filepath.Join(s.root, s.python))
-	}
-	if err != nil {
-		return 0, fmt.Errorf("no Python at %s; set PYTHON to the pinned CPython 3.14.6, or to '' to compare against recorded digests", s.python)
-	}
-	var ready []realdata.Run
-	failed := 0
-	for _, r := range runs {
-		if err := r.ClearReport(); err != nil {
-			return 0, err
-		}
-		args := []string{"-I", filepath.Join(s.root, "tools", "oracle", "real.py"), "--out", r.Out, r.Items}
-		if r.Local {
-			args = append(args, "--local")
-		}
-		logf("oracle: %s", r.Name)
-		command := exec.CommandContext(ctx, python, args...)
-		command.Dir = s.root
-		command.Stdout, command.Stderr = os.Stdout, os.Stderr
-		if err := command.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "realdata: the oracle failed on %s\n", r.Name)
-			failed++
-			continue
-		}
-		ready = append(ready, r)
-	}
-	differences, err := compare(ready)
-	if failed > 0 {
-		err = errors.Join(fmt.Errorf("the oracle failed on %d of %d runs", failed, len(runs)), err)
-	}
-	return differences, err
-}
-
-// compare compares each run and prints its report. A run that fails is reported, and the others go on.
+// compare compares each run and prints its report: a dataset's run against its recorded digests, and a local
+// run against the records in its results folder. A run that fails is reported, and the others go on.
 func compare(runs []realdata.Run) (int, error) {
 	total, failed := 0, 0
 	for _, r := range runs {
-		report, err := realdata.Compare(r)
+		var report *realdata.Report
+		var err error
+		if r.Local {
+			report, err = realdata.Compare(r)
+		} else {
+			var recorded *realdata.Recorded
+			if recorded, err = realdata.LoadRecorded(r.Name); err == nil {
+				report, err = realdata.CompareRecorded(r, recorded)
+			}
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "realdata: %v\n", err)
 			failed++

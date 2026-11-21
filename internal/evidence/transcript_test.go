@@ -98,7 +98,7 @@ const (
 )
 
 // importedRefusals are the changes to a saved transcript record, or to its bindings, that
-// tests/test_calls_import.py, tests/test_imported_briefing.py and tests/test_books_calls.py refuse, each with
+// the removed Python suite refused, each with
 // the refusal units.build gives for it. A change marked remade has the ID of its changed manifest, so only
 // the check of the changed field can refuse it.
 var importedRefusals = []struct {
@@ -262,7 +262,7 @@ func TestRemadeTranscriptIsAccepted(t *testing.T) {
 	}
 }
 
-// TestVoices is tests/test_units.py's test_each_voice_tag_of_a_cue_labels_what_follows_it.
+// TestVoices is the removed Python suite's test_each_voice_tag_of_a_cue_labels_what_follows_it.
 func TestVoices(t *testing.T) {
 	type span = [2]any
 	for _, c := range []struct {
@@ -340,7 +340,7 @@ func transcriptEvidence(t *testing.T, lines []string, first, last int) *strictjs
 	return evidence
 }
 
-// TestExcerptEdgeCutsASentence is tests/test_imported_briefing.py's
+// TestExcerptEdgeCutsASentence is the removed Python suite's
 // test_a_sentence_cut_by_the_edge_of_an_excerpt_is_counted_and_not_shown: lines 3 and 4 are asked for, so
 // lines 2 to 5 are read, and the sentences the excerpt's edges cut are counted and not shown.
 func TestExcerptEdgeCutsASentence(t *testing.T) {

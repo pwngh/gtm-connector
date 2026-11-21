@@ -1,5 +1,5 @@
-// Package calls imports one call transcript for one account and serves it to the card maker
-// (gtm_connector/calls_import.py). It parses a UTF-8 TXT, WebVTT or SRT export into transcript units, selects
+// Package calls imports one call transcript for one account and serves it to the card maker.
+// It parses a UTF-8 TXT, WebVTT or SRT export into transcript units, selects
 // an excerpt, and builds the manifest and record a stored import is read back as. It contacts no provider.
 // The store of imports is internal/storage/postgres.
 package calls

@@ -1,9 +1,10 @@
 # Working on gtm-connector
 
 A local connector that builds a Deal card for a renewal from CRM records, call transcripts, and
-Slack. One operator runs it. People use the CLI, assistants use the MCP tools. Python 3.11+ and SQLite
-today. It is becoming one Go program with PostgreSQL that also runs the renewal workflow and its web
-app. Until the Go CLI ships, the Python package is the product and the reference the Go code matches.
+Slack. One operator runs it. People use the CLI and the web app, assistants use the MCP tools. It is
+one Go program on PostgreSQL, with the web app inside it, and it is growing to run the renewal
+workflow. There is no Python in the repository: `testdata/oracle/` holds the outputs the Python
+package it replaced recorded, as frozen test data.
 
 ## Never break these
 
@@ -18,18 +19,9 @@ app. Until the Go CLI ships, the Python package is the product and the reference
 7. Credentials never reach output or logs. A real org's names, IDs, and URLs stay out of errors, Git,
    and reviews.
 
-## Where things are (`gtm_connector/`)
+## Where things are
 
-| Area | Files |
-| --- | --- |
-| Request path | `gateway.py`, `request_checks.py`, `tool_definitions.py`, `audit.py`, `auth.py`, `strict_json.py` |
-| Server and state | `runtime.py`, `profile.py` (what a folder is connected to), `client.py`, `doctor.py` |
-| Client setup | `connections.py`, `stdio_bridge.py` (the local bridge an assistant app starts) |
-| Cards | `units.py` (units, roles, neutralized text, the card), `briefing.py`, `selection.py`, `selected_briefs.py` |
-| Sources | `store.py`, `calls.py`, `slack.py` (demo), `salesforce*.py`, `calls_import.py`, `slack_*.py` |
-| Commands | `cli.py` |
-
-The Go port is the module at the root, in `internal/`: `unicodetab` (generated from `testdata/oracle/unicode`),
+The module is at the root, with its packages in `internal/`: `unicodetab` (generated from `testdata/oracle/unicode`),
 `strictjson`, `evidence` (neutralized text, sentences, the card), `receipts` (the contract, the publication
 rules every store applies, and `receiptstest`, which every store runs), `cards` (make, seal, verify, admit),
 `sources/demo`, `sources/calls` (the transcript parser, the excerpt and the record of an import, kept by
@@ -48,21 +40,23 @@ source is wired into those commands. `postgres.ReceiptStore` runs the card maker
 `mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`
 and `mcp stdio` serves on stdin and stdout.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
+`realdata` (with `cmd/realdata`) fetches public datasets and compares Go's text functions on them with
+the digests in `internal/realdata/recorded`. `web/` is the web app, which `make build` puts inside the
+binary.
 
-The guides in `docs/` describe the Go binary: `cli.md` (commands, workspaces, output, exit codes),
+The guides in `docs/` describe the binary: `cli.md` (commands, workspaces, output, exit codes),
 `cards.md` (how a card is built and read), `audit.md` (receipts), `sources.md` (Salesforce, call
 transcripts, Slack, the demo book), `mcp.md` (tools, scopes, tokens, selections), `operations.md`
-(install, setup, health, backup) and `api.md`. `docs/python/` holds the Python package's guides and
-goes with the package.
+(install, setup, health, backup), `api.md` and `real-data.md`.
 
 ```sh
-python3 -m venv .venv && .venv/bin/python -m pip install --require-hashes -r requirements-dev.lock
-.venv/bin/python -m gtm_connector demo             # the product on invented data
-.venv/bin/python -m unittest discover -s tests     # about 3 minutes; tests_stateful is separate
-.venv/bin/python -m ruff check . && .venv/bin/python -m mypy
-GOTOOLCHAIN=local go vet ./... && GOTOOLCHAIN=local go test ./...   # the Go port, in seconds
+GOTOOLCHAIN=local go vet ./... && GOTOOLCHAIN=local go test ./...   # in seconds; PostgreSQL tests skip
 make test                                          # the same, with PostgreSQL in Compose
-make verify-real                                   # real public text, Python against Go; downloads, never in CI
+cd web && npm ci && npm test && npm run test:browser   # the web app (Node is pinned in .nvmrc)
+make build                                         # build/gtm-connector, with the web app inside it
+make demo                                          # the product on invented data, on PostgreSQL in Compose
+make release                                       # the four release binaries and SHA256SUMS
+make verify-real                                   # real public text against recorded digests; downloads, never in CI
 ```
 
 ## How to work
@@ -70,13 +64,11 @@ make verify-real                                   # real public text, Python ag
 1. State the PR as "after this, a user can ...". If you cannot, it is a cleanup and must shrink the
    source. Report source lines before and after.
 2. Replace, do not add: the old way goes in the same PR as the better one. Never remove a useful
-   feature without its replacement. The Go port is the one exception: the Python package stays, with
-   fixes only, while `tools/oracle/` and the Go code grow beside it, and the PR that ships the Go CLI
-   removes the package and the tool.
+   feature without its replacement.
 3. If the change touches a rule above, write the failing test first. Test through the CLI and the
    gateway, not internals.
 4. Build it, run it as a user, then clean it before review: no duplicate helpers, leftover flags,
-   or filler in code, messages, and docs. Run the tests, ruff, and mypy.
+   or filler in code, messages, and docs. Run `go vet`, the Go tests and the web tests.
 5. For the request path, briefs, credentials, or `SECURITY_REVIEW.md`, get one review round by other
    models against the seven rules: `claude-fable-5-2` and `gpt-6.2-sol`, with `grok-4.7` advisory.
    Fix the findings without another round.
@@ -89,8 +81,9 @@ make verify-real                                   # real public text, Python ag
   built yet. Every other doc claims only what a test shows, and the roadmap's "Checks the docs still
   need" lists each guide statement no test asserts yet. Keep "No live org has been verified." on the
   roadmap until one has been.
-- `tests/test_cases.py` holds ten invented deals, one property each. A change to cards keeps them
-  passing. A case that waits for a feature says which assertion does not hold yet and why.
+- `testdata/oracle/cards/cases.jsonl.gz` holds the cards of ten invented deals, one property each,
+  and `internal/cards/parity_test.go` builds them byte for byte. A change to cards keeps them
+  passing.
 - Live checks use the development org and workspace only. Never create or edit a Slack app. Never
   use a credential pasted into a conversation.
 - Report the result first, then what changed, what failed, and what is unverified, with numbers.
@@ -100,21 +93,25 @@ make verify-real                                   # real public text, Python ag
 The goal is the renewal workflow: find what blocks a renewal in the evidence, turn it into reviewed
 work, and keep the history of what resolved it. No model writes text on a card.
 
-[docs/ROADMAP.md](docs/ROADMAP.md) lists the steps. v0.1.0 comes first: the Go program replaces the
-Python package and stays read-only. Until then:
+[docs/ROADMAP.md](docs/ROADMAP.md) lists the steps. v0.1.0 comes first: the Go program has replaced
+the Python package and stays read-only. To finish it:
 
-1. The reference is `testdata/oracle/`, written by `tools/oracle/` from the Python package on
-   CPython 3.14.6 with clocks and IDs fixed. `tests/test_oracle_fixtures.py` fails when Python and
-   the fixtures disagree, so a Python fix regenerates its fixtures in the same PR.
-2. Port what the Python package does, behind the fixtures. Card text matches byte for byte, and
-   units and gaps match as values. Character classes come from generated tables, never Go's or
-   RE2's. Work the fixtures cannot check waits until after v0.1.0, unless the cutover cannot ship
-   without it.
-3. Sign-in, grants, selection, expiry and the Host check come before any evidence is served. MCP
-   passes the recorded gateway vectors on both transports, HTTP and stdio.
-4. The PR that ships the Go CLI passes the fixtures and replays the recorded command session. It
-   opens existing cards and receipts, keeps source and client setup working through the binary, lists
-   every change a user sees, and removes the Python package and `tools/oracle/`.
+1. Keep the reference. `testdata/oracle/` holds the outputs the Python package recorded on CPython
+   3.14.6 with clocks and IDs fixed. It is frozen: nothing regenerates it, and a fixture that
+   disagrees with the code is the reference. Card text matches byte for byte, and units and gaps
+   match as values. A difference with a cause outside the product, such as the recorder's clock, is
+   listed in its test with the reason. Character classes come from `internal/unicodetab`, never Go's
+   or RE2's.
+2. Finish the Evidence row of the roadmap: neutralize a bare mail address, raise the neutralizer
+   version, and show the host of a valid `xn--` label.
+3. Admit the cards and receipts the Python package made: the four recorded card folders are admitted
+   and inspected, a changed byte is refused, and admitting twice adds nothing.
+4. Close the cutover: the binary, run outside a checkout, serves a deep-linked Evidence page; a
+   backup taken before the cutover restores; the time to publish a card is measured; and a tagged
+   release attaches the binaries.
+
+Sign-in, grants, selection, expiry and the Host check stay ahead of any evidence served. MCP passes
+the recorded gateway vectors on both transports, HTTP and stdio.
 
 Planned work is listed in `docs/ROADMAP.md`. A statement leaves it with the test that shows it.
 
@@ -122,8 +119,8 @@ After each step, use the product end to end as a stranger and fix what only show
 
 Test on real data at every step. Public datasets are fetched into a cache outside the repository,
 checked against a committed manifest of links and digests, and run with `make verify-real`, never
-in CI. Real text goes through Python and Go and must match; real inputs build the same cards once
-imports are ported. Reports hold counts, digests and positions, never text. A public corpus tests
+in CI. Real text goes through Go and must match the digests the Python package recorded on it, in
+`internal/realdata/recorded`. Reports hold counts, digests and positions, never text. A public corpus tests
 parsing and scale, not usefulness: the README's first limit stays until the owner has run the
 connector on five real renewals outside the repository. Agents never read those transcripts or
 results; each parser failure they report becomes an invented fixture.

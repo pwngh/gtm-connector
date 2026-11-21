@@ -178,6 +178,10 @@ func TestClientTokenGrantsAndWorkspaces(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &other); code != 0 || err != nil || other.Workspace != "elsewhere" {
 		t.Fatalf("a token of another workspace: %d %s", code, stderr)
 	}
+	if code, text, _ := d.tokenCommand(t, "new", "--scope", "crm:read", "--state-dir", "elsewhere"); code != 0 ||
+		!strings.Contains(text, "/mcp, where serve answers it in the workspace elsewhere.\n") {
+		t.Fatalf("token new as text names another workspace than its own: %d\n%s", code, text)
+	}
 	before := d.count(t, "SELECT count(*) FROM receipts WHERE workspace_id = $1", d.workspace.ID)
 	if status, answered := s.call(s.address, "get_account", other.Token, map[string]any{"account_id": "acc-003"}); status != 200 ||
 		dig(answered, "result", "isError") != false {

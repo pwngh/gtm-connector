@@ -1,6 +1,6 @@
 // Package salesforce reads standard Account, Contact, Opportunity and Contract records of one Salesforce
-// org through REST v68.0, under the credentials of an existing sf CLI login (gtm_connector/salesforce.py
-// and sf_credentials.py). It never writes to Salesforce.
+// org through REST v68.0, under the credentials of an existing sf CLI login. It never writes to
+// Salesforce.
 //
 // FromSF asks sf for the instance address and the token of one alias and keeps both in memory.
 // FromEnvironment takes them from the variables of the process instead, for a connector with no sf. Every

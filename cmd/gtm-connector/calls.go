@@ -15,7 +15,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/unicodetab"
 )
 
-// debug calls, as gtm_connector/cli.py runs it: import one transcript export for one account, list the
+// debug calls: import one transcript export for one account, list the
 // workspace's imports, or inspect one. An import reads the file and checks it before anything else is opened,
 // then resolves the account through the workspace's CRM as a tool call under its own receipt, and saves the
 // import bound to that receipt. list and inspect read the saved imports only: no source and no file.

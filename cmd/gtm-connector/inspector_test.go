@@ -219,7 +219,7 @@ func TestInspector(t *testing.T) {
 		}
 	}
 
-	// Over HTTPS, with the tokens token new printed, as scripts/check-inspector.py ran its sequence.
+	// Over HTTPS, with the tokens token new printed.
 	overHTTPS(issued["crm:read"])
 	discover()
 	account := run("tools/call", "get_account", true)

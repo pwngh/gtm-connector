@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 )
 
-// OracleMeta is oracle.json, which tools/oracle/real.py writes beside its outputs.
+// OracleMeta is oracle.json, which the Python oracle wrote beside its outputs.
 type OracleMeta struct {
 	Python        string   `json:"python"`
 	Unicode       string   `json:"unicode"`
@@ -29,8 +29,8 @@ type OracleMeta struct {
 // Report is what one comparison found. It holds counts, positions and digests, never text.
 type Report struct {
 	Run string `json:"run"`
-	// Against is "outputs" when Python's outputs were there to locate each difference, or "digests" when
-	// only their digests were (after the Python package is gone).
+	// Against is "outputs" when Python's outputs were there to locate each difference, "digests" when only
+	// their digests were, or "recorded digests" for the block digests committed in internal/realdata/recorded.
 	Against       string      `json:"against"`
 	Python        string      `json:"python"`
 	PackageSHA256 string      `json:"package_sha256"`

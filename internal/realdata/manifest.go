@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-//go:embed manifest.json pins
+//go:embed manifest.json pins recorded
 var embedded embed.FS
 
 // Access says who may fetch a dataset. A public dataset is fetched here; an owner dataset needs an account,

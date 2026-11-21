@@ -27,12 +27,15 @@ jar="$(mktemp)"
 body="$(mktemp)"
 trap 'rm -f "$jar" "$body"' EXIT
 fetch() { curl -sS --fail-with-body --cacert "$creds/tls.pem" -b "$jar" -c "$jar" "$@"; }
+# sha256sum where there is one, and shasum on a Mac without it.
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+# The API writes compact JSON with its members in a fixed order, so sed reads the few values checked here.
 
 sign_in() {
-  csrf="$(fetch "$base/api/v1/session" | python3 -c 'import json,sys; print(json.load(sys.stdin)["csrf_token"])')"
-  login="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))))' "$creds/demo-credentials.json")"
+  csrf="$(fetch "$base/api/v1/session" | sed -n 's/.*"csrf_token":"\([^"]*\)".*/\1/p')"
+  test -n "$csrf"
   fetch -o /dev/null -X POST -H "Origin: $base" -H "X-CSRF-Token: $csrf" -H 'Content-Type: application/json' \
-    --data "$login" "$base/api/v1/session"
+    --data-binary "@$creds/demo-credentials.json" "$base/api/v1/session"
 }
 
 case "${1:-}" in
@@ -42,14 +45,13 @@ case "${1:-}" in
     ;;
   card)
     sign_in
-    card="$(fetch "$base/api/v1/accounts/acc-003/cards" | python3 -c '
-import json, sys
-card = json.load(sys.stdin)["cards"][0]
-print(card["id"], card["sha256"])')"
+    card="$(fetch "$base/api/v1/accounts/acc-003/cards" |
+      sed -n 's/^{"account":"acc-003","cards":\[{"id":"\([^"]*\)",[^}]*"sha256":"\([0-9a-f]\{64\}\)".*/\1 \2/p')"
+    test -n "$card"
     id="${card% *}"
     sha="${card#* }"
     stated="$(fetch -D - -o "$body" "$base/api/v1/cards/$id/bytes" | tr -d '\r' | sed -n 's/^[Xx]-[Cc]ontent-[Ss][Hh][Aa]256: //p')"
-    actual="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$body")"
+    actual="$(sha256 "$body" | cut -d ' ' -f 1)"
     test "$actual" = "$sha" && test "$actual" = "$stated"
     echo "acc-003 $id $sha"
     exit
@@ -68,11 +70,9 @@ test "$($compose exec -T app ls /app)" = gtm-connector
 asset="$(fetch "$base/ops/evidence" | grep -o '/assets/[^"]*\.js' | head -n 1)"
 test "$(fetch -o /dev/null -w '%{content_type}' "$base$asset")" = 'text/javascript; charset=utf-8'
 sign_in
-fetch "$base/api/v1/session" | python3 -c '
-import json, sys
-session = json.load(sys.stdin)
-assert session["signed_in"] and session["principal"]["demo"], session
-print("signed in as", session["principal"]["display_name"])'
+session="$(fetch "$base/api/v1/session")"
+echo "$session" | grep -q '^{"signed_in":true,"principal":{[^}]*"demo":true}'
+echo "signed in as $(echo "$session" | sed -n 's/.*"display_name":"\([^"]*\)".*/\1/p')"
 test "$($compose exec -T app id -u)" != 0
 test "$(docker image inspect -f '{{.Config.User}}' gtm-connector:local)" = 65532:65532
 # The image and its binary name the commit they were built from.

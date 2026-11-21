@@ -20,7 +20,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// These transcribe tests/test_gateway.py and the prepared folder's read rows; each test names its source.
+// These transcribe the removed Python suite's gateway tests and the prepared folder's read rows; each test names its source.
 
 type harness struct {
 	t        *testing.T

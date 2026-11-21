@@ -23,7 +23,7 @@ import (
 // in standard base64), and for a dataset "file", where the item came from, and "kind" (natural,
 // role-played, elicited or invented). A local file needs only "id" and "text", and its other keys are
 // ignored. A line is parsed as strict_json parses, so a duplicate key or a
-// lone surrogate refuses it. Blank lines are skipped. tools/oracle/real.py reads the same rules.
+// lone surrogate refuses it. Blank lines are skipped. The oracle read the same rules.
 type Item struct {
 	Line   int // the line of the items file it is on, from 1
 	ID     string

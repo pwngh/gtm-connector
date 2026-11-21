@@ -9,7 +9,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The functions R0 compares, in the order tools/oracle/real.py writes them. Each output is a JSON value as the
+// The functions R0 compares, in the order the oracle recorded them. Each output is a JSON value as the
 // oracle fixtures record it:
 //   - safe_text: [text, [mentions, links, controls, brackets]]
 //   - sentences, sentences_lines: units.sentences(text) without and with lines=True, as corpora/sentences
@@ -37,7 +37,7 @@ func Functions(it Item) []string {
 }
 
 // canonical is the encoding outputs are compared and digested in: json.dumps(value, ensure_ascii=True,
-// separators=(",", ":")), as oracle/output.py's dumps writes it.
+// separators=(",", ":")), as the oracle wrote its outputs.
 func canonical(value any) (string, error) {
 	return strictjson.Dumps(value, strictjson.DumpOptions{EnsureASCII: true, Compact: true})
 }

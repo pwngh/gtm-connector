@@ -15,7 +15,7 @@ import (
 )
 
 // The token command issues, lists and revokes the bearer tokens an MCP client presents at serve's /mcp, as
-// connect APP --scope did for an HTTP client (gtm_connector/connections.py). A token is for one workspace,
+// the Python package's connect APP --scope did for an HTTP client. A token is for one workspace,
 // carries only the read scopes it is given, and expires: after five minutes by default, as the Python
 // authority's grants did, and after at most an hour. It belongs to the workspace's MCP clients principal,
 // which is granted every account of the connected book it was never granted, so a grant revoked for it stays
@@ -218,8 +218,8 @@ func (r *run) tokenText(result any) string {
 		"commits and model prompts.",
 		fmt.Sprintf("ID %s, for the workspace %s, with %s, expires %s.", get(t, "id"), get(t, "workspace"),
 			joinedScopes(t), get(t, "expires_at")),
-		fmt.Sprintf("Send it as Authorization: Bearer TOKEN to %s, which serve answers for the demo workspace.",
-			get(t, "url")),
+		fmt.Sprintf("Send it as Authorization: Bearer TOKEN to %s, where serve answers it in the workspace %s.",
+			get(t, "url"), get(t, "workspace")),
 		"Its calls: gtm-connector audit --caller " + fmt.Sprint(get(t, "caller")) + r.here(),
 		"Revoke it: gtm-connector token revoke " + fmt.Sprint(get(t, "id")) + r.here(),
 	}, "\n")

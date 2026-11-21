@@ -1,5 +1,6 @@
 // Package tablegen writes tables.go for unicodetab from testdata/oracle/unicode, so every Unicode property an
-// evidence rule uses comes from the Python oracle and never from Go's unicode package or RE2.
+// evidence rule uses comes from what CPython 3.14.6 recorded there, and never from Go's unicode package or
+// RE2. It reads no Python: go generate runs it on the committed data.
 package tablegen
 
 import (
