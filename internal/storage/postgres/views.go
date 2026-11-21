@@ -3,8 +3,12 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/pwngh/gtm-connector/internal/evidence"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // Viewer is a principal reading evidence.
@@ -12,13 +16,70 @@ type Viewer struct {
 	WorkspaceID, PrincipalID string
 }
 
-// CardView is a card with its units, its gaps, and the account of each
-// unit's read receipt (by unit number).
+// CardView is a card with what its bytes say it is as of, the source each
+// system was, and its text; its units, gaps and lines; and the account of each
+// unit's read receipt (by unit number). Lines is nil for a card published
+// before lines were projected.
 type CardView struct {
 	Card            Card
+	AsOf            string            // empty when the bytes name none
+	Sources         map[string]string // nil when the bytes name none
+	Text            string
 	Units           []Unit
 	Gaps            []Gap
+	Lines           []evidence.Line
 	ReceiptAccounts map[int]string
+}
+
+// sealed reads what a card's bytes say beside its projections: its as_of day,
+// its sources and its text.
+func sealed(bytes []byte) (asOf string, sources map[string]string, text string, err error) {
+	value, err := strictjson.Loads(bytes)
+	card, isObject := value.(*strictjson.Object)
+	if err != nil || !isObject {
+		return "", nil, "", errors.New("a card's bytes are not a JSON object")
+	}
+	ok := true
+	if v, found := card.Get("as_of"); found {
+		asOf, ok = v.(string)
+	}
+	if v, found := card.Get("sources"); found && ok {
+		o, isObject := v.(*strictjson.Object)
+		ok = isObject
+		sources = map[string]string{}
+		for i := 0; ok && i < len(o.Keys); i++ {
+			sources[o.Keys[i]], ok = o.Values[i].(string)
+		}
+	}
+	if v, found := card.Get("text"); found && ok {
+		text, ok = v.(string)
+	}
+	if !ok {
+		return "", nil, "", errors.New("a card's as_of, sources or text is not of its type")
+	}
+	return asOf, sources, text, nil
+}
+
+// viewLines reads a card's lines as data, or nil for a card that counts none.
+func viewLines(ctx context.Context, q querier, c Card) ([]evidence.Line, error) {
+	if c.LineCount == nil {
+		return nil, nil
+	}
+	held, err := lines(ctx, q, c.WorkspaceID, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]evidence.Line, len(held))
+	for i, l := range held {
+		value, err := strictjson.Loads(l.Body)
+		if err == nil {
+			out[i], err = evidence.ParseLine(value)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("card %s line %d: %w", c.ID, i, err)
+		}
+	}
+	return out, nil
 }
 
 // The View methods read evidence for a principal. Each runs in one
@@ -79,6 +140,12 @@ func (s *Store) ViewCard(ctx context.Context, v Viewer, cardID string) (CardView
 		if view.Card, err = scanCard(tx.QueryRow(ctx,
 			`SELECT `+cardColumns+` FROM cards c WHERE c.workspace_id = $1 AND c.id = $2`,
 			v.WorkspaceID, cardID)); err != nil {
+			return err
+		}
+		if view.AsOf, view.Sources, view.Text, err = sealed(view.Card.Bytes); err != nil {
+			return err
+		}
+		if view.Lines, err = viewLines(ctx, tx, view.Card); err != nil {
 			return err
 		}
 		if view.Units, err = units(ctx, tx, v.WorkspaceID, cardID); err != nil {

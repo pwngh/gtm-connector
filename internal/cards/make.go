@@ -555,7 +555,7 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	if err != nil {
 		return nil, err
 	}
-	units, text, gaps, err := evidence.Build(snapshot)
+	units, text, gaps, lines, err := evidence.Build(snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("brief %s rejected; no card published: %w", id, err)
 	}
@@ -582,7 +582,8 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	}
 	return m.publish(ctx, receipts.Publication{WorkspaceID: p.WorkspaceID, AccountRef: b.AccountID, BriefID: id,
 		PrincipalID: p.PrincipalID, Seal: seal.Ticket(), Kind: "card", SchemaVersion: 3, RulesVersion: rulesVersion, Bytes: []byte(encoded),
-		Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c, receipts.Failed(500, "brief_save_failed"), nil)
+		Lines: lineRows(lines), Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c,
+		receipts.Failed(500, "brief_save_failed"), nil)
 }
 
 // Prepare is prepare_renewal_brief, run as the gateway runs it: the outer call's receipt is committed first
@@ -686,7 +687,7 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 	if err != nil {
 		return fail(errors.Join(ErrEvidenceInvalid, err))
 	}
-	units, text, gaps, err := evidence.Build(snapshot)
+	units, text, gaps, lines, err := evidence.Build(snapshot)
 	if err != nil {
 		return fail(errors.Join(ErrRejected, err))
 	}
@@ -717,7 +718,7 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 	}
 	return m.publish(ctx, receipts.Publication{WorkspaceID: principal.WorkspaceID, AccountRef: accountID, BriefID: id,
 		PrincipalID: principal.PrincipalID, Seal: outer.Ticket(), Kind: "selected_brief", SchemaVersion: 3, RulesVersion: rulesVersion,
-		Bytes: []byte(encoded), Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c,
+		Bytes: []byte(encoded), Lines: lineRows(lines), Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c,
 		receipts.Failed(200, "request_failed"), stillLive)
 }
 

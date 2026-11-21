@@ -169,7 +169,8 @@ func cliCard(t *testing.T, f *postgrestest.Fixture, brief string) (postgres.Card
 	gaps := []postgres.Gap{{Code: "neutralized", Disposition: "note", Text: "none"}}
 	pub := postgres.CardPublication{WorkspaceID: f.Workspace.ID, AccountRef: postgrestest.Account, BriefID: brief,
 		ParentReceiptID: seal.ID, PrincipalID: f.Reader.ID, SealReceiptID: seal.ID, SealLeaseToken: seal.LeaseToken,
-		Kind: "go", SchemaVersion: 3, RulesVersion: &rules, Units: units, Gaps: gaps}
+		Kind: "go", SchemaVersion: 3, RulesVersion: &rules, Units: units, Gaps: gaps,
+		Lines: postgrestest.LineRows(t, postgrestest.AccountLine())}
 	embed(t, f, &pub, seal, []postgres.RecordVersion{record}, r)
 	return pub, seal
 }

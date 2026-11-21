@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/authz"
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // Every read here goes through authz.Evidence. A denial is 403
@@ -18,18 +20,27 @@ import (
 // so a principal learns nothing about what it may not read.
 
 type cardView struct {
-	ID            string     `json:"id"`
-	Account       string     `json:"account"`
-	BriefID       string     `json:"brief_id"`
-	Kind          string     `json:"kind"`
-	SchemaVersion int        `json:"schema_version"`
-	RulesVersion  *string    `json:"rules_version"`
-	SHA256        string     `json:"sha256"`
-	Size          int        `json:"size"`
-	SealReceiptID string     `json:"seal_receipt_id"`
-	PublishedAt   string     `json:"published_at"`
-	Units         []unitView `json:"units,omitempty"`
-	Gaps          []gapView  `json:"gaps,omitempty"`
+	ID            string  `json:"id"`
+	Account       string  `json:"account"`
+	BriefID       string  `json:"brief_id"`
+	Kind          string  `json:"kind"`
+	SchemaVersion int     `json:"schema_version"`
+	RulesVersion  *string `json:"rules_version"`
+	SHA256        string  `json:"sha256"`
+	Size          int     `json:"size"`
+	SealReceiptID string  `json:"seal_receipt_id"`
+	PublishedAt   string  `json:"published_at"`
+}
+
+// cardDetail is one card whole. Each line is evidence.Line.Value, the line as
+// data; Lines is null for a card published before lines were projected.
+type cardDetail struct {
+	cardView
+	AsOf    *string           `json:"as_of"`
+	Sources map[string]string `json:"sources"`
+	Units   []unitView        `json:"units"`
+	Gaps    []gapView         `json:"gaps"`
+	Lines   []json.RawMessage `json:"lines"`
 }
 
 type unitView struct {
@@ -173,16 +184,39 @@ func (s *Server) card(w http.ResponseWriter, r *http.Request, p authz.Principal)
 		readFailed(w, err)
 		return
 	}
-	card := viewCard(view.Card)
-	card.Units = make([]unitView, len(view.Units))
+	card := cardDetail{cardView: viewCard(view.Card), AsOf: optional(view.AsOf), Sources: view.Sources,
+		Units: make([]unitView, len(view.Units)), Gaps: make([]gapView, len(view.Gaps))}
 	for i, u := range view.Units {
 		card.Units[i] = viewUnit(u)
 	}
-	card.Gaps = make([]gapView, len(view.Gaps))
 	for i, g := range view.Gaps {
 		card.Gaps[i] = gapView{g.Code, g.Disposition, g.Count, g.ByRole, g.Text}
 	}
+	if view.Lines != nil {
+		card.Lines = make([]json.RawMessage, len(view.Lines))
+		for i, l := range view.Lines {
+			encoded, err := strictjson.Dumps(l.Value(), strictjson.Prepared)
+			if err != nil {
+				internal(w)
+				return
+			}
+			card.Lines[i] = json.RawMessage(encoded)
+		}
+	}
 	writeJSON(w, http.StatusOK, card)
+}
+
+// cardText gives the card's sealed text whole, as plain text, after the same
+// grant check as the card.
+func (s *Server) cardText(w http.ResponseWriter, r *http.Request, p authz.Principal) {
+	view, err := s.evidence.Card(r.Context(), p, r.PathValue("card"))
+	if err != nil {
+		readFailed(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	io.WriteString(w, view.Text)
 }
 
 // cardBytes gives the stored card exactly, so a client can re-hash it.
