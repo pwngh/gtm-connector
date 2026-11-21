@@ -207,43 +207,69 @@ make test                       # go vet and the Go tests against the Compose da
 
 Add `POSTGRES=18.7` to any of these to use the pinned fallback PostgreSQL, on its own volume.
 
-`make dev` and `make test` need Go 1.27.4, and `make dev` Node 22.23.4 (`nvm use` reads `.nvmrc`); both
-refuse other versions. `pins.json` lists every pinned version and digest, from the toolchains and images
-to the CI actions, and a test fails when the Dockerfile, `compose.yaml`, the Makefile or CI uses another.
-`gtm-connector version` prints the commit a binary was built from. An image that `make up` builds carries
-it as the label `org.opencontainers.image.revision`, ending in `-modified` if the checkout had changes.
+`make dev` and `make test` need Go 1.27.4, and `make dev` needs Node 22.23.4 (`nvm use` reads
+`.nvmrc`). Both refuse other versions.
 
-`make verify-real` downloads public meeting, call, chat and CRM datasets into `~/.cache/gtm-connector/real`
-and checks them against pinned digests, then runs every utterance and message through the Python package
-and the Go port and compares their sentences, neutralized text, scanners and JSON parsing. It reports
-counts, positions and digests, never text. Nothing real is committed, and CI never runs it.
-[Real data](docs/real-data.md)
+`pins.json` lists every pinned version and digest, from the toolchains and images to the CI actions.
+A test fails when the Dockerfile, `compose.yaml`, the Makefile or CI uses another. `gtm-connector
+version` prints the commit a binary was built from. An image that `make up` builds carries that
+commit as the label `org.opencontainers.image.revision`, ending in `-modified` if the checkout had
+changes.
 
-Open `https://127.0.0.1:8443/`; `localhost` redirects there. The first run writes `.env` (mode 0600,
-with random passwords for two database roles) and a private credentials folder,
-`~/.config/gtm-connector/credentials` (mode 0700, files 0600): the owner secret, the session key, the
-local TLS certificate and key, and the demo sign-in in `demo-credentials.json`. Setup, backup and
-restore connect as the database owner; the server connects as an app role that reads and writes rows
-and cannot change the schema or switch off a check. Browsers do not separate cookies by port, so
-another HTTPS server on `127.0.0.1` would see this one's cookies.
+### First run
 
-`make demo` (or `gtm-connector demo` after setup, as the app role) loads the invented demo book into the
-demo workspace, grants the demo sign-in its 30 accounts, and makes and publishes each account's card
-through the Go card maker on PostgreSQL, under receipts. Each card is the one the Python package makes for
-that account, apart from its brief and receipt IDs, its token fingerprint and its read times. A run
-publishes only for accounts that hold no card, so running it again finishes a run that stopped part way;
-`demo --again` publishes another card for every account. Cards and receipts are never deleted. A grant
-someone revoked stays revoked, and its account gets no card. Signed in, the server lists the accounts at
-`/api/v1/accounts` and their cards at `/api/v1/accounts/ACCOUNT/cards`. Demo data and a real source never
-share a workspace: the database refuses a real connection in the demo workspace.
+Open `https://127.0.0.1:8443/`. `localhost` redirects there.
 
-Backups go to `~/.config/gtm-connector/backups`. A backup's digests detect corruption only: they
-are stored in the backup itself, so they do not prove who made it. A restore needs an empty
-database, and each credential must be absent or the same as the backup's. It refuses any row the
-server would refuse on writing, such as a card whose seal does not name its bytes. If a restore
-stops after the database is in, run the same command again to finish it; until then, setup, the server and `demo` refuse to
-start and say to run `restore` again with the same backup. On Colima, if a port does not answer, the Makefile forwards it with
-`scripts/colima-forward.sh`.
+The first run writes `.env` (mode 0600, with random passwords for two database roles) and a private
+credentials folder, `~/.config/gtm-connector/credentials` (mode 0700, files 0600). The folder holds
+the owner secret, the session key, the local TLS certificate and key, and the demo sign-in in
+`demo-credentials.json`.
+
+Setup, backup and restore connect as the database owner. The server connects as an app role that
+reads and writes rows and cannot change the schema or switch off a check.
+
+Browsers do not separate cookies by port, so another HTTPS server on `127.0.0.1` would see this
+one's cookies.
+
+### The demo book
+
+`make demo` (or `gtm-connector demo` after setup, as the app role) loads the invented demo book into
+the demo workspace and grants the demo sign-in its 30 accounts. It then makes and publishes each
+account's card through the Go card maker on PostgreSQL, under receipts. Each card is the one the
+Python package makes for that account, apart from its brief and receipt IDs, its token fingerprint
+and its read times.
+
+A run publishes only for accounts that hold no card, so running it again finishes a run that stopped
+part way. `demo --again` publishes another card for every account. Cards and receipts are never
+deleted. A grant someone revoked stays revoked, and its account gets no card.
+
+Signed in, the server lists the accounts at `/api/v1/accounts` and their cards at
+`/api/v1/accounts/ACCOUNT/cards`. Demo data and a real source never share a workspace: the database
+refuses a real connection in the demo workspace.
+
+### Backup and restore
+
+Backups go to `~/.config/gtm-connector/backups`. A backup's digests detect corruption only. They are
+stored in the backup itself, so they do not prove who made it.
+
+A restore needs an empty database, and each credential must be absent or the same as the backup's.
+It refuses any row the server would refuse on writing, such as a card whose seal does not name its
+bytes.
+
+If a restore stops after the database is in, run the same command again to finish it. Until then,
+setup, the server and `demo` refuse to start and say to run `restore` again with the same backup.
+
+On Colima, if a port does not answer, the Makefile forwards it with `scripts/colima-forward.sh`.
+
+### Real public text
+
+`make verify-real` downloads public meeting, call, chat and CRM datasets into
+`~/.cache/gtm-connector/real` and checks them against pinned digests. It then runs every utterance
+and message through the Python package and the Go port, and compares their sentences, neutralized
+text, scanners and JSON parsing.
+
+It reports counts, positions and digests, never text. Nothing real is committed, and CI never runs
+it. [Real data](docs/real-data.md)
 
 ## Limits
 
@@ -264,9 +290,11 @@ start and say to run `restore` again with the same backup. On Colima, if a port 
   approvals are demonstrations, not authorization. Run it alone with `npm ci`, `npm test`, and
   `npm run dev` inside `web/`.
 
-More: [commands and output](docs/cli.md), [tools, scopes, and protocol](docs/tools.md),
-[Deal cards](docs/briefs.md), [audit](docs/audit.md),
-[clients and Inspector](docs/clients.md), [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
+## More
+
+- **Daily use:** [commands and output](docs/cli.md), [Deal cards](docs/briefs.md), [clients and Inspector](docs/clients.md).
+- **Access and audit:** [tools, scopes, and protocol](docs/tools.md), [audit](docs/audit.md), [security review](SECURITY_REVIEW.md).
+- **Where it is going:** [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
 
 MCP revision 2026-07-28, Python SDK 2.3.0. All checked-in companies, people, and records are
 invented. MIT licensed.
