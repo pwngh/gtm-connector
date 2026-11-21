@@ -103,8 +103,9 @@ func linkHost(target []rune, bare bool) string {
 	if hasPrefix(u.Lower(target), "mailto:") {
 		return "mail"
 	}
+	// A target with no scheme and no // names no host: a browser resolves it against the page it is on.
 	authority, _, named, ok := linkAuthority(target, bare)
-	if !ok {
+	if !ok || !named {
 		return unknownHost
 	}
 	// A backslash, a control character or a bracket gives no host, and so does a character whose compatibility
@@ -149,11 +150,14 @@ func linkHost(target []rune, bare bool) string {
 	if numberLabel(last) && !plainAddress(labels) {
 		return unknownHost
 	}
-	// A browser refuses an xn-- label that does not decode to a valid name, which takes the IDNA tables to
-	// check, so no such host is shown.
+	// A browser refuses an xn-- label that does not decode to a valid name. A valid one is shown in the ASCII
+	// form the browser looks up, which cannot hold two characters that look alike.
 	for _, label := range labels {
 		if strings.HasPrefix(label, "xn--") {
-			return unknownHost
+			if !validIDNA(host) {
+				return unknownHost
+			}
+			break
 		}
 	}
 	// The host of an authority is shown without a leading www., which a client would turn back into a link:
