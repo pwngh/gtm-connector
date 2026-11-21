@@ -40,12 +40,13 @@ func recordedLinesFile(t *testing.T) []byte {
 	return out.Bytes()
 }
 
-// TestRecordedLinesFile holds testdata/card_lines.jsonl.gz to the lines Build makes now. With
-// GTM_WRITE_CARD_LINES=1 it writes the file instead.
+// TestRecordedLinesFile holds testdata/card_lines.jsonl.gz to the lines Build makes now. With -update it
+// writes the file instead.
 func TestRecordedLinesFile(t *testing.T) {
 	path := filepath.Join(filepath.Dir(filepath.Dir(oracletest.Path(t, "manifest.json"))), "card_lines.jsonl.gz")
 	want := recordedLinesFile(t)
-	if os.Getenv("GTM_WRITE_CARD_LINES") == "1" {
+	if oracletest.Update() {
+		oracletest.RefuseNarrowRun(t)
 		var zipped bytes.Buffer
 		writer := gzip.NewWriter(&zipped)
 		if _, err := writer.Write(want); err != nil {
@@ -73,7 +74,7 @@ func TestRecordedLinesFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got.Bytes(), want) {
-		t.Fatalf("testdata/card_lines.jsonl.gz is not the lines Build makes; run this test with GTM_WRITE_CARD_LINES=1 "+
+		t.Fatalf("testdata/card_lines.jsonl.gz is not the lines Build makes; run this test with -update "+
 			"(first difference: %s)", oracletest.FirstDifference(got.String(), string(want)))
 	}
 }

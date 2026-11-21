@@ -112,9 +112,25 @@ func viewCard(c postgres.Card) cardView {
 		Size: len(c.Bytes), SealReceiptID: c.SealReceiptID, PublishedAt: stamp(c.PublishedAt)}
 }
 
-func viewUnit(u postgres.Unit) unitView {
+// viewUnit is a saved unit with its body as evidence.AsShown gives it. The stored body is not changed.
+func viewUnit(u postgres.Unit) (unitView, error) {
+	value, err := strictjson.Loads(u.Body)
+	sealed, _ := value.(*strictjson.Object)
+	if err != nil || sealed == nil {
+		return unitView{}, errors.New("a unit's body is not an object")
+	}
+	body := u.Body
+	if shown, err := evidence.AsShown(sealed); err != nil {
+		return unitView{}, err
+	} else if shown != sealed {
+		encoded, err := strictjson.Dumps(shown, strictjson.Quoted)
+		if err != nil {
+			return unitView{}, err
+		}
+		body = json.RawMessage(encoded)
+	}
 	return unitView{Card: u.CardID, N: u.N, Kind: u.Kind, RecordRef: u.RecordRef, Tool: u.Tool, Shown: u.Shown,
-		ReceiptID: optional(u.ReceiptID), RecordVersionID: optional(u.SourceRecordID), Body: u.Body}
+		ReceiptID: optional(u.ReceiptID), RecordVersionID: optional(u.SourceRecordID), Body: body}, nil
 }
 
 func viewReceipt(r postgres.Receipt) *receiptView {
@@ -197,7 +213,10 @@ func detailOf(view authz.CardView) (cardDetail, error) {
 	card := cardDetail{cardView: viewCard(view.Card), AsOf: optional(view.AsOf), Sources: view.Sources,
 		Units: make([]unitView, len(view.Units)), Gaps: make([]gapView, len(view.Gaps))}
 	for i, u := range view.Units {
-		card.Units[i] = viewUnit(u)
+		var err error
+		if card.Units[i], err = viewUnit(u); err != nil {
+			return cardDetail{}, err
+		}
 	}
 	for i, g := range view.Gaps {
 		card.Gaps[i] = gapView{g.Code, g.Disposition, g.Count, g.ByRole, g.Text}
@@ -253,7 +272,11 @@ func (s *Server) unit(w http.ResponseWriter, r *http.Request, p authz.Principal)
 		readFailed(w, err)
 		return
 	}
-	unit := viewUnit(view.Unit)
+	unit, err := viewUnit(view.Unit)
+	if err != nil {
+		internal(w)
+		return
+	}
 	if view.Receipt != nil {
 		unit.Receipt = viewReceipt(*view.Receipt)
 	}

@@ -387,6 +387,8 @@ export interface UnitFacts {
   at: string | null;
   text: string | null;
   partial: boolean;
+  /** Whether the sentence is in a block quote of a Slack message: words its author quoted. */
+  quoted: boolean;
   shown: string | null;
   notShown: string | null;
   speaker: string | null;
@@ -412,6 +414,7 @@ export function unitFacts(unit: Partial<UnitView> | null | undefined): UnitFacts
     at: text(body.at),
     text: text(body.text),
     partial: body.partial === true,
+    quoted: body.quoted === true,
     shown,
     notShown: shown && shown !== 'yes' ? (notShownReasons[shown] ?? `Reason ${shown}`) : null,
     speaker: text(body.speaker),

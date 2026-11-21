@@ -24,6 +24,9 @@ type card struct {
 	gaps          []Gap
 	titles        map[int]string
 	unshownTitles map[int]any
+	// known is whether a label names a known person of the card, as speakerRole compares one: a contact of
+	// the account or a listed seller. A line of a message that opens with such a label is that person's turn.
+	known func(name string) bool
 }
 
 // lines is source text neutralized, with what was replaced counted.
@@ -144,24 +147,40 @@ type contact struct {
 
 var noContact = [2]string{"listed seller identity", "label matches no listed seller and no contact"}
 
+// named is the contacts a speaker label equals, and whether it equals a listed seller, as speakerRole
+// compares them: each a label on one line.
+func named(name string, sellers []string, contacts []contact) (matches []contact, listed bool) {
+	for _, c := range contacts {
+		if label(c.name) == name {
+			matches = append(matches, c)
+		}
+	}
+	for _, seller := range sellers {
+		listed = listed || label(seller) == name
+	}
+	return matches, listed
+}
+
+// knownPerson is whether a label names a contact of the account or a listed seller.
+func knownPerson(value any, sellers []string, contacts []contact) bool {
+	name := label(value)
+	if name == "" {
+		return false
+	}
+	matches, listed := named(name, sellers, contacts)
+	return listed || len(matches) > 0
+}
+
 // speakerRole is units.speaker_role: a role from identity only.
 func speakerRole(value any, sellers []string, contacts []contact, slack bool) role {
 	name := label(value)
 	if name == "" {
 		return role{"unknown", "no speaker label", nil}
 	}
-	var matches []contact
-	if !slack {
-		for _, c := range contacts {
-			if label(c.name) == name {
-				matches = append(matches, c)
-			}
-		}
+	if slack {
+		contacts = nil
 	}
-	listed := false
-	for _, seller := range sellers {
-		listed = listed || label(seller) == name
-	}
+	matches, listed := named(name, sellers, contacts)
 	switch {
 	case listed && len(matches) > 0:
 		return role{"unknown", "label matches a listed seller and a contact", nil}
@@ -289,7 +308,11 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			ends[i] = total
 		}
 		safe := strings.Join(texts, "\n")
-		found, err := Sentences(safe, table == "messages")
+		var known func(string) bool
+		if table == "messages" {
+			known = c.known
+		}
+		found, quotedAt, err := sentences(safe, table == "messages", known)
 		if err != nil {
 			panic(invalid)
 		}
@@ -306,15 +329,24 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			// Inside a run only a paragraph break can leave a sentence without its end. At the end of a
 			// run, a short form that expects more does too.
 			cut = false
+			s := []rune(sentence)
+			_, ended := Ended(s, 0, len(s))
 			if transcript && position == len(found)-1 {
 				cut = unfinished(sentence)
 			} else if transcript {
-				s := []rune(sentence)
-				_, ended := Ended(s, 0, len(s))
 				cut = !ended
 			}
-			partial := follows || cut
+			// In a note or a message, a sentence without its end that more text follows is a fragment. It
+			// is not whole, and what follows it is read on its own.
+			fragment := !transcript && !ended && position < len(found)-1
+			partial := follows || cut || fragment
 			follows = cut
+			// A block quote or a speaker's turn in a message is someone else's words, which the author
+			// relayed: its speaker label is the author's, and no role is established for it.
+			spokenBy := who
+			if quotedAt[position] {
+				spokenBy = role{"unknown", QuotedBasis, nil}
+			}
 			reached, size = reached+size, nonSpace(sentence)
 			from := bisect(ends, reached, true)
 			if from == len(ends) {
@@ -347,8 +379,8 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			}
 			c.units = append(c.units, Unit{N: len(c.units) + 1, Kind: "sentence", Source: rule.system,
 				RecordRef: str(field(row, "record_ref")), Tool: rule.tool, At: shownAt, Speaker: speaker,
-				Role: who.role, Basis: who.basis, Contact: who.contact, Text: sentence, Partial: partial,
-				Shown: shown, Span: span, RawSHA256: rawDigest, SanitizerVersion: SanitizerVersion})
+				Role: spokenBy.role, Basis: spokenBy.basis, Contact: spokenBy.contact, Text: sentence,
+				Partial: partial, Quoted: quotedAt[position], Shown: shown, Span: span, RawSHA256: rawDigest, SanitizerVersion: SanitizerVersion})
 		}
 		if len(found) > 0 && cut {
 			waiting[name] = true
@@ -892,8 +924,9 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 	}
 }
 
-func (c *card) slack() {
+func (c *card) slack(contacts []contact) {
 	sellers := c.sellers("slack_backend")
+	c.known = func(name string) bool { return knownPerson(name, sellers, contacts) }
 	switch field(c.evidence, "slack_status") {
 	case "not_connected":
 		c.gap("slack_not_connected", "Slack: not connected.", nil, false, nil)
@@ -1162,8 +1195,8 @@ func (c *card) said() []string {
 		return "were read and are"
 	}
 	withheld("cut", func(n int, roles string) string {
-		return fmt.Sprintf("Sentences: %d cut off at a pause, a change of speaker, or the edge of the excerpt "+
-			"%s not shown %s.", n, readNotShown(n), roles)
+		return fmt.Sprintf("Sentences: %d cut off at a pause, a change of speaker, a break before their end, "+
+			"or the edge of the excerpt %s not shown %s.", n, readNotShown(n), roles)
 	})
 	withheld("later", func(n int, roles string) string {
 		return fmt.Sprintf("Sentences: %d dated after %s %s not shown %s.", n, isoDay(asOf), readNotShown(n), roles)
@@ -1224,7 +1257,7 @@ func build(evidence *strictjson.Object) ([]Unit, string, []Gap, []Line) {
 	c := &card{evidence: evidence, groups: v.groups, titles: map[int]string{}, unshownTitles: map[int]any{}}
 	contacts := c.crm(asOf)
 	c.calls(asOf, contacts)
-	c.slack()
+	c.slack(contacts)
 	said := c.said()
 	if len(said) == 0 {
 		read := 0
@@ -1311,8 +1344,7 @@ func build(evidence *strictjson.Object) ([]Unit, string, []Gap, []Line) {
 		lines = append(append(append(lines, AttentionHeading), RenderLines(c.signals)...), "")
 	}
 	lines = append(append(lines, ValuesHeading), RenderLines(c.values)...)
-	lines = append(append(append(lines, "", "SAID, whole sentences as recorded; not record values"), said...), "",
-		"NOT READ")
+	lines = append(append(append(lines, "", SaidHeading), said...), "", NotReadHeading)
 	for _, g := range c.gaps {
 		lines = append(lines, "  "+g.Text)
 	}

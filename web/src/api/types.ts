@@ -70,6 +70,7 @@ export interface UnitBody {
   contact?: number | null;
   text?: string;
   partial?: boolean;
+  quoted?: boolean;
   shown?: string;
 }
 
