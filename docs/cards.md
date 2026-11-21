@@ -194,7 +194,7 @@ with the account and brief in its `arguments`, and [receipts](audit.md) says how
 | `text` | The card. |
 | `units` | The [units](#units). |
 | `gaps` | The [gaps](#gaps). |
-| `evidence` | The records as read, one receipt per read, each source's binding, the seller list and the `people` object: `rules_version`, the workspace's `company_domains` and its `aliases`. |
+| `evidence` | The records as read, one receipt per read, each source's binding, the seller list and the `people` object: `rules_version`, the workspace's `company_domains` and its `aliases`, and `users`, whether the org's users were read (`read`, `not_read`, or `none` beside a CRM other than Salesforce). |
 
 `brief --json` prints every key but `evidence`. The evidence keeps the records read when the card
 was made, not later CRM changes.
@@ -282,7 +282,10 @@ The demo CRM gives `Renewal date`, `Annual recurring revenue` and `CRM risk`. Sa
 `Contract end`: the contract that ends first on or after the planning date, and its status, marked
 `a planning candidate, not activated` unless it is activated. With no such contract the line says
 `Missing: no contract ends on or after` the date. On Salesforce a `NOT READ` line always says annual
-recurring revenue and renewal risk are not mapped from standard Salesforce fields.
+recurring revenue and renewal risk are not mapped from standard Salesforce fields, and another says
+when the org's users were not read because it holds more than 50,000 Standard users. A live Slack
+thread's line says which authors' profiles were not read: for a scope the sign-in lacks, past the
+read's limit, or because Slack could not give one.
 
 Open opportunities come first, by close date, then closed ones, latest first.
 
@@ -331,8 +334,8 @@ the strongest identifier its evidence holds for the speaker, and the role is tha
 | 1 | A live Slack author's user ID in the signed-in workspace, or the profile email Slack gave for it ([Slack](sources.md#reading-a-thread)) | `by Slack profile` |
 | 2 | The row of the call's attendee list under the speaker's label: its email ([attendees](sources.md#attendees)) | `by attendee list` |
 | 3 | An alias of the label, set with `connect --alias` ([the CLI](cli.md#speaker-settings)) | `by alias` |
-| 4 | The label equals a contact's name, a user's name or a seller list entry, each on one line | `by name` |
-| 5 | The label, without a title, a suffix, a device name or the bracketed organization, and with "Last, First" turned around, equals such a name of exactly one person the call's attendee list names by email | `by name variant on the attendee list` |
+| 4 | The label equals a contact's name or a seller list entry, each on one line | `by name` |
+| 5 | The label, without a title, a suffix, a device name or the bracketed organization, and with "Last, First" turned around, equals the name of exactly one person the call's attendee list names by email: a contact, or an active Salesforce user | `by name variant on the attendee list` |
 
 The first rung that finds exactly one person decides, and no weaker rung is read after it. So the
 attendee list's email beats the label: a label that equals a listed seller's name is the customer when
@@ -344,12 +347,15 @@ A person's side comes from their records:
 | Role | The person |
 | --- | --- |
 | `customer` | A contact of the account. |
-| `seller` | A Salesforce user of the org (a `Standard` user, active or not) or an entry of the workspace's seller list. |
+| `seller` | A Salesforce user of the org (a `Standard` user, active or not), known by user ID and email, or an entry of the workspace's seller list. |
 | `unknown` | A contact who is also a user or a listed seller. |
 
 A Slack author is a seller when the author's user ID equals a name or ID on the workspace's seller list.
 A Slack author's name is compared with sellers only, so it never makes a customer: only a profile
-email that a contact holds does. A call's label is compared with contacts, users and sellers.
+email that a contact holds does. A call's label is compared with contacts and sellers. A Salesforce
+user's name is never compared with a label on its own: only rung 5 reads an active user's name, for a
+user the call's attendee list names by email, so a customer who shares a name with someone in the org
+is not made a seller.
 
 Records of one person are one person: a contact and a user with the same email address, and a seller
 list entry that equals the name of exactly one user.
@@ -359,11 +365,19 @@ An email that names no person still shows a side by its domain, and the sentence
 | Role | The address is on | `basis` |
 | --- | --- | --- |
 | `seller` | One of the company's domains (`connect --company-domain`). In Slack only an author of the signed-in workspace counts. | `seller side by domain D` |
-| `customer_side_not_in_crm` | One of the account's domains: the domains of its contacts' email addresses. The person is not a contact. | `customer side by domain D, not a contact` |
+| `customer_side_not_in_crm` | One of the account's domains. The person is not a contact. | `customer side by domain D, not a contact` |
 | `other_party` | Any other domain | `other party by domain D` |
 
+The account's domains are the domain its Salesforce Website names, and each email domain that at least
+two of its contacts hold. One contact alone never makes a domain the account's. A Website that is a
+page on a shared host, such as a site builder or a social network, names none. A domain is never the
+account's when it is a free or shared mail domain, one of the company's domains, a Salesforce user's
+domain or a seller list entry's.
+
 A free or shared mail domain, such as `gmail.com`, never shows a side, and neither does a domain on
-both the company's list and the account's. A person a weaker rung names must be on the side a domain
+both the company's list and the account's. A member of the signed-in Slack workspace is never put on
+the customer side by a domain. The domain a sentence names is neutralized as any source text is, and
+`matched` for a person outside the CRM holds that domain alone, never the full address. A person a weaker rung names must be on the side a domain
 showed, or the role is unknown. A label under several rows of the attendee list is several people
 behind one microphone, such as a meeting room: it takes a side only when every one of them is on it.
 

@@ -329,9 +329,13 @@ A [Deal card](cards.md) for a Salesforce account plans from the Contract with th
 | An opportunity | Name, stage, amount, close date and outcome. The amount prints `(currency Missing)`. |
 
 A Salesforce card also reads the org's users, as the `list_users` read under a `crm:read` receipt of
-its own: `SELECT Id, Name, Email, IsActive FROM User WHERE UserType = 'Standard'`, at most 2,000
-users. A user is a seller for [speaker roles](cards.md#speaker-roles), active or not, since a rep who
-has left still speaks on an old call. A portal or community user is never read, because one can be on
+its own: `SELECT Id, Name, Email, IsActive FROM User WHERE UserType = 'Standard'`, every page of it. A
+user is a seller for [speaker roles](cards.md#speaker-roles), active or not, since a rep who has left
+still speaks on an old call; a user is matched by user ID and email, and an active user's name only
+within a call's attendee list. An org with more than 50,000 Standard users has none read: the read
+finishes as an error with no rows, and the card is made without them and says so under NOT READ
+(`CRM: the org's users were not read: ...`). The account's own read includes its `Website`, which
+names the account's domain for speaker roles. A portal or community user is never read, because one can be on
 the customer's side. The read binds every user it returned, and the card shows none of them; a
 sentence whose speaker was matched to a user names that user's record, which `inspect BRIEF_ID N`
 traces to the `list_users` receipt.
@@ -381,7 +385,7 @@ attempted). A step's `code` is `ok`, `missing_fields`, `renewal_fields_unmapped`
 | GET attempts per operation | 12, retries included |
 | Response data per operation | 1 MiB. A compressed response is refused, and so is a 200 response labelled as anything but `application/json`. |
 | Pages per query | 10. A tenth page that is not the last is refused. |
-| Standard users of the org (`list_users`) | 2,000. One more fails with `salesforce_result_limit`, and no card is made. |
+| Standard users of the org (`list_users`) | 50,000, read in pages under a budget of their own. More and no user is read; the card is made without them and says so. |
 | Contacts, opportunities and contracts of one account | 1,000 each. One more fails with `salesforce_result_limit`. The account, its contacts and its contracts are one read and share its 12 requests and 1 MiB, so wide rows or many pages can fail below 1,000. No partial records are returned. |
 | Opportunities listed across accounts (`list_opportunities` with no account) | 100 |
 | `--query` text | 200 characters, with no control characters |
@@ -788,13 +792,18 @@ author, in user ID order, under the same sign-in, deadline and response bytes, a
 keeps one member record for each author, `slack/members/mem-USER`, bound by the same
 `read_slack_messages` receipt: the author's user ID, the Slack workspace (`team_id`) the profile names,
 whether that is the signed-in user's own workspace (`home`), the profile email, `profile` (`read`,
-`missing_scope` or `over_limit`) and `missing_scopes`.
+`missing_scope`, `over_limit` or `not_read`) and `missing_scopes`. A profile email is kept only when it
+is a valid address, with its domain in lower case; any other is no email.
 
 - Without `users:read` no profile is asked for. Every member is `missing_scope`, with no team and no
   email, and its `missing_scopes` lists `users:read` and `users:read.email`.
 - With `users:read` but not `users:read.email` the team is read and the email is not, and
   `missing_scopes` lists `users:read.email`.
 - An author past the first 50 is `over_limit` and is not asked for.
+- An author Slack does not find or show (`user_not_found`, `user_not_visible`), or whose profile answer
+  is malformed or names another user or no valid team, is `not_read`, and the read goes on. A 429
+  after the one retry, an expired token after the one refresh, and a failed request still refuse the
+  read.
 
 The read never fails for a missing profile scope: the author's role falls to what the card can still
 match, the seller list. See [speaker roles](cards.md#speaker-roles). The `read_slack_messages` MCP

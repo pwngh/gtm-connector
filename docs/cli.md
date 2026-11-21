@@ -137,7 +137,7 @@ salesforce`, `connect calls` and `connect slack` take them, never `connect demo`
 
 ```sh
 gtm-connector connect calls --state-dir renewals --company-domain northwind.example \
-  --alias 'Host=morgan@northwind.example' \
+  --alias 'M. Reed=morgan@northwind.example' \
   --alias '3f1c...64 HEX DIGITS...:Speaker 1=dana@acme.example'
 ```
 
@@ -161,6 +161,7 @@ Each list replaces the saved one when it is given, so name every entry each time
 | `Name at most 50 company domains with --company-domain.` | More than 50. |
 | `An --alias is LABEL=EMAIL or LABEL=SELLER, with CONTENT_SHA256: before the label for one call's transcript. The label and a seller have 1 to 200 characters.` | An alias of another form. |
 | `Name at most 200 aliases with --alias.` | More than 200. |
+| `The speaker settings would take N bytes, and a workspace holds at most 65536. Name fewer or shorter aliases. Nothing was saved.` | The domains and aliases together, encoded, are over 64 KiB. |
 
 ## Output
 
