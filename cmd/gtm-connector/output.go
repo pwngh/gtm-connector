@@ -31,6 +31,12 @@ func refused(format string, values ...any) *failure {
 	return &failure{code: 2, message: fmt.Sprintf(format, values...)}
 }
 
+// local is a failure of this install that the person running it can fix, in this program's own words:
+// exit 1.
+func local(format string, values ...any) *failure {
+	return &failure{code: 1, message: fmt.Sprintf(format, values...)}
+}
+
 // The JSON error code of each exit code.
 var exitNames = map[int]string{1: "local_failure", 2: "usage_error", 3: "refused", 4: "check_failed",
 	5: "upstream_failure", 130: "interrupted"}
@@ -44,8 +50,8 @@ type screen struct {
 }
 
 // newScreen is the process's own output.
-func newScreen(asJSON bool) screen {
-	s := screen{out: os.Stdout, err: os.Stderr, json: asJSON}
+func newScreen() screen {
+	s := screen{out: os.Stdout, err: os.Stderr}
 	if info, err := os.Stdout.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
 		_, plain := os.LookupEnv("NO_COLOR")
 		s.terminal, s.bold = true, !plain && os.Getenv("TERM") != "dumb"
@@ -67,6 +73,13 @@ func (s screen) fail(command string, f *failure) int {
 		fmt.Fprintf(s.err, "Error: %s\nNext: %s\n", oneLine(f.message), oneLine(next))
 	}
 	return f.code
+}
+
+// line writes one JSON value on one line, as json.dumps writes it, and gives exit code 0.
+func (s screen) line(value any) int {
+	text, _ := strictjson.Dumps(value, strictjson.DumpOptions{EnsureASCII: true})
+	fmt.Fprintln(s.out, text)
+	return 0
 }
 
 // oneLine keeps a source value or an error on one visible terminal line: a character that does not print

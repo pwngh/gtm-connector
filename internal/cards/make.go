@@ -202,9 +202,9 @@ func checkRequest(s evidence.Sources, accountID, asOf string) error {
 	return nil
 }
 
-// versions are the records a read returned, as the record versions their receipt binds: each record's
+// RecordVersions are the records a read returned, as the record versions their receipt binds: each record's
 // canonical encoding is its body.
-func versions(records []*strictjson.Object) ([]receipts.RecordVersion, error) {
+func RecordVersions(records []*strictjson.Object) ([]receipts.RecordVersion, error) {
 	out := make([]receipts.RecordVersion, len(records))
 	for i, record := range records {
 		ref, _ := record.Get("record_ref")
@@ -324,7 +324,7 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool},
 			finish(receipts.Failed(200, "request_failed")))
 	}
-	bound, err = versions(found)
+	bound, err = RecordVersions(found)
 	if err != nil {
 		return nil, nil, nil, "", errors.Join(err, finish(receipts.Failed(200, "request_failed")))
 	}
