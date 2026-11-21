@@ -10,15 +10,18 @@ import (
 
 // option is one option of a command.
 type option struct {
-	name    string
-	value   bool     // whether it takes one argument
-	choices []string // the values it takes, when they are fixed
+	name     string
+	value    bool     // whether it takes one argument
+	choices  []string // the values it takes, when they are fixed
+	repeat   bool     // whether each time it is given adds a value
+	required bool     // whether the command needs it
 }
 
 // arguments is how one command reads its command line.
 type arguments struct {
 	options  []option // after --state-dir, which every command takes
 	required string   // the name of the one positional argument it needs, or ""
+	choices  []string // the values that argument takes, when they are fixed
 	numbers  bool     // whether card numbers may follow that argument
 	help     string
 }
@@ -45,7 +48,8 @@ var readCommands = map[string]arguments{
 // parsed is one command line, read.
 type parsed struct {
 	help        bool
-	values      map[string]string // each option given, by name; an option without an argument holds ""
+	values      map[string]string   // each option given, by name; an option without an argument holds ""
+	lists       map[string][]string // each value of an option that repeats, by name, in order
 	positionals []string
 }
 
@@ -118,7 +122,7 @@ func quotedChoices(choices []string) string {
 
 // parse reads one command's arguments, after the command's name and with --json taken out.
 func (a arguments) parse(tokens []string) (parsed, error) {
-	p := parsed{values: map[string]string{}}
+	p := parsed{values: map[string]string{}, lists: map[string][]string{}}
 	options := append([]option{helpOption, jsonOption, stateOption}, a.options...)
 	unrecognized, literal := false, false
 	for i := 0; i < len(tokens); {
@@ -164,13 +168,28 @@ func (a arguments) parse(tokens []string) (parsed, error) {
 			return p, usageError("argument " + o.name + ": invalid choice (choose from " + quotedChoices(o.choices) + ")")
 		}
 		p.values[o.name] = value
+		if o.repeat {
+			p.lists[o.name] = append(p.lists[o.name], value)
+		}
 	}
 	taken := 0
+	var missing []string
 	if a.required != "" {
-		if len(p.positionals) == 0 {
-			return p, usageError("the following arguments are required: " + a.required)
+		switch {
+		case len(p.positionals) == 0:
+			missing = append(missing, a.required)
+		case a.choices != nil && !slices.Contains(a.choices, p.positionals[0]):
+			return p, usageError("argument " + a.required + ": invalid choice (choose from " + quotedChoices(a.choices) + ")")
 		}
 		taken = 1
+	}
+	for _, o := range a.options {
+		if _, given := p.values[o.name]; o.required && !given {
+			missing = append(missing, o.name)
+		}
+	}
+	if len(missing) > 0 {
+		return p, usageError("the following arguments are required: " + strings.Join(missing, ", "))
 	}
 	if a.numbers {
 		for _, number := range p.positionals[taken:] {

@@ -62,11 +62,21 @@ type MemoryRecorder struct {
 	FailFinish bool
 	// BeforeFinish, when set, runs at the start of every Finish, outside the lock; a test can block in it.
 	BeforeFinish func(auditID string)
+	// AfterStart, when set, runs after Start has recorded a receipt, outside the lock; a test can block in it.
+	AfterStart func(auditID string)
 }
 
 var errUnavailable = errors.New("receipt store unavailable")
 
-func (m *MemoryRecorder) Start(_ context.Context, s Start) (string, error) {
+func (m *MemoryRecorder) Start(ctx context.Context, s Start) (string, error) {
+	id, err := m.start(ctx, s)
+	if err == nil && m.AfterStart != nil {
+		m.AfterStart(id)
+	}
+	return id, err
+}
+
+func (m *MemoryRecorder) start(_ context.Context, s Start) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.FailStart {
