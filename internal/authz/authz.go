@@ -9,6 +9,7 @@ package authz
 import (
 	"context"
 
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
@@ -49,15 +50,23 @@ func (e Evidence) AccountCards(ctx context.Context, p Principal, account string)
 	return e.Store.ViewAccountCards(ctx, p.viewer(), account)
 }
 
-// CardView is a card with its units and gaps.
+// CardView is one card as every rendering of it takes it: its head; the day
+// it is as of and the source each system was, as its bytes say; its units
+// and gaps; its lines under ATTENTION and RECORD VALUES as data; and its
+// sealed text whole. A rendering reads values from Lines and never from Text.
+// Lines is nil for a card published before lines were projected.
 type CardView struct {
-	Card  postgres.Card
-	Units []postgres.Unit
-	Gaps  []postgres.Gap
+	Card    postgres.Card
+	AsOf    string
+	Sources map[string]string
+	Units   []postgres.Unit
+	Gaps    []postgres.Gap
+	Lines   []evidence.Line
+	Text    string
 }
 
-// Card reads a card, its units and its gaps. A card one of whose units
-// rests on a read of another account is refused whole: a grant on this
+// Card reads a card, its units, its gaps and its lines. A card one of whose
+// units rests on a read of another account is refused whole: a grant on this
 // account does not open the other's records.
 func (e Evidence) Card(ctx context.Context, p Principal, cardID string) (CardView, error) {
 	view, err := e.Store.ViewCard(ctx, p.viewer(), cardID)
@@ -69,7 +78,8 @@ func (e Evidence) Card(ctx context.Context, p Principal, cardID string) (CardVie
 			return CardView{}, ErrNotPermitted
 		}
 	}
-	return CardView{view.Card, view.Units, view.Gaps}, nil
+	return CardView{Card: view.Card, AsOf: view.AsOf, Sources: view.Sources, Units: view.Units, Gaps: view.Gaps,
+		Lines: view.Lines, Text: view.Text}, nil
 }
 
 // UnitView is one unit with the receipt it was read under, when bound.

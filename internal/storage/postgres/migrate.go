@@ -63,6 +63,18 @@ func migrations() ([]migration, error) {
 	return list, nil
 }
 
+// migrationVersion is the number of the embedded migration with this name
+// (NNNN_name.sql), or 0, so code that names a migration does not name its number.
+func migrationVersion(name string) int {
+	list, _ := migrations()
+	for _, m := range list {
+		if strings.HasSuffix(m.name, "_"+name+".sql") {
+			return m.version
+		}
+	}
+	return 0
+}
+
 // LatestSchemaVersion is the version the embedded migrations reach.
 func LatestSchemaVersion() int {
 	list, err := migrations()

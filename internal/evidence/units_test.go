@@ -38,7 +38,7 @@ func TestBuildFromSealedEvidence(t *testing.T) {
 				}
 				card := value.(*strictjson.Object)
 				evidence, _ := card.Get("evidence")
-				units, text, gaps, err := Build(evidence.(*strictjson.Object))
+				units, text, gaps, _, err := Build(evidence.(*strictjson.Object))
 				if err != nil {
 					mismatches.Add("%s: refused: %v", row.Key, err)
 					continue
@@ -89,7 +89,7 @@ func TestEvidenceVectors(t *testing.T) {
 		if object == nil {
 			object = &strictjson.Object{}
 		}
-		units, text, gaps, err := Build(object)
+		units, text, gaps, _, err := Build(object)
 		if want, isRejection := vector.Get("rejected"); isRejection {
 			rejected++
 			if err == nil || err.Error() != want {
@@ -125,7 +125,7 @@ func TestSlackFileCountsKeepTheirSize(t *testing.T) {
 			continue
 		}
 		evidence, _ := vector.Get("evidence")
-		_, _, gaps, err := Build(evidence.(*strictjson.Object))
+		_, _, gaps, _, err := Build(evidence.(*strictjson.Object))
 		if err != nil {
 			t.Fatal(err)
 		}

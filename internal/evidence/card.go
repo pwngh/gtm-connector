@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,8 +19,8 @@ type card struct {
 	units         []Unit
 	neutralized   Counts
 	missing       int
-	values        []string
-	signals       []string
+	values        []Line
+	signals       []Line
 	gaps          []Gap
 	titles        map[int]string
 	unshownTitles map[int]any
@@ -66,10 +67,18 @@ func (c *card) quoted(value any) string {
 
 // text is a displayed field; an empty one is counted once, where it is shown.
 func (c *card) text(value any) string {
+	shown, _ := c.field(value)
+	return shown
+}
+
+// field is a displayed field as text prints it and as data: its line, or nil when it is empty.
+func (c *card) field(value any) (string, *string) {
 	if empty(value) {
 		c.missing++
+		return "Missing", nil
 	}
-	return c.quoted(value)
+	line := c.line(value)
+	return strictjson.Quote(line), &line
 }
 
 func (c *card) record(row *strictjson.Object, table string) int {
@@ -96,16 +105,16 @@ func cite(numbers []int) string {
 	return b.String()
 }
 
-func (c *card) value(label, value string, numbers ...int) {
-	c.values = append(c.values, "  "+label+": "+value+" "+cite(numbers))
+// value adds a line under RECORD VALUES, labelled by its code.
+func (c *card) value(l Line) {
+	l.Section, l.Label, l.Cites = "value", valueLabels[l.Code], slices.Clone(l.Cites)
+	c.values = append(c.values, l)
 }
 
-func (c *card) signal(sentence string, more int, numbers ...int) {
-	line := "  " + sentence + " " + cite(numbers)
-	if more > 0 {
-		line += fmt.Sprintf(" and %d more", more)
-	}
-	c.signals = append(c.signals, line)
+// signal adds a line under ATTENTION.
+func (c *card) signal(code, sentence string, more int, numbers ...int) {
+	c.signals = append(c.signals, Line{Section: "signal", Code: code, Text: sentence, Cites: slices.Clone(numbers),
+		More: more})
 }
 
 // num is a count a gap states.
@@ -429,17 +438,19 @@ func grouped(n *big.Int) string {
 	return b.String()
 }
 
-// amount is units._amount: an amount as printed and how many of its fields are empty.
-func amount(row *strictjson.Object, salesforce bool, name string) (string, int) {
+// amount is units._amount: an amount as printed and how many of its fields are empty. An amount in cents is
+// also given as data.
+func amount(row *strictjson.Object, salesforce bool, name string) (string, *Amount, int) {
 	currency := field(row, "currency")
 	if currency != nil && !currencyCode(currency) {
 		reject("A currency must be a three-letter code or absent.")
 	}
 	var value string
+	var figure *Amount
 	if salesforce {
 		raw := field(row, "amount_decimal")
 		if raw == nil {
-			return "Missing", 1
+			return "Missing", nil, 1
 		}
 		text, ok := raw.(string)
 		if !ok || length(text) > 128 || !decimalText(text) {
@@ -453,12 +464,17 @@ func amount(row *strictjson.Object, salesforce bool, name string) (string, int) 
 		}
 		whole, rest := new(big.Int).QuoRem(cents, big.NewInt(100), new(big.Int))
 		value = fmt.Sprintf("%s.%02d", grouped(whole), rest.Int64())
+		figure = &Amount{Amount: fmt.Sprintf("%s.%02d", whole, rest.Int64())}
+		if currency != nil {
+			code := currency.(string)
+			figure.Currency = &code
+		}
 	}
 	missing := 0
 	if currency == nil {
 		missing = 1
 	}
-	return money(value, currency), missing
+	return money(value, currency), figure, missing
 }
 
 // shownRows is units._shown: the first few rows; the rest are counted.
@@ -544,15 +560,13 @@ func (c *card) crm(asOf time.Time) []contact {
 			if field(best.contract, "status_code") == "Activated" {
 				activated = ""
 			}
-			when := "today"
-			if *daysLeft != 0 {
-				when = "in " + days(*daysLeft)
-			}
-			c.value("Contract end", fmt.Sprintf("%s, %s; status %s%s", isoDay(best.end), when,
-				c.text(field(best.contract, "status")), activated), renewalNumbers...)
+			countdown := Countdown{Date: isoDay(best.end), Days: *daysLeft, CountsTo: "contract_end"}
+			c.value(Line{Code: "contract_end", Text: fmt.Sprintf("%s; status %s%s", countdown.text(),
+				c.text(field(best.contract, "status")), activated), Cites: renewalNumbers, Countdown: &countdown})
 		} else {
 			c.missing++
-			c.value("Contract end", "Missing: no contract ends on or after "+isoDay(asOf), first)
+			c.value(Line{Code: "contract_end", Text: "Missing: no contract ends on or after " + isoDay(asOf),
+				Cites: []int{first}})
 			if len(ended) > 0 {
 				last := ended[0]
 				for _, d := range ended[1:] {
@@ -560,7 +574,7 @@ func (c *card) crm(asOf time.Time) []contact {
 						last = d
 					}
 				}
-				c.signal(fmt.Sprintf("The latest contract end date, %s, was %s ago.", isoDay(last.end),
+				c.signal("contract_ended", fmt.Sprintf("The latest contract end date, %s, was %s ago.", isoDay(last.end),
 					days(daysBetween(asOf, last.end))), 0, contractNumbers[last.id])
 			}
 		}
@@ -570,17 +584,11 @@ func (c *card) crm(asOf time.Time) []contact {
 		renewal := dayOf(field(account, "renewal_date"))
 		renewalDay = &renewal
 		daysLeft = intp(daysBetween(renewal, asOf))
-		timing := "today"
-		switch {
-		case *daysLeft > 0:
-			timing = "in " + days(*daysLeft)
-		case *daysLeft < 0:
-			timing = days(-*daysLeft) + " ago"
-		}
-		c.value("Renewal date", isoDay(renewal)+", "+timing, first)
-		recurring, missing := amount(account, false, "arr_cents")
+		countdown := Countdown{Date: isoDay(renewal), Days: *daysLeft, CountsTo: "renewal"}
+		c.value(Line{Code: "renewal_date", Text: countdown.text(), Cites: []int{first}, Countdown: &countdown})
+		recurring, figure, missing := amount(account, false, "arr_cents")
 		c.missing += missing
-		c.value("Annual recurring revenue", recurring, first)
+		c.value(Line{Code: "arr", Text: recurring, Cites: []int{first}, Amount: figure})
 		risk := field(account, "risk_status")
 		if !oneOf(risk, "healthy", "at_risk") {
 			reject("Unknown CRM risk status.")
@@ -589,13 +597,13 @@ func (c *card) crm(asOf time.Time) []contact {
 		if truthy(field(account, "risk_reason")) {
 			reason = "; reason " + c.text(field(account, "risk_reason"))
 		}
-		c.value("CRM risk", strings.ReplaceAll(risk.(string), "_", " ")+reason, first)
+		c.value(Line{Code: "crm_risk", Text: strings.ReplaceAll(risk.(string), "_", " ") + reason, Cites: []int{first}})
 		if risk == "at_risk" {
-			c.signal("CRM marks this account at risk.", 0, first)
+			c.signal("crm_at_risk", "CRM marks this account at risk.", 0, first)
 		}
 	}
-	c.value("Account", fmt.Sprintf("%s; industry %s", c.text(field(account, "name")),
-		c.text(field(account, "industry"))), first)
+	c.value(Line{Code: "account", Text: fmt.Sprintf("%s; industry %s", c.text(field(account, "name")),
+		c.text(field(account, "industry"))), Cites: []int{first}})
 	type priced struct {
 		text    string
 		missing int
@@ -604,7 +612,7 @@ func (c *card) crm(asOf time.Time) []contact {
 	open := map[string]bool{}
 	amounts := map[string]priced{}
 	for _, row := range opportunities {
-		text, missing := amount(row, salesforce, "amount_cents")
+		text, _, missing := amount(row, salesforce, "amount_cents")
 		amounts[rowID(row)] = priced{text, missing}
 		var closed bool
 		if salesforce {
@@ -652,8 +660,8 @@ func (c *card) crm(asOf time.Time) []contact {
 			outcome = fmt.Sprintf("; closed %t; won %t", field(row, "is_closed").(bool), field(row, "is_won").(bool))
 		}
 		name, stage := c.text(field(row, "name")), c.text(field(row, "stage"))
-		c.value("Opportunity", fmt.Sprintf("%s; stage %s; amount %s; close date %s%s", name, stage, price.text,
-			str(field(row, "close_date")), outcome), opportunityNumbers[rowID(row)])
+		c.value(Line{Code: "opportunity", Text: fmt.Sprintf("%s; stage %s; amount %s; close date %s%s", name, stage,
+			price.text, str(field(row, "close_date")), outcome), Cites: []int{opportunityNumbers[rowID(row)]}})
 	}
 	if len(opportunities) == 0 {
 		c.gap("crm_no_opportunity", "CRM: no opportunity was returned for this account.", num(0), false, nil)
@@ -674,14 +682,16 @@ func (c *card) crm(asOf time.Time) []contact {
 		if end := field(row, "end_date"); end != nil {
 			ends = "ends " + str(end)
 		}
-		c.value("Contract", fmt.Sprintf("status %s; %s", c.text(field(row, "status")), ends), contractNumbers[rowID(row)])
+		c.value(Line{Code: "contract", Text: fmt.Sprintf("status %s; %s", c.text(field(row, "status")), ends),
+			Cites: []int{contractNumbers[rowID(row)]}})
 	}
 	for _, row := range c.shownRows(contacts, "contact", "contacts") {
 		n := contactNumbers[rowID(row)]
-		title := c.text(field(row, "title"))
+		title, titleValue := c.field(field(row, "title"))
 		c.titles[n] = title
-		c.value("Contact", fmt.Sprintf("%s; role %s; email %s", c.text(field(row, "name")), title,
-			c.text(field(row, "email"))), n)
+		name, nameValue := c.field(field(row, "name"))
+		c.value(Line{Code: "contact", Text: fmt.Sprintf("%s; role %s; email %s", name, title,
+			c.text(field(row, "email"))), Cites: []int{n}, Contact: &Person{Name: nameValue, Title: titleValue}})
 	}
 	c.unshownTitles = map[int]any{}
 	if len(contacts) > ShownRecords {
@@ -713,14 +723,14 @@ func (c *card) crm(asOf time.Time) []contact {
 	}
 	switch {
 	case daysLeft != nil && *daysLeft < 0 && len(stillOpen) == 0:
-		c.signal(when+".", 0, renewalNumbers...)
+		c.signal("renewal_passed", when+".", 0, renewalNumbers...)
 	case len(stillOpen) > ShownRecords:
-		c.signal(fmt.Sprintf("%s and %d opportunities are still open.", when, len(stillOpen)),
+		c.signal("still_open", fmt.Sprintf("%s and %d opportunities are still open.", when, len(stillOpen)),
 			len(stillOpen)-ShownRecords,
 			append(append([]int(nil), renewalNumbers...), numbersOf(stillOpen[:ShownRecords], opportunityNumbers)...)...)
 	default:
 		for _, row := range stillOpen {
-			c.signal(fmt.Sprintf("%s and this opportunity is still open at stage %s.", when,
+			c.signal("still_open", fmt.Sprintf("%s and this opportunity is still open at stage %s.", when,
 				c.quoted(field(row, "stage"))), 0,
 				append(append([]int(nil), renewalNumbers...), opportunityNumbers[rowID(row)])...)
 		}
@@ -736,12 +746,13 @@ func (c *card) crm(asOf time.Time) []contact {
 		renewalText = isoDay(*renewalDay)
 	}
 	if len(late) > ShownRecords {
-		c.signal(fmt.Sprintf("%d open opportunities have a close date after the %s date, %s.", len(late), what,
+		c.signal("close_after_renewal", fmt.Sprintf("%d open opportunities have a close date after the %s date, %s.",
+			len(late), what,
 			renewalText), len(late)-ShownRecords,
 			append(append([]int(nil), renewalNumbers...), numbersOf(late[:ShownRecords], opportunityNumbers)...)...)
 	} else {
 		for _, row := range late {
-			c.signal(fmt.Sprintf("This open opportunity's close date, %s, is after the %s date, %s.",
+			c.signal("close_after_renewal", fmt.Sprintf("This open opportunity's close date, %s, is after the %s date, %s.",
 				str(field(row, "close_date")), what, renewalText), 0,
 				append(append([]int(nil), renewalNumbers...), opportunityNumbers[rowID(row)])...)
 		}
@@ -753,11 +764,11 @@ func (c *card) crm(asOf time.Time) []contact {
 		}
 	}
 	if len(noRole) > ShownRecords {
-		c.signal(fmt.Sprintf("%d contacts have no role recorded.", len(noRole)), len(noRole)-ShownRecords,
-			numbersOf(noRole[:ShownRecords], contactNumbers)...)
+		c.signal("contact_no_role", fmt.Sprintf("%d contacts have no role recorded.", len(noRole)),
+			len(noRole)-ShownRecords, numbersOf(noRole[:ShownRecords], contactNumbers)...)
 	} else {
 		for _, row := range noRole {
-			c.signal("This contact has no role recorded.", 0, contactNumbers[rowID(row)])
+			c.signal("contact_no_role", "This contact has no role recorded.", 0, contactNumbers[rowID(row)])
 		}
 	}
 	return named
@@ -875,7 +886,8 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 	if latest != nil {
 		age := daysBetween(asOf, dateOf(*latest))
 		if age > staleDays {
-			c.signal(fmt.Sprintf("The latest dated call that was read is %s old.", days(age)), 0, firstUnit[latestRef])
+			c.signal("call_stale", fmt.Sprintf("The latest dated call that was read is %s old.", days(age)), 0,
+				firstUnit[latestRef])
 		}
 	}
 }
@@ -1206,7 +1218,7 @@ func (c *card) said() []string {
 
 // ---- the card ----
 
-func build(evidence *strictjson.Object) ([]Unit, string, []Gap) {
+func build(evidence *strictjson.Object) ([]Unit, string, []Gap, []Line) {
 	v := validate(evidence)
 	asOf := dayOf(field(evidence, "as_of"))
 	c := &card{evidence: evidence, groups: v.groups, titles: map[int]string{}, unshownTitles: map[int]any{}}
@@ -1296,16 +1308,16 @@ func build(evidence *strictjson.Object) ([]Unit, string, []Gap) {
 		lines = append(lines, "Sources read "+from+".", "")
 	}
 	if len(c.signals) > 0 {
-		lines = append(append(append(lines, "ATTENTION, from record fields and dates"), c.signals...), "")
+		lines = append(append(append(lines, AttentionHeading), RenderLines(c.signals)...), "")
 	}
-	lines = append(append(lines, "RECORD VALUES, from CRM fields and connector arithmetic"), c.values...)
+	lines = append(append(lines, ValuesHeading), RenderLines(c.values)...)
 	lines = append(append(append(lines, "", "SAID, whole sentences as recorded; not record values"), said...), "",
 		"NOT READ")
 	for _, g := range c.gaps {
 		lines = append(lines, "  "+g.Text)
 	}
 	lines = append(lines, "")
-	return c.units, strings.Join(lines, "\n"), c.gaps
+	return c.units, strings.Join(lines, "\n"), c.gaps, append(c.signals, c.values...)
 }
 
 // Trace resolves the numbers of one sealed card, as units.trace does, from an index of its evidence built

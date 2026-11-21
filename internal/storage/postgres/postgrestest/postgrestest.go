@@ -5,10 +5,16 @@ package postgrestest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/pgtest"
@@ -93,6 +99,59 @@ func CardBytes(t testing.TB, seal postgres.Receipt, account, brief string, reads
 		t.Fatal(err)
 	}
 	return []byte(out)
+}
+
+// AsOf is the day a card WithLines makes is as of.
+const AsOf = "2027-01-15"
+
+// WithLines makes a card as of AsOf whose text prints these lines under
+// ATTENTION and RECORD VALUES, signals first, and projects them, as the maker
+// does.
+func WithLines(t testing.TB, pub *postgres.CardPublication, lines ...evidence.Line) {
+	t.Helper()
+	doc := load(t, pub.Bytes).(*strictjson.Object)
+	doc.Set("as_of", AsOf)
+	text := "DEAL CARD " + pub.AccountRef + "\n"
+	var signals, values []evidence.Line
+	pub.Lines = nil
+	for _, l := range lines {
+		if l.Section == "signal" {
+			signals = append(signals, l)
+		} else {
+			values = append(values, l)
+		}
+		body, err := strictjson.Dumps(l.Value(), strictjson.Prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pub.Lines = append(pub.Lines, postgres.Line{Section: l.Section, Body: json.RawMessage(body)})
+	}
+	if len(signals) > 0 {
+		text += "\n" + evidence.AttentionHeading + "\n" + strings.Join(evidence.RenderLines(signals), "\n") + "\n"
+	}
+	text += "\n" + evidence.ValuesHeading + "\n" + strings.Join(evidence.RenderLines(values), "\n") + "\n"
+	doc.Set("text", text)
+	out, err := strictjson.Dumps(doc, strictjson.Artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub.Bytes = []byte(out)
+}
+
+// FixtureLines are the fixture card's lines, each citing its account record: a
+// signal, the renewal date with its countdown, the annual recurring revenue
+// with its amount, and the account.
+func FixtureLines() []evidence.Line {
+	usd := "USD"
+	return []evidence.Line{
+		{Section: "signal", Code: "crm_at_risk", Text: "CRM marks this account at risk.", Cites: []int{1}},
+		{Section: "value", Code: "renewal_date", Label: "Renewal date", Text: "2027-02-08, in 24 days", Cites: []int{1},
+			Countdown: &evidence.Countdown{Date: "2027-02-08", Days: 24, CountsTo: "renewal"}},
+		{Section: "value", Code: "arr", Label: "Annual recurring revenue", Text: "USD 450,000.00", Cites: []int{1},
+			Amount: &evidence.Amount{Amount: "450000.00", Currency: &usd}},
+		{Section: "value", Code: "account", Label: "Account", Text: `"Invented account"; industry Missing`,
+			Cites: []int{1}},
+	}
 }
 
 func load(t testing.TB, raw []byte) any {
@@ -191,7 +250,71 @@ func Publish(t testing.TB, f *Fixture, account, principal, brief string, gaps ..
 }
 
 // New migrates a fresh database and publishes the fixture card on it.
-func New(t testing.TB) *Fixture {
+func New(t testing.TB) *Fixture { t.Helper(); return newFixture(t, false) }
+
+// BeforeLines is New with the fixture card published as a binary from before
+// lines were projected published it: with no lines and no line count, and
+// every other rule checked at commit.
+func BeforeLines(t testing.TB) *Fixture { t.Helper(); return newFixture(t, true) }
+
+// publishUncounted writes a card as PublishCard did before lines were
+// projected. The trigger that requires a count is off while it is written, on
+// the fixture's own database.
+func publishUncounted(t testing.TB, f *Fixture, pub postgres.CardPublication) postgres.Card {
+	t.Helper()
+	ctx := context.Background()
+	sum := sha256.Sum256(pub.Bytes)
+	_, err := f.Store.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: pub.SealReceiptID,
+		LeaseToken: pub.SealLeaseToken, Status: "ok", HTTPStatus: 200,
+		Rows: []string{"briefs/" + pub.BriefID + "/" + hex.EncodeToString(sum[:])}})
+	must(t, err)
+	conn, err := pgx.Connect(ctx, f.URL)
+	must(t, err)
+	defer conn.Close(ctx)
+	_, err = conn.Exec(ctx, "ALTER TABLE cards DISABLE TRIGGER cards_count_lines")
+	must(t, err)
+	var id string
+	must(t, pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version, card_bytes,
+				card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, sha256($7), $8, $9, $10, $11, $12) RETURNING id`,
+			pub.WorkspaceID, pub.AccountRef, pub.BriefID, pub.Kind, pub.SchemaVersion, pub.RulesVersion, pub.Bytes,
+			pub.ParentReceiptID, pub.SealReceiptID, len(pub.Units), len(pub.Gaps), len(pub.ReadReceiptIDs)).
+			Scan(&id); err != nil {
+			return err
+		}
+		for _, u := range pub.Units {
+			if _, err := tx.Exec(ctx, `INSERT INTO evidence_units (workspace_id, card_id, n, kind, record_ref, tool,
+				shown, receipt_id, source_record_id, body) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8, $9, $10)`,
+				pub.WorkspaceID, id, u.N, u.Kind, u.RecordRef, u.Tool, u.Shown, u.ReceiptID, u.SourceRecordID,
+				u.Body); err != nil {
+				return err
+			}
+		}
+		for i, g := range pub.Gaps {
+			if _, err := tx.Exec(ctx, `INSERT INTO gaps (workspace_id, card_id, ordinal, code, disposition, count,
+				by_role, text) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, pub.WorkspaceID, id, i, g.Code, g.Disposition,
+				g.Count, g.ByRole, g.Text); err != nil {
+				return err
+			}
+		}
+		for i, read := range pub.ReadReceiptIDs {
+			if _, err := tx.Exec(ctx, `INSERT INTO card_reads (workspace_id, card_id, ordinal, receipt_id)
+				VALUES ($1, $2, $3, $4)`, pub.WorkspaceID, id, i, read); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	_, err = conn.Exec(ctx, "ALTER TABLE cards ENABLE TRIGGER cards_count_lines")
+	must(t, err)
+	card, err := f.Store.Card(ctx, pub.WorkspaceID, id)
+	must(t, err)
+	return card
+}
+
+func newFixture(t testing.TB, beforeLines bool) *Fixture {
 	t.Helper()
 	ctx := context.Background()
 	f := &Fixture{URL: pgtest.URL(t)}
@@ -223,8 +346,13 @@ func New(t testing.TB) *Fixture {
 		Text: "1 sentence had markup neutralized."}}
 	pub.Bytes = CardBytes(t, call, Account, "brief-1", []postgres.Receipt{read}, []postgres.RecordVersion{account,
 		contact}, pub.Units, pub.Gaps)
-	f.Card, err = store.PublishCard(ctx, pub)
-	must(t, err)
+	if beforeLines {
+		f.Card = publishUncounted(t, f, pub)
+	} else {
+		WithLines(t, &pub, FixtureLines()...)
+		f.Card, err = store.PublishCard(ctx, pub)
+		must(t, err)
+	}
 	f.Parent, err = store.Receipt(ctx, f.Workspace.ID, call.ID)
 	must(t, err)
 	f.Read, err = store.Receipt(ctx, f.Workspace.ID, read.ID)

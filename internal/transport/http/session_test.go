@@ -44,7 +44,12 @@ const (
 
 func newSite(t *testing.T, sessionTTL time.Duration) *site {
 	t.Helper()
-	f := postgrestest.New(t)
+	return siteOn(t, postgrestest.New(t), sessionTTL)
+}
+
+// siteOn serves a fixture's database.
+func siteOn(t *testing.T, f *postgrestest.Fixture, sessionTTL time.Duration) *site {
+	t.Helper()
 	ts := httptest.NewUnstartedServer(nil)
 	origin := "https://" + ts.Listener.Addr().String()
 	s, err := httptransport.New(httptransport.Config{PublicOrigin: origin,
