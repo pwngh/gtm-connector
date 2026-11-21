@@ -372,7 +372,11 @@ func TestSetupSetsTheAppRolePasswordFromTheURL(t *testing.T) {
 			t.Fatalf("after setup, the app role does not open with its URL: %v", err)
 		}
 	}
-	if err := opens("first-app-password-for-this-test"); err == nil || !strings.Contains(err.Error(), "(28P01)") {
+	// A server that trusts local connections, as CI's does, lets any password in, so the old password's
+	// refusal is checked only where a password nobody set is refused.
+	if opens("a-password-no-setup-gave") == nil {
+		t.Log("this server does not check passwords: the old password's refusal is not checked")
+	} else if err := opens("first-app-password-for-this-test"); err == nil || !strings.Contains(err.Error(), "(28P01)") {
 		t.Fatalf("the old password: %v", err)
 	}
 	// A URL that gives no password, with no password file or PGPASSWORD to give one, is refused.
