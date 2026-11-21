@@ -135,12 +135,12 @@ func PlainInstant(s string) bool {
 // Instant is units._instant for a string: datetime.fromisoformat after every Z is read as +00:00, in UTC.
 // It is false when the text is not an ISO time, has no offset, or leaves years 1 to 9999 in UTC.
 func Instant(value string) (time.Time, bool) {
-	return fromISOFormat(strings.ReplaceAll(value, "Z", "+00:00"))
+	return FromISOFormat(strings.ReplaceAll(value, "Z", "+00:00"))
 }
 
-// fromISOFormat is CPython 3.14's datetime.fromisoformat (Modules/_datetimemodule.c), which reads the text
+// FromISOFormat is CPython 3.14's datetime.fromisoformat (Modules/_datetimemodule.c), which reads the text
 // as UTF-8 bytes, for aware results only.
-func fromISOFormat(text string) (time.Time, bool) {
+func FromISOFormat(text string) (time.Time, bool) {
 	if utf8.RuneCountInString(text) < 7 {
 		return time.Time{}, false
 	}
