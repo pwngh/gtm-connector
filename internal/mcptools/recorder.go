@@ -21,10 +21,11 @@ import (
 // recorder is the gate's receipts on the store. It starts the one outer receipt of every call, and it
 // finishes it, but for a prepared brief's seal, which the brief's publication finishes with the bytes.
 type recorder struct {
-	store       receipts.Store
-	workspace   string
-	tokens      Storage
-	connections map[string]string
+	store     receipts.Store
+	workspace string
+	tokens    Storage
+	// sources gives the workspace's sources as they are connected now. Start asks it once for each call.
+	sources func(ctx context.Context) (Opened, error)
 
 	mu   sync.Mutex
 	open map[string]*pending // by receipt ID
@@ -32,7 +33,11 @@ type recorder struct {
 
 // pending is one call's committed receipt until it is finished.
 type pending struct {
-	receipt  receipts.Receipt
+	receipt receipts.Receipt
+	// view is the sources the call reads, opened before its receipt started. refusal is why the call reads
+	// none: they could not be opened, or the receipt started under a generation they were not opened under.
+	view     Opened
+	refusal  error
 	versions []receipts.RecordVersion // what a direct read returned, bound when its receipt finishes
 	since    time.Time
 }
@@ -66,10 +71,14 @@ func (r *recorder) Start(ctx context.Context, s mcp.Start) (string, error) {
 	if n := utf8.RuneCountInString(start.Tool); n < 1 || n > 100 || strings.ContainsRune(start.Tool, 0) {
 		start.Tool = "<invalid>"
 	}
+	// The sources are opened before the receipt starts, so the receipt names the connection the call reads
+	// through. Opening reads the workspace's own rows and no source. A call whose sources cannot be opened
+	// still gets its receipt, which names no connection, and is refused under it.
+	view, refusal := r.sources(ctx)
 	if definition, known := mcp.Definitions[start.Tool]; known {
 		start.Scope = definition.Scope
 		// A direct read is a source read of its connection, so it finishes by binding what it returned.
-		start.ConnectionID = r.connections[readSource[start.Tool]]
+		start.ConnectionID = view.Connections[readSource[start.Tool]]
 		if arguments, ok := s.Arguments.(*strictjson.Object); ok && arguments != nil {
 			account, _ := arguments.Get("account_id")
 			start.AccountRef, _ = account.(string)
@@ -83,6 +92,11 @@ func (r *recorder) Start(ctx context.Context, s mcp.Start) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if opened, checked := view.Generations[readSource[start.Tool]]; refusal == nil && checked &&
+		receipt.ConnectionID != "" && receipt.Generation != opened {
+		// The source was connected again or detached after it was opened: what was opened is not read.
+		refusal = mcp.ToolError("source_changed")
+	}
 	now := time.Now()
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -91,7 +105,7 @@ func (r *recorder) Start(ctx context.Context, s mcp.Start) (string, error) {
 			delete(r.open, id)
 		}
 	}
-	r.open[receipt.AuditID] = &pending{receipt: receipt, since: now}
+	r.open[receipt.AuditID] = &pending{receipt: receipt, view: view, refusal: refusal, since: now}
 	return receipt.AuditID, nil
 }
 
@@ -171,4 +185,15 @@ func (r *recorder) outer(auditID string) (receipts.Receipt, bool) {
 		return receipts.Receipt{}, false
 	}
 	return p.receipt, true
+}
+
+// opened is the sources a call reads, as they were opened before its receipt started, or why it reads none.
+func (r *recorder) opened(auditID string) (Opened, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p := r.open[auditID]
+	if p == nil {
+		return Opened{}, errors.New("the call has no pending receipt")
+	}
+	return p.view, p.refusal
 }

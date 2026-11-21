@@ -555,6 +555,12 @@ type GapRow struct {
 	ByRole                  []byte // JSON, nil for none
 }
 
+// LineRow is one line under ATTENTION or RECORD VALUES of a published card, as its projection holds it.
+type LineRow struct {
+	Section string // "signal" or "value"
+	Value   []byte // the line as data (evidence.Line.Value), as JSON
+}
+
 // Publication is everything Publish writes together.
 type Publication struct {
 	WorkspaceID, AccountRef, BriefID string
@@ -568,6 +574,8 @@ type Publication struct {
 	Bytes         []byte
 	Units         []UnitRow // exactly the bytes' units, in order
 	Gaps          []GapRow  // exactly the bytes' gaps, in order
+	// Lines render exactly what the bytes' text prints under ATTENTION and RECORD VALUES, signals first.
+	Lines []LineRow
 	// Reads are the read receipts the card rests on: exactly those its evidence.receipts embeds, in order.
 	Reads     []string
 	ElapsedMS float64
@@ -581,6 +589,7 @@ type Card struct {
 	Seal                                   Receipt
 	Units                                  []UnitRow
 	Gaps                                   []GapRow
+	Lines                                  []LineRow
 }
 
 // Reference is the row a seal names: briefs/<brief ID>/<digest of the bytes>.
@@ -602,6 +611,10 @@ func (c Card) clone() Card {
 			c.Gaps[i].Count = new(big.Int).Set(c.Gaps[i].Count)
 		}
 		c.Gaps[i].ByRole = append([]byte(nil), c.Gaps[i].ByRole...)
+	}
+	c.Lines = append([]LineRow(nil), c.Lines...)
+	for i := range c.Lines {
+		c.Lines[i].Value = append([]byte(nil), c.Lines[i].Value...)
 	}
 	return c
 }
@@ -977,7 +990,7 @@ func (m *Memory) Publish(_ context.Context, p Publication) (Card, error) {
 		}
 	}
 	card := Card{WorkspaceID: p.WorkspaceID, AccountRef: p.AccountRef, BriefID: p.BriefID, Kind: p.Kind,
-		Bytes: p.Bytes, SHA256: reference[len(reference)-64:], Units: p.Units, Gaps: p.Gaps}
+		Bytes: p.Bytes, SHA256: reference[len(reference)-64:], Units: p.Units, Gaps: p.Gaps, Lines: p.Lines}
 	card.Seal = m.finish(seal, ok)
 	card.Seal.Lease = ""
 	stored := card.clone()

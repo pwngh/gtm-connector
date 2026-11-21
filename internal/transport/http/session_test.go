@@ -44,7 +44,12 @@ const (
 
 func newSite(t *testing.T, sessionTTL time.Duration) *site {
 	t.Helper()
-	f := postgrestest.New(t)
+	return siteOn(t, postgrestest.New(t), sessionTTL)
+}
+
+// siteOn serves a fixture's database.
+func siteOn(t *testing.T, f *postgrestest.Fixture, sessionTTL time.Duration) *site {
+	t.Helper()
 	ts := httptest.NewUnstartedServer(nil)
 	origin := "https://" + ts.Listener.Addr().String()
 	s, err := httptransport.New(httptransport.Config{PublicOrigin: origin,
@@ -232,6 +237,16 @@ func TestSignInRotatesTheSessionAndCSRF(t *testing.T) {
 	if r := b.write(http.MethodPost, "/api/v1/session",
 		map[string]any{"login": "demo-reader", "password": readerPassword, "admin": true}); r.status != 400 {
 		t.Fatalf("unknown field: %d", r.status)
+	}
+	// A body that names the password twice signs nobody in, whichever of the two is the right one.
+	for _, twice := range []string{
+		`{"login":"demo-reader","password":"` + outsiderPassword + `","password":"` + readerPassword + `"}`,
+		`{"login":"demo-reader","password":"` + readerPassword + `","password":"` + outsiderPassword + `"}`,
+	} {
+		if r := b.write(http.MethodPost, "/api/v1/session", json.RawMessage(twice)); r.status != 400 ||
+			r.code() != "invalid_json" {
+			t.Fatalf("a password named twice: %d %s", r.status, r.raw)
+		}
 	}
 
 	r := b.write(http.MethodPost, "/api/v1/session", login)

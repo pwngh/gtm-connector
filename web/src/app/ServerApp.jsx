@@ -5,18 +5,16 @@ import Dialog from '../WorkspaceDialog.jsx';
 import CommandPalette from '../CommandPalette.jsx';
 import RouteContent from '../RouteContent.jsx';
 import {focusElement, holdPendingFocus} from '../focusElement.js';
-import {ApiCrumbs, NotAvailable, PrincipalMark, ServerContext, ServerNav, apiCommandItems, serverHome, serverPageAt} from '../ServerSwitch.jsx';
-// The styles the server pages use, in the walkthrough's order. The `?server`
-// query makes them modules of their own, so the walkthrough, loaded after
-// this app's styles on a static host, still brings its whole list in order.
-import '../readiness.css?server';
-import '../styles.css?server';
-import '../refinements.css?server';
-import '../modern.css?server';
-import '../atelier.css?server';
-import '../workplan.css?server';
-import '../chrome.css?server';
-import '../api.css?server';
+import {ApiCrumbs, NoPage, PrincipalMark, ServerContext, ServerNav, apiCommandItems, serverHome, serverPageAt} from '../ServerSwitch.jsx';
+// The styles the server pages use. Later files override earlier ones, so the order matters.
+import '../readiness.css';
+import '../styles.css';
+import '../refinements.css';
+import '../modern.css';
+import '../atelier.css';
+import '../workplan.css';
+import '../chrome.css';
+import '../api.css';
 
 const compactQuery = '(max-width:650px)';
 const navigationLinks = '#workspace-navigation button:not(:disabled),#workspace-navigation a[href]';
@@ -104,7 +102,7 @@ export function ServerShell() {
   });
 
   const closeNavigation = () => {setMobile(false); menuRef.current?.focus();};
-  const {Page, label} = serverPageAt(location.pathname) || {Page: NotAvailable, label: 'page'};
+  const {Page, label} = serverPageAt(location.pathname) || {Page: NoPage, label: 'page'};
   return <div className="app">
     <a className="skip" inert={overlayOpen} href="#main" onClick={event => {event.preventDefault(); focusElement(document.getElementById('main'), {block: 'start'});}}>Skip to content</a>
     <aside id="workspace-navigation" role={compact && mobile ? 'dialog' : undefined} aria-modal={compact && mobile ? true : undefined} aria-label={compact && mobile ? 'Workspace navigation' : undefined}
@@ -125,7 +123,7 @@ export function ServerShell() {
         </div>
       </header>
       <main id="main" className="main-content" tabIndex={-1}>
-        <RouteContent path={location.pathname} label={label} failure="This page could not load. Nothing was lost." onReady={setLoadedPath}><Page/></RouteContent>
+        <RouteContent path={location.pathname} label={label} onReady={setLoadedPath}><Page/></RouteContent>
         <footer className="page-footer"><span>gtm-connector</span><span>Read from the server</span></footer>
       </main>
     </div>
@@ -142,10 +140,11 @@ export function ServerPalette({opener, onClose}) {
   </Dialog>;
 }
 
-// The app the server serves. "/" opens the first server page.
+// The app the server serves. "/" and /ops open the first server page.
 export default function ServerApp({store}) {
   return <ServerContext value={store}><BrowserRouter><Routes>
     <Route path="/" element={<Navigate to={serverHome} replace/>}/>
+    <Route path="/ops" element={<Navigate to={serverHome} replace/>}/>
     <Route path="*" element={<ServerShell/>}/>
   </Routes></BrowserRouter></ServerContext>;
 }

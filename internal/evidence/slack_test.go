@@ -151,12 +151,12 @@ func changedThread(t *testing.T, i int) *strictjson.Object {
 }
 
 func TestLiveSlackRefusals(t *testing.T) {
-	if _, _, _, err := Build(sealedEvidence(t, "slack_threads", liveThread)); err != nil {
+	if _, _, _, _, err := Build(sealedEvidence(t, "slack_threads", liveThread)); err != nil {
 		t.Fatalf("as sealed: %v", err)
 	}
 	for i, c := range slackRefusals {
 		t.Run(c.name, func(t *testing.T) {
-			if _, _, _, err := Build(changedThread(t, i)); err == nil || err.Error() != c.want {
+			if _, _, _, _, err := Build(changedThread(t, i)); err == nil || err.Error() != c.want {
 				t.Errorf("got %v, want %q", err, c.want)
 			}
 		})
@@ -178,10 +178,10 @@ func recountedThread(t *testing.T) *strictjson.Object {
 func TestResealedThreadIsAccepted(t *testing.T) {
 	evidence := sealedEvidence(t, "slack_threads", liveThread)
 	memberObject(evidence, "thread_snapshot", "counts").Set("response_bytes", 1)
-	if _, _, _, err := Build(evidence); err == nil || err.Error() != otherSnapshot {
+	if _, _, _, _, err := Build(evidence); err == nil || err.Error() != otherSnapshot {
 		t.Fatalf("a changed snapshot under its old digest: %v", err)
 	}
-	_, text, _, err := Build(recountedThread(t))
+	_, text, _, _, err := Build(recountedThread(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,7 +2,6 @@ package cards
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -73,11 +72,31 @@ type TrustedRows map[string]*strictjson.Object
 // ErrDuplicateReceipt refuses an export that holds two rows for one audit ID.
 var ErrDuplicateReceipt = errors.New("cards: the audit export holds one audit ID twice")
 
-// ReadTrustedRows reads an export written one JSON object a line.
-func ReadTrustedRows(data []byte) (TrustedRows, error) {
+// The largest files of a folder that are read. Each is checked against its file's size before the file is
+// read.
+const (
+	// MaxCardBytes bounds a card saved by brief or demo, which Python saves at any size. A card's four reads
+	// return at most 1 MiB (the account), 1 MiB (its opportunities), 128 KiB (one imported transcript) and
+	// 256 KiB (one Slack thread) of records. The card holds each record once, and what it shows of them
+	// again in its units and its text, so 64 MiB is over twenty times those records.
+	MaxCardBytes = 64 << 20
+	// maxAuditRowBytes bounds one row of an audit export. A receipt's largest column is its arguments, which
+	// arrive in a request of at most 64 KiB and are written in the row as a JSON string.
+	maxAuditRowBytes = 1 << 20
+	// maxAuditBytes bounds the whole export. The limits put no bound on how many receipts a folder holds,
+	// and the export is read a row at a time, so this stops a file of another kind, not a long log.
+	maxAuditBytes = 1 << 30
+)
+
+// ErrFileTooLarge refuses a file over the size of what it holds. The file is not read.
+var ErrFileTooLarge = errors.New("cards: larger than its kind of file can be")
+
+// ReadTrustedRows reads an export written one JSON object a line, a line at a time. A line over
+// maxAuditRowBytes is refused.
+func ReadTrustedRows(export io.Reader) (TrustedRows, error) {
 	log := TrustedRows{}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(nil, 1<<26)
+	scanner := bufio.NewScanner(export)
+	scanner.Buffer(nil, maxAuditRowBytes)
 	for scanner.Scan() {
 		value, err := strictjson.Loads(scanner.Bytes())
 		if err != nil {
@@ -409,6 +428,9 @@ type Folder struct {
 	Cards    map[string][]byte // briefs/<brief ID>.json
 	Prepared map[string][]byte // selected-briefs/<brief ID>.json
 	Log      TrustedRows
+	// tooLarge holds, by sub-folder and brief ID ("briefs/<brief ID>"), the refusal of each file over its
+	// size. Such a file was not read.
+	tooLarge map[string]error
 }
 
 // OpenTrustedExport reads a folder whose audit log is exported as its rows, audit.jsonl, one receipt a line,
@@ -428,10 +450,11 @@ func OpenTrustedExport(dir string) (*Folder, error) {
 			return nil, ErrLinkedLog
 		}
 	}
-	f := &Folder{Cards: map[string][]byte{}, Prepared: map[string][]byte{}}
-	// A card saved by brief has no size cap; a prepared brief over its cap is read one byte past it, and
-	// refused.
-	limits := map[string]int64{"briefs": 1 << 30, "selected-briefs": MaxArtifactBytes}
+	f := &Folder{Cards: map[string][]byte{}, Prepared: map[string][]byte{}, tooLarge: map[string]error{}}
+	// A card file over its size is left unread, and the folder's other cards still open: its card is refused
+	// as invalid when it is asked for, as read_renewal_brief refuses a prepared brief over 4 MiB.
+	limits := map[string]int64{"briefs": MaxCardBytes, "selected-briefs": MaxArtifactBytes}
+	refusals := map[string]error{"briefs": ErrInvalidCard, "selected-briefs": ErrBriefInvalid}
 	for sub, into := range map[string]map[string][]byte{"briefs": f.Cards, "selected-briefs": f.Prepared} {
 		entries, err := os.ReadDir(filepath.Join(dir, sub))
 		if errors.Is(err, os.ErrNotExist) {
@@ -446,18 +469,31 @@ func OpenTrustedExport(dir string) (*Folder, error) {
 				continue
 			}
 			data, err := readRegular(filepath.Join(dir, sub, entry.Name()), limits[sub])
+			if errors.Is(err, ErrFileTooLarge) {
+				f.tooLarge[sub+"/"+name] = refusals[sub]
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
 			into[name] = data
 		}
 	}
-	data, err := readRegular(filepath.Join(dir, "audit.jsonl"), 1<<30)
+	export, err := openRegular(filepath.Join(dir, "audit.jsonl"), maxAuditBytes)
 	if err != nil {
 		return nil, err
 	}
-	if f.Log, err = ReadTrustedRows(data); err != nil {
+	defer export.Close()
+	if f.Log, err = ReadTrustedRows(io.LimitReader(export, maxAuditBytes+1)); err != nil {
 		return nil, err
+	}
+	// An export that grew past its size while it was read is refused too.
+	read, err := export.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return nil, err
+	}
+	if read > maxAuditBytes {
+		return nil, fmt.Errorf("%w: audit.jsonl", ErrFileTooLarge)
 	}
 	return f, nil
 }
@@ -468,10 +504,25 @@ var ErrNotRegular = errors.New("cards: not a regular file")
 // betweenCheckAndOpen lets a test change a file after it was checked and before it is opened.
 var betweenCheckAndOpen func(path string)
 
-// readRegular opens a file without following a link and reads it only if the opened file is the regular
-// file Lstat saw, so nothing can be swapped in between the check and the read. A file over limit bytes is
-// read up to one byte past it.
+// readRegular reads a file that openRegular opens. A file that grew past limit bytes after it was opened is
+// refused too.
 func readRegular(path string, limit int64) ([]byte, error) {
+	file, err := openRegular(path, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err == nil && int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w: %s", ErrFileTooLarge, filepath.Base(path))
+	}
+	return data, err
+}
+
+// openRegular opens a file without following a link, and only if the opened file is the regular file Lstat
+// saw, so nothing can be swapped in between the check and the read. A file over limit bytes is refused by
+// its size, before any of it is read.
+func openRegular(path string, limit int64) (*os.File, error) {
 	checked, err := os.Lstat(path)
 	if err != nil {
 		return nil, err
@@ -486,21 +537,32 @@ func readRegular(path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %v", ErrNotRegular, filepath.Base(path), err)
 	}
-	defer file.Close()
 	opened, err := file.Stat()
+	switch {
+	case err != nil:
+	case !opened.Mode().IsRegular() || !os.SameFile(checked, opened):
+		err = fmt.Errorf("%w: %s changed while it was opened", ErrNotRegular, filepath.Base(path))
+	case opened.Size() > limit:
+		err = fmt.Errorf("%w: %s", ErrFileTooLarge, filepath.Base(path))
+	}
 	if err != nil {
+		file.Close()
 		return nil, err
 	}
-	if !opened.Mode().IsRegular() || !os.SameFile(checked, opened) {
-		return nil, fmt.Errorf("%w: %s changed while it was opened", ErrNotRegular, filepath.Base(path))
-	}
-	return io.ReadAll(io.LimitReader(file, limit+1))
+	return file, nil
 }
 
-// Verify admits one card or prepared brief of the folder, by its brief ID.
+// Verify admits one card or prepared brief of the folder, by its brief ID. The card file is read first, so a
+// prepared brief of the same ID is looked at only when there is no card file.
 func (f *Folder) Verify(ctx context.Context, briefID string, bound evidence.Sources) (*Admitted, error) {
+	if refusal, ok := f.tooLarge["briefs/"+briefID]; ok {
+		return nil, refusal
+	}
 	if payload, ok := f.Cards[briefID]; ok {
 		return VerifyCard(ctx, payload, briefID, f.Log, bound)
+	}
+	if refusal, ok := f.tooLarge["selected-briefs/"+briefID]; ok {
+		return nil, refusal
 	}
 	if payload, ok := f.Prepared[briefID]; ok {
 		return VerifyPrepared(ctx, payload, briefID, f.Log, bound)

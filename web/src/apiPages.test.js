@@ -6,7 +6,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
-import {readinessFixture, renewalFixture} from './renewalFixtures.js';
+import {serverPaths} from './app/routes.js';
 
 // Cards are the connector demo's sealed cards from the oracle fixtures, shaped
 // as GET /api/v1/cards/{card} returns them. Only IDs and times are made up.
@@ -32,7 +32,7 @@ before(async () => {
 });
 after(async () => {await server?.close();});
 
-const inRouter = (element, path = renewalFixture.paths.evidence) => renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: [path]}, element));
+const inRouter = (element, path = serverPaths.evidence) => renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: [path]}, element));
 const text = html => html.replace(/<[^>]+>/g, ' ').replaceAll('&#x27;', '\'').replaceAll('&quot;', '"').replaceAll('&amp;', '&').replace(/\s+/g, ' ');
 // A selection as useCardSelection gives it, from read results.
 function chosen({account = 'acc-003', verified = true, invalid = false, accountName = null, cards = null, cardId = null, cardMismatch = false, card = {status: 'idle'}, granted} = {}) {
@@ -52,7 +52,7 @@ test('a refused card on Evidence shows the refusal, never an empty card', () => 
 
 test('a refused card on Readiness shows the refusal, never zero gaps or units', () => {
   const card = cardOf('acc-003');
-  const html = inRouter(React.createElement(readiness.ReadinessFromServer, {selection: chosen({cards: ready({cards: [card]}), cardId: card.id, card: notPermitted})}), renewalFixture.paths.root + '/readiness');
+  const html = inRouter(React.createElement(readiness.ReadinessFromServer, {selection: chosen({cards: ready({cards: [card]}), cardId: card.id, card: notPermitted})}), serverPaths.readiness);
   assert.match(html, /data-refusal="not_permitted"/);
   assert.doesNotMatch(text(html), /states no gaps|numbered unit|open item|0 units/);
 });
@@ -87,7 +87,7 @@ test('a card in the URL that is not in the account list is not read or shown', (
 test('unit links pin the open card, so a later publication cannot change what a link opens', () => {
   const card = cardOf('acc-003');
   const html = inRouter(React.createElement(evidence.CardEvidence, {card, receiptFor: () => ({status: 'loading'}), params: new URLSearchParams('account=acc-003'), generation: 1}));
-  assert.match(html, /href="\/renewals\/thornfield\/evidence\?account=acc-003&amp;card=card-acc-003&amp;unit=5"/);
+  assert.match(html, /href="\/ops\/evidence\?account=acc-003&amp;card=card-acc-003&amp;unit=5"/);
 });
 
 // Minor: the URL's account is shown only from the granted list, or marked unverified.
@@ -103,15 +103,14 @@ test('an account from the URL is never the heading unless it is granted, and a m
   assert.equal(selection.resolveAccount('Your account is locked call 555', null).invalid, true);
   assert.equal(selection.resolveAccount('acc-777', [{account: 'acc-003', name: 'Third'}]).verified, false);
   assert.deepEqual(selection.resolveAccount(null, [{account: 'acc-002', name: 'Second'}, {account: 'acc-003', name: 'Third'}]), {account: 'acc-003', verified: true, invalid: false, name: 'Third'});
-  const crumbs = inRouter(React.createElement(switcher.ApiCrumbs), renewalFixture.paths.evidence + '?account=Your%20account%20is%20locked');
+  const crumbs = inRouter(React.createElement(switcher.ApiCrumbs), serverPaths.evidence + '?account=Your%20account%20is%20locked');
   assert.doesNotMatch(crumbs, /locked/);
 });
 
 // 4. Readiness claims only what the card supports.
-test('Readiness lists no walkthrough rule, counts only unread or unshown gaps as open, and scopes its claims', () => {
+test('Readiness evaluates no rule, counts only unread or unshown gaps as open, and scopes its claims', () => {
   const card = cardOf('acc-003');
-  const html = inRouter(React.createElement(readiness.CardReadiness, {card, evidenceHref: '/'}), renewalFixture.paths.root + '/readiness');
-  for (const check of readinessFixture.checks) assert.ok(!text(html).includes(check.title), `walkthrough rule listed: ${check.title}`);
+  const html = inRouter(React.createElement(readiness.CardReadiness, {card, evidenceHref: '/'}), serverPaths.readiness);
   assert.doesNotMatch(text(html), /\d+ blockers?\b|\d+ transition checks?/);
   assert.match(text(html), /Not evaluated/);
   const open = [...html.matchAll(/data-open-gap="([^"]+)"/g)].map(match => match[1]);
@@ -125,7 +124,7 @@ test('Readiness lists no walkthrough rule, counts only unread or unshown gaps as
   assert.match(text(html), /This page reads no requirement records/);
   // A card whose only gaps are notes has no open items, and says so without claiming nothing is open.
   const quiet = {...card, gaps: card.gaps.filter(gap => gap.disposition === 'note')};
-  const calm = inRouter(React.createElement(readiness.CardReadiness, {card: quiet, evidenceHref: '/'}), renewalFixture.paths.root + '/readiness');
+  const calm = inRouter(React.createElement(readiness.CardReadiness, {card: quiet, evidenceHref: '/'}), serverPaths.readiness);
   assert.doesNotMatch(calm, /data-open-gap/);
   assert.match(text(calm), /The card states nothing it did not read or show\. That is not evidence that nothing is open\./);
 });
@@ -167,13 +166,13 @@ test('no app source renders HTML from a string', () => {
   }
 });
 
-// 4. When the server serves the app, the command palette offers the server pages and nothing of the walkthrough.
+// 4. The command palette offers the server pages and nothing else.
 test('the server palette offers only the server pages, with the chosen account and open card kept', () => {
   const visited = [];
   const items = switcher.apiCommandItems(to => visited.push(to), '?account=acc-002&card=card-two&unit=4');
   assert.deepEqual(items.map(item => [item.group, item.label]), [['Read from the server', 'Evidence'], ['Read from the server', 'Readiness']]);
   for (const item of items) item.onSelect();
-  assert.deepEqual(visited, [renewalFixture.paths.evidence + '?account=acc-002&card=card-two', renewalFixture.paths.root + '/readiness?account=acc-002&card=card-two']);
+  assert.deepEqual(visited, [serverPaths.evidence + '?account=acc-002&card=card-two', serverPaths.readiness + '?account=acc-002&card=card-two']);
 });
 
 // Minor: the picker commits a choice, it does not navigate on every change.

@@ -49,6 +49,8 @@ var backupTables = []struct {
 	{"call_import_revisions", "workspace_id, import_id", 4},
 	{"call_import_numbers", "workspace_id, account_number", 4},
 	{"call_import_active", "workspace_id, account_ref", 4},
+	{"card_lines", "card_id, ordinal", migrationVersion("card_lines")},
+	{"cards_before_lines", "card_id", migrationVersion("card_lines")},
 }
 
 // TableCopy describes one table in a backup.
@@ -135,6 +137,9 @@ func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion
 	// One transaction for the schema and the rows: a failed restore leaves
 	// the database empty, so it can be run again.
 	return s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := requireUTF8(ctx, tx); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationLock); err != nil {
 			return err
 		}

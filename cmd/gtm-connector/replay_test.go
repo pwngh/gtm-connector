@@ -31,31 +31,19 @@ import (
 // notPorted names the recorded steps the Go binary does not reproduce yet, each with why. Each one is still
 // run and must still differ from the recording. Porting a command removes its steps from this list, and a
 // step that is not listed must match the recording.
-var notPorted = map[string]string{
-	"no arguments as JSON": "the binary reads --json alone as an unknown command, and with no command prints its usage",
-	"version":              "the binary has a version command that prints its commit, and no --version",
-	"unknown command":      "the binary names an unknown command in plain text and lists its own commands",
-	"connect demo":         "connect is not ported",
-	"connect status":       "connect is not ported",
-	"demo": "the binary's demo publishes the whole demo book for the demo sign-in and takes no --state-dir; " +
-		"the recorded demo is one renewal with a lookup and a refused read",
-	"audit":         "the recorded log opens with the seven receipts of the recorded demo, which the binary's demo does not make",
-	"audit by tool": "the recorded list opens with the seal of the recorded demo's card, which the binary's demo does not make",
-	"audit by brief": "the recording numbers these receipts where the audit step before it first prints them, " +
-		"and that step does not match",
-	"mcp help":               "mcp is not ported",
-	"mcp without its action": "mcp is not ported",
-	"mcp without a scope":    "mcp is not ported",
-}
+var notPorted = map[string]string{}
 
 // clocked names the steps that print what the recorder's clock decided: a receipt's started_at, the card
 // line that names its first and last read, which is one time when both fall in one second, and elapsed_ms.
-// They are compared with exactly those values left out, and everything else as recorded.
-var clocked = []string{"brief", "brief without calls", "brief as of another day", "inspect a receipt"}
+// They are compared with exactly those values left out, and everything else as recorded. The recorder numbers
+// the times it issued in a step. The demo's card names its last read by a time the recorder had not numbered
+// in that step, so the recording holds that time as the clock wrote it, and it is left out too.
+var clocked = []string{"demo", "brief", "brief without calls", "brief as of another day", "inspect a receipt",
+	"audit", "audit by tool", "audit by brief"}
 
 var (
 	clockTime    = regexp.MustCompile(`<time-[0-9]+>`)
-	clockReads   = regexp.MustCompile(`Sources read <time>(?: to <time>)?\.`)
+	clockReads   = regexp.MustCompile(`Sources read <time>(?: to (?:<time>|` + instant + `))?\.`)
 	clockElapsed = regexp.MustCompile(`"elapsed_ms": [0-9.e+-]+`)
 )
 
@@ -144,9 +132,18 @@ func timeAt(value string) *regexp.Regexp {
 	return regexp.MustCompile(`"started_at": "(` + value + `)"|Sources read (` + value + `)(?: to (` + value + `))?`)
 }
 
+// instant is a receipt time as it is printed.
+const instant = `[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z`
+
+// recorderToken is the fingerprint the recording prints for the bearer of the demo's card. The recorder numbers
+// the tokens it issued, and this is not one of them, so the recording holds the fingerprint as it was, with no
+// placeholder. The replay writes the fingerprint the binary gave the same card's receipts as this one, so
+// those receipts are still compared as sharing one token that no other receipt has.
+const recorderToken = "de890ae4d2959b7ac12d463f093b68f6c5194ebb19182c94e077d292143a8b80"
+
 var (
 	printedToken  = tokenAt(`[0-9a-f]{64}`)
-	printedTime   = timeAt(`[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z`)
+	printedTime   = timeAt(instant)
 	recordedToken = tokenAt(`<token-[0-9]+>`)
 	recordedTime  = timeAt(`<time-[0-9]+>`)
 )
@@ -188,7 +185,9 @@ func unquoted(text, path string) string {
 // learn adds the tokens and receipt times a text prints to the ones the session knows.
 func (r *replay) learn(text string) {
 	for _, found := range printedToken.FindAllStringSubmatch(text, -1) {
-		r.tokens[found[1]] = true
+		if found[1] != recorderToken {
+			r.tokens[found[1]] = true
+		}
 	}
 	for _, found := range printedTime.FindAllStringSubmatch(text, -1) {
 		for _, value := range found[1:] {
@@ -276,6 +275,29 @@ func (r *replay) normalize(text string) string {
 	return sealed.ReplaceAllString(text, "${1}<sha256>")
 }
 
+// asRecorderToken is a list of receipts with the token of the demo's card written as recorderToken. That
+// card is the first the session printed, <brief-1>: its reads name it as their brief, and its seal in its
+// arguments. Any other output is returned as it is.
+func (r *replay) asRecorderToken(stdout string) string {
+	var listed []struct {
+		TokenID   string  `json:"token_id"`
+		BriefID   *string `json:"brief_id"`
+		Arguments struct {
+			BriefID string `json:"brief_id"`
+		} `json:"arguments"`
+	}
+	card, printed := r.values["<brief-1>"]
+	if !printed || json.Unmarshal([]byte(stdout), &listed) != nil {
+		return stdout
+	}
+	for _, receipt := range listed {
+		if receipt.BriefID != nil && *receipt.BriefID == card || receipt.Arguments.BriefID == card {
+			return strings.ReplaceAll(stdout, receipt.TokenID, recorderToken)
+		}
+	}
+	return stdout
+}
+
 // numbering is the values a session has numbered so far.
 type numbering struct {
 	tokens, times   map[string]bool
@@ -345,9 +367,10 @@ func (r *replay) run(t *testing.T, s step, compared func(string) string) string 
 	}
 	// The recorder knows a step's tokens and times before it normalizes the step's output, then normalizes
 	// stdout, stderr and each argument in that order.
-	r.learn(stdout.String())
+	printed := r.asRecorderToken(stdout.String())
+	r.learn(printed)
 	r.learn(stderr.String())
-	out, errs := r.normalize(stdout.String()), r.normalize(stderr.String())
+	out, errs := r.normalize(printed), r.normalize(stderr.String())
 	for _, argument := range argv {
 		r.normalize(argument)
 	}
@@ -415,11 +438,8 @@ func TestRecordedCommandSession(t *testing.T) {
 		"COLUMNS=100", "LINES=50", "HOME=" + home, "TMPDIR=" + temporary}
 	database := os.Getenv("GTM_TEST_DATABASE_URL") != "" || os.Getenv("GTM_REQUIRE_DATABASE") == "1"
 	if database {
-		// A database as setup leaves it, the app role's URL, and an empty credentials folder. connect is not
-		// ported, so the workspace the session's --state-dir names is connected to the demo data here, as the
-		// recording's "connect demo" step leaves its folder.
+		// A database as setup leaves it, the app role's URL, and an empty credentials folder.
 		d := setUpDemo(t)
-		d.connectDemo(t, r.state)
 		r.env = append(r.env, "GTM_OWNER_DATABASE_URL="+d.ownerURL, "GTM_DATABASE_URL="+d.appURL,
 			"GTM_CREDENTIALS_DIR="+privateDir(t))
 	}
@@ -432,6 +452,9 @@ func TestRecordedCommandSession(t *testing.T) {
 				// The step prints nothing here, so what it numbers in the recording is counted as issued.
 				r.skip(r.numbered(), s)
 				t.Skip("GTM_TEST_DATABASE_URL is not set")
+			}
+			if change := recordedHelp[s.Label]; change != nil {
+				s.Stdout, s.Compared = change(t, s.Stdout), "exactly"
 			}
 			compared := func(text string) string { return text }
 			if timed[s.Label] {

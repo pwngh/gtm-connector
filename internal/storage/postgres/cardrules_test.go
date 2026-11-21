@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -20,13 +21,20 @@ import (
 // PublishCard's own checks, changing one thing from a card that commits.
 
 // sqlCard finishes the seal naming the bytes, then writes the card, its
-// units, gaps and read set in one transaction, and returns what the commit
-// gave. The card counts the units, gaps and reads its bytes hold.
+// units, gaps, lines and read set in one transaction, and returns what the
+// commit gave. The card counts the units, gaps and reads its bytes hold, and
+// the lines it is given.
 func sqlCard(t *testing.T, f *postgrestest.Fixture, pub postgres.CardPublication) error {
 	t.Helper()
 	payload, err := receipts.ParsePayload(pub.Bytes)
 	ok(t, err)
-	_, err = f.Store.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: pub.SealReceiptID,
+	return sqlCardCounting(t, f, pub, len(payload.Units), len(payload.Gaps), len(payload.ReadIDs))
+}
+
+// sqlCardCounting is sqlCard for bytes that may not be a card at all: the card counts what it is told.
+func sqlCardCounting(t *testing.T, f *postgrestest.Fixture, pub postgres.CardPublication, units, gaps, reads int) error {
+	t.Helper()
+	_, err := f.Store.FinishReceipt(ctx, postgres.ReceiptFinish{ReceiptID: pub.SealReceiptID,
 		LeaseToken: pub.SealLeaseToken, Status: "ok", HTTPStatus: 200,
 		Rows: []string{"briefs/" + pub.BriefID + "/" + sha(pub.Bytes)}})
 	ok(t, err)
@@ -37,10 +45,10 @@ func sqlCard(t *testing.T, f *postgrestest.Fixture, pub postgres.CardPublication
 		var card string
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version, card_bytes,
-				card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
-			VALUES ($1, $2, $3, $4, 3, '3', $5, sha256($5), $6, $7, $8, $9, $10) RETURNING id`,
+				card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count, line_count)
+			VALUES ($1, $2, $3, $4, 3, '3', $5, sha256($5), $6, $7, $8, $9, $10, $11) RETURNING id`,
 			pub.WorkspaceID, pub.AccountRef, pub.BriefID, pub.Kind, pub.Bytes, pub.ParentReceiptID,
-			pub.SealReceiptID, len(payload.Units), len(payload.Gaps), len(payload.ReadIDs)).Scan(&card); err != nil {
+			pub.SealReceiptID, units, gaps, reads, len(pub.Lines)).Scan(&card); err != nil {
 			return err
 		}
 		for _, u := range pub.Units {
@@ -55,6 +63,12 @@ func sqlCard(t *testing.T, f *postgrestest.Fixture, pub postgres.CardPublication
 			if _, err := tx.Exec(ctx, `INSERT INTO gaps (workspace_id, card_id, ordinal, code, disposition, count,
 				text) VALUES ($1, $2, $3, $4, $5, $6, $7)`, pub.WorkspaceID, card, i, g.Code, g.Disposition, g.Count,
 				g.Text); err != nil {
+				return err
+			}
+		}
+		for i, l := range pub.Lines {
+			if _, err := tx.Exec(ctx, `INSERT INTO card_lines (workspace_id, card_id, ordinal, section, body)
+				VALUES ($1, $2, $3, $4, $5)`, pub.WorkspaceID, card, i, l.Section, l.Body); err != nil {
 				return err
 			}
 		}
@@ -232,8 +246,8 @@ func TestACardHoldsExactlyTheRowsItCounts(t *testing.T) {
 			var card string
 			if err := tx.QueryRow(ctx, `
 				INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version, card_bytes,
-					card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
-				VALUES ($1, $2, $3, 'go', 3, '3', $4, sha256($4), $5, $5, 3, 1, $6) RETURNING id`,
+					card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count, line_count)
+				VALUES ($1, $2, $3, 'go', 3, '3', $4, sha256($4), $5, $5, 3, 1, $6, 0) RETURNING id`,
 				pub.WorkspaceID, pub.AccountRef, pub.BriefID, pub.Bytes, pub.SealReceiptID,
 				len(payload.ReadIDs)).Scan(&card); err != nil {
 				return err
@@ -509,5 +523,160 @@ func TestARestoreChecksTheReadSet(t *testing.T) {
 	ok(t, err)
 	if len(violations) != 1 || !strings.Contains(violations[0], "does not hold exactly its units, gaps and reads") {
 		t.Fatalf("a card missing an uncited read from its read set: %v", violations)
+	}
+}
+
+// A card whose bytes hold the escape \u0000 is held as any other. jsonb cannot hold that escape, and the
+// checks once refused such bytes as not a JSON document; they now read a form of them with a stand-in for
+// the escape, and the rules stay exact: the bytes, the unit rows and each cited record's stored body agree
+// only when they hold the same characters, and what is not JSON is still refused.
+func TestTheTriggersReadACardThatHoldsANULEscape(t *testing.T) {
+	f := postgrestest.New(t)
+	const escape = `\u0000`
+	n := 0
+	// named is a prepared brief whose one record holds these fields, with a unit that holds these.
+	named := func(t *testing.T, fields []any, unit map[string]any) postgres.CardPublication {
+		t.Helper()
+		n++
+		brief := fmt.Sprintf("nul-%d", n)
+		record := postgrestest.Record("accounts", "acc-003", append([]any{"id", "acc-003"}, fields...)...)
+		pub, seal, read := postgrestest.Prepared(t, f.Store, f, brief+"-call", brief, f.Reader.ID,
+			postgres.TokenID("raw-token"), record)
+		pub.Units[0].Body = postgrestest.UnitBody(1, "record", "crm/accounts/acc-003", "get_account", "", unit)
+		embed(t, f, &pub, seal, []postgres.RecordVersion{record}, read)
+		return pub
+	}
+	// card is a prepared brief whose one record holds value, with a unit that holds shown.
+	card := func(t *testing.T, value, shown string) postgres.CardPublication {
+		t.Helper()
+		return named(t, []any{"v", value}, map[string]any{"value": shown})
+	}
+	stored := func(t *testing.T, brief string) []byte {
+		t.Helper()
+		conn, err := pgx.Connect(ctx, f.URL)
+		ok(t, err)
+		defer conn.Close(ctx)
+		var held []byte
+		ok(t, conn.QueryRow(ctx, "SELECT card_bytes FROM cards WHERE brief_id = $1", brief).Scan(&held))
+		return held
+	}
+	t.Run("a record that holds a NUL", func(t *testing.T) {
+		for name, write := range map[string]func(postgres.CardPublication) error{
+			"through PublishCard": func(pub postgres.CardPublication) error { _, err := f.Store.PublishCard(ctx, pub); return err },
+			"with SQL":            func(pub postgres.CardPublication) error { return sqlCard(t, f, pub) },
+		} {
+			pub := card(t, "a\x00b \\u0000 c\x00", "shown")
+			if strings.Count(string(pub.Bytes), escape) != 3 {
+				t.Fatalf("the bytes do not hold the escape:\n%s", pub.Bytes)
+			}
+			ok(t, write(pub))
+			if held := stored(t, pub.BriefID); string(held) != string(pub.Bytes) {
+				t.Errorf("%s: the stored bytes are not the published ones", name)
+			}
+		}
+	})
+	t.Run("the six characters after an escaped backslash are no NUL", func(t *testing.T) {
+		pub := card(t, `a\u0000b`, "shown")
+		if !strings.Contains(string(pub.Bytes), `a\\u0000b`) {
+			t.Fatalf("the bytes do not hold the escaped backslash:\n%s", pub.Bytes)
+		}
+		ok(t, sqlCard(t, f, pub))
+	})
+	// Each pair differs by one thing the stand-ins could hide: the bytes are changed after the rows are made.
+	for _, c := range []struct{ name, value, shown, from, to, want string }{
+		{"the bytes show U+FFFD where the record holds a NUL", "a\x00b", "shown", `a\u0000b`, "a\uFFFDb", "cites a read or record"},
+		{"the bytes show U+2400 where the record holds a NUL", "a\x00b", "shown", `a\u0000b`, "a\u2400b", "cites a read or record"},
+		{"the bytes show the six characters where the record holds a NUL", "a\x00b", "shown", `a\u0000b`, `a\\u0000b`, "cites a read or record"},
+		{"the bytes show a NUL where the record holds U+FFFD", "a\uFFFDb", "shown", "a\uFFFDb", `a\u0000b`, "cites a read or record"},
+		{"the bytes show a NUL where the record holds U+2400", "a\u2400b", "shown", "a\u2400b", `a\u0000b`, "cites a read or record"},
+		{"the bytes show a NUL where the record holds the six characters", `a\u0000b`, "shown", `a\\u0000b`, `a\u0000b`, "cites a read or record"},
+		{"the bytes hold a NUL where the unit row holds U+FFFD", "plain", "x\uFFFDy", "x\uFFFDy", `x\u0000y`, "differs from the sealed bytes"},
+		{"the bytes hold a NUL where the unit row holds U+2400", "plain", "x\u2400y", "x\u2400y", `x\u0000y`, "differs from the sealed bytes"},
+		{"the bytes name the brief with a NUL in it", "a\x00b", "shown", `"brief_id": "nul-`, `"brief_id": "\u0000nul-`, "is not its brief"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			pub := card(t, c.value, c.shown)
+			if !strings.Contains(string(pub.Bytes), c.from) {
+				t.Fatalf("the bytes do not hold %q:\n%s", c.from, pub.Bytes)
+			}
+			pub.Bytes = []byte(strings.ReplaceAll(string(pub.Bytes), c.from, c.to))
+			code, text := refusal(sqlCardCounting(t, f, pub, 1, 1, 1))
+			if code != "GT009" || !strings.Contains(text, c.want) {
+				t.Fatalf("got %s %s, want GT009 %s", code, text, c.want)
+			}
+		})
+	}
+	// jsonb keeps the last of two members of one name. A member whose name holds the escape takes the
+	// stand-in's place in its name, so beside members named with each stand-in it is overwritten under both,
+	// and the two readings agree on a document that holds a member no row holds. In a document that holds the
+	// escape, a member name that holds it or a stand-in is refused, in the card's bytes and in a cited body.
+	collide := []any{"k\uFFFD", 1, "k\u2400", 1}
+	first := regexp.MustCompile(`"k(\\ufffd|\\u2400|\x{FFFD}|\x{2400})"`)
+	extra := `"k\u0000": "anything", `
+	withNUL := regexp.MustCompile(`"k\\u0000":\s*"anything",\s*`)
+	for _, c := range []struct {
+		name   string
+		fields []any
+		unit   map[string]any
+		change func(string) string
+		want   string
+	}{
+		{"the bytes add a member named with a NUL to a shown record", collide, map[string]any{"value": "x"},
+			func(doc string) string { i := first.FindStringIndex(doc)[0]; return doc[:i] + extra + doc[i:] },
+			"member name"},
+		{"the bytes add a member named with a NUL to a unit", []any{"v", "a\x00b"},
+			map[string]any{"value": "x", "k\uFFFD": 1, "k\u2400": 1},
+			func(doc string) string { i := first.FindStringIndex(doc)[0]; return doc[:i] + extra + doc[i:] },
+			"member name"},
+		{"the bytes leave out a member named with a NUL from a stored body",
+			append([]any{"k\x00", "anything"}, collide...), map[string]any{"value": "x"},
+			func(doc string) string { return withNUL.ReplaceAllString(doc, "") }, "cites a read or record"},
+		{"the bytes name a member with a stand-in beside a NUL", []any{"v", "a\x00b", "k\uFFFD", 1},
+			map[string]any{"value": "x"}, func(doc string) string { return doc }, "member name"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			pub := named(t, c.fields, c.unit)
+			changed := c.change(string(pub.Bytes))
+			if !strings.Contains(changed, `\u0000`) && !strings.Contains(c.name, "stored body") {
+				t.Fatalf("the bytes do not hold the escape:\n%s", changed)
+			}
+			pub.Bytes = []byte(changed)
+			code, text := refusal(sqlCardCounting(t, f, pub, 1, 1, 1))
+			if code != "GT009" || !strings.Contains(text, c.want) {
+				t.Fatalf("got %s %s, want GT009 %s", code, text, c.want)
+			}
+		})
+	}
+	// A member named with a stand-in in a card that holds no escape is held as any other name.
+	t.Run("a member named with a stand-in and no NUL", func(t *testing.T) {
+		ok(t, sqlCard(t, f, named(t, collide, map[string]any{"value": "x", "k\uFFFD": 1})))
+	})
+	for name, change := range map[string]func(string) string{
+		"cut short":                          func(doc string) string { return doc[:len(doc)-2] },
+		"with the escape outside a string":   func(doc string) string { return doc + escape },
+		"with the escape for a value":        func(doc string) string { return strings.Replace(doc, `"shown"`, escape, 1) },
+		"with a control character unescaped": func(doc string) string { return strings.Replace(doc, "shown", "sho\x01wn", 1) },
+		"with an escape that is none":        func(doc string) string { return strings.Replace(doc, "shown", `sho\u00zzwn`, 1) },
+		"with half a surrogate pair":         func(doc string) string { return strings.Replace(doc, "shown", `sho\ud800wn`, 1) },
+		"with a surrogate pair around it":    func(doc string) string { return strings.Replace(doc, "shown", `\ud83d\u0000\ude00`, 1) },
+		"with a string left open by a backslash": func(doc string) string {
+			return strings.Replace(doc, `shown"`, `shown\\\"`, 1)
+		},
+	} {
+		t.Run("bytes that are no JSON, "+name, func(t *testing.T) {
+			pub := card(t, "a\x00b", "shown")
+			changed := change(string(pub.Bytes))
+			if changed == string(pub.Bytes) {
+				t.Fatal("the bytes were not changed")
+			}
+			pub.Bytes = []byte(changed)
+			code, text := refusal(sqlCardCounting(t, f, pub, 1, 1, 1))
+			if code != "GT009" || !strings.Contains(text, "is not a JSON document") {
+				t.Fatalf("got %s %s", code, text)
+			}
+		})
+	}
+	if violations := integrityViolations(t, f); len(violations) != 0 {
+		t.Fatalf("the cards that committed break a rule: %v", violations)
 	}
 }

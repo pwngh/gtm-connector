@@ -71,7 +71,9 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 // A backup restores every row of every table it holds, column for column,
 // and nothing of the tables it leaves out.
 func TestABackupRestoresEveryRow(t *testing.T) {
-	f := postgrestest.New(t)
+	// A card from before lines were kept, then one that keeps them.
+	f := postgrestest.BeforeLines(t)
+	postgrestest.Publish(t, f, postgrestest.Account, f.Reader.ID, "brief-since")
 	fillEveryTable(t, f)
 	files := dump(t, f)
 	fresh, url := freshStoreURL(t)

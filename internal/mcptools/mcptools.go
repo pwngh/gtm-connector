@@ -60,6 +60,11 @@ type Config struct {
 	Sources          evidence.Sources
 	// Connections names each source system's connection ("crm", "calls", "slack").
 	Connections map[string]string
+	// Open, when set, gives the workspace's sources as they are connected at the moment of a call, in place
+	// of Source, Sources and Connections. Every call asks it once, before its receipt starts, and reads only
+	// what it gave: a source detached or connected again is not read by a server that is still running. An
+	// error it returns is the call's refusal, under the call's receipt.
+	Open func(ctx context.Context) (Opened, error)
 	// Selection limits every read to its accounts, and Slack to those it marks, and adds the two brief
 	// tools. Nil serves every account the caller's principal is granted, and no brief tool.
 	Selection cards.Selection
@@ -72,29 +77,64 @@ type Config struct {
 	NewID       func() string
 }
 
+// Opened is a workspace's sources as one call reads them.
+type Opened struct {
+	Source      Book
+	Sources     evidence.Sources
+	Connections map[string]string
+	// Generations is the generation of each source's connection that Source was opened under. A call whose
+	// receipt starts under another generation is refused and reads nothing.
+	Generations map[string]int64
+}
+
 // server is the tools of one workspace.
 type server struct {
 	Config
 	recorder *recorder
-	maker    *cards.Maker
 }
 
-// New builds the gateway that serves a workspace's tools at its resource.
-func New(c Config) (*mcp.Gateway, error) {
-	if c.WorkspaceID == "" || c.Store == nil || c.Receipts == nil || c.Source == nil {
+// newServer is a workspace's tools, verifier and recorder.
+func newServer(c Config) (*server, error) {
+	if c.WorkspaceID == "" || c.Store == nil || c.Receipts == nil || c.Source == nil && c.Open == nil {
 		return nil, errors.New("the tools need a workspace, its store, its receipts and its source")
 	}
 	if c.RateLimit == 0 && c.WindowSeconds == 0 {
 		c.RateLimit, c.WindowSeconds = 60, 60
 	}
 	s := &server{Config: c}
-	s.recorder = &recorder{store: c.Receipts, workspace: c.WorkspaceID, tokens: c.Store, connections: c.Connections,
+	sources := c.Open
+	if sources == nil {
+		fixed := Opened{Source: c.Source, Sources: c.Sources, Connections: c.Connections}
+		sources = func(context.Context) (Opened, error) { return fixed, nil }
+	}
+	s.recorder = &recorder{store: c.Receipts, workspace: c.WorkspaceID, tokens: c.Store, sources: sources,
 		open: map[string]*pending{}}
-	s.maker = &cards.Maker{Receipts: c.Receipts, Source: c.Source, Sources: c.Sources, Connections: c.Connections,
-		NewID: c.NewID, Now: c.Now}
-	return mcp.NewGateway(mcp.GatewayConfig{Resource: c.Resource, Issuer: c.Issuer, RateLimit: c.RateLimit,
-		WindowSeconds: c.WindowSeconds, Selected: c.Selection != nil, Verify: s.verify, Receipts: s.recorder,
-		Run: s.run, Clock: c.Clock, Wall: c.Wall})
+	return s, nil
+}
+
+// New builds the gateway that serves a workspace's tools at its resource.
+func New(c Config) (*mcp.Gateway, error) {
+	s, err := newServer(c)
+	if err != nil {
+		return nil, err
+	}
+	return mcp.NewGateway(mcp.GatewayConfig{Resource: s.Resource, Issuer: s.Issuer, RateLimit: s.RateLimit,
+		WindowSeconds: s.WindowSeconds, Selected: s.Selection != nil, Verify: s.verify, Receipts: s.recorder,
+		Run: s.run, Clock: s.Clock, Wall: s.Wall})
+}
+
+// Stdio is the same tools, verifier and recorder for mcp.ServeStdio, served as the machine principal that
+// holds token. Every request is verified against the store with that token, as an HTTPS request is with its
+// bearer, so its expiry, revocation, scopes and principal's grants apply on stdio as they do over HTTPS, and
+// with Open every call reads the sources as they are connected at that moment, as over HTTPS.
+func Stdio(c Config, token string) (mcp.StdioConfig, error) {
+	s, err := newServer(c)
+	if err != nil {
+		return mcp.StdioConfig{}, err
+	}
+	return mcp.StdioConfig{Token: token, Resource: s.Resource, RateLimit: s.RateLimit, WindowSeconds: s.WindowSeconds,
+		Selected: s.Selection != nil, Verify: s.verify, Receipts: s.recorder, Run: s.run, Clock: s.Clock,
+		Wall: s.Wall}, nil
 }
 
 // lookup bounds one read of the token table. The gate's verifier takes no context of its own.

@@ -179,6 +179,27 @@ func (c *postgresCards) published(t *testing.T, sealed *Sealed, s setup, row fix
 	return normalised, hex.EncodeToString(sum[:]), seal
 }
 
+func (c *postgresCards) lines(t *testing.T, sealed *Sealed, _ setup) []receipts.LineRow {
+	t.Helper()
+	rows, err := c.conn.Query(context.Background(), `SELECT l.section, l.body::text FROM card_lines l
+		JOIN cards c ON c.id = l.card_id WHERE c.workspace_id = $1 AND c.brief_id = $2 ORDER BY l.ordinal`,
+		c.workspace, sealed.BriefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (receipts.LineRow, error) {
+		var l receipts.LineRow
+		var body string
+		err := row.Scan(&l.Section, &body)
+		l.Value = []byte(body)
+		return l, err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return held
+}
+
 // check reads what PostgreSQL holds for a card the maker published, and gives the stored bytes and every
 // way they or their rows differ from what the maker sealed, the receipts table, the verifier and want.
 func (c *postgresCards) check(t *testing.T, sealed *Sealed, sources evidence.Sources, want []byte,
@@ -368,7 +389,7 @@ func textAt(t *testing.T, stored []byte, want *receipts.Payload) (string, bool) 
 		at, _ := want.Receipts[i].Get("started_at")
 		r.(*strictjson.Object).Set("started_at", at)
 	}
-	_, text, _, err := evidence.Build(snapshot.(*strictjson.Object))
+	_, text, _, _, err := evidence.Build(snapshot.(*strictjson.Object))
 	return text, err == nil
 }
 

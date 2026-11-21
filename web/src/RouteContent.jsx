@@ -37,9 +37,8 @@ export class RouteError extends Component {
     this.setState(state => ({failed: false, attempt: state.attempt + 1}));
   };
   render() {
-    const what = this.props.dialog ? 'dialog' : 'page';
-    if (this.state.failed) return <section ref={this.panel} tabIndex={-1} className='route-loading route-error' aria-label={this.props.dialog ? 'Dialog unavailable' : 'Page unavailable'}>
-      {this.props.failure ? <p role='alert'>{this.props.failure}</p> : <p role='alert'>This {what} could not load. Your saved walkthrough has not been reset.</p>}
+    if (this.state.failed) return <section ref={this.panel} tabIndex={-1} className='route-loading route-error' aria-label='Page unavailable'>
+      <p role='alert'>This page could not load. Nothing was lost.</p>
       <button type='button' className='button' onClick={this.retry}>Try again</button>
     </section>;
     // A new key remounts the content, so the import starts again.
@@ -47,9 +46,8 @@ export class RouteError extends Component {
   }
 }
 
-// `failure` replaces the sentence shown when the page cannot load.
-export default function RouteContent({path, label, dialog = false, failure, onReady, children}) {
-  return <RouteError key={path} dialog={dialog} failure={failure}>
+export default function RouteContent({path, label, onReady, children}) {
+  return <RouteError key={path}>
     <Suspense fallback={<RouteLoading label={label}/>}>
       <Ready path={path} onReady={onReady}>{children}</Ready>
     </Suspense>

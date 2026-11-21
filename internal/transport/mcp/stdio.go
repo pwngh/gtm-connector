@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -18,9 +19,16 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// MaxFrame is the longest stdio line read whole. A longer line is refused unread: it gets no receipt,
-// because nothing in it was read to tell whether it was a tool call.
+// MaxFrame is the longest stdio line read whole. Of a longer line only the first MaxBody bytes are kept, to
+// find whether it is a tool call and which; the rest is read and discarded.
 const MaxFrame = 4 << 20
+
+// The default bounds on output and on stopping: how long one line may take to write before the client is
+// taken to have stopped reading, and how long stopping waits for a line being admitted.
+const (
+	DefaultWriteTimeout = 10 * time.Second
+	DefaultStopWait     = 10 * time.Second
+)
 
 // StdioConfig is one stdio server's machine principal and limits.
 type StdioConfig struct {
@@ -34,6 +42,9 @@ type StdioConfig struct {
 	Run           ToolFunc
 	Clock         func() float64
 	Wall          func() float64
+	// WriteTimeout bounds each write to out, and StopWait how long stopping waits for a line being admitted.
+	// Zero is the default.
+	WriteTimeout, StopWait time.Duration
 }
 
 // stdioMethods are the requests the stdio server answers. initialize and ping serve legacy clients, as the
@@ -54,13 +65,26 @@ func ServeStdio(ctx context.Context, config StdioConfig, in io.Reader, out io.Wr
 		return err
 	}
 	conn := newStdioConn(c, config.Token, out)
+	conn.writeTimeout = cmpOr(config.WriteTimeout, DefaultWriteTimeout)
 	go conn.readLoop(in)
 	err = c.server.Run(ctx, stdioTransport{conn})
+	// The server has stopped: by the end of input, by ctx, or because out can no longer be written. A line
+	// still being admitted may have committed its receipt; stopping waits for it, within StopWait, so that
+	// every committed receipt is pending here when abandon finishes them.
+	conn.Close()
+	conn.stop(cmpOr(config.StopWait, DefaultStopWait))
 	conn.abandon()
 	if errors.Is(err, io.EOF) {
 		return nil
 	}
 	return err
+}
+
+func cmpOr(value, fallback time.Duration) time.Duration {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 type stdioTransport struct{ conn *stdioConn }
@@ -82,8 +106,14 @@ type stdioConn struct {
 	closed   chan struct{}
 	once     sync.Once
 
-	writeMu sync.Mutex
-	out     io.Writer
+	writeMu      sync.Mutex
+	out          io.Writer
+	writeTimeout time.Duration
+	broken       bool // out failed or timed out; nothing more is written
+
+	// admitting is held while one line is admitted, so stopping can wait for it; stopped ends admission.
+	admitting sync.Mutex
+	stopped   bool
 
 	mu       sync.Mutex
 	pending  map[string]*pendingStdio // dispatch id -> request
@@ -117,10 +147,48 @@ func (s *stdioConn) Read(ctx context.Context) (jsonrpc.Message, error) {
 	}
 }
 
+// send writes one line. A write that fails, or that does not finish within the write timeout because the
+// client stopped reading, ends the session: nothing more is written, and the server stops.
 func (s *stdioConn) send(line []byte) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	s.out.Write(append(line, '\n'))
+	if s.broken {
+		return
+	}
+	written := make(chan error, 1)
+	go func() {
+		_, err := s.out.Write(append(line, '\n'))
+		written <- err
+	}()
+	timer := time.NewTimer(s.writeTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-written:
+		if err == nil {
+			return
+		}
+	case <-timer.C:
+	}
+	s.broken = true
+	s.Close()
+}
+
+// stop ends admission. It waits, at most wait, for a line being admitted, so a receipt that line committed is
+// pending before abandon runs.
+func (s *stdioConn) stop(wait time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		s.admitting.Lock()
+		s.stopped = true
+		s.admitting.Unlock()
+		close(done)
+	}()
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+	}
 }
 
 // Write takes the SDK's reply to a dispatch id, settles a call against its receipt, and writes the reply to
@@ -195,15 +263,15 @@ func (s *stdioConn) readLoop(in io.Reader) {
 	reader := bufio.NewReaderSize(in, 64<<10)
 	for {
 		line, tooLong, err := readFrame(reader)
-		if tooLong {
-			s.send(rpcError(nil, -32600, "request body exceeds 65536 bytes", reason("request_too_large")))
-		} else if len(bytes.TrimSpace(line)) > 0 {
-			if message := s.frame(line); message != nil {
-				select {
-				case s.incoming <- message:
-				case <-s.closed:
-					return
-				}
+		message, admitted := s.admit(line, tooLong)
+		if !admitted {
+			return
+		}
+		if message != nil {
+			select {
+			case s.incoming <- message:
+			case <-s.closed:
+				return
 			}
 		}
 		if err != nil {
@@ -212,7 +280,46 @@ func (s *stdioConn) readLoop(in io.Reader) {
 	}
 }
 
-// readFrame reads up to a newline. Past MaxFrame it stops keeping bytes and reports the line too long.
+// admit admits one line while the server runs, and reports false once it has stopped. A receipt the line
+// commits is finished, or pending for abandon, before admit returns.
+func (s *stdioConn) admit(line []byte, tooLong bool) (jsonrpc.Message, bool) {
+	s.admitting.Lock()
+	defer s.admitting.Unlock()
+	if s.stopped {
+		return nil, false
+	}
+	switch {
+	case tooLong:
+		s.oversized(line)
+	case len(bytes.TrimSpace(line)) > 0:
+		return s.frame(line), true
+	}
+	return nil, true
+}
+
+// oversized refuses a line past MaxFrame. When its kept start shows a tool call, the call gets one error
+// receipt under its tool name, as a line too deep to parse does.
+func (s *stdioConn) oversized(start []byte) {
+	refusal := rpcError(nil, -32600, "request body exceeds 65536 bytes", reason("request_too_large"))
+	if method, name, named := prefixCall(start); method == "tools/call" {
+		if !named {
+			name = "<unparsed>"
+		}
+		c, ctx, token := s.core, context.Background(), s.token
+		auditID, err := c.start(ctx, Start{Token: &token, Tool: name,
+			Arguments: strictjson.NewObject("unrecorded", "the line exceeds 4194304 bytes")})
+		switch {
+		case err != nil:
+			refusal = rpcError(nil, -32603, "audit_unavailable; call was not executed", nil)
+		case !c.refuseCall(ctx, auditID, Refusals["request_too_large"].Status, c.clock()):
+			refusal = rpcError(nil, -32603, "execution_or_audit_unavailable; no result released", nil)
+		}
+	}
+	s.send(refusal)
+}
+
+// readFrame reads up to a newline. Past MaxFrame it reports the line too long and gives only its first
+// MaxBody bytes.
 func readFrame(reader *bufio.Reader) ([]byte, bool, error) {
 	var line []byte
 	tooLong := false
@@ -220,7 +327,8 @@ func readFrame(reader *bufio.Reader) ([]byte, bool, error) {
 		chunk, err := reader.ReadSlice('\n')
 		if !tooLong {
 			if len(line)+len(chunk) > MaxFrame+1 {
-				tooLong, line = true, nil
+				tooLong = true
+				line = append(line, chunk...)[:MaxBody]
 			} else {
 				line = append(line, chunk...)
 			}
@@ -241,8 +349,9 @@ func (s *stdioConn) frame(raw []byte) jsonrpc.Message {
 	value, err := strictjson.Loads(raw)
 	if err != nil {
 		// A line the strict parser refuses but that json.loads reads as a tool call keeps its receipt. So
-		// does one refused only for its depth, which is not parsed: its method and tool name are read
-		// without descending, and its receipt is under that tool's name.
+		// does one refused for its depth, which is well encoded and is not parsed, so what else may be wrong
+		// with it is not known: its method and tool name are read without descending, and its receipt is
+		// under that tool's name.
 		tool, isCall := "<unparsed>", false
 		if errors.Is(err, strictjson.ErrTooDeep) {
 			method, name, named := shallowCall(raw)
@@ -328,7 +437,7 @@ func (s *stdioConn) frame(raw []byte) jsonrpc.Message {
 		if isCall {
 			// A call without an id would run and answer no one: refused, as the gateway refuses it.
 			status := 400
-			if e := s.admit(object, params, isCall).Error; e != nil {
+			if e := s.check(object, params, isCall, len(bytes.TrimRight(raw, "\r\n"))).Error; e != nil {
 				status = e.Status()
 			}
 			return refuse(nil, status)
@@ -351,8 +460,9 @@ func (s *stdioConn) frame(raw []byte) jsonrpc.Message {
 		}
 	}
 	var token *Token
+	size := len(bytes.TrimRight(raw, "\r\n"))
 	if gatedMethods[method] {
-		decision := s.admit(object, params, isCall)
+		decision := s.check(object, params, isCall, size)
 		token = decision.token
 		if e := decision.Error; e != nil {
 			return refuse(rpcError(echoID(id), e.Code(), e.Message, reason(e.Reason)), e.Status())
@@ -385,19 +495,18 @@ type stdioDecision struct {
 	token *Token
 }
 
-// admit runs the gateway's check on the facts the bridge's forwarded HTTPS request carries: its own host,
-// content type, bearer and 2026-07-28 metadata, so only the principal, rate, call id, scope, write, argument
-// and method checks can refuse. The machine bearer is verified once, here.
-func (s *stdioConn) admit(object, params *strictjson.Object, isCall bool) stdioDecision {
+// check runs the gateway's check on the facts the bridge's forwarded HTTPS request carries: its own host,
+// content type, bearer and 2026-07-28 metadata, so only the size, principal, rate, call id, scope, write,
+// argument and method checks can refuse. size is the line's own length, as HTTP measures the body it read.
+// The machine bearer is verified once, here.
+func (s *stdioConn) check(object, params *strictjson.Object, isCall bool, size int) stdioDecision {
 	resource, _ := url.Parse(s.core.policy.Resource)
 	tool, ok := memberOr(params, "name", "<unparsed>").(string)
 	if !ok {
 		tool = "<invalid>"
 	}
 	token := s.core.verify(s.token)
-	var b bytes.Buffer
-	encodeValue(&b, object)
-	facts := RequestFacts{BodySize: b.Len(), Parsed: object, Scheme: "https",
+	facts := RequestFacts{BodySize: size, Parsed: object, Scheme: "https",
 		Headers:      map[string]string{"host": resource.Host, "content-type": "application/json", "mcp-protocol-version": ProtocolVersion},
 		HeaderCounts: map[string]int{"host": 1, "content-type": 1, "authorization": 1},
 		RawToken:     s.token, IsCall: isCall, Tool: tool, Arguments: memberOr(params, "arguments", &strictjson.Object{}),

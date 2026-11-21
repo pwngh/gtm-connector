@@ -626,6 +626,9 @@ func TestDurableRowsRefuseChange(t *testing.T) {
 		"DELETE FROM cards",
 		"UPDATE evidence_units SET body = '{}'",
 		"DELETE FROM gaps",
+		"UPDATE card_lines SET body = '{}'",
+		"DELETE FROM card_lines",
+		"UPDATE cards SET line_count = 0",
 		"DELETE FROM receipt_records",
 	} {
 		if code(sql(t, f, statement)) != "GT010" {
@@ -644,15 +647,15 @@ func TestCardSealMustNameItsBytes(t *testing.T) {
 		Status: "ok", HTTPStatus: 200, Rows: []string{"briefs/forged/" + strings.Repeat("0", 64)}})
 	ok(t, err)
 	err = sql(t, f, `INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
-		VALUES ($1, 'acc-003', 'forged', 'go', 3, '3', $3, sha256($3), $4, $2, 0, 0, 0)`,
+		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count, line_count)
+		VALUES ($1, 'acc-003', 'forged', 'go', 3, '3', $3, sha256($3), $4, $2, 0, 0, 0, 0)`,
 		f.Workspace.ID, seal.ID, []byte(`{"units":[],"gaps":[]}`), pub.ParentReceiptID)
 	if code(err) != "GT009" {
 		t.Fatalf("a card was stored under a seal for other bytes: %v", err)
 	}
 	if code(sql(t, f, `INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
-		VALUES ($1, 'acc-003', 'x', 'go', 3, '3', 'x', sha256('y'), $3, $2, 0, 0, 0)`,
+		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count, line_count)
+		VALUES ($1, 'acc-003', 'x', 'go', 3, '3', 'x', sha256('y'), $3, $2, 0, 0, 0, 0)`,
 		f.Workspace.ID, seal.ID, pub.ParentReceiptID)) != "23514" {
 		t.Fatal("a card's digest need not match its bytes")
 	}
@@ -685,5 +688,47 @@ func TestRecordVersions(t *testing.T) {
 		})
 	if err == nil || r.Status != "error" || *r.HTTPStatus != 403 || len(r.Rows) != 0 {
 		t.Fatalf("denied read %+v %v", r, err)
+	}
+}
+
+// A receipt's JSON columns are read with the strict reader. A replayed start is the same request when its
+// arguments are the same values, however a number is written, and another request when a key differs by
+// its case. Rows that hold anything but references are refused, where a null was once read as an empty one.
+func TestReceiptColumnsAreReadStrictly(t *testing.T) {
+	f := postgrestest.New(t)
+	start := func(arguments string) (postgres.Receipt, error) {
+		return f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID, OperationID: "op-strict",
+			TokenID: "anonymous", Tool: "search_accounts", Arguments: json.RawMessage(arguments), Lease: time.Minute})
+	}
+	first, err := start(`{"limit":1.0,"query":"a"}`)
+	ok(t, err)
+	again, err := start(`{"query":"a", "limit":1.00}`)
+	ok(t, err)
+	if again.ID != first.ID || !again.Replay {
+		t.Fatalf("the same values started %s after %s", again.ID, first.ID)
+	}
+	for _, other := range []string{`{"limit":1,"query":"a"}`, `{"Limit":1.0,"query":"a"}`, `{"limit":1.0,"query":"A"}`} {
+		_, err := start(other)
+		is(t, err, postgres.ErrOperationReused)
+	}
+	_, err = start(`{"limit":1.0,"query":"a","query":"a"}`)
+	is(t, err, postgres.ErrInvalidArguments)
+
+	finished, err := f.Store.FinishReceipt(ctx, finishOK(first, "accounts/acc-003"))
+	ok(t, err)
+	if len(finished.Rows) != 1 || finished.Rows[0] != "accounts/acc-003" {
+		t.Fatalf("rows %q", finished.Rows)
+	}
+	conn, err := pgx.Connect(ctx, f.URL)
+	ok(t, err)
+	defer conn.Close(ctx)
+	for _, statement := range []string{"ALTER TABLE receipts DISABLE TRIGGER USER",
+		"UPDATE receipts SET rows = '[null]' WHERE operation_id = 'op-strict'",
+		"ALTER TABLE receipts ENABLE TRIGGER USER"} {
+		_, err := conn.Exec(ctx, statement)
+		ok(t, err)
+	}
+	if r, err := f.Store.Receipt(ctx, f.Workspace.ID, first.ID); err == nil {
+		t.Fatalf("rows that hold a null were read as %q", r.Rows)
 	}
 }

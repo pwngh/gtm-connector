@@ -155,12 +155,13 @@ func (s *Store) EnsureAccountGrant(ctx context.Context, workspaceID, principalID
 }
 
 // AccountsWithCards lists the accounts holding a card made here, sealed by
-// this principal, as of this day.
+// this principal, as of this day. A card's bytes may hold the escape \u0000,
+// which jsonb cannot, so the day is read from the form the checks read.
 func (s *Store) AccountsWithCards(ctx context.Context, workspaceID, principalID, asOf string) (map[string]bool, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT c.account_ref FROM cards c JOIN receipts r ON r.id = c.seal_receipt_id
 		 WHERE c.workspace_id = $1 AND c.kind = 'go' AND r.principal_id = $2
-		   AND convert_from(c.card_bytes, 'UTF8')::jsonb ->> 'as_of' = $3`, workspaceID, principalID, asOf)
+		   AND gtm_jsonb_without_nul(c.card_bytes) ->> 'as_of' = $3`, workspaceID, principalID, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -335,21 +336,34 @@ func (s *Store) DeleteEndedSessions(ctx context.Context) (int64, error) {
 	return tag.RowsAffected() + consumed.RowsAffected(), err
 }
 
-// Connection is what one source of a workspace is connected to.
+// Connection is what one source of a workspace is connected to. Mode "none"
+// is a source that is not connected.
 type Connection struct {
 	ID, WorkspaceID, Source, Mode string
 	Generation                    int64
+	// Binding is what the operator chose for the source, as the text of one
+	// JSON object. It holds no credential.
+	Binding string
+	// IdentitySHA256 is the digest of the identity the source is pinned to,
+	// or "" when it is pinned to none.
+	IdentitySHA256 string
+}
+
+const connectionColumns = `id, workspace_id, source, mode, generation, binding, coalesce(identity_sha256, '')`
+
+func scanConnection(row pgx.Row) (Connection, error) {
+	var c Connection
+	err := row.Scan(&c.ID, &c.WorkspaceID, &c.Source, &c.Mode, &c.Generation, &c.Binding, &c.IdentitySHA256)
+	return c, err
 }
 
 // EnsureConnection returns the workspace's connection for source, creating
 // it in mode if absent.
 func (s *Store) EnsureConnection(ctx context.Context, w Workspace, source, mode string) (Connection, error) {
-	c := Connection{WorkspaceID: w.ID, Source: source}
-	err := s.pool.QueryRow(ctx, `
+	return scanConnection(s.pool.QueryRow(ctx, `
 		INSERT INTO connections (workspace_id, workspace_kind, source, mode) VALUES ($1, $2, $3, $4)
 		ON CONFLICT (workspace_id, source) DO UPDATE SET source = excluded.source
-		RETURNING id, mode, generation`, w.ID, w.Kind, source, mode).Scan(&c.ID, &c.Mode, &c.Generation)
-	return c, err
+		RETURNING `+connectionColumns, w.ID, w.Kind, source, mode))
 }
 
 // BumpConnectionGeneration records that a source changed. Reads started

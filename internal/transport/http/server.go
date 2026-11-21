@@ -52,9 +52,9 @@ type Config struct {
 	MCP http.Handler
 }
 
-// DefaultClientRoutes are the web app's routes today: "/" and these
-// prefixes, each with anything below it.
-var DefaultClientRoutes = []string{"/renewals", "/queue", "/playbooks", "/operations"}
+// DefaultClientRoutes are the web app's routes: "/" and these prefixes,
+// each with anything below it.
+var DefaultClientRoutes = []string{"/deals", "/ops"}
 
 // Sessions is the storage the surface needs: sessions, and for /healthz
 // whether the applied migrations are this binary's.
@@ -153,6 +153,7 @@ func (s *Server) apiRoutes() []route {
 		{pattern: "GET /api/v1/accounts/{account}/cards", read: s.signedIn(s.accountCards)},
 		{pattern: "GET /api/v1/cards/{card}", read: s.signedIn(s.card)},
 		{pattern: "GET /api/v1/cards/{card}/bytes", read: s.signedIn(s.cardBytes)},
+		{pattern: "GET /api/v1/cards/{card}/text", read: s.signedIn(s.cardText)},
 		{pattern: "GET /api/v1/cards/{card}/units/{n}", read: s.signedIn(s.unit)},
 		{pattern: "GET /api/v1/receipts/{receipt}", read: s.signedIn(s.receipt)},
 	}
