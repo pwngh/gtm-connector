@@ -36,8 +36,16 @@ schema or switch off a check.
 
 ## Health
 
-`/healthz` answers when the database is reachable and the migrations are current. `gtm health`
-asks the same question from a terminal.
+`/healthz` answers 200 `{"status":"ok"}` when the database is reachable and its applied migrations
+are exactly the ones the binary carries. Otherwise it answers 503 with one of two statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `migrations_not_current` | The database answers, but its schema is behind the binary, ahead of it, or from other migration files. |
+| `database_unavailable` | The database did not answer within three seconds. |
+
+`gtm health` asks the same question from a terminal. It exits 1 with the status unless the answer
+is ok.
 
 ## Backup and restore
 

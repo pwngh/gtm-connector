@@ -25,7 +25,7 @@ const appMarker = "APP-HTML-MARKER"
 
 const themeScript = `try{document.documentElement.dataset.theme="dark"}catch{}`
 
-// noSessions answers Ping and fails every session lookup.
+// noSessions answers the health check and fails every session lookup.
 type noSessions struct{}
 
 func (noSessions) LiveSession(context.Context, []byte) (postgres.Session, error) {
@@ -38,7 +38,7 @@ func (noSessions) RevokeSession(context.Context, []byte) error { return errors.N
 func (noSessions) DemoPrincipalByLogin(context.Context, string) (postgres.Principal, []byte, error) {
 	return postgres.Principal{}, nil, postgres.ErrNotFound
 }
-func (noSessions) Ping(context.Context) error { return nil }
+func (noSessions) MigrationsCurrent(context.Context) (bool, error) { return true, nil }
 
 var testKey = []byte("0123456789abcdef0123456789abcdef")
 
@@ -67,9 +67,14 @@ func webDir(t *testing.T) string {
 
 func surface(t *testing.T) *httptransport.Server {
 	t.Helper()
+	return surfaceOn(t, noSessions{})
+}
+
+func surfaceOn(t *testing.T, sessions httptransport.Sessions) *httptransport.Server {
+	t.Helper()
 	s, err := httptransport.New(httptransport.Config{PublicOrigin: "https://127.0.0.1:8443",
 		AllowedHosts: []string{"127.0.0.1:8443", "localhost:8443"}, WebDir: webDir(t), SessionKey: testKey},
-		noSessions{}, authz.Evidence{})
+		sessions, authz.Evidence{})
 	if err != nil {
 		t.Fatal(err)
 	}
