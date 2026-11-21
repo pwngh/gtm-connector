@@ -16,8 +16,16 @@ CREATE TABLE slack_mappings (
     FOREIGN KEY (workspace_id, account_ref) REFERENCES accounts (workspace_id, ref),
     UNIQUE (workspace_id, channel_id, thread_ts),
     CHECK ((channel_id IS NULL) = (thread_ts IS NULL) AND (channel_id IS NULL) = (mapping IS NULL)),
-    CHECK (mapping::jsonb ->> 'account_id' = account_ref AND mapping::jsonb ->> 'channel_id' = channel_id
-           AND mapping::jsonb ->> 'thread_ts' = thread_ts)
+    -- A mapping holds every member the reader takes, each of its type, and agrees with its row. A member
+    -- that is missing makes a comparison NULL, which coalesce turns into a refusal.
+    CHECK (mapping IS NULL OR coalesce(
+        mapping::jsonb ?& ARRAY['schema_version', 'mapping_id', 'account_id', 'crm_binding', 'slack_binding',
+                                'channel_id', 'thread_ts', 'selected_at', 'resolution_receipt_id']
+        AND jsonb_typeof(mapping::jsonb -> 'crm_binding') = 'object'
+        AND jsonb_typeof(mapping::jsonb -> 'slack_binding') = 'object'
+        AND mapping::jsonb -> 'slack_binding' ->> 'provider' = 'slack'
+        AND mapping::jsonb ->> 'account_id' = account_ref AND mapping::jsonb ->> 'channel_id' = channel_id
+        AND mapping::jsonb ->> 'thread_ts' = thread_ts, false))
 );
 CREATE TRIGGER slack_mappings_no_truncate BEFORE TRUNCATE ON slack_mappings
     FOR EACH STATEMENT EXECUTE FUNCTION gtm_refuse_change();

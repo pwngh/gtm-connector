@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
@@ -14,9 +15,11 @@ import (
 // made of identity.
 func slackMapping(t *testing.T, account, channel, stamp, identity string) postgres.SlackMapping {
 	t.Helper()
-	text, err := strictjson.Dumps(strictjson.NewObject("account_id", account, "channel_id", channel, "thread_ts", stamp,
-		"crm_binding", crmBinding("sqlite", "a"), "slack_binding", strictjson.NewObject("schema_version", 1,
-			"provider", "slack", "identity_sha256", identity)), strictjson.Prepared)
+	text, err := strictjson.Dumps(strictjson.NewObject("schema_version", 1, "mapping_id", "map-invented",
+		"account_id", account, "channel_id", channel, "thread_ts", stamp, "crm_binding", crmBinding("sqlite", "a"),
+		"slack_binding", strictjson.NewObject("schema_version", 1, "provider", "slack", "identity_sha256", identity),
+		"selected_at", "2027-01-15T00:00:00Z", "resolution_receipt_id", "00000000-0000-4000-8000-000000000001"),
+		strictjson.Prepared)
 	ok(t, err)
 	return postgres.SlackMapping{AccountRef: account, ChannelID: channel, ThreadTS: stamp, Mapping: text}
 }
@@ -74,6 +77,58 @@ func TestSlackMappingsKeepOneThreadPerAccount(t *testing.T) {
 	// The row agrees with its mapping for any writer.
 	if err := sql(t, f, `UPDATE slack_mappings SET thread_ts = '1790000000.000009' WHERE account_ref = 'acc-004'`); err == nil {
 		t.Error("a row was changed apart from its mapping")
+	}
+	// A mapping that lacks a member the reader takes is refused for any writer, so it can never sit in the
+	// way of a valid one.
+	for i, c := range []struct {
+		name   string
+		broken func(complete string) string
+	}{
+		{"an empty object", func(string) string { return "{}" }},
+		{"no Slack binding", func(complete string) string {
+			value, err := strictjson.Loads([]byte(complete))
+			ok(t, err)
+			without := value.(*strictjson.Object).Copy()
+			without.Delete("slack_binding")
+			stripped, err := strictjson.Dumps(without, strictjson.Prepared)
+			ok(t, err)
+			return stripped
+		}},
+		{"a binding that is text", func(complete string) string {
+			return strings.Replace(complete, `"crm_binding":{`, `"crm_binding":"x","other":{`, 1)
+		}},
+	} {
+		// Each case has an account and a thread of its own, so a case the schema let through cannot hide
+		// another.
+		account, stamp := fmt.Sprintf("acc-%03d", 10+i), fmt.Sprintf("1790000000.%06d", 10+i)
+		ok(t, f.Store.EnsureAccount(ctx, f.Workspace.ID, account, "Invented account"))
+		mapping := c.broken(slackMapping(t, account, "C0456", stamp, identity).Mapping)
+		if err := sql(t, f, `INSERT INTO slack_mappings (workspace_id, account_ref, channel_id, thread_ts, mapping)
+			VALUES ($1, $2, 'C0456', $3, $4)`, f.Workspace.ID, account, stamp, mapping); err == nil {
+			t.Errorf("%s was saved as a mapping", c.name)
+		}
+	}
+}
+
+// A mapping is saved only while the connections it was made through are at the generations it was made
+// under.
+func TestSlackMappingsRefuseAMovedConnection(t *testing.T) {
+	f := postgrestest.New(t)
+	identity := fmt.Sprintf("%064x", 7)
+	ok(t, f.Store.EnsureAccount(ctx, f.Workspace.ID, "acc-004", "Invented account"))
+	connections, err := f.Store.Connections(ctx, f.Workspace.ID)
+	ok(t, err)
+	if len(connections) == 0 {
+		t.Fatal("the fixture has no connection")
+	}
+	m := slackMapping(t, "acc-004", "C0123", "1790000000.000001", identity)
+	m.Generations = map[string]int64{connections[0].ID: connections[0].Generation + 1}
+	if _, _, err := f.Store.SaveSlackMapping(ctx, f.Workspace.ID, m, false, false); !errors.Is(err, postgres.ErrSourceChanged) {
+		t.Errorf("a mapping made under a generation that moved: %v", err)
+	}
+	m.Generations = map[string]int64{connections[0].ID: connections[0].Generation}
+	if _, changed, err := f.Store.SaveSlackMapping(ctx, f.Workspace.ID, m, false, false); !changed || err != nil {
+		t.Errorf("a mapping made under the current generation: %v %v", changed, err)
 	}
 }
 

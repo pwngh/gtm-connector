@@ -41,7 +41,11 @@ type Configuration struct {
 	ClientID, RedirectURI string
 	Scopes                []string
 	TeamID                string
-	port                  int
+	// Pinned is the identity digest the workspace's Slack is pinned to, as IdentityBinding gives it, or ""
+	// for a workspace that was never connected to Slack. A grant for any other user is refused before it
+	// is saved.
+	Pinned string
+	port   int
 }
 
 // NewConfiguration checks what a sign-in was asked for before any file, browser or request is used. No
@@ -185,6 +189,15 @@ func (r *Reader) Connect(ctx context.Context, cfg Configuration, open Browser, p
 			}
 			if previous != nil && previous.Identity != candidate.Identity {
 				return refuse("slack_identity_mismatch")
+			}
+			if cfg.Pinned != "" {
+				binding, err := IdentityBinding(candidate.Identity)
+				if err != nil {
+					return err
+				}
+				if digest, _ := text(binding, "identity_sha256"); digest != cfg.Pinned {
+					return refuse("slack_identity_mismatch")
+				}
 			}
 			b.hold(&candidate)
 			progress.tell("identity", "running")

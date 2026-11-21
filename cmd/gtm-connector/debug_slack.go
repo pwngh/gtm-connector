@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"slices"
@@ -42,13 +43,41 @@ var slackActions = map[string]arguments{
 
 var slackActionNames = []string{"connect", "status", "disconnect", "map", "check"}
 
-// openBrowser opens the sign-in page in the system browser. Tests set their own.
-var openBrowser slack.Browser = func(ctx context.Context, page string) error {
+// openBrowser opens the sign-in's start page in the system browser. Tests set their own.
+var openBrowser slack.Browser = systemBrowser
+
+// systemBrowser starts the desktop's opener, open on macOS and xdg-open elsewhere, and does not wait for it:
+// an opener that stays running, as xdg-open can, never holds up the sign-in, and its exit is reaped apart.
+// The page it is given is the sign-in's start page on the loopback listener, which holds no state. It runs
+// with the environment browserEnvironment keeps, so no setting of the connector reaches the browser.
+func systemBrowser(_ context.Context, page string) error {
 	name := "xdg-open"
 	if runtime.GOOS == "darwin" {
 		name = "open"
 	}
-	return exec.CommandContext(ctx, name, page).Run()
+	opener := exec.Command(name, page)
+	opener.Env = browserEnvironment(os.Environ())
+	if err := opener.Start(); err != nil {
+		return err
+	}
+	go func() { _ = opener.Wait() }()
+	return nil
+}
+
+// browserEnvironment is what the opener is given of the connector's environment: only what a desktop needs
+// to find and show a browser. Nothing else passes, so no database URL, password or token can.
+func browserEnvironment(environ []string) []string {
+	var kept []string
+	for _, entry := range environ {
+		name, _, _ := strings.Cut(entry, "=")
+		switch {
+		case strings.HasPrefix(name, "GTM_"), strings.HasPrefix(name, "PG"), strings.HasSuffix(name, "_TOKEN"):
+		case name == "PATH", name == "HOME", name == "LANG", name == "DISPLAY", name == "WAYLAND_DISPLAY",
+			name == "DBUS_SESSION_BUS_ADDRESS", strings.HasPrefix(name, "XDG_"):
+			kept = append(kept, entry)
+		}
+	}
+	return kept
 }
 
 // debugSlack runs debug slack ACTION. Before the action it takes --state-dir and --help.
@@ -222,6 +251,22 @@ func (r *run) slackSignIn(ctx context.Context) (*strictjson.Object, error) {
 		if err != nil {
 			return nil, err
 		}
+		// A workspace whose Slack was connected stays pinned to that user, also once its sign-in was removed,
+		// so a sign-in for another user is refused before it is saved.
+		if err := r.open(ctx); err != nil {
+			return nil, err
+		}
+		if r.exists {
+			rows, err := r.store.Connections(ctx, r.workspace.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, row := range rows {
+				if row.Source == "slack" {
+					cfg.Pinned = row.IdentitySHA256
+				}
+			}
+		}
 		return reader.Connect(ctx, cfg, openBrowser, r.slackProgress)
 	case "status":
 		_, check := r.args.text("--check")
@@ -313,9 +358,17 @@ func (r *run) slackMap(ctx context.Context) (*strictjson.Object, error) {
 	}
 	_, isReplace := r.args.text("--replace")
 	_, isReassign := r.args.text("--reassign")
+	// The mapping is saved only while the CRM and Slack are still the connections it was made through.
+	generations := map[string]int64{}
+	for _, source := range []string{"crm", "slack"} {
+		generations[from.rows[source].ID] = from.rows[source].Generation
+	}
 	_, changed, err := r.store.SaveSlackMapping(ctx, r.workspace.ID, postgres.SlackMapping{AccountRef: account,
-		ChannelID: selection[0], ThreadTS: selection[1], Mapping: mapping}, isReplace, isReassign)
+		ChannelID: selection[0], ThreadTS: selection[1], Mapping: mapping, Generations: generations},
+		isReplace, isReassign)
 	switch {
+	case errors.Is(err, postgres.ErrSourceChanged):
+		return nil, receipts.ErrSourceChanged
 	case errors.Is(err, postgres.ErrSlackMappingConflict):
 		return nil, slackRefusal("slack_mapping_conflict")
 	case errors.Is(err, postgres.ErrSlackMappingSource):

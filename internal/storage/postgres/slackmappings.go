@@ -20,6 +20,10 @@ type SlackMapping struct {
 	// Mapping is the canonical JSON of the whole selection. Its crm_binding and slack_binding members are
 	// the bindings it was made under.
 	Mapping string
+	// Generations are the connections the selection was made through, each with the generation it was
+	// read under: the workspace's CRM and its Slack. A connection that has moved since refuses the save
+	// with ErrSourceChanged.
+	Generations map[string]int64
 }
 
 var (
@@ -62,6 +66,18 @@ func (s *Store) SaveSlackMapping(ctx context.Context, workspaceID string, m Slac
 		}
 		if err != nil {
 			return err
+		}
+		// connect changes a connection under the same workspace lock, so none moves until this commits.
+		for id, generation := range m.Generations {
+			var now int64
+			err := tx.QueryRow(ctx, `SELECT generation FROM connections WHERE workspace_id = $1 AND id = $2`,
+				workspaceID, id).Scan(&now)
+			if errors.Is(err, pgx.ErrNoRows) || err == nil && now != generation {
+				return ErrSourceChanged
+			}
+			if err != nil {
+				return err
+			}
 		}
 		var others int
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM slack_mappings

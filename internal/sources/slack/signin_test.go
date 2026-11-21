@@ -75,8 +75,18 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 		}
 		defer conn.Close()
 		fmt.Fprint(conn, request)
-		status, _ := bufio.NewReader(conn).ReadString('\n')
-		return strings.TrimSpace(status)
+		reader := bufio.NewReader(conn)
+		status, _ := reader.ReadString('\n')
+		for {
+			line, err := reader.ReadString('\n')
+			if location, found := strings.CutPrefix(line, "Location: "); found {
+				// A redirect gives where it leads.
+				return strings.TrimSpace(status) + " " + strings.TrimSpace(location)
+			}
+			if err != nil || line == "\r\n" {
+				return strings.TrimSpace(status)
+			}
+		}
 	}
 	host := fmt.Sprintf("Host: localhost:%d\r\n", port)
 	stray := []struct{ request, want string }{
@@ -90,12 +100,24 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 		{"GET /slack/callback?code=abc&code=abd&state=STATE HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 400 Bad Request"},
 		{"GET /slack/callback?code=abc&state=STATE&extra=1 HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 400 Bad Request"},
 		{"GET /slack/callback?code=abc&&state=STATE HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 400 Bad Request"},
+		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "Origin: https://invented-elsewhere.example\r\n\r\n",
+			"HTTP/1.1 400 Bad Request"},
+		{"GET /start/guessed HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 404 Not Found"},
 	}
-	answers := make(chan string, len(stray)+1)
+	answers := make(chan string, len(stray)+2)
 	var finished string
 	open := func(_ context.Context, page string) error {
-		state := page[strings.Index(page, "state=")+6:]
+		// The browser is given the start page alone, which leads once to the authorization page.
+		start, found := strings.CutPrefix(page, fmt.Sprintf("http://localhost:%d/start/", port))
+		if !found || strings.Contains(page, "state") {
+			return fmt.Errorf("the browser was given %q", page)
+		}
 		go func() {
+			led := send("GET /start/" + start + " HTTP/1.1\r\n" + host + "\r\n")
+			state, found := strings.CutPrefix(led, "HTTP/1.1 302 Found https://slack.com/x?state=")
+			if again := send("GET /start/" + start + " HTTP/1.1\r\n" + host + "\r\n"); !found || again != "HTTP/1.1 404 Not Found" {
+				answers <- fmt.Sprintf("the start page led to %q, then %q", led, again)
+			}
 			for _, s := range stray {
 				if got := send(strings.ReplaceAll(s.request, "STATE", state)); got != s.want {
 					answers <- fmt.Sprintf("%q: %s", s.request, got)

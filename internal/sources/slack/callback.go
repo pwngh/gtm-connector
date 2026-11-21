@@ -28,7 +28,6 @@ const (
 	maxHeaderBytes      = 16384
 	maxQuery            = 8192
 	requestTime         = 2 * time.Second
-	browserTime         = 10 * time.Second
 	maxAuthorizeURL     = 16384
 )
 
@@ -40,9 +39,12 @@ var (
 	callbackInvalid = []byte("<!doctype html><title>Local callback</title><p>This request was not accepted.</p>")
 )
 
-// receiveConsent listens on the redirect's port, opens the browser at the authorization page made for a new
-// state, and waits for the callback that carries that state. Given an approval's code it runs finish, and
-// answers the browser only after finish returns. The whole wait ends after loginTime.
+// receiveConsent listens on the redirect's port and opens the browser at a start page of that listener:
+// http://localhost:PORT/start/ and a random path, which holds no state and no challenge. The first request
+// of that page is redirected to the authorization page made for a new state, and the page is gone after it.
+// The authorization page never reaches a process argument. The wait for the callback that carries the state
+// ends only at loginTime: the opener is not waited on, and its exit changes nothing. Given an approval's code
+// it runs finish, and answers the browser only after finish returns.
 func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state string) string, open Browser,
 	finish func(ctx context.Context, code string) error) error {
 	ctx, cancel := context.WithTimeout(ctx, loginTime)
@@ -53,7 +55,7 @@ func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state
 		}
 		return refuse("slack_login_timeout")
 	}
-	state := randomText(32)
+	state, start := randomText(32), "/start/"+randomText(32)
 	listeners, err := listenLoopback(cfg.port)
 	if err != nil {
 		return err
@@ -65,16 +67,7 @@ func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state
 	}
 	defer closeAll()
 	page := authorize(state)
-	if page == "" || len(page) > maxAuthorizeURL || strings.ContainsFunc(page, func(c rune) bool { return c < 32 || c == 127 }) {
-		return refuse("slack_browser_unavailable")
-	}
-	opening, stop := context.WithTimeout(ctx, browserTime)
-	err = open(opening, page)
-	stop()
-	switch {
-	case ctx.Err() != nil:
-		return timedOut()
-	case err != nil:
+	if page == "" || len(page) > maxAuthorizeURL || strings.ContainsFunc(page, func(c rune) bool { return c < 33 || c == 127 }) {
 		return refuse("slack_browser_unavailable")
 	}
 	connections := make(chan net.Conn)
@@ -94,6 +87,12 @@ func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state
 			}
 		}(listener)
 	}
+	if err := open(ctx, fmt.Sprintf("http://localhost:%d%s", cfg.port, start)); err != nil {
+		if ctx.Err() != nil {
+			return timedOut()
+		}
+		return refuse("slack_browser_unavailable")
+	}
 	for range maxCallbackRequests {
 		var conn net.Conn
 		select {
@@ -101,7 +100,22 @@ func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state
 		case <-ctx.Done():
 			return timedOut()
 		}
-		fields, status := callbackFields(ctx, conn, cfg.port, state)
+		path, query, headers, status := readRequest(ctx, conn, cfg.port)
+		if status == 0 && start != "" && path == start && query == "" && !fromElsewhere(headers) {
+			// The start page is served once, then is gone.
+			start = ""
+			respond(conn, 302, nil, "Location: "+page)
+			_ = conn.Close()
+			continue
+		}
+		var fields map[string]string
+		switch {
+		case status != 0:
+		case path != "/slack/callback":
+			status = 404
+		default:
+			fields, status = callbackFields(query, headers, state)
+		}
 		if fields == nil {
 			respond(conn, status, callbackInvalid)
 			_ = conn.Close()
@@ -133,6 +147,13 @@ func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state
 	return refuse("slack_callback_unavailable")
 }
 
+// fromElsewhere is whether a request came from a page of another site: it states an Origin that is not
+// Slack's. A browser that follows Slack's redirect, or that opens a page itself, states none or Slack's.
+func fromElsewhere(headers map[string]string) bool {
+	given, stated := headers["origin"]
+	return stated && given != "https://slack.com" && origin(given) != given
+}
+
 // listenLoopback listens on 127.0.0.1 and ::1 at the port. A machine without one of the two families
 // listens on the other. A port that is taken refuses with slack_callback_unavailable.
 func listenLoopback(port int) ([]net.Listener, error) {
@@ -157,10 +178,9 @@ func listenLoopback(port int) ([]net.Listener, error) {
 	return listeners, nil
 }
 
-// callbackFields reads one request and gives its query fields when it is the callback for this state: a
-// GET of /slack/callback with the Host localhost:PORT, no body, and either a code or an error. Any other
-// request gives nil and the status to answer it with.
-func callbackFields(ctx context.Context, conn net.Conn, port int, state string) (map[string]string, int) {
+// readRequest reads one request: a GET with the Host localhost:PORT and no body. It gives the request's path
+// and query and its headers, each named once, or the status to answer any other request with.
+func readRequest(ctx context.Context, conn net.Conn, port int) (path, query string, headers map[string]string, status int) {
 	deadline := time.Now().Add(requestTime)
 	if limit, set := ctx.Deadline(); set && limit.Before(deadline) {
 		deadline = limit
@@ -174,69 +194,70 @@ func callbackFields(ctx context.Context, conn net.Conn, port int, state string) 
 		end := bytes.Index(data, []byte("\r\n"))
 		if (end < 0 && len(data) > maxRequestLine) || end+2 > maxRequestLine ||
 			(end >= 0 && len(data)-end-2 > maxHeaderBytes) {
-			return nil, 400
+			return "", "", nil, 400
 		}
 		if err != nil && !bytes.Contains(data, []byte("\r\n\r\n")) {
-			return nil, 400
+			return "", "", nil, 400
 		}
 	}
 	head, trailing, _ := bytes.Cut(data, []byte("\r\n\r\n"))
 	if len(trailing) > 0 {
-		return nil, 400
+		return "", "", nil, 400
 	}
 	lines := strings.Split(string(head), "\r\n")
 	parts := strings.Split(lines[0], " ")
 	for _, c := range []byte(lines[0]) {
 		if c > 127 {
-			return nil, 400
+			return "", "", nil, 400
 		}
 	}
 	if len(parts) != 3 {
-		return nil, 400
+		return "", "", nil, 400
 	}
 	method, target, version := parts[0], parts[1], parts[2]
 	if method != "GET" {
-		return nil, 405
+		return "", "", nil, 405
 	}
-	if (version != "HTTP/1.0" && version != "HTTP/1.1") || !strings.HasPrefix(target, "/") || strings.Contains(target, "#") {
-		return nil, 400
+	if (version != "HTTP/1.0" && version != "HTTP/1.1") || !strings.HasPrefix(target, "/") ||
+		strings.Contains(target, "#") || len(lines)-1 > 32 {
+		return "", "", nil, 400
 	}
-	path, query, asked := strings.Cut(target, "?")
-	if path != "/slack/callback" {
-		return nil, 404
-	}
-	if !asked || len(query) > maxQuery || len(lines)-1 > 32 {
-		return nil, 400
-	}
-	headers := map[string]string{}
+	path, query, _ = strings.Cut(target, "?")
+	headers = map[string]string{}
 	for _, line := range lines[1:] {
 		name, value, colon := strings.Cut(line, ":")
 		if !colon || name == "" || strings.ContainsFunc(name, func(c rune) bool {
 			return !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("!#$%&'*+.^_`|~-", c))
 		}) {
-			return nil, 400
+			return "", "", nil, 400
 		}
 		for _, c := range []byte(value) {
 			if c < 32 && c != 9 || c == 127 {
-				return nil, 400
+				return "", "", nil, 400
 			}
 		}
 		key := strings.ToLower(name)
 		if _, again := headers[key]; again {
-			return nil, 400
+			return "", "", nil, 400
 		}
 		headers[key] = strings.Trim(value, " \t")
 	}
 	if strings.ToLower(headers["host"]) != fmt.Sprintf("localhost:%d", port) {
-		return nil, 400
+		return "", "", nil, 400
 	}
 	if _, chunked := headers["transfer-encoding"]; chunked {
-		return nil, 400
+		return "", "", nil, 400
 	}
 	if length, stated := headers["content-length"]; stated && length != "0" {
-		return nil, 400
+		return "", "", nil, 400
 	}
-	if len(evidence.Percents([]rune(query))) > 0 {
+	return path, query, headers, 0
+}
+
+// callbackFields gives the query fields of the callback for this state: from no other site, with either a
+// code or an error. Any other callback gives nil and 400.
+func callbackFields(query string, headers map[string]string, state string) (map[string]string, int) {
+	if query == "" || len(query) > maxQuery || fromElsewhere(headers) || len(evidence.Percents([]rune(query))) > 0 {
 		return nil, 400
 	}
 	fields, valid := queryFields(query)
@@ -299,12 +320,16 @@ func queryFields(query string) (map[string]string, bool) {
 }
 
 // respond answers the browser and closes nothing. A browser that has gone does not undo a finished sign-in.
-func respond(conn net.Conn, status int, body []byte) {
-	reasons := map[int]string{200: "OK", 400: "Bad Request", 404: "Not Found", 405: "Method Not Allowed",
-		500: "Internal Server Error"}
+func respond(conn net.Conn, status int, body []byte, extra ...string) {
+	reasons := map[int]string{200: "OK", 302: "Found", 400: "Bad Request", 404: "Not Found",
+		405: "Method Not Allowed", 500: "Internal Server Error"}
+	headers := ""
+	for _, header := range extra {
+		headers += header + "\r\n"
+	}
 	_ = conn.SetWriteDeadline(time.Now().Add(time.Second))
-	_, _ = fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %d\r\n"+
+	_, _ = fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\n%sContent-Type: text/html; charset=utf-8\r\nContent-Length: %d\r\n"+
 		"Cache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nX-Content-Type-Options: nosniff\r\n"+
 		"Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'\r\n"+
-		"Connection: close\r\n\r\n%s", status, reasons[status], len(body), body)
+		"Connection: close\r\n\r\n%s", status, reasons[status], headers, len(body), body)
 }

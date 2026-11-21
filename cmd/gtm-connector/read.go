@@ -166,6 +166,7 @@ func runCommand(ctx context.Context, command string, tokens []string, s screen) 
 func (r *run) failed(ctx context.Context, err error) *failure {
 	var (
 		known    *failure
+		told     *cards.Diagnostic
 		unported *unportedSource
 		request  *cards.RequestError
 		rejected *evidence.Rejected
@@ -174,6 +175,9 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 	switch {
 	case errors.As(err, &known):
 		return known
+	case errors.As(err, &told):
+		// A source's refusal, in the fixed words it was written in for the person running the command.
+		return &failure{code: told.Exit, message: told.Message, next: told.Next}
 	case ctx.Err() != nil:
 		return &failure{code: 130, message: "Interrupted. Completed local writes are retained.",
 			next: "gtm-connector audit --help"}

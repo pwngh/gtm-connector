@@ -161,25 +161,37 @@ Until it finishes, setup and the server refuse to start.
 
 ## Slack
 
+Live Slack sits beside a real CRM. Connect one to the workspace first; `gtm connect --help` lists the
+sources this build connects, and a workspace that reads the demo data refuses live Slack. The sign-in
+needs no CRM, so it can come first.
+
 ```sh
-gtm connect salesforce --org ALIAS --state-dir acme
 gtm debug slack connect --client-id PUBLIC_CLIENT_ID --redirect-uri http://localhost:8765/slack/callback --state-dir acme
+gtm debug slack status --check --state-dir acme
+```
+
+With a real CRM connected to `acme`:
+
+```sh
 gtm connect slack --state-dir acme
 gtm debug slack map --account ACCOUNT_ID --thread-url 'COPIED_THREAD_LINK' --state-dir acme
 gtm debug slack check --account ACCOUNT_ID --state-dir acme
 gtm brief ACCOUNT_ID --state-dir acme
 ```
 
-`debug slack connect` signs in to a Slack app you already have, through the browser, as the
-[Slack guide](python/slack.md) states. It saves the sign-in in the credentials folder, in
-`slack-WORKSPACE.json` (mode 0600, one file for each workspace, replaced whole on every change),
-beside its lock `slack-WORKSPACE.lock`. `WORKSPACE` is the workspace's slug. The database holds the
-mapped threads and the identity digest the workspace is pinned to, never a token.
+`debug slack connect` signs in to a Slack app you already have, as the [Slack guide](python/slack.md)
+states. It opens the browser at a one-time page of its own loopback callback, which leads on to Slack,
+so Slack's address with its sign-in values never reaches a process argument. The browser is started
+with only what a desktop needs of the environment. A workspace whose Slack was connected keeps the user
+it was connected to: a sign-in for another user is refused.
+
+The sign-in is saved in the credentials folder, in `slack-WORKSPACE.json` (mode 0600, one file for
+each workspace, replaced whole on every change), beside its lock `slack-WORKSPACE.lock`. `WORKSPACE` is
+the workspace's slug. The database holds the mapped threads and the identity digest the workspace is
+pinned to, never a token.
 
 > **A backup leaves the Slack sign-in out.** Slack spends a refresh token once, so a restored copy is
 > one Slack no longer accepts. After a restore, run `debug slack connect` again.
-
-Live Slack sits beside a real CRM only. A workspace that reads the demo data refuses it.
 
 ## Upgrade
 

@@ -185,7 +185,7 @@ func sameValue(a, b any) bool {
 type liveSlack struct{ reader *slack.Reader }
 
 // Messages reads the thread mapped to the account. An account with no thread is not selected, and a refusal
-// is the failure its code names.
+// is the diagnostic its code names.
 func (l liveSlack) Messages(ctx context.Context, accountID string) ([]*strictjson.Object, *strictjson.Object, error) {
 	records, snapshot, err := l.reader.ReadThread(ctx, accountID)
 	var refused *slack.Error
@@ -193,7 +193,8 @@ func (l liveSlack) Messages(ctx context.Context, accountID string) ([]*strictjso
 	case errors.As(err, &refused) && refused.Code == "slack_mapping_missing":
 		return nil, nil, cards.ErrNotSelected
 	case errors.As(err, &refused):
-		return nil, nil, slackSourceFailure(refused)
+		failed := slackSourceFailure(refused)
+		return nil, nil, &cards.Diagnostic{Exit: failed.code, Message: failed.message, Next: failed.next}
 	}
 	return records, snapshot, err
 }
