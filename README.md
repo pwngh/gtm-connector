@@ -10,9 +10,12 @@ figure, date, name, and quotation on the card points to a stored record. Each se
 with who said it and on what basis, and the card says what it did not read. The connector writes
 every character. No model does.
 
-| No model | Cited | Sealed | Tested | Protocol |
+Some of what this page describes is still being built. The [roadmap](docs/ROADMAP.md) says which
+parts.
+
+| No model | Cited | Sealed | Tested | Surfaces |
 | --- | --- | --- | --- | --- |
-| **0** model calls on a card | every figure and quotation numbered to its record | **SHA-256** seal on each saved card | **8 of 10** invented hard cases pass | CLI and **MCP** `2026-07-28` |
+| **0** model calls on a card | every figure and quotation numbered to its record | **SHA-256** seal on each card | **10 of 10** invented hard cases pass | web app, CLI, HTTP API, **MCP** `2026-07-28` |
 
 ### The demo
 
@@ -21,8 +24,12 @@ call, the customer's deputy general counsel said their general counsel will not 
 is approved. The card shows both, and where each came from.
 
 ```sh
-pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo
+make up      # PostgreSQL and the server, in Docker Compose
+make demo    # the demo book, and the ten hard cases as ready-to-open workspaces
 ```
+
+Open `https://127.0.0.1:8443/` and sign in with the demo sign-in. It runs on invented data, with no
+model and no external service.
 
 ```text
 DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15
@@ -66,9 +73,8 @@ NOT READ
 - **Record values** come from typed CRM fields and connector arithmetic. The seller's "January 30"
   and the second-hand "USD 300,000" are sentences someone said, so they stay under SAID.
 - **A speaker role** comes from a label, never from wording. A seller is a name or ID the operator
-  listed. A customer is a speaker label equal to the name of exactly one contact of the account, and
-  the card prints that contact's title beside it. Anything else is unknown. A label is what the
-  source wrote: it does not prove who spoke.
+  listed. A customer is a speaker matched to exactly one contact of the account, and the card
+  prints that contact's title beside it. Anything else is unknown.
 - **A quotation** is one whole sentence. A sentence too long to show is counted, never cut.
 - **Source text is data.** The channel mention and the link were neutralized before anything
   displayed them, and the card says how many were.
@@ -77,21 +83,19 @@ NOT READ
 
 ```mermaid
 flowchart LR
-    S["Salesforce · transcripts · Slack"] -->|"scoped read, receipt first"| U["Numbered units<br/>typed fields · whole sentences · speaker roles"]
-    U --> C(["Deal card<br/>every character written by the connector"])
-    C -->|"brief saves it"| B["Saved card<br/>sealed by a receipt naming its SHA-256"]
+    S["Salesforce · transcripts · Slack · your own data"] -->|"scoped read, receipt first"| M["Matches<br/>approved by a person"]
+    M --> U["Numbered units<br/>typed fields · whole sentences · speaker roles"]
+    U --> C(["Deal card, sealed<br/>every character written by the connector"])
+    C --> O["Deals · Ops · API · MCP · alerts"]
 ```
 
 Every figure and sentence on a card carries a number. The number is a unit: one CRM record, or one
 sentence of a call or a Slack message. Each resolves to its record and to the receipt of the read
 that returned it, a receipt being one row of the audit log.
 
-When `brief` saves a card it adds one more receipt, which names the SHA-256 of the saved file. That
-receipt is the card's seal. The saved card gets a brief ID, `brief-…`, printed under it.
+A card is sealed when it is published: a receipt names the SHA-256 of its bytes.
 
 ### Trace any number
-
-`gtm-connector inspect brief-…` lists every unit of the card, one per line, and a number shows one:
 
 ```text
 $ gtm-connector inspect brief-… 5
@@ -110,38 +114,87 @@ Source text SHA-256   105807d2…
 Neutralizer version   3
 ```
 
-> **A changed card is refused.** `inspect` checks a saved card against its seal first, and refuses
-> one that was changed or copied from another folder.
+> **A changed card is refused.** `inspect` checks a card against its seal first, and refuses one
+> that was changed.
 
-## For sales reps and CSMs
+## For sales and CS teams
 
-Before a renewal call:
+Deals is your home in the web app. Active deals sit on the left, sorted by urgency: red for a risk
+or blocker, amber for new changes, green for on track. A badge shows when new calls or Slack
+threads need your approval. The Deal card fills the main pane, with a proof drawer and the deal's
+communications beside it.
 
-1. **Get the card.** `gtm-connector brief ACCOUNT_ID` prints it, or ask an assistant app over MCP.
-2. **Read the record values first,** then who said what. A seller's promise and a customer's condition sit under their own speaker, never in the record values.
-3. **Check what was not read.** The card says which sources and files it left out.
-4. **Trace a line.** `gtm-connector inspect brief-… 5` shows the record and the read behind number 5.
-
-On the [roadmap](docs/ROADMAP.md): a Deals page with your deals sorted by urgency, what changed
-since you last looked, the proof behind any line in one click, and a Slack alert when a renewal
-turns risky.
+1. **Confirm suggested calls and Slack threads.** The connector proposes the ones that match your account.
+2. **Get a Slack alert when a renewal turns risky.** It says what flagged the deal:
+   - customer silence: no reply near renewal;
+   - close-date slippage: the renewal date was pushed again;
+   - single-threaded deal: only one person is talking;
+   - pricing or seat conflict: a figure in Slack or on a call differs from the CRM;
+   - legal or security blocker: redlines or riders holding up signature.
+3. **Refresh before your call.** Pull the latest updates on demand.
+4. **Read the Deal card,** your 30-second renewal snapshot. It shows the renewal countdown and ARR, what changed since last time, exact buyer quotes and titles, promises you made, and missing or unread sources. From the card:
+   - click any line for its source proof, straight to the exact call or Slack message;
+   - track blockers on the renewal checklist and playbook until they are resolved;
+   - ask Claude, Codex or a local model what is blocking this renewal.
+5. **The deal closes.** It is archived with its final card.
 
 ## For RevOps and GTM engineers
 
-To set it up and keep it honest:
+Ops shows all of the plumbing that reps never see.
 
-1. **Connect each source once.** `connect salesforce --org ALIAS --seller NAME`, `connect calls`, `connect slack`.
-2. **Add the conversations.** `debug calls import meeting.vtt --account acc-007` for a transcript, `debug slack map` for a thread.
-3. **Limit what a client reads.** `debug serve --selection selection.json` serves only the accounts you list, under the client's own grant.
-4. **Audit every read.** `gtm-connector audit --tool get_account --follow` shows each tool attempt and its receipt.
+1. **Write one config file,** `gtm.yaml`. It connects Salesforce, Slack, calls, and SQL or webhook push.
+2. **Set auto-watch rules,** such as all open renewal opportunities closing in the next 90 days. Data then enters two ways:
+   - scheduled background pulls: the CRM, Slack channels and threads, Gong and Zoom;
+   - the push API or custom SQL: internal email, SMS or database tables.
+3. **Approve the discovered matches.** Calls and Slack messages matched by email and domain wait in a queue. Slack is matched by dedicated channel, such as `#deal-thornfield`, or by threads in a shared channel that mention the account.
+4. **Leave the rest to deterministic parsing and guardrails:**
+   - a whole-sentence splitter;
+   - an HTML and link neutralizer;
+   - speaker and role matching, sellers against buyers;
+   - a versioned PostgreSQL store with audit receipts;
+   - risk and diff rules for silence, slippage and conflicts.
+5. **Auto-stop and archive.** On Closed Won or Closed Lost, polling halts and the final card is sealed.
 
-On the [roadmap](docs/ROADMAP.md): field mapping for your own CRM fields, watch rules that propose
-renewals, a coverage view of which renewals have no current card, scheduled reads, a push API,
-read-only SQL, and webhooks.
+Results go out four ways:
+
+| Output | What it gives |
+| --- | --- |
+| REST API, `/v1/deals` | refresh on demand, the card as JSON, proof lookup |
+| MCP server, stdio or HTTP | Claude Desktop, Claude Code, ChatGPT, Codex |
+| Outbound webhooks and Slack alerts | deep links to flagged deals |
+| Web UI | work queue, diffs, receipt drawer |
+
+### One deal, one ID
+
+A deal is a bundle of IDs from many tools. Register the deal and bind them once:
+
+| Tool | IDs |
+| --- | --- |
+| Salesforce | account, opportunity and contact IDs |
+| Slack | channel ID and thread, or channel name |
+| Gong or Zoom | participant emails and the account domain |
+| Your own database | contact, client or contract IDs |
+
+After that, pass the deal ID to get the card:
+
+```sh
+gtm deal thornfield-2027
+curl https://HOST/v1/deals/thornfield-2027
+```
+
+## For operators
+
+Deployment is one step. A GitHub Actions release pipeline publishes prebuilt static binaries for
+each platform and Docker images, with the web app embedded in the binary.
+
+1. **Install.** Download the binary and give it a PostgreSQL 19 or 18.7 URL, or run the Docker image.
+2. **Set up.** `gtm-connector setup` runs the migrations as the database owner and writes the credentials folder. The server then runs as an app role that cannot change the schema.
+3. **Check.** `/healthz` answers when the database is reachable and the migrations are current.
+4. **Back up and upgrade.** `backup` and `restore` cover the database and the credentials. Rehearse an upgrade on a restored copy first.
 
 ## What it is tested against
 
-[Ten invented deals](tests/test_cases.py), each built to break one property. These pass today:
+[Ten invented deals](tests/test_cases.py), each built to break one property. All ten pass:
 
 | Deal | The card must |
 | --- | --- |
@@ -152,198 +205,35 @@ read-only SQL, and webhooks.
 | Long sentence | show a sentence whole or not at all |
 | Name collision | call a speaker unknown when a seller and a contact share the name |
 | Foreign number | resolve a number only inside its own card |
+| Buried blocker | put a marked blocker first, above routine messages |
+| Channel over the cap | count what was not read and say that more exists |
 | Law-firm renewal | equal the card above, byte for byte |
-
-## Try it
-
-The demo command at the top uses pipx and Python 3.11 or later. It runs on invented data, with no
-model and no external service.
-
-`pipx install` with the same source keeps the command on your PATH. From a checkout,
-`./scripts/demo.sh` installs the pinned dependencies, runs the tests, and runs the demo.
-`gtm-connector --help` lists the seven commands and `debug`, which holds the rest. `--json`, before or
-after a command, gives [stable output](docs/cli.md).
-
-## Use your own sources
-
-Connect each source once. `connect` saves what a state folder reads. A state folder is the private
-folder that `--state-dir` selects. Every other command then reads what is connected and takes no
-source option. A source you have not connected is stated as not connected on the card, and nothing
-falls back to demo data.
-
-```sh
-gtm-connector connect salesforce --org ALIAS --seller 'Morgan Reed'
-gtm-connector connect calls
-gtm-connector connect status
-gtm-connector accounts --query Thornfield
-gtm-connector brief ACCOUNT_ID
-```
-
-| Source | Commands | Guide |
-| --- | --- | --- |
-| Salesforce, read-only | `debug salesforce check --sf-org ALIAS`, `connect salesforce --org ALIAS` | [Salesforce](docs/salesforce.md) |
-| Call transcripts (TXT, VTT, SRT) | `connect calls`, `debug calls import meeting.vtt --account acc-007` | [Calls](docs/calls.md) |
-| Slack sign-in | `debug slack connect`, `connect slack`, `debug slack status`, `debug slack disconnect` | [Slack sign-in](docs/slack.md) |
-| One Slack thread per account | `debug slack map`, `debug slack check` | [Slack threads](docs/slack.md) |
-| Selected accounts for a client | `debug serve --selection selection.json` | [Selection](docs/selection.md) |
-| Invented data | `connect demo` | [Commands](docs/cli.md) |
-
-Transcripts and Slack threads are added one at a time with `debug calls import` and `debug slack map`.
-Transcript folders and a Slack channel window are on the [roadmap](docs/ROADMAP.md).
-
-Salesforce uses an existing `sf` CLI login. Slack uses an existing public PKCE app. Tests use
-invented provider responses. No live org has been verified.
-
-## Daily commands
-
-```sh
-gtm-connector connect status
-gtm-connector accounts --query Thornfield
-gtm-connector brief acc-003
-gtm-connector inspect brief-REPLACE                 # every unit of that card, one per line
-gtm-connector inspect brief-REPLACE 5               # one number: its record and receipt
-gtm-connector inspect acc-003                       # the account and its newest card
-gtm-connector audit --tool get_account --follow
-```
-
-An assistant app needs `debug serve` running in its state folder, for the HTTP transport and for the
-local bridge. One process holds a state folder at a time, so while `debug serve` runs, connect a
-second folder for `brief`:
-
-```sh
-gtm-connector debug serve
-gtm-connector connect inspector --scope crm:read
-gtm-connector brief acc-003 --state-dir var/brief   # a second connected folder while debug serve runs
-gtm-connector debug doctor
-```
-
-`debug serve` prints one line per tool attempt with its decision and receipt ID. The Inspector CLI is
-the tested client. Other assistant apps are untested. [Clients](docs/clients.md)
 
 ## What it guarantees
 
-Access is by scope and grant. A scope is what a tool requires, such as `crm:read`, and a grant is a
-bearer token issued for a list of scopes. In the Go server section below, a grant gives one sign-in
-one account.
-
-| Guarantee | Tests |
-| --- | --- |
-| One source's grant does not open another. A direct call without the scope returns HTTP 403. | [gateway](tests/test_gateway.py), [Slack](tests/test_slack_gateway.py) |
-| A tool runs only after its audit receipt is committed. | [audit](tests/test_audit.py), [gateway](tests/test_gateway.py) |
-| Retrying a write with the same key does not duplicate it. | [gateway](tests/test_gateway.py) |
-| A note cannot direct the workflow. An instruction inside one appears quoted and creates nothing. | [briefing](tests/test_briefing.py) |
-| A card is built only from checked evidence. A record of another account or a missing receipt gives no card. | [units](tests/test_units.py) |
-| With `debug serve --selection`, a client reads only the selected accounts, under its own grant. A source it lacks the scope for is stated as not read on the card. | [selection](tests/test_selected_sources.py) |
+- A tool runs only after its receipt is committed. A refused call still gets a receipt.
+- One source's grant does not open another, and a person reads only the deals granted to them.
+- Nothing joins a deal until a person approves it.
+- A card is built only from checked evidence. Evidence that fails a check gives no card.
+- A note cannot direct the workflow. An instruction inside one appears quoted and creates nothing.
+- The connector writes nothing to the CRM. Alerts and webhooks are off until you configure them.
+- A repeated push with the same key returns the same result.
 
 The card shows what the records say, not whether a source is true.
 
-## The Go server (in progress)
-
-The Go program at the root serves a read-only evidence API and the web app over HTTPS, on PostgreSQL.
-It reads only the invented demo book so far: its `demo` command publishes those cards. It needs Docker
-with Compose (Docker Desktop, or Colima with `docker-compose`). The [roadmap](docs/ROADMAP.md) lists
-what is left before it replaces the Python package.
-
-```sh
-make dev                        # PostgreSQL in Compose, the server on this machine (needs Go and Node)
-make up                         # PostgreSQL and the server in Compose
-make demo                       # a card for each demo account, read by the demo sign-in
-make down                       # stop; the database and credentials are kept
-make backup                     # the database and the credentials folder, into one file
-make restore BACKUP=gtm-....tar.gz   # into an empty database (make clean deletes the database)
-make test                       # go vet and the Go tests against the Compose database
-```
-
-Add `POSTGRES=18.7` to any of these to use the pinned fallback PostgreSQL, on its own volume.
-
-`make dev` and `make test` need Go 1.27.4, and `make dev` needs Node 22.23.4 (`nvm use` reads
-`.nvmrc`). Both refuse other versions.
-
-`pins.json` lists every pinned version and digest, from the toolchains and images to the CI actions.
-A test fails when the Dockerfile, `compose.yaml`, the Makefile or CI uses another. `gtm-connector
-version` prints the commit a binary was built from. An image that `make up` builds carries that
-commit as the label `org.opencontainers.image.revision`, ending in `-modified` if the checkout had
-changes.
-
-### First run
-
-Open `https://127.0.0.1:8443/`. `localhost` redirects there.
-
-The first run writes `.env` (mode 0600, with random passwords for two database roles) and a private
-credentials folder, `~/.config/gtm-connector/credentials` (mode 0700, files 0600). The folder holds
-the owner secret, the session key, the local TLS certificate and key, and the demo sign-in in
-`demo-credentials.json`.
-
-Setup, backup and restore connect as the database owner. The server connects as an app role that
-reads and writes rows and cannot change the schema or switch off a check.
-
-Browsers do not separate cookies by port, so another HTTPS server on `127.0.0.1` would see this
-one's cookies.
-
-### The demo book
-
-`make demo` (or `gtm-connector demo` after setup, as the app role) loads the invented demo book into
-the demo workspace and grants the demo sign-in its 30 accounts. It then makes and publishes each
-account's card through the Go card maker on PostgreSQL, under receipts. Each card is the one the
-Python package makes for that account, apart from its brief and receipt IDs, its token fingerprint
-and its read times.
-
-A run publishes only for accounts that hold no card, so running it again finishes a run that stopped
-part way. `demo --again` publishes another card for every account. Cards and receipts are never
-deleted. A grant someone revoked stays revoked, and its account gets no card.
-
-Signed in, the server lists the accounts at `/api/v1/accounts` and their cards at
-`/api/v1/accounts/ACCOUNT/cards`. Demo data and a real source never share a workspace: the database
-refuses a real connection in the demo workspace.
-
-### Backup and restore
-
-Backups go to `~/.config/gtm-connector/backups`. A backup's digests detect corruption only. They are
-stored in the backup itself, so they do not prove who made it.
-
-A restore needs an empty database, and each credential must be absent or the same as the backup's.
-It refuses any row the server would refuse on writing, such as a card whose seal does not name its
-bytes.
-
-If a restore stops after the database is in, run the same command again to finish it. Until then,
-setup, the server and `demo` refuse to start and say to run `restore` again with the same backup.
-
-On Colima, if a port does not answer, the Makefile forwards it with `scripts/colima-forward.sh`.
-
-### Real public text
-
-`make verify-real` downloads public meeting, call, chat and CRM datasets into
-`~/.cache/gtm-connector/real` and checks them against pinned digests. It then runs every utterance
-and message through the Python package and the Go port, and compares their sentences, neutralized
-text, scanners and JSON parsing.
-
-It reports counts, positions and digests, never text. Nothing real is committed, and CI never runs
-it. [Real data](docs/real-data.md)
-
 ## Limits
 
-- Nothing here was tried on a real deal. The cases test correctness on invented data, not usefulness.
-- The card shows up to twelve sentences, dealt by speaker role and by time, and counts the rest. It
-  does not rank them or relate one to another, so on a long call the sentence that matters may be
-  among those counted. Every sentence read is in `inspect BRIEF_ID` and `brief --json`.
-- A seller is whoever you list with `connect ... --seller NAME`. Slack authors are never shown as
-  customers.
-- Authorization is a local owner emulator. The file owner can request every scope and edit the
-  stores. Audit records are not tamper-proof. [Security review](SECURITY_REVIEW.md)
-- macOS and Linux. No hosted model or multi-user mode.
-- `web/` is a prototype of the renewal workflow on invented data. Served by the Go server, its
-  Evidence and Readiness pages sign in a demo principal and read sealed cards from `/api/v1`; Readiness
-  shows the sources a card did not read or show as open items, and the server has no workflow rules yet.
-  `web/scripts/api-browser.mjs` tests both pages in a browser against a stub of the API. Everything else, and every page
-  when it runs alone, is a walkthrough whose state lives in the browser, and whose reviews and
-  approvals are demonstrations, not authorization. Run it alone with `npm ci`, `npm test`, and
-  `npm run dev` inside `web/`.
+- The trial on five real renewals: its counts go here once it has run.
+- The card shows up to twelve sentences, dealt by speaker role and by time, and counts the rest. Every sentence read is in `inspect` and in the proof drawer.
+- A person, not wording, decides what is a blocker. A readiness rule reports what it observed in the sources it read, and unknown when a read is missing.
+- A model only proposes marks. A person accepts or rejects each one.
+- No live org has been verified.
+- macOS and Linux. One CRM: Salesforce.
 
 ## More
 
-- **Daily use:** [commands and output](docs/cli.md), [Deal cards](docs/briefs.md), [clients and Inspector](docs/clients.md).
+- **Daily use:** [commands and output](docs/cli.md), [Deal cards](docs/briefs.md), [clients](docs/clients.md).
 - **Access and audit:** [tools, scopes, and protocol](docs/tools.md), [audit](docs/audit.md), [security review](SECURITY_REVIEW.md).
 - **Where it is going:** [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
 
-MCP revision 2026-07-28, Python SDK 2.3.0. All checked-in companies, people, and records are
-invented. MIT licensed.
+All checked-in companies, people, and records are invented. MIT licensed.
