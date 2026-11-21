@@ -101,9 +101,13 @@ Sellers: "Morgan Reed"
   With imports, only `connect calls` connects them again.
 - **`demo --state-dir` connects a new workspace** to the demo data, as `connect demo` does.
 
-A `connect` that is refused saves nothing, and a workspace it would have made is not made. The rows of
-one `connect` are saved together or not at all. If another command changed the workspace's sources
-while `connect` ran, it exits `1`, saves nothing, and asks you to run it again.
+A `connect` that is refused or fails changes no connection. One refused for its arguments saves
+nothing, and a workspace it would have made is not made. `connect salesforce` makes its workspace
+before its first request to `sf` or the org, to hold that request's
+[receipt](audit.md#what-each-command-adds), so once it is made the workspace remains after a sign-in
+that fails, with any receipt already committed, and no connection is saved. The rows of one `connect`
+are saved together or not at all. If another command changed the workspace's sources while `connect`
+ran, it exits `1`, saves nothing, and asks you to run it again.
 
 ### The seller list
 

@@ -18,8 +18,9 @@ curl https://HOST/v1/deals/thornfield-2027-2e3hke   # with a script's token, onc
 gtm deal thornfield-2027-2e3hke
 ```
 
-Today the served routes take the session cookie of a person signed in to the web app, and nothing
-else ([deal routes](#deal-routes)).
+Today the deal and match routes know the caller by the session cookie of a person signed in to the
+web app, refuse a bearer token, and need the CSRF token and the public origin for a write
+([deal routes](#deal-routes)).
 
 ## One deal, one ID
 
@@ -45,7 +46,7 @@ what those reads returned:
 | --- | --- |
 | `account` | The account. |
 | `opportunity` | The open opportunity that closes first, by ID on a tie, or `null`. |
-| `contract` | On Salesforce, the contract a card counts the renewal to: the earliest that ends on or after the day of the read, by ID on a tie. Otherwise `null`. |
+| `contract` | On Salesforce, the contract a card counts the renewal to: the earliest that ends on or after the planning date, by ID on a tie. The planning date is the day `deal new --as-of` names, and without it `2027-01-15` on the demo book and today's UTC date on Salesforce. Otherwise `null`. |
 | `renews_on` | The account's renewal date, or else that contract's end, or else that opportunity's close date, or `null`. It is set once, when the deal is registered. A card's countdown is read again for every card and never counts to a close date, so the two can differ. |
 
 The database refuses a deal that binds a record its reads did not return.
@@ -56,7 +57,7 @@ account: `thornfield-2027-2e3hke` for Thornfield Wren LLP (`acc-003`), renewing 
 - The word is the first one that holds an ASCII letter or digit once its accents are taken off,
   lowered, with every other character dropped and cut to 40 characters, or `deal` when no word holds
   one.
-- The year is that of `renews_on`, or of the day of the read when it is `null`.
+- The year is that of `renews_on`, or of the planning date when it is `null`.
 - The key is the first six characters of the base32 of the SHA-256 of the account's ID, in lower case.
   It depends on the account alone, so an ID says nothing about another account's deals: two accounts
   whose names start with the same word get different IDs, whatever else the workspace holds. Only when

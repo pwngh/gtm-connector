@@ -2,8 +2,9 @@
 
 **Connect your tools once, say which renewals to watch, and decide what counts as risk.**
 
-Everything RevOps and GTM engineers set lives in one file, `gtm.yaml`. It is kept in Git, previewed
-against the book, and activated by exact revision. It holds no credential.
+What RevOps and GTM engineers set lives in one file, `gtm.yaml`, apart from the speaker settings,
+which stay on the workspace. The file is kept in Git, previewed against the book, and activated by
+exact revision. It holds no credential.
 
 This page describes the product as designed. The [roadmap](ROADMAP.md) says which parts are built.
 
@@ -22,8 +23,8 @@ rules:
 timezone: America/Chicago
 ```
 
-The seller list, the aliases and your company's domains are not in this file. They are set on the
-workspace with `connect` ([the CLI](cli.md#speaker-settings)).
+The speaker settings are the seller list, the aliases and your company's domains. They are set on
+the workspace with `connect` ([the CLI](cli.md#speaker-settings)).
 
 ## How a deal gets its evidence
 

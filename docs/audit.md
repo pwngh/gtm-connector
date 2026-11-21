@@ -32,13 +32,14 @@ call ──▶ receipt committed (pending) ──▶ checks, read ──▶ rece
 ```
 
 > **A refused call keeps its receipt.** A bad token, a missing scope, a rate limit or invalid arguments
-> each finish the call's receipt as `error`. Two requests get none: one that is no tool call, and a
-> call refused because `serve` could not read which workspace its bearer was issued in
-> ([security review](../SECURITY_REVIEW.md#1-a-receipt-comes-before-every-tool-call)).
+> each finish the call's receipt as `error`. A request that is no tool call gets none. A tool call
+> whose receipt cannot be committed does not run and keeps none: the two cases are below, and in the
+> [security review](../SECURITY_REVIEW.md#1-a-receipt-comes-before-every-tool-call).
 
 When the receipt cannot be committed, the call does not run. `serve`'s `/mcp` answers HTTP 503 with
 `{"error":"audit_unavailable; call was not executed"}`, and `mcp stdio` answers a JSON-RPC error in the
-same words.
+same words. `serve` answers the same way when it cannot read which workspace a bearer was issued in,
+since each workspace keeps its own receipts.
 
 When a call cannot finish cleanly, nothing is released: the receipt cannot be finished, the tool
 failed, its result was malformed, or the caller left during the call. The answer is HTTP 503 with
@@ -206,7 +207,7 @@ reads inside it are its child receipts, whose `request_id` is
 | The connector's own decisions | One `decide_match` per call or thread it decides, naming no principal, when `deal new`, `POST /v1/deals`, `debug calls import`, `debug slack map` or `brief` finds an undecided one while its account has an open deal. |
 | `debug calls import`, `debug slack map` | One `get_account` in an `import-` run, also on the demo book. On a real CRM, one more in an `inspect-` run before it. |
 | `grant` | One: `grant_account`, `revoke_grant` with `--revoke`, `disable_person` with `--disable` or `enable_person` with `--enable`, whose arguments are the account and the `to` or `subject` given. It finishes ok with the row `grants/PRINCIPAL_ID/ACCOUNT_ID`, or `people/PRINCIPAL_ID` for a person, in the transaction that makes the change, or as an error that changes nothing: `person_not_found` or `account_not_found` (404), or `person_ambiguous` (409). |
-| `connect salesforce` | One per request it makes to sign in and check the org, in a `sign-in-` run: `connect_salesforce_login_display` and `connect_salesforce_login_token` for the two `sf` commands, then `connect_salesforce_org`, `connect_salesforce_userinfo` and one `connect_salesforce_describe_` step for each object. |
+| `connect salesforce` | One per request it makes to sign in and check the org, in a `sign-in-` run. With `--org`, `connect_salesforce_login_display` and `connect_salesforce_login_token` for the two `sf` commands; with `--token-env`, neither. Then `connect_salesforce_org` and `connect_salesforce_userinfo`, and, where it checks the objects' fields, a `connect_salesforce_describe_` step for each object. That is the path of a sign-in that succeeds at once: a request the org refuses for an expired login may be retried once, under a receipt of its own. A request that fails has its receipt finished as an error, unless the store fails too, when the receipt stays pending until it is swept. |
 | `debug slack connect`, `debug slack status --check`, `debug slack disconnect --revoke` | One per request to Slack, in a `sign-in-` run: `slack_sign_in_exchange`, `slack_sign_in_refresh`, `slack_sign_in_identity` or `slack_sign_in_revoke`. |
 | `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `grants`, and every other form of `connect` | None. |
 | MCP calls through `serve` or `mcp stdio` | One per tool call, and one per read inside a prepared brief. |
