@@ -56,6 +56,13 @@ Three things carry the operator's authority, and whoever holds one holds that pa
 > **Whoever holds the app role's credentials holds every workspace.** Give the app role's URL, and its
 > password, only to people who may read every connected workspace.
 
+The owner can also delegate one read path in SQL. Each database has a reporting role that cannot log
+in, and a login role the owner grants it to reads the five `reporting` views of that database, for
+every workspace in it: deals, the lines of each card with their contact names, titles and amounts,
+units without their text, and receipts with the record references they returned and without their
+arguments. Such a reader passes no grant check, and its queries leave no receipt, because PostgreSQL
+answers them, not the connector. [The API](docs/api.md#read-only-sql) describes the views.
+
 The identity provider holds authority of its own. With `GTM_OIDC_ISSUER` set, its ID token decides who a
 person is. Whoever administers the provider can make an account in an allowed domain or tenant, or sign
 in as any of its people, and so read what the operator has granted that person. The provider grants
@@ -81,6 +88,8 @@ writes rows:
 | --- | --- |
 | `token new` and `mcp stdio` need nothing but the app role's URL. | `TestATokenFromTheCommandOpensMCP`, `TestStdioCommandCRMOnlyReadsCRMAndNeverWidens` (`cmd/gtm-connector`) |
 | The app role cannot disable a trigger, truncate, delete an account, drop or create a table, or change the record of migrations. `serve`, `demo` and every command that reads or connects a workspace open the database through one function, which refuses a role that owns the tables or is a superuser. | `TestTheAppRoleOnlyTouchesRows` (`storage/postgres`), `TestDemoRunsOnlyAsTheAppRole` (`cmd/gtm-connector`) |
+| The connector grants a database's reporting role the five `reporting` views of that database, and nothing on the connector's own tables or on another database's views: through the role, a `SELECT` on any table of the connector is refused. No view has a column named for a token, a lease, a password, a secret, a session, a credential, a call's arguments or request, a card's bytes, a unit's body or a binding. The role is made unable to log in. What PostgreSQL gives every role, such as the system catalogs, and whether a member login may connect to another database, are PostgreSQL's own privileges, which the connector does not change. | `TestTheReportingRoleReadsOnlyTheViews`, `TestEachDatabaseHasItsOwnReportingRole` (`storage/postgres`) |
+| A migration takes a role that already holds the reporting role's name only when it cannot log in, has no password, has no member, is a member of no role, and has none of the superuser, inherit, create-role, create-database, replication or bypass-row-security attributes. Any other stops the migration and makes nothing. The migration does not look at what such a role already owns or was granted, so do not reuse a role that holds anything. | `TestAReportingRoleThatCanDoMoreIsRefused` (`storage/postgres`) |
 | `serve` listens on a loopback address and refuses any other `GTM_LISTEN`. Only `GTM_CONTAINER_LISTEN`, set for a container's own network, takes another address. | `TestServeListensOnLoopbackOnly` (`cmd/gtm-connector`) |
 | `serve` speaks TLS 1.3 only, with the certificate `setup` wrote. | `TestServeSpeaksOnlyTLS13`, `TestServeAnswersMCPOverTLS` (`cmd/gtm-connector`) |
 | Outside `/mcp`, `serve` answers only the Hosts it is configured with, which also blocks DNS rebinding: any other Host gets 421, and another allowed Host is sent on to the public origin. `/mcp` admits the public origin's own Host alone (rule 3). | `TestWrongHostIsRefused`, `TestOtherAllowedHostsGoToThePublicOrigin` (`transport/http`), `TestOptionsStarMeetsTheHostCheck` (`cmd/gtm-connector`) |
@@ -223,6 +232,9 @@ own database.
 | With a selection, an unselected account is refused before any read, Slack is read only where the selection includes it, searches and lists hold selected accounts only, and the two brief tools are served. Without one, they are not. | `TestMountedSelectionLimitsAccounts` (`transport/mcp`), `TestStdioCommandWithASelection` (`cmd/gtm-connector`) |
 | A selection file is a regular file, not a symbolic link, that no one but its owner may write, at most 65,536 bytes, in one shape. An empty `--selection` is refused, never read as no selection. | `TestLoadSelection`, `TestServeSelectionFlag`, `TestMCPArgumentsNeedNoDatabase` (`cmd/gtm-connector`) |
 | A prepared brief checks the bearer again before each read inside it and once more before it publishes, counts each read against the bearer's rate, and goes by the scopes the bearer carries at each check. A bearer that expires before the last check leaves no brief. | `TestMountedReadsInsideABriefCheckTheBearerAgain`, `TestMountedABriefGoesByTheScopesTheBearerCarriesNow` (`transport/mcp`) |
+| The two deal tools read no source: a workspace whose CRM cannot be opened still lists its deals and gives their cards. `list_deals` holds the deals of the accounts the principal is granted, and with a selection only those of selected accounts. | `TestMountedDealToolsOpenNoSource`, `TestMountedDealCard` (`transport/mcp`) |
+| `read_deal_card` checks the principal's grant on the deal's account when it reads the deal and again when it reads the card, then the selection, the scopes of every source the card read, and the sources the workspace is bound to now. As the card is released it verifies the bearer and its scopes once more, so a bearer revoked or narrowed while the call runs gets no card. It does not check the grant again at release: a grant revoked after the card is read does not stop that one answer. | `TestMountedDealCard`, `TestMountedDealCardRefusals`, `TestMountedDealCardRereadsTheBearer`, `TestMountedDealCardFromOtherSources` (`transport/mcp`) |
+| An unknown deal, a deal of an account the principal is not granted, and a deal outside the selection get the same reply, which says nothing more of the deal. Each refusal has a receipt. The receipt names the deal's account when the deal exists, granted or not, and none for an unknown deal, so the audit log, unlike the reply, shows whether the deal exists. | `TestMountedDealCardRefusals`, `TestMountedDealCardReceiptNamesTheAccount` (`transport/mcp`) |
 | A card is published only if its principal still holds a grant on the card's own account, checked in the publication's transaction. | `TestPublicationRechecksTheGrant`, `TestPublicationRechecksTheCardsOwnGrant` (`storage/postgres`) |
 
 In the browser, a session reads a card, a unit or a receipt only through a grant on the card's account.
@@ -230,6 +242,8 @@ In the browser, a session reads a card, a unit or a receipt only through a grant
 | Claim | Test |
 | --- | --- |
 | Every evidence read needs a live session and a grant. A grant on one account opens no other, a revoked grant reads nothing, and an ID that does not exist is refused like one not granted. | `TestEvidenceReadsNeedAGrant`, `TestAGrantOnOneAccountOpensNoOtherOverHTTP` (`transport/http`), `TestGrantsGuardEveryUnitAndReceiptRead` (`authz`), `TestRefusalsAreUniform` (`storage/postgres`) |
+| The deal routes read through the same grants. The deal list holds the deals of the granted accounts only, a deal of another account answers 403 as an unknown one does, and registering a deal for an account without a grant is refused under the read's receipt, with nothing read. After a grant is revoked, the list leaves the account's deals out and a read of one answers 403. | `TestDealRoutesKeepTheGrants` (`cmd/gtm-connector`) |
+| The match routes read through the same grants. The queue holds the matches of the granted accounts only. A decision needs the CSRF token and the public origin. A decision that reaches the store leaves a `decide_match` receipt, kept or refused: a person with no grant on the match's account is refused 403 as for an unknown match, in the same words, and each such refusal has its receipt. A body that is not one of the two documented objects is refused 400 before any receipt. A decision sent after the grant was revoked is refused 403. | `TestMatchRoutesKeepTheGrants` (`cmd/gtm-connector`) |
 | No answer under the API, MCP, discovery or health paths may be kept by a browser or a proxy: not the session, a card, its bytes, a unit or a receipt. | `TestNoAPIResponseIsKept`, `TestNoSignedInResponseIsKept` (`transport/http`) |
 
 ## 3. A bad or expired token is refused, never retried
@@ -299,6 +313,10 @@ show source text as it is stored, for checking a seal or tracing a read.
 | `GET /api/v1/receipts/{receipt}`, and the receipt in `GET /api/v1/cards/{card}/units/{n}` | Diagnostic: a receipt's arguments and request ID as stored | A session with a grant on the receipt's account | `TestEvidenceReadsNeedAGrant` (`transport/http`) |
 | `audit --json` | Diagnostic: every receipt's arguments and request ID as stored, written in ASCII with escapes | The app role's URL | `TestAuditFilters` (`cmd/gtm-connector`) |
 | `debug calls inspect --full` | Diagnostic: the original transcript, quoted in text and escaped in JSON | The app role's URL | `TestOnlyFullInspectionShowsTextOutsideTheExcerpt` (`storage/postgres`), `TestFormatCharactersAreEscapedInJSON` (`cmd/gtm-connector`) |
+| `list_deals` | Each deal's record, with its account name neutralized and its newest card's ID and time. No card. Marked `untrusted_data: true`. | A token with `crm:read` and a grant on the deal's account, within the selection when one is served | `TestMountedDealCard` (`transport/mcp`) |
+| `read_deal_card` | The deal's record and its newest card: the text and the units as `inspect` shows them, which is as sealed for a card of today's rules and rendered again for a card that holds a unit sealed under older ones, and the lines and gaps as saved. Marked `untrusted_data: true`. | A token with `crm:read` and the scopes of every source the card read, a grant on the deal's account, and with a selection the account, and its Slack when the card read Slack | `TestMountedDealCard`, `TestMountedDealCardRefusals` (`transport/mcp`), for a card of today's rules |
+| `GET /v1/deals`, `GET /v1/deals/{id}`, `GET /v1/matches` | Each deal's and match's account name neutralized, and for one deal its newest card as `GET /api/v1/cards/{card}` gives it, with the matches that card read. No source scope or selection applies in the browser. | A session with a grant on the account | `TestDealRoutesKeepTheGrants`, `TestMatchRoutesKeepTheGrants` (`cmd/gtm-connector`), for who can reach them |
+| The `reporting` views | Export: what a sealed card already prints of a source, as a line's text, label and contact, and each receipt's record references. No unit's body, no card's bytes, no call's arguments. | A login role granted the database's reporting role | `TestTheReportingRoleReadsOnlyTheViews` (`storage/postgres`) |
 | The five direct MCP reads | Data for the client: each record as its source adapter returned it, marked `untrusted_data: true` (see the [limits](#known-limits)) | A token with the tool's scope and a grant on the account | `TestMountedDirectReadsReturnTheRecordsAsTheSourceGaveThem` (`transport/mcp`), `TestOneRequestAndTheMessagesAsGiven` (`sources/slack`) |
 | A backup | Export: every row and the credential files `setup` makes | Whoever can read the file | `TestABackupRestoresEveryRow` (`storage/postgres`), `TestBackupAndRestoreKeepState` (`cmd/gtm-connector`) |
 
@@ -378,6 +396,15 @@ its SHA-256.**
   a transaction left idle, not a dead peer found by its probes. It runs against a database without TLS.
 - `compose.yaml` publishes the server's and PostgreSQL's ports on the host's loopback only. No test
   reads the Compose file.
+- `read_deal_card` renders a card that holds a unit sealed under older neutralizer rules again, with
+  the functions `inspect` and the brief tools use. Those functions are tested; no test publishes such a
+  card and reads it through the deal tool.
+- A deal's and a match's account name is neutralized in `list_deals`, `read_deal_card` and the deal
+  and match routes. The code neutralizes it in each; no test sends a hostile name through them.
+- A decision of a match checks the grant again as it commits. The test revokes the grant before the
+  decision is sent, not while it commits.
+- The reporting views' column names are checked against a list of words. No test scans the values a
+  view returns.
 
 ## Known limits
 
@@ -401,6 +428,9 @@ its SHA-256.**
   account a command has recorded in a workspace of real sources. There is no limit for one token
   alone: a token limited to a selection is refused. Accounts narrow only when a grant of the principal
   is revoked, for all its tokens, or when a server runs with a selection, for all its clients.
+- **A reporting query has no grant and no receipt.** The reporting role reads every workspace of its
+  database, and PostgreSQL answers it, so the audit log holds nothing of what it read. Whoever is
+  granted the role reads as the operator does, within the views.
 - **The direct MCP reads return records unneutralized.** `search_accounts`, `get_account`,
   `list_opportunities`, `read_call_notes` and `read_slack_messages` return the source adapters'
   records, with their text not neutralized. The result carries `untrusted_data: true` in its
@@ -441,11 +471,15 @@ None. Each finding of the earlier review is a claim above, with its test.
 
 ## Not verified
 
-No live org has been verified. Every test runs against an invented Salesforce org, an invented `sf`
-and an invented Slack, with a local PostgreSQL.
+No automated test contacts a live source. The tests that read Salesforce or Slack run against an
+invented org, an invented `sf` and an invented Slack, and the tests that need a database use a local
+PostgreSQL. By hand, outside the tests and with no record of it in this repository, one development
+Salesforce org was read, read-only, and one development Slack workspace was signed in to and read,
+both on invented records, on 2026-11-21.
 
 - Sandbox and production Salesforce behaviour has only invented answers behind it.
-- No Slack workspace or Slack app has been signed in to.
+- No automated test signs in to a live Slack workspace. The sign-in has run by hand against one
+  development workspace and one app.
 - No real identity provider has been signed in to. Every sign-in runs against an invented provider, so
   the claims a real provider sends, such as `email_verified`, `hd` and `tid`, have only invented values
   behind them.
