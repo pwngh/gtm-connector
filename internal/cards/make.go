@@ -221,9 +221,10 @@ func (m *Maker) replayed(ctx context.Context, r reading) (records []any, bound [
 		return records, bound, nil, "ok", nil
 	case started.Error != nil && *started.Error == "request_failed" && *started.HTTPStatus == 403:
 		return nil, nil, nil, "denied", nil
-	case started.Error != nil && *started.Error == "request_failed" && *started.HTTPStatus == 200:
-		return nil, nil, nil, "not_selected", nil
 	}
+	// A read that failed and a read with no selection finish with the same receipt, error/200. A replay
+	// cannot tell them apart, so it makes no card: a card saying that nothing was selected would be false
+	// after a failed read. The command runs again under a new operation.
 	return nil, nil, nil, "", fmt.Errorf("%s: %w", r.tool, ErrBriefing)
 }
 
@@ -246,7 +247,8 @@ func (m *Maker) source(ctx context.Context, tool, accountID string) (system stri
 	}
 	records, thread, err := threads.ReadThread(ctx, accountID)
 	if thread != nil {
-		snapshot = thread
+		// The maker keeps its own copy, so the source cannot change the snapshot after it is checked.
+		snapshot = strictjson.Clone(thread)
 	}
 	return "slack", records, snapshot, err
 }
@@ -575,6 +577,12 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 	}
 	id := briefID(m.newID())
 	includeSlack := p.Selection[accountID] && m.Sources.SlackBackend != "none"
+	if includeSlack && m.Sources.SlackBackend == "slack" {
+		// A prepared card that holds live Slack text records the scopes of the Slack credential that read
+		// it, and a later release is checked against them. No reader reports those scopes yet, so a
+		// prepared card with live Slack is refused rather than sealed without them.
+		return fail(ErrBriefing)
+	}
 	c, err := m.collect(ctx, plan(m.Sources, includeSlack), accountID, principal, deadline, includeSlack,
 		func(n int, read planned) (receipts.Receipt, error) {
 			return m.Receipts.StartChild(ctx, receipts.ChildStart{Parent: outer.AuditID, Ordinal: n, Tool: read.tool,

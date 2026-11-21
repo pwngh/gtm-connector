@@ -290,6 +290,8 @@ func number(v any) (*big.Float, bool) {
 		return big.NewFloat(0), true
 	case int:
 		return new(big.Float).SetInt64(int64(v)), true
+	case int64:
+		return new(big.Float).SetInt64(v), true
 	case *big.Int:
 		return new(big.Float).SetInt(v), true
 	case float64:
