@@ -49,8 +49,8 @@ will connect your sources again, import your transcripts again, map your Slack t
 set your seller lists and selection files again. You will also set up your assistant apps again,
 because their saved entries start the Python package.
 
-The web app the binary serves shows Evidence and Readiness after sign-in and nothing else: it
-downloads, runs and stores nothing of the walkthrough, which loads only from a static host.
+The web app the binary serves shows Evidence and Readiness after sign-in and nothing else. Served
+from a static host, it says only that it needs its server.
 Real cards will be read with the CLI and the MCP tools.
 
 No live org has been verified. v0.1.0 does not wait for one.
