@@ -458,7 +458,7 @@ func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, 
 		}
 		if opened, checked := m.Generations[p.system]; checked && !started.Replay && started.Generation != opened {
 			// The receipt started under a generation the source was not opened under, so the source is not read.
-			_, finishErr := m.Receipts.Finish(context.WithoutCancel(ctx), started.Ticket(), receipts.Failed(409, "source_changed"))
+			finishErr := m.finish(ctx, started.Ticket(), receipts.Failed(409, "source_changed"))
 			return c, errors.Join(fmt.Errorf("%s: %w", p.tool, receipts.ErrSourceChanged), finishErr)
 		}
 		c.ids = append(c.ids, started.AuditID)

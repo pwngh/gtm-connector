@@ -128,6 +128,26 @@ func TestASettlingStepPastTheLimitIsGivenUp(t *testing.T) {
 	}
 }
 
+// A read whose receipt starts under another generation than its source was opened under is finished as
+// source_changed within the limit too: a store that does not finish it does not hold the maker.
+func TestASourceChangedReceiptPastTheLimitIsGivenUp(t *testing.T) {
+	for name, fresh := range worlds(t) {
+		for kind, run := range makes {
+			t.Run(name+"/"+kind, func(t *testing.T) {
+				w := fresh(t)
+				store := &stalled{watched: &watched{Store: w.store}, finish: true}
+				m := w.maker(t, store, demoBook(t))
+				m.Generations = map[string]int64{"crm": 999}
+				m.limit = short
+				sealed, err := within(t, func() (*Sealed, error) { return run(context.Background(), m, w, "changed") })
+				if sealed != nil || !errors.Is(err, receipts.ErrSourceChanged) || !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("a card: %t; %v", sealed != nil, err)
+				}
+			})
+		}
+	}
+}
+
 // session opens another connection to the world's PostgreSQL database, closed when the test ends.
 func (w *world) session(t *testing.T) *pgx.Conn {
 	t.Helper()
