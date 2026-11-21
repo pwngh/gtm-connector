@@ -27,13 +27,15 @@ type Refusal struct {
 
 // Refusals is request_checks.REFUSALS.
 var Refusals = map[string]Refusal{
-	"request_too_large":            {413, -32600},
-	"invalid_json":                 {400, -32700},
-	"unsupported_media_type":       {415, -32600},
-	"call_id_required":             {400, -32600},
-	"method_not_found":             {404, -32601},
-	"untrusted_origin_or_host":     {403, 1003},
-	"invalid_token":                {401, 1001},
+	"request_too_large":        {413, -32600},
+	"invalid_json":             {400, -32700},
+	"unsupported_media_type":   {415, -32600},
+	"call_id_required":         {400, -32600},
+	"method_not_found":         {404, -32601},
+	"untrusted_origin_or_host": {403, 1003},
+	"invalid_token":            {401, 1001},
+	// Not one of request_checks.REFUSALS: the Go gate refuses a request that repeats its own credential.
+	"credential_in_request":        {400, -32600},
 	"rate_limited":                 {429, 1002},
 	"insufficient_scope":           {403, 1004},
 	"crm_write_disabled":           {403, 1005},
@@ -48,6 +50,9 @@ type Token struct {
 	Scopes    []string
 	ExpiresAt *float64 // seconds since the epoch; nil means the token never states an expiry and is refused
 	Resource  string
+	// Principal is who holds the token, as the verifier knows them. The gate decides nothing by it and hands
+	// it to the tool with the admitted call.
+	Principal string
 }
 
 // Window is one credential's rate window: its start on the rate clock and the attempts counted in it.
@@ -140,17 +145,14 @@ func CheckRequest(request RequestFacts, policy Policy, windows Windows, definiti
 	if !ok || parsed == nil {
 		return refuse(nil, "invalid_json", "expected one valid JSON-RPC object", nil)
 	}
-	resource, err := url.Parse(policy.Resource)
-	_, hasOrigin := request.Headers["origin"]
-	if request.Scheme != "https" || hasOrigin || request.HeaderCounts["host"] != 1 || err != nil ||
-		request.Headers["host"] != resource.Host {
+	if !TrustedHost(request.Scheme, request.Headers, request.HeaderCounts, policy) {
 		return refuse(nil, "untrusted_origin_or_host", "untrusted origin or host", nil)
 	}
 	raw := request.RawToken
 	if request.HeaderCounts["authorization"] != 1 {
 		raw = ""
 	}
-	if raw == "" || token == nil || token.ExpiresAt == nil || *token.ExpiresAt <= wallTime || token.Resource != policy.Resource {
+	if raw == "" || !validToken(token, policy, wallTime) {
 		return refuse(nil, "invalid_token", "invalid or expired access token", map[string]string{
 			"WWW-Authenticate": fmt.Sprintf(`Bearer error="invalid_token", resource_metadata="%s"`, policy.MetadataURL),
 		})
@@ -208,6 +210,29 @@ func CheckRequest(request RequestFacts, policy Policy, windows Windows, definiti
 		return refuse(updated, "method_not_found", "Method not found", nil)
 	}
 	return Decision{Windows: updated}
+}
+
+// TrustedHost reports whether a request came over TLS, with no Origin header, for exactly the resource's own
+// Host, named once. Header names are lowercase.
+func TrustedHost(scheme string, headers map[string]string, counts map[string]int, policy Policy) bool {
+	resource, err := url.Parse(policy.Resource)
+	_, hasOrigin := headers["origin"]
+	return scheme == "https" && !hasOrigin && counts["host"] == 1 && err == nil && headers["host"] == resource.Host
+}
+
+// validToken reports whether a verified token admits anything now: it states an expiry that has not come,
+// it was issued for this resource, and every scope it carries is a read scope, as auth.verify_token_now
+// requires. A token with a scope outside that set is refused whole, never trimmed to the scopes that are.
+func validToken(token *Token, policy Policy, wallTime float64) bool {
+	if token == nil || token.ExpiresAt == nil || *token.ExpiresAt <= wallTime || token.Resource != policy.Resource {
+		return false
+	}
+	for _, scope := range token.Scopes {
+		if !slices.Contains(ReadScopes, scope) {
+			return false
+		}
+	}
+	return true
 }
 
 // isRequestID reports whether a strictjson value is a JSON-RPC id Python accepts: an integer or a string,

@@ -202,8 +202,9 @@ func TestStdioUnparsableCallKeepsAReceipt(t *testing.T) {
 	}
 }
 
-// A line nested past strictjson.MaxDepth is refused as invalid JSON, however long it is. No parser reads
-// it, so nothing says it is a call: it runs nothing and leaves no receipt, and the next line is served.
+// A line nested past strictjson.MaxDepth is refused as invalid JSON, however long it is, and runs nothing.
+// No parser reads it. A tool call among such lines is found without descending and keeps its receipt, under
+// its own tool's name; a line that is no call leaves none. The next line is served.
 func TestStdioLineNestedPastTheLimitIsInvalidJSON(t *testing.T) {
 	h := newStdio(t, []string{"crm:read"}, nil)
 	h.send(legacyStart, legacyReady)
@@ -216,8 +217,10 @@ func TestStdioLineNestedPastTheLimitIsInvalidJSON(t *testing.T) {
 			t.Fatalf("%.200v", refused)
 		}
 	}
-	if len(h.fx.ran()) != 0 || len(h.receipts.Read()) != 0 {
-		t.Fatalf("ran %v receipts %d", h.fx.ran(), len(h.receipts.Read()))
+	rows := h.receipts.Read()
+	if len(h.fx.ran()) != 0 || len(rows) != 1 || rows[0].Tool != "get_account" || rows[0].Status != "error" ||
+		*rows[0].HTTPStatus != 400 || path(rows[0].Arguments, "unparsed_sha256") == nil {
+		t.Fatalf("ran %v receipts %+v", h.fx.ran(), rows)
 	}
 	h.send(call(3, "get_account", `{"account_id":"acc-001"}`))
 	if served := h.answer(3); path(served, "result", "isError") != false {

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/authz"
+	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	httptransport "github.com/pwngh/gtm-connector/internal/transport/http"
 	"github.com/pwngh/gtm-connector/web"
@@ -58,10 +59,11 @@ func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 
 // serve runs the HTTPS server as the app role. It refuses to start before
 // setup has run, while a restore is unfinished, or as a role that owns the
-// tables.
+// tables. With --selection it reads the selection file first, before the
+// database or any credential, and never reads it again.
 func serve(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
-	if err := flags.Parse(args); err != nil {
+	selection, err := serveSelection(args)
+	if err != nil {
 		return err
 	}
 	c, err := loadConfig()
@@ -84,13 +86,7 @@ func serve(ctx context.Context, args []string) error {
 		return err
 	}
 	app := web.App()
-	surface, err := httptransport.New(httptransport.Config{
-		PublicOrigin: c.publicOrigin,
-		AllowedHosts: c.allowedHosts,
-		Web:          app,
-		WebDir:       c.webDir,
-		SessionKey:   key,
-	}, store, authz.Evidence{Store: store})
+	surface, err := newSurface(ctx, store, c, key, selection)
 	if err != nil {
 		return err
 	}
@@ -113,7 +109,7 @@ func serve(ctx context.Context, args []string) error {
 		from = "none (API only)"
 	}
 	logger.Info("serving", "origin", c.publicOrigin, "listen", c.listen, "web", from,
-		"credentials", c.credentialsDir)
+		"mcp", c.publicOrigin+"/mcp", "selected_accounts", len(selection), "credentials", c.credentialsDir)
 	select {
 	case err := <-served:
 		return err
@@ -123,6 +119,50 @@ func serve(ctx context.Context, args []string) error {
 	defer cancel()
 	logger.Info("stopping")
 	return server.Shutdown(shutdown)
+}
+
+// serveSelection reads serve's command line: the selection it was given, or nil when it was given none. A
+// --selection with no file name is refused, never read as "no selection", which would serve every account.
+func serveSelection(args []string) (cards.Selection, error) {
+	flags, file := serveFlags()
+	if err := flags.Parse(args); err != nil {
+		return nil, err
+	}
+	given := false
+	flags.Visit(func(f *flag.Flag) { given = given || f.Name == "selection" })
+	switch {
+	case flags.NArg() > 0:
+		return nil, fmt.Errorf("serve takes no argument but --selection FILE, not %q", flags.Arg(0))
+	case !given:
+		return nil, nil
+	case *file == "":
+		return nil, errors.New("--selection needs the name of a selection file; an empty name is not \"no selection\"")
+	}
+	return loadSelection(*file)
+}
+
+// serveFlags are serve's flags.
+func serveFlags() (*flag.FlagSet, *string) {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	return flags, flags.String("selection", "", "a selection `file`: MCP clients read only its accounts, and get the "+
+		"two brief tools. It is read once, at start: restart serve to change the selection")
+}
+
+// newSurface is everything serve answers: the browser surface, with the
+// MCP gateway mounted at /mcp.
+func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey []byte, selection cards.Selection) (*httptransport.Server, error) {
+	gateway, err := mcpGateway(ctx, store, c.publicOrigin, selection)
+	if err != nil {
+		return nil, err
+	}
+	return httptransport.New(httptransport.Config{
+		PublicOrigin: c.publicOrigin,
+		AllowedHosts: c.allowedHosts,
+		Web:          web.App(),
+		WebDir:       c.webDir,
+		SessionKey:   sessionKey,
+		MCP:          gateway,
+	}, store, authz.Evidence{Store: store})
 }
 
 // serving reads the TLS pair and the session key.

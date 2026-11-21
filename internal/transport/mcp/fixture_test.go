@@ -140,7 +140,8 @@ func (f *fixture) activityCount() int {
 }
 
 // fixtureTokens is tests/test_gateway.py's FixtureAuthority: seven bearers, one expired, one for another
-// audience. Verification of an unknown or malformed value returns nil.
+// audience, and "read", a grant of every read scope. "write" and "full" carry crm:write, as the Python
+// fixture issues them, so the gate refuses both whole. Verification of an unknown or malformed value returns nil.
 const (
 	testResource = "https://127.0.0.1:8765/mcp"
 	testIssuer   = "https://127.0.0.1:8766"
@@ -153,8 +154,10 @@ func tokenValue(name string) string { return "fixture-only-" + name + "-bearer-v
 func fixtureTokens(wall float64) map[string]*Token {
 	scopes := map[string][]string{
 		"crm": {"crm:read"}, "calls": {"calls:read"}, "slack": {"slack:read"}, "write": {"crm:write"},
-		"full":    {"crm:read", "calls:read", "slack:read", "crm:write"},
-		"expired": {"crm:read", "calls:read", "crm:write"}, "wrong_audience": {"crm:read", "calls:read", "crm:write"},
+		"full": {"crm:read", "calls:read", "slack:read", "crm:write"},
+		"read": {"crm:read", "calls:read", "slack:read"},
+		// Read scopes only, so the expiry and the audience are all that refuse these two.
+		"expired": {"crm:read", "calls:read"}, "wrong_audience": {"crm:read", "calls:read"},
 	}
 	tokens := map[string]*Token{}
 	for name, granted := range scopes {
