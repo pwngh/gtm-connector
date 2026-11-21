@@ -38,7 +38,9 @@ func (noSessions) RevokeSession(context.Context, []byte) error { return errors.N
 func (noSessions) DemoPrincipalByLogin(context.Context, string) (postgres.Principal, []byte, error) {
 	return postgres.Principal{}, nil, postgres.ErrNotFound
 }
-func (noSessions) MigrationsCurrent(context.Context) (bool, error) { return true, nil }
+func (noSessions) MigrationState(context.Context) (postgres.MigrationState, error) {
+	return postgres.MigrationsCurrent, nil
+}
 
 var testKey = []byte("0123456789abcdef0123456789abcdef")
 

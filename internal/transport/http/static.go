@@ -3,6 +3,7 @@ package httptransport
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -73,21 +74,35 @@ var contentTypes = map[string]string{
 // reserved paths have their own handlers, or none; they never get the app.
 var reserved = []string{"/api", "/mcp", "/.well-known", "/healthz"}
 
+// underReserved reports whether a path is a reserved prefix or below one.
+func underReserved(p string) bool {
+	for _, prefix := range reserved {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // serveApp serves a file of the web app's build, or index.html for a client
 // route. Only "/" and the client route prefixes fall back to index.html; a
 // path with a file extension, anything under /assets/, and any reserved
 // prefix (routed elsewhere) never does.
+//
+// A browser keeps a file under assets/ for a year without asking again: the
+// build names each by its content's hash. It asks about index.html, and so
+// about every client route, on each use: the page names the build's assets,
+// so it is served as no-cache with an ETag of its bytes, and a request whose
+// If-None-Match names them gets 304.
 func (s *Server) serveApp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET.")
 		return
 	}
 	clean := path.Clean("/" + r.URL.Path)
-	for _, prefix := range reserved {
-		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
-			writeError(w, http.StatusNotFound, "not_found", "Not found.")
-			return
-		}
+	if underReserved(clean) {
+		writeError(w, http.StatusNotFound, "not_found", "Not found.")
+		return
 	}
 	if s.web == nil {
 		http.Error(w, "The web app is not built.", http.StatusNotFound)
@@ -107,8 +122,8 @@ func (s *Server) serveApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Not found.", http.StatusNotFound)
 		return
 	}
-	w.Header().Set("Cache-Control", "no-cache")
 	if !s.serveFile(w, r, "index.html") {
+		w.Header().Set("Cache-Control", "no-cache")
 		http.Error(w, "The web app is not built.", http.StatusNotFound)
 	}
 }
@@ -145,9 +160,22 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) 
 		w.Header().Set("Content-Disposition", "attachment")
 	}
 	w.Header().Set("Content-Type", kind)
-	if strings.HasPrefix(name, "assets/") {
+	switch {
+	case strings.HasPrefix(name, "assets/"):
 		// Vite names assets by their content's hash.
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	case name == "index.html":
+		// The tag is read from the file on each request, so a folder that is
+		// built again gives a new one. ServeContent answers If-None-Match.
+		digest := sha256.New()
+		if _, err := io.Copy(digest, content); err != nil {
+			return false
+		}
+		if _, err := content.Seek(0, io.SeekStart); err != nil {
+			return false
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("ETag", `"`+hex.EncodeToString(digest.Sum(nil))+`"`)
 	}
 	http.ServeContent(w, r, info.Name(), info.ModTime(), content)
 	return true

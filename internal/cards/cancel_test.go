@@ -65,15 +65,22 @@ func (w *watched) Publish(ctx context.Context, p receipts.Publication) (receipts
 	return w.Store.Publish(ctx, p)
 }
 
-// stopped checks a card that stopped at its read of call notes, the third: the read returned, its receipt
+// stopped checks a card that stopped at its read of call notes, the third: the read returns, its receipt
 // finished as an error with this HTTP status and no rows, Slack was never read, and nothing was published.
+// The maker does not wait for a read once its context has ended, so the read may return a moment after it.
 func (w *world) stopped(t *testing.T, store *watched, source *blocking, readOperation string, status int) {
 	t.Helper()
 	select {
 	case <-source.returned:
-	default:
+	case <-time.After(5 * time.Second):
 		t.Fatal("the read has not returned")
 	}
+	w.stoppedAt(t, store, readOperation, status)
+}
+
+// stoppedAt checks the receipts and the store of a card that stopped at its read of call notes.
+func (w *world) stoppedAt(t *testing.T, store *watched, readOperation string, status int) {
+	t.Helper()
 	read, err := w.store.ByOperation(context.Background(), w.workspace, readOperation)
 	if err != nil {
 		t.Fatal(err)
