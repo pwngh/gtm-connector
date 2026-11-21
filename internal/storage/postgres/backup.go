@@ -56,6 +56,9 @@ var backupTables = []struct {
 	{"admitted_cards", "workspace_id, brief_id", "admitted_python_cards"},
 	{"deals", "workspace_id, ref", "deals"},
 	{"deal_cards", "card_id", "deals"},
+	// A decision is restored after the one it supersedes.
+	{"deal_matches", "decided_at, id", "deal_matches"},
+	{"deal_card_matches", "card_id, match_id", "deal_matches"},
 }
 
 // TableCopy describes one table in a backup.

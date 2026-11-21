@@ -11,7 +11,7 @@ gtm deal thornfield-2027-2e3hke
 ```
 
 > **What the binary serves today.** The `/api/v1` routes under
-> [the server today](#the-server-today), the three [deal routes](#deal-routes) marked as served,
+> [the server today](#the-server-today), the [deal routes](#deal-routes) and [matches](#matches) marked as served,
 > MCP at `/mcp` ([MCP](mcp.md)), `/healthz` ([running it](operations.md#health)) and the
 > [read-only SQL](#read-only-sql) views. A deal binds the CRM's IDs only. The other deal routes,
 > pushing your own data, and sending webhooks and Slack alerts are the design, and the
@@ -65,8 +65,11 @@ account: `thornfield-2027-2e3hke` for Thornfield Wren LLP (`acc-003`), renewing 
 An account has one open deal at a time. While it has one, every card `brief` makes for the account
 belongs to that deal, and `GET /v1/deals/{id}` returns the newest. The deal is found when the card is
 published, in the same transaction, so a deal registered while `brief` reads the account still gets
-the card. With none, `brief` makes the account's own card, which belongs to no deal. A card's bytes
-are the same either way: a deal is a binding around cards, not a new card format. A closed deal keeps
+the card, unless the card read an imported call or a mapped thread for no deal or for another one: then
+it is not published, and `brief` says to run it again. With none, `brief` makes the account's own card,
+which belongs to no deal. A deal is a binding around cards, not a new card format: a deal's card reads
+the account's call and thread only when they are [matched](#matches) to the deal, and is otherwise
+the card the account would get. A closed deal keeps
 its cards, and is never opened again or deleted. The database refuses a card bound to a deal it was
 not published during, and a restore checks the same.
 
@@ -79,7 +82,8 @@ not published during, and a restore checks the same.
 | `GET /v1/deals/{id}` | Returns the current card as JSON, with what changed | Served, without what changed |
 | `POST /v1/deals/{id}/refresh` | Reads every source of the deal again, on demand | Not built |
 | `GET /v1/deals/{id}/proof/{line}` | Returns the record or sentence behind one line, and its receipt | Not built |
-| `GET /v1/matches` | Lists the matches waiting for a person, when the queue is on | Not built |
+| `GET /v1/matches` | Lists the matches waiting for a person ([matches](#matches)) | Served |
+| `POST /v1/matches/{id}` | Decides one match: onto one deal of its account, or onto none | Served |
 | `POST /v1/deals/{id}/sources` | Pushes records or messages from your own system | Not built |
 
 The routes are described in an OpenAPI file served with the API. That file is not built yet.
@@ -97,7 +101,7 @@ leaves it out.
 | --- | --- |
 | `GET /v1/deals` | `{"deals": [DEAL, ...]}`, the open deals first, each group by ID |
 | `POST /v1/deals` with `{"account": "acc-003"}` | `201` and `{"deal": DEAL}` |
-| `GET /v1/deals/{id}` | `{"deal": DEAL, "card": CARD}`. `CARD` is the deal's newest card exactly as `GET /api/v1/cards/{card}` gives it, or `null` before `brief` has made one. |
+| `GET /v1/deals/{id}` | `{"deal": DEAL, "card": CARD, "matches": [MATCH, ...]}`. `CARD` is the deal's newest card exactly as `GET /api/v1/cards/{card}` gives it, or `null` before `brief` has made one. `matches` are the matches of the calls and threads that card read. |
 
 ```json
 {"id": "thornfield-2027-2e3hke", "account": "acc-003", "account_name": "Thornfield Wren LLP",
@@ -126,6 +130,47 @@ and the answer is `403 not_permitted`. With no CRM connected the answer is
 | `409 crm_not_connected` | The workspace has no CRM the server can read; nothing was read or written |
 | `409 source_changed` | The CRM was connected again while it was read |
 | `502 source_failed` | The CRM read failed, or did not return the account; its receipt says why |
+
+## Matches
+
+A match says which deal of its account an imported call or a mapped Slack thread belongs to. [Setting
+it up](config.md#what-is-built-today) gives the rule. The connector decides each one once, and a person
+may decide it again; each decision is a new match that supersedes the one before, under its own
+`decide_match` receipt.
+
+```json
+{"id": "MATCH_ID", "kind": "call", "item": "note-...", "account": "acc-007", "account_name": "...",
+ "at": null, "candidates": ["copper-2027-xxxxxx", "copper-2027-xxxxxx-2"], "state": "waiting",
+ "deal": null, "basis": "time_unknown", "decided_by": null, "decided_at": "...", "supersedes": null,
+ "receipt": "RECEIPT_ID", "superseded": false, "stale": false}
+```
+
+| Field | What it holds |
+| --- | --- |
+| `kind`, `item` | `call` and the import ID (`debug calls inspect` shows it), or `thread` and the mapping's ID |
+| `at` | The call's time, or the time of the thread's parent message; `null` for a call with none |
+| `candidates` | The deals of the account that hold that time, oldest first |
+| `state` | `matched` to `deal`, `waiting` for a person, or `rejected`, which keeps it off every card |
+| `basis` | `only_deal` (the account has had one deal), `within_deal` (the time is that deal's), `time_unknown` (it fits more than one deal), or `person` |
+| `decided_by` | The principal who decided, or `null` for the connector or the owner |
+| `supersedes` | The match this decision replaced, or `null` |
+| `receipt` | The `decide_match` receipt of the decision, which `GET /api/v1/receipts/{receipt}` serves |
+| `superseded` | Whether a later decision of the item replaced this one, as a deal's card can show for a match it read |
+| `stale` | Whether the item is no longer the account's current import or mapping, so no card reads it |
+
+`GET /v1/matches` gives `{"matches": [MATCH, ...]}`: the current matches that wait, and are not stale,
+oldest first, of the accounts the person holds a live grant on. `GET /v1/matches?all=1` gives every
+current decision of those accounts, stale ones included, so a wrong one can be found and decided again. `POST /v1/matches/{id}` takes `{"decision": "match", "deal":
+"DEAL_ID"}` or `{"decision": "reject"}` and answers `200` with `{"match": MATCH}`, the new decision. The
+grant is checked again as the decision commits. Both routes take what the deal routes take: the session
+cookie, an allowed Host, and for the write the CSRF token and the public origin; no answer is cached.
+
+| Refusal | When |
+| --- | --- |
+| `400 invalid_json` | The body is not one of the two objects above |
+| `400 invalid_deal` | The deal is not one of the match's account |
+| `403 not_permitted` | The match is unknown, or of an account the person holds no live grant on. Either way the refusal has a `decide_match` receipt, refused as error/403, that names no account. |
+| `409 match_decided` | A later decision has superseded this match, or did so while this one was made; decide the current one |
 
 ## The server today
 
@@ -190,7 +235,7 @@ an idempotency key and gets a receipt.
 1. A push with a new key is staged.
 2. A repeat with the same key and the same content returns the same result.
 3. A repeat with the same key and different content is refused.
-4. A staged record joins its deal at once. It waits for a person only when the matches queue is on.
+4. A staged record joins its deal at once. It waits for a person when it fits more than one deal.
 
 To take a record back, push a retraction. Later cards stop citing it, and its history stays.
 

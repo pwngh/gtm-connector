@@ -205,6 +205,9 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 	case errors.Is(err, receipts.ErrSourceChanged):
 		return &failure{code: 3, message: "A source of this workspace was connected again while it was read; " +
 			"nothing was published. Run the command again."}
+	case errors.Is(err, postgres.ErrDealChanged):
+		return &failure{code: 3, message: "The account's deal, or the match of its call or thread, changed while " +
+			"it was read; nothing was published. Run the command again."}
 	case errors.Is(err, postgres.ErrDealOpen):
 		return &failure{code: 3, next: "gtm-connector deal list" + r.here(), message: "This account already has " +
 			"an open deal. An account has one open deal at a time; close it first with gtm-connector deal close ID."}
@@ -308,9 +311,19 @@ func (r *run) brief(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	// The card belongs to the deal open for the account when it is published, found in its publication. A
-	// card of an account with none is the account's own.
+	// card of an account with none is the account's own. The account's calls and threads are matched first,
+	// and the card reads only those matched to the deal open now.
+	from.gate = &matchGate{store: r.store, workspace: r.workspace.ID}
+	if deal, open, err := r.store.OpenDeal(ctx, r.workspace.ID, account); err != nil {
+		return nil, err
+	} else if open {
+		if _, err := r.store.MatchAccount(ctx, r.workspace.ID, account); err != nil {
+			return nil, err
+		}
+		from.gate.read.Ref = deal.Ref
+	}
 	maker := from.maker()
-	maker.Receipts = &postgres.ReceiptStore{Store: r.store, OpenDeal: true}
+	maker.Receipts = &postgres.ReceiptStore{Store: r.store, OpenDeal: &from.gate.read}
 	sealed, err := maker.Brief(ctx, cards.Brief{
 		Principal: cards.Principal{WorkspaceID: r.workspace.ID, TokenID: receipts.Fingerprint(randomToken()),
 			Scopes: scopes},

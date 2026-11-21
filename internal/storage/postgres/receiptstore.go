@@ -26,9 +26,9 @@ type ReceiptStore struct {
 	// Lease is how long a started receipt's holder has to finish it before
 	// AbandonExpired may take it over. Zero is five minutes.
 	Lease time.Duration
-	// OpenDeal binds every card this store publishes to its account's open deal, when it has one, in the
-	// card's own publication.
-	OpenDeal bool
+	// OpenDeal, when set, binds every card this store publishes to its account's open deal, when it has
+	// one, in the card's own publication, with the matches of the calls and threads the card read.
+	OpenDeal *CardDeal
 }
 
 var _ receipts.Store = (*ReceiptStore)(nil)
@@ -184,8 +184,8 @@ func (rs *ReceiptStore) Publish(ctx context.Context, p receipts.Publication) (re
 		SchemaVersion: p.SchemaVersion, RulesVersion: rules, Bytes: p.Bytes, Units: units, Gaps: gaps, Lines: lines,
 		ReadReceiptIDs: p.Reads, ElapsedMS: p.ElapsedMS},
 		func(tx pgx.Tx, card Card, seal Receipt) error {
-			if rs.OpenDeal {
-				if err := bindOpenDeal(ctx, tx, card); err != nil {
+			if rs.OpenDeal != nil {
+				if err := bindOpenDeal(ctx, tx, card, rs.OpenDeal); err != nil {
 					return err
 				}
 			}

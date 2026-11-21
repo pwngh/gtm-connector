@@ -703,11 +703,14 @@ func TestEveryWriteNeedsItsCSRFToken(t *testing.T) {
 	for _, pattern := range writes {
 		method, path, _ := strings.Cut(pattern, " ")
 		var body any
-		// Past the token check, sign-in answers 200, and the deal route 404: this site registers no deals.
+		// Past the token check, sign-in answers 200, the deal route 404: this site registers no deals, and a
+		// decision of a match the site does not hold 403.
 		answer := http.StatusOK
 		switch {
 		case path == "/v1/deals":
 			body, answer = map[string]string{"account": postgrestest.Account}, http.StatusNotFound
+		case path == "/v1/matches/{match}":
+			body, answer = map[string]string{"decision": "reject"}, http.StatusForbidden
 		case method == http.MethodPost:
 			body = map[string]string{"login": "demo-reader", "password": readerPassword}
 		}

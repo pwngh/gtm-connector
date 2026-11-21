@@ -118,7 +118,14 @@ func (s *Server) deal(w http.ResponseWriter, r *http.Request, p authz.Principal)
 		}
 		card = &detail
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"deal": view, "card": card})
+	read := make([]matchView, len(deal.Read))
+	for i, m := range deal.Read {
+		if read[i], err = viewMatch(m); err != nil {
+			internal(w)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deal": view, "card": card, "matches": read})
 }
 
 type registerRequest struct {
