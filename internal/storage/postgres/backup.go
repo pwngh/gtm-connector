@@ -55,6 +55,8 @@ var backupTables = []struct {
 	// A card's seal is restored before the card.
 	{"admitted_receipts", "workspace_id, audit_id", migrationVersion("admitted_python_cards")},
 	{"admitted_cards", "workspace_id, brief_id", migrationVersion("admitted_python_cards")},
+	{"deals", "workspace_id, ref", migrationVersion("deals")},
+	{"deal_cards", "card_id", migrationVersion("deals")},
 }
 
 // TableCopy describes one table in a backup.

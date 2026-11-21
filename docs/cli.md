@@ -8,14 +8,15 @@ gtm-connector setup                              # once: credentials, migrations
 gtm-connector demo --state-dir renewal-demo      # one invented renewal, end to end
 gtm-connector connect demo                       # connect the default workspace to the demo data
 gtm-connector brief acc-003                      # make and print the card of one account
+gtm-connector deal new acc-003                   # register the account's renewal as thornfield-2027-2e3hke
 gtm-connector inspect BRIEF_ID                   # every unit of that card, one per line
 gtm-connector inspect BRIEF_ID 5                 # where number 5 on that card came from
 gtm-connector audit --brief BRIEF_ID             # the reads the card rests on
 gtm-connector COMMAND --help
 ```
 
-`help COMMAND` is `COMMAND --help` for `demo`, `connect`, `accounts`, `brief`, `inspect`, `audit`,
-`admit`, `mcp` and `token`. For any other name it prints the list of commands, as `--help` does. Run with no
+`help COMMAND` is `COMMAND --help` for `demo`, `connect`, `accounts`, `brief`, `deal`, `inspect`,
+`audit`, `admit`, `mcp` and `token`. For any other name it prints the list of commands, as `--help` does. Run with no
 command, the binary prints one sentence on what it does and three commands to try first.
 
 [Deal cards](cards.md) explains what a card says and how to read it. This page covers what each
@@ -24,7 +25,7 @@ command takes and prints.
 ## Workspaces
 
 A workspace is one named set of connected sources and everything read through them: the seller list,
-the accounts, the cards, the receipts, the MCP client tokens, and the imported transcripts and mapped
+the accounts, the deals, the cards, the receipts, the MCP client tokens, and the imported transcripts and mapped
 Slack threads. It lives in PostgreSQL. `--state-dir NAME` names it, and every command that reads or
 connects a workspace takes it. The default is `demo`.
 
@@ -180,7 +181,7 @@ they have reached. With `--json`, each progress line is one object with a single
 | `0` | The command succeeded, or `serve` stopped cleanly. | None. |
 | `1` | A local file, database or runtime operation failed, or `setup`, `serve`, `backup`, `restore` or `health` failed. | `local_failure` |
 | `2` | The arguments are missing or invalid, or what they name does not exist: no CRM connected, no such card, number or receipt, an account `inspect` cannot find. | `usage_error` |
-| `3` | The operation was refused: not in this build, a workspace of the other kind, another identity than the pinned one, a source connected again while it was read. | `refused` |
+| `3` | The operation was refused: not in this build, a workspace of the other kind, another identity than the pinned one, a source connected again while it was read, a second open deal of one account. | `refused` |
 | `4` | A check failed: the evidence of a card, a step of the demo, `debug salesforce check` or `debug slack check`. | `check_failed` |
 | `5` | A source or its transport failed, or returned what a read could not use. | `upstream_failure` |
 | `130` | Ctrl-C interrupted the command. Completed writes are kept. | `interrupted` |
@@ -193,6 +194,7 @@ they have reached. With `--json`, each progress line is one object with a single
 | `--version` | Object with `version`. Text: `gtm-connector 0.1.0`. |
 | [`accounts`](#accounts) | Object with `accounts` and `has_more`. |
 | [`brief`](#brief) | The saved card, without its evidence. |
+| [`deal`](#deal) | A deal's object, an array of them, or a deal and its newest card. |
 | [`inspect`](#inspect) | One of four results, by the ID given. |
 | [`audit`](#audit) | Array of receipts. |
 | [`demo`](#demo) | With `--state-dir`: one invented renewal. Without it: text only. |
@@ -228,6 +230,10 @@ receipt that `audit` lists.
 its receipt, and the card says "Calls: not read. The grant lacks calls:read."
 `--as-of YYYY-MM-DD` sets the day the card plans from.
 
+When the account has an open [deal](#deal), the card belongs to it, and text output names it on
+stderr, after the sources line: `Deal: thornfield-2027-2e3hke.` With none, the card is the account's own and
+belongs to no deal, as before deals existed. The card is the same either way.
+
 ```text
 Sources: CRM, calls, and Slack are demo data.          (stderr)
 DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15
@@ -254,6 +260,36 @@ The account ID and the day are checked before anything is read or written. An ID
 for the CRM (`acc-001` for the demo book, `acc-sf-` and 18 characters for Salesforce) or a day that is
 not `YYYY-MM-DD` exits `2`. An account the CRM does not hold exits `5` with `get_account: invalid or
 failed tool result; no brief generated`, and no card is published.
+
+### `deal`
+
+A deal is one renewal of one account, under a readable ID such as `thornfield-2027-2e3hke`. [The
+API](api.md#one-deal-one-id) gives the rule for the ID, what a deal binds, and the deal's object,
+which `--json` prints as the routes give it.
+
+| Command | What it does |
+| --- | --- |
+| `deal new ACCOUNT_ID [--as-of YYYY-MM-DD]` | Lists the account in the workspace, as `brief` does, then reads the account and its opportunities from the connected CRM, each as a tool call under its own receipt (on the demo book too), and registers the deal on what they returned. `--as-of` sets the day the contract is chosen from: by default `2027-01-15` on the demo book and today's UTC date on Salesforce. |
+| `deal list` | Lists the workspace's deals, the open ones first: ID, account, name, state and the day it renews. |
+| `deal show DEAL_ID` | Shows the deal's bindings, then its newest card as `brief` prints it, verified against its seal as `inspect` verifies one. `--json` gives `{"deal": DEAL, "card": CARD}`, the card without its evidence, or `null` before `brief` has made one. |
+| `deal close DEAL_ID` | Closes the deal. Its cards and receipts are kept, and the account's next card is its own again. Closing a closed deal prints it as it is. |
+
+```text
+$ gtm-connector deal new acc-003
+FIELD        VALUE
+ID           thornfield-2027-2e3hke
+Account      acc-003
+Name         "Thornfield Wren LLP"
+State        open
+Opportunity  opp-003
+Contract     none
+Renews       2027-02-08
+```
+
+An account has one open deal at a time: `deal new` for an account with one exits `3`, and names
+`deal list`. An account the CRM does not hold exits `2` with `account not found: ACCOUNT_ID`, and an
+ID of the wrong form for the CRM exits `2`, as `brief` does. `deal show` and `deal close` of an ID the
+workspace does not hold exit `2`. Each action takes `--state-dir NAME`, `--json` and `--help`.
 
 ### `inspect`
 

@@ -87,12 +87,16 @@ Nothing below is started unless it says so. Each links to the guide that describ
 
 One rep reads one real renewal before a call.
 
-- A deal as one renewal of an account, with a readable ID, registered by hand ([the API](api.md#one-deal-one-id)), the `/v1/deals` routes ([deal routes](api.md#deal-routes)) and the `deal` command.
+Started: a deal is registered by hand with `deal new` or `POST /v1/deals`, read with `deal list`,
+`deal show`, `GET /v1/deals` and `GET /v1/deals/{id}`, and closed with `deal close`, and `brief` makes
+an account's card for its open deal ([one deal, one ID](api.md#one-deal-one-id)). What is left:
+
+- The proof route of a deal ([deal routes](api.md#deal-routes)), and on the served routes the deal list's colour, `?status=needs_attention` and what changed. A deal that binds IDs of other tools than the CRM ([one deal, one ID](api.md#one-deal-one-id)), and `deal DEAL_ID` printing the card as [working a deal](deals.md) shows.
 - Sign-in through the company's identity provider, and each person reading only their deals.
-- Calls and Slack threads matched to the deal ([setting it up](config.md#how-a-deal-gets-its-evidence)).
+- Calls and Slack threads matched to the deal ([setting it up](config.md#how-a-deal-gets-its-evidence)), and the matches queue with `GET /v1/matches`.
 - The Deals page: the deal list, the card, the proof drawer and communications ([working a deal](deals.md#the-page)).
 - What changed since the reader last looked, and marks for blockers and commitments ([working a deal](deals.md#the-card)).
-- Refresh on demand, and close with a final sealed card.
+- Refresh on demand (`POST /v1/deals/{id}/refresh`), and close with a final sealed card.
 - Underneath: a Slack message keeps one identity across reads, and an import stays readable after a parser upgrade.
 
 Before real people sign in, the security review is redone for more than one person. Then the
@@ -121,7 +125,7 @@ RevOps covers every renewal and sees which have no current card.
 
 ### 4. Your own data
 
-- The push API and retractions ([pushing your own data](api.md#pushing-your-own-data)).
+- The push API, `POST /v1/deals/{id}/sources`, and retractions ([pushing your own data](api.md#pushing-your-own-data)).
 - A read-only view of a customer's database as a source.
 - Read-only SQL views for reporting.
 - A retention period, and deletion on request with a receipt.
@@ -232,6 +236,9 @@ grouped by the v0.1.0 step that owns the check.
   - `brief_save_failed` on a save that does not finish;
   - the seller list replaced or kept by `connect`, and `connect demo --seller` refused;
   - the extra account read of `brief` on a real CRM.
+- **Deals:**
+  - `POST /v1/deals` answering `409 source_changed` when the CRM is connected again during its reads;
+  - `deal new` on Salesforce choosing the contract from today's UTC date without `--as-of`.
 - **Audit:**
   - the five-minute lease of a pending receipt, and `serve` finishing interrupted receipts every 30 seconds after its sweep at start;
   - a restart resetting the rate counts;

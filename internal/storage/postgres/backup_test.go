@@ -70,6 +70,11 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	_, _, err = f.Store.SaveSlackMapping(ctx, f.Workspace.ID,
 		slackMapping(t, "acc-004", "C0123", "1790000000.000001", strings.Repeat("7", 64)), false, false)
 	ok(t, err)
+	// A deal of the fixture's account, with a card published while it is open bound to it.
+	deal := postgrestest.RegisterDeal(t, f, postgrestest.Account, "", "invented")
+	during := postgrestest.Publish(t, f, postgrestest.Account, f.Reader.ID, "brief-deal")
+	ok(t, sql(t, f, `INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref) VALUES ($1, $2, $3, $4)`,
+		f.Workspace.ID, during.Card.ID, deal.Ref, postgrestest.Account))
 	// The Python card of a recorded folder fills the admitted cards and receipts.
 	folder, word := pythonFolder(t)
 	added, err := f.Store.Admit(ctx, f.Workspace.ID, word, []postgres.AdmittedCard{{BriefID: pythonBrief, Kind: "cli",

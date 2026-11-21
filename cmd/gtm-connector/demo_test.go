@@ -118,20 +118,28 @@ func (d *demoDatabase) count(t *testing.T, query string, args ...any) int {
 	return n
 }
 
-// signedIn is a browser signed in to the server as the demo principal.
+// signedIn is a browser signed in to the server, as serve mounts it on store, as one demo principal.
 type signedIn struct {
 	t      *testing.T
 	server *httptest.Server
 	client *http.Client
+	origin string
+	// csrf is the session's CSRF token, for a write.
+	csrf string
 }
 
 func signInToDemo(t *testing.T, store *postgres.Store) *signedIn {
 	t.Helper()
+	return signInAs(t, store, demoLogin, demoPassword)
+}
+
+func signInAs(t *testing.T, store *postgres.Store, login, password string) *signedIn {
+	t.Helper()
 	ts := httptest.NewUnstartedServer(nil)
 	origin := "https://" + ts.Listener.Addr().String()
 	surface, err := httptransport.New(httptransport.Config{PublicOrigin: origin,
-		AllowedHosts: []string{ts.Listener.Addr().String()}, SessionKey: bytes.Repeat([]byte("k"), 32)},
-		store, authz.Evidence{Store: store})
+		AllowedHosts: []string{ts.Listener.Addr().String()}, SessionKey: bytes.Repeat([]byte("k"), 32),
+		Deals: dealRegistry{store}}, store, authz.Evidence{Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,18 +147,19 @@ func signInToDemo(t *testing.T, store *postgres.Store) *signedIn {
 	ts.StartTLS()
 	t.Cleanup(ts.Close)
 	jar, _ := cookiejar.New(nil)
-	b := &signedIn{t: t, server: ts, client: &http.Client{Transport: ts.Client().Transport, Jar: jar}}
+	b := &signedIn{t: t, server: ts, client: &http.Client{Transport: ts.Client().Transport, Jar: jar}, origin: origin}
 	var session struct {
 		CSRF string `json:"csrf_token"`
 	}
 	b.json(b.send(http.MethodGet, "/api/v1/session", nil, nil), &session)
-	body, _ := json.Marshal(map[string]string{"login": demoLogin, "password": demoPassword})
+	body, _ := json.Marshal(map[string]string{"login": login, "password": password})
 	reply := b.send(http.MethodPost, "/api/v1/session", body, map[string]string{"Origin": origin,
 		"X-CSRF-Token": session.CSRF, "Content-Type": "application/json"})
 	if reply.StatusCode != http.StatusOK {
 		t.Fatalf("sign-in: %d", reply.StatusCode)
 	}
-	reply.Body.Close()
+	b.json(reply, &session)
+	b.csrf = session.CSRF
 	return b
 }
 

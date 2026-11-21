@@ -1,6 +1,6 @@
 // Package httptransport is the browser surface of gtm-connector serve: the
-// JSON API under /api/v1, the web app's build with history fallback, and
-// /healthz. Every request's Host must be on a configured list, and every
+// JSON API under /api/v1, the deal routes under /v1/deals, the web app's
+// build with history fallback, and /healthz. Every request's Host must be on a configured list, and every
 // browser write must come from the configured public origin with the
 // session's CSRF token. It also mounts the MCP gateway at /mcp, which makes
 // every admission decision of its own.
@@ -50,6 +50,9 @@ type Config struct {
 	// describes it. It does its own admission checks, the Host among them,
 	// and writes the receipt of every call it is sent.
 	MCP http.Handler
+	// Deals, when set, registers deals for POST /v1/deals. Without it that
+	// route answers 404.
+	Deals DealRegistry
 }
 
 // DefaultClientRoutes are the web app's routes: "/" and these prefixes,
@@ -142,7 +145,7 @@ type route struct {
 	write   func(http.ResponseWriter, *http.Request, admission)
 }
 
-// apiRoutes are every /api/v1 route. Only a write route answers a method
+// apiRoutes are every /api/v1 and /v1 route. Only a write route answers a method
 // other than GET (and HEAD), so every write passes the CSRF check.
 func (s *Server) apiRoutes() []route {
 	return []route{
@@ -156,6 +159,9 @@ func (s *Server) apiRoutes() []route {
 		{pattern: "GET /api/v1/cards/{card}/text", read: s.signedIn(s.cardText)},
 		{pattern: "GET /api/v1/cards/{card}/units/{n}", read: s.signedIn(s.unit)},
 		{pattern: "GET /api/v1/receipts/{receipt}", read: s.signedIn(s.receipt)},
+		{pattern: "GET /v1/deals", read: s.signedIn(s.deals)},
+		{pattern: "POST /v1/deals", write: s.registerDeal},
+		{pattern: "GET /v1/deals/{deal}", read: s.signedIn(s.deal)},
 	}
 }
 
@@ -172,7 +178,7 @@ func (s *Server) routes() {
 		writeError(w, http.StatusNotFound, "not_found", "Not found.")
 	}
 	// Both spellings, so ServeMux never answers with an HTML redirect.
-	for _, pattern := range []string{"/api", "/api/", "/.well-known", "/.well-known/"} {
+	for _, pattern := range []string{"/api", "/api/", "/v1", "/v1/", "/.well-known", "/.well-known/"} {
 		mux.HandleFunc(pattern, notFound)
 	}
 	mux.HandleFunc("/healthz", s.healthz)
@@ -239,7 +245,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The API takes the session cookie and nothing else. A request that also
 	// carries a bearer token is refused, not served by the cookie: the browser
 	// and MCP surfaces never share credentials.
-	if strings.HasPrefix(r.URL.Path, "/api/") && len(r.Header.Values("Authorization")) > 0 {
+	if underAPI(r.URL.Path) && len(r.Header.Values("Authorization")) > 0 {
 		writeError(w, http.StatusUnauthorized, "authorization_refused",
 			"The API signs in with its session cookie; it takes no Authorization header.")
 		return
@@ -275,6 +281,16 @@ func canonical(p string) bool {
 		}
 	}
 	return true
+}
+
+// underAPI is whether a path is under the API: /api or /v1.
+func underAPI(p string) bool {
+	for _, prefix := range []string{"/api", "/v1"} {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func isWrite(method string) bool {

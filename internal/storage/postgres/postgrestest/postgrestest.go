@@ -5,6 +5,7 @@ package postgrestest
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -447,4 +448,38 @@ func must(t testing.TB, err error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Read is one finished top-level CRM read of account by principal ("" for the owner), which returned these
+// records.
+func Read(t testing.TB, f *Fixture, tool, account, principal string, records ...postgres.RecordVersion) postgres.Receipt {
+	t.Helper()
+	ctx := context.Background()
+	arguments, _ := json.Marshal(map[string]string{"account_id": account})
+	var id [16]byte
+	_, err := rand.Read(id[:])
+	must(t, err)
+	started, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
+		OperationID: "read-" + hex.EncodeToString(id[:]), PrincipalID: principal, TokenID: postgres.TokenID(""),
+		Tool: tool, Scope: "crm:read", AccountRef: account, ConnectionID: f.Connection.ID, Arguments: arguments,
+		RequestID: json.RawMessage(`1`), Lease: time.Minute})
+	must(t, err)
+	finished, err := f.Store.FinishRead(ctx, started.ID, started.LeaseToken, records, 1)
+	must(t, err)
+	return finished
+}
+
+// RegisterDeal registers an open deal of account, named from word and 2027, by principal ("" for the
+// owner), binding the account and the opportunity opp-1 that its two reads returned.
+func RegisterDeal(t testing.TB, f *Fixture, account, principal, word string) postgres.Deal {
+	t.Helper()
+	accountRead := Read(t, f, "get_account", account, principal,
+		Record("accounts", account, "id", account, "name", "Invented account "+account))
+	opportunities := Read(t, f, "list_opportunities", account, principal,
+		Record("opportunities", "opp-1", "id", "opp-1", "account_id", account))
+	deal, err := f.Store.RegisterDeal(context.Background(), postgres.DealRegistration{WorkspaceID: f.Workspace.ID,
+		PrincipalID: principal, AccountRef: account, Word: word, Year: 2027, OpportunityRef: "opp-1",
+		RenewsOn: "2027-02-08", AccountReadID: accountRead.ID, OpportunitiesReadID: opportunities.ID})
+	must(t, err)
+	return deal
 }

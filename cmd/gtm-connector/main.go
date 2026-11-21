@@ -7,7 +7,8 @@
 //	gtm-connector demo --state-dir WORKSPACE  open one invented renewal as a Deal card in that workspace
 //	gtm-connector connect [NAME]     connect a workspace to a source, detach one, or show what is connected
 //	gtm-connector accounts           search the connected CRM by account name
-//	gtm-connector brief ACCOUNT      make and print the Deal card for one account
+//	gtm-connector brief ACCOUNT      make and print the Deal card for one account, or for its open deal
+//	gtm-connector deal ACTION        register a deal for an account, list deals, show one, or close one
 //	gtm-connector inspect ID         show an account, a saved card, numbers on it, or a receipt
 //	gtm-connector audit              list the receipts of the audit log
 //	gtm-connector mcp stdio --scope SCOPE
@@ -83,7 +84,8 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   demo --state-dir WORKSPACE  open one invented renewal as a Deal card in that workspace
   connect [NAME]              connect a workspace to a source, detach one, or show what is connected
   accounts                    search the connected CRM by account name
-  brief ACCOUNT               make and print the Deal card for one account
+  brief ACCOUNT               make and print the Deal card for one account, or for its open deal
+  deal ACTION                 register a deal for an account, list deals, show one, or close one
   inspect ID                  show an account, a saved card, numbers on it, or a receipt
   audit                       list the receipts of the audit log
   admit FOLDER                admit the cards and receipts a Python state folder holds
@@ -97,7 +99,7 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   health                      check that the local server answers
   version                     print the commit this binary was built from
 
-demo, connect, accounts, brief, inspect, audit, admit, mcp, token, debug calls, debug salesforce and
+demo, connect, accounts, brief, deal, inspect, audit, admit, mcp, token, debug calls, debug salesforce and
 debug slack take --json, --state-dir WORKSPACE and --help. Not in this build: every other debug command.
 `
 
