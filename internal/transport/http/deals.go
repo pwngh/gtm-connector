@@ -15,13 +15,19 @@ import (
 // grants, Host check and caching as /api/v1. A deal of an account the principal holds no live grant on
 // answers 403 "not_permitted", as an unknown deal does.
 
-// ErrSourceFailed is a registration whose CRM read failed, or returned no account a deal can be made from.
-// The read's receipt says why, and the answer does not.
-var ErrSourceFailed = errors.New("the CRM read failed")
+var (
+	// ErrSourceFailed is a registration whose CRM read failed, or returned no account a deal can be made
+	// from. The read's receipt says why, and the answer does not.
+	ErrSourceFailed = errors.New("the CRM read failed")
+	// ErrNoCRM is a registration in a workspace with no CRM this server can read. Nothing was read, so no
+	// receipt was written.
+	ErrNoCRM = errors.New("no CRM is connected")
+)
 
 // DealRegistry registers a deal for a signed-in principal: it reads the account and its opportunities
 // through the workspace's CRM, each under a receipt that names the principal, and saves the deal. A
-// principal without a live grant on the account gets authz.ErrNotPermitted.
+// principal without a live grant on the account gets authz.ErrNotPermitted, and a workspace with no CRM it
+// can read gets ErrNoCRM.
 type DealRegistry interface {
 	RegisterDeal(ctx context.Context, p authz.Principal, account string) (postgres.Deal, error)
 }
@@ -146,6 +152,10 @@ func (s *Server) registerDeal(w http.ResponseWriter, r *http.Request, admitted a
 	case errors.Is(err, receipts.ErrSourceChanged):
 		writeError(w, http.StatusConflict, "source_changed",
 			"The CRM was connected again while it was read. No deal was registered; send the request again.")
+		return
+	case errors.Is(err, ErrNoCRM):
+		writeError(w, http.StatusConflict, "crm_not_connected",
+			"This workspace has no CRM the server can read. No deal was registered.")
 		return
 	case errors.Is(err, ErrSourceFailed):
 		writeError(w, http.StatusBadGateway, "source_failed",

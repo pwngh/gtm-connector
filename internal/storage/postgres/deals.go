@@ -2,18 +2,21 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base32"
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// A deal is one renewal of one account, under a readable ID: a word of the account's name and the year it
-// renews, such as thornfield-2027. Its bindings are records two CRM reads returned, under receipts the deal
-// names, and the database refuses any other (0012_deals.sql). A card belongs to the deal it was published
-// for.
+// A deal is one renewal of one account, under a readable ID: a word of the account's name, the year it
+// renews and a key of its account, such as thornfield-2027-2e3hke. Its bindings are records two CRM reads
+// returned, under receipts the deal names, and the database refuses any other (0013_deals.sql). A card
+// belongs to the deal that was open for its account when it was published.
 
 // Deal is one deal of a workspace.
 type Deal struct {
@@ -48,7 +51,7 @@ type DealRegistration struct {
 	// for the owner.
 	PrincipalID string
 	AccountRef  string
-	// Word and Year make the deal's ID, word-year. A clash takes the lowest free number after it.
+	// Word and Year start the deal's ID, which dealBase finishes.
 	Word string
 	Year int
 	// OpportunityRef, ContractRef and RenewsOn are as Deal has them.
@@ -59,8 +62,6 @@ type DealRegistration struct {
 var (
 	// ErrDealOpen refuses a second open deal for one account.
 	ErrDealOpen = errors.New("the account already has an open deal")
-	// ErrDealClosed refuses a card for a deal that is no longer open.
-	ErrDealClosed = errors.New("the deal is not open")
 	// ErrDealBindings refuses a deal that binds what its reads did not return.
 	ErrDealBindings = errors.New("the deal binds records its reads did not return")
 )
@@ -76,6 +77,13 @@ func dealRefWord(word string) bool {
 		}
 	}
 	return true
+}
+
+// dealKey is the key of an account in a deal's ID: the first n characters of the base32 of the SHA-256 of
+// the account's ID, in lower case. It depends on the account alone.
+func dealKey(account string, n int) string {
+	digest := sha256.Sum256([]byte(account))
+	return strings.ToLower(base32.StdEncoding.EncodeToString(digest[:]))[:n]
 }
 
 const dealColumns = `d.workspace_id, d.ref, d.account_ref, a.display_name, coalesce(d.opportunity_ref, ''),
@@ -159,8 +167,19 @@ func (s *Store) RegisterDeal(ctx context.Context, in DealRegistration) (Deal, er
 		if open {
 			return ErrDealOpen
 		}
-		// The ID is word-year, or word-year-N with the lowest N from 2 that no deal of the workspace holds.
-		base := in.Word + "-" + strconv.Itoa(in.Year)
+		// The ID is word-year-key, where the key depends on the account alone, so no other account's deals
+		// change it. Only a clash of six-character keys between two accounts, one in a billion, takes the
+		// twelve-character key instead. The account's own next deal of the year adds the lowest free N from 2.
+		base := in.Word + "-" + strconv.Itoa(in.Year) + "-" + dealKey(in.AccountRef, 6)
+		var clash bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM deals WHERE workspace_id = $1
+			AND (ref = $2 OR ref LIKE $2 || '-%') AND account_ref <> $3)`,
+			in.WorkspaceID, base, in.AccountRef).Scan(&clash); err != nil {
+			return err
+		}
+		if clash {
+			base = in.Word + "-" + strconv.Itoa(in.Year) + "-" + dealKey(in.AccountRef, 12)
+		}
 		rows, err := tx.Query(ctx, `SELECT ref FROM deals WHERE workspace_id = $1 AND (ref = $2 OR ref LIKE $2 || '-%')`,
 			in.WorkspaceID, base)
 		if err != nil {
@@ -243,23 +262,38 @@ func (s *Store) CloseDeal(ctx context.Context, workspaceID, ref string) (d Deal,
 	return d, tag.RowsAffected() == 1, err
 }
 
-// bindDealCard binds a card being published to its deal, inside the publication's transaction. A deal
-// that is not open, or of another account, gives ErrDealClosed and the card is not published.
-func bindDealCard(ctx context.Context, tx pgx.Tx, card Card, dealRef string) error {
-	tag, err := tx.Exec(ctx, `
-		INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref)
-		SELECT $1, $2, ref, account_ref FROM deals
-		 WHERE workspace_id = $1 AND ref = $3 AND account_ref = $4 AND state = 'open'`,
-		card.WorkspaceID, card.ID, dealRef, card.AccountRef)
-	switch {
-	case sqlState(err) == "GT022":
-		return ErrDealClosed
-	case err != nil:
-		return err
-	case tag.RowsAffected() != 1:
-		return ErrDealClosed
+// bindOpenDeal binds a card being published to its account's open deal, inside the publication's
+// transaction, when the account has one that was registered by the time the card was. The share lock holds
+// a close off until the publication commits.
+func bindOpenDeal(ctx context.Context, tx pgx.Tx, card Card) error {
+	var ref string
+	err := tx.QueryRow(ctx, `SELECT ref FROM deals
+		WHERE workspace_id = $1 AND account_ref = $2 AND state = 'open' AND registered_at <= $3 FOR SHARE`,
+		card.WorkspaceID, card.AccountRef, card.PublishedAt).Scan(&ref)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref) VALUES ($1, $2, $3, $4)`,
+		card.WorkspaceID, card.ID, ref, card.AccountRef)
+	return err
+}
+
+// DealOfBrief is the deal a card belongs to, by its brief ID, or "" for a card of no deal.
+func (s *Store) DealOfBrief(ctx context.Context, workspaceID, briefID string) (string, error) {
+	if !validUUID(workspaceID) {
+		return "", ErrNotFound
+	}
+	var ref string
+	err := s.pool.QueryRow(ctx, `SELECT dc.deal_ref FROM deal_cards dc
+		JOIN cards c ON c.workspace_id = dc.workspace_id AND c.id = dc.card_id
+		WHERE c.workspace_id = $1 AND c.brief_id = $2`, workspaceID, briefID).Scan(&ref)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return ref, err
 }
 
 // ViewDeals lists the deals of the accounts the principal holds a live grant on, as Deals orders them. A

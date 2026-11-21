@@ -195,7 +195,7 @@ reads inside it are its child receipts, whose `request_id` is
 | `demo --state-dir NAME` | Seven: the lookup, the refused call read, the card's four reads, and the seal. |
 | `demo` | Five for each card it publishes. |
 | `accounts`, `inspect ACCOUNT_ID` | One on a real CRM. None on the demo book, which is read without a tool call. |
-| `deal new`, `POST /v1/deals` | Two in a `deal-` run, also on the demo book: `get_account`, then `list_opportunities`. Through the API both name the signed-in principal, and without a grant on the account the first is refused as error/403 and the second is not made. |
+| `deal new`, `POST /v1/deals` | Two in a `deal-` run, also on the demo book: `get_account`, then `list_opportunities`. On a real CRM, `deal new` makes one `get_account` first, in an `inspect-` run, to list the account in the workspace. Through the API both name the signed-in principal, the grant is checked again just before each, and a read made without a live grant is refused as error/403, with no read after it. An API registration refused before any source is opened has one `get_account` receipt, refused as error/403 with no connection. |
 | `deal list`, `deal show`, `deal close` | None. |
 | `debug calls import`, `debug slack map` | One `get_account` in an `import-` run, also on the demo book. On a real CRM, one more in an `inspect-` run before it. |
 | `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `connect` | None. |

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"io"
@@ -51,9 +52,10 @@ func text(p *string) string {
 }
 
 // The owner registers a deal by hand with deal new: the account and its opportunities are read through the
-// CRM, each under a receipt of its own, and the deal binds what they returned under the ID thornfield-2027.
-// brief then makes the deal's card, which deal show gives, and a closed deal's account gets its own card
-// again. A second open deal of one account is refused, and a clash takes the next number.
+// CRM, each under a receipt of its own, and the deal binds what they returned under the ID
+// thornfield-2027-2e3hke. brief then makes the deal's card, which deal show gives, and a closed deal's account
+// gets its own card again. A second open deal of one account is refused, and the account's next deal of the
+// year takes the next number. A person granted the account afterwards reads both receipts the deal names.
 func TestDealCommand(t *testing.T) {
 	d := setUpDemo(t)
 	if code, stdout, stderr := d.read(t, "deal", "list"); code != 0 || stderr != "" ||
@@ -64,7 +66,7 @@ func TestDealCommand(t *testing.T) {
 
 	var deal dealResult
 	d.result(t, &deal, "deal", "new", "acc-003")
-	if deal.ID != "thornfield-2027" || deal.Account != "acc-003" || deal.AccountName != "Thornfield Wren LLP" ||
+	if deal.ID != "thornfield-2027-2e3hke" || deal.Account != "acc-003" || deal.AccountName != "Thornfield Wren LLP" ||
 		deal.State != "open" || text(deal.Opportunity) != "opp-003" || deal.Contract != nil ||
 		text(deal.RenewsOn) != "2027-02-08" || deal.RegisteredBy != nil || deal.ClosedAt != nil || deal.LatestCard != nil {
 		t.Fatalf("deal new acc-003: %+v", deal)
@@ -82,6 +84,25 @@ func TestDealCommand(t *testing.T) {
 		deal.Reads.ListOpportunities); n != 1 {
 		t.Errorf("the opportunities read did not return opp-003")
 	}
+	principal, err := d.owner.DemoPrincipal(ctx, demoLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.owner.GrantAccount(ctx, d.workspace.ID, principal.ID, "acc-003"); err != nil {
+		t.Fatal(err)
+	}
+	app, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.Close)
+	browser := signInToDemo(t, app)
+	for _, receipt := range []string{deal.Reads.GetAccount, deal.Reads.ListOpportunities} {
+		var read struct{ Account string }
+		if err := json.Unmarshal(browser.get("/api/v1/receipts/"+receipt), &read); err != nil || read.Account != "acc-003" {
+			t.Errorf("GET /api/v1/receipts/%s: %+v %v", receipt, read, err)
+		}
+	}
 
 	// One open deal per account.
 	if _, message, next := d.refusal(t, 3, "deal", "new", "acc-003"); !strings.Contains(message, "open deal") ||
@@ -98,30 +119,30 @@ func TestDealCommand(t *testing.T) {
 
 	// brief makes the open deal's card, and says so.
 	code, stdout, stderr := d.read(t, "brief", "acc-003")
-	if code != 0 || stderr != "Sources: CRM, calls, and Slack are demo data.\nDeal: thornfield-2027.\n" {
+	if code != 0 || stderr != "Sources: CRM, calls, and Slack are demo data.\nDeal: thornfield-2027-2e3hke.\n" {
 		t.Fatalf("brief acc-003: exit %d\n%s", code, stderr)
 	}
 	var made shown
-	d.result(t, &made, "deal", "show", "thornfield-2027")
+	d.result(t, &made, "deal", "show", "thornfield-2027-2e3hke")
 	if made.Card == nil || made.Deal.LatestCard == nil || made.Card.BriefID != made.Deal.LatestCard.BriefID ||
 		!strings.Contains(stdout, "Brief: "+made.Card.BriefID+"\n") ||
 		!strings.HasPrefix(made.Card.Text, `DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15`) {
 		t.Fatalf("deal show after brief: %+v\n%s", made, stdout)
 	}
-	code, stdout, _ = d.read(t, "deal", "show", "thornfield-2027")
-	if code != 0 || !strings.HasPrefix(stdout, "ID\tthornfield-2027\nAccount\tacc-003\nName\t\"Thornfield Wren LLP\"\n"+
+	code, stdout, _ = d.read(t, "deal", "show", "thornfield-2027-2e3hke")
+	if code != 0 || !strings.HasPrefix(stdout, "ID\tthornfield-2027-2e3hke\nAccount\tacc-003\nName\t\"Thornfield Wren LLP\"\n"+
 		"State\topen\nOpportunity\topp-003\nContract\tnone\nRenews\t2027-02-08\n\n"+made.Card.Text) {
 		t.Errorf("deal show as text:\n%s", stdout)
 	}
 
 	// Closing keeps the deal and its card; the account's next card is its own, with the same text.
 	var closed dealResult
-	d.result(t, &closed, "deal", "close", "thornfield-2027")
+	d.result(t, &closed, "deal", "close", "thornfield-2027-2e3hke")
 	if closed.State != "closed" || closed.ClosedAt == nil || closed.LatestCard == nil {
 		t.Fatalf("deal close: %+v", closed)
 	}
 	var again dealResult
-	d.result(t, &again, "deal", "close", "thornfield-2027")
+	d.result(t, &again, "deal", "close", "thornfield-2027-2e3hke")
 	if again.State != "closed" || text(again.ClosedAt) != text(closed.ClosedAt) {
 		t.Errorf("closing twice: %+v", again)
 	}
@@ -149,23 +170,23 @@ func TestDealCommand(t *testing.T) {
 	// The account's next deal of the same year takes the next number.
 	var next dealResult
 	d.result(t, &next, "deal", "new", "acc-003")
-	if next.ID != "thornfield-2027-2" || next.State != "open" {
+	if next.ID != "thornfield-2027-2e3hke-2" || next.State != "open" {
 		t.Errorf("the next deal of acc-003: %+v", next)
 	}
 	var listed []dealResult
 	d.result(t, &listed, "deal", "list")
-	if len(listed) != 2 || listed[0].ID != "thornfield-2027-2" || listed[1].ID != "thornfield-2027" {
+	if len(listed) != 2 || listed[0].ID != "thornfield-2027-2e3hke-2" || listed[1].ID != "thornfield-2027-2e3hke" {
 		t.Errorf("deal list: %+v", listed)
 	}
 	code, stdout, _ = d.read(t, "deal", "list")
-	if code != 0 || stdout != "thornfield-2027-2\tacc-003\tThornfield Wren LLP\topen\t2027-02-08\n"+
-		"thornfield-2027\tacc-003\tThornfield Wren LLP\tclosed\t2027-02-08\n" {
+	if code != 0 || stdout != "thornfield-2027-2e3hke-2\tacc-003\tThornfield Wren LLP\topen\t2027-02-08\n"+
+		"thornfield-2027-2e3hke\tacc-003\tThornfield Wren LLP\tclosed\t2027-02-08\n" {
 		t.Errorf("deal list as text:\n%s", stdout)
 	}
-	if _, message, _ := d.refusal(t, 2, "deal", "show", "thornfield"); !strings.Contains(message, "thornfield-2027") {
+	if _, message, _ := d.refusal(t, 2, "deal", "show", "thornfield"); !strings.Contains(message, "thornfield-2027-2e3hke") {
 		t.Errorf("deal show of a malformed ID: %s", message)
 	}
-	if _, message, _ := d.refusal(t, 2, "deal", "close", "alder-2027"); message != "No deal of this workspace has that ID." {
+	if _, message, _ := d.refusal(t, 2, "deal", "close", "alder-2027-he2vbf"); message != "No deal of this workspace has that ID." {
 		t.Errorf("deal close of an unknown ID: %s", message)
 	}
 }
@@ -261,7 +282,7 @@ func TestDealRoutesKeepTheGrants(t *testing.T) {
 	reply := write("acc-002", nil)
 	var registered struct{ Deal dealResult }
 	b.json(reply, &registered)
-	if reply.StatusCode != http.StatusCreated || registered.Deal.ID != "copper-2027" ||
+	if reply.StatusCode != http.StatusCreated || registered.Deal.ID != "copper-2027-b6ce6n" ||
 		text(registered.Deal.RegisteredBy) != principal.ID || text(registered.Deal.Opportunity) != "opp-002" {
 		t.Fatalf("POST /v1/deals: %d %+v", reply.StatusCode, registered)
 	}
@@ -305,7 +326,7 @@ func TestDealRoutesKeepTheGrants(t *testing.T) {
 	if err := json.Unmarshal(b.get("/v1/deals"), &listed); err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Deals) != 2 || listed.Deals[0].ID != "copper-2027" || listed.Deals[1].ID != "thornfield-2027" {
+	if len(listed.Deals) != 2 || listed.Deals[0].ID != "copper-2027-b6ce6n" || listed.Deals[1].ID != "thornfield-2027-2e3hke" {
 		t.Fatalf("GET /v1/deals: %+v", listed)
 	}
 	var one struct {
@@ -316,18 +337,18 @@ func TestDealRoutesKeepTheGrants(t *testing.T) {
 			Units []json.RawMessage
 		}
 	}
-	if err := json.Unmarshal(b.get("/v1/deals/thornfield-2027"), &one); err != nil {
+	if err := json.Unmarshal(b.get("/v1/deals/thornfield-2027-2e3hke"), &one); err != nil {
 		t.Fatal(err)
 	}
-	if one.Deal.ID != "thornfield-2027" || one.Card == nil || one.Deal.LatestCard == nil ||
+	if one.Deal.ID != "thornfield-2027-2e3hke" || one.Card == nil || one.Deal.LatestCard == nil ||
 		one.Card.ID != one.Deal.LatestCard.ID || len(one.Card.Lines) == 0 || len(one.Card.Units) == 0 {
-		t.Fatalf("GET /v1/deals/thornfield-2027: %+v", one)
+		t.Fatalf("GET /v1/deals/thornfield-2027-2e3hke: %+v", one)
 	}
 	// The card is the one GET /api/v1/cards/{card} serves, field for field.
 	var direct, nested map[string]json.RawMessage
 	json.Unmarshal(b.get("/api/v1/cards/"+one.Card.ID), &direct)
 	var whole map[string]json.RawMessage
-	json.Unmarshal(b.get("/v1/deals/thornfield-2027"), &whole)
+	json.Unmarshal(b.get("/v1/deals/thornfield-2027-2e3hke"), &whole)
 	json.Unmarshal(whole["card"], &nested)
 	if len(direct) == 0 || len(direct) != len(nested) {
 		t.Errorf("the deal's card and the card route differ: %d and %d fields", len(direct), len(nested))
@@ -343,7 +364,7 @@ func TestDealRoutesKeepTheGrants(t *testing.T) {
 	if err := json.Unmarshal(o.get("/v1/deals"), &listed); err != nil || len(listed.Deals) != 0 {
 		t.Errorf("the outsider's deals: %+v %v", listed, err)
 	}
-	for _, path := range []string{"/v1/deals/thornfield-2027", "/v1/deals/copper-2027", "/v1/deals/nothing-2027",
+	for _, path := range []string{"/v1/deals/thornfield-2027-2e3hke", "/v1/deals/copper-2027-b6ce6n", "/v1/deals/nothing-2027",
 		"/v1/deals/not%20an%20id"} {
 		reply := o.send(http.MethodGet, path, nil, nil)
 		body, _ := io.ReadAll(reply.Body)
@@ -374,7 +395,7 @@ func TestDealRoutesKeepTheGrants(t *testing.T) {
 		"Content-Type": "application/json"})
 	reply.Body.Close()
 	if err := json.Unmarshal(o.get("/v1/deals"), &listed); err != nil || reply.StatusCode != http.StatusCreated ||
-		len(listed.Deals) != 1 || listed.Deals[0].ID != "alder-2027" {
+		len(listed.Deals) != 1 || listed.Deals[0].ID != "alder-2027-he2vbf" {
 		t.Errorf("the outsider's own deal: %d %+v %v", reply.StatusCode, listed, err)
 	}
 
@@ -384,10 +405,10 @@ func TestDealRoutesKeepTheGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(b.get("/v1/deals"), &listed); err != nil || len(listed.Deals) != 2 ||
-		listed.Deals[0].ID != "alder-2027" || listed.Deals[1].ID != "copper-2027" {
+		listed.Deals[0].ID != "alder-2027-he2vbf" || listed.Deals[1].ID != "copper-2027-b6ce6n" {
 		t.Errorf("GET /v1/deals after a revocation: %+v %v", listed, err)
 	}
-	if reply := b.send(http.MethodGet, "/v1/deals/thornfield-2027", nil, nil); reply.StatusCode != http.StatusForbidden {
+	if reply := b.send(http.MethodGet, "/v1/deals/thornfield-2027-2e3hke", nil, nil); reply.StatusCode != http.StatusForbidden {
 		t.Errorf("GET of a revoked account's deal: %d", reply.StatusCode)
 	}
 }
@@ -406,7 +427,7 @@ func TestDealOnSalesforce(t *testing.T) {
 	sent := len(org.Requests)
 	var deal dealResult
 	d.result(t, &deal, append([]string{"deal", "new", book.AccountID, "--as-of", "2027-01-15"}, where...)...)
-	if deal.ID != "gemini-2027" || text(deal.RenewsOn) != "2027-02-20" || deal.Contract == nil ||
+	if deal.ID != "gemini-2027-rwqjal" || text(deal.RenewsOn) != "2027-02-20" || deal.Contract == nil ||
 		!strings.HasPrefix(*deal.Contract, "ctr-sf-") || deal.Opportunity == nil ||
 		!strings.HasPrefix(*deal.Opportunity, "opp-sf-") || deal.AccountName != "Gemini export 0: Zoom cloud recording VTT" {
 		t.Fatalf("deal new on Salesforce: %+v", deal)
@@ -419,13 +440,154 @@ func TestDealOnSalesforce(t *testing.T) {
 		t.Errorf("the account read did not return the contract")
 	}
 	code, _, stderr := d.read(t, append([]string{"brief", book.AccountID, "--as-of", "2027-01-15"}, where...)...)
-	if code != 0 || !strings.HasSuffix(stderr, "Deal: gemini-2027.\n") {
+	if code != 0 || !strings.HasSuffix(stderr, "Deal: gemini-2027-rwqjal.\n") {
 		t.Fatalf("brief: exit %d\n%s", code, stderr)
 	}
 	var made shown
-	d.result(t, &made, append([]string{"deal", "show", "gemini-2027"}, where...)...)
+	d.result(t, &made, append([]string{"deal", "show", "gemini-2027-rwqjal"}, where...)...)
 	if made.Card == nil || made.Deal.LatestCard == nil || made.Card.BriefID != made.Deal.LatestCard.BriefID ||
 		!strings.HasPrefix(made.Card.Text, "DEAL CARD: ") {
 		t.Errorf("the deal's card: %+v", made)
+	}
+}
+
+// hookedCRM serves the demo book through a CRM that calls hook before each read, until the test ends.
+func hookedCRM(t *testing.T, hook func(tool, account string)) {
+	t.Helper()
+	kind := kindsNamed("demo")[0]
+	saved := *kind
+	t.Cleanup(func() { *kind = saved })
+	kind.crm = func(_ context.Context, o opening) (crmSource, error) {
+		book, err := openedDemo(o)
+		return hooked{book, hook}, err
+	}
+}
+
+type hooked struct {
+	demoBook
+	hook func(tool, account string)
+}
+
+func (h hooked) Read(ctx context.Context, tool, accountID string) ([]*strictjson.Object, error) {
+	h.hook(tool, accountID)
+	return h.demoBook.Read(ctx, tool, accountID)
+}
+
+// register asks to register a deal for an account, as the signed-in person.
+func (b *signedIn) register(account string) (status int, body string) {
+	b.t.Helper()
+	sent, _ := json.Marshal(map[string]string{"account": account})
+	reply := b.send(http.MethodPost, "/v1/deals", sent, map[string]string{"Origin": b.origin, "X-CSRF-Token": b.csrf,
+		"Content-Type": "application/json"})
+	defer reply.Body.Close()
+	read, _ := io.ReadAll(reply.Body)
+	return reply.StatusCode, string(read)
+}
+
+// A grant revoked while the account is read stops the registration at the next read: that read is refused
+// under its receipt as error/403, the CRM is not asked again, and no deal is saved.
+func TestRegistrationReadsOnlyUnderALiveGrant(t *testing.T) {
+	d := setUpDemo(t)
+	if err := d.demo(t, d.appURL); err != nil {
+		t.Fatal(err)
+	}
+	app, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.Close)
+	principal, err := d.owner.DemoPrincipal(ctx, demoLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	hookedCRM(t, func(tool, account string) {
+		asked = append(asked, tool+" "+account)
+		if tool == "get_account" {
+			if err := d.owner.RevokeAccountGrant(ctx, d.workspace.ID, principal.ID, account); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	b := signInToDemo(t, app)
+	if status, body := b.register("acc-005"); status != http.StatusForbidden || !strings.Contains(body, "not_permitted") {
+		t.Fatalf("a registration whose grant was revoked during its first read: %d %s", status, body)
+	}
+	if strings.Join(asked, ", ") != "get_account acc-005" {
+		t.Errorf("the CRM was asked for %q", asked)
+	}
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE principal_id = $1 AND tool = 'list_opportunities'
+		AND requested_account = 'acc-005' AND status = 'error' AND http_status = 403 AND row_count = 0`,
+		principal.ID); n != 1 {
+		t.Errorf("%d refused receipts of the second read", n)
+	}
+	if n := d.count(t, "SELECT count(*) FROM deals"); n != 0 {
+		t.Errorf("%d deals saved", n)
+	}
+}
+
+// With the CRM detached, a person granted the account is told so, with no receipt to point at, and one
+// without a grant is refused under a receipt, as with a CRM.
+func TestRegistrationWithoutACRM(t *testing.T) {
+	d := setUpDemo(t)
+	if err := d.demo(t, d.appURL); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := d.read(t, "connect", "demo", "--remove"); code != 0 {
+		t.Fatalf("connect demo --remove: %s", stderr)
+	}
+	app, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.Close)
+	principal, err := d.owner.DemoPrincipal(ctx, demoLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.owner.RevokeAccountGrant(ctx, d.workspace.ID, principal.ID, "acc-004"); err != nil {
+		t.Fatal(err)
+	}
+	b := signInToDemo(t, app)
+	before := d.count(t, "SELECT count(*) FROM receipts")
+	if status, body := b.register("acc-003"); status != http.StatusConflict || !strings.Contains(body, "crm_not_connected") ||
+		strings.Contains(body, "receipt") {
+		t.Errorf("a registration with no CRM: %d %s", status, body)
+	}
+	if n := d.count(t, "SELECT count(*) FROM receipts"); n != before {
+		t.Errorf("a registration with no CRM wrote %d receipts", n-before)
+	}
+	if status, _ := b.register("acc-004"); status != http.StatusForbidden {
+		t.Errorf("an ungranted registration with no CRM: %d", status)
+	}
+	if n := d.count(t, `SELECT count(*) FROM receipts WHERE principal_id = $1 AND tool = 'get_account'
+		AND requested_account = 'acc-004' AND connection_id IS NULL AND status = 'error' AND http_status = 403`,
+		principal.ID); n != 1 {
+		t.Errorf("the ungranted registration left %d refused receipts", n)
+	}
+}
+
+// A deal registered while brief reads its account still gets the card: the open deal is found when the card
+// is published.
+func TestADealOpenedDuringBriefGetsItsCard(t *testing.T) {
+	d := setUpDemo(t)
+	d.connectDemo(t, defaultWorkspace)
+	opened := false
+	hookedCRM(t, func(tool, account string) {
+		if tool == "list_opportunities" && !opened {
+			opened = true
+			if code, _, stderr := d.read(t, "deal", "new", account); code != 0 {
+				t.Errorf("deal new during brief: %s", stderr)
+			}
+		}
+	})
+	code, stdout, stderr := d.read(t, "brief", "acc-003")
+	if code != 0 || !opened || stderr != "Sources: CRM, calls, and Slack are demo data.\nDeal: thornfield-2027-2e3hke.\n" {
+		t.Fatalf("brief: exit %d\n%s", code, stderr)
+	}
+	var made shown
+	d.result(t, &made, "deal", "show", "thornfield-2027-2e3hke")
+	if made.Card == nil || !strings.Contains(stdout, "Brief: "+made.Card.BriefID+"\n") {
+		t.Errorf("the deal's card: %+v", made.Card)
 	}
 }

@@ -6,8 +6,8 @@ The web app, the CLI, the MCP server and the alerts all read the same API. Every
 caller's grant, and a refusal is returned as a refusal, never as an empty list.
 
 ```sh
-curl https://HOST/v1/deals/thornfield-2027
-gtm deal thornfield-2027
+curl https://HOST/v1/deals/thornfield-2027-2e3hke
+gtm deal thornfield-2027-2e3hke
 ```
 
 > **What the binary serves today.** The `/api/v1` routes under
@@ -35,8 +35,8 @@ system.
 
 Today a deal is registered by hand, with `gtm-connector deal new ACCOUNT_ID` or `POST /v1/deals`, and
 binds the CRM's IDs alone. Registering reads the account and then its opportunities from the
-workspace's CRM, each as a tool call under its own receipt, and the deal binds what those reads
-returned:
+workspace's CRM, each as a tool call under its own receipt that names the account, and the deal binds
+what those reads returned:
 
 | Binding | What it is |
 | --- | --- |
@@ -47,18 +47,28 @@ returned:
 
 The database refuses a deal that binds a record its reads did not return.
 
-**The ID** is the first word of the account's name and the year the deal renews:
-`thornfield-2027` for Thornfield Wren LLP, renewing on 2027-02-08. The word is the first one that
-holds an ASCII letter or digit once its accents are taken off, lowered, with every other character
-dropped and cut to 40 characters, or `deal` when no word holds one. The year is that of `renews_on`,
-or of the day of the read when it is `null`. An ID that a deal of the workspace already holds, open or
-closed, takes the lowest free number from 2: `thornfield-2027-2`. An ID is never given twice.
+**The ID** is the first word of the account's name, the year the deal renews, and a key of the
+account: `thornfield-2027-2e3hke` for Thornfield Wren LLP (`acc-003`), renewing on 2027-02-08.
+
+- The word is the first one that holds an ASCII letter or digit once its accents are taken off,
+  lowered, with every other character dropped and cut to 40 characters, or `deal` when no word holds
+  one.
+- The year is that of `renews_on`, or of the day of the read when it is `null`.
+- The key is the first six characters of the base32 of the SHA-256 of the account's ID, in lower case.
+  It depends on the account alone, so an ID says nothing about another account's deals: two accounts
+  whose names start with the same word get different IDs, whatever else the workspace holds. Only when
+  two accounts' six-character keys are the same, about one pair in a billion, does the later one take
+  twelve characters.
+- The account's next deal of the same year takes the lowest free number from 2:
+  `thornfield-2027-2e3hke-2`. An ID is never given twice.
 
 An account has one open deal at a time. While it has one, every card `brief` makes for the account
-belongs to that deal, and `GET /v1/deals/{id}` returns the newest. With none, `brief` makes the
-account's own card, which belongs to no deal. A card's bytes are the same either way: a deal is a
-binding around cards, not a new card format. A closed deal keeps its cards, and is never opened
-again or deleted.
+belongs to that deal, and `GET /v1/deals/{id}` returns the newest. The deal is found when the card is
+published, in the same transaction, so a deal registered while `brief` reads the account still gets
+the card. With none, `brief` makes the account's own card, which belongs to no deal. A card's bytes
+are the same either way: a deal is a binding around cards, not a new card format. A closed deal keeps
+its cards, and is never opened again or deleted. The database refuses a card bound to a deal it was
+not published during, and a restore checks the same.
 
 ## Deal routes
 
@@ -90,7 +100,7 @@ leaves it out.
 | `GET /v1/deals/{id}` | `{"deal": DEAL, "card": CARD}`. `CARD` is the deal's newest card exactly as `GET /api/v1/cards/{card}` gives it, or `null` before `brief` has made one. |
 
 ```json
-{"id": "thornfield-2027", "account": "acc-003", "account_name": "Thornfield Wren LLP",
+{"id": "thornfield-2027-2e3hke", "account": "acc-003", "account_name": "Thornfield Wren LLP",
  "state": "open", "opportunity": "opp-003", "contract": null, "renews_on": "2027-02-08",
  "registered_by": "PRINCIPAL_ID", "registered_at": "2026-11-21T15:04:05.123456Z", "closed_at": null,
  "reads": {"get_account": "RECEIPT_ID", "list_opportunities": "RECEIPT_ID"},
@@ -102,15 +112,18 @@ through the API, or `null` for one `deal new` registered. `reads` are the receip
 was registered on, which `GET /api/v1/receipts/{receipt}` serves. `latest_card` is `null` until
 `brief` makes the deal's card.
 
-`POST /v1/deals` registers the deal as the signed-in person: both reads name them. Without a live
-grant on the account the first read is refused under its receipt, nothing is read, and the answer is
-`403 not_permitted`.
+`POST /v1/deals` registers the deal as the signed-in person: both reads name them. The grant is checked
+before any source is opened, and again just before each read. Without a live grant on the account,
+the read that would come next is refused under its receipt, nothing more is read, no deal is saved,
+and the answer is `403 not_permitted`. With no CRM connected the answer is
+`409 crm_not_connected` and nothing is written.
 
 | Refusal | When |
 | --- | --- |
 | `400 invalid_json` | The body is not one JSON object with `account` |
 | `403 not_permitted` | No live grant on the account |
 | `409 deal_open` | The account already has an open deal |
+| `409 crm_not_connected` | The workspace has no CRM the server can read; nothing was read or written |
 | `409 source_changed` | The CRM was connected again while it was read |
 | `502 source_failed` | The CRM read failed, or did not return the account; its receipt says why |
 

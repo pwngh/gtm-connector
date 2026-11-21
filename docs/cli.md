@@ -8,7 +8,7 @@ gtm-connector setup                              # once: credentials, migrations
 gtm-connector demo --state-dir renewal-demo      # one invented renewal, end to end
 gtm-connector connect demo                       # connect the default workspace to the demo data
 gtm-connector brief acc-003                      # make and print the card of one account
-gtm-connector deal new acc-003                   # register the account's renewal as thornfield-2027
+gtm-connector deal new acc-003                   # register the account's renewal as thornfield-2027-2e3hke
 gtm-connector inspect BRIEF_ID                   # every unit of that card, one per line
 gtm-connector inspect BRIEF_ID 5                 # where number 5 on that card came from
 gtm-connector audit --brief BRIEF_ID             # the reads the card rests on
@@ -229,7 +229,7 @@ its receipt, and the card says "Calls: not read. The grant lacks calls:read."
 `--as-of YYYY-MM-DD` sets the day the card plans from.
 
 When the account has an open [deal](#deal), the card belongs to it, and text output names it on
-stderr, after the sources line: `Deal: thornfield-2027.` With none, the card is the account's own and
+stderr, after the sources line: `Deal: thornfield-2027-2e3hke.` With none, the card is the account's own and
 belongs to no deal, as before deals existed. The card is the same either way.
 
 ```text
@@ -261,13 +261,13 @@ failed tool result; no brief generated`, and no card is published.
 
 ### `deal`
 
-A deal is one renewal of one account, under a readable ID such as `thornfield-2027`. [The
+A deal is one renewal of one account, under a readable ID such as `thornfield-2027-2e3hke`. [The
 API](api.md#one-deal-one-id) gives the rule for the ID, what a deal binds, and the deal's object,
 which `--json` prints as the routes give it.
 
 | Command | What it does |
 | --- | --- |
-| `deal new ACCOUNT_ID [--as-of YYYY-MM-DD]` | Reads the account and its opportunities from the connected CRM, each as a tool call under its own receipt (on the demo book too), and registers the deal on what they returned. `--as-of` sets the day the contract is chosen from: by default `2027-01-15` on the demo book and today's UTC date on Salesforce. |
+| `deal new ACCOUNT_ID [--as-of YYYY-MM-DD]` | Lists the account in the workspace, as `brief` does, then reads the account and its opportunities from the connected CRM, each as a tool call under its own receipt (on the demo book too), and registers the deal on what they returned. `--as-of` sets the day the contract is chosen from: by default `2027-01-15` on the demo book and today's UTC date on Salesforce. |
 | `deal list` | Lists the workspace's deals, the open ones first: ID, account, name, state and the day it renews. |
 | `deal show DEAL_ID` | Shows the deal's bindings, then its newest card as `brief` prints it, verified against its seal as `inspect` verifies one. `--json` gives `{"deal": DEAL, "card": CARD}`, the card without its evidence, or `null` before `brief` has made one. |
 | `deal close DEAL_ID` | Closes the deal. Its cards and receipts are kept, and the account's next card is its own again. Closing a closed deal prints it as it is. |
@@ -275,7 +275,7 @@ which `--json` prints as the routes give it.
 ```text
 $ gtm-connector deal new acc-003
 FIELD        VALUE
-ID           thornfield-2027
+ID           thornfield-2027-2e3hke
 Account      acc-003
 Name         "Thornfield Wren LLP"
 State        open

@@ -542,6 +542,9 @@ type toolCall struct {
 	account   string // the account the call names, or ""
 	// principal is the principal the call is made for, or "" for the owner.
 	principal string
+	// live, when set, is asked just before the read whether the caller may still make it. A call it refuses
+	// is finished as refused, and nothing is read.
+	live func(context.Context) (bool, error)
 	// scope is the scope of a read that is no registered tool, such as a check's. A registered tool takes none.
 	scope string
 }
@@ -595,6 +598,14 @@ func (r *reads) call(ctx context.Context, c toolCall,
 	}
 	if !slices.Contains(c.scopes, scope) {
 		return fail(receipts.Denied(), errDenied)
+	}
+	if c.live != nil {
+		switch allowed, err := c.live(ctx); {
+		case err != nil:
+			return fail(receipts.Failed(200, "request_failed"), err)
+		case !allowed:
+			return fail(receipts.Denied(), errDenied)
+		}
 	}
 	records, err := read(ctx)
 	if err == nil {

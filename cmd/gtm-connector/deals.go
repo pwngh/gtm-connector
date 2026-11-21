@@ -24,11 +24,13 @@ import (
 // tool call under its own receipt, and binds the account, and the opportunity and contract the reads
 // returned. brief makes an account's card for its open deal.
 //
-// The ID is the first word of the account's name and the year the deal renews: thornfield-2027. The word
-// is the first word with an ASCII letter or digit once its accents are taken off, lowered, with every other
-// character dropped and cut to 40 characters, or "deal" when no word has one. The year is the year of the
-// day the deal renews, or of the day it was registered when the CRM gives none. An ID a deal of the
-// workspace already holds, open or closed, takes the lowest free number from 2 after it: thornfield-2027-2.
+// The ID is the first word of the account's name, the year the deal renews and a key of the account:
+// thornfield-2027-2e3hke. The word is the first word with an ASCII letter or digit once its accents are
+// taken off, lowered, with every other character dropped and cut to 40 characters, or "deal" when no word
+// has one. The year is the year of the day the deal renews, or of the day it was registered when the CRM
+// gives none. The key is six characters of the digest of the account's ID (postgres.RegisterDeal), so an
+// ID says nothing of another account's deals. The account's next deal of the same year takes the lowest
+// free number from 2 after it: thornfield-2027-2e3hke-2.
 
 var dealActions = map[string]arguments{
 	"new":   {options: []option{{name: "--as-of", value: true}}, required: "account_id", help: dealNewHelp},
@@ -38,7 +40,7 @@ var dealActions = map[string]arguments{
 }
 
 // dealID is the form of a deal's ID.
-var dealID = regexp.MustCompile(`^[a-z0-9]{1,40}-[0-9]{4}(-[1-9][0-9]{0,5})?$`)
+var dealID = regexp.MustCompile(`^[a-z0-9]{1,40}-[0-9]{4}-([a-z2-7]{6}|[a-z2-7]{12})(-[1-9][0-9]{0,5})?$`)
 
 // errNoDeal is a deal ID the workspace does not hold.
 var errNoDeal = &failure{code: 2, message: "No deal of this workspace has that ID.", next: "gtm-connector deal list"}
@@ -122,7 +124,12 @@ func (r *run) newDeal(ctx context.Context) (any, error) {
 	if err := cards.CheckRequest(from.sources(), account, asOf); err != nil {
 		return nil, err
 	}
-	deal, err := from.registerDeal(ctx, "", []string{"crm:read"}, account, asOf)
+	// A deal belongs to an account of its workspace, so an account the CRM holds is listed there first, and
+	// the receipts of the deal's reads name it.
+	if err := from.list(ctx, account); err != nil {
+		return nil, err
+	}
+	deal, err := from.registerDeal(ctx, "", []string{"crm:read"}, nil, account, asOf)
 	if errors.Is(err, errAccountNotFound) {
 		return nil, &failure{code: 2, message: "account not found: " + account, next: "gtm-connector accounts" + r.folder()}
 	}
@@ -159,8 +166,9 @@ func (r *run) listDeals(ctx context.Context) (any, error) {
 func (r *run) stored(ctx context.Context) (postgres.Deal, error) {
 	id := r.args.positionals[0]
 	if !dealID.MatchString(id) {
-		return postgres.Deal{}, refused("A deal ID is a word, the year it renews and, after a clash, a number, " +
-			"such as thornfield-2027. gtm-connector deal list prints them.")
+		return postgres.Deal{}, refused("A deal ID is a word, the year it renews, a key of its account and, for " +
+			"the account's next deal of that year, a number, such as thornfield-2027-2e3hke. gtm-connector deal " +
+			"list prints them.")
 	}
 	if err := r.open(ctx); err != nil {
 		return postgres.Deal{}, err
@@ -219,19 +227,21 @@ func (r *run) closeDeal(ctx context.Context) (any, error) {
 
 // registerDeal reads the account and then its opportunities through the workspace's CRM, each as a tool
 // call of its own under a receipt committed before the read, by principal ("" for the owner) with scopes,
-// and registers the deal on what they returned. A grant without crm:read is refused under the first
-// receipt, and nothing is read.
-func (r *reads) registerDeal(ctx context.Context, principal string, scopes []string, account, asOf string) (
-	postgres.Deal, error) {
+// and registers the deal on what they returned. The account must be listed in the workspace, so both
+// receipts name it. A grant without crm:read, or one live says is gone just before a read, is refused
+// under that read's receipt, and nothing more is read.
+func (r *reads) registerDeal(ctx context.Context, principal string, scopes []string,
+	live func(context.Context) (bool, error), account, asOf string) (postgres.Deal, error) {
 	crm, err := r.crm(ctx)
 	if err != nil {
-		return postgres.Deal{}, sourceFailure{err}
+		return postgres.Deal{}, noCRM{err}
 	}
 	run := "deal-" + strings.ReplaceAll(receipts.RandomID(), "-", "")
 	token := receipts.Fingerprint(randomToken())
 	read := func(n int, tool string, use func([]*strictjson.Object) error) (receipts.Receipt, error) {
 		finished, _, err := r.call(ctx, toolCall{token: token, scopes: scopes, run: run, request: n, tool: tool,
-			arguments: strictjson.NewObject("account_id", account), account: account, principal: principal},
+			arguments: strictjson.NewObject("account_id", account), account: account, principal: principal,
+			live: live},
 			func(ctx context.Context) ([]*strictjson.Object, error) {
 				records, err := crm.Read(ctx, tool, account)
 				if err == nil {
@@ -255,10 +265,6 @@ func (r *reads) registerDeal(ctx context.Context, principal string, scopes []str
 		return err
 	})
 	if err != nil {
-		return postgres.Deal{}, err
-	}
-	// A deal belongs to an account of its workspace, so the account is listed under the name its CRM gives it.
-	if err := r.store.EnsureAccount(ctx, r.workspace.ID, account, name); err != nil {
 		return postgres.Deal{}, err
 	}
 	var opportunities []*strictjson.Object
@@ -451,8 +457,9 @@ func orNone(value any) any {
 }
 
 // dealRegistry registers deals for the people signed in to serve, each in the workspace they belong to,
-// reading the CRM as that workspace is connected at the moment of the request. A person with no live grant
-// on the account is refused under the read's receipt, and nothing is read.
+// reading the CRM as that workspace is connected at the moment of the request. The grant is checked first,
+// before any source is opened, and again just before each read. A person with no live grant on the account
+// is refused under a receipt, and nothing is read.
 type dealRegistry struct{ store *postgres.Store }
 
 func (d dealRegistry) RegisterDeal(ctx context.Context, p authz.Principal, account string) (postgres.Deal, error) {
@@ -460,34 +467,67 @@ func (d dealRegistry) RegisterDeal(ctx context.Context, p authz.Principal, accou
 	if err != nil {
 		return postgres.Deal{}, err
 	}
+	live := func(ctx context.Context) (bool, error) {
+		return d.store.HasAccountGrant(ctx, workspace.ID, p.ID, account)
+	}
+	switch granted, err := live(ctx); {
+	case err != nil:
+		return postgres.Deal{}, err
+	case !granted:
+		if err := refuseRegistration(ctx, d.store, workspace, p.ID, account); err != nil {
+			return postgres.Deal{}, err
+		}
+		return postgres.Deal{}, authz.ErrNotPermitted
+	}
 	from, err := workspaceReads(ctx, d.store, workspace)
 	if err != nil {
-		return postgres.Deal{}, fmt.Errorf("%w: %w", httptransport.ErrSourceFailed, err)
+		return postgres.Deal{}, fmt.Errorf("%w: %w", httptransport.ErrNoCRM, err)
 	}
-	asOf := from.day()
-	var scopes []string
-	granted, err := d.store.HasAccountGrant(ctx, workspace.ID, p.ID, account)
-	if err != nil {
-		return postgres.Deal{}, err
-	}
-	if granted {
-		scopes = []string{"crm:read"}
-	}
-	deal, err := from.registerDeal(ctx, p.ID, scopes, account, asOf)
-	var failed sourceFailure
+	deal, err := from.registerDeal(ctx, p.ID, []string{"crm:read"}, live, account, from.day())
+	var (
+		failed sourceFailure
+		absent noCRM
+	)
 	switch {
 	case errors.Is(err, errDenied):
 		return postgres.Deal{}, authz.ErrNotPermitted
+	case errors.As(err, &absent):
+		return postgres.Deal{}, fmt.Errorf("%w: %w", httptransport.ErrNoCRM, err)
 	case errors.As(err, &failed):
 		return postgres.Deal{}, fmt.Errorf("%w: %w", httptransport.ErrSourceFailed, err)
 	}
 	return deal, err
 }
 
-// sourceFailure is a failure of the CRM, or of what it returned, as against one of the database.
+// refuseRegistration writes the receipt of a registration refused before any source was opened: the
+// get_account read it would have made, refused as error/403, naming no connection.
+func refuseRegistration(ctx context.Context, store *postgres.Store, workspace postgres.Workspace, principal,
+	account string) error {
+	log := &postgres.ReceiptStore{Store: store}
+	run := "deal-" + strings.ReplaceAll(receipts.RandomID(), "-", "")
+	started, err := log.Start(ctx, receipts.Start{WorkspaceID: workspace.ID, OperationID: run + "/1",
+		PrincipalID: principal, TokenID: receipts.Fingerprint(randomToken()), Tool: "get_account",
+		Scope: "crm:read", AccountRef: account, Arguments: strictjson.NewObject("account_id", account), RequestID: receipts.RPC(1),
+		BriefID: &run})
+	if err != nil {
+		return err
+	}
+	settle, cancel := context.WithTimeout(context.WithoutCancel(ctx), settling)
+	defer cancel()
+	_, err = log.Finish(settle, started.Ticket(), receipts.Denied())
+	return err
+}
+
+// sourceFailure is a failure of a CRM read, or of what it returned, under the read's receipt, as against
+// one of the database.
 type sourceFailure struct{ error }
 
 func (e sourceFailure) Unwrap() error { return e.error }
+
+// noCRM is a CRM that could not be opened, before any read or receipt.
+type noCRM struct{ error }
+
+func (e noCRM) Unwrap() error { return e.error }
 
 const dealHelp = `usage: gtm-connector deal [-h] {new,list,show,close} ...
 

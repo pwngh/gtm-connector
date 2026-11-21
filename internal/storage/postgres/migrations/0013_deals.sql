@@ -1,19 +1,20 @@
--- Deals: one renewal of one account, under a readable ID such as thornfield-2027.
+-- Deals: one renewal of one account, under a readable ID such as thornfield-2027-2e3hke.
 --
 -- A deal is registered by hand after two CRM reads of its account, each under its own receipt: get_account
--- and list_opportunities, made by the principal that registers it (none for the owner). The deal names both
--- receipts, and binds only records they returned: the account, and the opportunity and the contract when
--- the CRM has them. Its ID is unique in its workspace and is never given again. An account has at most one
--- open deal. A deal closes once, and is never changed otherwise or deleted.
+-- and list_opportunities, made for the account as the workspace lists it, by the principal that registers
+-- the deal (none for the owner). The deal names both receipts, and binds only records they returned: the
+-- account, and the opportunity and the contract when the CRM has them. Its ID is unique in its workspace
+-- and is never given again. An account has at most one open deal. A deal closes once, and is never changed
+-- otherwise or deleted.
 --
--- A card belongs to at most one deal, of the card's own account, and is bound to it while the deal is open,
--- in the card's own publication. A card's bytes do not name its deal.
+-- A card belongs to at most one deal, of the card's own account, published while that deal was open, and
+-- is bound to it in the card's own publication. A card's bytes do not name its deal.
 
 ALTER TABLE cards ADD CONSTRAINT cards_account_unique UNIQUE (workspace_id, id, account_ref);
 
 CREATE TABLE deals (
     workspace_id uuid NOT NULL,
-    ref text COLLATE "C" NOT NULL CHECK (ref ~ '^[a-z0-9]{1,40}-[0-9]{4}(-[1-9][0-9]{0,5})?$'),
+    ref text COLLATE "C" NOT NULL CHECK (ref ~ '^[a-z0-9]{1,40}-[0-9]{4}-([a-z2-7]{6}|[a-z2-7]{12})(-[1-9][0-9]{0,5})?$'),
     account_ref text NOT NULL,
     opportunity_ref text COLLATE "C" CHECK (opportunity_ref ~ '^[A-Za-z0-9._-]{1,64}$'),
     contract_ref text COLLATE "C" CHECK (contract_ref ~ '^[A-Za-z0-9._-]{1,64}$'),
@@ -40,7 +41,7 @@ CREATE FUNCTION gtm_deal_violation(d deals) RETURNS text LANGUAGE plpgsql STABLE
 BEGIN
     PERFORM 1 FROM receipts r
      WHERE r.workspace_id = d.workspace_id AND r.id = d.account_read_id AND r.status = 'ok'
-       AND r.tool = 'get_account' AND r.requested_account = d.account_ref
+       AND r.tool = 'get_account' AND r.account_ref = d.account_ref
        AND r.principal_id IS NOT DISTINCT FROM d.registered_by
        AND r.rows ? ('crm/accounts/' || d.account_ref)
        AND (d.contract_ref IS NULL OR r.rows ? ('crm/contracts/' || d.contract_ref));
@@ -49,7 +50,7 @@ BEGIN
     END IF;
     PERFORM 1 FROM receipts r
      WHERE r.workspace_id = d.workspace_id AND r.id = d.opportunities_read_id AND r.status = 'ok'
-       AND r.tool = 'list_opportunities' AND r.requested_account = d.account_ref
+       AND r.tool = 'list_opportunities' AND r.account_ref = d.account_ref
        AND r.principal_id IS NOT DISTINCT FROM d.registered_by
        AND (d.opportunity_ref IS NULL OR r.rows ? ('crm/opportunities/' || d.opportunity_ref));
     IF NOT FOUND THEN
@@ -94,7 +95,8 @@ CREATE TRIGGER deals_no_truncate BEFORE TRUNCATE ON deals
     FOR EACH STATEMENT EXECUTE FUNCTION gtm_refuse_change();
 
 -- The cards of each deal. The keys hold a card to its own account's deal; the trigger holds the deal open
--- (a share lock, so a close waits) while the card is bound.
+-- (a share lock, so a close waits) while the card is bound, and refuses a card published before the deal
+-- was registered.
 CREATE TABLE deal_cards (
     workspace_id uuid NOT NULL,
     card_id uuid PRIMARY KEY,
@@ -105,12 +107,26 @@ CREATE TABLE deal_cards (
 );
 CREATE INDEX deal_cards_deal ON deal_cards (workspace_id, deal_ref);
 
+-- What is wrong with a card's place in its deal, or NULL: the card was published while the deal was open.
+CREATE FUNCTION gtm_deal_card_violation(l deal_cards) RETURNS text LANGUAGE sql STABLE AS $$
+    SELECT 'card ' || l.card_id || ' was published outside the time deal ' || l.deal_ref || ' was open'
+      FROM deals d JOIN cards c ON c.workspace_id = d.workspace_id AND c.id = l.card_id
+     WHERE d.workspace_id = l.workspace_id AND d.ref = l.deal_ref
+       AND (c.published_at < d.registered_at OR c.published_at > d.closed_at)
+$$;
+
 CREATE FUNCTION gtm_deal_cards_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+    problem text;
 BEGIN
     PERFORM 1 FROM deals WHERE workspace_id = NEW.workspace_id AND ref = NEW.deal_ref AND state = 'open'
         FOR SHARE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'deal % is not open', NEW.deal_ref USING ERRCODE = 'GT022';
+    END IF;
+    problem := gtm_deal_card_violation(NEW);
+    IF problem IS NOT NULL THEN
+        RAISE EXCEPTION '%', problem USING ERRCODE = 'GT022';
     END IF;
     RETURN NEW;
 END
@@ -122,11 +138,14 @@ CREATE TRIGGER deal_cards_immutable BEFORE UPDATE OR DELETE ON deal_cards
 CREATE TRIGGER deal_cards_no_truncate BEFORE TRUNCATE ON deal_cards
     FOR EACH STATEMENT EXECUTE FUNCTION gtm_refuse_change();
 
--- A restore loads deals with their triggers off, so gtm_integrity_violations checks their bindings too. It
--- keeps every check it held, under another name. A later migration that replaces it must keep both.
+-- A restore loads deals and their cards with their triggers off, so gtm_integrity_violations checks the
+-- deals' bindings and their cards' times too. It keeps every check it held, under another name. A later
+-- migration that replaces it must keep both.
 ALTER FUNCTION gtm_integrity_violations() RENAME TO gtm_violations_before_deals;
 CREATE FUNCTION gtm_integrity_violations() RETURNS SETOF text LANGUAGE sql STABLE AS $$
     SELECT v FROM gtm_violations_before_deals() v
     UNION ALL
     SELECT v FROM (SELECT gtm_deal_violation(d) AS v FROM deals d) x WHERE v IS NOT NULL
+    UNION ALL
+    SELECT v FROM (SELECT gtm_deal_card_violation(l) AS v FROM deal_cards l) x WHERE v IS NOT NULL
 $$;
