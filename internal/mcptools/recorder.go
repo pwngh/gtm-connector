@@ -53,13 +53,19 @@ var readSource = map[string]string{"search_accounts": "crm", "get_account": "crm
 // Start commits the pending receipt of one call, before the gate checks or runs anything. The receipt names
 // the principal the bearer belongs to when the workspace knows the bearer, whether or not it still admits
 // anything: that is who presented it, never a grant.
+//
+// The token lookup and the opening of the sources share at most half the time ctx leaves, so the receipt's
+// write keeps the other half however long they take: a call whose sources are slow to open still gets its
+// receipt, and is refused under it.
 func (r *recorder) Start(ctx context.Context, s mcp.Start) (string, error) {
+	looking, cancel := halfway(ctx)
+	defer cancel()
 	start := receipts.Start{WorkspaceID: r.workspace, OperationID: "mcp-" + receipts.RandomID(),
 		TokenID: receipts.Anonymous, Tool: s.Tool, Arguments: s.Arguments, RequestID: requestID(s.RequestID)}
 	if s.Token != nil {
 		start.TokenID = receipts.Fingerprint(*s.Token)
 		digest := sha256.Sum256([]byte(*s.Token))
-		token, err := r.tokens.MachineToken(ctx, r.workspace, digest[:])
+		token, err := r.tokens.MachineToken(looking, r.workspace, digest[:])
 		switch {
 		case err == nil:
 			start.PrincipalID = token.PrincipalID
@@ -74,7 +80,7 @@ func (r *recorder) Start(ctx context.Context, s mcp.Start) (string, error) {
 	// The sources are opened before the receipt starts, so the receipt names the connection the call reads
 	// through. Opening reads the workspace's own rows and no source. A call whose sources cannot be opened
 	// still gets its receipt, which names no connection, and is refused under it.
-	view, refusal := r.sources(ctx)
+	view, refusal := r.sources(looking)
 	if definition, known := mcp.Definitions[start.Tool]; known {
 		start.Scope = definition.Scope
 		// A direct read is a source read of its connection, so it finishes by binding what it returned.
@@ -196,4 +202,13 @@ func (r *recorder) opened(auditID string) (Opened, error) {
 		return Opened{}, errors.New("the call has no pending receipt")
 	}
 	return p.view, p.refusal
+}
+
+// halfway is ctx ending at half the time it has left, or ctx itself, with a cancel, when it has no deadline.
+func halfway(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, bounded := ctx.Deadline()
+	if !bounded {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, time.Until(deadline)/2)
 }

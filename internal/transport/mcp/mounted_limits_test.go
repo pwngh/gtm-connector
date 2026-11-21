@@ -2,30 +2,91 @@ package mcp_test
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/mcptools"
+	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/transport/mcp"
 )
 
 // Rule one on a stuck database, over both transports. Each receipt start and finish of the gate waits no
 // longer than the settle limit, which these tests shorten. A start that another connection's lock holds past
 // it refuses the call, and no tool runs. A finish held past it releases nothing, and the receipt stays
-// pending for the sweep of expired leases, which finishes it as interrupted.
+// pending for the sweep of expired leases, which finishes it as interrupted. Every store call the lock held
+// ended at the gate's deadline, never at the database's own lock or statement timeout.
 
-// settleLimit stands in for cards.SettleLimit here. storeGivesUp is the store's own lock timeout: a call
-// answered before it was ended by the gate's limit, not by the database.
-const (
-	settleLimit  = 250 * time.Millisecond
-	storeGivesUp = 5 * time.Second
-)
+// settleLimit stands in for cards.SettleLimit here.
+const settleLimit = 250 * time.Millisecond
+
+// noted is the receipt store with every error it gave the gate kept.
+type noted struct {
+	receipts.Store
+	mu     sync.Mutex
+	errors []error
+}
+
+func (n *noted) note(err error) error {
+	if err != nil {
+		n.mu.Lock()
+		n.errors = append(n.errors, err)
+		n.mu.Unlock()
+	}
+	return err
+}
+
+func (n *noted) Start(ctx context.Context, s receipts.Start) (receipts.Receipt, error) {
+	r, err := n.Store.Start(ctx, s)
+	return r, n.note(err)
+}
+
+func (n *noted) Finish(ctx context.Context, t receipts.Ticket, o receipts.Outcome) (receipts.Receipt, error) {
+	r, err := n.Store.Finish(ctx, t, o)
+	return r, n.note(err)
+}
+
+func (n *noted) FinishRead(ctx context.Context, t receipts.Ticket, versions []receipts.RecordVersion,
+	elapsedMS float64) (receipts.Receipt, error) {
+	r, err := n.Store.FinishRead(ctx, t, versions, elapsedMS)
+	return r, n.note(err)
+}
+
+// byTheGate reports whether the store failed, and every failure was the gate's deadline: none was the
+// database's own refusal, such as its lock timeout.
+func (n *noted) byTheGate() bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, err := range n.errors {
+		var refused *pgconn.PgError
+		if !errors.Is(err, context.DeadlineExceeded) || errors.As(err, &refused) {
+			return false
+		}
+	}
+	return len(n.errors) > 0
+}
+
+// watched serves the mounted database again with every receipt store error noted, and the gate's limit
+// shortened.
+func (m *mounted) watchedStore() *noted {
+	m.t.Helper()
+	var store *noted
+	m.serve(m.selection, func(c *mcptools.Config) {
+		store = &noted{Store: c.Receipts}
+		c.Receipts = store
+	})
+	mcp.SetSettleLimit(m.gateway, settleLimit)
+	return store
+}
 
 // hold takes a lock in a transaction of another connection, as a stuck writer holds one. release ends the
 // transaction; it runs at the latest when the test ends.
@@ -49,8 +110,13 @@ func (m *mounted) hold(statement string, args ...any) (release func()) {
 	return release
 }
 
-// answered runs one call and gives how long it took to be answered. A call still unanswered long after the
-// store itself would have given up fails the test, with the lock released so the call can end.
+// unanswered is how long a call may stay unanswered before the test fails. It is a watchdog, far past any
+// limit here, not a measure.
+const unanswered = 30 * time.Second
+
+// answered runs one call and gives how long it took to be answered. A call still unanswered after the
+// watchdog fails the test, with the lock released so the call can end; one that does not end then either is
+// left behind.
 func answered(t *testing.T, release func(), do func()) time.Duration {
 	t.Helper()
 	done := make(chan struct{})
@@ -62,10 +128,14 @@ func answered(t *testing.T, release func(), do func()) time.Duration {
 	select {
 	case <-done:
 		return time.Since(began)
-	case <-time.After(6 * storeGivesUp):
+	case <-time.After(unanswered):
 		release()
-		<-done
-		t.Fatal("the call was not answered while the lock was held")
+		select {
+		case <-done:
+			t.Fatal("the call was answered only once the lock was released")
+		case <-time.After(unanswered):
+			t.Fatal("the call was not answered even once the lock was released")
+		}
 	}
 	return 0
 }
@@ -104,7 +174,8 @@ func (m *mounted) swept() {
 	}
 }
 
-func inLimit(elapsed time.Duration) bool { return elapsed >= settleLimit && elapsed < storeGivesUp }
+// waited reports whether a call waited at least the limit: the lock held it, until the gate gave up.
+func waited(elapsed time.Duration) bool { return elapsed >= settleLimit }
 
 func TestMountedStuckReceiptsOverHTTPS(t *testing.T) {
 	account := map[string]any{"account_id": "acc-003"}
@@ -113,7 +184,7 @@ func TestMountedStuckReceiptsOverHTTPS(t *testing.T) {
 	t.Run("a start", func(t *testing.T) {
 		m := mount(t, cards.Selection{"acc-003": true}, nil)
 		m.fixture()
-		mcp.SetSettleLimit(m.gateway, settleLimit)
+		store := m.watchedStore()
 		release := m.hold(stuckStart)
 		var response string
 		var code int
@@ -122,7 +193,7 @@ func TestMountedStuckReceiptsOverHTTPS(t *testing.T) {
 			code, response = answer.Code, strings.TrimSpace(answer.Body.String())
 		})
 		release()
-		if code != 503 || response != `{"error":"audit_unavailable; call was not executed"}` || !inLimit(elapsed) ||
+		if code != 503 || response != `{"error":"audit_unavailable; call was not executed"}` || !waited(elapsed) || !store.byTheGate() ||
 			len(m.book.made()) != 0 || len(m.outer()) != 0 {
 			t.Fatalf("a call whose receipt could not start: %d %s after %s, read %v, receipts %+v", code, response,
 				elapsed, m.book.made(), m.outer())
@@ -136,7 +207,7 @@ func TestMountedStuckReceiptsOverHTTPS(t *testing.T) {
 	t.Run("a finish", func(t *testing.T) {
 		m := mount(t, cards.Selection{"acc-003": true}, nil)
 		m.fixture()
-		mcp.SetSettleLimit(m.gateway, settleLimit)
+		store := m.watchedStore()
 		release := stuckFinish(m, "get_account")
 		var response string
 		var code int
@@ -145,7 +216,7 @@ func TestMountedStuckReceiptsOverHTTPS(t *testing.T) {
 			code, response = answer.Code, strings.TrimSpace(answer.Body.String())
 		})
 		release()
-		if code != 503 || response != `{"error":"execution_or_audit_unavailable; no result released"}` || !inLimit(elapsed) ||
+		if code != 503 || response != `{"error":"execution_or_audit_unavailable; no result released"}` || !waited(elapsed) || !store.byTheGate() ||
 			m.count("SELECT count(*) FROM receipt_records") != 0 {
 			t.Fatalf("a call whose receipt could not finish: %d %s after %s", code, response, elapsed)
 		}
@@ -160,9 +231,14 @@ type stdioSession struct {
 	done  chan error
 }
 
-func (m *mounted) stdio(raw string) *stdioSession {
+// stdio serves the session with every receipt store error noted, and the gate's limit shortened.
+func (m *mounted) stdio(raw string) (*stdioSession, *noted) {
 	m.t.Helper()
-	config, err := mcptools.Stdio(m.tools(nil), raw)
+	var store *noted
+	config, err := mcptools.Stdio(m.tools(func(c *mcptools.Config) {
+		store = &noted{Store: c.Receipts}
+		c.Receipts = store
+	}), raw)
 	must(m.t, err)
 	mcp.SetStdioSettleLimit(&config, settleLimit)
 	clientIn, serverIn := io.Pipe()
@@ -192,13 +268,13 @@ func (m *mounted) stdio(raw string) *stdioSession {
 		if !strings.Contains(line, `"result"`) {
 			m.t.Fatalf("initialize: %s", line)
 		}
-	case <-time.After(6 * storeGivesUp):
+	case <-time.After(unanswered):
 		m.t.Fatal("initialize was not answered")
 	}
 	if _, err := io.WriteString(s.in, `{"jsonrpc":"2.0","method":"notifications/initialized"}`+"\n"); err != nil {
 		m.t.Fatal(err)
 	}
-	return s
+	return s, store
 }
 
 // ask sends one line and gives the server's next line as written, or "" when the session ended. The caller
@@ -237,12 +313,12 @@ func TestMountedStuckReceiptsOverStdio(t *testing.T) {
 	t.Run("a start", func(t *testing.T) {
 		m := mount(t, cards.Selection{"acc-003": true}, nil)
 		m.fixture()
-		s := m.stdio(bearer("read"))
+		s, store := m.stdio(bearer("read"))
 		release := m.hold(stuckStart)
 		var line string
 		elapsed := answered(t, release, func() { line = s.ask(call(1, "get_account", account)) })
 		release()
-		if message := failure(t, line); message != "audit_unavailable; call was not executed" || !inLimit(elapsed) ||
+		if message := failure(t, line); message != "audit_unavailable; call was not executed" || !waited(elapsed) || !store.byTheGate() ||
 			len(m.book.made()) != 0 || len(m.outer()) != 0 {
 			t.Fatalf("a call whose receipt could not start: %q after %s, read %v, receipts %+v", message, elapsed,
 				m.book.made(), m.outer())
@@ -257,12 +333,12 @@ func TestMountedStuckReceiptsOverStdio(t *testing.T) {
 	t.Run("a finish", func(t *testing.T) {
 		m := mount(t, cards.Selection{"acc-003": true}, nil)
 		m.fixture()
-		s := m.stdio(bearer("read"))
+		s, store := m.stdio(bearer("read"))
 		release := stuckFinish(m, "get_account")
 		var line string
 		elapsed := answered(t, release, func() { line = s.ask(call(1, "get_account", account)) })
 		release()
-		if message := failure(t, line); message != "execution_or_audit_unavailable; no result released" || !inLimit(elapsed) ||
+		if message := failure(t, line); message != "execution_or_audit_unavailable; no result released" || !waited(elapsed) || !store.byTheGate() ||
 			m.count("SELECT count(*) FROM receipt_records") != 0 {
 			t.Fatalf("a call whose receipt could not finish: %q after %s", message, elapsed)
 		}

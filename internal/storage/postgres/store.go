@@ -79,17 +79,48 @@ func (s *Store) at(point string) error {
 	return s.crash(point)
 }
 
+// recoverWait is how long a rollback may take, and the read that settles a
+// commit whose answer was lost. Either is one short exchange with a working
+// server; past it the connection is taken to be lost.
+const recoverWait = 3 * time.Second
+
+// errCommitUnknown is a commit that was sent but got no answer: it may or
+// may not have committed. A caller reads back what it wrote to learn which.
+var errCommitUnknown = errors.New("the commit got no answer")
+
+// recovering is the context of a rollback or of a read-back after a lost
+// commit: the caller's cancel and deadline do not end it, and recoverWait
+// does.
+func recovering(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), recoverWait)
+}
+
 // inTx runs fn in one transaction and commits it, or rolls back on error.
+// The rollback waits at most recoverWait: one that fails or runs out of time
+// closes its connection, which the pool then drops, so a connection lost
+// with its socket still open does not hold the caller. A commit that got no
+// answer is errCommitUnknown.
 func (s *Store) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
+	defer func() {
+		ending, cancel := recovering(ctx)
+		defer cancel()
+		tx.Rollback(ending) // a no-op after a commit
+	}()
 	if err := fn(tx); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		var refused *pgconn.PgError
+		if errors.As(err, &refused) || pgconn.SafeToRetry(err) {
+			return err // the server refused it, or it was never sent
+		}
+		return fmt.Errorf("%w: %w", errCommitUnknown, err)
+	}
+	return nil
 }
 
 // ErrDatabaseURL is a database URL that could not be parsed.
