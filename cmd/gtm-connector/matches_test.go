@@ -28,6 +28,8 @@ type matchResult struct {
 	DecidedBy  *string `json:"decided_by"`
 	Supersedes *string
 	Receipt    string
+	Superseded bool
+	Stale      bool
 }
 
 // shownWithMatches is deal show's result with the matches its card read.
@@ -145,7 +147,7 @@ func TestCallsAreMatchedToTheirDeal(t *testing.T) {
 	// every time from its registration on.
 	for at, want := range map[string]string{"closed_at": deal.ID, "registered_at": second.ID} {
 		if n := d.count(t, `SELECT count(*) FROM deals d WHERE d.ref = $1 AND gtm_match_candidates(d.workspace_id,
-			'acc-007', (SELECT `+at+` FROM deals WHERE ref = $1)) = ARRAY[$1::text]`, want); n != 1 {
+			'acc-007', (SELECT `+at+` FROM deals WHERE ref = $1), clock_timestamp()) = ARRAY[$1::text]`, want); n != 1 {
 			t.Errorf("%s of %s is not its own", at, want)
 		}
 	}
@@ -154,7 +156,7 @@ func TestCallsAreMatchedToTheirDeal(t *testing.T) {
 		t.Errorf("the second deal's card: %s", gaps)
 	}
 	code, stdout, _ = d.read(t, with("brief", "acc-007")...)
-	if code != 0 || !strings.Contains(stdout, "Calls: not read. The account's transcript is not matched to this deal.\n") {
+	if code != 0 || !strings.Contains(stdout, "Calls: not read. The account's transcript is not matched to this card.\n") {
 		t.Errorf("the second deal's card as text:\n%s", stdout)
 	}
 	d.result(t, &shown, with("deal", "show", second.ID)...)
@@ -347,7 +349,7 @@ func TestMatchRoutesKeepTheGrants(t *testing.T) {
 		t.Errorf("deal decide of an unknown match: %s", message)
 	}
 	code, stdout, _ := d.read(t, "brief", "acc-007")
-	if code != 0 || !strings.Contains(stdout, "Calls: not read. The account's transcript is not matched to this deal.\n") {
+	if code != 0 || !strings.Contains(stdout, "Calls: not read. The account's transcript is not matched to this card.\n") {
 		t.Errorf("the card after the rejection:\n%s", stdout)
 	}
 

@@ -466,8 +466,12 @@ func (r *run) dealText(action string, result any) string {
 	// The card names the call and the thread it read, each by its match.
 	for _, value := range read {
 		m := value.(*strictjson.Object)
+		again := ""
+		if get(m, "superseded") == true {
+			again = ", decided again"
+		}
 		fields = append(fields, []any{"Read " + get(m, "kind").(string), get(m, "item").(string) + " (match " +
-			get(m, "id").(string) + ")"})
+			get(m, "id").(string) + again + ")"})
 	}
 	text := r.screen.table([]string{"FIELD", "VALUE"}, fields)
 	switch {

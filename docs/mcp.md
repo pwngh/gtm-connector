@@ -85,6 +85,7 @@ text `Error executing tool TOOL: CODE`. Its receipt is finished as an error.
 | `account_not_selected`, `slack_not_selected` | A selection is served, and the account, or its Slack thread, is not in it. |
 | `crm_not_connected`, `calls_not_connected`, `slack_not_connected` | The workspace has no such source connected at the moment of the call. |
 | `crm_not_served` | The workspace's CRM is one the MCP tools do not serve in this build. |
+| `calls_not_matched`, `slack_not_matched` | The account's imported call, or its mapped thread, waits for a person in the matches queue or was kept off every card ([setting it up](config.md#what-is-built-today)). |
 | `account_number_requires_salesforce` | `search_accounts` was given `account_number` on the demo CRM, which has no account numbers. |
 | A source's own code, such as `source_identity_mismatch` | The source refused the read. See [sources](sources.md). |
 

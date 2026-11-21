@@ -35,7 +35,7 @@ type Store interface {
 	ViewReceipt(ctx context.Context, v postgres.Viewer, receiptID string) (postgres.Receipt, error)
 	ViewDeals(ctx context.Context, v postgres.Viewer) ([]postgres.Deal, error)
 	ViewDeal(ctx context.Context, v postgres.Viewer, ref string) (postgres.Deal, error)
-	ViewMatches(ctx context.Context, v postgres.Viewer) ([]postgres.Match, error)
+	ViewMatches(ctx context.Context, v postgres.Viewer, every bool) ([]postgres.Match, error)
 	DecideMatch(ctx context.Context, in postgres.MatchDecision) (postgres.Match, error)
 }
 
@@ -120,9 +120,10 @@ func (e Evidence) Deal(ctx context.Context, p Principal, ref string) (postgres.D
 	return e.Store.ViewDeal(ctx, p.viewer(), ref)
 }
 
-// Matches lists the matches waiting for a person on the accounts the principal holds a live grant on.
-func (e Evidence) Matches(ctx context.Context, p Principal) ([]postgres.Match, error) {
-	return e.Store.ViewMatches(ctx, p.viewer())
+// Matches lists the matches waiting for a person on the accounts the principal holds a live grant on, or with
+// every each of their current decisions.
+func (e Evidence) Matches(ctx context.Context, p Principal, every bool) ([]postgres.Match, error) {
+	return e.Store.ViewMatches(ctx, p.viewer(), every)
 }
 
 // DecideMatch decides a match as the principal: onto one deal of its account, or with deal "" onto none. The

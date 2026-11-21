@@ -868,7 +868,7 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 		c.gap("calls_denied", "Calls: not read. The grant lacks calls:read.", nil, false, nil)
 		return
 	case "not_matched":
-		c.gap("calls_not_matched", "Calls: not read. The account's transcript is not matched to this deal.", nil,
+		c.gap("calls_not_matched", "Calls: not read. The account's transcript is not matched to this card.", nil,
 			false, nil)
 		return
 	}
@@ -963,7 +963,7 @@ func (c *card) slack(contacts []contact) {
 		c.gap("slack_denied", "Slack: not read. The grant lacks slack:read.", nil, false, nil)
 		return
 	case "not_matched":
-		c.gap("slack_not_matched", "Slack: not read. The account's thread is not matched to this deal.", nil, false,
+		c.gap("slack_not_matched", "Slack: not read. The account's thread is not matched to this card.", nil, false,
 			nil)
 		return
 	}

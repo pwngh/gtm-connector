@@ -3,9 +3,10 @@
 -- An item is one call import revision (note-...) or one Slack mapping (map-...), stated for one account when
 -- it was imported or mapped. Its time is the call's time, or unknown, and for a thread the time of its parent
 -- message. The deals of an account follow each other, so each deal holds the times from its own registration
--- to the next deal's, the first deal every earlier time and the last every later one: evidence joins the next
--- deal from the moment it is registered. An item fits the deal that holds its time, and an item with no time
--- fits every deal of its account (gtm_match_candidates).
+-- to the next deal's, the first deal every earlier time and the last-registered every later one: evidence
+-- joins the next deal from the moment it is registered. An item fits the deal that holds its time, and an
+-- item with no time fits every deal of its account (gtm_match_candidates), each as the deals stood when it
+-- was decided.
 --
 -- While the account has an open deal, the connector decides each item once: one deal fits, and the item is
 -- matched to it, or more fit, and the item waits for a person. A person may later decide an item again:
@@ -26,12 +27,14 @@ CREATE FUNCTION gtm_call_time(manifest text) RETURNS timestamptz LANGUAGE sql ST
     SELECT (manifest::jsonb ->> 'called_at')::timestamptz
 $$;
 
-CREATE FUNCTION gtm_match_candidates(ws uuid, account text, at timestamptz) RETURNS text[] LANGUAGE sql STABLE AS $$
+-- The deals of the account registered by as_of that hold the time at, or every one when at is NULL.
+CREATE FUNCTION gtm_match_candidates(ws uuid, account text, at timestamptz, as_of timestamptz) RETURNS text[]
+LANGUAGE sql STABLE AS $$
     SELECT coalesce(array_agg(ref ORDER BY registered_at, ref), '{}') FROM (
         SELECT ref, registered_at,
                lag(registered_at) OVER (ORDER BY registered_at, ref) IS NULL AS first,
                lead(registered_at) OVER (ORDER BY registered_at, ref) AS next
-          FROM deals WHERE workspace_id = ws AND account_ref = account) d
+          FROM deals WHERE workspace_id = ws AND account_ref = account AND registered_at <= as_of) d
      WHERE at IS NULL OR ((first OR at >= registered_at) AND (next IS NULL OR at < next))
 $$;
 
@@ -68,8 +71,10 @@ CREATE TABLE deal_matches (
 CREATE UNIQUE INDEX deal_matches_first ON deal_matches (workspace_id, kind, item) WHERE supersedes IS NULL;
 CREATE INDEX deal_matches_account ON deal_matches (workspace_id, account_ref);
 
--- What is wrong with a decision, or NULL: its receipt, its candidates, and the decision it supersedes. These
--- hold for good, so a restore checks them too.
+-- What is wrong with a decision, or NULL: its receipt; its time, which is its call's own, or its thread's
+-- while the thread is still mapped; its candidates, which for the connector's own decision are the deals
+-- registered when it was made that hold that time; and the decision it supersedes. These hold for good, so a
+-- restore checks them too.
 CREATE FUNCTION gtm_deal_match_violation(m deal_matches) RETURNS text LANGUAGE plpgsql STABLE AS $$
 BEGIN
     PERFORM 1 FROM receipts r
@@ -89,6 +94,25 @@ BEGIN
     IF FOUND THEN
         RETURN 'match ' || m.id || ' names a candidate that is no deal of its account';
     END IF;
+    IF m.kind = 'call' THEN
+        PERFORM 1 FROM call_import_revisions v
+         WHERE v.workspace_id = m.workspace_id AND v.import_id = m.item AND v.account_ref = m.account_ref
+           AND gtm_call_time(v.manifest) IS NOT DISTINCT FROM m.at;
+        IF NOT FOUND THEN
+            RETURN 'match ' || m.id || ' is not of a call of its account at the call''s time';
+        END IF;
+    ELSE
+        PERFORM 1 FROM slack_mappings s
+         WHERE s.workspace_id = m.workspace_id AND s.mapping::jsonb ->> 'mapping_id' = m.item
+           AND (s.account_ref <> m.account_ref OR gtm_slack_time(s.thread_ts) IS DISTINCT FROM m.at);
+        IF FOUND THEN
+            RETURN 'match ' || m.id || ' is not of a thread of its account at the thread''s time';
+        END IF;
+    END IF;
+    IF m.basis <> 'person'
+       AND m.candidates <> gtm_match_candidates(m.workspace_id, m.account_ref, m.at, m.decided_at) THEN
+        RETURN 'match ' || m.id || ' names other deals than held its time when it was decided';
+    END IF;
     IF m.basis <> 'person' AND (m.state = 'matched') <> (cardinality(m.candidates) = 1)
        OR m.basis <> 'person' AND m.state = 'matched' AND m.deal_ref <> m.candidates[1]
        OR m.state = 'rejected' AND m.basis <> 'person' THEN
@@ -107,8 +131,8 @@ BEGIN
 END
 $$;
 
--- At its insert, the connector's own decision also follows the rule: the account has an open deal, the item
--- is the account's, its time is the item's own, and its candidates are the deals that hold that time.
+-- At its insert, the connector's own decision is also made while the account has an open deal, of a thread
+-- the account has mapped now.
 CREATE FUNCTION gtm_deal_matches_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
     problem text;
@@ -125,20 +149,13 @@ BEGIN
     IF NOT FOUND THEN
         RAISE EXCEPTION 'the connector decides an item only while its account has an open deal' USING ERRCODE = 'GT023';
     END IF;
-    IF NEW.kind = 'call' THEN
-        PERFORM 1 FROM call_import_revisions v
-         WHERE v.workspace_id = NEW.workspace_id AND v.import_id = NEW.item AND v.account_ref = NEW.account_ref
-           AND gtm_call_time(v.manifest) IS NOT DISTINCT FROM NEW.at;
-    ELSE
+    IF NEW.kind = 'thread' THEN
         PERFORM 1 FROM slack_mappings s
          WHERE s.workspace_id = NEW.workspace_id AND s.account_ref = NEW.account_ref
-           AND s.mapping::jsonb ->> 'mapping_id' = NEW.item AND gtm_slack_time(s.thread_ts) = NEW.at;
-    END IF;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'match % is not of an item of its account at its time', NEW.id USING ERRCODE = 'GT023';
-    END IF;
-    IF NEW.candidates <> gtm_match_candidates(NEW.workspace_id, NEW.account_ref, NEW.at) THEN
-        RAISE EXCEPTION 'match % names other deals than hold its time', NEW.id USING ERRCODE = 'GT023';
+           AND s.mapping::jsonb ->> 'mapping_id' = NEW.item;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'match % is not of a thread its account has mapped', NEW.id USING ERRCODE = 'GT023';
+        END IF;
     END IF;
     RETURN NEW;
 END
@@ -174,11 +191,13 @@ CREATE FUNCTION gtm_deal_card_match_violation(l deal_card_matches) RETURNS text 
              OR m.kind = 'thread' AND r.tool = 'read_slack_messages'))
 $$;
 
--- A card names only its account's current decision of an item.
+-- A card names only its account's current decision of an item. The share lock on the match makes a decision
+-- of it being made wait for the card's publication, or the publication for the decision, which it then sees.
 CREATE FUNCTION gtm_deal_card_matches_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
     problem text;
 BEGIN
+    PERFORM 1 FROM deal_matches WHERE workspace_id = NEW.workspace_id AND id = NEW.match_id FOR SHARE;
     problem := gtm_deal_card_match_violation(NEW);
     IF problem IS NOT NULL THEN
         RAISE EXCEPTION '%', problem USING ERRCODE = 'GT024';

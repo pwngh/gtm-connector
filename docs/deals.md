@@ -51,8 +51,10 @@ If a source was not read, a rule answers unknown, not silence.
 - **Promises you made:** seller sentences marked as commitments.
 - **Missing or unread sources.**
 
-A call or thread that could belong to this deal or an earlier one of the account is on neither card
-until someone decides it, and the card says it was not read.
+A call or thread belongs to the deal that was the account's latest when it happened: a call between one
+deal's close and the next deal's registration belongs to the closed deal. One with no time that could
+belong to this deal or an earlier one is on neither card until someone decides it, and the card says it
+was not read.
 
 ## The checklist and playbooks
 

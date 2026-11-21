@@ -52,7 +52,9 @@ and the connector matches each to a deal of that account:
 - **The item's time decides.** A call's time is its `--called-at`, and a thread's is the time of its
   parent message. The deals of an account follow each other, and each holds the times from its own
   registration to the next deal's registration: the account's first deal also holds every earlier
-  time, and its open deal every later one. A call or thread joins the deal that holds its time.
+  time, and its last-registered deal every later one. A call or thread joins the deal that holds its
+  time, so a call made after a deal closed and before the next deal was registered belongs to the closed
+  deal.
 - **A call with no time** fits every deal of its account. While the account has had one deal, that
   deal takes it. Once it has had two, the call waits for a person.
 - **When it is decided:** as a deal is registered, as a call is imported or a thread mapped while the
@@ -60,8 +62,12 @@ and the connector matches each to a deal of that account:
   person may decide it again.
 - **What a deal's card reads:** the account's current call and thread only when they are matched to
   that deal. Otherwise the card says `Calls: not read. The account's transcript is not matched to this
-  deal.` or `Slack: not read. The account's thread is not matched to this deal.` A card made while the
-  account has no open deal reads both, as before deals existed.
+  card.` or `Slack: not read. The account's thread is not matched to this card.` Every other card,
+  made while the account has no open deal or through MCP, reads them unless they wait for a person or
+  were rejected, and says the same when they do; an MCP read of them is refused as `calls_not_matched` or
+  `slack_not_matched`.
+- **A stale match** is one whose call or thread is no longer the account's current import or mapping.
+  It leaves the queue, since no card can read it, and the full lists mark it `stale`.
 - **Every decision has a receipt.** A `decide_match` receipt names the item, the decision and the deal,
   and the person who decided, or none for the connector. The decision and the receipt's finish commit
   together.

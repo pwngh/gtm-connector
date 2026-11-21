@@ -42,8 +42,10 @@ type Match struct {
 	Supersedes string
 	ReceiptID  string
 	DecidedAt  time.Time
-	// Current is whether no later decision of the item supersedes this one.
-	Current bool
+	// Superseded is whether a later decision of the item replaced this one.
+	Superseded bool
+	// Stale is whether the item is no longer the account's current import or mapping, so no card reads it.
+	Stale bool
 }
 
 // MatchDecision is a person's decision of a match.
@@ -69,14 +71,20 @@ var (
 const matchColumns = `m.workspace_id, m.id, m.kind, m.item, m.account_ref, a.display_name, m.at, m.candidates,
 	m.state, coalesce(m.deal_ref, ''), m.basis, coalesce(m.decided_by::text, ''), coalesce(m.supersedes::text, ''),
 	m.receipt_id, m.decided_at,
-	NOT EXISTS (SELECT 1 FROM deal_matches n WHERE n.workspace_id = m.workspace_id AND n.supersedes = m.id)`
+	EXISTS (SELECT 1 FROM deal_matches n WHERE n.workspace_id = m.workspace_id AND n.supersedes = m.id),
+	NOT CASE m.kind
+		WHEN 'call' THEN EXISTS (SELECT 1 FROM call_import_active c WHERE c.workspace_id = m.workspace_id
+			AND c.account_ref = m.account_ref AND c.import_id = m.item)
+		ELSE EXISTS (SELECT 1 FROM slack_mappings s WHERE s.workspace_id = m.workspace_id
+			AND s.account_ref = m.account_ref AND s.mapping::jsonb ->> 'mapping_id' = m.item) END`
 
 const matchFrom = ` FROM deal_matches m JOIN accounts a ON a.workspace_id = m.workspace_id AND a.ref = m.account_ref`
 
 func scanMatch(row pgx.Row) (Match, error) {
 	var m Match
 	err := row.Scan(&m.WorkspaceID, &m.ID, &m.Kind, &m.Item, &m.AccountRef, &m.AccountName, &m.At, &m.Candidates,
-		&m.State, &m.DealRef, &m.Basis, &m.DecidedBy, &m.Supersedes, &m.ReceiptID, &m.DecidedAt, &m.Current)
+		&m.State, &m.DealRef, &m.Basis, &m.DecidedBy, &m.Supersedes, &m.ReceiptID, &m.DecidedAt, &m.Superseded,
+		&m.Stale)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Match{}, ErrNotFound
 	}
@@ -176,7 +184,7 @@ func (s *Store) MatchAccount(ctx context.Context, workspaceID, account string) (
 	for _, item := range items {
 		var candidates []string
 		var deals int
-		if err := s.pool.QueryRow(ctx, `SELECT gtm_match_candidates($1, $2, $3),
+		if err := s.pool.QueryRow(ctx, `SELECT gtm_match_candidates($1, $2, $3, clock_timestamp()),
 			(SELECT count(*) FROM deals WHERE workspace_id = $1 AND account_ref = $2)`,
 			workspaceID, account, item.at).Scan(&candidates, &deals); err != nil {
 			return made, err
@@ -204,7 +212,7 @@ func (s *Store) MatchAccount(ctx context.Context, workspaceID, account string) (
 				return err
 			}
 			var now []string
-			if err := tx.QueryRow(ctx, `SELECT gtm_match_candidates($1, $2, $3)`, workspaceID, account,
+			if err := tx.QueryRow(ctx, `SELECT gtm_match_candidates($1, $2, $3, clock_timestamp())`, workspaceID, account,
 				item.at).Scan(&now); err != nil {
 				return err
 			}
@@ -247,15 +255,24 @@ func (s *Store) Match(ctx context.Context, workspaceID, id string) (Match, error
 		workspaceID, id))
 }
 
-// Matches lists a workspace's current decisions, the waiting ones alone unless every is set, oldest first.
+// listed keeps the current decisions a list shows: with every, all of them; otherwise those that wait for a
+// person while their item is still the account's current one, which a card could read.
+const listed = ` AND NOT EXISTS (SELECT 1 FROM deal_matches n WHERE n.workspace_id = m.workspace_id AND n.supersedes = m.id)
+	AND ($2 OR m.state = 'waiting' AND CASE m.kind
+		WHEN 'call' THEN EXISTS (SELECT 1 FROM call_import_active c WHERE c.workspace_id = m.workspace_id
+			AND c.account_ref = m.account_ref AND c.import_id = m.item)
+		ELSE EXISTS (SELECT 1 FROM slack_mappings s WHERE s.workspace_id = m.workspace_id
+			AND s.account_ref = m.account_ref AND s.mapping::jsonb ->> 'mapping_id' = m.item) END)
+	ORDER BY m.decided_at, m.id`
+
+// Matches lists a workspace's current decisions that wait for a person on an item a card could still read,
+// or with every all of its current decisions, oldest first.
 func (s *Store) Matches(ctx context.Context, workspaceID string, every bool) ([]Match, error) {
 	if !validUUID(workspaceID) {
 		return nil, ErrNotFound
 	}
-	return collectMatches(s.pool.Query(ctx, `SELECT `+matchColumns+matchFrom+`
-		WHERE m.workspace_id = $1 AND (m.state = 'waiting' OR $2)
-		  AND NOT EXISTS (SELECT 1 FROM deal_matches n WHERE n.workspace_id = m.workspace_id AND n.supersedes = m.id)
-		ORDER BY m.decided_at, m.id`, workspaceID, every))
+	return collectMatches(s.pool.Query(ctx, `SELECT `+matchColumns+matchFrom+` WHERE m.workspace_id = $1`+listed,
+		workspaceID, every))
 }
 
 // CurrentMatch is the current decision of an item, and false when the connector has not decided it.
@@ -287,9 +304,9 @@ func (s *Store) AccountItem(ctx context.Context, workspaceID, account, kind stri
 	return "", false, err
 }
 
-// ViewMatches lists the waiting matches of the accounts the principal holds a live grant on, oldest first. A
-// principal that is unknown, of another workspace, or disabled gets ErrNotPermitted.
-func (s *Store) ViewMatches(ctx context.Context, v Viewer) ([]Match, error) {
+// ViewMatches lists the matches of the accounts the principal holds a live grant on as Matches lists a
+// workspace's. A principal that is unknown, of another workspace, or disabled gets ErrNotPermitted.
+func (s *Store) ViewMatches(ctx context.Context, v Viewer, every bool) ([]Match, error) {
 	if !validUUID(v.WorkspaceID) || !validUUID(v.PrincipalID) {
 		return nil, ErrNotPermitted
 	}
@@ -312,9 +329,8 @@ func (s *Store) ViewMatches(ctx context.Context, v Viewer) ([]Match, error) {
 		}
 		matches, err = collectMatches(tx.Query(ctx, `SELECT `+matchColumns+matchFrom+`
 			JOIN account_grants g ON g.workspace_id = m.workspace_id AND g.account_ref = m.account_ref
-			WHERE m.workspace_id = $1 AND g.principal_id = $2 AND g.revoked_at IS NULL AND m.state = 'waiting'
-			  AND NOT EXISTS (SELECT 1 FROM deal_matches n WHERE n.workspace_id = m.workspace_id AND n.supersedes = m.id)
-			ORDER BY m.decided_at, m.id`, v.WorkspaceID, v.PrincipalID))
+			WHERE m.workspace_id = $1 AND g.principal_id = $3 AND g.revoked_at IS NULL`+listed,
+			v.WorkspaceID, every, v.PrincipalID))
 		return err
 	})
 	return matches, err
@@ -397,6 +413,17 @@ func (s *Store) DecideMatch(ctx context.Context, in MatchDecision) (Match, error
 				return err
 			}
 		}
+		// The update lock makes a card being published that names this match, or another decision of it, wait
+		// for this one, and this one for them.
+		var superseded bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM deal_matches WHERE workspace_id = $1 AND supersedes = $2)
+			FROM deal_matches WHERE workspace_id = $1 AND id = $2 FOR UPDATE`, in.WorkspaceID, before.ID).
+			Scan(&superseded); err != nil {
+			return err
+		}
+		if superseded {
+			return ErrMatchDecided
+		}
 		if _, err := finishLocked(ctx, tx, ReceiptFinish{ReceiptID: receipt.ID, LeaseToken: receipt.LeaseToken,
 			Status: "ok", HTTPStatus: 200}, false); err != nil {
 			return err
@@ -416,6 +443,7 @@ func (s *Store) DecideMatch(ctx context.Context, in MatchDecision) (Match, error
 			status, code = 403, "not_permitted"
 		case errors.Is(err, ErrMatchDeal):
 			status, code = 400, "invalid_deal"
+		case errors.Is(err, ErrMatchDecided):
 		case sqlState(err) == "23505":
 			err = ErrMatchDecided
 		default:

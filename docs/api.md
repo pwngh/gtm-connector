@@ -142,7 +142,7 @@ may decide it again; each decision is a new match that supersedes the one before
 {"id": "MATCH_ID", "kind": "call", "item": "note-...", "account": "acc-007", "account_name": "...",
  "at": null, "candidates": ["copper-2027-xxxxxx", "copper-2027-xxxxxx-2"], "state": "waiting",
  "deal": null, "basis": "time_unknown", "decided_by": null, "decided_at": "...", "supersedes": null,
- "receipt": "RECEIPT_ID"}
+ "receipt": "RECEIPT_ID", "superseded": false, "stale": false}
 ```
 
 | Field | What it holds |
@@ -155,9 +155,12 @@ may decide it again; each decision is a new match that supersedes the one before
 | `decided_by` | The principal who decided, or `null` for the connector or the owner |
 | `supersedes` | The match this decision replaced, or `null` |
 | `receipt` | The `decide_match` receipt of the decision, which `GET /api/v1/receipts/{receipt}` serves |
+| `superseded` | Whether a later decision of the item replaced this one, as a deal's card can show for a match it read |
+| `stale` | Whether the item is no longer the account's current import or mapping, so no card reads it |
 
-`GET /v1/matches` gives `{"matches": [MATCH, ...]}`: the current matches that wait, oldest first, of the
-accounts the person holds a live grant on. `POST /v1/matches/{id}` takes `{"decision": "match", "deal":
+`GET /v1/matches` gives `{"matches": [MATCH, ...]}`: the current matches that wait, and are not stale,
+oldest first, of the accounts the person holds a live grant on. `GET /v1/matches?all=1` gives every
+current decision of those accounts, stale ones included, so a wrong one can be found and decided again. `POST /v1/matches/{id}` takes `{"decision": "match", "deal":
 "DEAL_ID"}` or `{"decision": "reject"}` and answers `200` with `{"match": MATCH}`, the new decision. The
 grant is checked again as the decision commits. Both routes take what the deal routes take: the session
 cookie, an allowed Host, and for the write the CSRF token and the public origin; no answer is cached.
@@ -167,7 +170,7 @@ cookie, an allowed Host, and for the write the CSRF token and the public origin;
 | `400 invalid_json` | The body is not one of the two objects above |
 | `400 invalid_deal` | The deal is not one of the match's account |
 | `403 not_permitted` | The match is unknown, or of an account the person holds no live grant on. Either way the refusal has a `decide_match` receipt, refused as error/403, that names no account. |
-| `409 match_decided` | A later decision has superseded this match; decide the current one |
+| `409 match_decided` | A later decision has superseded this match, or did so while this one was made; decide the current one |
 
 ## The server today
 

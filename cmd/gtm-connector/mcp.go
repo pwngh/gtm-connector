@@ -198,6 +198,8 @@ func toolSources(store *postgres.Store, workspace postgres.Workspace) func(conte
 		mu.Lock()
 		held.row, held.crm = row, opened
 		mu.Unlock()
+		// The tools read an account's imported call and mapped thread through the gate every card reads by.
+		from.gate = &matchGate{store: store, workspace: workspace.ID}
 		return mcptools.Opened{Source: servedBook{cardSource{from}, served}, Sources: from.sources(),
 			Connections: from.connections(), Generations: from.generations()}, nil
 	}
@@ -219,6 +221,9 @@ func (b servedBook) Read(ctx context.Context, tool, accountID string) (string, [
 		err = demo.ErrAccountNotFound
 	case errors.As(err, &unported):
 		err = mcp.ToolError(system + "_not_served")
+	case errors.Is(err, cards.ErrNotMatched):
+		// A card made through the tools states it; a read alone is refused by name.
+		err = errors.Join(mcp.ToolError(system+"_not_matched"), err)
 	default:
 		err = toolRefusal(err)
 	}

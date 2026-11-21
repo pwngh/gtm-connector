@@ -14,33 +14,37 @@ import (
 
 // Matches: which deal an account's imported call and mapped Slack thread belong to (postgres.MatchAccount).
 // The connector decides each one while its account has an open deal: when a deal is registered, a call is
-// imported, a thread is mapped, and before brief reads the account. A deal's card reads the account's call
-// and thread only when they are matched to that deal, and its publication names the matches it read. Demo
-// call notes and demo Slack messages belong to their account in the demo book and need no match.
+// imported, a thread is mapped, and before brief reads the account. Every card reads through the same gate:
+// a deal's card reads the account's call and thread only when they are matched to that deal, and names the
+// matches it read; any other card, of an account with no open deal or made through MCP, never reads one that
+// waits for a person or was rejected. Demo call notes and demo Slack messages belong to their account in the
+// demo book and need no match.
 
-// matchGate keeps a card's reads of the account's imported call and mapped thread to those matched to the
-// deal they are read for, and counts what they read for the card's publication (postgres.CardDeal).
+// matchGate keeps a card's reads of the account's imported call and mapped thread to those it may read, and
+// counts what they read for the card's publication (postgres.CardDeal).
 type matchGate struct {
 	store     *postgres.Store
 	workspace string
 	read      postgres.CardDeal
 }
 
-// allowed is whether the account's current item of a kind may be read for the gate's deal, and the item.
-// An account with no item of the kind is read as before, and says so on the card.
+// allowed is whether the account's current item of a kind may be read, and the item. For a deal, the item
+// must be matched to it. With no deal, an item that waits for a person or was rejected is refused, and any
+// other is read and counted. An account with no item of the kind is read as before, and says so on the card.
 func (g *matchGate) allowed(ctx context.Context, account, kind string) (item string, err error) {
 	item, held, err := g.store.AccountItem(ctx, g.workspace, account, kind)
 	if err != nil || !held {
 		return "", err
 	}
-	if g.read.Ref == "" {
-		g.read.Unmatched++
-		return item, nil
-	}
 	match, decided, err := g.store.CurrentMatch(ctx, g.workspace, kind, item)
 	switch {
 	case err != nil:
 		return "", err
+	case g.read.Ref == "" && decided && match.State != "matched":
+		return "", cards.ErrNotMatched
+	case g.read.Ref == "":
+		g.read.Unmatched++
+		return item, nil
 	case !decided || match.State != "matched" || match.DealRef != g.read.Ref:
 		return "", cards.ErrNotMatched
 	}
@@ -117,7 +121,7 @@ func matchValue(m postgres.Match) (*strictjson.Object, error) {
 	return strictjson.NewObject("id", m.ID, "kind", m.Kind, "item", m.Item, "account", m.AccountRef,
 		"account_name", name, "at", at, "candidates", candidates, "state", m.State, "deal", orNull(m.DealRef),
 		"basis", m.Basis, "decided_by", orNull(m.DecidedBy), "decided_at", utcSeconds(m.DecidedAt),
-		"supersedes", orNull(m.Supersedes), "receipt", m.ReceiptID), nil
+		"supersedes", orNull(m.Supersedes), "receipt", m.ReceiptID, "superseded", m.Superseded, "stale", m.Stale), nil
 }
 
 // listMatches lists the workspace's matches that wait for a person, or with --all its every current decision.
@@ -199,7 +203,11 @@ func (r *run) matchesText(result any) string {
 		for _, c := range get(m, "candidates").([]any) {
 			candidates = append(candidates, c.(string))
 		}
-		rows[i] = []any{get(m, "id"), get(m, "kind"), get(m, "item"), get(m, "account"), get(m, "state"),
+		state := get(m, "state").(string)
+		if get(m, "stale") == true {
+			state += " (stale)"
+		}
+		rows[i] = []any{get(m, "id"), get(m, "kind"), get(m, "item"), get(m, "account"), state,
 			orNone(get(m, "deal")), oneLine(strings.Join(candidates, ", "))}
 	}
 	return r.screen.table([]string{"ID", "KIND", "ITEM", "ACCOUNT", "STATE", "DEAL", "CANDIDATES"}, rows)

@@ -28,6 +28,8 @@ type matchView struct {
 	DecidedAt   string   `json:"decided_at"`
 	Supersedes  *string  `json:"supersedes"`
 	Receipt     string   `json:"receipt"`
+	Superseded  bool     `json:"superseded"`
+	Stale       bool     `json:"stale"`
 }
 
 // viewMatch is a match as the routes give it. The account's name is source text, neutralized here.
@@ -39,12 +41,13 @@ func viewMatch(m postgres.Match) (matchView, error) {
 	return matchView{ID: m.ID, Kind: m.Kind, Item: m.Item, Account: m.AccountRef, AccountName: name,
 		At: stampPtr(m.At), Candidates: m.Candidates, State: m.State, Deal: optional(m.DealRef), Basis: m.Basis,
 		DecidedBy: optional(m.DecidedBy), DecidedAt: stamp(m.DecidedAt), Supersedes: optional(m.Supersedes),
-		Receipt: m.ReceiptID}, nil
+		Receipt: m.ReceiptID, Superseded: m.Superseded, Stale: m.Stale}, nil
 }
 
-// matches lists the matches waiting for a person on the accounts the principal holds a live grant on.
+// matches lists the matches waiting for a person on the accounts the principal holds a live grant on, or
+// with ?all=1 each of their current decisions, so a wrong one can be found and decided again.
 func (s *Server) matches(w http.ResponseWriter, r *http.Request, p authz.Principal) {
-	matches, err := s.evidence.Matches(r.Context(), p)
+	matches, err := s.evidence.Matches(r.Context(), p, r.URL.Query().Get("all") == "1")
 	if err != nil {
 		readFailed(w, err)
 		return
