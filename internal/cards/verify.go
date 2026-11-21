@@ -428,7 +428,8 @@ type Folder struct {
 	Cards    map[string][]byte // briefs/<brief ID>.json
 	Prepared map[string][]byte // selected-briefs/<brief ID>.json
 	Log      TrustedRows
-	// tooLarge holds, by brief ID, the refusal of each card file over its size. Such a file was not read.
+	// tooLarge holds, by sub-folder and brief ID ("briefs/<brief ID>"), the refusal of each file over its
+	// size. Such a file was not read.
 	tooLarge map[string]error
 }
 
@@ -469,7 +470,7 @@ func OpenTrustedExport(dir string) (*Folder, error) {
 			}
 			data, err := readRegular(filepath.Join(dir, sub, entry.Name()), limits[sub])
 			if errors.Is(err, ErrFileTooLarge) {
-				f.tooLarge[name] = refusals[sub]
+				f.tooLarge[sub+"/"+name] = refusals[sub]
 				continue
 			}
 			if err != nil {
@@ -551,13 +552,17 @@ func openRegular(path string, limit int64) (*os.File, error) {
 	return file, nil
 }
 
-// Verify admits one card or prepared brief of the folder, by its brief ID.
+// Verify admits one card or prepared brief of the folder, by its brief ID. The card file is read first, so a
+// prepared brief of the same ID is looked at only when there is no card file.
 func (f *Folder) Verify(ctx context.Context, briefID string, bound evidence.Sources) (*Admitted, error) {
-	if refusal, ok := f.tooLarge[briefID]; ok {
+	if refusal, ok := f.tooLarge["briefs/"+briefID]; ok {
 		return nil, refusal
 	}
 	if payload, ok := f.Cards[briefID]; ok {
 		return VerifyCard(ctx, payload, briefID, f.Log, bound)
+	}
+	if refusal, ok := f.tooLarge["selected-briefs/"+briefID]; ok {
+		return nil, refusal
 	}
 	if payload, ok := f.Prepared[briefID]; ok {
 		return VerifyPrepared(ctx, payload, briefID, f.Log, bound)

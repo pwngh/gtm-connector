@@ -86,6 +86,43 @@ func TestACardFileOverItsSizeIsNotRead(t *testing.T) {
 	}
 }
 
+// A file over its size refuses only the read of its own sub-folder. A prepared brief over its size beside a
+// card file of the same brief ID leaves that card to be verified, since the card file is read first; a card
+// file over its size beside a prepared brief is still the card that is refused.
+func TestAFileOverItsSizeRefusesOnlyItsOwnSubFolder(t *testing.T) {
+	ctx := context.Background()
+	t.Run("a prepared brief beside a card", func(t *testing.T) {
+		dir := t.TempDir()
+		copyTree(t, oracletest.Path(t, "folders/"+folders[0].name), dir)
+		if err := os.MkdirAll(filepath.Join(dir, "selected-briefs"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		sized(t, filepath.Join(dir, "selected-briefs", folders[0].brief+".json"), MaxArtifactBytes+1)
+		f, err := OpenTrustedExport(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Verify(ctx, folders[0].brief, demoSources(nil)); err != nil {
+			t.Errorf("the card beside a prepared brief over its size: %v", err)
+		}
+	})
+	t.Run("a card beside a prepared brief", func(t *testing.T) {
+		dir := t.TempDir()
+		copyTree(t, oracletest.Path(t, "folders/"+folders[1].name), dir)
+		if err := os.MkdirAll(filepath.Join(dir, "briefs"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		sized(t, filepath.Join(dir, "briefs", folders[1].brief+".json"), MaxCardBytes+1)
+		f, err := OpenTrustedExport(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Verify(ctx, folders[1].brief, demoSources(nil)); !errors.Is(err, ErrInvalidCard) {
+			t.Errorf("a card over its size beside a prepared brief: got %v, want %v", err, ErrInvalidCard)
+		}
+	})
+}
+
 func (f *Folder) payloads(sub string) map[string][]byte {
 	if sub == "briefs" {
 		return f.Cards
