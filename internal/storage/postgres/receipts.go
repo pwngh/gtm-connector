@@ -214,22 +214,32 @@ func (s *Store) StartReceipt(ctx context.Context, in ReceiptStart) (Receipt, err
 	}
 	requested := requestedAccount(in.AccountRef)
 	// A connection of another workspace matches no row: ErrNotFound below.
-	row := s.pool.QueryRow(ctx, `
-		INSERT INTO receipts AS r (workspace_id, operation_id, principal_id, token_id, tool, scope,
-			requested_account, account_ref, connection_id, connection_generation, arguments, request_id,
-			brief_id, lease_token, lease_expires_at)
-		SELECT $1, $2, $3, $4, $5, $6, $7,
-			(SELECT ref FROM accounts WHERE workspace_id = $1 AND ref = $7),
-			c.id, c.generation, $8, $9, $10, gen_random_uuid(), clock_timestamp() + make_interval(secs => $11)
-		  FROM (SELECT 1) one
-		  LEFT JOIN connections c ON c.workspace_id = $1 AND c.id = $12
-		 WHERE $12::uuid IS NULL OR c.id IS NOT NULL
-		ON CONFLICT (workspace_id, operation_id) DO NOTHING
-		RETURNING `+receiptColumns,
-		in.WorkspaceID, in.OperationID, nullable(in.PrincipalID), in.TokenID, in.Tool, nullable(in.Scope),
-		requested, string(in.Arguments), in.requestID(), nullable(in.BriefID), in.Lease.Seconds(),
-		nullable(in.ConnectionID))
-	r, err := scanReceipt(row)
+	// The insert runs in a transaction under the store's lock and statement
+	// timeouts (bound), so it commits only when the caller commits it: an
+	// insert its caller stopped waiting for writes nothing.
+	var r Receipt
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
+		var err error
+		r, err = scanReceipt(tx.QueryRow(ctx, `
+			INSERT INTO receipts AS r (workspace_id, operation_id, principal_id, token_id, tool, scope,
+				requested_account, account_ref, connection_id, connection_generation, arguments, request_id,
+				brief_id, lease_token, lease_expires_at)
+			SELECT $1, $2, $3, $4, $5, $6, $7,
+				(SELECT ref FROM accounts WHERE workspace_id = $1 AND ref = $7),
+				c.id, c.generation, $8, $9, $10, gen_random_uuid(), clock_timestamp() + make_interval(secs => $11)
+			  FROM (SELECT 1) one
+			  LEFT JOIN connections c ON c.workspace_id = $1 AND c.id = $12
+			 WHERE $12::uuid IS NULL OR c.id IS NOT NULL
+			ON CONFLICT (workspace_id, operation_id) DO NOTHING
+			RETURNING `+receiptColumns,
+			in.WorkspaceID, in.OperationID, nullable(in.PrincipalID), in.TokenID, in.Tool, nullable(in.Scope),
+			requested, string(in.Arguments), in.requestID(), nullable(in.BriefID), in.Lease.Seconds(),
+			nullable(in.ConnectionID)))
+		return err
+	})
 	if err == nil {
 		return r, nil
 	}
@@ -438,6 +448,9 @@ func (s *Store) FinishReceipt(ctx context.Context, f ReceiptFinish) (Receipt, er
 	}
 	var finished Receipt
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
 		var err error
 		finished, err = finishLocked(ctx, tx, f, false)
 		return err
@@ -590,6 +603,9 @@ func (s *Store) FinishRead(ctx context.Context, receiptID, leaseToken string, re
 	var finished Receipt
 	var refused error
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
 		var status, workspaceID, source string
 		var connectionID *string
 		var generation *int64
@@ -722,6 +738,9 @@ func (s *Store) FailRead(ctx context.Context, receiptID, leaseToken string, http
 	}
 	var finished Receipt
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
 		var err error
 		finished, err = finishLocked(ctx, tx, f, true)
 		return err

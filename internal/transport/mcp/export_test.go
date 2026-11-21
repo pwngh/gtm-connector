@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"testing"
+	"time"
 )
 
 // What the tests of the mounted endpoint (package mcp_test) share with the gate's own: the recorded vectors,
@@ -63,6 +64,12 @@ func WriteVectorAnswers() map[string]string {
 	}
 	return answers
 }
+
+// SetSettleLimit shortens how long each receipt start and finish of a gateway may take, before it serves.
+func SetSettleLimit(g *Gateway, limit time.Duration) { g.limit = limit }
+
+// SetStdioSettleLimit is SetSettleLimit for a stdio server.
+func SetStdioSettleLimit(c *StdioConfig, limit time.Duration) { c.limit = limit }
 
 // RecordedTools are the tools the Python gateway listed, write tool included.
 func RecordedTools() []string { return slices.Clone(recordedTools) }

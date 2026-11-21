@@ -17,6 +17,7 @@ import (
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -31,6 +32,8 @@ type settings struct {
 	run           ToolFunc
 	clock         func() float64
 	wall          func() float64
+	// limit, when a test sets it, stands in for cards.SettleLimit.
+	limit time.Duration
 }
 
 // core is what HTTP and stdio share: the tool selection, the policy, the rate windows, the receipt store,
@@ -180,8 +183,17 @@ func (c *core) invocation(id string) *Invocation {
 	return nil
 }
 
-// start commits a call's pending receipt. An empty id from the store is no receipt.
+// settling gives the context of one receipt start or finish: the caller's leaving does not end it, and
+// cards.SettleLimit does, as it ends each step the card maker settles.
+func (c *core) settling(ctx context.Context) (context.Context, context.CancelFunc) {
+	return cards.Settling(ctx, c.limit)
+}
+
+// start commits a call's pending receipt within the settle limit. An empty id from the store is no receipt.
+// A start that has not committed when the limit passes fails like any other, and the call does not run.
 func (c *core) start(ctx context.Context, s Start) (string, error) {
+	ctx, cancel := c.settling(ctx)
+	defer cancel()
 	id, err := c.receipts.Start(ctx, s)
 	if err == nil && id == "" {
 		err = errors.New("the receipt store returned no id")
@@ -189,9 +201,12 @@ func (c *core) start(ctx context.Context, s Start) (string, error) {
 	return id, err
 }
 
-// refuseCall finishes a refused call's receipt. It reports false when the store failed, which leaves the
-// receipt pending, as Python leaves it.
+// refuseCall finishes a refused call's receipt within the settle limit. It reports false when the store
+// failed or the limit passed, which leaves the receipt pending for the sweep of expired leases, as Python
+// leaves it.
 func (c *core) refuseCall(ctx context.Context, auditID string, status int, started float64) bool {
+	ctx, cancel := c.settling(ctx)
+	defer cancel()
 	reason := "request_failed"
 	return c.receipts.Finish(ctx, auditID, Finish{Status: "error", HTTPStatus: status, Rows: []string{},
 		ElapsedMs: (c.clock() - started) * 1000, Error: &reason}) == nil
@@ -207,8 +222,11 @@ type outcome struct {
 // settle decides whether an admitted call's reply may be released, writes its receipt id into the result
 // and finishes its receipt; only then may the transport write. Only a complete tool result without isError
 // is released. A panic, a caller gone mid-call, a malformed result or record, or a receipt that will not
-// finish releases nothing, and the receipt finishes as 503 when the store allows.
+// finish releases nothing, and the receipt finishes as 503 when the store allows. Every finish here shares
+// one settle limit: a receipt not finished within it is left pending for the sweep of expired leases.
 func (c *core) settle(ctx context.Context, inv *Invocation, started float64, result, rpcError *strictjson.Object, gone bool) outcome {
+	ctx, cancel := c.settling(ctx)
+	defer cancel()
 	failed := func() outcome {
 		reason := "execution_or_audit_failure"
 		c.receipts.Finish(ctx, inv.AuditID, Finish{Status: "error", HTTPStatus: 503, Rows: []string{},

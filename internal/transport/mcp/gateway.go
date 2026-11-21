@@ -185,7 +185,8 @@ func (g *Gateway) trusted(r *http.Request) bool {
 func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 	headers := readCarrier(r)
 	// A receipt is written under a context that outlives the caller: one who leaves after its call was read
-	// still has the call's receipt committed and finished.
+	// still has the call's receipt committed and finished. Each start and finish is still bounded by the
+	// settle limit (core.settling).
 	ctx := context.WithoutCancel(r.Context())
 	started := g.clock()
 	rawAuth := headers.last["authorization"]

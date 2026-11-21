@@ -45,6 +45,8 @@ type StdioConfig struct {
 	// WriteTimeout bounds each write to out, and StopWait how long stopping waits for a line being admitted.
 	// Zero is the default.
 	WriteTimeout, StopWait time.Duration
+	// limit, when a test sets it, stands in for cards.SettleLimit.
+	limit time.Duration
 }
 
 // stdioMethods are the requests the stdio server answers. initialize and ping serve legacy clients, as the
@@ -60,7 +62,7 @@ var gatedMethods = map[string]bool{"tools/list": true, "tools/call": true, "prom
 func ServeStdio(ctx context.Context, config StdioConfig, in io.Reader, out io.Writer) error {
 	c, err := newCore(settings{resource: config.Resource, rateLimit: config.RateLimit, windowSeconds: config.WindowSeconds,
 		selected: config.Selected, verify: config.Verify, receipts: config.Receipts,
-		run: config.Run, clock: config.Clock, wall: config.Wall}, nil)
+		run: config.Run, clock: config.Clock, wall: config.Wall, limit: config.limit}, nil)
 	if err != nil {
 		return err
 	}

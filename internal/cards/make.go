@@ -159,14 +159,19 @@ type Maker struct {
 	limit time.Duration
 }
 
-// settling gives the context of one step that must not stop when the caller leaves: the publication, or the
-// finishing of a receipt. The caller's cancel and deadline do not end it, and SettleLimit does.
-func (m *Maker) settling(ctx context.Context) (context.Context, context.CancelFunc) {
-	limit := m.limit
+// Settling gives the context of one step that must not stop when the caller leaves: a publication, or the
+// start or finish of a receipt. The caller's cancel and deadline do not end it, and limit does. A zero limit
+// is SettleLimit.
+func Settling(ctx context.Context, limit time.Duration) (context.Context, context.CancelFunc) {
 	if limit == 0 {
 		limit = SettleLimit
 	}
 	return context.WithTimeout(context.WithoutCancel(ctx), limit)
+}
+
+// settling is Settling under the maker's limit.
+func (m *Maker) settling(ctx context.Context) (context.Context, context.CancelFunc) {
+	return Settling(ctx, m.limit)
 }
 
 // finish finishes a receipt with an outcome that binds no records, whether or not the caller has left.

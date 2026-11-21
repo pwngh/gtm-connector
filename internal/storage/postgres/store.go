@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -23,21 +24,25 @@ type Store struct {
 	// transaction; an error it returns aborts that transaction there.
 	crash func(point string) error
 	// publishLock and publishStatement, when a test sets them, stand in for
-	// publishLockTimeout and publishStatementTimeout.
+	// publishLockTimeout and publishStatementTimeout (bound).
 	publishLock, publishStatement time.Duration
 }
 
-// publishTimeouts are how long a publication's transaction waits on a lock
-// and runs one statement.
-func (s *Store) publishTimeouts() (lock, statement time.Duration) {
-	lock, statement = publishLockTimeout, publishStatementTimeout
+// bound sets how long tx waits on a lock and runs one statement:
+// publishLockTimeout and publishStatementTimeout, or what a test set. The
+// settings end with tx. A publication runs under them, and so does each
+// transaction that starts or finishes a receipt.
+func (s *Store) bound(ctx context.Context, tx pgx.Tx) error {
+	lock, statement := publishLockTimeout, publishStatementTimeout
 	if s.publishLock > 0 {
 		lock = s.publishLock
 	}
 	if s.publishStatement > 0 {
 		statement = s.publishStatement
 	}
-	return lock, statement
+	_, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true)`,
+		strconv.FormatInt(lock.Milliseconds(), 10), strconv.FormatInt(statement.Milliseconds(), 10))
+	return err
 }
 
 // Open connects to the database at url and checks that it answers. It does
