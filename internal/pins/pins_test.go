@@ -136,7 +136,7 @@ func TestThePinsAreExact(t *testing.T) {
 }
 
 // The Dockerfile, compose.yaml, the Makefile, .nvmrc, go.mod, the oracle's
-// manifest, the Inspector checks and the CI workflow all use the pins.
+// manifest, the Inspector checks and both workflows all use the pins.
 func TestTheBuildFilesUseThePins(t *testing.T) {
 	m := load(t)
 	check := func(file, what string, got []string, want ...string) {
@@ -179,17 +179,6 @@ func TestTheBuildFilesUseThePins(t *testing.T) {
 		m.Images.Postgres, m.Images.PostgresFallback)
 	check(ci, "the smoke job's PostgreSQL versions", all(workflow, `(?m)^\s+postgres: (\[.+\])$`),
 		"['"+strings.Join([]string{versionOf(m.Images.Postgres), versionOf(m.Images.PostgresFallback)}, "', '")+"']")
-	check(ci, "go-version", all(workflow, `(?m)^\s+go-version: '([^']+)'$`), m.Go.Version)
-	if strings.Contains(workflow, "go-version-file") {
-		t.Errorf("%s: setup-go reads a version range from a file", ci)
-	}
-	nodeFiles := all(workflow, `(?m)^\s+node-version-file: (\S+)$`)
-	if len(nodeFiles) == 0 || strings.Contains(workflow, "node-version:") {
-		t.Errorf("%s: setup-node does not read .nvmrc", ci)
-	}
-	for _, file := range nodeFiles {
-		check(ci, "node-version-file", []string{file}, ".nvmrc")
-	}
 	pythons := all(workflow, `(?m)^\s+python-version: (\[.+\]|'[^']+')$`)
 	want := "['" + strings.Join(m.Python.CI, "', '") + "']"
 	for _, p := range pythons {
@@ -200,16 +189,38 @@ func TestTheBuildFilesUseThePins(t *testing.T) {
 	if !slices.Contains(m.Python.CI, m.Python.Oracle) {
 		t.Errorf("CI does not run the oracle's Python %s", m.Python.Oracle)
 	}
+	// The test workflow and the release workflow set up Go and Node from the
+	// pins, and every action either uses is pinned to its commit.
 	used := map[string]bool{}
-	for _, use := range all(workflow, `(?m)^\s+- uses: (\S+)`) {
-		action, sha, _ := strings.Cut(use, "@")
-		used[action] = true
-		if m.Actions[action] != sha {
-			t.Errorf("%s: %s, pins.json says %s", ci, use, m.Actions[action])
+	for _, file := range []string{ci, ".github/workflows/release.yml"} {
+		workflow := read(t, file)
+		versions := all(workflow, `(?m)^\s+go-version: '([^']+)'$`)
+		if len(versions) == 0 {
+			t.Errorf("%s: no setup-go names its version", file)
+		}
+		for _, version := range versions {
+			check(file, "go-version", []string{version}, m.Go.Version)
+		}
+		if strings.Contains(workflow, "go-version-file") {
+			t.Errorf("%s: setup-go reads a version range from a file", file)
+		}
+		nodeFiles := all(workflow, `(?m)^\s+node-version-file: (\S+)$`)
+		if len(nodeFiles) == 0 || strings.Contains(workflow, "node-version:") {
+			t.Errorf("%s: setup-node does not read .nvmrc", file)
+		}
+		for _, nodeFile := range nodeFiles {
+			check(file, "node-version-file", []string{nodeFile}, ".nvmrc")
+		}
+		for _, use := range all(workflow, `(?m)^\s+- uses: (\S+)`) {
+			action, sha, _ := strings.Cut(use, "@")
+			used[action] = true
+			if m.Actions[action] != sha {
+				t.Errorf("%s: %s, pins.json says %s", file, use, m.Actions[action])
+			}
 		}
 	}
 	if names := slices.Sorted(maps.Keys(m.Actions)); !slices.Equal(names, slices.Sorted(maps.Keys(used))) {
-		t.Errorf("pins.json lists actions %v; the workflow uses %v", names, slices.Sorted(maps.Keys(used)))
+		t.Errorf("pins.json lists actions %v; the workflows use %v", names, slices.Sorted(maps.Keys(used)))
 	}
 }
 

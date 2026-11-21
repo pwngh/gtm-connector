@@ -1,0 +1,36 @@
+name: Release binaries
+
+# A version tag builds the four binaries and SHA256SUMS with `make release`,
+# as any machine does, and attaches them to a GitHub release for the tag.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # To create the release. Only the last step is given the token.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          # The pinned patch (pins.json), never the newest of a range.
+          go-version: '1.27.4'
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version-file: .nvmrc
+      - run: make release
+      - name: The binaries are stamped with the tagged commit, with no change in the checkout
+        run: test "$(build/release/gtm-connector-linux-amd64 version)" = "gtm-connector $(git rev-parse HEAD) $(go env GOVERSION)"
+      - name: Attach the binaries and SHA256SUMS to a release for the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes build/release/*

@@ -3,6 +3,7 @@
 #   make dev                  PostgreSQL in Compose, the connector on this machine
 #   make up                   everything in Compose
 #   make build                build/gtm-connector, one binary with the web app inside it
+#   make release              build/release: that binary for macOS and Linux on arm64 and amd64, and SHA256SUMS
 #   make demo                 publish a card for each demo account that holds none
 #   make down                 stop; the database and credentials are kept
 #   make backup               back up the database and the credentials folder
@@ -12,9 +13,9 @@
 #
 # Add POSTGRES=18.7 to any of them to use the pinned fallback PostgreSQL, on
 # its own volume. Go and Node are pinned too (pins.json): dev, test and every
-# Go build here refuse another Go, and dev and build another Node (nvm use
-# reads .nvmrc). The first run writes .env (random passwords for the owner
-# and app roles, your user IDs, and GTM_HOME, the folder holding
+# Go build here refuse another Go, and dev, build and release another Node
+# (nvm use reads .nvmrc). The first run writes .env (random passwords for the
+# owner and app roles, your user IDs, and GTM_HOME, the folder holding
 # credentials/ and backups/). Recipes never name a password: scripts read
 # .env when they run, so `make -n` shows none.
 
@@ -46,7 +47,7 @@ GTM_DB_PORT = $(shell sed -n 's/^GTM_DB_PORT=//p' .env 2>/dev/null)
 WEB_SOURCES := $(shell find web/src web/public web/index.html web/vite.config.js web/package.json web/package-lock.json -type f 2>/dev/null)
 GO_SOURCES := go.mod go.sum web/embed.go $(shell find cmd internal -name '*.go' -o -name '*.sql')
 
-.PHONY: help env dev build up down db demo backup restore test vet psql logs clean require-compose state \
+.PHONY: help env dev build release up down db demo backup restore test vet psql logs clean require-compose state \
 	verify-real go-version node-version
 
 help: ## List the targets
@@ -84,6 +85,13 @@ build/gtm-connector: $(GO_SOURCES) | go-version
 
 build: go-version web/dist/index.html ## Build build/gtm-connector with the current web app inside it
 	go build -o build/gtm-connector ./cmd/gtm-connector
+
+# The files a version tag attaches to its GitHub release. A commit builds
+# the same bytes on any machine; with changes in the checkout the stamp ends
+# in -modified.
+release: go-version web/dist/index.html ## Build build/release: the binary for macOS and Linux on arm64 and amd64, and SHA256SUMS
+	scripts/release.sh
+	scripts/release.sh check
 
 dev: go-version node-version db web/dist/index.html build/gtm-connector ## Run the connector here, on PostgreSQL in Compose
 	@$(COMPOSE) stop app >/dev/null 2>&1 || true
