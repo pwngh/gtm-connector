@@ -10,6 +10,9 @@ sources:
   crm:   {kind: salesforce}
   chat:  {kind: slack, channels: ["#deal-*", "#ext-*", "#renewals", "#deal-desk"]}
   calls: {kind: transcripts, folder: calls/}
+  gong:  {kind: gong}
+  inbox: {kind: push}                       # internal email, SMS, webhook push
+  app:   {kind: sql, view: renewal_contacts}  # a read-only view in your own database
 watch:
   renewals_closing_within_days: 90
 rules:
@@ -28,7 +31,7 @@ flowchart LR
 ```
 
 1. **The watch rule pulls** every open renewal opportunity that closes inside the window, with its account and contact emails.
-2. **The connector discovers** matching calls and Slack messages by those emails and domains. In Slack it looks in dedicated channels, such as `#deal-thornfield`, and in threads of shared channels that mention the account's name or domain.
+2. **The connector discovers** matching calls and Slack messages by those emails and domains. In Slack it looks in a dedicated internal or Slack Connect channel, such as `#deal-thornfield` or `#ext-thornfield`, and in threads of shared channels, such as `#renewals` or `#deal-desk`, that mention the account's name or domain. No thread is hard-coded.
 3. **Each match joins its deal.** Nobody has to click. A match that fits more than one deal waits in the matches queue for a person.
 
 Set `approval: required` to hold every match in the queue for a person instead. A rejected match adds
@@ -60,7 +63,9 @@ Pick the rules and set their thresholds. Preview a change against the book befor
 turns red, and what becomes unknown. Every result cites its records, its receipts and the rule
 version that produced it.
 
-## Under the hood
+## Deterministic parsing and guardrails
+
+Under the hood:
 
 - **Whole-sentence splitter.** A quotation is one whole sentence.
 - **HTML and link neutralizer.** Mentions, links and control characters become inert words before anything shows them.
@@ -75,6 +80,9 @@ version that produced it.
 | Coverage | Which deals have a current card, which do not, and why |
 | Setup | Each source's state and last read, and the active file beside a draft |
 | Activity | What ran, with its receipt, and whether it is safe to retry |
+
+Any line on any card opens a receipt drawer in Ops: the read that returned it, and its seal. Diffs
+between two cards of a deal open the same way.
 
 ## Auto-stop and archive
 

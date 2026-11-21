@@ -11,7 +11,7 @@ gtm serve     # the web app, the API and MCP, over HTTPS
 
 ## Install
 
-Each release publishes prebuilt static binaries for macOS and Linux, on arm64 and amd64, and Docker
+A GitHub Actions release pipeline (GoReleaser) publishes, with each release, prebuilt static binaries for macOS and Linux, on arm64 and amd64, and Docker
 images. The web app is embedded in the binary, so there is nothing else to deploy.
 
 | Way | What you run |
