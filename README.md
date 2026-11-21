@@ -2,11 +2,19 @@
 
 [![Tests](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml?query=branch%3Amain)
 
-gtm-connector builds a Deal card for a renewal from Salesforce, call transcripts, and Slack: what the
-records say about one account, before the renewal conversation. Every figure, date, name, and
-quotation on the card points to a stored record. Each sentence is labelled with who said it and on
-what basis, and the card says what it did not read. The connector writes every character. No model
-does.
+**See what the CRM says about a renewal and what people actually said, side by side, with a source
+behind every line.**
+
+gtm-connector builds a Deal card for a renewal from Salesforce, call transcripts, and Slack. Every
+figure, date, name, and quotation on the card points to a stored record. Each sentence is labelled
+with who said it and on what basis, and the card says what it did not read. The connector writes
+every character. No model does.
+
+| No model | Cited | Sealed | Tested | Protocol |
+| --- | --- | --- | --- | --- |
+| **0** model calls on a card | every figure and quotation numbered to its record | **SHA-256** seal on each saved card | **8 of 10** invented hard cases pass | CLI and **MCP** `2026-07-28` |
+
+### The demo
 
 Here is the demo, on an invented law firm. Its CRM record says healthy. Three days earlier, on a
 call, the customer's deputy general counsel said their general counsel will not sign until a rider
@@ -53,6 +61,8 @@ NOT READ
   Neutralized in source text: 1 mention, 1 link.
 ```
 
+### How to read it
+
 - **Record values** come from typed CRM fields and connector arithmetic. The seller's "January 30"
   and the second-hand "USD 300,000" are sentences someone said, so they stay under SAID.
 - **A speaker role** comes from a label, never from wording. A seller is a name or ID the operator
@@ -63,17 +73,24 @@ NOT READ
 - **Source text is data.** The channel mention and the link were neutralized before anything
   displayed them, and the card says how many were.
 
+### How the card is built
+
 ```mermaid
 flowchart LR
     S["Salesforce · transcripts · Slack"] -->|"scoped read, receipt first"| U["Numbered units<br/>typed fields · whole sentences · speaker roles"]
     U --> C(["Deal card<br/>every character written by the connector"])
+    C -->|"brief saves it"| B["Saved card<br/>sealed by a receipt naming its SHA-256"]
 ```
 
 Every figure and sentence on a card carries a number. The number is a unit: one CRM record, or one
 sentence of a call or a Slack message. Each resolves to its record and to the receipt of the read
-that returned it, a receipt being one row of the audit log. When `brief` saves a card it adds one
-more receipt, which names the SHA-256 of the saved file. That receipt is the card's seal. The saved
-card gets a brief ID, `brief-…`, printed under it.
+that returned it, a receipt being one row of the audit log.
+
+When `brief` saves a card it adds one more receipt, which names the SHA-256 of the saved file. That
+receipt is the card's seal. The saved card gets a brief ID, `brief-…`, printed under it.
+
+### Trace any number
+
 `gtm-connector inspect brief-…` lists every unit of the card, one per line, and a number shows one:
 
 ```text
@@ -95,6 +112,32 @@ Neutralizer version   3
 
 > **A changed card is refused.** `inspect` checks a saved card against its seal first, and refuses
 > one that was changed or copied from another folder.
+
+## For sales reps and CSMs
+
+Before a renewal call:
+
+1. **Get the card.** `gtm-connector brief ACCOUNT_ID` prints it, or ask an assistant app over MCP.
+2. **Read the record values first,** then who said what. A seller's promise and a customer's condition sit under their own speaker, never in the record values.
+3. **Check what was not read.** The card says which sources and files it left out.
+4. **Trace a line.** `gtm-connector inspect brief-… 5` shows the record and the read behind number 5.
+
+On the [roadmap](docs/ROADMAP.md): a Deals page with your deals sorted by urgency, what changed
+since you last looked, the proof behind any line in one click, and a Slack alert when a renewal
+turns risky.
+
+## For RevOps and GTM engineers
+
+To set it up and keep it honest:
+
+1. **Connect each source once.** `connect salesforce --org ALIAS --seller NAME`, `connect calls`, `connect slack`.
+2. **Add the conversations.** `debug calls import meeting.vtt --account acc-007` for a transcript, `debug slack map` for a thread.
+3. **Limit what a client reads.** `debug serve --selection selection.json` serves only the accounts you list, under the client's own grant.
+4. **Audit every read.** `gtm-connector audit --tool get_account --follow` shows each tool attempt and its receipt.
+
+On the [roadmap](docs/ROADMAP.md): field mapping for your own CRM fields, watch rules that propose
+renewals, a coverage view of which renewals have no current card, scheduled reads, a push API,
+read-only SQL, and webhooks.
 
 ## What it is tested against
 
