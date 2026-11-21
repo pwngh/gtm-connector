@@ -60,7 +60,7 @@ test('API mode: Evidence and Readiness read from the server', async () => {
   const session = {signed_in: true, principal, csrf_token: 't', expires_at: '2027-01-15T23:00:00Z'};
   const page = await renderServer(serverPaths.evidence, storeOf({mode: 'api', session, error: null, ended: false}));
   assert.match(page, /class="plain-panel evidence-library api-evidence"/);
-  assert.match(text(page.slice(0, page.indexOf('<main'))), /Demo, invented records .*Find a page .*Demo reviewer Sign out/);
+  assert.match(text(page.slice(0, page.indexOf('<main'))), /Demo, invented records .*Find a deal .*Demo reviewer Sign out/);
   // Without ?account= the page waits for the principal's accounts before it reads any cards.
   assert.match(text(page), /Reading your accounts…/);
   assert.doesNotMatch(text(page), /Reading cards for/);
@@ -171,9 +171,9 @@ function chrome(html) {
   return {mark: text(bar.split('</span></span>')[0]).trim(), areas: links(bar), pages: links(pages), controls,
     demo: /Demo, invented records/.test(bar), name: bar.match(/class="fr-who">([^<]*)</)?.[1] ?? null};
 }
-const signedInChrome = (path, query) => ({mark: 'gtm-connector', areas: [['Ops', serverPaths.evidence + query, true]],
+const signedInChrome = (path, query) => ({mark: 'gtm-connector', areas: [['Deals', serverPaths.deals, false], ['Ops', serverPaths.evidence + query, true]],
   pages: [['Evidence', serverPaths.evidence + query, path === serverPaths.evidence], ['Readiness', serverPaths.readiness + query, path === serverPaths.readiness]],
-  controls: ['Find a page', 'Dark theme', 'Sign out', 'Menu'], demo: true, name: 'Demo reviewer'});
+  controls: ['Find a deal', 'Dark theme', 'Sign out', 'Menu'], demo: true, name: 'Demo reviewer'});
 const signedOutChrome = {mark: 'gtm-connector', areas: [], pages: [], controls: [], demo: false, name: null};
 
 for (const [page, path] of [['evidence', serverPaths.evidence], ['readiness', serverPaths.readiness]]) {
@@ -194,12 +194,40 @@ for (const [page, path] of [['evidence', serverPaths.evidence], ['readiness', se
   });
 }
 
-test('the frame keeps the account and open card in its links, never the open unit, and names no area without a page', async () => {
+test('the frame keeps the account and open card in its Ops links, never the open unit, and lists Deals first', async () => {
   const html = await renderServer(serverPaths.readiness + '?account=acc-002&card=card-two&unit=4', storeOf(signedIn));
   const {areas, pages} = chrome(html);
-  assert.deepEqual(areas, [['Ops', serverPaths.evidence + '?account=acc-002&card=card-two', true]]);
+  assert.deepEqual(areas, [['Deals', serverPaths.deals, false], ['Ops', serverPaths.evidence + '?account=acc-002&card=card-two', true]]);
   assert.deepEqual(pages.map(([label, href]) => [label, href]), [['Evidence', serverPaths.evidence + '?account=acc-002&card=card-two'], ['Readiness', serverPaths.readiness + '?account=acc-002&card=card-two']]);
-  assert.doesNotMatch(html, />Deals</);
+  // From an open deal, Ops opens on that deal's account.
+  const fromDeal = chrome(await renderServer('/deals/acc-003?q=wren', storeOf(signedIn)));
+  assert.deepEqual(fromDeal.areas, [['Deals', serverPaths.deals, true], ['Ops', serverPaths.evidence + '?account=acc-003', false]]);
+  assert.deepEqual(fromDeal.pages, []);
+});
+
+test('Deals: signed in, the list is read with six placeholder rows, the title, the line under it and the filter', async () => {
+  const html = await renderServer(serverPaths.deals + '?q=wren', storeOf(signedIn));
+  const main = html.slice(html.indexOf('<main'));
+  assert.match(main, /<h1 id="deals-title" class="deals-head__title">Deals<\/h1>/);
+  assert.match(text(main), /Deals Listed by name\. This server does not rank deals yet\. Filter by name Reading your deals/);
+  const filter = main.match(/<label class="ui-field__label" for="([^"]+)">Filter by name<\/label><input ([^>]*)\/>/);
+  assert.ok(filter, 'the filter field is labelled');
+  for (const attribute of ['type="search"', 'name="q"', 'value="wren"', `id="${filter[1]}"`]) assert.ok(filter[2].includes(attribute), attribute);
+  assert.equal((main.match(/class="deals-rows__item deals-placeholder"/g) || []).length, 6);
+  assert.doesNotMatch(main, /class="deals-row"|No deals|Not permitted|api-frame/);
+  assert.equal(chrome(html).pages.length, 0);
+});
+
+test('Deals: an open deal is the Evidence page for that account, with no account picker and a way back to the list', async () => {
+  const html = await renderServer('/deals/acc-003?q=wren', storeOf(signedIn));
+  const main = html.slice(html.indexOf('<main'));
+  assert.match(main, /<a class="deals-back" href="\/deals\?q=wren"[^>]*>.*Deals<\/a>/);
+  assert.match(main, /class="plain-panel evidence-library api-evidence"/);
+  assert.match(text(main), /Account ID acc-003 ?, not verified/);
+  assert.doesNotMatch(main, /class="api-account"|name="account"/);
+  const odd = await renderServer('/deals/%3Cimg%20src%3Dx%3E', storeOf(signedIn));
+  assert.match(text(odd), /The account in this link is not an account ID\. It was not read\./);
+  assert.doesNotMatch(odd, /<img src=x>/);
 });
 
 test('the demo tag shows for a principal with demo true and not for one with demo false', async () => {
@@ -221,10 +249,10 @@ test('a session past its expiry is never shown as signed in, and nothing read is
 });
 
 // Paths the server sends to the app that are not a page.
-const otherPaths = ['/deals', '/deals/acc-003', '/ops/nothing', '/ops/workplan', '/ops/history', '/ops/evidence/extra'];
+const otherPaths = ['/deals/acc-003/more', '/ops/nothing', '/ops/workplan', '/ops/history', '/ops/evidence/extra'];
 
 for (const path of otherPaths) {
-  for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${path}, ${name}: ${name === 'signed in' ? 'no page at this address, with one link home' : 'the sign-in screen'}`, async () => {
+  for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${path}, ${name}: ${name === 'signed in' ? 'no page at this address, with links to Deals and Ops' : 'the sign-in screen'}`, async () => {
     const html = await renderServer(path, storeOf(state));
     const main = html.slice(html.indexOf('<main'));
     assert.doesNotMatch(html, /api-frame|api-renewal-header/);
@@ -235,14 +263,14 @@ for (const path of otherPaths) {
       return;
     }
     assert.match(main, /<h1 class="fr-nopage__title">There is no page at this address\.<\/h1>/);
-    assert.match(text(main), /The server provides Evidence and Readiness\. Check the address, or start again from Evidence\./);
-    assert.deepEqual([...main.matchAll(/<a [^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(match => [match[1], match[2]]), [[serverPaths.evidence, 'Go to Evidence']]);
+    assert.match(text(main), /Check the address, or start again from Deals or Ops\./);
+    assert.deepEqual([...main.matchAll(/<a [^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(match => [match[1], match[2]]), [[serverPaths.deals, 'Go to Deals'], [serverPaths.evidence, 'Go to Ops']]);
     assert.equal(chrome(html).pages.some(([, , current]) => current), false);
   });
 }
 
 test('API mode: a path that only resembles a server page has no page either', async () => {
-  for (const path of [serverPaths.evidence + '/extra', '/deals/evidence', serverPaths.readiness + '/']) {
+  for (const path of [serverPaths.evidence + '/extra', '/deals/acc-003/units', '/deals/', serverPaths.readiness + '/']) {
     const html = await renderServer(path, storeOf(signedIn));
     assert.match(html, /<h1 class="fr-nopage__title">There is no page at this address/, path);
     assert.doesNotMatch(html, /api-frame/, path);

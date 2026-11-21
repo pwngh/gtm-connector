@@ -3,6 +3,8 @@ import {type KeyboardEvent, useEffect, useId, useRef, useState} from 'react';
 import './palette.css';
 
 export interface PaletteItem {
+  /** Tells apart two items that share a group and a label. */
+  key?: string;
   group: string;
   label: string;
   sub: string;
@@ -15,10 +17,12 @@ export interface PaletteProps {
   inputLabel: string;
   placeholder: string;
   empty: string;
+  /** One line above the results, as when part of the list could not be read. */
+  notice?: string | undefined;
 }
 
 /** A filter box over a list of places: arrows move, Enter opens. Its dialog holds it. */
-export function Palette({items, inputLabel, placeholder, empty}: PaletteProps) {
+export function Palette({items, inputLabel, placeholder, empty, notice}: PaletteProps) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const listId = useId();
@@ -68,6 +72,7 @@ export function Palette({items, inputLabel, placeholder, empty}: PaletteProps) {
           onKeyDown={handleKey}
         />
       </div>
+      {notice && <p className="ui-palette__empty">{notice}</p>}
       <div
         className="ui-palette__results"
         id={listId}
@@ -79,7 +84,7 @@ export function Palette({items, inputLabel, placeholder, empty}: PaletteProps) {
           const groupStarts = i === 0 || results[i - 1]?.group !== item.group;
           return (
             <div
-              key={`${item.group}:${item.label}`}
+              key={item.key ?? `${item.group}:${item.label}`}
               role="presentation"
             >
               {groupStarts && (
