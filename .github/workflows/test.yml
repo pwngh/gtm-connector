@@ -187,6 +187,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run build
+      - name: The browser checks drive the runner's installed Chrome against the build
+        run: npm run test:browser
       - name: The release target builds four binaries with this web app inside them, and their sums match
         working-directory: .
         run: make release

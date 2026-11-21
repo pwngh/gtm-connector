@@ -5,7 +5,6 @@ import {CheckCircle2, CircleDashed, ClipboardCheck, FileText, GitBranch, History
 import PlanesSegmentedControl from './vendor/PlanesSegmentedControl';
 import {MotionConfig} from 'motion/react';
 import {buildOperations} from './operations';
-import './operations.css';
 
 const groups=[{id:'ready',label:'Ready to act'},{id:'blocked',label:'Prerequisites open'},{id:'waiting',label:'Awaiting counsel'},{id:'done',label:'Complete'}];
 const icons={plan:ClipboardCheck,document:FileText,condition:ShieldCheck};

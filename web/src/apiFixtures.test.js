@@ -60,10 +60,11 @@ const states = {
   unreachable: {mode: 'unreachable', session: null, error: {kind: 'unreachable'}, generation: 0},
 };
 
-let server, App, ServerContext, fixtures, evidence, readiness, frame;
+let server, App, ServerShell, ServerContext, fixtures, evidence, readiness, frame;
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error', plugins: [sentinelPlugin()]});
   App = (await server.ssrLoadModule('/src/main.jsx')).App;
+  ServerShell = (await server.ssrLoadModule('/src/app/ServerApp.jsx')).ServerShell;
   ServerContext = (await server.ssrLoadModule('/src/ServerSwitch.jsx')).ServerContext;
   fixtures = await server.ssrLoadModule('/src/renewalFixtures.js');
   evidence = await server.ssrLoadModule('/src/ApiEvidence.jsx');
@@ -73,9 +74,11 @@ before(async () => {
 after(async () => {await server?.close();});
 
 const storeOf = state => ({api: {}, subscribe: () => () => {}, getSnapshot: () => state, start: () => Promise.resolve(state)});
+// The walkthrough is main.jsx's App; the server's app is its own shell.
 async function renderApp(path, state) {
+  const shell = state.mode === 'walkthrough' ? App : ServerShell;
   const {prelude} = await prerenderToNodeStream(React.createElement(ServerContext, {value: storeOf(state)},
-    React.createElement(MemoryRouter, {initialEntries: [path]}, React.createElement(App))));
+    React.createElement(MemoryRouter, {initialEntries: [path]}, React.createElement(shell))));
   let html = '';
   for await (const chunk of prelude) html += chunk;
   return html;

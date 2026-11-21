@@ -3,7 +3,6 @@ import {Link, useLocation, useSearchParams} from 'react-router';
 import {ArrowDown, ArrowUp, ArrowUpRight, ChevronRight, Info, ListFilter, Search, X} from 'lucide-react';
 import {clearWorklistSearch, selectWorklist, updateWorklistSearch, worklistActionHref, worklistCount, worklistHref, worklistNoun} from './worklist.js';
 import {activateWorklistRow, focusWorklistElement, moveWorklistFocus, restoreWorklistFocus, worklistFocusKey} from './worklistBrowser.js';
-import './worklists.css';
 export {default as WorklistStepEntry} from './WorklistStepEntry.jsx';
 
 function ScopeLabel({row}) {
