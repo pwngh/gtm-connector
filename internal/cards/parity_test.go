@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -353,6 +354,8 @@ type cardStore interface {
 	// to compare with the oracle's.
 	published(t *testing.T, sealed *Sealed, s setup, row fixtureRow, mismatches *oracletest.Mismatches) (
 		payload []byte, sha string, seal receipts.Receipt)
+	// lines gives the lines the store holds for a card the maker sealed, as JSON, in order.
+	lines(t *testing.T, sealed *Sealed, s setup) []receipts.LineRow
 }
 
 // memoryCards builds each card on its own Memory store, under the scope's IDs and clock, as the oracle did.
@@ -404,11 +407,43 @@ func (c *memoryCards) published(_ *testing.T, sealed *Sealed, s setup, row fixtu
 	return sealed.Payload, sealed.SHA256, sealed.Seal
 }
 
+func (c *memoryCards) lines(_ *testing.T, sealed *Sealed, s setup) []receipts.LineRow {
+	published, _ := c.stores[s.scope].Published(testWorkspace, sealed.BriefID)
+	return published.Lines
+}
+
+// storedLines checks the lines a store holds for a card against the lines the recorded card's text prints
+// under ATTENTION and RECORD VALUES. It gives how many signal and value lines matched, byte for byte.
+func storedLines(t *testing.T, rows []receipts.LineRow, recorded string, mismatches *oracletest.Mismatches,
+	key string) (signals, values int) {
+	t.Helper()
+	card, _ := load(t, []byte(recorded)).(*strictjson.Object)
+	text, _ := card.Get("text")
+	lines := make([]evidence.Line, len(rows))
+	for i, row := range rows {
+		value, err := strictjson.Loads(row.Value)
+		if err == nil {
+			lines[i], err = evidence.ParseLine(value)
+		}
+		if err != nil || lines[i].Section != row.Section {
+			mismatches.Add("%s: stored line %d is not a line: %v", key, i+1, err)
+			return 0, 0
+		}
+	}
+	printedSignals, printedValues := evidence.PrintedLines(text.(string))
+	if got, want := evidence.RenderLines(lines), slices.Concat(printedSignals, printedValues); !slices.Equal(got, want) {
+		mismatches.Add("%s: the stored lines render %q, the recorded text prints %q", key, got, want)
+		return 0, 0
+	}
+	return len(printedSignals), len(printedValues)
+}
+
 func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStore,
 	prepare func(row fixtureRow, input *strictjson.Object) setup) {
 	mismatches := oracletest.NewMismatches(t, "cards/"+family)
 	var cards cardStore
 	checked, identical, skipped := 0, 0, map[string]int{}
+	signalLines, valueLines := 0, 0
 	for _, line := range oracletest.Lines(t, "cards/"+family+".jsonl.gz") {
 		var row fixtureRow
 		if err := json.Unmarshal(line, &row); err != nil {
@@ -460,9 +495,13 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 		if gaps, _ := want.Get("gaps"); !evidence.Equal(evidence.GapValues(sealed.Gaps), gaps) {
 			mismatches.Add("%s: gaps differ", row.Key)
 		}
+		signals, values := storedLines(t, cards.lines(t, sealed, s), row.Card, mismatches, row.Key)
+		signalLines, valueLines = signalLines+signals, valueLines+values
 	}
 	t.Logf("%s: %d cards checked, %d byte-identical, %d differ; not built from inputs: %v", family, checked,
 		identical, mismatches.Count(), skipped)
+	t.Logf("%s: the stored lines render the recorded text's %d signal and %d value lines", family, signalLines,
+		valueLines)
 	if want := builtCards[family]; checked != want {
 		t.Errorf("%s: %d cards built, want %d; a card that stops being built must not pass as skipped", family,
 			checked, want)

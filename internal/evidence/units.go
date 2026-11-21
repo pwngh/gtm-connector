@@ -153,20 +153,20 @@ func GapValues(gaps []Gap) []any {
 	return out
 }
 
-// Build checks the evidence and returns its numbered units, the card, and the lines of NOT READ. Bad
-// evidence gives no card.
-func Build(evidence *strictjson.Object) (units []Unit, text string, gaps []Gap, err error) {
+// Build checks the evidence and returns its numbered units, the card, the lines of NOT READ, and the lines
+// under ATTENTION and RECORD VALUES as data, signals first. Bad evidence gives no card.
+func Build(evidence *strictjson.Object) (units []Unit, text string, gaps []Gap, lines []Line, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			rejected, ok := r.(*Rejected)
 			if !ok {
 				panic(r)
 			}
-			units, text, gaps, err = nil, "", nil, rejected
+			units, text, gaps, lines, err = nil, "", nil, nil, rejected
 		}
 	}()
-	units, text, gaps = build(evidence)
-	return units, text, gaps, nil
+	units, text, gaps, lines = build(evidence)
+	return units, text, gaps, lines, nil
 }
 
 // ---- Python's values, read as units.py reads them ----

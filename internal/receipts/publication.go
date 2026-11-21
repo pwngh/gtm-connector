@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -36,7 +37,9 @@ type Payload struct {
 	Receipts    []*strictjson.Object
 	ReadIDs     []string
 	Units, Gaps []any
-	records     map[string]*strictjson.Object
+	// Text is the card's text and AsOf its as_of day; each is empty when the bytes hold none.
+	Text, AsOf string
+	records    map[string]*strictjson.Object
 }
 
 // Record is the first record of evidence.records with this reference, as the card's numbers resolve it.
@@ -70,6 +73,8 @@ func ParsePayload(data []byte) (*Payload, error) {
 	if !ok[0] || !ok[1] || !ok[2] || !ok[3] {
 		return nil, fmt.Errorf("%w: the card does not name its brief, account, units and gaps", ErrProjection)
 	}
+	p.Text, _ = text(card, "text")
+	p.AsOf, _ = text(card, "as_of")
 	kind, hasKind := card.Get("kind")
 	switch {
 	case !hasKind:
@@ -193,7 +198,7 @@ func CheckPublication(p Publication, payload *Payload, seal Receipt, reads map[s
 		payload.Prepared != (seal.Tool == Composite) || payload.Prepared && payload.TokenID != seal.TokenID {
 		return refuse("the bytes are not this brief's card under this seal")
 	}
-	if err := checkProjection(payload, p.Units, p.Gaps); err != nil {
+	if err := checkProjection(payload, p.Units, p.Gaps, p.Lines); err != nil {
 		return err
 	}
 	if len(p.Reads) != len(payload.ReadIDs) {
@@ -257,8 +262,9 @@ func IndexBound(bound map[string][]RecordVersion) map[Citation]RecordVersion {
 	return index
 }
 
-// checkProjection requires units and gaps to be exactly the payload's, in order and type for type.
-func checkProjection(payload *Payload, units []UnitRow, gaps []GapRow) error {
+// checkProjection requires units and gaps to be exactly the payload's, in order and type for type, and lines
+// to be exactly the lines its text prints under ATTENTION and RECORD VALUES (evidence.CheckLines).
+func checkProjection(payload *Payload, units []UnitRow, gaps []GapRow, lines []LineRow) error {
 	refuse := func(format string, args ...any) error {
 		return fmt.Errorf("%w: "+format, append([]any{ErrProjection}, args...)...)
 	}
@@ -296,6 +302,19 @@ func checkProjection(payload *Payload, units []UnitRow, gaps []GapRow) error {
 		if !sameValue(row, payload.Gaps[i]) {
 			return refuse("gap %s", g.Code)
 		}
+	}
+	parsed := make([]evidence.Line, len(lines))
+	for i, row := range lines {
+		value, err := strictjson.Loads(row.Value)
+		if err == nil {
+			parsed[i], err = evidence.ParseLine(value)
+		}
+		if err != nil || parsed[i].Section != row.Section {
+			return refuse("line %d", i+1)
+		}
+	}
+	if err := evidence.CheckLines(parsed, payload.Text, len(payload.Units), payload.AsOf); err != nil {
+		return refuse("%v", err)
 	}
 	return nil
 }

@@ -626,6 +626,9 @@ func TestDurableRowsRefuseChange(t *testing.T) {
 		"DELETE FROM cards",
 		"UPDATE evidence_units SET body = '{}'",
 		"DELETE FROM gaps",
+		"UPDATE card_lines SET body = '{}'",
+		"DELETE FROM card_lines",
+		"UPDATE cards SET line_count = 0",
 		"DELETE FROM receipt_records",
 	} {
 		if code(sql(t, f, statement)) != "GT010" {
@@ -644,15 +647,15 @@ func TestCardSealMustNameItsBytes(t *testing.T) {
 		Status: "ok", HTTPStatus: 200, Rows: []string{"briefs/forged/" + strings.Repeat("0", 64)}})
 	ok(t, err)
 	err = sql(t, f, `INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
-		VALUES ($1, 'acc-003', 'forged', 'go', 3, '3', $3, sha256($3), $4, $2, 0, 0, 0)`,
+		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count, line_count)
+		VALUES ($1, 'acc-003', 'forged', 'go', 3, '3', $3, sha256($3), $4, $2, 0, 0, 0, 0)`,
 		f.Workspace.ID, seal.ID, []byte(`{"units":[],"gaps":[]}`), pub.ParentReceiptID)
 	if code(err) != "GT009" {
 		t.Fatalf("a card was stored under a seal for other bytes: %v", err)
 	}
 	if code(sql(t, f, `INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
-		VALUES ($1, 'acc-003', 'x', 'go', 3, '3', 'x', sha256('y'), $3, $2, 0, 0, 0)`,
+		card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count, line_count)
+		VALUES ($1, 'acc-003', 'x', 'go', 3, '3', 'x', sha256('y'), $3, $2, 0, 0, 0, 0)`,
 		f.Workspace.ID, seal.ID, pub.ParentReceiptID)) != "23514" {
 		t.Fatal("a card's digest need not match its bytes")
 	}

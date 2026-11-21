@@ -6,13 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // A card for the contract: the shape the maker writes, cut down to what publication checks. Its bytes name
 // the brief, the account and the seal; evidence.receipts embeds each read as stored; evidence.records holds
-// each record a unit shows; and one record unit and one gap are its projections.
+// each record a unit shows; its text prints one signal and one value; and one record unit, one gap and its
+// two lines are its projections.
 type card struct {
 	f        *Fixture
 	brief    string
@@ -93,6 +95,29 @@ func (c *card) unit() *strictjson.Object {
 		"tool", "get_account")
 }
 
+// lines are the contract card's lines: a signal and a value, each citing its unit.
+func lines() []evidence.Line {
+	return []evidence.Line{
+		{Section: "signal", Code: "crm_at_risk", Text: "CRM marks this account at risk.", Cites: []int{1}},
+		{Section: "value", Code: "account", Label: "Account", Text: `"Invented account"; industry Missing`,
+			Cites: []int{1}},
+	}
+}
+
+// lineRows are lines as a publication carries them.
+func lineRows(t *testing.T, lines []evidence.Line) []receipts.LineRow {
+	t.Helper()
+	rows := make([]receipts.LineRow, len(lines))
+	for i, l := range lines {
+		value, err := strictjson.Dumps(l.Value(), strictjson.Prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows[i] = receipts.LineRow{Section: l.Section, Value: []byte(value)}
+	}
+	return rows
+}
+
 // build writes the publication and the document its bytes are made from; finish dumps the bytes.
 func (c *card) build(t *testing.T) {
 	t.Helper()
@@ -115,6 +140,9 @@ func (c *card) build(t *testing.T) {
 	} else {
 		c.doc.Set("sealed_by", c.seal.AuditID)
 	}
+	printed := evidence.RenderLines(lines())
+	c.doc.Set("text", "DEAL CARD "+c.f.Account+"\n\n"+evidence.AttentionHeading+"\n"+printed[0]+"\n\n"+
+		evidence.ValuesHeading+"\n"+printed[1]+"\n")
 	c.doc.Set("units", []any{unit})
 	c.doc.Set("gaps", []any{gap})
 	c.doc.Set("evidence", strictjson.NewObject("brief_id", c.brief, "account_id", c.f.Account,
@@ -125,7 +153,8 @@ func (c *card) build(t *testing.T) {
 		Units: []receipts.UnitRow{{N: 1, Kind: "record", RecordRef: "crm/accounts/" + c.f.Account, Tool: "get_account",
 			ReceiptID: c.cited.AuditID, ContentVersion: v.Version(), Value: []byte(value)}},
 		Gaps: []receipts.GapRow{{Code: "neutralized", Disposition: "note", Text: "1 sentence had markup neutralized.",
-			Count: big.NewInt(1)}}}
+			Count: big.NewInt(1)}},
+		Lines: lineRows(t, lines())}
 }
 
 func (c *card) finish(t *testing.T) {
@@ -154,12 +183,26 @@ func published(t *testing.T, c *card, got receipts.Card) {
 	if got.Seal.Status != "ok" || len(got.Seal.Rows) != 1 || got.Seal.Rows[0] != ref ||
 		got.SHA256 != ref[len(ref)-64:] || string(got.Bytes) != string(c.pub.Bytes) || !c.f.Published(t, c.brief) ||
 		len(got.Units) != 1 || string(got.Units[0].Value) != string(c.pub.Units[0].Value) ||
-		got.Units[0].ReceiptID != c.cited.AuditID || len(got.Gaps) != 1 || got.Gaps[0].Count.Int64() != 1 {
+		got.Units[0].ReceiptID != c.cited.AuditID || len(got.Gaps) != 1 || got.Gaps[0].Count.Int64() != 1 ||
+		!sameLines(got.Lines, c.pub.Lines) {
 		t.Fatalf("published %+v", got)
 	}
 	if seal := readOne(t, c.f, c.seal.AuditID); !seal.Same(got.Seal) {
 		t.Fatalf("the seal reads back as %s", encode(t, seal.Value()))
 	}
+}
+
+// sameLines is whether two projections hold the same lines, in order.
+func sameLines(a, b []receipts.LineRow) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Section != b[i].Section || string(a[i].Value) != string(b[i].Value) {
+			return false
+		}
+	}
+	return true
 }
 
 func publishACard(t *testing.T, f *Fixture) {
@@ -312,6 +355,32 @@ func publishRefusals(t *testing.T, f *Fixture) {
 				gaps, _ := c.doc.Get("gaps")
 				gaps.([]any)[0].(*strictjson.Object).Set("count", 1.0)
 			}, err: receipts.ErrProjection, seal: "422 projection"},
+		{name: "a line whose words are not the text's",
+			edit: func(t *testing.T, c *card) {
+				altered := lines()
+				altered[1].Text = `"Another account"; industry Missing`
+				c.pub.Lines = lineRows(t, altered)
+			}, err: receipts.ErrProjection, seal: "422 projection"},
+		{name: "a line citing another unit",
+			edit: func(t *testing.T, c *card) {
+				altered := lines()
+				altered[0].Cites = []int{2}
+				c.pub.Lines = lineRows(t, altered)
+			}, err: receipts.ErrProjection, seal: "422 projection"},
+		{name: "a line the text prints left out",
+			edit: func(t *testing.T, c *card) { c.pub.Lines = c.pub.Lines[1:] },
+			err:  receipts.ErrProjection, seal: "422 projection"},
+		{name: "a line in another section",
+			edit: func(t *testing.T, c *card) { c.pub.Lines[0].Section = "value" },
+			err:  receipts.ErrProjection, seal: "422 projection"},
+		{name: "a line that is not a line",
+			edit: func(t *testing.T, c *card) { c.pub.Lines[1].Value = []byte(`{"section": "value"}`) },
+			err:  receipts.ErrProjection, seal: "422 projection"},
+		{name: "a text that prints other lines",
+			edit: func(t *testing.T, c *card) {
+				text, _ := c.doc.Get("text")
+				c.doc.Set("text", strings.Replace(text.(string), "at risk", "at  risk", 1))
+			}, err: receipts.ErrProjection, seal: "422 projection"},
 		{name: "a seal of another tool",
 			edit: func(t *testing.T, c *card) { c.reseal(t, receipts.SaveBrief+"_other", nil, c.brief) },
 			err:  receipts.ErrInvalid, seal: "pending"},
@@ -378,11 +447,12 @@ func publishRetries(t *testing.T, f *Fixture) {
 	retry.Bytes = append([]byte(nil), c.pub.Bytes...)
 	retry.Units = []receipts.UnitRow{{N: 1, Kind: "record", RecordRef: "x", Tool: "y", Value: []byte(`{}`)}}
 	retry.Gaps = nil
+	retry.Lines = nil
 	again, err := f.Store.Publish(ctx, retry)
 	if err != nil || string(again.Bytes) != string(first.Bytes) || !again.Seal.Same(first.Seal) ||
 		len(again.Units) != 1 || string(again.Units[0].Value) != string(c.pub.Units[0].Value) ||
 		again.Units[0].ReceiptID != c.cited.AuditID || again.Units[0].ContentVersion != c.pub.Units[0].ContentVersion ||
-		len(again.Gaps) != 1 || again.Gaps[0].Code != "neutralized" {
+		len(again.Gaps) != 1 || again.Gaps[0].Code != "neutralized" || !sameLines(again.Lines, c.pub.Lines) {
 		t.Fatalf("a retried publication: %+v %v", again, err)
 	}
 	// The card handed back is a copy.
