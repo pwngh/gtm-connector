@@ -32,7 +32,17 @@ flowchart LR
 
 1. **The watch rule pulls** every open renewal opportunity that closes inside the window, with its account and contact emails.
 2. **The connector discovers** matching calls and Slack messages by those emails and domains. In Slack it looks in a dedicated internal or Slack Connect channel, such as `#deal-thornfield` or `#ext-thornfield`, and in threads of shared channels, such as `#renewals` or `#deal-desk`, that mention the account's name or domain. No thread is hard-coded.
-3. **Each match joins its deal.** Nobody clicks. A match that fits more than one deal goes on neither card. Both cards list it under what was not read, and the owner of either deal can claim it there with one click. Nothing waits on that: the cards publish without it.
+3. **Each match joins its deal.** Nobody clicks.
+
+A match can fit more than one deal, and there are two cases:
+
+| The match fits | What happens | Why |
+| --- | --- | --- |
+| Two deals of the same account, such as a renewal and an expansion | It goes on both cards, marked as shared with the other deal | It is the same customer, so nothing is misattributed, and leaving it off would empty the card |
+| Deals of two different accounts | It goes on neither card, and both say so under what was not read | One customer's words must never reach another customer's card |
+
+Nobody is asked to settle either case. Coverage counts the second kind by rule, so you can fix the
+rule that produces them, for example by excluding a domain two accounts share.
 
 ## The matches queue is off
 
@@ -41,8 +51,8 @@ The queue exists for a team that wants a person in the loop, and the engineer ch
 
 | `approval` in `gtm.yaml` | What waits for a person |
 | --- | --- |
-| `off`, the default | Nothing. A match that fits two deals stays off both cards until a deal's owner claims it. |
-| `ambiguous` | Only a match that fits more than one deal |
+| `off`, the default | Nothing |
+| `ambiguous` | Only a match that fits deals of two different accounts |
 | `all` | Every match, before it reaches a card |
 
 The setting can also be given per source, for example `all` for pushed records and `off` for the CRM.
@@ -91,7 +101,7 @@ Under the hood:
 
 | Screen | What it answers |
 | --- | --- |
-| Coverage | Which deals have a current card, which do not, and why. It also counts the matches that fit two deals, by rule, so you can tighten the rule that keeps producing them. |
+| Coverage | Which deals have a current card, which do not, and why. It also counts, by rule, the matches left off because they fit two accounts. |
 | Setup | Each source's state and last read, and the active file beside a draft |
 | Activity | What ran, with its receipt, and whether it is safe to retry |
 
