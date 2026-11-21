@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce/salesforcetest"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
@@ -602,8 +603,127 @@ func TestSearchesAreFixedQueries(t *testing.T) {
 
 func failure(_ []*strictjson.Object, _ bool, err error) error { return err }
 
-// The address sf gives must be an HTTPS My Domain origin, and the token printable ASCII. These cases were
-// run through the Python adapter, and agree with it.
+// An answer that holds a token of the read is refused whole, before it is parsed: a token the org sends back
+// as a field gives no record. A failure here names counts and a code, never the token or the answer.
+func TestAnAnswerHoldingATokenIsRefused(t *testing.T) {
+	const rotated = "invented-rotated-token"
+	named := func(t *testing.T, name string) (*salesforcetest.Org, *salesforcetest.SF, string) {
+		org, sf := salesforcetest.NewOrg(), salesforcetest.NewSF()
+		rows := sized(t, 1, 0)
+		accounts, _ := rows.Get("Account")
+		accounts.([]any)[0].(*strictjson.Object).Set("Name", name)
+		return org, sf, org.Add(rows)
+	}
+	refused := func(t *testing.T, reader *Reader, accountID string) {
+		t.Helper()
+		found, err := reader.GetAccount(context.Background(), accountID)
+		if found != nil || codeOf(err) != invalidResponse {
+			t.Fatalf("an answer holding a token gave a record (%t) and the code %q", found != nil, codeOf(err))
+		}
+		_, records, err := reader.Read(context.Background(), "get_account", accountID)
+		if records != nil || codeOf(err) != invalidResponse {
+			t.Fatalf("an answer holding a token gave %d records and the code %q", len(records), codeOf(err))
+		}
+	}
+	t.Run("the token the reader holds", func(t *testing.T) {
+		org, sf, accountID := named(t, salesforcetest.Token)
+		refused(t, signIn(t, org, sf, "production"), accountID)
+	})
+	t.Run("inside longer text", func(t *testing.T) {
+		org, sf, accountID := named(t, "Bearer "+salesforcetest.Token+" and more")
+		refused(t, signIn(t, org, sf, "production"), accountID)
+	})
+	t.Run("the token sf gave during the read", func(t *testing.T) {
+		org, sf, accountID := named(t, rotated)
+		reader := signIn(t, org, sf, "production")
+		org.Token, sf.Token = rotated, rotated
+		refused(t, reader, accountID)
+	})
+	t.Run("the token sf replaced during the read", func(t *testing.T) {
+		org, sf, accountID := named(t, salesforcetest.Token)
+		reader := signIn(t, org, sf, "production")
+		org.Token, sf.Token = rotated, rotated
+		found, err := reader.GetAccount(context.Background(), accountID)
+		if found != nil || codeOf(err) != invalidResponse || reader.accessToken != rotated {
+			t.Fatalf("an answer holding a token gave a record (%t) and the code %q", found != nil, codeOf(err))
+		}
+	})
+	t.Run("written with escapes", func(t *testing.T) {
+		// The same text as JSON may write it: one character as its code point, and a solidus escaped.
+		const slashed = "invented/salesforce-token"
+		hyphen := `\` + "u002d"
+		for token, written := range map[string]string{
+			salesforcetest.Token: strings.Replace(salesforcetest.Token, "-", hyphen, 1),
+			slashed:              strings.Replace(slashed, "/", `\/`, 1),
+		} {
+			if strings.Contains(written, token) || !strings.Contains(written, `\`) {
+				t.Fatal("the name does not hold the token with an escape")
+			}
+			org, sf, accountID := named(t, "Invented Account")
+			org.Token, sf.Token = token, token
+			reader := signIn(t, org, sf, "production")
+			org.Intercept = func(request *http.Request) *http.Response {
+				if !strings.Contains(request.URL.Query().Get("q"), "FROM Account") {
+					return nil
+				}
+				return salesforcetest.Respond(200, `{"totalSize": 1, "done": true, "records": [{"Id": "`+account+
+					`", "Name": "`+written+`", "Industry": null, "AccountNumber": null}]}`)
+			}
+			refused(t, reader, accountID)
+		}
+	})
+	t.Run("text a card would turn into the token", func(t *testing.T) {
+		// A card composes source text, which turns the Kelvin sign into the letter K, and lowers the host
+		// of a link. Neither name below holds the token; each would once it is on a card.
+		const token = "invented-Kelvin-salesforce-token"
+		kelvin := strings.Replace(token, "K", string(rune(0x212A)), 1)
+		shown, _, err := evidence.SafeText(kelvin)
+		if err != nil || strings.Contains(kelvin, token) || !strings.Contains(shown, token) {
+			t.Fatal("the name with a Kelvin sign is not one a card turns into the token")
+		}
+		for _, name := range []string{kelvin, "INVENTED-KELVIN-SALESFORCE-TOKEN", "invented-kelvin-salesforce-token",
+			"See https://INVENTED-KELVIN-SALESFORCE-TOKEN/ for more"} {
+			org, sf, accountID := named(t, name)
+			org.Token, sf.Token = token, token
+			refused(t, signIn(t, org, sf, "production"), accountID)
+		}
+	})
+	t.Run("the replaced token later in the same read", func(t *testing.T) {
+		// The account answers under the new token. The contacts that follow hold the old one.
+		org, sf := salesforcetest.NewOrg(), salesforcetest.NewSF()
+		rows := sized(t, 1, 0)
+		contacts, _ := rows.Get("Contact")
+		contacts.([]any)[0].(*strictjson.Object).Set("Name", salesforcetest.Token)
+		accountID := org.Add(rows)
+		reader := signIn(t, org, sf, "production")
+		org.Token, sf.Token = rotated, rotated
+		found, err := reader.GetAccount(context.Background(), accountID)
+		if found != nil || codeOf(err) != invalidResponse || reader.accessToken != rotated {
+			t.Fatalf("an answer holding the replaced token gave a record (%t) and the code %q", found != nil, codeOf(err))
+		}
+	})
+	t.Run("in a denial", func(t *testing.T) {
+		org, sf, accountID := named(t, "Invented Account")
+		reader := signIn(t, org, sf, "production")
+		org.Intercept = func(*http.Request) *http.Response {
+			return salesforcetest.Respond(403, `[{"errorCode": "API_DISABLED_FOR_ORG", "message": "`+salesforcetest.Token+`"}]`)
+		}
+		if _, err := reader.GetAccount(context.Background(), accountID); codeOf(err) != invalidResponse {
+			t.Fatalf("a denial holding a token gave the code %q", codeOf(err))
+		}
+	})
+	t.Run("a token nobody holds is text", func(t *testing.T) {
+		org, sf, accountID := named(t, rotated)
+		found, err := signIn(t, org, sf, "production").GetAccount(context.Background(), accountID)
+		if err != nil || found == nil {
+			t.Fatalf("an account named for a token nobody holds was refused with %q", codeOf(err))
+		}
+	})
+}
+
+// The address sf gives must be an HTTPS My Domain origin. The address cases were run through the Python
+// adapter, and agree with it. The token must be one an answer could not hold by chance: 20 characters or
+// more, of those a Salesforce token is made of. The Python adapter takes any printable ASCII.
 func TestTheInstanceAndTokenAreChecked(t *testing.T) {
 	long := "https://" + strings.Repeat("a", 60)
 	long += "." + strings.Repeat("a", 60) + "." + strings.Repeat("a", 60) + "." + strings.Repeat("a", 60) + ".my.salesforce.com"
@@ -637,21 +757,45 @@ func TestTheInstanceAndTokenAreChecked(t *testing.T) {
 		"https://İnvented.my.salesforce.com":               "",
 		"":                                                 "",
 	} {
-		origin, err := configure(address, "t")
+		origin, err := configure(address, salesforcetest.Token)
 		if origin != want || (err == nil) != (want != "") || err != nil && codeOf(err) != invalidConfiguration {
 			t.Errorf("%q: %q, %v", address, origin, err)
 		}
 	}
-	for token, accepted := range map[string]bool{"t": true, "!~": true, strings.Repeat("x", 4096): true, "": false,
-		"a b": false, "aé": false, "a\x7f": false, strings.Repeat("x", 4097): false} {
+	twenty := strings.Repeat("x", 20)
+	for token, accepted := range map[string]bool{
+		twenty: true, strings.Repeat("x", 4096): true, "00D000000000000!AQ.b_c-d+e/f=": true,
+		// Short enough to be found in any answer: "o" is in the name of the member "records".
+		"": false, "o": false, "t": false, "records": false, strings.Repeat("x", 19): false,
+		strings.Repeat("x", 4097): false,
+		// Any printable ASCII mark is allowed: a service may change what its tokens are made of.
+		twenty + `"`: true, twenty + "{": true, twenty + ":": true, twenty + `\`: true, twenty + "~": true,
+		// A space, a control character or anything outside ASCII is not.
+		twenty + " b": false, twenty + "é": false, twenty + "\x7f": false, twenty + "\t": false,
+	} {
 		if _, err := configure(salesforcetest.Instance, token); (err == nil) != accepted {
-			t.Errorf("a token of %d bytes: %v", len(token), err)
+			t.Errorf("a token of %d bytes: accepted %t, want %t", len(token), err == nil, accepted)
 		}
 	}
 	// What sf gives that fails these checks is a login that cannot be used, not a setting to correct.
-	sf := salesforcetest.NewSF()
-	sf.Instance = "https://invented-books.my.salesforce.com/services"
-	if _, err := FromSF(context.Background(), salesforcetest.Alias, Options{Runner: sf}); codeOf(err) != authRequired {
-		t.Fatal(err)
+	for _, change := range []func(*salesforcetest.SF){
+		func(sf *salesforcetest.SF) { sf.Instance = "https://invented-books.my.salesforce.com/services" },
+		func(sf *salesforcetest.SF) { sf.Token = "o" },
+		func(sf *salesforcetest.SF) { sf.Token = twenty + " x" },
+	} {
+		sf := salesforcetest.NewSF()
+		change(sf)
+		if _, err := FromSF(context.Background(), salesforcetest.Alias, Options{Runner: sf}); codeOf(err) != authRequired {
+			t.Fatalf("a login that cannot be used gave the code %q", codeOf(err))
+		}
+	}
+	// A token sf gives in place of a refused one is held to the same rule, and is never sent.
+	org, sf := salesforcetest.NewOrg(), salesforcetest.NewSF()
+	accountID := org.Add(sized(t, 0, 0))
+	reader := signIn(t, org, sf, "production")
+	org.Requests = nil
+	org.Token, sf.Token = "o", "o"
+	if _, err := reader.GetAccount(context.Background(), accountID); codeOf(err) != authRequired || len(org.Requests) != 1 {
+		t.Fatalf("a one-letter token gave the code %q after %d requests", codeOf(err), len(org.Requests))
 	}
 }

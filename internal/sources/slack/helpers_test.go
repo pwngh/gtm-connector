@@ -53,10 +53,10 @@ func signIn(now time.Time, rotating, expired bool) *Credentials {
 	}
 	document := &Credentials{ClientID: testClient, RedirectURI: testRedirect, Identity: testIdentity,
 		WorkspaceOrigin: testOrigin, RequestedScopes: []string{"channels:history"},
-		GrantedScopes: []string{"channels:history"}, State: ready, AccessToken: accessToken,
+		GrantedScopes: []string{"channels:history"}, State: ready, AccessToken: NewSecret(accessToken),
 		AccessObtainedAt: obtained, LastVerifiedAt: obtained}
 	if rotating {
-		document.RefreshToken = refreshToken
+		document.RefreshToken = NewSecret(refreshToken)
 		document.RefreshObtainedAt = obtained
 		document.AccessExpiresAt = obtained.Add(time.Hour)
 	}
@@ -71,20 +71,36 @@ type connection struct {
 	holdErr  error // what Hold refuses with, when set
 	saveErr  error // what Save fails with, when set
 	whenHeld func()
+	waitOn   int // the Hold, counted from one, that waits for its context to end and fails with its error
+	// loadWaits and saveWaits make a Load or a Save wait for its context to end and fail with its error.
+	loadWaits, saveWaits bool
+	// saveContexts are, for each Save, whether its context had ended when it was called, and whether it
+	// carried a deadline.
+	saveContexts []saveContext
 }
 
-func (c *connection) Hold(_ context.Context, held func(Saved) error) error {
+type saveContext struct{ ended, bounded bool }
+
+func (c *connection) Hold(ctx context.Context, held func(Saved) error) error {
 	if c.holdErr != nil {
 		return c.holdErr
 	}
 	c.holds++
+	if c.holds == c.waitOn {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if c.whenHeld != nil {
 		c.whenHeld()
 	}
 	return held(c)
 }
 
-func (c *connection) Load() (*Credentials, error) {
+func (c *connection) Load(ctx context.Context) (*Credentials, error) {
+	if c.loadWaits {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if c.saved == nil {
 		return nil, nil
 	}
@@ -92,7 +108,13 @@ func (c *connection) Load() (*Credentials, error) {
 	return &document, nil
 }
 
-func (c *connection) Save(document *Credentials) error {
+func (c *connection) Save(ctx context.Context, document *Credentials) error {
+	_, bounded := ctx.Deadline()
+	c.saveContexts = append(c.saveContexts, saveContext{ctx.Err() != nil, bounded})
+	if c.saveWaits {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if c.saveErr != nil {
 		return c.saveErr
 	}
@@ -205,6 +227,31 @@ type sent struct {
 	method, url, path, query string
 	header                   http.Header
 	body                     string
+}
+
+// Format prints a request for a failure message, under any verb, without the tokens it carried.
+func (s sent) Format(f fmt.State, _ rune) {
+	fmt.Fprintf(f, "%s %s %v %q", s.method, s.url, shown(s.header), formShown(s.body))
+}
+
+// shown is a request's headers with the bearer left out.
+func shown(header http.Header) http.Header {
+	printed := header.Clone()
+	if printed.Get("Authorization") != "" {
+		printed.Set("Authorization", "Bearer "+redacted)
+	}
+	return printed
+}
+
+// formShown is a request's form with the refresh token left out.
+func formShown(form string) string {
+	members := strings.Split(form, "&")
+	for i, member := range members {
+		if name, _, found := strings.Cut(member, "="); found && name == "refresh_token" {
+			members[i] = name + "=" + redacted
+		}
+	}
+	return strings.Join(members, "&")
 }
 
 // script is a transport that answers page requests and sign-in requests from two queues, and never
