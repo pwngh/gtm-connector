@@ -55,6 +55,9 @@ type SourceChange struct {
 // than the one it is pinned to.
 var ErrPinned = errors.New("the source is pinned to another identity")
 
+// ErrDemoCallNotes refuses imported calls in a workspace that has read demo call notes.
+var ErrDemoCallNotes = errors.New("the workspace has read demo call notes")
+
 // SourceUpdate is one change to what a workspace reads.
 type SourceUpdate struct {
 	Changes []SourceChange
@@ -113,6 +116,8 @@ func (s *Store) UpdateSources(ctx context.Context, w Workspace,
 				       (excluded.mode, excluded.binding, coalesce(excluded.identity_sha256, connections.identity_sha256))`,
 				w.ID, w.Kind, c.Source, c.Mode, binding, identity); sqlState(err) == "GT019" {
 				return ErrPinned
+			} else if sqlState(err) == "GT020" {
+				return ErrDemoCallNotes
 			} else if err != nil {
 				return err
 			}

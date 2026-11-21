@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
+	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/calls"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
@@ -18,6 +21,9 @@ import (
 type CallImports struct {
 	Store       *Store
 	WorkspaceID string
+	// Generations are the connections an import is saved under, by source, at the generations its command
+	// read them at. Import saves only while each is still at its generation.
+	Generations map[string]int64
 }
 
 var _ calls.Imports = CallImports{}
@@ -28,7 +34,7 @@ func (c CallImports) Workspace() string { return c.WorkspaceID }
 // callsError gives a failure of the database as calls.ErrIO, with its cause. A refusal passes as it is.
 func callsError(err error) error {
 	var refusal *calls.Error
-	if err == nil || errors.As(err, &refusal) {
+	if err == nil || errors.As(err, &refusal) || errors.Is(err, receipts.ErrSourceChanged) {
 		return err
 	}
 	return fmt.Errorf("%w: %w", calls.ErrIO, err)
@@ -75,6 +81,48 @@ func (c CallImports) bound(ctx context.Context, q queries, binding *strictjson.O
 	return nil
 }
 
+// Binding is the CRM binding the workspace's imports are bound to, or nil when the workspace holds no
+// import.
+func (c CallImports) Binding(ctx context.Context) (*strictjson.Object, error) {
+	var stored string
+	err := c.Store.pool.QueryRow(ctx, "SELECT crm_binding FROM call_import_stores WHERE workspace_id = $1",
+		c.WorkspaceID).Scan(&stored)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, callsError(err)
+	}
+	value, err := strictjson.LoadsText(stored)
+	binding, ok := value.(*strictjson.Object)
+	if err != nil || !ok || binding == nil {
+		return nil, calls.ErrCorrupt
+	}
+	if _, valid := evidence.CRMBackend(binding); !valid {
+		return nil, calls.ErrCorrupt
+	}
+	return binding, nil
+}
+
+// fenced holds the workspace's connections of each source in Generations at the generation given, under a
+// share lock until the transaction ends, so no connect or removal moves them while an import is saved. A
+// source that moved, or is no longer connected, gives receipts.ErrSourceChanged.
+func (c CallImports) fenced(ctx context.Context, tx pgx.Tx) error {
+	sources := slices.Sorted(maps.Keys(c.Generations))
+	for _, source := range sources {
+		var generation int64
+		err := tx.QueryRow(ctx, `SELECT generation FROM connections
+			WHERE workspace_id = $1 AND source = $2 AND mode <> 'none' FOR SHARE`, c.WorkspaceID, source).Scan(&generation)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows) || err == nil && generation != c.Generations[source]:
+			return receipts.ErrSourceChanged
+		case err != nil:
+			return err
+		}
+	}
+	return nil
+}
+
 // Import is calls_import.store_import: in one transaction it saves the file's bytes, the revision of this
 // request, and the pointers that make it the account's active import. The same bytes, account, call time and
 // range find the revision saved before and change nothing. Bytes, or an AccountNumber, that belong to another
@@ -94,6 +142,9 @@ func (c CallImports) Import(ctx context.Context, in calls.Import) (*strictjson.O
 	}
 	var result *strictjson.Object
 	err = c.Store.inTx(ctx, func(tx pgx.Tx) error {
+		if err := c.fenced(ctx, tx); err != nil {
+			return err
+		}
 		var known bool
 		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM accounts WHERE workspace_id = $1 AND ref = $2)",
 			c.WorkspaceID, a.AccountID).Scan(&known); err != nil {

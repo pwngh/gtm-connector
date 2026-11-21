@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
+	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/calls"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/postgrestest"
@@ -715,5 +716,97 @@ func TestARevisionOfOtherBytesIsNotARepeat(t *testing.T) {
 	}
 	if importRows(t, f) != before {
 		t.Fatal("the refused import changed rows")
+	}
+}
+
+// connectedForImports connects the fixture's workspace to the demo CRM and imported calls, and gives the
+// generation of each row.
+func connectedForImports(t *testing.T, f *postgrestest.Fixture) map[string]int64 {
+	t.Helper()
+	generations := map[string]int64{}
+	for _, source := range []string{"crm", "calls"} {
+		mode := map[string]string{"crm": "demo", "calls": "imported"}[source]
+		row, err := f.Store.EnsureConnection(ctx, f.Workspace, source, mode)
+		ok(t, err)
+		generations[source] = row.Generation
+	}
+	return generations
+}
+
+// An import is saved only while the CRM and the calls are connected at the generations its command read
+// them at. A source detached after the read that resolved the account committed refuses the save as
+// changed, and nothing is written. At those generations the same import is saved.
+func TestAnImportIsSavedOnlyAtTheGenerationsItWasMadeUnder(t *testing.T) {
+	for _, moved := range []string{"crm", "calls"} {
+		f := postgrestest.New(t)
+		store := imports(t, f)
+		store.Generations = connectedForImports(t, f)
+		in := made(t, store, importing{})
+		before := importRows(t, f)
+		_, err := f.Store.UpdateSources(ctx, f.Workspace, func([]postgres.Connection) (postgres.SourceUpdate, error) {
+			return postgres.SourceUpdate{Changes: []postgres.SourceChange{{Source: moved, Mode: "none"}}}, nil
+		})
+		ok(t, err)
+		if _, err := store.Import(ctx, in); !errors.Is(err, receipts.ErrSourceChanged) {
+			t.Errorf("an import after its %s was detached ended with %v", moved, err)
+		}
+		if importRows(t, f) != before {
+			t.Errorf("the import refused after its %s was detached wrote rows", moved)
+		}
+	}
+	f := postgrestest.New(t)
+	store := imports(t, f)
+	store.Generations = connectedForImports(t, f)
+	publish(t, store, importing{})
+}
+
+// demoNoteRead starts a read_call_notes read of the workspace's demo calls, and gives it with the record it
+// returns: a demo call note.
+func demoNoteRead(t *testing.T, f *postgrestest.Fixture, operation string) (postgres.Receipt, postgres.RecordVersion) {
+	t.Helper()
+	row, err := f.Store.EnsureConnection(ctx, f.Workspace, "calls", "demo")
+	ok(t, err)
+	read, err := f.Store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
+		TokenID: postgres.TokenID("raw-token"), OperationID: operation, Tool: "read_call_notes", Scope: "calls:read",
+		AccountRef: "acc-003", ConnectionID: row.ID, Arguments: json.RawMessage(`{"account_id":"acc-003"}`),
+		Lease: time.Minute})
+	ok(t, err)
+	body := `{"account_id":"acc-003","id":"note-003","record_ref":"calls/call_notes/note-003"}`
+	return read, postgres.RecordVersion{Source: "calls", Table: "call_notes", RecordID: "note-003", Body: []byte(body)}
+}
+
+// importedCalls connects the workspace's calls to imports, as connect calls saves them.
+func importedCalls(f *postgrestest.Fixture) error {
+	_, err := f.Store.UpdateSources(ctx, f.Workspace, func([]postgres.Connection) (postgres.SourceUpdate, error) {
+		return postgres.SourceUpdate{Changes: []postgres.SourceChange{{Source: "calls", Mode: "imported"}}}, nil
+	})
+	return err
+}
+
+// Demo call notes and imports never share a workspace, for any writer and whatever the order: the calls are
+// not made imported once a read returned a demo call note, and a demo read that is still running when they
+// are finishes as changed, binding nothing.
+func TestDemoCallNotesAndImportsNeverShareAWorkspace(t *testing.T) {
+	f := postgrestest.New(t)
+	read, note := demoNoteRead(t, f, "demo-note-first")
+	_, err := f.Store.FinishRead(ctx, read.ID, read.LeaseToken, []postgres.RecordVersion{note}, 0)
+	ok(t, err)
+	if err := importedCalls(f); !errors.Is(err, postgres.ErrDemoCallNotes) {
+		t.Errorf("imported calls after a demo call note was read: %v", err)
+	}
+	if mode := scalar(t, f.URL, "SELECT mode FROM connections WHERE source = 'calls'"); mode != "demo" {
+		t.Errorf("the calls are %s", mode)
+	}
+
+	f = postgrestest.New(t)
+	read, note = demoNoteRead(t, f, "demo-note-during")
+	ok(t, importedCalls(f))
+	if _, err := f.Store.FinishRead(ctx, read.ID, read.LeaseToken, []postgres.RecordVersion{note}, 0); !errors.Is(err,
+		postgres.ErrSourceChanged) {
+		t.Errorf("a demo read that finished after the calls were imported ended with %v", err)
+	}
+	if rows := scalar(t, f.URL, "SELECT count(*)::text FROM receipts r, jsonb_array_elements_text(r.rows) x "+
+		"WHERE x LIKE 'calls/%'"); rows != "0" {
+		t.Errorf("%s demo call rows were bound beside imported calls", rows)
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -15,8 +16,8 @@ import (
 // are sourceKinds (sources.go). What it saves are connection rows and the seller list, never a credential.
 //
 // A workspace is made for demo data or for real sources, and keeps that: demo data and a real source never
-// share one. So beside the demo CRM, calls and Slack are always demo data, and beside a real CRM a source
-// is real or not connected.
+// share one. So beside the demo CRM, Slack is always demo data and calls are demo data or imported
+// transcripts, and beside a real CRM a source is real or not connected.
 
 // assistantApps are the assistant apps whose setup the Python CLI's connect prints. This build prints
 // none.
@@ -229,7 +230,10 @@ var unpinned = &failure{code: 3, next: "gtm-connector connect --help",
 // calls and Slack, which belong to their CRM, are only ever kept beside the CRM they were connected to.
 func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string) (before, after []postgres.Connection, err error) {
 	holds := "demo"
-	if kinds[0].live {
+	switch {
+	case kinds[0].besideDemo && r.exists:
+		holds = r.workspace.Kind
+	case kinds[0].live:
 		holds = "live"
 	}
 	switch {
@@ -242,6 +246,11 @@ func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string)
 	case r.exists:
 		if before, err = r.store.Connections(ctx, r.workspace.ID); err != nil {
 			return nil, nil, err
+		}
+		if kinds[0].provider == "demo" {
+			if kinds, err = keptTranscripts(ctx, r.store, r.workspace, before, kinds); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	var crm *postgres.Connection
@@ -295,5 +304,8 @@ func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string)
 		}
 		return postgres.SourceUpdate{Changes: changes, Sellers: sellers}, nil
 	})
+	if errors.Is(err, postgres.ErrDemoCallNotes) {
+		err = demoCallNotesHeld
+	}
 	return before, after, err
 }
