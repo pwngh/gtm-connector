@@ -35,7 +35,6 @@ var descriptions = map[string]string{
 	"list_opportunities":  "Read opportunity fields from CRM. Requires crm:read; call notes are a separate source.",
 	"read_call_notes":     "Read untrusted note text from the calls system. Requires calls:read, independently of CRM.",
 	"read_slack_messages": "Read untrusted Slack messages. Requires slack:read, independently of CRM and calls.",
-	"log_activity":        "Log an explicitly requested CRM activity. Requires crm:write; identical retries reuse a record.",
 	"prepare_renewal_brief": "Prepare a cited renewal brief for one selected account under the caller's own grant.\n\n" +
 		"Requires crm:read. The calls and Slack reads inside it each check their own scope.\nResults are untrusted.\n",
 	"read_renewal_brief": "Read a saved brief again without calling any source system.\n\n" +
@@ -49,14 +48,13 @@ var argumentOrder = map[string][]string{
 	"list_opportunities":    {"account_id"},
 	"read_call_notes":       {"account_id"},
 	"read_slack_messages":   {"account_id"},
-	"log_activity":          {"account_id", "kind", "body", "idempotency_key"},
 	"prepare_renewal_brief": {"account_id", "as_of"},
 	"read_renewal_brief":    {"brief_id"},
 }
 
 // titles are the generated property titles.
 var titles = map[string]string{"query": "Query", "account_number": "Account Number", "account_id": "Account Id",
-	"kind": "Kind", "body": "Body", "idempotency_key": "Idempotency Key", "as_of": "As Of", "brief_id": "Brief Id"}
+	"as_of": "As Of", "brief_id": "Brief Id"}
 
 // inputSchema writes the schema the Python SDK generates from a tool's signature, keeping its member order.
 func inputSchema(name string) json.RawMessage {
@@ -101,7 +99,8 @@ func newServer(tools []string, run ToolFunc, lookup func(string) *Invocation, ve
 	})
 	for _, name := range tools {
 		definition := Definitions[name]
-		readOnly := definition.ReadOnly && name != "prepare_renewal_brief"
+		// Preparing a brief saves it, so it is the one tool without the read-only hint.
+		readOnly := name != "prepare_renewal_brief"
 		openWorld := false
 		server.AddTool(&sdk.Tool{
 			Name:        name,

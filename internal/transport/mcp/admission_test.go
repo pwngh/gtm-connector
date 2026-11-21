@@ -25,7 +25,7 @@ const pureRaw = "fixture-pure-check-token"
 
 func pureSetup() (RequestFacts, Policy, *Token) {
 	policy := Policy{Resource: "https://127.0.0.1:8765/mcp", MetadataURL: "https://127.0.0.1:8765/metadata",
-		RateLimit: 2, WindowSeconds: 60, WritesDisabled: false}
+		RateLimit: 2, WindowSeconds: 60}
 	request := RequestFacts{
 		BodySize: 100, Parsed: object("id", big.NewInt(1)), Scheme: "https",
 		Headers: map[string]string{"host": "127.0.0.1:8765", "mcp-protocol-version": "2026-07-28",
@@ -56,52 +56,46 @@ func TestRefusalsHaveFixedReasonsStatusesAndCodes(t *testing.T) {
 		reason       string
 		status, code int
 		request      RequestFacts
-		policy       *Policy
 		windows      Windows
 		token        **Token
 	}{
-		{"request_too_large", 413, -32600, with(func(r *RequestFacts) { r.BodySize = 65537 }), nil, nil, nil},
-		{"invalid_json", 400, -32700, with(func(r *RequestFacts) { r.Parsed = nil }), nil, nil, nil},
-		{"unsupported_media_type", 415, -32600, with(func(r *RequestFacts) { r.Headers["content-type"] = "text/plain" }), nil, nil, nil},
-		{"unsupported_media_type", 415, -32600, with(func(r *RequestFacts) { r.HeaderCounts["content-type"]++ }), nil, nil, nil},
-		{"call_id_required", 400, -32600, with(func(r *RequestFacts) { r.Parsed = object() }), nil, nil, nil},
-		{"call_id_required", 400, -32600, with(func(r *RequestFacts) { r.Parsed = object("id", true) }), nil, nil, nil},
-		{"untrusted_origin_or_host", 403, 1003, with(func(r *RequestFacts) { r.Scheme = "http" }), nil, nil, nil},
-		{"invalid_token", 401, 1001, base, nil, nil, new((*Token)(nil))},
-		{"rate_limited", 429, 1002, base, nil, Windows{key: {90, 2}}, nil},
-		{"insufficient_scope", 403, 1004, with(func(r *RequestFacts) { r.Tool = "read_call_notes" }), nil, nil, nil},
-		{"crm_write_disabled", 403, 1005, with(func(r *RequestFacts) { r.Tool = "log_activity" }),
-			&Policy{Resource: policy.Resource, MetadataURL: policy.MetadataURL, RateLimit: 2, WindowSeconds: 60, WritesDisabled: true},
-			nil, &writeToken},
-		{"invalid_arguments", 400, -32602, with(func(r *RequestFacts) { r.Arguments = object() }), nil, nil, nil},
-		{"missing_protocol_version", 400, -32602, with(func(r *RequestFacts) { r.Meta = object() }), nil, nil, nil},
+		{"request_too_large", 413, -32600, with(func(r *RequestFacts) { r.BodySize = 65537 }), nil, nil},
+		{"invalid_json", 400, -32700, with(func(r *RequestFacts) { r.Parsed = nil }), nil, nil},
+		{"unsupported_media_type", 415, -32600, with(func(r *RequestFacts) { r.Headers["content-type"] = "text/plain" }), nil, nil},
+		{"unsupported_media_type", 415, -32600, with(func(r *RequestFacts) { r.HeaderCounts["content-type"]++ }), nil, nil},
+		{"call_id_required", 400, -32600, with(func(r *RequestFacts) { r.Parsed = object() }), nil, nil},
+		{"call_id_required", 400, -32600, with(func(r *RequestFacts) { r.Parsed = object("id", true) }), nil, nil},
+		{"untrusted_origin_or_host", 403, 1003, with(func(r *RequestFacts) { r.Scheme = "http" }), nil, nil},
+		{"invalid_token", 401, 1001, base, nil, new((*Token)(nil))},
+		{"rate_limited", 429, 1002, base, Windows{key: {90, 2}}, nil},
+		{"insufficient_scope", 403, 1004, with(func(r *RequestFacts) { r.Tool = "read_call_notes" }), nil, nil},
+		{"crm_write_disabled", 403, 1005, with(func(r *RequestFacts) { r.Tool = "log_activity" }), nil, &writeToken},
+		{"invalid_arguments", 400, -32602, with(func(r *RequestFacts) { r.Arguments = object() }), nil, nil},
+		{"missing_protocol_version", 400, -32602, with(func(r *RequestFacts) { r.Meta = object() }), nil, nil},
 		{"protocol_version_mismatch", 400, -32020, with(func(r *RequestFacts) {
 			r.Headers = map[string]string{"host": "127.0.0.1:8765", "content-type": "application/json; charset=utf-8"}
-		}), nil, nil, nil},
+		}), nil, nil},
 		{"unsupported_protocol_version", 400, -32022, with(func(r *RequestFacts) {
 			r.Headers["mcp-protocol-version"] = "2099-01-01"
 			r.Meta = object("io.modelcontextprotocol/protocolVersion", "2099-01-01")
-		}), nil, nil, nil},
+		}), nil, nil},
 		{"method_not_found", 404, -32601, with(func(r *RequestFacts) {
 			r.IsCall, r.Parsed = false, object("id", big.NewInt(1), "method", "prompts/get")
-		}), nil, nil, nil},
+		}), nil, nil},
 		{"method_not_found", 404, -32601, with(func(r *RequestFacts) {
 			r.IsCall, r.Parsed = false, object("id", big.NewInt(1), "method", "resources/read")
-		}), nil, nil, nil},
+		}), nil, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.reason, func(t *testing.T) {
-			p, tok, windows := policy, token, c.windows
-			if c.policy != nil {
-				p = *c.policy
-			}
+			tok, windows := token, c.windows
 			if c.token != nil {
 				tok = *c.token
 			}
 			if windows == nil {
 				windows = Windows{}
 			}
-			decision := CheckRequest(c.request, p, windows, Definitions, tok, 1000, 100)
+			decision := CheckRequest(c.request, policy, windows, Definitions, tok, 1000, 100)
 			if decision.Error == nil {
 				t.Fatalf("admitted; want %s", c.reason)
 			}
