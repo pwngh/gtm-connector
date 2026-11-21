@@ -2,19 +2,35 @@
 
 Sign in to a Slack app you already have, connect that sign-in, map one thread to one CRM account,
 then read it onto a [Deal card](briefs.md).
-The connector creates no app, asks for no client secret, and accepts no pasted token. A failed live
-read never falls back to invented messages. The tests use invented responses.
+
+```sh
+gtm-connector connect slack --seller 'Morgan Reed' --seller U12345678   # after debug slack connect; name every seller
+gtm-connector debug slack map --account acc-007 --thread-url 'COPIED_THREAD_LINK'
+gtm-connector debug slack check --account acc-007
+gtm-connector brief acc-007
+```
+
+The connector creates no app, asks for no client secret, and accepts no pasted token. The tests use
+invented responses.
+
+> **No fallback.** A failed live read never falls back to invented messages.
 
 ## Sign in
 
-A Slack sign-in is what `debug slack connect` saves in the [state folder](cli.md): the Slack user
+`debug slack connect` saves a Slack sign-in in the [state folder](cli.md): the Slack user
 credentials and the identity they were verified for.
+
+> **The sign-in is a credential.** Keep the state folder private and never commit it.
 
 The Slack app needs:
 
 - [PKCE](https://docs.slack.dev/authentication/using-pkce/) enabled as a public client.
 - The exact redirect `http://localhost:PORT/slack/callback` registered, `PORT` from 1024 to 65535.
-- The user scope `channels:history`, `groups:history`, or both, approved for the workspace.
+- The Slack user scope `channels:history`, `groups:history`, or both, approved for the workspace.
+
+No other Slack scope is requested, and a Slack grant that returns other scopes is refused. Slack
+bot grants, organization-wide installs, GovSlack, confidential clients, and Slack's separate
+user-centric OAuth endpoints are not supported.
 
 | Command | What it does | Slack requests |
 | --- | --- | ---: |
@@ -24,6 +40,9 @@ The Slack app needs:
 | `debug slack disconnect` | Removes local credentials. Repeating it succeeds. | 0 |
 | `debug slack disconnect --revoke` | Asks Slack to revoke the saved access token, then removes local credentials. If Slack does not confirm, it exits 5. Remove the app itself in Slack settings. | At most 1 |
 
+Ctrl-C exits 130. An approval or save that already finished is not undone, so run
+`debug slack status`.
+
 | Flag | Meaning |
 | --- | --- |
 | `--client-id`, `--redirect-uri` | `connect` only, required. The existing app's public client ID and exact registered redirect. |
@@ -31,43 +50,46 @@ The Slack app needs:
 | `--team-id` | `connect` only. Require this workspace. It is never printed. |
 | `--state-dir` | Every `debug slack` action. The state folder, `var/v2` by default. Its sign-in is saved inside it, in `slack-connection`. |
 
-- No other scope is requested, and a grant that returns other scopes is refused.
-- Slack requests in one command share a 20-second deadline. Each response is limited to 64 KiB.
-- Ctrl-C exits 130. An approval or save that already finished is not undone, so run `debug slack status`.
-- A refresh token is single use and usable for 30 days.
-- Bot grants, organization-wide installs, GovSlack, confidential clients, and Slack's separate
-  user-centric OAuth endpoints are not supported.
-- The sign-in is a credential. Keep the state folder private and never commit it.
+| Bound | Limit |
+| --- | --- |
+| Slack requests in one command | One shared 20-second deadline |
+| Each response | 64 KiB |
+| A refresh token | Single use, usable for 30 days |
 
 ## Connect, map, check, and brief
 
-```sh
-gtm-connector connect slack --seller 'Morgan Reed' --seller U12345678   # after debug slack connect; name every seller
-gtm-connector debug slack map --account acc-007 --thread-url 'COPIED_THREAD_LINK'
-gtm-connector debug slack check --account acc-007
-gtm-connector brief acc-007
-```
+1. `connect slack` connects the sign-in saved in the folder, beside Salesforce or beside the demo
+   CRM. It contacts nobody.
+2. `debug slack map` requires Slack connected and a `ready` sign-in. It makes one audited CRM
+   lookup and saves the mapping. It fetches no messages.
+3. `debug slack check` reads the mapped thread through `read_slack_messages` and validates its
+   receipt. It reads no CRM or calls data.
+4. A card reads Slack whenever Slack is connected. An account with no mapped thread gets a card
+   that says so.
 
 Slack threads are added one at a time with `debug slack map`. A Slack channel window is on the
 [roadmap](ROADMAP.md).
 
+- `connect slack --remove` detaches Slack and keeps the sign-in.
+- Use the same state folder every time. Stop a `debug serve` running on it first.
+- Select the parent message. A reply selected as the parent fails the check.
+- A folder that has read demo Slack messages refuses live Slack. Connect it in a fresh folder.
+
 | Command or flag | Rule |
 | --- | --- |
-| `connect slack` | Connects the sign-in saved in the folder, beside Salesforce or beside the demo CRM. With no saved sign-in it exits `2` and names `debug slack connect`. With one that needs a new login it exits `3`. It contacts nobody. `connect slack --remove` detaches Slack and keeps the sign-in. |
-| `debug slack map` | Requires Slack connected and a `ready` sign-in, makes one audited CRM lookup, and saves the mapping: one thread for one account. It fetches no messages. |
-| `debug slack check` | Reads the mapped thread through `read_slack_messages` and validates its receipt. It reads no CRM or calls data. |
+| `connect slack` | With no saved sign-in it exits `2` and names `debug slack connect`. With one that needs a new login it exits `3`. |
 | `--thread-url` | The saved workspace's HTTPS origin and the path `/archives/CHANNEL/pTIMESTAMP`. A reply link names its parent through `thread_ts`. An optional `cid` must match. Other query fields, fragments, and other workspaces are refused. |
 | `--channel` with `--thread-ts` | Needed when the saved sign-in has no workspace origin. The timestamp is whole seconds, a dot, and exactly six digits. |
 | `--account`, `--account-number` | The CRM account ID: `acc-007`, or the `acc-sf-` form with Salesforce. Or, Salesforce only, a number that matches exactly one account. |
 | `--replace`, `--reassign` | Needed when the account already has another thread, and when the thread belongs to another account. |
 
-- Use the same state folder every time. Stop a `debug serve` running on it first.
-- Select the parent message. A reply selected as the parent fails the check.
-- A folder that has read demo Slack messages refuses live Slack. Connect it in a fresh folder.
-- A card reads Slack whenever Slack is connected. An account with no mapped thread gets a card that
-  says so.
-
 ## Limits
+
+> **A read is not an archive.** Earlier edits, deletions, and retention are unknown.
+
+- Every returned message becomes whole-sentence units. The card shows the newest and counts the
+  rest, and its `NOT READ` section gives the files, attachments, and blocks that were left out.
+- Ctrl-C can wait for the read in flight. Windows is not supported.
 
 | Bound | Limit |
 | --- | --- |
@@ -90,11 +112,6 @@ Slack threads are added one at a time with `debug slack map`. A Slack channel wi
 | Role on a card | `seller` when that user ID is listed in `sellers.json`, otherwise `unknown`. A Slack author is never a customer. |
 | Slack's rate policy | Slack limits some commercially distributed apps outside its Marketplace to one request per minute and 15 messages per request on this method. The connector cannot tell which [policy](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps/) applies. |
 
-- A read is not an archive. Earlier edits, deletions, and retention are unknown.
-- Every returned message becomes whole-sentence units. The card shows the newest and counts the
-  rest, and its `NOT READ` section gives the files, attachments, and blocks that were left out.
-- Ctrl-C can wait for the read in flight. Windows is not supported.
-
 ## JSON results
 
 `disconnect` returns `schema_version`, `status: "disconnected"`, `local_credentials_removed`,
@@ -108,7 +125,7 @@ is never included. `connect` and `status` return:
 | `credential_state` | `missing`, `ready`, `identity_unchecked` (run `status --check`), or `refresh_pending` (run `connect`; it does not mean a refresh is running). |
 | `verification`, `verified_component` | `saved` for local inspection, or `live` when this command checked with Slack. Always `authentication`, never message access. |
 | `requested_scopes`, `granted_scopes` | Arrays in a fixed order. |
-| `rotation`, `access_expires_at`, `last_verified_at` | Whether the grant has a refresh token ([token rotation](https://docs.slack.dev/authentication/using-token-rotation/)), or `null`. UTC timestamps or `null`. |
+| `rotation`, `access_expires_at`, `last_verified_at` | Whether the Slack grant has a refresh token ([token rotation](https://docs.slack.dev/authentication/using-token-rotation/)), or `null`. UTC timestamps or `null`. |
 | `needs_login` | Whether `connect` is needed. An expired `ready` credential with a usable refresh token can be checked instead. |
 
 | Result | Fields |
@@ -120,7 +137,7 @@ is never included. `connect` and `status` return:
 
 The check report holds no IDs, names, timestamps, message text, URLs, tokens, or paths. Tool results
 and saved briefs hold message text, Slack message IDs, and the mapping, so keep them and the state
-folder private. A `slack:read` grant can read every mapped account the server serves.
+folder private. A `slack:read` [grant](tools.md) can read every mapped account the server serves.
 
 ## Errors
 
@@ -170,8 +187,8 @@ card. It uses no Slack account, token, or network request.
 - `read_slack_messages` requires `slack:read`. A grant that holds only `slack:read` cannot read CRM or call notes.
 - A card with Slack makes four audited reads and never requests `crm:write`.
 - Messages live in `slack.sqlite3`: 29 of them, `msg-001` through `msg-030` without `msg-005`.
-  Each has an author name and a count of attached files that were not read. On demo data the
-  demo's own sellers are sellers without a `sellers.json`.
+  Each has an author name and a count of attached files that were not read.
+- On demo data the demo's own sellers are sellers without a `sellers.json`.
 
 | Case | What the card says |
 | --- | --- |
