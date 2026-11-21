@@ -60,10 +60,18 @@ gtm brief acc-007 --state-dir renewals
   account in the same workspace.
 - The file's bytes, every revision and the active excerpt of each account are kept in PostgreSQL and
   never changed or deleted. Every read checks a revision against its stored bytes.
+- The file is read through a path with no symbolic link in any folder on the way, so give the real
+  path: on macOS, `/tmp` and `/var` are links, and `/private/tmp` is the folder they name. A file
+  replaced after it is checked, or changed while it is read, is refused.
+- An import is saved only while the CRM and the calls are connected as the command found them. One
+  detached or connected again meanwhile refuses it, and nothing is saved.
 - `connect calls --remove` detaches the transcripts and deletes nothing: a card then says
-  `Calls: not connected.` `connect demo` in a workspace that holds imports keeps them connected.
+  `Calls: not connected.` `connect demo` keeps connected transcripts connected and leaves detached ones
+  detached. Only `connect calls` connects them again.
 - A workspace whose cards already read the demo call notes refuses `connect calls`. Import into a
-  workspace of its own.
+  workspace of its own. The database makes this check as the calls are connected, so a demo read that
+  finishes meanwhile is either seen or refused.
+- With `--json`, format characters such as bidirectional controls are written as `\uXXXX` escapes.
 
 ## Health
 

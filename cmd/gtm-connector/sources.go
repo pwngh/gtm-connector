@@ -65,8 +65,8 @@ import (
 //     whose CRM row has no pin, because what that workspace holds was read through a CRM this one is not
 //     known to be.
 //   - The kind of workspace. A workspace is made for demo data or for real sources and keeps that, so the
-//     two never share one, except imported transcripts, which a demo workspace may hold beside the demo
-//     CRM (besideDemo). Only a row whose mode is "demo" opens the demo book, and only beside the demo CRM. An entry with no opener is refused by name by a command that reads it, and an entry with no
+//     two never share one. Only a row whose mode is "demo" opens the demo book, and only beside the demo
+//     CRM. An entry with no opener is refused by name by a command that reads it, and an entry with no
 //     attach is refused by connect. Neither is read as demo data.
 //   - Receipts outside a card. accounts and inspect read a real CRM as its tool, under a receipt committed
 //     before the read (ownerRead). A card without --as-of is planned from today for a real CRM (day), and
@@ -121,10 +121,6 @@ type opening struct {
 type attaching struct {
 	// args are connect's own options, such as --org.
 	args parsed
-	// store and workspace are the workspace connect attaches to, for a source whose records are kept in
-	// PostgreSQL. A workspace that connect is about to make has no ID yet.
-	store     *postgres.Store
-	workspace postgres.Workspace
 	// crm is the workspace's CRM as it is connected now, or nil.
 	crm *postgres.Connection
 	// pinned is the identity the source's row is pinned to, kept when it was detached, or "". connect
@@ -152,7 +148,8 @@ type sourceKind struct {
 	detail   string // what connect's table and a refusal say the source is connected to
 	// live is a real source. Its workspace is made as one that holds no demo data.
 	live bool
-	// besideDemo is a real source that a demo workspace may also hold, beside the demo CRM.
+	// besideDemo is a real source that a demo workspace may also hold, beside the demo CRM: the one
+	// exception to the kind of workspace.
 	besideDemo bool
 	// options are the options connect takes with it, besides --remove.
 	options []string

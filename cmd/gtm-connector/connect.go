@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -269,8 +270,7 @@ func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string)
 				pinned, present = row.IdentitySHA256, true
 			}
 		}
-		saved, err := kind.attach(ctx, attaching{args: r.args, store: r.store, workspace: r.workspace, crm: crm,
-			pinned: pinned})
+		saved, err := kind.attach(ctx, attaching{args: r.args, crm: crm, pinned: pinned})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -304,5 +304,8 @@ func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string)
 		}
 		return postgres.SourceUpdate{Changes: changes, Sellers: sellers}, nil
 	})
+	if errors.Is(err, postgres.ErrDemoCallNotes) {
+		err = demoCallNotesHeld
+	}
 	return before, after, err
 }

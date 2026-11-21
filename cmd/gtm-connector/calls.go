@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/calls"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
+	"github.com/pwngh/gtm-connector/internal/unicodetab"
 )
 
 // debug calls, as gtm_connector/cli.py runs it: import one transcript export for one account, list the
@@ -146,11 +148,28 @@ func runCalls(ctx context.Context, tokens []string, s screen) int {
 		if err != nil {
 			return s.fail(command, r.callsFailed(ctx, err))
 		}
-		fmt.Fprintln(s.out, text)
+		fmt.Fprintln(s.out, inertFormat(text))
 		return 0
 	}
 	fmt.Fprintln(s.out, r.callsText(result))
 	return 0
+}
+
+// inertFormat writes each format character (category Cf) of a JSON text, such as a bidirectional control
+// from a transcript, as its \u escape, so that it cannot reorder what a terminal shows. JSON holds such a
+// character only inside a string, where the escape reads back as the same character.
+func inertFormat(text string) string {
+	var b strings.Builder
+	for _, c := range text {
+		if unicodetab.Category(c) != "Cf" {
+			b.WriteRune(c)
+			continue
+		}
+		for _, unit := range utf16.Encode([]rune{c}) {
+			fmt.Fprintf(&b, `\u%04x`, unit)
+		}
+	}
+	return b.String()
 }
 
 // first is the first of a list of words, or "".
@@ -229,7 +248,11 @@ func (r *run) importTranscript(ctx context.Context) (*strictjson.Object, error) 
 	}
 	r.progress("saving_import")
 	made.ImportedAt = receipts.StartedAtText(time.Now())
-	result, err := postgres.CallImports{Store: r.store, WorkspaceID: r.workspace.ID}.Import(ctx, *made)
+	// The import is saved only while the CRM and the calls are still connected as the command read them:
+	// a source detached or connected again since then refuses it as changed.
+	generations := from.generations()
+	result, err := postgres.CallImports{Store: r.store, WorkspaceID: r.workspace.ID,
+		Generations: map[string]int64{"crm": generations["crm"], "calls": generations["calls"]}}.Import(ctx, *made)
 	if err != nil {
 		return nil, err
 	}

@@ -76,25 +76,38 @@ func recordedBooks(t *testing.T) map[string]*demo.Store {
 	return books
 }
 
-// The clock and the IDs of a card are the recorder's in the recording and this program's here, so the card
-// line that names when the sources were read is compared without its times.
-var sourcesRead = regexp.MustCompile(`(?m)^Sources read [^\n]*\.$`)
+// The clock of a card is the recorder's in the recording and this program's here, so the line that names
+// when the sources were read is compared without its times. It names one time when the first and last read
+// fall in one second, which the clock decides too.
+var (
+	sourcesRead = regexp.MustCompile(`(?m)^Sources read ` + instant + `(?: to ` + instant + `)?\.$`)
+	readTime    = regexp.MustCompile(instant)
+)
+
+// withoutTimes is a card's text with the times of its sources line left out.
+func withoutTimes(text string) string {
+	return sourcesRead.ReplaceAllStringFunc(text, func(line string) string {
+		return strings.Replace(readTime.ReplaceAllString(line, "<time>"), "<time> to <time>", "<time>", 1)
+	})
+}
 
 // Each recorded transcript a books_calls card read is imported through debug calls import, beside the demo
 // CRM holding the rows the card's book inserted, and brief then prints the recorded card. Card text is
 // compared byte for byte, and units and gaps as values, except for what the recorder decided by itself:
 //
-//   - its clock, which wrote the line naming when the sources were read and the time of each import;
+//   - its clock, which wrote the times of the line naming when the sources were read and the time of each
+//     import;
 //   - its IDs: the card's brief ID and seal, the receipt each import was resolved under, and so each
 //     import's ID, which is the digest of a manifest that holds the import's time and that receipt;
 //   - Slack: the recorder made these cards with Slack not requested, and the brief command always asks for
-//     it, as the Python brief command does, so the Slack line, the Slack gap and the Slack source differ.
+//     it, as the Python brief command does. The card's Slack line, gap and source are each asserted as the
+//     demo Slack's, which holds no message for these accounts.
 //
 // A card whose book imported nothing is made the same way, and says no transcript is imported.
 func TestImportedTranscriptsMakeTheRecordedCards(t *testing.T) {
 	d := setUpDemo(t)
 	books := recordedBooks(t)
-	folder := t.TempDir()
+	folder := exports(t)
 	imported, cards := 0, 0
 	for i, line := range oracletest.Lines(t, "cards/books_calls.jsonl.gz") {
 		var row struct {
@@ -162,12 +175,15 @@ func TestImportedTranscriptsMakeTheRecordedCards(t *testing.T) {
 		stdout, _ := d.succeeded(t, append([]string{"--json", "brief", row.AccountID, "--as-of", asOf}, where...)...)
 		got, want := object(t, stdout), object(t, row.Card)
 		cards++
-		gotText, wantText := get(got, "text").(string), get(want, "text").(string)
-		gotText, wantText = sourcesRead.ReplaceAllString(gotText, "Sources read."),
-			sourcesRead.ReplaceAllString(wantText, "Sources read.")
-		wantText = strings.Replace(wantText, "\n  Slack: not requested for this card.\n",
-			"\n  Slack: no message was returned for this account.\n", 1)
-		if gotText != wantText {
+		gotText, wantText := withoutTimes(get(got, "text").(string)), withoutTimes(get(want, "text").(string))
+		// The one Slack line: the recorder did not request Slack, and brief reads the demo Slack, which holds
+		// no message for these accounts.
+		const notRequested, noMessage = "\n  Slack: not requested for this card.\n",
+			"\n  Slack: no message was returned for this account.\n"
+		if strings.Count(wantText, notRequested) != 1 || strings.Count(gotText, noMessage) != 1 {
+			t.Errorf("%s: the Slack line is not the one expected", row.Key)
+		}
+		if wantText = strings.Replace(wantText, notRequested, noMessage, 1); gotText != wantText {
 			t.Errorf("%s: the card's text differs at %s", row.Key, oracletest.FirstDifference(gotText, wantText))
 		}
 		for _, key := range []string{"schema_version", "account_id", "as_of", "status", "rules_version", "units"} {
@@ -175,13 +191,21 @@ func TestImportedTranscriptsMakeTheRecordedCards(t *testing.T) {
 				t.Errorf("%s: the card's %s differs", row.Key, key)
 			}
 		}
-		for _, source := range []string{"crm", "calls"} {
-			if gotSource, wantSource := get(get(got, "sources").(*strictjson.Object), source),
-				get(get(want, "sources").(*strictjson.Object), source); gotSource != wantSource {
-				t.Errorf("%s: the card's %s source is %v, recorded %v", row.Key, source, gotSource, wantSource)
+		// The recorded sources are crm and calls; the card adds Slack as the demo data it read.
+		wantSources := get(want, "sources").(*strictjson.Object).Copy()
+		wantSources.Set("slack", "demo_fixture")
+		if !evidence.Equal(get(got, "sources"), wantSources) {
+			t.Errorf("%s: the card's sources differ", row.Key)
+		}
+		// The recorded Slack gap is not_requested; the card's, in its place, is the empty demo Slack's.
+		wantGaps := get(want, "gaps").([]any)
+		for i, gap := range wantGaps {
+			if get(gap.(*strictjson.Object), "code") == "slack_not_requested" {
+				wantGaps[i] = strictjson.NewObject("code", "slack_no_message", "disposition", "note", "count", 0,
+					"by_role", nil, "text", strings.TrimSpace(noMessage))
 			}
 		}
-		if gotGaps, wantGaps := withoutSlack(get(got, "gaps").([]any)), withoutSlack(get(want, "gaps").([]any)); !evidence.Equal(gotGaps, wantGaps) {
+		if !evidence.Equal(get(got, "gaps"), wantGaps) {
 			t.Errorf("%s: the card's gaps differ", row.Key)
 		}
 	}
@@ -190,15 +214,15 @@ func TestImportedTranscriptsMakeTheRecordedCards(t *testing.T) {
 	}
 }
 
-// withoutSlack is a card's gaps without its Slack gap.
-func withoutSlack(gaps []any) []any {
-	var kept []any
-	for _, gap := range gaps {
-		if code, _ := get(gap.(*strictjson.Object), "code").(string); !strings.HasPrefix(code, "slack_") {
-			kept = append(kept, gap)
-		}
+// exports is a new folder for transcript exports whose path holds no symbolic link, as an import requires
+// (a temporary folder's can: on macOS, /var is one).
+func exports(t *testing.T) string {
+	t.Helper()
+	folder, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
 	}
-	return kept
+	return folder
 }
 
 // meeting is an invented call of the demo book's acc-007: its contact speaks, then a listed seller.
@@ -210,7 +234,7 @@ const meeting = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\n<v Dana Crest>We wi
 // leaves the imports and a card that reads no calls.
 func TestDebugCallsBesideTheDemoCRM(t *testing.T) {
 	d := setUpDemo(t)
-	folder := t.TempDir()
+	folder := exports(t)
 	file := filepath.Join(folder, "meeting.vtt")
 	if err := os.WriteFile(file, []byte(meeting), 0o600); err != nil {
 		t.Fatal(err)
@@ -309,6 +333,11 @@ func TestDebugCallsBesideTheDemoCRM(t *testing.T) {
 	if err := os.Symlink(file, link); err != nil {
 		t.Fatal(err)
 	}
+	// A folder on the way to the file that is a link.
+	linkedFolder := filepath.Join(folder, "linked")
+	if err := os.Symlink(folder, linkedFolder); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []struct {
 		code    int
 		argv    []string
@@ -334,6 +363,8 @@ func TestDebugCallsBesideTheDemoCRM(t *testing.T) {
 		{2, []string{"debug", "calls", "import", file, "--account", "acc-007", "--cues", "1:200"},
 			"calls_import_invalid: " + callFailures["calls_import_invalid"], "gtm-connector debug calls import --help"},
 		{2, []string{"debug", "calls", "import", link, "--account", "acc-007"},
+			"calls_import_invalid: " + callFailures["calls_import_invalid"], "gtm-connector debug calls import --help"},
+		{2, []string{"debug", "calls", "import", filepath.Join(linkedFolder, "meeting.vtt"), "--account", "acc-007"},
 			"calls_import_invalid: " + callFailures["calls_import_invalid"], "gtm-connector debug calls import --help"},
 		{2, []string{"debug", "calls", "import", large, "--account", "acc-007"},
 			"calls_import_too_large: " + callFailures["calls_import_too_large"], "gtm-connector debug calls import --help"},
@@ -373,18 +404,27 @@ func TestDebugCallsBesideTheDemoCRM(t *testing.T) {
 		t.Errorf("%d imports after the refusals", n)
 	}
 
-	// Removing the calls keeps the imports, and a card then reads no calls. connect demo connects them again.
+	// connect demo keeps connected imports connected.
+	if stdout, _ = d.succeeded(t, with("connect", "demo")...); !strings.Contains(stdout, "\ncalls\tconnected\timported transcripts\n") {
+		t.Errorf("connect demo beside connected imports:\n%s", stdout)
+	}
+	// Removing the calls keeps the imports, and a card then reads no calls. connect demo never brings them
+	// back, and never makes them demo data: only connect calls does.
 	stdout, _ = d.succeeded(t, with("connect", "calls", "--remove")...)
 	if !strings.HasPrefix(stdout, "Call transcripts removed.") || !strings.Contains(stdout, "\ncalls\tnot connected\t\n") {
 		t.Errorf("connect calls --remove:\n%s", stdout)
 	}
+	d.succeeded(t, with("debug", "calls", "inspect", importID)...)
+	if stdout, _ = d.succeeded(t, with("connect", "demo")...); !strings.Contains(stdout, "\ncalls\tnot connected\t\n") {
+		t.Errorf("connect demo beside detached imports:\n%s", stdout)
+	}
 	if stdout, _ = d.succeeded(t, with("brief", "acc-007")...); !strings.Contains(stdout, "\n  Calls: not connected.\n") ||
 		strings.Contains(stdout, "We will sign") {
-		t.Errorf("brief after the removal:\n%s", stdout)
+		t.Errorf("brief after the removal and connect demo:\n%s", stdout)
 	}
-	d.succeeded(t, with("debug", "calls", "inspect", importID)...)
-	if stdout, _ = d.succeeded(t, with("connect", "demo")...); !strings.Contains(stdout, "\ncalls\tconnected\timported transcripts\n") {
-		t.Errorf("connect demo beside the imports:\n%s", stdout)
+	d.succeeded(t, with("connect", "calls")...)
+	if stdout, _ = d.succeeded(t, with("brief", "acc-007")...); !strings.Contains(stdout, "We will sign") {
+		t.Errorf("brief after connect calls again:\n%s", stdout)
 	}
 
 	// A workspace that read demo call notes takes no imports, and a demo workspace holds no other real source.
@@ -415,7 +455,7 @@ func TestDebugCallsBesideARegisteredCRM(t *testing.T) {
 	const name = "invented-books"
 	d.connectInvented(t, name, salesforcetest.Alias)
 	d.succeeded(t, "connect", "calls", "--state-dir", name)
-	file := filepath.Join(t.TempDir(), "meeting.txt")
+	file := filepath.Join(exports(t), "meeting.txt")
 	if err := os.WriteFile(file, []byte("Dana Crest: We will sign the renewal this quarter.\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -436,6 +476,97 @@ func TestDebugCallsBesideARegisteredCRM(t *testing.T) {
 		stderr != "Sources: CRM is Salesforce (production), identity verified; calls are imported transcripts, whose "+
 			"provider and statements are unverified; Slack is not connected.\n" {
 		t.Errorf("brief:\n%s%s", stdout, stderr)
+	}
+}
+
+// interrupted is the demo book as a CRM that runs during once, on its read under a receipt: the second
+// get_account of an import, after the listing read.
+type interrupted struct {
+	demoBook
+	reads  int
+	during func()
+}
+
+func (c *interrupted) Read(ctx context.Context, tool, accountID string) ([]*strictjson.Object, error) {
+	if c.reads++; tool == "get_account" && c.reads == 2 {
+		c.during()
+	}
+	return c.demoBook.Read(ctx, tool, accountID)
+}
+
+// An import whose calls are detached after its account is resolved is not saved: the resolution's receipt
+// is committed, and the save refuses it as changed, so no transcript and no active selection is written.
+func TestAnImportIsNotSavedAfterItsCallsAreDetached(t *testing.T) {
+	d := setUpDemo(t)
+	where := []string{"--state-dir", "detached-calls"}
+	d.succeeded(t, append([]string{"connect", "demo"}, where...)...)
+	d.succeeded(t, append([]string{"connect", "calls"}, where...)...)
+	workspace, err := d.owner.Workspace(ctx, "detached-calls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := seededBook()
+	if err != nil {
+		t.Fatal(err)
+	}
+	crm := &interrupted{demoBook: demoBook{book}, during: func() {
+		if _, err := d.owner.UpdateSources(ctx, workspace, func([]postgres.Connection) (postgres.SourceUpdate, error) {
+			return postgres.SourceUpdate{Changes: []postgres.SourceChange{{Source: "calls", Mode: "none"}}}, nil
+		}); err != nil {
+			t.Error(err)
+		}
+	}}
+	kind := kindsNamed("demo")[0]
+	saved := *kind
+	t.Cleanup(func() { *kind = saved })
+	kind.crm = func(context.Context, opening) (crmSource, error) { return crm, nil }
+
+	file := filepath.Join(exports(t), "meeting.vtt")
+	if err := os.WriteFile(file, []byte(meeting), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if message := d.failed(t, 3, append([]string{"debug", "calls", "import", file, "--account", "acc-007"}, where...)...); !strings.Contains(message,
+		"Error: A source of this workspace was connected again while it was read") {
+		t.Errorf("an import whose calls were detached: %s", message)
+	}
+	if audited := d.audited(t, "detached-calls"); audited != "get_account:ok:200:" {
+		t.Errorf("the resolution's receipt: %s", audited)
+	}
+	if n := d.count(t, "SELECT (SELECT count(*) FROM call_import_revisions) + (SELECT count(*) FROM call_import_active)"); n != 0 {
+		t.Errorf("the refused import wrote %d rows", n)
+	}
+}
+
+// --json writes a transcript's format characters, such as a bidirectional override, as escapes, so a
+// terminal shows the text in the order it was written. The decoded text is the transcript's.
+func TestFormatCharactersAreEscapedInJSON(t *testing.T) {
+	d := setUpDemo(t)
+	where := []string{"--state-dir", "format-books"}
+	d.succeeded(t, append([]string{"connect", "demo"}, where...)...)
+	d.succeeded(t, append([]string{"connect", "calls"}, where...)...)
+	// A right-to-left override and its pop, and a language tag, written here by code point.
+	override, pop, tag := string(rune(0x202e)), string(rune(0x202c)), string(rune(0xe0001))
+	said := "We will sign " + override + "the renewal" + pop + " this quarter." + tag + "\n"
+	file := filepath.Join(exports(t), "override.txt")
+	if err := os.WriteFile(file, []byte(said), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stdout, _ := d.succeeded(t, append([]string{"--json", "debug", "calls", "import", file, "--account", "acc-007"}, where...)...)
+	importID := get(object(t, stdout), "import_id").(string)
+	stdout, _ = d.succeeded(t, append([]string{"--json", "debug", "calls", "inspect", importID, "--full"}, where...)...)
+	escape := func(units ...string) string {
+		var text string
+		for _, unit := range units {
+			text += string(rune(92)) + "u" + unit
+		}
+		return text
+	}
+	if strings.ContainsAny(stdout, override+pop+tag) ||
+		!strings.Contains(stdout, escape("202e")+"the renewal"+escape("202c")) || !strings.Contains(stdout, escape("db40", "dc01")) {
+		t.Errorf("format characters are written as they are:\n%s", stdout)
+	}
+	if got := get(object(t, stdout), "original_text"); got != said {
+		t.Errorf("the decoded text is %q", got)
 	}
 }
 
