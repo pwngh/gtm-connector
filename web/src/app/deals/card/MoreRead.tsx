@@ -5,7 +5,7 @@ import type {SectionProps} from './sections.ts';
 // Every sentence that was read and is not on the card, behind one
 // disclosure, grouped by why it is not shown and in the card's order. A whole
 // sentence is set as a quotation; a cut one is listed as cut.
-export function MoreRead({account, card}: SectionProps) {
+export function MoreRead({card}: SectionProps) {
   const reasons = notShown(sentencesOf(card));
   if (!reasons.length) {
     return null;
@@ -26,8 +26,6 @@ export function MoreRead({account, card}: SectionProps) {
             {reason.sentences.map(sentence => (
               <SentenceLine
                 key={sentence.n}
-                account={account}
-                card={card.id}
                 sentence={sentence}
                 mark="more"
               />

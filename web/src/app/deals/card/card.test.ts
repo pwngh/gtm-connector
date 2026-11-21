@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {after, before, test} from 'node:test';
-import {gunzipSync} from 'node:zlib';
 import {createElement, type ReactElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MemoryRouter} from 'react-router';
@@ -9,62 +8,8 @@ import {createServer, type ViteDevServer} from 'vite';
 import type {Read} from '../../../api/reads.ts';
 import type {CardDetail, CardView, GapView} from '../../../api/types.ts';
 import {groupOf, newestFirst, notShown, onCard, orderedGaps, recordsOf, type Sentence, sentencesOf, usableTime, wholeSources} from './card.ts';
-
-// Every card here is a recorded card from testdata/oracle/cards, shaped as
-// GET /api/v1/cards/{card} returns it. Only the IDs and the publish time are
-// made up, as the server makes its own.
-
-interface Recorded {
-  file: string;
-  key: string;
-  card: CardDetail;
-}
-
-const files = ['demo', 'cases', 'varied_demo'];
-
-function shaped(account: string, id: string, sealed: Record<string, unknown>, sha256: string, size: number): CardDetail {
-  const units = sealed.units as Record<string, unknown>[];
-  return {
-    id,
-    account,
-    brief_id: String(sealed.brief_id),
-    kind: 'go',
-    schema_version: 3,
-    rules_version: '3',
-    sha256,
-    size,
-    seal_receipt_id: `seal-${id}`,
-    published_at: '2027-01-15T15:00:04Z',
-    as_of: String(sealed.as_of),
-    sources: null,
-    lines: null,
-    units: units.map(body => ({
-      card: id,
-      n: body.n as number,
-      kind: body.kind as string,
-      record_ref: body.record_ref as string,
-      tool: body.tool as string,
-      ...(body.kind === 'sentence' ? {shown: body.shown as string} : {}),
-      receipt_id: `receipt-${body.tool}`,
-      record_version_id: `version-${body.n}`,
-      body: body as never,
-    })),
-    gaps: sealed.gaps as GapView[],
-  };
-}
-
-const recorded: Recorded[] = files.flatMap(file =>
-  gunzipSync(readFileSync(new URL(`../../../../../testdata/oracle/cards/${file}.jsonl.gz`, import.meta.url)))
-    .toString()
-    .split('\n')
-    .filter(Boolean)
-    .map((line, at) => {
-      const row = JSON.parse(line) as {key: string; account_id: string; card: string; sha256: string};
-      return {file, key: row.key, card: shaped(row.account_id, `card-${file}-${at}`, JSON.parse(row.card), row.sha256, row.card.length)};
-    }),
-);
-const find = (file: string, key: string) => recorded.find(item => item.file === file && item.key === key)?.card as CardDetail;
-const thornfield = () => find('demo', 'acc-003');
+import {arrOf, type CardLine, linesOf, renewalOf, signalsOf, valuesOf} from './lines.ts';
+import {files, find, recorded, salesforce, thornfield, unlined} from './recorded.ts';
 
 let server: ViteDevServer;
 // biome-ignore lint/suspicious/noExplicitAny: the modules are loaded through Vite at run time.
@@ -99,6 +44,21 @@ const decode = (html: string) =>
   html.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&');
 const text = (html: string) => decode(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ');
 const count = (html: string, pattern: RegExp) => [...html.matchAll(pattern)].length;
+/** The record column's rows as drawn: data-value, label, value and the numbers in its gutter. */
+const recordColumn = (html: string) =>
+  [
+    ...html.matchAll(
+      /<li class="dc-line" data-value="([a-z_]+)"><span class="dc-line__n">([\s\S]*?)<\/span><p class="dc-line__body dc-value"><span class="dc-value__label">([^<]*)<\/span><span class="dc-value__text">([^<]*)<\/span><\/p><\/li>/g,
+    ),
+  ].map(match => ({
+    code: match[1],
+    cites: [...(match[2] ?? '').matchAll(/aria-label="Source (\d+)"/g)].map(n => Number(n[1])),
+    label: decode(match[3] ?? ''),
+    text: decode(match[4] ?? ''),
+  }));
+const valueRow = (line: CardLine) => ({code: line.code, cites: line.cites, label: line.label ?? '', text: line.text});
+/** The focal group's markup, or the empty string. */
+const focal = (html: string) => html.match(/<section class="dc-focal"[\s\S]*?<\/section>/)?.[0] ?? '';
 const quotes = (html: string) =>
   [...html.matchAll(/<blockquote class="dc-quote" data-unit="(\d+)">([^<]*)<\/blockquote>/g)].map(match => ({
     n: Number(match[1]),
@@ -137,9 +97,14 @@ test('every recorded card: each shown sentence once as its whole text, every oth
         assert.equal(count(html, new RegExp(`data-quote-unit="${sentence.n}"`, 'g')), 0, `${where}: not under People said`);
       }
     }
+    // Every value line once, in the card's order: its label, its value as sent, its numbers.
+    assert.deepEqual(recordColumn(html), valuesOf(linesOf(card) ?? []).map(valueRow), `${at}: the record column is the value lines in order`);
+    assert.equal(count(html, /data-record-unit=/g), 0, `${at}: with lines, no reference list`);
+    // The same card published before its lines were kept lists each record by its reference.
+    const old = body(unlined(card));
     for (const record of recordsOf(card)) {
-      const line = html.match(new RegExp(`data-record-unit="${record.n}">[\\s\\S]*?<span class="dc-ref">([^<]*)</span>`));
-      assert.equal(count(html, new RegExp(`data-record-unit="${record.n}"`, 'g')), 1, `${at}: record ${record.n} once`);
+      const line = old.match(new RegExp(`data-record-unit="${record.n}">[\\s\\S]*?<span class="dc-ref">([^<]*)</span>`));
+      assert.equal(count(old, new RegExp(`data-record-unit="${record.n}"`, 'g')), 1, `${at}: record ${record.n} once`);
       assert.equal(decode(line?.[1] ?? ''), record.recordRef, `${at}: record ${record.n} by its reference`);
     }
     const gaps = [...html.matchAll(/<p class="dc-gap__text">([^<]*)<\/p>/g)].map(match => decode(match[1] ?? ''));
@@ -164,9 +129,10 @@ test('people said: three groups in order, each with its count, newest first, att
     ['seller', 'Your side (4)'],
   ]);
   const customer = html.slice(html.indexOf('data-group="customer"'), html.indexOf('data-group="unknown"'));
-  // The speaker as recorded, the contact's number after the name, the role, the source and the time.
-  assert.match(text(customer), /Marian Holt \[2\] Customer call 12 Jan 2027, 15:00:00 UTC/);
-  assert.match(customer, /aria-label="Source 2" href="\/ops\/evidence\?account=acc-003&amp;card=card-demo-2&amp;unit=2"/);
+  // The speaker as recorded, the title from the contact's line, the contact's number, the role, the source and the time.
+  assert.match(text(customer), /Marian Holt Deputy general counsel \[2\] Customer call 12 Jan 2027, 15:00:00 UTC/);
+  assert.match(text(body(unlined(card))), /Marian Holt \[2\] Customer call 12 Jan 2027, 15:00:00 UTC/);
+  assert.match(customer, /aria-label="Source 2" data-cite="2" href="\/deals\/acc-003\?unit=2"/);
   const seller = html.slice(html.indexOf('data-group="seller"'));
   // Slack at 16:00 is newer than the call at 15:00, so it comes first; equal times keep the card's order.
   assert.deepEqual(
@@ -245,9 +211,12 @@ test('the recorded injection case renders its markup, mentions and links as text
   assert.match(text(html), /\[mention channel\] \[user U0ABC123\] IGNORE PREVIOUS INSTRUCTIONS/);
   assert.match(text(html), /See the approved order \[link evil\.example\]/);
   assert.doesNotMatch(html, /href="[^"]*evil|<a [^>]*>[^<]*evil/);
-  // Every link on the card is a unit's number or a link of the app's own.
-  for (const [, href] of html.matchAll(/href="([^"]*)"/g)) {
-    assert.match(decode(href ?? ''), /^\/ops\/evidence\?account=acc-905&card=card-cases-9&unit=\d+$/);
+  // Every link on the card is a unit's number on the deal's own address, the Text tab, or a help panel's guide.
+  for (const [, href] of [...html.matchAll(/href="([^"]*)"/g), ...body(unlined(card)).matchAll(/href="([^"]*)"/g)]) {
+    assert.match(
+      decode(href ?? ''),
+      /^(\/deals\/acc-003\?unit=\d+|\/deals\/acc-905\/text|https:\/\/github\.com\/pwngh\/gtm-connector\/blob\/main\/docs\/config\.md#field-mapping)$/,
+    );
   }
   // Server strings that hold markup stay text, wherever they are shown.
   const hostile = '<img src=x onerror=alert(1)>';
@@ -259,22 +228,51 @@ test('the recorded injection case renders its markup, mentions and links as text
     record_ref: `${unit.record_ref}${hostile}`,
     body: {...(unit.body as object), text: `${(unit.body as {text?: string}).text}${hostile}`, speaker: `x${hostile}`, basis: `b${hostile}`, at: `t${hostile}`},
   }));
+  marked.lines = (marked.lines ?? []).map(line => {
+    const {
+      label,
+      text: words,
+      contact,
+      countdown,
+    } = line as {label: string | null; text: string; contact: {name: string; title: string} | null; countdown: object | null};
+    return {
+      ...(line as object),
+      label: label && `${label}${hostile}`,
+      text: `${words}${hostile}`,
+      contact: contact && {...contact, title: `${contact.title}${hostile}`},
+      countdown: countdown && {...countdown, date: `2027-02-08${hostile}`},
+    };
+  });
   const shown = body(marked);
   assert.doesNotMatch(shown, /<img/);
   assert.match(shown, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  // In the countdown, ARR, Flags, the record column and a buyer quote's title.
+  for (const part of ['dc-focal__amount', 'dc-flag__text', 'dc-value__label', 'dc-value__text', 'dc-attr__title']) {
+    assert.match(shown, new RegExp(`<span class="[^"]*${part}">[^<]*&lt;img src=x onerror=alert\\(1\\)&gt;</span>`), part);
+  }
+  assert.equal(count(shown, /USD 450,000\.00&lt;img src=x onerror=alert\(1\)&gt;/g), 2, 'ARR in the focal group and the record column');
+  assert.match(shown, /<span class="dc-attr__title">Deputy general counsel&lt;img src=x onerror=alert\(1\)&gt;<\/span>/);
+  assert.match(shown, /<time dateTime="2027-02-08&lt;img src=x onerror=alert\(1\)&gt;">2027-02-08&lt;img/);
 });
 
-test('the title is the server’s name and the ID, with one line on where the values are; the seal names the card', () => {
+test('the title is the server’s name and the ID, then the countdown and ARR; the seal names the card', () => {
   const card = thornfield();
   const html = deal(card);
-  assert.match(html, /<h1 id="dc-title" class="dc-title">Thornfield Wren LLP<\/h1><p class="dc-id">acc-003<\/p>/);
   assert.match(
     html,
-    /<p class="dc-values-note">The countdown and ARR are on <a class="dc-values-note__link" href="\/deals\/acc-003\/text"[^>]*>the plain-text card<\/a>\.<\/p>/,
+    /<h1 id="dc-title" class="dc-title">Thornfield Wren LLP<\/h1><p class="dc-id">acc-003<\/p><\/header><nav[\s\S]*?<\/nav><section class="dc-focal" aria-label="Countdown and ARR">/,
   );
-  assert.match(text(html), /This page shows each record’s reference\. Its values are on the plain-text card\./);
+  assert.doesNotMatch(html, /dc-values-note|plain-text card/);
   assert.match(text(html), /Sealed 15 Jan 2027, 15:00:04 UTC Card card-demo-2/);
-  assert.doesNotMatch(html, /At risk|On track|Changed|days/);
+  assert.doesNotMatch(html, /At risk|On track|Changed/);
+  // A card published before its lines were kept keeps the line on where the values are, with the link to its text.
+  const old = deal(unlined(card));
+  assert.match(
+    old,
+    /<\/nav><p class="dc-values-note" data-focal="none">The countdown and ARR are on <a class="dc-values-note__link" href="\/deals\/acc-003\/text"[^>]*>the plain-text card<\/a>\.<\/p>/,
+  );
+  assert.match(text(old), /This page shows each record’s reference\. Its values are on the plain-text card\./);
+  assert.doesNotMatch(old, /dc-focal__|dc-flags|data-value=|dc-attr__title|days/);
   // An account the list does not hold is never named from the address.
   const other = deal(card, {accounts: ready({accounts: [{account: 'acc-002', name: 'Second'}]})});
   assert.match(other, /<h1 id="dc-title" class="dc-title">Account not verified<\/h1><p class="dc-id">Account ID acc-003, not verified<\/p>/);
@@ -351,14 +349,204 @@ test('not read lists whole sources first, then other unread, then read and not s
   assert.match(body(card), /data-gap="slack_denied">[\s\S]*?<p class="dc-meta">Not read<\/p>/);
 });
 
-test('every number is a link named Source n, to the page that shows that unit in full', () => {
-  const html = body(thornfield());
-  const cites = [...html.matchAll(/<a class="dc-cite" aria-label="Source (\d+)" href="([^"]+)"[^>]*><span class="dc-cite__box">\[(\d+)\]<\/span><\/a>/g)];
-  assert.equal(cites.length, count(html, /class="dc-cite"/g));
-  for (const [, named, href, shown] of cites) {
-    assert.equal(named, shown);
-    assert.equal(decode(href ?? ''), `/ops/evidence?account=acc-003&card=card-demo-2&unit=${shown}`);
+test('every number is a link named Source n that puts ?unit=n in the deal’s address, keeping the rest', () => {
+  const card = thornfield();
+  const opened = (shown: CardDetail) =>
+    inRouter(createElement(view.CardBody, {account: 'acc-003', card: shown, listed: [shown], query: 'thorn'}), '/deals/acc-003?q=thorn&unit=6');
+  for (const [html, total] of [
+    // Nine units, and the two customer sentences each cite their contact.
+    [opened(unlined(card)), 9 + 2],
+    // With lines, the six sentences and two contacts, the countdown's and ARR's numbers, the flag's two, and the
+    // six value lines' in the record column, which take the place of the three record references.
+    [opened(card), 6 + 2 + 2 + 2 + 6],
+  ] as const) {
+    const cites = [
+      ...html.matchAll(
+        /<a class="dc-cite" aria-label="Source (\d+)" data-cite="(\d+)"(?: data-open="")? href="([^"]+)"[^>]*><span class="dc-cite__box">\[(\d+)\]<\/span><\/a>/g,
+      ),
+    ];
+    assert.equal(cites.length, count(html, /class="dc-cite"/g));
+    for (const [, named, data, href, shown] of cites) {
+      assert.equal(named, shown);
+      assert.equal(data, shown);
+      assert.equal(decode(href ?? ''), `/deals/acc-003?q=thorn&unit=${shown}`);
+    }
+    // The number whose unit is open is marked, and only it.
+    assert.equal(count(html, /<a class="dc-cite"[^>]*data-open=""/g), 1);
+    assert.match(html, /data-cite="6" data-open=""/);
+    assert.equal(cites.length, total);
   }
-  // Nine units, and the two customer sentences each cite their contact.
-  assert.equal(cites.length, 9 + 2);
+});
+
+const escaped = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+const citesIn = (html: string) => [...html.matchAll(/aria-label="Source (\d+)"/g)].map(match => Number(match[1]));
+
+test('every recorded card with lines: the countdown is the typed days and date with the card’s date, and ARR is its line’s words', () => {
+  const seen = {counted: 0, passed: 0, contractEnd: 0, missing: 0, arr: 0, unmapped: 0};
+  for (const {file, key, card} of [...recorded, ...salesforce]) {
+    const at = `${file} ${key}`;
+    const lines = linesOf(card);
+    assert.ok(lines, `${at}: the recorded lines read`);
+    const shown = focal(body(card));
+    const [countdownHtml = '', arrHtml = ''] = shown.split('data-focal="arr"');
+    const renewal = renewalOf(lines);
+    const countdown = renewal?.countdown;
+    if (countdown) {
+      seen.counted++;
+      seen.passed += countdown.days < 0 ? 1 : 0;
+      seen.contractEnd += countdown.countsTo === 'contract_end' ? 1 : 0;
+      const number = countdownHtml.match(/<span class="dc-focal__number" data-days="(-?\d+)">(\d+)<\/span><span class="dc-focal__unit">([^<]*)<\/span>/);
+      assert.equal(Number(number?.[1]), countdown.days, `${at}: the server's days`);
+      assert.equal(number?.[2], String(Math.abs(countdown.days)), `${at}: the number shown`);
+      assert.equal(number?.[3], `${Math.abs(countdown.days) === 1 ? 'day' : 'days'}${countdown.days < 0 ? ' ago' : ''}`, `${at}: the word beside it`);
+      const what = countdown.countsTo === 'renewal' ? 'the renewal' : 'the contract end';
+      assert.ok(
+        countdownHtml.includes(`${countdown.days < 0 ? 'since ' : 'to '}${what}, <time dateTime="${countdown.date}">${countdown.date}</time>`),
+        `${at}: what it counts to and its date`,
+      );
+      assert.deepEqual(citesIn(countdownHtml.split('dc-focal__sub')[0] ?? ''), renewal.cites, `${at}: the countdown's numbers`);
+    } else {
+      seen.missing++;
+      assert.match(countdownHtml, /<span>No renewal date<\/span>/, `${at}: no renewal date`);
+      assert.doesNotMatch(countdownHtml, /data-days/, `${at}: and no number`);
+      assert.ok(renewal && countdownHtml.includes(`<span class="dc-focal__words">${escaped(renewal.text)}</span>`), `${at}: the connector's words under it`);
+    }
+    assert.ok(countdownHtml.includes(`as of <time dateTime="${card.as_of}">${card.as_of}</time>`), `${at}: the card's date`);
+    const arr = arrOf(lines);
+    if (arr) {
+      seen.arr++;
+      assert.ok(arrHtml.includes(`<span class="dc-focal__number dc-focal__amount">${escaped(arr.text)}</span>`), `${at}: ARR in the connector's words`);
+      assert.deepEqual(citesIn(arrHtml.split('dc-focal__sub')[0] ?? ''), arr.cites, `${at}: ARR's numbers`);
+      assert.match(arrHtml, /<span>ARR, from the mapped field<\/span>/);
+    } else {
+      seen.unmapped++;
+      assert.match(arrHtml, /<span>ARR is not mapped<\/span>/, `${at}: ARR is not mapped`);
+      assert.doesNotMatch(arrHtml, /dc-focal__number|aria-label="Source/, `${at}: and no figure stands in`);
+    }
+  }
+  assert.deepEqual(seen, {counted: 163, passed: 15, contractEnd: 65, missing: 13, arr: 98, unmapped: 78});
+});
+
+test('a card with no renewal line shows No renewal date and no number', () => {
+  const card = structuredClone(thornfield());
+  card.lines = (card.lines ?? []).filter(line => (line as {code?: string}).code !== 'renewal_date');
+  const shown = focal(body(card));
+  assert.match(text(shown), /No renewal date The record has no end date\. Nothing is inferred from the close date\. as of 2027-01-15/);
+  assert.doesNotMatch(shown, /data-days|dc-focal__words/);
+  assert.match(text(shown), /USD 450,000\.00 \[1\] ARR, from the mapped field/);
+});
+
+test('the focal step is used by the countdown and ARR and nothing else', () => {
+  const sheets = ['ui/tokens.css', 'ui/help.css', 'app/deals/card/card.css', 'app/deals/card/lines.css', 'app/deals/deals.css', 'chrome.css', 'api.css'];
+  const users: string[] = [];
+  for (const sheet of sheets) {
+    const css = readFileSync(new URL(`../../../${sheet}`, import.meta.url), 'utf8');
+    for (const match of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (/var\(--gc-focal\)|font-size:\s*2\.5rem/.test(match[2] ?? '')) {
+        users.push(`${sheet} ${(match[1] ?? '').trim()}`);
+      }
+    }
+  }
+  assert.deepEqual(users, ['app/deals/card/lines.css .dc-focal__number']);
+  const html = body(thornfield());
+  assert.equal(count(html, /class="dc-focal__number/g), 2, 'the countdown and ARR');
+});
+
+test('changing the browser’s clock changes nothing on the page', t => {
+  const cards = [
+    thornfield(),
+    recorded.find(item => (renewalOf(linesOf(item.card) ?? [])?.countdown?.days ?? 0) < 0)?.card as CardDetail,
+    salesforce[0]?.card as CardDetail,
+  ];
+  const at = (now: string) => {
+    t.mock.timers.enable({apis: ['Date'], now: Date.parse(now)});
+    const html = cards.map(card => deal(card));
+    t.mock.timers.reset();
+    return html;
+  };
+  assert.deepEqual(at('2026-03-01T00:00:00Z'), at('2031-12-31T23:59:59Z'));
+});
+
+test('a customer quotation shows the title from its contact’s line; a quotation with no contact or no title shows none', () => {
+  let titled = 0;
+  let untitled = 0;
+  for (const {file, key, card} of recorded) {
+    const html = body(card);
+    const contacts = new Map((linesOf(card) ?? []).filter(line => line.code === 'contact').map(line => [line.cites[0], line.contact?.title ?? null]));
+    for (const sentence of sentencesOf(card).filter(onCard)) {
+      const line = html.slice(html.indexOf(`data-quote-unit="${sentence.n}"`)).split('</li>')[0] ?? '';
+      const title = groupOf(sentence) === 'customer' && sentence.contact !== null ? (contacts.get(sentence.contact) ?? null) : null;
+      if (title) {
+        titled++;
+        assert.ok(
+          line.includes(`<span class="dc-attr__title">${escaped(title)}</span><a class="dc-cite" aria-label="Source ${sentence.contact}"`),
+          `${file} ${key} unit ${sentence.n}: the title, then the contact's number`,
+        );
+      } else {
+        untitled++;
+        assert.doesNotMatch(line, /dc-attr__title/, `${file} ${key} unit ${sentence.n}: no title`);
+      }
+    }
+  }
+  assert.ok(titled > 0 && untitled > 0, `${titled} titled, ${untitled} untitled`);
+});
+
+test('the fixed signals are the first lines of Flags, each with its numbers; a card with none has no Flags', () => {
+  let flagged = 0;
+  for (const {file, key, card} of [...recorded, ...salesforce]) {
+    const html = body(card);
+    const signals = signalsOf(linesOf(card) ?? []);
+    if (!signals.length) {
+      assert.doesNotMatch(html, /dc-flags/, `${file} ${key}`);
+      continue;
+    }
+    flagged++;
+    const rows = [
+      ...html.matchAll(
+        /<li class="dc-flag" data-signal="([a-z_]+)"><span class="dc-flag__text">([^<]*)<\/span><span class="dc-flag__cites">([\s\S]*?)<\/span><\/li>/g,
+      ),
+    ].map(match => ({
+      code: match[1],
+      text: decode(match[2] ?? ''),
+      cites: citesIn(match[3] ?? ''),
+      more: Number(match[3]?.match(/and (\d+) more/)?.[1] ?? 0),
+    }));
+    assert.deepEqual(
+      rows,
+      signals.map(signal => ({code: signal.code, text: signal.text, cites: signal.cites, more: signal.more})),
+      `${file} ${key}`,
+    );
+    assert.ok(html.indexOf('dc-flags') < html.indexOf('dc-ledger'), `${file} ${key}: Flags comes before the ledger`);
+  }
+  assert.equal(flagged, 92);
+});
+
+test('lines that are not a line’s shape are not read, and the card says where its values are', () => {
+  const card = structuredClone(thornfield());
+  card.lines = [...(card.lines ?? []), {code: 'arr', section: 'value'}];
+  assert.equal(linesOf(card), null);
+  const html = body(card);
+  assert.match(html, /data-focal="none"/);
+  assert.doesNotMatch(html, /dc-focal__|dc-flags|data-value=/);
+});
+
+test('the countdown and ARR help is the copy file’s, drawn from the guide it links to', () => {
+  const help = JSON.parse(readFileSync(new URL('../../../help/help.json', import.meta.url), 'utf8')) as Record<
+    string,
+    {text: string; guide: {path: string; anchor: string; title: string}}
+  >;
+  const guide = readFileSync(new URL('../../../../../docs/config.md', import.meta.url), 'utf8');
+  const html = body(thornfield());
+  for (const term of ['countdown', 'arr']) {
+    const entry = help[term];
+    assert.ok(entry, term);
+    assert.ok(
+      html.includes(`data-help="${term}"><span class="ui-help__text">${escaped(entry.text).replaceAll("'", '&#x27;')}</span>`),
+      `${term}: the panel's text`,
+    );
+    assert.equal(entry.guide.path, 'docs/config.md');
+    assert.ok(guide.includes('\n## Field mapping\n') && entry.guide.anchor === 'field-mapping', `${term}: the guide has the section`);
+  }
+  assert.match(guide, /Opportunity amount never stands in for recurring revenue\.\*\* If no field is mapped, the card\n> says the value is missing\./);
+  assert.equal(count(html, /class="ui-help__button"/g), 2);
 });

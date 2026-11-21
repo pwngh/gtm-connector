@@ -16,7 +16,7 @@ import {type Named, Title} from './Title.tsx';
 
 // The Deal card of one account: its newest published card, or the one the
 // address pins when that card is one of the account's. It is laid out from
-// the card's units and gaps: the record on one side, the words on the other,
+// the card's units, gaps and lines: the record on one side, the words on the other,
 // a numbered spine between them. Its Text tab shows the plain-text card. A
 // card of another account is not read, and a card whose bytes do not match
 // its seal shows nothing on either tab.
@@ -207,20 +207,7 @@ export function DealView({asked, pinned, query, tab = 'card', reads}: DealViewPr
       className="dc"
       aria-labelledby="dc-title"
     >
-      <Title named={named}>
-        {shown && account && tab === 'card' && (
-          <p className="dc-values-note">
-            The countdown and ARR are on{' '}
-            <Link
-              className="dc-values-note__link"
-              to={dealHref(account, query, {tab: 'text', card: pinned})}
-            >
-              the plain-text card
-            </Link>
-            .
-          </p>
-        )}
-      </Title>
+      <Title named={named} />
       {shown && account && (
         <DealTabs
           account={account}
