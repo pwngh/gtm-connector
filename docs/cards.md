@@ -116,7 +116,7 @@ A record unit has `n`, `kind` (`record`), `source` (`crm`, `calls` or `slack`), 
 | `contact` | The number of the one contact a customer's label equals, or `null`. |
 | `text` | The sentence, neutralized. |
 | `partial` | `true` when the sentence is not whole. |
-| `quoted` | `true` when the sentence is in a block quote of a Slack message: words its author quoted, with `role` `unknown` and `basis` `quoted by the message's author`. A card sealed under rules version 3 has no `quoted` key. |
+| `quoted` | `true` when the sentence is in a block quote or a speaker's turn of a Slack message: words its author relayed, with `role` `unknown` and `basis` `quoted by the message's author`. A card sealed under rules version 3 has no `quoted` key. |
 | `shown` | `yes`, or why the sentence is not under `SAID` (below). |
 | `span` | `null`, except in an imported transcript: `first` and `last`, the cues or lines the sentence lies in, and `start_ms` and `end_ms`, which cover every cue it lies in, whatever order the file wrote them in. Lines have no times, so both are `null` for a TXT file. |
 | `raw_sha256` | The SHA-256 of the record's text as stored. |
@@ -221,11 +221,14 @@ A sentence ends at closing punctuation or at a blank line.
     any space;
   - a speaker label: one to three capitalized words, at most 40 characters, a colon and a space, as in
     `Dana Reyes: we can sign`;
-  - a block quote: a run of lines that start with `>` or `&gt;`. Its sentences are marked `quoted`:
-    the author quoted them, so the author's role is not theirs, and the card shows them under no
-    established role, as quoted by the message's author;
+  - a block quote: a run of lines that start with `>` or `&gt;`;
   - a code block, from the line that opens a ```` ``` ```` fence to the line that closes it. The line
     after a block quote or a code block starts a new block too.
+
+  The sentences of a block quote or of a speaker's turn are marked `quoted`: the author relayed someone
+  else's words, so the author's role is not theirs. The card shows them under no established role, as
+  quoted by the message's author, and a speaker's turn keeps its label in the text, so the reader sees
+  whose words they are.
 - A line that ends in closing punctuation ends its sentence there as anywhere else.
 - In a call note or a Slack message, a sentence without closing punctuation that more of the record
   follows is not whole. It is counted as `cut` and never shown as a quotation. The end of the record

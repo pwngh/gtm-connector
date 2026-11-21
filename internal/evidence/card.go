@@ -318,8 +318,8 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			fragment := !transcript && !ended && position < len(found)-1
 			partial := follows || cut || fragment
 			follows = cut
-			// A block quote in a message is someone else's words, which the author quoted: its speaker
-			// label is the author's, and no role is established for it.
+			// A block quote or a speaker's turn in a message is someone else's words, which the author
+			// relayed: its speaker label is the author's, and no role is established for it.
 			spokenBy := who
 			if quotedAt[position] {
 				spokenBy = role{"unknown", QuotedBasis, nil}

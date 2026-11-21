@@ -26,7 +26,7 @@ func fields(s []rune) [][]rune {
 }
 
 // block is a run of text that no sentence crosses: a paragraph, and in a message also a block quote, a code
-// block, a list item or a speaker's turn. quoted is whether it is a block quote.
+// block, a list item or a speaker's turn. quoted is whether it is a block quote or a speaker's turn.
 type block struct {
 	text   []rune
 	quoted bool
@@ -56,9 +56,10 @@ func paragraphs(s []rune) []block {
 
 // messageBlocks splits a chat message into blocks. A line break is a wrap, except that a blank line ends a
 // block and each of these starts one: a line that starts a list item, a line that starts with a speaker
-// label, a run of lines that start a block quote (> or &gt;), which is marked quoted, and the line that
-// opens a code fence. The line after a block quote, and the line after the one that closes a code fence,
-// start one too. Inside a code block nothing else starts a block.
+// label, a run of lines that start a block quote (> or &gt;), and the line that opens a code fence. The line
+// after a block quote, and the line after the one that closes a code fence, start one too. Inside a code
+// block nothing else starts a block. A block quote and a speaker's turn are marked quoted: the author
+// relays someone else's words, and the label stays in the text to say whose.
 func messageBlocks(s []rune) []block {
 	var found []block
 	ended, fenced, quoting := true, false, false
@@ -74,7 +75,7 @@ func messageBlocks(s []rune) []block {
 			continue
 		}
 		trimmed := strip(line)
-		begins, closes, quoted := false, false, false
+		begins, closes, quote, label := false, false, false, false
 		switch {
 		case fenced:
 			closes = hasSuffix(trimmed, "```")
@@ -84,17 +85,18 @@ func messageBlocks(s []rune) []block {
 			closes = len(trimmed) > 3 && hasSuffix(trimmed, "```")
 			fenced = !closes
 		case hasPrefix(trimmed, ">") || hasPrefix(trimmed, "&gt;"):
-			begins, quoted = !quoting, true
+			begins, quote = !quoting, true
 		default:
-			begins = quoting || listItem(line) || speakerLabel(trimmed)
+			label = speakerLabel(trimmed)
+			begins = quoting || label || listItem(line)
 		}
 		if ended || begins {
-			found = append(found, block{quoted: quoted})
+			found = append(found, block{quoted: quote || label})
 		} else {
 			found[len(found)-1].text = append(found[len(found)-1].text, '\n')
 		}
 		found[len(found)-1].text = append(found[len(found)-1].text, line...)
-		ended, quoting = closes, quoted
+		ended, quoting = closes, quote
 	}
 	return found
 }

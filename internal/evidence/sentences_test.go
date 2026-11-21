@@ -50,7 +50,7 @@ var slackCases = []struct {
 	{"Run this:\n```make test```\nthen tell me.", []string{"Run this:", "```make test```", "then tell me."}, nil, []int{0, 1}},
 	// A line that starts with a speaker label starts a block.
 	{"Pasted from the call\nDana: we can sign\nMorgan Reed: then send it",
-		[]string{"Pasted from the call", "Dana: we can sign", "Morgan Reed: then send it"}, nil, []int{0, 1}},
+		[]string{"Pasted from the call", "Dana: we can sign", "Morgan Reed: then send it"}, []int{1, 2}, []int{0, 1}},
 	// A dash or a number that is no list marker is a wrap.
 	{"Seats go to\n-5 from 40", []string{"Seats go to -5 from 40"}, nil, nil},
 	{"Renewal is\n*not* blocked", []string{"Renewal is *not* blocked"}, nil, nil},
@@ -149,6 +149,24 @@ func TestAFragmentOfANoteIsNeverQuoted(t *testing.T) {
 	}
 	if strings.Contains(text, `"We can renew if"`) || strings.Contains(text, `"Security signs off"`) {
 		t.Errorf("a fragment is quoted on the card:\n%s", text)
+	}
+}
+
+// A seller who pastes a customer's words after a speaker label relays them: the turn is quoted, under no
+// established role, with the label kept in the text, and never the seller's own claim.
+func TestASpeakersTurnIsNotTheAuthorsClaim(t *testing.T) {
+	units, text := built(t, "We will see.", "From the call today.\nDana Ito: we will sign by Friday.")
+	slack := units["slack"]
+	if len(slack) != 2 || slack[0].Quoted || slack[0].Role != "seller" {
+		t.Fatalf("the author's own sentence: %+v", slack)
+	}
+	turn := slack[1]
+	if !turn.Quoted || turn.Role != "unknown" || turn.Basis != QuotedBasis || turn.Contact != nil ||
+		turn.Text != "Dana Ito: we will sign by Friday." || turn.Shown != "yes" {
+		t.Fatalf("the relayed turn: %+v", turn)
+	}
+	if !strings.Contains(text, fmt.Sprintf(`"Morgan Reed" (%s)`, QuotedBasis)+"\n        \"Dana Ito: we will sign by Friday.\"") {
+		t.Errorf("the card does not print the turn as quoted by its author:\n%s", text)
 	}
 }
 

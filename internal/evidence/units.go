@@ -26,8 +26,8 @@ const (
 	staleDays        = 60
 	runGapMS         = 2000
 	bridgeGapMS      = 10_000
-	// QuotedBasis is the basis of a sentence in a block quote of a Slack message: the author quoted it, so
-	// the author's role is not its speaker's.
+	// QuotedBasis is the basis of a sentence in a block quote or a speaker's turn in a Slack message: the
+	// author relayed it, so the author's role is not its speaker's.
 	QuotedBasis = "quoted by the message's author"
 )
 
@@ -73,7 +73,7 @@ type Unit struct {
 	Contact          *int
 	Text             string
 	Partial          bool
-	Quoted           bool   // in a block quote of a Slack message: words the author quoted, not their own
+	Quoted           bool   // in a block quote or a speaker's turn in a Slack message: words the author relayed
 	Shown            string // "yes", "cut", "later", "long" or "more"
 	Span             *UnitSpan
 	RawSHA256        string
