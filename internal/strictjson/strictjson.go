@@ -3,9 +3,14 @@
 // Nesting past MaxDepth is refused with ErrTooDeep, whose message is its own.
 //
 // A document is read from its bytes, with no decoded copy of it. Before anything is built, one pass over
-// the bytes counts the nesting and a second checks the encoding, so a document that is too deep or is not
-// UTF-8 is refused for the cost of reading it. A reader sets no limit on a document's size: the caller
+// the bytes checks the encoding and a second counts the nesting, so a document that is not UTF-8 or is too
+// deep is refused for the cost of reading it. A reader sets no limit on a document's size: the caller
 // checks that before it loads the bytes.
+//
+// Refusals come in one order. A document that is not UTF-8 (or, as text, holds a lone surrogate) is refused
+// for that, whatever else it holds. A well-encoded document nested past MaxDepth is refused as too deep,
+// whatever other fault it has, before or after that point: nothing else about it is looked at. Every other
+// fault is the parser's, in the order of the document, and an escaped lone surrogate is refused last.
 //
 // Values are nil, bool, string, *big.Int, []any, *Object, and for a number with a fraction or an exponent
 // either float64 (Loads and LoadsText, like Python's default) or Decimal (LoadsDecimal, like
@@ -62,11 +67,11 @@ func loads(document []byte, decimal bool) (any, error) {
 	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
 		data = data[3:]
 	}
-	if tooDeep(data) {
-		return nil, ErrTooDeep
-	}
 	if err := checkUTF8(data, false); err != nil {
 		return nil, err
+	}
+	if tooDeep(data) {
+		return nil, ErrTooDeep
 	}
 	return parse(data, decimal)
 }
@@ -77,9 +82,6 @@ func loads(document []byte, decimal bool) (any, error) {
 func LoadsText(text string) (any, error) { return loadsText(text, false) }
 
 func loadsText(text string, decimal bool) (any, error) {
-	if tooDeep(text) {
-		return nil, ErrTooDeep
-	}
 	data := []byte(text)
 	if err := checkUTF8(data, true); err != nil {
 		return nil, err
@@ -87,15 +89,19 @@ func loadsText(text string, decimal bool) (any, error) {
 	if err := encodable(data); err != nil {
 		return nil, err
 	}
+	if tooDeep(data) {
+		return nil, ErrTooDeep
+	}
 	return parse(data, decimal)
 }
 
 // tooDeep reports whether a document opens more than MaxDepth arrays and objects at once, counting the
-// brackets outside strings. It reads bytes and allocates nothing, so a document of any size that is too
-// deep is refused before it is decoded or built. Up to the parser's first refusal it counts exactly as the
-// parser does, and a document that is too deep past another fault is refused as too deep. A closing
-// bracket with nothing open is a fault the parser reports, so the count stops there.
-func tooDeep[T string | []byte](text T) bool {
+// brackets outside strings. It reads bytes that are already known to be well encoded and allocates nothing,
+// so a document of any size that is too deep is refused before it is built. Up to the parser's first
+// refusal it counts exactly as the parser does, and a document that is too deep past another fault of its
+// syntax is refused as too deep. A closing bracket with nothing open is a fault the parser reports, so the
+// count stops there.
+func tooDeep(text []byte) bool {
 	depth, inString := 0, false
 	for i := 0; i < len(text); i++ {
 		c := text[i]

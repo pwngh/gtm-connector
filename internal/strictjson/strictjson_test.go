@@ -305,7 +305,6 @@ func TestNestingLimitCounts(t *testing.T) {
 		"[" + open + "1" + shut:               true,
 		"[" + open + "x":                      true,
 		"x[" + open:                           true,
-		"\xff[" + open:                        true,
 		`["` + open + `[",` + open[1:] + shut: false,
 		`["\"` + open + `",` + open[1:] + `[]` + shut: true,
 		`["\\",` + open[1:] + `[]` + shut:             true,
@@ -321,6 +320,47 @@ func TestNestingLimitCounts(t *testing.T) {
 	_, err := Loads([]byte("][" + open))
 	if want := "JSONDecodeError: Expecting value: line 1 column 1 (char 0)"; err == nil || err.Error() != want {
 		t.Errorf("a closing bracket first: got %v, want %s", err, want)
+	}
+}
+
+// Refusals come in one order: the encoding, then the depth, then whatever the parser finds. A document that
+// is not UTF-8 is refused for that however deep it is, so no caller takes it for a document refused only for
+// its depth. One that is well encoded and too deep is refused as too deep whatever else is wrong with it.
+func TestRefusalsComeInOneOrder(t *testing.T) {
+	deep := strings.Repeat("[", MaxDepth+1)
+	readers := map[string]func(string) (any, error){
+		"Loads":        func(s string) (any, error) { return Loads([]byte(s)) },
+		"LoadsDecimal": func(s string) (any, error) { return LoadsDecimal([]byte(s)) },
+		"LoadsText":    LoadsText,
+		"LoadsLoose":   func(s string) (any, error) { return LoadsLoose([]byte(s)) },
+	}
+	for name, read := range readers {
+		for document, want := range map[string]string{
+			"\xff" + deep:                         "UnicodeDecodeError",
+			deep + "\xff":                         "UnicodeDecodeError",
+			"{\"a\":\"\xff\",\"b\":" + deep:       "UnicodeDecodeError",
+			"{\"a\":\"\xc3\",\"b\":" + deep + "}": "UnicodeDecodeError",
+			"x" + deep:                            "RecursionError",
+			`{"a":nope,"b":` + deep:               "RecursionError",
+			`{"a":1,"a":2,"b":` + deep:            "RecursionError",
+			`{"a":NaN,"b":` + deep:                "RecursionError",
+			`{"a":"\ud800","b":` + deep:           "RecursionError",
+			deep:                                  "RecursionError",
+			`{"a":nope,"b":` + deep[2:] + `1`:     "JSONDecodeError",
+			`{"a":1,"a":2,"b":` + deep[2:] + "":   "JSONDecodeError",
+		} {
+			_, err := read(document)
+			var refusal *Error
+			if !errors.As(err, &refusal) || refusal.Type != want {
+				t.Errorf("%s, %.24q: got %v, want %s", name, document, err, want)
+			}
+		}
+	}
+	// As text, a lone surrogate cannot be encoded, and that too comes before the depth.
+	_, err := LoadsText("\xed\xa0\x80" + deep)
+	var refusal *Error
+	if !errors.As(err, &refusal) || refusal.Type != "UnicodeEncodeError" {
+		t.Errorf("LoadsText, a lone surrogate before the depth: %v", err)
 	}
 }
 
@@ -361,10 +401,10 @@ func TestALargeDocumentIsRefusedBeforeItIsDecoded(t *testing.T) {
 			}
 		}
 	}
-	// LoadsText counts the levels of its string where it is, and copies it only to read it.
+	// LoadsText takes a string, and its one copy of that string is all it may allocate.
 	text := string(deep)
 	var err error
-	if used := measured(func() { _, err = LoadsText(text) }); !errors.Is(err, ErrTooDeep) || used > 64<<10 {
+	if used := measured(func() { _, err = LoadsText(text) }); !errors.Is(err, ErrTooDeep) || used > size+64<<10 {
 		t.Errorf("LoadsText, too deep: %v after %d bytes", err, used)
 	}
 	long := append(append([]byte(`"`), bytes.Repeat([]byte("a"), size)...), '"')
