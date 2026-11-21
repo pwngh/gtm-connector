@@ -307,6 +307,68 @@ func SafeText(raw string) (string, Counts, error) {
 	}
 }
 
+// QuoteText neutralizes source text a quotation is made from: SafeText, and each bare mail address, which a
+// GitHub Markdown client turns into a mail link, replaced as one in angle brackets is, by [link mail]. The
+// steps run again until a round changes nothing. A record value, such as a contact's email, is neutralized
+// by SafeText alone: the connector writes it as a value, never as a quotation.
+func QuoteText(raw string) (string, Counts, error) {
+	var counts Counts
+	text := raw
+	for {
+		safe, round, err := SafeText(text)
+		counts.Mentions += round.Mentions
+		counts.Links += round.Links
+		counts.Controls += round.Controls
+		counts.Brackets += round.Brackets
+		if err != nil {
+			return "", counts, err
+		}
+		quoted := string(bareMail([]rune(safe), &counts))
+		if quoted == safe {
+			return quoted, counts, nil
+		}
+		text = quoted
+	}
+}
+
+// bareMail replaces each bare mail address with [link mail], as a GitHub Markdown client finds one: a local
+// part of letters, digits and . + - _, an @, and a domain of letters, digits, - and _ with at least one dot
+// that a letter or digit follows. Dots that end the domain are left after the marker. An address the client
+// would pass over for the last letter of its domain is replaced too.
+func bareMail(s []rune, counts *Counts) []rune {
+	local := func(c rune) bool { return asciiLetter(c) || asciiDigit(c) || in(c, ".+-_") }
+	out := make([]rune, 0, len(s))
+	last := 0 // where the last replacement ended: an address starts no earlier
+	for i := 0; i < len(s); i++ {
+		if s[i] != '@' {
+			out = append(out, s[i])
+			continue
+		}
+		start := i
+		for start > last && local(s[start-1]) {
+			start--
+		}
+		end, dotted := i+1, false
+		for end < len(s) && (asciiLetter(s[end]) || asciiDigit(s[end]) || in(s[end], "-_.")) {
+			if s[end] == '.' && end+1 < len(s) && (asciiLetter(s[end+1]) || asciiDigit(s[end+1])) {
+				dotted = true
+			}
+			end++
+		}
+		for end > i+1 && s[end-1] == '.' {
+			end--
+		}
+		if start == i || !dotted {
+			out = append(out, s[i])
+			continue
+		}
+		counts.Links++
+		out = append(out[:len(out)-(i-start)], []rune("[link mail]")...)
+		i, last = end-1, end
+	}
+	return out
+}
+
 // neutralize is one round of SafeText (units._neutralize).
 func neutralize(raw []rune, counts *Counts) []rune {
 	plain := u.NFC(raw)

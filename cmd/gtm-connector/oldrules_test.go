@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -99,15 +100,15 @@ func TestTheCLIPrintsAnOlderCardRenderedAgain(t *testing.T) {
 	}
 	card := value.(*strictjson.Object)
 	unit := get(card, "units").([]any)[7].(*strictjson.Object)
-	sealed := "Write to <renewals@example.test> for the order form."
+	sealed := "Write to <renewals@example.test> or orders@example.test for the order form."
 	card.Set("text", strings.Replace(get(card, "text").(string), strictjson.Quote(get(unit, "text").(string)),
 		strictjson.Quote(sealed), 1))
 	unit.Set("text", sealed)
 	printed := (&run{command: "brief", screen: screen{terminal: true}}).human(card)
 	first, _, _ := strings.Cut(printed, "\n")
-	if !strings.Contains(first, "rendered again under neutralizer version 4") ||
-		!strings.Contains(printed, `"Write to [link mail] for the order form."`) ||
-		strings.Contains(printed, "renewals@example.test") || !strings.Contains(printed, "Brief: "+brief) {
+	if !strings.Contains(first, fmt.Sprintf("rendered again under neutralizer version %d", evidence.SanitizerVersion)) ||
+		!strings.Contains(printed, `"Write to [link mail] or [link mail] for the order form."`) ||
+		strings.Contains(printed, "renewals@example.test") || strings.Contains(printed, "orders@example.test") || !strings.Contains(printed, "Brief: "+brief) {
 		t.Errorf("the CLI prints the older card as:\n%s", printed)
 	}
 }

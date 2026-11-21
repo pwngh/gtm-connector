@@ -87,7 +87,7 @@ the same record, or `null`.
 
 `inspect` answers from the sealed units and evidence, never from the card's text, and rebuilds
 nothing. A later change to the rules cannot move or refuse a number. A sentence sealed under an
-older version of the neutralizer rules (`sanitizer_version` below 4) has its text and speaker
+older version of the neutralizer rules (`sanitizer_version` below 5) has its text and speaker
 neutralized again under today's before `inspect`, the web API or a brief tool shows it. The card's
 bytes stay as sealed, so it still verifies, and the sentence keeps the version it was sealed under.
 
@@ -120,7 +120,7 @@ A record unit has `n`, `kind` (`record`), `source` (`crm`, `calls` or `slack`), 
 | `shown` | `yes`, or why the sentence is not under `SAID` (below). |
 | `span` | `null`, except in an imported transcript: `first` and `last`, the cues or lines the sentence lies in, and `start_ms` and `end_ms`, which cover every cue it lies in, whatever order the file wrote them in. Lines have no times, so both are `null` for a TXT file. |
 | `raw_sha256` | The SHA-256 of the record's text as stored. |
-| `sanitizer_version` | The version of the neutralizer rules, `4`. |
+| `sanitizer_version` | The version of the neutralizer rules, `5`. |
 
 | `shown` | Why the sentence is not shown |
 | --- | --- |
@@ -184,7 +184,7 @@ with the account and brief in its `arguments`, and [receipts](audit.md) says how
 | `schema_version` | `3` |
 | `brief_id`, `account_id`, `as_of` | The card's identity and planning date. |
 | `status` | `accepted` |
-| `rules_version` | `4`, the version of the rules the text was made under. |
+| `rules_version` | `5`, the version of the rules the text was made under. |
 | `sealed_by` | The `audit_id` of the seal. |
 | `sources` | `crm`: `demo_fixture` or `salesforce`. `calls`: `demo_fixture`, `imported_transcript` or `not_connected`. `slack`: `demo_fixture`, `slack` or `not_connected`. |
 | `text` | The card. |
@@ -359,6 +359,9 @@ listed below with inert words.
   `[mention group]`, `[user U123]` or `[channel C123]`.
 - A link of any scheme (`scheme://`), a `mailto:` address, a `//host` address or a `www.` address
   becomes its label, if it has one, and `[link host]`. A `mailto:` link shows `[link mail]`.
+- In the text a quotation is made from, a bare mail address such as `dana@files.example`, which a
+  Markdown client links, shows `[link mail]` too. A contact's email is a record value and is shown as
+  the CRM holds it.
 - A link with a backslash or a control character before the end of its host shows
   `[link unknown host]`, because a browser may open a different host than the one written. So does
   a Slack link `<target|label>` whose target names a scheme with no `//` after it.

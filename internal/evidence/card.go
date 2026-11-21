@@ -43,6 +43,24 @@ func (c *card) lines(value any) string {
 	return safe
 }
 
+// quotation is source text a quotation is made from, neutralized by QuoteText, with what was replaced
+// counted.
+func (c *card) quotation(value any) string {
+	raw, ok := value.(string)
+	if !ok {
+		reject("Evidence text fields must be strings.")
+	}
+	safe, counts, err := QuoteText(raw)
+	if err != nil {
+		reject("Evidence text fields must be strings.")
+	}
+	c.neutralized.Mentions += counts.Mentions
+	c.neutralized.Links += counts.Links
+	c.neutralized.Controls += counts.Controls
+	c.neutralized.Brackets += counts.Brackets
+	return safe
+}
+
 // oneLine is " ".join(text.split()).
 func oneLine(text string) string {
 	words := fields([]rune(text))
@@ -284,7 +302,7 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 		// characters, spaces apart.
 		texts, ends, total := make([]string, len(r.pieces)), make([]int, len(r.pieces)), 0
 		for i, piece := range r.pieces {
-			texts[i] = c.lines(piece.raw)
+			texts[i] = c.quotation(piece.raw)
 			total += nonSpace(texts[i])
 			ends[i] = total
 		}

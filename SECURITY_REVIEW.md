@@ -46,8 +46,7 @@ Three things carry the operator's authority, and whoever holds one holds that pa
   commands connect with. The owner role's URL (`GTM_OWNER_DATABASE_URL`) runs setup, migrations,
   backup and restore. That role owns the tables, so it can switch their triggers off.
 - **The credentials folder** (`GTM_CREDENTIALS_DIR`). It holds the TLS key and certificate, the key that
-  signs the browser's pre-sessions, the demo sign-in's password, an owner secret, and each workspace's
-  Slack sign-in.
+  signs the browser's pre-sessions, the demo sign-in's password, and each workspace's Slack sign-in.
 - **The source logins.** An `sf` alias's login or a Salesforce token handed to the process, and the
   saved Slack sign-in. The connector reads with whatever they may read, through its fixed queries.
 
@@ -116,9 +115,15 @@ body that fails as it is read with no header to mark it.
 
 Two steps come before the receipt's insert. `serve` looks up which workspace a bearer was issued in, to
 pick that workspace's gate. The gate then looks up who holds the bearer, and opens the workspace's
-sources from their rows. A failure of the first lookup gets no receipt (open finding 4), and a database
-failure in the second is answered as a receipt that could not be committed. After the insert, every
-check runs, so a call refused for its token, its scope, its arguments or its Host is receipted. The
+sources from their rows. A database failure in the second is answered as a receipt that could not be
+committed. After the insert, every check runs, so a call refused for its token, its scope, its arguments
+or its Host is receipted.
+
+> **One refusal keeps no receipt.** When `serve` cannot read which workspace a bearer was issued in,
+> because the database fails or takes more than five seconds, no gate can take the call, since a gate
+> keeps the receipts of its own workspace. The call is answered as one whose receipt could not be
+> committed, HTTP 503 `audit_unavailable` in the gate's JSON, nothing runs, and `serve` logs one fixed
+> line with the failure's code. This is the only place a call is refused with no receipt. The
 database holds each receipt to its rules with triggers, so a writer that goes around the connector's
 code meets the same rules. [Audit](docs/audit.md) describes what a receipt holds.
 
@@ -138,6 +143,9 @@ code meets the same rules. [Audit](docs/audit.md) describes what a receipt holds
 | A receipt left pending by a process that stopped is finished as error/503 `interrupted` once its lease has expired by the database's clock. `setup`, `mcp stdio` and `serve` do this as they start. | `TestExpiredLeaseCannotFinish` (`storage/postgres`), `TestStdioAndSetupFinishInterruptedReceipts`, `TestServeFinishesInterruptedReceiptsAsItStarts` (`cmd/gtm-connector`) |
 | For any writer, a receipt finishes once, its arguments never change, an error holds no rows, a parent finishes after its children, and receipts are never deleted or truncated. A finish must present the receipt's live lease token: the database refuses a missing, wrong or expired one. | `TestReceiptFinishesOnce`, `TestExpiredLeaseCannotFinish`, `TestTheLeaseHolderIsEnforcedByTheDatabase`, `TestParentsAndChildren`, `TestArgumentsKeepTheirOrder` (`storage/postgres`) |
 | The commands read under receipts too: a card's reads, and `accounts` and `inspect` on a real CRM. With no receipt store, nothing is read, and an owner read is never left pending. | `TestReceiptsRuleOnPostgres` (`cards`), `TestSalesforceIsReadByEveryCommand`, `TestAnOwnerReadIsNeverLeftPending` (`cmd/gtm-connector`) |
+| A request that signs in to a source outside a read runs under a receipt of its step, committed first, in the workspace the command names, which is made for real sources if it does not exist: `connect salesforce`'s sign-in (`connect_salesforce_login`) and org check (`connect_salesforce_org`), and Slack's code exchange, refresh, identity check and revocation (`slack_sign_in_exchange`, `slack_sign_in_refresh`, `slack_sign_in_identity`, `slack_sign_in_revoke`) in `debug slack connect`, `status --check` and `disconnect --revoke`. A request that fails, is refused or is cancelled leaves its receipt finished as an error, and connects nothing. | `TestSlackSignInRequestsRunUnderReceipts`, `TestConnectSalesforceRefusesWhatItCannotPin`, `TestACancelEndsTheSFProcessGroup`, `TestSalesforceIsReadByEveryCommand` (`cmd/gtm-connector`) |
+| When `serve` cannot read which workspace a bearer was issued in, the call is answered 503 `audit_unavailable` in the gate's JSON, nothing runs and no receipt is kept, and `serve` logs one fixed line that holds neither the bearer nor PostgreSQL's text. | `TestABearerWhoseWorkspaceCannotBeReadIsRefusedInTheGatesWords` (`cmd/gtm-connector`) |
+| A connection the network loses with its socket open does not keep its transaction's locks: the server ends a session that waits 30 seconds inside a transaction, and both ends of every pooled connection send TCP keepalives after 30 seconds of silence, every 10 seconds, and give up after 3. | `TestTheServerEndsATransactionLeftIdle` (`storage/postgres`) |
 
 The lease keeps a process whose lease expired and was taken over, or that never held it, from
 finishing a receipt. It does not keep out a holder of the app role, who can read the token.
@@ -220,6 +228,8 @@ whole sentence with its speaker's role, which comes from a label and never from 
 | Claim | Test |
 | --- | --- |
 | Source text is neutralized as a recorded corpus of it was: mentions, links in every form, control characters and bracketed numbers become inert words. A host a browser would rewrite or refuse is not shown. | `TestSafeTextCorpus`, `TestLinkHost`, `TestAmbiguousLinkHost`, `TestMarkdownLinkWithAnyScheme`, `TestHostABrowserRewritesOrRefuses` (`evidence`) |
+| A bare mail address in quotation text becomes `[link mail]`, as one in angle brackets does, since a client may link either. A contact's email, a record value the connector writes, is shown as the CRM holds it. | `TestABareMailAddressInAQuotationIsNeutralized`, `TestACardQuotesNoBareAddressAndKeepsTheContactsEmail` (`evidence`) |
+| A unit sealed under an older neutralizer version is shown under today's rules, its quotation and speaker neutralized again, by `inspect`, the CLI's card, the web API and the brief tools. Its card's bytes stay as sealed and still verify. | `TestAnOlderCardsTextIsRenderedAgain` (`evidence`), `TestACardSealedUnderOlderRulesVerifiesAndShows`, `TestTheCLIPrintsAnOlderCardRenderedAgain` (`cmd/gtm-connector`), `TestAUnitSavedUnderOlderRulesIsShownUnderTodays` (`transport/http`), `TestABriefToolShowsAnOlderUnitUnderTodaysRules` (`mcptools`) |
 | The browser's account names, the receipt arguments `inspect` shows and the names of members in printed JSON are neutralized too, and `--json` writes format characters as escapes. | `TestAccountsListThePrincipalsGrants` (`transport/http`), `TestInspectShowsAReceiptsArgumentsInert`, `TestNeutralMakesMemberNamesInert`, `TestFormatCharactersAreEscapedInJSON` (`cmd/gtm-connector`) |
 | A quotation is a whole sentence: one an excerpt's edge cuts is kept as a unit marked partial and never quoted in the card's text, and a figure inside a sentence stays there and never becomes a record value. | `TestCardsFromDemoStores` (`cards`, its ten invented cases), `TestExcerptEdgeCutsASentence` (`evidence`) |
 | A speaker's role comes from a label, never from wording: a seller's retelling stays the seller's, a name a seller and a contact share is unknown, and a stated name is the only label of its cue. | `TestCardsFromDemoStores` (`cards`, its ten invented cases), `TestAStatedNameIsTheOnlyLabelOfACue` (`evidence`), `TestAVoiceTagAfterAStatedNameIsRefused` (`sources/calls`) |
@@ -289,6 +299,7 @@ its SHA-256.**
 | The credentials folder is a real folder of mode 0700. Each file in it is a regular file of mode 0600 with one link and at most 64 KiB, checked on the descriptor that is read, so a link or a swapped path is refused. | `TestCredentialsFolderIsPrivate`, `TestCredentialsStayAttachedToTheVerifiedFiles`, `TestCredentialsAreReadWithinTheirSize` (`cmd/gtm-connector`) |
 | A Slack sign-in is saved as `slack-WORKSPACE.json`, mode 0600, in the credentials folder, never in the database. No Slack token reaches any output, receipt or row. | `TestSlackFromSignInToACard` (`cmd/gtm-connector`), `TestNoCredentialIsPrinted` (`sources/slack`) |
 | The Slack sign-in gives the system browser a one-time start page on its loopback callback, never Slack's address, the state or the PKCE challenge, and none of the connector's settings. The callback takes only a GET of its own path with its Host and state, and the code is exchanged with the verifier of an S256 challenge. | `TestTheSystemBrowserIsGivenOnlyTheStartPage`, `TestSlackFromSignInToACard` (`cmd/gtm-connector`), `TestTheCallbackTakesOnlyItsOwnRequest` (`sources/slack`) |
+| The start page is answered once: a second request of it gets 404. It is taken only from a request that states no `Origin` or `Sec-Fetch-Site` of another site and carries no sign-in cookie, and a refused first request ends it too. It sets a cookie of a random value, `HttpOnly`, `SameSite=Lax`, for the callback's path, for the sign-in's ten minutes, and the callback is taken only with that cookie, once, so it comes from the browser that loaded the start page. | `TestTheCallbackTakesOnlyItsOwnRequest` (`sources/slack`), `TestTheSystemBrowserIsGivenOnlyTheStartPage` (`cmd/gtm-connector`) |
 | No Salesforce token is saved: a workspace keeps the alias, the environment and a digest of the identity, and no token, org ID or address. A token given as `--org` never reaches `sf`, a row or the screen, and a token handed to the process reaches no output, row or receipt. | `TestSalesforceIsReadByEveryCommand`, `TestAnOrgArgumentIsAnAliasOrNothing`, `TestASalesforceTokenHandedToTheProcessIsReadByEveryCommand` (`cmd/gtm-connector`) |
 | Signing in through `sf` runs exactly `sf org display` and `sf org auth show-access-token`, each with the alias and `--json`, with no input, its error output discarded, and its telemetry, updates and log files off. An alias `sf` could read as an option, or one holding a space or a control character, never reaches it. | `TestSigningInRunsTwoCommandsAndReadsNothing`, `TestExecRunsTheProgramWithItsNoiseOff`, `TestAnAliasThatIsNotOneNeverReachesSF` (`sources/salesforce`) |
 | The Salesforce token file is a regular file only its owner can read, or a link to one in a folder others cannot write, and a refusal gives its mode, never its path or the token. A database password file others can read is refused before any connection, by its mode, never by what it holds. | `TestTheTokenFileMustBePrivateAndPlain` (`sources/salesforce`), `TestAPasswordFileOthersCanReadIsRefused` (`cmd/gtm-connector`) |
@@ -298,6 +309,7 @@ its SHA-256.**
 | An error the connector did not word itself prints a fixed line or a SQLSTATE, never a driver's text, which can name a host, a role or a password. The install commands never print back what they were given, and a source's refusal is its fixed code. | `TestAnUnexpectedErrorPrintsNoneOfItsText`, `TestAFailingStorePrintsItsCodeOnly`, `TestTheInstallCommandsPrintNoneOfWhatTheyWereGiven` (`cmd/gtm-connector`), `TestAnAnswerSFDidNotGiveIsNoLogin` (`sources/salesforce`), `TestAFailedReadKeepsOnlyTheSourcesDiagnostic` (`cards`) |
 | `debug salesforce check` prints no record, account or org ID, address or token. The report of a Slack read, which `debug slack check` prints from, holds no ID, timestamp, token or message text. | `TestSalesforceIsReadByEveryCommand` (`cmd/gtm-connector`), `TestTheReportHoldsNoSourceValue` (`sources/slack`) |
 | A backup is written with mode 0600 and never over another file, and it carries the credential files `setup` makes. It leaves the Slack sign-ins out, since a copy of one could still be a valid sign-in. | `TestBackupAndRestoreKeepState`, `TestABackupLeavesTheSlackSignInOut` (`cmd/gtm-connector`) |
+| `setup` writes no owner secret, which no command uses. It leaves an `owner-secret` file an earlier setup wrote as it is and says so in one line, a backup does not carry it, and a backup of an earlier setup that carries it restores without installing it. | `TestNoCommandKeepsTheUnusedOwnerSecret` (`cmd/gtm-connector`) |
 
 ## Claims no test checks yet
 
@@ -309,8 +321,9 @@ its SHA-256.**
   routing with a selection is not, because the routing test starts `serve` without one.
 - Over MCP, a read that finishes after its source moved is answered with the gate's HTTP 503. The
   database's side of it is tested, the gate's answer is not.
-- `inspect` neutralizes again a unit sealed under another neutralizer version, so it shows nothing that
-  today's rules replace. No test seals a unit under another version and inspects it.
+- The TCP keepalives end a connection whose peer has gone. The test checks the settings each pooled
+  connection carries, and that the server ends a transaction left idle, not a dead peer found by its
+  probes.
 - `compose.yaml` publishes the server's and PostgreSQL's ports on the host's loopback only. No test
   reads the Compose file.
 
@@ -323,7 +336,10 @@ its SHA-256.**
   backup, holds the TLS key, the session key and the demo sign-in, and the folder also holds every
   Slack sign-in. A backup also holds every record every source returned.
 - **Processes of the operator are not isolated.** Anything running as the operator can read the
-  credentials folder and the app role's URL, and so every connected workspace.
+  credentials folder and the app role's URL, and so every connected workspace. It can also read the
+  Slack start page from the browser opener's arguments and ask for it before the browser does: the
+  operator's browser then gets a 404, and that process holds the sign-in's cookie and can finish it with
+  an approval of its own. In a workspace whose Slack was connected before, the pin refuses another user.
 - **Every client token of a workspace reads the same accounts.** Grants belong to the workspace's one
   `MCP clients` principal, and issuing a token grants it every account of the demo book, or every
   account a command has recorded in a workspace of real sources. There is no limit for one token
@@ -359,32 +375,7 @@ its SHA-256.**
 
 ## Open findings
 
-Each is true of the code today.
-
-1. **The Slack start page shows in the opener's arguments.** `debug slack connect` passes the
-   one-time start page to the browser opener as an argument. Anyone on the machine who can read the
-   opener's arguments can request the page before the browser does, receive the authorization page
-   meant for the operator's browser, and leave the operator's browser a 404.
-2. **A lost connection keeps its locks.** When the network to PostgreSQL stops passing bytes during a
-   receipt's transaction, the connector gives up after a fixed wait and leaves the receipt pending.
-   PostgreSQL keeps that transaction's locks until it notices the connection is gone. The connector
-   sets no `idle_in_transaction_session_timeout`, and leaves the server's keepalive settings as they
-   are.
-3. **Some sign-ins leave no receipt.** `connect salesforce` signs in and reads the org's identity, and
-   outside Developer Edition the four objects' fields, with no receipt. The Slack sign-in commands
-   (`debug slack connect`, `status --check` and `disconnect --revoke`) call Slack with none either.
-   Receipts cover tool calls and source reads.
-4. **One refusal of `serve` leaves no receipt.** When `serve` cannot read which workspace a bearer was
-   issued in, because the database fails or takes more than five seconds, the call is answered HTTP
-   503 in plain text and gets no receipt. Nothing runs.
-5. **The neutralizer version was not raised after the link changes.** It is still 3, so `inspect`
-   shows a unit sealed under the earlier link rules as it was sealed, not neutralized again.
-6. **A bare email address is not neutralized.** `dana@files.example` in a quotation stays as written,
-   and a GitHub Markdown client turns it into a mail link. In angle brackets or after `mailto:`, it is
-   neutralized.
-7. **An owner secret no sign-in uses.** `setup` writes an `owner-secret` file that grants nothing:
-   no sign-in and no command takes it as authority. `backup` reads it to carry it, and `restore` puts
-   it back.
+None. Each finding of the earlier review is a claim above, with its test.
 
 ## Not verified
 
