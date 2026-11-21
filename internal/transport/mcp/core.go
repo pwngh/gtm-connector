@@ -22,16 +22,15 @@ import (
 
 // settings are what both transports take from their configuration.
 type settings struct {
-	resource       string
-	rateLimit      int
-	windowSeconds  float64
-	writesDisabled bool
-	selected       bool
-	verify         Verifier
-	receipts       Recorder
-	run            ToolFunc
-	clock          func() float64
-	wall           func() float64
+	resource      string
+	rateLimit     int
+	windowSeconds float64
+	selected      bool
+	verify        Verifier
+	receipts      Recorder
+	run           ToolFunc
+	clock         func() float64
+	wall          func() float64
 }
 
 // core is what HTTP and stdio share: the tool selection, the policy, the rate windows, the receipt store,
@@ -50,8 +49,8 @@ type core struct {
 	dispatch atomic.Uint64
 }
 
-// selectTools is the one choice of tools and definitions both transports use: a selection offers the brief
-// tools, and its definitions keep the write so that a write is refused as disabled rather than unknown.
+// selectTools is the one choice of tools and definitions both transports use: only a selection offers and
+// defines the brief tools.
 func selectTools(selected bool) ([]string, map[string]ToolDefinition) {
 	tools := DefaultTools
 	if selected {
@@ -89,7 +88,7 @@ func newCore(s settings, versions []string) (*core, error) {
 	c.tools, c.definitions = selectTools(s.selected)
 	origin := s.resource[:strings.LastIndex(s.resource, "/")]
 	c.policy = Policy{Resource: s.resource, MetadataURL: origin + "/.well-known/oauth-protected-resource/mcp",
-		RateLimit: s.rateLimit, WindowSeconds: s.windowSeconds, WritesDisabled: s.writesDisabled || s.selected}
+		RateLimit: s.rateLimit, WindowSeconds: s.windowSeconds}
 	c.server = newServer(c.tools, s.run, c.invocation, versions)
 	return c, nil
 }

@@ -135,8 +135,9 @@ func TestMethodsAsPython(t *testing.T) {
 			`{"jsonrpc":"2.0","id":9,"error":{"code":-32602,"message":"Invalid request parameters","data":""}}`, ""},
 	})
 	// A string cursor is ignored and the whole list comes back.
+	whole := unlistedTools(t, "tools/list with a string cursor")
 	response := h.post(methodBody("8", "tools/list", `"cursor":"abc",`), vectorHeaders("tools/list", ""))
-	if response.Code != 200 || len(path(decode(t, response.Body.Bytes()), "result", "tools").([]any)) != 6 {
+	if response.Code != 200 || len(path(decode(t, response.Body.Bytes()), "result", "tools").([]any)) != len(whole) {
 		t.Errorf("string cursor: %d %s", response.Code, response.Body)
 	}
 }
@@ -288,7 +289,7 @@ func TestToolOrderAndDiscoveryArePinned(t *testing.T) {
 	for _, tool := range path(decode(t, listing.Body.Bytes()), "result", "tools").([]any) {
 		names = append(names, tool.(map[string]any)["name"].(string))
 	}
-	if want := []string{"get_account", "list_opportunities", "log_activity", "read_call_notes", "read_slack_messages", "search_accounts"}; !reflect.DeepEqual(names, want) {
+	if want := unlistedTools(t, "tools/list order"); !reflect.DeepEqual(names, want) {
 		t.Errorf("tool order %v", names)
 	}
 	discovery := h.rpc("server/discover", nil, "full", nil, true)
