@@ -80,7 +80,12 @@ const (
 )
 
 // Error is a failed read: one fixed diagnostic code. Upstream messages and credentials stay private.
-type Error struct{ Code string }
+type Error struct {
+	Code string
+	// Detail is a fixed sentence that says more than the code, such as the mode of a token file refused
+	// for it, or "". It never holds a value read from a source, a path or a credential.
+	Detail string
+}
 
 func (e *Error) Error() string { return e.Code }
 
@@ -223,11 +228,14 @@ func configure(instanceURL, accessToken string) (origin string, err error) {
 	if !found || len(host) > 253 || !hostPattern.MatchString(host) {
 		return "", refuse(invalidConfiguration)
 	}
-	if !echo.Usable(accessToken, 4096) {
+	if !echo.Usable(accessToken, maxToken) {
 		return "", refuse(invalidConfiguration)
 	}
 	return "https://" + host, nil
 }
+
+// maxToken is the longest token a reader takes.
+const maxToken = 4096
 
 func validEnvironment(environment string) bool {
 	return environment == "developer" || environment == "sandbox" || environment == "production"
@@ -321,14 +329,7 @@ func (r *Reader) bounded(ctx context.Context, capabilities bool, run func(o *ope
 	defer func() { <-r.turn }()
 	o := &operation{reader: r, ctx: ctx, token: r.accessToken, deadline: r.now().Add(operationTime)}
 	if !r.editionVerified {
-		organization, err := o.query(organizationQuery, 1)
-		if err != nil {
-			return err
-		}
-		if err := r.validateEnvironment(organization); err != nil {
-			return err
-		}
-		if err := o.checkUser(); err != nil {
+		if err := o.firstCheck(); err != nil {
 			return err
 		}
 		// A token sf gave during this first check is kept only now that it has proved the org.
@@ -343,6 +344,31 @@ func (r *Reader) bounded(ctx context.Context, capabilities bool, run func(o *ope
 		}
 	}
 	return run(o)
+}
+
+// firstCheck reads the Organization row and checks it against the selected environment, then asks which
+// user the token reads as. A token that expires between the two, so that the org answers the first and
+// refuses the second, is replaced once, as any first HTTP 401 of an operation is, and both checks run again
+// under the replacement, inside the same operation's budget.
+func (o *operation) firstCheck() error {
+	for {
+		organization, err := o.query(organizationQuery, 1)
+		if err == nil {
+			err = o.reader.validateEnvironment(organization)
+		}
+		if err == nil {
+			err = o.checkUser()
+		}
+		if err != errUserRefused {
+			return err
+		}
+		token, err := o.refresh()
+		if err != nil {
+			return err
+		}
+		// Kept only once both checks pass under it.
+		o.unproved = token
+	}
 }
 
 // validateEnvironment checks the Organization row against the selected environment, and that the org is the

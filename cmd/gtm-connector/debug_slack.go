@@ -20,6 +20,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/calls"
+	"github.com/pwngh/gtm-connector/internal/sources/childenv"
 	"github.com/pwngh/gtm-connector/internal/sources/slack"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -66,13 +67,13 @@ func systemBrowser(_ context.Context, page string) error {
 }
 
 // browserEnvironment is what the opener is given of the connector's environment: only what a desktop needs
-// to find and show a browser. Nothing else passes, so no database URL, password or token can.
+// to find and show a browser, of what childenv lets any child have. Nothing else passes, so no database URL,
+// password or token can.
 func browserEnvironment(environ []string) []string {
 	var kept []string
-	for _, entry := range environ {
+	for _, entry := range childenv.WithoutSecrets(environ) {
 		name, _, _ := strings.Cut(entry, "=")
 		switch {
-		case strings.HasPrefix(name, "GTM_"), strings.HasPrefix(name, "PG"), strings.HasSuffix(name, "_TOKEN"):
 		case name == "PATH", name == "HOME", name == "LANG", name == "DISPLAY", name == "WAYLAND_DISPLAY",
 			name == "DBUS_SESSION_BUS_ADDRESS", strings.HasPrefix(name, "XDG_"):
 			kept = append(kept, entry)

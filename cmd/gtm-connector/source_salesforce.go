@@ -165,7 +165,11 @@ func failureAs(err error, token bool) error {
 	if _, known := salesforceFailures[code]; !known {
 		code = "check_failed"
 	}
-	return &failure{code: exit, message: code + ": " + failureText(code, token)[0], next: salesforceNext}
+	text := failureText(code, token)[0]
+	if failed.Detail != "" {
+		text = failed.Detail
+	}
+	return &failure{code: exit, message: code + ": " + text, next: salesforceNext}
 }
 
 // failureText is what a code means and how to fix it, for an sf login or for a token handed to the process.
@@ -325,7 +329,7 @@ func (c *salesforceCRM) signInLocked(ctx context.Context) error {
 // identify signs in and checks the org and the user against the environment and, with fields outside
 // Developer Edition, the four objects' fields. It gives the pin: the digest of the org's identity and the
 // user's ID. In a workspace, a login that is not the pinned one is refused, and one that is becomes the
-// reader every read uses.
+// reader every read uses. A login that fails any of this is let go.
 func (c *salesforceCRM) identify(ctx context.Context, fields bool) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -337,12 +341,18 @@ func (c *salesforceCRM) identify(ctx context.Context, fields bool) (string, erro
 		check = c.login.PrepareConnection
 	}
 	identity, err := check(ctx)
-	if err != nil {
-		return "", c.failed(err)
-	}
 	pin := identity.Pin()
-	if c.pinned != "" && pin != c.pinned {
-		return "", identityElsewhere(c.token)
+	switch {
+	case err != nil:
+		err = c.failed(err)
+	case c.pinned != "" && pin != c.pinned:
+		err = identityElsewhere(c.token)
+	}
+	if err != nil {
+		// The login is let go with what it checked, so the next read signs in again and checks a new
+		// login from the start: a token file put right, or an alias signed in again, is read then.
+		c.login = nil
+		return "", err
 	}
 	c.reader = c.login
 	return pin, nil

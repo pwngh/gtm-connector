@@ -69,6 +69,7 @@ Sellers: "Morgan Reed"
 | --- | --- |
 | `connect demo` | Connects the CRM, calls and Slack to the invented demo book. Imported transcripts that are connected stay connected. Nothing is contacted. |
 | `connect salesforce --org ALIAS --state-dir NAME` | Reads the `sf` login of that alias, checks the org against `--environment`, pins the workspace to the org and the user the login reads as, and saves the alias and the environment. It reads no record. See [Salesforce](sources.md). |
+| `connect salesforce --token-env --state-dir NAME` | Does the same with the org address and token in `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` or `SALESFORCE_ACCESS_TOKEN_FILE`, where there is no `sf`, as in a container. It saves no alias. See [a token handed to the container](sources.md#without-sf-a-token-handed-to-the-container). |
 | `connect calls` | Connects imported call transcripts. Add them with `debug calls import`. See [call transcripts](sources.md). |
 | `connect slack` | Connects the Slack sign-in that `debug slack connect` saved for this workspace. Without one it exits `2` and names that command. See [Slack](sources.md). |
 | `connect status`, or `connect` alone | Lists `crm`, `calls` and `slack` as connected or not connected, with the org alias and environment for Salesforce, then the seller list. It reads only the database. |

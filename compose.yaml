@@ -84,7 +84,7 @@ services:
     command: [serve]
     # No Salesforce token is ever set in this file or the image: a Compose
     # file kept outside the repository mounts it from a folder of its own
-    # (docs/operations.md, "Without sf").
+    # (docs/sources.md, "Without sf").
     environment:
       GTM_DATABASE_URL: postgres://gtm_app:${GTM_APP_PASSWORD:?run make, which adds it to .env}@postgres:5432/gtm?sslmode=disable
       GTM_CREDENTIALS_DIR: /state/credentials

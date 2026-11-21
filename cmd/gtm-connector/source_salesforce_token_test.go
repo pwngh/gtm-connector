@@ -300,3 +300,52 @@ func TestASalesforceTokenHandedToTheProcessIsReadByEveryCommand(t *testing.T) {
 		t.Errorf("the removed row: %+v %v", rows, err)
 	}
 }
+
+// A CRM that serve or mcp stdio keeps open is let go of a login the pin refused: once the token file holds
+// a token of the pinned user again, the next read signs in afresh and reads. A token file others can read
+// is refused by one line that gives its mode and nothing of the file.
+func TestATokenRefusedByThePinIsReadAgainOnceItIsPutRight(t *testing.T) {
+	d := setUpDemo(t)
+	org, _, _ := inventedSalesforce(t)
+	rotate := handToken(t, salesforcetest.Token)
+	d.result(t, &connectResult{}, "connect", "salesforce", "--token-env", "--environment", "production",
+		"--state-dir", "token-books")
+	workspace, err := d.owner.Workspace(ctx, "token-books")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := d.owner.Connections(ctx, workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := bindingOf(rows[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	crm, err := openSalesforce(ctx, opening{connection: rows[0], binding: binding})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const otherUser = "invented-token-of-another-user-of-the-org"
+	org.Token = otherUser
+	org.Users[otherUser] = [2]string{"0059F2C41D7EA03ZZZ", "other@invented-books.example"}
+	rotate(otherUser)
+	if _, err := crm.Read(ctx, "get_account", inventedAccount); failureCode(err) != "source_identity_mismatch" {
+		t.Fatalf("a token of another user: %v", err)
+	}
+	org.Token = salesforcetest.Token
+	rotate(salesforcetest.Token)
+	if records, err := crm.Read(ctx, "get_account", inventedAccount); err != nil || len(records) == 0 {
+		t.Fatalf("after the file was put right: %v", err)
+	}
+
+	if err := os.Chmod(os.Getenv(salesforce.TokenFileVariable), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, message, _ := d.refusal(t, 2, "accounts", "--state-dir", "token-books")
+	if message != "salesforce_invalid_configuration: The token file can be read by others than its owner (mode "+
+		"0644). Make it readable by its owner alone: chmod 600." {
+		t.Errorf("a token file others can read: %s", message)
+	}
+}

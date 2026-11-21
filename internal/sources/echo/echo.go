@@ -54,9 +54,11 @@ type credential struct {
 // Format writes the redaction for every verb.
 func (Tokens) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, "[redacted]") }
 
-// Add puts a credential among the tokens. An empty one, or one already there, changes nothing.
+// Add puts a credential among the tokens. One that Usable refuses, such as a short fragment of a file
+// read while it was written, is never sent, so it is not held either: held, it would be found in ordinary
+// answers for the rest of the read and refuse them all. One already there changes nothing.
 func (t *Tokens) Add(token string) {
-	if token == "" {
+	if !Usable(token, len(token)) {
 		return
 	}
 	exact := unique.Make(token)

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/sources/echo"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -170,13 +171,20 @@ func (o *operation) refresh() (string, error) {
 	started := r.now()
 	given, err := r.credentials.read(o.ctx)
 	o.deadline = o.deadline.Add(r.now().Sub(started))
-	if codeOf(err) == invalidConfiguration {
+	var failed *Error
+	if errors.As(err, &failed) && failed.Code == invalidConfiguration && failed.Detail == "" {
 		return "", refuse(authRequired)
 	}
 	if err != nil {
 		return "", err
 	}
-	// Whatever sf gave is held from here on, so no answer of this Reader may hold it, sent or not.
+	// A token that breaks the token rule is refused before it is held: it is never sent, and held it would
+	// refuse every later answer that holds its text.
+	if !echo.Usable(given.accessToken, maxToken) {
+		return "", refuse(authRequired)
+	}
+	// Whatever usable token the source gave is held from here on, so no answer of this Reader may hold it,
+	// sent or not.
 	r.tokens.Add(given.accessToken)
 	if origin, err := configure(given.instanceURL, given.accessToken); err != nil || origin != r.instanceURL {
 		return "", refuse(authRequired)
@@ -192,6 +200,10 @@ func (o *operation) refresh() (string, error) {
 	return given.accessToken, nil
 }
 
+// errUserRefused is an HTTP 401 to the question of which user the token reads as. Its code is
+// salesforce_auth_required. During the first check it starts the one replacement of the token.
+var errUserRefused = &Error{Code: authRequired}
+
 // userInfoPath is where a token says which user it reads as.
 const userInfoPath = "/services/oauth2/userinfo"
 
@@ -201,6 +213,9 @@ const userInfoPath = "/services/oauth2/userinfo"
 func (o *operation) checkUser() error {
 	r := o.reader
 	value, err := o.requestOnce(userInfoPath, nil)
+	if codeOf(err) == authRequired {
+		return errUserRefused
+	}
 	if err != nil {
 		return err
 	}

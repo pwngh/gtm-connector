@@ -208,9 +208,9 @@ func TestAnExpiredTokenReadsTheEnvironmentOnce(t *testing.T) {
 		}
 	})
 	for name, change := range map[string]func(t *testing.T, path string){
-		"the file is gone":            func(t *testing.T, path string) { os.Remove(path) },
-		"the file holds a short text": func(t *testing.T, path string) { rotate(t, path, "o") },
-		"both variables are set":      func(t *testing.T, path string) { t.Setenv(TokenVariable, rotated) },
+		"the file is gone":          func(t *testing.T, path string) { os.Remove(path) },
+		"the file holds a fragment": func(t *testing.T, path string) { rotate(t, path, "e") },
+		"both variables are set":    func(t *testing.T, path string) { t.Setenv(TokenVariable, rotated) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			org, reader, accountID, path := start(t)
@@ -219,6 +219,13 @@ func TestAnExpiredTokenReadsTheEnvironmentOnce(t *testing.T) {
 			if _, err := reader.GetAccount(context.Background(), accountID); codeOf(err) != authRequired ||
 				err.Error() != authRequired || len(org.Requests) != 1 {
 				t.Fatal(err, org.Requests)
+			}
+			// Once the file is put right, the next read takes the new token and goes on. Nothing the
+			// refused read saw, such as a fragment "e" found in every answer, is held against it.
+			t.Setenv(TokenVariable, "")
+			rotate(t, path, rotated)
+			if found, err := reader.GetAccount(context.Background(), accountID); err != nil || len(found.Contacts) != 1 {
+				t.Fatalf("after the file was put right: %v", err)
 			}
 		})
 	}
