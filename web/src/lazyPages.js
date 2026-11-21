@@ -4,9 +4,7 @@ import {lazyPage} from './app/lazyPage.ts';
 export const pageLoaders = {
   Deals: () => import('./app/deals/Deals.tsx'),
   ApiEvidence: () => import('./ApiEvidence.jsx'),
-  ApiReadiness: () => import('./ApiReadiness.jsx'),
 };
 
 export const Deals = lazyPage(pageLoaders.Deals);
 export const ApiEvidence = lazyPage(pageLoaders.ApiEvidence);
-export const ApiReadiness = lazyPage(pageLoaders.ApiReadiness);

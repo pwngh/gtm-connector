@@ -1,9 +1,8 @@
 import {BrowserRouter, Navigate, Route, Routes} from 'react-router';
 import {ServerContext} from '../api/reads.ts';
 import type {ServerStore} from '../api/session.ts';
-// The styles the two existing pages use. Later files override earlier ones,
+// The styles the Evidence page uses. Later files override earlier ones,
 // so the order matters, and the app's own tokens and components come after.
-import '../readiness.css';
 import '../styles.css';
 import '../refinements.css';
 import '../modern.css';
@@ -13,6 +12,7 @@ import '../chrome.css';
 import '../api.css';
 import '../ui/tokens.css';
 import './deals/deals.css';
+import './deals/card/card.css';
 import {Frame} from './frame/Frame.tsx';
 import {home, opsHome} from './frame/pages.ts';
 

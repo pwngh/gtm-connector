@@ -67,6 +67,7 @@ export interface UnitBody {
   speaker?: string | null;
   role?: string | null;
   basis?: string | null;
+  contact?: number | null;
   text?: string;
   partial?: boolean;
   shown?: string;

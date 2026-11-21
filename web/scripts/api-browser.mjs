@@ -2,8 +2,8 @@
 // a stub of /api/v1 that each test steers: delayed and refused answers, two
 // accounts, the demo book's thirty accounts on Deals, blocked browser storage,
 // a session that expires, hostile text in names, gaps and receipts, a static
-// host's answer, and wrong addresses. The
-// frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
+// host's answer, and wrong addresses. The Deal card's ledger is checked at 320,
+// 390 and 1440 wide. The frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
 // and dark: tab order, target sizes, focus outlines, Escape, overflow, text
 // contrast and what browser storage holds. The stub keeps the Go server's
 // shapes: the session view, the {"error": {code, message}} envelope, the CSRF
@@ -193,7 +193,7 @@ const server = createServer(async (request, response) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 base = `http://127.0.0.1:${server.address().port}`;
-const evidence = `${base}/ops/evidence`, readiness = `${base}/ops/readiness`;
+const evidence = `${base}/ops/evidence`, thornfield = `${base}/deals/acc-003`;
 
 // Checks.
 const results = [];
@@ -294,7 +294,7 @@ for (const [label, answer] of [['431 text/plain', {status: 431, type: 'text/plai
 // 2. Sign-in, focus, picker commits, hostile text.
 await scenario('sign-in and the picker', async () => {
   const tab = await page();
-  await tab.goto(readiness, {waitUntil: 'networkidle'});
+  await tab.goto(evidence, {waitUntil: 'networkidle'});
   await tab.waitForSelector('.fr-signin');
   await tab.fill('input[name=login]', login);
   await tab.fill('input[name=password]', 'wrong');
@@ -306,7 +306,7 @@ await scenario('sign-in and the picker', async () => {
   await until(tab, () => document.activeElement?.matches('main h1'));
   check(true, 'after sign-in focus is on the page heading');
   check((await tab.textContent('.fr > .fr-announce[role=status]')).startsWith('Signed in as Demo reviewer'), 'the sign-in is announced in a live region that was already on the page');
-  await tab.waitForSelector('.api-readiness [data-open-gap]');
+  await tab.waitForSelector('.api-evidence [data-gap-code]');
   const injected = await tab.evaluate(() => Boolean(window.__injected) || Boolean(document.querySelector('main img')));
   check(!injected && (await tab.textContent('main')).includes('<img src=x onerror'), 'hostile names, gaps and speakers render as text');
   const select = tab.locator('select[name=account]');
@@ -317,7 +317,7 @@ await scenario('sign-in and the picker', async () => {
   check(tab.url() === before.url && stub.log.filter(entry => entry.includes('/cards')).length === before.reads, 'changing the picker reads nothing until the choice is committed');
   await tab.click('.api-account button[type=submit]');
   // The URL changes first; the router renders the new account in a transition, so wait for the page itself.
-  await until(tab, () => new URL(location.href).searchParams.get('account') === 'acc-002' && document.querySelector('.api-renewal-header h1')?.textContent.startsWith('Second') && document.querySelector('.api-readiness [data-open-gap]'));
+  await until(tab, () => new URL(location.href).searchParams.get('account') === 'acc-002' && document.querySelector('.api-renewal-header h1')?.textContent.startsWith('Second') && document.querySelector('.api-evidence [data-gap-code]'));
   check(await tab.evaluate(() => history.length) === before.history, 'a committed choice replaces the history entry');
   check((await tab.textContent('.api-renewal-header h1')).startsWith('Second <img'), 'the header shows the granted account by its server name, as text');
   check(tab.errors.length === 0, `no page errors (${tab.errors.join(' | ')})`);
@@ -372,19 +372,16 @@ await scenario('account and card out of step', async () => {
   await signIn(tab);
   await tab.waitForSelector('.api-card-mismatch');
   check(await tab.locator('.api-unit').count() === 0 && !stub.log.includes('GET /api/v1/cards/card-acc-003'), 'the other account’s card is neither read nor shown');
-  await tab.goto(`${readiness}?account=acc-002&card=card-acc-003`, {waitUntil: 'networkidle'});
-  await tab.waitForSelector('.api-card-mismatch');
-  check(await tab.locator('[data-open-gap]').count() === 0, 'Readiness shows no gap of the other account’s card');
   await tab.context().close();
 });
 
 // 5. Nine refusals, each shown as a refusal and never as an empty result.
 const refusals = [
-  ['the account list', readiness, path => path === '/api/v1/accounts', '.api-no-accounts'],
+  ['the account list', evidence, path => path === '/api/v1/accounts', '.api-no-accounts'],
   ['the card list on Evidence', `${evidence}?account=acc-003`, path => path.endsWith('/cards'), 'text=No card is published'],
-  ['the card list on Readiness', `${readiness}?account=acc-003`, path => path.endsWith('/cards'), 'text=No card is published'],
+  ['the card list on a deal', thornfield, path => path.endsWith('/cards'), '.dc-section, .dc-empty'],
   ['the card on Evidence', `${evidence}?account=acc-003`, path => path === '/api/v1/cards/card-acc-003', '.api-section-title'],
-  ['the card on Readiness', `${readiness}?account=acc-003`, path => path === '/api/v1/cards/card-acc-003', '[data-open-gap], .api-unit-summary'],
+  ['the card on a deal', thornfield, path => path === '/api/v1/cards/card-acc-003', '.dc-section, .dc-values-note, blockquote'],
   ['a receipt', `${evidence}?account=acc-003`, path => path.startsWith('/api/v1/receipts/'), 'text=No receipt is bound'],
   ['a unit in full', `${evidence}?account=acc-003&card=card-acc-003&unit=5`, path => path.includes('/units/'), '.api-unit-detail >> text=No receipt is bound'],
   ['an ungranted account', `${evidence}?account=acc-001`, () => false, 'text=No card is published'],
@@ -497,10 +494,10 @@ for (const [width, scheme] of [[320, 'light'], [1440, 'light'], [320, 'dark'], [
     await tab.waitForSelector('.ui-palette__group:has-text("Deals")');
     const groups = await tab.locator('.ui-palette__group').allTextContents();
     const options = await tab.locator('.ui-palette__label').allTextContents();
-    check(groups.join() === 'Deals,Ops' && options.join('|') === `Second ${hostile} Co.|Third Account Co.|Evidence|Readiness`,
+    check(groups.join() === 'Deals,Ops' && options.join('|') === `Second ${hostile} Co.|Third Account Co.|Evidence`,
       `${width} ${scheme}: the palette lists the deals by name, as text, then the Ops pages (${groups.join()}: ${options.join('|')})`);
-    await tab.locator('.ui-palette__option', {hasText: 'Readiness'}).first().click();
-    await until(tab, () => location.pathname.endsWith('/readiness') && new URL(location.href).searchParams.get('account') === 'acc-003');
+    await tab.locator('.ui-palette__option', {hasText: 'Third Account Co.'}).first().click();
+    await until(tab, () => location.pathname === '/deals/acc-003' && document.querySelector('.dc-title')?.textContent === 'Third Account Co.');
     check(tab.errors.length === 0, `${width} ${scheme}: no page errors (${tab.errors.join(' | ')})`);
     await tab.context().close();
   });
@@ -515,13 +512,13 @@ for (const width of [390, 1440]) {
     await tab.goto(`${evidence}?account=acc-003`, {waitUntil: 'networkidle'});
     await signIn(tab);
     await tab.waitForSelector('.api-unit');
-    await tab.goto(`${readiness}?account=acc-003`, {waitUntil: 'networkidle'});
-    await tab.waitForSelector('.api-readiness [data-open-gap]');
+    await tab.goto(thornfield, {waitUntil: 'networkidle'});
+    await tab.waitForSelector('.dc-ledger');
     await tab.reload({waitUntil: 'networkidle'});
-    await tab.waitForSelector('.api-readiness [data-open-gap]');
+    await tab.waitForSelector('.dc-ledger');
     // Long enough for anything loaded when the page is idle.
     await tab.waitForTimeout(2500);
-    check(stub.files.some(name => name.startsWith('ApiReadiness-')), `${width}: the Readiness page loaded its own chunk`);
+    check(stub.files.some(name => name.startsWith('Deals-')), `${width}: the deal loaded the Deals chunk`);
     const shown = await tab.evaluate(() => `${document.title}\n${document.body.innerText}`);
     check(!/Revenue Workflow Lab|walkthrough/i.test(shown), `${width}: no screen names the prototype (title ${await tab.title()})`);
     await tab.keyboard.press('Control+k');
@@ -541,7 +538,7 @@ for (const width of [390, 1440]) {
       return {entry, status: answer.status(), type: answer.headers()['content-type']};
     }));
     const title = await tab.title();
-    check(title === 'gtm-connector' && icons.map(icon => icon.entry).join() === 'icon /favicon.svg,alternate icon /favicon.ico,default /favicon.ico' && icons.every(icon => icon.status === 200 && icon.type.startsWith('image/')),
+    check(title === 'Third Account Co.' && icons.map(icon => icon.entry).join() === 'icon /favicon.svg,alternate icon /favicon.ico,default /favicon.ico' && icons.every(icon => icon.status === 200 && icon.type.startsWith('image/')),
       `${width}: the tab is titled ${title}, and its icons answer (${icons.map(icon => `${icon.entry} ${icon.status} ${icon.type}`).join(', ')})`);
     check(tab.origins.size === 1 && tab.origins.has(base), `${width}: no request left the page's origin (requested origins: ${[...tab.origins].join(', ')})`);
     await tab.context().close();
@@ -718,7 +715,7 @@ for (const width of [320, 390, 768, 1440]) {
         }
         const box = await tab.locator('[role=dialog]').boundingBox();
         facts = await measure(tab);
-        check(items.join() === 'Deals,Ops,Evidence,Readiness,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.width === width,
+        check(items.join() === 'Deals,Ops,Evidence,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.width === width,
           `${at}: the menu fills the screen with ${items.join(', ')}, and Tab stays in it (${trapped.map(focus => focus.name).join(', ')})`);
         check(healthy(facts), `${at}: the menu, ${reported(`${at} menu`, facts)}`);
         if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `menu-${width}-${scheme}.png`)});
@@ -799,7 +796,7 @@ await scenario('deals: thirty accounts in name order, each opening its address',
   for (const row of rows) {
     await tab.click(`.deals-row[data-account="${row.account}"]`);
     await until(tab, ([href, name]) => location.pathname === href && document.querySelector('.deals-row[aria-current="page"]')?.getAttribute('href') === href &&
-      document.querySelector('.deals-pane .api-renewal-header h1')?.textContent.startsWith(name), [row.href, row.name]);
+      document.querySelector('.deals-pane .dc-title')?.textContent === name, [row.href, row.name]);
     opened++;
   }
   const open = await tab.evaluate(() => ({rail: document.querySelector('.deals-head__title').tagName, heading: document.activeElement?.closest('.deals-pane') !== null, rows: document.querySelectorAll('.deals-row').length}));
@@ -949,7 +946,7 @@ await scenario('deals: keys and the filter', async () => {
   const row = await tab.evaluate(() => document.activeElement.getBoundingClientRect().width);
   check(focus.height >= 56 && focus.outline >= 3 && row >= 600, `focus shows on the whole row (${Math.round(row)}x${Math.round(focus.height)}, ${focus.outline}px outline)`);
   await tab.keyboard.press('Enter');
-  await until(tab, href => location.pathname === href && document.querySelector('.api-renewal-header h1'), `/deals/${names[1]}`);
+  await until(tab, href => location.pathname === href && document.querySelector('.dc-title'), `/deals/${names[1]}`);
   check(await tab.locator('.deals-back').isVisible() && await tab.locator('.deals-row').count() === 0, 'Enter opens the row; under 1100 the deal is the whole page, with a link back');
   await tab.click('.deals-back');
   await until(tab, () => location.pathname === '/deals' && document.querySelectorAll('.deals-row').length === 30);
@@ -996,6 +993,105 @@ for (const width of [320, 390, 768, 1440]) {
     });
   }
 }
+
+// 16. The Deal card: the stub's acc-003 card, with hostile speakers and gaps, at
+// 320, 390 and 1440 wide; refusals; a card of another account; an older card.
+const dealCard = cards['acc-003'];
+const shownUnits = dealCard.units.filter(unit => unit.kind === 'sentence' && unit.shown === 'yes' && !unit.body.partial);
+const cardParts = '.fr-chrome, .dc';
+for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+  await scenario(`deal card ${width} ${scheme}`, async () => {
+    const at = `deal card ${width} ${scheme}`;
+    const tab = await page({width, scheme});
+    await tab.goto(thornfield, {waitUntil: 'networkidle'});
+    await signIn(tab);
+    await tab.waitForSelector('.dc-ledger');
+    const facts = await tab.evaluate(() => {
+      const box = selector => document.querySelector(selector).getBoundingClientRect();
+      const lefts = selector => [...new Set([...document.querySelectorAll(selector)].map(el => Math.round(el.getBoundingClientRect().left)))];
+      const rights = selector => [...new Set([...document.querySelectorAll(selector)].map(el => Math.round(el.getBoundingClientRect().right)))];
+      const record = box('.dc-record'), words = box('.dc-words');
+      return {title: document.title, heading: document.querySelector('.dc-title').textContent, id: document.querySelector('.dc-id').textContent,
+        note: document.querySelector('.dc-values-note').textContent,
+        quotes: [...document.querySelectorAll('blockquote')].map(el => ({n: Number(el.dataset.unit), text: el.textContent, children: el.children.length,
+          face: getComputedStyle(el).fontFamily.split(',')[0], size: getComputedStyle(el).fontSize, rule: `${getComputedStyle(el).borderLeftWidth} ${getComputedStyle(el).borderLeftStyle}`})),
+        injected: Boolean(window.__injected) || Boolean(document.querySelector('.dc img')),
+        rule: Math.round(record.right), border: getComputedStyle(document.querySelector('.dc-record')).borderRightWidth,
+        recordLeft: Math.round(record.left), wordsLeft: Math.round(words.left), recordRights: rights('.dc-record .dc-line__n'), wordLefts: lefts('.dc-words .dc-people .dc-line__n'),
+        peopleFirst: box('.dc-people').top < box('.dc-the-record').top, recordBeforeNotRead: box('.dc-the-record').bottom <= box('.dc-not-read').top,
+        local: Object.keys(localStorage), session: Object.keys(sessionStorage)};
+    });
+    check(facts.heading === 'Third Account Co.' && facts.title === 'Third Account Co.' && facts.id === 'acc-003' &&
+      facts.note === 'The countdown and ARR are on the plain-text card. This page does not show them yet.',
+      `${at}: the title is the server’s name, the tab is titled with it, the ID and the line on the values are under it`);
+    const expected = shownUnits.map(unit => `${unit.n} ${unit.body.text}`).sort().join('|');
+    check(facts.quotes.map(quote => `${quote.n} ${quote.text}`).sort().join('|') === expected && facts.quotes.every(quote => quote.children === 0) && !facts.injected,
+      `${at}: each shown sentence is one blockquote holding exactly its text, and hostile speakers and gaps stay text`);
+    check(facts.quotes.every(quote => quote.face === 'Charter' || quote.face.includes('Charter') || quote.face.includes('Georgia')) && facts.quotes.every(quote => quote.size === '18px' && quote.rule === '3px solid'),
+      `${at}: a quotation is in the quotation face at 18 with a 3px rule (${facts.quotes[0].face} ${facts.quotes[0].size} ${facts.quotes[0].rule})`);
+    if (width >= 1100) {
+      // The record's numbers end at the 1px rule, and the words' numbers start where it ends.
+    check(facts.recordLeft < facts.wordsLeft && facts.border === '1px' && facts.recordRights.length === 1 && facts.rule - facts.recordRights[0] === 1 && facts.wordLefts.join() === String(facts.rule),
+        `${at}: the record and the words sit either side of the rule, their numbers in a line against it (rule ${facts.rule}; record numbers end ${facts.recordRights}; words numbers start ${facts.wordLefts})`);
+    } else {
+      check(facts.peopleFirst && facts.recordBeforeNotRead, `${at}: People said comes before The record, then Not read`);
+    }
+    const measured = await measure(tab, cardParts);
+    check(healthy(measured), `${at}: ${reported(at, measured)}`);
+    // Every number takes keyboard focus with the 3px ring, and is 44 by 44.
+    await tab.focus('.dc-cite');
+    await tab.keyboard.press('Shift+Tab');
+    await tab.keyboard.press('Tab');
+    const focus = await ring(tab);
+    const sizes = await tab.$$eval('.dc-cite', els => els.map(el => el.getBoundingClientRect()).map(box => [box.width, box.height]));
+    check(fits(focus) && focus.name.startsWith('Source') && sizes.every(([w, h]) => w >= 44 && h >= 44), `${at}: each of ${sizes.length} numbers is at least 44 by 44, and focus shows a ${focus.outline}px ring`);
+    check(facts.local.every(key => ['gtm-connector-theme', 'gtm-connector-deals-hint'].includes(key)) && facts.session.length === 0,
+      `${at}: storage holds only display keys (local ${facts.local.join()}; session ${facts.session.join()})`);
+    if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `deal-card-${width}-${scheme}.png`), fullPage: true});
+    check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+    await tab.context().close();
+  });
+}
+
+await scenario('deal card: a number opens the unit in full', async () => {
+  const tab = await page({width: 1440});
+  await tab.goto(thornfield, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.dc-ledger');
+  await tab.click('.dc-people .dc-cite');
+  await until(tab, () => location.pathname === '/ops/evidence' && document.querySelector('.api-unit-detail .api-receipt-full'));
+  const opened = new URL(tab.url());
+  check(opened.searchParams.get('account') === 'acc-003' && opened.searchParams.get('card') === 'card-acc-003' && opened.searchParams.get('unit') === '5',
+    `the first quotation's number opens that unit of that card in full (${opened.search})`);
+  await tab.context().close();
+});
+
+await scenario('deal card: a card of another account in ?card= is not read', async () => {
+  const tab = await page({width: 390});
+  await tab.goto(`${base}/deals/acc-002?card=card-acc-003`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('[data-notice="mismatch"]');
+  await apiSettled();
+  check(!stub.log.includes('GET /api/v1/cards/card-acc-003') && await tab.locator('.dc-section, blockquote').count() === 0,
+    'the other account’s card is neither requested nor shown, and a notice says so');
+  await tab.context().close();
+});
+
+await scenario('deal card: an older card pinned in ?card=', async () => {
+  const {units, gaps, ...head} = dealCard;
+  stub.steer = (method, path) => path === '/api/v1/accounts/acc-003/cards'
+    ? {json: {account: 'acc-003', cards: [{...head, id: 'card-acc-003-newer', published_at: '2027-01-16T09:00:00Z'}, head]}} : null;
+  const tab = await page({width: 390});
+  await tab.goto(`${thornfield}?card=card-acc-003`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('[data-notice="older"]');
+  const notice = (await tab.innerText('[data-notice="older"]')).replace(/\s+/g, ' ').trim();
+  const link = await tab.getAttribute('[data-notice="older"] a', 'href');
+  check(notice === 'You are reading the card of 15 Jan 2027, 15:00:04 UTC. A newer card was published 16 Jan 2027, 09:00:00 UTC. Open the newest' && link === '/deals/acc-003',
+    `an older card says so and links to the newest (${notice}; ${link})`);
+  check(!stub.log.includes('GET /api/v1/cards/card-acc-003-newer'), 'only the pinned card is read');
+  await tab.context().close();
+});
 
 await browser.close();
 server.close();

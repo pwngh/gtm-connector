@@ -322,6 +322,8 @@ export interface UnitFacts {
   speaker: string | null;
   role: string | null;
   basis: string | null;
+  /** The number of the contact's record unit a customer's label equals, or null. */
+  contact: number | null;
   receiptId: string | null;
 }
 
@@ -345,6 +347,7 @@ export function unitFacts(unit: Partial<UnitView> | null | undefined): UnitFacts
     speaker: text(body.speaker),
     role: text(body.role),
     basis: text(body.basis),
+    contact: Number.isInteger(body.contact) && (body.contact as number) > 0 ? (body.contact as number) : null,
     receiptId: unit?.receipt_id || null,
   };
 }

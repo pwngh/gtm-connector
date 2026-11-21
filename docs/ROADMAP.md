@@ -53,8 +53,10 @@ will connect your sources again, import your transcripts again, map your Slack t
 set your seller lists and selection files again. You will also set up your assistant apps again,
 because their saved entries start the Python package.
 
-The web app the binary serves shows Evidence and Readiness after sign-in and nothing else, at
-`/ops/evidence` and `/ops/readiness`; `/` opens Evidence. Any other address shows a page that says
+The web app the binary serves shows, after sign-in, the deals you may read at `/deals`, each deal's
+card at `/deals/{account}`, and Evidence at `/ops/evidence`; `/` opens the deals. A deal's card shows
+what people said and what the card did not read; its countdown, ARR and record values are on the
+plain-text card. Any other address shows a page that says
 there is no page there and links back. Served from a static host, it says only that it needs its server.
 Real cards will be read with the CLI and the MCP tools.
 

@@ -3,5 +3,4 @@
 export const serverPaths = {
   deals: '/deals',
   evidence: '/ops/evidence',
-  readiness: '/ops/readiness',
 };

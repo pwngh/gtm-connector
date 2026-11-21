@@ -1,7 +1,6 @@
 import {ArrowLeft} from 'lucide-react';
 import {type KeyboardEvent, type ReactNode, type RefObject, useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {Link, useLocation, useSearchParams} from 'react-router';
-import ApiEvidence from '../../ApiEvidence.jsx';
 import {demoAccount, formatUtc} from '../../api/client.ts';
 import {readsFor, useRead, useServer} from '../../api/reads.ts';
 import type {AccountCards, AccountView} from '../../api/types.ts';
@@ -9,13 +8,13 @@ import {Button} from '../../ui/Button.tsx';
 import {Field} from '../../ui/Field.tsx';
 import {Refusal, refusalText} from '../../ui/Refusal.tsx';
 import {displayStorage} from '../../ui/theme.ts';
+import DealCard from './card/DealCard.tsx';
 import {byName, cardReadLimit, dealAt, dealHref, dealsPath, hintKey, matching, type RowRead, readInTurn, rowFrom} from './deals.ts';
 
 // Deals: every account the server grants the signed-in person, by name, each
 // with the time of its newest card. At 1100 and wider the list is a rail and
 // the open deal is beside it; narrower, the list and the deal are each the
-// whole page. The open deal is the Evidence page for that account until the
-// card page exists.
+// whole page. The open deal is its Deal card.
 
 const wideQuery = '(min-width: 1100px)';
 
@@ -413,7 +412,7 @@ function OpenDeal({account, wide}: {account: string; wide: boolean}) {
           Deals
         </Link>
       )}
-      <ApiEvidence account={account} />
+      <DealCard account={account} />
     </div>
   );
 }
