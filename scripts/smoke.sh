@@ -9,7 +9,17 @@
 set -eu
 cd "$(dirname "$0")/.."
 . ./.env
-compose="${COMPOSE:-docker compose}"
+# The same choice the Makefile makes: the Compose plugin, or the standalone docker-compose.
+if [ -n "${COMPOSE:-}" ]; then
+  compose="$COMPOSE"
+elif docker compose version >/dev/null 2>&1; then
+  compose="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  compose="docker-compose"
+else
+  echo "Docker Compose was not found (docker compose or docker-compose)." >&2
+  exit 1
+fi
 creds="$GTM_HOME/credentials"
 base="https://127.0.0.1:$GTM_PORT"
 jar="$(mktemp)"
