@@ -53,7 +53,8 @@ To take a record back, push a retraction. Later cards stop citing it, and its hi
 
 ## MCP
 
-The MCP server runs over stdio or HTTP and serves the same deals, cards and proof.
+The MCP server runs over stdio or HTTP and serves the same deals, cards and proof. Ask it "what is
+blocking thornfield?" from any client below.
 
 | Client | How it connects |
 | --- | --- |
@@ -61,6 +62,7 @@ The MCP server runs over stdio or HTTP and serves the same deals, cards and proo
 | Claude Code | stdio or HTTP |
 | ChatGPT | HTTP |
 | Codex | stdio or HTTP |
+| Cursor | stdio or HTTP |
 
 `gtm setup` prints the configuration for each client.
 

@@ -133,7 +133,7 @@ communications beside it.
 4. **Read the Deal card,** your 30-second renewal snapshot. It shows the renewal countdown and ARR, what changed since last time, exact buyer quotes and titles, promises you made, and missing or unread sources. From the card:
    - click any line for its source proof, straight to the exact call or Slack message;
    - track blockers on the renewal checklist and playbook until they are resolved;
-   - ask Claude, Codex or a local model what is blocking this renewal.
+   - ask the council (Claude, Codex and local models) what is blocking this renewal.
 5. **The deal closes.** It is archived with its final card.
 
 If your team turns approval on, new calls and threads wait for your OK before they reach the card.
@@ -160,7 +160,7 @@ Results go out four ways:
 | Output | What it gives |
 | --- | --- |
 | REST API, `/v1/deals` | refresh on demand, the card as JSON, proof lookup |
-| MCP server, stdio or HTTP | Claude Desktop, Claude Code, ChatGPT, Codex |
+| MCP server, stdio or HTTP | Claude Desktop, Claude Code, ChatGPT, Codex, Cursor |
 | Outbound webhooks and Slack alerts | deep links to flagged deals |
 | Web UI | work queue, diffs, receipt drawer |
 
