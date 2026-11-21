@@ -15,8 +15,9 @@ import (
 )
 
 // README.md shows one traced number of the demo card: the inspect command in a shell block, then what
-// inspect prints on a terminal in a text block of its own. The README shortens three values of the trace. A card's ID and a receipt's ID are random in every run, so the
-// README's own spelling of them is the reference. The digest is the traced one, cut to its first eight
+// inspect prints on a terminal in a text block of its own. The README shortens three values of the
+// trace. A card's ID and a receipt's ID are random in every run, so the README's own spelling of them
+// is the reference. The digest is the traced one, cut to its first eight
 // characters.
 const (
 	shownAccount = "acc-003"
