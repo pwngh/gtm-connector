@@ -31,6 +31,25 @@ images. The web app is embedded in the binary, so there is nothing else to deplo
 The server then connects as an app role. That role reads and writes rows. It cannot change the
 schema or switch off a check.
 
+### The app role's password
+
+The operator chooses it. `gtm setup` reads the app role's name and password from
+`GTM_DATABASE_URL`, connects as the owner through `GTM_OWNER_DATABASE_URL`, and makes the role with
+that password, or sets the existing role's password to it. It does this on every run. Setup refuses
+a URL that gives no password. The credentials folder holds no copy of it: the server and every command connect
+with `GTM_DATABASE_URL` as they find it when they start.
+
+With `make`, the first run writes `.env` (mode 0600) with a random `GTM_APP_PASSWORD`, and Compose
+and `scripts/host.sh` build `GTM_DATABASE_URL` from it for the `gtm_app` role.
+
+To rotate it:
+
+1. Put the new password in `GTM_DATABASE_URL`. With `make`, change `GTM_APP_PASSWORD` in `.env`.
+2. Run `gtm setup` with the owner URL set (`make dev` or `make up` run it). The old password is
+   refused from then on.
+3. Restart `gtm serve`, and give the new URL to anything else that holds the old one, such as an
+   assistant app's `mcp stdio` configuration.
+
 The database must be encoded as UTF8. Setup refuses any other encoding before it runs a migration,
 with one line: `the database is encoded as SQL_ASCII; create it with ENCODING 'UTF8' TEMPLATE template0`.
 

@@ -61,6 +61,8 @@ type run struct {
 	exists bool
 	// action is the form inspect was given: account, brief, numbers or receipt.
 	action string
+	// admitted is the operator's word a card or receipt inspect shows was admitted on, or nil for one made here.
+	admitted *postgres.OperatorWord
 }
 
 // folder is the --state-dir that names this workspace in the commands printed for it.
@@ -155,7 +157,7 @@ func runCommand(ctx context.Context, command string, tokens []string, s screen) 
 		return 0
 	}
 	fmt.Fprintln(s.out, r.human(result))
-	if cut, ok := result.(*strictjson.Object); ok && command == "accounts" {
+	if cut, ok := result.(*strictjson.Object); ok && command == "accounts" && get(cut, "has_more") == true {
 		// On stderr, so piped rows stay rows.
 		listed, _ := get(cut, "accounts").([]any)
 		fmt.Fprintf(s.err, "Showing the first %d accounts. More match; narrow the search with --query.\n", len(listed))
@@ -234,6 +236,8 @@ func (r *run) result(ctx context.Context) (any, error) {
 		return r.connect(ctx)
 	case "demo":
 		return r.demo(ctx)
+	case "admit":
+		return r.admit(ctx)
 	}
 	return r.audit(ctx)
 }
@@ -262,10 +266,10 @@ func (r *run) accounts(ctx context.Context) (any, error) {
 		rows[i] = row
 	}
 	shown, err := neutral(rows)
-	if err != nil || !more {
-		return shown, err
+	if err != nil {
+		return nil, err
 	}
-	return strictjson.NewObject("accounts", shown, "has_more", true), nil
+	return strictjson.NewObject("accounts", shown, "has_more", more), nil
 }
 
 // brief reads one account through the card maker and publishes its card. The raw records stay in the
@@ -369,20 +373,24 @@ func (r *run) inspect(ctx context.Context) (any, error) {
 		if !r.exists {
 			return nil, r.noAuditLog()
 		}
+		var value *strictjson.Object
 		receipt, err := r.store.Receipt(ctx, r.workspace.ID, target)
-		if errors.Is(err, postgres.ErrNotFound) {
-			return nil, refused("Audit receipt not found.")
+		switch {
+		case errors.Is(err, postgres.ErrNotFound):
+			// A receipt the Python package wrote, admitted with its card.
+			value, err = r.admittedReceipt(ctx, target)
+		case err == nil:
+			value, err = receipt.AuditValue()
 		}
-		if err != nil {
-			return nil, err
-		}
-		value, err := receipt.AuditValue()
 		if err != nil {
 			return nil, err
 		}
 		// A caller's arguments can hold any text: shown, it is inert as source text on a card is.
 		arguments, err := neutral(get(value, "arguments"))
 		value.Set("arguments", arguments)
+		if r.admitted != nil {
+			value.Set("admitted", strictjson.NewObject("from_org", r.admitted.FromOrg, "note", admittedNote))
+		}
 		return value, err
 	}
 	// A card is read from the sources its workspace is connected to, so a workspace with none holds no card.
@@ -398,7 +406,14 @@ func (r *run) inspect(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	if r.action == "numbers" {
-		return traces(card, target, numbers)
+		traced, err := traces(card, target, numbers)
+		if err != nil || r.admitted == nil {
+			return traced, err
+		}
+		for _, found := range traced.([]any) {
+			found.(*strictjson.Object).Set("admitted", r.admittedValue())
+		}
+		return traced, nil
 	}
 	units, _ := get(card, "units").([]any)
 	listed := []any{}
@@ -411,7 +426,11 @@ func (r *run) inspect(ctx context.Context) (any, error) {
 			listed = append(listed, unit)
 		}
 	}
-	return strictjson.NewObject("brief_id", target, "account_id", get(card, "account_id"), "units", listed), nil
+	result := strictjson.NewObject("brief_id", target, "account_id", get(card, "account_id"), "units", listed)
+	if r.admitted != nil {
+		result.Set("admitted", r.admittedValue())
+	}
+	return result, nil
 }
 
 // account is the account as the CRM returns it, with the newest saved card of it that the workspace holds
@@ -458,7 +477,8 @@ func (r *run) account(ctx context.Context, id string) (any, error) {
 func (r *run) sealed(ctx context.Context, brief string, bound evidence.Sources) (*strictjson.Object, error) {
 	stored, err := r.store.CardByBrief(ctx, r.workspace.ID, brief)
 	if errors.Is(err, postgres.ErrNotFound) {
-		return nil, refused("%s", cards.ErrNoCard)
+		// A card the Python package made, admitted into this workspace.
+		return r.admittedCard(ctx, brief, bound)
 	}
 	if err != nil {
 		return nil, err

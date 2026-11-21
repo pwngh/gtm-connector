@@ -5,13 +5,18 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/pgtest"
@@ -325,6 +330,62 @@ func rewrite(t *testing.T, from, to, name string) {
 	writer.Close()
 	gz.Close()
 	os.WriteFile(to, out.Bytes(), 0o600)
+}
+
+// Setup takes the app role's name and password from GTM_DATABASE_URL: it makes the role with that password,
+// and run again with another password in the URL, it sets the role's password to that one. The old password
+// is then refused.
+func TestSetupSetsTheAppRolePasswordFromTheURL(t *testing.T) {
+	ownerURL := pgtest.URL(t)
+	suffix := make([]byte, 6)
+	rand.Read(suffix)
+	role := "gtm_app_" + hex.EncodeToString(suffix)
+	t.Cleanup(func() {
+		if conn, err := pgx.Connect(context.Background(), ownerURL); err == nil {
+			defer conn.Close(context.Background())
+			conn.Exec(context.Background(), "DROP OWNED BY "+role)
+			conn.Exec(context.Background(), "DROP ROLE "+role)
+		}
+	})
+	appURL := func(password string) string {
+		parsed, err := url.Parse(ownerURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed.User = url.UserPassword(role, password)
+		return parsed.String()
+	}
+	opens := func(password string) error {
+		store, err := openAppStore(ctx, config{databaseURL: appURL(password)})
+		if err == nil {
+			store.Close()
+		}
+		return err
+	}
+	cfg := config{ownerDatabaseURL: ownerURL, credentialsDir: privateDir(t), allowedHosts: []string{"127.0.0.1:8443"}}
+	for _, password := range []string{"first-app-password-for-this-test", "second-app-password-for-this-test"} {
+		cfg.databaseURL = appURL(password)
+		if err := setUp(ctx, cfg); err != nil {
+			t.Fatal(err)
+		}
+		if err := opens(password); err != nil {
+			t.Fatalf("after setup, the app role does not open with its URL: %v", err)
+		}
+	}
+	// A server that trusts local connections, as CI's does, lets any password in, so the old password's
+	// refusal is checked only where a password nobody set is refused.
+	if opens("a-password-no-setup-gave") == nil {
+		t.Log("this server does not check passwords: the old password's refusal is not checked")
+	} else if err := opens("first-app-password-for-this-test"); err == nil || !strings.Contains(err.Error(), "(28P01)") {
+		t.Fatalf("the old password: %v", err)
+	}
+	// A URL that gives no password, with no password file or PGPASSWORD to give one, is refused.
+	t.Setenv("PGPASSWORD", "")
+	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "none"))
+	cfg.databaseURL = strings.Replace(appURL("x"), ":x@", "@", 1)
+	if err := setUp(ctx, cfg); err == nil || err.Error() != "the app role needs a password" {
+		t.Fatalf("a URL with no password: %v", err)
+	}
 }
 
 // Setup and restore refuse a database that is not encoded as UTF-8, with one line, and install no schema in it.

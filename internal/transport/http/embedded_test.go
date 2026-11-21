@@ -190,12 +190,19 @@ var assetLink = regexp.MustCompile(`"(/assets/[^"]+)"`)
 
 // The build compiled into this test binary, which is the one the connector's
 // binary carries, serves its page, a deep link and every asset the page
-// names. A checkout that has not built the web app has none to check.
+// names. A checkout that has not built the web app has none to check, unless
+// GTM_REQUIRE_WEB_BUILD=1 says it must, as the web job in CI does after its build.
 func TestTheBuildInTheBinaryIsServed(t *testing.T) {
 	build := web.App()
+	if build == nil && os.Getenv("GTM_REQUIRE_WEB_BUILD") == "1" {
+		t.Fatal("GTM_REQUIRE_WEB_BUILD=1, and no web app was built into this binary")
+	}
 	if build == nil {
 		t.Skip("the web app is not built: run npm ci and npm run build in web/")
 	}
+	// Served from a folder that holds no checkout: the page and its assets come from the build inside the
+	// binary, never from a file beside it.
+	t.Chdir(t.TempDir())
 	s := serving(t, httptransport.Config{Web: build})
 	page := send(s, http.MethodGet, "/", "127.0.0.1:8443", nil)
 	if page.Code != http.StatusOK || page.Header().Get("Content-Type") != "text/html; charset=utf-8" ||
@@ -206,9 +213,12 @@ func TestTheBuildInTheBinaryIsServed(t *testing.T) {
 		!strings.Contains(page.Header().Get("Content-Security-Policy"), "script-src 'self' 'sha256-") {
 		t.Errorf("the page's inline script is not in the policy %q", page.Header().Get("Content-Security-Policy"))
 	}
-	deep := send(s, http.MethodGet, "/ops/evidence", "127.0.0.1:8443", nil)
-	if deep.Code != http.StatusOK || deep.Body.String() != page.Body.String() {
-		t.Errorf("a deep link: %d", deep.Code)
+	for _, path := range []string{"/deals/acc-003", "/deals/acc-003/communications", "/ops/coverage", "/ops/activity"} {
+		deep := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
+		if deep.Code != http.StatusOK || deep.Header().Get("Content-Type") != "text/html; charset=utf-8" ||
+			deep.Body.String() != page.Body.String() {
+			t.Errorf("the deep link %s: %d %q", path, deep.Code, deep.Header().Get("Content-Type"))
+		}
 	}
 	assets := assetLink.FindAllStringSubmatch(page.Body.String(), -1)
 	if len(assets) == 0 {

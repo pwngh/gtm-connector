@@ -75,6 +75,14 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	during := postgrestest.Publish(t, f, postgrestest.Account, f.Reader.ID, "brief-deal")
 	ok(t, sql(t, f, `INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref) VALUES ($1, $2, $3, $4)`,
 		f.Workspace.ID, during.Card.ID, deal.Ref, postgrestest.Account))
+	// The Python card of a recorded folder fills the admitted cards and receipts.
+	folder, word := pythonFolder(t)
+	added, err := f.Store.Admit(ctx, f.Workspace.ID, word, []postgres.AdmittedCard{{BriefID: pythonBrief, Kind: "cli",
+		AccountID: "acc-003", Bytes: folder.Cards[pythonBrief], SealID: pythonSeal}}, folder.Lines)
+	ok(t, err)
+	if len(added.Cards) != 1 || len(added.Receipts) != len(folder.Lines) {
+		t.Fatalf("admitted %+v", added)
+	}
 }
 
 // A backup restores every row of every table it holds, column for column,
