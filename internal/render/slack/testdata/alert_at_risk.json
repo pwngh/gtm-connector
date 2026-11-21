@@ -43,7 +43,7 @@
       "text": {
         "type": "mrkdwn",
         "verbatim": true,
-        "text": ":red_circle: *Legal or security blocker*\nMarked as a blocker on 2027-01-14. 1 sentence cited. <https://gtm.example.internal/deals/acc-003?card=card-dbd6af736631&unit=5|See the source>"
+        "text": ":red_circle: *Legal or security blocker*\nMarked as a blocker on 2027-01-14. 1 sentence cited. <https://gtm.example.internal/deals/acc-003?card=card-61c9379456b6&unit=5|See the source>"
       }
     },
     {
@@ -51,7 +51,7 @@
       "text": {
         "type": "mrkdwn",
         "verbatim": true,
-        "text": ":red_circle: *Close-date slippage*\nThe close date moved 2 times in 30 days, last from 2027-01-25 to 2027-02-01. Threshold: 2 moves. <https://gtm.example.internal/deals/acc-003?card=card-dbd6af736631&unit=3|See the source>"
+        "text": ":red_circle: *Close-date slippage*\nThe close date moved 2 times in 30 days, last from 2027-01-25 to 2027-02-01. Threshold: 2 moves. <https://gtm.example.internal/deals/acc-003?card=card-61c9379456b6&unit=3|See the source>"
       }
     },
     {
