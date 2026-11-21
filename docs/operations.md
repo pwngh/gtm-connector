@@ -80,7 +80,7 @@ are exactly the ones the binary carries. Otherwise it answers 503 with one of fo
 | --- | --- |
 | `migrations_behind` | A migration the binary carries is not applied. Run `gtm setup`. |
 | `migrations_ahead` | A migration is applied that the binary does not carry. The binary is older than the database. |
-| `migrations_changed` | An applied migration's contents differ from the binary's file of that number. |
+| `migrations_changed` | An applied migration's contents differ from the binary's file of that name. |
 | `database_unavailable` | The database did not answer within three seconds. |
 
 `gtm health` asks the same question from a terminal. It exits 1 with the status unless the answer
@@ -104,6 +104,11 @@ A restore needs an empty database. It refuses any row the server would refuse on
 card whose seal does not name its bytes. If a restore stops part way, run the same command again.
 Until it finishes, setup and the server refuse to start.
 
+A backup names the migrations its database had applied. A restore applies those, loads the rows,
+then applies the rest of the binary's migrations and checks the rows again. It refuses a backup
+that names a migration the binary does not carry. A backup that gives a schema number from 1 to 13
+in place of the names, as v0.1.0 writes, restores the same way.
+
 > **A backup leaves the Slack sign-in out.** Slack spends a refresh token once, so a restored copy is
 > one Slack no longer accepts. After a restore, run `debug slack connect` again for each workspace
 > that reads Slack.
@@ -114,6 +119,29 @@ Until it finishes, setup and the server refuse to start.
 2. Run the new binary's `setup` against it.
 3. Open a sealed card and check that it verifies.
 4. Then upgrade the running server the same way.
+
+An older binary refuses a database a newer binary's setup has migrated. To go back, restore the
+backup into an empty database.
+
+## Adding a migration
+
+```sh
+make migration NAME=deal_matches   # writes internal/storage/postgres/migrations/20261121T1830_deal_matches.sql
+```
+
+A migration file is named by the UTC minute it was written and lower-case words:
+`YYYYMMDDTHHMM_words.sql`. The first thirteen files keep the names `0001_...` to `0013_...` and
+sort before every stamp. The binary refuses any other name, a fourteenth number among them.
+
+Setup applies every migration the database has not applied, in name order, each in its own
+transaction, and records its name and the SHA-256 of its contents. Two branches that each add a
+migration merge in either order with no rename. A database that applied the later-stamped file
+first applies the earlier one at its next setup, so a migration must apply whether or not files
+merged after it was written have run. Two migrations that each add a column to one table leave the
+columns in the order they ran; a restore loads columns by name.
+
+Never edit a merged migration: setup and the server refuse a database whose recorded digest differs
+from the file. Write a new migration instead.
 
 ## Limits
 

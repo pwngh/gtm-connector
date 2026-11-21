@@ -24,6 +24,8 @@ type recorder struct {
 	store     receipts.Store
 	workspace string
 	tokens    Storage
+	// deals names the account of the deal read_deal_card asks for, on its receipt.
+	deals Storage
 	// sources gives the workspace's sources as they are connected now. Start asks it once for each call.
 	sources func(ctx context.Context) (Opened, error)
 
@@ -45,6 +47,9 @@ type pending struct {
 // stale is how long an unfinished call is kept. A receipt's lease is shorter, so by then the store has
 // finished it as interrupted.
 const stale = 15 * time.Minute
+
+// dealTools read the store and no source, so no source is opened for them.
+var dealTools = map[string]bool{"list_deals": true, "read_deal_card": true}
 
 // readSource is the source system each direct read reads.
 var readSource = map[string]string{"search_accounts": "crm", "get_account": "crm", "list_opportunities": "crm",
@@ -80,7 +85,11 @@ func (r *recorder) Start(ctx context.Context, s mcp.Start) (string, error) {
 	// The sources are opened before the receipt starts, so the receipt names the connection the call reads
 	// through. Opening reads the workspace's own rows and no source. A call whose sources cannot be opened
 	// still gets its receipt, which names no connection, and is refused under it.
-	view, refusal := r.sources(looking)
+	var view Opened
+	var refusal error
+	if !dealTools[start.Tool] {
+		view, refusal = r.sources(looking)
+	}
 	if definition, known := mcp.Definitions[start.Tool]; known {
 		start.Scope = definition.Scope
 		// A direct read is a source read of its connection, so it finishes by binding what it returned.
@@ -88,6 +97,17 @@ func (r *recorder) Start(ctx context.Context, s mcp.Start) (string, error) {
 		if arguments, ok := s.Arguments.(*strictjson.Object); ok && arguments != nil {
 			account, _ := arguments.Get("account_id")
 			start.AccountRef, _ = account.(string)
+			// A deal's card is read for the deal's account, which the receipt names when the deal exists,
+			// whether or not the caller may read it.
+			if ref, isText := member(arguments, "deal_id").(string); isText && start.Tool == "read_deal_card" {
+				deal, err := r.deals.Deal(looking, r.workspace, ref)
+				switch {
+				case err == nil:
+					start.AccountRef = deal.AccountRef
+				case !errors.Is(err, postgres.ErrNotFound):
+					return "", err
+				}
+			}
 		}
 	}
 	// The receipt of a prepared brief is the brief's seal, and a seal names no brief of the caller's.

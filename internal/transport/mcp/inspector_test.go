@@ -187,6 +187,9 @@ func TestInspector(t *testing.T) {
 	}
 	replay(t, inspectorListing, wantUnlisted)
 	delete(scopes, writeTool)
+	for _, tool := range DealTools {
+		scopes[tool] = "crm:read"
+	}
 	if !reflect.DeepEqual(declared, scopes) {
 		t.Fatalf("tools %v", declared)
 	}

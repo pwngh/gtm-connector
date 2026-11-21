@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,15 +28,19 @@ func SetPublishTimeouts(s *Store, lock, statement time.Duration) {
 	s.publishLock, s.publishStatement = lock, statement
 }
 
-// MigrateTo migrates to exactly this schema version, as an older binary did.
-func MigrateTo(s *Store, ctx context.Context, version int) error { return s.migrateTo(ctx, version) }
+// MigrateTo applies the first n migrations in name order, as an older binary
+// that held only those did.
+func MigrateTo(s *Store, ctx context.Context, n int) error { return s.migrateFirst(ctx, n) }
 
-// MigrationVersion is the number of the embedded migration with this name, or 0.
-func MigrationVersion(name string) int { return migrationVersion(name) }
+// MigrationVersion is the place, from 1, of the embedded migration
+// PREFIX_name.sql in name order, or 0.
+func MigrationVersion(name string) int {
+	return slices.Index(MigrationNames(), migrationFile(name)) + 1
+}
 
 // MigrationSQL gives the text of each embedded migration, in order.
 func MigrationSQL() []string {
-	list, _ := migrations()
+	list, _ := embeddedMigrations()
 	var texts []string
 	for _, m := range list {
 		texts = append(texts, m.sql)
@@ -43,12 +48,39 @@ func MigrationSQL() []string {
 	return texts
 }
 
+// MigrationDigest is the SHA-256 of a migration's text, as schema_migrations
+// records it.
+func MigrationDigest(sql string) string { return newMigration("x", sql).sha256 }
+
+// CheckMigrationNames checks the embedded files with files of these names
+// beside them, as the binary checks its files.
+func CheckMigrationNames(names ...string) error {
+	list, err := embeddedMigrations()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		list = append(list, newMigration(name, ""))
+	}
+	_, err = checkMigrations(list)
+	return err
+}
+
+// AddMigrations makes the store apply these files, name to text, beside the
+// embedded ones, as a binary that held them would; nil takes them away.
+func AddMigrations(s *Store, files map[string]string) {
+	s.extraMigrations = nil
+	for name, sql := range files {
+		s.extraMigrations = append(s.extraMigrations, newMigration(name, sql))
+	}
+}
+
 // MigrationLock is the advisory lock a migration and a restore hold.
 const MigrationLock int64 = migrationLock
 
-// DumpAt dumps a database at an older schema version, as an older binary did.
-func DumpAt(s *Store, ctx context.Context, version int, open func(table string) (io.WriteCloser, error)) ([]TableCopy, error) {
-	return s.dump(ctx, version, open)
+// DumpAt dumps a database with these migrations applied, as an older binary did.
+func DumpAt(s *Store, ctx context.Context, applied []string, open func(table string) (io.WriteCloser, error)) ([]TableCopy, error) {
+	return s.dump(ctx, applied, open)
 }
 
 // NotBackedUp gives the tables a backup leaves out, with the reasons.

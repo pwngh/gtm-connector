@@ -210,6 +210,9 @@ func TestCurrentDiscoveryAndToolScopeDeclarations(t *testing.T) {
 		"read_call_notes": "calls:read", "read_slack_messages": "slack:read", "log_activity": "crm:write"}
 	replay(t, "test_current_discovery_and_tool_scope_declarations: tools/list", wantUnlisted)
 	delete(want, writeTool)
+	for _, tool := range DealTools {
+		want[tool] = "crm:read"
+	}
 	if !reflect.DeepEqual(scopes, want) {
 		t.Fatalf("scopes %v", scopes)
 	}

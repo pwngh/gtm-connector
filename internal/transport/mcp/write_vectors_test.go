@@ -27,7 +27,8 @@ const (
 	wantUnauthorized = "unauthorized"
 	// wantWithheld is the 503 a refusal becomes when its receipt cannot finish: the receipt stays pending.
 	wantWithheld = "withheld"
-	// wantUnlisted is a tools/list answer with the recorded tools except log_activity.
+	// wantUnlisted is a tools/list answer with the recorded tools except log_activity, and the two deal tools,
+	// which the Python gateway did not have, in the SDK's order.
 	wantUnlisted = "unlisted"
 )
 
@@ -93,7 +94,16 @@ func replay(t *testing.T, name, want string) {
 func unlistedTools(t *testing.T, name string) []string {
 	t.Helper()
 	replay(t, name, wantUnlisted)
-	return slices.DeleteFunc(slices.Clone(recordedTools), func(tool string) bool { return tool == writeTool })
+	return listedTools()
+}
+
+// listedTools are the default server's tools in the SDK's order: the recorded ones except log_activity, and
+// the deal tools.
+func listedTools() []string {
+	tools := append(slices.DeleteFunc(slices.Clone(recordedTools), func(tool string) bool { return tool == writeTool }),
+		DealTools...)
+	slices.Sort(tools)
+	return tools
 }
 
 // TestMain fails a whole run of the package that left a named write vector out. The Inspector's vector runs
@@ -304,6 +314,7 @@ func TestATokenWithAScopeOutsideTheReadSetOpensNothing(t *testing.T) {
 		"search_accounts": {}, "get_account": {"account_id": "acc-001"}, "list_opportunities": {},
 		"read_call_notes": {"account_id": "acc-001"}, "read_slack_messages": {"account_id": "acc-003"},
 		"prepare_renewal_brief": {"account_id": "acc-001"}, "read_renewal_brief": {"brief_id": "brief-fixture-001"},
+		"list_deals": {}, "read_deal_card": {"deal_id": fixtureDeal},
 	}
 	for _, selected := range []bool{false, true} {
 		tools := DefaultTools

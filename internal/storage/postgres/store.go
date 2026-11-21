@@ -27,6 +27,9 @@ type Store struct {
 	// publishLock and publishStatement, when a test sets them, stand in for
 	// publishLockTimeout and publishStatementTimeout (bound).
 	publishLock, publishStatement time.Duration
+	// extraMigrations, when a test sets them, are applied beside the
+	// embedded files as if they were embedded.
+	extraMigrations []migration
 }
 
 // bound sets how long tx waits on a lock and runs one statement:
