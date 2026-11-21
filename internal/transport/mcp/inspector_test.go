@@ -185,6 +185,8 @@ func TestInspector(t *testing.T) {
 			}
 		}
 	}
+	replay(t, inspectorListing, wantUnlisted)
+	delete(scopes, writeTool)
 	if !reflect.DeepEqual(declared, scopes) {
 		t.Fatalf("tools %v", declared)
 	}

@@ -76,11 +76,10 @@ type RequestFacts struct {
 
 // Policy is request_checks.RequestPolicy.
 type Policy struct {
-	Resource       string
-	MetadataURL    string
-	RateLimit      int
-	WindowSeconds  float64
-	WritesDisabled bool
+	Resource      string
+	MetadataURL   string
+	RateLimit     int
+	WindowSeconds float64
 }
 
 // RequestError is one refusal with its reason, message and response headers.
@@ -175,15 +174,16 @@ func CheckRequest(request RequestFacts, policy Policy, windows Windows, definiti
 			// Without an id the call is a notification: nothing would run and nothing would answer.
 			return refuse(updated, "call_id_required", "a tool call requires a string or integer id", nil)
 		}
+		if request.Tool == writeTool {
+			// No scope opens the write tool, so its refusal asks for none.
+			return refuse(updated, "crm_write_disabled", "crm_write_disabled", nil)
+		}
 		definition, known := definitions[request.Tool]
 		if known && definition.Scope != "" && !slices.Contains(token.Scopes, definition.Scope) {
 			challenge := fmt.Sprintf(`Bearer error="insufficient_scope", scope="%s", resource_metadata="%s"`,
 				definition.Scope, policy.MetadataURL)
 			return refuse(updated, "insufficient_scope", fmt.Sprintf("insufficient_scope: %s required", definition.Scope),
 				map[string]string{"WWW-Authenticate": challenge})
-		}
-		if known && !definition.ReadOnly && policy.WritesDisabled {
-			return refuse(updated, "crm_write_disabled", "crm_write_disabled", nil)
 		}
 		if known && !ValidArguments(request.Tool, definition, request.Arguments) {
 			return refuse(updated, "invalid_arguments", "invalid tool arguments", nil)

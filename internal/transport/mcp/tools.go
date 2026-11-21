@@ -14,41 +14,40 @@ type StringArgument struct {
 	Nullable  bool
 }
 
-// ToolDefinition is a tool's scope, write flag and argument rules, as tool_definitions.ToolDefinition states it.
+// ToolDefinition is a tool's scope and argument rules, as tool_definitions.ToolDefinition states them.
 type ToolDefinition struct {
 	Scope     string
-	ReadOnly  bool
 	Arguments map[string]StringArgument
 }
 
 func required(n int) StringArgument { return StringArgument{MaxLength: n, Required: true} }
 
-// Definitions holds every tool the connector can serve, as tool_definitions.TOOL_DEFINITIONS does.
+// Definitions holds every tool the connector can serve: the read tools of tool_definitions.TOOL_DEFINITIONS.
+// Each requires a read scope.
 var Definitions = map[string]ToolDefinition{
-	"search_accounts": {Scope: "crm:read", ReadOnly: true, Arguments: map[string]StringArgument{
+	"search_accounts": {Scope: "crm:read", Arguments: map[string]StringArgument{
 		"query":          {MaxLength: 200},
 		"account_number": {MaxLength: 40, Nullable: true},
 	}},
-	"get_account":        {Scope: "crm:read", ReadOnly: true, Arguments: map[string]StringArgument{"account_id": required(64)}},
-	"list_opportunities": {Scope: "crm:read", ReadOnly: true, Arguments: map[string]StringArgument{"account_id": {MaxLength: 64, Nullable: true}}},
-	"read_call_notes":    {Scope: "calls:read", ReadOnly: true, Arguments: map[string]StringArgument{"account_id": required(64)}},
-	"read_slack_messages": {Scope: "slack:read", ReadOnly: true, Arguments: map[string]StringArgument{
-		"account_id": required(64),
-	}},
-	"log_activity": {Scope: "crm:write", ReadOnly: false, Arguments: map[string]StringArgument{
-		"account_id": required(64), "kind": required(40), "body": required(2000), "idempotency_key": required(128),
-	}},
-	"prepare_renewal_brief": {Scope: "crm:read", ReadOnly: true, Arguments: map[string]StringArgument{
+	"get_account":         {Scope: "crm:read", Arguments: map[string]StringArgument{"account_id": required(64)}},
+	"list_opportunities":  {Scope: "crm:read", Arguments: map[string]StringArgument{"account_id": {MaxLength: 64, Nullable: true}}},
+	"read_call_notes":     {Scope: "calls:read", Arguments: map[string]StringArgument{"account_id": required(64)}},
+	"read_slack_messages": {Scope: "slack:read", Arguments: map[string]StringArgument{"account_id": required(64)}},
+	"prepare_renewal_brief": {Scope: "crm:read", Arguments: map[string]StringArgument{
 		"account_id": required(64), "as_of": {MaxLength: 10, Nullable: true},
 	}},
-	"read_renewal_brief": {Scope: "crm:read", ReadOnly: true, Arguments: map[string]StringArgument{"brief_id": required(64)}},
+	"read_renewal_brief": {Scope: "crm:read", Arguments: map[string]StringArgument{"brief_id": required(64)}},
 }
 
-// DefaultTools are the six tools the default server offers; SelectedTools replace the write with the brief tools.
+// DefaultTools are the five tools the default server offers; SelectedTools add the brief tools.
 var (
-	DefaultTools  = []string{"search_accounts", "get_account", "list_opportunities", "read_call_notes", "read_slack_messages", "log_activity"}
+	DefaultTools  = []string{"search_accounts", "get_account", "list_opportunities", "read_call_notes", "read_slack_messages"}
 	SelectedTools = []string{"search_accounts", "get_account", "list_opportunities", "read_call_notes", "read_slack_messages", "prepare_renewal_brief", "read_renewal_brief"}
 )
+
+// writeTool is the Python gateway's CRM write. The connector is read-only: it never lists, defines or runs
+// this tool, and CheckRequest refuses a call to it as crm_write_disabled.
+const writeTool = "log_activity"
 
 // ValidAccountSearch reports whether an exact account number may be used, as tool_definitions.valid_account_search does.
 func ValidAccountSearch(query, accountNumber any) bool {
