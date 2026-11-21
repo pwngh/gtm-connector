@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -160,7 +161,7 @@ func TestBackupAndRestoreKeepState(t *testing.T) {
 	if err := restore(ctx, untouched, target, archive); err == nil || !strings.Contains(err.Error(), "differs") {
 		t.Fatalf("restored over other credentials: %v", err)
 	}
-	if v, _ := untouched.SchemaVersion(ctx); v != 0 {
+	if v, _ := untouched.AppliedMigrations(ctx); len(v) != 0 {
 		t.Fatal("a refused restore changed the database")
 	}
 
@@ -263,8 +264,8 @@ func TestASchemaOneBackupRestores(t *testing.T) {
 	if err := restore(ctx, fresh, target, filepath.Join("testdata", "backup-schema1.tar.gz")); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := fresh.SchemaVersion(ctx); err != nil || v != postgres.LatestSchemaVersion() {
-		t.Fatalf("restored at schema %d (%v)", v, err)
+	if v, err := fresh.AppliedMigrations(ctx); err != nil || !slices.Equal(v, postgres.MigrationNames()) {
+		t.Fatalf("restored with migrations %v (%v)", v, err)
 	}
 	creds, err := openCredentials(target, false)
 	if err != nil {
@@ -289,6 +290,79 @@ func TestASchemaOneBackupRestores(t *testing.T) {
 	refused, err := fresh.ReceiptByOperation(ctx, workspace, "refused")
 	if err != nil || string(refused.Arguments) != `{"a": 2, "b": 1}` || *refused.HTTPStatus != 403 {
 		t.Fatalf("the refused call after restore: %s %v", refused.Arguments, err)
+	}
+}
+
+// testdata/backup-schema12.tar.gz was written by v0.1.0, whose migrations end
+// at 0012, and backup-schema13.tar.gz by main at c15c38a, whose migrations end
+// at 0013: setup, demo, then backup. Their manifests give schema_version.
+// This binary restores both with every migration applied, and signs in the
+// demo principal.
+func TestBackupsOfNumberedSchemasRestore(t *testing.T) {
+	for file, principal := range map[string]string{
+		"backup-schema12.tar.gz": "75efdfac-e29b-444f-a437-72717ea1d14e",
+		"backup-schema13.tar.gz": "76c8aaf0-8eb1-4859-a97b-734a5b0e85c5",
+	} {
+		t.Run(file, func(t *testing.T) {
+			fresh := openFresh(t)
+			target := filepath.Join(t.TempDir(), "restored")
+			if err := restore(ctx, fresh, target, filepath.Join("testdata", file)); err != nil {
+				t.Fatal(err)
+			}
+			if v, err := fresh.AppliedMigrations(ctx); err != nil || !slices.Equal(v, postgres.MigrationNames()) {
+				t.Fatalf("restored with migrations %v (%v)", v, err)
+			}
+			if state, err := fresh.MigrationState(ctx); err != nil || state != postgres.MigrationsCurrent {
+				t.Fatalf("the restored migrations are %q (%v)", state, err)
+			}
+			creds, err := openCredentials(target, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer creds.Close()
+			demo, err := parseDemo(must(creds.read(demoFile)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, digest, err := fresh.DemoPrincipalByLogin(ctx, demo.Login)
+			if err != nil || p.ID != principal || !bytes.Equal(digest, demoDigest(demo)) {
+				t.Fatalf("the demo sign-in after restore: %+v %v", p, err)
+			}
+		})
+	}
+}
+
+// A backup that names a migration this binary does not hold, or a schema
+// number past 0013, is refused before the database is touched.
+func TestABackupOfANewerSchemaIsRefused(t *testing.T) {
+	_, archive := backedUp(t)
+	for want, change := range map[string]func(*manifest){
+		"the backup holds migration 29991231T2359_later.sql, which this binary does not": func(m *manifest) {
+			m.Migrations = append(m.Migrations, "29991231T2359_later.sql")
+		},
+		"the backup is at schema 14; this binary knows 1 to 13": func(m *manifest) {
+			m.Version, m.SchemaVersion, m.Migrations = 1, 14, nil
+		},
+		"is not a version 1 or 2 gtm-connector backup": func(m *manifest) { m.SchemaVersion = 13 },
+	} {
+		t.Run(want, func(t *testing.T) {
+			edited := edit(t, archive, func(files map[string][]byte) {
+				var m manifest
+				if err := json.Unmarshal(files["manifest.json"], &m); err != nil || m.Version != 2 {
+					t.Fatalf("this binary's manifest: version %d (%v)", m.Version, err)
+				}
+				change(&m)
+				files["manifest.json"], _ = json.Marshal(m)
+			})
+			fresh := openFresh(t)
+			if err := restore(ctx, fresh, filepath.Join(t.TempDir(), "creds"), edited); err == nil ||
+				!strings.Contains(err.Error(), want) {
+				t.Fatalf("restore answered %v", err)
+			}
+			if v, _ := fresh.AppliedMigrations(ctx); len(v) != 0 {
+				t.Fatalf("a refused restore left %v", v)
+			}
+		})
 	}
 }
 
@@ -405,16 +479,16 @@ func TestSetupRefusesADatabaseNotInUTF8(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if version, err := store.SchemaVersion(ctx); err != nil || version != 0 {
-		t.Fatalf("schema %d after the refusal (%v)", version, err)
+	if version, err := store.AppliedMigrations(ctx); err != nil || len(version) != 0 {
+		t.Fatalf("migrations %v after the refusal (%v)", version, err)
 	}
 	// A restore refuses it too.
 	_, archive := backedUp(t)
 	if err := restore(ctx, store, privateDir(t), archive); err == nil || err.Error() != want {
 		t.Fatalf("restore: got %v, want %s", err, want)
 	}
-	if version, err := store.SchemaVersion(ctx); err != nil || version != 0 {
-		t.Fatalf("schema %d after the restore was refused (%v)", version, err)
+	if version, err := store.AppliedMigrations(ctx); err != nil || len(version) != 0 {
+		t.Fatalf("migrations %v after the restore was refused (%v)", version, err)
 	}
 }
 
