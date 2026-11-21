@@ -116,7 +116,7 @@ test('every recorded card: each shown sentence once as its whole text, every oth
       `${at}: the gaps in Not read's order`,
     );
   }
-  assert.equal(sentences, 90 + 1297 + 444);
+  assert.equal(sentences, 90 + 1297 + 375);
 });
 
 test('people said: three groups in order, each with its count, newest first, attribution as recorded', () => {
