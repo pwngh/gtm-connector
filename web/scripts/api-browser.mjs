@@ -141,7 +141,7 @@ async function api(request, response, path) {
   return refuse(response, 404, 'not_found');
 }
 
-const types = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json'};
+const types = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json'};
 const server = createServer(async (request, response) => {
   const path = new URL(request.url, 'http://stub').pathname;
   if (path.startsWith('/api/')) {
@@ -150,7 +150,10 @@ const server = createServer(async (request, response) => {
     try {return await api(request, response, path);} finally {stub.pending--;}
   }
   const file = normalize(join(dist, path));
-  const target = file.startsWith(dist) && existsSync(file) && statSync(file).isFile() ? file : join(dist, 'index.html');
+  const found = file.startsWith(dist) && existsSync(file) && statSync(file).isFile();
+  // As on the Go server, a missing file is not found and only a path without an extension gets the app.
+  if (!found && extname(path)) {response.writeHead(404, {...securityHeaders, 'Content-Type': 'text/plain; charset=utf-8'}); response.end('Not found.'); return;}
+  const target = found ? file : join(dist, 'index.html');
   stub.files.push(basename(target));
   response.writeHead(200, {...securityHeaders, 'Content-Type': types[extname(target)] || 'application/octet-stream'});
   response.end(readFileSync(target));
@@ -165,7 +168,9 @@ const check = (ok, what) => {results.push(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
 const browser = await chromium.launch({channel: options.channel, headless: true});
 async function page({width = 1440, scheme = 'light', blockStorage = false} = {}) {
   const context = await browser.newContext({viewport: {width, height: 900}, colorScheme: scheme, reducedMotion: 'reduce'});
-  // Offline: the font stylesheet and anything else off the stub is refused.
+  // Offline: anything off the stub is refused. The origin of every request is kept.
+  const origins = new Set();
+  context.on('request', request => {const url = new URL(request.url()); if (!['data:', 'blob:'].includes(url.protocol)) origins.add(url.origin);});
   await context.route(url => !url.href.startsWith(base), route => route.abort());
   await context.addInitScript(([theme, block]) => {
     document.addEventListener('securitypolicyviolation', event => console.error(`policy violation: ${event.violatedDirective} ${event.blockedURI}`));
@@ -174,6 +179,7 @@ async function page({width = 1440, scheme = 'light', blockStorage = false} = {})
   }, [scheme, blockStorage]);
   const tab = await context.newPage();
   tab.setDefaultTimeout(8000);
+  tab.origins = origins;
   tab.errors = [];
   tab.console = [];
   tab.on('console', message => tab.console.push(message.text()));
@@ -509,6 +515,17 @@ for (const width of [390, 1440]) {
     check(palette.title === 'Go to' && palette.placeholder === 'Find a page' && empty === 'No page matches.', `${width}: the palette is titled ${palette.title}, asks to ${palette.placeholder} and says ${empty}`);
     check(violations(tab).length === 0, `${width}: no policy violation (${violations(tab).join(' | ')})`);
     check(tab.errors.length === 0, `${width}: no page errors (${tab.errors.join(' | ')})`);
+    // The icons the page links, and the one a browser asks for by default, answer with an image.
+    // They are read from here: Playwright aborts a page's request for /favicon.ico while routes are set.
+    const linked = await tab.evaluate(() => [...document.querySelectorAll('link[rel~=icon]')].map(link => `${link.rel} ${link.getAttribute('href')}`));
+    const icons = await Promise.all([...linked, 'default /favicon.ico'].map(async entry => {
+      const answer = await tab.request.get(base + entry.split(' ').at(-1));
+      return {entry, status: answer.status(), type: answer.headers()['content-type']};
+    }));
+    const title = await tab.title();
+    check(title === 'gtm-connector' && icons.map(icon => icon.entry).join() === 'icon /favicon.svg,alternate icon /favicon.ico,default /favicon.ico' && icons.every(icon => icon.status === 200 && icon.type.startsWith('image/')),
+      `${width}: the tab is titled ${title}, and its icons answer (${icons.map(icon => `${icon.entry} ${icon.status} ${icon.type}`).join(', ')})`);
+    check(tab.origins.size === 1 && tab.origins.has(base), `${width}: no request left the page's origin (requested origins: ${[...tab.origins].join(', ')})`);
     await tab.context().close();
   });
 }
