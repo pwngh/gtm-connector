@@ -525,7 +525,7 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 // card's as "card KEY" and a unit's as "unit KEY".
 type renewal struct {
 	cards, units, of int
-	members      map[string]int
+	members          map[string]int
 }
 
 func (r renewal) String() string {

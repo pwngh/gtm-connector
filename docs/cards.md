@@ -219,8 +219,10 @@ A sentence ends at closing punctuation or at a blank line.
   its own:
   - a list item: after any spaces, `-`, `+`, `*`, `•`, `◦` or `▪`, or a number with `.` or `)`, then
     any space;
-  - a speaker label: one to three capitalized words, at most 40 characters, a colon and a space, as in
-    `Dana Reyes: we can sign`;
+  - a speaker's turn: a line whose text up to its first colon names a known person of the card, a
+    contact of the account or a listed seller, compared as a speaker label is compared for a role,
+    then a space and more, as in `Dana Ito: we can sign`. A label that names nobody known, such as
+    `Update:` or `Blocker:`, leaves the line the author's own;
   - a block quote: a run of lines that start with `>` or `&gt;`;
   - a code block, from the line that opens a ```` ``` ```` fence to the line that closes it. The line
     after a block quote or a code block starts a new block too.

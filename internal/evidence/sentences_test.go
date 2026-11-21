@@ -48,19 +48,28 @@ var slackCases = []struct {
 	{"Seat math I just ran\n```\nseats = 116\n```\nPlease check it.",
 		[]string{"Seat math I just ran", "``` seats = 116 ```", "Please check it."}, nil, []int{0, 1}},
 	{"Run this:\n```make test```\nthen tell me.", []string{"Run this:", "```make test```", "then tell me."}, nil, []int{0, 1}},
-	// A line that starts with a speaker label starts a block.
-	{"Pasted from the call\nDana: we can sign\nMorgan Reed: then send it",
-		[]string{"Pasted from the call", "Dana: we can sign", "Morgan Reed: then send it"}, []int{1, 2}, []int{0, 1}},
-	// A heading of words that are not all capitalized is no speaker label.
+	// A line that opens with the name of a known person of the card, a contact or a listed seller, is that
+	// person's turn: a block of its own, marked quoted.
+	{"Pasted from the call\nDana Ito: we can sign\nMorgan  Reed: then send it",
+		[]string{"Pasted from the call", "Dana Ito: we can sign", "Morgan Reed: then send it"}, []int{1, 2}, []int{0, 1}},
+	// A label that names nobody known is the author's own line, which wraps.
+	{"Update: legal is done\nBlocker: pricing\nDana: we can sign",
+		[]string{"Update: legal is done Blocker: pricing Dana: we can sign"}, nil, nil},
 	{"Our numbers\nJune renewal math: 90 seats.", []string{"Our numbers June renewal math: 90 seats."}, nil, nil},
 	// A dash or a number that is no list marker is a wrap.
 	{"Seats go to\n-5 from 40", []string{"Seats go to -5 from 40"}, nil, nil},
 	{"Renewal is\n*not* blocked", []string{"Renewal is *not* blocked"}, nil, nil},
 }
 
+// cardPeople are the known people of the card built builds: its contact Dana Ito and its listed seller
+// Morgan Reed, compared as the card compares a label.
+func cardPeople(name string) bool {
+	return knownPerson(name, []string{"Morgan Reed"}, []contact{{name: "Dana Ito", n: 2}})
+}
+
 func TestSentencesInASlackMessage(t *testing.T) {
 	for _, c := range slackCases {
-		got, quoted, err := sentences(c.body, true)
+		got, quoted, err := sentences(c.body, true, cardPeople)
 		if err != nil || !reflect.DeepEqual(got, c.want) {
 			t.Errorf("Sentences(%q, lines): got %q %v, want %q", c.body, got, err, c.want)
 			continue
@@ -74,6 +83,10 @@ func TestSentencesInASlackMessage(t *testing.T) {
 	// In a call note or a cue, a line break before a list item is a wrap too.
 	if got, _ := Sentences("We need:\n- SSO", false); !reflect.DeepEqual(got, []string{"We need: - SSO"}) {
 		t.Errorf("Sentences without lines: got %q", got)
+	}
+	// With no person known, no line is a turn.
+	if got, _ := Sentences("Pasted\nDana Ito: we can sign", true); !reflect.DeepEqual(got, []string{"Pasted Dana Ito: we can sign"}) {
+		t.Errorf("Sentences with no person known: got %q", got)
 	}
 }
 
@@ -169,6 +182,13 @@ func TestASpeakersTurnIsNotTheAuthorsClaim(t *testing.T) {
 	}
 	if !strings.Contains(text, fmt.Sprintf(`"Morgan Reed" (%s)`, QuotedBasis)+"\n        \"Dana Ito: we will sign by Friday.\"") {
 		t.Errorf("the card does not print the turn as quoted by its author:\n%s", text)
+	}
+	// A label that names nobody known to the card, such as a heading, leaves the line the author's own.
+	units, _ = built(t, "We will see.", "From the call today.\nUpdate: we will sign by Friday.\nDana: no rider.")
+	for _, u := range units["slack"] {
+		if u.Quoted || u.Role != "seller" {
+			t.Errorf("the author's own line %q is quoted %v, with role %q", u.Text, u.Quoted, u.Role)
+		}
 	}
 }
 
