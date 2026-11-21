@@ -132,6 +132,8 @@ var unreadGaps = map[string]Unread{
 	"slack_not_selected":  {"slack", "slack_not_selected", "Slack was not read: no thread is selected for this account."},
 	"slack_not_requested": {"slack", "slack_not_requested", "Slack was not read: it was not requested for this card."},
 	"slack_denied":        {"slack", "slack_denied", "Slack was not read: the grant lacks slack:read."},
+	"calls_not_matched":   {"calls", "calls_not_matched", "Calls were not read: the account's transcript is not matched to this card."},
+	"slack_not_matched":   {"slack", "slack_not_matched", "Slack was not read: the account's thread is not matched to this card."},
 }
 
 // SourceName is a source as a message names it.

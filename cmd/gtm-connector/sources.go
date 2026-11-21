@@ -281,6 +281,9 @@ type reads struct {
 	kinds     map[string]*sourceKind
 	bindings  map[string]*strictjson.Object // each row's binding, read
 	sellers   []string
+	// gate, when set, keeps a card's reads of imported calls and live Slack threads to those matched to the
+	// deal the card is read for.
+	gate *matchGate
 	// The reads opened so far.
 	crmReads   crmSource
 	callsReads callsSource
@@ -510,6 +513,10 @@ func (s cardSource) Read(ctx context.Context, tool, accountID string) (string, [
 		if err != nil {
 			return "calls", nil, err
 		}
+		if s.gate != nil && s.backend("calls") == "imported" {
+			records, err := s.gate.callNotes(ctx, calls, accountID)
+			return "calls", records, err
+		}
 		records, err := calls.CallNotes(ctx, accountID)
 		return "calls", records, err
 	case "read_slack_messages":
@@ -524,6 +531,9 @@ func (s cardSource) ReadThread(ctx context.Context, accountID string) ([]*strict
 	slack, err := s.slack(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	if s.gate != nil && s.backend("slack") == "slack" {
+		return s.gate.messages(ctx, slack, accountID)
 	}
 	return slack.Messages(ctx, accountID)
 }

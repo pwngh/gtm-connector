@@ -143,8 +143,11 @@ func TestTheReportingRoleReadsOnlyTheViews(t *testing.T) {
 	}
 	// The fixture card states the day it is as of, its renewal line counts down to its day, and its ARR line
 	// holds its amount.
-	if n := scalar(t, f.URL, `SELECT count(*)::text FROM reporting.cards WHERE as_of = '`+postgrestest.AsOf+`'`); n != "2" {
-		t.Errorf("%s cards are as of the fixture card's day", n)
+	// Every card the fixture stores is as of its day, as each card's own bytes state it.
+	if n, want := scalar(t, f.URL, `SELECT count(*)::text FROM reporting.cards WHERE as_of = '`+postgrestest.AsOf+`'`),
+		scalar(t, f.URL, `SELECT count(*)::text FROM cards
+			WHERE convert_from(card_bytes, 'UTF8')::json ->> 'as_of' = '`+postgrestest.AsOf+`'`); n != want || n == "0" {
+		t.Errorf("%s cards are as of the fixture card's day, of %s stored", n, want)
 	}
 	if n := scalar(t, f.URL, `SELECT count(*)::text FROM reporting.card_lines
 		WHERE code = 'renewal_date' AND countdown_date IS NOT NULL AND countdown_days IS NOT NULL AND cites = '{1}'`); n == "0" {

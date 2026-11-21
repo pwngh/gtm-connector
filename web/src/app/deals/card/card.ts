@@ -125,10 +125,12 @@ export function notShown(sentences: readonly Sentence[]): Reason[] {
 export const wholeSources = new Set([
   'calls_denied',
   'calls_not_connected',
+  'calls_not_matched',
   'slack_denied',
   'slack_not_connected',
   'slack_not_requested',
   'slack_not_selected',
+  'slack_not_matched',
   'crm_unmapped_fields',
 ]);
 
