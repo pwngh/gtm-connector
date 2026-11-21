@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pwngh/gtm-connector/internal/sources/echo"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -27,9 +26,6 @@ type operation struct {
 	requests int
 	// refreshed is whether this operation has asked sf for credentials again. It may once.
 	refreshed bool
-	// tokens are every token this operation has sent or been given: the one the Reader kept, and the one
-	// sf gave in its place. An answer that holds any of them is refused, to the end of the operation.
-	tokens echo.Tokens
 	// unproved is a token sf gave before the org's first check passed. It is kept once that check passes.
 	unproved string
 }
@@ -119,8 +115,8 @@ func (o *operation) query(soql string, limit int) ([]*strictjson.Object, error) 
 }
 
 // request is one GET, and after a first HTTP 401 one more under the credentials sf gives now. Before the
-// retry the org is read again and must be the one this Reader saw before. The retry shares the operation's
-// deadline, request count and byte budget.
+// retry the org and the user are read again and must be the ones this Reader saw before. The retry shares
+// the operation's deadline, request count and byte budget.
 func (o *operation) request(path string, soql *string) (any, error) {
 	document, err := o.requestOnce(path, soql)
 	if codeOf(err) != authRequired {
@@ -135,6 +131,9 @@ func (o *operation) request(path string, soql *string) (any, error) {
 		organization, err := o.query(organizationQuery, 1)
 		if err == nil {
 			err = r.validateEnvironment(organization)
+		}
+		if err == nil {
+			err = o.checkUser()
 		}
 		switch codeOf(err) {
 		case editionRequired, environmentMismatch, invalidResponse:
@@ -161,28 +160,56 @@ func (o *operation) refresh() (string, error) {
 		return "", refuse(authRequired)
 	case !r.now().Before(o.deadline):
 		return "", refuse(timedOut)
-	case o.requests+2 > maxRequests:
-		// No room is left to confirm the org and retry, so sf is not run.
+	case o.requests+3 > maxRequests:
+		// No room is left to confirm the org and the user and retry, so sf is not run.
 		return "", refuse(resultLimit)
 	}
 	o.refreshed = true
 	started := r.now()
-	instanceURL, organizationID, accessToken, err := r.credentials.read(o.ctx)
+	given, err := r.credentials.read(o.ctx)
 	o.deadline = o.deadline.Add(r.now().Sub(started))
 	if err != nil {
 		return "", err
 	}
-	if origin, err := configure(instanceURL, accessToken); err != nil || origin != r.instanceURL {
+	// Whatever sf gave is held from here on, so no answer of this Reader may hold it, sent or not.
+	r.tokens.Add(given.accessToken)
+	if origin, err := configure(given.instanceURL, given.accessToken); err != nil || origin != r.instanceURL {
 		return "", refuse(authRequired)
 	}
-	if organizationID != r.signedInTo || accessToken == o.token {
-		// The alias now names another org, or sf gave back the token the org has just refused. Neither
-		// is sent.
+	if given.organizationID != r.signedInTo || given.username != r.username || given.accessToken == o.token {
+		// The alias now names another org or another user, or sf gave back the token the org has just
+		// refused. None is sent.
 		return "", refuse(authRequired)
 	}
-	o.tokens.Add(accessToken)
-	o.token = accessToken
-	return accessToken, nil
+	o.token = given.accessToken
+	return given.accessToken, nil
+}
+
+// userInfoPath is where a token says which user it reads as.
+const userInfoPath = "/services/oauth2/userinfo"
+
+// checkUser asks the org which user the operation's token reads as. It must be a user of the org this
+// Reader checked, under the username sf org display named, and, once a token has been checked, the same
+// user ID as before. A refusal says only that the login cannot be used.
+func (o *operation) checkUser() error {
+	r := o.reader
+	value, err := o.requestOnce(userInfoPath, nil)
+	if err != nil {
+		return err
+	}
+	document, _ := value.(*strictjson.Object)
+	userValue, _ := document.Get("user_id")
+	organizationValue, _ := document.Get("organization_id")
+	username, _ := document.Get("preferred_username")
+	userID, err := nativeID(userValue)
+	if err != nil || !strings.HasPrefix(userID, "005") {
+		return refuse(invalidResponse)
+	}
+	if organizationValue != r.organizationID || username != r.username || r.userID != "" && userID != r.userID {
+		return refuse(authRequired)
+	}
+	r.userID = userID
+	return nil
 }
 
 // requestOnce is one GET attempt and its checked JSON document. A 200 must be labelled application/json and
@@ -250,7 +277,7 @@ func (o *operation) requestOnce(path string, soql *string) (any, error) {
 	}
 	// An answer that holds a token of this operation is refused before it is parsed, so a token the org
 	// sends back as a field never becomes a record.
-	if o.tokens.InBytes(body) {
+	if o.reader.tokens.InBytes(body) {
 		return nil, refuse(invalidResponse)
 	}
 	document, err := strictjson.LoadsDecimal(body)
@@ -261,7 +288,7 @@ func (o *operation) requestOnce(path string, soql *string) (any, error) {
 		return nil, refuse(invalidResponse)
 	}
 	// So is one whose parsed text holds a token, or would once a card composes it or lowers its case.
-	if o.tokens.InValue(document) {
+	if o.reader.tokens.InValue(document) {
 		return nil, refuse(invalidResponse)
 	}
 	if status == 403 {
