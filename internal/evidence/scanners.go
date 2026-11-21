@@ -153,7 +153,7 @@ func RawLinks(s []rune) []Span {
 // it at End2.
 type SentenceEnd struct{ Start, End1, End2 int }
 
-// SentenceEnds is _SENTENCE_END.finditer(line) (units.py line 284).
+// SentenceEnds is _SENTENCE_END.finditer(line) (units.py line 312).
 func SentenceEnds(s []rune) []SentenceEnd {
 	var found []SentenceEnd
 	n := len(s)
@@ -185,7 +185,7 @@ var openers = []string{"We", "Our", "They", "Their", "He", "She", "It", "Its", "
 	"This", "That", "These", "Those", "The", "A", "An", "In", "On", "At", "For", "If", "When", "As", "There",
 	"But", "And", "So", "Then", "However", "Therefore"}
 
-// Opener is _OPENER.match(line, pos, endpos) (units.py line 314): the first alternative, in order, that
+// Opener is _OPENER.match(line, pos, endpos) (units.py line 342): the first alternative, in order, that
 // is not followed by a word character, a dot or a hyphen.
 func Opener(s []rune, pos, end int) (int, bool) {
 	pos, end = clamp(s, pos, end)
@@ -201,7 +201,7 @@ func Opener(s []rune, pos, end int) (int, bool) {
 	return 0, false
 }
 
-// Named is _NAMED.match(text) (units.py line 404): the speaker's name runs from Start to NameEnd, and
+// Named is _NAMED.match(text) (units.py line 432): the speaker's name runs from Start to NameEnd, and
 // the words start at End.
 type Named struct{ Start, NameEnd, End int }
 
@@ -507,7 +507,7 @@ type VoiceTag struct {
 	Named              bool
 }
 
-// voiceTag is _VOICE.match(s, i) (units.py line 145). classesEnd is where the tag's classes end from the
+// voiceTag is _VOICE.match(s, i) (units.py line 156). classesEnd is where the tag's classes end from the
 // character after "<v".
 func voiceTag(s []rune, i int, classesEnd func(int) int) (VoiceTag, bool) {
 	n := len(s)
@@ -596,7 +596,7 @@ func cueStamp(s []rune, i int) (int, bool) {
 	return clock(i)
 }
 
-// cueMarkup is _CUE_MARKUP.match(s, i) (units.py line 155): the end of the match.
+// cueMarkup is _CUE_MARKUP.match(s, i) (units.py line 166): the end of the match.
 func cueMarkup(s []rune, i int) (int, bool) {
 	n := len(s)
 	if i >= n || s[i] != '<' {

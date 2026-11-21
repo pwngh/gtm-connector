@@ -57,11 +57,12 @@ func schemeEnd(target []rune) int {
 	return 0
 }
 
-// linkAuthority is units._authority: the part of a link target that names its host, and whether the target
-// ends inside it. ok is false when a browser reads no host there. A bare target is a www. address in running
-// text, which a client opens as a web address, so a colon in it starts a port. Any other target that starts
-// with a name and a colon has a scheme.
-func linkAuthority(target []rune, bare bool) (authority []rune, open, ok bool) {
+// linkAuthority is units._authority: the part of a link target that names its host, whether the target ends
+// inside it, and whether the part is an authority: what follows //, or a www. address in running text. ok is
+// false when a browser reads no host there. A bare target is a www. address in running text, which a client
+// opens as a web address, so a colon in it starts a port. Any other target that starts with a name and a
+// colon has a scheme.
+func linkAuthority(target []rune, bare bool) (authority []rune, open, named, ok bool) {
 	start, scheme := 0, 0
 	if !bare {
 		scheme = schemeEnd(target)
@@ -72,7 +73,7 @@ func linkAuthority(target []rune, bare bool) (authority []rune, open, ok bool) {
 		// link as a path on the reader's computer. A scheme longer than _RAW_LINK reads names no host either.
 		if !literal(target, scheme, len(target), "//") || scheme > 33 ||
 			strings.ToLower(string(target[:scheme])) == "file:" { // ASCII only
-			return nil, false, false
+			return nil, false, false, false
 		}
 		start = scheme + 2
 	case !bare && hasPrefix(target, "//"):
@@ -82,7 +83,7 @@ func linkAuthority(target []rune, bare bool) (authority []rune, open, ok bool) {
 	for end < len(target) && !in(target[end], "/?#") {
 		end++
 	}
-	return target[start:end], end == len(target), true
+	return target[start:end], end == len(target), bare || start > 0, true
 }
 
 // linkHost is units._host: the host a browser opens for a link target, read as the URL Standard reads it, or
@@ -91,7 +92,7 @@ func linkHost(target []rune, bare bool) string {
 	if hasPrefix(u.Lower(target), "mailto:") {
 		return "mail"
 	}
-	authority, _, ok := linkAuthority(target, bare)
+	authority, _, named, ok := linkAuthority(target, bare)
 	if !ok {
 		return unknownHost
 	}
@@ -118,7 +119,7 @@ func linkHost(target []rune, bare bool) string {
 			}
 		}
 	}
-	if len(name) < 1 || len(name) > 80 {
+	if len(name) == 0 {
 		return unknownHost
 	}
 	for _, c := range name {
@@ -126,11 +127,7 @@ func linkHost(target []rune, bare bool) string {
 			return unknownHost
 		}
 	}
-	// A host that holds www. is not shown, because a client would turn it back into a link.
 	host := strings.ToLower(string(name)) // ASCII only
-	if strings.Contains(host, "www.") {
-		return unknownHost
-	}
 	// A browser reads a host whose last label is a number as an address and rewrites or refuses it: 0xc0000201
 	// and 3221225985 both open 192.0.2.1. Only four plain decimal parts stay as written.
 	labels := strings.Split(host, ".")
@@ -139,6 +136,14 @@ func linkHost(target []rune, bare bool) string {
 		last = labels[len(labels)-2]
 	}
 	if numberLabel(last) && !plainAddress(labels) {
+		return unknownHost
+	}
+	// The host of an authority is shown without a leading www., which a client would turn back into a link:
+	// files.example names the site of www.files.example. A host that still holds www. is not shown.
+	for named && strings.HasPrefix(host, "www.") {
+		host = host[4:]
+	}
+	if len(host) < 1 || len(host) > 80 || strings.Contains(host, "www.") {
 		return unknownHost
 	}
 	return host
@@ -369,7 +374,7 @@ func SafeText(raw string) (string, Counts, error) {
 		// A dot right after the host or its port may end the link or the sentence, and a browser opens a
 		// different host for each, or none. A link cut by a tab or a line break before its host ends goes on in
 		// a browser, to another host.
-		_, open, _ := linkAuthority(link, bare)
+		_, open, _, _ := linkAuthority(link, bare)
 		if kept < len(link) && link[kept] == '.' && linkHost(link[:kept+1], bare) != host ||
 			open && linkContinues(text, end) {
 			host = unknownHost
@@ -392,29 +397,8 @@ func SafeText(raw string) (string, Counts, error) {
 			visible = append(visible, c)
 		}
 	}
-	// _OPEN_TARGET: (\]\(\s*)([A-Za-z][A-Za-z0-9+.-]*:[^\s<>"']*), a Markdown target with a scheme that
-	// still follows a ]( in the finished text.
-	visible = substitute(visible, func(i int) (int, string, bool) {
-		n := len(visible)
-		if visible[i] != ']' || i+1 >= n || visible[i+1] != '(' {
-			return 0, "", false
-		}
-		j := i + 2
-		for j < n && u.ReSpace(visible[j]) {
-			j++
-		}
-		k := j + schemeEnd(visible[j:])
-		if k == j {
-			return 0, "", false
-		}
-		for k < n && !u.ReSpace(visible[k]) && !in(visible[k], `<>"'`) {
-			k++
-		}
-		counts.Links++
-		return k, string(visible[i:j]) + "[link " + linkHost(visible[j:k], false) + "]", true
-	})
 	// _CITATION: a bracketed integer is how a card cites a unit, so source text never keeps one.
-	result := substitute(visible, func(i int) (int, string, bool) {
+	finished := substitute(visible, func(i int) (int, string, bool) {
 		if visible[i] != '[' {
 			return 0, "", false
 		}
@@ -428,5 +412,170 @@ func SafeText(raw string) (string, Counts, error) {
 		counts.Brackets++
 		return j + 1, "(" + string(visible[i+1:j]) + ")", true
 	})
-	return string(result), counts, nil
+	// The finished text is read once more as a Markdown client reads it. Each step can leave a bracket the
+	// next one reads, so the order is fixed.
+	finished = angleLinks(finished, &counts)
+	finished = definitions(finished, &counts)
+	finished = openTargets(finished, &counts)
+	return string(finished), counts, nil
+}
+
+// angleLinks is _AUTOLINK.sub: an angle-bracket link is a scheme of 2 to 32 characters, a colon, and no space
+// up to the closing bracket.
+func angleLinks(s []rune, counts *Counts) []rune {
+	return substitute(s, func(i int) (int, string, bool) {
+		n := len(s)
+		if s[i] != '<' || i+1 >= n || !asciiLetter(s[i+1]) {
+			return 0, "", false
+		}
+		j := i + 2
+		for j < n && j-i-1 < 32 && (asciiLetter(s[j]) || asciiDigit(s[j]) || in(s[j], "+.-")) {
+			j++
+		}
+		if j-i-1 < 2 || j >= n || s[j] != ':' {
+			return 0, "", false
+		}
+		for j++; j < n && !in(s[j], " \n<>"); j++ {
+		}
+		if j >= n || s[j] != '>' {
+			return 0, "", false
+		}
+		counts.Links++
+		return j + 1, "[link " + linkHost(s[i+1:j], false) + "]", true
+	})
+}
+
+// definition is _DEFINITION.match(s, i): a line that starts, after at most three spaces, with a bracketed
+// label and a colon, then a destination on that line or the next. Only a destination that starts with a
+// scheme or < is read. It gives where the destination starts and ends.
+func definition(s []rune, i int) (start, end int, ok bool) {
+	n := len(s)
+	if i > 0 && s[i-1] != '\n' {
+		return 0, 0, false
+	}
+	j := i
+	for j < n && j-i < 3 && s[j] == ' ' {
+		j++
+	}
+	if j >= n || s[j] != '[' {
+		return 0, 0, false
+	}
+	// The label runs to the first bracket that no backslash comes before.
+	label := j + 1
+	for j = label; j < n && !in(s[j], "[]"); j++ {
+		if s[j] == '\\' {
+			if j+1 >= n {
+				break
+			}
+			j++
+		}
+	}
+	if j == label || !literal(s, j, n, "]:") {
+		return 0, 0, false
+	}
+	for j += 2; j < n && s[j] == ' '; j++ {
+	}
+	if j < n && s[j] == '\n' {
+		for j++; j < n && s[j] == ' '; j++ {
+		}
+	}
+	if j >= n {
+		return 0, 0, false
+	}
+	start = j
+	if s[j] == '<' {
+		for j++; j < n && !in(s[j], "<>\n"); j++ {
+		}
+		if j >= n || s[j] != '>' {
+			return 0, 0, false
+		}
+		return start, j + 1, true
+	}
+	if j += schemeEnd(s[j:]); j == start {
+		return 0, 0, false
+	}
+	for j < n && s[j] != ' ' && s[j] != '\n' {
+		j++
+	}
+	return start, j, true
+}
+
+// titled is _TITLE.fullmatch(s, i, end): what may follow a destination on its line. That is nothing, or a
+// title in quotes or parentheses, which may go on to the next line. Anything else makes the line ordinary
+// text, as in "[10:32]: Dana: hello".
+func titled(s []rune, i, end int) bool {
+	j := i
+	for j < end && s[j] == ' ' {
+		j++
+	}
+	if j == end {
+		return true
+	}
+	if j == i || !in(s[j], `"'(`) {
+		return false
+	}
+	closer := s[j]
+	if closer == '(' {
+		closer = ')'
+	}
+	for j++; j < end && s[j] != closer; j++ {
+		if s[j] == '\\' {
+			j++
+		}
+	}
+	// A title that is not closed on this line goes on. One that is closed ends the line.
+	for j++; j < end; j++ {
+		if s[j] != ' ' {
+			return false
+		}
+	}
+	return true
+}
+
+// definitions is _DEFINITION.sub: the destination of a reference definition becomes a link marker.
+func definitions(s []rune, counts *Counts) []rune {
+	return substitute(s, func(i int) (int, string, bool) {
+		start, end, ok := definition(s, i)
+		if !ok {
+			return 0, "", false
+		}
+		line := end
+		for line < len(s) && s[line] != '\n' {
+			line++
+		}
+		if !titled(s, end, line) {
+			return end, string(s[i:end]), true
+		}
+		counts.Links++
+		return end, string(s[i:start]) + "[link " + linkHost(s[start:end], false) + "]", true
+	})
+}
+
+// openTargets is _OPEN_TARGET.sub: a target with a scheme after a ]( that _MARKDOWN_LINK did not read. It
+// follows a label that holds a line break or brackets, a target cut by a control character, a <, or a
+// bracketed word the connector wrote.
+func openTargets(s []rune, counts *Counts) []rune {
+	return substitute(s, func(i int) (int, string, bool) {
+		n := len(s)
+		if s[i] != ']' || i+1 >= n || s[i+1] != '(' {
+			return 0, "", false
+		}
+		j := i + 2
+		for j < n && u.ReSpace(s[j]) {
+			j++
+		}
+		if j < n && s[j] == '<' {
+			for j++; j < n && u.ReSpace(s[j]); j++ {
+			}
+		}
+		k := j + schemeEnd(s[j:])
+		if k == j {
+			return 0, "", false
+		}
+		for k < n && !u.ReSpace(s[k]) && !in(s[k], `<>"'`) {
+			k++
+		}
+		counts.Links++
+		return k, string(s[i:j]) + "[link " + linkHost(s[j:k], false) + "]", true
+	})
 }

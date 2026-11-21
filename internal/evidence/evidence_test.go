@@ -334,8 +334,9 @@ func TestLinkHostWithNoSlashesAfterScheme(t *testing.T) {
 		{"<files.example:8443/x|deck>", "deck [link unknown host]"},
 		// A scheme too long for its // to be found is not read as a host either.
 		{"[deck](" + strings.Repeat("a", 40) + "://files.example/)", "deck [link unknown host]"},
-		// A // address and a link with its // keep the host before a port or a colon.
+		// A www. address, a // address and a link with its // keep the host before a port or a colon.
 		{"<files.example/x|deck>", "deck [link files.example]"},
+		{"www.files.example:8443/x now", "[link files.example] now"},
 		{"<//files.example:8443/x|deck>", "deck [link files.example]"},
 		{"<https://files.example/a:b|deck>", "deck [link files.example]"},
 		{"<mailto:a@files.example|deck>", "deck [link mail]"},
@@ -433,27 +434,124 @@ func checkLinks(t *testing.T, cases [][2]string) {
 	}
 }
 
-// A www. address is a host only in running text, and a host that holds www. is not shown. The cases are
-// those of test_a_www_address_is_a_host_only_in_running_text in tests/test_units.py.
+// A www. address is a host only in running text, and a host after // or in running text is shown without a
+// leading www. The cases are those of test_a_www_address_is_a_host_only_in_running_text in
+// tests/test_units.py.
 func TestWWWAddress(t *testing.T) {
 	checkLinks(t, [][2]string{
 		// As a link target, www.files.example:8443/x has the scheme www.files.example and no host.
 		{"[deck](www.files.example:8443/x)", "deck [link unknown host]"},
 		{"<www.files.example:8443/x|deck>", "deck [link unknown host]"},
+		{"<WWW.files.example:8443|deck>", "deck [link unknown host]"},
 		{"<WWW.user:pass@files.example/x|deck>", "deck [link unknown host]"},
 		// In running text a client opens it as a web address, so the colon starts a password or a port.
 		{"www.user:pass@files.example/x now", "[link files.example] now"},
 		{"www.user@files.example:8443/a//b now", "[link files.example] now"},
-		// A host that begins with www. is never shown without it: files.example is another host.
-		{"<https://www.files.example/|deck>", "deck [link unknown host]"},
+		{"www.files.example:8443/x now", "[link files.example] now"},
+		// After // or in running text the host is shown without a leading www., however many.
+		{"<https://www.files.example/|deck>", "deck [link files.example]"},
+		{"<//WWW.www.files.example:8443/x|deck>", "deck [link files.example]"},
+		{"www.files.example/a//b now", "[link files.example] now"},
+		// A target with no // names no host of its own, so its www. is not removed, and www. after another
+		// label, or before a number a browser refuses, gives no host.
 		{"<www.files.example|deck>", "deck [link unknown host]"},
-		{"www.files.example:8443/x now", "[link unknown host] now"},
+		{"[deck](www.files.example/x)", "deck [link unknown host]"},
 		{"<https://files.www.example/|deck>", "deck [link unknown host]"},
+		{"<https://www.192.0.2.1/|deck>", "deck [link unknown host]"},
+		{"<https://www./|deck>", "deck [link unknown host]"},
 		// Two slashes in a path are not the start of a host.
 		{"<files.example/a//b|deck>", "deck [link files.example]"},
 		{"<https://files.example/a//b|deck>", "deck [link files.example]"},
 		{"<//files.example/a//b|deck>", "deck [link files.example]"},
 	})
+}
+
+// An angle-bracket link with a scheme is a link. The cases are those of
+// test_an_angle_bracket_link_with_a_scheme_is_a_link in tests/test_units.py.
+func TestAngleBracketLinkWithScheme(t *testing.T) {
+	// A Markdown client links <scheme:value>: a scheme of 2 to 32 characters, a colon, and no space.
+	for _, c := range []struct {
+		raw, safe       string
+		links, controls int
+	}{
+		{"<https:/files.example>", "[link unknown host]", 1, 0},
+		{"see <HTTPS:files.example/x> now", "see [link unknown host] now", 1, 0},
+		{"<tel:5551234>", "[link unknown host]", 1, 0},
+		{"<x-app:open?id=1|2>.", "2 [link unknown host].", 1, 0},
+		{"<" + strings.Repeat("a", 32) + ":x>", "[link unknown host]", 1, 0},
+		// A control character or an inner token leaves no space, so the finished text is still a link.
+		{"<tel:555\x1c1234>", "[link unknown host]", 1, 1},
+		{"<tel:555<#|>1234>", "[link unknown host]", 1, 0},
+		// What follows the bracket it leaves is read too.
+		{"<tel:1>(tel:2)", "[link unknown host]([link unknown host]", 2, 0},
+		{"<tel:1>: tel:2", "[link unknown host]: [link unknown host]", 2, 0},
+		{"[deck](<https:/files.example/a b>)", "[deck](<[link unknown host] b>)", 1, 0},
+		{"[deck](< tel:5551234 x>)", "[deck](< [link unknown host] x>)", 1, 0},
+	} {
+		want := Counts{Mentions: strings.Count(c.raw, "<#"), Links: c.links, Controls: c.controls}
+		text, counts, err := SafeText(c.raw)
+		if err != nil || text != c.safe || counts != want {
+			t.Errorf("SafeText(%q): got %q %+v %v, want %q", c.raw, text, counts, err, c.safe)
+		}
+		if text, counts, err := SafeText(c.safe); err != nil || text != c.safe || counts != (Counts{}) {
+			t.Errorf("SafeText(%q) a second time: got %q %+v %v", c.raw, text, counts, err)
+		}
+	}
+	// A space, a one-letter scheme, a scheme of 33 characters, a time and a voice tag are not links.
+	for _, plain := range []string{"<tel:555 1234>", "<v:Dana>", "<" + strings.Repeat("a", 33) + ":x>", "<12:30>",
+		"<v Dana Ito>", "<note>", "a < b: c > d"} {
+		if text, counts, err := SafeText(plain); err != nil || text != plain || counts != (Counts{}) {
+			t.Errorf("SafeText(%q): got %q %+v %v", plain, text, counts, err)
+		}
+	}
+}
+
+// The destination of a reference definition is a link. The cases are those of
+// test_the_destination_of_a_reference_definition_is_a_link in tests/test_units.py.
+func TestReferenceDefinition(t *testing.T) {
+	// A Markdown client reads "[deck]: https:/files.example" on its own line as where [deck] leads.
+	for _, c := range []struct {
+		raw, safe string
+		links     int
+	}{
+		{"[deck]: https:/files.example", "[deck]: [link unknown host]", 1},
+		{"see [deck]\n\n   [deck]: HTTPS:files.example/x\n", "see [deck]\n\n   [deck]: [link unknown host]\n", 1},
+		{"[deck]:\n  tel:5551234", "[deck]:\n  [link unknown host]", 1},
+		{"[deck]:\ttel:5551234  ", "[deck]: [link unknown host]  ", 1},
+		// A title may follow the destination, and may go on to the next line.
+		{`[deck]: tel:5551234 "the deck"`, `[deck]: [link unknown host] "the deck"`, 1},
+		{`[deck]: tel:5551234 (the \) deck) `, `[deck]: [link unknown host] (the \) deck) `, 1},
+		{"[deck]: tel:5551234 'the\ndeck'", "[deck]: [link unknown host] 'the\ndeck'", 1},
+		// A destination in angle brackets may hold a space.
+		{"[deck]: <https:/files.example/a b>", "[deck]: [link unknown host]", 1},
+		{"[deck]: <a b> 'the deck'", "[deck]: [link unknown host] 'the deck'", 1},
+		// The label may hold a line break or an escaped bracket, or be a bracketed word the connector wrote.
+		{"[the\ndeck]: tel:5551234", "[the\ndeck]: [link unknown host]", 1},
+		{`[the \] deck]: tel:5551234`, `[the \] deck]: [link unknown host]`, 1},
+		{"<https://files.example>: https:/second.example/x", "[link files.example]: [link unknown host]", 2},
+		{"[10:32]: Dana:", "[10:32]: [link unknown host]", 1},
+	} {
+		text, counts, err := SafeText(c.raw)
+		if err != nil || text != c.safe || counts != (Counts{Links: c.links}) {
+			t.Errorf("SafeText(%q): got %q %+v %v, want %q", c.raw, text, counts, err, c.safe)
+		}
+		if text, counts, err := SafeText(c.safe); err != nil || text != c.safe || counts != (Counts{}) {
+			t.Errorf("SafeText(%q) a second time: got %q %+v %v", c.raw, text, counts, err)
+		}
+	}
+	if text, counts, err := SafeText("[[7]]: tel:5551234"); err != nil || text != "[(7)]: [link unknown host]" ||
+		counts != (Counts{Links: 1, Brackets: 1}) {
+		t.Errorf("SafeText of a definition with a number in its label: got %q %+v %v", text, counts, err)
+	}
+	// Words after the destination make the line ordinary text, and so does anything before the label.
+	for _, plain := range []string{"[10:32]: Dana: hello", "[Q3 notes]: Summary: the renewal moved to March",
+		`   [14:05]: Morgan: "we can sign" was the answer`, "[10:32]: Dana:hello there",
+		"    [deck]: https:/files.example", "see [deck]: https:/files.example", "[deck] : https:/files.example",
+		"[deck]: relative/path", "[]: tel:5551234", "[deck]: tel:5551234 'the' deck'"} {
+		if text, counts, err := SafeText(plain); err != nil || text != plain || counts != (Counts{}) {
+			t.Errorf("SafeText(%q): got %q %+v %v", plain, text, counts, err)
+		}
+	}
 }
 
 // A host a browser rewrites or refuses is not shown. The cases are those of

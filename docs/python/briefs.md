@@ -231,13 +231,15 @@ listed below with inert words.
   The host is the one a browser opens, read as the URL Standard reads it. A link becomes
   `[link unknown host]` when a browser would open another host than the one written, or none:
   - a backslash, a control character, a tab or a line break before its path or query
-  - no `//` after its scheme, as in `https:/files.example` or a Markdown target `(tel:5551234)`
+  - no `//` after its scheme, as in `https:/files.example`, a Markdown target `(tel:5551234)`, an
+    angle-bracket link `<tel:5551234>`, or a reference definition `[deck]: tel:5551234` on its own line
   - a host a browser reads as a number, such as `0xc0000201`, unless it is four plain decimal parts
     such as `192.0.2.1`
   - a port that is not a number up to 65535, a host in brackets, or a `file:` link
   - in running text, a dot right after the host, which may end the host or the sentence
 
-  A host that holds `www.` is not shown either, because a client would turn it back into a link.
+  A leading `www.` is not shown, because a client would turn it back into a link: a link to
+  `www.files.example` shows `files.example`.
 - A control, direction-changing, or invisible format character becomes `[U+202E]`.
 - A bracketed number such as `[3]` becomes `(3)`, because a card cites its units that way.
 

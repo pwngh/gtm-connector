@@ -126,9 +126,20 @@ _IS_TARGET = re.compile(_TARGET, re.IGNORECASE)
 _AMBIGUOUS = re.compile(r"[\x00-\x1f\x7f-\x9f\\]")
 # A scheme at the start of a link target: a name and a colon.
 _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
-# A Markdown target with a scheme that still follows a ]( in the finished text: after a label that holds a line
-# break or brackets, after a target cut by a control character, or after a bracketed word the connector wrote.
-_OPEN_TARGET = re.compile(r"(\]\(\s*)([A-Za-z][A-Za-z0-9+.-]*:[^\s<>\"']*)")
+# What a Markdown client still reads as a link in the finished text. An angle-bracket link: a scheme of 2 to 32
+# characters, a colon, and no space up to the closing bracket.
+_AUTOLINK = re.compile(r"<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^ \n<>]*)>")
+# A reference definition: a line that starts, after at most three spaces, with a bracketed label and a colon,
+# then a destination on that line or the next. Only a destination that starts with a scheme or < is read.
+_DEFINITION = re.compile(
+    r"^( {0,3}\[(?:\\[\s\S]|[^\[\]\\])+\]: *(?:\n *)?)(<[^<>\n]*>|[A-Za-z][A-Za-z0-9+.-]*:[^ \n]*)", re.MULTILINE)
+# What may follow the destination on its line: nothing, or a title in quotes or parentheses, which may go on
+# to the next line. Anything else makes the line ordinary text, as in "[10:32]: Dana: hello".
+_TITLE = re.compile(r""" *| +(?:"(?:\\.|[^"\\])*(?:" *|\\?)|'(?:\\.|[^'\\])*(?:' *|\\?)"""
+                    r"""|\((?:\\.|[^)\\])*(?:\) *|\\?))""")
+# A target with a scheme after a ]( that _MARKDOWN_LINK did not read: after a label that holds a line break or
+# brackets, after a target cut by a control character, inside <>, or after a bracketed word the connector wrote.
+_OPEN_TARGET = re.compile(r"(\]\(\s*(?:<\s*)?)([A-Za-z][A-Za-z0-9+.-]*:[^\s<>\"']*)")
 # A last label that makes a browser read the whole host as a number, and the one address form it leaves as written.
 _NUMBER = re.compile(r"[0-9]+|0x[0-9a-f]*")
 _OCTET = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
@@ -161,22 +172,22 @@ _ENDED = re.compile(r"""[.!?\u3002\uff01\uff1f\u0964\u061f\u06d4]["')\]\u201d\u2
 
 
 def _authority(target, bare):
-    """The part of a link target that names its host, and whether the target ends inside it. The part is None
-    when a browser reads no host there. A bare target is a www. address in running text, which a client opens
-    as a web address, so a colon in it starts a port. Any other target that starts with a name and a colon has
-    a scheme."""
+    """The part of a link target that names its host, whether the target ends inside it, and whether the part
+    is an authority: what follows //, or a www. address in running text. The part is None when a browser reads
+    no host there. A bare target is a www. address in running text, which a client opens as a web address, so
+    a colon in it starts a port. Any other target that starts with a name and a colon has a scheme."""
     start = 0
     scheme = None if bare else _SCHEME.match(target)
     if scheme:
         # A browser reads https:files.example and https:/files.example as https://files.example, and a file
         # link as a path on the reader's computer. A scheme longer than _RAW_LINK reads names no host either.
         if not target.startswith("//", scheme.end()) or scheme.end() > 33 or scheme.group().lower() == "file:":
-            return None, False
+            return None, False, False
         start = scheme.end() + 2
     elif not bare and target.startswith("//"):
         start = 2
     authority = re.split("[/?#]", target[start:], maxsplit=1)[0]
-    return authority, start + len(authority) == len(target)
+    return authority, start + len(authority) == len(target), bare or start > 0
 
 
 def _host(target, bare=False):
@@ -184,10 +195,10 @@ def _host(target, bare=False):
     browser would open another host, or none."""
     if target.lower().startswith("mailto:"):
         return "mail"
-    authority, _ = _authority(target, bare)
+    authority, _, named = _authority(target, bare)
     # A bracketed address is never shown. A character whose compatibility form is one of / ? # @ : gives no host.
     if authority is None or _AMBIGUOUS.search(authority) or "[" in authority or "]" in authority or any(
-            mark in unicodedata.normalize("NFKC", character) for character in authority if not character.isascii()
+            mark in unicodedata.normalize("NFKC", character) for character in re.findall(r"[^\x00-\x7f]", authority)
             for mark in "/?#@:"):
         return "unknown host"
     # The host follows the last @ and ends at the first colon. A browser refuses a port that is not a number
@@ -195,8 +206,7 @@ def _host(target, bare=False):
     host, _, port = authority.rpartition("@")[2].partition(":")
     if not re.fullmatch("[0-9]*", port) or len(port.lstrip("0")) > 5 or int(port.lstrip("0") or "0") > 65535:
         return "unknown host"
-    # A host that holds www. is not shown, because a client would turn it back into a link.
-    if not re.fullmatch(r"[A-Za-z0-9.-]{1,80}", host) or "www." in host.lower():
+    if not re.fullmatch(r"[A-Za-z0-9.-]+", host):
         return "unknown host"
     host = host.lower()
     # A browser reads a host whose last label is a number as an address and rewrites or refuses it: 0xc0000201
@@ -205,7 +215,11 @@ def _host(target, bare=False):
     last = labels[-2] if len(labels) > 1 and not labels[-1] else labels[-1]
     if _NUMBER.fullmatch(last) and not _IPV4.fullmatch(host):
         return "unknown host"
-    return host
+    # The host of an authority is shown without a leading www., which a client would turn back into a link:
+    # files.example names the site of www.files.example. A host that still holds www. is not shown.
+    if named:
+        host = re.sub(r"\A(?:www\.)+", "", host)
+    return host if 1 <= len(host) <= 80 and "www." not in host else "unknown host"
 
 
 def safe_text(raw: object) -> tuple[str, dict[str, int]]:
@@ -253,13 +267,24 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
         counts["links"] += 1
         return f"[link {host}]" + whole[len(link):]
 
-    def open_target(match):
-        counts["links"] += 1
-        return f"{match.group(1)}[link {_host(match.group(2))}]"
-
     def citation(match):
         counts["brackets"] += 1
         return f"({match.group(1)})"
+
+    def autolink(match):
+        counts["links"] += 1
+        return f"[link {_host(match.group(1))}]"
+
+    def definition(match):
+        end = match.string.find("\n", match.end())
+        if not _TITLE.fullmatch(match.string, match.end(), len(match.string) if end < 0 else end):
+            return match.group(0)
+        counts["links"] += 1
+        return f"{match.group(1)}[link {_host(match.group(2))}]"
+
+    def open_target(match):
+        counts["links"] += 1
+        return f"{match.group(1)}[link {_host(match.group(2))}]"
 
     # A Windows line ending is a line break, not a control character to show.
     plain = unicodedata.normalize("NFC", raw).replace("\r\n", "\n")
@@ -277,7 +302,10 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
             visible.append(f"[U+{code:04X}]")
         else:
             visible.append(character)
-    return _CITATION.sub(citation, _OPEN_TARGET.sub(open_target, "".join(visible))), counts
+    # The finished text is read once more as a Markdown client reads it. Each step can leave a bracket the
+    # next one reads, so the order is fixed.
+    text = _AUTOLINK.sub(autolink, _CITATION.sub(citation, "".join(visible)))
+    return _OPEN_TARGET.sub(open_target, _DEFINITION.sub(definition, text)), counts
 
 
 # A sentence may end at closing punctuation followed by a token that does not start in lower case.

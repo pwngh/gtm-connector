@@ -23,13 +23,13 @@
   },
   {
    "input": "HTTPS://WWW.Example.COM/",
-   "host": "unknown host",
+   "host": "example.com",
    "running_text": null
   },
   {
    "input": "www.www.example",
    "host": "unknown host",
-   "running_text": "unknown host"
+   "running_text": "example"
   },
   {
    "input": "www.",
@@ -188,7 +188,7 @@
   },
   {
    "input": "https://www.www.example/",
-   "host": "unknown host",
+   "host": "example",
    "running_text": null
   },
   {
@@ -219,7 +219,7 @@
   {
    "input": "www.example.com/path?q=1",
    "host": "unknown host",
-   "running_text": "unknown host"
+   "running_text": "example.com"
   },
   {
    "input": "http://\u0130.example/",
@@ -479,12 +479,12 @@
   {
    "input": "www.good.example:8443/x",
    "host": "unknown host",
-   "running_text": "unknown host"
+   "running_text": "good.example"
   },
   {
    "input": "WWW.good.example:8443",
    "host": "unknown host",
-   "running_text": "unknown host"
+   "running_text": "good.example"
   },
   {
    "input": "wwww.example:8443",
@@ -509,7 +509,7 @@
   {
    "input": "www.good.example",
    "host": "unknown host",
-   "running_text": "unknown host"
+   "running_text": "good.example"
   },
   {
    "input": "www.user:pass@good.example/x",
@@ -524,11 +524,11 @@
   {
    "input": "www.good.example/a//b",
    "host": "unknown host",
-   "running_text": "unknown host"
+   "running_text": "good.example"
   },
   {
    "input": "https://www.good.example/",
-   "host": "unknown host",
+   "host": "good.example",
    "running_text": null
   },
   {
@@ -544,6 +544,36 @@
   {
    "input": "https://good.example/a//b",
    "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "//WWW.www.good.example:8443/x",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "https://www.192.0.2.1/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://www./",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://www.good.example./x",
+   "host": "good.example.",
+   "running_text": null
+  },
+  {
+   "input": "https://www.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "running_text": null
+  },
+  {
+   "input": "https://www.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "host": "unknown host",
    "running_text": null
   },
   {

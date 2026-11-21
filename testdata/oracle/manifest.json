@@ -2,7 +2,7 @@
  "python_version": "3.14.6",
  "python_build": "3.14.6 (main, Jun 25 2026, 00:12:50) [Clang 14.0.3 (clang-1403.0.22.14.1)]",
  "unicode_version": "16.0.0",
- "package_sha256": "1861ed17a5a9139417617263cc29b5c181fefe1db121ee812dca455b3ac37e47",
+ "package_sha256": "67161f80248d9706961ca2fd940fa0c6fb8820921fdd74184b5d272c651f3f6e",
  "generator": "tools/oracle/generate.py",
  "files": {
   "cards/books_calls.jsonl.gz": {
@@ -81,8 +81,8 @@
    "records": 30
   },
   "corpora/safe_text.jsonl.gz": {
-   "sha256": "a2c0acbb79d419622496c3fb595fbb33a50ce2c10d886418745cc2886bdf1b03",
-   "bytes": 10743374,
+   "sha256": "d43222113bb2d0049ed8c314a2b9dd1cc9874a89916d5d2c25d182972eb52e0f",
+   "bytes": 10734235,
    "records": 104767
   },
   "corpora/sentences.jsonl.gz": {
@@ -192,9 +192,9 @@
    "records": 56
   },
   "library/link_host.json": {
-   "sha256": "dbda4f85fa6174993978a6b1143226289b0a539af95e1644f29780e0b59f3f38",
-   "bytes": 47864,
-   "records": 479
+   "sha256": "79e4b84e0382e1928b1855e42c2a75c5e22d20d92e7feaa54557cc3c1f236dcc",
+   "bytes": 48653,
+   "records": 485
   },
   "library/strict_json.json": {
    "sha256": "f68de0a1ab0bd26f843a5b0a8c03cfddd746972f8caf27d6329b08c0495dd4e4",
@@ -202,7 +202,7 @@
    "records": 85
   },
   "scanners/index.json": {
-   "sha256": "95e1e56cabc5b2906b3a7c505db2f74a2f555b97a01e9e84f2549e4a873c768a",
+   "sha256": "34c594c8ac4fd7f65a6892abf84296e527ee3bcf7dca89433a3ff0e197699e26",
    "bytes": 1045,
    "records": 7
   },

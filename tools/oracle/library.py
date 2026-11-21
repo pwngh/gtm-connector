@@ -42,10 +42,12 @@ HOSTS = (
     "user:pass@good.example", "a" * 40 + "://good.example/", "https:good.example" + "/a" * 20 + "//x",
     "www.good.example:8443/x", "WWW.good.example:8443", "wwww.example:8443", "//good.example:8443/x",
     "good.example/a:b", "1.example:8443",
-    # A www. address is a host in running text only, and a host that holds www. is not shown. Two slashes in a
-    # path start no host.
+    # A www. address is a host in running text only. A leading www. is not shown after // or in running text,
+    # and a host that still holds www. is not shown at all. Two slashes in a path start no host.
     "www.good.example", "www.user:pass@good.example/x", "WWW.user@good.example:8443/a//b", "www.good.example/a//b",
     "https://www.good.example/", "https://good.www.example/", "good.example/a//b", "https://good.example/a//b",
+    "//WWW.www.good.example:8443/x", "https://www.192.0.2.1/", "https://www./", "https://www.good.example./x",
+    "https://www." + "a" * 80, "https://www." + "a" * 81,
     # A host a browser reads as a number and rewrites or refuses. Four plain decimal parts stay as written.
     "http://0xc0000201/", "http://0XC0000201/", "http://3221225985/", "http://0300.0.2.1/", "http://192.0.513/",
     "http://192.0.2.1./", "http://192.0.2.01/", "http://192.0.2.1/", "http://192.0.2.256/", "http://1.2.3.4.5/",
