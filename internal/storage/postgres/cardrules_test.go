@@ -574,6 +574,10 @@ func TestTheTriggersReadACardThatHoldsANULEscape(t *testing.T) {
 				t.Errorf("%s: the stored bytes are not the published ones", name)
 			}
 		}
+		// The reporting view reads a day from the bytes of each card, these too.
+		if n := count(t, f, "SELECT count(*) FROM reporting.cards"); n != count(t, f, "SELECT count(*) FROM cards") {
+			t.Errorf("the reporting view reads %d cards", n)
+		}
 	})
 	t.Run("the six characters after an escaped backslash are no NUL", func(t *testing.T) {
 		pub := card(t, `a\u0000b`, "shown")

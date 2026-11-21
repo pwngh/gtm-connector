@@ -63,6 +63,14 @@ func URLEncoded(t testing.TB, encoding string) string {
 		defer conn.Close(ctx)
 		if _, err := conn.Exec(ctx, "DROP DATABASE "+name+" WITH (FORCE)"); err != nil {
 			t.Errorf("drop test database: %v", err)
+			return
+		}
+		// The database's reporting role belongs to the server; it goes with the database. A role a test
+		// made a member of it is the test's to drop.
+		if _, err := conn.Exec(ctx, `DO $$ BEGIN EXECUTE format('DROP ROLE IF EXISTS %I', 'gtm_reporting_'
+			|| left(regexp_replace(lower('`+name+`'), '[^a-z0-9_]', '_', 'g'), 40) || '_' || left(md5('`+name+`'), 8));
+			END $$`); err != nil {
+			t.Errorf("drop the test database's reporting role: %v", err)
 		}
 	})
 	parsed.Path = "/" + name
