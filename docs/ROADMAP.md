@@ -85,7 +85,7 @@ Nothing below is started unless it says so. Each links to the guide that describ
 One rep reads one real renewal before a call.
 
 - A deal as one renewal of an account, with a readable ID, registered by hand ([the API](api.md#one-deal-one-id)), the `/v1/deals` routes ([deal routes](api.md#deal-routes)) and the `deal` command.
-- Sign-in through the company's identity provider, and each person reading only their deals.
+- Each person reading only their deals: the deal list and the deal routes open a deal through a grant on its account. Sign-in through the company's identity provider and grants by account are built ([running it](operations.md#sign-in-through-your-identity-provider)).
 - Calls and Slack threads matched to the deal ([setting it up](config.md#how-a-deal-gets-its-evidence)).
 - The Deals page: the deal list, the card, the proof drawer and communications ([working a deal](deals.md#the-page)).
 - What changed since the reader last looked, and marks for blockers and commitments ([working a deal](deals.md#the-card)).
@@ -174,6 +174,7 @@ grouped by the v0.1.0 step that owns the check.
 - The Makefile forwarding a port on Colima from a cold start.
 - macOS as a supported platform alongside Linux.
 - `serve` refusing to start while a restore is unfinished (setup and `demo` are tested).
+- The line `serve` prints as it starts naming the sign-ins it offers (the words are tested, the line is not).
 - `make verify-real`:
   - its `DATASETS` and `LOCAL` options;
   - its default cache folder and the counts in `items.json`;

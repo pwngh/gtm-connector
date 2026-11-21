@@ -231,6 +231,10 @@ func (r *run) result(ctx context.Context) (any, error) {
 		return r.connect(ctx)
 	case "demo":
 		return r.demo(ctx)
+	case "grant":
+		return r.grant(ctx)
+	case "grants":
+		return r.grants(ctx)
 	}
 	return r.audit(ctx)
 }

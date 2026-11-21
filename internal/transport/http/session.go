@@ -94,7 +94,9 @@ func (s *Server) preSession(r *http.Request) (string, time.Time, bool) {
 	return cookie.Value, expires, true
 }
 
-// current gives the request's live signed-in session and its token, if any.
+// current gives the request's live signed-in session and its token, if any. A session of a sign-in this
+// install does not offer now is no session: a demo person's while the demo sign-in is off, and a
+// provider's person's unless the provider signs in that person's workspace here.
 func (s *Server) current(r *http.Request) (string, postgres.Session, bool, error) {
 	cookie, err := r.Cookie(cookieName)
 	if err != nil || !tokenPattern.MatchString(cookie.Value) {
@@ -106,6 +108,11 @@ func (s *Server) current(r *http.Request) (string, postgres.Session, bool, error
 	}
 	if err != nil {
 		return "", postgres.Session{}, false, err
+	}
+	p := session.Principal
+	if (p.Login != "" && s.cfg.DemoSignInOff) || (p.Issuer != "" && (s.cfg.OIDC == nil ||
+		p.Issuer != s.cfg.OIDC.Client.Issuer() || p.WorkspaceID != s.cfg.OIDC.Workspace.ID)) {
+		return "", postgres.Session{}, false, nil
 	}
 	return cookie.Value, session, true, nil
 }
@@ -137,10 +144,22 @@ type sessionView struct {
 	Principal *principalView `json:"principal"`
 	CSRFToken string         `json:"csrf_token,omitempty"`
 	ExpiresAt string         `json:"expires_at,omitempty"`
+	// SignIn is how a person signs in here, on every session view but a sign-out's.
+	SignIn *signInView `json:"sign_in,omitempty"`
+	// EndSessionURL is the identity provider's own sign-out page, which a sign-out of a person who signed
+	// in through it offers when the provider publishes one.
+	EndSessionURL string `json:"end_session_url,omitempty"`
 }
 
-func viewOf(p *postgres.Principal, token string, expires time.Time) sessionView {
-	view := sessionView{CSRFToken: csrfFor(token), ExpiresAt: expires.UTC().Format(time.RFC3339)}
+// signInView is the ways in this install offers: through the identity provider, and the demo sign-in.
+type signInView struct {
+	OIDC bool `json:"oidc"`
+	Demo bool `json:"demo"`
+}
+
+func (s *Server) viewOf(p *postgres.Principal, token string, expires time.Time) sessionView {
+	view := sessionView{CSRFToken: csrfFor(token), ExpiresAt: expires.UTC().Format(time.RFC3339),
+		SignIn: &signInView{OIDC: s.cfg.OIDC != nil, Demo: !s.cfg.DemoSignInOff}}
 	if p != nil {
 		view.SignedIn = true
 		view.Principal = &principalView{ID: p.ID, DisplayName: p.DisplayName, Kind: p.Kind,
@@ -159,7 +178,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok {
-		writeJSON(w, http.StatusOK, viewOf(session.Principal, token, session.ExpiresAt))
+		writeJSON(w, http.StatusOK, s.viewOf(session.Principal, token, session.ExpiresAt))
 		return
 	}
 	pre, expires, ok := s.preSession(r)
@@ -167,7 +186,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		pre, expires = s.newPreSession()
 		setCookie(w, preCookieName, pre, expires)
 	}
-	writeJSON(w, http.StatusOK, viewOf(nil, pre, expires))
+	writeJSON(w, http.StatusOK, s.viewOf(nil, pre, expires))
 }
 
 // csrfValid checks the CSRF header against a session's token: exactly one
@@ -177,11 +196,12 @@ func csrfValid(r *http.Request, token string) bool {
 	return len(given) == 1 && subtle.ConstantTimeCompare([]byte(given[0]), []byte(csrfFor(token))) == 1
 }
 
-// admission is what admitted a write: a live session and its token, or, for
-// sign-in only, a signed pre-session (token empty).
+// admission is what admitted a write: a live session, its token and its
+// principal, or, for sign-in only, a signed pre-session (token empty).
 type admission struct {
-	token  string
-	stored postgres.Admission
+	token     string
+	principal *postgres.Principal
+	stored    postgres.Admission
 }
 
 // write admits a write by its CSRF token, which must be the live session's
@@ -190,14 +210,14 @@ type admission struct {
 // apiRoutes is served through it.
 func (s *Server) write(signIn bool, next func(http.ResponseWriter, *http.Request, admission)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token, _, live, err := s.current(r)
+		token, session, live, err := s.current(r)
 		if err != nil {
 			internal(w)
 			return
 		}
 		switch {
 		case live && csrfValid(r, token):
-			next(w, r, admission{token, postgres.Admission{IDSHA256: digest(token)}})
+			next(w, r, admission{token, session.Principal, postgres.Admission{IDSHA256: digest(token)}})
 			return
 		case signIn:
 			if pre, expires, ok := s.preSession(r); ok && csrfValid(r, pre) {
@@ -222,8 +242,14 @@ type signInRequest struct {
 // signIn signs in a demo principal with its per-install credential. It is
 // admitted by the CSRF token of a live session or of a signed pre-session,
 // and the rotation consumes exactly that one, atomically: a pre-session
-// signs in once, and a session revoked meanwhile signs in nobody.
+// signs in once, and a session revoked meanwhile signs in nobody. While the
+// demo sign-in is off it signs nobody in.
 func (s *Server) signIn(w http.ResponseWriter, r *http.Request, admitted admission) {
+	if s.cfg.DemoSignInOff {
+		writeError(w, http.StatusForbidden, "demo_sign_in_off",
+			"The demo sign-in is off on this install. Sign in with your company account.")
+		return
+	}
 	var request signInRequest
 	if !readJSON(w, r, &request) {
 		return
@@ -254,17 +280,24 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, admitted admissi
 	}
 	clearCookie(w, preCookieName)
 	setCookie(w, cookieName, next, expires)
-	writeJSON(w, http.StatusOK, viewOf(&principal, next, expires))
+	writeJSON(w, http.StatusOK, s.viewOf(&principal, next, expires))
 }
 
-// signOut ends the session. It is a protected write like any other.
+// signOut ends the session here. It is a protected write like any other.
+// For a person who signed in through the identity provider, it also offers
+// the provider's own sign-out page, when the provider publishes one: the
+// provider's session is the provider's to end.
 func (s *Server) signOut(w http.ResponseWriter, r *http.Request, admitted admission) {
 	if err := s.sessions.RevokeSession(r.Context(), digest(admitted.token)); err != nil {
 		internal(w)
 		return
 	}
 	clearCookie(w, cookieName)
-	writeJSON(w, http.StatusOK, sessionView{})
+	view := sessionView{}
+	if s.cfg.OIDC != nil && admitted.principal != nil && admitted.principal.Issuer != "" {
+		view.EndSessionURL = s.cfg.OIDC.Client.EndSessionURL(r.Context())
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 // signedIn admits only a live, signed-in session, and passes its principal on.

@@ -7,7 +7,7 @@ import type {ServerState} from './session.ts';
 
 // A store with only what the read layer uses: its api, its generation, and expire.
 function storeOf() {
-  let state: ServerState = {mode: 'api', session: null, error: null, ended: false, generation: 1, elsewhere: null};
+  let state: ServerState = {mode: 'api', session: null, error: null, ended: false, generation: 1, elsewhere: null, endSessionUrl: null};
   const listeners = new Set<() => void>();
   let expired = 0;
   const store = {

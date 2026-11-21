@@ -1,4 +1,4 @@
-import {type Api, ApiError, sessionExpired} from './client.ts';
+import {type Api, ApiError, isSessionView, sessionExpired} from './client.ts';
 import type {SessionView} from './types.ts';
 
 // How the server answered, and the signed-in session when the Go server
@@ -19,9 +19,11 @@ export interface ServerState {
   generation: number;
   /** A session another tab signed this browser in to, offered and not taken. */
   elsewhere: SessionView | null;
+  /** The identity provider's own sign-out page, offered by the sign-out that just happened here. */
+  endSessionUrl: string | null;
 }
 
-type Next = Omit<ServerState, 'generation' | 'elsewhere'> & {elsewhere?: SessionView | null};
+type Next = Omit<ServerState, 'generation' | 'elsewhere' | 'endSessionUrl'> & {elsewhere?: SessionView | null; endSessionUrl?: string | null};
 
 export interface ServerStore {
   api: Api;
@@ -54,7 +56,7 @@ export function createServerStore(
   api: Api,
   {now = () => Date.now(), setTimer = (run, ms) => setTimeout(run, ms), clearTimer = id => clearTimeout(id), events = globalThis.document}: StoreOptions = {},
 ): ServerStore {
-  let state: ServerState = {mode: 'probing', session: null, error: null, ended: false, generation: 0, elsewhere: null};
+  let state: ServerState = {mode: 'probing', session: null, error: null, ended: false, generation: 0, elsewhere: null, endSessionUrl: null};
   let probe: Promise<ServerState> | null = null;
   let timer: TimerId | null = null;
   const listeners = new Set<() => void>();
@@ -83,16 +85,16 @@ export function createServerStore(
   }
   function set(next: Next) {
     const generation = identity(next.session) === identity(state.session) ? state.generation : state.generation + 1;
-    state = {elsewhere: null, ...next, generation};
+    state = {elsewhere: null, endSessionUrl: null, ...next, generation};
     schedule();
     for (const listener of [...listeners]) {
       listener();
     }
   }
   // A session that was signed in and is not now, without a sign-out here, ended.
-  function settle(session: SessionView, {signedOut = false} = {}) {
+  function settle(session: SessionView, {signedOut = false, endSessionUrl = null as string | null} = {}) {
     const ended = !signedOut && !session.signed_in && (Boolean(state.session?.signed_in) || state.ended);
-    set({mode: 'api', session, error: null, ended});
+    set({mode: 'api', session, error: null, ended, endSessionUrl});
   }
   // Ask the server for the session. An answer that arrives after the session
   // changed here belongs to an earlier generation and is ignored.
@@ -179,18 +181,20 @@ export function createServerStore(
       return state;
     },
     async signOut() {
+      // The answer of a sign-out, or null when the session had ended already.
       const signOutWith = (token: string | undefined) =>
         api.signOut(token).then(
-          () => true,
+          answer => answer,
           error => {
             if (asError(error).kind === 'signed_out') {
-              return true;
+              return null;
             }
             throw error;
           },
         );
+      let answer: unknown = null;
       try {
-        await signOutWith(state.session?.csrf_token);
+        answer = await signOutWith(state.session?.csrf_token);
       } catch (error) {
         if (asError(error).kind !== 'csrf') {
           await refresh();
@@ -199,16 +203,19 @@ export function createServerStore(
         // The session rotated under this tab: retry once with its fresh token.
         const fresh = await api.session();
         if (fresh.signed_in) {
-          await signOutWith(fresh.csrf_token);
+          answer = await signOutWith(fresh.csrf_token);
         }
       }
+      // A person who signed in through the identity provider is offered its own sign-out page.
+      const offered =
+        isSessionView(answer) && typeof answer.end_session_url === 'string' && /^https:\/\//.test(answer.end_session_url) ? answer.end_session_url : null;
       // Signed out: clear the view now, then fetch a sign-in token.
-      set({mode: 'api', session: signedOutView, error: null, ended: false});
+      set({mode: 'api', session: signedOutView, error: null, ended: false, endSessionUrl: offered});
       const generation = state.generation;
       try {
         const session = await api.session();
         if (state.generation === generation) {
-          settle(session, {signedOut: true});
+          settle(session, {signedOut: true, endSessionUrl: offered});
         }
       } catch (error) {
         if (state.generation === generation) {

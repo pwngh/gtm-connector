@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -50,6 +51,15 @@ type Config struct {
 	// describes it. It does its own admission checks, the Host among them,
 	// and writes the receipt of every call it is sent.
 	MCP http.Handler
+	// OIDC, when set, signs the people of one workspace in through their
+	// company's identity provider.
+	OIDC *OIDC
+	// DemoSignInOff turns the demo sign-in off: it signs nobody in, and a
+	// demo person's session opens nothing.
+	DemoSignInOff bool
+	// Log, when set, is told each refused sign-in through the identity
+	// provider, by its fixed words.
+	Log *slog.Logger
 }
 
 // DefaultClientRoutes are the web app's routes: "/" and these prefixes,
@@ -61,6 +71,9 @@ var DefaultClientRoutes = []string{"/deals", "/ops"}
 type Sessions interface {
 	LiveSession(ctx context.Context, idSHA256 []byte) (postgres.Session, error)
 	SignIn(ctx context.Context, admitted postgres.Admission, idSHA256 []byte, principal postgres.Principal, ttl time.Duration) (time.Time, error)
+	SignInPerson(ctx context.Context, admitted postgres.Admission, idSHA256 []byte, w postgres.Workspace,
+		who postgres.PersonIdentity, ttl time.Duration, previous []byte) (postgres.Principal, time.Time, error)
+	PreSessionUsed(ctx context.Context, idSHA256 []byte) (bool, error)
 	RevokeSession(ctx context.Context, idSHA256 []byte) error
 	DemoPrincipalByLogin(ctx context.Context, login string) (postgres.Principal, []byte, error)
 	MigrationState(ctx context.Context) (postgres.MigrationState, error)
@@ -100,6 +113,17 @@ func New(cfg Config, sessions Sessions, evidence authz.Evidence) (*Server, error
 	}
 	if len(cfg.ClientRoutes) == 0 {
 		cfg.ClientRoutes = DefaultClientRoutes
+	}
+	if o := cfg.OIDC; o != nil {
+		switch {
+		case o.Client == nil || o.Workspace.ID == "":
+			return nil, errors.New("sign-in through an identity provider needs its client and its workspace")
+		case o.Client.RedirectURL() != cfg.PublicOrigin+OIDCCallbackPath:
+			return nil, fmt.Errorf("the identity provider's redirect URL must be the public origin followed by %s",
+				OIDCCallbackPath)
+		case o.SessionTTL <= 0:
+			o.SessionTTL = DefaultOIDCSessionTTL
+		}
 	}
 	s := &Server{cfg: cfg, sessions: sessions, evidence: evidence, hosts: map[string]bool{},
 		host: strings.ToLower(origin.Host), policy: fmt.Sprintf(basePolicy, ""), web: cfg.Web}
@@ -149,6 +173,8 @@ func (s *Server) apiRoutes() []route {
 		{pattern: "GET /api/v1/session", read: s.getSession},
 		{pattern: "POST /api/v1/session", signIn: true, write: s.signIn},
 		{pattern: "DELETE /api/v1/session", write: s.signOut},
+		{pattern: "GET " + OIDCStartPath, read: s.startOIDC},
+		{pattern: "GET " + OIDCCallbackPath, read: s.finishOIDC},
 		{pattern: "GET /api/v1/accounts", read: s.signedIn(s.accounts)},
 		{pattern: "GET /api/v1/accounts/{account}/cards", read: s.signedIn(s.accountCards)},
 		{pattern: "GET /api/v1/cards/{card}", read: s.signedIn(s.card)},

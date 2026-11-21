@@ -15,7 +15,7 @@ gtm-connector COMMAND --help
 ```
 
 `help COMMAND` is `COMMAND --help` for `demo`, `connect`, `accounts`, `brief`, `inspect`, `audit`,
-`mcp` and `token`. For any other name it prints the list of commands, as `--help` does. Run with no
+`grant`, `grants`, `mcp` and `token`. For any other name it prints the list of commands, as `--help` does. Run with no
 command, the binary prints one sentence on what it does and three commands to try first.
 
 [Deal cards](cards.md) explains what a card says and how to read it. This page covers what each
@@ -199,6 +199,7 @@ they have reached. With `--json`, each progress line is one object with a single
 | [`connect`](#connect-results) | Object with `schema_version`, `sources`, and `sellers` or `provider` and `status`. |
 | [`mcp stdio`](#mcp-stdio-and-token) | MCP messages only. |
 | [`token`](#mcp-stdio-and-token) | A token's object, or an array of them. |
+| [`grant`, `grants`](#grant-and-grants) | A grant's object, or an array of people. |
 | [`debug calls`, `debug salesforce check`, `debug slack`](#debug-commands) | See below. |
 | [`setup`, `serve`, `backup`, `restore`, `health`, `version`](#install-commands) | Text only. |
 
@@ -451,6 +452,27 @@ revoke a workspace's tokens.
 
 `caller` is the token's SHA-256, which its receipts name as `token_id`: `audit --caller CALLER` lists
 its calls. [MCP](mcp.md) covers scopes, grants, lifetimes and both transports.
+
+### `grant` and `grants`
+
+`grant ACCOUNT --to PERSON` gives a person who signs in through the identity provider read access to one
+account the workspace holds, and `--revoke` ends it. `grants` lists the people who have signed in to the
+workspace and every grant each holds or held, and `--to PERSON` lists one of them. A person is listed
+from their first sign-in, with no grant. [Running it](operations.md#sign-in-through-your-identity-provider)
+covers the sign-in.
+
+`--to` takes an email the person's provider verified, in any case, or their subject. In the `demo`
+workspace, an account of the demo book can be granted before any command has read it.
+
+| Command | JSON result |
+| --- | --- |
+| `grant` | Object with `account`, `account_name`, `person`, `state` (`live`, or `revoked` with `--revoke`), `changed` (false when the grant already stood so) and `receipt_id`. |
+| `grants` | Array of people, first signed in first, each with `id`, `name`, `email`, `email_verified`, `subject`, `state` (`enabled` or `disabled`), `first_signed_in` and `grants`, each grant with `account`, `account_name`, `state`, `granted_at` and `revoked_at`. `[]` when no one has signed in. |
+
+`grant` exits `2` for an ACCOUNT that is not an account ID, a `--to` that is not one line of printable
+text, a workspace that does not exist, a person or an account the workspace does not have, and an email
+two people share. A refused person or account, and an email two people share, keep their receipt,
+finished as an error. See [audit](audit.md#what-each-command-adds).
 
 ### Debug commands
 

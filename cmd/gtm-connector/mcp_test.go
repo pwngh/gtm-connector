@@ -51,15 +51,25 @@ type served struct {
 	server  *http.Server
 	logs    *lockedBuffer
 	key     []byte
-	send    func(host, method, name, token string, params map[string]any) (int, map[string]any)
-	call    func(host, tool, token string, arguments map[string]any) (int, map[string]any)
-	result  func(document map[string]any) map[string]any
-	reason  func(document map[string]any) any
+	// roots trust the install's certificate.
+	roots  *x509.CertPool
+	send   func(host, method, name, token string, params map[string]any) (int, map[string]any)
+	call   func(host, tool, token string, arguments map[string]any) (int, map[string]any)
+	result func(document map[string]any) map[string]any
+	reason func(document map[string]any) any
 }
 
 // startServe starts what serve itself builds, until the test ends. It fails the test when serve cannot
 // start.
 func startServe(t *testing.T, d *demoDatabase, selection cards.Selection) *served {
+	t.Helper()
+	return startServeWith(t, d, selection, nil)
+}
+
+// startServeWith is startServe with the sign-ins people gives for the server's public origin, as serve
+// opens them from its settings.
+func startServeWith(t *testing.T, d *demoDatabase, selection cards.Selection,
+	people func(origin string, store *postgres.Store, logs *slog.Logger) signInSurface) *served {
 	t.Helper()
 	store, err := openAppStore(ctx, config{databaseURL: d.appURL})
 	if err != nil {
@@ -83,13 +93,19 @@ func startServe(t *testing.T, d *demoDatabase, selection cards.Selection) *serve
 		t.Fatal(err)
 	}
 	address := listener.Addr().String()
-	surface, err := newSurface(ctx, store, config{publicOrigin: "https://" + address, allowedHosts: []string{address}}, key, selection)
+	logs := &lockedBuffer{}
+	logger := slog.New(slog.NewTextHandler(logs, nil))
+	var signIns signInSurface
+	if people != nil {
+		signIns = people("https://"+address, store, logger)
+	}
+	surface, err := newSurface(ctx, store, config{publicOrigin: "https://" + address, allowedHosts: []string{address}}, key,
+		selection, signIns)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { surface.Close() })
-	logs := &lockedBuffer{}
-	server := newServer(surface, pair, slog.New(slog.NewTextHandler(logs, nil)))
+	server := newServer(surface, pair, logger)
 	go server.ServeTLS(listener, "", "")
 	t.Cleanup(func() { server.Close() })
 
@@ -101,7 +117,7 @@ func startServe(t *testing.T, d *demoDatabase, selection cards.Selection) *serve
 	pool.AddCert(leaf)
 	client := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS13}}}
-	s := &served{address: address, server: server, logs: logs, key: key}
+	s := &served{address: address, server: server, logs: logs, key: key, roots: pool}
 	s.send = func(host, method, name, token string, params map[string]any) (int, map[string]any) {
 		t.Helper()
 		params["_meta"] = json.RawMessage(mcpMeta)
@@ -385,7 +401,7 @@ func TestMCPStartupErrorsAreFixedLines(t *testing.T) {
 		t.Fatalf("a role that may not write: %v", err)
 	}
 	_, err = newSurface(ctx, store, config{publicOrigin: "https://127.0.0.1:8443", allowedHosts: []string{"127.0.0.1:8443"}},
-		bytes.Repeat([]byte("k"), 32), nil)
+		bytes.Repeat([]byte("k"), 32), nil, signInSurface{})
 	for _, leaked := range []string{"permission denied", "connections", "workspaces", app.User.Username(), "SQLSTATE"} {
 		if err == nil || strings.Contains(err.Error(), leaked) {
 			t.Errorf("serve's own error holds %q: %v", leaked, err)

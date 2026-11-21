@@ -195,7 +195,8 @@ reads inside it are its child receipts, whose `request_id` is
 | `demo` | Five for each card it publishes. |
 | `accounts`, `inspect ACCOUNT_ID` | One on a real CRM. None on the demo book, which is read without a tool call. |
 | `debug calls import`, `debug slack map` | One `get_account` in an `import-` run, also on the demo book. On a real CRM, one more in an `inspect-` run before it. |
-| `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `connect` | None. |
+| `grant` | One: `grant_account`, or `revoke_grant` with `--revoke`, whose arguments are the account and the `--to` given. It finishes ok with the row `grants/PRINCIPAL_ID/ACCOUNT_ID`, in the transaction that changes the grant, or as an error that changes nothing: `person_not_found` or `account_not_found` (404), or `person_ambiguous` (409). |
+| `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `connect`, `grants` | None. |
 | MCP calls through `serve` or `mcp stdio` | One per tool call, and one per read inside a prepared brief. |
 
 ## Rate limit and writes

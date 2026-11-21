@@ -32,10 +32,12 @@ rules every store applies, and `receiptstest`, which every store runs), `cards` 
 `people` resolves a speaker to a person and a side by the strongest identifier a source carries; its
 package comment states the ladder and the rules, and nothing calls it yet.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
-rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
+rules for any writer), `authz` the grant checks on evidence reads, `oidc` sign-in through a company's
+identity provider (with an invented provider in `oidctest`), `transport/http` the browser
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with `connect` and the
 read commands `accounts`, `brief`, `inspect` and `audit` on demo data and Salesforce, `debug salesforce
-check`, `debug slack`, `token` for MCP client tokens and `mcp stdio`. Its `sources.go` is the one place a
+check`, `debug slack`, `token` for MCP client tokens, `grant` and `grants` for people's account grants,
+and `mcp stdio`. Its `sources.go` is the one place a
 source is wired into those commands. `postgres.ReceiptStore` runs the card maker on PostgreSQL.
 `mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`
 and `mcp stdio` serves on stdin and stdout.

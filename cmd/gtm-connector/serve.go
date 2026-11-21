@@ -87,6 +87,10 @@ func serve(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	settings, err := loadSignIn(c)
+	if err != nil {
+		return err
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	store, err := openAppStore(ctx, c)
 	if err != nil {
@@ -98,12 +102,20 @@ func serve(ctx context.Context, args []string) error {
 		return fmt.Errorf("%w (run setup first)", err)
 	}
 	pair, key, err := serving(creds)
+	var secret string
+	if err == nil {
+		secret, err = settings.secret(creds)
+	}
 	creds.Close()
 	if err != nil {
 		return err
 	}
+	people, err := settings.open(ctx, store, secret, nil, logger)
+	if err != nil {
+		return err
+	}
 	app := web.App()
-	surface, err := newSurface(ctx, store, c, key, selection)
+	surface, err := newSurface(ctx, store, c, key, selection, people)
 	if err != nil {
 		return err
 	}
@@ -126,7 +138,8 @@ func serve(ctx context.Context, args []string) error {
 		from = "none (API only)"
 	}
 	logger.Info("serving", "origin", c.publicOrigin, "listen", c.listen, "web", from,
-		"mcp", c.publicOrigin+"/mcp", "selected_accounts", len(selection), "credentials", c.credentialsDir)
+		"mcp", c.publicOrigin+"/mcp", "selected_accounts", len(selection), "credentials", c.credentialsDir,
+		"sign_in", people.described())
 	select {
 	case err := <-served:
 		return err
@@ -166,19 +179,23 @@ func serveFlags() (*flag.FlagSet, *string) {
 }
 
 // newSurface is everything serve answers: the browser surface, with the
-// MCP gateway mounted at /mcp.
-func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey []byte, selection cards.Selection) (*httptransport.Server, error) {
+// MCP gateway mounted at /mcp, and the sign-ins people use.
+func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey []byte, selection cards.Selection,
+	people signInSurface) (*httptransport.Server, error) {
 	gateway, err := mcpGateway(ctx, store, c.publicOrigin, selection)
 	if err != nil {
 		return nil, err
 	}
 	return httptransport.New(httptransport.Config{
-		PublicOrigin: c.publicOrigin,
-		AllowedHosts: c.allowedHosts,
-		Web:          web.App(),
-		WebDir:       c.webDir,
-		SessionKey:   sessionKey,
-		MCP:          gateway,
+		PublicOrigin:  c.publicOrigin,
+		AllowedHosts:  c.allowedHosts,
+		Web:           web.App(),
+		WebDir:        c.webDir,
+		SessionKey:    sessionKey,
+		MCP:           gateway,
+		OIDC:          people.oidc,
+		DemoSignInOff: people.demoOff,
+		Log:           people.log,
 	}, store, authz.Evidence{Store: store})
 }
 

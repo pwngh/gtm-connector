@@ -53,6 +53,9 @@ var commands = map[string]arguments{
 		optional: "provider", choices: append(append([]string{"status"}, providerNames()...), assistantApps...),
 		help: connectHelp},
 	"demo": {options: []option{{name: "--again"}}, help: demoHelp},
+	"grant": {options: []option{{name: "--to", value: true, required: true}, {name: "--revoke"}}, required: "ACCOUNT",
+		help: grantHelp},
+	"grants": {options: []option{{name: "--to", value: true}}, help: grantsHelp},
 }
 
 // parsed is one command line, read.

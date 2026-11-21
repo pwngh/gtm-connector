@@ -37,6 +37,13 @@ func (noSessions) LiveSession(context.Context, []byte) (postgres.Session, error)
 func (noSessions) SignIn(context.Context, postgres.Admission, []byte, postgres.Principal, time.Duration) (time.Time, error) {
 	return time.Time{}, errors.New("no database")
 }
+func (noSessions) SignInPerson(context.Context, postgres.Admission, []byte, postgres.Workspace,
+	postgres.PersonIdentity, time.Duration, []byte) (postgres.Principal, time.Time, error) {
+	return postgres.Principal{}, time.Time{}, errors.New("no database")
+}
+func (noSessions) PreSessionUsed(context.Context, []byte) (bool, error) {
+	return false, errors.New("no database")
+}
 func (noSessions) RevokeSession(context.Context, []byte) error { return errors.New("no database") }
 func (noSessions) DemoPrincipalByLogin(context.Context, string) (postgres.Principal, []byte, error) {
 	return postgres.Principal{}, nil, postgres.ErrNotFound

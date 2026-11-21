@@ -170,7 +170,8 @@ func TestBackupAndRestoreKeepState(t *testing.T) {
 // A backup carries the credential files setup makes and leaves a workspace's Slack sign-in and its lock out.
 // A copy of the sign-in could still be valid, a live Slack credential in a file that is copied and kept; and
 // Slack spends a refresh token once, so a restored copy could as well be one Slack no longer accepts. A
-// restore puts no sign-in back.
+// restore puts no sign-in back. It leaves the identity provider's client secret out too, which the operator
+// puts in place by hand.
 func TestABackupLeavesTheSlackSignInOut(t *testing.T) {
 	f := postgrestest.New(t)
 	source := privateDir(t)
@@ -183,7 +184,7 @@ func TestABackupLeavesTheSlackSignInOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	const saved = "invented-slack-sign-in-0000000000000000"
-	for _, name := range []string{"slack-acme.json", "slack-acme.lock"} {
+	for _, name := range []string{"slack-acme.json", "slack-acme.lock", oidcSecretFile} {
 		if err := creds.write(name, []byte(saved)); err != nil {
 			t.Fatal(err)
 		}
@@ -216,9 +217,9 @@ func TestABackupLeavesTheSlackSignInOut(t *testing.T) {
 			t.Fatal(err)
 		}
 		carried[header.Name] = true
-		if strings.Contains(header.Name, "slack-acme") || bytes.Contains(body, []byte("slack-acme")) ||
-			bytes.Contains(body, []byte(saved)) {
-			t.Errorf("the backup carries the Slack sign-in in %s", header.Name)
+		if strings.Contains(header.Name, "slack-acme") || strings.Contains(header.Name, oidcSecretFile) ||
+			bytes.Contains(body, []byte("slack-acme")) || bytes.Contains(body, []byte(saved)) {
+			t.Errorf("the backup carries the Slack sign-in or the client secret in %s", header.Name)
 		}
 	}
 	for _, name := range credentialFiles {
@@ -235,7 +236,7 @@ func TestABackupLeavesTheSlackSignInOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range restored {
-		if strings.HasPrefix(entry.Name(), "slack-") {
+		if strings.HasPrefix(entry.Name(), "slack-") || entry.Name() == oidcSecretFile {
 			t.Errorf("the restore wrote %s", entry.Name())
 		}
 	}

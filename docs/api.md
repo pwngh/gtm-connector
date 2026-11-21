@@ -55,9 +55,11 @@ the web app. The API takes the session cookie and nothing else.
 
 | Route | What it returns |
 | --- | --- |
-| `GET /api/v1/session` | Whether the caller is signed in, who as, and the CSRF token for the next write |
-| `POST /api/v1/session` | Signs in with `login` and `password`, the demo sign-in that `setup` writes |
-| `DELETE /api/v1/session` | Signs out |
+| `GET /api/v1/session` | Whether the caller is signed in, who as, the CSRF token for the next write, and `sign_in`: whether the identity provider (`oidc`) and the demo sign-in (`demo`) are offered |
+| `POST /api/v1/session` | Signs in with `login` and `password`, the demo sign-in that `setup` writes, unless `GTM_DEMO_SIGN_IN` is off |
+| `GET /api/v1/session/oidc?return=PAGE` | Starts a sign-in through the identity provider and sends the browser there. It comes back to `PAGE` when that is a page of the web app, else to `/`. |
+| `GET /api/v1/session/oidc/callback` | Where the provider sends the browser back: it signs the person in and sends the browser on to the page, or back to it with `sign_in_error` set to `denied`, `not_allowed`, `disabled`, `expired`, `unavailable` or `failed` |
+| `DELETE /api/v1/session` | Signs out. For a person of the identity provider, `end_session_url` is the provider's own sign-out page, when it publishes one. |
 | `GET /api/v1/accounts` | The accounts the person may read, each with its neutralized name |
 | `GET /api/v1/accounts/{account}/cards` | The account's published cards: ID, brief ID, SHA-256, size, seal receipt and when it was published |
 | `GET /api/v1/cards/{card}` | The card as JSON: its head, `as_of`, `sources`, `units`, `gaps` and `lines`. A unit sealed under an older neutralizer version has its text and speaker neutralized again. |
@@ -76,7 +78,8 @@ the person may not read.
 | `401 sign_in_refused` | The login or password is not right |
 | `401 authorization_refused` | A request under `/api/` carries an `Authorization` header |
 | `403 csrf_invalid` | A write without the CSRF token of `GET /api/v1/session` in `X-CSRF-Token` |
-| `404 not_found` | Any other path under `/api/`, or a unit number that is not a positive integer |
+| `403 demo_sign_in_off` | The demo sign-in, while `GTM_DEMO_SIGN_IN` is off |
+| `404 not_found` | Any other path under `/api/`, a unit number that is not a positive integer, or a sign-in path of the identity provider where none is set up |
 
 Each of `lines` is one line under ATTENTION or RECORD VALUES, as data, so a page, an alert or a
 script reads a value without reading the text. The renewal date line of the README's card:

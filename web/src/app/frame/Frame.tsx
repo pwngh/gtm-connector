@@ -3,7 +3,7 @@ import {type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useStat
 import {Link, useLocation, useNavigate} from 'react-router';
 import {ApiError, sessionExpired} from '../../api/client.ts';
 import {useRead, useServer} from '../../api/reads.ts';
-import type {PrincipalView} from '../../api/types.ts';
+import type {PrincipalView, SignInView} from '../../api/types.ts';
 import {Button} from '../../ui/Button.tsx';
 import {Dialog} from '../../ui/Dialog.tsx';
 import {Palette} from '../../ui/Palette.tsx';
@@ -18,6 +18,9 @@ import {SignIn} from './SignIn.tsx';
 import './frame.css';
 
 const phoneQuery = '(max-width: 719.98px)';
+
+// A server that does not say how people sign in offers the demo sign-in alone.
+const demoOnly: SignInView = {oidc: false, demo: true};
 
 function Mark() {
   return (
@@ -148,6 +151,8 @@ export function Frame() {
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<ApiError | null>(null);
   const [loadedPath, setLoadedPath] = useState<string | null>(null);
+  // Why a sign-in through the identity provider came back refused, taken from the address it came back to.
+  const [refused, setRefused] = useState<string | null>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const previousPath = useRef(location.pathname);
@@ -164,6 +169,20 @@ export function Frame() {
       store.check();
     }
   }, [expired, store]);
+
+  // A refused sign-in through the provider comes back with sign_in_error. The reason is kept to show, and
+  // the parameter leaves the address, so a reload or a shared link does not show it again.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const reason = params.get('sign_in_error');
+    if (reason === null) {
+      return;
+    }
+    setRefused(reason);
+    params.delete('sign_in_error');
+    const rest = params.toString();
+    navigate(`${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`, {replace: true});
+  }, [location, navigate]);
 
   const openPalette = useCallback(() => {
     opener.current = menu ? menuButton.current : document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -203,6 +222,8 @@ export function Frame() {
       setPalette(false);
       setMenu(false);
       setSigningOut(false);
+    } else {
+      setRefused(null);
     }
   }, [signedIn]);
 
@@ -387,6 +408,9 @@ export function Frame() {
             ended={state.ended || expired}
             elsewhere={state.elsewhere}
             problem={noSession ? (state.error ?? new ApiError({kind: 'unreachable'})) : null}
+            ways={state.session?.sign_in ?? demoOnly}
+            refused={refused}
+            endSessionUrl={state.endSessionUrl ?? null}
           />
         ) : (
           <div className="fr-page">

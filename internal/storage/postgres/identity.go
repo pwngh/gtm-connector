@@ -24,10 +24,13 @@ type Workspace struct {
 	ID, Slug, Kind, DisplayName string
 }
 
-// Principal is a person or a machine in one workspace.
+// Principal is a person or a machine in one workspace. Login is a demo person's; Issuer and Subject are a
+// person's who signs in through an identity provider, with the email that provider gave last.
 type Principal struct {
 	ID, WorkspaceID, WorkspaceKind, Kind, DisplayName string
 	Login                                             string
+	Issuer, Subject, Email                            string
+	EmailVerified                                     bool
 }
 
 // EnsureWorkspace returns the workspace with this slug, creating it if absent.
@@ -229,22 +232,24 @@ func createSession(ctx context.Context, q execQuerier, idSHA256 []byte, principa
 // expired nor been revoked, and its principal is enabled; else ErrNotFound.
 func (s *Store) LiveSession(ctx context.Context, idSHA256 []byte) (Session, error) {
 	session := Session{IDSHA256: idSHA256, Principal: &Principal{}}
-	var login *string
+	var login, issuer, subject, email *string
 	p := session.Principal
 	err := s.pool.QueryRow(ctx, `
-		SELECT s.expires_at, p.id, p.workspace_id, p.workspace_kind, p.kind, p.display_name, p.login
+		SELECT s.expires_at, p.id, p.workspace_id, p.workspace_kind, p.kind, p.display_name, p.login,
+		       p.oidc_issuer, p.oidc_subject, p.email, p.email_verified
 		  FROM sessions s
 		  JOIN principals p ON p.workspace_id = s.workspace_id AND p.id = s.principal_id
 		 WHERE s.id_sha256 = $1 AND s.revoked_at IS NULL AND s.expires_at > now()
 		   AND p.disabled_at IS NULL`, idSHA256).
-		Scan(&session.ExpiresAt, &p.ID, &p.WorkspaceID, &p.WorkspaceKind, &p.Kind, &p.DisplayName, &login)
+		Scan(&session.ExpiresAt, &p.ID, &p.WorkspaceID, &p.WorkspaceKind, &p.Kind, &p.DisplayName, &login,
+			&issuer, &subject, &email, &p.EmailVerified)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}
 	if err != nil {
 		return Session{}, err
 	}
-	p.Login = deref(login)
+	p.Login, p.Issuer, p.Subject, p.Email = deref(login), deref(issuer), deref(subject), deref(email)
 	return session, nil
 }
 
