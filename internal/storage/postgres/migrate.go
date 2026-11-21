@@ -141,6 +141,21 @@ func (s *Store) MigrationsCurrent(ctx context.Context) (bool, error) {
 // undefinedTable is the SQLSTATE of a read from a table that does not exist.
 const undefinedTable = "42P01"
 
+// requireUTF8 refuses a database that is not encoded as UTF-8, before any migration or restore. The checks
+// name characters outside ASCII, and the records they compare may hold any character.
+func requireUTF8(ctx context.Context, db interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}) error {
+	var encoding string
+	if err := db.QueryRow(ctx, "SELECT current_setting('server_encoding')").Scan(&encoding); err != nil {
+		return err
+	}
+	if encoding != "UTF8" {
+		return fmt.Errorf("the database is encoded as %s; create it with ENCODING 'UTF8' TEMPLATE template0", encoding)
+	}
+	return nil
+}
+
 func (s *Store) migrateTo(ctx context.Context, target int) error {
 	list, err := migrations()
 	if err != nil {
@@ -151,6 +166,9 @@ func (s *Store) migrateTo(ctx context.Context, target int) error {
 		return err
 	}
 	defer conn.Release()
+	if err := requireUTF8(ctx, conn); err != nil {
+		return err
+	}
 	if _, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", migrationLock); err != nil {
 		return err
 	}

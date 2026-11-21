@@ -239,8 +239,9 @@ func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		request = nil
 		if errors.Is(err, strictjson.ErrTooDeep) {
-			// A body refused only for its depth is not parsed at all. Its method and its tool name are read
-			// without descending, so a tool call it makes keeps its receipt, under its own tool's name.
+			// A body refused for its depth is well encoded and is not parsed at all, so what else may be wrong
+			// with it is not known. Its method and its tool name are read without descending, so a tool call
+			// it makes keeps its receipt, under its own tool's name.
 			method, name, named := shallowCall(body)
 			if method == "tools/call" {
 				marked, tooDeep = true, named

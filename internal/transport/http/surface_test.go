@@ -280,10 +280,21 @@ func TestTheSignInBodyIsOneObject(t *testing.T) {
 		return w.Code
 	}
 	for _, body := range []string{`{"login":"a","password":"b"}}`, `{"login":"a","password":"b"}{}`,
-		`{"login":"a","password":"b"} []`, `null`, `[]`, `"x"`, `{"login":"a","password":"b","x":1}`} {
+		`{"login":"a","password":"b"} []`, `null`, `[]`, `"x"`, `{"login":"a","password":"b","x":1}`,
+		// As the strict reader reads it: a field twice, a field in another case, a field of another type,
+		// bytes that are not UTF-8, a number no float holds, and a leading byte-order mark are each refused.
+		"\xef\xbb\xbf{\"login\":\"a\",\"password\":\"b\"}",
+		`{"login":"a","password":"b","password":"c"}`, `{"login":"a","login":"a","password":"b"}`,
+		`{"Login":"a","password":"b"}`, `{"login":"a","PASSWORD":"b"}`, `{"login":null,"password":"b"}`,
+		`{"login":"a","password":1}`, "{\"login\":\"a\xff\",\"password\":\"b\"}", `{"login":"a","password":"b"} NaN`,
+		`{"login":"a","password":"\ud800"}`} {
 		if code := post(body); code != http.StatusBadRequest {
 			t.Errorf("%s: %d", body, code)
 		}
+	}
+	// The reader's depth limit holds inside the body's size limit.
+	if code := post(`{"login":` + strings.Repeat("[", 1001) + strings.Repeat("]", 1001) + `}`); code != http.StatusBadRequest {
+		t.Errorf("a body nested past the limit: %d", code)
 	}
 	if code := post(`{"login":"a","password":"b"}` + "\n"); code != http.StatusUnauthorized {
 		t.Errorf("one object: %d", code)

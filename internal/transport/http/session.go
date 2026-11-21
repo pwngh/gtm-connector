@@ -1,14 +1,12 @@
 package httptransport
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -19,6 +17,7 @@ import (
 
 	"github.com/pwngh/gtm-connector/internal/authz"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // The cookies. The __Host- prefix makes the browser require Secure, Path=/
@@ -286,8 +285,10 @@ func (s *Server) signedIn(next func(http.ResponseWriter, *http.Request, authz.Pr
 
 const maxBody = 4096
 
-// readJSON decodes exactly one JSON object, with no unknown fields and
-// nothing after it, from a JSON body.
+// readJSON decodes exactly one JSON object from a JSON body of at most
+// maxBody bytes, as strictjson reads it: no field named twice, no field the
+// request does not document, each field of its own type and spelled exactly,
+// and nothing after the object.
 func readJSON(w http.ResponseWriter, r *http.Request, value any) bool {
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || media != "application/json" {
@@ -295,21 +296,9 @@ func readJSON(w http.ResponseWriter, r *http.Request, value any) bool {
 		return false
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
-	invalid := func() bool {
+	if err != nil || strictjson.Decode(body, value) != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json", "Send one JSON object with the documented fields.")
 		return false
-	}
-	if err != nil || !bytes.HasPrefix(bytes.TrimLeft(body, " \t\r\n"), []byte("{")) {
-		return invalid()
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(value); err != nil {
-		return invalid()
-	}
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); err != io.EOF {
-		return invalid()
 	}
 	return true
 }

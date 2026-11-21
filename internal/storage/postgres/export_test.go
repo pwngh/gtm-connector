@@ -15,6 +15,16 @@ func MigrateTo(s *Store, ctx context.Context, version int) error { return s.migr
 // MigrationVersion is the number of the embedded migration with this name, or 0.
 func MigrationVersion(name string) int { return migrationVersion(name) }
 
+// MigrationSQL gives the text of each embedded migration, in order.
+func MigrationSQL() []string {
+	list, _ := migrations()
+	var texts []string
+	for _, m := range list {
+		texts = append(texts, m.sql)
+	}
+	return texts
+}
+
 // MigrationLock is the advisory lock a migration and a restore hold.
 const MigrationLock int64 = migrationLock
 

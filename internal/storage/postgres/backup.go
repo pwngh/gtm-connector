@@ -137,6 +137,9 @@ func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion
 	// One transaction for the schema and the rows: a failed restore leaves
 	// the database empty, so it can be run again.
 	return s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := requireUTF8(ctx, tx); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", migrationLock); err != nil {
 			return err
 		}

@@ -252,3 +252,31 @@ func rewrite(t *testing.T, from, to, name string) {
 	gz.Close()
 	os.WriteFile(to, out.Bytes(), 0o600)
 }
+
+// Setup and restore refuse a database that is not encoded as UTF-8, with one line, and install no schema in it.
+func TestSetupRefusesADatabaseNotInUTF8(t *testing.T) {
+	url := pgtest.URLEncoded(t, "SQL_ASCII")
+	cfg := config{ownerDatabaseURL: url, databaseURL: url, credentialsDir: privateDir(t),
+		allowedHosts: []string{"127.0.0.1:8443"}}
+	err := setUp(ctx, cfg)
+	want := "the database is encoded as SQL_ASCII; create it with ENCODING 'UTF8' TEMPLATE template0"
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v, want %s", err, want)
+	}
+	store, err := postgres.Open(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if version, err := store.SchemaVersion(ctx); err != nil || version != 0 {
+		t.Fatalf("schema %d after the refusal (%v)", version, err)
+	}
+	// A restore refuses it too.
+	_, archive := backedUp(t)
+	if err := restore(ctx, store, privateDir(t), archive); err == nil || err.Error() != want {
+		t.Fatalf("restore: got %v, want %s", err, want)
+	}
+	if version, err := store.SchemaVersion(ctx); err != nil || version != 0 {
+		t.Fatalf("schema %d after the restore was refused (%v)", version, err)
+	}
+}
