@@ -166,26 +166,35 @@ func finishExpired(ctx context.Context, store *postgres.Store) error {
 
 // issueClientToken makes a token for the workspace's MCP clients principal and gives it, never stored, with
 // its row. The principal's grants on the connected CRM's accounts and the token are written in one
-// transaction, so a token that cannot be stored widens no other token's access. The MCP tools serve only a
-// workspace connected to the demo data in this build, as serve's tools say, so a workspace with no CRM or
-// another CRM gets no token.
+// transaction, so a token that cannot be stored widens no other token's access. The accounts are those of
+// the demo book beside the demo CRM, and beside a real CRM those the workspace holds: each account a command
+// has listed there, as brief does. A workspace with no CRM, or with one the MCP tools do not serve, gets no
+// token. Opening the CRM reads its row only: nothing is read from the source here.
 func issueClientToken(ctx context.Context, store *postgres.Store, workspace postgres.Workspace,
 	scopes []string, lifetime time.Duration) (string, postgres.ClientToken, error) {
 	from, err := workspaceReads(ctx, store, workspace)
-	switch {
-	case err != nil:
-		return "", postgres.ClientToken{}, err
-	case from.backend("crm") != "sqlite":
-		return "", postgres.ClientToken{}, &failure{code: 3, message: "This workspace's CRM is " +
-			from.described("crm") + ", which the MCP tools do not serve in this build."}
-	}
-	book, err := seededBook()
 	if err != nil {
 		return "", postgres.ClientToken{}, err
 	}
+	opened, err := from.crm(ctx)
+	if err != nil {
+		return "", postgres.ClientToken{}, err
+	}
+	if _, serves := opened.(servedCRM); !serves {
+		return "", postgres.ClientToken{}, &failure{code: 3, message: "This workspace's CRM is " +
+			from.described("crm") + ", which the MCP tools do not serve in this build."}
+	}
 	var accounts []postgres.ClientAccount
-	for _, account := range book.Accounts() {
-		accounts = append(accounts, postgres.ClientAccount{Ref: account.ID, Name: account.Name})
+	if from.backend("crm") == "sqlite" {
+		book, err := seededBook()
+		if err != nil {
+			return "", postgres.ClientToken{}, err
+		}
+		for _, account := range book.Accounts() {
+			accounts = append(accounts, postgres.ClientAccount{Ref: account.ID, Name: account.Name})
+		}
+	} else if accounts, err = store.HeldAccounts(ctx, workspace.ID); err != nil {
+		return "", postgres.ClientToken{}, err
 	}
 	raw := randomToken()
 	digest := sha256.Sum256([]byte(raw))

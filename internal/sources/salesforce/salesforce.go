@@ -257,9 +257,15 @@ type Reader struct {
 	accessToken     string
 	editionVerified bool
 	organizationID  string
-	// signedInTo is the org ID sf org display named for the alias. The token must open that org.
-	signedInTo string
-	checked    map[string]bool
+	// signedInTo is the org ID sf org display named for the alias, and username the user it named. The token
+	// must open that org as that user.
+	signedInTo, username string
+	// userID is the ID of the user the first token read as. Every later token must read as the same user.
+	userID  string
+	checked map[string]bool
+	// tokens are every token this Reader has held or been given, for as long as it lives. An answer that
+	// holds any of them is refused.
+	tokens echo.Tokens
 }
 
 // FromSF captures the credentials of an existing sf login, by its alias, and makes the Reader of that org.
@@ -280,29 +286,35 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	instanceURL, organizationID, accessToken, err := login.read(ctx)
+	given, err := login.read(ctx)
 	if err != nil {
 		return nil, err
 	}
-	origin, err := configure(instanceURL, accessToken)
-	if err != nil {
+	origin, err := configure(given.instanceURL, given.accessToken)
+	if err != nil || !plainLabel(given.username) {
 		// What sf gave is not a usable login.
 		return nil, refuse(authRequired)
 	}
 	transport := o.Transport
 	if transport == nil {
-		transport = sourcehttp.Transport(sourcehttp.Direct, nil)
+		transport = DefaultTransport()
 	}
 	now := o.Now
 	if now == nil {
 		now = time.Now
 	}
-	return &Reader{environment: environment, instanceURL: origin, accessToken: accessToken, credentials: login,
-		signedInTo: organizationID,
-		now:        now, turn: make(chan struct{}, 1), checked: map[string]bool{},
+	r := &Reader{environment: environment, instanceURL: origin, accessToken: given.accessToken, credentials: login,
+		signedInTo: given.organizationID, username: given.username,
+		now: now, turn: make(chan struct{}, 1), checked: map[string]bool{},
 		client: &http.Client{Transport: transport,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	r.tokens.Add(given.accessToken)
+	return r, nil
 }
+
+// DefaultTransport is the transport a Reader makes when it is given none: sourcehttp's, which dials out
+// only in a process whose main allowed it (sourcehttp.Live).
+func DefaultTransport() http.RoundTripper { return sourcehttp.Transport(sourcehttp.Direct, nil) }
 
 // operation runs one bounded read, after the checks every first read makes: the org against the selected
 // environment, and outside Developer Edition the four objects' fields.
@@ -319,13 +331,15 @@ func (r *Reader) bounded(ctx context.Context, capabilities bool, run func(o *ope
 	}
 	defer func() { <-r.turn }()
 	o := &operation{reader: r, ctx: ctx, token: r.accessToken, deadline: r.now().Add(operationTime)}
-	o.tokens.Add(r.accessToken)
 	if !r.editionVerified {
 		organization, err := o.query(organizationQuery, 1)
 		if err != nil {
 			return err
 		}
 		if err := r.validateEnvironment(organization); err != nil {
+			return err
+		}
+		if err := o.checkUser(); err != nil {
 			return err
 		}
 		// A token sf gave during this first check is kept only now that it has proved the org.
@@ -391,11 +405,25 @@ func plainLabel(name string) bool {
 	return true
 }
 
-// Identity is what pins a folder to one Salesforce connection.
+// Identity is what pins a folder to one Salesforce connection: the org, and the user it is read as.
 type Identity struct {
 	InstanceURL    string
 	OrganizationID string
 	Environment    string
+	UserID         string
+}
+
+// Pin is what a workspace is pinned to: the SHA-256 of the identity with the ID of the user it is read as,
+// in the canonical encoding. Another user of the same org has another pin.
+func (i Identity) Pin() string {
+	value := i.Value()
+	value.Set("user_id", i.UserID)
+	canonical, err := strictjson.Dumps(value, strictjson.Prepared)
+	if err != nil {
+		panic(err)
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:])
 }
 
 // Value is the identity as crm-connection.json holds it.
@@ -416,11 +444,17 @@ func (i Identity) Binding() *strictjson.Object {
 		"identity_sha256", hex.EncodeToString(sum[:]))
 }
 
+// identity is the org and the user this Reader has checked.
+func (r *Reader) identity() Identity {
+	return Identity{InstanceURL: r.instanceURL, OrganizationID: r.organizationID, Environment: r.environment,
+		UserID: r.userID}
+}
+
 // PrepareConnection gives the org's identity once the environment and schema checks pass. It reads no record.
 func (r *Reader) PrepareConnection(ctx context.Context) (Identity, error) {
 	var identity Identity
 	err := r.operation(ctx, func(*operation) error {
-		identity = Identity{InstanceURL: r.instanceURL, OrganizationID: r.organizationID, Environment: r.environment}
+		identity = r.identity()
 		return nil
 	})
 	return identity, err
@@ -431,7 +465,7 @@ func (r *Reader) PrepareConnection(ctx context.Context) (Identity, error) {
 func (r *Reader) CheckEnvironment(ctx context.Context) (Identity, error) {
 	var identity Identity
 	err := r.bounded(ctx, false, func(*operation) error {
-		identity = Identity{InstanceURL: r.instanceURL, OrganizationID: r.organizationID, Environment: r.environment}
+		identity = r.identity()
 		return nil
 	})
 	return identity, err

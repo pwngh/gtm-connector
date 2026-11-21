@@ -52,6 +52,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
@@ -100,6 +101,8 @@ Not in this build: ` + strings.Join(notInBuild, ", ") + ", except debug salesfor
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// The program itself reaches real sources. Its tests never set this, so none of them can.
+	sourcehttp.Live.Store(true)
 	code := dispatch(ctx, os.Args[1:], newScreen())
 	stop()
 	os.Exit(code)

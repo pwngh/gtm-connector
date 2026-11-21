@@ -89,8 +89,8 @@ func TestTheReadersOwnTransportSpeaksHTTP1(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	// The Organization row, then the four objects' fields.
-	if want := strings.Fields(strings.Repeat("HTTP/1.1 ", 5)); !slices.Equal(protocols, want) || len(connections) != 5 {
+	// The Organization row, the user, then the four objects' fields.
+	if want := strings.Fields(strings.Repeat("HTTP/1.1 ", 6)); !slices.Equal(protocols, want) || len(connections) != 6 {
 		t.Fatalf("the server was asked over %v on %d connections", protocols, len(connections))
 	}
 }

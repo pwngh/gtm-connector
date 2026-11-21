@@ -1,7 +1,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -535,7 +534,7 @@ type toolCall struct {
 	tool      string
 	arguments *strictjson.Object
 	account   string // the account the call names, or ""
-	// scope is the scope of a read that is no MCP tool, such as a check's. "" is the tool's own.
+	// scope is the scope of a read that is no registered tool, such as a check's. A registered tool takes none.
 	scope string
 }
 
@@ -554,7 +553,18 @@ const settling = 5 * time.Second
 func (r *reads) call(ctx context.Context, c toolCall,
 	read func(context.Context) ([]*strictjson.Object, error)) (receipts.Receipt, []*strictjson.Object, error) {
 	log := &postgres.ReceiptStore{Store: r.store}
-	scope := cmp.Or(c.scope, mcp.Definitions[c.tool].Scope)
+	// A registered tool's definition decides its scope, and so its source and connection. Only a read that
+	// is no registered tool, such as one of a check, names its own.
+	definition, registered := mcp.Definitions[c.tool]
+	scope := definition.Scope
+	switch {
+	case registered && c.scope != "":
+		return receipts.Receipt{}, nil, fmt.Errorf("%s is a registered tool and takes its own scope", c.tool)
+	case !registered && c.scope == "":
+		return receipts.Receipt{}, nil, fmt.Errorf("%s is no registered tool and names no scope", c.tool)
+	case !registered:
+		scope = c.scope
+	}
 	row := r.rows[strings.TrimSuffix(scope, ":read")]
 	started, err := log.Start(ctx, receipts.Start{WorkspaceID: r.workspace.ID,
 		OperationID: fmt.Sprintf("%s/%d", c.run, c.request), TokenID: c.token, Tool: c.tool, Scope: scope,
@@ -589,6 +599,15 @@ func (r *reads) call(ctx context.Context, c toolCall,
 	versions, err := cards.RecordVersions(records)
 	if err != nil {
 		return fail(receipts.Failed(200, "request_failed"), err)
+	}
+	if started.ConnectionID == "" {
+		// A call of no connected source, as a check of an org before it is connected, binds no record.
+		if len(versions) > 0 {
+			return fail(receipts.Failed(200, "request_failed"), errors.New("a call of no connected source returned records"))
+		}
+		finished, err := log.Finish(ctx, started.Ticket(), receipts.Outcome{Status: "ok", HTTPStatus: 200,
+			Rows: []string{}, ElapsedMS: elapsed()})
+		return finished, records, err
 	}
 	finished, err := log.FinishRead(ctx, started.Ticket(), versions, elapsed())
 	switch {

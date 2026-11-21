@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -16,27 +18,13 @@ import (
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/oracletest"
+	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce/salesforcetest"
+	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
-
-// No test reaches the sf of this machine or the network: one that reads Salesforce gives the invented ones,
-// and any other is refused as a login sf did not give.
-func init() {
-	salesforceOptions = salesforce.Options{Runner: unreachable{}, Transport: unreachable{}}
-}
-
-type unreachable struct{}
-
-func (unreachable) Run(context.Context, []string) ([]byte, int, error) {
-	return nil, 0, errors.New("a test ran sf without the invented one")
-}
-
-func (unreachable) RoundTrip(*http.Request) (*http.Response, error) {
-	return nil, errors.New("a test sent a request without the invented org")
-}
 
 // recordedBook is one card of the books_salesforce family: the org rows it was read from, and the card.
 type recordedBook struct {
@@ -137,8 +125,9 @@ func TestSalesforceIsReadByEveryCommand(t *testing.T) {
 		"slack\tnot connected\t\n" {
 		t.Fatalf("connect: exit %d\n%s%s", code, stdout, stderr)
 	}
-	// connect ran the two login commands, checked the org and described the four objects. It read no record.
-	if len(sf.Commands) != 2 || len(org.Requests) != 5 || strings.Contains(strings.Join(org.Requests, " "), "FROM Account") {
+	// connect ran the two login commands, checked the org and the user and described the four objects. It read
+	// no record.
+	if len(sf.Commands) != 2 || len(org.Requests) != 6 || strings.Contains(strings.Join(org.Requests, " "), "FROM Account") {
 		t.Errorf("connect ran %d sf commands and sent %q", len(sf.Commands), org.Requests)
 	}
 	var status connectResult
@@ -249,18 +238,98 @@ func TestSalesforceIsReadByEveryCommand(t *testing.T) {
 	if code, _, stderr := d.read(t, append(connect, where...)...); code != 0 {
 		t.Fatalf("the same org again: exit %d\n%s", code, stderr)
 	}
-	// A command signs in on its first read and reads nothing from an org that is no longer the pinned one.
+	// A command signs in on its first read and reads nothing from an org that is no longer the pinned one: it
+	// compares the pin before it describes any object, so an error of the other org's schema cannot hide it.
 	org.ID, sf.OrganizationID = "00D000000000000AAA", "00D000000000000AAA"
+	org.Intercept = func(request *http.Request) *http.Response {
+		if strings.HasSuffix(request.URL.Path, "/describe") {
+			return salesforcetest.Respond(200, `{"name": "Account", "queryable": false, "fields": []}`)
+		}
+		return nil
+	}
+	org.Requests = nil
 	_, message, _ := d.refusal(t, 3, append([]string{"accounts"}, where...)...)
 	if !strings.HasPrefix(message, "source_identity_mismatch: The org behind this alias is not the one this "+
-		"workspace is pinned to") {
-		t.Errorf("accounts from another org: %s", message)
+		"workspace is pinned to") || strings.Contains(strings.Join(org.Requests, " "), "/describe") {
+		t.Errorf("accounts from another org: %s, after %q", message, org.Requests)
 	}
+	org.Intercept = nil
 	code, stdout, _ = d.debug(t, append([]string{"check", "--json"}, where...)...)
 	if err := json.Unmarshal([]byte(stdout), &report); code != 4 || err != nil ||
 		!strings.HasPrefix(report.shown(), "credentials:pass:ok environment:fail:source_identity_mismatch "+
 			"account_fields:fail:prerequisite_failed") {
 		t.Errorf("check of another org: exit %d, %v %s", code, err, report.shown())
+	}
+	// The refused identity check still left its receipt, committed before sf ran.
+	var checked []receiptRow
+	d.result(t, &checked, append([]string{"audit", "--tool", "check_salesforce_org"}, where...)...)
+	if last := checked[len(checked)-1]; last.Status != "error" {
+		t.Errorf("the refused identity check: %+v", last)
+	}
+	// Another user of the same org, behind the same alias, is another pin.
+	org.ID, sf.OrganizationID = salesforcetest.OrganizationID, salesforcetest.OrganizationID
+	org.Users[salesforcetest.Token] = [2]string{"0059F2C41D7EA03ZZZ", "other@invented-books.example"}
+	sf.Username = "other@invented-books.example"
+	if _, message, _ := d.refusal(t, 3, append([]string{"accounts"}, where...)...); !strings.HasPrefix(message,
+		"source_identity_mismatch:") {
+		t.Errorf("accounts as another user: %s", message)
+	}
+}
+
+// connect salesforce takes as --org only what an sf alias may be, and saves and shows it only once sf org
+// display has named a login under that alias: a token given as --org never reaches sf, a row or the screen.
+func TestAnOrgArgumentIsAnAliasOrNothing(t *testing.T) {
+	d := setUpDemo(t)
+	_, sf, _ := inventedSalesforce(t)
+	for _, given := range []string{"00D54481A5CC257EID!AQEAQInventedAccessTokenText", "invented!token",
+		strings.Repeat("a", 65), "someone@example.com"} {
+		code, stdout, stderr := d.read(t, "connect", "salesforce", "--org", given, "--environment", "production",
+			"--state-dir", "token-books")
+		if code != 2 || strings.Contains(stdout+stderr, given) {
+			t.Errorf("--org %q: exit %d\n%s%s", given, code, stdout, stderr)
+		}
+	}
+	// sf resolves what it is given, and names no alias for it: the login is not taken.
+	sf.Answer = func(_ context.Context, arguments []string) ([]byte, int, error) {
+		return []byte(`{"status": 0, "result": {"id": "` + salesforcetest.OrganizationID + `", "instanceUrl": "` +
+			salesforcetest.Instance + `", "username": "` + salesforcetest.Username + `"}}`), 0, nil
+	}
+	if _, message, _ := d.refusal(t, 5, "connect", "salesforce", "--org", "resolved-elsewhere", "--environment",
+		"production", "--state-dir", "token-books"); !strings.HasPrefix(message, "salesforce_auth_required:") {
+		t.Errorf("a login under no alias: %s", message)
+	}
+	if len(sf.Commands) != 1 || d.count(t, "SELECT count(*) FROM connections c JOIN workspaces w ON w.id = c.workspace_id "+
+		"WHERE w.slug = 'token-books'") != 0 {
+		t.Errorf("sf ran %d commands, or a row was saved", len(sf.Commands))
+	}
+}
+
+// A registered tool's definition decides its scope, and so the connection it reads: a call cannot name
+// another. Only a check's own tool names its scope, and it must.
+func TestARegisteredToolKeepsItsOwnScope(t *testing.T) {
+	d := setUpDemo(t)
+	workspace := d.connectDemo(t, "scoped-books")
+	store, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	from, err := workspaceReads(ctx, store, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func(context.Context) ([]*strictjson.Object, error) { return []*strictjson.Object{}, nil }
+	for _, c := range []toolCall{
+		{tool: "get_account", scope: "slack:read", scopes: []string{"slack:read"}},
+		{tool: "check_salesforce_org", scopes: []string{"crm:read"}},
+	} {
+		c.token, c.run, c.request, c.arguments = receipts.Fingerprint(randomToken()), "scoped-"+c.tool, 1, &strictjson.Object{}
+		if _, _, err := from.call(ctx, c, read); err == nil {
+			t.Errorf("%s with scope %q was read", c.tool, c.scope)
+		}
+	}
+	if n := d.count(t, "SELECT count(*) FROM receipts WHERE workspace_id = $1", workspace.ID); n != 0 {
+		t.Errorf("%d receipts were started", n)
 	}
 }
 
@@ -311,42 +380,78 @@ func TestBriefMakesTheRecordedSalesforceCards(t *testing.T) {
 	type card struct {
 		Text  string
 		Units []map[string]any
+		Gaps  []map[string]any
 	}
-	crmOf := func(c card) (string, []map[string]any) {
-		sections := strings.Split(c.Text, "\n\n")
-		var shown []string
-		shown = append(shown, strings.SplitN(sections[0], "\n", 2)[0])
-		for _, section := range sections {
-			if strings.HasPrefix(section, "RECORD VALUES") {
-				shown = append(shown, section)
+	cited := regexp.MustCompile(`\[([0-9]+)\]`)
+	// crmOf is what a card shows of its CRM: its first line, the RECORD VALUES block, each ATTENTION line
+	// that cites CRM units alone, and the NOT READ lines of the CRM; its CRM units; and its CRM gaps, each
+	// with its code, disposition, count, count by role and text.
+	crmOf := func(c card) (string, []map[string]any, []map[string]any) {
+		crmUnit := map[string]bool{}
+		var units, gaps []map[string]any
+		for _, unit := range c.Units {
+			if unit["source"] == "crm" {
+				units = append(units, unit)
+				crmUnit[fmt.Sprint(unit["n"])] = true
 			}
-			if strings.HasPrefix(section, "NOT READ") {
-				for _, line := range strings.Split(section, "\n") {
+		}
+		for _, gap := range c.Gaps {
+			if code, _ := gap["code"].(string); strings.HasPrefix(code, "crm_") {
+				gaps = append(gaps, gap)
+			}
+		}
+		sections := strings.Split(c.Text, "\n\n")
+		shown := []string{strings.SplitN(sections[0], "\n", 2)[0]}
+		for _, section := range sections {
+			lines := strings.Split(section, "\n")
+			switch {
+			case strings.HasPrefix(section, "RECORD VALUES"):
+				shown = append(shown, section)
+			case strings.HasPrefix(section, "ATTENTION"):
+				heading := lines[0]
+				for _, line := range lines[1:] {
+					numbers := cited.FindAllStringSubmatch(line, -1)
+					crm := len(numbers) > 0
+					for _, number := range numbers {
+						crm = crm && crmUnit[number[1]]
+					}
+					if crm && heading != "" {
+						// The heading stands once, before the first CRM line.
+						shown, heading = append(shown, heading), ""
+					}
+					if crm {
+						shown = append(shown, line)
+					}
+				}
+			case strings.HasPrefix(section, "NOT READ"):
+				for _, line := range lines {
 					if strings.HasPrefix(line, "  CRM:") {
 						shown = append(shown, line)
 					}
 				}
 			}
 		}
-		var units []map[string]any
-		for _, unit := range c.Units {
-			if unit["source"] == "crm" {
-				units = append(units, unit)
-			}
-		}
-		return strings.Join(shown, "\n"), units
+		return strings.Join(shown, "\n"), units, gaps
 	}
+	signals := 0
 	for _, book := range books {
 		var recorded, made card
 		if err := json.Unmarshal([]byte(book.Card), &recorded); err != nil {
 			t.Fatal(err)
 		}
 		d.result(t, &made, append([]string{"brief", book.AccountID, "--as-of", book.Options.AsOf}, where...)...)
-		wantText, wantUnits := crmOf(recorded)
-		gotText, gotUnits := crmOf(made)
-		if gotText != wantText || !reflect.DeepEqual(gotUnits, wantUnits) || len(wantUnits) == 0 {
-			t.Errorf("%s:\n%s\nrecorded:\n%s", book.Key, gotText, wantText)
+		wantText, wantUnits, wantGaps := crmOf(recorded)
+		gotText, gotUnits, gotGaps := crmOf(made)
+		if gotText != wantText || !reflect.DeepEqual(gotUnits, wantUnits) || !reflect.DeepEqual(gotGaps, wantGaps) ||
+			len(wantUnits) == 0 || len(wantGaps) == 0 {
+			t.Errorf("%s:\n%s\n%v\nrecorded:\n%s\n%v", book.Key, gotText, gotGaps, wantText, wantGaps)
 		}
+		if strings.Contains(wantText, "\nATTENTION") {
+			signals++
+		}
+	}
+	if signals != 31 {
+		t.Errorf("%d recorded cards have CRM signals, not 31", signals)
 	}
 	if saved := d.count(t, `SELECT count(*) FROM cards c JOIN workspaces w ON w.id = c.workspace_id
 		WHERE w.slug = 'invented-books'`); saved != len(books) || len(books) != 78 {
@@ -361,17 +466,33 @@ func TestBriefMakesTheRecordedSalesforceCards(t *testing.T) {
 func TestDebugSalesforceCheckReportsEachStep(t *testing.T) {
 	d := setUpDemo(t)
 	org, _, _ := inventedSalesforce(t)
-	before := []string{"check", "--sf-org", salesforcetest.Alias, "--sf-environment", "production", "--json"}
+	before := []string{"check", "--sf-org", salesforcetest.Alias, "--sf-environment", "production", "--state-dir",
+		"checked-books", "--json"}
 	code, stdout, stderr := d.debug(t, before...)
 	var report checkReport
 	if err := json.Unmarshal([]byte(stdout), &report); code != 0 || err != nil || report.Status != "passed" ||
 		report.shown() != "credentials:pass:ok environment:pass:ok account_fields:pass:ok contact_fields:pass:ok "+
-			"opportunity_fields:pass:ok contract_fields:pass:ok" || report.APICalls != 5 || report.SFCommands != 2 {
+			"opportunity_fields:pass:ok contract_fields:pass:ok" || report.APICalls != 6 || report.SFCommands != 2 {
 		t.Fatalf("check --sf-org: exit %d, %v %+v\n%s", code, err, report, stderr)
 	}
 	if !strings.HasPrefix(stderr, `{"progress": {"command": "debug salesforce check", "step": "credentials", `+
 		`"status": "running", "count": null}}`+"\n") || strings.Contains(strings.Join(org.Requests, " "), "FROM Account") {
 		t.Errorf("progress:\n%s\nrequests %q", stderr, org.Requests)
+	}
+	// Each step that asked sf or the org did so under a receipt kept in the workspace it named, which is made
+	// for real sources and left unconnected.
+	const metadata = "check_salesforce_login:ok:200: check_salesforce_org:ok:200: check_salesforce_fields:ok:200: " +
+		"check_salesforce_fields:ok:200: check_salesforce_fields:ok:200: check_salesforce_fields:ok:200:"
+	if got := d.audited(t, "checked-books"); got != metadata || d.count(t, `SELECT count(*) FROM connections c
+		JOIN workspaces w ON w.id = c.workspace_id WHERE w.slug = 'checked-books'`) != 0 {
+		t.Errorf("the receipts of the check: %s", got)
+	}
+	// An org of another environment fails the identity step, whose receipt says so.
+	sandbox := []string{"check", "--sf-org", salesforcetest.Alias, "--sf-environment", "sandbox", "--state-dir",
+		"sandbox-books", "--json"}
+	if code, _, _ := d.debug(t, sandbox...); code != 4 || d.audited(t, "sandbox-books") !=
+		"check_salesforce_login:ok:200: check_salesforce_org:error:200:request_failed" {
+		t.Errorf("the check of a sandbox: exit %d, receipts %s", code, d.audited(t, "sandbox-books"))
 	}
 	org.Intercept = func(request *http.Request) *http.Response {
 		if strings.HasSuffix(request.URL.Path, "/Contact/describe") {
@@ -389,10 +510,10 @@ func TestDebugSalesforceCheckReportsEachStep(t *testing.T) {
 	}
 	org.Intercept = nil
 	for _, c := range [][]string{
-		{"check", "--sf-org", salesforcetest.Alias, "--state-dir", "invented-books"},
+		{"check", "--sf-org", salesforcetest.Alias},
 		{"check", "--sf-environment", "production", "--state-dir", "invented-books"},
-		{"check", "--sf-org", "someone@example.com"},
-		{"check", "--as-of", "2027-02-30", "--sf-org", salesforcetest.Alias},
+		{"check", "--sf-org", "someone@example.com", "--state-dir", "invented-books"},
+		{"check", "--as-of", "2027-02-30", "--sf-org", salesforcetest.Alias, "--state-dir", "invented-books"},
 		{"check"},
 		{},
 	} {
@@ -410,7 +531,7 @@ func TestDebugSalesforceCheckReportsEachStep(t *testing.T) {
 			"opportunity_read:fail:prerequisite_failed") {
 		t.Errorf("no candidate: exit %d, %v %s", code, err, report.shown())
 	}
-	if got := d.audited(t, "invented-books"); got != "search_accounts:ok:200: find_renewal_candidate:ok:200:" {
+	if got := d.audited(t, "invented-books"); got != metadata+" search_accounts:ok:200: find_renewal_candidate:ok:200:" {
 		t.Errorf("the receipts: %s", got)
 	}
 }
@@ -425,9 +546,14 @@ func TestACancelEndsTheSFProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", folder+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The sf on PATH is this test's, which the live process runs as the program's main would.
 	saved := salesforceOptions
 	salesforceOptions = salesforce.Options{}
-	t.Cleanup(func() { salesforceOptions = saved })
+	sourcehttp.Live.Store(true)
+	t.Cleanup(func() {
+		salesforceOptions = saved
+		sourcehttp.Live.Store(false)
+	})
 
 	interrupted, cancel := context.WithCancel(ctx)
 	defer cancel()

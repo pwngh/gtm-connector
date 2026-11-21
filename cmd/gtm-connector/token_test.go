@@ -170,16 +170,22 @@ func TestClientTokenGrantsAndWorkspaces(t *testing.T) {
 		t.Fatalf("an account no longer granted: %d %v", status, refused)
 	}
 
-	// Another workspace's token is refused at the demo workspace's endpoint.
-	d.connectDemo(t, "elsewhere")
+	// Another workspace's token is served by that workspace's own gate: its call is receipted there, and the
+	// demo workspace's revoked grant does not apply to it.
+	elsewhere := d.connectDemo(t, "elsewhere")
 	code, stdout, stderr := d.tokenCommand(t, "new", "--scope", "crm:read", "--state-dir", "elsewhere", "--json")
 	var other issuedToken
 	if err := json.Unmarshal([]byte(stdout), &other); code != 0 || err != nil || other.Workspace != "elsewhere" {
 		t.Fatalf("a token of another workspace: %d %s", code, stderr)
 	}
-	if status, refused := s.call(s.address, "get_account", other.Token, map[string]any{"account_id": "acc-007"}); status != 401 ||
-		reasonOf(refused) != "invalid_token" {
-		t.Fatalf("another workspace's token: %d %v", status, refused)
+	before := d.count(t, "SELECT count(*) FROM receipts WHERE workspace_id = $1", d.workspace.ID)
+	if status, answered := s.call(s.address, "get_account", other.Token, map[string]any{"account_id": "acc-003"}); status != 200 ||
+		dig(answered, "result", "isError") != false {
+		t.Fatalf("another workspace's token: %d %v", status, answered)
+	}
+	if d.count(t, "SELECT count(*) FROM receipts WHERE workspace_id = $1 AND tool = 'get_account'", elsewhere.ID) != 1 ||
+		d.count(t, "SELECT count(*) FROM receipts WHERE workspace_id = $1", d.workspace.ID) != before {
+		t.Fatal("the call was not receipted in its own workspace alone")
 	}
 
 	// A disabled clients principal gets no token, and no stdio server.

@@ -7,11 +7,12 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
+	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -42,6 +43,10 @@ type Exec struct {
 func (e Exec) Run(ctx context.Context, arguments []string) ([]byte, int, error) {
 	if ctx.Err() != nil {
 		return nil, 0, context.Cause(ctx)
+	}
+	if !sourcehttp.Live.Load() {
+		// Only the program's main lets a process run sf, so no test reaches the sf of the machine it runs on.
+		return nil, 0, sourcehttp.ErrNotLive
 	}
 	path := e.Path
 	if path == "" {
@@ -134,39 +139,49 @@ type credentials struct {
 	commandTime, loginTime time.Duration
 }
 
-// newCredentials refuses an alias sf could take for an option, or that holds a space or a control
-// character. An alias is never a username.
+// aliasPattern is what an sf alias may be here: 1 to 64 letters, digits, dots, hyphens and underscores,
+// opening with a letter or a digit. A username holds "@", and an access token holds "!" or runs longer, so
+// neither passes for an alias.
+var aliasPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// ValidAlias reports whether a text may be an sf alias. Anything else never reaches sf.
+func ValidAlias(alias string) bool { return aliasPattern.MatchString(alias) }
+
+// newCredentials refuses a text that cannot be an alias before sf is run.
 func newCredentials(alias string, runner Runner) (*credentials, error) {
-	length := utf8.RuneCountInString(alias)
-	if length < 1 || length > 255 || alias[0] == '-' {
+	if !ValidAlias(alias) {
 		return nil, refuse(authRequired)
-	}
-	for _, c := range alias {
-		if c <= 32 || c == 127 {
-			return nil, refuse(authRequired)
-		}
 	}
 	return &credentials{alias: alias, runner: runner, commandTime: commandTime, loginTime: loginTime}, nil
 }
 
-// read runs sf org display and sf org auth show-access-token, and gives the origin, the org's ID and the
-// token in memory. The two commands run one after the other, so the alias may change between them: the org
-// ID is what sf org display named, and the reader checks the token against it before keeping the token.
-func (c *credentials) read(ctx context.Context) (instanceURL, organizationID, accessToken string, err error) {
-	login, cancel := context.WithTimeout(ctx, c.loginTime)
+// login is what one login read gives, held in memory: the origin, the org's ID, the user sf signed in as,
+// and the token.
+type login struct {
+	instanceURL, organizationID, username, accessToken string
+}
+
+// read runs sf org display and sf org auth show-access-token, and gives the login. sf org display must name
+// the alias it was asked for as the login's alias, so a username or anything else sf would resolve is not
+// taken. The two commands run one after the other, so the alias may change between them: the org ID and
+// the username are what sf org display named, and the reader checks the token against both before keeping
+// it.
+func (c *credentials) read(ctx context.Context) (login, error) {
+	limited, cancel := context.WithTimeout(ctx, c.loginTime)
 	defer cancel()
-	shown, err := c.command(ctx, login, []string{"display"}, "instanceUrl", "id")
+	shown, err := c.command(ctx, limited, []string{"display"}, "instanceUrl", "id", "username", "alias")
 	if err != nil {
-		return "", "", "", err
+		return login{}, err
 	}
-	if organizationID, err = nativeID(shown[1]); err != nil || !strings.HasPrefix(organizationID, "00D") {
-		return "", "", "", refuse(authRequired)
+	organizationID, err := nativeID(shown[1])
+	if err != nil || !strings.HasPrefix(organizationID, "00D") || shown[3] != c.alias {
+		return login{}, refuse(authRequired)
 	}
-	token, err := c.command(ctx, login, []string{"auth", "show-access-token"}, "accessToken")
+	token, err := c.command(ctx, limited, []string{"auth", "show-access-token"}, "accessToken")
 	if err != nil {
-		return "", "", "", err
+		return login{}, err
 	}
-	return shown[0], organizationID, token[0], nil
+	return login{instanceURL: shown[0], organizationID: organizationID, username: shown[2], accessToken: token[0]}, nil
 }
 
 // command runs one sf org command for the alias and gives the named text fields of its JSON result.

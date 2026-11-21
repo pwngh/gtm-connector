@@ -45,25 +45,34 @@ with `--state-dir` and give every later command the same name.
 
 ```sh
 sf org login web --alias gtm-de
-gtm debug salesforce check --sf-org gtm-de
+gtm debug salesforce check --sf-org gtm-de --state-dir gtm-de
 gtm connect salesforce --org gtm-de --state-dir gtm-de --seller 'Morgan Reed'
 gtm debug salesforce check --state-dir gtm-de
 gtm accounts --query SEARCH_TEXT --state-dir gtm-de
 gtm brief ACCOUNT_ID --state-dir gtm-de
+gtm mcp stdio --scope crm:read --state-dir gtm-de
 ```
 
+- `--org` takes an `sf` alias only: 1 to 64 letters, digits, dots, hyphens or underscores. Anything
+  else, such as a username or a token, is refused before `sf` runs, and the alias is saved only once
+  `sf org display` names a login under it.
 - `connect salesforce` reads the alias's login through `sf`, checks the org against `--environment`
   (`developer` by default, `sandbox` or `production`) and pins the workspace to the org's address,
-  ID and environment. It saves the alias, the environment and a digest of that identity, never the
-  token, address or ID, and reads no record. The workspace refuses any other org, also after
-  `connect salesforce --remove`.
-- Each later command signs in again on its first read, and reads nothing from an org that is not
-  the pinned one. Every read is a tool call under a receipt that `audit` lists.
-- `debug salesforce check --sf-org ALIAS` checks the sign-in, the environment and the four objects'
-  fields before anything is connected, and reads no record. `--state-dir NAME` checks a connected
-  workspace and adds an account search, the contract a renewal plans from, and that account's reads,
-  each under a receipt. The report holds counts and codes, no record. A failed check prints its
-  report and exits 4.
+  ID and environment and to the user the login reads as. It saves the alias, the environment and a
+  digest of that identity, never the token, address, org ID or user, and reads no record. The
+  workspace refuses any other org or user, also after `connect salesforce --remove`.
+- Each later command signs in again on its first read and compares the pin before it describes or
+  reads anything. A login refreshed during a read must be the same org and user. Every read is a
+  tool call under a receipt that `audit` lists.
+- `debug salesforce check --sf-org ALIAS --state-dir NAME` checks the sign-in, the environment and
+  the four objects' fields before anything is connected, and reads no record. `--state-dir NAME`
+  alone checks a connected workspace and adds an account search, the contract a renewal plans from,
+  and that account's reads. Every step's requests to `sf` and the org run under a receipt committed
+  first, kept in the named workspace. The report holds counts and codes, no record. A failed check
+  prints its report and exits 4.
+- `mcp stdio --state-dir NAME` and `serve`'s `/mcp` serve the workspace's CRM to MCP clients. `serve`
+  answers each token in the workspace it was issued in. A token reads the accounts the workspace
+  holds, which `brief` lists there.
 - A token handed to the container instead of `sf` is not read yet.
 
 ## Health

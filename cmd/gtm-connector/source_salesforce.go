@@ -15,7 +15,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce"
-	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
+	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -147,9 +147,10 @@ func failureCode(err error) string {
 	return code
 }
 
-// orgAlias is the refusal of a missing --org, or of a username given as one.
+// orgAlias is the refusal of a missing --org, or of one that cannot be an sf alias, such as a username or
+// an access token. What was given is not repeated.
 const orgAlias = "connect salesforce needs --org ALIAS, the alias of an org signed in with sf org login web " +
-	"--alias ALIAS. A username is not an alias."
+	"--alias ALIAS: 1 to 64 letters, digits, dots, hyphens or underscores. A username or a token is not an alias."
 
 // salesforceCRM is one org as a workspace's CRM. It signs in on its first read and counts the sf commands it
 // runs and the requests it sends.
@@ -186,10 +187,11 @@ func validEnvironment(environment string) bool {
 
 // attachSalesforce is what connect salesforce checks: the alias, the sign-in, the environment and, outside
 // Developer Edition, the four objects' fields. It reads no record. The row is saved with the alias and the
-// environment, and pinned to the org's identity.
+// environment, and pinned to the org's identity and the user it reads as. The alias is saved, and so shown,
+// only once sf has named a login under it.
 func attachSalesforce(ctx context.Context, a attaching) (attached, error) {
 	alias, given := a.args.text("--org")
-	if !given || strings.Contains(alias, "@") {
+	if !given || !salesforce.ValidAlias(alias) {
 		return attached{}, refused(orgAlias)
 	}
 	if _, named := a.args.text("--state-dir"); !named {
@@ -216,7 +218,7 @@ func (c *salesforceCRM) options() salesforce.Options {
 		o.Runner = salesforce.Exec{}
 	}
 	if o.Transport == nil {
-		o.Transport = sourcehttp.Transport(sourcehttp.Direct, nil)
+		o.Transport = salesforce.DefaultTransport()
 	}
 	o.Runner = countedRunner{o.Runner, &c.commands}
 	o.Transport = countedTransport{o.Transport, &c.requests}
@@ -242,9 +244,10 @@ func (c *salesforceCRM) signInLocked(ctx context.Context) error {
 	return nil
 }
 
-// identify signs in and checks the org against the environment and, with fields outside Developer Edition,
-// the four objects' fields. It gives the digest of the org's identity. In a workspace, an org that is not
-// the pinned one is refused, and one that is becomes the reader every read uses.
+// identify signs in and checks the org and the user against the environment and, with fields outside
+// Developer Edition, the four objects' fields. It gives the pin: the digest of the org's identity and the
+// user's ID. In a workspace, a login that is not the pinned one is refused, and one that is becomes the
+// reader every read uses.
 func (c *salesforceCRM) identify(ctx context.Context, fields bool) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -259,15 +262,17 @@ func (c *salesforceCRM) identify(ctx context.Context, fields bool) (string, erro
 	if err != nil {
 		return "", salesforceFailure(err)
 	}
-	digest, _ := get(identity.Binding(), "identity_sha256").(string)
-	if c.pinned != "" && digest != c.pinned {
+	pin := identity.Pin()
+	if c.pinned != "" && pin != c.pinned {
 		return "", orgElsewhere
 	}
 	c.reader = c.login
-	return digest, nil
+	return pin, nil
 }
 
-// signedIn is the reader of the pinned org, signed in and checked on the first read.
+// signedIn is the reader of the pinned org, signed in and checked on the first read. The pin is compared
+// before any object is described or any record read, so another org is read nothing, and an error of its
+// schema cannot hide that it is another org.
 func (c *salesforceCRM) signedIn(ctx context.Context) (*salesforce.Reader, error) {
 	c.mu.Lock()
 	reader := c.reader
@@ -275,7 +280,7 @@ func (c *salesforceCRM) signedIn(ctx context.Context) (*salesforce.Reader, error
 	if reader != nil {
 		return reader, nil
 	}
-	if _, err := c.identify(ctx, true); err != nil {
+	if _, err := c.identify(ctx, false); err != nil {
 		return nil, err
 	}
 	return c.reader, nil
@@ -297,6 +302,39 @@ func (c *salesforceCRM) SearchAccounts(ctx context.Context, query string) ([]*st
 	}
 	accounts, more, err := reader.SearchAccounts(ctx, query, nil, nil)
 	return accounts, more, salesforceFailure(err)
+}
+
+// Search is the MCP tools' search_accounts: the accounts among these whose name holds the query, or with
+// a number the one with exactly that AccountNumber. No account to search within reads nothing.
+func (c *salesforceCRM) Search(ctx context.Context, query string, number *string,
+	accounts []string) ([]*strictjson.Object, bool, error) {
+	if len(accounts) == 0 {
+		return []*strictjson.Object{}, false, nil
+	}
+	reader, err := c.signedIn(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	found, more, err := reader.SearchAccounts(ctx, query, number, accounts)
+	return referenced(found), more, salesforceFailure(err)
+}
+
+// Opportunities is the MCP tools' list_opportunities with no account: the opportunities of these accounts.
+func (c *salesforceCRM) Opportunities(ctx context.Context, accounts []string) ([]*strictjson.Object, error) {
+	if len(accounts) == 0 {
+		return []*strictjson.Object{}, nil
+	}
+	reader, err := c.signedIn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	found, err := reader.ListAllOpportunities(ctx, accounts)
+	records := make([]*strictjson.Object, len(found))
+	for i, opportunity := range found {
+		records[i] = opportunity.Copy()
+		records[i].Set("record_ref", "crm/opportunities/"+cellText(get(opportunity, "id")))
+	}
+	return records, salesforceFailure(err)
 }
 
 // countedRunner counts the sf commands a reader runs, and countedTransport the requests it sends.
@@ -342,7 +380,9 @@ options:
   --json                Write the documented JSON result for scripts.
   --state-dir STATE_DIR
                         Check the Salesforce org this workspace is connected
-                        to, reading its records under receipts.
+                        to. With --sf-org, the workspace it will be connected
+                        in, made when missing. Every step's requests run
+                        under receipts kept there.
   --sf-org SF_ORG       Check this signed-in sf CLI alias before it is
                         connected: the sign-in, the environment and the
                         fields. No record is read.
@@ -353,7 +393,7 @@ options:
                         UTC).
 
 Examples:
-  gtm-connector debug salesforce check --sf-org gtm-de
+  gtm-connector debug salesforce check --sf-org gtm-de --state-dir gtm-de
   gtm-connector debug salesforce check --state-dir gtm-de
 `
 
@@ -439,27 +479,31 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 	_, chosen := r.args.text("--sf-environment")
 	_, named := r.args.text("--state-dir")
 	switch {
-	case before && named:
-		return nil, refused("--sf-org checks an org before it is connected, in no workspace. Give --sf-org or " +
-			"--state-dir, not both.")
 	case chosen && !before:
 		return nil, refused("--sf-environment goes with --sf-org. A connected workspace is checked in the " +
 			"environment it was connected with.")
-	case before && (alias == "" || strings.Contains(alias, "@")):
-		return nil, refused("--sf-org takes the alias of an org signed in with sf org login web --alias ALIAS. " +
-			"A username is not an alias.")
+	case before && !salesforce.ValidAlias(alias):
+		return nil, refused("--sf-org takes the alias of an org signed in with sf org login web --alias ALIAS: 1 " +
+			"to 64 letters, digits, dots, hyphens or underscores. A username or a token is not an alias.")
+	case before && !named:
+		return nil, refused("--sf-org checks an org before it is connected, under receipts kept in the workspace " +
+			"it will be connected in. Give --state-dir NAME too: the default workspace holds demo data.")
+	}
+	if err := r.open(ctx); err != nil {
+		return nil, err
 	}
 	var (
 		crm  *salesforceCRM
 		from *reads
 	)
 	if before {
+		var err error
+		if from, err = r.unconnected(ctx); err != nil {
+			return nil, err
+		}
 		environment, _ := r.args.text("--sf-environment")
 		crm = &salesforceCRM{alias: alias, environment: cmp.Or(environment, "developer")}
 	} else {
-		if err := r.open(ctx); err != nil {
-			return nil, err
-		}
 		var err error
 		if from, err = r.reads(ctx); err != nil {
 			return nil, err
@@ -478,7 +522,9 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 		}
 	}
 
-	run := "check-" + strings.ReplaceAll(receipts.RandomID(), "-", "")
+	// Every request the check makes to sf or to the org runs under a receipt of its step, committed first.
+	c := &checkRun{from: from, run: "check-" + strings.ReplaceAll(receipts.RandomID(), "-", ""),
+		token: receipts.Fingerprint(randomToken())}
 	steps, passed := []any{}, true
 	var aborted error
 	step := func(name string, ready bool, operation func() (int, string, error)) bool {
@@ -530,28 +576,38 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 	}
 
 	signedIn := step("credentials", true, func() (int, string, error) {
-		return 2, "Instance and token were loaded in memory.", crm.signIn(ctx)
+		return 2, "Instance and token were loaded in memory.", c.step(ctx, "check_salesforce_login", nil,
+			func(ctx context.Context) error { return crm.signIn(ctx) })
 	})
 	name, confirmed := "environment", "The selected "+crm.environment+" environment was confirmed."
 	if crm.environment == "developer" {
 		name, confirmed = "edition", "Developer Edition was confirmed."
 	}
 	schema := step(name, signedIn, func() (int, string, error) {
-		_, err := crm.identify(ctx, false)
-		return 1, confirmed, err
+		return 1, confirmed, c.step(ctx, "check_salesforce_org", nil, func(ctx context.Context) error {
+			_, err := crm.identify(ctx, false)
+			return err
+		})
 	})
 	checked := schema
 	for _, object := range salesforce.Objects() {
 		exposed := step(strings.ToLower(object)+"_fields", schema, func() (int, string, error) {
-			mapped, missing, err := crm.login.MissingFields(ctx, object)
-			if err == nil && len(missing) > 0 {
-				err = &missingFields{object, missing}
-			}
-			return mapped, "Required " + object + " fields are exposed by describe.", salesforceFailure(err)
+			mapped := 0
+			err := c.step(ctx, "check_salesforce_fields", strictjson.NewObject("object", object),
+				func(ctx context.Context) error {
+					var missing []string
+					var err error
+					mapped, missing, err = crm.login.MissingFields(ctx, object)
+					if err == nil && len(missing) > 0 {
+						return &missingFields{object, missing}
+					}
+					return salesforceFailure(err)
+				})
+			return mapped, "Required " + object + " fields are exposed by describe.", err
 		})
 		checked = checked && exposed
 	}
-	if from != nil {
+	if !before {
 		step("account_search", checked, func() (int, string, error) {
 			found, _, err := from.searchAccounts(ctx, "")
 			return len(found), "The bounded Account search completed.", err
@@ -559,7 +615,7 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 		var account string
 		candidate := step("renewal_candidate", checked, func() (int, string, error) {
 			var err error
-			account, err = r.renewalCandidate(ctx, from, crm, run, asOf)
+			account, err = c.renewalCandidate(ctx, crm, asOf)
 			return 1, "A dated renewal-planning candidate was found.", err
 		})
 		step("account_read", candidate, func() (int, string, error) {
@@ -598,12 +654,69 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 		"sf_cli_definition", "Attempted sf subprocess invocations, including failed launches."), nil
 }
 
-// renewalCandidate reads, under a receipt of its own, the contract a renewal plans from, and gives its
+// checkRun is one run of the check: its receipts, each a crm:read call of a check tool in the run, in order.
+// A tool name of the check is no MCP tool, so it carries its scope itself.
+type checkRun struct {
+	from       *reads
+	run, token string
+	requests   int
+}
+
+// call reads under a receipt of the check, committed before the read.
+func (c *checkRun) call(ctx context.Context, tool string, arguments *strictjson.Object,
+	read func(context.Context) ([]*strictjson.Object, error)) ([]*strictjson.Object, error) {
+	if arguments == nil {
+		arguments = &strictjson.Object{}
+	}
+	c.requests++
+	_, records, err := c.from.call(ctx, toolCall{token: c.token, scopes: []string{"crm:read"}, run: c.run,
+		request: c.requests, tool: tool, scope: "crm:read", arguments: arguments}, read)
+	return records, err
+}
+
+// step is a call that returns no record: a sign-in, the org's identity, or an object's fields.
+func (c *checkRun) step(ctx context.Context, tool string, arguments *strictjson.Object,
+	run func(context.Context) error) error {
+	_, err := c.call(ctx, tool, arguments, func(ctx context.Context) ([]*strictjson.Object, error) {
+		return []*strictjson.Object{}, run(ctx)
+	})
+	return err
+}
+
+// unconnected is the workspace --sf-org checks an org in before it is connected: one for real sources whose
+// CRM is not connected, made when it does not exist. Its receipts name no connection.
+func (r *run) unconnected(ctx context.Context) (*reads, error) {
+	if r.exists {
+		if r.workspace.Kind != "live" {
+			return nil, &failure{code: 3, message: "This workspace holds demo data, and a real source never shares " +
+				"a workspace with it. Check Salesforce in a workspace of its own with --state-dir NAME."}
+		}
+		rows, err := r.store.Connections(ctx, r.workspace.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if row.Source == "crm" && row.Mode != "none" {
+				return nil, refused("This workspace's CRM is connected. Check it with debug salesforce check " +
+					"--state-dir NAME alone, which reads the org it is pinned to.")
+			}
+		}
+	} else {
+		slug := workspaceSlug(r.name)
+		var err error
+		if r.workspace, err = r.store.EnsureWorkspace(ctx, slug, "live", "Workspace "+slug); err != nil {
+			return nil, err
+		}
+		r.exists = true
+	}
+	return &reads{store: r.store, workspace: r.workspace, rows: map[string]postgres.Connection{},
+		kinds: map[string]*sourceKind{}, bindings: map[string]*strictjson.Object{}}, nil
+}
+
+// renewalCandidate reads, under a receipt of the check, the contract a renewal plans from, and gives its
 // account. The receipt binds the contract it returned.
-func (r *run) renewalCandidate(ctx context.Context, from *reads, crm *salesforceCRM, run, asOf string) (string, error) {
-	_, records, err := from.call(ctx, toolCall{token: receipts.Fingerprint(randomToken()), scopes: []string{"crm:read"},
-		run: run, request: 1, tool: "find_renewal_candidate", scope: "crm:read",
-		arguments: strictjson.NewObject("as_of", asOf)},
+func (c *checkRun) renewalCandidate(ctx context.Context, crm *salesforceCRM, asOf string) (string, error) {
+	records, err := c.call(ctx, "find_renewal_candidate", strictjson.NewObject("as_of", asOf),
 		func(ctx context.Context) ([]*strictjson.Object, error) {
 			reader, err := crm.signedIn(ctx)
 			if err != nil {
