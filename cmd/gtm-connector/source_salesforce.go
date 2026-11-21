@@ -213,6 +213,8 @@ type salesforceCRM struct {
 	token bool
 	// pinned is the identity digest of the workspace's row, or "" while connect attaches it.
 	pinned string
+	// audit runs each request to sf or the org under a receipt of its own, as connect's are, or is nil.
+	audit func(ctx context.Context, step string, request func(context.Context) error) error
 
 	mu sync.Mutex
 	// login is the reader once sf has given the login, and reader is the same once the org is checked.
@@ -247,7 +249,8 @@ func validEnvironment(environment string) bool {
 }
 
 // attachSalesforce is what connect salesforce checks: the alias, the sign-in, the environment and, outside
-// Developer Edition, the four objects' fields. It reads no record. The row is saved with the alias and the
+// Developer Edition, the four objects' fields, each sf command and each request under a receipt of its own.
+// It reads no record. The row is saved with the alias and the
 // environment, and pinned to the org's identity and the user it reads as. The alias is saved, and so shown,
 // only once sf has named a login under it.
 //
@@ -270,7 +273,12 @@ func attachSalesforce(ctx context.Context, a attaching) (attached, error) {
 	if chosen, given := a.args.text("--environment"); given {
 		environment = chosen
 	}
-	crm := &salesforceCRM{alias: alias, environment: environment, token: token}
+	// Each request to sf or to the org runs under a receipt of its own step, committed first:
+	// connect_salesforce_login_display, _login_token, _org, _userinfo and _describe_account and the rest.
+	crm := &salesforceCRM{alias: alias, environment: environment, token: token,
+		audit: func(ctx context.Context, step string, request func(context.Context) error) error {
+			return a.step(ctx, "connect_salesforce_"+step, request)
+		}}
 	identity, err := crm.identify(ctx, true)
 	switch {
 	case err != nil:
@@ -294,6 +302,7 @@ func (c *salesforceCRM) options() salesforce.Options {
 	}
 	o.Runner = countedRunner{o.Runner, &c.commands}
 	o.Transport = countedTransport{o.Transport, &c.requests}
+	o.Audit = c.audit
 	return o
 }
 
@@ -611,7 +620,7 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 
 	// Every request the check makes to sf or to the org runs under a receipt of its step, committed first.
 	c := &checkRun{from: from, run: "check-" + strings.ReplaceAll(receipts.RandomID(), "-", ""),
-		token: receipts.Fingerprint(randomToken())}
+		token: receipts.Fingerprint(randomToken()), scope: "crm:read"}
 	steps, passed := []any{}, true
 	var aborted error
 	step := func(name string, ready bool, operation func() (int, string, error)) bool {
@@ -741,12 +750,12 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 		"sf_cli_definition", "Attempted sf subprocess invocations, including failed launches."), nil
 }
 
-// checkRun is one run of the check: its receipts, each a crm:read call of a check tool in the run, in order.
-// A tool name of the check is no MCP tool, so it carries its scope itself.
+// checkRun is one run of a check or a sign-in: its receipts, each a call of one of its steps in the run, in
+// order, under its scope. A step's tool name is no MCP tool, so it carries its scope itself.
 type checkRun struct {
-	from       *reads
-	run, token string
-	requests   int
+	from              *reads
+	run, token, scope string
+	requests          int
 }
 
 // call reads under a receipt of the check, committed before the read.
@@ -756,8 +765,8 @@ func (c *checkRun) call(ctx context.Context, tool string, arguments *strictjson.
 		arguments = &strictjson.Object{}
 	}
 	c.requests++
-	_, records, err := c.from.call(ctx, toolCall{token: c.token, scopes: []string{"crm:read"}, run: c.run,
-		request: c.requests, tool: tool, scope: "crm:read", arguments: arguments}, read)
+	_, records, err := c.from.call(ctx, toolCall{token: c.token, scopes: []string{c.scope}, run: c.run,
+		request: c.requests, tool: tool, scope: c.scope, arguments: arguments}, read)
 	return records, err
 }
 

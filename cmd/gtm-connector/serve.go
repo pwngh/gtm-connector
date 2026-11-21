@@ -103,7 +103,7 @@ func serve(ctx context.Context, args []string) error {
 		return err
 	}
 	app := web.App()
-	surface, err := newSurface(ctx, store, c, key, selection)
+	surface, err := newSurface(ctx, store, c, key, selection, logger)
 	if err != nil {
 		return err
 	}
@@ -167,8 +167,9 @@ func serveFlags() (*flag.FlagSet, *string) {
 
 // newSurface is everything serve answers: the browser surface, with the
 // MCP gateway mounted at /mcp.
-func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey []byte, selection cards.Selection) (*httptransport.Server, error) {
-	gateway, err := mcpGateway(ctx, store, c.publicOrigin, selection)
+func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey []byte, selection cards.Selection,
+	logger *slog.Logger) (*httptransport.Server, error) {
+	gateway, err := mcpGateway(ctx, store, c.publicOrigin, selection, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +180,7 @@ func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey
 		WebDir:       c.webDir,
 		SessionKey:   sessionKey,
 		MCP:          gateway,
+		Deals:        dealRegistry{store},
 	}, store, authz.Evidence{Store: store})
 }
 

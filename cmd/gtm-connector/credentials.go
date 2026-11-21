@@ -29,22 +29,25 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The private credentials folder: the owner secret, the demo credential, the
-// session key and the TLS key and certificate. It is a real folder (not a
-// link) of mode 0700 owned by this user, holding regular files of mode 0600
-// with one link each. Nothing here goes into PostgreSQL, and every file goes
-// into a backup.
+// The private credentials folder: the demo credential, the session key and
+// the TLS key and certificate. It is a real folder (not a link) of mode 0700
+// owned by this user, holding regular files of mode 0600 with one link each.
+// Nothing here goes into PostgreSQL, and every file goes into a backup.
 const (
-	ownerSecretFile = "owner-secret"
-	demoFile        = "demo-credentials.json"
-	sessionKeyFile  = "session-key"
-	tlsKeyFile      = "tls.key"
-	tlsCertFile     = "tls.pem"
-	demoLogin       = "demo-reviewer"
+	demoFile       = "demo-credentials.json"
+	sessionKeyFile = "session-key"
+	tlsKeyFile     = "tls.key"
+	tlsCertFile    = "tls.pem"
+	demoLogin      = "demo-reviewer"
 )
 
 // credentialFiles are the files a backup carries, in order.
-var credentialFiles = []string{ownerSecretFile, demoFile, sessionKeyFile, tlsKeyFile, tlsCertFile}
+var credentialFiles = []string{demoFile, sessionKeyFile, tlsKeyFile, tlsCertFile}
+
+// unusedSecretFile is a file earlier setups wrote and no command reads. setup
+// leaves one it finds, a backup does not carry it, and restore checks its
+// digest in an earlier backup and does not install it.
+const unusedSecretFile = "owner-secret"
 
 // maxCredentialBytes is the largest credential file read, from the folder or
 // from a backup. The files written here are under 1 KiB each; the largest an
@@ -251,11 +254,6 @@ type demoCredential struct {
 // setUp makes whatever credentials are missing and returns the demo
 // credential. hosts are the names and addresses the certificate must cover.
 func (c *credentials) setUp(hosts []string) (demoCredential, error) {
-	if _, err := c.ensure(ownerSecretFile, func() ([]byte, error) {
-		return []byte(randomToken()), nil
-	}); err != nil {
-		return demoCredential{}, err
-	}
 	if _, err := c.ensure(sessionKeyFile, func() ([]byte, error) {
 		return []byte(randomToken()), nil
 	}); err != nil {
@@ -293,7 +291,7 @@ func parseDemo(raw []byte) (demoCredential, error) {
 // name, before a restore installs them.
 func checkCredential(name string, data []byte, all map[string][]byte) error {
 	switch name {
-	case ownerSecretFile, sessionKeyFile:
+	case sessionKeyFile:
 		if len(strings.TrimSpace(string(data))) < 32 {
 			return fmt.Errorf("%s is too short", name)
 		}

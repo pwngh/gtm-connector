@@ -43,7 +43,7 @@
   },
   {
    "input": "x.example",
-   "host": "x.example",
+   "host": "unknown host",
    "running_text": null
   },
   {
@@ -103,7 +103,7 @@
   },
   {
    "input": "http://xn--bcher-kva.example/",
-   "host": "unknown host",
+   "host": "xn--bcher-kva.example",
    "running_text": null
   },
   {
@@ -213,7 +213,7 @@
   },
   {
    "input": "a//b",
-   "host": "a",
+   "host": "unknown host",
    "running_text": null
   },
   {
@@ -498,12 +498,12 @@
   },
   {
    "input": "good.example/a:b",
-   "host": "good.example",
+   "host": "unknown host",
    "running_text": null
   },
   {
    "input": "1.example:8443",
-   "host": "1.example",
+   "host": "unknown host",
    "running_text": null
   },
   {
@@ -518,7 +518,7 @@
   },
   {
    "input": "WWW.user@good.example:8443/a//b",
-   "host": "good.example",
+   "host": "unknown host",
    "running_text": "good.example"
   },
   {
@@ -538,7 +538,7 @@
   },
   {
    "input": "good.example/a//b",
-   "host": "good.example",
+   "host": "unknown host",
    "running_text": null
   },
   {
@@ -813,12 +813,12 @@
   },
   {
    "input": "https://xn--bcher-kva.example/",
-   "host": "unknown host",
+   "host": "xn--bcher-kva.example",
    "running_text": null
   },
   {
    "input": "https://good.XN--p1ai/",
-   "host": "unknown host",
+   "host": "good.xn--p1ai",
    "running_text": null
   },
   {
@@ -1458,22 +1458,22 @@
   },
   {
    "input": "<@http://",
-   "host": "http",
+   "host": "unknown host",
    "running_text": null
   },
   {
    "input": "<@https://",
-   "host": "https",
+   "host": "unknown host",
    "running_text": null
   },
   {
    "input": "<@HTTPS://B.example/y",
-   "host": "https",
+   "host": "unknown host",
    "running_text": null
   },
   {
    "input": "<@mailto:",
-   "host": "mailto",
+   "host": "unknown host",
    "running_text": null
   },
   {
@@ -1483,12 +1483,12 @@
   },
   {
    "input": "<@slack://x",
-   "host": "slack",
+   "host": "unknown host",
    "running_text": null
   },
   {
    "input": "<@ftp://",
-   "host": "ftp",
+   "host": "unknown host",
    "running_text": null
   },
   {

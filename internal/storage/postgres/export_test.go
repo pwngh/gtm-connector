@@ -4,7 +4,18 @@ import (
 	"context"
 	"io"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// OpenIdle opens a store whose sessions the server ends after idle inside a
+// transaction, in place of idleInTransaction.
+func OpenIdle(ctx context.Context, url string, idle time.Duration) (*Store, error) {
+	return open(ctx, url, idle)
+}
+
+// Pool is the store's connection pool.
+func Pool(s *Store) *pgxpool.Pool { return s.pool }
 
 // SetCrash makes the store fail at a named step inside a transaction, as if
 // the process stopped there: the transaction is rolled back.

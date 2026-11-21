@@ -131,6 +131,9 @@ type attaching struct {
 	// refuses any other identity, so attach need not compare. It is here for a source that can say more
 	// than a refusal, such as which sign-in to use.
 	pinned string
+	// step runs one request attach makes to the source, such as a sign-in, under a receipt of its own tool
+	// name, committed first in the workspace (signInSteps).
+	step func(ctx context.Context, tool string, request func(context.Context) error) error
 }
 
 // attached is what a source's row is saved with.
@@ -560,6 +563,11 @@ type toolCall struct {
 	tool      string
 	arguments *strictjson.Object
 	account   string // the account the call names, or ""
+	// principal is the principal the call is made for, or "" for the owner.
+	principal string
+	// live, when set, is asked just before the read whether the caller may still make it. A call it refuses
+	// is finished as refused, and nothing is read.
+	live func(context.Context) (bool, error)
 	// scope is the scope of a read that is no registered tool, such as a check's. A registered tool takes none.
 	scope string
 }
@@ -593,9 +601,9 @@ func (r *reads) call(ctx context.Context, c toolCall,
 	}
 	row := r.rows[strings.TrimSuffix(scope, ":read")]
 	started, err := log.Start(ctx, receipts.Start{WorkspaceID: r.workspace.ID,
-		OperationID: fmt.Sprintf("%s/%d", c.run, c.request), TokenID: c.token, Tool: c.tool, Scope: scope,
-		AccountRef: c.account, ConnectionID: row.ID, Arguments: c.arguments, RequestID: receipts.RPC(c.request),
-		BriefID: &c.run})
+		OperationID: fmt.Sprintf("%s/%d", c.run, c.request), PrincipalID: c.principal, TokenID: c.token,
+		Tool: c.tool, Scope: scope, AccountRef: c.account, ConnectionID: row.ID, Arguments: c.arguments,
+		RequestID: receipts.RPC(c.request), BriefID: &c.run})
 	if err != nil {
 		return started, nil, err
 	}
@@ -613,6 +621,14 @@ func (r *reads) call(ctx context.Context, c toolCall,
 	}
 	if !slices.Contains(c.scopes, scope) {
 		return fail(receipts.Denied(), errDenied)
+	}
+	if c.live != nil {
+		switch allowed, err := c.live(ctx); {
+		case err != nil:
+			return fail(receipts.Failed(200, "request_failed"), err)
+		case !allowed:
+			return fail(receipts.Denied(), errDenied)
+		}
 	}
 	records, err := read(ctx)
 	if err == nil {
@@ -644,6 +660,33 @@ func (r *reads) call(ctx context.Context, c toolCall,
 		return fail(receipts.Failed(200, "request_failed"), err)
 	}
 	return finished, records, nil
+}
+
+// signInSteps runs the requests a command makes to a source outside any read, as connect salesforce signs in
+// and checks the org and the Slack sign-in commands call Slack. Each request runs under a receipt of its
+// step, a tool name that is no MCP tool, with the scope of its source, committed first in the command's
+// workspace; one that fails leaves its receipt finished as an error. The receipts name no connection and
+// bind no record. A workspace that does not exist is made, to hold what holds, on the first step. The run's
+// store must be open.
+func (r *run) signInSteps(scope, holds string) func(ctx context.Context, tool string, request func(context.Context) error) error {
+	var steps *checkRun
+	return func(ctx context.Context, tool string, request func(context.Context) error) error {
+		if steps == nil {
+			if !r.exists {
+				slug := workspaceSlug(r.name)
+				var err error
+				if r.workspace, err = r.store.EnsureWorkspace(ctx, slug, holds, "Workspace "+slug); err != nil {
+					return err
+				}
+				r.exists = true
+			}
+			steps = &checkRun{from: &reads{store: r.store, workspace: r.workspace, rows: map[string]postgres.Connection{},
+				kinds: map[string]*sourceKind{}, bindings: map[string]*strictjson.Object{}},
+				run:   "sign-in-" + strings.ReplaceAll(receipts.RandomID(), "-", ""),
+				token: receipts.Fingerprint(randomToken()), scope: scope}
+		}
+		return steps.step(ctx, tool, nil, request)
+	}
 }
 
 // referenced gives each account of a search its record_ref, as the search_accounts tool returns it.

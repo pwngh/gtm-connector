@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/url"
 	"slices"
@@ -32,7 +33,26 @@ var loginTime = 10 * time.Minute
 // lists them.
 var signInExits = map[string]int{
 	"slack_browser_unavailable": 1, "slack_callback_unavailable": 1, "slack_login_timeout": 1,
-	"slack_login_denied": 3, "slack_scope_mismatch": 3, "slack_identity_mismatch": 3,
+	"slack_login_denied": 3, "slack_login_unconfirmed": 3, "slack_scope_mismatch": 3, "slack_identity_mismatch": 3,
+}
+
+// confirmed asks Confirm whether the approval of this identity, in this workspace, is the operator's own,
+// and refuses with slack_login_unconfirmed unless it says yes. A Reader with no Confirm saves no sign-in.
+func (r *Reader) confirmed(ctx context.Context, identity Identity, workspace string) error {
+	if r.Confirm == nil {
+		return refuse("slack_login_unconfirmed")
+	}
+	yes, err := r.Confirm(ctx, identity, workspace)
+	switch {
+	case ctx.Err() != nil:
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return ctx.Err()
+		}
+		return refuse("slack_login_timeout")
+	case err != nil || !yes:
+		return refuse("slack_login_unconfirmed")
+	}
+	return nil
 }
 
 // Configuration is what a sign-in was asked for: the existing app's public client ID, its exact registered
@@ -180,35 +200,55 @@ func (r *Reader) Connect(ctx context.Context, cfg Configuration, open Browser, p
 		finish := func(ctx context.Context, code string) error {
 			b := newBudget(r.Clock)
 			progress.tell("exchange", "running")
-			obtained := r.Clock.now()
-			document, err := r.exchange(ctx, b, code, verifier, cfg)
-			if err != nil {
-				return err
-			}
-			candidate, err := parseInitial(document, cfg, obtained)
-			if err != nil {
-				return err
-			}
-			if previous != nil && previous.Identity != candidate.Identity {
-				return refuse("slack_identity_mismatch")
-			}
-			if cfg.Pinned != "" {
-				binding, err := IdentityBinding(candidate.Identity)
+			// The exchange's receipt is finished with what its answer gives once it is read: a grant that
+			// is not one this sign-in can keep fails it.
+			var candidate Credentials
+			err := r.audited(ctx, "slack_sign_in_exchange", func(ctx context.Context) error {
+				obtained := r.Clock.now()
+				document, err := r.exchange(ctx, b, code, verifier, cfg)
 				if err != nil {
 					return err
 				}
-				if digest, _ := text(binding, "identity_sha256"); digest != cfg.Pinned {
+				if candidate, err = parseInitial(document, cfg, obtained); err != nil {
+					return err
+				}
+				if previous != nil && previous.Identity != candidate.Identity {
 					return refuse("slack_identity_mismatch")
 				}
+				if cfg.Pinned != "" {
+					binding, err := IdentityBinding(candidate.Identity)
+					if err != nil {
+						return err
+					}
+					if digest, _ := text(binding, "identity_sha256"); digest != cfg.Pinned {
+						return refuse("slack_identity_mismatch")
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				return err
 			}
 			b.hold(&candidate)
 			progress.tell("identity", "running")
-			verified, err := r.verify(ctx, b, kept{under, ctx, b, true}, candidate)
+			workspace, err := r.checked(ctx, b, kept{under, ctx, b, true}, candidate)
 			if err != nil {
 				return err
 			}
 			progress.tell("identity", "passed")
+			// Anyone who reads the start page first can finish a sign-in with an approval of their own, so
+			// nothing is saved until the person at the command's terminal says this approval is theirs.
+			if err := r.confirmed(ctx, candidate.Identity, workspace); err != nil {
+				return err
+			}
+			// The wait for that answer is not the sign-in's: the save has a budget of its own.
+			after := newBudget(r.Clock)
+			after.hold(&candidate)
 			progress.tell("save", "running")
+			verified, err := r.ready(ctx, after, kept{under, ctx, after, true}, candidate, workspace)
+			if err != nil {
+				return err
+			}
 			progress.tell("save", "passed")
 			result = PublicStatus(verified, "live", r.Clock.now())
 			return nil
@@ -454,6 +494,12 @@ type Erasable interface {
 
 // revoke asks Slack to revoke the access token, without a refresh, and requires Slack to confirm it.
 func (r *Reader) revoke(ctx context.Context, document *Credentials) error {
+	return r.audited(ctx, "slack_sign_in_revoke", func(ctx context.Context) error {
+		return r.revokeRequest(ctx, document)
+	})
+}
+
+func (r *Reader) revokeRequest(ctx context.Context, document *Credentials) error {
 	b := newBudget(r.Clock)
 	b.hold(document)
 	answer, err := r.authRequest(ctx, b, &b.tokens, func(ctx context.Context) (*http.Request, error) {

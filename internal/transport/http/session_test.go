@@ -700,7 +700,12 @@ func TestEveryWriteNeedsItsCSRFToken(t *testing.T) {
 	for _, pattern := range writes {
 		method, path, _ := strings.Cut(pattern, " ")
 		var body any
-		if method == http.MethodPost {
+		// Past the token check, sign-in answers 200, and the deal route 404: this site registers no deals.
+		answer := http.StatusOK
+		switch {
+		case path == "/v1/deals":
+			body, answer = map[string]string{"account": postgrestest.Account}, http.StatusNotFound
+		case method == http.MethodPost:
 			body = map[string]string{"login": "demo-reader", "password": readerPassword}
 		}
 		b := s.browser(t)
@@ -732,7 +737,7 @@ func TestEveryWriteNeedsItsCSRFToken(t *testing.T) {
 				t.Fatalf("%s with %s changed the session: %s", pattern, name, r.raw)
 			}
 		}
-		if r := b.write(method, path, body); r.status != 200 {
+		if r := b.write(method, path, body); r.status != answer {
 			t.Errorf("%s with its token: %d %s", pattern, r.status, r.raw)
 		}
 	}

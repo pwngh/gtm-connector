@@ -15,13 +15,18 @@ import (
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
-// read runs one read command as main does, connecting as the app role.
+// read runs one read command, or deal, as main does, connecting as the app role.
 func (d *demoDatabase) read(t *testing.T, tokens ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	t.Setenv("GTM_DATABASE_URL", d.appURL)
 	rest, asJSON := withoutJSON(tokens)
 	var out, errs bytes.Buffer
-	code = runCommand(ctx, rest[0], rest[1:], screen{out: &out, err: &errs, json: asJSON})
+	s := screen{out: &out, err: &errs, json: asJSON}
+	if rest[0] == "deal" {
+		code = runDeal(ctx, rest[1:], s)
+	} else {
+		code = runCommand(ctx, rest[0], rest[1:], s)
+	}
 	return code, out.String(), errs.String()
 }
 

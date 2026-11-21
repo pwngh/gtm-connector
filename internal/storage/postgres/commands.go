@@ -24,6 +24,20 @@ func (s *Store) Workspace(ctx context.Context, slug string) (Workspace, error) {
 	return w, err
 }
 
+// WorkspaceByID finds a workspace by its ID.
+func (s *Store) WorkspaceByID(ctx context.Context, id string) (Workspace, error) {
+	if !validUUID(id) {
+		return Workspace{}, ErrNotFound
+	}
+	var w Workspace
+	err := s.pool.QueryRow(ctx, `SELECT id, slug, kind, display_name FROM workspaces WHERE id = $1`, id).
+		Scan(&w.ID, &w.Slug, &w.Kind, &w.DisplayName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Workspace{}, ErrNotFound
+	}
+	return w, err
+}
+
 // Connections lists what a workspace's sources are connected to, by source.
 func (s *Store) Connections(ctx context.Context, workspaceID string) ([]Connection, error) {
 	if !validUUID(workspaceID) {

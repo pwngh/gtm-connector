@@ -46,7 +46,7 @@ var commands = map[string]arguments{
 		{name: "--caller", value: true}, {name: "--status", value: true, choices: []string{"ok", "error", "pending"}},
 		{name: "--since", value: true}, {name: "--until", value: true}, {name: "--follow"}}, help: auditHelp},
 	"connect": {options: []option{
-		{name: "--scope", value: true, repeat: true, choices: []string{"crm:read", "calls:read", "crm:write", "slack:read"}},
+		{name: "--scope", value: true, repeat: true, choices: []string{"crm:read", "calls:read", "slack:read"}},
 		{name: "--org", value: true}, {name: "--token-env"},
 		{name: "--environment", value: true, choices: []string{"developer", "sandbox", "production"}},
 		{name: "--seller", value: true, repeat: true}, {name: "--alias", value: true, repeat: true},
@@ -55,6 +55,8 @@ var commands = map[string]arguments{
 		optional: "provider", choices: append(append([]string{"status"}, providerNames()...), assistantApps...),
 		help: connectHelp},
 	"demo": {options: []option{{name: "--again"}}, help: demoHelp},
+	"admit": {options: []option{{name: "--from-org", value: true, required: true},
+		{name: "--export-sha256", value: true, required: true}}, required: "FOLDER", help: admitHelp},
 }
 
 // parsed is one command line, read.
@@ -305,6 +307,39 @@ Examples:
   gtm-connector inspect RECEIPT_ID
 `
 
+const admitHelp = `usage: gtm-connector admit [-h] [--json] [--state-dir STATE_DIR]
+                           --from-org IDENTITY --export-sha256 DIGEST FOLDER
+
+Admit the cards and receipts a Python state folder holds into a workspace, on
+the operator's word for where they came from: admission trusts the export
+folder, and reads nothing again from Salesforce or any other source. Each card
+is verified against its seal, every receipt line it rests on, its own evidence
+for each quotation, the workspace's imports and the sources the workspace is
+connected to, and kept byte for byte. A folder that fails any check admits
+nothing. Admitting a folder again adds nothing.
+
+positional arguments:
+  FOLDER                A state folder of the Python package, with its audit
+                        log exported as audit.jsonl.
+
+options:
+  -h, --help            show this help message and exit
+  --json                Write the documented JSON result for scripts.
+  --state-dir STATE_DIR
+                        Admit into this workspace (default: demo).
+  --from-org IDENTITY   The CRM identity the cards were read from: the
+                        identity_sha256 a card records under crm_binding. It
+                        must be the workspace's.
+  --export-sha256 DIGEST
+                        The SHA-256 of the folder's audit.jsonl, as exported.
+
+Examples:
+  gtm-connector connect demo --state-dir old-cards
+  gtm-connector admit ./state --state-dir old-cards --from-org IDENTITY \
+      --export-sha256 "$(shasum -a 256 < ./state/audit.jsonl | cut -c1-64)"
+  gtm-connector inspect BRIEF_ID --state-dir old-cards
+`
+
 const auditHelp = `usage: gtm-connector audit [-h] [--json] [--state-dir STATE_DIR]
                            [--brief BRIEF] [--tool TOOL] [--caller CALLER]
                            [--status {ok,error,pending}] [--since SINCE]
@@ -332,7 +367,7 @@ Example: gtm-connector audit --tool save_brief
 `
 
 const connectHelp = `usage: gtm-connector connect [-h] [--json] [--state-dir STATE_DIR]
-                             [--scope {crm:read,calls:read,crm:write,slack:read}]
+                             [--scope {crm:read,calls:read,slack:read}]
                              [--org ORG] [--token-env]
                              [--environment {developer,sandbox,production}]
                              [--seller SELLER] [--remove]
@@ -354,7 +389,7 @@ options:
   --json                Write the documented JSON result for scripts.
   --state-dir STATE_DIR
                         Use this workspace (default: demo).
-  --scope {crm:read,calls:read,crm:write,slack:read}
+  --scope {crm:read,calls:read,slack:read}
                         With an app: grant this scope. Repeat for each.
   --org ORG             With salesforce: read credentials from this signed-in
                         sf CLI alias.

@@ -39,7 +39,7 @@ func stopped(ctx context.Context) error {
 // records runs one query and maps each row.
 func (o *operation) records(soql string, limit int,
 	record func(*strictjson.Object) (*strictjson.Object, error)) ([]*strictjson.Object, error) {
-	rows, err := o.query(soql, limit)
+	rows, err := o.query(soql, limit, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -53,18 +53,45 @@ func (o *operation) records(soql string, limit int,
 }
 
 // query reads every page of one SOQL query. More than limit rows, by the total the org states or by the
-// rows it sends, is refused, and so is a tenth page that is not the last.
-func (o *operation) query(soql string, limit int) ([]*strictjson.Object, error) {
+// rows it sends, is refused, and so is a tenth page that is not the last. Each page is read and checked
+// within its own request, and so is final, when it is given, with every row, on the last page.
+func (o *operation) query(soql string, limit int, final func([]*strictjson.Object) error) ([]*strictjson.Object, error) {
 	rows := []*strictjson.Object{}
 	seenIDs, seenLocators := map[string]bool{}, map[string]bool{}
 	path, first := queryPath, &soql
 	var total *big.Int
 	for page := 0; page < maxPages; page++ {
-		value, err := o.request(path, first)
+		finished := false
+		_, err := o.request(path, first, func(value any) error {
+			next, done, err := o.page(value, limit, &rows, &total, seenIDs, seenLocators)
+			if err != nil || !done {
+				path = next
+				return err
+			}
+			finished = true
+			if final != nil {
+				return final(rows)
+			}
+			return nil
+		})
 		if err != nil {
 			return nil, err
 		}
+		if finished {
+			return rows, nil
+		}
 		first = nil
+	}
+	return nil, refuse(resultLimit)
+}
+
+// page checks one page of a query and adds its rows: it gives the next page's path, or whether this page
+// was the last.
+func (o *operation) page(value any, limit int, rowsOut *[]*strictjson.Object, totalOut **big.Int,
+	seenIDs, seenLocators map[string]bool) (string, bool, error) {
+	rows, total := *rowsOut, *totalOut
+	defer func() { *rowsOut, *totalOut = rows, total }()
+	{
 		document, _ := value.(*strictjson.Object)
 		doneValue, _ := document.Get("done")
 		sizeValue, _ := document.Get("totalSize")
@@ -73,26 +100,26 @@ func (o *operation) query(soql string, limit int) ([]*strictjson.Object, error) 
 		size, isInt := sizeValue.(*big.Int)
 		records, isList := recordsValue.([]any)
 		if document == nil || !isBool || !isInt || size.Sign() < 0 || !isList {
-			return nil, refuse(invalidResponse)
+			return "", false, refuse(invalidResponse)
 		}
 		if total == nil {
 			total = size
 		}
 		if size.Cmp(total) != 0 {
-			return nil, refuse(invalidResponse)
+			return "", false, refuse(invalidResponse)
 		}
 		if total.Cmp(big.NewInt(int64(limit))) > 0 || len(rows)+len(records) > limit {
-			return nil, refuse(resultLimit)
+			return "", false, refuse(resultLimit)
 		}
 		for _, item := range records {
 			row, ok := item.(*strictjson.Object)
 			if !ok {
-				return nil, refuse(invalidResponse)
+				return "", false, refuse(invalidResponse)
 			}
 			id, _ := row.Get("Id")
 			native, err := nativeID(id)
 			if err != nil || seenIDs[native] {
-				return nil, refuse(invalidResponse)
+				return "", false, refuse(invalidResponse)
 			}
 			seenIDs[native] = true
 			rows = append(rows, row)
@@ -100,28 +127,27 @@ func (o *operation) query(soql string, limit int) ([]*strictjson.Object, error) 
 		next, _ := document.Get("nextRecordsUrl")
 		if done {
 			if int64(len(rows)) != total.Int64() || next != nil {
-				return nil, refuse(invalidResponse)
+				return "", false, refuse(invalidResponse)
 			}
-			return rows, nil
+			return "", true, nil
 		}
 		locator, ok := next.(string)
 		if !ok || !locatorPattern.MatchString(locator) || seenLocators[locator] || len(records) == 0 ||
 			int64(len(rows)) >= total.Int64() {
-			return nil, refuse(paginationInvalid)
+			return "", false, refuse(paginationInvalid)
 		}
 		seenLocators[locator] = true
-		path = locator
+		return locator, false, nil
 	}
-	return nil, refuse(resultLimit)
 }
 
 // request is one GET, and after a first HTTP 401 one more under the credentials the login source gives now:
 // sf for an alias, or the variables of the process for a token handed to it. Before the
 // retry the org and the user are read again and must be the ones this Reader saw before. The retry shares
 // the operation's deadline, request count and byte budget.
-func (o *operation) request(path string, soql *string) (any, error) {
-	document, err := o.requestOnce(path, soql)
-	if codeOf(err) != authRequired {
+func (o *operation) request(path string, soql *string, check func(any) error) (any, error) {
+	document, err := o.requestOnce(path, soql, check)
+	if !errors.Is(err, errUnauthorized) {
 		return document, err
 	}
 	r := o.reader
@@ -130,10 +156,7 @@ func (o *operation) request(path string, soql *string) (any, error) {
 		return nil, err
 	}
 	if r.editionVerified {
-		organization, err := o.query(organizationQuery, 1)
-		if err == nil {
-			err = r.validateEnvironment(organization)
-		}
+		_, err := o.query(organizationQuery, 1, r.validateEnvironment)
 		if err == nil {
 			err = o.checkUser()
 		}
@@ -150,7 +173,7 @@ func (o *operation) request(path string, soql *string) (any, error) {
 		// The first Organization answer is still to be checked before this credential may be kept.
 		o.unproved = token
 	}
-	return o.requestOnce(path, soql)
+	return o.requestOnce(path, soql, check)
 }
 
 // refresh asks the login source for credentials once in this operation. The wait for sf does not use up
@@ -211,14 +234,28 @@ const userInfoPath = "/services/oauth2/userinfo"
 // Reader checked, under the username sf org display named when sf named one, and, once a token has been
 // checked, the same user ID as before. A refusal says only that the login cannot be used.
 func (o *operation) checkUser() error {
-	r := o.reader
-	value, err := o.requestOnce(userInfoPath, nil)
-	if codeOf(err) == authRequired {
+	_, err := o.requestOnce(userInfoPath, nil, o.userIs)
+	switch {
+	case errors.Is(err, errUserMismatch):
+		return refuse(authRequired)
+	case errors.Is(err, errUnauthorized):
+		// The org refused the token itself.
 		return errUserRefused
 	}
-	if err != nil {
-		return err
-	}
+	return err
+}
+
+// errUserMismatch is a token that reads as another user than the one this Reader expects. Its code is
+// salesforce_auth_required, and it starts no replacement of the token.
+var errUserMismatch = &Error{Code: authRequired}
+
+// errUnauthorized is an HTTP 401 from the org: the token was refused. Its code is salesforce_auth_required.
+// A check of an answer that refuses with the same code is not one, and starts no replacement of the token.
+var errUnauthorized = &Error{Code: authRequired}
+
+// userIs checks the answer to which user the operation's token reads as.
+func (o *operation) userIs(value any) error {
+	r := o.reader
 	document, _ := value.(*strictjson.Object)
 	userValue, _ := document.Get("user_id")
 	organizationValue, _ := document.Get("organization_id")
@@ -229,15 +266,50 @@ func (o *operation) checkUser() error {
 	}
 	if organizationValue != r.organizationID || r.username != "" && username != r.username ||
 		r.userID != "" && userID != r.userID {
-		return refuse(authRequired)
+		return errUserMismatch
 	}
 	r.userID = userID
 	return nil
 }
 
-// requestOnce is one GET attempt and its checked JSON document. A 200 must be labelled application/json and
-// must not be compressed.
-func (o *operation) requestOnce(path string, soql *string) (any, error) {
+// requestOnce is one GET attempt and its checked JSON document, with check, when it is given, run on the
+// document. A 200 must be labelled application/json and must not be compressed. With Options.Audit set it
+// runs under a receipt of its step, finished with what the checks of its answer decide.
+func (o *operation) requestOnce(path string, soql *string, check func(any) error) (any, error) {
+	var document any
+	err := audited(o.reader.audit, o.ctx, stepOf(path, soql), func(context.Context) error {
+		var err error
+		if document, err = o.attempt(path, soql); err == nil && check != nil {
+			err = check(document)
+		}
+		return err
+	})
+	return document, err
+}
+
+// stepOf names a request for its receipt: org, userinfo, describe_OBJECT or query.
+func stepOf(path string, soql *string) string {
+	describe := "/services/data/" + apiVersion + "/sobjects/"
+	switch {
+	case path == userInfoPath:
+		return "userinfo"
+	case strings.HasPrefix(path, describe):
+		object, _, _ := strings.Cut(strings.TrimPrefix(path, describe), "/")
+		lowered := []byte(object)
+		for i, c := range lowered {
+			if c >= 'A' && c <= 'Z' {
+				lowered[i] = c + 'a' - 'A'
+			}
+		}
+		return "describe_" + string(lowered)
+	case soql != nil && *soql == organizationQuery:
+		return "org"
+	}
+	return "query"
+}
+
+// attempt is one GET and its JSON document.
+func (o *operation) attempt(path string, soql *string) (any, error) {
 	r := o.reader
 	remaining := o.deadline.Sub(r.now())
 	if remaining <= 0 {
@@ -275,7 +347,7 @@ func (o *operation) requestOnce(path string, soql *string) (any, error) {
 	status := response.StatusCode
 	switch {
 	case status == 401:
-		return nil, refuse(authRequired)
+		return nil, errUnauthorized
 	case status == 429:
 		return nil, refuse(rateLimited)
 	case status != 200 && status != 403:
@@ -382,14 +454,8 @@ func (o *operation) checkCapabilities() error {
 		if r.checked[object.object] {
 			continue
 		}
-		names, err := o.describe(object.object)
-		if err != nil {
+		if _, err := o.describe(object.object, object.fields); err != nil {
 			return err
-		}
-		for _, field := range object.fields {
-			if !names[field] {
-				return refuse(schemaUnavailable)
-			}
 		}
 		passed[object.object] = true
 	}
@@ -399,12 +465,27 @@ func (o *operation) checkCapabilities() error {
 	return nil
 }
 
-// describe is the field names of one queryable object.
-func (o *operation) describe(object string) (map[string]bool, error) {
-	value, err := o.request("/services/data/"+apiVersion+"/sobjects/"+object+"/describe", nil)
-	if err != nil {
-		return nil, err
-	}
+// describe is the field names of one queryable object. Each field of required must be among them, checked
+// within the request.
+func (o *operation) describe(object string, required []string) (map[string]bool, error) {
+	var names map[string]bool
+	_, err := o.request("/services/data/"+apiVersion+"/sobjects/"+object+"/describe", nil, func(value any) error {
+		var err error
+		if names, err = describedFields(object, value); err != nil {
+			return err
+		}
+		for _, field := range required {
+			if !names[field] {
+				return refuse(schemaUnavailable)
+			}
+		}
+		return nil
+	})
+	return names, err
+}
+
+// describedFields reads a describe answer: the field names of a queryable object.
+func describedFields(object string, value any) (map[string]bool, error) {
 	document, _ := value.(*strictjson.Object)
 	fieldsValue, _ := document.Get("fields")
 	list, isList := fieldsValue.([]any)

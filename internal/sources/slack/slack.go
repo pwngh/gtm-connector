@@ -77,6 +77,30 @@ func (e *Error) ExitCode() int {
 
 func refuse(code string) error { return &Error{Code: code} }
 
+// AuditFailed is a sign-in request whose receipt could not be committed, so the request was not made, or
+// could not be finished, so what it gave is not used.
+type AuditFailed struct{ Err error }
+
+func (a *AuditFailed) Error() string { return "the receipt of a Slack sign-in request failed" }
+func (a *AuditFailed) Unwrap() error { return a.Err }
+
+// audited runs one sign-in request under Audit, when it is set.
+func (r *Reader) audited(ctx context.Context, step string, request func(context.Context) error) error {
+	if r.Audit == nil {
+		return request(ctx)
+	}
+	var ran bool
+	var own error
+	err := r.Audit(ctx, step, func(ctx context.Context) error {
+		ran, own = true, request(ctx)
+		return own
+	})
+	if err != nil && (!ran || own == nil) {
+		return &AuditFailed{err}
+	}
+	return err
+}
+
 // code is the fixed code of a refusal, or "" for any other error, such as the caller's cancel.
 func code(err error) string {
 	var refused *Error
@@ -132,6 +156,15 @@ type Reader struct {
 	Clock     Clock
 	// OnRead, when set, is given the report of every read, passed or failed.
 	OnRead func(Report)
+	// Audit, when set, runs each request a sign-in command makes to Slack (Connect, Status and Disconnect):
+	// the code exchange, a refresh, the identity check and the revocation. It is given the step's name and
+	// the request, and runs the request only once the request's receipt is committed. A failure of the
+	// receipt itself comes back as an *AuditFailed.
+	Audit func(ctx context.Context, step string, request func(context.Context) error) error
+	// Confirm is asked, after Connect has checked a new approval's identity with Slack and before it saves
+	// anything, whether the Slack user and workspace that approved are the operator's own. Only a yes saves
+	// the sign-in.
+	Confirm func(ctx context.Context, identity Identity, workspace string) (bool, error)
 
 	sleep func(context.Context, time.Duration) error // the wait before the retry after a 429; nil sleeps
 	idle  time.Duration                              // how long a body may stop arriving; zero is readTimeout

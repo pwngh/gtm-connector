@@ -17,7 +17,7 @@ import (
 
 // Rules, as units.py names them.
 const (
-	SanitizerVersion = 4
+	SanitizerVersion = 5
 	ShownSentences   = 12
 	ShownRecords     = 5
 	MaxSentence      = 300

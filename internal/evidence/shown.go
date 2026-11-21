@@ -17,9 +17,9 @@ const (
 )
 
 // AsShown is a saved unit as anything shows it. A unit sealed under today's rules is shown as sealed. One
-// sealed under other rules has its text and speaker neutralized again, so it shows nothing that today's
-// rules replace; the unit given, and the bytes it was sealed in, stay as they are. A unit that neutralizing
-// again leaves as it is is given back itself.
+// sealed under other rules has its text neutralized again as a quotation is (QuoteText) and its speaker as
+// source text is (SafeText), so it shows nothing that today's rules replace; the unit given, and the bytes
+// it was sealed in, stay as they are. A unit that neutralizing again leaves as it is is given back itself.
 func AsShown(unit *strictjson.Object) (*strictjson.Object, error) {
 	if version, _ := unit.Get("sanitizer_version"); Equal(version, SanitizerVersion) {
 		return unit, nil
@@ -31,7 +31,11 @@ func AsShown(unit *strictjson.Object) (*strictjson.Object, error) {
 		if !ok {
 			continue
 		}
-		safe, _, err := SafeText(text)
+		neutral := SafeText
+		if key == "text" {
+			neutral = QuoteText
+		}
+		safe, _, err := neutral(text)
 		if err != nil {
 			return nil, err
 		}

@@ -88,7 +88,7 @@ the same record, or `null`.
 
 `inspect` answers from the sealed units and evidence, never from the card's text, and rebuilds
 nothing. A later change to the rules cannot move or refuse a number. A sentence sealed under an
-older version of the neutralizer rules (`sanitizer_version` below 4) has its text and speaker
+older version of the neutralizer rules (`sanitizer_version` below 5) has its text and speaker
 neutralized again under today's before `inspect`, the web API or a brief tool shows it. The card's
 bytes stay as sealed, so it still verifies, and the sentence keeps the version it was sealed under.
 
@@ -121,7 +121,7 @@ A record unit has `n`, `kind` (`record`), `source` (`crm`, `calls` or `slack`), 
 | `shown` | `yes`, or why the sentence is not under `SAID` (below). |
 | `span` | `null`, except in an imported transcript: `first` and `last`, the cues or lines the sentence lies in, and `start_ms` and `end_ms`, which cover every cue it lies in, whatever order the file wrote them in. Lines have no times, so both are `null` for a TXT file. |
 | `raw_sha256` | The SHA-256 of the record's text as stored. |
-| `sanitizer_version` | The version of the neutralizer rules, `4`. |
+| `sanitizer_version` | The version of the neutralizer rules, `5`. |
 | `speaker_rules` | The version of the speaker rules the role was decided under, `1`. A unit sealed before them has no `speaker_rules`, `rung` or `matched`, and shows its role and basis as sealed. |
 | `rung` | The rung of the ladder that decided, `1` to `5`, or `0` when none did. |
 | `matched` | The identifier that decided, or `null`: `kind` (`email`, `slack_user`, `salesforce_contact`, `salesforce_user`, `name`, `listed_seller` or `alias`), `value`, neutralized, and `record_ref`, the record it came from, or `null` for a listed seller or an alias. |
@@ -188,7 +188,7 @@ with the account and brief in its `arguments`, and [receipts](audit.md) says how
 | `schema_version` | `3` |
 | `brief_id`, `account_id`, `as_of` | The card's identity and planning date. |
 | `status` | `accepted` |
-| `rules_version` | `4`, the version of the rules the text was made under. |
+| `rules_version` | `5`, the version of the rules the text was made under. |
 | `sealed_by` | The `audit_id` of the seal. |
 | `sources` | `crm`: `demo_fixture` or `salesforce`. `calls`: `demo_fixture`, `imported_transcript` or `not_connected`. `slack`: `demo_fixture`, `slack` or `not_connected`. |
 | `text` | The card. |
@@ -432,10 +432,24 @@ listed below with inert words.
 - A Slack mention becomes `[mention channel]`, `[mention here]`, `[mention everyone]` or
   `[mention group]`, `[user U123]` or `[channel C123]`.
 - A link of any scheme (`scheme://`), a `mailto:` address, a `//host` address or a `www.` address
-  becomes its label, if it has one, and `[link host]`. A `mailto:` link shows `[link mail]`.
+  becomes its label, if it has one, and `[link host]`. A `mailto:` link shows `[link mail]`. The host
+  is shown without a leading `www.`, which a browser keeps: `https://www.files.example/` shows
+  `[link files.example]`.
+- In the text a quotation is made from, a bare mail address such as `dana@files.example`, which a
+  Markdown client links, shows `[link mail]` too, and a `]` right before a `(` gets a space between, so
+  no quotation is a Markdown link. A contact's email is a record value and is shown as the CRM holds it.
 - A link with a backslash or a control character before the end of its host shows
   `[link unknown host]`, because a browser may open a different host than the one written. So does
-  a Slack link `<target|label>` whose target names a scheme with no `//` after it.
+  a Slack link `<target|label>` whose target names a scheme with no `//` after it, and a Slack link
+  or a Markdown reference definition whose target has no scheme and no `//`, such as
+  `<files.example/x|deck>`: a browser opens it on the page's own host.
+- A host with an internationalised label (`xn--` and Punycode) is shown in that ASCII form, lowercased,
+  as `[link xn--bcher-kva.example]`: the name a browser looks up, never the Unicode form it decodes to,
+  whose letters can look like other letters. A label shows `[link unknown host]` when it fails the
+  checks the URL Standard's host parser makes (UTS #46 with Unicode 16.0.0 characters): the Punycode
+  does not decode or encode back to the same label, the decoded name holds a character the mapping
+  changes or refuses, starts with a combining mark or with `xn--`, is only ASCII, or breaks the
+  right-to-left rule or the joiner rules of RFC 5892.
 - A control, direction-changing or invisible format character becomes its code, such as `[U+202E]`.
 - A bracketed number such as `[3]` becomes `(3)`, because a card cites its units that way.
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -35,13 +36,20 @@ import (
 // (toolSources), so a source detached or connected again while the server runs is not read through what
 // was opened before. A workspace with no CRM is served too: the browser surface works, and every tool is
 // refused by name, under its receipt.
-func mcpGateway(ctx context.Context, store *postgres.Store, publicOrigin string, selection cards.Selection) (http.Handler, error) {
+//
+// A request whose bearer's workspace cannot be read, because the database fails or takes longer than
+// tokenLookup, is the one refusal of a call that keeps no receipt: no gate can take it, since a gate keeps
+// the receipts of its own workspace. It is answered as a gate answers a call whose receipt could not be
+// committed, and logged in one fixed line. Making the gate of a workspace that was read reads nothing, and
+// fails only on settings the demo gate was made with at mount, so it is answered the same way.
+func mcpGateway(ctx context.Context, store *postgres.Store, publicOrigin string, selection cards.Selection,
+	logger *slog.Logger) (http.Handler, error) {
 	demoGate, workspace, err := demoGateway(ctx, store, publicOrigin, selection)
 	if err != nil {
 		return nil, err
 	}
 	return &mcpEndpoints{store: store, publicOrigin: publicOrigin, demo: demoGate, demoID: workspace.ID,
-		selected: selection != nil, gates: map[string]*mcp.Gateway{}}, nil
+		selected: selection != nil, gates: map[string]*mcp.Gateway{}, logger: logger}, nil
 }
 
 // mcpEndpoints is /mcp across workspaces: one gate for each workspace a bearer names, made on its first
@@ -52,6 +60,7 @@ type mcpEndpoints struct {
 	demo         *mcp.Gateway
 	demoID       string
 	selected     bool
+	logger       *slog.Logger
 
 	mu    sync.Mutex
 	gates map[string]*mcp.Gateway
@@ -74,7 +83,9 @@ func (e *mcpEndpoints) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		cancel()
 		if err != nil && !errors.Is(err, postgres.ErrNotFound) {
-			http.Error(w, "The MCP endpoint could not be set up.", http.StatusServiceUnavailable)
+			e.logger.Warn("an MCP request was refused with no receipt: the workspace of its bearer could not be read",
+				"error", plain(err))
+			mcp.AuditUnavailable(w)
 			return
 		}
 	}
