@@ -10,8 +10,9 @@ gtm-connector connect inspector --state-dir var/clients --scope crm:read
 An assistant app needs `debug serve` running in its state folder, for the HTTP transport and for the
 local bridge. `debug serve` serves the sources its state folder is [connected](cli.md) to.
 `connect APP` prints the setup commands and limits for one client. It does not launch an
-application. With `--scope`, it requests a local grant and saves it in `APP.json` in the state
-folder, mode 0600, without printing the bearer token. Without `--scope`, it previews the setup and
+application. With `--scope`, an HTTP client (Inspector, Claude Code or Cursor) gets a local grant,
+saved in `APP.json` in the state folder, mode 0600, without printing the bearer token. Claude Desktop
+gets none over HTTP, and a stdio entry holds no grant (below). Without `--scope`, it previews the setup and
 creates nothing. Repeat `--scope` for each of `crm:read`, `calls:read`, `slack:read`, and
 `crm:write`.
 
@@ -57,7 +58,7 @@ gtm-connector connect claude-desktop --transport stdio --scope crm:read --scope 
   Python starts isolated (`-I`), so a folder the app runs in cannot stand in for the connector.
 - A call the bridge would refuse for its shape is still sent to the gateway, which records it and
   refuses it.
-- The app starts `gtm-connector mcp stdio --state-dir DIR --scope ...`. The bridge attaches to the
+- The app starts that Python with `-I` and the connector, as `mcp stdio --state-dir DIR --scope ...`. The bridge attaches to the
   `debug serve` already running in that folder, obtains a grant for exactly those scopes, keeps it in
   memory, and renews only those scopes. Every call still goes through the HTTPS gateway, with its
   scope check, rate limit, and audit receipt. A call outside the scopes is refused.
@@ -117,7 +118,7 @@ inspect --method tools/call --tool-name get_account --tool-arg account_id=acc-00
 | `tools/list` | Any | All six tools, with input and output schemas and required-scope metadata. |
 | `get_account` | `crm:read` | `result.structuredContent.records` with `crm/accounts/acc-003` and `crm/contacts/con-003`. |
 | `read_call_notes` | `crm:read` only | HTTP 403. Inspector exits 1 with empty stdout and reports `Insufficient scope: required "calls:read"` in its stderr JSON error. |
-| `read_call_notes` | `calls:read` | `calls/call_notes/note-003`, marked as untrusted data. |
+| `read_call_notes` | `calls:read` | `calls/call_notes/note-003` and `calls/call_notes/note-003b`, marked as untrusted data. |
 | `read_slack_messages` | `slack:read` | `slack/messages/msg-003`. A Slack-only grant cannot read CRM or call notes. |
 
 Rerun `connect` with other `--scope` values to replace the grant while the server runs.

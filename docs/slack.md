@@ -45,7 +45,8 @@ gtm-connector debug slack check --account acc-007
 gtm-connector brief acc-007
 ```
 
-Slack threads are added with `debug slack map` until a later change lets `connect slack --channel` do it.
+Slack threads are added one at a time with `debug slack map`. A Slack channel window is on the
+[roadmap](ROADMAP.md).
 
 | Command or flag | Rule |
 | --- | --- |
@@ -82,7 +83,7 @@ Slack threads are added with `debug slack map` until a later change lets `connec
 | Accepted messages | Plain messages, `bot_message`, `me_message`, `file_share`, `thread_broadcast`, and, as the selected parent only, the `tombstone` that Slack's system user leaves for a deleted message |
 | Refuse the whole read | Other hidden messages, edit or delete wrappers, other subtypes, and missing text |
 | Counted and left out | Files, attachments, and blocks |
-| Speaker on a card | The raw Slack user ID. A message from an app, a deleted message, or one with no user has no speaker label. |
+| Speaker on a card | The raw Slack user ID the message carries. A deleted parent carries `USLACKBOT`, which becomes its label. A message with no user, such as some app messages, has no speaker label. |
 | Role on a card | `seller` when that user ID is listed in `sellers.json`, otherwise `unknown`. A Slack author is never a customer. |
 | Slack's rate policy | Slack limits some commercially distributed apps outside its Marketplace to one request per minute and 15 messages per request on this method. The connector cannot tell which [policy](https://docs.slack.dev/changelog/2025/05/29/rate-limit-changes-for-non-marketplace-apps/) applies. |
 
@@ -109,9 +110,9 @@ is never included. `connect` and `status` return:
 
 | Result | Fields |
 | --- | --- |
-| `debug slack map` | `schema_version`, `status` (`saved` or `unchanged`), `selection`, `thread_access: "unchecked"`, `counts`, `duration_ms`, and `next`. |
+| `debug slack map` | `schema_version`, `status` (`saved` or `unchanged`), `selection`, `thread_access: "unchecked"`, `counts` with `selected_threads`, `duration_ms`, and `next`. |
 | `debug slack check` | `schema_version: 1`, `status` (`passed` or `failed`), `crm_access_checked: false`, `calls_access_checked: false`, `duration_ms`, `api_calls`, `response_bytes`, `counts`, `steps`, and `next`, the first failed step's recovery command. Request and byte counts are `null` when unknown. |
-| `counts` | `auth_calls`, `message_calls`, `pages`, `raw_rows`, `messages`, `duplicates`, `refresh_attempts`, `token_retries`, `rate_retries`. |
+| `counts` of `debug slack check` | `auth_calls`, `message_calls`, `pages`, `raw_rows`, `messages`, `duplicates`, `refresh_attempts`, `token_retries`, `rate_retries`. |
 | `steps` | `private_state`, `mapping`, `credential_binding`, `thread_read`, `receipt`. Each has `name`, `status` (`pass`, `fail`, `not_run`), `count`, `duration_ms`, `api_calls`, `response_bytes`, `code`, `message`, `next`. |
 
 The check report holds no IDs, names, timestamps, message text, URLs, tokens, or paths. Tool results
@@ -166,8 +167,8 @@ card. It uses no Slack account, token, or network request.
 - `read_slack_messages` requires `slack:read`. A Slack-only token cannot read CRM or call notes.
 - A card with Slack makes four audited reads and never requests `crm:write`.
 - Messages live in `slack.sqlite3`: 29 of them, `msg-001` through `msg-030` without `msg-005`.
-  Each has an author name, which is a seller only when `sellers.json` lists it, and a count of
-  attached files that were not read.
+  Each has an author name and a count of attached files that were not read. On demo data the
+  demo's own sellers are sellers without a `sellers.json`.
 
 | Case | What the card says |
 | --- | --- |

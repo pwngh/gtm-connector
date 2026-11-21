@@ -17,8 +17,8 @@ gtm-connector debug calls inspect IMPORT_ID --full --json
 gtm-connector brief acc-007
 ```
 
-Transcripts are added with `debug calls import` until a later change lets `connect calls FOLDER` do
-it.
+Transcripts are added one at a time with `debug calls import`. Transcript folders are on the
+[roadmap](ROADMAP.md).
 
 | Option | Meaning |
 | --- | --- |

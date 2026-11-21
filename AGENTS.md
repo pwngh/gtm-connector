@@ -81,46 +81,21 @@ make verify-real                                   # real public text, Python ag
 The goal is the renewal workflow: find what blocks a renewal in the evidence, turn it into reviewed
 work, and keep the history of what resolved it. No model writes text on a card.
 
+[docs/ROADMAP.md](docs/ROADMAP.md) lists the steps. v0.1.0 comes first: the Go program replaces the
+Python package and stays read-only. Until then:
+
 1. The reference is `testdata/oracle/`, written by `tools/oracle/` from the Python package on
    CPython 3.14.6 with clocks and IDs fixed. `tests/test_oracle_fixtures.py` fails when Python and
    the fixtures disagree, so a Python fix regenerates its fixtures in the same PR.
-2. Build the parity skeleton: `cmd/gtm-connector`, with PostgreSQL in `compose.yaml`. Go reads the
-   demo book under receipts; card text must match the oracle byte for byte, and units and gaps must
-   match as values. Sign-in, grants, and a Host check come before any evidence is served, and MCP
-   passes the vectors in `tests/test_request_checks.py` and `tests/test_gateway.py`. If only
-   rendering differs, Go gives the frozen Python what `briefing.assemble_evidence` takes, as a
-   no-network job. Go keeps authorization, storage, and receipts, and withholds any card that fails
-   to render or finish.
-3. Build the workflow beside step 4: readiness; the playbooks `obtain_current_rider`,
-   `review_renewal_condition`, and `reconcile_approval_conflict`; review bound to one plan revision,
-   where an edit needs review again and changed cited evidence marks it for re-review; work items;
-   and history. Every actor comes from a signed-in session.
-   - Readiness signals are rules over versioned records, each citing its receipts: customer silence
-     against days to renewal, close-date pushes, a deal where one contact says everything, and a
-     sentence whose amount differs from a record value. That last one is a candidate a person
-     resolves, never a verdict.
-   - History shows what changed since an account's last card: units, record versions, and gaps.
-4. Port the evidence engine and sources behind the fixtures, with character classes from generated
-   tables, never Go's or RE2's. Build these in Go:
-   - one brief store and request path for the CLI and the assistant tools, with the same scope,
-     selection, expiry, and receipt checks;
-   - `gtm-connector mcp` over stdio, with `setup` printing the configuration for Claude Desktop,
-     Claude Code, and Cursor. Docs name a client only after it is tested live;
-   - transcript folders, which replace hand-picked excerpts;
-   - a bounded Slack channel window, which replaces thread mapping, counts what was not read, and
-     says when more exist. Folders and channels propose account links that a person accepts;
-     nothing binds on its own;
-   - two assistant tools, evidence and submit, on one sealed card. A submission is unit numbers, a
-     label from a fixed list checked against each speaker's role, and pairs marked in tension. A cut
-     sentence, an unknown label, or a unit of another account is refused with a receipt.
-5. Add model assistance, which proposes units, labels, and a playbook for a person to review, and
-   `evaluate`: the ten cases as a table and a model's unchecked answers on the same deals, kept as
-   test inputs and scored offline. Then ship the Go CLI in one PR that removes the Python package.
-   That PR passes the fixtures and the CLI contract tests, and lists changes such as `serve` and
-   `evaluate`. It keeps the stdio bridge and source setup working, opens existing cards and
-   receipts, and runs without the Python fallback.
+2. Port what the Python package does, behind the fixtures. Card text matches byte for byte, and
+   units and gaps match as values. Character classes come from generated tables, never Go's or
+   RE2's. Work the fixtures cannot check waits until after v0.1.0, unless the cutover cannot ship
+   without it.
+3. The PR that ships the Go CLI passes the fixtures and replays the recorded command session. It
+   opens existing cards and receipts, lists every change a user sees, and removes the Python package
+   and `tools/oracle/`.
 
-After each of these, use the product end to end as a stranger and fix what only shows from there.
+After each step, use the product end to end as a stranger and fix what only shows from there.
 
 Test on real data at every step. Public datasets are fetched into a cache outside the repository,
 checked against a committed manifest of links and digests, and run with `make verify-real`, never
@@ -129,5 +104,3 @@ imports are ported. Reports hold counts, digests and positions, never text. A pu
 parsing and scale, not usefulness: the README's first limit stays until the owner has run the
 connector on five real renewals outside the repository. Agents never read those transcripts or
 results; each parser failure they report becomes an invented fixture.
-Later, when a real user needs them: Salesforce task creation, transcript provider adapters,
-Windows, MCP Apps, a second CRM, team deployment.

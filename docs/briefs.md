@@ -28,7 +28,9 @@ A source that is not connected is never called, and the card says "Calls: not co
 ## Units
 
 Evidence becomes numbered units in a fixed order: the account, its contacts, contracts, and
-opportunities by ID, then call text by time, then Slack messages by time. A CRM record is one unit.
+opportunities by ID, then call text in the order of its time as written and then its ID, then Slack
+messages: demo messages in the order of their time as written, live messages in the order Slack
+returns them. Times written with different UTC offsets sort by their text, not by the moment they name. A CRM record is one unit.
 Call and Slack text is one unit for each whole sentence, and a call or message with no sentence is
 one unit, so every record that was read has a number. Every number on a card is one of these.
 `inspect BRIEF_ID` lists them all, one per line. `inspect BRIEF_ID N` resolves a number to the source
@@ -155,6 +157,6 @@ gives no card and saves nothing.
 | ---: | --- | --- | --- |
 | 1 | `local_failure` | A running connector holds the state folder. | Stop the server or pass another `--state-dir`. |
 | 2 | `usage_error` | The account ID, date, brief ID, or number is invalid, or a saved card does not match the audit log. | Use an ID such as `acc-003`, a `YYYY-MM-DD` date, and a number printed on the card. Create the card again if its file was changed. |
-| 3 | `refused` | An account has no imported transcript, or the state folder belongs to another source. | See [Salesforce](salesforce.md) and [transcript imports](calls.md). |
+| 3 | `refused` | The state folder belongs to another source. An account with no imported transcript still gets a card, which states the gap. | See [Salesforce](salesforce.md) and [transcript imports](calls.md). |
 | 4 | `check_failed` | The evidence failed a check, so no card was produced. | Repeat the command. If it repeats, inspect the audit receipts. |
 | 5 | `upstream_failure` | A read failed or the account was not found. | Check the account ID with `accounts`, then retry. |

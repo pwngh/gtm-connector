@@ -1,6 +1,6 @@
 # Connector security review
 
-Scope: one local connector process, invented data by default, and one operator. No model takes part.
+Scope: one local connector process and one operator. No model takes part.
 This review records the boundary and the evidence behind each guarantee. It does not grant
 production approval. Real data or shared deployment requires a separate review.
 
@@ -11,8 +11,9 @@ scopes. Administration commands read local files directly and bypass MCP authori
 This is not multi-user isolation or production identity.
 
 Both services bind HTTPS to `127.0.0.1`. Each start generates a fresh P-256 key and a one-day
-loopback certificate that the client trusts explicitly. Browser origins are rejected. Sources
-default to invented local fixtures. A real source is used only when the operator selects it.
+loopback certificate that the client trusts explicitly. Browser origins are rejected. A folder
+starts with nothing connected, and a command that reads a source refuses until one is. Invented data
+is used only after `connect demo` or `demo`, and a real source only when the operator connects it.
 
 ## Scopes
 
@@ -62,8 +63,8 @@ untrusted data and cannot request a tool, a grant, or a write.
 `connect salesforce --org ALIAS` saves the alias and environment in the state folder's
 `profile.json`, which holds no credential, org ID, or address. Each command in that folder then
 captures the existing Salesforce CLI login of that alias inside the connector process. The provider invokes only `sf org display` and `sf org auth show-access-token`,
-with an explicit alias and `--json`, using argument arrays and no shell. Stdin is closed; stdout
-and stderr are captured. CLI telemetry, automatic updates, and file logging are disabled for these
+with an explicit alias and `--json`, using argument arrays and no shell. Stdin is closed, stdout
+is captured, and stderr is discarded. CLI telemetry, automatic updates, and file logging are disabled for these
 child commands. Errors expose a fixed code, never the alias, child output, arguments, or token.
 A command has at most 120 seconds, and both share a 180-second login deadline that is separate from
 each read's budget. An `sf` that outlasts its limit is stopped and reported as

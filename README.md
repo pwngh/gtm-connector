@@ -132,8 +132,8 @@ gtm-connector brief ACCOUNT_ID
 | Selected accounts for a client | `debug serve --selection selection.json` | [Selection](docs/selection.md) |
 | Invented data | `connect demo` | [Commands](docs/cli.md) |
 
-Transcripts and Slack threads are added with `debug calls import` and `debug slack map` until a later
-change lets `connect calls FOLDER` and `connect slack --channel` do it.
+Transcripts and Slack threads are added one at a time with `debug calls import` and `debug slack map`.
+Transcript folders and a Slack channel window are on the [roadmap](docs/ROADMAP.md).
 
 Salesforce uses an existing `sf` CLI login. Slack uses an existing public PKCE app. Tests use
 invented provider responses. No live org has been verified.
@@ -179,8 +179,9 @@ The card shows what the records say, not whether a source is true.
 ## The Go server (in progress)
 
 The Go program at the root serves a read-only evidence API and the web app over HTTPS, on PostgreSQL.
-It does not read sources yet, so it has no cards of its own. It needs Docker with Compose (Docker
-Desktop, or Colima with `docker-compose`).
+It reads only the invented demo book so far, and `make demo` publishes its cards. It needs Docker
+with Compose (Docker Desktop, or Colima with `docker-compose`). The [roadmap](docs/ROADMAP.md) lists
+what is left before it replaces the Python package.
 
 ```sh
 make dev                        # PostgreSQL in Compose, the server on this machine (needs Go and Node)
@@ -228,8 +229,8 @@ Backups go to `~/.config/gtm-connector/backups`. A backup's digests detect corru
 are stored in the backup itself, so they do not prove who made it. A restore needs an empty
 database, and each credential must be absent or the same as the backup's. It refuses any row the
 server would refuse on writing, such as a card whose seal does not name its bytes. If a restore
-stops after the database is in, run the same command again to finish it; setup and the server wait
-until it is finished. On Colima, if a port does not answer, the Makefile forwards it with
+stops after the database is in, run the same command again to finish it; until then, setup, the server and `demo` refuse to
+start and say to run the restore again. On Colima, if a port does not answer, the Makefile forwards it with
 `scripts/colima-forward.sh`.
 
 ## Limits
@@ -253,7 +254,7 @@ until it is finished. On Colima, if a port does not answer, the Makefile forward
 
 More: [commands and output](docs/cli.md), [tools, scopes, and protocol](docs/tools.md),
 [Deal cards](docs/briefs.md), [audit](docs/audit.md),
-[clients and Inspector](docs/clients.md), [working on the code](AGENTS.md).
+[clients and Inspector](docs/clients.md), [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
 
 MCP revision 2026-07-28, Python SDK 2.3.0. All checked-in companies, people, and records are
 invented. MIT licensed.
