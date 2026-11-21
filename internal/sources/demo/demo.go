@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -59,6 +60,83 @@ func (s *Store) Accounts() []Account {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
+}
+
+// searchRows is how many accounts a search returns (store._SEARCH_ROWS).
+const searchRows = 100
+
+// asciiLower is SQLite's lower(): only the letters A to Z change.
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
+// SearchAccounts is store.search_accounts: the accounts whose name holds the literal query, ignoring ASCII
+// case, ordered by name without ASCII case and then by ID. It returns the first 100, each with its columns
+// in table order, and whether more matched.
+func (s *Store) SearchAccounts(query string) (accounts []*strictjson.Object, more bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t := s.tables["crm/accounts"]
+	name := -1
+	for i, c := range t.columns {
+		if c == "name" {
+			name = i
+		}
+	}
+	type match struct {
+		folded string
+		row    []any
+	}
+	var found []match
+	for _, row := range t.rows {
+		text := ""
+		if name >= 0 {
+			text, _ = row[name].(string)
+		}
+		if folded := asciiLower(text); strings.Contains(folded, asciiLower(query)) {
+			found = append(found, match{folded, row})
+		}
+	}
+	sort.SliceStable(found, func(i, j int) bool {
+		if found[i].folded != found[j].folded {
+			return found[i].folded < found[j].folded
+		}
+		return found[i].row[0].(string) < found[j].row[0].(string)
+	})
+	if more = len(found) > searchRows; more {
+		found = found[:searchRows]
+	}
+	accounts = make([]*strictjson.Object, len(found))
+	for i, m := range found {
+		accounts[i] = &strictjson.Object{Keys: append([]string(nil), t.columns...), Values: append([]any(nil), m.row...)}
+	}
+	return accounts, more
+}
+
+// GetAccount is store.get_account: the account's columns and then its contacts, ordered by ID, or false
+// when the book holds no such account.
+func (s *Store) GetAccount(accountID string) (*strictjson.Object, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	found := s.rows("crm", "accounts", "id", accountID)
+	if len(found) == 0 {
+		return nil, false
+	}
+	account := found[0]
+	account.Delete("record_ref")
+	contacts := []any{}
+	for _, contact := range s.rows("crm", "contacts", "account_id", accountID) {
+		contact.Delete("record_ref")
+		contacts = append(contacts, contact)
+	}
+	account.Set("contacts", contacts)
+	return account, true
 }
 
 // ErrAccountNotFound is get_account's refusal of an unknown account.

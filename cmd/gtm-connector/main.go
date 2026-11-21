@@ -3,6 +3,10 @@
 //	gtm-connector setup              make credentials, migrate, set up the app role, seed the demo workspace
 //	gtm-connector serve              run the HTTPS server, as the app role
 //	gtm-connector demo [--again]     publish a card for each demo account that holds none, for the demo sign-in
+//	gtm-connector accounts           search the connected CRM by account name
+//	gtm-connector brief ACCOUNT      make and print the Deal card for one account
+//	gtm-connector inspect ID         show an account, a saved card, numbers on it, or a receipt
+//	gtm-connector audit              list the receipts of the audit log
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
 //	gtm-connector health             check that the local server answers
@@ -10,7 +14,7 @@
 //
 // Settings come from the environment:
 //
-//	GTM_DATABASE_URL        the app role's URL, which serve and demo use (setup creates that role)
+//	GTM_DATABASE_URL        the app role's URL, which serve, demo and the read commands use (setup creates that role)
 //	GTM_OWNER_DATABASE_URL  the owner role's URL, for setup, backup and restore
 //	GTM_CREDENTIALS_DIR     the private credentials folder
 //	GTM_LISTEN              a loopback host:port (default 127.0.0.1:8443)
@@ -46,10 +50,16 @@ commands:
   setup              make missing credentials, migrate, set up the app role, seed the demo workspace
   serve              run the HTTPS server, connecting as the app role
   demo [--again]     publish a card for each demo account that holds none, for the demo sign-in
+  accounts           search the connected CRM by account name
+  brief ACCOUNT      make and print the Deal card for one account
+  inspect ID         show an account, a saved card, numbers on it, or a receipt
+  audit              list the receipts of the audit log
   backup --out FILE  write PostgreSQL and the credentials folder to FILE
   restore --in FILE  restore FILE into an empty database and credentials folder
   health             check that the local server answers
   version            print the commit this binary was built from
+
+accounts, brief, inspect and audit take --json, --state-dir WORKSPACE and --help.
 `
 
 func main() {
@@ -59,6 +69,17 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// The read commands take --json anywhere, and "help COMMAND" as COMMAND --help.
+	if tokens, asJSON := withoutJSON(os.Args[1:]); len(tokens) > 0 {
+		if tokens[0] == "help" && len(tokens) > 1 {
+			tokens = append(tokens[1:], "--help")
+		}
+		if _, reads := readCommands[tokens[0]]; reads {
+			code := runRead(ctx, tokens[0], tokens[1:], newScreen(asJSON))
+			stop()
+			os.Exit(code)
+		}
+	}
 	var err error
 	switch command, args := os.Args[1], os.Args[2:]; command {
 	case "serve":

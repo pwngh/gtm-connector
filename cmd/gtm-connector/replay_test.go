@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -24,23 +26,43 @@ import (
 //
 // The recorder ran every step on its own clock: each receipt one whole second after the one before it, and no
 // elapsed time. The recording's card lines, receipt times and elapsed_ms hold that clock. The replay does not
-// set the binary's clock, so the steps that print those match only a binary that runs on the recorder's.
+// set the binary's clock, so a step that prints those is compared with them left out (clocked).
 
-// notPorted names the recorded steps the Go binary does not reproduce yet. Each one is still run and must
-// still differ from the recording. Porting a command removes its steps from this list, and a step that is not
-// listed must match the recording.
-var notPorted = []string{
-	"no arguments as JSON", "version", "unknown command", "brief without an account",
-	"connect demo", "connect status",
-	"demo",
-	"accounts", "accounts by name", "accounts by a literal pattern character",
-	"brief", "brief without calls", "brief as of another day", "brief of an unknown account",
-	"brief of a malformed account", "brief on an impossible day",
-	"inspect an account", "inspect a card", "inspect numbers", "inspect by role",
-	"inspect a number off the card", "inspect an unknown card", "inspect a receipt",
-	"audit", "audit by tool", "audit by brief", "audit of a missing folder",
-	"mcp help", "mcp without its action", "mcp without a scope",
-	"brief on a text that is not a day", "brief with an argument it does not take",
+// notPorted names the recorded steps the Go binary does not reproduce yet, each with why. Each one is still
+// run and must still differ from the recording. Porting a command removes its steps from this list, and a
+// step that is not listed must match the recording.
+var notPorted = map[string]string{
+	"no arguments as JSON": "the binary reads --json alone as an unknown command, and with no command prints its usage",
+	"version":              "the binary has a version command that prints its commit, and no --version",
+	"unknown command":      "the binary names an unknown command in plain text and lists its own commands",
+	"connect demo":         "connect is not ported",
+	"connect status":       "connect is not ported",
+	"demo": "the binary's demo publishes the whole demo book for the demo sign-in and takes no --state-dir; " +
+		"the recorded demo is one renewal with a lookup and a refused read",
+	"audit":         "the recorded log opens with the seven receipts of the recorded demo, which the binary's demo does not make",
+	"audit by tool": "the recorded list opens with the seal of the recorded demo's card, which the binary's demo does not make",
+	"audit by brief": "the recording numbers these receipts where the audit step before it first prints them, " +
+		"and that step does not match",
+	"mcp help":               "mcp is not ported",
+	"mcp without its action": "mcp is not ported",
+	"mcp without a scope":    "mcp is not ported",
+}
+
+// clocked names the steps that print what the recorder's clock decided: a receipt's started_at, the card
+// line that names its first and last read, which is one time when both fall in one second, and elapsed_ms.
+// They are compared with exactly those values left out, and everything else as recorded.
+var clocked = []string{"brief", "brief without calls", "brief as of another day", "inspect a receipt"}
+
+var (
+	clockTime    = regexp.MustCompile(`<time-[0-9]+>`)
+	clockReads   = regexp.MustCompile(`Sources read <time>(?: to <time>)?\.`)
+	clockElapsed = regexp.MustCompile(`"elapsed_ms": [0-9.e+-]+`)
+)
+
+// withoutClock is a normalized text with the values the clock decided left out.
+func withoutClock(text string) string {
+	text = clockReads.ReplaceAllString(clockTime.ReplaceAllString(text, "<time>"), "Sources read <time>.")
+	return clockElapsed.ReplaceAllString(text, `"elapsed_ms": <elapsed>`)
 }
 
 // needsDatabase names the steps whose recorded outcome depends on what the state folder holds. The Go program
@@ -50,6 +72,7 @@ var needsDatabase = []string{
 	"demo",
 	"accounts", "accounts by name", "accounts by a literal pattern character",
 	"brief", "brief without calls", "brief as of another day", "brief of an unknown account",
+	"brief of a malformed account", "brief on an impossible day", "brief on a text that is not a day",
 	"inspect an account", "inspect a card", "inspect numbers", "inspect by role",
 	"inspect a number off the card", "inspect an unknown card", "inspect a receipt",
 	"audit", "audit by tool", "audit by brief", "audit of a missing folder",
@@ -253,9 +276,42 @@ func (r *replay) normalize(text string) string {
 	return sealed.ReplaceAllString(text, "${1}<sha256>")
 }
 
+// numbering is the values a session has numbered so far.
+type numbering struct {
+	tokens, times   map[string]bool
+	numbers, values map[string]string
+	order           []string
+}
+
+func (r *replay) numbered() numbering {
+	return numbering{tokens: maps.Clone(r.tokens), times: maps.Clone(r.times), numbers: maps.Clone(r.numbers),
+		values: maps.Clone(r.values), order: slices.Clone(r.order)}
+}
+
+// skip puts the numbering back to what it was before a step that is not ported, and counts every
+// placeholder the recording first prints in that step as issued, with no value. The steps after it then
+// number their own values as the recording does. A later argument that needs one of those values has none.
+func (r *replay) skip(before numbering, s step) {
+	r.tokens, r.times, r.numbers, r.values, r.order = before.tokens, before.times, before.numbers, before.values,
+		before.order
+	issued := map[string]bool{}
+	for _, placeholder := range r.numbers {
+		issued[placeholder] = true
+	}
+	for _, text := range append([]string{s.Stdout, s.Stderr}, s.Argv...) {
+		for _, placeholder := range numbered.FindAllString(text, -1) {
+			if !issued[placeholder] {
+				issued[placeholder] = true
+				r.numbers["\x00"+placeholder] = placeholder
+			}
+		}
+	}
+}
+
 // run runs one recorded step as the recorder did, with the placeholders in its arguments filled from this
-// session, and returns what differs from the recording, or "" when nothing does.
-func (r *replay) run(t *testing.T, s step) string {
+// session, and returns what differs from the recording, or "" when nothing does. compared is what of a
+// normalized text is compared.
+func (r *replay) run(t *testing.T, s step, compared func(string) string) string {
 	t.Helper()
 	argv := make([]string, len(s.Argv))
 	for i, recorded := range s.Argv {
@@ -300,11 +356,11 @@ func (r *replay) run(t *testing.T, s step) string {
 		differs = append(differs, fmt.Sprintf("exit code %d, recorded %d", exit, s.Exit))
 	}
 	if s.Compared != helpNotCompared {
-		if out != s.Stdout {
-			differs = append(differs, "stdout "+oracletest.FirstDifference(out, s.Stdout))
+		if out, recorded := compared(out), compared(s.Stdout); out != recorded {
+			differs = append(differs, "stdout "+oracletest.FirstDifference(out, recorded))
 		}
-		if errs != s.Stderr {
-			differs = append(differs, "stderr "+oracletest.FirstDifference(errs, s.Stderr))
+		if errs, recorded := compared(errs), compared(s.Stderr); errs != recorded {
+			differs = append(differs, "stderr "+oracletest.FirstDifference(errs, recorded))
 		}
 	}
 	return strings.Join(differs, "\n")
@@ -336,7 +392,8 @@ func TestRecordedCommandSession(t *testing.T) {
 		}
 		return set
 	}
-	pending, stateful := listed(notPorted, "notPorted"), listed(needsDatabase, "needsDatabase")
+	pending, stateful := listed(slices.Collect(maps.Keys(notPorted)), "notPorted"), listed(needsDatabase, "needsDatabase")
+	timed := listed(clocked, "clocked")
 
 	root := t.TempDir()
 	r := newReplay(filepath.Join(root, "session"))
@@ -358,34 +415,49 @@ func TestRecordedCommandSession(t *testing.T) {
 		"COLUMNS=100", "LINES=50", "HOME=" + home, "TMPDIR=" + temporary}
 	database := os.Getenv("GTM_TEST_DATABASE_URL") != "" || os.Getenv("GTM_REQUIRE_DATABASE") == "1"
 	if database {
-		// A database as setup leaves it, the app role's URL, and an empty credentials folder.
+		// A database as setup leaves it, the app role's URL, and an empty credentials folder. connect is not
+		// ported, so the workspace the session's --state-dir names is connected to the demo data here, as the
+		// recording's "connect demo" step leaves its folder.
 		d := setUpDemo(t)
+		d.connectDemo(t, r.state)
 		r.env = append(r.env, "GTM_OWNER_DATABASE_URL="+d.ownerURL, "GTM_DATABASE_URL="+d.appURL,
 			"GTM_CREDENTIALS_DIR="+privateDir(t))
 	}
 
-	matched, waiting := 0, 0
+	matched, apart, waiting := 0, 0, 0
 	for i, s := range steps {
 		t.Run(fmt.Sprintf("%02d %s", i+1, s.Label), func(t *testing.T) {
 			if stateful[s.Label] && !database {
 				waiting++
+				// The step prints nothing here, so what it numbers in the recording is counted as issued.
+				r.skip(r.numbered(), s)
 				t.Skip("GTM_TEST_DATABASE_URL is not set")
 			}
-			differs := r.run(t, s)
-			if differs == "" {
-				matched++
+			compared := func(text string) string { return text }
+			if timed[s.Label] {
+				compared = withoutClock
 			}
+			before := r.numbered()
+			differs := r.run(t, s, compared)
 			switch {
 			case differs == "" && pending[s.Label]:
 				t.Errorf("the binary now matches this step: remove %q from notPorted", s.Label)
 			case differs != "" && pending[s.Label]:
-				t.Logf("not ported: %.300s", differs)
+				r.skip(before, s)
+				t.Logf("not ported: %s\n%.300s", notPorted[s.Label], differs)
 			case differs != "":
 				t.Errorf("gtm-connector %s\n%s", strings.Join(s.Argv, " "), differs)
+			case timed[s.Label]:
+				matched, apart = matched+1, apart+1
+			default:
+				matched++
 			}
 		})
 	}
 	summary := fmt.Sprintf("command replay: the Go binary matches %d of %d recorded steps", matched, len(steps))
+	if apart > 0 {
+		summary += fmt.Sprintf(", %d of them apart from what the recorder's clock decided", apart)
+	}
 	if waiting > 0 {
 		summary += fmt.Sprintf("; %d were not run, because GTM_TEST_DATABASE_URL is not set", waiting)
 	}
@@ -431,5 +503,27 @@ func TestReplayNormalizesAsTheRecorderDoes(t *testing.T) {
 	printed, given := r.values["<brief-2>"], r.values["<brief-5>"]
 	if printed != "brief-0123456789abcdef0123456789abcdef" || given != recorderGiven["<brief-5>"] {
 		t.Errorf("an argument would get %q for <brief-2> and %q for <brief-5>", printed, given)
+	}
+}
+
+// A step that is not ported leaves nothing of what it printed, and the placeholders its recording first
+// prints are taken, so the next step numbers its values as the recording does.
+func TestReplaySkipsAStepThatIsNotPorted(t *testing.T) {
+	const (
+		printed  = `{"brief_id": "brief-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sealed_by": "11111111-2222-4333-8444-555555555555"}`
+		recorded = `{"receipt_id": "<uuid-1>", "other": "<uuid-2>", "brief_id": "<brief-1>", "text": "<uuid-1>"}`
+	)
+	r := newReplay("/tmp/oracle-x")
+	before := r.numbered()
+	r.normalize(`{"brief_id": "brief-ffffffffffffffffffffffffffffffff"}`)
+	r.skip(before, step{Stdout: recorded, Argv: []string{"inspect", "<run-1>"}})
+	if got, want := r.normalize(printed), `{"brief_id": "<brief-2>", "sealed_by": "<uuid-3>"}`; got != want {
+		t.Errorf("after a skipped step: %s", got)
+	}
+	if got := r.normalize(`"demo-0123456789abcdef0123456789abcdef"`); got != `"<run-2>"` {
+		t.Errorf("a run after a skipped step's argument: %s", got)
+	}
+	if _, has := r.values["<brief-1>"]; has || r.values["<brief-2>"] != "brief-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Errorf("the values an argument would get: %v", r.values)
 	}
 }

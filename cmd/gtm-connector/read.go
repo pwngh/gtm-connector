@@ -1,0 +1,723 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/pwngh/gtm-connector/internal/cards"
+	"github.com/pwngh/gtm-connector/internal/evidence"
+	"github.com/pwngh/gtm-connector/internal/receipts"
+	"github.com/pwngh/gtm-connector/internal/sources/demo"
+	"github.com/pwngh/gtm-connector/internal/storage/postgres"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
+	"github.com/pwngh/gtm-connector/internal/unicodetab"
+)
+
+// The read commands, as gtm_connector/cli.py runs them: accounts, brief, inspect and audit. They are the
+// commands of the person who runs the install, so they connect as the app role and read a whole workspace.
+// A card they make is the owner's: its receipts name no principal, and a bearer made for the run, never
+// stored or shown, gives them their token ID.
+
+// defaultWorkspace is the workspace a command reads without --state-dir: the one setup makes.
+const defaultWorkspace = "demo"
+
+var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+
+// workspaceSlug is the workspace a --state-dir names. A name that is a slug is that workspace's slug. Any
+// other name, such as the path of a folder, names the workspace whose slug is "dir-" and the first 32 hex
+// digits of the SHA-256 of the name as given.
+func workspaceSlug(name string) string {
+	if slugPattern.MatchString(name) {
+		return name
+	}
+	digest := sha256.Sum256([]byte(name))
+	return "dir-" + hex.EncodeToString(digest[:16])
+}
+
+// errNotConnected is a workspace with no CRM: there is nothing to read an account from.
+var errNotConnected = errors.New("no CRM is connected")
+
+// unportedSource is a source the read commands do not read yet.
+type unportedSource struct{ source string }
+
+func (e *unportedSource) Error() string {
+	return "This workspace is connected to " + e.source + ", which this command does not read yet."
+}
+
+// reads is what a workspace's cards are read from: the kind of each source, each source's connection, and
+// the demo book.
+type reads struct {
+	sources     evidence.Sources
+	connections map[string]string
+	book        *demo.Store
+}
+
+// workspaceReads reads what a workspace is connected to. Only demo data is read here: a workspace with no
+// CRM gives errNotConnected, and one connected to any other source is refused as not ported.
+func workspaceReads(ctx context.Context, store *postgres.Store, workspace postgres.Workspace) (reads, error) {
+	r := reads{sources: demoSources, connections: map[string]string{}}
+	connections, err := store.Connections(ctx, workspace.ID)
+	if err != nil {
+		return r, err
+	}
+	modes := map[string]string{}
+	for _, c := range connections {
+		modes[c.Source] = c.Mode
+		r.connections[c.Source] = c.ID
+	}
+	names := map[string]string{"sf": "Salesforce", "env_token": "Salesforce", "imported": "imported transcripts",
+		"slack": "a Slack thread"}
+	backend := func(source string) (string, error) {
+		switch mode := modes[source]; mode {
+		case "demo", "fixture":
+			return "fixture", nil
+		case "", "none":
+			return "none", nil
+		default:
+			return "", &unportedSource{names[mode]}
+		}
+	}
+	crm, err := backend("crm")
+	switch {
+	case err != nil:
+		return r, err
+	case crm == "none":
+		return r, errNotConnected
+	}
+	if r.sources.CallsBackend, err = backend("calls"); err != nil {
+		return r, err
+	}
+	if r.sources.SlackBackend, err = backend("slack"); err != nil {
+		return r, err
+	}
+	r.book, err = demo.Seeded()
+	return r, err
+}
+
+// maker makes cards from these sources on PostgreSQL.
+func (r reads) maker(store *postgres.Store) *cards.Maker {
+	return &cards.Maker{Receipts: &postgres.ReceiptStore{Store: store}, Source: r.book, Sources: r.sources,
+		Connections: r.connections}
+}
+
+// sourcesLine names what a card reads, once, on stderr.
+func (r reads) sourcesLine() string {
+	word := map[string]string{"fixture": "demo data", "none": "not connected"}
+	calls, slack := word[r.sources.CallsBackend], word[r.sources.SlackBackend]
+	if calls == "demo data" && slack == "demo data" {
+		return "Sources: CRM, calls, and Slack are demo data."
+	}
+	return "Sources: CRM is demo data; calls are " + calls + "; Slack is " + slack + "."
+}
+
+// run is one read command with its arguments.
+type run struct {
+	command string
+	args    parsed
+	screen  screen
+	// name is the workspace's name as --state-dir gave it.
+	name      string
+	store     *postgres.Store
+	workspace postgres.Workspace
+	// exists is whether a workspace has that name. Nothing is in one that does not exist.
+	exists bool
+	// action is the form inspect was given: account, brief, numbers or receipt.
+	action string
+}
+
+// folder is the --state-dir that names this workspace in the commands printed for it.
+func (r *run) folder() string { return " --state-dir " + shellQuote(r.name) }
+
+// here is the same, left out when the workspace is the default.
+func (r *run) here() string {
+	if r.name == defaultWorkspace {
+		return ""
+	}
+	return r.folder()
+}
+
+// open connects to the database and finds the workspace.
+func (r *run) open(ctx context.Context) error {
+	c, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if r.store, err = openAppStore(ctx, c); err != nil {
+		return err
+	}
+	r.workspace, err = r.store.Workspace(ctx, workspaceSlug(r.name))
+	if errors.Is(err, postgres.ErrNotFound) {
+		return nil
+	}
+	r.exists = err == nil
+	return err
+}
+
+// reads is what the workspace is connected to. A workspace that does not exist has no CRM.
+func (r *run) reads(ctx context.Context) (reads, error) {
+	if !r.exists {
+		return reads{}, errNotConnected
+	}
+	return workspaceReads(ctx, r.store, r.workspace)
+}
+
+// noAuditLog is the refusal of a workspace that does not exist, which holds no receipt.
+func (r *run) noAuditLog() *failure {
+	return &failure{code: 2, message: "audit database not found; run the demo first",
+		next: "gtm-connector demo" + r.folder()}
+}
+
+// runRead runs one read command and gives its exit code.
+func runRead(ctx context.Context, command string, tokens []string, s screen) int {
+	spec := readCommands[command]
+	args, err := spec.parse(tokens)
+	if err != nil {
+		return s.fail(command, refused("%s", err))
+	}
+	if args.help {
+		fmt.Fprint(s.out, spec.help)
+		return 0
+	}
+	r := &run{command: command, args: args, screen: s, name: defaultWorkspace}
+	if name, given := args.text("--state-dir"); given {
+		r.name = name
+	}
+	defer func() {
+		if r.store != nil {
+			r.store.Close()
+		}
+	}()
+	result, err := r.result(ctx)
+	if err != nil {
+		return s.fail(command, r.failed(ctx, err))
+	}
+	if result == nil {
+		return 0
+	}
+	if s.json {
+		text, err := strictjson.Dumps(result, strictjson.Artifact)
+		if err != nil {
+			return s.fail(command, r.failed(ctx, err))
+		}
+		fmt.Fprintln(s.out, text)
+		return 0
+	}
+	fmt.Fprintln(s.out, r.human(result))
+	if cut, ok := result.(*strictjson.Object); ok && command == "accounts" {
+		// On stderr, so piped rows stay rows.
+		listed, _ := get(cut, "accounts").([]any)
+		fmt.Fprintf(s.err, "Showing the first %d accounts. More match; narrow the search with --query.\n", len(listed))
+	}
+	return 0
+}
+
+// failed is an error as the command reports it: its exit code, its message and what to run next.
+func (r *run) failed(ctx context.Context, err error) *failure {
+	var (
+		known    *failure
+		unported *unportedSource
+		request  *cards.RequestError
+		rejected *evidence.Rejected
+		read     *cards.ReadError
+	)
+	switch {
+	case errors.As(err, &known):
+		return known
+	case ctx.Err() != nil:
+		return &failure{code: 130, message: "Interrupted. Completed local writes are retained.",
+			next: "gtm-connector audit --help"}
+	case errors.Is(err, errNotConnected):
+		return &failure{code: 2, next: "gtm-connector connect --help",
+			message: "No CRM is connected. Run gtm-connector connect salesforce --org ALIAS" + r.here() +
+				", or gtm-connector connect demo" + r.here() + " for invented data."}
+	case errors.As(err, &unported):
+		return &failure{code: 3, message: unported.Error()}
+	case errors.As(err, &request):
+		return refused("%s", request.Message)
+	case errors.As(err, &rejected):
+		// The card's own ID, then that it was refused: the evidence stays out of the message.
+		message, _, _ := strings.Cut(err.Error(), ": ")
+		return &failure{code: 4, message: message}
+	case errors.As(err, &read) && read.HTTPStatus != 0:
+		return &failure{code: 5, message: fmt.Sprintf("%s: HTTP %d; no brief generated", read.Tool, read.HTTPStatus)}
+	case errors.As(err, &read):
+		return &failure{code: 5, message: read.Tool + ": invalid or failed tool result; no brief generated"}
+	case errors.Is(err, cards.ErrBriefing):
+		return &failure{code: 5, message: "required evidence could not be collected; no brief generated"}
+	}
+	return &failure{code: 1, message: err.Error()}
+}
+
+func (r *run) result(ctx context.Context) (any, error) {
+	switch r.command {
+	case "accounts":
+		return r.accounts(ctx)
+	case "brief":
+		return r.brief(ctx)
+	case "inspect":
+		return r.inspect(ctx)
+	}
+	return r.audit(ctx)
+}
+
+// accounts searches the connected CRM by name. A complete list is an array. A cut one is an object that
+// says so. Names are shown inert.
+func (r *run) accounts(ctx context.Context) (any, error) {
+	if err := r.open(ctx); err != nil {
+		return nil, err
+	}
+	from, err := r.reads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query, _ := r.args.text("--query")
+	found, more := from.book.SearchAccounts(query)
+	rows := make([]any, len(found))
+	for i, row := range found {
+		rows[i] = row
+	}
+	shown, err := neutral(rows)
+	if err != nil || !more {
+		return shown, err
+	}
+	return strictjson.NewObject("accounts", shown, "has_more", true), nil
+}
+
+// brief reads one account through the card maker and publishes its card. The raw records stay in the
+// stored card: the result holds neutralized text only.
+func (r *run) brief(ctx context.Context) (any, error) {
+	if err := r.open(ctx); err != nil {
+		return nil, err
+	}
+	from, err := r.reads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	account := r.args.positionals[0]
+	asOf, given := r.args.text("--as-of")
+	if !given {
+		asOf = cards.DemoAsOf
+	}
+	if !r.screen.json {
+		fmt.Fprintln(r.screen.err, from.sourcesLine())
+	}
+	// A card belongs to an account of its workspace, so an account the CRM holds is listed there first.
+	if row, ok := from.book.GetAccount(account); ok {
+		name, _ := get(row, "name").(string)
+		if err := r.store.EnsureAccount(ctx, r.workspace.ID, account, name); err != nil {
+			return nil, err
+		}
+	}
+	scopes := []string{"crm:read", "calls:read", "slack:read"}
+	if _, without := r.args.text("--without-calls"); without {
+		scopes = []string{"crm:read", "slack:read"}
+	}
+	sealed, err := from.maker(r.store).Brief(ctx, cards.Brief{
+		Principal: cards.Principal{WorkspaceID: r.workspace.ID, TokenID: receipts.Fingerprint(randomToken()),
+			Scopes: scopes},
+		OperationID: "brief-" + receipts.RandomID(), AccountID: account, AsOf: asOf, IncludeSlack: true})
+	if err != nil {
+		return nil, err
+	}
+	value, err := strictjson.Loads(sealed.Payload)
+	if err != nil {
+		return nil, err
+	}
+	card := value.(*strictjson.Object)
+	card.Delete("evidence")
+	return card, nil
+}
+
+var (
+	briefID   = regexp.MustCompile(`^brief-[0-9a-f]{32}$`)
+	accountID = regexp.MustCompile(`^acc-(?:[0-9]{3}|sf-[A-Za-z0-9]{18})$`)
+	receiptID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+)
+
+const inspectForms = "inspect takes an account ID (acc-003, or acc-sf- and 18 characters), a brief ID (brief- and " +
+	"32 lowercase hex digits), a brief ID and numbers printed on its card, or a receipt ID from audit."
+
+// inspect shows an account, a saved card, numbers on it, or a receipt. Only the account is read from a
+// source; the other forms read the stored cards and receipts, and nothing is written.
+func (r *run) inspect(ctx context.Context) (any, error) {
+	target, numbers := r.args.positionals[0], r.args.positionals[1:]
+	switch {
+	case briefID.MatchString(target) && len(numbers) > 0:
+		r.action = "numbers"
+	case briefID.MatchString(target):
+		r.action = "brief"
+	case len(numbers) > 0:
+		return nil, refused(inspectForms)
+	case accountID.MatchString(target):
+		r.action = "account"
+	case receiptID.MatchString(target):
+		r.action = "receipt"
+	default:
+		return nil, refused(inspectForms)
+	}
+	role, filtered := r.args.text("--role")
+	if filtered && r.action != "brief" {
+		return nil, refused("--role lists one role's sentences of a saved card. Give it a brief ID alone.")
+	}
+	if err := r.open(ctx); err != nil {
+		return nil, err
+	}
+	switch r.action {
+	case "account":
+		return r.account(ctx, target)
+	case "receipt":
+		if !r.exists {
+			return nil, r.noAuditLog()
+		}
+		receipt, err := r.store.Receipt(ctx, r.workspace.ID, target)
+		if errors.Is(err, postgres.ErrNotFound) {
+			return nil, refused("Audit receipt not found.")
+		}
+		if err != nil {
+			return nil, err
+		}
+		value, err := receipt.AuditValue()
+		if err != nil {
+			return nil, err
+		}
+		// A caller's arguments can hold any text: shown, it is inert as source text on a card is.
+		arguments, err := neutral(get(value, "arguments"))
+		value.Set("arguments", arguments)
+		return value, err
+	}
+	// A card is read from the sources its workspace is connected to, so a workspace with none holds no card.
+	from, err := r.reads(ctx)
+	if errors.Is(err, errNotConnected) {
+		return nil, refused("%s", cards.ErrNoCard)
+	}
+	if err != nil {
+		return nil, err
+	}
+	card, err := r.sealed(ctx, target, from.sources)
+	if err != nil {
+		return nil, err
+	}
+	if r.action == "numbers" {
+		return traces(card, target, numbers)
+	}
+	units, _ := get(card, "units").([]any)
+	listed := []any{}
+	for _, value := range units {
+		unit, err := asShown(value.(*strictjson.Object))
+		if err != nil {
+			return nil, err
+		}
+		if !filtered || get(unit, "role") == role {
+			listed = append(listed, unit)
+		}
+	}
+	return strictjson.NewObject("brief_id", target, "account_id", get(card, "account_id"), "units", listed), nil
+}
+
+// account is the account as the CRM returns it, with the newest saved card of it that the workspace holds
+// and inspect can open.
+func (r *run) account(ctx context.Context, id string) (any, error) {
+	from, err := r.reads(ctx)
+	if err != nil {
+		return nil, err
+	}
+	found, ok := from.book.GetAccount(id)
+	if !ok {
+		return nil, &failure{code: 2, message: "account not found: " + id, next: "gtm-connector accounts" + r.folder()}
+	}
+	shown, err := neutral(found)
+	if err != nil {
+		return nil, err
+	}
+	account := shown.(*strictjson.Object)
+	briefs, err := r.store.AccountBriefs(ctx, r.workspace.ID, id)
+	if err != nil {
+		return nil, err
+	}
+	var newest any
+	for _, brief := range briefs {
+		if card, err := r.sealed(ctx, brief, from.sources); err == nil && get(card, "account_id") == id {
+			newest = brief
+			break
+		}
+	}
+	account.Set("newest_brief_id", newest)
+	return account, nil
+}
+
+// sealed is a stored card, only when its bytes are the ones its seal receipt names, its read receipts are
+// the ones the workspace holds, it was read from the sources the workspace is bound to, and every number
+// on it resolves (cards.VerifyCard).
+func (r *run) sealed(ctx context.Context, brief string, bound evidence.Sources) (*strictjson.Object, error) {
+	stored, err := r.store.CardByBrief(ctx, r.workspace.ID, brief)
+	if errors.Is(err, postgres.ErrNotFound) {
+		return nil, refused("%s", cards.ErrNoCard)
+	}
+	if err != nil {
+		return nil, err
+	}
+	value, err := strictjson.Loads(stored.Bytes)
+	card, _ := value.(*strictjson.Object)
+	if err != nil || card == nil {
+		return nil, refused("%s", cards.ErrInvalidCard)
+	}
+	if get(card, "kind") == "selected_brief" {
+		return nil, refused("This brief was prepared by an assistant with prepare_renewal_brief, which reads it " +
+			"back with read_renewal_brief. inspect reads cards saved by brief or demo.")
+	}
+	log := cards.StoreLog{Store: &postgres.ReceiptStore{Store: r.store}, WorkspaceID: r.workspace.ID}
+	if _, err := cards.VerifyCard(ctx, stored.Bytes, brief, log, bound); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, refused("%s", err)
+	}
+	return card, nil
+}
+
+// asShown is a sealed unit as it is shown. A unit sealed under today's rules is shown as sealed. One
+// sealed under older rules has its text and speaker neutralized again, so it shows nothing that today's
+// rules replace.
+func asShown(unit *strictjson.Object) (*strictjson.Object, error) {
+	if evidence.Equal(get(unit, "sanitizer_version"), evidence.SanitizerVersion) {
+		return unit, nil
+	}
+	shown := unit.Copy()
+	for _, key := range []string{"text", "speaker"} {
+		if text, ok := get(unit, key).(string); ok {
+			safe, _, err := evidence.SafeText(text)
+			if err != nil {
+				return nil, err
+			}
+			shown.Set(key, safe)
+		}
+	}
+	return shown, nil
+}
+
+// replaced is whether a speaker label holds what neutralizing can put there: a bracketed mention, user,
+// channel, link or character code, or a number in parentheses. Two labels that differ only where these
+// stand print alike.
+func replaced(label string) bool {
+	runes := []rune(label)
+	for i, c := range runes {
+		switch c {
+		case '[':
+			rest := string(runes[i+1:])
+			for _, word := range []string{"mention", "user", "channel", "link", "U+"} {
+				if strings.HasPrefix(rest, word) && strings.Contains(rest[len(word):], "]") {
+					return true
+				}
+			}
+		case '(':
+			end := i + 1
+			for end < len(runes) && unicodetab.ReDigit(runes[end]) {
+				end++
+			}
+			if end > i+1 && end < len(runes) && runes[end] == ')' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// traces resolves numbers on one saved card from its sealed units and evidence, never from the card's
+// text: each to its record, the receipt of the read that returned it, and, for a sentence, the next whole
+// sentence under the same speaker label in the same record.
+func traces(card *strictjson.Object, brief string, numbers []string) (any, error) {
+	units, _ := get(card, "units").([]any)
+	snapshot, _ := get(card, "evidence").(*strictjson.Object)
+	trace := evidence.NewTrace(snapshot)
+	traced := make([]any, len(numbers))
+	for i, text := range numbers {
+		n, err := strconv.Atoi(text)
+		if err != nil || n < 1 || n > len(units) {
+			return nil, refused("This card has numbers 1 to %d.", len(units))
+		}
+		receipt, record, ok := trace.Resolve(units, n)
+		if !ok {
+			return nil, refused("Number %d does not resolve to a record and a receipt of its own card.", n)
+		}
+		sealed := units[n-1].(*strictjson.Object)
+		unit := sealed.Copy()
+		unit.Delete("tool")
+		unit.Set("receipt", strictjson.NewObject("audit_id", get(receipt, "audit_id"), "tool", get(receipt, "tool"),
+			"status", get(receipt, "status"), "http_status", get(receipt, "http_status")))
+		if get(unit, "kind") == "record" {
+			fields, err := recordFields(record)
+			if err != nil {
+				return nil, err
+			}
+			unit.Set("fields", fields)
+		}
+		if unit, err = asShown(unit); err != nil {
+			return nil, err
+		}
+		var following any
+		if speaker, labelled := get(sealed, "speaker").(string); get(sealed, "kind") == "sentence" && labelled &&
+			!replaced(speaker) {
+			for _, later := range units[n:] {
+				next, _ := later.(*strictjson.Object)
+				if get(next, "kind") == "sentence" && get(next, "partial") == false &&
+					get(next, "record_ref") == get(sealed, "record_ref") && get(next, "speaker") == speaker {
+					following = get(next, "n")
+					break
+				}
+			}
+		}
+		found := strictjson.NewObject("brief_id", brief, "account_id", get(card, "account_id"))
+		for k, key := range unit.Keys {
+			found.Set(key, unit.Values[k])
+		}
+		found.Set("next_by_speaker", following)
+		traced[i] = found
+	}
+	return traced, nil
+}
+
+// recordFields is a record's plain values by name, each string neutralized and on one line.
+func recordFields(record *strictjson.Object) (*strictjson.Object, error) {
+	keys := append([]string(nil), record.Keys...)
+	sort.Strings(keys)
+	fields := &strictjson.Object{}
+	for _, key := range keys {
+		value := get(record, key)
+		text, isText := value.(string)
+		if _, plain := evidence.PyStr(value); key == "record_ref" || !plain {
+			continue
+		}
+		if isText {
+			safe, _, err := evidence.SafeText(text)
+			if err != nil {
+				return nil, err
+			}
+			value = strings.Join(strings.FieldsFunc(safe, unicodetab.IsSpace), " ")
+		}
+		fields.Set(key, value)
+	}
+	return fields, nil
+}
+
+// filters reads audit's options, as inspection.ReceiptFilters checks them before any receipt is read.
+func (r *run) filters() (postgres.ReceiptFilter, error) {
+	var f postgres.ReceiptFilter
+	blank := func(text string) bool {
+		return strings.TrimFunc(text, unicodetab.IsSpace) == ""
+	}
+	for name, field := range map[string]**string{"--tool": &f.Tool, "--caller": &f.TokenID, "--status": &f.Status} {
+		if text, given := r.args.text(name); given {
+			*field = &text
+		}
+	}
+	since, hasSince := r.args.text("--since")
+	until, hasUntil := r.args.text("--until")
+	for _, name := range []string{"--tool", "--caller", "--since", "--until", "--status"} {
+		if text, given := r.args.text(name); given && blank(text) {
+			return f, refused("Receipt filters must be nonempty text.")
+		}
+	}
+	if f.TokenID != nil && !callerPattern.MatchString(*f.TokenID) {
+		return f, refused("--caller must be a complete SHA-256 fingerprint or anonymous, not a bearer token.")
+	}
+	var err error
+	if hasSince {
+		if f.Since, err = timestamp(since, "--since"); err != nil {
+			return f, err
+		}
+	}
+	if hasUntil {
+		if f.Until, err = timestamp(until, "--until"); err != nil {
+			return f, err
+		}
+	}
+	if hasSince && hasUntil && !f.Since.Before(f.Until) {
+		return f, refused("--since must be earlier than --until.")
+	}
+	if brief, given := r.args.text("--brief"); given {
+		f.BriefID = &brief
+	}
+	return f, nil
+}
+
+var callerPattern = regexp.MustCompile(`^(?:[0-9a-f]{64}|anonymous)$`)
+
+// timestamp reads an ISO 8601 time that carries its UTC offset.
+func timestamp(text, label string) (time.Time, error) {
+	if moment, ok := evidence.Instant(text); ok {
+		return moment, nil
+	}
+	// A day alone, or a time with no offset, is a time and says where it was not.
+	_, dayErr := evidence.DateFromISO(text)
+	if _, timed := evidence.Instant(text + "+00:00"); dayErr == nil || timed {
+		return time.Time{}, refused("%s must include its UTC offset.", label)
+	}
+	return time.Time{}, refused("%s must be an ISO 8601 timestamp with a UTC offset.", label)
+}
+
+// audit lists the workspace's receipts in the order they started. With --follow it prints the matching
+// receipts and then each new or changed one, until it is interrupted.
+func (r *run) audit(ctx context.Context) (any, error) {
+	filter, err := r.filters()
+	if err != nil {
+		return nil, err
+	}
+	if err := r.open(ctx); err != nil {
+		return nil, err
+	}
+	if !r.exists {
+		return nil, r.noAuditLog()
+	}
+	read := func() ([]any, error) {
+		found, err := r.store.Receipts(ctx, r.workspace.ID, filter)
+		if err != nil {
+			return nil, err
+		}
+		rows := make([]any, len(found))
+		for i, receipt := range found {
+			if rows[i], err = receipt.AuditValue(); err != nil {
+				return nil, err
+			}
+		}
+		return rows, nil
+	}
+	if _, follow := r.args.text("--follow"); !follow {
+		return read()
+	}
+	// Whole rows are compared, so a pending receipt is printed again when it finishes.
+	seen := map[string]string{}
+	for {
+		rows, err := read()
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			line, err := strictjson.Dumps(row, strictjson.Quoted)
+			if err != nil {
+				return nil, err
+			}
+			id, _ := get(row.(*strictjson.Object), "audit_id").(string)
+			if seen[id] == line {
+				continue
+			}
+			seen[id] = line
+			if !r.screen.json {
+				line = r.auditTable([]any{row})
+			}
+			fmt.Fprintln(r.screen.out, line)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
