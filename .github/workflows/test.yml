@@ -149,6 +149,11 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run build
+      - name: The build inside the binary serves its page at each deep link, and the assets it names
+        working-directory: .
+        env:
+          GTM_REQUIRE_WEB_BUILD: '1'
+        run: go test -count=1 -run '^TestTheBuildInTheBinaryIsServed$' -v ./internal/transport/http
       - name: The browser checks drive the runner's installed Chrome against the build
         run: npm run test:browser
       - name: The release target builds four binaries with this web app inside them, and their sums match

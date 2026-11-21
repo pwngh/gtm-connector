@@ -3,6 +3,8 @@ package cards
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -185,6 +187,7 @@ type Admitted struct {
 	AccountID string
 	SHA256    string
 	SealID    string
+	Payload   []byte   // the bytes that were verified
 	ReadIDs   []string // the read receipts the card sealed, in its order
 	Units     []UnitBinding
 }
@@ -359,6 +362,7 @@ func VerifyCard(ctx context.Context, payload []byte, briefID string, log Log, bo
 		return nil, err
 	}
 	return &Admitted{Kind: "card", BriefID: briefID, AccountID: account, SHA256: sha(payload), SealID: sealID,
+		Payload: payload,
 		ReadIDs: readIDs(reads), Units: admitted}, nil
 }
 
@@ -453,7 +457,7 @@ func VerifyPrepared(ctx context.Context, payload []byte, briefID string, log Log
 	if err != nil {
 		return nil, err
 	}
-	return &Admitted{Kind: "selected_brief", BriefID: briefID, AccountID: account, SHA256: sha(payload),
+	return &Admitted{Kind: "selected_brief", BriefID: briefID, AccountID: account, SHA256: sha(payload), Payload: payload,
 		SealID: outerID, ReadIDs: readIDs(reads), Units: admitted}, nil
 }
 
@@ -465,6 +469,8 @@ type Folder struct {
 	Log      TrustedRows
 	// Lines is each row of Log as the export held it, by audit ID.
 	Lines map[string][]byte
+	// ExportSHA256 is the SHA-256 of the export's bytes, as read.
+	ExportSHA256 string
 	// tooLarge holds, by sub-folder and brief ID ("briefs/<brief ID>"), the refusal of each file over its
 	// size. Such a file was not read.
 	tooLarge map[string]error
@@ -521,9 +527,11 @@ func OpenTrustedExport(dir string) (*Folder, error) {
 		return nil, err
 	}
 	defer export.Close()
-	if f.Log, f.Lines, err = readTrustedLines(io.LimitReader(export, maxAuditBytes+1)); err != nil {
+	digest := sha256.New()
+	if f.Log, f.Lines, err = readTrustedLines(io.TeeReader(io.LimitReader(export, maxAuditBytes+1), digest)); err != nil {
 		return nil, err
 	}
+	f.ExportSHA256 = hex.EncodeToString(digest.Sum(nil))
 	// An export that grew past its size while it was read is refused too.
 	read, err := export.Seek(0, io.SeekCurrent)
 	if err != nil {
@@ -611,13 +619,49 @@ func (f *Folder) BriefIDs() []string {
 	return ids
 }
 
-// Payload is the bytes Verify admits for a brief ID: the card file, or the prepared brief when there is
-// no card file.
-func (f *Folder) Payload(briefID string) []byte {
-	if payload, ok := f.Cards[briefID]; ok {
-		return payload
+// ErrTwoFiles refuses a folder that holds a card and a prepared brief of one brief ID.
+var ErrTwoFiles = errors.New("This folder holds a card and a prepared brief with this one brief ID.")
+
+// FileError is a refusal of one card file of a folder, by its brief ID.
+type FileError struct {
+	BriefID string
+	Err     error
+}
+
+func (e *FileError) Error() string { return e.BriefID + ": " + e.Err.Error() }
+func (e *FileError) Unwrap() error { return e.Err }
+
+// VerifyAll admits every card and prepared brief file of the folder, or none: a file that fails its check
+// or is over its size refuses the folder, whichever sub-folder it is in, and so do a card and a prepared
+// brief of one brief ID.
+func (f *Folder) VerifyAll(ctx context.Context, bound evidence.Sources) ([]*Admitted, error) {
+	var all []*Admitted
+	for _, id := range f.BriefIDs() {
+		var found []*Admitted
+		for _, sub := range []string{"briefs", "selected-briefs"} {
+			if refusal, ok := f.tooLarge[sub+"/"+id]; ok {
+				return nil, &FileError{id, refusal}
+			}
+			var admitted *Admitted
+			var err error
+			if payload, ok := f.Cards[id]; ok && sub == "briefs" {
+				admitted, err = VerifyCard(ctx, payload, id, f.Log, bound)
+			} else if payload, ok := f.Prepared[id]; ok && sub == "selected-briefs" {
+				admitted, err = VerifyPrepared(ctx, payload, id, f.Log, bound)
+			} else {
+				continue
+			}
+			if err != nil {
+				return nil, &FileError{id, err}
+			}
+			found = append(found, admitted)
+		}
+		if len(found) > 1 {
+			return nil, &FileError{id, ErrTwoFiles}
+		}
+		all = append(all, found...)
 	}
-	return f.Prepared[briefID]
+	return all, nil
 }
 
 // Verify admits one card or prepared brief of the folder, by its brief ID. The card file is read first, so a

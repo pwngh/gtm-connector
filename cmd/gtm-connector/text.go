@@ -42,6 +42,14 @@ func (r *run) human(result any) string {
 			cellText(get(get(renewal, "denied_read").(*strictjson.Object), "status")),
 			r.cardText(get(renewal, "brief").(*strictjson.Object)))
 	}
+	if r.admitted != nil {
+		return r.admittedLine() + "\n" + r.inspectText(result)
+	}
+	return r.inspectText(result)
+}
+
+// inspectText is inspect's result as text, by the form it was given.
+func (r *run) inspectText(result any) string {
 	switch r.action {
 	case "account":
 		return r.accountText(result.(*strictjson.Object))

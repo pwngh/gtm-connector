@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -15,11 +16,29 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
+var digestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// admitted is what inspect says of a card or receipt admitted from an export.
+const admittedNote = "admitted from an export, not re-read"
+
 // admit admits the cards a Python state folder holds, and the receipts they rest on, into a workspace.
-// Each card is verified against its seal and its reads in the folder's audit log export and against the
-// sources the workspace is connected to, and kept as the folder holds it. A folder any card of which fails
-// admits nothing.
+//
+// The folder supplies each card, its reads and its seal, and nothing offline can show where it came from,
+// so admit takes it on the operator's word: --from-org names the CRM identity the cards were read from,
+// which must be the one each card records and the one the workspace is bound to, and --export-sha256 the
+// digest of the export, which covers what of a seal no digest in the folder covers. Within that, each card
+// is verified against its seal, every one of its receipts line for line, the workspace's sources, its own
+// evidence for every quotation, and the workspace's imports for every transcript it quotes. A folder any
+// file of which fails admits nothing.
 func (r *run) admit(ctx context.Context) (any, error) {
+	fromOrg, _ := r.args.text("--from-org")
+	exported, _ := r.args.text("--export-sha256")
+	if !digestPattern.MatchString(fromOrg) {
+		return nil, refused("--from-org takes the CRM identity a card records: 64 lowercase hex digits.")
+	}
+	if !digestPattern.MatchString(exported) {
+		return nil, refused("--export-sha256 takes the SHA-256 of the folder's audit.jsonl: 64 lowercase hex digits.")
+	}
 	if err := r.open(ctx); err != nil {
 		return nil, err
 	}
@@ -27,35 +46,53 @@ func (r *run) admit(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	bound := from.sources()
+	if workspaceOrg := identityOf(bound.CRMBinding); workspaceOrg != fromOrg {
+		return nil, &failure{code: 4, message: "This workspace is bound to CRM identity " + workspaceOrg +
+			", not the one --from-org names. Nothing was admitted."}
+	}
 	folder, err := cards.OpenTrustedExport(r.args.positionals[0])
 	if err != nil {
 		return nil, unreadableFolder(err)
 	}
-	ids := folder.BriefIDs()
-	if len(ids) == 0 {
+	if folder.ExportSHA256 != exported {
+		return nil, &failure{code: 4, message: "The folder's audit.jsonl is not the export whose SHA-256 " +
+			"--export-sha256 gives. Nothing was admitted."}
+	}
+	verified, err := folder.VerifyAll(ctx, bound)
+	var refusal *cards.FileError
+	switch {
+	case ctx.Err() != nil:
+		return nil, ctx.Err()
+	case errors.As(err, &refusal):
+		return nil, notAdmitted(refusal.BriefID, refusal.Err)
+	case err != nil:
+		return nil, err
+	case len(verified) == 0:
 		return nil, refused("This folder holds no saved card: no briefs or selected-briefs file.")
 	}
 	var admitted []postgres.AdmittedCard
 	rows := map[string][]byte{}
-	for _, id := range ids {
-		verified, err := folder.Verify(ctx, id, from.sources())
+	for _, card := range verified {
+		failed, err := r.checkAdmitted(ctx, folder, card, fromOrg)
 		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, notAdmitted(id, err)
+			return nil, err
+		}
+		if failed != nil {
+			return nil, notAdmitted(card.BriefID, failed)
 		}
 		kind := "cli"
-		if verified.Kind == "selected_brief" {
+		if card.Kind == "selected_brief" {
 			kind = "prepared"
 		}
-		admitted = append(admitted, postgres.AdmittedCard{BriefID: id, Kind: kind, AccountID: verified.AccountID,
-			Bytes: folder.Payload(id), SealID: verified.SealID})
-		for _, receipt := range append([]string{verified.SealID}, verified.ReadIDs...) {
+		admitted = append(admitted, postgres.AdmittedCard{BriefID: card.BriefID, Kind: kind,
+			AccountID: card.AccountID, Bytes: card.Payload, SealID: card.SealID})
+		for _, receipt := range append([]string{card.SealID}, card.ReadIDs...) {
 			rows[receipt] = folder.Lines[receipt]
 		}
 	}
-	added, err := r.store.Admit(ctx, r.workspace.ID, admitted, rows)
+	added, err := r.store.Admit(ctx, r.workspace.ID, postgres.OperatorWord{FromOrg: fromOrg, ExportSHA256: exported},
+		admitted, rows)
 	if errors.Is(err, postgres.ErrAdmittedDiffers) {
 		return nil, &failure{code: 3, message: "This workspace already holds another card or receipt with an ID " +
 			"this folder uses, or a card made here with one of its brief IDs. Nothing was admitted."}
@@ -70,6 +107,55 @@ func (r *run) admit(ctx context.Context) (any, error) {
 	}
 	return strictjson.NewObject("cards", listed, "cards_added", len(added.Cards),
 		"receipts_added", len(added.Receipts)), nil
+}
+
+// errNotThisOrg refuses a card read from another CRM identity than the one --from-org names.
+var errNotThisOrg = errors.New("This card was read from another CRM identity than the one --from-org names.")
+
+// errImportMissing refuses a card that quotes an imported transcript the workspace does not hold.
+var errImportMissing = errors.New("This card quotes an imported transcript this workspace does not hold. " +
+	"Import it with debug calls import first.")
+
+// checkAdmitted is what admit checks of a verified card beyond its seal: the CRM identity it records, its
+// receipts line for line, every quotation against its evidence, and every imported transcript it quotes
+// against the workspace's imports. It gives the check the card failed, or an error of the database.
+func (r *run) checkAdmitted(ctx context.Context, folder *cards.Folder, card *cards.Admitted, fromOrg string) (
+	failed, err error) {
+	value, err := strictjson.Loads(card.Payload)
+	if err != nil {
+		return cards.ErrInvalidCard, nil
+	}
+	snapshot, _ := get(value.(*strictjson.Object), "evidence").(*strictjson.Object)
+	if identityOf(get(snapshot, "crm_binding")) != fromOrg {
+		return errNotThisOrg, nil
+	}
+	if failed := folder.CheckExport(card); failed != nil {
+		return failed, nil
+	}
+	if failed := cards.CheckQuotations(card.Payload); failed != nil {
+		return failed, nil
+	}
+	transcripts, failed := cards.ImportedTranscripts(card.Payload)
+	if failed != nil {
+		return failed, nil
+	}
+	for _, transcript := range transcripts {
+		held, err := r.store.HoldsImportedTranscript(ctx, r.workspace.ID, transcript.AccountID, transcript.ContentSHA256)
+		if err != nil {
+			return nil, err
+		}
+		if !held {
+			return errImportMissing, nil
+		}
+	}
+	return nil, nil
+}
+
+// identityOf is the identity_sha256 a source binding records, or "".
+func identityOf(binding any) string {
+	object, _ := binding.(*strictjson.Object)
+	identity, _ := get(object, "identity_sha256").(string)
+	return identity
 }
 
 // unreadableFolder is the refusal of a folder that cannot be opened, in fixed words: an error from the
@@ -167,7 +253,21 @@ func (r *run) admittedCard(ctx context.Context, brief string, bound evidence.Sou
 		}
 		return nil, refused("%s", checkSentence(err))
 	}
+	r.admitted = &stored.Word
 	return card, nil
+}
+
+// admittedValue is what inspect says of a card admitted from an export: the operator's word, and that it
+// was not read again from its source.
+func (r *run) admittedValue() *strictjson.Object {
+	return strictjson.NewObject("from_org", r.admitted.FromOrg, "export_sha256", r.admitted.ExportSHA256,
+		"note", admittedNote)
+}
+
+// admittedLine is the line text output prints first for a card admitted from an export.
+func (r *run) admittedLine() string {
+	return "Admitted from an export, not re-read: the folder's own receipts vouch for it, on the " +
+		"operator's word that it came from CRM identity " + r.admitted.FromOrg + "."
 }
 
 // admittedReceipt is an admitted receipt of the workspace as audit gives a receipt.
@@ -183,5 +283,10 @@ func (r *run) admittedReceipt(ctx context.Context, id string) (*strictjson.Objec
 	if err != nil {
 		return nil, refused("Audit receipt contains invalid JSON.")
 	}
+	from, err := r.store.AdmittedReceiptFrom(ctx, r.workspace.ID, id)
+	if err != nil {
+		return nil, err
+	}
+	r.admitted = &postgres.OperatorWord{FromOrg: from}
 	return decoded.Value(), nil
 }

@@ -278,7 +278,9 @@ anything but a brief ID, or `--role` with anything but a brief ID alone, exits `
 A brief that an assistant prepared here with `prepare_renewal_brief` is read with `read_renewal_brief`,
 not with `inspect`, and `inspect` exits `2` and says so. See [MCP](mcp.md). A card or prepared brief
 the Python package saved, brought in with [`admit`](#admit), opens with `inspect` in all four forms,
-checked against the receipts admitted with it.
+checked against the receipts admitted with it. Its result carries `admitted`, with the `from_org` and
+`export_sha256` it was admitted on and the note `admitted from an export, not re-read`, and text output
+says so on its first line. A receipt admitted with it carries `admitted` with `from_org` and the note.
 
 #### `inspect ACCOUNT_ID`
 
@@ -420,22 +422,44 @@ stays revoked, and its account gets no card. This form writes text only: with `-
 
 ### `admit`
 
-`admit FOLDER` brings the cards a state folder of the Python package holds into a workspace, with the
-receipts they rest on. It reads the folder's `briefs/` and `selected-briefs/` files and its audit log
-as `audit.jsonl`, one receipt row a line, as exported from `audit.sqlite3`; the database itself is not
-read.
+`admit FOLDER --from-org IDENTITY --export-sha256 DIGEST` brings the cards a state folder of the
+Python package holds into a workspace, with the receipts they rest on. It reads the folder's `briefs/`
+and `selected-briefs/` files and its audit log as `audit.jsonl`, one receipt row a line, as exported
+from `audit.sqlite3`; the database itself is not read.
 
 ```sh
 gtm-connector connect demo --state-dir old-cards
-gtm-connector admit ./state --state-dir old-cards
+gtm-connector admit ./state --state-dir old-cards --from-org IDENTITY --export-sha256 "$(shasum -a 256 < ./state/audit.jsonl | cut -c1-64)"
 gtm-connector inspect BRIEF_ID --state-dir old-cards
 ```
 
-Each card is checked as `inspect` checks a card: its bytes are the ones its seal receipt names, its
-reads are rows of the log, it was read from the sources the workspace is connected to, and every
-number on it resolves. Then the card is kept as the folder holds it, byte for byte, never made again,
-and the receipts are kept as the log's rows. A card keeps the neutralizer version it was sealed under,
-and `inspect` shows its units as it shows any card's.
+> **Admission trusts the export folder.** The folder supplies each card, the receipts of its reads and
+> its seal, so a seal that names a card's bytes shows only that the folder agrees with itself. `admit`
+> does not read the cards' records again from Salesforce or any other source, and cannot show offline
+> which org a folder came from. It admits a folder on the operator's word: `--from-org` names the CRM
+> identity the cards were read from (the `identity_sha256` a card records under `crm_binding`), which
+> must be the one each card records and the one the workspace is connected to, and `--export-sha256`
+> is the SHA-256 of `audit.jsonl` as the operator exported it. Both are kept with each card, and
+> `inspect` says the card was admitted from an export and not read again.
+
+Within that, each card is checked as `inspect` checks a card: its bytes are the ones its seal receipt
+names, its reads are rows of the log, it was read from the sources the workspace is connected to, and
+every number on it resolves. Then:
+
+- every receipt line the card rests on is written the one way the export writes a receipt, and each
+  read's line holds exactly the receipt the card embeds, so no byte of a line can change unseen; the
+  seal's time and duration, which no digest in the folder covers, are covered by `--export-sha256`;
+- every quotation on the card is a sentence its record holds under that speaker, as today's rules
+  split and neutralize the record;
+- every imported transcript the card quotes is one the workspace holds for that account, whose stored
+  bytes hash to the `content_sha256` the card's record names; import it with `debug calls import`
+  first;
+- every card and prepared brief file of the folder is checked, so a good file does not hide a damaged
+  or oversized one.
+
+The card is then kept as the folder holds it, byte for byte, never made again, and the receipts are
+kept as the log's rows. A card keeps the neutralizer version it was sealed under, and `inspect` shows
+its units as it shows any card's.
 
 A folder any card of which fails a check admits nothing and exits `4` with the card's brief ID and
 the check's sentence, for example:
@@ -444,6 +468,8 @@ the check's sentence, for example:
 Error: brief-2430d066000040008000000000000001: This file is not the card that was sealed: the card or its seal receipt was changed. Nothing was admitted.
 ```
 
+A `--from-org` that is not the workspace's CRM identity, and an `audit.jsonl` whose digest is not
+`--export-sha256`, also exit `4`. Either flag missing, or not 64 lowercase hex digits, exits `2`.
 Admitting a folder again adds nothing. A card or receipt whose ID the workspace holds with other
 bytes, or a card made here with the same brief ID, exits `3` and admits nothing. A workspace that is
 connected to no CRM exits `2`, as `brief` does.

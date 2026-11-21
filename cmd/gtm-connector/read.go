@@ -61,6 +61,8 @@ type run struct {
 	exists bool
 	// action is the form inspect was given: account, brief, numbers or receipt.
 	action string
+	// admitted is the operator's word a card or receipt inspect shows was admitted on, or nil for one made here.
+	admitted *postgres.OperatorWord
 }
 
 // folder is the --state-dir that names this workspace in the commands printed for it.
@@ -374,6 +376,9 @@ func (r *run) inspect(ctx context.Context) (any, error) {
 		// A caller's arguments can hold any text: shown, it is inert as source text on a card is.
 		arguments, err := neutral(get(value, "arguments"))
 		value.Set("arguments", arguments)
+		if r.admitted != nil {
+			value.Set("admitted", strictjson.NewObject("from_org", r.admitted.FromOrg, "note", admittedNote))
+		}
 		return value, err
 	}
 	// A card is read from the sources its workspace is connected to, so a workspace with none holds no card.
@@ -389,7 +394,14 @@ func (r *run) inspect(ctx context.Context) (any, error) {
 		return nil, err
 	}
 	if r.action == "numbers" {
-		return traces(card, target, numbers)
+		traced, err := traces(card, target, numbers)
+		if err != nil || r.admitted == nil {
+			return traced, err
+		}
+		for _, found := range traced.([]any) {
+			found.(*strictjson.Object).Set("admitted", r.admittedValue())
+		}
+		return traced, nil
 	}
 	units, _ := get(card, "units").([]any)
 	listed := []any{}
@@ -402,7 +414,11 @@ func (r *run) inspect(ctx context.Context) (any, error) {
 			listed = append(listed, unit)
 		}
 	}
-	return strictjson.NewObject("brief_id", target, "account_id", get(card, "account_id"), "units", listed), nil
+	result := strictjson.NewObject("brief_id", target, "account_id", get(card, "account_id"), "units", listed)
+	if r.admitted != nil {
+		result.Set("admitted", r.admittedValue())
+	}
+	return result, nil
 }
 
 // account is the account as the CRM returns it, with the newest saved card of it that the workspace holds

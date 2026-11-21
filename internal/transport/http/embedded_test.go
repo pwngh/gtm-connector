@@ -190,9 +190,13 @@ var assetLink = regexp.MustCompile(`"(/assets/[^"]+)"`)
 
 // The build compiled into this test binary, which is the one the connector's
 // binary carries, serves its page, a deep link and every asset the page
-// names. A checkout that has not built the web app has none to check.
+// names. A checkout that has not built the web app has none to check, unless
+// GTM_REQUIRE_WEB_BUILD=1 says it must, as the web job in CI does after its build.
 func TestTheBuildInTheBinaryIsServed(t *testing.T) {
 	build := web.App()
+	if build == nil && os.Getenv("GTM_REQUIRE_WEB_BUILD") == "1" {
+		t.Fatal("GTM_REQUIRE_WEB_BUILD=1, and no web app was built into this binary")
+	}
 	if build == nil {
 		t.Skip("the web app is not built: run npm ci and npm run build in web/")
 	}
