@@ -107,8 +107,7 @@ the Python package and stays read-only. To finish it:
    checks), with `GTM_TEST_DATABASE_URL` set for the command replay, and the real-data digests of the
    changed functions with `go run ./cmd/realdata -update=FUNCTION,... verify`. Its PR lists each
    rewritten file with how many cards, units or rows changed, and why.
-2. Finish the Evidence row of the roadmap: neutralize a bare mail address and show the host of a
-   valid `xn--` label.
+2. Finish the Evidence row of the roadmap: neutralize a bare mail address.
 3. Admit the cards and receipts the Python package made: the four recorded card folders are admitted
    and inspected, a changed byte is refused, and admitting twice adds nothing.
 4. Close the cutover: the binary, run outside a checkout, serves a deep-linked Deal card; a
