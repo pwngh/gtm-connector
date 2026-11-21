@@ -32,8 +32,8 @@ const altered = (bytes: Uint8Array<ArrayBuffer>, at = 40) => {
   return copy;
 };
 
-test('every recorded card is read whole: its bytes match its seal and the answer is its text, and nothing else', async () => {
-  assert.equal(sealedCards.length, 450);
+test('every golden card is read whole: its bytes match its seal and the answer is its text, and nothing else', async () => {
+  assert.equal(sealedCards.length, 90);
   for (const card of sealedCards) {
     const at = `${card.file} ${card.key}`;
     assert.equal(createHash('sha256').update(card.bytes).digest('hex'), card.sha256, `${at}: the recorded digest is the bytes' digest`);

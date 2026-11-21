@@ -51,7 +51,7 @@ var loginCommands = [][]string{
 // salesforceBooks builds the books_salesforce cards as the oracle did: one invented org and one reader for
 // the family, signed in through an invented sf, each account's recorded rows put in the org before its card,
 // and its call notes and Slack messages in the demo stores.
-func salesforceBooks(t *testing.T, newStore func(*testing.T) cardStore, book []byte) {
+func salesforceBooks(t *testing.T, newStore func(*testing.T) cardStore, book []byte, cov *coverage) {
 	ctx := context.Background()
 	org, sf := salesforcetest.NewOrg(), salesforcetest.NewSF()
 	reader, err := salesforce.FromSF(ctx, salesforcetest.Alias, salesforce.Options{Environment: "production",
@@ -84,7 +84,7 @@ func salesforceBooks(t *testing.T, newStore func(*testing.T) cardStore, book []b
 		index, _ := input.Get("index")
 		return setup{scope: fmt.Sprintf("books/salesforce/%s/%d", name, intOf(index)),
 			source: besideDemo{reader, store}, sources: salesforceSources(identity)}
-	})
+	}, cov)
 	if len(org.Unexpected) > 0 {
 		t.Errorf("the invented org was asked what it does not serve: %v", org.Unexpected[:1])
 	}

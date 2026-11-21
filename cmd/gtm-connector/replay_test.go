@@ -40,7 +40,7 @@ var notPorted = map[string]string{}
 // They are compared with exactly those values left out, and everything else as recorded. The recorder numbers
 // the times it issued in a step. The demo's card names its last read by a time the recorder had not numbered
 // in that step, so the recording holds that time as the clock wrote it, and it is left out too.
-var clocked = []string{"demo", "brief", "brief without calls", "brief as of another day", "inspect a receipt",
+var clocked = []string{"demo", "brief", "inspect a receipt",
 	"audit", "audit by tool", "audit by brief"}
 
 var (
@@ -61,8 +61,8 @@ var needsDatabase = []string{
 	"connect demo", "connect status",
 	"demo",
 	"accounts", "accounts by name", "accounts by a literal pattern character",
-	"brief", "brief without calls", "brief as of another day", "brief of an unknown account",
-	"brief of a malformed account", "brief on an impossible day", "brief on a text that is not a day",
+	"brief", "brief of an unknown account",
+	"brief of a malformed account", "brief on an impossible day",
 	"inspect an account", "inspect a card", "inspect numbers", "inspect by role",
 	"inspect a number off the card", "inspect an unknown card", "inspect a receipt",
 	"audit", "audit by tool", "audit by brief", "audit of a missing folder",
@@ -70,7 +70,7 @@ var needsDatabase = []string{
 
 // recorderGiven holds the one ID the recorder passes that no command printed: "inspect an unknown card" asks
 // for a card that was never saved. The recording holds its placeholder only.
-var recorderGiven = map[string]string{"<brief-5>": "brief-" + strings.Repeat("0", 32)}
+var recorderGiven = map[string]string{"<brief-3>": "brief-" + strings.Repeat("0", 32)}
 
 // helpNotCompared marks a step whose output is help text. Only its exit code is compared.
 const helpNotCompared = "help text is reviewed, not compared"

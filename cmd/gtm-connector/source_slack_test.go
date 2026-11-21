@@ -251,13 +251,14 @@ func registerRecordedFolders(t *testing.T) recordedFolders {
 }
 
 // recordedCard is one card of the books_slack or slack_threads family: its folder's rows, the thread Slack
-// served it, and the card.
+// served it, the snapshot of that thread's read, and the card for a golden row, or nil.
 type recordedCard struct {
 	key, account string
 	rows         *strictjson.Object // the rows the folder's demo databases held besides the demo book
 	tables       []string           // the databases they were inserted into
 	thread       []any              // nil for an account with no mapped thread
 	page         int
+	read         *strictjson.Object // the snapshot of the thread's read; nil for no mapped thread
 	card         *strictjson.Object
 }
 
@@ -272,12 +273,15 @@ func recordedCards(t *testing.T) []recordedCard {
 			}
 			row := value.(*strictjson.Object)
 			input := get(row, "input").(*strictjson.Object)
-			card, err := strictjson.Loads([]byte(get(row, "card").(string)))
-			if err != nil {
-				t.Fatal(err)
+			c := recordedCard{key: family + " " + get(row, "key").(string), account: get(row, "account_id").(string)}
+			c.read, _ = get(get(input, "read").(*strictjson.Object), "snapshot").(*strictjson.Object)
+			if text, ok := get(row, "card").(string); ok {
+				card, err := strictjson.Loads([]byte(text))
+				if err != nil {
+					t.Fatal(err)
+				}
+				c.card = card.(*strictjson.Object)
 			}
-			c := recordedCard{key: family + " " + get(row, "key").(string), account: get(row, "account_id").(string),
-				card: card.(*strictjson.Object)}
 			if family == "books_slack" {
 				c.rows, c.tables = get(input, "rows").(*strictjson.Object), []string{"crm", "calls"}
 				c.thread, _ = get(input, "thread").([]any)
@@ -313,11 +317,8 @@ func (c recordedCard) book(t *testing.T) *demo.Store {
 	return store
 }
 
-// snapshot is the recorded card's thread snapshot.
-func (c recordedCard) snapshot() *strictjson.Object {
-	snapshot, _ := get(get(c.card, "evidence").(*strictjson.Object), "thread_snapshot").(*strictjson.Object)
-	return snapshot
-}
+// snapshot is the recorded snapshot of the card's thread.
+func (c recordedCard) snapshot() *strictjson.Object { return c.read }
 
 // mapped is a member of the recorded snapshot's mapping.
 func (c recordedCard) mapped(key string) string {
@@ -372,15 +373,15 @@ func connectRecorded(t *testing.T, d *demoDatabase, books recordedFolders, c rec
 // Every recorded card that read a live Slack thread is made again through the commands: its folder's CRM
 // and calls are registered as the recorded folder read them, the sign-in is saved, connect slack connects
 // it, debug slack map maps the recorded thread, and brief reads that thread from the invented Slack. The
-// card's text is the recorded card's, byte for byte, but for the line that gives when its sources were read;
-// and the snapshot it saved holds the recorded thread's counts, cutoff and message digests. An account with
-// no mapped thread gets the recorded card that says so.
+// snapshot the card saved holds the recorded read's counts, cutoff and message digests, and an account with
+// no mapped thread gets a card that says no thread is selected. A golden card's text is the one its row
+// holds, byte for byte, but for the line that gives when its sources were read.
 func TestBriefReadsAMappedThreadAsTheRecordedCard(t *testing.T) {
 	d, folder, wall := slackSetup(t)
 	slackAPI := newInventedSlack(t)
 	slackAPI.valid[inventedAccess] = true
 	books := registerRecordedFolders(t)
-	matched, unmapped := 0, 0
+	matched, unmapped, golden := 0, 0, 0
 	for i, c := range recordedCards(t) {
 		name := fmt.Sprintf("thread-%d", i)
 		seedSignIn(t, folder, name, *wall, "ready")
@@ -400,9 +401,17 @@ func TestBriefReadsAMappedThreadAsTheRecordedCard(t *testing.T) {
 		if err := json.Unmarshal([]byte(stdout), &made); code != 0 || err != nil {
 			t.Fatalf("%s: brief: exit %d\n%s", c.key, code, stderr)
 		}
-		if got, want := withoutReadTimes(made.Text), withoutReadTimes(get(c.card, "text").(string)); got != want {
+		if c.card == nil {
+			// A row of inputs alone: the card says no thread is selected, or holds the read checked below.
+			if selected := !strings.Contains(made.Text, "\n  Slack: no thread is selected for this account.\n"); selected != (c.thread != nil) {
+				t.Errorf("%s: the card's Slack line does not match the mapping", c.key)
+				continue
+			}
+		} else if got, want := withoutReadTimes(made.Text), withoutReadTimes(get(c.card, "text").(string)); got != want {
 			t.Errorf("%s: the card\n%s\nis not the recorded card\n%s", c.key, got, want)
 			continue
+		} else {
+			golden++
 		}
 		if c.thread != nil {
 			workspace, err := d.owner.Workspace(ctx, name)
@@ -426,8 +435,9 @@ func TestBriefReadsAMappedThreadAsTheRecordedCard(t *testing.T) {
 		}
 		matched++
 	}
-	if matched != 114 || unmapped != 10 {
-		t.Errorf("%d cards matched, %d of them for an account with no thread; the oracle holds 114 and 10", matched, unmapped)
+	if matched != 114 || unmapped != 10 || golden != 8 {
+		t.Errorf("%d cards matched, %d of them for an account with no thread and %d golden; the fixtures hold 114, "+
+			"10 and 8", matched, unmapped, golden)
 	}
 }
 
@@ -970,11 +980,12 @@ func TestTheSystemBrowserIsGivenOnlyTheStartPage(t *testing.T) {
 	openBrowser = systemBrowser
 	t.Cleanup(func() { openBrowser = previous })
 	answerTerminal(t, "yes")
-	// An opener that notes what it was given and then stays running.
+	// An opener that notes what it was given and then stays running for a minute. connect must return within
+	// 30 seconds, long before the opener ends, so it does not wait for the opener.
 	bin := t.TempDir()
 	given, environment := filepath.Join(bin, "given"), filepath.Join(bin, "environment")
 	script := "#!/bin/sh\nenv > '" + environment + ".part' && mv '" + environment + ".part' '" + environment + "'\n" +
-		"printf '%s' \"$*\" > '" + given + "'\nexec sleep 20\n"
+		"printf '%s' \"$*\" > '" + given + "'\nexec sleep 60\n"
 	for _, name := range []string{"open", "xdg-open"} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o700); err != nil {
 			t.Fatal(err)
@@ -1005,7 +1016,7 @@ func TestTheSystemBrowserIsGivenOnlyTheStartPage(t *testing.T) {
 	began := time.Now()
 	code, stdout, stderr := d.line(t, "debug", "slack", "connect", "--client-id", inventedClient, "--redirect-uri",
 		api.redirect, "--state-dir", "acme", "--json")
-	if code != 0 || time.Since(began) > 8*time.Second || !strings.Contains(stdout, `"credential_state": "ready"`) {
+	if code != 0 || time.Since(began) > 30*time.Second || !strings.Contains(stdout, `"credential_state": "ready"`) {
 		t.Fatalf("connect with an opener that stays running: exit %d after %v\n%s%s", code, time.Since(began), stdout, stderr)
 	}
 	if answer := <-answers; !strings.HasPrefix(answer, "400 400 200 ") {

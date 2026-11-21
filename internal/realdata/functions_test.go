@@ -56,21 +56,26 @@ func TestOutputsMatchOracleFixtures(t *testing.T) {
 			}
 		}
 	}
-	// Enough rows of each corpus to see every shape; the evidence tests check every row.
-	const rows = 5000
+	// The golden rows of each corpus, which hold every shape of result; the evidence tests run every row.
 	safe := oracletest.NewMismatches(t, "safe_text outputs")
-	for _, line := range oracletest.Lines(t, "corpora/safe_text.jsonl.gz")[:rows] {
-		safe.Row()
+	for _, line := range oracletest.Lines(t, "corpora/safe_text.jsonl.gz") {
 		row := loadList(t, line)
+		if len(row) == 1 {
+			continue
+		}
+		safe.Row()
 		want, _ := canonical([]any{row[1], row[2]})
 		if got := Outputs(textItem(row[0].(string)))[at("safe_text")]; got != want {
 			safe.Add("%s", line)
 		}
 	}
 	split := oracletest.NewMismatches(t, "sentences outputs")
-	for _, line := range oracletest.Lines(t, "corpora/sentences.jsonl.gz")[:rows] {
-		split.Row()
+	for _, line := range oracletest.Lines(t, "corpora/sentences.jsonl.gz") {
 		row := loadList(t, line)
+		if len(row) == 1 {
+			continue
+		}
+		split.Row()
 		if row[2] == nil {
 			row[2] = row[1]
 		}

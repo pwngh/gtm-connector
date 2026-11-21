@@ -134,7 +134,7 @@ func equivalent(role, basis string, contact *int, r people.Result, contactKey ma
 	return fmt.Errorf("unrecognized recorded basis %q", basis)
 }
 
-// TestRecordedCards feeds the resolver, for every sentence of the recorded cards, only what today's rule
+// TestRecordedCards feeds the resolver, for every sentence of the golden cards, only what today's rule
 // sees: the label, the account's contacts and the listed sellers, with no emails, no aliases and rung 5
 // off. Each result must be the recorded role with an equivalent basis.
 func TestRecordedCards(t *testing.T) {
@@ -274,7 +274,7 @@ func TestRecordedCards(t *testing.T) {
 		"their message's author, under no role", cards, sentences, cut, quoted)
 	t.Logf("by role: customer %d, seller %d, unknown %d", roles["customer"], roles["seller"], roles["unknown"])
 	t.Logf("unknown by reason: %v", reasons)
-	if cards != 450 {
-		t.Errorf("%d recorded cards, want 450", cards)
+	if cards != 90 {
+		t.Errorf("%d golden cards, want 90", cards)
 	}
 }

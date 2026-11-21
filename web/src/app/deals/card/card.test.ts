@@ -67,14 +67,14 @@ const quotes = (html: string) =>
     text: decode(match[2] ?? ''),
   }));
 
-test('the loop covers every recorded card of the three files', () => {
+test('the loop covers every golden card of the three files', () => {
   assert.deepEqual(
     files.map(file => recorded.filter(item => item.file === file).length),
-    [33, 19, 46],
+    [33, 19, 7],
   );
 });
 
-test('every recorded card: each shown sentence once as its whole text, every other sentence once under More, each record once, each gap once', () => {
+test('every golden card: each shown sentence once as its whole text, every other sentence once under More, each record once, each gap once', () => {
   let sentences = 0;
   for (const {file, key, card} of recorded) {
     const at = `${file} ${key}`;
@@ -118,7 +118,7 @@ test('every recorded card: each shown sentence once as its whole text, every oth
       `${at}: the gaps in Not read's order`,
     );
   }
-  assert.equal(sentences, 90 + 1297 + 375);
+  assert.equal(sentences, 90 + 1297 + 73);
 });
 
 test('people said: three groups in order, each with its count, newest first, attribution as recorded', () => {
@@ -394,7 +394,7 @@ test('every number is a link named Source n that puts ?unit=n in the deal’s ad
 const escaped = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const citesIn = (html: string) => [...html.matchAll(/aria-label="Source (\d+)"/g)].map(match => Number(match[1]));
 
-test('every recorded card with lines: the countdown is the typed days and date with the card’s date, and ARR is its line’s words', () => {
+test('every golden card with lines: the countdown is the typed days and date with the card’s date, and ARR is its line’s words', () => {
   const seen = {counted: 0, passed: 0, contractEnd: 0, missing: 0, arr: 0, unmapped: 0};
   for (const {file, key, card} of [...recorded, ...salesforce]) {
     const at = `${file} ${key}`;
@@ -437,7 +437,7 @@ test('every recorded card with lines: the countdown is the typed days and date w
       assert.doesNotMatch(arrHtml, /dc-focal__number|aria-label="Source/, `${at}: and no figure stands in`);
     }
   }
-  assert.deepEqual(seen, {counted: 163, passed: 15, contractEnd: 65, missing: 13, arr: 98, unmapped: 78});
+  assert.deepEqual(seen, {counted: 62, passed: 4, contractEnd: 3, missing: 1, arr: 59, unmapped: 4});
 });
 
 test('a card with no renewal line shows No renewal date and no number', () => {
@@ -539,7 +539,7 @@ test('the fixed signals are the first lines of Flags, each with its numbers; a c
     );
     assert.ok(html.indexOf('dc-flags') < html.indexOf('dc-ledger'), `${file} ${key}: Flags comes before the ledger`);
   }
-  assert.equal(flagged, 92);
+  assert.equal(flagged, 30);
 });
 
 test('lines that are not a line’s shape are not read, and the card says where its values are', () => {

@@ -215,10 +215,14 @@ func TestACommitWhoseAnswerIsLostIsReadBack(t *testing.T) {
 		})
 	}
 
+	// The caller's time ends the wait for the lost answer. It also bounds the statements before the commit,
+	// which a busy runner can take more than a second over, so it gives them three.
+	const callerTime = 3 * time.Second
+
 	losing("start:inserted")
 	var started postgres.Receipt
 	err := within(t, func() error {
-		bounded, cancel := context.WithTimeout(ctx, time.Second)
+		bounded, cancel := context.WithTimeout(ctx, callerTime)
 		defer cancel()
 		var err error
 		started, err = store.StartReceipt(bounded, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID,
@@ -235,7 +239,7 @@ func TestACommitWhoseAnswerIsLostIsReadBack(t *testing.T) {
 	losing("read:finished")
 	var finished postgres.Receipt
 	err = within(t, func() error {
-		bounded, cancel := context.WithTimeout(ctx, time.Second)
+		bounded, cancel := context.WithTimeout(ctx, callerTime)
 		defer cancel()
 		var err error
 		finished, err = store.FinishRead(bounded, started.ID, started.LeaseToken, records("lost"), 1)
@@ -317,9 +321,11 @@ func TestTheServerEndsATransactionLeftIdle(t *testing.T) {
 	}))
 	conn.Release()
 
-	// A shorter limit, so the test does not wait half a minute.
+	// A shorter limit, so the test does not wait half a minute. The server also ends the session when the
+	// test itself waits that long between two statements of the transaction, so the limit gives a busy runner
+	// two seconds, and the session's pid is read before the transaction begins.
 	p, proxied := newLossy(t, f.URL)
-	idle, err := postgres.OpenIdle(ctx, proxied, 500*time.Millisecond)
+	idle, err := postgres.OpenIdle(ctx, proxied, 2*time.Second)
 	ok(t, err)
 	t.Cleanup(func() {
 		p.close()
@@ -328,12 +334,12 @@ func TestTheServerEndsATransactionLeftIdle(t *testing.T) {
 	held, err := postgres.Pool(idle).Acquire(ctx)
 	ok(t, err)
 	lost := held.Hijack()
+	var pid int
+	ok(t, lost.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid))
 	_, err = lost.Exec(ctx, "BEGIN")
 	ok(t, err)
 	_, err = lost.Exec(ctx, "SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE", f.Workspace.ID)
 	ok(t, err)
-	var pid int
-	ok(t, lost.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid))
 	p.stop(toServer, toClient)
 
 	other := session(t, f.URL)

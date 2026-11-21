@@ -148,7 +148,7 @@ func stringsOf(t *testing.T, raw []byte) []string {
 	return out
 }
 
-// For every recorded card, a body of each type built from it holds no string of its units (no sentence,
+// For every golden card, a body of each type built from it holds no string of its units (no sentence,
 // speaker or record reference), not the account's name and no contact's name, title or email.
 func TestNoRecordedCardLeaksIntoABody(t *testing.T) {
 	cards := 0
@@ -198,7 +198,7 @@ func TestNoRecordedCardLeaksIntoABody(t *testing.T) {
 			}
 		}
 	}
-	if cards != 450 {
-		t.Errorf("%d recorded cards, want 450", cards)
+	if cards != 90 {
+		t.Errorf("%d golden cards, want 90", cards)
 	}
 }
