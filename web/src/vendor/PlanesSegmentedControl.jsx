@@ -3,7 +3,6 @@
 // See THIRD_PARTY_NOTICES.md for provenance and local changes.
 import React, {forwardRef, useCallback, useEffect, useId, useLayoutEffect, useRef, useState} from 'react';
 import {motion, useMotionValue, useReducedMotion, useSpring, useTransform, useVelocity} from 'motion/react';
-import './planes.css';
 
 const PILL_SPRING = {stiffness:380, damping:24, mass:.6};
 const WIDTH_SPRING = {stiffness:400, damping:28, mass:.5};

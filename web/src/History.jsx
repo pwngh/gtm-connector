@@ -4,7 +4,6 @@ import {ArrowUpRight, Check, Clock, Download, FileText, GitCompareArrows, Histor
 import {createHistorySelector, formatHistoryTime, historyActionHref, historyCategories, historyExport, historyHref, historyScopeLabel, historySearch} from './history.js';
 import {readinessHref} from './readiness.js';
 import {closeHistoryOnEscape, focusHistoryElement, historyFocusTarget, moveHistoryFocus, restoreHistoryFocus} from './historyBrowser.js';
-import './history.css';
 
 function Time({value}) {
   return value ? <time dateTime={value}>{formatHistoryTime(value)}</time> : <span>not recorded</span>;

@@ -3,7 +3,6 @@ import {renewalFixture, walkthroughActors} from './renewalFixtures.js';
 import {canSubmitCustomerDecision, decisionCitationOptions} from './customerDecision.js';
 import {derive} from './workflow.js';
 import {ReceiptFacts} from './CustomerEvidence.jsx';
-import './customerDecision.css';
 
 // The decision cites the accepted signed letter and names the contact from the authority record.
 // There is no field for approval text, and the recorder is the signed-in demo principal.
