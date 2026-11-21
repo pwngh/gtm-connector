@@ -1,3 +1,4 @@
+import {Fragment} from 'react';
 import {Link, useSearchParams} from 'react-router';
 import {Help} from '../../../ui/Help.tsx';
 import {dealHref} from '../deals.ts';
@@ -5,20 +6,21 @@ import {Cite} from './Cite.tsx';
 import {arrOf, type CardLine, countsToWords, dayWord, linesOf, renewalOf} from './lines.ts';
 import type {SectionProps} from './sections.ts';
 
-// A line's numbers, each opening its unit in the proof drawer.
-function Cites({line}: {line: CardLine}) {
-  return line.cites.map(n => (
-    <Cite
-      key={n}
-      n={n}
-    />
+// A line's numbers, each opening its unit in the proof drawer. With help, its
+// first number carries the help for what a number is.
+function Cites({line, help = false}: {line: CardLine; help?: boolean}) {
+  return line.cites.map((n, at) => (
+    <Fragment key={n}>
+      <Cite n={n} />
+      {help && at === 0 && <Help term="citation" />}
+    </Fragment>
   ));
 }
 
 // The countdown: the server's number of days, the record it counts to and
 // that record's date, and the card's own date. Nothing is counted here: the
 // number is the server's, and a passed date reads as days ago.
-function Countdown({asOf, line}: {asOf: string | null; line: CardLine | null}) {
+function Countdown({asOf, line, help}: {asOf: string | null; line: CardLine | null; help: boolean}) {
   const countdown = line?.countdown ?? null;
   const asOfLine = (
     <p className="dc-focal__sub">
@@ -39,7 +41,12 @@ function Countdown({asOf, line}: {asOf: string | null; line: CardLine | null}) {
             aria-hidden="true"
           />
           <span>No renewal date</span>
-          {line && <Cites line={line} />}
+          {line && (
+            <Cites
+              line={line}
+              help={help}
+            />
+          )}
         </p>
         <p className="dc-focal__sub">
           {line ? <span className="dc-focal__words">{line.text}</span> : <span>The record has no end date.</span>}
@@ -63,7 +70,10 @@ function Countdown({asOf, line}: {asOf: string | null; line: CardLine | null}) {
           {String(Math.abs(countdown.days))}
         </span>
         <span className="dc-focal__unit">{passed ? `${dayWord(countdown.days)} ago` : dayWord(countdown.days)}</span>
-        <Cites line={line} />
+        <Cites
+          line={line}
+          help={help}
+        />
       </p>
       <p className="dc-focal__sub">
         <span>
@@ -78,7 +88,7 @@ function Countdown({asOf, line}: {asOf: string | null; line: CardLine | null}) {
 
 // ARR: the connector's own words for the annual recurring revenue line, or a
 // plain statement that the card has none. No other figure stands in for it.
-function Arr({line}: {line: CardLine | null}) {
+function Arr({line, help}: {line: CardLine | null; help: boolean}) {
   if (!line) {
     return (
       <div
@@ -107,7 +117,10 @@ function Arr({line}: {line: CardLine | null}) {
     >
       <p className="dc-focal__figure">
         <span className="dc-focal__number dc-focal__amount">{line.text}</span>
-        <Cites line={line} />
+        <Cites
+          line={line}
+          help={help}
+        />
       </p>
       <p className="dc-focal__sub">
         <span>ARR, from the mapped field</span>
@@ -140,6 +153,12 @@ export function Focal({account, card, query}: SectionProps) {
       </p>
     );
   }
+  // The help for what a number is sits on the first number box of ARR, the
+  // focal group's last, where it never pushes ARR off the countdown's line
+  // on a phone; on the countdown's when ARR has no number.
+  const renewal = renewalOf(lines);
+  const arr = arrOf(lines);
+  const onArr = Boolean(arr?.cites.length);
   return (
     <section
       className="dc-focal"
@@ -147,9 +166,13 @@ export function Focal({account, card, query}: SectionProps) {
     >
       <Countdown
         asOf={typeof card.as_of === 'string' ? card.as_of : null}
-        line={renewalOf(lines)}
+        line={renewal}
+        help={!onArr}
       />
-      <Arr line={arrOf(lines)} />
+      <Arr
+        line={arr}
+        help={onArr}
+      />
     </section>
   );
 }

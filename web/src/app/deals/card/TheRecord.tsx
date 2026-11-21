@@ -1,3 +1,4 @@
+import {Help} from '../../../ui/Help.tsx';
 import {Cite} from './Cite.tsx';
 import {recordsOf} from './card.ts';
 import {linesOf, valuesOf} from './lines.ts';
@@ -10,12 +11,15 @@ import type {SectionProps} from './sections.ts';
 export function TheRecord({card}: SectionProps) {
   const lines = linesOf(card);
   const heading = (
-    <h2
-      id="dc-record-title"
-      className="dc-section__title"
-    >
-      {lines ? 'The record says' : 'The record'}
-    </h2>
+    <div className="ui-help-head">
+      <h2
+        id="dc-record-title"
+        className="dc-section__title"
+      >
+        {lines ? 'The record says' : 'The record'}
+      </h2>
+      <Help term="record" />
+    </div>
   );
   if (lines) {
     return (

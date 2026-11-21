@@ -8,6 +8,8 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
+# The guide links in the app open at this commit.
+ARG GTM_REVISION
 RUN npm run build
 
 FROM golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280 AS build

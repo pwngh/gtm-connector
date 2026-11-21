@@ -1,3 +1,4 @@
+import {Help} from '../../../ui/Help.tsx';
 import {dispositionWords, orderedGaps} from './card.ts';
 import type {SectionProps} from './sections.ts';
 
@@ -11,12 +12,15 @@ export function NotRead({card}: SectionProps) {
       className="dc-section dc-not-read"
       aria-labelledby="dc-not-read-title"
     >
-      <h2
-        id="dc-not-read-title"
-        className="dc-section__title"
-      >
-        Not read
-      </h2>
+      <div className="ui-help-head">
+        <h2
+          id="dc-not-read-title"
+          className="dc-section__title"
+        >
+          Not read
+        </h2>
+        <Help term="not_read" />
+      </div>
       {gaps.length ? (
         <ul className="dc-lines">
           {gaps.map((gap, at) => (

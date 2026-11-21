@@ -1,10 +1,12 @@
-/* A help panel. The button is a 16px circled "i" inside a 44 by 44 target
-   with the 3px focus ring. At 720 and wider the panel opens below its line;
-   narrower, it opens in the flow under its line, full width, on the sunken
-   surface. */
+/* Help on the page. The button is a 16px circled "i" inside a 44 by 44
+   target with the 3px focus ring. At 720 and wider the hint or panel is
+   placed under its line, or over it when there is no room below (Help.tsx
+   sets its offset); narrower, it opens in the flow after its line, full
+   width, on the sunken surface. */
 .ui-help {
   position: relative;
   display: inline-flex;
+  flex: none;
   vertical-align: middle;
 }
 
@@ -26,7 +28,8 @@
 }
 
 .ui-help__button:hover,
-.ui-help__button[aria-expanded="true"] {
+.ui-help__button[aria-expanded="true"],
+.ui-help:has(> .ui-help__panel:not([hidden])) > .ui-help__button {
   color: var(--gc-accent);
 }
 
@@ -44,7 +47,7 @@
   display: grid;
   gap: var(--gc-space-1);
   width: max-content;
-  max-width: min(22rem, 80vw);
+  max-width: min(22rem, calc(100vw - 32px));
   padding: var(--gc-space-3);
   border: var(--gc-rule-width) solid var(--gc-rule);
   border-radius: var(--gc-radius-panel);
@@ -52,7 +55,9 @@
   box-shadow: var(--gc-shadow);
   color: var(--gc-ink);
   font: var(--gc-meta);
+  letter-spacing: 0;
   text-align: left;
+  text-transform: none;
   white-space: normal;
   overflow-wrap: anywhere;
 }
@@ -76,6 +81,15 @@
   outline-offset: 2px;
 }
 
+/* A heading and its help on one line. */
+.ui-help-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--gc-space-1);
+  min-width: 0;
+}
+
 @media (max-width: 719px) {
   .ui-help {
     display: contents;
@@ -83,6 +97,7 @@
 
   .ui-help__panel {
     position: static;
+    order: 1;
     flex: 1 0 100%;
     width: 100%;
     max-width: none;

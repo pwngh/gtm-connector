@@ -5,6 +5,7 @@ import {ApiError, formatUtc} from '../../api/client.ts';
 import {type Read, useRead, useServer} from '../../api/reads.ts';
 import type {AccountCards, AccountView, Health} from '../../api/types.ts';
 import {Button} from '../../ui/Button.tsx';
+import {Help} from '../../ui/Help.tsx';
 import {Placeholder} from '../../ui/Placeholder.tsx';
 import {Refusal, refusalText} from '../../ui/Refusal.tsx';
 import {serverPaths} from '../routes.ts';
@@ -341,12 +342,15 @@ export default function Coverage() {
       className="cv"
       aria-labelledby="cv-title"
     >
-      <h1
-        id="cv-title"
-        className="cv-title"
-      >
-        Coverage
-      </h1>
+      <div className="ui-help-head">
+        <h1
+          id="cv-title"
+          className="cv-title"
+        >
+          Coverage
+        </h1>
+        <Help term="ops.coverage" />
+      </div>
       <p className="cv-meta">Which deals granted to you have a card, read from the server as you. Times are UTC.</p>
       {body}
       <ServerLine health={health} />
