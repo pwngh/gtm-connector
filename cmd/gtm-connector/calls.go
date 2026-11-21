@@ -27,7 +27,8 @@ const callsArgumentsRefused = "The calls arguments do not match this action. Che
 var callsActions = map[string]arguments{
 	"import": {options: []option{{name: "--account", value: true}, {name: "--account-number", value: true},
 		{name: "--called-at", value: true}, {name: "--speaker-names"}, {name: "--cues", value: true},
-		{name: "--lines", value: true}, {name: "--reassign"}}, required: "FILE", help: callsImportHelp},
+		{name: "--lines", value: true}, {name: "--reassign"}, {name: "--attendees", value: true}}, required: "FILE",
+		help: callsImportHelp},
 	"list":    {options: []option{{name: "--account", value: true}, {name: "--after", value: true}}, help: callsListHelp},
 	"inspect": {options: []option{{name: "--full"}}, required: "IMPORT_ID", help: callsInspectHelp},
 }
@@ -56,6 +57,9 @@ var callFailures = map[string]string{
 	"calls_source_unavailable": "The local CRM connection could not be reached. Check the setup and repeat the " +
 		"import.",
 	"calls_import_io": "The export or private store could not be read or written. Check permissions and retry.",
+	"calls_attendees_invalid": "The attendee file is not an attendee list. Give JSON with schema_version 1 and 1 " +
+		"to 200 attendees, each a label and an email, with no row twice.",
+	"calls_attendees_too_large": "The attendee file exceeds 64 KiB. Name fewer attendees.",
 }
 
 // callsProgress is what an import says on stderr as it reaches each step.
@@ -313,6 +317,11 @@ func (r *run) preparedImport(backend string) (*calls.Import, error) {
 	if made.Excerpt, err = calls.SelectExcerpt(made.Parsed, selection); err != nil {
 		return nil, err
 	}
+	if path, given := r.args.text("--attendees"); given {
+		if made.Attendees, err = calls.ReadAttendees(path); err != nil {
+			return nil, err
+		}
+	}
 	_, made.Reassign = r.args.text("--reassign")
 	return made, nil
 }
@@ -569,6 +578,7 @@ const callsImportHelp = `usage: gtm-connector debug calls import [-h] [--json] [
                                         [--called-at CALLED_AT]
                                         [--speaker-names] [--cues CUES |
                                         --lines LINES] [--reassign]
+                                        [--attendees ATTENDEES]
                                         FILE
 
 Import an existing transcript and select an account excerpt.
@@ -596,6 +606,9 @@ options:
   --lines LINES         Select an inclusive one-based TXT line range, such as
                         3:8.
   --reassign            Explicitly reassign imported content locally.
+  --attendees ATTENDEES
+                        Read the call's attendee list from this JSON file:
+                        each speaker label with that person's email.
 
 Example: gtm-connector debug calls import call.vtt --account acc-003
 `

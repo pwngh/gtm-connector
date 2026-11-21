@@ -13,6 +13,7 @@ import (
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
+	"github.com/pwngh/gtm-connector/internal/sources/calls"
 	"github.com/pwngh/gtm-connector/internal/sources/demo"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce/salesforcetest"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
@@ -581,5 +582,75 @@ func TestImportsOnATerminal(t *testing.T) {
 	}
 	if got := r.importsText(nil, nil); got != "No transcript imports are stored." {
 		t.Errorf("an empty page: %s", got)
+	}
+}
+
+// An attendee list given with --attendees is part of the import: the result counts its rows and shows none
+// of them, the same list again is the same import, another list is a new import that becomes the account's,
+// and a bad file is refused before anything is opened.
+func TestAnImportCarriesItsAttendeeList(t *testing.T) {
+	d := setUpDemo(t)
+	folder := exports(t)
+	file := filepath.Join(folder, "meeting.vtt")
+	write := func(name, text string) string {
+		path := filepath.Join(folder, name)
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	write("meeting.vtt", meeting)
+	two := write("two.json", `{"schema_version": 1, "attendees": [{"label": "Dana Crest", "email": "dana@alder-vale.example"}, `+
+		`{"label": "Morgan Reed", "email": "morgan@northwind.example"}]}`)
+	one := write("one.json", `{"schema_version": 1, "attendees": [{"label": "Dana Crest", "email": "dana@alder-vale.example"}]}`)
+	where := []string{"--state-dir", "calls-attendees"}
+	with := func(argv ...string) []string { return append(argv, where...) }
+	d.succeeded(t, with("connect", "demo")...)
+	d.succeeded(t, with("connect", "calls")...)
+
+	stdout, _ := d.succeeded(t, with("--json", "debug", "calls", "import", file, "--account", "acc-007", "--attendees", two)...)
+	first := object(t, stdout)
+	if get(first, "status") != "imported" || !evidence.Equal(get(first, "attendees"), 2) ||
+		strings.Contains(stdout, "alder-vale") || strings.Contains(stdout, "Dana Crest") {
+		t.Errorf("the import with two attendees: %s", stdout)
+	}
+	stdout, _ = d.succeeded(t, with("--json", "debug", "calls", "import", file, "--account", "acc-007", "--attendees", two)...)
+	if again := object(t, stdout); get(again, "status") != "unchanged" || get(again, "import_id") != get(first, "import_id") {
+		t.Errorf("the same list again: %s", stdout)
+	}
+	stdout, _ = d.succeeded(t, with("--json", "debug", "calls", "import", file, "--account", "acc-007", "--attendees", one)...)
+	other := object(t, stdout)
+	if get(other, "status") != "imported" || get(other, "import_id") == get(first, "import_id") ||
+		!evidence.Equal(get(other, "attendees"), 1) {
+		t.Errorf("another list: %s", stdout)
+	}
+	stdout, _ = d.succeeded(t, with("--json", "debug", "calls", "import", file, "--account", "acc-007")...)
+	if plain := object(t, stdout); get(plain, "status") != "imported" || get(plain, "attendees") != nil {
+		t.Errorf("no list: %s", stdout)
+	}
+	if stdout, _ = d.succeeded(t, with("brief", "acc-007")...); !strings.Contains(stdout, "We will sign") {
+		t.Errorf("brief after the imports:\n%s", stdout)
+	}
+
+	for _, c := range []struct {
+		code    int
+		sidecar string
+		refusal string
+	}{
+		{2, write("bad.json", `{"schema_version": 1, "attendees": [{"label": "Dana Crest", "email": "dana"}]}`),
+			"calls_attendees_invalid"},
+		{2, write("big.json", strings.Repeat(" ", calls.MaxAttendeeFileBytes+1)), "calls_attendees_too_large"},
+		{1, filepath.Join(folder, "missing.json"), "calls_import_io"},
+	} {
+		lines := strings.Split(strings.TrimSuffix(d.failed(t, c.code, with("--json", "debug", "calls", "import", file,
+			"--account", "acc-007", "--attendees", c.sidecar)...), "\n"), "\n")
+		var refused struct {
+			Error struct{ Message, Next string }
+		}
+		if err := json.Unmarshal([]byte(lines[len(lines)-1]), &refused); err != nil ||
+			refused.Error.Message != c.refusal+": "+callFailures[c.refusal] ||
+			refused.Error.Next != "gtm-connector debug calls import --help" || len(lines) != 2 {
+			t.Errorf("%s: %v %+v", c.refusal, lines, refused.Error)
+		}
 	}
 }
