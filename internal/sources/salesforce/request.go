@@ -163,12 +163,17 @@ func (o *operation) refresh() (string, error) {
 	}
 	o.refreshed = true
 	started := r.now()
-	instanceURL, accessToken, err := r.credentials.read(o.ctx)
+	instanceURL, organizationID, accessToken, err := r.credentials.read(o.ctx)
 	o.deadline = o.deadline.Add(r.now().Sub(started))
 	if err != nil {
 		return "", err
 	}
 	if origin, err := configure(instanceURL, accessToken); err != nil || origin != r.instanceURL {
+		return "", refuse(authRequired)
+	}
+	if organizationID != r.signedInTo || accessToken == o.token {
+		// The alias now names another org, or sf gave back the token the org has just refused. Neither
+		// is sent.
 		return "", refuse(authRequired)
 	}
 	o.token = accessToken

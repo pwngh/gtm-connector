@@ -107,7 +107,7 @@ if [ -e "$folder/expired" ]; then
   wait
 fi
 case "$2" in
-  display) echo '{"status": 0, "result": {"instanceUrl": "` + salesforcetest.Instance + `"}}' ;;
+  display) echo '{"status": 0, "result": {"id": "` + salesforcetest.OrganizationID + `", "instanceUrl": "` + salesforcetest.Instance + `"}}' ;;
   auth) echo '{"status": 0, "result": {"accessToken": "` + salesforcetest.Token + `"}}' ;;
 esac
 `

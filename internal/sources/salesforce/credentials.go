@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -104,6 +105,12 @@ func (e Exec) Run(ctx context.Context, arguments []string) ([]byte, int, error) 
 			return nil, 0, err
 		case reaped == pid:
 			_ = command.Process.Release()
+			if ctx.Err() != nil {
+				// The cancel landed as sf exited. A descendant that is still running keeps the group's ID
+				// in use, so the signal reaches only that group.
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+				return nil, 0, context.Cause(ctx)
+			}
 			if !state.Exited() {
 				return got.output, -1, nil
 			}
@@ -142,33 +149,40 @@ func newCredentials(alias string, runner Runner) (*credentials, error) {
 	return &credentials{alias: alias, runner: runner, commandTime: commandTime, loginTime: loginTime}, nil
 }
 
-// read runs sf org display and sf org auth show-access-token, and gives the origin and the token in memory.
-func (c *credentials) read(ctx context.Context) (instanceURL, accessToken string, err error) {
+// read runs sf org display and sf org auth show-access-token, and gives the origin, the org's ID and the
+// token in memory. The two commands run one after the other, so the alias may change between them: the org
+// ID is what sf org display named, and the reader checks the token against it before keeping the token.
+func (c *credentials) read(ctx context.Context) (instanceURL, organizationID, accessToken string, err error) {
 	login, cancel := context.WithTimeout(ctx, c.loginTime)
 	defer cancel()
-	if instanceURL, err = c.command(ctx, login, []string{"display"}, "instanceUrl"); err != nil {
-		return "", "", err
+	shown, err := c.command(ctx, login, []string{"display"}, "instanceUrl", "id")
+	if err != nil {
+		return "", "", "", err
 	}
-	if accessToken, err = c.command(ctx, login, []string{"auth", "show-access-token"}, "accessToken"); err != nil {
-		return "", "", err
+	if organizationID, err = nativeID(shown[1]); err != nil || !strings.HasPrefix(organizationID, "00D") {
+		return "", "", "", refuse(authRequired)
 	}
-	return instanceURL, accessToken, nil
+	token, err := c.command(ctx, login, []string{"auth", "show-access-token"}, "accessToken")
+	if err != nil {
+		return "", "", "", err
+	}
+	return shown[0], organizationID, token[0], nil
 }
 
-// command runs one sf org command for the alias and gives one text field of its JSON result.
-func (c *credentials) command(caller, login context.Context, words []string, field string) (string, error) {
+// command runs one sf org command for the alias and gives the named text fields of its JSON result.
+func (c *credentials) command(caller, login context.Context, words []string, names ...string) ([]string, error) {
 	limited, cancel := context.WithTimeout(login, c.commandTime)
 	defer cancel()
 	arguments := append(append([]string{"org"}, words...), "--target-org", c.alias, "--json")
 	output, status, err := c.runner.Run(limited, arguments)
 	switch {
 	case caller.Err() != nil:
-		return "", stopped(caller)
+		return nil, stopped(caller)
 	case limited.Err() != nil:
 		// sf did not answer in time. That says nothing about the saved login.
-		return "", refuse(cliTimeout)
+		return nil, refuse(cliTimeout)
 	case err != nil || status != 0 || len(output) > maxOutputBytes:
-		return "", refuse(authRequired)
+		return nil, refuse(authRequired)
 	}
 	parsed, err := strictjson.Loads(output)
 	document, _ := parsed.(*strictjson.Object)
@@ -176,10 +190,15 @@ func (c *credentials) command(caller, login context.Context, words []string, fie
 	result, _ := document.Get("result")
 	number, isInt := code.(*big.Int)
 	fields, _ := result.(*strictjson.Object)
-	value, _ := fields.Get(field)
-	text, _ := value.(string)
-	if err != nil || !isInt || number.Sign() != 0 || fields == nil || text == "" {
-		return "", refuse(authRequired)
+	if err != nil || !isInt || number.Sign() != 0 || fields == nil {
+		return nil, refuse(authRequired)
 	}
-	return text, nil
+	found := make([]string, len(names))
+	for i, name := range names {
+		value, _ := fields.Get(name)
+		if found[i], _ = value.(string); found[i] == "" {
+			return nil, refuse(authRequired)
+		}
+	}
+	return found, nil
 }

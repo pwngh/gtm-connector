@@ -26,18 +26,18 @@ func answering(output string, status int, err error) *salesforcetest.SF {
 func TestAnAnswerSFDidNotGiveIsNoLogin(t *testing.T) {
 	private := "https://invented-private.my.salesforce.com"
 	for name, sf := range map[string]*salesforcetest.SF{
-		"sf failed":            answering(`{"status": 0, "result": {"instanceUrl": "`+private+`"}}`, 1, nil),
+		"sf failed":            answering(`{"status": 0, "result": {"id": "00D54481A5CC257EID", "instanceUrl": "`+private+`"}}`, 1, nil),
 		"sf could not start":   answering("", 0, errors.New("exec: sf: not found in "+private)),
-		"a status that is not": answering(`{"status": 1, "result": {"instanceUrl": "`+private+`"}}`, 0, nil),
-		"a status as text":     answering(`{"status": "0", "result": {"instanceUrl": "`+private+`"}}`, 0, nil),
-		"a status of false":    answering(`{"status": false, "result": {"instanceUrl": "`+private+`"}}`, 0, nil),
+		"a status that is not": answering(`{"status": 1, "result": {"id": "00D54481A5CC257EID", "instanceUrl": "`+private+`"}}`, 0, nil),
+		"a status as text":     answering(`{"status": "0", "result": {"id": "00D54481A5CC257EID", "instanceUrl": "`+private+`"}}`, 0, nil),
+		"a status of false":    answering(`{"status": false, "result": {"id": "00D54481A5CC257EID", "instanceUrl": "`+private+`"}}`, 0, nil),
 		"no result":            answering(`{"status": 0, "instanceUrl": "`+private+`"}`, 0, nil),
 		"a result as a list":   answering(`{"status": 0, "result": ["`+private+`"]}`, 0, nil),
-		"an empty field":       answering(`{"status": 0, "result": {"instanceUrl": ""}}`, 0, nil),
-		"a field as a number":  answering(`{"status": 0, "result": {"instanceUrl": 7}}`, 0, nil),
-		"a key given twice":    answering(`{"status": 0, "status": 0, "result": {"instanceUrl": "`+private+`"}}`, 0, nil),
+		"an empty field":       answering(`{"status": 0, "result": {"id": "00D54481A5CC257EID", "instanceUrl": ""}}`, 0, nil),
+		"a field as a number":  answering(`{"status": 0, "result": {"id": "00D54481A5CC257EID", "instanceUrl": 7}}`, 0, nil),
+		"a key given twice":    answering(`{"status": 0, "status": 0, "result": {"id": "00D54481A5CC257EID", "instanceUrl": "`+private+`"}}`, 0, nil),
 		"text before the JSON": answering(`Warning: `+private+` {"status": 0, "result": {}}`, 0, nil),
-		"more than a mebibyte": answering(`{"status": 0, "result": {"instanceUrl": "`+private+`"}}`+
+		"more than a mebibyte": answering(`{"status": 0, "result": {"id": "00D54481A5CC257EID", "instanceUrl": "`+private+`"}}`+
 			strings.Repeat(" ", maxOutputBytes), 0, nil),
 		"nothing": answering("", 0, nil),
 	} {
@@ -82,7 +82,7 @@ func TestSFIsStoppedAtItsLimitAndOnCancel(t *testing.T) {
 			t.Fatal(err)
 		}
 		login.commandTime, login.loginTime = limits[0], limits[1]
-		if _, _, err := login.read(context.Background()); codeOf(err) != cliTimeout {
+		if _, _, _, err := login.read(context.Background()); codeOf(err) != cliTimeout {
 			t.Errorf("%s: %v", name, err)
 		}
 	}

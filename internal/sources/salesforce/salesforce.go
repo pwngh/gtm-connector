@@ -258,7 +258,9 @@ type Reader struct {
 	accessToken     string
 	editionVerified bool
 	organizationID  string
-	checked         map[string]bool
+	// signedInTo is the org ID sf org display named for the alias. The token must open that org.
+	signedInTo string
+	checked    map[string]bool
 }
 
 // FromSF captures the credentials of an existing sf login, by its alias, and makes the Reader of that org.
@@ -279,7 +281,7 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
-	instanceURL, accessToken, err := login.read(ctx)
+	instanceURL, organizationID, accessToken, err := login.read(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +301,8 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 		now = time.Now
 	}
 	return &Reader{environment: environment, instanceURL: origin, accessToken: accessToken, credentials: login,
-		now: now, turn: make(chan struct{}, 1), checked: map[string]bool{},
+		signedInTo: organizationID,
+		now:        now, turn: make(chan struct{}, 1), checked: map[string]bool{},
 		client: &http.Client{Transport: transport,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
@@ -362,7 +365,9 @@ func (r *Reader) validateEnvironment(organization []*strictjson.Object) error {
 		r.environment == "sandbox" && !sandbox,
 		r.environment == "production" && (sandbox || name == "Developer Edition"):
 		return refuse(environmentMismatch)
-	case r.organizationID != "" && organizationID != r.organizationID:
+	case r.organizationID != "" && organizationID != r.organizationID,
+		// The token opens another org than the one sf org display named for the alias.
+		r.signedInTo != "" && organizationID != r.signedInTo:
 		return refuse(authRequired)
 	}
 	r.organizationID = organizationID

@@ -235,6 +235,8 @@ func encode(value any) string {
 type SF struct {
 	// Instance and Token are what the login holds now.
 	Instance, Token string
+	// OrganizationID is the org sf org display names for the alias.
+	OrganizationID string
 	// Answer, when set, answers a command in the login's place.
 	Answer func(ctx context.Context, arguments []string) (output []byte, status int, err error)
 
@@ -243,20 +245,20 @@ type SF struct {
 }
 
 // NewSF is the invented login of Alias.
-func NewSF() *SF { return &SF{Instance: Instance, Token: Token} }
+func NewSF() *SF { return &SF{Instance: Instance, Token: Token, OrganizationID: OrganizationID} }
 
 // Run answers sf org display and sf org auth show-access-token for Alias as sf --json does, and fails any
 // other command as sf fails one it cannot run.
 func (s *SF) Run(ctx context.Context, arguments []string) ([]byte, int, error) {
 	s.mu.Lock()
 	s.Commands = append(s.Commands, append([]string(nil), arguments...))
-	instance, token, answer := s.Instance, s.Token, s.Answer
+	instance, token, named, answer := s.Instance, s.Token, s.OrganizationID, s.Answer
 	s.mu.Unlock()
 	if answer != nil {
 		return answer(ctx, arguments)
 	}
 	result := map[string]*strictjson.Object{
-		"org display --target-org " + Alias + " --json": strictjson.NewObject("id", OrganizationID,
+		"org display --target-org " + Alias + " --json": strictjson.NewObject("id", named,
 			"instanceUrl", instance, "alias", Alias, "connectedStatus", "Connected"),
 		"org auth show-access-token --target-org " + Alias + " --json": strictjson.NewObject("accessToken", token),
 	}[strings.Join(arguments, " ")]

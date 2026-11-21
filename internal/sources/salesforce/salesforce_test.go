@@ -300,8 +300,20 @@ func TestAnExpiredTokenAsksSFOnce(t *testing.T) {
 		if _, err := reader.GetAccount(context.Background(), accountID); codeOf(err) != authRequired {
 			t.Fatal(err)
 		}
-		if len(sf.Commands) != 4 || len(org.Requests) != 2 {
+		// The token the org has just refused is not sent a second time.
+		if len(sf.Commands) != 4 || len(org.Requests) != 1 {
 			t.Fatal(sf.Commands, org.Requests)
+		}
+	})
+	t.Run("sf now names another org for the alias", func(t *testing.T) {
+		org, sf, reader, accountID := start(t)
+		org.Token, sf.Token, sf.OrganizationID = rotated, rotated, "00D000000000000BBB"
+		if _, err := reader.GetAccount(context.Background(), accountID); codeOf(err) != authRequired {
+			t.Fatal(err)
+		}
+		// The new token is sent nowhere and is not kept.
+		if len(org.Requests) != 1 || reader.accessToken != salesforcetest.Token {
+			t.Fatalf("a request followed the refusal: %v", org.Requests)
 		}
 	})
 	t.Run("sf gives another instance", func(t *testing.T) {
