@@ -4,14 +4,18 @@
 // Coverage, blocked browser storage, a session that expires, hostile text in
 // names, gaps and receipts, a static host's answer, and wrong addresses. The
 // frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
-// and dark, Coverage at 320, 390 and 1440, the Deal card's ledger, Text and
+// and dark, Coverage at 320, 390 and 1440, Activity and its receipt drawer at
+// 320, 390, 768 and 1440, the Deal card's ledger, Text and
 // Communications tabs at 320, 390 and 1440, and its proof drawer at 390, 1100 and 1440: tab
 // order, target sizes, focus outlines, Escape, overflow, text contrast and what
 // browser storage holds. The Text tab is also read and copied for every
 // recorded card, and shown for a card whose bytes do not match its seal, and
 // the Communications tab lists every sentence unit of every recorded card once.
-// Every help button on the Deal card, the drawer and Coverage is opened by
-// Tab, by hover at 1440 and by touch at 390.
+// Activity checks a card's seal against the stub's true bytes and against
+// bytes with one byte changed. Every help button on the Deal card, the
+// drawer, Coverage and Activity is opened by Tab, by hover at 1440 and by
+// touch at 390. Every page is also opened under the policy without
+// 'unsafe-inline' in style-src, and what that policy refuses is reported.
 // The stub keeps the Go server's shapes: the session view, the {"error":
 // {code, message}} envelope, the CSRF header and Origin checks, 403
 // not_permitted for an ungranted account, the /healthz answers, and the
@@ -23,7 +27,7 @@
 //   npm run build
 //   npm run test:browser [-- --channel chrome --screenshots DIR --contrast]
 // Build and run it with the same GTM_REVISION, which the guide links hold.
-// With --screenshots, the frame's matrix, Coverage, the Deal card and its drawer save one picture per
+// With --screenshots, the frame's matrix, Coverage, Activity, the Deal card and its drawer save one picture per
 // width and theme in DIR; with --contrast, it prints the lowest contrast of
 // each text colour.
 // The exit code is 1 when any check fails.
@@ -92,8 +96,11 @@ const book = JSON.parse(readFileSync(new URL('../../testdata/oracle/cards/demo_b
 // In the book each account's card has its own day, so a row can only show its own time.
 const bookTime = account => `2027-01-${account.slice(-2)}T15:00:04Z`;
 const receiptOf = (id, account, tool) => ({id, operation_id: `op-${id}`, parent_id: 'brief', ordinal: 1, principal_id: 'p-1', token_id: 't', tool, scope: `${tool.includes('call') ? 'calls' : tool.includes('slack') ? 'slack' : 'crm'}:read`,
-  account, connection_generation: 1, arguments: {}, request_id: null, brief_id: null, status: 'ok', http_status: 200, row_count: 1, rows: [`row ${hostile}`],
+  account, connection_generation: 1, arguments: {account_id: account, note: `${hostile} right\u202eleft`}, request_id: null, brief_id: null, status: 'ok', http_status: 200, row_count: 1, rows: [`row ${hostile}`],
   elapsed_ms: 1, error: `note ${hostile}`, started_at: '2027-01-15T15:00:00Z', finished_at: '2027-01-15T15:00:01Z', delivered_at: null});
+// A card's seal as the Go server answers it: save_brief, its one row naming the digest of the card's bytes.
+const sealReceiptOf = card => ({...receiptOf(card.seal_receipt_id, card.account, 'save_brief'), parent_id: null, ordinal: null, scope: null,
+  arguments: {account_id: card.account, brief_id: card.brief_id}, rows: [`briefs/${card.brief_id}/${card.sha256}`], error: null, elapsed_ms: 2.5});
 const principal = {id: 'p-1', display_name: `Demo reviewer ${hostile}`, kind: 'person', workspace_id: 'w-1', workspace_kind: 'demo', demo: true};
 const customer = {...principal, id: 'p-3', display_name: 'Customer reader', workspace_kind: 'customer', demo: false};
 const elsewhere = {...principal, id: 'p-2', display_name: 'Another principal'};
@@ -195,8 +202,10 @@ async function api(request, response, path) {
     return unit ? send(response, 200, {...unit, receipt: receiptOf(unit.receipt_id, card.account, unit.tool)}) : refuse(response, 403, 'not_permitted');
   }
   if ((match = path.match(/^\/api\/v1\/receipts\/(.+)$/))) {
-    const id = decodeURIComponent(match[1]), card = Object.values(cards).find(item => item.units.some(unit => unit.receipt_id === id) && stub.granted.has(item.account));
-    return card ? send(response, 200, receiptOf(id, card.account, card.units.find(unit => unit.receipt_id === id).tool)) : refuse(response, 403, 'not_permitted');
+    const id = decodeURIComponent(match[1]);
+    const card = [...Object.values(cards), ...stub.extra].find(item => stub.granted.has(item.account) && (item.seal_receipt_id === id || item.units.some(unit => unit.receipt_id === id)));
+    if (!card) return refuse(response, 403, 'not_permitted');
+    return send(response, 200, card.seal_receipt_id === id ? sealReceiptOf(card) : receiptOf(id, card.account, card.units.find(unit => unit.receipt_id === id).tool));
   }
   return refuse(response, 404, 'not_found');
 }
@@ -234,7 +243,7 @@ const server = createServer(async (request, response) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 base = `http://127.0.0.1:${server.address().port}`;
-const evidence = `${base}/ops/evidence`, thornfield = `${base}/deals/acc-003`;
+const activity = `${base}/ops/activity`, thornfield = `${base}/deals/acc-003`, thornfieldActivity = `${activity}?card=card-acc-003`;
 
 // Checks.
 const results = [];
@@ -325,17 +334,17 @@ for (const [label, answer] of [['431 text/plain', {status: 431, type: 'text/plai
   await scenario(`probe ${label}`, async () => {
     stub.steer = (method, path) => path === '/api/v1/session' && method === 'GET' ? answer : null;
     const tab = await page();
-    await tab.goto(evidence, {waitUntil: 'networkidle'});
+    await tab.goto(`${base}/ops/coverage`, {waitUntil: 'networkidle'});
     await tab.waitForSelector('[data-refusal]');
     check(await tab.locator(`text=${needsServer}`).count() === 0 && await tab.locator('[data-refusal]').count() === 1, `probe answered with ${label}: an error in API mode`);
     await tab.context().close();
   });
 }
 
-// 2. Sign-in, focus, picker commits, hostile text.
-await scenario('sign-in and the picker', async () => {
+// 2. Sign-in, focus, and hostile text in names and receipts.
+await scenario('sign-in and hostile text', async () => {
   const tab = await page();
-  await tab.goto(evidence, {waitUntil: 'networkidle'});
+  await tab.goto(thornfieldActivity, {waitUntil: 'networkidle'});
   await tab.waitForSelector('.fr-signin');
   await tab.fill('input[name=login]', login);
   await tab.fill('input[name=password]', 'wrong');
@@ -343,55 +352,29 @@ await scenario('sign-in and the picker', async () => {
   await tab.waitForSelector('.fr-signin [data-refusal="sign_in_refused"]');
   check((await focused(tab)).includes('password') && await tab.inputValue('input[name=password]') === '', `a refused sign-in from the button clears the password and puts focus there (${await focused(tab)})`);
   await signIn(tab, 'enter');
-  await tab.waitForSelector('.api-renewal-header h1');
+  await tab.waitForSelector('.ac-table tbody .ac-ref');
   await until(tab, () => document.activeElement?.matches('main h1'));
   check(true, 'after sign-in focus is on the page heading');
   check((await tab.textContent('.fr > .fr-announce[role=status]')).startsWith('Signed in as Demo reviewer'), 'the sign-in is announced in a live region that was already on the page');
-  await tab.waitForSelector('.api-evidence [data-gap-code]');
-  const injected = await tab.evaluate(() => Boolean(window.__injected) || Boolean(document.querySelector('main img')));
-  check(!injected && (await tab.textContent('main')).includes('<img src=x onerror'), 'hostile names, gaps and speakers render as text');
-  const select = tab.locator('select[name=account]');
-  const before = {url: tab.url(), history: await tab.evaluate(() => history.length), reads: stub.log.filter(entry => entry.includes('/cards')).length};
-  await select.focus();
-  await select.selectOption('acc-002');
-  await tab.waitForTimeout(400);
-  check(tab.url() === before.url && stub.log.filter(entry => entry.includes('/cards')).length === before.reads, 'changing the picker reads nothing until the choice is committed');
-  await tab.click('.api-account button[type=submit]');
-  // The URL changes first; the router renders the new account in a transition, so wait for the page itself.
-  await until(tab, () => new URL(location.href).searchParams.get('account') === 'acc-002' && document.querySelector('.api-renewal-header h1')?.textContent.startsWith('Second') && document.querySelector('.api-evidence [data-gap-code]'));
-  check(await tab.evaluate(() => history.length) === before.history, 'a committed choice replaces the history entry');
-  check((await tab.textContent('.api-renewal-header h1')).startsWith('Second <img'), 'the header shows the granted account by its server name, as text');
+  await tab.click('.ac-table tbody tr:nth-child(2) .ac-open');
+  await tab.waitForSelector('[role=dialog] [data-field="arguments"]');
+  const shown = await tab.evaluate(() => ({injected: Boolean(window.__injected) || Boolean(document.querySelector('main img, [role=dialog] img')), text: document.querySelector('[role=dialog]').textContent}));
+  check(!shown.injected && shown.text.includes('row <img src=x onerror') && shown.text.includes('right\\u202eleft') && !shown.text.includes('\u202e'),
+    'hostile receipt rows and arguments render as inert text, a format character as its escape');
   check(tab.errors.length === 0, `no page errors (${tab.errors.join(' | ')})`);
+  await tab.keyboard.press('Escape');
   await signOut(tab);
   await tab.waitForSelector('.fr-signin');
   check((await focused(tab)) === 'h1#fr-signin-title', `after sign-out focus is on the sign-in heading (${await focused(tab)})`);
   await tab.context().close();
 });
 
-// 3. Two accounts answered out of order: the later choice wins, the earlier answer is dropped.
-await scenario('out-of-order answers', async () => {
-  const tab = await page();
-  await tab.goto(`${evidence}?account=acc-003`, {waitUntil: 'networkidle'});
-  await signIn(tab);
-  await tab.waitForSelector('.api-unit');
-  stub.steer = (method, path) => path.includes('acc-002') ? {delay: 1200} : null;
-  await tab.selectOption('select[name=account]', 'acc-002');
-  await tab.click('.api-account button[type=submit]');
-  await tab.waitForTimeout(100);
-  await tab.selectOption('select[name=account]', 'acc-003');
-  await tab.click('.api-account button[type=submit]');
-  await tab.waitForTimeout(1800);
-  const facts = await tab.textContent('.api-facts');
-  check(facts.includes('acc-003') && !facts.includes('acc-002') && (await tab.textContent('.api-renewal-header h1')).startsWith('Third'), 'a slow answer for an account no longer chosen is dropped');
-  await tab.context().close();
-});
-
-// 3b. A new session reads afresh: nothing read under the earlier session is shown again.
+// 3. A new session reads afresh: nothing read under the earlier session is shown again.
 await scenario('a second sign-in in the same tab', async () => {
   const tab = await page();
-  await tab.goto(`${evidence}?account=acc-003`, {waitUntil: 'networkidle'});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
   await signIn(tab);
-  await tab.waitForSelector('select[name=account] option[value="acc-002"]', {state: 'attached'});
+  await tab.waitForSelector('.deals-row[data-account="acc-002"]');
   await signOut(tab);
   await tab.waitForSelector('.fr-signin');
   // Between the sessions the principal loses its grant on acc-002, and the new session's reads are slow.
@@ -399,35 +382,25 @@ await scenario('a second sign-in in the same tab', async () => {
   stub.steer = (method, path) => path === '/api/v1/accounts' || path.endsWith('/cards') ? {delay: 1500} : null;
   await signIn(tab);
   await tab.waitForTimeout(400);
-  check(await tab.locator('select[name=account] option[value="acc-002"], .api-unit').count() === 0, 'while the new session reads, nothing read under the earlier session is shown');
-  await until(tab, () => document.querySelectorAll('select[name=account] option').length > 0 && document.querySelector('.api-unit'));
-  const options = await tab.locator('select[name=account] option').evaluateAll(els => els.map(el => el.value));
-  check(JSON.stringify(options) === '["acc-003"]', `the second session's account list is read afresh (${options.join(', ')})`);
-  await tab.context().close();
-});
-
-// 4. A card from another account in the URL is not read or shown.
-await scenario('account and card out of step', async () => {
-  const tab = await page();
-  await tab.goto(`${evidence}?account=acc-002&card=card-acc-003`, {waitUntil: 'networkidle'});
-  await signIn(tab);
-  await tab.waitForSelector('.api-card-mismatch');
-  check(await tab.locator('.api-unit').count() === 0 && !stub.log.includes('GET /api/v1/cards/card-acc-003'), 'the other account’s card is neither read nor shown');
+  check(await tab.locator('.deals-row').count() === 0, 'while the new session reads, nothing read under the earlier session is shown');
+  await until(tab, () => document.querySelectorAll('.deals-row').length > 0);
+  const rows = await tab.locator('.deals-row').evaluateAll(els => els.map(el => el.dataset.account));
+  check(JSON.stringify(rows) === '["acc-003"]', `the second session's account list is read afresh (${rows.join(', ')})`);
   await tab.context().close();
 });
 
 // 5. Ten refusals, each shown as a refusal and never as an empty result.
 const refusals = [
-  ['the account list', evidence, path => path === '/api/v1/accounts', '.api-no-accounts'],
-  ['the card list on Evidence', `${evidence}?account=acc-003`, path => path.endsWith('/cards'), 'text=No card is published'],
+  ['the account list', `${base}/deals`, path => path === '/api/v1/accounts', '.deals-row, .deals-empty'],
   ['the card list on a deal', thornfield, path => path.endsWith('/cards'), '.dc-section, .dc-empty'],
-  ['the card on Evidence', `${evidence}?account=acc-003`, path => path === '/api/v1/cards/card-acc-003', '.api-section-title'],
   ['the card on a deal', thornfield, path => path === '/api/v1/cards/card-acc-003', '.dc-section, .dc-values-note, blockquote'],
   ['the sealed bytes on a deal', `${thornfield}/text`, path => path === '/api/v1/cards/card-acc-003/bytes', '.dc-section, .dc-values-note, blockquote, .dc-plain, [data-seal]'],
-  ['a receipt', `${evidence}?account=acc-003`, path => path.startsWith('/api/v1/receipts/'), 'text=No receipt is bound'],
-  ['a unit in full', `${evidence}?account=acc-003&card=card-acc-003&unit=5`, path => path.includes('/units/'), '.api-unit-detail >> text=No receipt is bound'],
-  ['an ungranted account', `${evidence}?account=acc-001`, () => false, 'text=No card is published'],
-  ['the session read', evidence, path => path === '/api/v1/session', 'input[name=login]'],
+  ['the card on Activity', thornfieldActivity, path => path === '/api/v1/cards/card-acc-003', '.ac-table, .ac-card'],
+  ['the receipts on Activity', thornfieldActivity, path => path.startsWith('/api/v1/receipts/'), '.ac-table tbody .ac-ref'],
+  ['a receipt in its drawer', `${thornfieldActivity}&receipt=seal-acc-003`, path => path.startsWith('/api/v1/receipts/'), '[role=dialog] [data-field]'],
+  ['a card of an ungranted account', `${activity}?card=card-acc-001`, () => false, '.ac-table, .ac-card'],
+  ['Coverage', `${base}/ops/coverage`, path => path === '/api/v1/accounts', '.cv-table, .cv-count'],
+  ['the session read', `${base}/deals`, path => path === '/api/v1/session', 'input[name=login]'],
 ];
 for (const [what, url, refused, empty] of refusals) {
   await scenario(`refused ${what}`, async () => {
@@ -445,15 +418,15 @@ for (const [what, url, refused, empty] of refusals) {
 await scenario('expiry', async () => {
   stub.ttlMs = 2500;
   const tab = await page();
-  await tab.goto(`${evidence}?account=acc-003`, {waitUntil: 'networkidle'});
+  await tab.goto(thornfieldActivity, {waitUntil: 'networkidle'});
   await signIn(tab);
-  await tab.waitForSelector('.api-unit');
+  await tab.waitForSelector('.ac-table tbody .ac-ref');
   stub.steer = (method, path) => path === '/api/v1/session' && method === 'GET' ? {status: 503, code: 'internal'} : null;
   await tab.waitForSelector('.fr-signin', {timeout: 6000});
   const reads = stub.log.filter(entry => entry === 'GET /api/v1/session').length;
   await tab.waitForTimeout(3000);
   const left = await tab.evaluate(() => document.body.innerText);
-  check(await tab.locator('.api-unit, .api-frame, .fr-who').count() === 0 && !/Third Account Co|acc-003|card-acc-003|Demo reviewer/.test(left),
+  check(await tab.locator('.ac-table, .ac-card, .fr-who').count() === 0 && !/Third Account Co|acc-003|card-acc-003|Demo reviewer/.test(left),
     'after an expired session nothing that was read is on screen');
   check(stub.log.filter(entry => entry === 'GET /api/v1/session').length - reads === 0, 'no session polling after a failed refresh');
   await tab.context().close();
@@ -462,10 +435,10 @@ await scenario('expiry', async () => {
 // 7. Sign-out with a token made stale by another tab is retried once with the fresh one.
 await scenario('stale sign-out token', async () => {
   const tab = await page();
-  await tab.goto(`${evidence}?account=acc-003`, {waitUntil: 'networkidle'});
+  await tab.goto(thornfieldActivity, {waitUntil: 'networkidle'});
   await signIn(tab);
   // The page's own reads finish first, so none of them meets the rotated session.
-  await tab.waitForSelector('.api-unit');
+  await tab.waitForSelector('.ac-table tbody .ac-ref');
   await apiSettled();
   // Another tab signs out and in again: the session, and its CSRF token, rotate under the same cookie name.
   const [id] = [...stub.sessions.keys()];
@@ -480,7 +453,7 @@ await scenario('stale sign-out token', async () => {
 // 8. A sign-in that finds this browser signed in elsewhere says so and does not adopt it silently.
 await scenario('signed in elsewhere', async () => {
   const tab = await page();
-  await tab.goto(evidence, {waitUntil: 'networkidle'});
+  await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'});
   await tab.waitForSelector('.fr-signin');
   stub.pre.clear();
   const other = token(); stub.sessions.set(other, {principal: elsewhere, expires: Date.now() + 3600_000});
@@ -500,9 +473,9 @@ await scenario('signed in elsewhere', async () => {
 for (const width of [320, 1440]) {
   await scenario(`blocked storage ${width}`, async () => {
     const tab = await page({width, blockStorage: true});
-    await tab.goto(`${evidence}?account=acc-003`, {waitUntil: 'networkidle'});
+    await tab.goto(thornfieldActivity, {waitUntil: 'networkidle'});
     await signIn(tab);
-    await tab.waitForSelector('.api-unit');
+    await tab.waitForSelector('.ac-table tbody .ac-ref');
     await tab.waitForTimeout(300);
     check(tab.errors.length === 0, `${width}: no page errors with storage blocked (${tab.errors.join(' | ')})`);
     const theme = await tab.evaluate(() => document.documentElement.dataset.theme);
@@ -515,28 +488,23 @@ for (const width of [320, 1440]) {
 for (const [width, scheme] of [[320, 'light'], [1440, 'light'], [320, 'dark'], [1440, 'dark']]) {
   await scenario(`layout ${width} ${scheme}`, async () => {
     const tab = await page({width, scheme});
-    await tab.goto(`${evidence}?account=acc-003&card=card-acc-003&unit=8`, {waitUntil: 'networkidle'});
+    await tab.goto(`${thornfieldActivity}&receipt=receipt-acc-003-read_call_notes`, {waitUntil: 'networkidle'});
     await signIn(tab);
-    await tab.waitForSelector('.api-unit-detail .api-receipt-full');
-    const deep = await tab.evaluate(() => {const el = document.activeElement, box = el.getBoundingClientRect(); return {id: el.id, inView: box.top >= 0 && box.bottom <= innerHeight};});
-    check(deep.id === 'api-unit-8-detail' && deep.inView, `${width} ${scheme}: a ?unit= link focuses the unit in view`);
-    const sizes = await tab.evaluate(() => {
-      const luminance = rgb => {const [r, g, b] = rgb.match(/\d+/g).slice(0, 3).map(Number).map(v => {v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4;}); return .2126 * r + .7152 * g + .0722 * b;};
-      const background = el => {while (el) {const color = getComputedStyle(el).backgroundColor; if (color && !/rgba\(.*, 0\)|transparent/.test(color)) return color; el = el.parentElement;} return 'rgb(255,255,255)';};
-      const contrast = el => {const a = luminance(getComputedStyle(el).color), b = luminance(background(el)); return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);};
-      const meta = document.querySelector('.api-unit .library-meta span:not(.pill)');
-      const small = [...document.querySelectorAll('.api-mono, .api-digest, .api-rows li, .api-record')].filter(el => parseFloat(getComputedStyle(el).fontSize) < 16).length;
-      return {metaContrast: contrast(meta), small, overflow: document.documentElement.scrollWidth - innerWidth};
-    });
-    check(sizes.metaContrast >= 4.5, `${width} ${scheme}: unit kind, source and time contrast ${sizes.metaContrast.toFixed(2)}:1`);
-    check(sizes.small === 0, `${width} ${scheme}: record references, receipt rows and the digest are at least 16px`);
+    await tab.waitForSelector('[role=dialog] [data-field="rows"]');
+    await until(tab, () => document.activeElement?.matches('.ui-dialog__title'));
+    check(await tab.textContent('.ui-dialog__title') === 'Read receipt', `${width} ${scheme}: a ?receipt= link opens that receipt's drawer with focus on its title`);
+    const sizes = await tab.evaluate(() => ({small: [...document.querySelectorAll('.ac-ref, .ac-json')].filter(el => parseFloat(getComputedStyle(el).fontSize) < 14).length,
+      face: getComputedStyle(document.querySelector('[role=dialog] .ac-ref')).fontFamily, overflow: document.documentElement.scrollWidth - innerWidth}));
+    check(sizes.small === 0 && /mono|Menlo|Consolas/i.test(sizes.face), `${width} ${scheme}: IDs, rows and arguments are in the reference face at 14 or more (${sizes.face})`);
     check(sizes.overflow <= 1, `${width} ${scheme}: no horizontal overflow (${sizes.overflow}px)`);
+    await tab.keyboard.press('Escape');
+    await tab.waitForSelector('[role=dialog]', {state: 'detached'});
     await tab.keyboard.press('Control+k');
     await tab.waitForSelector('.ui-palette__option');
     await tab.waitForSelector('.ui-palette__group:has-text("Deals")');
     const groups = await tab.locator('.ui-palette__group').allTextContents();
     const options = await tab.locator('.ui-palette__label').allTextContents();
-    check(groups.join() === 'Deals,Ops' && options.join('|') === `Second ${hostile} Co.|Third Account Co.|Coverage|Evidence`,
+    check(groups.join() === 'Deals,Ops' && options.join('|') === `Second ${hostile} Co.|Third Account Co.|Coverage|Activity`,
       `${width} ${scheme}: the palette lists the deals by name, as text, then the Ops pages (${groups.join()}: ${options.join('|')})`);
     await tab.locator('.ui-palette__option', {hasText: 'Third Account Co.'}).first().click();
     await until(tab, () => location.pathname === '/deals/acc-003' && document.querySelector('.dc-title')?.textContent === 'Third Account Co.');
@@ -551,9 +519,9 @@ const violations = tab => tab.console.filter(line => /policy violation|Content S
 for (const width of [390, 1440]) {
   await scenario(`the server app alone ${width}`, async () => {
     const tab = await page({width});
-    await tab.goto(`${evidence}?account=acc-003`, {waitUntil: 'networkidle'});
+    await tab.goto(thornfieldActivity, {waitUntil: 'networkidle'});
     await signIn(tab);
-    await tab.waitForSelector('.api-unit');
+    await tab.waitForSelector('.ac-table tbody .ac-ref');
     await tab.goto(thornfield, {waitUntil: 'networkidle'});
     await tab.waitForSelector('.dc-ledger');
     await tab.reload({waitUntil: 'networkidle'});
@@ -569,7 +537,7 @@ for (const width of [390, 1440]) {
     await tab.keyboard.type('nothing like this');
     await tab.waitForSelector('.ui-palette__empty');
     const empty = await tab.textContent('.ui-palette__empty');
-    check(palette.title === 'Find a deal' && palette.placeholder === 'A deal’s name, or Evidence' && empty === 'No deal or page matches.', `${width}: the palette is titled ${palette.title}, suggests ${palette.placeholder} and says ${empty}`);
+    check(palette.title === 'Find a deal' && palette.placeholder === 'A deal’s name, or Activity' && empty === 'No deal or page matches.', `${width}: the palette is titled ${palette.title}, suggests ${palette.placeholder} and says ${empty}`);
     check(violations(tab).length === 0, `${width}: no policy violation (${violations(tab).join(' | ')})`);
     check(tab.errors.length === 0, `${width}: no page errors (${tab.errors.join(' | ')})`);
     // The icons the page links, and the one a browser asks for by default, answer with an image.
@@ -592,7 +560,7 @@ await scenario('a static host', async () => {
   stub.steer = (method, path) => path === '/api/v1/session' ? {status: 404, type: 'text/html', raw: '<html>Not found</html>'} : null;
   const tab = await page({width: 390});
   const seen = [];
-  for (const path of ['/', new URL(evidence).pathname, '/ops/nothing']) {
+  for (const path of ['/', new URL(activity).pathname, '/ops/nothing']) {
     await tab.goto(base + path, {waitUntil: 'networkidle'});
     await tab.waitForSelector('[role=alert]');
     seen.push((await tab.evaluate(() => document.body.innerText)).trim());
@@ -756,11 +724,13 @@ await scenario('coverage reads', async () => {
   check(newest.sorted.join() === 'newest ascending' && newest.rows.join() === 'c-02,c-05,c-06,c-04,c-03,c-01,c-07', `Newest card sorts ascending with aria-sort (${newest.rows.join()})`);
   check(newestDown.sorted.join() === 'newest descending' && newestDown.rows.join() === 'c-01,c-03,c-04,c-06,c-02,c-05,c-07', `pressed again it sorts descending (${newestDown.rows.join()})`);
   check(cardsUp.sorted.join() === 'cards ascending' && cardsUp.rows.join() === 'c-02,c-05,c-03,c-06,c-01,c-04,c-07', `Cards sorts by count (${cardsUp.rows.join()})`);
-  // The link opens the newest card on Evidence.
-  await tab.click('.cv-table tr[data-account="c-04"] .cv-open');
-  await until(tab, () => location.pathname === '/ops/evidence');
-  const opened = new URL(tab.url()).searchParams;
-  check(opened.get('account') === 'c-04' && opened.get('card') === 'card-c-04-0', `Open the card leads to Evidence with its account and newest card (${opened})`);
+  // The row's links: the deal's card, and what ran for its newest card.
+  const links = await tab.$$eval('.cv-table tr[data-account="c-04"] .cv-open', els => els.map(el => `${el.textContent} ${el.getAttribute('href')}`));
+  check(links.join() === 'Open the card of Dogwood Co. /deals/c-04,What ran for the card of Dogwood Co. /ops/activity?card=card-c-04-0',
+    `a row links its deal's card and what ran for its newest card (${links.join(', ')})`);
+  await tab.click('.cv-table tr[data-account="c-04"] .cv-open:has-text("What ran")');
+  await until(tab, () => location.pathname === '/ops/activity' && document.querySelector('.ac'));
+  check(new URL(tab.url()).searchParams.get('card') === 'card-c-04-0', `What ran opens Activity for that card (${tab.url()})`);
   check(tab.errors.length === 0 && violations(tab).length === 0, `coverage: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
   await tab.context().close();
 });
@@ -817,7 +787,7 @@ for (const width of [320, 390, 768, 1440]) {
     await scenario(`frame ${width} ${scheme}`, async () => {
       const phone = width < 720, other = scheme === 'light' ? 'dark' : 'light', at = `${width} ${scheme}`;
       const tab = await page({width, scheme});
-      const asked = `${evidence}?account=acc-003`;
+      const asked = thornfieldActivity;
       await tab.goto(asked, {waitUntil: 'networkidle'});
       await tab.waitForSelector('.fr-signin');
       const theme = await tab.evaluate(() => document.documentElement.dataset.theme);
@@ -846,9 +816,9 @@ for (const width of [320, 390, 768, 1440]) {
         `${at}: a wrong password shows the refusal and focus is in the cleared password field`);
       // After sign-in the address that was asked for renders, with its account.
       await signIn(tab);
-      await until(tab, () => document.querySelector('.api-renewal-header h1')?.textContent.startsWith('Third') && document.querySelector('.api-unit'));
-      check(new URL(tab.url()).searchParams.get('account') === 'acc-003' && new URL(tab.url()).pathname === '/ops/evidence' && await tab.inputValue('select[name=account]') === 'acc-003',
-        `${at}: after sign-in ${new URL(tab.url()).pathname}${new URL(tab.url()).search} renders with that account`);
+      await until(tab, () => document.querySelector('.ac-table tbody .ac-ref'));
+      check(new URL(tab.url()).searchParams.get('card') === 'card-acc-003' && new URL(tab.url()).pathname === '/ops/activity' && (await tab.textContent('.ac-card')).includes('card-acc-003'),
+        `${at}: after sign-in ${new URL(tab.url()).pathname}${new URL(tab.url()).search} renders with that card`);
       const demo = phone ? '.fr-demo-row .fr-demo' : '.fr-bar .fr-demo';
       check(await tab.locator(demo).isVisible() && (await tab.textContent(demo)) === 'Demo, invented records', `${at}: the demo tag shows for a demo principal`);
       facts = await measure(tab);
@@ -856,7 +826,7 @@ for (const width of [320, 390, 768, 1440]) {
       if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `frame-${width}-${scheme}.png`)});
       // Tab order from the top of the page.
       await tab.reload({waitUntil: 'networkidle'});
-      await tab.waitForSelector('.api-unit');
+      await tab.waitForSelector('.ac-table tbody .ac-ref');
       const order = [];
       for (let i = 0; i < (phone ? 2 : 6); i++) {
         await tab.keyboard.press('Tab');
@@ -889,7 +859,7 @@ for (const width of [320, 390, 768, 1440]) {
         }
         const box = await tab.locator('[role=dialog]').boundingBox();
         facts = await measure(tab);
-        check(items.join() === 'Deals,Ops,Coverage,Evidence,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.width === width,
+        check(items.join() === 'Deals,Ops,Coverage,Activity,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.width === width,
           `${at}: the menu fills the screen with ${items.join(', ')}, and Tab stays in it (${trapped.map(focus => focus.name).join(', ')})`);
         check(healthy(facts), `${at}: the menu, ${reported(`${at} menu`, facts)}`);
         if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `menu-${width}-${scheme}.png`)});
@@ -905,7 +875,7 @@ for (const width of [320, 390, 768, 1440]) {
         await tab.keyboard.press('Escape');
       } else await tab.click('.fr-tools button[aria-label="Dark theme"]');
       await tab.reload({waitUntil: 'networkidle'});
-      await tab.waitForSelector('.api-unit');
+      await tab.waitForSelector('.ac-table tbody .ac-ref');
       const kept = await tab.evaluate(() => ({theme: document.documentElement.dataset.theme, local: Object.keys(localStorage), session: Object.keys(sessionStorage),
         canvas: getComputedStyle(document.querySelector('.fr')).backgroundColor}));
       check(kept.theme === other, `${at}: after choosing ${other} and reloading, the page is ${kept.theme} (${kept.canvas})`);
@@ -916,7 +886,7 @@ for (const width of [320, 390, 768, 1440]) {
       await signOut(tab);
       await tab.waitForSelector('.fr-signin');
       await until(tab, () => document.activeElement?.id === 'fr-signin-title');
-      check(await tab.locator('.api-frame, .api-renewal-header, [role=dialog]').count() === 0, `${at}: after sign-out focus is on the sign-in heading and nothing read is on screen`);
+      check(await tab.locator('.ac, [role=dialog]').count() === 0, `${at}: after sign-out focus is on the sign-in heading and nothing read is on screen`);
       check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
       await tab.context().close();
     });
@@ -1303,6 +1273,10 @@ for (const [width, scheme] of [[390, 'light'], [1440, 'light'], [390, 'dark'], [
     check(facts.read === 'Read 15 Jan 2027, 15:00:00 UTC from calls' && !/receipt-|read_call_notes|op-|calls:read|[0-9a-f]{64}/.test(facts.text),
       `${at}: the read line gives the read's start and source, and no receipt ID, digest or tool name (${facts.read})`);
     check(/After \[6\] Please do not put a date on the order form\./.test(facts.text) && !facts.text.includes('Before'), `${at}: Around it shows unit 6 after it and nothing before it`);
+    const receiptLink = await tab.evaluate(() => {const link = document.querySelector('[role=dialog] .dc-proof__receipt'), read = document.querySelector('[role=dialog] .dc-proof__read');
+      return {text: link?.textContent, href: link?.getAttribute('href'), under: Boolean(link && read && read.getBoundingClientRect().bottom <= link.getBoundingClientRect().top)};});
+    check(receiptLink.text === 'Open the receipt in Ops' && receiptLink.href === '/ops/activity?card=card-acc-003&receipt=receipt-acc-003-read_call_notes' && receiptLink.under,
+      `${at}: under Read, a link opens the receipt in Ops (${receiptLink.href})`);
     if (width < 720) {
       check(facts.box.left === 0 && facts.box.top === 0 && facts.box.width === facts.viewport.width && facts.box.height === facts.viewport.height && facts.close.width >= 44 && facts.close.height >= 44 && facts.modal === 'true',
         `${at}: the sheet covers the viewport (${facts.box.width}x${facts.box.height}) and its close button is ${facts.close.width}x${facts.close.height}`);
@@ -1415,7 +1389,7 @@ await scenario('proof drawer at 1100: pressing numbers, Left and Right, Before a
   await tab.click('.dc-line__n > .dc-cite[data-cite="2"]');
   await until(tab, () => document.querySelector('[role=dialog] .dc-proof__record'));
   const record = (await tab.innerText('[role=dialog] [data-proof="unit"]')).replace(/\s+/g, ' ').trim();
-  check(record === 'Record crm/contacts/con-003 This server returns a record’s reference, not its fields yet. On the card Read 15 Jan 2027, 15:00:00 UTC from the CRM',
+  check(record === 'Record crm/contacts/con-003 This server returns a record’s reference, not its fields yet. On the card Read 15 Jan 2027, 15:00:00 UTC from the CRM Open the receipt in Ops',
     `a record unit shows its reference and says its fields are not served yet (${record})`);
   await tab.click('.ui-dialog__close');
   await tab.waitForSelector('[role=dialog]', {state: 'detached'});
@@ -1785,6 +1759,13 @@ for (const [width, touch] of [[390, true], [1440, false]]) {
       await tab.locator('.cv .ui-help__button').focus();
       await tab.screenshot({path: join(options.screenshots, `help-coverage-${width}.png`)});
     }
+    // Activity: its title carries the help, and the seal's drawer the seal's and the arguments'.
+    await openInApp(tab, '/ops/activity?card=card-acc-003');
+    await tab.waitForSelector('.ac-table tbody .ac-ref');
+    await exerciseHelp(tab, `${at} activity`, '.ac', {touch, outside: '.ac-meta', expected: ['ops.activity']});
+    await openInApp(tab, '/ops/activity?card=card-acc-003&receipt=seal-acc-003');
+    await tab.waitForSelector('[role=dialog] [data-field="arguments"]');
+    await exerciseHelp(tab, `${at} receipt drawer`, '[role=dialog]', {touch, outside: '.ui-dialog__title', expected: ['seal', 'receipt.arguments']});
     check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
     await tab.context().close();
   });
@@ -1895,6 +1876,207 @@ await scenario('communications: every recorded card lists each sentence unit onc
     `each of ${recorded.length} recorded cards lists its ${units} sentence units once (${hidden} not on the card), groups oldest first, ${untimedCards} cards with groups under No time recorded (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
   check(tab.errors.length === 0 && violations(tab).length === 0, `recorded cards: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
   await tab.context().close();
+});
+
+// 20. Activity: what ran for one card. The seal first, then one row per
+// distinct read receipt; a row opens the receipt whole; Check the seal against
+// the true bytes and against bytes with one byte changed; a refused receipt;
+// no card in the address; and the layout at 320, 390, 768 and 1440, light and dark.
+const readsOfCard = card => [...new Set(card.units.map(unit => unit.receipt_id).filter(Boolean))];
+const activityRows = card => [card.seal_receipt_id, ...readsOfCard(card)];
+const rowsRead = tab => until(tab, count => document.querySelectorAll('.ac-table tbody tr').length === count &&
+  ![...document.querySelectorAll('.ac-table tbody tr')].some(row => row.textContent.includes('Reading')), activityRows(cards['acc-003']).length);
+
+await scenario('activity: no card in the address', async () => {
+  const tab = await page({width: 390});
+  await tab.goto(activity, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.ac-choose');
+  await apiSettled();
+  const said = (await tab.innerText('.ac-choose')).replace(/\s+/g, ' ').trim();
+  const href = await tab.getAttribute('.ac-choose a', 'href');
+  check(said === 'Choose a deal in Coverage to see what ran for its card. Go to Coverage' && href === '/ops/coverage' && !stub.log.some(entry => /\/receipts\/|\/cards\/[^/]+$/.test(entry)),
+    `with no card in the address Activity asks for a deal in Coverage and reads no card or receipt (${said})`);
+  await tab.context().close();
+});
+
+await scenario('activity: the seal, then one row per distinct read receipt, each opening its receipt', async () => {
+  const card = cards['acc-003'], expected = activityRows(card);
+  const tab = await page({width: 1440});
+  await tab.goto(thornfieldActivity, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await rowsRead(tab);
+  const facts = await tab.evaluate(() => ({rows: [...document.querySelectorAll('.ac-table tbody tr')].map(row => row.dataset.receipt),
+    seal: [...document.querySelectorAll('.ac-table tbody tr[data-seal]')].map(row => row.dataset.receipt),
+    head: [...document.querySelectorAll('.ac-table thead th')].map(th => th.textContent), first: document.querySelector('.ac-table tbody tr').innerText.replace(/\s+/g, ' ').trim(),
+    card: document.querySelector('.ac-card__facts').innerText.replace(/\s+/g, ' ').trim()}));
+  check(facts.rows.join() === expected.join() && facts.seal.join() === card.seal_receipt_id && expected.length === 5,
+    `the table lists the seal receipt, then one row per distinct read receipt (${facts.rows.join(', ')})`);
+  check(facts.head.join() === 'Started,Tool,Status,Rows,Elapsed' && facts.first === '15 Jan 2027, 15:00:00 UTC , open the seal receipt Seal save_brief ok 200 1 2.50 ms',
+    `the columns, and the seal's row (${facts.first})`);
+  check(facts.card === 'Card card-acc-003 Account acc-003 Published 15 Jan 2027, 15:00:04 UTC', `the card's ID, account and publish time (${facts.card})`);
+  const reads = stub.log.filter(entry => entry.startsWith('GET /api/v1/receipts/')).length;
+  check(reads === expected.length, `each receipt is read once (${reads} reads)`);
+  const second = expected[1];
+  await tab.click(`.ac-table tr[data-receipt="${second}"] .ac-open`);
+  await tab.waitForSelector('[role=dialog] [data-field="delivered_at"]');
+  await until(tab, () => document.activeElement?.matches('.ui-dialog__title'));
+  const drawer = await tab.evaluate(() => ({fields: [...document.querySelectorAll('[role=dialog] [data-field]')].map(el => el.dataset.field),
+    title: document.querySelector('.ui-dialog__title').textContent, receipt: new URL(location.href).searchParams.get('receipt'), seal: document.querySelectorAll('[role=dialog] .ac-seal').length,
+    tool: document.querySelector('[role=dialog] [data-field="tool"] dd').textContent}));
+  check(drawer.title === 'Read receipt' && drawer.receipt === second && drawer.fields.length === 22 && drawer.seal === 0 && drawer.tool === card.units.find(unit => unit.receipt_id === second).tool,
+    `a row opens its receipt whole, ${drawer.fields.length} fields, with ?receipt= in the address (${drawer.receipt})`);
+  await tab.keyboard.press('Escape');
+  await tab.waitForSelector('[role=dialog]', {state: 'detached'});
+  await until(tab, id => document.activeElement?.closest('tr')?.dataset.receipt === id, second);
+  check(!new URL(tab.url()).searchParams.has('receipt'), 'Escape closes the drawer, removes ?receipt= and returns focus to its row');
+  check(tab.errors.length === 0 && violations(tab).length === 0, `activity: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+  await tab.context().close();
+});
+
+await scenario('activity: the proof drawer opens the receipt in Ops', async () => {
+  const tab = await page({width: 1440});
+  await tab.goto(`${thornfield}?unit=5`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('[role=dialog] .dc-proof__receipt');
+  await tab.click('[role=dialog] .dc-proof__receipt');
+  await tab.waitForSelector('[role=dialog] [data-field="rows"]');
+  const opened = await tab.evaluate(() => ({path: location.pathname, card: new URL(location.href).searchParams.get('card'), receipt: new URL(location.href).searchParams.get('receipt'),
+    shown: document.querySelector('[role=dialog] [data-field="id"] dd')?.textContent}));
+  check(opened.path === '/ops/activity' && opened.card === 'card-acc-003' && opened.receipt === 'receipt-acc-003-read_call_notes' && opened.shown === 'receipt-acc-003-read_call_notes',
+    `Open the receipt in Ops opens Activity for the card with that receipt's drawer (${JSON.stringify(opened)})`);
+  await tab.context().close();
+});
+
+await scenario('activity: Check the seal', async () => {
+  const sealed = sealedFiles.get('card-acc-003');
+  const tab = await page({width: 1440});
+  await tab.goto(`${thornfieldActivity}&receipt=seal-acc-003`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('[role=dialog] .ac-seal button');
+  const title = await tab.textContent('.ui-dialog__title');
+  await tab.click('[role=dialog] .ac-seal button');
+  await tab.waitForSelector('[data-seal-check="match"]');
+  const match = await tab.textContent('.ac-seal__said');
+  // The stub changes one byte of the stored card and keeps the digest it sends with it.
+  stub.steer = (method, path) => path === '/api/v1/cards/card-acc-003/bytes'
+    ? {raw: Buffer.from(sealed.bytes).map((byte, at) => (at === 40 ? byte ^ 1 : byte)), type: 'application/octet-stream', headers: {'Cache-Control': 'no-store', 'X-Content-SHA256': sealed.sha256}} : null;
+  await tab.click('[role=dialog] .ac-seal button');
+  await tab.waitForSelector('[data-seal-check="mismatch"]');
+  const mismatch = await tab.textContent('.ac-seal__said');
+  check(title === 'Seal receipt' && match === 'These bytes match the digest the seal names.' && mismatch === 'These bytes do not match the digest the seal names.',
+    `Check the seal says match for the true bytes and no match with one byte changed (${match} / ${mismatch})`);
+  check(tab.errors.length === 0 && violations(tab).length === 0, `seal check: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+  await tab.context().close();
+});
+
+await scenario('activity: a refused receipt', async () => {
+  const refusedId = 'receipt-acc-003-read_call_notes';
+  stub.steer = (method, path) => path === `/api/v1/receipts/${refusedId}` ? {status: 403, code: 'not_permitted'} : null;
+  const tab = await page({width: 390});
+  await tab.goto(thornfieldActivity, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector(`.ac-table tr[data-receipt="${refusedId}"] [data-refusal="not_permitted"]`);
+  const row = (await tab.innerText(`.ac-table tr[data-receipt="${refusedId}"]`)).replace(/\s+/g, ' ').trim();
+  await tab.click(`.ac-table tr[data-receipt="${refusedId}"] .ac-open`);
+  await tab.waitForSelector('[role=dialog] [data-refusal="not_permitted"]');
+  const drawer = await tab.evaluate(() => ({text: document.querySelector('[role=dialog] .ui-dialog__body').innerText.replace(/\s+/g, ' ').trim(),
+    fields: document.querySelectorAll('[role=dialog] [data-field]').length, rows: document.querySelectorAll('.ac-table tbody tr').length}));
+  check(row.includes('Not permitted') && row.includes('Server code: not_permitted') && drawer.text.includes('Not permitted.') && drawer.text.includes('Server code: not_permitted') &&
+    drawer.fields === 0 && drawer.rows === activityRows(cards['acc-003']).length, `a refused receipt says Not permitted in its row and its drawer, and the table stays (${drawer.text.slice(0, 60)})`);
+  await tab.context().close();
+});
+
+for (const width of [320, 390, 768, 1440]) {
+  for (const scheme of ['light', 'dark']) {
+    await scenario(`activity layout ${width} ${scheme}`, async () => {
+      const at = `activity ${width} ${scheme}`;
+      const tab = await page({width, scheme});
+      await tab.goto(thornfieldActivity, {waitUntil: 'networkidle'});
+      await signIn(tab);
+      await rowsRead(tab);
+      const display = await tab.evaluate(() => getComputedStyle(document.querySelector('.ac-table tbody tr')).display);
+      check(display === (width < 720 ? 'grid' : 'table-row'), `${at}: receipts are ${width < 720 ? 'blocks' : 'table rows'} (${display})`);
+      const facts = await measure(tab, '.fr-chrome, .ac');
+      check(healthy(facts), `${at}: Activity, ${reported(at, facts)}`);
+      await tab.focus('.ac-card .ac-link');
+      await tab.keyboard.press('Tab');
+      const rowRing = await ring(tab);
+      check(rowRing.name.startsWith('15 Jan 2027') && fits(rowRing), `${at}: a row's link takes focus with its ring (${rowRing.name} ${Math.round(rowRing.width)}x${Math.round(rowRing.height)} ${rowRing.outline}px)`);
+      if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `activity-${width}-${scheme}.png`), fullPage: true});
+      await tab.keyboard.press('Enter');
+      await tab.waitForSelector('[role=dialog] [data-field="delivered_at"]');
+      await tab.click('[role=dialog] .ac-seal button');
+      await tab.waitForSelector('[data-seal-check="match"]');
+      const drawer = await measure(tab, '[role=dialog]');
+      check(healthy(drawer), `${at}: the seal's drawer, ${reported(`${at} drawer`, drawer)}`);
+      const box = await tab.locator('[role=dialog]').boundingBox();
+      check(width < 720 ? box.width === width : box.width === 480, `${at}: the drawer is ${width < 720 ? 'a sheet' : '480 wide'} (${box.width})`);
+      if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `activity-drawer-${width}-${scheme}.png`)});
+      check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+      await tab.context().close();
+    });
+  }
+}
+
+// 21. The server's policy without 'unsafe-inline' in style-src: every page
+// opened under it, and what it refuses. The pages of the app are checked; the
+// static 404 page is reported, as it holds its own style element.
+const servedPolicy = securityHeaders['Content-Security-Policy'];
+const strictPolicy = servedPolicy.replace("style-src 'self' 'unsafe-inline'", "style-src 'self'");
+await scenario('every page under a style policy without unsafe-inline', async () => {
+  securityHeaders['Content-Security-Policy'] = strictPolicy;
+  try {
+    check(strictPolicy !== servedPolicy && !strictPolicy.includes('unsafe-inline'), `the strict policy: ${strictPolicy}`);
+    const tab = await page({width: 390});
+    const refusedOn = {};
+    const visit = async (label, open) => {
+      const before = violations(tab).length;
+      await open();
+      await tab.waitForTimeout(300);
+      refusedOn[label] = violations(tab).slice(before);
+    };
+    await visit('sign-in', async () => {await tab.goto(`${base}/deals`, {waitUntil: 'networkidle'}); await tab.waitForSelector('.fr-signin');});
+    await visit('deals', async () => {await signIn(tab); await tab.waitForSelector('.deals-row');});
+    await visit('deal card', async () => {await openInApp(tab, '/deals/acc-003'); await tab.waitForSelector('.dc-ledger');});
+    await visit('help', async () => {await tab.click('.dc-seal .ui-help__button'); await tab.waitForSelector('.dc-seal .ui-help__panel:not([hidden])');});
+    await visit('proof drawer', async () => {await openInApp(tab, '/deals/acc-003?unit=5'); await tab.waitForSelector('[role=dialog] [data-proof="unit"]');});
+    await visit('text tab', async () => {await openInApp(tab, '/deals/acc-003/text'); await tab.waitForSelector('.dc-plain');});
+    await visit('communications tab', async () => {await openInApp(tab, '/deals/acc-003/communications'); await tab.waitForSelector('.dc-comms');});
+    await visit('coverage', async () => {await openInApp(tab, '/ops/coverage'); await tab.waitForSelector('.cv-table');});
+    await visit('activity and the seal check', async () => {
+      await openInApp(tab, '/ops/activity?card=card-acc-003&receipt=seal-acc-003');
+      await tab.waitForSelector('[role=dialog] .ac-seal button');
+      await tab.click('[role=dialog] .ac-seal button');
+      await tab.waitForSelector('[data-seal-check="match"]');
+      await tab.keyboard.press('Escape');
+      await tab.waitForSelector('[role=dialog]', {state: 'detached'});
+    });
+    await visit('menu and palette', async () => {
+      await tab.click('.fr-menu-button');
+      await tab.waitForSelector('[role=dialog] .fr-menu');
+      await tab.keyboard.press('Escape');
+      await tab.waitForSelector('[role=dialog]', {state: 'detached'});
+      await tab.keyboard.press('Control+k');
+      await tab.waitForSelector('.ui-palette__option');
+      await tab.keyboard.press('Escape');
+    });
+    await visit('no page in the app', async () => {await openInApp(tab, '/ops/nothing'); await tab.waitForSelector('.fr-nopage__title');});
+    const app = Object.entries(refusedOn).filter(([, refused]) => refused.length);
+    check(app.length === 0 && tab.errors.length === 0,
+      `every page of the app renders with nothing refused under the strict policy (${Object.keys(refusedOn).join(', ')}; refused: ${app.map(([label, refused]) => `${label}: ${refused.join(' | ')}`).join('; ') || 'none'})`);
+    const styled = await tab.evaluate(() => getComputedStyle(document.querySelector('.fr-bar')).borderBottomStyle);
+    check(styled === 'solid', `the app's stylesheet applies under the strict policy (the bar's rule is ${styled})`);
+    await tab.context().close();
+    const missing = await page({width: 390});
+    await missing.goto(`${base}/history`, {waitUntil: 'networkidle'});
+    await missing.waitForTimeout(300);
+    const staticRefused = violations(missing);
+    results.push(`note the static 404 page under the strict policy: ${staticRefused.length ? `refused ${staticRefused.join(' | ')}` : 'nothing refused'}`);
+    await missing.context().close();
+  } finally {
+    securityHeaders['Content-Security-Policy'] = servedPolicy;
+  }
 });
 
 await browser.close();

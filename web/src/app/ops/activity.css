@@ -1,0 +1,271 @@
+/* Activity: the card's facts, then a table of its receipts; a row opens the
+   receipt whole in a drawer. Under 720 wide each receipt is a block of label
+   and value lines, and nothing scrolls sideways. IDs, rows and the arguments
+   are in the reference face at 14 or more. */
+.fr .ac {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--gc-space-5);
+  min-width: 0;
+  padding: var(--gc-space-6) 0 var(--gc-space-7);
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.fr .ac p {
+  margin: 0;
+}
+
+.fr .ac-title {
+  justify-self: start;
+  margin: 0;
+  color: var(--gc-ink);
+  font: var(--gc-title);
+}
+
+.fr .ac-title:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
+.fr .ac-meta,
+.fr .ac-note {
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+}
+
+.ac-choose,
+.ac-card {
+  display: grid;
+  justify-items: start;
+  gap: var(--gc-space-3);
+}
+
+.ac-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gc-space-2) var(--gc-space-6);
+  margin: 0;
+}
+
+.ac-card__facts dt,
+.ac-fields dt {
+  color: var(--gc-ink-2);
+  font: var(--gc-label);
+}
+
+.ac-card__facts dd,
+.ac-fields dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.ac-ref,
+.ac-json {
+  font-family: var(--gc-face-reference);
+  font-size: 0.875rem;
+  line-height: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+.fr .ac-link,
+.fr .ac-open {
+  display: inline-flex;
+  align-items: center;
+  min-width: var(--gc-target);
+  min-height: var(--gc-target);
+  color: var(--gc-accent);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.fr .ac-link:focus-visible,
+.fr .ac-open:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: -3px;
+}
+
+.ac-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.fr .ac-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--gc-surface);
+  text-align: left;
+}
+
+.fr .ac-table caption {
+  padding: 0 0 var(--gc-space-3);
+  caption-side: top;
+  color: var(--gc-ink);
+  font: var(--gc-label);
+  text-align: left;
+}
+
+.fr .ac-table th,
+.fr .ac-table td {
+  padding: var(--gc-space-2) var(--gc-space-4);
+  border-bottom: var(--gc-rule-width) solid var(--gc-rule);
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  text-align: left;
+  vertical-align: top;
+}
+
+.fr .ac-table thead th {
+  padding-block: var(--gc-space-3);
+  font: var(--gc-label);
+}
+
+.fr .ac-table tbody th {
+  font-weight: 400;
+}
+
+.ac-seal-tag {
+  display: inline-block;
+  padding: 0 var(--gc-space-2);
+  border: var(--gc-rule-width) solid var(--gc-control);
+  border-radius: var(--gc-radius-control);
+  font: var(--gc-label);
+}
+
+.fr .ac-problem {
+  display: block;
+  padding-left: var(--gc-space-3);
+  border-left: 4px solid var(--gc-ink);
+  font-weight: 600;
+}
+
+.fr .ac-problem .ac-note {
+  display: block;
+  font-weight: 400;
+}
+
+.ac-label {
+  display: none;
+}
+
+@media (min-width: 720px) {
+  .fr .ac-table .ac-num {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  /* The link's 44px target is centred on the first line of its row. */
+  .fr .ac-open {
+    margin-block: calc((1.5rem - var(--gc-target)) / 2);
+  }
+}
+
+@media (max-width: 719.98px) {
+  .fr .ac-table,
+  .fr .ac-table caption,
+  .fr .ac-table thead,
+  .fr .ac-table tbody,
+  .fr .ac-table tr,
+  .fr .ac-table th,
+  .fr .ac-table td {
+    display: block;
+  }
+
+  .fr .ac-table thead {
+    display: none;
+  }
+
+  .fr .ac-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--gc-space-2);
+    padding: var(--gc-space-3) var(--gc-space-4);
+    border-bottom: var(--gc-rule-width) solid var(--gc-rule);
+  }
+
+  .fr .ac-table tbody th,
+  .fr .ac-table tbody td {
+    padding: 0;
+    border: 0;
+  }
+
+  .ac-label {
+    display: block;
+    color: var(--gc-ink-2);
+    font: var(--gc-label);
+  }
+}
+
+/* The drawer: the seal check, then every field of the receipt. */
+.ac-drawer,
+.ac-state {
+  padding: var(--gc-space-4);
+}
+
+.ac-drawer {
+  display: grid;
+  gap: var(--gc-space-5);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fr .ac-state {
+  margin: 0;
+  font: var(--gc-body);
+  overflow-wrap: anywhere;
+}
+
+.ac-drawer .ac-state {
+  padding: 0;
+}
+
+.ac-seal {
+  display: grid;
+  gap: var(--gc-space-2);
+  padding-bottom: var(--gc-space-5);
+  border-bottom: var(--gc-rule-width) solid var(--gc-rule);
+}
+
+.fr .ac-seal__said {
+  margin: 0;
+  font: var(--gc-body);
+  font-weight: 600;
+}
+
+.fr .ac-seal__said:empty {
+  display: none;
+}
+
+.ac-fields {
+  display: grid;
+  gap: var(--gc-space-3);
+  margin: 0;
+}
+
+.ac-field {
+  display: grid;
+  gap: var(--gc-space-1);
+  min-width: 0;
+}
+
+.ac-rows {
+  margin: 0;
+  padding-left: var(--gc-space-5);
+}
+
+.fr .ac-json {
+  margin: 0;
+  padding: var(--gc-space-2) var(--gc-space-3);
+  border-radius: var(--gc-radius-control);
+  background: var(--gc-sunken);
+  color: var(--gc-ink);
+  white-space: pre-wrap;
+}

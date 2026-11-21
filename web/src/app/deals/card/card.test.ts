@@ -439,7 +439,15 @@ test('a card with no renewal line shows No renewal date and no number', () => {
 });
 
 test('the focal step is used by the countdown and ARR and nothing else', () => {
-  const sheets = ['ui/tokens.css', 'ui/help.css', 'app/deals/card/card.css', 'app/deals/card/lines.css', 'app/deals/deals.css', 'chrome.css', 'api.css'];
+  const sheets = [
+    'ui/base.css',
+    'ui/tokens.css',
+    'ui/help.css',
+    'app/deals/card/card.css',
+    'app/deals/card/lines.css',
+    'app/deals/deals.css',
+    'app/ops/activity.css',
+  ];
   const users: string[] = [];
   for (const sheet of sheets) {
     const css = readFileSync(new URL(`../../../${sheet}`, import.meta.url), 'utf8');
@@ -551,6 +559,8 @@ const drawnFrom: Record<string, [string, string]> = {
   arr: ['docs/config.md', 'Opportunity amount never stands in for'],
   'ops.coverage': ['docs/config.md', 'Which deals have a current card'],
   'ops.receipt': ['docs/config.md', 'A read gets its receipt before it runs.'],
+  'ops.activity': ['docs/audit.md', 'every card seal leaves a receipt'],
+  'receipt.arguments': ['docs/audit.md', 'The arguments as the call sent them'],
 };
 // GitHub's anchor for a heading.
 const anchorOf = (heading: string) =>
