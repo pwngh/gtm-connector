@@ -21,42 +21,41 @@ var notBackedUp = map[string]string{
 }
 
 // backupTables are copied in this order, so every foreign key points at a
-// table, or (for receipts) a row, that is already restored. since is the
-// schema version that made the table, so a backup of an older version lists
-// only its own tables.
+// table, or (for receipts) a row, that is already restored. since names the
+// migration that made the table (its file name without the prefix), so a
+// backup of a database without that migration does not list it.
 var backupTables = []struct {
-	name, order string
-	since       int
+	name, order, since string
 }{
-	{"workspaces", "id", 1},
-	{"principals", "id", 1},
-	{"accounts", "workspace_id, ref", 1},
-	{"account_grants", "workspace_id, principal_id, account_ref", 1},
-	{"machine_tokens", "id", 1},
-	{"connections", "id", 1},
-	{"source_records", "id", 1},
+	{"workspaces", "id", "identity_and_evidence"},
+	{"principals", "id", "identity_and_evidence"},
+	{"accounts", "workspace_id, ref", "identity_and_evidence"},
+	{"account_grants", "workspace_id, principal_id, account_ref", "identity_and_evidence"},
+	{"machine_tokens", "id", "identity_and_evidence"},
+	{"connections", "id", "identity_and_evidence"},
+	{"source_records", "id", "identity_and_evidence"},
 	// A parent receipt always starts before its children.
-	{"receipts", "started_at, id", 1},
-	{"receipt_records", "receipt_id, ordinal", 1},
-	{"receipt_deliveries", "receipt_id", 1},
-	{"cards", "id", 1},
-	{"evidence_units", "card_id, n", 1},
-	{"gaps", "card_id, ordinal", 1},
-	{"card_reads", "card_id, ordinal", 2},
+	{"receipts", "started_at, id", "identity_and_evidence"},
+	{"receipt_records", "receipt_id, ordinal", "identity_and_evidence"},
+	{"receipt_deliveries", "receipt_id", "identity_and_evidence"},
+	{"cards", "id", "identity_and_evidence"},
+	{"evidence_units", "card_id, n", "identity_and_evidence"},
+	{"gaps", "card_id, ordinal", "identity_and_evidence"},
+	{"card_reads", "card_id, ordinal", "cli_reads_and_briefs"},
 	// An import's bytes come before the revisions made from them, and a revision before the account that reads it.
-	{"call_import_stores", "workspace_id", 4},
-	{"call_import_contents", "workspace_id, content_sha256", 4},
-	{"call_import_revisions", "workspace_id, import_id", 4},
-	{"call_import_numbers", "workspace_id, account_number", 4},
-	{"call_import_active", "workspace_id, account_ref", 4},
-	{"card_lines", "card_id, ordinal", migrationVersion("card_lines")},
-	{"cards_before_lines", "card_id", migrationVersion("card_lines")},
-	{"slack_mappings", "workspace_id, account_ref", migrationVersion("slack_mappings")},
+	{"call_import_stores", "workspace_id", "call_imports"},
+	{"call_import_contents", "workspace_id, content_sha256", "call_imports"},
+	{"call_import_revisions", "workspace_id, import_id", "call_imports"},
+	{"call_import_numbers", "workspace_id, account_number", "call_imports"},
+	{"call_import_active", "workspace_id, account_ref", "call_imports"},
+	{"card_lines", "card_id, ordinal", "card_lines"},
+	{"cards_before_lines", "card_id", "card_lines"},
+	{"slack_mappings", "workspace_id, account_ref", "slack_mappings"},
 	// A card's seal is restored before the card.
-	{"admitted_receipts", "workspace_id, audit_id", migrationVersion("admitted_python_cards")},
-	{"admitted_cards", "workspace_id, brief_id", migrationVersion("admitted_python_cards")},
-	{"deals", "workspace_id, ref", migrationVersion("deals")},
-	{"deal_cards", "card_id", migrationVersion("deals")},
+	{"admitted_receipts", "workspace_id, audit_id", "admitted_python_cards"},
+	{"admitted_cards", "workspace_id, brief_id", "admitted_python_cards"},
+	{"deals", "workspace_id, ref", "deals"},
+	{"deal_cards", "card_id", "deals"},
 }
 
 // TableCopy describes one table in a backup.
@@ -67,28 +66,36 @@ type TableCopy struct {
 }
 
 // Dump writes every table, in PostgreSQL's COPY text format, from one
-// read-only snapshot. open gives the writer for each table. It returns the
-// schema version and what it wrote.
-func (s *Store) Dump(ctx context.Context, open func(table string) (io.WriteCloser, error)) (int, []TableCopy, error) {
-	version, err := s.SchemaVersion(ctx)
+// read-only snapshot. open gives the writer for each table. The database's
+// migrations must be exactly this binary's. It returns the names of the
+// applied migrations and what it wrote.
+func (s *Store) Dump(ctx context.Context, open func(table string) (io.WriteCloser, error)) ([]string, []TableCopy, error) {
+	state, err := s.MigrationState(ctx)
 	if err != nil {
-		return 0, nil, err
+		return nil, nil, err
 	}
-	if version != LatestSchemaVersion() {
-		return 0, nil, fmt.Errorf("the database is at schema %d; run serve or setup to migrate it to %d first",
-			version, LatestSchemaVersion())
+	if state != MigrationsCurrent {
+		return nil, nil, state.Err()
 	}
-	copies, err := s.dump(ctx, version, open)
-	return version, copies, err
+	list, err := s.migrations()
+	if err != nil {
+		return nil, nil, err
+	}
+	var applied []string
+	for _, m := range list {
+		applied = append(applied, m.name)
+	}
+	copies, err := s.dump(ctx, applied, open)
+	return applied, copies, err
 }
 
-// dump copies the tables of this schema version.
-func (s *Store) dump(ctx context.Context, version int, open func(table string) (io.WriteCloser, error)) ([]TableCopy, error) {
+// dump copies the tables of a database with these migrations applied.
+func (s *Store) dump(ctx context.Context, applied []string, open func(table string) (io.WriteCloser, error)) ([]TableCopy, error) {
 	var copies []TableCopy
 	err := pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
 		func(tx pgx.Tx) error {
 			for _, table := range backupTables {
-				if table.since > version {
+				if !slices.Contains(applied, migrationFile(table.since)) {
 					continue
 				}
 				columns, err := tableColumns(ctx, tx, table.name)
@@ -115,19 +122,34 @@ func (s *Store) dump(ctx context.Context, version int, open func(table string) (
 	return copies, err
 }
 
-// Restore loads a dump into an empty database. In one transaction it creates
-// the schema at the dump's version, copies every table with the tables' own
-// triggers off, checks the row counts, checks the loaded rows against every
-// rule the triggers enforce (gtm_integrity_violations), applies the later
-// migrations and checks again at the latest version, and records the restore
-// as waiting for its credentials. FinishRestore records that the credentials
-// are in place.
-func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion int, copies []TableCopy,
+// Restore loads a dump into an empty database. applied names the migrations
+// the dumped database held. In one transaction it applies those, copies
+// every table with the tables' own triggers off, checks the row counts,
+// checks the loaded rows against every rule the triggers enforce
+// (gtm_integrity_violations), applies the rest of this binary's migrations
+// and checks again, and records the restore as waiting for its credentials.
+// FinishRestore records that the credentials are in place.
+func (s *Store) Restore(ctx context.Context, archiveSHA256 string, applied []string, copies []TableCopy,
 	open func(table string) (io.ReadCloser, error)) error {
-	if schemaVersion < 1 || schemaVersion > LatestSchemaVersion() {
-		return fmt.Errorf("the backup is at schema %d; this binary knows 1 to %d", schemaVersion, LatestSchemaVersion())
+	list, err := s.migrations()
+	if err != nil {
+		return err
 	}
-	tables := BackupTableNames(schemaVersion)
+	held := map[string]bool{}
+	for _, name := range applied {
+		if !slices.ContainsFunc(list, func(m migration) bool { return m.name == name }) {
+			return fmt.Errorf("the backup holds migration %s, which this binary does not; "+
+				"restore it with a binary that holds it", name)
+		}
+		if held[name] {
+			return fmt.Errorf("the backup lists migration %s twice", name)
+		}
+		held[name] = true
+	}
+	if len(held) == 0 {
+		return errors.New("the backup lists no migration")
+	}
+	tables := BackupTableNames(applied)
 	if len(copies) != len(tables) {
 		return errors.New("the backup does not list the expected tables")
 	}
@@ -135,10 +157,6 @@ func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion
 		if copies[i].Name != table {
 			return fmt.Errorf("the backup lists %q where %q belongs", copies[i].Name, table)
 		}
-	}
-	list, err := migrations()
-	if err != nil {
-		return err
 	}
 	// One transaction for the schema and the rows: a failed restore leaves
 	// the database empty, so it can be run again.
@@ -167,22 +185,25 @@ func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion
 		if _, err := tx.Exec(ctx, createMigrationsTable); err != nil {
 			return err
 		}
-		for _, m := range list[:schemaVersion] {
-			if _, err := tx.Exec(ctx, m.sql); err != nil {
-				return fmt.Errorf("migration %s: %w", m.name, err)
+		for _, m := range list {
+			if !held[m.name] {
+				continue
 			}
-			if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, $2, $3)",
-				m.version, m.name, m.sha256); err != nil {
+			if err := apply(ctx, tx, m); err != nil {
 				return err
 			}
 		}
+		// Two migrations that each add a column to one table, applied in
+		// either order, leave the columns in either order; COPY names them,
+		// so they are compared as a set.
 		for _, c := range copies {
 			columns, err := tableColumns(ctx, tx, c.Name)
 			if err != nil {
 				return err
 			}
-			if !slices.Equal(columns, c.Columns) {
-				return fmt.Errorf("%s: the backup's columns differ from schema %d", c.Name, schemaVersion)
+			slices.Sort(columns)
+			if !slices.Equal(columns, slices.Sorted(slices.Values(c.Columns))) {
+				return fmt.Errorf("%s: the backup's columns differ from its migrations' schema", c.Name)
 			}
 			if _, err := tx.Exec(ctx, "ALTER TABLE "+pgx.Identifier{c.Name}.Sanitize()+" DISABLE TRIGGER USER"); err != nil {
 				return err
@@ -211,18 +232,17 @@ func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion
 			}
 		}
 		// The rows went in with the triggers off: check every rule the
-		// triggers enforce on writing, at the backup's version; then apply
-		// the later migrations, which refuse rows their rules do not admit,
-		// and check again at the latest version, before anything commits.
+		// triggers enforce on writing, at the backup's migrations; then apply
+		// the rest, which refuse rows their rules do not admit, and check
+		// again with every migration applied, before anything commits.
 		if err := integrity(ctx, tx); err != nil {
 			return err
 		}
-		for _, m := range list[schemaVersion:] {
-			if _, err := tx.Exec(ctx, m.sql); err != nil {
-				return fmt.Errorf("migration %s: %w", m.name, err)
+		for _, m := range list {
+			if held[m.name] {
+				continue
 			}
-			if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, $2, $3)",
-				m.version, m.name, m.sha256); err != nil {
+			if err := apply(ctx, tx, m); err != nil {
 				return err
 			}
 		}
@@ -292,12 +312,12 @@ func (s *Store) FinishRestore(ctx context.Context, archiveSHA256 string) error {
 	return err
 }
 
-// BackupTableNames lists the tables a backup at this schema version holds,
-// in restore order.
-func BackupTableNames(version int) []string {
+// BackupTableNames lists the tables a backup of a database with these
+// migrations applied holds, in restore order.
+func BackupTableNames(applied []string) []string {
 	var names []string
 	for _, table := range backupTables {
-		if table.since <= version {
+		if slices.Contains(applied, migrationFile(table.since)) {
 			names = append(names, table.name)
 		}
 	}

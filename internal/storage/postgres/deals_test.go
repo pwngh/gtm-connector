@@ -130,7 +130,7 @@ func TestARestoreRefusesACardOutsideItsDeal(t *testing.T) {
 	ok(t, sql(t, f, `ALTER TABLE deal_cards ENABLE TRIGGER USER`))
 	files := dump(t, f)
 	fresh, _ := freshStoreURL(t)
-	err := fresh.Restore(ctx, strings.Repeat("e", 64), files.version, files.copies, opener(files.data))
+	err := fresh.Restore(ctx, strings.Repeat("e", 64), files.applied, files.copies, opener(files.data))
 	if err == nil || !strings.Contains(err.Error(), "outside the time deal") {
 		t.Errorf("the restore: %v", err)
 	}
