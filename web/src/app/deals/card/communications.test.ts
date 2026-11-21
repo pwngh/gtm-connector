@@ -239,7 +239,7 @@ test('every recorded card: the first sentence of each role carries that role’s
         firsts.set(groupOf(sentence), sentence.n);
       }
     }
-    const drawn = [...html.matchAll(/data-help="(role\.[a-z]+)"><span class="ui-help__text">([^<]*)<\/span>/g)];
+    const drawn = [...html.matchAll(/data-help="(role\.[a-z_]+)"><span class="ui-help__text">([^<]*)<\/span>/g)];
     assert.deepEqual(
       drawn.map(match => match[1]),
       [...firsts.keys()].map(group => `role.${group}`),
