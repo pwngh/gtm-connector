@@ -66,14 +66,14 @@ Scopes do not imply one another. The gateway and the handlers both enforce them.
 
 | Area | Behavior |
 | --- | --- |
-| Local authority | Authorization needs the owner credential and an explicit scope list, for one preregistered public client. [docs/tools.md](docs/tools.md) has the code and token lifetimes. |
+| Local authority | Authorization needs the owner credential and an explicit scope list, for one preregistered public client. [docs/python/tools.md](docs/python/tools.md) has the code and token lifetimes. |
 | Client grants | With `--scope`, `connect` writes an HTTP client's bearer grant for only the named scopes to a mode-0600 file in the state folder; a stdio entry holds no grant. The client receives that grant, never the owner credential, and its calls pass through the same gateway, audit log, and rate limit. Keep these files out of Git. |
-| Audit receipts | `audit.sqlite3` stores, for each tool attempt, a SHA-256 token fingerprint, the tool, its arguments, a UTC timestamp, request and brief IDs, the outcome, and returned record references. Saving a card adds one more receipt, `save_brief`, that holds the saved file's SHA-256. [docs/audit.md](docs/audit.md) has the HTTP 503 cases, the requests that get no receipt, and the rate limit. |
+| Audit receipts | `audit.sqlite3` stores, for each tool attempt, a SHA-256 token fingerprint, the tool, its arguments, a UTC timestamp, request and brief IDs, the outcome, and returned record references. Saving a card adds one more receipt, `save_brief`, that holds the saved file's SHA-256. [docs/python/audit.md](docs/python/audit.md) has the HTTP 503 cases, the requests that get no receipt, and the rate limit. |
 | Receipt contents | Arguments can include activity text, search terms, and IDs. Bearer tokens and response bodies are not logged. A fingerprint establishes neither identity nor a valid grant. |
 | Retention | Runtime directories use mode 0700 and files use mode 0600. Nothing expires automatically. A brief is a saved card with its evidence: saved briefs include source evidence and receipt copies. |
-| Cards | `units.py` builds a card from checked evidence alone. No model runs and no inference service is called. See [docs/briefs.md](docs/briefs.md). |
+| Cards | `units.py` builds a card from checked evidence alone. No model runs and no inference service is called. See [docs/python/briefs.md](docs/python/briefs.md). |
 | Sellers | A seller is whoever the operator lists with `connect ... --seller NAME`, saved as `sellers.json`, and that list is the operator's own claim. Each demo source adds the demo's invented sellers. A live source uses the operator's list. |
-| Imported transcripts | `debug calls import` is a local operator command. It parses a selected TXT, VTT, or SRT export, obtains only `crm:read`, and resolves the account through the audited gateway before committing an association. A missing, ambiguous, changed, or unreceipted association publishes nothing. See [docs/calls.md](docs/calls.md). |
+| Imported transcripts | `debug calls import` is a local operator command. It parses a selected TXT, VTT, or SRT export, obtains only `crm:read`, and resolves the account through the audited gateway before committing an association. A missing, ambiguous, changed, or unreceipted association publishes nothing. See [docs/python/calls.md](docs/python/calls.md). |
 | Nothing imported | An account with nothing imported gets a card that says so, and demo content never stands in. |
 | `debug calls inspect --full` | Local `debug calls inspect --full` returns the complete original and is not an MCP tool. |
 
@@ -103,7 +103,7 @@ alias and `--json`, using argument arrays and no shell.
 | Writes | The write tool is omitted. A write attempt returns HTTP 403. |
 | HTTP 401 | The first 401 in an operation may reacquire credentials once through `sf`, read the Organization again to confirm the same org, and retry the same GET. Time spent waiting for `sf` is added back to the read's deadline. An `sf` that does not answer in time returns `salesforce_cli_timeout`. A second 401, a lookup failure, or a changed origin or org returns `salesforce_auth_required`. Other errors are not retried. |
 | `debug salesforce check` | A local diagnostic the operator runs. Its report holds fixed step names, outcomes, counts, timings, fixed errors, and missing required field names. It returns no source record, ID, org detail, or credential. |
-| Tests and guide | [test_sf_credentials.py](tests/test_sf_credentials.py), with a fake CLI on PATH. [docs/salesforce.md](docs/salesforce.md). |
+| Tests and guide | [test_sf_credentials.py](tests/test_sf_credentials.py), with a fake CLI on PATH. [docs/python/salesforce.md](docs/python/salesforce.md). |
 
 ## Slack (optional, read-only)
 
@@ -121,7 +121,7 @@ alias and `--json`, using argument arrays and no shell.
 | Read budget | Ten HTTP attempts, 1 MiB of response bytes, and a 20-second deadline per read, covering pages, authentication, failures, and retries. One rate-limit retry, with a valid delay of at most five seconds. Only exact token expiry permits one retry, with at most one local refresh. An ambiguous refresh is not retried and then requires browser login. |
 | Content | Missing text, unsupported subtypes, and hidden content refuse the whole observation. Files, blocks, and attachments add omission counts only. A completed read does not establish a full archive or an atomic view while messages change. |
 | `debug slack check` | Reads the mapped thread through a temporary local service that enables only the Slack read tool. Its report holds no identifiers, paths, URLs, or message text. |
-| Tests and guides | [test_slack_auth.py](tests/test_slack_auth.py) and [test_slack_reader.py](tests/test_slack_reader.py). [docs/slack.md](docs/slack.md). |
+| Tests and guides | [test_slack_auth.py](tests/test_slack_auth.py) and [test_slack_reader.py](tests/test_slack_reader.py). [docs/python/slack.md](docs/python/slack.md). |
 
 ## Selected sources and prepared briefs
 
@@ -141,7 +141,7 @@ caller's grant.
 | `prepare_renewal_brief`, missing scope or failure | A missing calls or Slack scope makes the card say that source was not read. Any other failure, including an audit write failure, an expired token, a rate limit, or a 45-second brief deadline, leaves no readable brief. |
 | `read_renewal_brief` | A saved brief counts only if its own outer call finished successfully and that receipt names the SHA-256 digest of the saved file. A brief ID alone grants nothing. The tool makes no source system call and reports that it did not recheck the source systems. |
 | `read_renewal_brief`, release | It releases the brief only while the account and any Slack thread it contains are still selected, the caller's current grant has every scope the brief's content needs, and the source bindings, transcript revision, and Slack mapping are unchanged. For live Slack it also requires a ready local credential for the same identity with at least the scopes of each credential that returned a page of the brief's thread. That decision is made while holding the Slack connection lock. A disconnect that finishes after the decision does not recall the response. |
-| Tests and guide | [test_selected_sources.py](tests/test_selected_sources.py). [docs/selection.md](docs/selection.md). |
+| Tests and guide | [test_selected_sources.py](tests/test_selected_sources.py). [docs/python/selection.md](docs/python/selection.md). |
 
 ## Known limits
 

@@ -18,7 +18,7 @@ from tests import varied
 
 AS_OF = varied.AS_OF.isoformat()
 IMPORTED_AT = "2027-01-15T12:00:00Z"
-# The limits table of docs/calls.md, restated so that the importer is held to the document.
+# The limits table of docs/python/calls.md, restated so that the importer is held to the document.
 MAX_FILE, MAX_UNITS, MAX_QUOTE, MAX_RETURNED, MAX_RECORD = 2 * 1024 * 1024, 10_000, 16 * 1024, 256, 128 * 1024
 QUOTED_LIMIT = 120 * 1024
 # One per transcript of a book: no call time, 60 days before the planning date, 61 days, and 593 days.
@@ -30,7 +30,7 @@ SRT_TIMING = re.compile(rf"{SRT_STAMP}[ \t]+-->[ \t]+{SRT_STAMP}(?:[ \t].*)?")
 HEADER = re.compile(r"Kind: (?:captions|subtitles|descriptions|chapters|metadata)"
                     r"|Language: [A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*"
                     r"|X-TIMESTAMP-MAP=(?:MPEGTS:[0-9]+,LOCAL:[0-9:.]+|LOCAL:[0-9:.]+,MPEGTS:[0-9]+)")
-# docs/briefs.md, Speaker roles: in a WebVTT transcript a voice tag labels what follows it in the cue.
+# docs/python/briefs.md, Speaker roles: in a WebVTT transcript a voice tag labels what follows it in the cue.
 VOICE = re.compile(r"<v(?:\.[^\s>]*)*[ \t]+([^<>\n]+)>")
 # A plain account for the cases built in code.
 PLAIN = {"name": "Size Case Co", "industry": "Software", "renewal_date": "2027-06-30", "arr_cents": 100,
@@ -100,7 +100,7 @@ def default_last(found):
 
 
 def deserved(raw, kind):
-    """The refusal docs/calls.md gives this export on a default import, or None when it must be accepted."""
+    """The refusal docs/python/calls.md gives this export on a default import, or None when it must be accepted."""
     if len(raw) > MAX_FILE:
         return "calls_import_too_large"
     try:

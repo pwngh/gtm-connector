@@ -99,7 +99,7 @@ The server implements
 section. The official Python SDK is pinned to **2.3.0**.
 
 > **Authorization is a local owner emulator, not production login or consent.** `debug serve`
-> grants no scopes at startup. See the [security review](../SECURITY_REVIEW.md).
+> grants no scopes at startup. See the [security review](../../SECURITY_REVIEW.md).
 
 - The transport is stateless Streamable HTTP with per-request protocol metadata and
   `server/discover`. Only revision 2026-07-28 is accepted. Subscriptions and legacy initialization

@@ -29,10 +29,10 @@ EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 READ_AT = datetime(2027, 1, 16, tzinfo=timezone.utc)
 READER = slack_reader.SlackThreadReader
 REPLIES = "https://slack.com/api/conversations.replies"
-# The limits table of docs/slack.md, restated so that the reader is held to the document.
+# The limits table of docs/python/slack.md, restated so that the reader is held to the document.
 MAX_ATTEMPTS, MAX_RESPONSE, MAX_ROWS, MAX_TEXT, MAX_ALL_TEXT, MAX_RESULT, MAX_CURSOR = (
     10, 1024 * 1024, 100, 16 * 1024, 64 * 1024, 256 * 1024, 2048)
-# The exit code docs/slack.md gives each reason a read can stop for here.
+# The exit code docs/python/slack.md gives each reason a read can stop for here.
 EXIT = {"slack_mapping_missing": 3, "slack_resource_limit": 3, "slack_output_too_large": 3,
         "slack_thread_incomplete": 3, "slack_thread_unavailable": 3, "slack_response_invalid": 5,
         "slack_rate_limited": 5}
@@ -76,7 +76,7 @@ def replies(texts, start=1_800_000_000):
 
 
 def refusal(rows, cutoff):
-    """The reason docs/slack.md gives for refusing this whole thread, or None when it must be read."""
+    """The reason docs/python/slack.md gives for refusing this whole thread, or None when it must be read."""
     sizes = [len(row["text"].encode()) for row in rows]
     if micros(rows[0]["ts"]) > micros(cutoff):
         return "slack_thread_unavailable"

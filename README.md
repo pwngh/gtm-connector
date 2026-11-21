@@ -232,13 +232,13 @@ The card shows what the records say, not whether a source is true.
 
 ## More
 
-- **Sales and CS:** [working a deal](docs/deals.md), [reading a Deal card](docs/briefs.md).
-- **RevOps and GTM engineers:** [setting it up](docs/config.md), [the API](docs/api.md), [audit receipts](docs/audit.md).
+- **Sales and CS:** [working a deal](docs/deals.md), [reading a Deal card](docs/python/briefs.md).
+- **RevOps and GTM engineers:** [setting it up](docs/config.md), [the API](docs/api.md), [audit receipts](docs/python/audit.md).
 - **Operators:** [running it](docs/operations.md), [security review](SECURITY_REVIEW.md).
 - **The project:** [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
 
-Until the cutover, the Python package's guides stay in `docs/`: [commands](docs/cli.md),
-[Salesforce](docs/salesforce.md), [calls](docs/calls.md), [Slack](docs/slack.md),
-[selection](docs/selection.md), [clients](docs/clients.md) and [tools](docs/tools.md).
+Until the cutover, the Python package's guides stay in `docs/`: [commands](docs/python/cli.md),
+[Salesforce](docs/python/salesforce.md), [calls](docs/python/calls.md), [Slack](docs/python/slack.md),
+[selection](docs/python/selection.md), [clients](docs/python/clients.md) and [tools](docs/python/tools.md).
 
 All checked-in companies, people, and records are invented. MIT licensed.
