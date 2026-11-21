@@ -44,7 +44,13 @@ const (
 	contactFields     = "Id, AccountId, Name, Title, Email"
 	contractFields    = "Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate"
 	opportunityFields = "Id, AccountId, Name, StageName, Amount, CloseDate, IsClosed, IsWon"
+	// usersQuery reads the org's Standard users. A portal or community user can be a customer, so only a
+	// Standard user is read as one of the seller's own people.
+	usersQuery = "SELECT Id, Name, Email, IsActive FROM User WHERE UserType = 'Standard' ORDER BY Id LIMIT %d"
 )
+
+// MaxUsers is how many Standard users a users read returns. An org with more is refused whole.
+const MaxUsers = 2000
 
 // The bounds of one operation.
 const (
@@ -724,9 +730,25 @@ func (r *Reader) SearchAccounts(ctx context.Context, query string, accountNumber
 	return accounts, false, nil
 }
 
-// Read is one of the two CRM reads a card makes, as the gateway's tool bodies give them: get_account is the
-// account, then its contacts, then its contracts, and list_opportunities its opportunities, each record
-// with its record_ref.
+// ListUsers reads the org's Standard users, active or not, ordered by ID: at most MaxUsers. An org with more
+// is refused with salesforce_result_limit.
+func (r *Reader) ListUsers(ctx context.Context) ([]*strictjson.Object, error) {
+	var found []*strictjson.Object
+	err := r.operation(ctx, func(o *operation) error {
+		var err error
+		found, err = o.records(fmt.Sprintf(usersQuery, MaxUsers+1), MaxUsers, userRecord)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return found, nil
+}
+
+// Read is one of the CRM reads a card makes, as the gateway's tool bodies give them: get_account is the
+// account, then its contacts, then its contracts, list_opportunities its opportunities, and list_users the
+// org's Standard users, each record with its record_ref. list_users is made for one account's card, so it
+// checks the form of that account's ID, but the users it returns are the org's.
 func (r *Reader) Read(ctx context.Context, tool, accountID string) (system string, records []*strictjson.Object, err error) {
 	switch tool {
 	case "get_account":
@@ -746,6 +768,15 @@ func (r *Reader) Read(ctx context.Context, tool, accountID string) (system strin
 			return "", nil, err
 		}
 		return "crm", referenced("opportunities", opportunities), nil
+	case "list_users":
+		if _, err := accountNative(accountID); err != nil {
+			return "", nil, err
+		}
+		users, err := r.ListUsers(ctx)
+		if err != nil {
+			return "", nil, err
+		}
+		return "crm", referenced("users", users), nil
 	}
 	return "", nil, fmt.Errorf("salesforce: no read %q", tool)
 }
@@ -827,6 +858,23 @@ func accountRecord(row *strictjson.Object) (*strictjson.Object, error) {
 	record := strictjson.NewObject("id", "acc-sf-"+native, "source_id", native, "backend", "salesforce",
 		"name", f.text("Name", false), "industry", f.text("Industry", true),
 		"account_number", f.text("AccountNumber", true))
+	return record, f.err
+}
+
+// userRecord maps one User: its ID, name, email and whether it is active.
+func userRecord(row *strictjson.Object) (*strictjson.Object, error) {
+	id, _ := row.Get("Id")
+	native, err := nativeID(id)
+	if err != nil {
+		return nil, err
+	}
+	active, _ := row.Get("IsActive")
+	if _, isBool := active.(bool); !isBool {
+		return nil, refuse(invalidResponse)
+	}
+	f := fields{row: row}
+	record := strictjson.NewObject("id", "usr-sf-"+native, "source_id", native, "backend", "salesforce",
+		"name", f.text("Name", false), "email", f.text("Email", true), "is_active", active)
 	return record, f.err
 }
 

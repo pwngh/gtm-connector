@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -53,7 +54,13 @@ var (
 		`FROM Contract WHERE EndDate >= ([0-9]{4}-[0-9]{2}-[0-9]{2}) AND StatusCode IN \('Draft', 'InApproval', ` +
 		`'Activated'\) ORDER BY EndDate, Id LIMIT 1$`)
 	unescaped = regexp.MustCompile(`\\(.)`)
+	// The org's Standard users, with the limit the read asks for.
+	standardUsers = regexp.MustCompile(`^SELECT Id, Name, Email, IsActive FROM User WHERE UserType = 'Standard' ` +
+		`ORDER BY Id LIMIT ([0-9]+)$`)
 )
+
+// userFields are the fields of a User the org returns to the users read.
+var userFields = []string{"Id", "Name", "Email", "IsActive"}
 
 type cursor struct {
 	object, account string
@@ -78,6 +85,7 @@ type Org struct {
 
 	mu       sync.Mutex
 	rows     map[string]map[string][]*strictjson.Object // object, then account ID
+	people   []*strictjson.Object                       // the org's User rows, each with its UserType
 	pageSize map[[2]string]int
 	cursors  map[string]cursor
 	served   int
@@ -116,6 +124,32 @@ func (o *Org) Add(rows *strictjson.Object) string {
 		o.rows[object][native] = held
 	}
 	return "acc-sf-" + native
+}
+
+// AddUsers puts User rows in the org: {"Id", "Name", "Email", "IsActive", "UserType"}. The users read
+// returns the Standard ones, by ID, without their UserType. PageSize("User", "", n) pages them.
+func (o *Org) AddUsers(rows ...*strictjson.Object) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.people = append(o.people, rows...)
+	sort.SliceStable(o.people, func(i, j int) bool { return idOf(o.people[i]) < idOf(o.people[j]) })
+}
+
+// standard is the Standard users, each with the fields the users read asks for, at most limit of them.
+func (o *Org) standard(limit int) []*strictjson.Object {
+	found := []*strictjson.Object{}
+	for _, row := range o.people {
+		if kind, _ := row.Get("UserType"); kind != "Standard" || len(found) == limit {
+			continue
+		}
+		shown := strictjson.NewObject()
+		for _, field := range userFields {
+			value, _ := row.Get(field)
+			shown.Set(field, value)
+		}
+		found = append(found, shown)
+	}
+	return found
 }
 
 // PageSize sets how many rows of one object the org sends per page for one account. It is 2,000 otherwise,
@@ -202,6 +236,9 @@ func (o *Org) answer(request *http.Request, path, query string) *http.Response {
 		}
 		sort.SliceStable(rows, func(i, j int) bool { return idOf(rows[i]) < idOf(rows[j]) })
 		page = cursor{object: "Opportunity", rows: rows[:min(len(rows), 101)]}
+	case standardUsers.MatchString(query):
+		limit, _ := strconv.Atoi(standardUsers.FindStringSubmatch(query)[1])
+		page = cursor{object: "User", rows: o.standard(limit)}
 	case candidate.MatchString(query):
 		page = cursor{object: "Contract", rows: o.ending(candidate.FindStringSubmatch(query)[1])}
 	default:
