@@ -209,13 +209,13 @@ func changedEvidence(t *testing.T, i int) *strictjson.Object {
 
 func TestImportedTranscriptRefusals(t *testing.T) {
 	for _, key := range []string{plainExport, namedExport} {
-		if _, _, _, err := Build(sealedEvidence(t, "books_calls", key)); err != nil {
+		if _, _, _, _, err := Build(sealedEvidence(t, "books_calls", key)); err != nil {
 			t.Fatalf("%s as sealed: %v", key, err)
 		}
 	}
 	for i, c := range importedRefusals {
 		t.Run(c.name, func(t *testing.T) {
-			if _, _, _, err := Build(changedEvidence(t, i)); err == nil || err.Error() != c.want {
+			if _, _, _, _, err := Build(changedEvidence(t, i)); err == nil || err.Error() != c.want {
 				t.Errorf("got %v, want %q", err, c.want)
 			}
 		})
@@ -237,7 +237,7 @@ func secondTranscript(t *testing.T) *strictjson.Object {
 
 func TestOneTranscriptForAnAccount(t *testing.T) {
 	const want = "Imported calls hold at most one selected transcript excerpt for an account."
-	if _, _, _, err := Build(secondTranscript(t)); err == nil || err.Error() != want {
+	if _, _, _, _, err := Build(secondTranscript(t)); err == nil || err.Error() != want {
 		t.Errorf("got %v, want %q", err, want)
 	}
 }
@@ -249,11 +249,11 @@ func TestRemadeTranscriptIsAccepted(t *testing.T) {
 	record := recordOf(evidence, "calls/call_notes")
 	memberObject(record, "manifest").Set("called_at", "2027-01-10T10:00:00Z")
 	record.Set("called_at", "2027-01-10T10:00:00Z")
-	if _, _, _, err := Build(evidence); err == nil || err.Error() != otherRevision {
+	if _, _, _, _, err := Build(evidence); err == nil || err.Error() != otherRevision {
 		t.Fatalf("a changed manifest under its old ID: %v", err)
 	}
 	remake(t, evidence)
-	_, text, _, err := Build(evidence)
+	_, text, _, _, err := Build(evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func transcriptEvidence(t *testing.T, lines []string, first, last int) *strictjs
 func TestExcerptEdgeCutsASentence(t *testing.T) {
 	evidence := transcriptEvidence(t, []string{"We", "will not sign until the rider is approved.", "Good.", "Fine.",
 		"The price is acceptable if", "legal approves."}, 3, 4)
-	units, text, _, err := Build(evidence)
+	units, text, _, _, err := Build(evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestAStatedNameIsTheOnlyLabelOfACue(t *testing.T) {
 		unit.Set("text", changed)
 		record.Set("body", strings.Replace(member(record, "body").(string), spoken, changed, 1))
 		remake(t, evidence)
-		_, _, _, err := Build(evidence)
+		_, _, _, _, err := Build(evidence)
 		if want == "" && err != nil || want != "" && (err == nil || err.Error() != want) {
 			t.Errorf("%q after the name: %v, want %q", words, err, want)
 		}

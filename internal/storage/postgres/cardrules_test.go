@@ -21,8 +21,9 @@ import (
 // PublishCard's own checks, changing one thing from a card that commits.
 
 // sqlCard finishes the seal naming the bytes, then writes the card, its
-// units, gaps and read set in one transaction, and returns what the commit
-// gave. The card counts the units, gaps and reads its bytes hold.
+// units, gaps, lines and read set in one transaction, and returns what the
+// commit gave. The card counts the units, gaps and reads its bytes hold, and
+// the lines it is given.
 func sqlCard(t *testing.T, f *postgrestest.Fixture, pub postgres.CardPublication) error {
 	t.Helper()
 	payload, err := receipts.ParsePayload(pub.Bytes)
@@ -44,10 +45,10 @@ func sqlCardCounting(t *testing.T, f *postgrestest.Fixture, pub postgres.CardPub
 		var card string
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version, card_bytes,
-				card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
-			VALUES ($1, $2, $3, $4, 3, '3', $5, sha256($5), $6, $7, $8, $9, $10) RETURNING id`,
+				card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count, line_count)
+			VALUES ($1, $2, $3, $4, 3, '3', $5, sha256($5), $6, $7, $8, $9, $10, $11) RETURNING id`,
 			pub.WorkspaceID, pub.AccountRef, pub.BriefID, pub.Kind, pub.Bytes, pub.ParentReceiptID,
-			pub.SealReceiptID, units, gaps, reads).Scan(&card); err != nil {
+			pub.SealReceiptID, units, gaps, reads, len(pub.Lines)).Scan(&card); err != nil {
 			return err
 		}
 		for _, u := range pub.Units {
@@ -62,6 +63,12 @@ func sqlCardCounting(t *testing.T, f *postgrestest.Fixture, pub postgres.CardPub
 			if _, err := tx.Exec(ctx, `INSERT INTO gaps (workspace_id, card_id, ordinal, code, disposition, count,
 				text) VALUES ($1, $2, $3, $4, $5, $6, $7)`, pub.WorkspaceID, card, i, g.Code, g.Disposition, g.Count,
 				g.Text); err != nil {
+				return err
+			}
+		}
+		for i, l := range pub.Lines {
+			if _, err := tx.Exec(ctx, `INSERT INTO card_lines (workspace_id, card_id, ordinal, section, body)
+				VALUES ($1, $2, $3, $4, $5)`, pub.WorkspaceID, card, i, l.Section, l.Body); err != nil {
 				return err
 			}
 		}
@@ -239,8 +246,8 @@ func TestACardHoldsExactlyTheRowsItCounts(t *testing.T) {
 			var card string
 			if err := tx.QueryRow(ctx, `
 				INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version, card_bytes,
-					card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
-				VALUES ($1, $2, $3, 'go', 3, '3', $4, sha256($4), $5, $5, 3, 1, $6) RETURNING id`,
+					card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count, line_count)
+				VALUES ($1, $2, $3, 'go', 3, '3', $4, sha256($4), $5, $5, 3, 1, $6, 0) RETURNING id`,
 				pub.WorkspaceID, pub.AccountRef, pub.BriefID, pub.Bytes, pub.SealReceiptID,
 				len(payload.ReadIDs)).Scan(&card); err != nil {
 				return err

@@ -39,6 +39,43 @@ system.
 
 The routes are described in an OpenAPI file served with the API.
 
+## A card on the Go server today
+
+Until deals exist, the Go server serves cards by card ID. Each route needs a signed-in person with a
+grant on the card's account. Anyone else gets `403 not_permitted`, whether the card exists or not.
+
+| Route | What it returns |
+| --- | --- |
+| `GET /api/v1/cards/{card}` | The card as JSON: its head, `as_of`, `sources`, `units`, `gaps` and `lines` |
+| `GET /api/v1/cards/{card}/text` | The text card whole, as `text/plain` |
+| `GET /api/v1/cards/{card}/bytes` | The sealed bytes exactly, so a client can hash them again |
+| `GET /api/v1/cards/{card}/units/{n}` | One unit and the receipt of the read that returned it |
+
+Each of `lines` is one line under ATTENTION or RECORD VALUES, as data, so a page, an alert or a
+script reads a value without reading the text. The renewal date line of the README's card:
+
+```json
+{"amount":null,"cites":[1],"code":"renewal_date","contact":null,
+ "countdown":{"counts_to":"renewal","date":"2027-02-08","days":24},
+ "label":"Renewal date","more":0,"section":"value","text":"2027-02-08, in 24 days"}
+```
+
+| Field | What it holds |
+| --- | --- |
+| `section` | `signal` for a line under ATTENTION, `value` for one under RECORD VALUES |
+| `code` | What the line states, such as `renewal_date`, `arr`, `contact`, `still_open` or `crm_at_risk` |
+| `label` | A value's label as the card prints it; null for a signal |
+| `text` | The value or the sentence, in the connector's words |
+| `cites` | The numbers of the units it cites |
+| `more` | How many more a signal counts than it cites, the card's "and N more"; 0 for none |
+| `countdown` | On the renewal date or contract end line: `date`, `days` from `as_of` (negative once it has passed), and `counts_to`, `renewal` or `contract_end` |
+| `amount` | On the annual recurring revenue line: `amount`, a decimal such as `"450000.00"`, and `currency`, null when the record has none |
+| `contact` | On a contact line: the contact's `name` and `title`, each null when the record's field is empty |
+
+Rendered in order, the lines are the text card's lines under those two headings, byte for byte. A
+card whose lines differ is not published. A card published before lines were kept answers
+`"lines": null`; publish it again to get them.
+
 ## Pushing your own data
 
 Push rows from another CRM, a spreadsheet, internal email, SMS or product usage. Each push carries
