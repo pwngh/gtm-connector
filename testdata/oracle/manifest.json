@@ -2,7 +2,7 @@
  "python_version": "3.14.6",
  "python_build": "3.14.6 (main, Jun 25 2026, 00:12:50) [Clang 14.0.3 (clang-1403.0.22.14.1)]",
  "unicode_version": "16.0.0",
- "package_sha256": "12a496d931618c7072e0921d371afd364a7114c4807445a5e347a57b44a6af1f",
+ "package_sha256": "39f32bf88d1f5d4b730421918f7afb2c13f9aaeaae33c4d1588d0550c619147a",
  "generator": "tools/oracle/generate.py",
  "files": {
   "cards/books_calls.jsonl.gz": {
@@ -197,12 +197,12 @@
    "records": 85
   },
   "library/urlsplit.json": {
-   "sha256": "4194264c38fc6bd58181685c333a608ab69aac3eba446b930025ac5c1ee65bfc",
-   "bytes": 109700,
-   "records": 414
+   "sha256": "9b879b2beca15420378f89d2d6bbfcc83583bedbea0c323fb66126437097f6a1",
+   "bytes": 113448,
+   "records": 428
   },
   "scanners/index.json": {
-   "sha256": "3b4980ad88b428c239e49a101b775dc7e4ddd30609411f4ec9e0446fb0d4d0a7",
+   "sha256": "e9d38742e31c244f2b7a3c9467d1099a9c90ade9a65f6ce2104439746eff9b13",
    "bytes": 1045,
    "records": 7
   },

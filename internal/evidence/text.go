@@ -50,6 +50,10 @@ func linkHost(target []rune) string {
 	}
 	url := target
 	if !strings.Contains(string(head), "//") {
+		// A browser reads https:files.example as https://files.example, and urlsplit would give https as the host.
+		if startsWithScheme(target) {
+			return "unknown host"
+		}
 		url = append([]rune("//"), target...)
 	}
 	if ambiguousAuthority(url) {
@@ -71,6 +75,22 @@ func linkHost(target []rune) string {
 		}
 	}
 	return string(host)
+}
+
+// startsWithScheme is _SCHEME.match(target): a name and a colon at the start of a target. A www. address is a
+// host, and a colon in it starts a port.
+func startsWithScheme(target []rune) bool {
+	if len(target) == 0 || !asciiLetter(target[0]) {
+		return false
+	}
+	if len(target) > 3 && in(target[0], "Ww") && in(target[1], "Ww") && in(target[2], "Ww") && target[3] == '.' {
+		return false
+	}
+	i := 1
+	for i < len(target) && (asciiLetter(target[i]) || asciiDigit(target[i]) || in(target[i], "+.-")) {
+		i++
+	}
+	return i < len(target) && target[i] == ':'
 }
 
 // ambiguousAuthority is whether a link holds a backslash or a control character between its start and the

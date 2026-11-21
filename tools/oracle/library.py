@@ -37,7 +37,12 @@ HOSTS = (
     "http://user\x00@good.example/", "ht\ttp://good.example/", "\x01http://good.example/",
     "http://good\x7f.example/", "http://\x9f@good.example/", "http:/\t/evil.example\\@good.example/x//",
     "http://good.example/a\\b", "http://good.example/a\tb", "http://good.example?a\\@b",
-    "http://good.example#a\\@b", "http://user@good.example:8443/x")
+    "http://good.example#a\\@b", "http://user@good.example:8443/x",
+    # A scheme with no // after it gives no host. A www. address and a // address keep the host before a port.
+    "https:good.example/x", "https:/good.example", "HTTP:8080", "tel:5551234", "good.example:8443/x",
+    "user:pass@good.example", "a" * 40 + "://good.example/", "https:good.example" + "/a" * 20 + "//x",
+    "www.good.example:8443/x", "WWW.good.example:8443", "wwww.example:8443", "//good.example:8443/x",
+    "good.example/a:b", "1.example:8443")
 JSON_VALUES: tuple[Any, ...] = (
     "", "plain", 'quote " and backslash \\ and slash /', "\x00\x01\x1f\x7f\x80\x9f", "\t\n\r\x0b\x0c\x08",
     "\u2028\u2029\u0085", "\u00e9\u00df\u4e2d\U0001f642", "\ufeff\u200b\u202e", "</script>&<>'", "\ud83d\ude00",

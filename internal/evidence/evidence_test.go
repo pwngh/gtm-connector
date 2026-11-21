@@ -396,6 +396,35 @@ func TestAmbiguousLinkHost(t *testing.T) {
 	}
 }
 
+// A link with no // after its scheme shows no host. The cases are those of
+// test_a_link_with_no_slashes_after_its_scheme_shows_no_host in tests/test_units.py.
+func TestLinkHostWithNoSlashesAfterScheme(t *testing.T) {
+	for _, c := range [][2]string{
+		// A browser reads https:files.example as https://files.example. Read as a host, it would be https.
+		{"<https:files.example/x|deck>", "deck [link unknown host]"},
+		{"<https:/files.example|deck>", "deck [link unknown host]"},
+		{"<HTTP:8080|deck>", "deck [link unknown host]"},
+		{"<tel:5551234|deck>", "deck [link unknown host]"},
+		{"<javascript:alert(1)|deck>", "deck [link unknown host]"},
+		// A name before a colon is a scheme to a browser, whatever follows the colon.
+		{"<files.example:8443/x|deck>", "deck [link unknown host]"},
+		// A scheme too long for its // to be found is not read as a host either.
+		{"[deck](" + strings.Repeat("a", 40) + "://files.example/)", "deck [link unknown host]"},
+		// A www. address, a // address and a link with its // keep the host before a port or a colon.
+		{"<files.example/x|deck>", "deck [link files.example]"},
+		{"www.files.example:8443/x now", "[link files.example] now"},
+		{"<WWW.files.example:8443|deck>", "deck [link files.example]"},
+		{"<//files.example:8443/x|deck>", "deck [link files.example]"},
+		{"<https://files.example/a:b|deck>", "deck [link files.example]"},
+		{"<mailto:a@files.example|deck>", "deck [link mail]"},
+	} {
+		text, counts, err := SafeText(c[0])
+		if err != nil || text != c[1] || counts != (Counts{Links: 1}) {
+			t.Errorf("SafeText(%q): got %q %+v %v, want %q", c[0], text, counts, err, c[1])
+		}
+	}
+}
+
 // Text that is not valid UTF-8 is refused, whether its bytes are malformed or encode a lone surrogate.
 func TestInvalidText(t *testing.T) {
 	for name, text := range map[string]string{

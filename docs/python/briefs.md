@@ -228,8 +228,8 @@ listed below with inert words.
 
 - A Slack mention becomes `[mention channel]`, `[user U123]`, or `[channel C123]`.
 - A link of any scheme, a `//host` address, or a `www.` address becomes its label and `[link host]`.
-  A link with a backslash or a control character before its path or query becomes `[link unknown host]`,
-  because a browser may open a different host than the one written.
+  A link with a backslash or a control character before its path or query, or with no `//` after its
+  scheme, becomes `[link unknown host]`, because a browser may open a different host than the one written.
 - A control, direction-changing, or invisible format character becomes `[U+202E]`.
 - A bracketed number such as `[3]` becomes `(3)`, because a card cites its units that way.
 

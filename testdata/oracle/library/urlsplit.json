@@ -660,7 +660,7 @@
    "port": {
     "ok": null
    },
-   "host": "http"
+   "host": "unknown host"
   },
   {
    "input": "http:/x.example",
@@ -679,7 +679,7 @@
    "port": {
     "ok": null
    },
-   "host": "http"
+   "host": "unknown host"
   },
   {
    "input": "http:///x",
@@ -1040,7 +1040,7 @@
    "port": {
     "ok": null
    },
-   "host": "javascript"
+   "host": "unknown host"
   },
   {
    "input": "data:text/html,x",
@@ -1059,7 +1059,7 @@
    "port": {
     "ok": null
    },
-   "host": "data"
+   "host": "unknown host"
   },
   {
    "input": "http://1.2.3.4/",
@@ -1633,6 +1633,272 @@
    "host": "good.example"
   },
   {
+   "input": "https:good.example/x",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "",
+     "good.example/x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "https"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "https:/good.example",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "",
+     "/good.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "https"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "HTTP:8080",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "",
+     "8080",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "http"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "tel:5551234",
+   "urlsplit": {
+    "ok": [
+     "tel",
+     "",
+     "5551234",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "tel"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "good.example:8443/x",
+   "urlsplit": {
+    "ok": [
+     "good.example",
+     "",
+     "8443/x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "user:pass@good.example",
+   "urlsplit": {
+    "ok": [
+     "user",
+     "",
+     "pass@good.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://good.example/",
+   "urlsplit": {
+    "ok": [
+     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "good.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "https:good.example/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a//x",
+   "urlsplit": {
+    "ok": [
+     "https",
+     "",
+     "good.example/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a/a//x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "https"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "www.good.example:8443/x",
+   "urlsplit": {
+    "ok": [
+     "www.good.example",
+     "",
+     "8443/x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "www.good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "WWW.good.example:8443",
+   "urlsplit": {
+    "ok": [
+     "www.good.example",
+     "",
+     "8443",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "www.good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "wwww.example:8443",
+   "urlsplit": {
+    "ok": [
+     "wwww.example",
+     "",
+     "8443",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "wwww.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "//good.example:8443/x",
+   "urlsplit": {
+    "ok": [
+     "",
+     "good.example:8443",
+     "/x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": 8443
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "good.example/a:b",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "good.example/a:b",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "1.example:8443",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "1.example:8443",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "1.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "1.example"
+  },
+  {
    "input": "<https://a.example/x|label>",
    "urlsplit": {
     "ok": [
@@ -1953,7 +2219,7 @@
    "port": {
     "ok": null
    },
-   "host": "kind"
+   "host": "unknown host"
   },
   {
    "input": "Language: en-US",
@@ -1972,7 +2238,7 @@
    "port": {
     "ok": null
    },
-   "host": "language"
+   "host": "unknown host"
   },
   {
    "input": "X-TIMESTAMP-MAP=MPEGTS:900000,LOCAL:00:00:00.000",
@@ -2029,7 +2295,7 @@
    "port": {
     "ok": null
    },
-   "host": "kind"
+   "host": "unknown host"
   },
   {
    "input": "Dana: this was said.",
@@ -2048,7 +2314,7 @@
    "port": {
     "ok": null
    },
-   "host": "dana"
+   "host": "unknown host"
   },
   {
    "input": "00:00:00.000 --> 00:00:01.000 align:start",
@@ -2371,7 +2637,7 @@
    "port": {
     "ok": null
    },
-   "host": "seats"
+   "host": "unknown host"
   },
   {
    "input": "- Signal: renewal is in 1 day.",

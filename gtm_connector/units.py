@@ -125,6 +125,8 @@ _IS_TARGET = re.compile(_TARGET, re.IGNORECASE)
 # A browser reads a backslash before a link's path as a slash and drops a tab or a line break, so urlsplit and a
 # browser can name different hosts. A link with a backslash or a control character there is shown with no host.
 _AMBIGUOUS = re.compile(r"[\x00-\x1f\x7f-\x9f\\]")
+# A scheme at the start of a target: a name and a colon. A www. address is a host, and a colon in it starts a port.
+_SCHEME = re.compile(r"(?![Ww]{3}\.)[A-Za-z][A-Za-z0-9+.-]*:")
 # The longest speaker label a card shows. A longer one is no label.
 MAX_LABEL = 200
 # A time in this form is shown as given. Any other time is source text and is shown as a neutralized literal.
@@ -153,6 +155,9 @@ def _host(target):
     if target.lower().startswith("mailto:"):
         return "mail"
     link = target if "//" in target[:40] else "//" + target
+    # A browser reads https:files.example as https://files.example, and urlsplit would give https as the host.
+    if link != target and _SCHEME.match(target):
+        return "unknown host"
     # The scheme and the authority: what comes before the first //, and after it up to the next /, ? or #.
     scheme, _, rest = link.partition("//")
     if _AMBIGUOUS.search(scheme + re.split("[/?#]", rest, maxsplit=1)[0]):
