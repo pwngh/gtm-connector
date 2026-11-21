@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/url"
 	"os"
@@ -15,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
@@ -27,8 +30,10 @@ import (
 )
 
 // debug slack: connect, status and disconnect work on the workspace's saved
-// sign-in and need no database; map saves the thread of one account after an audited CRM read; check reads
-// that thread through read_slack_messages under a receipt and reports its steps in counts, never in text.
+// sign-in, and each request they make to Slack runs under a receipt of its step in the workspace; status
+// without --check and disconnect without --revoke make none and need no database. map saves the thread of one
+// account after an audited CRM read; check reads that thread through read_slack_messages under a receipt
+// and reports its steps in counts, never in text.
 
 // slackActions are debug slack's actions, each with its options and help.
 var slackActions = map[string]arguments{
@@ -64,6 +69,54 @@ func systemBrowser(_ context.Context, page string) error {
 	}
 	go func() { _ = opener.Wait() }()
 	return nil
+}
+
+// askTerminal asks a question at the terminal that runs the command and gives the line typed in answer.
+// It reads /dev/tty, not standard input, so the answer comes from the person at that terminal and never from
+// a pipe or a file. Tests set their own.
+var askTerminal = func(ctx context.Context, question string) (string, error) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return "", err
+	}
+	var closing sync.Once
+	stop := func() { closing.Do(func() { _ = tty.Close() }) }
+	defer stop()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			stop()
+		case <-done:
+		}
+	}()
+	if _, err := io.WriteString(tty, question); err != nil {
+		return "", err
+	}
+	line, err := bufio.NewReader(io.LimitReader(tty, 256)).ReadString('\n')
+	if err != nil && ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	return strings.TrimSpace(line), nil
+}
+
+// confirmSignIn asks the operator, at the command's terminal, whether the Slack user and workspace a new
+// approval came from are their own. Only "yes" saves the sign-in. The question names Slack's own IDs and the
+// workspace origin Slack stated, which the operator compares with the account they approved with.
+func (r *run) confirmSignIn(ctx context.Context, identity slack.Identity, workspace string) (bool, error) {
+	where := workspace
+	if where == "" {
+		where = "a workspace whose address Slack did not state"
+	}
+	enterprise := ""
+	if identity.EnterpriseID != "" {
+		enterprise = ", organization " + identity.EnterpriseID
+	}
+	answer, err := askTerminal(ctx, fmt.Sprintf("Slack approved user %s in team %s%s (%s) for app %s.\n"+
+		"Save this sign-in for workspace %s? Type yes to save it: ", identity.UserID, identity.TeamID, enterprise,
+		where, identity.AppID, workspaceSlug(r.name)))
+	return err == nil && answer == "yes", err
 }
 
 // browserEnvironment is what the opener is given of the connector's environment: only what a desktop needs
@@ -269,12 +322,26 @@ func (r *run) slackSignIn(ctx context.Context) (*strictjson.Object, error) {
 				}
 			}
 		}
+		reader.Audit = r.signInSteps("slack:read", "live")
+		reader.Confirm = r.confirmSignIn
 		return reader.Connect(ctx, cfg, openBrowser, r.slackProgress)
 	case "status":
 		_, check := r.args.text("--check")
+		if check {
+			if err := r.open(ctx); err != nil {
+				return nil, err
+			}
+			reader.Audit = r.signInSteps("slack:read", "live")
+		}
 		return reader.Status(ctx, check, r.slackProgress)
 	}
 	_, revoke := r.args.text("--revoke")
+	if revoke {
+		if err := r.open(ctx); err != nil {
+			return nil, err
+		}
+		reader.Audit = r.signInSteps("slack:read", "live")
+	}
 	return reader.Disconnect(ctx, revoke, r.slackProgress)
 }
 
@@ -910,8 +977,8 @@ var slackExits = map[string]int{
 	"slack_invalid_configuration": 2, "slack_connection_busy": 1, "slack_private_state_invalid": 3,
 	"slack_credentials_invalid": 4, "slack_not_connected": 3, "slack_reconnect_required": 3,
 	"slack_browser_unavailable": 1, "slack_callback_unavailable": 1, "slack_login_timeout": 1,
-	"slack_login_denied": 3, "slack_oauth_rejected": 3, "slack_scope_mismatch": 3, "slack_identity_mismatch": 3,
-	"slack_token_type_unsupported": 3, "slack_selection_invalid": 2, "slack_crm_configuration_invalid": 2,
+	"slack_login_denied": 3, "slack_login_unconfirmed": 3, "slack_oauth_rejected": 3, "slack_scope_mismatch": 3,
+	"slack_identity_mismatch": 3, "slack_token_type_unsupported": 3, "slack_selection_invalid": 2, "slack_crm_configuration_invalid": 2,
 	"slack_account_not_found": 2, "slack_account_ambiguous": 3, "slack_association_failed": 4,
 	"slack_association_invalid": 4, "slack_crm_unavailable": 5, "slack_mapping_missing": 3,
 	"slack_mapping_conflict": 3, "slack_source_mismatch": 3, "slack_identity_unchecked": 3,
@@ -939,6 +1006,8 @@ var slackAuthFailures = map[string]string{
 	"slack_callback_unavailable": "The registered localhost callback could not start. Free its port and retry.",
 	"slack_login_timeout":        "Browser approval did not finish within ten minutes. Repeat the connect command.",
 	"slack_login_denied":         "Slack authorization was declined. Retry only when you intend to approve the user scopes.",
+	"slack_login_unconfirmed": "The Slack approval was not confirmed at this terminal, and nothing was saved. " +
+		"Repeat the connect command, and type yes only for the Slack user you approved as.",
 	"slack_oauth_rejected": "Slack rejected authorization. Check the existing app's PKCE, registered redirect, " +
 		"and workspace approval settings.",
 	"slack_scope_mismatch": "The grant does not match the selected history scopes. " +

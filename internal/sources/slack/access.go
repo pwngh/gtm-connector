@@ -336,7 +336,7 @@ func storeError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case code(err) != "" || errors.Is(err, context.Canceled):
+	case code(err) != "" || errors.Is(err, context.Canceled) || errors.As(err, new(*AuditFailed)):
 		return err
 	}
 	return refuse("slack_storage_failed")
@@ -481,24 +481,30 @@ func (r *Reader) usable(ctx context.Context, b *budget, saved kept, document *Cr
 		// The caller has gone. The refresh token has not been sent, so the sign-in is left as it is.
 		return nil, err
 	}
-	if err := saved.save(quarantined); err != nil {
-		return nil, err
-	}
-	if _, err := b.remaining(); err != nil {
-		return nil, err
-	}
-	obtained := r.Clock.now()
-	granted, err := r.refresh(ctx, b, document)
+	// The refresh's receipt is committed before the sign-in is marked as needing a login, so a receipt
+	// store that refuses leaves the saved sign-in as it was, and the receipt finishes with what the answer
+	// gives once it is read.
+	var replacement Credentials
+	err := r.audited(ctx, "slack_sign_in_refresh", func(ctx context.Context) error {
+		if err := saved.save(quarantined); err != nil {
+			return err
+		}
+		if _, err := b.remaining(); err != nil {
+			return err
+		}
+		obtained := r.Clock.now()
+		granted, err := r.refresh(ctx, b, document)
+		if err != nil {
+			return err
+		}
+		if replacement, err = parseRefresh(granted, *document, obtained); err != nil {
+			return err
+		}
+		// The pair that was replaced stays among the tokens the read looks for, beside the new one.
+		b.hold(&replacement)
+		return saved.save(replacement)
+	})
 	if err != nil {
-		return nil, err
-	}
-	replacement, err := parseRefresh(granted, *document, obtained)
-	if err != nil {
-		return nil, err
-	}
-	// The pair that was replaced stays among the tokens the read looks for, beside the new one.
-	b.hold(&replacement)
-	if err := saved.save(replacement); err != nil {
 		return nil, err
 	}
 	return r.verify(ctx, b, saved, replacement)
@@ -507,8 +513,17 @@ func (r *Reader) usable(ctx context.Context, b *budget, saved kept, document *Cr
 // verify checks a token's identity with Slack and saves the sign-in as ready. An answer that shows the
 // token is for someone else, or is no longer accepted, saves the sign-in as needing a login.
 func (r *Reader) verify(ctx context.Context, b *budget, saved kept, candidate Credentials) (*Credentials, error) {
-	if _, err := b.remaining(); err != nil {
+	workspace, err := r.checked(ctx, b, saved, candidate)
+	if err != nil {
 		return nil, err
+	}
+	return r.ready(ctx, b, saved, candidate, workspace)
+}
+
+// checked is verify's check of the identity with Slack: the workspace origin Slack states.
+func (r *Reader) checked(ctx context.Context, b *budget, saved kept, candidate Credentials) (string, error) {
+	if _, err := b.remaining(); err != nil {
+		return "", err
 	}
 	workspace, err := r.identity(ctx, b, &candidate)
 	if err != nil {
@@ -520,14 +535,19 @@ func (r *Reader) verify(ctx context.Context, b *budget, saved kept, candidate Cr
 			quarantined := candidate.copy()
 			quarantined.State = pending
 			if err := saved.save(quarantined); err != nil {
-				return nil, err
+				return "", err
 			}
 		}
-		return nil, err
+		return "", err
 	}
 	if _, err := b.remaining(); err != nil {
-		return nil, err
+		return "", err
 	}
+	return workspace, nil
+}
+
+// ready is verify's save: the checked sign-in as ready, with the workspace origin Slack stated.
+func (r *Reader) ready(ctx context.Context, b *budget, saved kept, candidate Credentials, workspace string) (*Credentials, error) {
 	now := r.Clock.now()
 	if now.Before(candidate.AccessObtainedAt) ||
 		(!candidate.AccessExpiresAt.IsZero() && !now.Before(candidate.AccessExpiresAt)) {
@@ -655,6 +675,16 @@ func noBot(document *strictjson.Object) error {
 // origin Slack states, or "" when that is not a slack.com root. The origin is lowered from what Slack
 // stated, so it is searched for tokens once more as it will be saved.
 func (r *Reader) identity(ctx context.Context, b *budget, candidate *Credentials) (string, error) {
+	var workspace string
+	err := r.audited(ctx, "slack_sign_in_identity", func(ctx context.Context) error {
+		var err error
+		workspace, err = r.identityRequest(ctx, b, candidate)
+		return err
+	})
+	return workspace, err
+}
+
+func (r *Reader) identityRequest(ctx context.Context, b *budget, candidate *Credentials) (string, error) {
 	document, err := r.authRequest(ctx, b, &b.tokens, func(ctx context.Context) (*http.Request, error) {
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, identityURL, nil)
 		if err != nil {

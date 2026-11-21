@@ -175,7 +175,7 @@ func TestAnInterruptedRestoreResumes(t *testing.T) {
 	url := freshURL(t, fresh)
 	cfg := config{ownerDatabaseURL: url, databaseURL: url, credentialsDir: target,
 		allowedHosts: []string{"127.0.0.1:8443"}}
-	if err := setUp(ctx, cfg); err == nil || !strings.Contains(err.Error(), "restore") {
+	if _, err := setUp(ctx, cfg); err == nil || !strings.Contains(err.Error(), "restore") {
 		t.Fatalf("setup ran during a restore: %v", err)
 	}
 	// Another backup cannot slip in either.
@@ -229,24 +229,24 @@ func TestCredentialsStayAttachedToTheVerifiedFiles(t *testing.T) {
 	}
 	// A hard link is refused, wherever its other name is.
 	other := filepath.Join(filepath.Dir(dir), "copy-of-secret")
-	if err := os.Link(filepath.Join(dir, ownerSecretFile), other); err != nil {
+	if err := os.Link(filepath.Join(dir, sessionKeyFile), other); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := creds.read(ownerSecretFile); err == nil || !strings.Contains(err.Error(), "hard link") {
+	if _, err := creds.read(sessionKeyFile); err == nil || !strings.Contains(err.Error(), "hard link") {
 		t.Fatalf("a hard-linked secret was read: %v", err)
 	}
 	os.Remove(other)
 	// Swapping the folder's path for a link after opening changes nothing.
 	moved := dir + "-moved"
 	decoy := privateDir(t)
-	os.WriteFile(filepath.Join(decoy, ownerSecretFile), []byte("decoy"), 0o600)
+	os.WriteFile(filepath.Join(decoy, sessionKeyFile), []byte("decoy"), 0o600)
 	if err := os.Rename(dir, moved); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(decoy, dir); err != nil {
 		t.Fatal(err)
 	}
-	secret, err := creds.read(ownerSecretFile)
+	secret, err := creds.read(sessionKeyFile)
 	if err != nil || string(secret) == "decoy" {
 		t.Fatalf("read through the swapped path: %q %v", secret, err)
 	}

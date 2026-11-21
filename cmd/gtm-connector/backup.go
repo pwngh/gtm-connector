@@ -472,7 +472,11 @@ func exactEntries(m manifest) error {
 	for i, name := range credentialFiles {
 		want[i] = "credentials/" + name
 	}
-	if !slices.Equal(tables, postgres.BackupTableNames(m.SchemaVersion)) || !slices.Equal(files, want) {
+	// A backup of an earlier setup lists the unused owner secret first. Its digest is checked as it is
+	// unpacked, and it is not installed.
+	earlier := append([]string{"credentials/" + unusedSecretFile}, want...)
+	if !slices.Equal(tables, postgres.BackupTableNames(m.SchemaVersion)) ||
+		!slices.Equal(files, want) && !slices.Equal(files, earlier) {
 		return errors.New("the manifest does not list exactly the expected tables and credentials")
 	}
 	return nil
@@ -497,7 +501,7 @@ func listed(m manifest, name string) (fileEntry, bool) {
 			continue
 		}
 		base := strings.TrimPrefix(strings.TrimPrefix(name, "credentials/"), "tables/")
-		if strings.HasPrefix(name, "credentials/") && slices.Contains(credentialFiles, base) ||
+		if strings.HasPrefix(name, "credentials/") && (slices.Contains(credentialFiles, base) || base == unusedSecretFile) ||
 			strings.HasPrefix(name, "tables/") && !strings.ContainsAny(strings.TrimSuffix(base, ".copy"), "/\\.") &&
 				strings.HasSuffix(base, ".copy") {
 			return entry, true

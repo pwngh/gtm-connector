@@ -630,8 +630,15 @@ gtm-connector brief ACCOUNT_ID --state-dir acme
 `debug slack connect` opens the browser at a one-time page of its own loopback callback, which leads
 on to Slack. Slack's address with its sign-in values never reaches a process argument, and the
 browser is started with only what a desktop needs of the environment. The command waits up to ten
-minutes for approval, exchanges the code with PKCE, checks the identity the token is for, and saves
-the sign-in.
+minutes for approval, exchanges the code with PKCE, and checks the identity the token is for. It then
+prints the Slack user, team and workspace the approval came from and asks, at the terminal that runs
+the command, whether to save the sign-in. Only `yes` typed there saves it. Any other answer, or no
+terminal, refuses with `slack_login_unconfirmed` and saves nothing. The one-time page can be opened by
+any program that reads the opener's argument first, and that program could approve as its own Slack
+user. The question is what keeps such an approval from being saved.
+
+Each request the sign-in commands make to Slack runs under a receipt of its step, committed first, in
+the workspace the command names.
 
 The Slack app needs:
 
@@ -796,6 +803,7 @@ A reason sets the exit code of a command, and is a step `code` in `debug slack c
 | `slack_callback_unavailable` | 1 | Free the registered localhost port. |
 | `slack_login_timeout` | 1 | Retry and approve within ten minutes. |
 | `slack_login_denied` | 3 | Retry only if you intend to approve. |
+| `slack_login_unconfirmed` | 3 | The approval was not confirmed at the terminal, and nothing was saved. Retry, and type `yes` only for your own Slack user. |
 | `slack_oauth_rejected` | 3 | Check the app's PKCE setting, redirect and workspace approval. |
 | `slack_scope_mismatch` | 3 | Use a grant with exactly the selected scopes. |
 | `slack_identity_mismatch` | 3 | Restore the original identity, or use another workspace. |

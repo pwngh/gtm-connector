@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -83,7 +84,8 @@ func startServe(t *testing.T, d *demoDatabase, selection cards.Selection) *serve
 		t.Fatal(err)
 	}
 	address := listener.Addr().String()
-	surface, err := newSurface(ctx, store, config{publicOrigin: "https://" + address, allowedHosts: []string{address}}, key, selection)
+	surface, err := newSurface(ctx, store, config{publicOrigin: "https://" + address, allowedHosts: []string{address}}, key,
+		selection, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,12 +382,12 @@ func TestMCPStartupErrorsAreFixedLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(store.Close)
-	_, err = mcpGateway(ctx, store, "https://127.0.0.1:8443", nil)
+	_, err = mcpGateway(ctx, store, "https://127.0.0.1:8443", nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil || err.Error() != "the MCP endpoint could not be set up: PostgreSQL error 42501" {
 		t.Fatalf("a role that may not write: %v", err)
 	}
 	_, err = newSurface(ctx, store, config{publicOrigin: "https://127.0.0.1:8443", allowedHosts: []string{"127.0.0.1:8443"}},
-		bytes.Repeat([]byte("k"), 32), nil)
+		bytes.Repeat([]byte("k"), 32), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	for _, leaked := range []string{"permission denied", "connections", "workspaces", app.User.Username(), "SQLSTATE"} {
 		if err == nil || strings.Contains(err.Error(), leaked) {
 			t.Errorf("serve's own error holds %q: %v", leaked, err)
@@ -458,5 +460,54 @@ func TestServeFollowsWhatTheWorkspaceIsConnectedTo(t *testing.T) {
 	}
 	if status, _ := restarted.send(restarted.address, "tools/list", "", bearer, map[string]any{}); status != 200 {
 		t.Errorf("tools/list with no CRM: %d", status)
+	}
+}
+
+// When serve cannot read which workspace a bearer was issued in, no gate can keep the call's receipt, and none
+// is kept: this is the one refusal of a call with no receipt. The call is answered as a gate answers a call
+// whose receipt could not be committed, 503 audit_unavailable in JSON, and serve logs one fixed line that
+// holds no bearer and no text of PostgreSQL's.
+func TestABearerWhoseWorkspaceCannotBeReadIsRefusedInTheGatesWords(t *testing.T) {
+	d := setUpDemo(t)
+	role := d.appRole(t)
+	store, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	logs := &lockedBuffer{}
+	handler, err := mcpGateway(ctx, store, "https://127.0.0.1:8443", nil, slog.New(slog.NewTextHandler(logs, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn(t, d.ownerURL).Exec(ctx, "REVOKE SELECT ON machine_tokens FROM "+role); err != nil {
+		t.Fatal(err)
+	}
+	const bearer = "invented-bearer-whose-workspace-cannot-be-read"
+	request, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:8443/mcp", strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-003"}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+bearer)
+	request.Header.Set("Content-Type", "application/json")
+	answer := httptest.NewRecorder()
+	handler.ServeHTTP(answer, request)
+	if answer.Code != http.StatusServiceUnavailable || answer.Header().Get("Content-Type") != "application/json" ||
+		answer.Body.String() != `{"error":"audit_unavailable; call was not executed"}` {
+		t.Errorf("the answer: %d %s %s", answer.Code, answer.Header().Get("Content-Type"), answer.Body.String())
+	}
+	logged := logs.String()
+	if strings.Count(logged, "\n") != 1 || !strings.Contains(logged, `level=WARN msg="an MCP request was refused with `+
+		`no receipt: the workspace of its bearer could not be read" error="PostgreSQL error 42501"`) {
+		t.Errorf("the log:\n%s", logged)
+	}
+	for _, leaked := range []string{bearer, "permission denied", role} {
+		if strings.Contains(logged, leaked) || strings.Contains(answer.Body.String(), leaked) {
+			t.Errorf("the log or the answer holds %q", leaked)
+		}
+	}
+	if n := d.count(t, "SELECT count(*) FROM receipts"); n != 0 {
+		t.Errorf("%d receipts were kept", n)
 	}
 }

@@ -105,7 +105,7 @@ func TestRestoreReadsItsJSONStrictly(t *testing.T) {
 			`{"login":"demo-reviewer","password":"` + password + `","role":"owner"}`)},
 		"a login in another case": {"credentials/" + demoFile: []byte(
 			`{"Login":"demo-reviewer","password":"` + password + `"}`)},
-		"a secret larger than a credential": {"credentials/" + ownerSecretFile: bytes.Repeat([]byte("a"),
+		"a secret larger than a credential": {"credentials/" + sessionKeyFile: bytes.Repeat([]byte("a"),
 			maxCredentialBytes+1)},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -142,15 +142,15 @@ func TestCredentialsAreReadWithinTheirSize(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(ownerSecretFile, bytes.Repeat([]byte("a"), maxCredentialBytes))
-	if data, err := creds.read(ownerSecretFile); err != nil || len(data) != maxCredentialBytes {
+	write(sessionKeyFile, bytes.Repeat([]byte("a"), maxCredentialBytes))
+	if data, err := creds.read(sessionKeyFile); err != nil || len(data) != maxCredentialBytes {
 		t.Fatalf("a secret at the limit: %d bytes, %v", len(data), err)
 	}
-	write(ownerSecretFile, bytes.Repeat([]byte("a"), maxCredentialBytes+1))
-	if _, err := creds.read(ownerSecretFile); err == nil || !strings.Contains(err.Error(), "larger than a credential file") {
+	write(sessionKeyFile, bytes.Repeat([]byte("a"), maxCredentialBytes+1))
+	if _, err := creds.read(sessionKeyFile); err == nil || !strings.Contains(err.Error(), "larger than a credential file") {
 		t.Fatalf("a secret over the limit: %v", err)
 	}
-	write(ownerSecretFile, []byte(demo.Password))
+	write(sessionKeyFile, []byte(demo.Password))
 	for name, body := range map[string]string{
 		"a password named twice":   `{"login":"demo-reviewer","password":"` + demo.Password + `","password":"` + demo.Password + `"}`,
 		"a field it does not have": `{"login":"demo-reviewer","password":"` + demo.Password + `","role":"owner"}`,

@@ -311,6 +311,99 @@ func SafeText(raw string) (string, Counts, error) {
 	}
 }
 
+// QuoteText neutralizes source text a quotation is made from: SafeText, and each bare mail address, which a
+// GitHub Markdown client turns into a mail link, replaced as one in angle brackets is, by [link mail]. An
+// address whose domain starts with www. is replaced before SafeText, which would read the www. as a link of
+// its own and leave the address split around that marker. Then a ] right before a (, which a Markdown
+// client reads as a link and its destination, gets a space between, so no quotation is a link, whatever it
+// was written as or whatever a marker ends up beside. The steps run again until a round changes nothing. A
+// record value, such as a contact's email, is neutralized by SafeText alone: the connector writes it as a
+// value, never as a quotation.
+func QuoteText(raw string) (string, Counts, error) {
+	var counts Counts
+	text := raw
+	for {
+		early := string(bareMail([]rune(text), &counts, true))
+		safe, round, err := SafeText(early)
+		counts.Mentions += round.Mentions
+		counts.Links += round.Links
+		counts.Controls += round.Controls
+		counts.Brackets += round.Brackets
+		if err != nil {
+			return "", counts, err
+		}
+		quoted := string(apart(bareMail([]rune(safe), &counts, false)))
+		if quoted == safe && early == text {
+			return quoted, counts, nil
+		}
+		text = quoted
+	}
+}
+
+// apart puts a space between each ] and the ( right after it.
+func apart(s []rune) []rune {
+	out := make([]rune, 0, len(s))
+	for i, c := range s {
+		out = append(out, c)
+		if c == ']' && i+1 < len(s) && s[i+1] == '(' {
+			out = append(out, ' ')
+		}
+	}
+	return out
+}
+
+// bareMail replaces each bare mail address with [link mail], as a GitHub Markdown client finds one: a local
+// part of letters, digits and . + - _, an @, and a domain of letters, digits, - and _ with at least one dot
+// that a letter or digit follows. Dots that end the domain are left after the marker. An address the client
+// would pass over for the last letter of its domain is replaced too. With www, it replaces only an address
+// whose domain starts with www., and leaves one that SafeText reads whole: after a : or a /, as in mailto:
+// or a link's user. An address in angle brackets is replaced with its brackets.
+func bareMail(s []rune, counts *Counts, www bool) []rune {
+	local := func(c rune) bool { return asciiLetter(c) || asciiDigit(c) || in(c, ".+-_") }
+	out := make([]rune, 0, len(s))
+	last := 0 // where the last replacement ended: an address starts no earlier
+	for i := 0; i < len(s); i++ {
+		if s[i] != '@' {
+			out = append(out, s[i])
+			continue
+		}
+		start := i
+		for start > last && local(s[start-1]) {
+			start--
+		}
+		end, dotted := i+1, false
+		for end < len(s) && (asciiLetter(s[end]) || asciiDigit(s[end]) || in(s[end], "-_.")) {
+			if s[end] == '.' && end+1 < len(s) && (asciiLetter(s[end+1]) || asciiDigit(s[end+1])) {
+				dotted = true
+			}
+			end++
+		}
+		for end > i+1 && s[end-1] == '.' {
+			end--
+		}
+		skipped := start == i || !dotted
+		if www && !skipped {
+			before := rune(0)
+			if start > 0 {
+				before = s[start-1]
+			}
+			skipped = !literalFold(s, i+1, end, "www.") || before == ':' || before == '/'
+		}
+		if skipped {
+			out = append(out, s[i])
+			continue
+		}
+		if start > last && s[start-1] == '<' && end < len(s) && s[end] == '>' {
+			// In angle brackets, the brackets go with it, as SafeText replaces such a link whole.
+			start, end = start-1, end+1
+		}
+		counts.Links++
+		out = append(out[:len(out)-(i-start)], []rune("[link mail]")...)
+		i, last = end-1, end
+	}
+	return out
+}
+
 // neutralize is one round of SafeText (units._neutralize).
 func neutralize(raw []rune, counts *Counts) []rune {
 	plain := u.NFC(raw)

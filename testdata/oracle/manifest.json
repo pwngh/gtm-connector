@@ -56,12 +56,12 @@
    "records": 8
   },
   "cards/slack_threads.jsonl.gz": {
-   "sha256": "422def68298bb703ebf5b8d4e955d705d8563ab4b8d45f583fc2a07df9c1e58b",
-   "bytes": 792040,
+   "sha256": "9edeaf498ecd731f7ca6b06d90f8357a70511d9115f5579132a892d0b77b4e19",
+   "bytes": 792790,
    "records": 36
   },
   "cards/varied_demo.jsonl.gz": {
-   "sha256": "e60e7a6d3651d2423b93ee6244d3fda71b64173103f211a74dd2e05be9e0b909",
+   "sha256": "c1ba8ee977981be8044bef62b1374725fd898c129d3b67c11a4a4857891da677",
    "bytes": 2273430,
    "records": 46
   },
@@ -71,7 +71,7 @@
    "records": 33
   },
   "commands/session.jsonl": {
-   "sha256": "330b73ba7f17750c666fcbd5b083da14fc2faff8d4416cb8d0ae0e62fefd4d77",
+   "sha256": "ed5c1b67b6fde7ca396d8d31e66f2d677d8eae386092db0758f55cd2196c7fba",
    "bytes": 123719,
    "records": 33
   },

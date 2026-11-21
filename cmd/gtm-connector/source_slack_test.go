@@ -11,9 +11,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,6 +73,9 @@ type inventedSlack struct {
 	channel   string
 	threadTS  string
 	page      int
+	// before, when set, is called as each request arrives, before it is answered.
+	before  func(path string)
+	noGrant bool // the code exchange answers ok with no authed_user
 }
 
 func newInventedSlack(t *testing.T) *inventedSlack {
@@ -94,6 +99,9 @@ func (s *inventedSlack) RoundTrip(request *http.Request) (*http.Response, error)
 		return nil, errors.New("not Slack")
 	}
 	s.paths = append(s.paths, request.URL.Path)
+	if s.before != nil {
+		s.before(request.URL.Path)
+	}
 	bearer := strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")
 	switch request.URL.Path {
 	case "/api/oauth.v2.access":
@@ -129,6 +137,8 @@ func (s *inventedSlack) RoundTrip(request *http.Request) (*http.Response, error)
 		if form.Get("grant_type") == "refresh_token" {
 			body = user
 			body["ok"] = true
+		} else if s.noGrant {
+			delete(body, "authed_user")
 		}
 		encoded, _ := json.Marshal(body)
 		return s.answer(request, 200, string(encoded)), nil
@@ -450,14 +460,44 @@ func useBrowser(t *testing.T, s *inventedSlack, refusal string, strays ...string
 	previous := openBrowser
 	openBrowser = b.open
 	t.Cleanup(func() { openBrowser = previous })
+	answerTerminal(t, "yes")
 	return b
+}
+
+// answerTerminal answers each question the command asks at its terminal with answer, and gives the
+// questions asked.
+func answerTerminal(t *testing.T, answer string) *[]string {
+	var asked []string
+	previous := askTerminal
+	askTerminal = func(_ context.Context, question string) (string, error) {
+		asked = append(asked, question)
+		return answer, nil
+	}
+	t.Cleanup(func() { askTerminal = previous })
+	return &asked
 }
 
 // noRedirects is a client that shows a redirect rather than following it.
 var noRedirects = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
-// visit asks for a page with the given headers, and gives the status, the Location and the body.
+// browserClient is a browser's own client: it keeps cookies in a jar, which sends each only to the paths it
+// was set for, and shows a redirect rather than following it.
+func browserClient(t *testing.T) *http.Client {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Client{Jar: jar, CheckRedirect: noRedirects.CheckRedirect}
+}
+
+// visit asks for a page with the given headers, with no cookie jar, and gives the status, the Location and
+// the body.
 func visit(target string, header map[string]string) (int, string, string) {
+	return visitWith(noRedirects, target, header)
+}
+
+// visitWith is visit through a client of its own.
+func visitWith(client *http.Client, target string, header map[string]string) (int, string, string) {
 	request, err := http.NewRequest(http.MethodGet, target, nil)
 	if err != nil {
 		return 0, "", err.Error()
@@ -465,7 +505,7 @@ func visit(target string, header map[string]string) (int, string, string) {
 	for name, value := range header {
 		request.Header.Set(name, value)
 	}
-	response, err := noRedirects.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		return 0, "", err.Error()
 	}
@@ -474,14 +514,39 @@ func visit(target string, header map[string]string) (int, string, string) {
 	return response.StatusCode, response.Header.Get("Location"), string(body)
 }
 
-// follow opens the sign-in's start page as a browser does: it must redirect once to Slack's authorization
-// page for the invented app, with a PKCE challenge the invented Slack then expects, and then be gone. It
-// gives the page's state.
-func (s *inventedSlack) follow(t *testing.T, start string) string {
+// follow opens the sign-in's start page through a browser's client: it must redirect once to Slack's
+// authorization page for the invented app, with a PKCE challenge the invented Slack then expects, set the
+// cookie, named for the sign-in, that binds the callback to this browser and that the jar keeps for the
+// callback's path only, and then be gone. It gives the page's state.
+func (s *inventedSlack) follow(t *testing.T, client *http.Client, start string) (state string) {
 	if !strings.HasPrefix(start, strings.TrimSuffix(s.redirect, "/slack/callback")+"/start/") {
 		t.Errorf("the browser was sent to %q", start)
 	}
-	status, page, _ := visit(start, nil)
+	request, err := http.NewRequest(http.MethodGet, start, nil)
+	if err != nil {
+		t.Errorf("the start page %v", err)
+		return ""
+	}
+	request.Header.Set("Sec-Fetch-Site", "none")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Errorf("the start page %v", err)
+		return ""
+	}
+	response.Body.Close()
+	status, page := response.StatusCode, response.Header.Get("Location")
+	callback, _ := url.Parse(s.redirect)
+	set := response.Cookies()
+	if len(set) != 1 || !strings.HasPrefix(set[0].Name, "gtm_slack_sign_in_"+callback.Port()+"_") ||
+		set[0].Path != "/slack/callback" || !set[0].HttpOnly || set[0].SameSite != http.SameSiteLaxMode ||
+		set[0].MaxAge <= 0 || len(set[0].Value) < 43 {
+		t.Errorf("the start page set %d cookies", len(set))
+		return ""
+	}
+	startURL, _ := url.Parse(start)
+	if kept := client.Jar.Cookies(callback); len(kept) != 1 || kept[0].Name != set[0].Name || len(client.Jar.Cookies(startURL)) != 0 {
+		t.Errorf("the jar keeps %d cookies for the callback and %d for the start page", len(kept), len(client.Jar.Cookies(startURL)))
+	}
 	parsed, err := url.Parse(page)
 	if status != 302 || err != nil {
 		t.Errorf("the start page answered %d", status)
@@ -495,7 +560,7 @@ func (s *inventedSlack) follow(t *testing.T, start string) string {
 		len(query.Get("state")) < 32 || strings.Contains(page, "code_verifier") {
 		t.Errorf("the authorization page %s", parsed.Path)
 	}
-	if again, _, _ := visit(start, nil); again != 404 {
+	if again, _, _ := visitWith(client, start, nil); again != 404 {
 		t.Errorf("the start page answered %d a second time", again)
 	}
 	s.mu.Lock()
@@ -505,10 +570,11 @@ func (s *inventedSlack) follow(t *testing.T, start string) string {
 }
 
 func (b *browser) open(_ context.Context, start string) error {
+	client := browserClient(b.t)
 	go func() {
-		state := b.slack.follow(b.t, start)
+		state := b.slack.follow(b.t, client, start)
 		get := func(target string) string {
-			status, _, body := visit(b.slack.redirect+target, nil)
+			status, _, body := visitWith(client, b.slack.redirect+target, nil)
 			return fmt.Sprintf("%d %s", status, body)
 		}
 		for _, stray := range b.strays {
@@ -894,8 +960,8 @@ func TestSlackCommandsRefuse(t *testing.T) {
 
 // The system browser is started, not waited on, with the start page alone and an environment that holds
 // none of the connector's settings. An opener that stays running, as xdg-open can, holds up nothing: the
-// approval is taken while it runs. The start page leads to Slack once; a callback from another site's page
-// is answered and ignored.
+// approval is taken while it runs. The start page leads to Slack once; a callback from another site's page,
+// and one without the cookie the start page set, is answered and ignored.
 func TestTheSystemBrowserIsGivenOnlyTheStartPage(t *testing.T) {
 	d, folder, _ := slackSetup(t)
 	api := newInventedSlack(t)
@@ -903,6 +969,7 @@ func TestTheSystemBrowserIsGivenOnlyTheStartPage(t *testing.T) {
 	previous := openBrowser
 	openBrowser = systemBrowser
 	t.Cleanup(func() { openBrowser = previous })
+	answerTerminal(t, "yes")
 	// An opener that notes what it was given and then stays running.
 	bin := t.TempDir()
 	given, environment := filepath.Join(bin, "given"), filepath.Join(bin, "environment")
@@ -927,11 +994,13 @@ func TestTheSystemBrowserIsGivenOnlyTheStartPage(t *testing.T) {
 			}
 			time.Sleep(25 * time.Millisecond)
 		}
-		state := api.follow(t, string(start))
-		elsewhere, _, _ := visit(api.redirect+"?code="+inventedCode+"&state="+url.QueryEscape(state),
+		client := browserClient(t)
+		state := api.follow(t, client, string(start))
+		elsewhere, _, _ := visitWith(client, api.redirect+"?code="+inventedCode+"&state="+url.QueryEscape(state),
 			map[string]string{"Origin": "https://invented-elsewhere.example"})
-		approved, _, body := visit(api.redirect+"?code="+inventedCode+"&state="+url.QueryEscape(state), nil)
-		answers <- fmt.Sprintf("%d %d %s", elsewhere, approved, body)
+		unbound, _, _ := visit(api.redirect+"?code="+inventedCode+"&state="+url.QueryEscape(state), nil)
+		approved, _, body := visitWith(client, api.redirect+"?code="+inventedCode+"&state="+url.QueryEscape(state), nil)
+		answers <- fmt.Sprintf("%d %d %d %s", elsewhere, unbound, approved, body)
 	}()
 	began := time.Now()
 	code, stdout, stderr := d.line(t, "debug", "slack", "connect", "--client-id", inventedClient, "--redirect-uri",
@@ -939,7 +1008,7 @@ func TestTheSystemBrowserIsGivenOnlyTheStartPage(t *testing.T) {
 	if code != 0 || time.Since(began) > 8*time.Second || !strings.Contains(stdout, `"credential_state": "ready"`) {
 		t.Fatalf("connect with an opener that stays running: exit %d after %v\n%s%s", code, time.Since(began), stdout, stderr)
 	}
-	if answer := <-answers; !strings.HasPrefix(answer, "400 200 ") {
+	if answer := <-answers; !strings.HasPrefix(answer, "400 400 200 ") {
 		t.Errorf("the callbacks were answered %s", answer)
 	}
 	if _, err := os.Lstat(filepath.Join(folder, "slack-acme.json")); err != nil {
@@ -1036,5 +1105,169 @@ func TestAMappingIsNotSavedAfterSlackIsDetached(t *testing.T) {
 	}
 	if saved, err := d.owner.SlackMappingOf(ctx, workspace.ID, card.account); saved != "" || err != nil {
 		t.Errorf("the mapping was saved: %v", err)
+	}
+}
+
+// Each request the Slack sign-in commands make runs under a receipt of its step in the workspace the command
+// names, committed before the request, as a second connection to the database sees it: connect's code
+// exchange and identity check, status --check's refresh and identity check, and disconnect --revoke's
+// revocation. A request whose answer is refused leaves its receipt finished as an error. status without
+// --check asks Slack nothing and keeps no receipt.
+func TestSlackSignInRequestsRunUnderReceipts(t *testing.T) {
+	d, _, wall := slackSetup(t)
+	api := newInventedSlack(t)
+	api.redirect, api.expiresIn = freeRedirect(t), 12*3600
+	owner := conn(t, d.ownerURL)
+	var pending []string
+	api.before = func(string) {
+		var tools []string
+		if err := owner.QueryRow(ctx, `SELECT coalesce(array_agg(r.tool ORDER BY r.started_at), '{}') FROM receipts r
+			JOIN workspaces w ON w.id = r.workspace_id WHERE w.slug = 'acme' AND r.status = 'pending'`).Scan(&tools); err != nil {
+			t.Error(err)
+		}
+		pending = append(pending, strings.Join(tools, ","))
+	}
+	where := []string{"--state-dir", "acme"}
+
+	b := useBrowser(t, api, "")
+	code, stdout, stderr := d.line(t, append([]string{"debug", "slack", "connect", "--client-id", inventedClient,
+		"--redirect-uri", api.redirect}, where...)...)
+	for range b.answers {
+	}
+	if code != 0 {
+		t.Fatalf("connect: exit %d\n%s%s", code, stdout, stderr)
+	}
+	if code, stdout, _ = d.line(t, append([]string{"debug", "slack", "status"}, where...)...); code != 0 {
+		t.Fatalf("status: exit %d\n%s", code, stdout)
+	}
+	// Past the access token's expiry, the check refreshes it once.
+	*wall = wall.Add(12 * time.Hour)
+	if code, stdout, _ = d.line(t, append([]string{"debug", "slack", "status", "--check"}, where...)...); code != 0 {
+		t.Fatalf("status --check: exit %d\n%s", code, stdout)
+	}
+	api.unrevoked = true
+	if code, stdout, _ = d.line(t, append([]string{"debug", "slack", "disconnect", "--revoke"}, where...)...); code != 5 {
+		t.Fatalf("disconnect --revoke, unconfirmed: exit %d\n%s", code, stdout)
+	}
+
+	steps := []string{"slack_sign_in_exchange", "slack_sign_in_identity", "slack_sign_in_refresh",
+		"slack_sign_in_identity", "slack_sign_in_revoke"}
+	if !slices.Equal(pending, steps) {
+		t.Errorf("the receipts pending as each request arrived: %q", pending)
+	}
+	if got := d.audited(t, "acme"); got != "slack_sign_in_exchange:ok:200: slack_sign_in_identity:ok:200: "+
+		"slack_sign_in_refresh:ok:200: slack_sign_in_identity:ok:200: slack_sign_in_revoke:error:200:request_failed" {
+		t.Errorf("the receipts: %s", got)
+	}
+	if n := d.count(t, `SELECT count(DISTINCT r.scope) + count(DISTINCT r.brief_id) FROM receipts r
+		JOIN workspaces w ON w.id = r.workspace_id WHERE w.slug = 'acme' AND r.scope = 'slack:read'
+		AND r.connection_id IS NULL`); n != 4 {
+		t.Errorf("the receipts are not each command's slack:read run of no connection: %d", n)
+	}
+}
+
+// A new approval is saved only once the person at the command's terminal says yes to the Slack user, team
+// and workspace it came from. Whoever loads the one-time start page first can finish the sign-in with an
+// approval of their own; any answer but yes saves nothing, though the exchange and the identity check keep
+// their receipts.
+func TestASignInIsSavedOnlyOnTheOperatorsYes(t *testing.T) {
+	d, folder, _ := slackSetup(t)
+	api := newInventedSlack(t)
+	api.redirect = freeRedirect(t)
+	where := []string{"--state-dir", "acme"}
+	connect := append([]string{"debug", "slack", "connect", "--client-id", inventedClient, "--redirect-uri", api.redirect}, where...)
+	for _, answer := range []string{"no", "", "YES", "yes please"} {
+		b := useBrowser(t, api, "")
+		asked := answerTerminal(t, answer)
+		message := slackRefused(t, d, 3, connect...)
+		var answers []string
+		for answer := range b.answers {
+			answers = append(answers, answer)
+		}
+		if !strings.HasPrefix(message, "slack_login_unconfirmed: ") || len(answers) != 1 ||
+			!strings.Contains(answers[0], "did not finish") {
+			t.Errorf("answered %q: %s, the browser was answered %q", answer, message, answers)
+		}
+		if _, err := os.Lstat(filepath.Join(folder, "slack-acme.json")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("answered %q, the sign-in was saved: %v", answer, err)
+		}
+		if len(*asked) != 1 || !strings.Contains((*asked)[0], "user "+inventedUser+" in team "+inventedTeam+
+			" ("+inventedOrigin+") for app "+inventedApp) || !strings.Contains((*asked)[0], "for workspace acme?") {
+			t.Errorf("the question asked: %q", *asked)
+		}
+	}
+	if got := d.audited(t, "acme"); got != strings.TrimSpace(strings.Repeat(
+		"slack_sign_in_exchange:ok:200: slack_sign_in_identity:ok:200: ", 4)) {
+		t.Errorf("the receipts: %s", got)
+	}
+	useBrowser(t, api, "")
+	if code, stdout, stderr := d.line(t, connect...); code != 0 {
+		t.Fatalf("connect with yes: exit %d\n%s%s", code, stdout, stderr)
+	}
+	if _, err := os.Lstat(filepath.Join(folder, "slack-acme.json")); err != nil {
+		t.Errorf("a confirmed sign-in was not saved: %v", err)
+	}
+}
+
+// The requests' receipts are written before the sign-in changes. With the receipt store refusing, a check
+// of a token due for a refresh sends Slack nothing and leaves the saved sign-in as it was, so the next
+// check refreshes it without a new login. An exchange whose answer says ok but holds no grant leaves its
+// receipt as an error, decided once the answer is read.
+func TestASlackSignInChangesNothingBeforeItsReceipt(t *testing.T) {
+	d, folder, wall := slackSetup(t)
+	api := newInventedSlack(t)
+	api.redirect, api.expiresIn = freeRedirect(t), 12*3600
+	where := []string{"--state-dir", "acme"}
+	useBrowser(t, api, "")
+	if code, stdout, stderr := d.line(t, append([]string{"debug", "slack", "connect", "--client-id", inventedClient,
+		"--redirect-uri", api.redirect}, where...)...); code != 0 {
+		t.Fatalf("connect: exit %d\n%s%s", code, stdout, stderr)
+	}
+	saved := func() string {
+		raw, err := os.ReadFile(filepath.Join(folder, "slack-acme.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document struct {
+			State string `json:"credential_state"`
+		}
+		if err := json.Unmarshal(raw, &document); err != nil {
+			t.Fatal(err)
+		}
+		return document.State
+	}
+	owner := conn(t, d.ownerURL)
+	role := d.appRole(t)
+	if _, err := owner.Exec(ctx, "REVOKE INSERT ON receipts FROM "+role); err != nil {
+		t.Fatal(err)
+	}
+	*wall = wall.Add(12 * time.Hour)
+	api.paths = nil
+	if code, _, _ := d.line(t, append([]string{"debug", "slack", "status", "--check"}, where...)...); code == 0 {
+		t.Error("a check whose receipt was refused passed")
+	}
+	if len(api.paths) != 0 || saved() != "ready" {
+		t.Errorf("with its receipt refused, the check asked Slack for %q and left the sign-in %s", api.paths, saved())
+	}
+	if _, err := owner.Exec(ctx, "GRANT INSERT ON receipts TO "+role); err != nil {
+		t.Fatal(err)
+	}
+	if code, stdout, _ := d.line(t, append([]string{"debug", "slack", "status", "--check"}, where...)...); code != 0 {
+		t.Errorf("the next check: exit %d\n%s", code, stdout)
+	}
+
+	// An exchange answer that says ok and holds no grant.
+	other := []string{"--state-dir", "other"}
+	api.noGrant = true
+	b := useBrowser(t, api, "")
+	message := slackRefused(t, d, 5, append([]string{"debug", "slack", "connect", "--client-id", inventedClient,
+		"--redirect-uri", api.redirect}, other...)...)
+	for range b.answers {
+	}
+	if !strings.HasPrefix(message, "slack_response_invalid: ") {
+		t.Errorf("an exchange with no grant: %s", message)
+	}
+	if got := d.audited(t, "other"); got != "slack_sign_in_exchange:error:200:request_failed" {
+		t.Errorf("the receipts of an exchange with no grant: %s", got)
 	}
 }
