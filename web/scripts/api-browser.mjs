@@ -1,8 +1,7 @@
 // Browser tests for the app in API mode, against the built app (web/dist) and
 // a stub of /api/v1 that each test steers: delayed and refused answers, two
 // accounts, blocked browser storage, a session that expires, hostile text in
-// names, gaps and receipts, and the walkthrough's paths, which are not
-// available in API mode and whole on a static host. The stub keeps the Go server's
+// names, gaps and receipts, and a static host's answer. The stub keeps the Go server's
 // shapes: the session view, the {"error": {code, message}} envelope, the CSRF
 // header and Origin checks, 403 not_permitted for an ungranted account, and the
 // security headers on every response, with the Content-Security-Policy built
@@ -189,7 +188,7 @@ async function signIn(tab, how = 'enter') {
   await tab.waitForSelector('.api-session');
 }
 const focused = tab => tab.evaluate(() => {const el = document.activeElement; return el === document.body ? 'body' : `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}${el.name ? '[' + el.name + ']' : ''}`;});
-const noWalkthrough = tab => tab.evaluate(() => !document.querySelector('.evidence-flow,.rd-page:not(.api-readiness),.evidence-library:not(.api-evidence)'));
+const needsServer = 'This page needs its server. Open the address your gtm-connector server prints.';
 const until = (tab, fn, arg) => tab.waitForFunction(fn, arg, {timeout: 8000});
 
 async function scenario(name, run) {
@@ -197,7 +196,7 @@ async function scenario(name, run) {
   try {await run();} catch (error) {check(false, `${name}: ${String(error).split('\n')[0]}`);}
 }
 
-// 1. The probe: only a static host's answer means walkthrough.
+// 1. The probe: only a static host's answer means no server.
 for (const [label, answer] of [['431 text/plain', {status: 431, type: 'text/plain', raw: 'Request Header Fields Too Large'}], ['502 text/html', {status: 502, type: 'text/html', raw: '<html>Bad gateway</html>'}],
   ['a null body', {status: 200, type: 'application/json', raw: 'null'}], ['a cut-off JSON body', {status: 200, type: 'application/json', raw: '{"signed_in": fal'}]]) {
   await scenario(`probe ${label}`, async () => {
@@ -205,7 +204,7 @@ for (const [label, answer] of [['431 text/plain', {status: 431, type: 'text/plai
     const tab = await page();
     await tab.goto(evidence, {waitUntil: 'networkidle'});
     await tab.waitForSelector('[data-refusal]');
-    check(await noWalkthrough(tab) && await tab.locator('[data-refusal]').count() === 1, `probe answered with ${label}: an error in API mode, no walkthrough data`);
+    check(await tab.locator(`text=${needsServer}`).count() === 0 && await tab.locator('[data-refusal]').count() === 1, `probe answered with ${label}: an error in API mode`);
     await tab.context().close();
   });
 }
@@ -314,7 +313,7 @@ for (const [what, url, refused, empty] of refusals) {
     stub.steer = (method, path) => method === 'GET' && refused(path) ? {status: what === 'the session read' ? 503 : 403, code: what === 'the session read' ? 'internal' : 'not_permitted'} : null;
     await tab.goto(url, {waitUntil: 'networkidle'});
     await tab.waitForSelector('[data-refusal]');
-    check(await tab.locator('[data-refusal]').count() >= 1 && await tab.locator(empty).count() === 0 && await noWalkthrough(tab), `a refused read of ${what} shows the refusal, not an empty result`);
+    check(await tab.locator('[data-refusal]').count() >= 1 && await tab.locator(empty).count() === 0, `a refused read of ${what} shows the refusal, not an empty result`);
     await tab.context().close();
   });
 }
@@ -372,7 +371,7 @@ await scenario('signed in elsewhere', async () => {
   await tab.context().close();
 });
 
-// 9. Blocked browser storage: the server pages show no walkthrough save advice. (The theme falls back to dark.)
+// 9. Blocked browser storage: the server pages still work. (The theme falls back to dark.)
 for (const width of [320, 1440]) {
   await scenario(`blocked storage ${width}`, async () => {
     const tab = await page({width, blockStorage: true});
@@ -380,7 +379,6 @@ for (const width of [320, 1440]) {
     await signIn(tab);
     await tab.waitForSelector('.api-unit');
     await tab.waitForTimeout(300);
-    check(await tab.locator('.save-failure-notice').count() === 0 && await tab.locator('text=Export History').count() === 0, `${width}: blocked storage shows no walkthrough save advice on a server page`);
     check(tab.errors.length === 0, `${width}: no page errors with storage blocked (${tab.errors.join(' | ')})`);
     await tab.context().close();
   });
@@ -418,69 +416,8 @@ for (const [width, scheme] of [[320, 'light'], [1440, 'light'], [320, 'dark'], [
   });
 }
 
-// 11. A walkthrough path when the server serves the app: not available here, the server pages only, and the way home.
-const walkthroughPaths = ['/renewals', '/queue', '/playbooks', '/operations', '/renewals/thornfield/workplan', '/renewals/thornfield/history'];
-const walkthroughParts = '.wl-page,.pb-page,.ops-page,.work-grid,.hs-page,.evidence-flow,.rd-page:not(.api-readiness),.evidence-library:not(.api-evidence),.detail-nav,.nav-count,.demo-account,.reset-link,.save-indicator,.save-failure-notice';
-const shellOf = tab => tab.evaluate(parts => ({heading: document.querySelector('main h1')?.textContent, parts: document.querySelectorAll(parts).length,
-  nav: [...document.querySelectorAll('#workspace-navigation nav a')].map(link => link.textContent).join(), crumbs: document.querySelector('.breadcrumbs').textContent,
-  footer: document.querySelector('.page-footer').textContent}), walkthroughParts);
-async function tabTo(tab, selector) {
-  for (let presses = 0; presses < 40; presses++) {
-    await tab.keyboard.press('Tab');
-    if (await tab.evaluate(target => Boolean(document.activeElement?.matches(target)), selector)) return true;
-  }
-  return false;
-}
-const focusShows = tab => tab.evaluate(() => {const style = getComputedStyle(document.activeElement); return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2;});
-const evidencePath = new URL(evidence).pathname, readinessPath = new URL(readiness).pathname;
-for (const width of [320, 1440]) {
-  await scenario(`walkthrough paths ${width}`, async () => {
-    const tab = await page({width});
-    for (const path of walkthroughPaths) {
-      await tab.goto(`${base}${path}?selection=work-item%3Aexample`, {waitUntil: 'networkidle'});
-      await tab.waitForSelector('.api-unavailable h1');
-      const seen = await shellOf(tab);
-      check(seen.heading === 'Not available here.' && seen.parts === 0 && seen.nav === 'Evidence,Readiness' && seen.crumbs === 'Not available here' && !/Invented|prototype/.test(seen.footer),
-        `${width}: ${path} is not available here: no walkthrough page, and the navigation lists only the server pages (${seen.nav})`);
-    }
-    const home = await tab.locator('.api-unavailable a').boundingBox();
-    check(home.height >= 44 && home.width >= 44, `${width}: the way home is at least 44px (${Math.round(home.width)} by ${Math.round(home.height)})`);
-    check(await tabTo(tab, '.api-unavailable a') && await focusShows(tab), `${width}: the way home shows keyboard focus`);
-    await tab.keyboard.press('Enter');
-    await until(tab, path => location.pathname === path, evidencePath);
-    await signIn(tab);
-    await tab.goto(`${base}/`, {waitUntil: 'networkidle'});
-    await until(tab, path => location.pathname === path, evidencePath);
-    await tab.waitForSelector('.api-session');
-    check(await noWalkthrough(tab), `${width}: / opens Evidence, read from the server`);
-    await tab.goto(`${base}/queue`, {waitUntil: 'networkidle'});
-    await tab.waitForSelector('.api-unavailable h1');
-    const mark = await tab.evaluate(() => {const el = document.querySelector('.topbar .profile'); return {tag: el.tagName, label: el.getAttribute('aria-label')};});
-    check(mark.tag === 'SPAN' && mark.label.startsWith('Signed in as Demo reviewer'), `${width}: the header names the signed-in principal, and opens nothing of the walkthrough (${mark.tag})`);
-    await tab.keyboard.press('Control+k');
-    await tab.waitForSelector('.command-option');
-    const options = await tab.locator('.command-option strong').allTextContents();
-    check(options.join() === 'Evidence,Readiness', `${width}: the palette on a walkthrough path offers the server pages only (${options.join()})`);
-    await tab.keyboard.press('Escape');
-    if (width === 320) await tab.click('.mobile-menu');
-    const links = await tab.evaluate(() => [...document.querySelectorAll('#workspace-navigation a')].map(link => {const box = link.getBoundingClientRect(); return {href: link.getAttribute('href'), width: box.width, height: box.height};}));
-    check(links.map(link => link.href).join() === [evidencePath, evidencePath, readinessPath].join() && links.every(link => link.width >= 44 && link.height >= 44),
-      `${width}: the brand and the navigation link the server pages only, each at least 44px (${links.map(link => `${link.href} ${Math.round(link.height)}`).join(', ')})`);
-    check(await tabTo(tab, '#workspace-navigation nav a') && await focusShows(tab), `${width}: a navigation link shows keyboard focus`);
-    await tab.keyboard.press('Enter');
-    await until(tab, path => location.pathname === path, evidencePath);
-    await tab.waitForSelector('.api-session');
-    check(await noWalkthrough(tab), `${width}: the navigation opens Evidence, read from the server`);
-    check(tab.errors.length === 0, `${width}: no page errors (${tab.errors.join(' | ')})`);
-    await tab.context().close();
-  });
-}
-
-// 12. The server's app is all that loads: after sign-in, both pages and a reload, no
-// walkthrough chunk was asked for, browser storage holds nothing of the walkthrough,
-// nothing broke the policy, and no screen names the prototype. ApiReadiness is the
-// server's own page, so only a chunk named Readiness- is the walkthrough's.
-const walkthroughChunk = name => /renewalFixtures|workflow|Worklists|Playbooks|History|WorkPlan|WorkflowDialogContent/.test(name) || /^(Readiness|main)-/.test(name);
+// 11. The server's app at 390 and 1440: after sign-in, both pages and a reload,
+// nothing broke the policy, no screen names the prototype, and the palette uses its own words.
 const violations = tab => tab.console.filter(line => /policy violation|Content Security Policy|Refused to/i.test(line));
 for (const width of [390, 1440]) {
   await scenario(`the server app alone ${width}`, async () => {
@@ -494,12 +431,9 @@ for (const width of [390, 1440]) {
     await tab.waitForSelector('.api-readiness [data-open-gap]');
     // Long enough for anything loaded when the page is idle.
     await tab.waitForTimeout(2500);
-    const keys = await tab.evaluate(() => Object.keys(localStorage));
-    check(!keys.some(key => key.startsWith('gtm-workflow-demo') || key.startsWith('gtm-readiness')), `${width}: browser storage holds nothing of the walkthrough (${keys.join(', ')})`);
-    const asked = [...new Set(stub.files.filter(walkthroughChunk))];
-    check(asked.length === 0 && stub.files.some(name => name.startsWith('ApiReadiness-')), `${width}: no walkthrough chunk was requested (${asked.join(', ')})`);
+    check(stub.files.some(name => name.startsWith('ApiReadiness-')), `${width}: the Readiness page loaded its own chunk`);
     const shown = await tab.evaluate(() => `${document.title}\n${document.body.innerText}`);
-    check(!/Revenue Workflow Lab|walkthrough/i.test(shown), `${width}: no screen names the prototype or the walkthrough (title ${await tab.title()})`);
+    check(!/Revenue Workflow Lab|walkthrough/i.test(shown), `${width}: no screen names the prototype (title ${await tab.title()})`);
     await tab.keyboard.press('Control+k');
     await tab.waitForSelector('.command-option');
     const palette = await tab.evaluate(() => ({title: document.querySelector('.dialog-head h2').textContent, placeholder: document.querySelector('.command-input input').placeholder}));
@@ -513,23 +447,18 @@ for (const width of [390, 1440]) {
   });
 }
 
-// 13. A static host's answer keeps the whole walkthrough.
-await scenario('the static build', async () => {
+// 12. A static host's answer: one sentence, at any path, that the page needs its server.
+await scenario('a static host', async () => {
   stub.steer = (method, path) => path === '/api/v1/session' ? {status: 404, type: 'text/html', raw: '<html>Not found</html>'} : null;
-  const tab = await page();
-  for (const [path, part] of [['/renewals', '.wl-page'], ['/queue', '.wl-page'], ['/playbooks', '.pb-page'], ['/operations', '.ops-page'], ['/renewals/thornfield/workplan', '.work-grid'],
-    ['/renewals/thornfield/history', '.hs-page'], ['/renewals/thornfield/evidence', '.evidence-library:not(.api-evidence)'], ['/renewals/thornfield/readiness', '.rd-page:not(.api-readiness)']]) {
+  const tab = await page({width: 390});
+  const seen = [];
+  for (const path of ['/', new URL(evidence).pathname, '/queue']) {
     await tab.goto(base + path, {waitUntil: 'networkidle'});
-    await tab.waitForSelector(part);
-    const seen = await shellOf(tab);
-    check(/^Renewals,Work queue\d+,Playbooks,Operations$/.test(seen.nav) && await tab.locator('.api-unavailable, .api-frame').count() === 0 && await tab.locator('.demo-account, .reset-link, button.profile').count() === 3,
-      `the static build shows the walkthrough at ${path} (${seen.nav})`);
+    await tab.waitForSelector('.route-error');
+    seen.push((await tab.evaluate(() => document.body.innerText)).trim());
   }
-  await tab.goto(`${base}/`, {waitUntil: 'networkidle'});
-  await tab.waitForSelector('.work-grid');
-  check(await tab.evaluate(() => location.pathname) === '/renewals/thornfield/workplan', 'the static build opens / on the walkthrough work plan');
-  check(tab.errors.length === 0, `the static build: no page errors (${tab.errors.join(' | ')})`);
-  check(violations(tab).length === 0, `the static build: no policy violation (${violations(tab).join(' | ')})`);
+  check(seen.every(shown => shown === needsServer) && tab.errors.length === 0 && violations(tab).length === 0,
+    `a static host's answer shows only that the page needs its server (${seen.join(' | ')}; ${tab.errors.join(' | ')})`);
   await tab.context().close();
 });
 

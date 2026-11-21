@@ -6,17 +6,15 @@ import CommandPalette from '../CommandPalette.jsx';
 import RouteContent from '../RouteContent.jsx';
 import {focusElement, holdPendingFocus} from '../focusElement.js';
 import {ApiCrumbs, NotAvailable, PrincipalMark, ServerContext, ServerNav, apiCommandItems, serverHome, serverPageAt} from '../ServerSwitch.jsx';
-// The styles the server pages use, in the walkthrough's order. The `?server`
-// query makes them modules of their own, so the walkthrough, loaded after
-// this app's styles on a static host, still brings its whole list in order.
-import '../readiness.css?server';
-import '../styles.css?server';
-import '../refinements.css?server';
-import '../modern.css?server';
-import '../atelier.css?server';
-import '../workplan.css?server';
-import '../chrome.css?server';
-import '../api.css?server';
+// The styles the server pages use. Later files override earlier ones, so the order matters.
+import '../readiness.css';
+import '../styles.css';
+import '../refinements.css';
+import '../modern.css';
+import '../atelier.css';
+import '../workplan.css';
+import '../chrome.css';
+import '../api.css';
 
 const compactQuery = '(max-width:650px)';
 const navigationLinks = '#workspace-navigation button:not(:disabled),#workspace-navigation a[href]';
@@ -125,7 +123,7 @@ export function ServerShell() {
         </div>
       </header>
       <main id="main" className="main-content" tabIndex={-1}>
-        <RouteContent path={location.pathname} label={label} failure="This page could not load. Nothing was lost." onReady={setLoadedPath}><Page/></RouteContent>
+        <RouteContent path={location.pathname} label={label} onReady={setLoadedPath}><Page/></RouteContent>
         <footer className="page-footer"><span>gtm-connector</span><span>Read from the server</span></footer>
       </main>
     </div>
