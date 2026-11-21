@@ -2,7 +2,8 @@
 # After `make up`.
 #
 #   scripts/smoke.sh        the server answers over TLS with this install's certificate, refuses a
-#                           foreign Host, signs in the demo principal, and runs the commit it was built from
+#                           foreign Host, serves the web app from the binary alone, signs in the demo
+#                           principal, and runs the commit it was built from
 #   scripts/smoke.sh demo   publish the demo cards, as the app role inside the app container
 #   scripts/smoke.sh card   print acc-003's newest card, ID and SHA-256, after checking the bytes the API
 #                           gives against both digests it states
@@ -62,6 +63,10 @@ esac
 
 $compose exec -T app /app/gtm-connector health
 test "$(curl -sS --cacert "$creds/tls.pem" -o /dev/null -w '%{http_code}' -H "Host: evil.example:$GTM_PORT" "$base/healthz")" = 421
+# The image holds the binary and no web folder; a deep link gets the app's page, whose script is served.
+test "$($compose exec -T app ls /app)" = gtm-connector
+asset="$(fetch "$base/renewals/r-1/evidence" | grep -o '/assets/[^"]*\.js' | head -n 1)"
+test "$(fetch -o /dev/null -w '%{content_type}' "$base$asset")" = 'text/javascript; charset=utf-8'
 sign_in
 fetch "$base/api/v1/session" | python3 -c '
 import json, sys
