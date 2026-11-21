@@ -108,8 +108,7 @@ the Python package and stays read-only. To finish it:
    checks), with `GTM_TEST_DATABASE_URL` set for the command replay, and the real-data digests of the
    changed functions with `go run ./cmd/realdata -update=FUNCTION,... verify`. Its PR lists each
    rewritten file with how many cards, units or rows changed, and why.
-2. Finish the Evidence row of the roadmap: neutralize a bare mail address and show the host of a
-   valid `xn--` label.
+2. Finish the Evidence row of the roadmap: neutralize a bare mail address.
 3. Close the cutover: a tagged release attaches the binaries.
 
 Sign-in, grants, selection, expiry and the Host check stay ahead of any evidence served. MCP passes
