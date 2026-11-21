@@ -204,10 +204,8 @@ grouped by the v0.1.0 step that owns the check.
     - `calls_source_unavailable` exits 5.
 - **Slack:**
   - the accepted and refused message subtypes, and every read limit;
-  - one retry after HTTP 429 when its `Retry-After` is at most five seconds;
-  - a backup leaving the Slack sign-in out.
+  - one retry after HTTP 429 when its `Retry-After` is at most five seconds.
 - **Demo data:** the cases of `acc-001`, `acc-002` and `acc-004` to `acc-007`, checked by running `brief`.
-- **Every source:** a read whose source was connected again meanwhile finishing as `source_changed`, error/409.
 
 </details>
 
@@ -225,12 +223,11 @@ grouped by the v0.1.0 step that owns the check.
 - **Cards:**
   - `brief` exiting 4 with `check_failed`, and exit 130;
   - `brief` exiting 2 for a bad `--as-of` or brief ID;
-  - card, unit, gap and line rows never changing once written (the test covers receipts only);
   - `brief_save_failed` on a save that does not finish;
   - the seller list replaced or kept by `connect`, and `connect demo --seller` refused;
   - the extra account read of `brief` on a real CRM.
 - **Audit:**
-  - a pending receipt finished as `interrupted` after its five-minute lease, and `serve` doing so every 30 seconds;
+  - the five-minute lease of a pending receipt, and `serve` finishing interrupted receipts every 30 seconds after its sweep at start;
   - a restart resetting the rate counts;
   - a tool name over 100 characters recorded as `<invalid>`, and `brief_id` taken from `_meta`, up to 128 characters;
   - `audit --since` and `--until`, and `--follow` reading every half second.

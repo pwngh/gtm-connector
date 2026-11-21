@@ -221,9 +221,16 @@
 }
 
 .dc-attr__part:not(:last-child)::after,
-.dc-seal__part:not(:last-child)::after {
+.dc-seal__part:has(+ .dc-seal__part)::after {
   content: "·";
   padding: 0 var(--gc-space-2);
+}
+
+/* Under 720 the role word's help opens under the whole attribution line. */
+@media (max-width: 719px) {
+  .dc-attr__part:has(> .ui-help) {
+    display: contents;
+  }
 }
 
 .dc-attr__speaker {
@@ -310,6 +317,7 @@
 .fr .dc-seal__line {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   margin: 0;
   padding-top: var(--gc-space-3);
   border-top: var(--gc-rule-width) solid var(--gc-rule);

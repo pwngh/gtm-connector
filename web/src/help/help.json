@@ -1,12 +1,57 @@
 {
+  "citation": {
+    "title": "a number",
+    "text": "The number of one unit: one CRM record, or one sentence of a call or a Slack message. Select it to see the source."
+  },
+  "quotation": {
+    "title": "a quotation",
+    "text": "One whole sentence as recorded. A sentence too long to show is counted, never cut."
+  },
+  "record": {
+    "title": "the record",
+    "text": "Typed CRM fields and connector arithmetic. A figure someone said stays with what people said."
+  },
+  "role.customer": {
+    "title": "the customer role",
+    "text": "A call's speaker label equals the name of exactly one contact of this account, and no listed seller. The title is that contact's title in the CRM. Slack authors are never customers. A role comes from a label, never from wording.",
+    "guide": {"label": "Deal cards, Speaker roles", "path": "docs/cards.md#speaker-roles"}
+  },
+  "role.seller": {
+    "title": "the seller role",
+    "text": "The speaker label or Slack author equals a name or ID on the workspace's seller list."
+  },
+  "role.unknown": {
+    "title": "the unknown role",
+    "text": "No label, a label that matches nobody, two or more contacts with the name, a name shared by a seller and a contact, or a label over 200 characters. The card does not guess. The line says which.",
+    "guide": {"label": "Deal cards, Speaker roles", "path": "docs/cards.md#speaker-roles"}
+  },
+  "not_read": {
+    "title": "Not read",
+    "text": "What the connector did not read or did not show for this card. A source that was not read is never treated as silence.",
+    "guide": {"label": "Working a deal, What flags a deal", "path": "docs/deals.md#what-flags-a-deal"}
+  },
+  "seal": {
+    "title": "the seal",
+    "text": "A card is sealed when it is published: a receipt names the SHA-256 of its bytes. A changed card is refused.",
+    "guide": {"label": "README, How the card is built", "path": "README.md#how-the-card-is-built"}
+  },
   "countdown": {
-    "term": "the countdown",
+    "title": "the countdown",
     "text": "Days from the card's date to the renewal date on the record. The line under the number names the record it counts to. Nothing is inferred from the close date.",
-    "guide": {"title": "Setting it up, Field mapping", "path": "docs/config.md", "anchor": "field-mapping"}
+    "guide": {"label": "Setting it up, Field mapping", "path": "docs/config.md#field-mapping"}
   },
   "arr": {
-    "term": "ARR",
+    "title": "ARR",
     "text": "Annual recurring revenue, from the field mapped as recurring revenue. Opportunity amount never stands in for it. If no field is mapped, the card says the value is missing.",
-    "guide": {"title": "Setting it up, Field mapping", "path": "docs/config.md", "anchor": "field-mapping"}
+    "guide": {"label": "Setting it up, Field mapping", "path": "docs/config.md#field-mapping"}
+  },
+  "ops.coverage": {
+    "title": "Coverage",
+    "text": "Which deals have a current card and which do not.",
+    "guide": {"label": "Setting it up, The Ops area", "path": "docs/config.md#the-ops-area"}
+  },
+  "ops.receipt": {
+    "title": "the receipt",
+    "text": "One row of the audit log. A read gets its receipt before it runs."
   }
 }

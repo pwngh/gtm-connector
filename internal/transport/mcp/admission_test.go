@@ -129,6 +129,32 @@ func TestMissingOrExpiredTokenIsRefusedWithoutCharging(t *testing.T) {
 	}
 }
 
+// A call is counted against its bearer's window only once the checks of its size, its parsing, its Host and
+// its bearer have passed: a call one of them refuses is not counted, and one a later check refuses is.
+func TestOnlyACallPastTheBearerCheckIsCounted(t *testing.T) {
+	base, policy, token := pureSetup()
+	for name, c := range map[string]struct {
+		change  func(*RequestFacts)
+		token   *Token
+		counted bool
+	}{
+		"its size":           {func(r *RequestFacts) { r.BodySize = MaxBody + 1 }, token, false},
+		"its parsing":        {func(r *RequestFacts) { r.Parsed = nil }, token, false},
+		"its Host":           {func(r *RequestFacts) { r.Headers["host"] = "localhost:8765" }, token, false},
+		"its bearer":         {func(*RequestFacts) {}, nil, false},
+		"its scope, counted": {func(r *RequestFacts) { r.Tool = "read_call_notes" }, token, true},
+	} {
+		request := base
+		request.Headers = maps.Clone(base.Headers)
+		request.HeaderCounts = maps.Clone(base.HeaderCounts)
+		c.change(&request)
+		decision := CheckRequest(request, policy, Windows{}, Definitions, c.token, 1000, 100)
+		if decision.Error == nil || (decision.Windows[fingerprint(pureRaw)].Used == 1) != c.counted {
+			t.Errorf("a call refused for %s: %+v", name, decision)
+		}
+	}
+}
+
 // test_repeated_denial_returns_same_quota_update_without_mutating_inputs
 func TestRepeatedDenialReturnsSameQuotaUpdate(t *testing.T) {
 	request, policy, token := pureSetup()

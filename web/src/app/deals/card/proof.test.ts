@@ -27,8 +27,10 @@ after(async () => {
 
 const decode = (html: string) =>
   html.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&');
+// The text a reader sees: without the help hints and panels, which are in the document but hidden until opened.
+const hiddenHelp = /<span [^>]*class="ui-help__panel"[^>]*hidden=""[^>]*><span class="ui-help__text">[^<]*<\/span>(?:<a [^>]*>[^<]*<\/a>)?<\/span>/g;
 const text = (html: string) =>
-  decode(html.replace(/<[^>]+>/g, ' '))
+  decode(html.replace(hiddenHelp, '').replace(/<[^>]+>/g, ' '))
     .replace(/\s+/g, ' ')
     .trim();
 

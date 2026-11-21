@@ -42,7 +42,9 @@ const deal = (card: CardDetail, reads: Partial<Record<'accounts' | 'cards' | 'ca
   );
 const decode = (html: string) =>
   html.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&#x27;', "'").replaceAll('&amp;', '&');
-const text = (html: string) => decode(html.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ');
+// The text a reader sees: without the help hints and panels, which are in the document but hidden until opened.
+const hiddenHelp = /<span [^>]*class="ui-help__panel"[^>]*hidden=""[^>]*><span class="ui-help__text">[^<]*<\/span>(?:<a [^>]*>[^<]*<\/a>)?<\/span>/g;
+const text = (html: string) => decode(html.replace(hiddenHelp, '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ');
 const count = (html: string, pattern: RegExp) => [...html.matchAll(pattern)].length;
 /** The record column's rows as drawn: data-value, label, value and the numbers in its gutter. */
 const recordColumn = (html: string) =>
@@ -226,7 +228,7 @@ test('the recorded injection case renders its markup, mentions and links as text
   for (const [, href] of [...html.matchAll(/href="([^"]*)"/g), ...body(unlined(card)).matchAll(/href="([^"]*)"/g)]) {
     assert.match(
       decode(href ?? ''),
-      /^(\/deals\/acc-003\?unit=\d+|\/deals\/acc-905\/text|https:\/\/github\.com\/pwngh\/gtm-connector\/blob\/main\/docs\/config\.md#field-mapping)$/,
+      /^(\/deals\/acc-003\?unit=\d+|\/deals\/acc-905\/text|https:\/\/github\.com\/pwngh\/gtm-connector\/blob\/main\/(README|docs\/[a-z]+)\.md#[a-z-]+)$/,
     );
   }
   // Server strings that hold markup stay text, wherever they are shown.
@@ -541,23 +543,119 @@ test('lines that are not a line’s shape are not read, and the card says where 
   assert.doesNotMatch(html, /dc-focal__|dc-flags|data-value=/);
 });
 
-test('the countdown and ARR help is the copy file’s, drawn from the guide it links to', () => {
-  const help = JSON.parse(readFileSync(new URL('../../../help/help.json', import.meta.url), 'utf8')) as Record<
-    string,
-    {text: string; guide: {path: string; anchor: string; title: string}}
-  >;
-  const guide = readFileSync(new URL('../../../../../docs/config.md', import.meta.url), 'utf8');
-  const html = body(thornfield());
-  for (const term of ['countdown', 'arr']) {
-    const entry = help[term];
-    assert.ok(entry, term);
+const helpFile = JSON.parse(readFileSync(new URL('../../../help/help.json', import.meta.url), 'utf8')) as Record<
+  string,
+  {title: string; text: string; guide?: {label: string; path: string}}
+>;
+const guideFile = (path: string) => readFileSync(new URL(`../../../../../${path}`, import.meta.url), 'utf8');
+// Each entry and the guide it is drawn from, with words the entry and the guide both hold.
+const drawnFrom: Record<string, [string, string]> = {
+  citation: ['README.md', 'one CRM record, or one sentence of a call or a Slack message'],
+  quotation: ['README.md', 'A sentence too long to show is counted, never cut.'],
+  record: ['README.md', 'typed CRM fields and connector arithmetic'],
+  'role.customer': ['docs/cards.md', 'Slack authors are never customers.'],
+  'role.seller': ['docs/cards.md', "equals a name or ID on the workspace's seller list."],
+  'role.unknown': ['docs/cards.md', 'two or more contacts with the name, a name shared by a seller and a contact, or a label over 200 characters'],
+  not_read: ['docs/deals.md', 'was not read'],
+  seal: ['README.md', 'A card is sealed when it is published: a receipt names the SHA-256 of its bytes.'],
+  countdown: ['docs/config.md', 'renewal date'],
+  arr: ['docs/config.md', 'Opportunity amount never stands in for'],
+  'ops.coverage': ['docs/config.md', 'Which deals have a current card'],
+  'ops.receipt': ['docs/config.md', 'A read gets its receipt before it runs.'],
+};
+// GitHub's anchor for a heading.
+const anchorOf = (heading: string) =>
+  heading
+    .toLowerCase()
+    .replace(/[^a-z0-9 -]/g, '')
+    .replaceAll(' ', '-');
+
+test('every help entry is fixed copy drawn from a guide, and each guide link names a section the guide has', () => {
+  assert.deepEqual(Object.keys(helpFile).sort(), Object.keys(drawnFrom).sort());
+  for (const [key, entry] of Object.entries(helpFile)) {
+    const [file, words] = drawnFrom[key] ?? ['', ''];
+    assert.ok(entry.title && entry.text, key);
     assert.ok(
-      html.includes(`data-help="${term}"><span class="ui-help__text">${escaped(entry.text).replaceAll("'", '&#x27;')}</span>`),
-      `${term}: the panel's text`,
+      entry.text.toLowerCase().includes(words.toLowerCase()) && guideFile(file).replace(/\s+/g, ' ').toLowerCase().includes(words.toLowerCase()),
+      `${key}: ${file}`,
     );
-    assert.equal(entry.guide.path, 'docs/config.md');
-    assert.ok(guide.includes('\n## Field mapping\n') && entry.guide.anchor === 'field-mapping', `${term}: the guide has the section`);
+    if (entry.guide) {
+      const [path = '', anchor = ''] = entry.guide.path.split('#');
+      assert.equal(path, file, `${key}: the guide it links to`);
+      const anchors = [...guideFile(path).matchAll(/^#{1,4} (.+)$/gm)].map(match => anchorOf(match[1] ?? ''));
+      assert.ok(anchors.includes(anchor), `${key}: ${path} has #${anchor}`);
+    }
   }
-  assert.match(guide, /Opportunity amount never stands in for recurring revenue\.\*\* If no field is mapped, the card\n> says the value is missing\./);
-  assert.equal(count(html, /class="ui-help__button"/g), 2);
+});
+
+test('the card’s help: each shown sentence is the copy file’s, a hint describes its button and a panel is a note the button controls', () => {
+  const html = body(thornfield());
+  const helps = [
+    ...html.matchAll(
+      /<span class="ui-help"><button type="button"([^>]*)>[\s\S]*?<\/button><span id="([^"]+)" class="ui-help__panel" role="(tooltip|note)"[^>]*hidden="" data-help="([a-z_.]+)"><span class="ui-help__text">([^<]*)<\/span>(?:<a class="ui-help__guide" href="([^"]*)" target="_blank" rel="noopener noreferrer">([^<]*)<\/a>)?<\/span><\/span>/g,
+    ),
+  ].map(match => ({
+    attributes: match[1] ?? '',
+    id: match[2],
+    role: match[3],
+    key: match[4] ?? '',
+    text: decode(match[5] ?? ''),
+    href: match[6] ? decode(match[6]) : null,
+    label: match[7] ? decode(match[7]) : null,
+  }));
+  assert.equal(count(html, /class="ui-help__button"/g), helps.length);
+  // The countdown, ARR's number box and ARR, the heads, one role word of each group the card shows, and the seal line.
+  assert.deepEqual(
+    helps.map(help => help.key),
+    ['countdown', 'citation', 'arr', 'quotation', 'role.customer', 'role.seller', 'record', 'not_read', 'seal'],
+  );
+  for (const help of helps) {
+    const entry = helpFile[help.key];
+    assert.ok(entry, help.key);
+    assert.equal(help.text, entry.text, `${help.key}: the sentence shown`);
+    assert.match(help.attributes, new RegExp(`aria-label="About ${escaped(entry.title)}"`), help.key);
+    if (entry.guide) {
+      assert.equal(help.role, 'note', help.key);
+      assert.match(
+        help.attributes,
+        new RegExp(`id="([^"]+)" class="ui-help__button" aria-label="[^"]*" aria-expanded="false" aria-controls="${help.id}"`),
+        help.key,
+      );
+      assert.ok(
+        html.includes(`aria-labelledby="${help.attributes.match(/id="([^"]+)"/)?.[1]}" hidden="" data-help="${help.key}"`),
+        `${help.key}: the note is labelled by its button`,
+      );
+      assert.equal(help.href, `https://github.com/pwngh/gtm-connector/blob/main/${entry.guide.path}`, help.key);
+      assert.equal(help.label, `Guide: ${entry.guide.label}`, help.key);
+    } else {
+      assert.equal(help.role, 'tooltip', help.key);
+      assert.match(help.attributes, new RegExp(`aria-describedby="${help.id}"`), help.key);
+      assert.doesNotMatch(help.attributes, /aria-expanded|aria-controls/, help.key);
+      assert.equal(help.href, null, help.key);
+    }
+  }
+  // On every recorded card, the help of a role sits after the role word on the first line of each group shown, and nowhere else.
+  for (const {file, key, card} of recorded) {
+    const each = body(card);
+    const shown = new Set(sentencesOf(card).filter(onCard).map(groupOf));
+    const roles = [...each.matchAll(/class="dc-attr__part">(Customer|Seller|Unknown)[^<]*<span class="ui-help">[\s\S]*?data-help="(role\.[a-z]+)"/g)];
+    assert.deepEqual(
+      roles.map(match => `${match[1]?.toLowerCase()} ${match[2]}`).sort(),
+      [...shown].map(group => `${group} role.${group}`).sort(),
+      `${file} ${key}`,
+    );
+    for (const match of each.matchAll(/data-help="([a-z_.]+)"><span class="ui-help__text">([^<]*)<\/span>/g)) {
+      assert.equal(decode(match[2] ?? ''), helpFile[match[1] ?? '']?.text, `${file} ${key} ${match[1]}`);
+    }
+  }
+  // With no ARR line, the help for a number is on the countdown's first number box.
+  const noArr = structuredClone(thornfield());
+  noArr.lines = (noArr.lines ?? []).filter(line => (line as {code?: string}).code !== 'arr');
+  assert.match(
+    focal(body(noArr)),
+    /data-focal="countdown"><p class="dc-focal__figure">[\s\S]*?aria-label="Source 1"[\s\S]*?<\/a><span class="ui-help">[\s\S]*?data-help="citation"/,
+  );
+  assert.equal(count(body(noArr), /data-help="citation"/g), 1);
+  // A card published before its lines were kept has no number box above the ledger, and no citation help.
+  assert.doesNotMatch(body(unlined(thornfield())), /data-help="citation"/);
 });

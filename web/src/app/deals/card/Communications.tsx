@@ -1,4 +1,5 @@
 import {formatUtc} from '../../../api/client.ts';
+import {Help} from '../../../ui/Help.tsx';
 import {Cite} from './Cite.tsx';
 import {groupOf, roleWords} from './card.ts';
 import {countsOf, reasonOf, type Talk, talksOf, talkWord} from './communications.ts';
@@ -11,9 +12,10 @@ import type {SectionProps} from './sections.ts';
 // record: what it is and its time, then its sentences in unit order, each with
 // its number, the speaker and the role, and the reason when the card leaves it
 // out. A group with no usable time comes last, under No time recorded. A
-// number opens the proof drawer, as on the card.
+// number opens the proof drawer, as on the card. The first sentence of each
+// role carries the help for its role word.
 
-function TalkGroup({talk, level}: {talk: Talk; level: 'h3' | 'h4'}) {
+function TalkGroup({talk, level, helped}: {talk: Talk; level: 'h3' | 'h4'; helped: ReadonlySet<number>}) {
   const Head = level;
   return (
     <li
@@ -53,6 +55,7 @@ function TalkGroup({talk, level}: {talk: Talk; level: 'h3' | 'h4'}) {
                   <span className="dc-attr__part">
                     {roleWords[group]}
                     {group === 'unknown' && ` (${sentence.basis ?? 'basis not recorded'})`}
+                    {helped.has(sentence.n) && <Help term={`role.${group}`} />}
                   </span>
                 </p>
                 {reason && (
@@ -75,6 +78,14 @@ function TalkGroup({talk, level}: {talk: Talk; level: 'h3' | 'h4'}) {
 export function Communications(props: SectionProps) {
   const {timed, untimed} = talksOf(props.card);
   const all = [...timed, ...untimed];
+  // The number of the first sentence of each role, in the order the tab lists them.
+  const firsts = new Map<string, number>();
+  for (const sentence of all.flatMap(talk => talk.sentences)) {
+    if (!firsts.has(groupOf(sentence))) {
+      firsts.set(groupOf(sentence), sentence.n);
+    }
+  }
+  const helped = new Set(firsts.values());
   return (
     <>
       <Proof {...props} />
@@ -98,6 +109,7 @@ export function Communications(props: SectionProps) {
                     key={talk.ref}
                     talk={talk}
                     level="h3"
+                    helped={helped}
                   />
                 ))}
               </ol>
@@ -119,6 +131,7 @@ export function Communications(props: SectionProps) {
                       key={talk.ref}
                       talk={talk}
                       level="h4"
+                      helped={helped}
                     />
                   ))}
                 </ol>

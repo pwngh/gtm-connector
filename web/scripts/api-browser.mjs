@@ -10,6 +10,8 @@
 // browser storage holds. The Text tab is also read and copied for every
 // recorded card, and shown for a card whose bytes do not match its seal, and
 // the Communications tab lists every sentence unit of every recorded card once.
+// Every help button on the Deal card, the drawer and Coverage is opened by
+// Tab, by hover at 1440 and by touch at 390.
 // The stub keeps the Go server's shapes: the session view, the {"error":
 // {code, message}} envelope, the CSRF header and Origin checks, 403
 // not_permitted for an ungranted account, the /healthz answers, and the
@@ -20,6 +22,7 @@
 // It drives the installed Chrome, so it is not part of `npm test`. To run it:
 //   npm run build
 //   npm run test:browser [-- --channel chrome --screenshots DIR --contrast]
+// Build and run it with the same GTM_REVISION, which the guide links hold.
 // With --screenshots, the frame's matrix, Coverage, the Deal card and its drawer save one picture per
 // width and theme in DIR; with --contrast, it prints the lowest contrast of
 // each text colour.
@@ -237,8 +240,8 @@ const evidence = `${base}/ops/evidence`, thornfield = `${base}/deals/acc-003`;
 const results = [];
 const check = (ok, what) => {results.push(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) process.exitCode = 1;};
 const browser = await chromium.launch({channel: options.channel, headless: true});
-async function page({width = 1440, scheme = 'light', blockStorage = false, theme = null} = {}) {
-  const context = await browser.newContext({viewport: {width, height: 900}, colorScheme: scheme, reducedMotion: 'reduce'});
+async function page({width = 1440, scheme = 'light', blockStorage = false, theme = null, touch = false} = {}) {
+  const context = await browser.newContext({viewport: {width, height: 900}, colorScheme: scheme, reducedMotion: 'reduce', hasTouch: touch});
   // Offline: anything off the stub is refused. The origin of every request is kept.
   const origins = new Set();
   context.on('request', request => {const url = new URL(request.url()); if (!['data:', 'blob:'].includes(url.protocol)) origins.add(url.origin);});
@@ -1274,7 +1277,7 @@ const drawerFacts = tab => tab.evaluate(() => {
   const card = document.querySelector('.dc').getBoundingClientRect(), style = getComputedStyle(dialog);
   return {title: document.querySelector('.ui-dialog__title').textContent, focus: document.activeElement === document.querySelector('.ui-dialog__title'), modal: dialog.getAttribute('aria-modal'),
     quote: dialog.querySelector('blockquote')?.textContent ?? null, quoteChildren: dialog.querySelector('blockquote')?.children.length ?? null, quotes: dialog.querySelectorAll('blockquote').length,
-    text: dialog.querySelector('.ui-dialog__body').innerText.replace(/\s+/g, ' ').trim(), read: dialog.querySelector('.dc-proof__read')?.textContent ?? null,
+    text: dialog.querySelector('.ui-dialog__body').innerText.replace(/\s+/g, ' ').trim(), read: dialog.querySelector('.dc-proof__read')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
     injected: Boolean(window.__injected) || Boolean(dialog.querySelector('img')), unit: new URL(location.href).searchParams.get('unit'),
     box: {left: box.left, top: box.top, width: box.width, height: box.height}, close: {width: close.width, height: close.height},
     background: style.backgroundColor, shadow: style.boxShadow, cardRight: card.right, cardWidth: card.width, viewport: {width: innerWidth, height: innerHeight},
@@ -1344,10 +1347,10 @@ await scenario('deal card: help opens on hover and on a press, one at a time, an
   await tab.goto(thornfield, {waitUntil: 'networkidle'});
   await signIn(tab);
   await tab.waitForSelector('.dc-focal');
-  const state = () => tab.$$eval('.dc-focal .ui-help__button', buttons => buttons.map(button => button.getAttribute('aria-expanded')).join());
-  await tab.hover('[data-focal="arr"] .ui-help__button');
+  const state = () => tab.$$eval('.dc-focal .ui-help__button[aria-controls]', buttons => buttons.map(button => button.getAttribute('aria-expanded')).join());
+  await tab.hover('[data-focal="arr"] .ui-help__button[aria-controls]');
   const hovered = await state();
-  await tab.hover('[data-focal="arr"] .ui-help__panel');
+  await tab.hover('[data-focal="arr"] .ui-help__panel[role=note]');
   const onPanel = await state();
   await tab.click('[data-focal="countdown"] .ui-help__button');
   const pressed = await state();
@@ -1623,6 +1626,167 @@ await scenario('text tab: a copy the browser refuses', async () => {
   check(said === 'This browser refused to copy. Select the text and copy it with the keyboard.', `a refused copy says so (${said})`);
   await tab.context().close();
 });
+
+// 19. Help on the page: every help button of the Deal card, the proof drawer
+// and Coverage, at 390 by touch and 1440 by mouse. Each is reached by Tab and
+// opens on focus, on hover or on a tap; Escape closes it and focus stays on
+// its button; each sentence is the copy file's, and a hint's is its button's
+// accessible description; a panel opens under its line at 390, in the flow,
+// and never over its line at 1440; no button's hit area overlaps another
+// control's; one is open at a time; and a pinned panel's guide link is
+// reached by Tab and opens the guide at the build's revision.
+const helpFile = JSON.parse(readFileSync(new URL('../src/help/help.json', import.meta.url), 'utf8'));
+// The revision vite.config.js builds in from GTM_REVISION: build and run this with the same value.
+const builtRevision = (() => {const named = (process.env.GTM_REVISION ?? '').replace(/-modified$/, ''); return /^[0-9A-Za-z][0-9A-Za-z._-]{0,99}$/.test(named) ? named : 'main';})();
+const helpButtons = (tab, scope) => tab.locator(`${scope} .ui-help__button`);
+// One help's state, as drawn: shown, where its panel is against its line and the viewport, and what its button overlaps.
+const helpState = (tab, scope, index) => tab.evaluate(([scope, index]) => {
+  const button = document.querySelectorAll(`${scope} .ui-help__button`)[index], wrapper = button.parentElement, panel = wrapper.querySelector('.ui-help__panel');
+  const line = wrapper.parentElement.closest('p, li, h1, h2, h3, h4, div'), box = panel.getBoundingClientRect(), own = button.getBoundingClientRect(), held = line.getBoundingClientRect();
+  const style = getComputedStyle(line), inner = held.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth);
+  // What else the line draws, outside its panel.
+  const others = [...line.querySelectorAll('*')].filter(el => !panel.contains(el) && el !== panel && el.getClientRects().length).map(el => el.getBoundingClientRect());
+  const crosses = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+  // The controls of the same layer: the open dialog's, or the page's outside any dialog.
+  const layer = button.closest('[role=dialog]');
+  const controls = [...document.querySelectorAll('a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])')]
+    .filter(el => el !== button && !wrapper.contains(el) && el.getClientRects().length && el.closest('[role=dialog]') === layer);
+  return {key: panel.dataset.help, role: panel.getAttribute('role'), shown: !panel.hidden && box.height > 0, text: panel.querySelector('.ui-help__text').textContent,
+    expanded: button.getAttribute('aria-expanded'), focused: document.activeElement === button, position: getComputedStyle(panel).position,
+    ring: getComputedStyle(button).outlineStyle !== 'none' ? parseFloat(getComputedStyle(button).outlineWidth) : 0,
+    size: [own.width, own.height], overlaps: controls.filter(el => crosses(own, el.getBoundingClientRect())).map(el => el.getAttribute('aria-label') || el.textContent.trim().slice(0, 30)),
+    underLine: others.every(rect => rect.bottom <= box.top + 1) && box.top >= own.bottom - 1, fullWidth: box.width >= inner - 1,
+    lineVisible: held.top >= 0 && own.top >= 0 && own.bottom <= innerHeight, overLine: crosses(box, held), inViewport: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
+    open: [...document.querySelectorAll('.ui-help__panel')].filter(el => !el.hidden).length};
+}, [scope, index]);
+// Each help button's accessible name and description, from Chrome's accessibility tree.
+async function accessible(tab, scope) {
+  const cdp = await tab.context().newCDPSession(tab);
+  await cdp.send('DOM.enable');
+  await cdp.send('Accessibility.enable');
+  const {root} = await cdp.send('DOM.getDocument', {depth: -1});
+  const {nodeIds} = await cdp.send('DOM.querySelectorAll', {nodeId: root.nodeId, selector: `${scope} .ui-help__button`});
+  const named = [];
+  for (const nodeId of nodeIds) {
+    const {nodes} = await cdp.send('Accessibility.getPartialAXTree', {nodeId, fetchRelatives: false});
+    named.push({name: nodes[0]?.name?.value ?? null, description: nodes[0]?.description?.value ?? null});
+  }
+  await cdp.detach();
+  return named;
+}
+// Every help in the scope, by keyboard, then by hover or tap, then the pinned guide link and one at a time.
+async function exerciseHelp(tab, at, scope, {touch, outside, expected}) {
+  const buttons = helpButtons(tab, scope);
+  const total = await buttons.count();
+  const keys = await tab.$$eval(`${scope} .ui-help__panel`, panels => panels.map(panel => panel.dataset.help));
+  check(keys.join() === expected.join(), `${at}: help on ${keys.join(', ')}`);
+  // Tab reaches every help button, and each opens as it takes focus.
+  await tab.evaluate(() => {document.activeElement?.blur(); window.scrollTo(0, 0);});
+  const reached = new Map();
+  for (let press = 0; press < 400 && reached.size < total; press++) {
+    await tab.keyboard.press('Tab');
+    const index = await tab.evaluate(scope => [...document.querySelectorAll(`${scope} .ui-help__button`)].indexOf(document.activeElement), scope);
+    if (index >= 0 && !reached.has(index)) reached.set(index, await helpState(tab, scope, index));
+  }
+  check(reached.size === total && [...reached.values()].every(state => state.shown && state.focused && state.ring >= 3),
+    `${at}: Tab reaches all ${total} help buttons, and each opens on focus with a 3px ring (${[...reached.values()].map(state => `${state.key} ${state.shown} ${state.ring}`).join(', ')})`);
+  const named = await accessible(tab, scope);
+  for (let index = 0; index < total; index++) {
+    const entry = helpFile[keys[index]];
+    await buttons.nth(index).focus();
+    const opened = await helpState(tab, scope, index);
+    check(opened.shown && opened.text === entry.text && named[index].name === `About ${entry.title}` && opened.size[0] >= 44 && opened.size[1] >= 44 && opened.overlaps.length === 0,
+      `${at} ${opened.key}: focus shows the copy file's sentence; the button is "${named[index].name}", ${opened.size.map(Math.round).join('x')}, and overlaps no control (${opened.overlaps.join() || 'none'})`);
+    if (entry.guide) check(opened.role === 'note' && opened.expanded === 'true', `${at} ${opened.key}: a panel is a note its button expands`);
+    else check(opened.role === 'tooltip' && opened.expanded === null && named[index].description === entry.text, `${at} ${opened.key}: the hint's sentence is its button's accessible description (${named[index].description})`);
+    if (touch) check(opened.position === 'static' && opened.underLine && opened.fullWidth && opened.lineVisible, `${at} ${opened.key}: in the flow under its line, full width, with the line in view (${JSON.stringify({p: opened.position, under: opened.underLine, full: opened.fullWidth, visible: opened.lineVisible})})`);
+    else check(opened.position === 'absolute' && !opened.overLine && opened.inViewport, `${at} ${opened.key}: placed off its line and inside the viewport (${JSON.stringify({over: opened.overLine, inside: opened.inViewport})})`);
+    await tab.keyboard.press('Escape');
+    const closed = await helpState(tab, scope, index);
+    check(!closed.shown && closed.focused, `${at} ${opened.key}: Escape closes it and focus stays on its button`);
+    // Hover, and the pointer onto the panel; or a tap, then a tap outside.
+    await tab.evaluate(() => document.activeElement?.blur());
+    if (touch) {
+      await buttons.nth(index).tap();
+      const tapped = await helpState(tab, scope, index);
+      await tab.tap(outside);
+      const away = await helpState(tab, scope, index);
+      check(tapped.shown && !away.shown, `${at} ${opened.key}: a tap opens it and a tap outside closes it`);
+    } else {
+      await buttons.nth(index).hover();
+      const hovered = await helpState(tab, scope, index);
+      await tab.locator(`${scope} .ui-help__panel`).nth(index).hover();
+      await tab.waitForTimeout(500);
+      const onPanel = await helpState(tab, scope, index);
+      await tab.mouse.move(2, 450);
+      await tab.waitForTimeout(500);
+      const left = await helpState(tab, scope, index);
+      check(hovered.shown && onPanel.shown && !left.shown, `${at} ${opened.key}: hover opens it, the pointer may move onto it, and leaving closes it`);
+    }
+    // A press pins a panel; Tab reaches its guide link at the build's revision; Escape puts focus back on the button.
+    if (entry.guide) {
+      if (touch) await buttons.nth(index).tap(); else await buttons.nth(index).click();
+      await tab.keyboard.press('Tab');
+      const link = await tab.evaluate(() => ({href: document.activeElement.getAttribute('href'), target: document.activeElement.target, rel: document.activeElement.rel, guide: document.activeElement.matches('.ui-help__guide')}));
+      check(link.guide && link.href === `https://github.com/pwngh/gtm-connector/blob/${builtRevision}/${entry.guide.path}` && link.target === '_blank' && link.rel === 'noopener noreferrer',
+        `${at} ${opened.key}: pinned, Tab reaches its guide link ${link.href}`);
+      await tab.keyboard.press('Escape');
+      const back = await helpState(tab, scope, index);
+      check(!back.shown && back.focused, `${at} ${opened.key}: Escape from the guide link closes it and focus returns to its button`);
+    }
+  }
+  // One open at a time: pinning one and then focusing another closes the first.
+  if (total > 1) {
+    if (touch) await buttons.nth(0).tap(); else await buttons.nth(0).click();
+    await buttons.nth(1).focus();
+    const [first, second] = [await helpState(tab, scope, 0), await helpState(tab, scope, 1)];
+    check(!first.shown && second.shown && second.open === 1, `${at}: one help is open at a time (${JSON.stringify({first: first.shown, second: second.shown, open: second.open})})`);
+    await tab.keyboard.press('Escape');
+  }
+}
+for (const [width, touch] of [[390, true], [1440, false]]) {
+  await scenario(`help on the deal card ${width}`, async () => {
+    const at = `help ${width}`;
+    const tab = await page({width, touch});
+    await tab.goto(thornfield, {waitUntil: 'networkidle'});
+    await signIn(tab);
+    await tab.waitForSelector('.dc-ledger');
+    const roles = await tab.$$eval('.dc-people [data-group]', groups => groups.filter(group => group.querySelector('.dc-attr')).map(group => `role.${group.dataset.group}`));
+    await exerciseHelp(tab, `${at} deal card`, '.dc', {touch, outside: '.dc-title', expected: ['countdown', 'citation', 'arr', 'quotation', ...roles, 'record', 'not_read', 'seal']});
+    if (options.screenshots) {
+      await tab.evaluate(() => document.activeElement?.blur());
+      await tab.locator('.dc-not-read .ui-help__button').focus();
+      await tab.screenshot({path: join(options.screenshots, `help-not-read-${width}.png`)});
+      await tab.keyboard.press('Escape');
+    }
+    // The proof drawer: "Read" carries the receipt's hint; Escape closes the hint before the drawer.
+    await openInApp(tab, '/deals/acc-003?unit=5');
+    await tab.waitForSelector('[role=dialog] [data-proof="unit"]');
+    await exerciseHelp(tab, `${at} drawer`, '[role=dialog]', {touch, outside: '.ui-dialog__title', expected: ['ops.receipt']});
+    await tab.locator('[role=dialog] .ui-help__button').focus();
+    await tab.keyboard.press('Escape');
+    const drawer = await tab.locator('[role=dialog]').count();
+    await tab.keyboard.press('Escape');
+    await tab.waitForSelector('[role=dialog]', {state: 'detached'});
+    check(drawer === 1, `${at} drawer: the first Escape closes the receipt's hint and the drawer stays; the second closes the drawer`);
+    // The Communications tab: the first sentence of each role carries that role's help.
+    await openInApp(tab, '/deals/acc-003/communications');
+    await tab.waitForSelector('.dc-comms');
+    const talkRoles = await tab.$$eval('.dc-comms .dc-line', lines => [...new Set(lines.map(line => line.querySelector('.dc-attr__part:nth-child(2)').firstChild.textContent.split(' ')[0].toLowerCase()))].map(role => `role.${role}`));
+    await exerciseHelp(tab, `${at} communications`, '.dc-comms', {touch, outside: '.dc-title', expected: talkRoles});
+    // Coverage: its title carries the help.
+    await openInApp(tab, '/ops/coverage');
+    await tab.waitForSelector('.cv-title');
+    await exerciseHelp(tab, `${at} coverage`, '.cv', {touch, outside: '.cv-meta', expected: ['ops.coverage']});
+    if (options.screenshots) {
+      await tab.evaluate(() => document.activeElement?.blur());
+      await tab.locator('.cv .ui-help__button').focus();
+      await tab.screenshot({path: join(options.screenshots, `help-coverage-${width}.png`)});
+    }
+    check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+    await tab.context().close();
+  });
+}
 
 // 18. The Communications tab: every sentence the card read, call by call and
 // message by message, oldest first, at 320, 390 and 1440 wide, light and dark;

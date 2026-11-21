@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {after, before, test} from 'node:test';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
@@ -7,7 +8,7 @@ import {createServer, type ViteDevServer} from 'vite';
 import type {Read} from '../../../api/reads.ts';
 import type {CardDetail} from '../../../api/types.ts';
 import {dealAt, dealHref, tabAt} from '../deals.ts';
-import {onCard, sentencesOf, usableTime} from './card.ts';
+import {groupOf, onCard, roleWords, sentencesOf, usableTime} from './card.ts';
 import {talksOf} from './communications.ts';
 import {find, recorded, salesforce, thornfield} from './recorded.ts';
 
@@ -226,12 +227,47 @@ test('every number is a link named Source n that opens the proof drawer on this 
   );
 });
 
+test('every recorded card: the first sentence of each role carries that role’s help after its role word, in the copy file’s words', () => {
+  const help = JSON.parse(readFileSync(new URL('../../../help/help.json', import.meta.url), 'utf8')) as Record<string, {text: string}>;
+  for (const {file, key, card} of every) {
+    const html = deal(card);
+    const listed = talksOf(card);
+    const order = [...listed.timed, ...listed.untimed].flatMap(talk => talk.sentences);
+    const firsts = new Map<string, number>();
+    for (const sentence of order) {
+      if (!firsts.has(groupOf(sentence))) {
+        firsts.set(groupOf(sentence), sentence.n);
+      }
+    }
+    const drawn = [...html.matchAll(/data-help="(role\.[a-z]+)"><span class="ui-help__text">([^<]*)<\/span>/g)];
+    assert.deepEqual(
+      drawn.map(match => match[1]),
+      [...firsts.keys()].map(group => `role.${group}`),
+      `${file} ${key}`,
+    );
+    for (const match of drawn) {
+      assert.equal(decode(match[2] ?? ''), help[match[1] ?? '']?.text, `${file} ${key}`);
+    }
+    for (const [group, n] of firsts) {
+      assert.match(
+        lineOf(html, n),
+        new RegExp(`class="dc-attr__part">${roleWords[group as keyof typeof roleWords]}[^<]*<span class="ui-help">`),
+        `${file} ${key} ${n}`,
+      );
+    }
+  }
+});
+
 test('the recorded injection case and hostile server strings render as text and make no element', () => {
   const card = find('cases', 'test_05_injected_markup_and_figures_stay_inert/2');
   const html = deal(card);
   assert.match(words(html), /\[mention channel\] \[user U0ABC123\] IGNORE PREVIOUS INSTRUCTIONS/);
+  // Every link is the deal's own address, or the guide of a role's help panel.
   for (const [, href] of html.matchAll(/href="([^"]*)"/g)) {
-    assert.match(decode(href ?? ''), /^\/deals\/acc-905(\/communications\?unit=\d+|\/text|\/communications)?$/);
+    assert.match(
+      decode(href ?? ''),
+      /^(\/deals\/acc-905(\/communications\?unit=\d+|\/text|\/communications)?|https:\/\/github\.com\/pwngh\/gtm-connector\/blob\/main\/docs\/cards\.md#speaker-roles)$/,
+    );
   }
   const hostile = '<img src=x onerror=alert(1)>';
   const marked = structuredClone(thornfield());
