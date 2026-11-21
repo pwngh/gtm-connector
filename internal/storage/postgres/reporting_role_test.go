@@ -134,7 +134,7 @@ func TestARestoreRefusesADatabaseWithAReportingSchema(t *testing.T) {
 	files := dump(t, f)
 	fresh, url := freshStoreURL(t)
 	ok(t, execute(t, url, "CREATE SCHEMA reporting"))
-	err := fresh.Restore(ctx, strings.Repeat("f", 64), files.version, files.copies, opener(files.data))
+	err := fresh.Restore(ctx, strings.Repeat("f", 64), files.applied, files.copies, opener(files.data))
 	if err == nil || !strings.Contains(err.Error(), "restore needs an empty database") {
 		t.Fatalf("a restore into a database with a reporting schema: %v", err)
 	}

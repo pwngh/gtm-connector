@@ -74,7 +74,7 @@ func TestReportingViewsCountTheStoredRows(t *testing.T) {
 	restored, err := postgres.Open(ctx, url)
 	ok(t, err)
 	defer restored.Close()
-	ok(t, restored.Restore(ctx, strings.Repeat("e", 64), files.version, files.copies, opener(files.data)))
+	ok(t, restored.Restore(ctx, strings.Repeat("e", 64), files.applied, files.copies, opener(files.data)))
 	again, _ := reportingCounts(t, url)
 	every := func(u string) string {
 		return scalar(t, u, `SELECT string_agg(x::text, E'\n' ORDER BY x::text) FROM (
