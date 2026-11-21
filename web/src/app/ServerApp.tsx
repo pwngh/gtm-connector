@@ -12,10 +12,11 @@ import '../workplan.css';
 import '../chrome.css';
 import '../api.css';
 import '../ui/tokens.css';
+import './deals/deals.css';
 import {Frame} from './frame/Frame.tsx';
-import {home} from './frame/pages.ts';
+import {home, opsHome} from './frame/pages.ts';
 
-// The app the server serves. "/" and /ops open the first page.
+// The app the server serves. "/" opens Deals, and /ops its first page.
 export default function ServerApp({store}: {store: ServerStore}) {
   return (
     <ServerContext value={store}>
@@ -34,7 +35,7 @@ export default function ServerApp({store}: {store: ServerStore}) {
             path="/ops"
             element={
               <Navigate
-                to={home}
+                to={opsHome}
                 replace
               />
             }

@@ -1,0 +1,303 @@
+/* Deals: a ledger of the granted deals, one line each, and at 1100 and wider
+   the open deal beside it. Lines are lines: a rule between rows, no radius,
+   no box around a row. */
+.deals {
+  min-width: 0;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+}
+
+.deals-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gc-space-4);
+  min-width: 0;
+}
+
+.deals-head {
+  display: grid;
+  gap: var(--gc-space-2);
+}
+
+/* Scoped under .fr so the older sheets' heading colours do not reach it. */
+.fr .deals-head__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gc-space-3);
+  margin: 0;
+  color: var(--gc-ink);
+  font: var(--gc-title);
+  letter-spacing: 0;
+  text-shadow: none;
+}
+
+.deals-head__title:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
+.deals-head__count {
+  color: var(--gc-ink-2);
+  font: var(--gc-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.deals-head__meta,
+.deals-status,
+.deals-empty__meta {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+}
+
+.deals-head__filter {
+  max-width: 400px;
+  margin-top: var(--gc-space-2);
+}
+
+/* The field clears with the keyboard or the filter's own button, so the small built-in clear control is not drawn. */
+.deals-head__filter .ui-field__input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.deals-rows {
+  margin: 0;
+  padding: 0;
+  border-top: var(--gc-rule-width) solid var(--gc-rule);
+  list-style: none;
+}
+
+.deals-rows__item {
+  margin: 0;
+  padding: 0;
+  border-bottom: var(--gc-rule-width) solid var(--gc-rule);
+}
+
+.deals-row {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--gc-space-1) var(--gc-space-4);
+  min-height: 56px;
+  padding: var(--gc-space-2) var(--gc-space-3);
+  border-left: 3px solid transparent;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  font-variant-numeric: tabular-nums;
+  text-decoration: none;
+}
+
+.deals-row:hover {
+  background: var(--gc-surface);
+}
+
+.deals-row:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: -3px;
+}
+
+.deals-row[aria-current="page"] {
+  border-left-color: var(--gc-accent);
+  background: var(--gc-surface);
+}
+
+.deals-row__who {
+  display: grid;
+  min-width: 0;
+}
+
+.deals-row__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.deals-row__id,
+.deals-row__label,
+.deals-row__meta {
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+}
+
+.deals-row__id {
+  overflow-wrap: anywhere;
+}
+
+.deals-row__card {
+  display: grid;
+  justify-items: end;
+  text-align: right;
+}
+
+.deals-row__value {
+  color: var(--gc-ink);
+  font: var(--gc-body);
+}
+
+/* Six static rows of the final shape while the list is read. Nothing moves. */
+.deals-placeholder {
+  box-sizing: border-box;
+  display: grid;
+  align-content: center;
+  gap: var(--gc-space-2);
+  min-height: 56px;
+  padding: var(--gc-space-2) var(--gc-space-3);
+}
+
+.deals-placeholder__name,
+.deals-placeholder__id {
+  display: block;
+  height: var(--gc-space-4);
+  background: var(--gc-sunken);
+}
+
+.deals-placeholder__name {
+  width: 55%;
+}
+
+.deals-placeholder__id {
+  width: 25%;
+  height: var(--gc-space-3);
+}
+
+.deals-placeholder:nth-child(even) .deals-placeholder__name {
+  width: 40%;
+}
+
+.deals-reading {
+  display: grid;
+  gap: var(--gc-space-3);
+}
+
+.deals-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gc-space-2) var(--gc-space-3);
+  margin: 0;
+  padding: var(--gc-space-1) var(--gc-space-1) var(--gc-space-1) var(--gc-space-3);
+  border: var(--gc-rule-width) solid var(--gc-rule);
+  background: var(--gc-surface);
+  color: var(--gc-ink);
+}
+
+.deals-hint__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.deals-hint__link,
+.deals-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gc-space-2);
+  min-width: var(--gc-target);
+  min-height: var(--gc-target);
+  color: var(--gc-accent);
+  font-weight: 600;
+}
+
+.deals-hint__link:focus-visible,
+.deals-back:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
+.deals-back {
+  margin-bottom: var(--gc-space-3);
+  text-decoration: none;
+}
+
+.deals-empty {
+  display: grid;
+  justify-items: start;
+  gap: var(--gc-space-3);
+  padding: var(--gc-space-5) 0;
+}
+
+.deals-empty__text {
+  margin: 0;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+}
+
+.deals-empty__code {
+  color: var(--gc-ink);
+  font-family: var(--gc-face-reference);
+  font-size: 1rem;
+}
+
+.deals-choose {
+  margin: 0;
+  padding: var(--gc-space-7) 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-body);
+}
+
+.deals-open {
+  min-width: 0;
+}
+
+/* Under 720, and in the rail, a row is two lines: the name and ID, then the card time. */
+@media (max-width: 719.98px) {
+  .deals-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .deals-row__who,
+  .deals-row__card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 0 var(--gc-space-2);
+    text-align: left;
+  }
+
+  .fr .deals-head__title {
+    font-size: 1.375rem;
+    line-height: 1.75rem;
+  }
+}
+
+/* At 1100 and wider the list is a rail 336 wide whose rows scroll on their own. */
+@media (min-width: 1100px) {
+  .deals--split {
+    display: grid;
+    grid-template-columns: 336px minmax(0, 1fr);
+    align-items: start;
+    gap: var(--gc-space-6);
+  }
+
+  .deals-rail {
+    position: sticky;
+    top: 0;
+  }
+
+  .deals-rail .deals-list {
+    max-height: 100dvh;
+  }
+
+  .deals-rail .deals-rows,
+  .deals-rail .deals-reading {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .deals-rail .deals-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .deals-rail .deals-row__who,
+  .deals-rail .deals-row__card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 0 var(--gc-space-2);
+    text-align: left;
+  }
+}

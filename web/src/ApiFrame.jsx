@@ -42,13 +42,14 @@ export function selectionHref(params, changes) {
 // in ?card= when it is in that account's list, else the latest published.
 // Every read is keyed by the account and the session generation, so an answer
 // for an account or card no longer chosen is dropped.
-export function useCardSelection(session) {
+// A fixed account, as a deal's address names one, takes the place of ?account=.
+export function useCardSelection(session, fixed = null) {
   const [params, setParams] = useSearchParams();
   const {state} = useServer();
   const signedIn = Boolean(session?.principal?.id);
   const accounts = useRead(signedIn ? 'accounts' : null, (api, signal) => api.accounts({signal}));
   const granted = accounts.status === 'ready' && Array.isArray(accounts.data?.accounts) ? accounts.data.accounts : null;
-  const asked = params.get('account')?.trim() || null;
+  const asked = fixed ?? (params.get('account')?.trim() || null);
   const {account, verified, invalid, name} = resolveAccount(asked, granted);
   useEffect(() => {
     if (!asked && account) setParams(current => new URLSearchParams(selectionHref(current, {account}).slice(1)), {replace: true, preventScrollReset: true});
@@ -59,7 +60,7 @@ export function useCardSelection(session) {
   const {cardId, mismatch} = resolveCard(params.get('card'), listed);
   const read = useRead(cardId ? `card:${account}:${cardId}` : null, (api, signal) => api.card(cardId, {signal}));
   const card = cardId ? checkCard(read, account, cardId) : read;
-  return {params, accounts, granted, account, verified, invalid, accountName: verified ? name : null, cards, listed, cardId, cardMismatch: mismatch, card, generation: state.generation};
+  return {params, accounts, granted, account, fixed: fixed !== null, verified, invalid, accountName: verified ? name : null, cards, listed, cardId, cardMismatch: mismatch, card, generation: state.generation};
 }
 
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;
