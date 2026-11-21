@@ -47,6 +47,7 @@ var (
 	ErrInvalidAsOf        = &CodeError{"invalid_as_of"}
 	ErrDeadline           = &CodeError{"brief_deadline_exceeded"}
 	ErrInvalidToken       = &CodeError{"invalid_token"}
+	ErrRateLimited        = &CodeError{"rate_limited"}
 	ErrTooLarge           = &CodeError{"brief_too_large"}
 	ErrRejected           = &CodeError{"brief_rejected"}
 	ErrEvidenceInvalid    = &CodeError{"brief_evidence_invalid"}
@@ -71,6 +72,9 @@ type Principal struct {
 	Scopes      []string // what the token grants
 	// Live is whether the credential still verifies now. Nil means it does.
 	Live func() bool
+	// Charge counts one source read against the caller's rate window and reports whether the window had
+	// room for it, as the gateway counts each read inside a prepared brief. Nil counts nothing.
+	Charge func() bool
 }
 
 func (p Principal) live() bool { return p.Live == nil || p.Live() }
@@ -180,9 +184,9 @@ func checkRequest(s evidence.Sources, accountID, asOf string) error {
 	return nil
 }
 
-// versions are the records a read returned, as the record versions their receipt binds: each record's
+// RecordVersions are the records a read returned, as the record versions their receipt binds: each record's
 // canonical encoding is its body.
-func versions(records []*strictjson.Object) ([]receipts.RecordVersion, error) {
+func RecordVersions(records []*strictjson.Object) ([]receipts.RecordVersion, error) {
 	out := make([]receipts.RecordVersion, len(records))
 	for i, record := range records {
 		ref, _ := record.Get("record_ref")
@@ -273,6 +277,9 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 	if !r.principal.live() {
 		return nil, nil, nil, "", errors.Join(ErrInvalidToken, finish(receipts.Failed(401, "request_failed")))
 	}
+	if r.principal.Charge != nil && !r.principal.Charge() {
+		return nil, nil, nil, "", errors.Join(ErrRateLimited, finish(receipts.Failed(429, "request_failed")))
+	}
 	if !slices.Contains(r.principal.Scopes, scopes[r.tool]) {
 		return nil, nil, nil, "denied", finish(receipts.Denied())
 	}
@@ -302,7 +309,7 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 		return nil, nil, nil, "", errors.Join(fmt.Errorf("%s: %w", r.tool, ErrBriefing),
 			finish(receipts.Failed(200, "request_failed")))
 	}
-	bound, err = versions(found)
+	bound, err = RecordVersions(found)
 	if err != nil {
 		return nil, nil, nil, "", errors.Join(err, finish(receipts.Failed(200, "request_failed")))
 	}
@@ -515,8 +522,11 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 // and records the call's arguments as given; each source read is a child read of it; and the outer
 // receipt, finished with the published bytes' digest, is the brief's seal.
 type Prepare struct {
-	Principal   Principal
-	Selection   Selection
+	Principal Principal
+	Selection Selection
+	// Outer is the call's receipt when the gateway has committed it. The maker then starts none: the call
+	// has the one outer receipt its gateway gave it, and OperationID and RequestID are not read.
+	Outer       *receipts.Receipt
 	OperationID string
 	RequestID   receipts.RequestID
 	// Arguments are the call's arguments as received: account_id, and as_of when the caller gave one.
@@ -547,11 +557,20 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 	principal := p.Principal
 	accountValue, _ := p.Arguments.Get("account_id")
 	accountID, _ := accountValue.(string)
-	outer, err := m.Receipts.Start(ctx, receipts.Start{WorkspaceID: principal.WorkspaceID, OperationID: p.OperationID,
-		PrincipalID: principal.PrincipalID, TokenID: principal.TokenID, Tool: receipts.Composite, Scope: "crm:read",
-		AccountRef: accountID, Arguments: p.Arguments, RequestID: p.RequestID})
-	if err != nil {
-		return nil, err
+	var outer receipts.Receipt
+	if p.Outer != nil {
+		outer = *p.Outer
+		if outer.Tool != receipts.Composite || outer.Status != "pending" || outer.AuditID == "" {
+			return nil, fmt.Errorf("%w: the outer receipt is not a pending %s call", receipts.ErrInvalid, receipts.Composite)
+		}
+	} else {
+		var err error
+		outer, err = m.Receipts.Start(ctx, receipts.Start{WorkspaceID: principal.WorkspaceID, OperationID: p.OperationID,
+			PrincipalID: principal.PrincipalID, TokenID: principal.TokenID, Tool: receipts.Composite, Scope: "crm:read",
+			AccountRef: accountID, Arguments: p.Arguments, RequestID: p.RequestID})
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Only the worker whose start committed the call runs it and settles it.
 	if err := ownStart(outer); err != nil {

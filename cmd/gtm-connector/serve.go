@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/authz"
+	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	httptransport "github.com/pwngh/gtm-connector/internal/transport/http"
 	"github.com/pwngh/gtm-connector/web"
@@ -58,15 +59,23 @@ func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 
 // serve runs the HTTPS server as the app role. It refuses to start before
 // setup has run, while a restore is unfinished, or as a role that owns the
-// tables.
+// tables. With --selection it reads the selection file first, before the
+// database or any credential, and never reads it again.
 func serve(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	selectionFile := flags.String("selection", "", "a selection `file`: MCP clients read only its accounts, and get the two brief tools")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	c, err := loadConfig()
 	if err != nil {
 		return err
+	}
+	var selection cards.Selection
+	if *selectionFile != "" {
+		if selection, err = loadSelection(*selectionFile); err != nil {
+			return err
+		}
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	store, err := openAppStore(ctx, c)
@@ -84,13 +93,7 @@ func serve(ctx context.Context, args []string) error {
 		return err
 	}
 	app := web.App()
-	surface, err := httptransport.New(httptransport.Config{
-		PublicOrigin: c.publicOrigin,
-		AllowedHosts: c.allowedHosts,
-		Web:          app,
-		WebDir:       c.webDir,
-		SessionKey:   key,
-	}, store, authz.Evidence{Store: store})
+	surface, err := newSurface(ctx, store, c, key, selection)
 	if err != nil {
 		return err
 	}
@@ -113,7 +116,7 @@ func serve(ctx context.Context, args []string) error {
 		from = "none (API only)"
 	}
 	logger.Info("serving", "origin", c.publicOrigin, "listen", c.listen, "web", from,
-		"credentials", c.credentialsDir)
+		"mcp", c.publicOrigin+"/mcp", "selected_accounts", len(selection), "credentials", c.credentialsDir)
 	select {
 	case err := <-served:
 		return err
@@ -123,6 +126,23 @@ func serve(ctx context.Context, args []string) error {
 	defer cancel()
 	logger.Info("stopping")
 	return server.Shutdown(shutdown)
+}
+
+// newSurface is everything serve answers: the browser surface, with the
+// MCP gateway mounted at /mcp.
+func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey []byte, selection cards.Selection) (*httptransport.Server, error) {
+	gateway, err := mcpGateway(ctx, store, c.publicOrigin, selection)
+	if err != nil {
+		return nil, err
+	}
+	return httptransport.New(httptransport.Config{
+		PublicOrigin: c.publicOrigin,
+		AllowedHosts: c.allowedHosts,
+		Web:          web.App(),
+		WebDir:       c.webDir,
+		SessionKey:   sessionKey,
+		MCP:          gateway,
+	}, store, authz.Evidence{Store: store})
 }
 
 // serving reads the TLS pair and the session key.

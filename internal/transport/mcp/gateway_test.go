@@ -629,6 +629,27 @@ func TestGetAndDeleteAreNotAllowed(t *testing.T) {
 // (captured from Connector under mcp 2.3.0).
 func TestSDKLadderAfterAdmission(t *testing.T) {
 	h := newHarness(t)
+	checkVectors(t, h, ladderVectors())
+	// Methods the 2026-07-28 revision removed are answered as the Python SDK answers them.
+	for _, method := range []string{"ping", "initialize"} {
+		response := h.rpc(method, nil, "read", nil, false)
+		want := decode(t, []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"error":{"code":-32601,"message":"Method not found","data":%q}}`, h.number, method)))
+		if response.Code != 404 || !reflect.DeepEqual(decode(t, response.Body.Bytes()), want) {
+			t.Errorf("%s: %d %s", method, response.Code, response.Body)
+		}
+	}
+	// An unknown tool is a tool error with HTTP 200 and the Python SDK's text.
+	unknown := h.tool("unknown_fixture_tool", nil, "read", nil)
+	result := path(decode(t, unknown.Body.Bytes()), "result")
+	if unknown.Code != 200 || path(result, "isError") != true || path(result, "resultType") != "complete" ||
+		!strings.Contains(fmt.Sprint(path(result, "content")), "Unknown tool: unknown_fixture_tool") {
+		t.Errorf("unknown tool: %d %s", unknown.Code, unknown.Body)
+	}
+}
+
+// ladderVectors are requests the gateway admits and the Python SDK then refuses or acknowledges, in its own
+// words. None is a tool call, so none leaves a receipt.
+func ladderVectors() []vector {
 	read := "Bearer " + tokenValue("read")
 	headers := func(method string, extra ...[2]string) [][2]string {
 		return append([][2]string{{"Content-Type", "application/json"}, {"Accept", "application/json, text/event-stream"},
@@ -663,29 +684,11 @@ func TestSDKLadderAfterAdmission(t *testing.T) {
 		{"missing metadata", `{"jsonrpc":"2.0","id":99,"method":"tools/list","params":{}}`,
 			headers("tools/list"), 400, `{"jsonrpc":"2.0","id":99,"error":{"code":-32602,"message":"request metadata requires protocolVersion","data":{"reason":"missing_protocol_version"}}}`},
 	}
-	for _, c := range cases {
-		status, reply := c.status, c.reply
-		response := h.post([]byte(c.body), c.headers)
-		if response.Code != status || (reply != "" && !reflect.DeepEqual(decode(t, response.Body.Bytes()), decode(t, []byte(reply)))) ||
-			(reply == "" && response.Body.Len() != 0) {
-			t.Errorf("%s: %d %s", c.label, response.Code, response.Body)
-		}
+	vectors := make([]vector, len(cases))
+	for i, c := range cases {
+		vectors[i] = vector{c.label, []byte(c.body), c.headers, c.status, c.reply, ""}
 	}
-	// Methods the 2026-07-28 revision removed are answered as the Python SDK answers them.
-	for _, method := range []string{"ping", "initialize"} {
-		response := h.rpc(method, nil, "read", nil, false)
-		want := decode(t, []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"error":{"code":-32601,"message":"Method not found","data":%q}}`, h.number, method)))
-		if response.Code != 404 || !reflect.DeepEqual(decode(t, response.Body.Bytes()), want) {
-			t.Errorf("%s: %d %s", method, response.Code, response.Body)
-		}
-	}
-	// An unknown tool is a tool error with HTTP 200 and the Python SDK's text.
-	unknown := h.tool("unknown_fixture_tool", nil, "read", nil)
-	result := path(decode(t, unknown.Body.Bytes()), "result")
-	if unknown.Code != 200 || path(result, "isError") != true || path(result, "resultType") != "complete" ||
-		!strings.Contains(fmt.Sprint(path(result, "content")), "Unknown tool: unknown_fixture_tool") {
-		t.Errorf("unknown tool: %d %s", unknown.Code, unknown.Body)
-	}
+	return vectors
 }
 
 // The prepared folder's read rows (testdata/oracle/folders/prepared/reads.jsonl): a brief read again, refused

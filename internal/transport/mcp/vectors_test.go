@@ -50,15 +50,35 @@ type vector struct {
 	body    []byte
 	headers [][2]string
 	status  int
-	reply   string // the exact reply as a JSON value; "" for an empty body; "released" for a released tool result
+	// reply is the exact reply as a JSON value; "" for an empty body; "released" for a released tool result;
+	// "listed" for a tools/list result.
+	reply   string
 	receipt string // "" for none, else "tool status http"
+}
+
+// target is an endpoint the vectors are replayed against: how a request reaches it, and every outer receipt
+// it has written so far, each as "tool status http".
+type target struct {
+	post     func(body []byte, headers [][2]string) *httptest.ResponseRecorder
+	receipts func() []string
 }
 
 func checkVectors(t *testing.T, h *harness, vectors []vector) {
 	t.Helper()
+	replayVectors(t, target{h.post, func() []string {
+		var rows []string
+		for _, row := range h.receipts.Read() {
+			rows = append(rows, fmt.Sprintf("%s %s %d", row.Tool, row.Status, *row.HTTPStatus))
+		}
+		return rows
+	}}, vectors)
+}
+
+func replayVectors(t *testing.T, to target, vectors []vector) {
+	t.Helper()
 	for _, v := range vectors {
-		before := len(h.receipts.Read())
-		response := h.post(v.body, v.headers)
+		before := len(to.receipts())
+		response := to.post(v.body, v.headers)
 		problem := ""
 		switch {
 		case response.Code != v.status:
@@ -69,17 +89,21 @@ func checkVectors(t *testing.T, h *harness, vectors []vector) {
 			if path(decode(t, response.Body.Bytes()), "result", "isError") != false {
 				problem = "not a released result"
 			}
+		case v.reply == "listed":
+			if _, listed := path(decode(t, response.Body.Bytes()), "result", "tools").([]any); !listed {
+				problem = "not a tool list"
+			}
 		case v.reply != "" && !reflect.DeepEqual(withoutAuditID(decode(t, response.Body.Bytes())), withoutAuditID(decode(t, []byte(v.reply)))):
 			problem = "reply differs"
 		case strings.Contains(response.Header().Get("Content-Type"), "event-stream"):
 			problem = "an SSE reply"
 		}
-		rows := h.receipts.Read()[before:]
+		rows := to.receipts()[before:]
 		got := ""
 		if len(rows) > 1 {
 			problem = fmt.Sprintf("%d receipts", len(rows))
 		} else if len(rows) == 1 {
-			got = fmt.Sprintf("%s %s %d", rows[0].Tool, rows[0].Status, *rows[0].HTTPStatus)
+			got = rows[0]
 		}
 		if got != v.receipt {
 			problem += fmt.Sprintf(" receipt %q, want %q", got, v.receipt)
@@ -92,11 +116,12 @@ func checkVectors(t *testing.T, h *harness, vectors []vector) {
 
 // The Python SDK's Accept and Content-Type rules: a missing or empty Accept is 406; JSON alone is enough;
 // a Content-Type parameter that fails MIME parsing is still JSON to Python.
-func TestAcceptAndContentTypeAsPython(t *testing.T) {
-	h := newHarness(t)
+func TestAcceptAndContentTypeAsPython(t *testing.T) { checkVectors(t, newHarness(t), acceptVectors()) }
+
+func acceptVectors() []vector {
 	call := func(id string) []byte { return callBody(id, "get_account", `{"account_id":"acc-001"}`, vectorMeta) }
 	headers := vectorHeaders("tools/call", "get_account")
-	checkVectors(t, h, []vector{
+	return []vector{
 		{"Accept missing", call("1"), replace(headers, "Accept", unset), 406, "", "get_account error 406"},
 		{"Accept empty", call("2"), replace(headers, "Accept", ""), 406, "", "get_account error 406"},
 		{"Accept JSON alone", call("3"), replace(headers, "Accept", "application/json"), 200, "released", "get_account ok 200"},
@@ -104,13 +129,23 @@ func TestAcceptAndContentTypeAsPython(t *testing.T) {
 		{"Content-Type with empty parameters", call("5"), replace(headers, "Content-Type", "application/json;;=x"), 200, "released", "get_account ok 200"},
 		{"subscriptions/listen with JSON alone", methodBody("6", "subscriptions/listen", `"notifications":{},`),
 			replace(vectorHeaders("subscriptions/listen", ""), "Accept", "application/json"), 406, "", ""},
-	})
+	}
 }
 
 // Every method the Python gateway does not serve is its 404/-32601 with the method as data; the three empty
 // lists it does serve are answered in its shape; subscriptions/listen never reaches SDK streaming.
 func TestMethodsAsPython(t *testing.T) {
 	h := newHarness(t)
+	checkVectors(t, h, methodVectors())
+	// A string cursor is ignored and the whole list comes back.
+	whole := unlistedTools(t, "tools/list with a string cursor")
+	response := h.post(methodBody("8", "tools/list", `"cursor":"abc",`), vectorHeaders("tools/list", ""))
+	if response.Code != 200 || len(path(decode(t, response.Body.Bytes()), "result", "tools").([]any)) != len(whole) {
+		t.Errorf("string cursor: %d %s", response.Code, response.Body)
+	}
+}
+
+func methodVectors() []vector {
 	notFound := func(id, method string) string {
 		return fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"Method not found","data":%q}}`, id, method)
 	}
@@ -118,7 +153,7 @@ func TestMethodsAsPython(t *testing.T) {
 		return fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"cacheScope":"private","%s":[],"resultType":"complete","ttlMs":0,`+
 			`"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"gtm-connector","version":"0.2.0"}}}}`, id, member)
 	}
-	checkVectors(t, h, []vector{
+	return []vector{
 		{"subscriptions/listen", methodBody("5", "subscriptions/listen", `"notifications":{"toolsListChanged":true},`),
 			vectorHeaders("subscriptions/listen", ""), 404, notFound("5", "subscriptions/listen"), ""},
 		{"logging/setLevel", methodBody("20", "logging/setLevel", `"level":"debug",`), vectorHeaders("logging/setLevel", ""), 404, notFound("20", "logging/setLevel"), ""},
@@ -133,19 +168,15 @@ func TestMethodsAsPython(t *testing.T) {
 		{"a custom method", methodBody("14", "gtm/anything", ""), vectorHeaders("gtm/anything", ""), 404, notFound("14", "gtm/anything"), ""},
 		{"tools/list with a number cursor", methodBody("9", "tools/list", `"cursor":5,`), vectorHeaders("tools/list", ""), 400,
 			`{"jsonrpc":"2.0","id":9,"error":{"code":-32602,"message":"Invalid request parameters","data":""}}`, ""},
-	})
-	// A string cursor is ignored and the whole list comes back.
-	whole := unlistedTools(t, "tools/list with a string cursor")
-	response := h.post(methodBody("8", "tools/list", `"cursor":"abc",`), vectorHeaders("tools/list", ""))
-	if response.Code != 200 || len(path(decode(t, response.Body.Bytes()), "result", "tools").([]any)) != len(whole) {
-		t.Errorf("string cursor: %d %s", response.Code, response.Body)
 	}
 }
 
 // Python validates the 2026-07-28 request schema, including the reserved _meta keys, and answers a
 // mis-shaped one with -32602 "Invalid request parameters". Well-formed extras pass.
-func TestRequestSchemaAsPython(t *testing.T) {
-	h := newHarness(t)
+func TestRequestSchemaAsPython(t *testing.T) { checkVectors(t, newHarness(t), schemaVectors()) }
+
+// schemaVectors are each _meta shape on a tool call and on a list.
+func schemaVectors() []vector {
 	invalid := func(id string) string {
 		return `{"jsonrpc":"2.0","id":` + id + `,"error":{"code":-32602,"message":"Invalid request parameters","data":""}}`
 	}
@@ -176,32 +207,30 @@ func TestRequestSchemaAsPython(t *testing.T) {
 		{"progressToken an object", meta(cc + `{},"progressToken":{}`), false},
 		{"logLevel unknown", meta(cc + `{},"io.modelcontextprotocol/logLevel":"loud"`), false},
 	}
+	var vectors []vector
 	for i, c := range cases {
 		id := fmt.Sprint(100 + i)
-		status, reply, receipt := 200, "released", "get_account ok 200"
+		status, reply, receipt, listReply := 200, "released", "get_account ok 200", "listed"
 		if !c.ok {
-			status, reply, receipt = 400, invalid(id), "get_account error 400"
+			status, reply, receipt, listReply = 400, invalid(id), "get_account error 400", invalid(id)
 		}
-		checkVectors(t, h, []vector{{c.label + " (tools/call)", callBody(id, "get_account", `{"account_id":"acc-001"}`, c.meta),
-			vectorHeaders("tools/call", "get_account"), status, reply, receipt}})
-		listStatus, listReply := 200, ""
-		if !c.ok {
-			listStatus, listReply = 400, invalid(id)
-		}
-		response := h.post([]byte(`{"jsonrpc":"2.0","id":`+id+`,"method":"tools/list","params":{"_meta":`+c.meta+`}}`), vectorHeaders("tools/list", ""))
-		if response.Code != listStatus || (listReply != "" && !reflect.DeepEqual(decode(t, response.Body.Bytes()), decode(t, []byte(listReply)))) {
-			t.Errorf("%s (tools/list): %d %s", c.label, response.Code, response.Body)
-		}
+		vectors = append(vectors,
+			vector{c.label + " (tools/call)", callBody(id, "get_account", `{"account_id":"acc-001"}`, c.meta),
+				vectorHeaders("tools/call", "get_account"), status, reply, receipt},
+			vector{c.label + " (tools/list)", []byte(`{"jsonrpc":"2.0","id":` + id + `,"method":"tools/list","params":{"_meta":` + c.meta + `}}`),
+				vectorHeaders("tools/list", ""), status, listReply, ""})
 	}
+	return vectors
 }
 
 // Tool-call shapes Python's schema refuses, and those it serves.
-func TestToolCallShapesAsPython(t *testing.T) {
-	h := newHarness(t)
+func TestToolCallShapesAsPython(t *testing.T) { checkVectors(t, newHarness(t), shapeVectors()) }
+
+func shapeVectors() []vector {
 	invalid := func(id string) string {
 		return `{"jsonrpc":"2.0","id":` + id + `,"error":{"code":-32602,"message":"Invalid request parameters","data":""}}`
 	}
-	checkVectors(t, h, []vector{
+	return []vector{
 		{"no params.name", []byte(`{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"arguments":{"account_id":"acc-001"},"_meta":` + vectorMeta + `}}`),
 			vectorHeaders("tools/call", "get_account"), 400, invalid("32"), "get_account error 400"},
 		{"unknown tool, string arguments", callBody("36", "nope", `"x"`, vectorMeta), vectorHeaders("tools/call", "nope"), 400, invalid("36"), "nope error 400"},
@@ -231,7 +260,7 @@ func TestToolCallShapesAsPython(t *testing.T) {
 		{"a progress token is accepted", callBody("37", "get_account", `{"account_id":"acc-001"}`,
 			`{"progressToken":7,"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}`),
 			vectorHeaders("tools/call", "get_account"), 200, "released", "get_account ok 200"},
-	})
+	}
 }
 
 // The client's id comes back exactly, however large: Python ints are exact.

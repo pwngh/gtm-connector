@@ -15,7 +15,9 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -208,15 +210,92 @@ func (s *Store) Read(_ context.Context, tool, accountID string) (source string, 
 	return "", nil, fmt.Errorf("demo: no read %q", tool)
 }
 
+// SearchRows is how many accounts one search returns.
+const SearchRows = 100
+
+// Search is search_accounts on the demo CRM (store.search_accounts): the accounts whose name contains the
+// literal query, ignoring ASCII case, ordered by name without ASCII case and then by ID. It returns the first
+// SearchRows of them and whether more matched. accounts, when not nil, limits the search to those IDs before
+// the order and the bound.
+func (s *Store) Search(query string, accounts []string) (records []*strictjson.Object, more bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t := s.tables["crm/accounts"]
+	name := t.column("name")
+	needle := lowerASCII(query)
+	var found [][]any
+	for _, row := range t.rows {
+		text, _ := row[name].(string)
+		if strings.Contains(lowerASCII(text), needle) && (accounts == nil || slices.Contains(accounts, row[0].(string))) {
+			found = append(found, row)
+		}
+	}
+	sort.SliceStable(found, func(i, j int) bool {
+		a, b := lowerASCII(found[i][name].(string)), lowerASCII(found[j][name].(string))
+		if a != b {
+			return a < b
+		}
+		return found[i][0].(string) < found[j][0].(string)
+	})
+	if more = len(found) > SearchRows; more {
+		found = found[:SearchRows]
+	}
+	return t.records("crm", "accounts", found), more
+}
+
+// Opportunities is list_opportunities without an account (store.list_opportunities): every opportunity in ID
+// order, or those of accounts when it is not nil.
+func (s *Store) Opportunities(accounts []string) []*strictjson.Object {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t := s.tables["crm/opportunities"]
+	account := t.column("account_id")
+	var found [][]any
+	for _, row := range t.rows {
+		if id, _ := row[account].(string); accounts == nil || slices.Contains(accounts, id) {
+			found = append(found, row)
+		}
+	}
+	sort.SliceStable(found, func(i, j int) bool { return found[i][0].(string) < found[j][0].(string) })
+	return t.records("crm", "opportunities", found)
+}
+
+// lowerASCII is SQLite's lower(): only the letters A to Z change.
+func lowerASCII(text string) string {
+	out := []byte(text)
+	for i, c := range out {
+		if c >= 'A' && c <= 'Z' {
+			out[i] = c + ('a' - 'A')
+		}
+	}
+	return string(out)
+}
+
+// column is the position of a named column.
+func (t *table) column(name string) int {
+	for i, c := range t.columns {
+		if c == name {
+			return i
+		}
+	}
+	return -1
+}
+
+// records are rows as a read returns them: the columns in table order, then the record_ref.
+func (t *table) records(database, name string, rows [][]any) []*strictjson.Object {
+	records := make([]*strictjson.Object, len(rows))
+	for i, row := range rows {
+		record := &strictjson.Object{Keys: append([]string(nil), t.columns...), Values: append([]any(nil), row...)}
+		record.Set("record_ref", fmt.Sprintf("%s/%s/%s", database, name, row[0]))
+		records[i] = record
+	}
+	return records
+}
+
 // rows is SELECT * FROM table WHERE column = value ORDER BY id, as records.
 func (s *Store) rows(database, name, column, value string) []*strictjson.Object {
 	t := s.tables[database+"/"+name]
-	where := -1
-	for i, c := range t.columns {
-		if c == column {
-			where = i
-		}
-	}
+	where := t.column(column)
 	var found [][]any
 	for _, row := range t.rows {
 		if row[where] == value {
@@ -225,11 +304,5 @@ func (s *Store) rows(database, name, column, value string) []*strictjson.Object 
 	}
 	// SQLite orders TEXT by its bytes, which is Go's string order.
 	sort.SliceStable(found, func(i, j int) bool { return found[i][0].(string) < found[j][0].(string) })
-	records := make([]*strictjson.Object, len(found))
-	for i, row := range found {
-		record := &strictjson.Object{Keys: append([]string(nil), t.columns...), Values: append([]any(nil), row...)}
-		record.Set("record_ref", fmt.Sprintf("%s/%s/%s", database, name, row[0]))
-		records[i] = record
-	}
-	return records
+	return t.records(database, name, found)
 }

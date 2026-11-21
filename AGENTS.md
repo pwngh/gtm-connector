@@ -32,7 +32,8 @@ app. Until the Go CLI ships, the Python package is the product and the reference
 The Go port is the module at the root, in `internal/`: `unicodetab` (generated from `testdata/oracle/unicode`),
 `strictjson`, `evidence` (neutralized text, sentences, the card), `receipts` (the contract, the publication
 rules every store applies, and `receiptstest`, which every store runs), `cards` (make, seal, verify, admit)
-and `sources/demo`. Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate.
+and `sources/demo`. Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate, and
+`mcptools` its tokens, receipts and tools on the store, which `serve` mounts at `/mcp`.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`. `postgres.ReceiptStore`
