@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/pwngh/gtm-connector/internal/cards"
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/mcptools"
 	"github.com/pwngh/gtm-connector/internal/sources/demo"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
@@ -108,7 +109,7 @@ func (e *mcpEndpoints) gate(ctx context.Context, workspace postgres.Workspace) (
 	}
 	gate, err := mcptools.New(mcptools.Config{Resource: e.publicOrigin + "/mcp", Issuer: e.publicOrigin,
 		WorkspaceID: workspace.ID, Store: e.store, Receipts: &postgres.ReceiptStore{Store: e.store},
-		Open: toolSources(e.store, workspace)})
+		Open: toolSources(e.store, workspace), Bound: toolBindings(e.store, workspace)})
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +148,7 @@ func demoGateway(ctx context.Context, store *postgres.Store, publicOrigin string
 	}
 	gate, err := mcptools.New(mcptools.Config{Resource: publicOrigin + "/mcp", Issuer: publicOrigin,
 		WorkspaceID: workspace.ID, Store: store, Receipts: &postgres.ReceiptStore{Store: store},
-		Open: toolSources(store, workspace), Selection: selection})
+		Open: toolSources(store, workspace), Bound: toolBindings(store, workspace), Selection: selection})
 	return gate, workspace, err
 }
 
@@ -200,6 +201,21 @@ func toolSources(store *postgres.Store, workspace postgres.Workspace) func(conte
 		mu.Unlock()
 		return mcptools.Opened{Source: servedBook{cardSource{from}, served}, Sources: from.sources(),
 			Connections: from.connections(), Generations: from.generations()}, nil
+	}
+}
+
+// toolBindings gives the sources a workspace is bound to at the moment of a call, from its own rows: no
+// source is opened. A workspace with no CRM connected is refused as crm_not_connected.
+func toolBindings(store *postgres.Store, workspace postgres.Workspace) func(context.Context) (evidence.Sources, error) {
+	return func(ctx context.Context) (evidence.Sources, error) {
+		from, err := workspaceReads(ctx, store, workspace)
+		if errors.Is(err, errNotConnected) {
+			return evidence.Sources{}, mcp.ToolError("crm_not_connected")
+		}
+		if err != nil {
+			return evidence.Sources{}, err
+		}
+		return from.sources(), nil
 	}
 }
 

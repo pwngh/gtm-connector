@@ -189,7 +189,7 @@ func TestServeAnswersMCPOverTLS(t *testing.T) {
 	account := map[string]any{"account_id": "acc-003"}
 
 	status, listing := send(address, "tools/list", "", bearer, map[string]any{})
-	if tools, _ := result(listing)["tools"].([]any); status != 200 || len(tools) != 7 {
+	if tools, _ := result(listing)["tools"].([]any); status != 200 || len(tools) != 9 {
 		t.Fatalf("tools/list: %d %v", status, listing)
 	}
 	status, read := call(address, "get_account", bearer, account)

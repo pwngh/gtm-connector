@@ -28,13 +28,26 @@ func (s *server) run(ctx context.Context, call mcp.Call) (json.RawMessage, error
 	if err != nil || arguments == nil || call.Invocation == nil {
 		return nil, errors.New("a call needs its arguments and its invocation")
 	}
+	var result *strictjson.Object
+	switch call.Tool {
+	case "list_deals":
+		result, err = s.listDeals(ctx, call.Invocation)
+	case "read_deal_card":
+		result, err = s.readDealCard(ctx, call.Invocation, arguments)
+	}
+	if dealTools[call.Tool] {
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := strictjson.Dumps(result, strictjson.Quoted)
+		return json.RawMessage(encoded), err
+	}
 	// What the call reads was opened before its receipt started. A workspace whose sources could not be
 	// opened, or were changed since, is refused here, under that receipt, before anything is read.
 	view, err := s.recorder.opened(call.Invocation.AuditID)
 	if err != nil {
 		return nil, err
 	}
-	var result *strictjson.Object
 	switch call.Tool {
 	case "prepare_renewal_brief":
 		result, err = s.prepare(ctx, view, call.Invocation, arguments)
