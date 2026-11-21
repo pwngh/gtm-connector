@@ -53,5 +53,15 @@
   "ops.receipt": {
     "title": "the receipt",
     "text": "One row of the audit log. A read gets its receipt before it runs."
+  },
+  "ops.activity": {
+    "title": "Activity",
+    "text": "What ran to make one card: its seal, then each read it rests on, each with its receipt in full. Every source read and every card seal leaves a receipt.",
+    "guide": {"label": "Receipts and the audit log, What a receipt holds", "path": "docs/audit.md#what-a-receipt-holds"}
+  },
+  "receipt.arguments": {
+    "title": "the arguments",
+    "text": "The arguments as the call sent them, kept as stored. They are shown here as text, with every character outside printable ASCII written as an escape.",
+    "guide": {"label": "Receipts and the audit log, What a call sent", "path": "docs/audit.md#what-a-call-sent-tool-and-arguments"}
   }
 }

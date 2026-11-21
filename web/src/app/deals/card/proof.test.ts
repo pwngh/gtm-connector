@@ -101,9 +101,14 @@ test('unit 5 of the README’s deal: the recorded sentence character for charact
   assert.doesNotMatch(html, /data-near="before"/);
   assert.match(html, /data-near="after"><span class="dc-proof__label">After<\/span><a class="dc-proof__step" href="\/deals\/acc-003\?unit=6"/);
   assert.match(text(html), /After \[6\] Please do not put a date on the order form\./);
-  assert.match(text(html), /Read 15 Jan 2027, 15:00:00 UTC from calls$/);
-  // No receipt ID, digest or tool name.
-  assert.doesNotMatch(html, /receipt-|read_call_notes|operation-1|token-1|[0-9a-f]{64}/);
+  assert.match(text(html), /Read 15 Jan 2027, 15:00:00 UTC from calls Open the receipt in Ops$/);
+  // Under the read, a link to its receipt whole in Ops; the drawer itself shows no receipt ID, digest or tool name.
+  assert.match(
+    html,
+    /<a class="dc-proof__receipt" href="\/ops\/activity\?card=card-demo-\d+&amp;receipt=receipt-read_call_notes"[^>]*>Open the receipt in Ops<\/a>/,
+  );
+  assert.doesNotMatch(text(html), /receipt-|read_call_notes|operation-1|token-1|[0-9a-f]{64}/);
+  assert.doesNotMatch(html.replace(/ href="[^"]*"/g, ''), /receipt-|read_call_notes|operation-1|token-1|[0-9a-f]{64}/);
 });
 
 test('a record unit shows its reference and says its fields are not served yet', () => {
@@ -111,7 +116,7 @@ test('a record unit shows its reference and says its fields are not served yet',
   const html = render(card, '2', answered(card, 2));
   assert.match(
     text(html),
-    /^Record crm\/contacts\/con-003 This server returns a record’s reference, not its fields yet\. On the card Read 15 Jan 2027, 15:00:00 UTC from the CRM$/,
+    /^Record crm\/contacts\/con-003 This server returns a record’s reference, not its fields yet\. On the card Read 15 Jan 2027, 15:00:00 UTC from the CRM Open the receipt in Ops$/,
   );
   assert.doesNotMatch(html, /<blockquote/);
 });

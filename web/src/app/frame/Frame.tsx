@@ -4,16 +4,16 @@ import {Link, useLocation, useNavigate} from 'react-router';
 import {ApiError, sessionExpired} from '../../api/client.ts';
 import {useRead, useServer} from '../../api/reads.ts';
 import type {PrincipalView} from '../../api/types.ts';
-import {focusElement, holdPendingFocus} from '../../focusElement.js';
-import RouteContent from '../../RouteContent.jsx';
 import {Button} from '../../ui/Button.tsx';
 import {Dialog} from '../../ui/Dialog.tsx';
 import {Palette} from '../../ui/Palette.tsx';
 import {Refusal, refusalText} from '../../ui/Refusal.tsx';
 import {type Theme, useTheme} from '../../ui/theme.ts';
 import {byName} from '../deals/deals.ts';
+import {focusElement, holdPendingFocus} from './focus.ts';
 import {NoPage} from './NoPage.tsx';
 import {type Area, areaAt, areaHome, dealItems, keptQuery, pageAt, pageItems, shownAreas} from './pages.ts';
+import RouteContent from './RouteContent.tsx';
 import {SignIn} from './SignIn.tsx';
 import './frame.css';
 
@@ -82,11 +82,11 @@ interface LinksProps {
 }
 
 // An area with listed pages keeps the chosen account and open card; Deals starts afresh.
-function AreaLinks({search, current, pathname, className, onNavigate}: LinksProps) {
+function AreaLinks({search, current, className, onNavigate}: Omit<LinksProps, 'pathname'>) {
   return shownAreas.map(area => (
     <Link
       key={area.id}
-      to={areaHome(area) + (area.subnav ? keptQuery(search, pathname) : '')}
+      to={areaHome(area) + (area.subnav ? keptQuery(search) : '')}
       className={className}
       aria-current={current?.id === area.id ? 'page' : undefined}
       onClick={onNavigate}
@@ -100,7 +100,7 @@ function PageLinks({search, current, pathname, className, onNavigate}: LinksProp
   return (current?.pages ?? []).map(page => (
     <Link
       key={page.id}
-      to={page.path + keptQuery(search, pathname)}
+      to={page.path + keptQuery(search)}
       className={className}
       aria-current={page.path === pathname ? 'page' : undefined}
       onClick={onNavigate}
@@ -115,7 +115,7 @@ const asError = (error: unknown) => (error instanceof ApiError ? error : new Api
 // The palette: the granted deals by name, then the Ops pages. The deals are
 // the account list the server answers; until it answers only the pages show,
 // and a refusal is said, never shown as no deals.
-function Finder({go, search, pathname}: {go: (to: string) => void; search: string; pathname: string}) {
+function Finder({go, search}: {go: (to: string) => void; search: string}) {
   const accounts = useRead('accounts', (api, signal) => api.accounts({signal}));
   const granted = accounts.status === 'ready' && Array.isArray(accounts.data?.accounts) ? byName(accounts.data.accounts) : [];
   const notice =
@@ -123,10 +123,10 @@ function Finder({go, search, pathname}: {go: (to: string) => void; search: strin
   return (
     <Palette
       inputLabel="Deal or page name"
-      placeholder="A deal’s name, or Evidence"
+      placeholder="A deal’s name, or Activity"
       empty="No deal or page matches."
       notice={notice}
-      items={[...dealItems(go, granted), ...pageItems(go, search, pathname)]}
+      items={[...dealItems(go, granted), ...pageItems(go, search)]}
     />
   );
 }
@@ -307,7 +307,6 @@ export function Frame() {
                 <AreaLinks
                   search={location.search}
                   current={area}
-                  pathname={location.pathname}
                   className="fr-link"
                 />
               </nav>
@@ -390,7 +389,7 @@ export function Frame() {
             problem={noSession ? (state.error ?? new ApiError({kind: 'unreachable'})) : null}
           />
         ) : (
-          <div className="main-content fr-page">
+          <div className="fr-page">
             {(signOutError ?? state.error) && (
               <Refusal
                 error={signOutError ?? state.error}
@@ -421,7 +420,6 @@ export function Frame() {
               navigate(to);
             }}
             search={location.search}
-            pathname={location.pathname}
           />
         </Dialog>
       )}
@@ -475,7 +473,6 @@ function PhoneMenu({returnFocus, principal, area, search, pathname, theme, choos
           <AreaLinks
             search={search}
             current={area}
-            pathname={pathname}
             className="fr-menu__item"
             onNavigate={onClose}
           />
