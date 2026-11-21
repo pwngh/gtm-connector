@@ -230,7 +230,8 @@ func TestConfigIsChecked(t *testing.T) {
 	}
 }
 
-// Item 12: every response carries the CSP; the shell's inline theme script
+// Item 12: every response carries the CSP, which names no other origin for
+// styles, fonts or anything else; the shell's inline theme script
 // is allowed by its hash and no other inline script is; content types come
 // from a fixed table.
 func TestEveryDocumentIsUnderThePolicy(t *testing.T) {
@@ -254,7 +255,8 @@ func TestEveryDocumentIsUnderThePolicy(t *testing.T) {
 		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
 		policy := w.Header().Get("Content-Security-Policy")
 		if w.Header().Get("Content-Type") != kind || !strings.Contains(policy, "script-src 'self' "+allowed+";") ||
-			strings.Contains(policy, "unsafe-inline' https://fonts.gstatic") || !strings.Contains(policy, "https://fonts.googleapis.com") {
+			!strings.Contains(policy, "style-src 'self' 'unsafe-inline';") || !strings.Contains(policy, "font-src 'self';") ||
+			strings.Contains(policy, "://") {
 			t.Errorf("%s: %q, policy %q", path, w.Header().Get("Content-Type"), policy)
 		}
 	}
@@ -282,10 +284,21 @@ func TestTheSignInBodyIsOneObject(t *testing.T) {
 		return w.Code
 	}
 	for _, body := range []string{`{"login":"a","password":"b"}}`, `{"login":"a","password":"b"}{}`,
-		`{"login":"a","password":"b"} []`, `null`, `[]`, `"x"`, `{"login":"a","password":"b","x":1}`} {
+		`{"login":"a","password":"b"} []`, `null`, `[]`, `"x"`, `{"login":"a","password":"b","x":1}`,
+		// As the strict reader reads it: a field twice, a field in another case, a field of another type,
+		// bytes that are not UTF-8, a number no float holds, and a leading byte-order mark are each refused.
+		"\xef\xbb\xbf{\"login\":\"a\",\"password\":\"b\"}",
+		`{"login":"a","password":"b","password":"c"}`, `{"login":"a","login":"a","password":"b"}`,
+		`{"Login":"a","password":"b"}`, `{"login":"a","PASSWORD":"b"}`, `{"login":null,"password":"b"}`,
+		`{"login":"a","password":1}`, "{\"login\":\"a\xff\",\"password\":\"b\"}", `{"login":"a","password":"b"} NaN`,
+		`{"login":"a","password":"\ud800"}`} {
 		if code := post(body); code != http.StatusBadRequest {
 			t.Errorf("%s: %d", body, code)
 		}
+	}
+	// The reader's depth limit holds inside the body's size limit.
+	if code := post(`{"login":` + strings.Repeat("[", 1001) + strings.Repeat("]", 1001) + `}`); code != http.StatusBadRequest {
+		t.Errorf("a body nested past the limit: %d", code)
 	}
 	if code := post(`{"login":"a","password":"b"}` + "\n"); code != http.StatusUnauthorized {
 		t.Errorf("one object: %d", code)

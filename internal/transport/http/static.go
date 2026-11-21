@@ -16,12 +16,12 @@ import (
 	"time"
 )
 
-// basePolicy is the Content-Security-Policy of every response: only this
-// origin's scripts, and the font stylesheet and files the app's shell loads.
+// basePolicy is the Content-Security-Policy of every response: scripts,
+// styles, fonts and requests come from this origin only.
 // Inline style attributes stay allowed: the app's animation library sets them.
 const basePolicy = "default-src 'self'; script-src 'self'%s; " +
-	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-	"img-src 'self' data:; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data:; font-src 'self'; connect-src 'self'; " +
 	"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
 var inlineScript = regexp.MustCompile(`(?is)<script(\s[^>]*)?>(.*?)</script>`)

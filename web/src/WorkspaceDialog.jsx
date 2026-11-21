@@ -1,9 +1,9 @@
 import React, {useId, useLayoutEffect, useRef, useState} from 'react';
-import {X,AlertCircle} from 'lucide-react';
+import {X} from 'lucide-react';
 
-// One scroll-lock owner lives in App. Dialogs only manage their own focus.
-export default function WorkspaceDialog({title, children, onClose, wide=false, drawer=false, returnFocusRef, editing=false, command=false, error, onDismissError}) {
-  const ref=useRef(null), errorRef=useRef(null), close=useRef(onClose), titleId=useId();
+// The app shell owns the scroll lock. A dialog only manages its own focus.
+export default function WorkspaceDialog({title, children, onClose, wide=false, returnFocusRef, command=false}) {
+  const ref=useRef(null), close=useRef(onClose), titleId=useId();
   const [viewport,setViewport]=useState(null);
   close.current=onClose;
   useLayoutEffect(()=>{
@@ -40,11 +40,9 @@ export default function WorkspaceDialog({title, children, onClose, wide=false, d
       });
     };
   },[]);
-  useLayoutEffect(()=>{if(error){errorRef.current?.focus({preventScroll:true});errorRef.current?.scrollIntoView({block:'nearest'})}},[error]);
-  return <div className={`dialog-backdrop ${drawer?'drawer-backdrop':''}`} style={viewport?{top:viewport.top,height:viewport.height,bottom:'auto','--dialog-available-height':`${viewport.height}px`}:undefined} onMouseDown={event=>{if(event.target===event.currentTarget)close.current()}}>
-    <section role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={ref} className={`dialog ${wide?'wide':''} ${drawer?'source-drawer':''} ${editing?'is-editing':''} ${command?'command-dialog':''}`}>
+  return <div className="dialog-backdrop" style={viewport?{top:viewport.top,height:viewport.height,bottom:'auto','--dialog-available-height':`${viewport.height}px`}:undefined} onMouseDown={event=>{if(event.target===event.currentTarget)close.current()}}>
+    <section role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} ref={ref} className={`dialog ${wide?'wide':''} ${command?'command-dialog':''}`}>
       <div className="dialog-head"><h2 id={titleId}>{title}</h2><button type="button" className="icon-button" aria-label="Close dialog" onClick={()=>close.current()}><X size={21}/></button></div>
-      {error&&<div className="dialog-error" role="alert" tabIndex={-1} ref={errorRef}><AlertCircle size={18}/><p>{error}</p><button type="button" className="icon-button" aria-label="Dismiss error" onClick={()=>{onDismissError?.();ref.current?.focus({preventScroll:true})}}><X size={18}/></button></div>}
       {children}
     </section>
   </div>;

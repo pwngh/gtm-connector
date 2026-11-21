@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // The private credentials folder: the owner secret, the demo credential, the
@@ -44,6 +46,11 @@ const (
 // credentialFiles are the files a backup carries, in order.
 var credentialFiles = []string{ownerSecretFile, demoFile, sessionKeyFile, tlsKeyFile, tlsCertFile}
 
+// maxCredentialBytes is the largest credential file read, from the folder or
+// from a backup. The files written here are under 1 KiB each; the largest an
+// operator may put in place is a certificate with its chain, a few KiB.
+const maxCredentialBytes = 64 << 10
+
 // credentials holds a descriptor of the folder, checked when it was opened.
 // Every later read and write goes through that descriptor, so swapping the
 // path for a link or another folder afterwards changes nothing.
@@ -53,7 +60,8 @@ type credentials struct {
 }
 
 // openCredentials checks the folder, creating it (and only it) when absent
-// and create is set.
+// and create is set. Its refusals, and those of the files in it, name the
+// folder and a file by what they are, never by their path.
 func openCredentials(dir string, create bool) (*credentials, error) {
 	if dir == "" {
 		return nil, errors.New("set GTM_CREDENTIALS_DIR to the private credentials folder")
@@ -61,12 +69,12 @@ func openCredentials(dir string, create bool) (*credentials, error) {
 	dir = filepath.Clean(dir)
 	if create {
 		if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-			return nil, fmt.Errorf("credentials folder: %w", err)
+			return nil, fmt.Errorf("the credentials folder could not be made: %w", err)
 		}
 	}
 	fd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, fmt.Errorf("credentials folder %s: %w", dir, describe(err))
+		return nil, fmt.Errorf("the credentials folder %w", describe(err))
 	}
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
@@ -75,19 +83,25 @@ func openCredentials(dir string, create bool) (*credentials, error) {
 	}
 	if err := private(stat, true); err != nil {
 		unix.Close(fd)
-		return nil, fmt.Errorf("credentials folder %s: %w", dir, err)
+		return nil, fmt.Errorf("the credentials folder %w", err)
 	}
 	return &credentials{dir: dir, fd: fd}, nil
 }
 
 func (c *credentials) Close() error { return unix.Close(c.fd) }
 
+// absent is a folder or a file that does not exist. It is fs.ErrNotExist to errors.Is.
+type absent struct{}
+
+func (absent) Error() string        { return "does not exist" }
+func (absent) Is(target error) bool { return target == fs.ErrNotExist }
+
 func describe(err error) error {
 	switch {
 	case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
 		return errors.New("is a symbolic link or not a folder")
 	case errors.Is(err, unix.ENOENT):
-		return fs.ErrNotExist
+		return absent{}
 	}
 	return err
 }
@@ -120,14 +134,15 @@ func validName(name string) error {
 }
 
 // read gives a file's bytes, or fs.ErrNotExist. The checks run on the
-// opened descriptor, so they describe the file actually read.
+// opened descriptor, so they describe the file actually read. A file over
+// maxCredentialBytes is refused by its size, before any of it is read.
 func (c *credentials) read(name string) ([]byte, error) {
 	if err := validName(name); err != nil {
 		return nil, err
 	}
 	fd, err := unix.Openat(c.fd, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Join(c.dir, name), describe(err))
+		return nil, fmt.Errorf("the credential %s %w", name, describe(err))
 	}
 	file := os.NewFile(uintptr(fd), name)
 	defer file.Close()
@@ -136,9 +151,17 @@ func (c *credentials) read(name string) ([]byte, error) {
 		return nil, err
 	}
 	if err := private(stat, false); err != nil {
-		return nil, fmt.Errorf("%s %w", filepath.Join(c.dir, name), err)
+		return nil, fmt.Errorf("the credential %s %w", name, err)
 	}
-	return io.ReadAll(io.LimitReader(file, 1<<20))
+	if stat.Size > maxCredentialBytes {
+		return nil, fmt.Errorf("%s is larger than a credential file (%d bytes)", filepath.Join(c.dir, name),
+			maxCredentialBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxCredentialBytes+1))
+	if err == nil && len(data) > maxCredentialBytes {
+		return nil, fmt.Errorf("%s grew while it was read", filepath.Join(c.dir, name))
+	}
+	return data, err
 }
 
 // staged writes data to a new private temporary file in the folder and
@@ -189,7 +212,7 @@ func (c *credentials) write(name string, data []byte) error {
 func (c *credentials) install(temp, name string) error {
 	if err := unix.Linkat(c.fd, temp, c.fd, name, 0); err != nil {
 		if errors.Is(err, unix.EEXIST) {
-			return fmt.Errorf("%s appeared meanwhile", filepath.Join(c.dir, name))
+			return fmt.Errorf("the credential %s appeared meanwhile", name)
 		}
 		return err
 	}
@@ -246,7 +269,7 @@ func (c *credentials) setUp(hosts []string) (demoCredential, error) {
 	}
 	demo, err := parseDemo(raw)
 	if err != nil {
-		return demoCredential{}, fmt.Errorf("%s: %w", filepath.Join(c.dir, demoFile), err)
+		return demoCredential{}, fmt.Errorf("the credential %s: %w", demoFile, err)
 	}
 	if err := c.ensureCertificate(hosts); err != nil {
 		return demoCredential{}, err
@@ -254,9 +277,13 @@ func (c *credentials) setUp(hosts []string) (demoCredential, error) {
 	return demo, nil
 }
 
+// parseDemo reads the demo credential as the strict reader reads it: one
+// object of at most maxCredentialBytes with exactly the two fields setUp
+// writes, each named once.
 func parseDemo(raw []byte) (demoCredential, error) {
 	var demo demoCredential
-	if err := json.Unmarshal(raw, &demo); err != nil || demo.Login == "" || len(demo.Password) < 32 {
+	if len(raw) > maxCredentialBytes || strictjson.Decode(raw, &demo) != nil || demo.Login == "" ||
+		len(demo.Password) < 32 {
 		return demoCredential{}, errors.New("not a demo credential")
 	}
 	return demo, nil

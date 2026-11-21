@@ -127,7 +127,8 @@ func scanReceiptWith(row pgx.Row, extra ...any) (Receipt, error) {
 	if generation != nil {
 		r.ConnectionGeneration = *generation
 	}
-	if err := json.Unmarshal(rows, &r.Rows); err != nil {
+	// The rows are a list of references and nothing else: a null among them is no reference.
+	if err := strictjson.Decode(rows, &r.Rows); err != nil {
 		return Receipt{}, fmt.Errorf("receipt %s rows: %w", r.ID, err)
 	}
 	return r, nil
@@ -955,22 +956,22 @@ func checkLease(lease time.Duration) error {
 	return nil
 }
 
-// sameJSON compares two JSON values as values: key order and spacing aside,
-// as jsonb stores them.
+// sameJSON compares two JSON values as strictjson reads them, as every
+// receipts.Store compares a replayed request: key order and spacing aside,
+// an integer apart from a number with a fraction, and a number by its value
+// (1.0 is 1.00). A value strictjson refuses is the same as nothing.
 func sameJSON(stored, given json.RawMessage) bool {
-	decode := func(raw json.RawMessage) ([]byte, bool) {
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.UseNumber()
-		var value any
-		if decoder.Decode(&value) != nil {
-			return nil, false
+	canonical := func(raw json.RawMessage) (string, bool) {
+		value, err := strictjson.Loads(raw)
+		if err != nil {
+			return "", false
 		}
-		encoded, err := json.Marshal(value)
-		return encoded, err == nil
+		text, err := strictjson.Dumps(value, strictjson.Prepared)
+		return text, err == nil
 	}
-	a, okA := decode(stored)
-	b, okB := decode(given)
-	return okA && okB && bytes.Equal(a, b)
+	a, okA := canonical(stored)
+	b, okB := canonical(given)
+	return okA && okB && a == b
 }
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)

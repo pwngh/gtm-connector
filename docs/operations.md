@@ -31,6 +31,9 @@ images. The web app is embedded in the binary, so there is nothing else to deplo
 The server then connects as an app role. That role reads and writes rows. It cannot change the
 schema or switch off a check.
 
+The database must be encoded as UTF8. Setup refuses any other encoding before it runs a migration,
+with one line: `the database is encoded as SQL_ASCII; create it with ENCODING 'UTF8' TEMPLATE template0`.
+
 > **Demo data and real sources never share a workspace.** The database refuses a real connection in
 > the demo workspace.
 
@@ -79,5 +82,5 @@ Until it finishes, setup and the server refuse to start.
 | Limit | Value |
 | --- | --- |
 | Platforms | macOS and Linux |
-| Database | PostgreSQL 19, or 18.7 |
+| Database | PostgreSQL 19, or 18.7, encoded as UTF8 |
 | Listeners | One HTTPS port for the web app, the API and MCP |

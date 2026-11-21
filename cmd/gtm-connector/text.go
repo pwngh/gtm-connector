@@ -28,14 +28,17 @@ func (r *run) human(result any) string {
 		}
 		return r.screen.table([]string{"ID", "ACCOUNT", "INDUSTRY", "RENEWAL"}, cells)
 	case "brief":
-		card := result.(*strictjson.Object)
-		brief := get(card, "brief_id").(string)
-		// A workspace's name can hold any byte. Escaped, the hint never writes a control character.
-		return fmt.Sprintf("%s\nBrief: %s\n%s\n%s", get(card, "text"), brief,
-			oneLine("List every unit: gtm-connector inspect "+brief+r.folder()),
-			oneLine("Resolve a number: gtm-connector inspect "+brief+" N"+r.folder()))
+		return r.cardText(result.(*strictjson.Object))
 	case "audit":
 		return r.auditTable(result.([]any))
+	case "connect":
+		return r.connectText(result.(*strictjson.Object))
+	case "demo":
+		renewal := result.(*strictjson.Object)
+		return fmt.Sprintf("Call-note access was refused (HTTP %s) for a grant without calls:read.\n"+
+			"Every source below is an invented demo fixture.\n\n%s",
+			cellText(get(get(renewal, "denied_read").(*strictjson.Object), "status")),
+			r.cardText(get(renewal, "brief").(*strictjson.Object)))
 	}
 	switch r.action {
 	case "account":
@@ -67,6 +70,63 @@ func (r *run) human(result any) string {
 		rows = []string{"none"}
 	}
 	return r.auditTable([]any{receipt}) + "\n\nArguments\n" + arguments + "\n\nReturned rows\n" + strings.Join(rows, "\n")
+}
+
+// cardText is a card, its brief ID, and the two commands that list its units and resolve one of its
+// numbers, with the card's workspace.
+func (r *run) cardText(card *strictjson.Object) string {
+	brief := get(card, "brief_id").(string)
+	// A workspace's name can hold any byte. Escaped, the hint never writes a control character.
+	return fmt.Sprintf("%s\nBrief: %s\n%s\n%s", get(card, "text"), brief,
+		oneLine("List every unit: gtm-connector inspect "+brief+r.folder()),
+		oneLine("Resolve a number: gtm-connector inspect "+brief+" N"+r.folder()))
+}
+
+// connectText is what connect did, then each source as connected or not, then the seller list when the
+// result holds one. Each seller prints as a quoted literal: the operator typed it, and it prints as data.
+func (r *run) connectText(result *strictjson.Object) string {
+	sources := get(result, "sources").(*strictjson.Object)
+	rows := make([][]any, len(sourceNames))
+	for i, source := range sourceNames {
+		rows[i] = []any{source, "not connected", ""}
+		if entry, connected := get(sources, source).(*strictjson.Object); connected {
+			detail := get(entry, "provider")
+			for _, kind := range sourceKinds {
+				if kind.source == source && kind.shown == detail {
+					detail = kind.detail
+				}
+			}
+			rows[i] = []any{source, "connected", detail}
+		}
+	}
+	text := ""
+	if name, named := get(result, "provider").(string); named {
+		kind := kindsNamed(name)[0]
+		switch get(result, "status") {
+		case "connected":
+			text = kind.title + " connected.\n"
+		case "removed":
+			text = kind.title + " removed. Its cards and receipts are kept.\n"
+		case "not_connected":
+			was := " was"
+			if kind.plural {
+				was = " were"
+			}
+			text = kind.title + was + " not connected. Nothing changed.\n"
+		}
+	}
+	text += r.screen.table([]string{"SOURCE", "STATUS", "DETAIL"}, rows)
+	if sellers, listed := get(result, "sellers").([]any); listed {
+		names := make([]string, len(sellers))
+		for i, seller := range sellers {
+			names[i] = oneLine(strictjson.Quote(cellText(seller)))
+		}
+		if len(names) == 0 {
+			names = []string{"none listed"}
+		}
+		text += "\nSellers: " + strings.Join(names, ", ")
+	}
+	return text
 }
 
 // auditTable is one row per receipt: when it started, its tool, its caller's token ID, how it ended, how

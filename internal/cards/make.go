@@ -146,6 +146,11 @@ type Maker struct {
 	// Connections names each source system's connection ("crm", "calls", "slack"), whose generation fences
 	// its reads and the card's publication. A system with none is not fenced.
 	Connections map[string]string
+	// Generations is the generation of each system's connection that the Source was opened under. A read
+	// whose receipt starts under another generation finishes as error/409 source_changed and no card is
+	// made: the source was connected again, or detached, after it was opened. A system with none is not
+	// checked.
+	Generations map[string]int64
 	// NewID gives the UUIDs brief IDs are made from. Nil is receipts.RandomID.
 	NewID func() string
 	// Now is the clock elapsed times and deadlines are read from. Nil is time.Now.
@@ -244,8 +249,10 @@ func sourceNames(s evidence.Sources, includeSlack bool) *strictjson.Object {
 
 func briefID(uuid string) string { return "brief-" + strings.ReplaceAll(uuid, "-", "") }
 
-// checkRequest is collect_evidence's checks before any read, in its order and with its messages.
-func checkRequest(s evidence.Sources, accountID, asOf string) error {
+// CheckRequest is collect_evidence's checks before any read, in its order and with its messages: the
+// account ID has the form of the folder's CRM, and the day is one. Brief makes them itself. A command
+// that reads or writes anything for a card before it calls Brief makes them first.
+func CheckRequest(s evidence.Sources, accountID, asOf string) error {
 	if !evidence.ValidAccountID(accountID, s.CRMBackend == "salesforce") {
 		if s.CRMBackend == "salesforce" {
 			return &RequestError{"account ID must use acc-sf- followed by the 18-character Salesforce ID"}
@@ -448,6 +455,11 @@ func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, 
 		started, err := start(i+1, p)
 		if err != nil {
 			return c, err
+		}
+		if opened, checked := m.Generations[p.system]; checked && !started.Replay && started.Generation != opened {
+			// The receipt started under a generation the source was not opened under, so the source is not read.
+			_, finishErr := m.Receipts.Finish(context.WithoutCancel(ctx), started.Ticket(), receipts.Failed(409, "source_changed"))
+			return c, errors.Join(fmt.Errorf("%s: %w", p.tool, receipts.ErrSourceChanged), finishErr)
 		}
 		c.ids = append(c.ids, started.AuditID)
 		c.receiptOf[p.tool] = started.AuditID
@@ -672,7 +684,7 @@ func (m *Maker) connection(system string) string { return m.Connections[system] 
 // Brief reads, builds and publishes one card.
 func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	id := briefID(m.newID())
-	if err := checkRequest(m.Sources, b.AccountID, b.AsOf); err != nil {
+	if err := CheckRequest(m.Sources, b.AccountID, b.AsOf); err != nil {
 		return nil, err
 	}
 	p := b.Principal

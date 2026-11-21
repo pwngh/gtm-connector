@@ -35,9 +35,9 @@ test('the probe picks the API only when the server answers in JSON, even with a 
 
   for (const answer of [{status: 200, text: '<!doctype html>'}, {status: 404, text: 'Not found'}]) {
     ({fetch} = fakeFetch(answer));
-    assert.equal((await createApiClient(fetch).probe()).mode, 'walkthrough');
+    assert.equal((await createApiClient(fetch).probe()).mode, 'static');
   }
-  // A server that answers and refuses stays the source: never walkthrough data.
+  // A server that answers and refuses is still the server, never a static host.
   ({fetch} = fakeFetch(refused(503, 'internal')));
   const failed = await createApiClient(fetch).probe();
   assert.equal(failed.mode, 'api');
@@ -154,9 +154,9 @@ test('unit facts keep cut and not-shown units labelled and read the body defensi
 });
 
 // Review round: the probe, deadlines and redirects.
-test('the probe picks walkthrough only for a static host: a 404, or a 2xx text/html page', async () => {
+test('the probe takes only a 404, or a 2xx text/html page, for a static host', async () => {
   for (const answer of [{status: 404, text: 'Not found', type: null}, {status: 404, text: 'Not found', type: 'text/plain'}, {status: 200, text: '<!doctype html>', type: 'text/html; charset=utf-8'}]) {
-    assert.equal((await createApiClient(fakeFetch(answer).fetch).probe()).mode, 'walkthrough', JSON.stringify(answer));
+    assert.equal((await createApiClient(fakeFetch(answer).fetch).probe()).mode, 'static', JSON.stringify(answer));
   }
   const cases = [
     [{status: 431, text: 'Request Header Fields Too Large', type: 'text/plain; charset=utf-8'}, 'unexpected'],
@@ -169,7 +169,7 @@ test('the probe picks walkthrough only for a static host: a 404, or a 2xx text/h
   ];
   for (const [answer, kind] of cases) {
     const result = await createApiClient(fakeFetch(answer).fetch).probe();
-    assert.equal(result.mode, 'api', `${JSON.stringify(answer)} must not be walkthrough`);
+    assert.equal(result.mode, 'api', `${JSON.stringify(answer)} must not be a static host`);
     assert.equal(result.session, null);
     assert.equal(result.error?.kind, kind, JSON.stringify(answer));
   }

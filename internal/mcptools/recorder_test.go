@@ -37,8 +37,9 @@ func newRecorder(t *testing.T) (*recorder, *receipts.Memory) {
 	t.Helper()
 	store := receipts.NewMemory(nil, nil)
 	store.SetGeneration(testWorkspace, testCRM, 1)
-	return &recorder{store: store, workspace: testWorkspace, tokens: oneToken{}, connections: map[string]string{"crm": testCRM},
-		open: map[string]*pending{}}, store
+	view := Opened{Connections: map[string]string{"crm": testCRM}, Generations: map[string]int64{"crm": 1}}
+	return &recorder{store: store, workspace: testWorkspace, tokens: oneToken{},
+		sources: func(context.Context) (Opened, error) { return view, nil }, open: map[string]*pending{}}, store
 }
 
 func stored(t *testing.T, store *receipts.Memory, id string) receipts.Receipt {
@@ -212,5 +213,36 @@ func TestFinishConfirmsAReceiptItsWorkFinished(t *testing.T) {
 	}
 	if got := stored(t, store, id); *got.HTTPStatus != 403 || *got.Error != refused {
 		t.Fatalf("the refusal was rewritten: %+v", got)
+	}
+}
+
+// A call reads its sources as they were opened before its receipt started. When the connection moved in
+// between, by a reconnect or a removal, the call is refused under that receipt and reads nothing; a call
+// whose sources could not be opened is refused the same way.
+func TestACallReadsNothingFromASourceThatMovedBeforeItsReceipt(t *testing.T) {
+	ctx := context.Background()
+	r, store := newRecorder(t)
+	store.SetGeneration(testWorkspace, testCRM, 2)
+	id, err := r.Start(ctx, mcp.Start{Tool: "get_account", Arguments: strictjson.NewObject("account_id", "acc-003")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, refusal := r.opened(id); refusal != mcp.ToolError("source_changed") {
+		t.Errorf("a source that moved: %v", refusal)
+	}
+	if got := stored(t, store, id); got.ConnectionID != testCRM || got.Generation != 2 {
+		t.Errorf("the receipt: %+v", got)
+	}
+
+	r.sources = func(context.Context) (Opened, error) { return Opened{}, mcp.ToolError("crm_not_connected") }
+	id, err = r.Start(ctx, mcp.Start{Tool: "get_account", Arguments: strictjson.NewObject("account_id", "acc-003")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, refusal := r.opened(id); refusal != mcp.ToolError("crm_not_connected") {
+		t.Errorf("no CRM: %v", refusal)
+	}
+	if got := stored(t, store, id); got.ConnectionID != "" {
+		t.Errorf("a refused call's receipt names a connection: %+v", got)
 	}
 }

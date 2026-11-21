@@ -87,11 +87,14 @@ func (s *Store) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return tx.Commit(ctx)
 }
 
+// ErrDatabaseURL is a database URL that could not be parsed.
+var ErrDatabaseURL = errors.New("the database URL could not be parsed")
+
 // redact drops a connection string's password from a parse error.
 func redact(err error) error {
 	var parse *pgconn.ParseConfigError
 	if errors.As(err, &parse) {
-		return errors.New("the database URL could not be parsed")
+		return ErrDatabaseURL
 	}
 	return err
 }

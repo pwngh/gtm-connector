@@ -398,7 +398,7 @@ func TestVerifyRefuses(t *testing.T) {
 		if _, err := VerifyPrepared(ctx, deep, folders[1].brief, f.Log, demoSources(nil)); !errors.Is(err, ErrBriefInvalid) {
 			t.Fatalf("got %v", err)
 		}
-		if _, err := ReadTrustedRows(deep); !errors.Is(err, strictjson.ErrTooDeep) {
+		if _, err := ReadTrustedRows(bytes.NewReader(deep)); !errors.Is(err, strictjson.ErrTooDeep) {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -427,7 +427,8 @@ func TestVerifyRefuses(t *testing.T) {
 	t.Run("an export that holds one audit ID twice", func(t *testing.T) {
 		data := oracletest.Read(t, "folders/cli_card/audit.jsonl")
 		first := data[:bytes.IndexByte(data, '\n')+1]
-		if _, err := ReadTrustedRows(append(append([]byte(nil), data...), first...)); !errors.Is(err, ErrDuplicateReceipt) {
+		twice := bytes.NewReader(append(append([]byte(nil), data...), first...))
+		if _, err := ReadTrustedRows(twice); !errors.Is(err, ErrDuplicateReceipt) {
 			t.Fatalf("got %v", err)
 		}
 	})
@@ -686,6 +687,17 @@ func TestReceiptsComeFirstAndReleaseLast(t *testing.T) {
 		source.during = func() { r.SetGeneration(testWorkspace, "crm-1", 2) }
 		if _, err := m.Brief(ctx, brief); !errors.Is(err, receipts.ErrSourceChanged) || r.published != 0 {
 			t.Fatalf("got %v", err)
+		}
+	})
+	t.Run("a source changed after it was opened is not read", func(t *testing.T) {
+		m, r, source := setup()
+		m.Generations = map[string]int64{"crm": 1}
+		r.SetGeneration(testWorkspace, "crm-1", 2)
+		if _, err := m.Brief(ctx, brief); !errors.Is(err, receipts.ErrSourceChanged) || source.reads != 0 || r.published != 0 {
+			t.Fatalf("got %v after %d reads", err, source.reads)
+		}
+		if first := r.All()[0]; first.Status != "error" || *first.HTTPStatus != 409 || *first.Error != "source_changed" {
+			t.Fatalf("the first read's receipt: %+v", first)
 		}
 	})
 	t.Run("a source changed before publication gives no card", func(t *testing.T) {

@@ -2,7 +2,7 @@ import React, {createContext, useContext, useSyncExternalStore} from 'react';
 import {Link, NavLink, useLocation} from 'react-router';
 import {ChevronRight, FileText, GitBranch, UserRound} from 'lucide-react';
 import {serverPaths} from './app/routes.js';
-import {lazyPage} from './app/lazyPage.js';
+import {ApiEvidence, ApiReadiness} from './lazyPages.js';
 import {Avatar} from './WorkspaceControls.jsx';
 
 // The server's store: the signed-in session and how the server answered.
@@ -16,9 +16,6 @@ export function useServer() {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   return {store, state};
 }
-
-const ApiEvidence = lazyPage(() => import('./ApiEvidence.jsx'));
-const ApiReadiness = lazyPage(() => import('./ApiReadiness.jsx'));
 
 // The pages that read from the server, in the order the navigation lists
 // them. The first is home. Every other path is not available here.
