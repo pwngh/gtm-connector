@@ -223,12 +223,9 @@ func TestASourceRegisteredInItsKindIsReadByEveryCommand(t *testing.T) {
 	if crm.opened != 0 || len(crm.sf.Commands) != 2 {
 		t.Errorf("status opened the source %d times, and sf ran %d commands", crm.opened, len(crm.sf.Commands))
 	}
-	// The demo data never joins a real source, and a source with no entry filled stays refused.
+	// The demo data never joins a real source.
 	if _, message, _ := d.refusal(t, 3, append([]string{"connect", "demo"}, where...)...); !strings.Contains(message, "real sources") {
 		t.Errorf("connect demo beside the registered CRM: %s", message)
-	}
-	if _, message, _ := d.refusal(t, 3, append([]string{"connect", "calls"}, where...)...); !strings.Contains(message, "not available") {
-		t.Errorf("connect calls: %s", message)
 	}
 
 	code, stdout, stderr := d.read(t, append([]string{"accounts", "--query", "Gemini"}, where...)...)

@@ -377,8 +377,9 @@ Examples:
   gtm-connector connect status
   gtm-connector connect demo --remove
 
-This build connects demo data. It refuses salesforce, calls, slack and the
-assistant apps, and never reads demo data in their place.
+This build connects demo data and imported call transcripts. It refuses
+salesforce, slack and the assistant apps, and never reads demo data in their
+place.
 `
 
 const demoHelp = `usage: gtm-connector demo [-h] [--json] [--state-dir STATE_DIR] [--again]

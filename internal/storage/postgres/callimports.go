@@ -75,6 +75,40 @@ func (c CallImports) bound(ctx context.Context, q queries, binding *strictjson.O
 	return nil
 }
 
+// Binding is the CRM binding the workspace's imports are bound to, or nil when the workspace holds no
+// import.
+func (c CallImports) Binding(ctx context.Context) (*strictjson.Object, error) {
+	var stored string
+	err := c.Store.pool.QueryRow(ctx, "SELECT crm_binding FROM call_import_stores WHERE workspace_id = $1",
+		c.WorkspaceID).Scan(&stored)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, nil
+	case err != nil:
+		return nil, callsError(err)
+	}
+	value, err := strictjson.LoadsText(stored)
+	binding, ok := value.(*strictjson.Object)
+	if err != nil || !ok || binding == nil {
+		return nil, calls.ErrCorrupt
+	}
+	if _, valid := evidence.CRMBackend(binding); !valid {
+		return nil, calls.ErrCorrupt
+	}
+	return binding, nil
+}
+
+// HeldOtherCallNotes is whether a read of the workspace returned call records that are not imports: the
+// demo book's call notes, whose IDs never take the form of an import's.
+func (c CallImports) HeldOtherCallNotes(ctx context.Context) (bool, error) {
+	var held bool
+	err := c.Store.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM receipts r, jsonb_array_elements_text(r.rows) AS row
+		 WHERE r.workspace_id = $1 AND r.status = 'ok' AND row LIKE 'calls/%'
+		   AND row !~ '^calls/call_notes/note-[0-9a-f]{64}$')`, c.WorkspaceID).Scan(&held)
+	return held, callsError(err)
+}
+
 // Import is calls_import.store_import: in one transaction it saves the file's bytes, the revision of this
 // request, and the pointers that make it the account's active import. The same bytes, account, call time and
 // range find the revision saved before and change nothing. Bytes, or an AccountNumber, that belong to another
