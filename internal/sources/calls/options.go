@@ -89,10 +89,15 @@ func CalledAt(text string) (string, error) {
 // refused as invalid; one that changes while it is read could not be read whole, and is refused as such.
 func ReadExport(path string) ([]byte, error) { return readExport(path, nil) }
 
-// readExport is ReadExport. When step is not nil it runs after the path is checked ("checked"), after its
-// folder is resolved ("resolved") and after the file is read ("read"), for a test that changes the file or
-// the folder there.
+// readExport is ReadExport: readLimited at the size of an export.
 func readExport(path string, step func(stage string)) ([]byte, error) {
+	return readLimited(path, evidence.MaxRawBytes, step)
+}
+
+// readLimited reads a file as ReadExport does, of at most limit bytes. When step is not nil it runs after the
+// path is checked ("checked"), after its folder is resolved ("resolved") and after the file is read ("read"),
+// for a test that changes the file or the folder there.
+func readLimited(path string, limit int64, step func(stage string)) ([]byte, error) {
 	checked, err := os.Lstat(path)
 	if err != nil {
 		return nil, ErrIO
@@ -119,15 +124,15 @@ func readExport(path string, step func(stage string)) ([]byte, error) {
 		// inode a removed one had, so its size and modification time are compared too. A replacement with the
 		// same inode, size and modification time cannot be told apart by these, and is read as the file it is.
 		return nil, ErrInvalid
-	case opened.Size() > evidence.MaxRawBytes:
+	case opened.Size() > limit:
 		return nil, ErrTooLarge
 	}
 	// One byte past the limit, so a file that grew while it was read is still refused as too large.
-	raw, err := io.ReadAll(io.LimitReader(file, evidence.MaxRawBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return nil, ErrIO
 	}
-	if len(raw) > evidence.MaxRawBytes {
+	if int64(len(raw)) > limit {
 		return nil, ErrTooLarge
 	}
 	if step != nil {

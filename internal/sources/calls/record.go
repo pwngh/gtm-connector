@@ -60,6 +60,8 @@ type Import struct {
 	ImportedAt  string
 	// Reassign moves content, or an AccountNumber, that belongs to another account.
 	Reassign bool
+	// Attendees is the call's attendee list from the file given with --attendees, or nil when none was.
+	Attendees []Attendee
 }
 
 // Check is what calls_import.store_import checks before it opens its store: the association, the times,
@@ -71,7 +73,7 @@ func (i Import) Check() error {
 		return err
 	}
 	if i.CalledAt != nil && !evidence.UTCStamp(*i.CalledAt) || !evidence.UTCStamp(i.ImportedAt) || i.Parsed == nil ||
-		i.Excerpt == nil {
+		i.Excerpt == nil || i.Attendees != nil && !evidence.ValidAttendees(attendeeValues(i.Attendees)) {
 		return ErrInvalid
 	}
 	reparsed, err := Parse(i.Parsed.Raw, i.Parsed.Format, i.Parsed.SpeakerNames)
@@ -93,6 +95,14 @@ func (i Import) Check() error {
 		return ErrInvalid
 	}
 	return nil
+}
+
+// attendees is the attendee list as a manifest holds it, or nil when the import was given none.
+func (i Import) attendees() any {
+	if i.Attendees == nil {
+		return nil
+	}
+	return attendeeValues(i.Attendees)
 }
 
 func (i Import) calledAt() any {
@@ -117,9 +127,10 @@ func digest(text string) string {
 }
 
 // requestKey is calls_import._request_key: what makes two requests the same import. The receipt of the
-// resolution, the private selector and the time of the import are not part of it.
-func requestKey(contentSHA256, format any, speakerNames bool, binding, accountID, method, calledAt, generation, mode,
-	requested, cited any) string {
+// resolution, the private selector and the time of the import are not part of it. An attendee list is, when
+// one was given, so the same transcript imported with another list is another import.
+func requestKey(contentSHA256, format any, speakerNames bool, attendees, binding, accountID, method, calledAt,
+	generation, mode, requested, cited any) string {
 	key := strictjson.NewObject("content_sha256", contentSHA256, "format", format,
 		"parser_version", evidence.ParserVersion,
 		"association", strictjson.NewObject("crm_binding", binding, "account_id", accountID, "method", method),
@@ -128,14 +139,17 @@ func requestKey(contentSHA256, format any, speakerNames bool, binding, accountID
 	if speakerNames {
 		key.Set("speaker_names", true)
 	}
+	if attendees != nil {
+		key.Set("attendees", attendees)
+	}
 	return digest(canonical(key))
 }
 
 // RequestKey is the key of this import at one generation of its content's association.
 func (i Import) RequestKey(generation int64) string {
 	a := i.Association
-	return requestKey(i.Parsed.ContentSHA256, i.Parsed.Format, i.Parsed.SpeakerNames, a.CRMBinding, a.AccountID, a.Method,
-		i.calledAt(), generation, i.Excerpt.SelectionMode, i.Excerpt.Requested.value(), i.Excerpt.Cited.value())
+	return requestKey(i.Parsed.ContentSHA256, i.Parsed.Format, i.Parsed.SpeakerNames, i.attendees(), a.CRMBinding,
+		a.AccountID, a.Method, i.calledAt(), generation, i.Excerpt.SelectionMode, i.Excerpt.Requested.value(), i.Excerpt.Cited.value())
 }
 
 // manifestRequestKey is the key of the request a checked manifest was saved for.
@@ -143,7 +157,7 @@ func manifestRequestKey(manifest *strictjson.Object) string {
 	association := member(manifest, "association").(*strictjson.Object)
 	_, declared := manifest.Get("speaker_names")
 	return requestKey(member(manifest, "content_sha256"), member(manifest, "format"), declared,
-		member(association, "crm_binding"), member(association, "account_id"), member(association, "method"),
+		member(manifest, "attendees"), member(association, "crm_binding"), member(association, "account_id"), member(association, "method"),
 		member(manifest, "called_at"), member(manifest, "association_generation"), member(manifest, "selection_mode"),
 		member(manifest, "requested_range"), member(manifest, "cited_range"))
 }
@@ -171,6 +185,9 @@ func (i Import) Revision(generation int64) (Revision, *strictjson.Object, error)
 		"units", unitValues(e.Units))
 	if p.SpeakerNames {
 		manifest.Set("speaker_names", true)
+	}
+	if attendees := i.attendees(); attendees != nil {
+		manifest.Set("attendees", attendees)
 	}
 	revision := Revision{RequestKey: i.RequestKey(generation), ContentSHA256: p.ContentSHA256,
 		AccountID: i.Association.AccountID, Manifest: canonical(manifest), Raw: p.Raw}
@@ -294,6 +311,11 @@ func Result(manifest *strictjson.Object, importID string, created, reassigned bo
 	shown := metadata(manifest, importID)
 	for n, key := range shown.Keys {
 		result.Set(key, shown.Values[n])
+	}
+	// How many attendees the import holds, only when it was given a list. No label or email is shown.
+	if rows, listed := manifest.Get("attendees"); listed {
+		list, _ := rows.([]any)
+		result.Set("attendees", len(list))
 	}
 	return result
 }

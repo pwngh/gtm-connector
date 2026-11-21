@@ -6,7 +6,8 @@ import {SentenceLine} from './Sentence.tsx';
 import type {SectionProps} from './sections.ts';
 
 // What people said, by who said it: buyer quotes, then sentences whose
-// speaker has no established role, then your side. Only the sentences the
+// speaker has no established role, then your side, then other organisations
+// when the card shows a sentence of one. Only the sentences the
 // card shows, each whole, newest first. A buyer quote carries the title from
 // the line of the contact its speaker matched. The first line of each group
 // carries the help for its role word.
@@ -22,6 +23,9 @@ export function PeopleSaid({card}: SectionProps) {
   } else {
     body = groups.map(group => {
       const list = newestFirst(shown.filter(sentence => groupOf(sentence) === group.id));
+      if (!group.always && !list.length) {
+        return null;
+      }
       const heading = `dc-group-${group.id}`;
       return (
         <section

@@ -122,7 +122,7 @@ func TestATokenHandedToTheProcessIsCheckedAgainstTheOrg(t *testing.T) {
 // missing are refused as salesforce_auth_required, and the variables are not read twice in one read.
 func TestAnExpiredTokenReadsTheEnvironmentOnce(t *testing.T) {
 	const rotated = "invented-rotated-token-in-the-file"
-	accountQuery := queryPrefix + "SELECT Id, Name, Industry, AccountNumber FROM Account WHERE Id = '" + account +
+	accountQuery := queryPrefix + "SELECT Id, Name, Industry, AccountNumber, Website FROM Account WHERE Id = '" + account +
 		"' ORDER BY Id LIMIT 101"
 	start := func(t *testing.T) (*salesforcetest.Org, *Reader, string, string) {
 		path := handed(t, salesforcetest.Token)

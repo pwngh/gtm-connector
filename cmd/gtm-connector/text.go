@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 	"github.com/pwngh/gtm-connector/internal/transport/mcp"
@@ -166,6 +167,22 @@ func (r *run) connectText(result *strictjson.Object) string {
 		}
 		text += "\nSellers: " + strings.Join(names, ", ")
 	}
+	if domains, listed := get(result, "company_domains").([]any); listed {
+		names := make([]string, len(domains))
+		for i, d := range domains {
+			names[i] = cellText(d)
+		}
+		text += "\nCompany domains: " + strings.Join(names, ", ")
+	}
+	if aliases, listed := get(result, "aliases").([]any); listed {
+		text += "\nAliases:"
+		for _, value := range aliases {
+			entry, _ := value.(*strictjson.Object)
+			call, _ := get(entry, "call").(string)
+			text += "\n  " + aliasText(evidence.Alias{Label: cellText(get(entry, "label")), Call: call,
+				Target: cellText(get(entry, "target"))})
+		}
+	}
 	return text
 }
 
@@ -176,7 +193,7 @@ func (r *run) auditTable(receipts []any) string {
 	for i, value := range receipts {
 		receipt := value.(*strictjson.Object)
 		tool := get(receipt, "tool")
-		if name, _ := tool.(string); mcp.Definitions[name].Scope == "" && name != "save_brief" {
+		if name, _ := tool.(string); mcp.Definitions[name].Scope == "" && cards.ReadScope(name) == "" && name != "save_brief" {
 			tool = strictjson.Quote(name)
 		}
 		elapsed := get(receipt, "elapsed_ms")
@@ -309,5 +326,21 @@ func (r *run) traceText(traced *strictjson.Object) string {
 	}
 	rows = append(rows, []any{"Source text SHA-256", get(traced, "raw_sha256")},
 		[]any{"Neutralizer version", get(traced, "sanitizer_version")})
+	// A unit sealed under the speaker rules says which rung decided and by what identifier.
+	if rules, stated := traced.Get("speaker_rules"); stated {
+		rows = append(rows, []any{"Speaker rules", rules}, []any{"Rung", get(traced, "rung")})
+		if matched, ok := get(traced, "matched").(*strictjson.Object); ok {
+			from := "the workspace's aliases"
+			if ref, isRef := get(matched, "record_ref").(string); isRef {
+				from = ref
+				if receipt, read := get(matched, "receipt").(*strictjson.Object); read {
+					from += fmt.Sprintf(", receipt %s (%s, %s)", cellText(get(receipt, "audit_id")),
+						cellText(get(receipt, "tool")), cellText(get(receipt, "status")))
+				}
+			}
+			rows = append(rows, []any{"Matched", fmt.Sprintf("%s %s", cellText(get(matched, "kind")),
+				strictjson.Quote(cellText(get(matched, "value"))))}, []any{"Matched from", from})
+		}
+	}
 	return r.screen.table([]string{"FIELD", "VALUE"}, rows)
 }

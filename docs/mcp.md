@@ -329,6 +329,9 @@ prepare_renewal_brief ──▶ get_account ──▶ list_opportunities ──�
      (receipt)              (child 1)         (child 2)             (child 3)            (child 4)
 ```
 
+On Salesforce, a `list_users` read of the org's users, under `crm:read`, comes after
+`list_opportunities` as one more child read. `list_users` is a read of a card only, and no tool.
+
 Both brief tools answer with `structuredContent` holding `source: "brief"`, one record (the brief, with a
 `record_ref` of `briefs/BRIEF_ID/` and the SHA-256 of its bytes), `untrusted_data: true`, and `brief`.
 

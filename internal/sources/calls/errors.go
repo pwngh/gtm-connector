@@ -26,10 +26,13 @@ var (
 	ErrAssociationFailed   = &Error{"calls_association_failed"}
 	ErrSourceUnavailable   = &Error{"calls_source_unavailable"}
 	ErrIO                  = &Error{"calls_import_io"}
+	ErrAttendeesInvalid    = &Error{"calls_attendees_invalid"}
+	ErrAttendeesTooLarge   = &Error{"calls_attendees_too_large"}
 )
 
 var categories = map[*Error]string{
 	ErrInvalid: "usage", ErrTooLarge: "usage", ErrExcerptTooLarge: "usage", ErrSpeakerNamesMissing: "usage",
+	ErrAttendeesInvalid: "usage", ErrAttendeesTooLarge: "usage",
 	ErrNotFound: "usage", ErrAccountNotFound: "usage",
 	ErrReassignRequired: "refusal", ErrAssociationChanged: "refusal", ErrSourceMismatch: "refusal",
 	ErrAccountAmbiguous: "refusal",

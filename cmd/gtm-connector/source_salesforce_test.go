@@ -195,7 +195,7 @@ func TestSalesforceIsReadByEveryCommand(t *testing.T) {
 		"connect_salesforce_describe_contract:ok:200: "+
 		"search_accounts:ok:200: get_account:ok:200: "+
 		"get_account:error:200:request_failed get_account:ok:200: get_account:ok:200: list_opportunities:ok:200: "+
-		"save_brief:ok:200:" {
+		"list_users:ok:200: save_brief:ok:200:" {
 		t.Errorf("the receipts: %s", got)
 	}
 

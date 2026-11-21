@@ -393,6 +393,16 @@ func textAt(t *testing.T, stored []byte, want *receipts.Payload) (string, bool) 
 	return text, err == nil
 }
 
+// accountReadDay is the day the get_account read started, as a card prints it beside a contact's title.
+func accountReadDay(reads []*strictjson.Object) string {
+	for _, r := range reads {
+		if at, _ := get(r, "started_at").(string); get(r, "tool") == "get_account" && len(at) >= 10 {
+			return at[:10]
+		}
+	}
+	return ""
+}
+
 // sourcesRead is the text's line on when the ok reads started, as evidence.Build writes it.
 func sourcesRead(reads []*strictjson.Object) string {
 	var first, last time.Time
@@ -567,7 +577,12 @@ func normalise(stored, want []byte, prepared bool) ([]byte, error) {
 	if strings.Count(text, line) != 1 || !bytes.Contains(want[oracle["text"][0]:oracle["text"][1]], []byte(oracleLine)) {
 		return nil, fmt.Errorf("the text does not state %q once", line)
 	}
-	patches = append(patches, patch{at, []byte(strings.Replace(text, line, oracleLine, 1))})
+	text = strings.Replace(text, line, oracleLine, 1)
+	// And the day a contact's title was read, which is the day of the account's read.
+	if day, oracleDay := accountReadDay(storedPayload.Receipts), accountReadDay(wantPayload.Receipts); day != "" {
+		text = strings.ReplaceAll(text, " read "+day+" [", " read "+oracleDay+" [")
+	}
+	patches = append(patches, patch{at, []byte(text)})
 	sort.Slice(patches, func(i, j int) bool { return patches[i].at[0] > patches[j].at[0] })
 	out := append([]byte(nil), stored...)
 	for _, p := range patches {

@@ -164,7 +164,8 @@ A tool name that is not 1 to 100 characters is recorded as `<invalid>`.
 | A seal | `null`. |
 
 So `audit --brief BRIEF_ID` lists the four reads of a demo card: `get_account`,
-`list_opportunities`, `read_call_notes` and `read_slack_messages`. `audit --brief RUN_ID` lists the
+`list_opportunities`, `read_call_notes` and `read_slack_messages`. A Salesforce card adds
+`list_users`, the org's users, after `list_opportunities`. `audit --brief RUN_ID` lists the
 demo's lookup and its refused read.
 
 ## The seal
@@ -192,7 +193,7 @@ reads inside it are its child receipts, whose `request_id` is
 
 | Command | Receipts |
 | --- | --- |
-| `brief` | One per read: `get_account`, `list_opportunities`, and `read_call_notes` and `read_slack_messages` when calls and Slack are connected. Then the seal. `--without-calls` keeps the call read, refused as error/403. On a real CRM, one `get_account` comes first, in an `inspect-` run, to list the account in the workspace. |
+| `brief` | One per read: `get_account`, `list_opportunities`, `list_users` on Salesforce, and `read_call_notes` and `read_slack_messages` when calls and Slack are connected. Then the seal. `--without-calls` keeps the call read, refused as error/403. On a real CRM, one `get_account` comes first, in an `inspect-` run, to list the account in the workspace. |
 | `demo --state-dir NAME` | Seven: the lookup, the refused call read, the card's four reads, and the seal. |
 | `demo` | Five for each card it publishes. |
 | `accounts`, `inspect ACCOUNT_ID` | One on a real CRM. None on the demo book, which is read without a tool call. |

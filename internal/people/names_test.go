@@ -1,10 +1,6 @@
 package people
 
-import (
-	"testing"
-
-	"github.com/pwngh/gtm-connector/internal/evidence"
-)
+import "testing"
 
 func TestLabel(t *testing.T) {
 	for in, want := range map[string]string{
@@ -75,15 +71,6 @@ func TestAnonymous(t *testing.T) {
 	}
 }
 
-// TestTitlesAreKnownAbbreviations checks that every honorific and suffix a variant drops is one the
-// sentence rules in internal/evidence already treat as an abbreviation.
-func TestTitlesAreKnownAbbreviations(t *testing.T) {
-	for _, list := range []map[string]bool{honorifics, suffixes} {
-		for word := range list {
-			title := []rune(string(rune(word[0])-'a'+'A') + word[1:] + ".")
-			if _, ok := evidence.Abbreviation(title, 0, len(title)); !ok {
-				t.Errorf("%q is not an abbreviation the sentence rules know", string(title))
-			}
-		}
-	}
-}
+// Titles are the honorifics and suffixes a variant drops, for the test in package people_test that checks
+// them against internal/evidence, which imports this package.
+var Titles = []map[string]bool{honorifics, suffixes}

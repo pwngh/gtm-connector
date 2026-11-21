@@ -70,20 +70,20 @@ func (g *matchGate) callNotes(ctx context.Context, calls callsSource, account st
 
 // messages reads the account's thread when it may, and refuses a read of another mapping than the one
 // allowed: the account's thread was mapped again while it was read.
-func (g *matchGate) messages(ctx context.Context, slack slackSource, account string) ([]*strictjson.Object,
-	*strictjson.Object, error) {
+func (g *matchGate) messages(ctx context.Context, slack slackSource, account string) (messages,
+	members []*strictjson.Object, snapshot *strictjson.Object, err error) {
 	item, err := g.allowed(ctx, account, "thread")
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	records, snapshot, err := slack.Messages(ctx, account)
+	messages, members, snapshot, err = slack.Messages(ctx, account)
 	if err == nil && snapshot != nil {
 		mapping, _ := get(snapshot, "mapping").(*strictjson.Object)
 		if item == "" || mapping == nil || get(mapping, "mapping_id") != item {
-			return nil, nil, matchChanged
+			return nil, nil, nil, matchChanged
 		}
 	}
-	return records, snapshot, err
+	return messages, members, snapshot, err
 }
 
 // settleMatches decides the account's calls and threads the connector has not decided, when it has an open

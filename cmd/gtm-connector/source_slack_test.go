@@ -334,6 +334,29 @@ func withoutReadTimes(text string) string {
 	return strings.Join(lines, "\n")
 }
 
+// profilesNotRead is what a card made through a sign-in without users:read says after its thread's line.
+// The recorded cards were made from the thread alone, with no authors' profiles to read.
+const profilesNotRead = " Authors' profiles were not read: the Slack sign-in lacks users:read and users:read.email."
+
+// withoutProfileNote is a live card's text without that sentence, and whether it stated it once.
+func withoutProfileNote(text string) (string, bool) {
+	return strings.Replace(text, profilesNotRead, "", 1), strings.Count(text, profilesNotRead) == 1
+}
+
+// sameButProfiles is whether a live card's text is the recorded card's: a card read from a mapped thread
+// states once that its authors' profiles were not read, which the recorded card, made from the thread alone,
+// does not.
+func sameButProfiles(t *testing.T, key, got, want string, mapped bool) bool {
+	t.Helper()
+	if mapped {
+		var stated bool
+		if got, stated = withoutProfileNote(got); !stated {
+			t.Errorf("%s: the card does not say its authors' profiles were not read", key)
+		}
+	}
+	return got == want
+}
+
 // seedSignIn saves a sign-in for a workspace, obtained at the given time, as debug slack connect leaves it
 // when state is "ready".
 func seedSignIn(t *testing.T, folder, slug string, at time.Time, state string) {
@@ -407,7 +430,7 @@ func TestBriefReadsAMappedThreadAsTheRecordedCard(t *testing.T) {
 				t.Errorf("%s: the card's Slack line does not match the mapping", c.key)
 				continue
 			}
-		} else if got, want := withoutReadTimes(made.Text), withoutReadTimes(get(c.card, "text").(string)); got != want {
+		} else if got, want := withoutReadTimes(made.Text), withoutReadTimes(get(c.card, "text").(string)); !sameButProfiles(t, c.key, got, want, c.thread != nil) {
 			t.Errorf("%s: the card\n%s\nis not the recorded card\n%s", c.key, got, want)
 			continue
 		} else {
@@ -727,8 +750,9 @@ func TestSlackFromSignInToACard(t *testing.T) {
 	// The card is the recorded card.
 	code, stdout, stderr = printed.line(t, d, append([]string{"brief", card.account, "--as-of", "2027-01-15", "--json"}, where...)...)
 	var made cardResult
-	if err := json.Unmarshal([]byte(stdout), &made); code != 0 || err != nil ||
-		withoutReadTimes(made.Text) != withoutReadTimes(get(card.card, "text").(string)) {
+	err = json.Unmarshal([]byte(stdout), &made)
+	text, stated := withoutProfileNote(withoutReadTimes(made.Text))
+	if code != 0 || err != nil || !stated || text != withoutReadTimes(get(card.card, "text").(string)) {
 		t.Fatalf("brief: exit %d\n%s%s", code, stdout, stderr)
 	}
 	for _, argv := range [][]string{{"audit"}, {"audit", "--json"}, {"inspect", made.BriefID}, {"inspect", made.BriefID, "--json"},
@@ -873,7 +897,8 @@ func TestSlackCommandsRefuse(t *testing.T) {
 		{[]string{"connect", "--client-id", inventedClient}, "the following arguments are required: --redirect-uri"},
 		{[]string{"check"}, "the following arguments are required: --account"},
 		{[]string{"connect", "--client-id", inventedClient, "--redirect-uri", api.redirect, "--user-scope", "chat:write"},
-			"argument --user-scope: invalid choice (choose from 'channels:history', 'groups:history')"},
+			"argument --user-scope: invalid choice (choose from 'channels:history', 'groups:history', 'users:read', " +
+				"'users:read.email')"},
 		{[]string{"unknown"}, "argument ACTION: invalid choice (choose from 'connect', 'status', 'disconnect', 'map', 'check')"},
 	} {
 		if message := slackRefused(t, d, 2, append([]string{"debug", "slack"}, c.argv...)...); message != c.want {

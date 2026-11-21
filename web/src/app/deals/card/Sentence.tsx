@@ -1,7 +1,7 @@
 import {formatUtc} from '../../../api/client.ts';
 import {Help} from '../../../ui/Help.tsx';
 import {Cite} from './Cite.tsx';
-import {groupOf, roleWords, type Sentence as SentenceUnit, sourceWord, usableTime} from './card.ts';
+import {groupOf, roleOf, type Sentence as SentenceUnit, sourceWord, usableTime} from './card.ts';
 
 interface SentenceProps {
   sentence: SentenceUnit;
@@ -12,9 +12,9 @@ interface SentenceProps {
 }
 
 // Who said it, as recorded: the speaker or "No speaker label", for a customer
-// the title from the contact's line and the contact's number, the role and,
-// for a role not established, its basis, and the role's help where asked;
-// then the source and the time.
+// the title from the contact's line and the contact's number, the role with
+// how the speaker was matched and, for another party, its domain, and the
+// role's help where asked; then the source and the time.
 export function Attribution({sentence, title = null, help = false}: SentenceProps) {
   const group = groupOf(sentence);
   const time = usableTime(sentence.at);
@@ -33,8 +33,7 @@ export function Attribution({sentence, title = null, help = false}: SentenceProp
       )}
       {sentence.quoted && <span className="dc-attr__part">Quoted in the author's message</span>}
       <span className="dc-attr__part">
-        {roleWords[group]}
-        {group === 'unknown' && ` (${sentence.basis ?? 'basis not recorded'})`}
+        {roleOf(sentence)}
         {help && <Help term={`role.${group}`} />}
       </span>
       <span className="dc-attr__part">{sourceWord(sentence.source)}</span>

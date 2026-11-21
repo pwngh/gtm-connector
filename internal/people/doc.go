@@ -2,7 +2,7 @@
 // and one speaker reference, and returns the person or none, a role, the rung that decided, a basis code,
 // and for an unknown role a reason code. Codes are fixed strings; this package never writes text for a
 // card. Resolve reads nothing but its arguments: no I/O, no clock, no globals, and the order of any list
-// in its input never changes its result. Nothing calls it yet.
+// in its input never changes its result. internal/evidence calls it for every sentence of a card.
 //
 // # People
 //
@@ -21,7 +21,10 @@
 // seller (for Slack, only a member of the seller's own workspace), the account's domain makes
 // customer_side_not_in_crm, and any other domain makes other_party, shown with the domain. A free or
 // shared domain never shows a side, and a domain on both the seller's list and the account's counts as
-// shared.
+// shared. A member of the seller's own Slack workspace is never put on the customer side by a domain.
+//
+// A ParticipantName, such as a Salesforce user's, is compared only by rung 5, for a person the attendee
+// list names by email, and never with a label on its own.
 //
 // # The ladder
 //

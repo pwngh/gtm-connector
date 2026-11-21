@@ -1269,7 +1269,7 @@ for (const [width, scheme] of [[390, 'light'], [1440, 'light'], [390, 'dark'], [
     const facts = await drawerFacts(tab);
     check(facts.title === 'Source [5]' && facts.focus && facts.quote === unitText(5) && facts.quoteChildren === 0 && facts.quotes === 1,
       `${at}: /deals/acc-003?unit=5 opens the drawer on the recorded sentence of unit 5, character for character, with focus on the head (${facts.title})`);
-    check(!facts.injected && facts.text.includes(`Marian Holt ${hostile}`) && facts.text.includes('Customer (label matches contact [2])') && facts.text.includes('On the card'),
+    check(!facts.injected && facts.text.includes(`Marian Holt ${hostile}`) && facts.text.includes('Customer (by name)') && facts.text.includes('On the card'),
       `${at}: the hostile speaker name renders as text, with the role and its basis as recorded`);
     check(facts.read === 'Read 15 Jan 2027, 15:00:00 UTC from calls' && !/receipt-|read_call_notes|op-|calls:read|[0-9a-f]{64}/.test(facts.text),
       `${at}: the read line gives the read's start and source, and no receipt ID, digest or tool name (${facts.read})`);

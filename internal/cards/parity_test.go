@@ -665,13 +665,17 @@ func renewed(t *testing.T, golden *oracletest.Golden, i int, line []byte, row fi
 	}
 	changes.add(was, load(t, sealed.Payload).(*strictjson.Object))
 	old := load(t, line).(*strictjson.Object)
-	// The seal names the card by its digest, in its one row. A row that held no card takes the seal made now.
+	// The seal names the card by its digest, in its one row. A row that held no card, or a card that reads more
+	// than it did and so seals later under a later ID, takes the seal made now.
 	seal, err := strictjson.Dumps(sealed.Seal.Value(), strictjson.Quoted)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if row.Card != "" {
-		seal = strings.ReplaceAll(string(row.Seal), row.SHA256, sealed.SHA256)
+		replaced := strings.ReplaceAll(string(row.Seal), row.SHA256, sealed.SHA256)
+		if recorded, err := receipts.Decode(load(t, []byte(replaced))); err == nil && sealed.Seal.Same(recorded) {
+			seal = replaced
+		}
 	}
 	value := old.Copy()
 	value.Set("sha256", sealed.SHA256)

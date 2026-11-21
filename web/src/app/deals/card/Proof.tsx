@@ -10,7 +10,7 @@ import {Refusal} from '../../../ui/Refusal.tsx';
 import {displayStorage} from '../../../ui/theme.ts';
 import {activityHref} from '../../ops/activity.ts';
 import {useMedia, wideQuery} from '../deals.ts';
-import {groupOf, roleWords, type Sentence, sourceWord, usableTime} from './card.ts';
+import {roleOf, type Sentence, sourceWord, usableTime} from './card.ts';
 import {type Asked, answers, around, askedUnit, firstLine, placeOf, proofSeenKey, readFrom, stepFrom, unitOf, unitParam, unitSearch} from './proof.ts';
 import {Words} from './Sentence.tsx';
 import type {SectionProps} from './sections.ts';
@@ -31,7 +31,7 @@ function SentenceProof({unit}: {unit: UnitView}) {
       <Words sentence={sentence} />
       <p className="dc-attr">
         <span className="dc-attr__part dc-attr__speaker">{sentence.speaker || 'No speaker label'}</span>
-        <span className="dc-attr__part">{`${roleWords[groupOf(sentence)]} (${sentence.basis ?? 'basis not recorded'})`}</span>
+        <span className="dc-attr__part">{roleOf(sentence)}</span>
         <span className="dc-attr__part">
           {time === null ? formatUtc(sentence.at) : <time dateTime={sentence.at ?? undefined}>{formatUtc(sentence.at)}</time>}
         </span>
