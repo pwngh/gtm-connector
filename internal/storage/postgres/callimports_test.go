@@ -829,13 +829,13 @@ func TestARestoreRefusesImportsBesideReadDemoCallNotes(t *testing.T) {
 		t.Fatal("the dump holds no demo calls connection to edit")
 	}
 	fresh := freshStore(t)
-	err = fresh.Restore(ctx, strings.Repeat("d", 64), files.version, recount(files.copies, edited), opener(edited))
+	err = fresh.Restore(ctx, strings.Repeat("d", 64), files.applied, recount(files.copies, edited), opener(edited))
 	if err == nil || !strings.Contains(err.Error(), "connects imported calls where a read returned a demo call note") {
 		t.Fatalf("a restore of imports beside a read demo call note: %v", err)
 	}
-	if v, _ := fresh.SchemaVersion(ctx); v != 0 {
+	if v, _ := fresh.AppliedMigrations(ctx); len(v) != 0 {
 		t.Fatal("a refused restore left a schema")
 	}
 	// The archive as it was dumped restores.
-	ok(t, freshStore(t).Restore(ctx, strings.Repeat("d", 64), files.version, files.copies, opener(files.data)))
+	ok(t, freshStore(t).Restore(ctx, strings.Repeat("d", 64), files.applied, files.copies, opener(files.data)))
 }

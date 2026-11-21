@@ -24,7 +24,7 @@ func tables(t *testing.T, url string) []string {
 // new table cannot be dropped from backups without anyone deciding it.
 func TestEveryTableIsBackedUpOrLeftOut(t *testing.T) {
 	f := postgrestest.New(t)
-	backedUp := postgres.BackupTableNames(postgres.LatestSchemaVersion())
+	backedUp := postgres.BackupTableNames(postgres.MigrationNames())
 	for _, table := range tables(t, f.URL) {
 		_, left := postgres.NotBackedUp()[table]
 		if slices.Contains(backedUp, table) == left {
@@ -98,12 +98,12 @@ func TestABackupRestoresEveryRow(t *testing.T) {
 	fillEveryTable(t, f)
 	files := dump(t, f)
 	fresh, url := freshStoreURL(t)
-	ok(t, fresh.Restore(ctx, strings.Repeat("d", 64), files.version, files.copies, opener(files.data)))
+	ok(t, fresh.Restore(ctx, strings.Repeat("d", 64), files.applied, files.copies, opener(files.data)))
 
 	every := func(u, table string) string {
 		return scalar(t, u, `SELECT coalesce(string_agg(x::text, E'\n' ORDER BY x::text), '') FROM `+table+` x`)
 	}
-	for _, table := range postgres.BackupTableNames(postgres.LatestSchemaVersion()) {
+	for _, table := range postgres.BackupTableNames(postgres.MigrationNames()) {
 		before, after := every(f.URL, table), every(url, table)
 		if before == "" {
 			t.Errorf("the fixture leaves %s empty", table)

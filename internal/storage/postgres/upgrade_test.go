@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"bytes"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,18 +102,18 @@ func populate(t *testing.T, url string, parentTool string, childOrdinal int) {
 	)
 }
 
-// backupAt dumps a store at this schema version into memory.
+// backupAt dumps a store with its first n migrations applied into memory.
 type backupAt struct {
-	version int
+	applied []string
 	copies  []postgres.TableCopy
 	files   map[string]*bytes.Buffer
 }
 
-func dumpAt(t *testing.T, s *postgres.Store, version int) backupAt {
+func dumpAt(t *testing.T, s *postgres.Store, n int) backupAt {
 	t.Helper()
-	b := backupAt{version: version, files: map[string]*bytes.Buffer{}}
+	b := backupAt{applied: postgres.MigrationNames()[:n], files: map[string]*bytes.Buffer{}}
 	var err error
-	b.copies, err = postgres.DumpAt(s, ctx, version, func(table string) (io.WriteCloser, error) {
+	b.copies, err = postgres.DumpAt(s, ctx, b.applied, func(table string) (io.WriteCloser, error) {
 		b.files[table] = &bytes.Buffer{}
 		return memoryFile{b.files[table]}, nil
 	})
@@ -126,7 +127,7 @@ func (b backupAt) restore(t *testing.T) (*postgres.Store, string, error) {
 	fresh, err := postgres.Open(ctx, url)
 	ok(t, err)
 	t.Cleanup(fresh.Close)
-	return fresh, url, fresh.Restore(ctx, strings.Repeat("c", 64), b.version, b.copies,
+	return fresh, url, fresh.Restore(ctx, strings.Repeat("c", 64), b.applied, b.copies,
 		func(table string) (io.ReadCloser, error) {
 			return io.NopCloser(bytes.NewReader(b.files[table].Bytes())), nil
 		})
@@ -136,13 +137,13 @@ func TestAnUpgradeFrom0001KeepsItsData(t *testing.T) {
 	one, url := schemaOne(t)
 	populate(t, url, "prepare_renewal_brief", 1)
 	first := dumpAt(t, one, 1)
-	if len(first.copies) != len(postgres.BackupTableNames(1)) {
+	if len(first.copies) != len(postgres.BackupTableNames(first.applied)) {
 		t.Fatalf("a schema 1 backup lists %d tables", len(first.copies))
 	}
 
 	// In place.
 	ok(t, one.Migrate(ctx))
-	if v, _ := one.SchemaVersion(ctx); v != postgres.LatestSchemaVersion() ||
+	if v, _ := one.AppliedMigrations(ctx); !slices.Equal(v, postgres.MigrationNames()) ||
 		scalar(t, url, "SELECT count(*)::text FROM gtm_integrity_violations()") != "0" {
 		t.Fatal("the upgrade in place")
 	}
@@ -160,11 +161,11 @@ func TestAnUpgradeFrom0001KeepsItsData(t *testing.T) {
 	// From the schema 1 backup, then from the schema 2 backup of that.
 	second, secondURL, err := first.restore(t)
 	ok(t, err)
-	if v, _ := second.SchemaVersion(ctx); v != postgres.LatestSchemaVersion() {
-		t.Fatalf("restored at schema %d", v)
+	if v, _ := second.AppliedMigrations(ctx); !slices.Equal(v, postgres.MigrationNames()) {
+		t.Fatalf("restored with migrations %v", v)
 	}
-	third := dumpAt(t, second, postgres.LatestSchemaVersion())
-	if len(third.copies) != len(postgres.BackupTableNames(postgres.LatestSchemaVersion())) {
+	third := dumpAt(t, second, len(postgres.MigrationNames()))
+	if len(third.copies) != len(postgres.BackupTableNames(postgres.MigrationNames())) {
 		t.Fatalf("a schema 2 backup lists %d tables", len(third.copies))
 	}
 	last, lastURL, err := third.restore(t)
@@ -190,15 +191,15 @@ func TestAnUpgradeFrom0001RefusesRowsItCannotKeep(t *testing.T) {
 	if code(err) != "GT018" || !strings.Contains(err.Error(), "66666666-6666-4666-8666-666666666666") {
 		t.Fatalf("the upgrade: %v", err)
 	}
-	if v, _ := one.SchemaVersion(ctx); v != 1 {
-		t.Fatalf("left at schema %d", v)
+	if v, _ := one.AppliedMigrations(ctx); len(v) != 1 {
+		t.Fatalf("left with migrations %v", v)
 	}
 	fresh, _, err := backup.restore(t)
 	if err == nil || !strings.Contains(err.Error(), "0002") {
 		t.Fatalf("a schema 1 backup with the same rows restored: %v", err)
 	}
-	if v, _ := fresh.SchemaVersion(ctx); v != 0 {
-		t.Fatalf("a refused restore left schema %d", v)
+	if v, _ := fresh.AppliedMigrations(ctx); len(v) != 0 {
+		t.Fatalf("a refused restore left migrations %v", v)
 	}
 }
 
@@ -250,8 +251,8 @@ func TestTheReadScopesMigrationRefusesAWriteScope(t *testing.T) {
 		if code(err) != "GT018" || !strings.Contains(err.Error(), held.id) {
 			t.Fatalf("%s: the upgrade answered %v", held.label, err)
 		}
-		if v, _ := store.SchemaVersion(ctx); v != before {
-			t.Fatalf("%s: left at schema %d", held.label, v)
+		if v, _ := store.AppliedMigrations(ctx); len(v) != before {
+			t.Fatalf("%s: left with migrations %v", held.label, v)
 		}
 		if n := scalar(t, url, rows); n != "3" {
 			t.Fatalf("%s: %s rows are left of 3", held.label, n)
@@ -261,8 +262,8 @@ func TestTheReadScopesMigrationRefusesAWriteScope(t *testing.T) {
 	// With read scopes only, the database migrates, keeps its rows, and then refuses the write scope.
 	store, url := behind()
 	ok(t, store.Migrate(ctx))
-	if v, _ := store.SchemaVersion(ctx); v != postgres.LatestSchemaVersion() {
-		t.Fatalf("migrated to schema %d", v)
+	if v, _ := store.AppliedMigrations(ctx); !slices.Equal(v, postgres.MigrationNames()) {
+		t.Fatalf("migrated to %v", v)
 	}
 	if n := scalar(t, url, rows); n != "2" {
 		t.Fatalf("%s rows are left of 2", n)

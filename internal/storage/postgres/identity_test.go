@@ -82,7 +82,7 @@ func TestDumpAndRestoreKeepState(t *testing.T) {
 	f := postgrestest.New(t)
 	files := map[string]*bytes.Buffer{}
 	archive := strings.Repeat("b", 64)
-	version, copies, err := f.Store.Dump(ctx, func(table string) (io.WriteCloser, error) {
+	applied, copies, err := f.Store.Dump(ctx, func(table string) (io.WriteCloser, error) {
 		files[table] = &bytes.Buffer{}
 		return memoryFile{files[table]}, nil
 	})
@@ -94,7 +94,7 @@ func TestDumpAndRestoreKeepState(t *testing.T) {
 	open := func(table string) (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(files[table].Bytes())), nil
 	}
-	ok(t, fresh.Restore(ctx, archive, version, copies, open))
+	ok(t, fresh.Restore(ctx, archive, applied, copies, open))
 
 	card, err := fresh.Card(ctx, f.Workspace.ID, f.Card.ID)
 	ok(t, err)
@@ -121,7 +121,7 @@ func TestDumpAndRestoreKeepState(t *testing.T) {
 	is(t, err, postgres.ErrAlreadyFinished)
 
 	// A database that is not empty is refused.
-	if err := fresh.Restore(ctx, archive, version, copies, open); err == nil {
+	if err := fresh.Restore(ctx, archive, applied, copies, open); err == nil {
 		t.Fatal("restored over existing data")
 	}
 	// So is a dump whose row counts do not match.
@@ -129,13 +129,13 @@ func TestDumpAndRestoreKeepState(t *testing.T) {
 	ok(t, err)
 	defer other.Close()
 	copies[0].Rows++
-	if err := other.Restore(ctx, archive, version, copies, open); err == nil {
+	if err := other.Restore(ctx, archive, applied, copies, open); err == nil {
 		t.Fatal("a short table was accepted")
 	}
 	// A failed restore leaves the database empty, so it can be run again.
-	if v, err := other.SchemaVersion(ctx); err != nil || v != 0 {
-		t.Fatalf("schema after a failed restore: %d %v", v, err)
+	if v, err := other.AppliedMigrations(ctx); err != nil || len(v) != 0 {
+		t.Fatalf("migrations after a failed restore: %v %v", v, err)
 	}
 	copies[0].Rows--
-	ok(t, other.Restore(ctx, archive, version, copies, open))
+	ok(t, other.Restore(ctx, archive, applied, copies, open))
 }
