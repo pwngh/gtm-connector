@@ -196,9 +196,13 @@ func neutral(value any) (any, error) {
 		if v == nil {
 			return v, nil
 		}
-		o := &strictjson.Object{Keys: append([]string(nil), v.Keys...), Values: make([]any, len(v.Values))}
+		// A key can be source text too, such as the name of a caller's argument on a receipt.
+		o := &strictjson.Object{Keys: make([]string, len(v.Keys)), Values: make([]any, len(v.Values))}
 		for i, item := range v.Values {
 			var err error
+			if o.Keys[i], _, err = evidence.SafeText(v.Keys[i]); err != nil {
+				return nil, err
+			}
 			if o.Values[i], err = neutral(item); err != nil {
 				return nil, err
 			}

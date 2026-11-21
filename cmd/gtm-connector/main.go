@@ -166,7 +166,7 @@ func loadConfig() (config, error) {
 	c.publicOrigin = envOr("GTM_PUBLIC_ORIGIN", "https://127.0.0.1:"+port)
 	origin, err := url.Parse(c.publicOrigin)
 	if err != nil || origin.Host == "" {
-		return c, fmt.Errorf("GTM_PUBLIC_ORIGIN %q is not an origin", c.publicOrigin)
+		return c, errors.New("GTM_PUBLIC_ORIGIN is not an origin")
 	}
 	hosts := envOr("GTM_ALLOWED_HOSTS", origin.Host+",localhost:"+origin.Port())
 	for _, host := range strings.Split(hosts, ",") {

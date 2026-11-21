@@ -31,11 +31,17 @@ const defaultWorkspace = "demo"
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
+// hashedSlug is the form of a slug made from a name that is not one.
+var hashedSlug = regexp.MustCompile(`^dir-[0-9a-f]{32}$`)
+
 // workspaceSlug is the workspace a --state-dir names. A name that is a slug is that workspace's slug. Any
 // other name, such as the path of a folder, names the workspace whose slug is "dir-" and the first 32 hex
 // digits of the SHA-256 of the name as given.
+//
+// A name already in that "dir-" form is not taken as a slug. It is hashed like any other name, so no name
+// a person types can select the workspace that a folder path names.
 func workspaceSlug(name string) string {
-	if slugPattern.MatchString(name) {
+	if slugPattern.MatchString(name) && !hashedSlug.MatchString(name) {
 		return name
 	}
 	digest := sha256.Sum256([]byte(name))
@@ -134,7 +140,13 @@ type run struct {
 }
 
 // folder is the --state-dir that names this workspace in the commands printed for it.
-func (r *run) folder() string { return " --state-dir " + shellQuote(r.name) }
+func (r *run) folder() string {
+	if strings.Contains(r.name, "://") {
+		// A URL given by mistake may hold a password, so it is not printed back.
+		return " --state-dir NAME"
+	}
+	return " --state-dir " + shellQuote(r.name)
+}
 
 // here is the same, left out when the workspace is the default.
 func (r *run) here() string {
@@ -310,7 +322,9 @@ func (r *run) brief(ctx context.Context) (any, error) {
 		fmt.Fprintln(r.screen.err, from.sourcesLine())
 	}
 	// A card belongs to an account of its workspace, so an account the CRM holds is listed there first.
-	if row, ok := from.book.GetAccount(account); ok {
+	// A day that does not exist is refused by the maker below, and nothing is written for it.
+	_, dayErr := time.Parse("2006-01-02", asOf)
+	if row, ok := from.book.GetAccount(account); ok && dayErr == nil {
 		name, _ := get(row, "name").(string)
 		if err := r.store.EnsureAccount(ctx, r.workspace.ID, account, name); err != nil {
 			return nil, err
@@ -638,6 +652,11 @@ func (r *run) filters() (postgres.ReceiptFilter, error) {
 		if f.Until, err = timestamp(until, "--until"); err != nil {
 			return f, err
 		}
+	}
+	if hasUntil && f.Until.IsZero() {
+		// The store reads a zero time as no bound. Nothing started before the first instant, so the
+		// bound is kept by moving it one step.
+		f.Until = f.Until.Add(time.Nanosecond)
 	}
 	if hasSince && hasUntil && !f.Since.Before(f.Until) {
 		return f, refused("--since must be earlier than --until.")
