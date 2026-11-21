@@ -427,6 +427,10 @@ func (r *Reader) usable(ctx context.Context, b *budget, saved Saved, document *C
 	if _, err := b.remaining(); err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		// The caller has gone. The refresh token has not been sent, so the sign-in is left as it is.
+		return nil, err
+	}
 	if err := save(saved, quarantined); err != nil {
 		return nil, err
 	}

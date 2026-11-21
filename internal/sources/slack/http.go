@@ -104,6 +104,9 @@ var ownTransport = sync.OnceValue(func() http.RoundTripper {
 		DialContext:           (&net.Dialer{Timeout: connectTimeout}).DialContext,
 		TLSHandshakeTimeout:   connectTimeout,
 		ResponseHeaderTimeout: readTimeout,
+		// One connection per request. On a reused connection that closes before it answers, the
+		// transport sends a GET again by itself, and that second send would not be counted.
+		DisableKeepAlives: true,
 	}
 })
 
