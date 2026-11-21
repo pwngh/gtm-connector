@@ -33,6 +33,8 @@ type Store interface {
 	ViewCard(ctx context.Context, v postgres.Viewer, cardID string) (postgres.CardView, error)
 	ViewUnit(ctx context.Context, v postgres.Viewer, cardID string, n int) (postgres.Unit, *postgres.Receipt, string, error)
 	ViewReceipt(ctx context.Context, v postgres.Viewer, receiptID string) (postgres.Receipt, error)
+	ViewDeals(ctx context.Context, v postgres.Viewer) ([]postgres.Deal, error)
+	ViewDeal(ctx context.Context, v postgres.Viewer, ref string) (postgres.Deal, error)
 }
 
 // Evidence is the read side of cards, units and receipts, with grants enforced.
@@ -104,4 +106,14 @@ func (e Evidence) Unit(ctx context.Context, p Principal, cardID string, n int) (
 // Receipt reads one receipt; the principal needs a grant on its account.
 func (e Evidence) Receipt(ctx context.Context, p Principal, receiptID string) (postgres.Receipt, error) {
 	return e.Store.ViewReceipt(ctx, p.viewer(), receiptID)
+}
+
+// Deals lists the deals of the accounts the principal holds a live grant on.
+func (e Evidence) Deals(ctx context.Context, p Principal) ([]postgres.Deal, error) {
+	return e.Store.ViewDeals(ctx, p.viewer())
+}
+
+// Deal reads one deal; the principal needs a live grant on its account.
+func (e Evidence) Deal(ctx context.Context, p Principal, ref string) (postgres.Deal, error) {
+	return e.Store.ViewDeal(ctx, p.viewer(), ref)
 }

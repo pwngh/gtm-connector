@@ -200,12 +200,22 @@ func (s *Server) card(w http.ResponseWriter, r *http.Request, p authz.Principal)
 		readFailed(w, err)
 		return
 	}
+	card, err := detailOf(view)
+	if err != nil {
+		internal(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, card)
+}
+
+// detailOf is a card whole, as GET /api/v1/cards/{card} gives it.
+func detailOf(view authz.CardView) (cardDetail, error) {
 	card := cardDetail{cardView: viewCard(view.Card), AsOf: optional(view.AsOf), Sources: view.Sources,
 		Units: make([]unitView, len(view.Units)), Gaps: make([]gapView, len(view.Gaps))}
 	for i, u := range view.Units {
+		var err error
 		if card.Units[i], err = viewUnit(u); err != nil {
-			internal(w)
-			return
+			return cardDetail{}, err
 		}
 	}
 	for i, g := range view.Gaps {
@@ -216,13 +226,12 @@ func (s *Server) card(w http.ResponseWriter, r *http.Request, p authz.Principal)
 		for i, l := range view.Lines {
 			encoded, err := strictjson.Dumps(l.Value(), strictjson.Prepared)
 			if err != nil {
-				internal(w)
-				return
+				return cardDetail{}, err
 			}
 			card.Lines[i] = json.RawMessage(encoded)
 		}
 	}
-	writeJSON(w, http.StatusOK, card)
+	return card, nil
 }
 
 // cardText gives the card's sealed text whole, as plain text, after the same

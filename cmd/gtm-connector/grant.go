@@ -283,13 +283,6 @@ func (r *run) grantText(result any) string {
 	return oneLine(line + receipt)
 }
 
-func orNone(value any) any {
-	if value == nil {
-		return "no email"
-	}
-	return value
-}
-
 // grantHelp and grantsHelp are the two commands' help.
 var grantHelp = strings.TrimLeft(`
 usage: gtm-connector grant [-h] [--json] [--state-dir STATE_DIR] --to PERSON

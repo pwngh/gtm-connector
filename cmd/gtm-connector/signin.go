@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -137,14 +136,13 @@ func (s signInSettings) secret(creds *credentials) (string, error) {
 type signInSurface struct {
 	oidc    *httptransport.OIDC
 	demoOff bool
-	log     *slog.Logger
 }
 
 // open finds the provider's workspace and makes its client. The demo sign-in is refused beside a provider
 // that signs in a live workspace: the demo sign-in is for the demo workspace alone.
 func (s signInSettings) open(ctx context.Context, store *postgres.Store, secret string,
-	transport http.RoundTripper, log *slog.Logger) (signInSurface, error) {
-	surface := signInSurface{demoOff: s.demoOff, log: log}
+	transport http.RoundTripper) (signInSurface, error) {
+	surface := signInSurface{demoOff: s.demoOff}
 	if s.issuer == "" {
 		return surface, nil
 	}

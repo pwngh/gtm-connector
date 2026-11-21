@@ -110,12 +110,12 @@ func serve(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	people, err := settings.open(ctx, store, secret, nil, logger)
+	people, err := settings.open(ctx, store, secret, nil)
 	if err != nil {
 		return err
 	}
 	app := web.App()
-	surface, err := newSurface(ctx, store, c, key, selection, people)
+	surface, err := newSurface(ctx, store, c, key, selection, logger, people)
 	if err != nil {
 		return err
 	}
@@ -181,8 +181,8 @@ func serveFlags() (*flag.FlagSet, *string) {
 // newSurface is everything serve answers: the browser surface, with the
 // MCP gateway mounted at /mcp, and the sign-ins people use.
 func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey []byte, selection cards.Selection,
-	people signInSurface) (*httptransport.Server, error) {
-	gateway, err := mcpGateway(ctx, store, c.publicOrigin, selection)
+	logger *slog.Logger, people signInSurface) (*httptransport.Server, error) {
+	gateway, err := mcpGateway(ctx, store, c.publicOrigin, selection, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -193,9 +193,10 @@ func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey
 		WebDir:        c.webDir,
 		SessionKey:    sessionKey,
 		MCP:           gateway,
+		Deals:         dealRegistry{store},
 		OIDC:          people.oidc,
 		DemoSignInOff: people.demoOff,
-		Log:           people.log,
+		Log:           logger,
 	}, store, authz.Evidence{Store: store})
 }
 

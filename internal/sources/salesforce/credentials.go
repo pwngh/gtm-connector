@@ -145,6 +145,8 @@ func (e Exec) command(arguments []string) *exec.Cmd {
 type credentials struct {
 	alias  string
 	runner Runner
+	// audit is Options.Audit: each command runs under a receipt of its own.
+	audit func(context.Context, string, func(context.Context) error) error
 	// The limits, which a test shortens.
 	commandTime, loginTime time.Duration
 }
@@ -199,8 +201,23 @@ func (c *credentials) read(ctx context.Context) (login, error) {
 	return login{instanceURL: shown[0], organizationID: organizationID, username: shown[2], accessToken: token[0]}, nil
 }
 
-// command runs one sf org command for the alias and gives the named text fields of its JSON result.
+// command runs one sf org command for the alias and gives the named text fields of its JSON result, under a
+// receipt of its step when Options.Audit is set: login_display or login_token.
 func (c *credentials) command(caller, login context.Context, words []string, names ...string) ([]string, error) {
+	step := "login_token"
+	if words[0] == "display" {
+		step = "login_display"
+	}
+	var found []string
+	err := audited(c.audit, caller, step, func(context.Context) error {
+		var err error
+		found, err = c.commandOnce(caller, login, words, names...)
+		return err
+	})
+	return found, err
+}
+
+func (c *credentials) commandOnce(caller, login context.Context, words []string, names ...string) ([]string, error) {
 	limited, cancel := context.WithTimeout(login, c.commandTime)
 	defer cancel()
 	arguments := append(append([]string{"org"}, words...), "--target-org", c.alias, "--json")

@@ -206,7 +206,9 @@ func TestAPublicationBehindALockIsGivenUpOnPostgreSQL(t *testing.T) {
 			w.hold(t, "SELECT 1 FROM account_grants WHERE principal_id = $1 FOR UPDATE", w.principal)
 			store := &watched{Store: w.store}
 			m := w.maker(t, store, demoBook(t))
-			m.limit = short
+			// The limit also bounds each receipt write before the publication, which a busy runner can take
+			// more than short to commit; a second leaves those writes room and still gives the lock up.
+			m.limit = time.Second
 			sealed, err := within(t, func() (*Sealed, error) { return run(context.Background(), m, w, "locked") })
 			if sealed != nil || err != ErrNotPublished || store.published != 1 {
 				t.Fatalf("a card: %t; %v; %d publications", sealed != nil, err, store.published)

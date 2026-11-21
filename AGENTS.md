@@ -32,12 +32,11 @@ rules every store applies, and `receiptstest`, which every store runs), `cards` 
 `people` resolves a speaker to a person and a side by the strongest identifier a source carries; its
 package comment states the ladder and the rules, and nothing calls it yet.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
-rules for any writer), `authz` the grant checks on evidence reads, `oidc` sign-in through a company's
-identity provider (with an invented provider in `oidctest`), `transport/http` the browser
+rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with `connect` and the
-read commands `accounts`, `brief`, `inspect` and `audit` on demo data and Salesforce, `debug salesforce
-check`, `debug slack`, `token` for MCP client tokens, `grant` and `grants` for people's account grants,
-and `mcp stdio`. Its `sources.go` is the one place a
+read commands `accounts`, `brief`, `inspect` and `audit` on demo data and Salesforce, `admit` for the
+cards a Python state folder holds, `debug salesforce
+check`, `debug slack`, `token` for MCP client tokens, `deal` for deals and `mcp stdio`. Its `sources.go` is the one place a
 source is wired into those commands. `postgres.ReceiptStore` runs the card maker on PostgreSQL.
 `mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`
 and `mcp stdio` serves on stdin and stdout.
@@ -109,13 +108,7 @@ the Python package and stays read-only. To finish it:
    checks), with `GTM_TEST_DATABASE_URL` set for the command replay, and the real-data digests of the
    changed functions with `go run ./cmd/realdata -update=FUNCTION,... verify`. Its PR lists each
    rewritten file with how many cards, units or rows changed, and why.
-2. Finish the Evidence row of the roadmap: neutralize a bare mail address and show the host of a
-   valid `xn--` label.
-3. Admit the cards and receipts the Python package made: the four recorded card folders are admitted
-   and inspected, a changed byte is refused, and admitting twice adds nothing.
-4. Close the cutover: the binary, run outside a checkout, serves a deep-linked Deal card; a
-   backup taken before the cutover restores; the time to publish a card is measured; and a tagged
-   release attaches the binaries.
+2. Close the cutover: a tagged release attaches the binaries.
 
 Sign-in, grants, selection, expiry and the Host check stay ahead of any evidence served. MCP passes
 the recorded gateway vectors on both transports, HTTP and stdio.

@@ -130,6 +130,21 @@ func IgnoreCaseLetter(letter byte, c rune) bool {
 // netloc that is not all ASCII.
 func NFKCNetloc(c rune) bool { return nfkcNetloc.has(c) }
 
+// JoiningType is the joining type of DerivedJoiningType.txt that the ContextJ rule of RFC 5892 reads: 'L',
+// 'D', 'R' or 'T', and 'U' for any other code point. The tables keep only code points Unicode 16.0.0 assigns.
+func JoiningType(c rune) byte {
+	for _, kind := range []struct {
+		name   byte
+		ranges []rng
+	}{{'L', joiningLRanges}, {'D', joiningDRanges}, {'R', joiningRRanges}, {'T', joiningTRanges}} {
+		i := sort.Search(len(kind.ranges), func(i int) bool { return kind.ranges[i].hi >= c })
+		if i < len(kind.ranges) && kind.ranges[i].lo <= c {
+			return kind.name
+		}
+	}
+	return 'U'
+}
+
 // Category is unicodedata.category.
 func Category(c rune) string {
 	i := sort.Search(len(categoryRuns), func(i int) bool { return categoryRuns[i].hi >= c })

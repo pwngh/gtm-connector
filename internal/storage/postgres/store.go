@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"time"
 
@@ -45,15 +46,47 @@ func (s *Store) bound(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
+// A connection the network loses while its socket stays open is ended on
+// both sides, so the locks of its transaction do not outlive it:
+//
+//   - idleInTransaction is how long the server lets a session wait inside a
+//     transaction for its next statement before it ends the session and its
+//     locks. The connector sends a transaction's statements one after the
+//     other, so a session of its own that waits this long has lost its client.
+//   - keepaliveIdle, keepaliveInterval and keepaliveCount are the TCP
+//     keepalives both the connector and the server set on the connection: a
+//     probe after keepaliveIdle of silence, then one every keepaliveInterval,
+//     and the connection is dropped after keepaliveCount unanswered probes,
+//     about a minute after the peer went quiet.
+const (
+	idleInTransaction = 30 * time.Second
+	keepaliveIdle     = 30 * time.Second
+	keepaliveInterval = 10 * time.Second
+	keepaliveCount    = 3
+	connectTimeout    = 5 * time.Second
+)
+
 // Open connects to the database at url and checks that it answers. It does
 // not migrate; call Migrate.
 func Open(ctx context.Context, url string) (*Store, error) {
+	return open(ctx, url, idleInTransaction)
+}
+
+// open is Open with the server's limit on a session idle in a transaction.
+func open(ctx context.Context, url string, idle time.Duration) (*Store, error) {
 	config, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		return nil, fmt.Errorf("database URL: %w", redact(err))
 	}
 	config.MaxConns = 16
-	config.ConnConfig.ConnectTimeout = 5 * time.Second
+	config.ConnConfig.ConnectTimeout = connectTimeout
+	config.ConnConfig.DialFunc = (&net.Dialer{Timeout: connectTimeout, KeepAliveConfig: net.KeepAliveConfig{
+		Enable: true, Idle: keepaliveIdle, Interval: keepaliveInterval, Count: keepaliveCount}}).DialContext
+	seconds := func(d time.Duration) string { return strconv.FormatInt(int64(d/time.Second), 10) }
+	config.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = strconv.FormatInt(idle.Milliseconds(), 10)
+	config.ConnConfig.RuntimeParams["tcp_keepalives_idle"] = seconds(keepaliveIdle)
+	config.ConnConfig.RuntimeParams["tcp_keepalives_interval"] = seconds(keepaliveInterval)
+	config.ConnConfig.RuntimeParams["tcp_keepalives_count"] = strconv.Itoa(keepaliveCount)
 	// Every session reads and writes times in UTC, so text output (backups,
 	// receipts) does not depend on the server's time zone.
 	config.ConnConfig.RuntimeParams["timezone"] = "UTC"

@@ -8,14 +8,15 @@ gtm-connector setup                              # once: credentials, migrations
 gtm-connector demo --state-dir renewal-demo      # one invented renewal, end to end
 gtm-connector connect demo                       # connect the default workspace to the demo data
 gtm-connector brief acc-003                      # make and print the card of one account
+gtm-connector deal new acc-003                   # register the account's renewal as thornfield-2027-2e3hke
 gtm-connector inspect BRIEF_ID                   # every unit of that card, one per line
 gtm-connector inspect BRIEF_ID 5                 # where number 5 on that card came from
 gtm-connector audit --brief BRIEF_ID             # the reads the card rests on
 gtm-connector COMMAND --help
 ```
 
-`help COMMAND` is `COMMAND --help` for `demo`, `connect`, `accounts`, `brief`, `inspect`, `audit`,
-`grant`, `grants`, `mcp` and `token`. For any other name it prints the list of commands, as `--help` does. Run with no
+`help COMMAND` is `COMMAND --help` for `demo`, `connect`, `accounts`, `brief`, `deal`, `inspect`,
+`audit`, `admit`, `grant`, `grants`, `mcp` and `token`. For any other name it prints the list of commands, as `--help` does. Run with no
 command, the binary prints one sentence on what it does and three commands to try first.
 
 [Deal cards](cards.md) explains what a card says and how to read it. This page covers what each
@@ -24,7 +25,7 @@ command takes and prints.
 ## Workspaces
 
 A workspace is one named set of connected sources and everything read through them: the seller list,
-the accounts, the cards, the receipts, the MCP client tokens, and the imported transcripts and mapped
+the accounts, the deals, the cards, the receipts, the MCP client tokens, and the imported transcripts and mapped
 Slack threads. It lives in PostgreSQL. `--state-dir NAME` names it, and every command that reads or
 connects a workspace takes it. The default is `demo`.
 
@@ -180,7 +181,7 @@ they have reached. With `--json`, each progress line is one object with a single
 | `0` | The command succeeded, or `serve` stopped cleanly. | None. |
 | `1` | A local file, database or runtime operation failed, or `setup`, `serve`, `backup`, `restore` or `health` failed. | `local_failure` |
 | `2` | The arguments are missing or invalid, or what they name does not exist: no CRM connected, no such card, number or receipt, an account `inspect` cannot find. | `usage_error` |
-| `3` | The operation was refused: not in this build, a workspace of the other kind, another identity than the pinned one, a source connected again while it was read. | `refused` |
+| `3` | The operation was refused: not in this build, a workspace of the other kind, another identity than the pinned one, a source connected again while it was read, a second open deal of one account. | `refused` |
 | `4` | A check failed: the evidence of a card, a step of the demo, `debug salesforce check` or `debug slack check`. | `check_failed` |
 | `5` | A source or its transport failed, or returned what a read could not use. | `upstream_failure` |
 | `130` | Ctrl-C interrupted the command. Completed writes are kept. | `interrupted` |
@@ -191,11 +192,13 @@ they have reached. With `--json`, each progress line is one object with a single
 | --- | --- |
 | No command | Object with `description`, `try` (an array of three commands) and `help`. |
 | `--version` | Object with `version`. Text: `gtm-connector 0.1.0`. |
-| [`accounts`](#accounts) | Array of account objects, or an object with `accounts` and `has_more`. |
+| [`accounts`](#accounts) | Object with `accounts` and `has_more`. |
 | [`brief`](#brief) | The saved card, without its evidence. |
+| [`deal`](#deal) | A deal's object, an array of them, or a deal and its newest card. |
 | [`inspect`](#inspect) | One of four results, by the ID given. |
 | [`audit`](#audit) | Array of receipts. |
 | [`demo`](#demo) | With `--state-dir`: one invented renewal. Without it: text only. |
+| [`admit`](#admit) | Object with `cards`, `cards_added` and `receipts_added`. |
 | [`connect`](#connect-results) | Object with `schema_version`, `sources`, and `sellers` or `provider` and `status`. |
 | [`mcp stdio`](#mcp-stdio-and-token) | MCP messages only. |
 | [`token`](#mcp-stdio-and-token) | A token's object, or an array of them. |
@@ -213,9 +216,10 @@ ID       ACCOUNT              INDUSTRY        RENEWAL
 acc-003  Thornfield Wren LLP  Legal services  2027-02-08
 ```
 
-`--json` gives an array of account objects as the CRM returns them, or `[]`. When more than 100
-accounts match, it gives an object with `accounts`, the first 100, and `has_more: true`, and text
-output adds one line on stderr that says so. Names are neutralized as a card's text is.
+`--json` gives one object, with or without `--query`: `accounts`, an array of at most 100 account
+objects as the CRM returns them, and `has_more`, which is `true` when more accounts match and
+`false` otherwise. Text output then adds one line on stderr that says more match. Names are
+neutralized as a card's text is.
 
 On the demo book the search is no tool call. On any other CRM it is a `search_accounts` call under a
 receipt that `audit` lists.
@@ -226,6 +230,10 @@ receipt that `audit` lists.
 `--without-calls` leaves `calls:read` out of the card's grant: the call notes read is refused under
 its receipt, and the card says "Calls: not read. The grant lacks calls:read."
 `--as-of YYYY-MM-DD` sets the day the card plans from.
+
+When the account has an open [deal](#deal), the card belongs to it, and text output names it on
+stderr, after the sources line: `Deal: thornfield-2027-2e3hke.` With none, the card is the account's own and
+belongs to no deal, as before deals existed. The card is the same either way.
 
 ```text
 Sources: CRM, calls, and Slack are demo data.          (stderr)
@@ -254,6 +262,36 @@ for the CRM (`acc-001` for the demo book, `acc-sf-` and 18 characters for Salesf
 not `YYYY-MM-DD` exits `2`. An account the CRM does not hold exits `5` with `get_account: invalid or
 failed tool result; no brief generated`, and no card is published.
 
+### `deal`
+
+A deal is one renewal of one account, under a readable ID such as `thornfield-2027-2e3hke`. [The
+API](api.md#one-deal-one-id) gives the rule for the ID, what a deal binds, and the deal's object,
+which `--json` prints as the routes give it.
+
+| Command | What it does |
+| --- | --- |
+| `deal new ACCOUNT_ID [--as-of YYYY-MM-DD]` | Lists the account in the workspace, as `brief` does, then reads the account and its opportunities from the connected CRM, each as a tool call under its own receipt (on the demo book too), and registers the deal on what they returned. `--as-of` sets the day the contract is chosen from: by default `2027-01-15` on the demo book and today's UTC date on Salesforce. |
+| `deal list` | Lists the workspace's deals, the open ones first: ID, account, name, state and the day it renews. |
+| `deal show DEAL_ID` | Shows the deal's bindings, then its newest card as `brief` prints it, verified against its seal as `inspect` verifies one. `--json` gives `{"deal": DEAL, "card": CARD}`, the card without its evidence, or `null` before `brief` has made one. |
+| `deal close DEAL_ID` | Closes the deal. Its cards and receipts are kept, and the account's next card is its own again. Closing a closed deal prints it as it is. |
+
+```text
+$ gtm-connector deal new acc-003
+FIELD        VALUE
+ID           thornfield-2027-2e3hke
+Account      acc-003
+Name         "Thornfield Wren LLP"
+State        open
+Opportunity  opp-003
+Contract     none
+Renews       2027-02-08
+```
+
+An account has one open deal at a time: `deal new` for an account with one exits `3`, and names
+`deal list`. An account the CRM does not hold exits `2` with `account not found: ACCOUNT_ID`, and an
+ID of the wrong form for the CRM exits `2`, as `brief` does. `deal show` and `deal close` of an ID the
+workspace does not hold exit `2`. Each action takes `--state-dir NAME`, `--json` and `--help`.
+
 ### `inspect`
 
 `inspect` takes one of four IDs. The account form reads the CRM. The other three read only the cards
@@ -275,8 +313,12 @@ anything but a brief ID, or `--role` with anything but a brief ID alone, exits `
 > workspace is bound to, and every number on it resolves. Otherwise it exits `2`, as does a brief ID
 > this workspace holds no card for: "No saved card has this brief ID in this state folder."
 
-A brief that an assistant prepared with `prepare_renewal_brief` is read with `read_renewal_brief`, not
-with `inspect`, and `inspect` exits `2` and says so. See [MCP](mcp.md).
+A brief that an assistant prepared here with `prepare_renewal_brief` is read with `read_renewal_brief`,
+not with `inspect`, and `inspect` exits `2` and says so. See [MCP](mcp.md). A card or prepared brief
+the Python package saved, brought in with [`admit`](#admit), opens with `inspect` in all four forms,
+checked against the receipts admitted with it. Its result carries `admitted`, with the `from_org` and
+`export_sha256` it was admitted on and the note `admitted from an export, not re-read`, and text output
+says so on its first line. A receipt admitted with it carries `admitted` with `from_org` and the note.
 
 #### `inspect ACCOUNT_ID`
 
@@ -344,7 +386,7 @@ Role                  customer (label matches contact [2])
 Time                  2027-01-12T15:00:00Z
 On the card           yes
 Source text SHA-256   105807d242e8f55965e938a24bc94a445f157178cbb28569e9b5ce4234bc100c
-Neutralizer version   4
+Neutralizer version   5
 ```
 
 A sentence in an imported transcript adds a `Cues or lines` row. A record's table lists its fields by
@@ -415,6 +457,74 @@ acc-001  brief-7f121b379c65471babfba70ffe80fabc  5 units  sha256 4c1215e5...
 `--again` publishes a new card for every account, also those that hold one. A grant someone revoked
 stays revoked, and its account gets no card. This form writes text only: with `--json` it exits `2`.
 `--again` with `--state-dir` exits `2`. It needs `setup` first, and exits `1` without the demo sign-in.
+
+### `admit`
+
+`admit FOLDER --from-org IDENTITY --export-sha256 DIGEST` brings the cards a state folder of the
+Python package holds into a workspace, with the receipts they rest on. It reads the folder's `briefs/`
+and `selected-briefs/` files and its audit log as `audit.jsonl`, one receipt row a line, as exported
+from `audit.sqlite3`; the database itself is not read.
+
+```sh
+gtm-connector connect demo --state-dir old-cards
+gtm-connector admit ./state --state-dir old-cards --from-org IDENTITY --export-sha256 "$(shasum -a 256 < ./state/audit.jsonl | cut -c1-64)"
+gtm-connector inspect BRIEF_ID --state-dir old-cards
+```
+
+> **Admission trusts the export folder.** The folder supplies each card, the receipts of its reads and
+> its seal, so a seal that names a card's bytes shows only that the folder agrees with itself. `admit`
+> does not read the cards' records again from Salesforce or any other source, and cannot show offline
+> which org a folder came from. It admits a folder on the operator's word: `--from-org` names the CRM
+> identity the cards were read from (the `identity_sha256` a card records under `crm_binding`), which
+> must be the one each card records and the one the workspace is connected to, and `--export-sha256`
+> is the SHA-256 of `audit.jsonl` as the operator exported it. Both are kept with each card, and
+> `inspect` says the card was admitted from an export and not read again.
+
+Within that, each card is checked as `inspect` checks a card: its bytes are the ones its seal receipt
+names, its reads are rows of the log, it was read from the sources the workspace is connected to, and
+every number on it resolves. Then:
+
+- every receipt line the card rests on is written the one way the export writes a receipt, and each
+  read's line holds exactly the receipt the card embeds, so no byte of a line can change unseen; the
+  seal's time and duration, which no digest in the folder covers, are covered by `--export-sha256`;
+- every quotation on the card is a sentence its record holds under that speaker, as today's rules
+  split and neutralize the record;
+- every imported transcript the card quotes is one the workspace holds for that account, whose stored
+  bytes hash to the `content_sha256` the card's record names; import it with `debug calls import`
+  first;
+- every card and prepared brief file of the folder is checked, so a good file does not hide a damaged
+  or oversized one.
+
+The card is then kept as the folder holds it, byte for byte, never made again, and the receipts are
+kept as the log's rows. A card keeps the neutralizer version it was sealed under, and `inspect` shows
+its units as it shows any card's.
+
+A folder any card of which fails a check admits nothing and exits `4` with the card's brief ID and
+the check's sentence, for example:
+
+```text
+Error: brief-2430d066000040008000000000000001: This file is not the card that was sealed: the card or its seal receipt was changed. Nothing was admitted.
+```
+
+A `--from-org` that is not the workspace's CRM identity, and an `audit.jsonl` whose digest is not
+`--export-sha256`, also exit `4`. Either flag missing, or not 64 lowercase hex digits, exits `2`.
+Admitting a folder again adds nothing. A card or receipt whose ID the workspace holds with other
+bytes, or a card made here with the same brief ID, exits `3` and admits nothing. A workspace that is
+connected to no CRM exits `2`, as `brief` does.
+
+`--json` gives an object with `cards`, one object per card with `brief_id`, `account_id`, `kind`
+(`cli` for a card saved by `brief` or `demo`, `prepared` for a brief saved by
+`prepare_renewal_brief`) and `added`, then `cards_added` and `receipts_added`. Text output is a table
+of the cards, then the counts:
+
+```text
+brief-2430d066000040008000000000000001  acc-003  saved by brief or demo  added
+1 cards and 5 receipts added.
+List every unit: gtm-connector inspect BRIEF_ID --state-dir old-cards
+```
+
+Admitted cards open with `inspect` and travel in a backup. `audit`, `inspect ACCOUNT_ID`, the web app
+and the MCP tools show only the cards and receipts made here.
 
 ### Connect results
 

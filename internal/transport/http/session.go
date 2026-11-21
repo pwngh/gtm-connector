@@ -197,11 +197,12 @@ func csrfValid(r *http.Request, token string) bool {
 }
 
 // admission is what admitted a write: a live session, its token and its
-// principal, or, for sign-in only, a signed pre-session (token empty).
+// principal, or, for sign-in only, a signed pre-session (token empty and no
+// principal).
 type admission struct {
 	token     string
-	principal *postgres.Principal
 	stored    postgres.Admission
+	principal *postgres.Principal
 }
 
 // write admits a write by its CSRF token, which must be the live session's
@@ -217,7 +218,7 @@ func (s *Server) write(signIn bool, next func(http.ResponseWriter, *http.Request
 		}
 		switch {
 		case live && csrfValid(r, token):
-			next(w, r, admission{token, session.Principal, postgres.Admission{IDSHA256: digest(token)}})
+			next(w, r, admission{token, postgres.Admission{IDSHA256: digest(token)}, session.Principal})
 			return
 		case signIn:
 			if pre, expires, ok := s.preSession(r); ok && csrfValid(r, pre) {

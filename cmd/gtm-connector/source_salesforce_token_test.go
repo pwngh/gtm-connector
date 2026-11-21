@@ -251,6 +251,8 @@ func TestASalesforceTokenHandedToTheProcessIsReadByEveryCommand(t *testing.T) {
 	if len(org.Requests) != 0 {
 		t.Errorf("invalid variables sent %q", org.Requests)
 	}
+	// Reading the variables is no request to a source, so a connect refused there keeps no receipt and
+	// makes no workspace.
 	if _, err := d.owner.Workspace(ctx, "missing-books"); !errors.Is(err, postgres.ErrNotFound) {
 		t.Error("a refused connect made its workspace")
 	}

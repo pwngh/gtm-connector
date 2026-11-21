@@ -22,7 +22,7 @@ BEGIN
     IF (NEW.workspace_id, NEW.workspace_kind, NEW.kind, NEW.login, NEW.oidc_issuer, NEW.oidc_subject)
        IS DISTINCT FROM
        (OLD.workspace_id, OLD.workspace_kind, OLD.kind, OLD.login, OLD.oidc_issuer, OLD.oidc_subject) THEN
-        RAISE EXCEPTION 'a principal keeps the identity it was made with' USING ERRCODE = 'GT021';
+        RAISE EXCEPTION 'a principal keeps the identity it was made with' USING ERRCODE = 'GT023';
     END IF;
     RETURN NEW;
 END

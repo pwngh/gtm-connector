@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"os"
@@ -51,14 +50,14 @@ func companyServe(t *testing.T, d *demoDatabase) (*served, *oidctest.Provider) {
 		t.Setenv(name, value)
 	}
 	var p *oidctest.Provider
-	s := startServeWith(t, d, nil, func(origin string, store *postgres.Store, logs *slog.Logger) signInSurface {
+	s := startServeWith(t, d, nil, func(origin string, store *postgres.Store) signInSurface {
 		p = oidctest.New(t, oidctest.Client{ID: oidcEnv["GTM_OIDC_CLIENT_ID"],
 			RedirectURL: origin + httptransport.OIDCCallbackPath}, danaAccount)
 		settings, err := loadSignIn(config{publicOrigin: origin})
 		if err != nil {
 			t.Fatal(err)
 		}
-		people, err := settings.open(ctx, store, "", p.Transport(), logs)
+		people, err := settings.open(ctx, store, "", p.Transport())
 		if err != nil {
 			t.Fatal(err)
 		}

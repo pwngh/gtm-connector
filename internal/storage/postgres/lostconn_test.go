@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net"
@@ -9,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/postgrestest"
@@ -270,4 +273,92 @@ func TestAChildStartGivesUpOnItsLockedParent(t *testing.T) {
 	_, err = holder.Exec(ctx, "ROLLBACK")
 	ok(t, err)
 	child(t, f, brief, 1, time.Minute)
+}
+
+// Every pooled connection carries the store's limits on a lost connection: the server ends a session idle
+// in a transaction, and both ends send TCP keepalives. A transaction whose connection the network loses, its
+// socket still open, is ended by the server once it has waited past the limit, and its row lock is free.
+func TestTheServerEndsATransactionLeftIdle(t *testing.T) {
+	f := postgrestest.New(t)
+	store, _ := through(t, f)
+	conn, err := postgres.Pool(store).Acquire(ctx)
+	ok(t, err)
+	for name, want := range map[string]string{"idle_in_transaction_session_timeout": "30s",
+		"tcp_keepalives_idle": "30", "tcp_keepalives_interval": "10", "tcp_keepalives_count": "3"} {
+		var got string
+		ok(t, conn.QueryRow(ctx, "SELECT current_setting($1)", name).Scan(&got))
+		if got != want {
+			t.Errorf("%s is %s, not %s", name, got, want)
+		}
+	}
+	// A database reached over TLS gives the TLS connection, which wraps the socket.
+	socket := conn.Conn().PgConn().Conn()
+	if secured, isTLS := socket.(*tls.Conn); isTLS {
+		socket = secured.NetConn()
+	}
+	tcp, isTCP := socket.(*net.TCPConn)
+	if !isTCP {
+		t.Fatalf("the test database is reached over %T, not TCP", socket)
+	}
+	raw, err := tcp.SyscallConn()
+	ok(t, err)
+	ok(t, raw.Control(func(fd uintptr) {
+		// SO_KEEPALIVE reads as any value but 0 when it is on.
+		if on, err := unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_KEEPALIVE); err != nil || on == 0 {
+			t.Errorf("the connector's keepalives are off (%v)", err)
+		}
+		for name, option := range map[string][3]int{"the first probe's delay": {unix.IPPROTO_TCP, keepIdleOption, 30},
+			"TCP_KEEPINTVL": {unix.IPPROTO_TCP, unix.TCP_KEEPINTVL, 10},
+			"TCP_KEEPCNT":   {unix.IPPROTO_TCP, unix.TCP_KEEPCNT, 3}} {
+			if got, err := unix.GetsockoptInt(int(fd), option[0], option[1]); err != nil || got != option[2] {
+				t.Errorf("the connector's %s is %d (%v), not %d", name, got, err, option[2])
+			}
+		}
+	}))
+	conn.Release()
+
+	// A shorter limit, so the test does not wait half a minute.
+	p, proxied := newLossy(t, f.URL)
+	idle, err := postgres.OpenIdle(ctx, proxied, 500*time.Millisecond)
+	ok(t, err)
+	t.Cleanup(func() {
+		p.close()
+		idle.Close()
+	})
+	held, err := postgres.Pool(idle).Acquire(ctx)
+	ok(t, err)
+	lost := held.Hijack()
+	_, err = lost.Exec(ctx, "BEGIN")
+	ok(t, err)
+	_, err = lost.Exec(ctx, "SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE", f.Workspace.ID)
+	ok(t, err)
+	var pid int
+	ok(t, lost.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&pid))
+	p.stop(toServer, toClient)
+
+	other := session(t, f.URL)
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var sessions int
+		ok(t, other.QueryRow(ctx, "SELECT count(*) FROM pg_stat_activity WHERE pid = $1", pid).Scan(&sessions))
+		if sessions == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the server kept the lost transaction's session")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	_, err = other.Exec(ctx, "BEGIN")
+	ok(t, err)
+	_, err = other.Exec(ctx, "SELECT 1 FROM workspaces WHERE id = $1 FOR UPDATE NOWAIT", f.Workspace.ID)
+	if err != nil {
+		t.Fatalf("the lost transaction's lock is still held: %v", err)
+	}
+	_, err = other.Exec(ctx, "ROLLBACK")
+	ok(t, err)
+	p.close()
+	closing, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	_ = lost.Close(closing)
 }

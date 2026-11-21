@@ -155,6 +155,7 @@ A tool name that is not 1 to 100 characters is recorded as `<invalid>`.
 | A read of a card made by `brief` or `demo` | The card's brief ID. |
 | A call of `demo --state-dir` outside the card | The run ID, `demo-` and 32 hex digits. The demo prints it as `audit.run_id`. |
 | A read by `accounts` or `inspect ACCOUNT_ID` on a real CRM | `inspect-` and 32 hex digits. |
+| A read that registers a deal, by `deal new` or `POST /v1/deals` | `deal-` and 32 hex digits. |
 | The account lookup of `debug calls import` and `debug slack map` | `import-` and 32 hex digits. |
 | A step of `debug salesforce check` | `check-` and 32 hex digits. |
 | The read of `debug slack check` | `slack-check-` and 32 hex digits. |
@@ -194,6 +195,8 @@ reads inside it are its child receipts, whose `request_id` is
 | `demo --state-dir NAME` | Seven: the lookup, the refused call read, the card's four reads, and the seal. |
 | `demo` | Five for each card it publishes. |
 | `accounts`, `inspect ACCOUNT_ID` | One on a real CRM. None on the demo book, which is read without a tool call. |
+| `deal new`, `POST /v1/deals` | Two in a `deal-` run, also on the demo book: `get_account`, then `list_opportunities`. On a real CRM, `deal new` makes one `get_account` first, in an `inspect-` run, to list the account in the workspace. Through the API both name the signed-in principal, the grant is checked again just before each, and a read made without a live grant is refused as error/403, with no read after it. An API registration refused before any source is opened has one `get_account` receipt, refused as error/403 with no connection. |
+| `deal list`, `deal show`, `deal close` | None. |
 | `debug calls import`, `debug slack map` | One `get_account` in an `import-` run, also on the demo book. On a real CRM, one more in an `inspect-` run before it. |
 | `grant` | One: `grant_account`, or `revoke_grant` with `--revoke`, whose arguments are the account and the `--to` given. It finishes ok with the row `grants/PRINCIPAL_ID/ACCOUNT_ID`, in the transaction that changes the grant, or as an error that changes nothing: `person_not_found` or `account_not_found` (404), or `person_ambiguous` (409). |
 | `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `connect`, `grants` | None. |

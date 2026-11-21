@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -10,10 +11,11 @@ import (
 )
 
 // keptAddress is a quotation as a card sealed under neutralizer version 3 could hold it, with a mail address
-// in angle brackets that today's rules replace, and shownAddress is the same quotation under today's rules.
+// in angle brackets and a bare one, which today's rules replace, and shownAddress is the same quotation under
+// today's rules.
 const (
-	keptAddress  = "Write to <renewals@example.test> for the order form."
-	shownAddress = "Write to [link mail] for the order form."
+	keptAddress  = "Write to <renewals@example.test> or orders@example.test for the order form."
+	shownAddress = "Write to [link mail] or [link mail] for the order form."
 )
 
 // olderCard is the recorded card of folders/cli_card, sealed under version 3, with its unit 8 holding
@@ -50,7 +52,7 @@ func TestAnOlderCardsTextIsRenderedAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, want := strings.Split(text, "\n"), strings.Split(sealed, "\n")
-	if len(got) != len(want)+1 || !strings.Contains(got[0], "rendered again under neutralizer version 4") ||
+	if len(got) != len(want)+1 || !strings.Contains(got[0], fmt.Sprintf("rendered again under neutralizer version %d", SanitizerVersion)) ||
 		!strings.Contains(got[0], "sealed text is unchanged") {
 		t.Fatalf("the text rendered again:\n%s", text)
 	}
@@ -75,7 +77,7 @@ func TestAnOlderCardsTextIsRenderedAgain(t *testing.T) {
 
 // A card made under today's rules is given its sealed text exactly.
 func TestACurrentCardsTextIsItsSealedText(t *testing.T) {
-	_, text := built(t, "We will see.", "Write to <renewals@example.test> for the order form.")
+	_, text := built(t, "We will see.", keptAddress)
 	value, err := strictjson.Loads(oracletest.Lines(t, "cards/demo.jsonl.gz")[0])
 	if err != nil {
 		t.Fatal(err)

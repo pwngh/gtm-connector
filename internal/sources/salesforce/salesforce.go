@@ -253,6 +253,37 @@ type Options struct {
 	Transport http.RoundTripper
 	// Now is the clock the operation budget is read from. Nil is time.Now.
 	Now func() time.Time
+	// Audit, when set, runs each request to sf or the org: each sf command ("login_display",
+	// "login_token") and each HTTPS request ("org", "userinfo", "describe_account" and the other objects,
+	// "query"). It is given the request's step and the request, with the checks of its answer, and runs it
+	// only once the request's receipt is committed. A failure of the receipt itself comes back as an
+	// *AuditFailed.
+	Audit func(ctx context.Context, step string, request func(context.Context) error) error
+}
+
+// AuditFailed is a request whose receipt could not be committed, so the request was not made, or could not
+// be finished, so what it gave is not used.
+type AuditFailed struct{ Err error }
+
+func (a *AuditFailed) Error() string { return "the receipt of a Salesforce request failed" }
+func (a *AuditFailed) Unwrap() error { return a.Err }
+
+// audited runs one request under audit, when it is set.
+func audited(audit func(context.Context, string, func(context.Context) error) error, ctx context.Context,
+	step string, request func(context.Context) error) error {
+	if audit == nil {
+		return request(ctx)
+	}
+	var ran bool
+	var own error
+	err := audit(ctx, step, func(ctx context.Context) error {
+		ran, own = true, request(ctx)
+		return own
+	})
+	if err != nil && (!ran || own == nil) {
+		return &AuditFailed{err}
+	}
+	return err
 }
 
 // Reader reads one org. It runs one operation at a time.
@@ -277,6 +308,8 @@ type Reader struct {
 	// tokens are every token this Reader has held or been given, for as long as it lives. An answer that
 	// holds any of them is refused.
 	tokens echo.Tokens
+	// audit is Options.Audit.
+	audit func(context.Context, string, func(context.Context) error) error
 }
 
 // FromSF captures the credentials of an existing sf login, by its alias, and makes the Reader of that org.
@@ -297,6 +330,7 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 	if err != nil {
 		return nil, err
 	}
+	login.audit = o.Audit
 	given, err := login.read(ctx)
 	if err != nil {
 		return nil, err
@@ -352,10 +386,7 @@ func (r *Reader) bounded(ctx context.Context, capabilities bool, run func(o *ope
 // under the replacement, inside the same operation's budget.
 func (o *operation) firstCheck() error {
 	for {
-		organization, err := o.query(organizationQuery, 1)
-		if err == nil {
-			err = o.reader.validateEnvironment(organization)
-		}
+		_, err := o.query(organizationQuery, 1, o.reader.validateEnvironment)
 		if err == nil {
 			err = o.checkUser()
 		}
@@ -503,7 +534,7 @@ func (r *Reader) MissingFields(ctx context.Context, object string) (mapped int, 
 			if each.object != object {
 				continue
 			}
-			names, err := o.describe(object)
+			names, err := o.describe(object, nil)
 			if err != nil {
 				return err
 			}
@@ -530,7 +561,7 @@ func (r *Reader) RenewalCandidate(ctx context.Context, asOf string) (*strictjson
 	var candidate *strictjson.Object
 	err := r.operation(ctx, func(o *operation) error {
 		rows, err := o.query("SELECT "+contractFields+" FROM Contract WHERE EndDate >= "+asOf+
-			" AND StatusCode IN ('Draft', 'InApproval', 'Activated') ORDER BY EndDate, Id LIMIT 1", 1)
+			" AND StatusCode IN ('Draft', 'InApproval', 'Activated') ORDER BY EndDate, Id LIMIT 1", 1, nil)
 		if err != nil || len(rows) == 0 {
 			return err
 		}
@@ -569,7 +600,7 @@ func (r *Reader) GetAccount(ctx context.Context, accountID string) (*Account, er
 	}
 	var account *Account
 	err = r.operation(ctx, func(o *operation) error {
-		rows, err := o.query("SELECT "+accountFields+" FROM Account WHERE Id = '"+native+"' ORDER BY Id LIMIT 101", 1)
+		rows, err := o.query("SELECT "+accountFields+" FROM Account WHERE Id = '"+native+"' ORDER BY Id LIMIT 101", 1, nil)
 		if err != nil || len(rows) == 0 {
 			return err
 		}

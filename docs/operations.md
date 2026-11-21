@@ -25,11 +25,30 @@ images. The web app is embedded in the binary, so there is nothing else to deplo
 `gtm setup` does three things:
 
 1. It runs the migrations as the database owner.
-2. It writes the credentials folder (mode 0700, files 0600): the owner secret, the session key, and the TLS certificate and key.
+2. It writes the credentials folder (mode 0700, files 0600): the demo password, the session key, and the TLS certificate and key. An `owner-secret` file an earlier setup wrote is left as it is, with a note: no command uses it, a backup does not carry it, and it may be deleted.
 3. It makes the `demo` workspace and the demo sign-in, and prints the folder and the file that holds the demo password.
 
 The server then connects as an app role. That role reads and writes rows. It cannot change the
 schema or switch off a check.
+
+### The app role's password
+
+The operator chooses it. `gtm setup` reads the app role's name and password from
+`GTM_DATABASE_URL`, connects as the owner through `GTM_OWNER_DATABASE_URL`, and makes the role with
+that password, or sets the existing role's password to it. It does this on every run. Setup refuses
+a URL that gives no password. The credentials folder holds no copy of it: the server and every command connect
+with `GTM_DATABASE_URL` as they find it when they start.
+
+With `make`, the first run writes `.env` (mode 0600) with a random `GTM_APP_PASSWORD`, and Compose
+and `scripts/host.sh` build `GTM_DATABASE_URL` from it for the `gtm_app` role.
+
+To rotate it:
+
+1. Put the new password in `GTM_DATABASE_URL`. With `make`, change `GTM_APP_PASSWORD` in `.env`.
+2. Run `gtm setup` with the owner URL set (`make dev` or `make up` run it). The old password is
+   refused from then on.
+3. Restart `gtm serve`, and give the new URL to anything else that holds the old one, such as an
+   assistant app's `mcp stdio` configuration.
 
 The database must be encoded as UTF8. Setup refuses any other encoding before it runs a migration,
 with one line: `the database is encoded as SQL_ASCII; create it with ENCODING 'UTF8' TEMPLATE template0`.
