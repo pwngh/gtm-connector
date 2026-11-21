@@ -20,6 +20,7 @@ import (
 type world struct {
 	store       receipts.Store
 	workspace   string
+	url         string // of the PostgreSQL database, for a test's own sessions; empty on the memory store
 	principal   string
 	connections map[string]string
 	mu          sync.Mutex
@@ -41,7 +42,7 @@ func worlds(t *testing.T) map[string]func(t *testing.T) *world {
 		},
 		"postgres": func(t *testing.T) *world {
 			e := newE2E(t)
-			return &world{store: e.receipts, workspace: e.workspace, principal: e.reader.ID, connections: e.connections,
+			return &world{store: e.receipts, workspace: e.workspace, url: e.url, principal: e.reader.ID, connections: e.connections,
 				reads: map[string]int{}, log: StoreLog{Store: e.receipts, WorkspaceID: e.workspace}}
 		},
 	}

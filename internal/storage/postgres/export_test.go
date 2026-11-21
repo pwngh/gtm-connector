@@ -3,11 +3,18 @@ package postgres
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // SetCrash makes the store fail at a named step inside a transaction, as if
 // the process stopped there: the transaction is rolled back.
 func SetCrash(s *Store, crash func(point string) error) { s.crash = crash }
+
+// SetPublishTimeouts shortens how long a publication's transaction waits on
+// a lock and runs one statement.
+func SetPublishTimeouts(s *Store, lock, statement time.Duration) {
+	s.publishLock, s.publishStatement = lock, statement
+}
 
 // MigrateTo migrates to exactly this schema version, as an older binary did.
 func MigrateTo(s *Store, ctx context.Context, version int) error { return s.migrateTo(ctx, version) }

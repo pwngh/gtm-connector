@@ -96,6 +96,7 @@ var (
 	ErrVersionConflict = errors.New("receipts: a record version already exists with a different body")
 	ErrNotPermitted    = errors.New("receipts: the principal holds no grant on the account")
 	ErrInProgress      = errors.New("receipts: another worker holds this pending receipt")
+	ErrTimeout         = errors.New("receipts: the store gave up on a publication that waited too long")
 )
 
 // Anonymous is the token_id of a call that carried no credential.
