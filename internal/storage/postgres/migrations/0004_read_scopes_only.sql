@@ -18,8 +18,8 @@ BEGIN
         SELECT 'receipt ' || id || ' names the scope crm:write' FROM receipts WHERE scope = 'crm:write'
         LIMIT 5) x;
     IF found IS NOT NULL THEN
-        RAISE EXCEPTION 'migration 0004 refuses rows that 0001 accepted: %', found
-            USING ERRCODE = 'GT018', HINT = 'Keep this database at schema 3, or start a new one.';
+        RAISE EXCEPTION 'the read-scopes migration refuses rows that 0001 accepted: %', found
+            USING ERRCODE = 'GT018', HINT = 'Keep this database at its schema, or start a new one.';
     END IF;
 END
 $$;

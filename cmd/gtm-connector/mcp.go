@@ -10,54 +10,36 @@ import (
 
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/mcptools"
-	"github.com/pwngh/gtm-connector/internal/sources/demo"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/transport/mcp"
 )
 
-// demoBook is the demo workspace with what reads of the demo book need in it: a connection per source and
-// every account of the book.
-type demoBook struct {
-	workspace   postgres.Workspace
-	book        *demo.Store
-	connections map[string]string
-}
-
-func openDemoBook(ctx context.Context, store *postgres.Store) (demoBook, error) {
-	d := demoBook{connections: map[string]string{}}
-	var err error
-	if d.workspace, err = store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace"); err != nil {
-		return d, err
-	}
-	if d.book, err = demo.Seeded(); err != nil {
-		return d, err
-	}
-	for _, source := range []string{"crm", "calls", "slack"} {
-		connection, err := store.EnsureConnection(ctx, d.workspace, source, "demo")
-		if err != nil {
-			return d, err
-		}
-		d.connections[source] = connection.ID
-	}
-	for _, account := range d.book.Accounts() {
-		if err := store.EnsureAccount(ctx, d.workspace.ID, account.ID, account.Name); err != nil {
-			return d, err
-		}
-	}
-	return d, nil
-}
-
 // mcpGateway is the MCP endpoint serve mounts at /mcp: the read tools of the demo workspace over the demo
-// book, for the machine tokens of that workspace. Tokens are issued for the public origin's /mcp, and that
+// book, for the machine tokens of that workspace. It makes sure the workspace holds a connection per source
+// and every account of the book, as demo does. Tokens are issued for the public origin's /mcp, and that
 // origin's Host is the only one the endpoint admits.
 func mcpGateway(ctx context.Context, store *postgres.Store, publicOrigin string, selection cards.Selection) (*mcp.Gateway, error) {
-	d, err := openDemoBook(ctx, store)
+	workspace, err := store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace")
 	if err != nil {
 		return nil, err
 	}
-	return mcptools.New(mcptools.Config{Resource: publicOrigin + "/mcp", Issuer: publicOrigin,
-		WorkspaceID: d.workspace.ID, Store: store, Receipts: &postgres.ReceiptStore{Store: store}, Source: d.book,
-		Sources: demoSources, Connections: d.connections, Selection: selection})
+	for _, source := range []string{"crm", "calls", "slack"} {
+		if _, err := store.EnsureConnection(ctx, workspace, source, "demo"); err != nil {
+			return nil, err
+		}
+	}
+	from, err := workspaceReads(ctx, store, workspace)
+	if err != nil {
+		return nil, err
+	}
+	for _, account := range from.book.Accounts() {
+		if err := store.EnsureAccount(ctx, workspace.ID, account.ID, account.Name); err != nil {
+			return nil, err
+		}
+	}
+	return mcptools.New(mcptools.Config{Resource: publicOrigin + "/mcp", Issuer: publicOrigin, WorkspaceID: workspace.ID,
+		Store: store, Receipts: &postgres.ReceiptStore{Store: store}, Source: from.book, Sources: from.sources,
+		Connections: from.connections, Selection: selection})
 }
 
 // maxSelectionBytes is the largest selection file read.

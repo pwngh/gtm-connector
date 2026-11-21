@@ -77,6 +77,22 @@ func setUpDemo(t *testing.T) *demoDatabase {
 	return d
 }
 
+// connectDemo connects the workspace a --state-dir names to the demo data, as "connect demo" leaves a
+// folder. connect is not ported, so a test does it.
+func (d *demoDatabase) connectDemo(t *testing.T, name string) postgres.Workspace {
+	t.Helper()
+	workspace, err := d.owner.EnsureWorkspace(ctx, workspaceSlug(name), "demo", "Connected by a test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []string{"crm", "calls", "slack"} {
+		if _, err := d.owner.EnsureConnection(ctx, workspace, source, "demo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return workspace
+}
+
 // demo runs the command as a person does, with GTM_DATABASE_URL naming databaseURL.
 func (d *demoDatabase) demo(t *testing.T, databaseURL string, args ...string) error {
 	t.Helper()

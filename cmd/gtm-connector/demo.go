@@ -56,11 +56,10 @@ type demoRun struct {
 // never deleted, so each card again adds rows only a new database removes.
 func makeDemoCards(ctx context.Context, store *postgres.Store, login string, again bool, out io.Writer) (demoRun, error) {
 	var run demoRun
-	d, err := openDemoBook(ctx, store)
+	workspace, err := store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace")
 	if err != nil {
 		return run, err
 	}
-	workspace, book, connections := d.workspace, d.book, d.connections
 	principal, err := store.DemoPrincipal(ctx, login)
 	switch {
 	case errors.Is(err, postgres.ErrDisabled):
@@ -70,12 +69,25 @@ func makeDemoCards(ctx context.Context, store *postgres.Store, login string, aga
 	case err != nil:
 		return run, err
 	}
+	for _, source := range []string{"crm", "calls", "slack"} {
+		if _, err := store.EnsureConnection(ctx, workspace, source, "demo"); err != nil {
+			return run, err
+		}
+	}
+	from, err := workspaceReads(ctx, store, workspace)
+	if err != nil {
+		return run, err
+	}
+	book := from.book
 	held, err := store.AccountsWithCards(ctx, workspace.ID, principal.ID, cards.DemoAsOf)
 	if err != nil {
 		return run, err
 	}
 	var todo []string
 	for _, account := range book.Accounts() {
+		if err := store.EnsureAccount(ctx, workspace.ID, account.ID, account.Name); err != nil {
+			return run, err
+		}
 		live, err := store.EnsureAccountGrant(ctx, workspace.ID, principal.ID, account.ID)
 		switch {
 		case err != nil:
@@ -88,8 +100,7 @@ func makeDemoCards(ctx context.Context, store *postgres.Store, login string, aga
 			todo = append(todo, account.ID)
 		}
 	}
-	maker := &cards.Maker{Receipts: &postgres.ReceiptStore{Store: store}, Source: book, Sources: demoSources,
-		Connections: connections}
+	maker := from.maker(store)
 	actor := cards.Principal{WorkspaceID: workspace.ID, PrincipalID: principal.ID,
 		TokenID: receipts.Fingerprint(randomToken()), Scopes: []string{"crm:read", "calls:read", "slack:read"}}
 	operation := receipts.RandomID()

@@ -37,12 +37,3 @@ func (s *Store) MachineToken(ctx context.Context, workspaceID string, tokenSHA25
 	}
 	return token, err
 }
-
-// CardByBrief reads the card of a workspace with this brief ID, with its bytes, or ErrNotFound.
-func (s *Store) CardByBrief(ctx context.Context, workspaceID, briefID string) (Card, error) {
-	if !validUUID(workspaceID) {
-		return Card{}, ErrNotFound
-	}
-	return scanCard(s.pool.QueryRow(ctx,
-		`SELECT `+cardColumns+` FROM cards c WHERE c.workspace_id = $1 AND c.brief_id = $2`, workspaceID, briefID))
-}

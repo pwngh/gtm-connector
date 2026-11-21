@@ -202,9 +202,14 @@ func TestAnUpgradeFrom0001RefusesRowsItCannotKeep(t *testing.T) {
 	}
 }
 
-// 0004 takes crm:write out of what a machine token and a receipt may hold. A database at schema 3 that
-// holds either is refused by name and left as it was, and a migrated one refuses both.
-func TestAnUpgradeTo0004RefusesAWriteScope(t *testing.T) {
+// The read-scopes migration takes crm:write out of what a machine token and a receipt may hold. A database
+// one schema behind it that holds either is refused by name and left as it was, and a migrated one refuses
+// both.
+func TestTheReadScopesMigrationRefusesAWriteScope(t *testing.T) {
+	before := postgres.MigrationVersion("read_scopes_only") - 1
+	if before < 3 {
+		t.Fatalf("the read-scopes migration is numbered %d", before+1)
+	}
 	const workspace, machine = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
 	token := func(id, scopes string) string {
 		return `INSERT INTO machine_tokens (id, workspace_id, principal_id, token_sha256, scopes, expires_at) VALUES
@@ -218,12 +223,12 @@ func TestAnUpgradeTo0004RefusesAWriteScope(t *testing.T) {
 	}
 	const writeToken, mixedToken, writeReceipt = "88888888-8888-4888-8888-888888888888",
 		"99999999-9999-4999-8999-999999999999", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	three := func() (*postgres.Store, string) {
+	behind := func() (*postgres.Store, string) {
 		url := pgtest.URL(t)
 		store, err := postgres.Open(ctx, url)
 		ok(t, err)
 		t.Cleanup(store.Close)
-		ok(t, postgres.MigrateTo(store, ctx, 3))
+		ok(t, postgres.MigrateTo(store, ctx, before))
 		exec(t, url,
 			`INSERT INTO workspaces (id, slug, kind, display_name) VALUES ('`+workspace+`', 'demo', 'demo', 'Demo workspace')`,
 			`INSERT INTO principals (id, workspace_id, workspace_kind, kind, display_name) VALUES
@@ -239,13 +244,13 @@ func TestAnUpgradeTo0004RefusesAWriteScope(t *testing.T) {
 		{"a token with crm:write beside a read scope", token(mixedToken, `'crm:read', 'crm:write'`), mixedToken},
 		{"a receipt naming crm:write", receipt(writeReceipt, "crm:write"), writeReceipt},
 	} {
-		store, url := three()
+		store, url := behind()
 		exec(t, url, held.row)
 		err := store.Migrate(ctx)
 		if code(err) != "GT018" || !strings.Contains(err.Error(), held.id) {
 			t.Fatalf("%s: the upgrade answered %v", held.label, err)
 		}
-		if v, _ := store.SchemaVersion(ctx); v != 3 {
+		if v, _ := store.SchemaVersion(ctx); v != before {
 			t.Fatalf("%s: left at schema %d", held.label, v)
 		}
 		if n := scalar(t, url, rows); n != "3" {
@@ -254,7 +259,7 @@ func TestAnUpgradeTo0004RefusesAWriteScope(t *testing.T) {
 	}
 
 	// With read scopes only, the database migrates, keeps its rows, and then refuses the write scope.
-	store, url := three()
+	store, url := behind()
 	ok(t, store.Migrate(ctx))
 	if v, _ := store.SchemaVersion(ctx); v != postgres.LatestSchemaVersion() {
 		t.Fatalf("migrated to schema %d", v)
@@ -268,7 +273,7 @@ func TestAnUpgradeTo0004RefusesAWriteScope(t *testing.T) {
 	for _, refused := range []string{token(writeToken, `'crm:write'`), token(mixedToken, `'crm:read', 'crm:write'`),
 		token(mixedToken, `'crm:read', 'admin'`), receipt(writeReceipt, "crm:write")} {
 		if _, err := conn.Exec(ctx, refused); code(err) != "23514" {
-			t.Fatalf("after 0004 the store answered %v to %s", err, refused)
+			t.Fatalf("after the migration the store answered %v to %s", err, refused)
 		}
 	}
 	if _, err := conn.Exec(ctx, receipt("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "slack:read")); err != nil {
