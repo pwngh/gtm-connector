@@ -349,8 +349,9 @@ func (s *stdioConn) frame(raw []byte) jsonrpc.Message {
 	value, err := strictjson.Loads(raw)
 	if err != nil {
 		// A line the strict parser refuses but that json.loads reads as a tool call keeps its receipt. So
-		// does one refused only for its depth, which is not parsed: its method and tool name are read
-		// without descending, and its receipt is under that tool's name.
+		// does one refused for its depth, which is well encoded and is not parsed, so what else may be wrong
+		// with it is not known: its method and tool name are read without descending, and its receipt is
+		// under that tool's name.
 		tool, isCall := "<unparsed>", false
 		if errors.Is(err, strictjson.ErrTooDeep) {
 			method, name, named := shallowCall(raw)
