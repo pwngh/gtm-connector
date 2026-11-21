@@ -26,6 +26,15 @@ func ReplayRecordedVectors(t *testing.T, to Target) int {
 	return len(vectors)
 }
 
+// ReplayDealVectors sends the deal tools' vectors to an endpoint and checks each as ReplayRecordedVectors
+// does. It returns how many it sent.
+func ReplayDealVectors(t *testing.T, to Target) int {
+	t.Helper()
+	vectors := dealVectors()
+	replayVectors(t, target{to.Post, to.Receipts}, vectors)
+	return len(vectors)
+}
+
 // The fixture's resource and protocol revision, and its bearers by name.
 const (
 	FixtureResource = testResource
@@ -73,3 +82,7 @@ func SetStdioSettleLimit(c *StdioConfig, limit time.Duration) { c.limit = limit 
 
 // RecordedTools are the tools the Python gateway listed, write tool included.
 func RecordedTools() []string { return slices.Clone(recordedTools) }
+
+// ListedTools are the tools a recorded tools/list vector is answered with: the recorded ones except the write
+// tool, and the deal tools, in the SDK's order.
+func ListedTools() []string { return listedTools() }

@@ -175,9 +175,7 @@ func TestMigrationsWrittenApartApplyInEitherOrder(t *testing.T) {
 	bThenA, bThenAURL := build(b, a)
 	aThenB, aThenBURL := build(a, b)
 
-	// The two files of this test, among whatever stamped migrations the binary holds.
-	if order := scalar(t, bThenAURL, "SELECT string_agg(name, ' ' ORDER BY applied_at, name) FROM schema_migrations WHERE name IN ('"+
-		a+"', '"+b+"')"); order != b+" "+a {
+	if order := scalar(t, bThenAURL, "SELECT string_agg(name, ' ' ORDER BY applied_at, name) FROM schema_migrations WHERE name IN ('"+a+"', '"+b+"')"); order != b+" "+a {
 		t.Fatalf("applied as %s", order)
 	}
 	if one, other := schema(t, bThenAURL), schema(t, aThenBURL); one != other {

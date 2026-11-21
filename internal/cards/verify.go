@@ -260,6 +260,18 @@ func sameSources(snapshot *strictjson.Object, s evidence.Sources) bool {
 		evidence.Equal(get(snapshot, "slack_binding"), s.SlackBinding)
 }
 
+// ReadFrom reports whether a saved card was read from these sources: its evidence names the same backends
+// and bindings, as VerifyCard and VerifyPrepared require of a card they admit.
+func ReadFrom(payload []byte, bound evidence.Sources) bool {
+	value, err := strictjson.Loads(payload)
+	artifact, _ := value.(*strictjson.Object)
+	if err != nil || artifact == nil {
+		return false
+	}
+	snapshot, _ := get(artifact, "evidence").(*strictjson.Object)
+	return snapshot != nil && sameSources(snapshot, bound)
+}
+
 // resolve binds every unit as units.trace resolves it. A card is admitted only when every number resolves.
 func resolve(briefID string, snapshot *strictjson.Object, units []any) ([]UnitBinding, error) {
 	trace := evidence.NewTrace(snapshot)
