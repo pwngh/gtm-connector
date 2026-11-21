@@ -36,9 +36,17 @@ func addContact(t *testing.T, evidence *strictjson.Object, native, name, email s
 // hold one note by each speaker.
 func salesforceCard(t *testing.T, users []*strictjson.Object, speakers ...string) *strictjson.Object {
 	t.Helper()
-	evidence := sealedEvidence(t, "books_salesforce", "exports-gemini/0")
+	evidence := sealedEvidence(t, "books_salesforce", "fable/1")
 	account := member(evidence, "account_id").(string)
-	records := member(evidence, "records").([]any)
+	// The card's own call notes give way to the speakers', and no seller is listed.
+	var records []any
+	for _, value := range member(evidence, "records").([]any) {
+		if ref, _ := member(value, "record_ref").(string); !strings.HasPrefix(ref, "calls/call_notes/") {
+			records = append(records, value)
+		}
+	}
+	evidence.Set("sellers", []any{})
+	evidence.Set("demo_sellers", []any{})
 	var userRows, noteRows []any
 	for _, user := range users {
 		records = append(records, user)
@@ -223,7 +231,7 @@ func TestADomainReachesTheCardNeutralized(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, u := range units {
-		if u.Kind != "sentence" || u.Quoted {
+		if u.Kind != "sentence" || u.Quoted || u.Source != "slack" {
 			continue
 		}
 		if u.Basis != "seller side by domain "+oneLine(safe) || u.Matched == nil || u.Matched.Value != oneLine(safe) {

@@ -208,17 +208,53 @@ func slackMember(account, user, team string, home bool, email any, profile strin
 func withMember(t *testing.T, change func(account string) *strictjson.Object, sellers []any,
 	settings *strictjson.Object) *strictjson.Object {
 	t.Helper()
-	evidence := sealedEvidence(t, "books_slack", "exports-gemini/0")
-	record := change(member(evidence, "account_id").(string))
-	evidence.Set("records", append(member(evidence, "records").([]any), record))
+	evidence := sealedEvidence(t, "books_slack", "gemini/1")
+	// The card's thread has several authors: each gets the member record made for the author called
+	// placeholderAuthor, under its own user ID, and a seller entry of that name stands for every author.
+	var authors []string
+	seen := map[string]bool{}
+	for _, value := range member(evidence, "records").([]any) {
+		message, _ := member(value, "slack_message").(*strictjson.Object)
+		if message == nil {
+			continue
+		}
+		if user, ok := member(message, "user_id").(string); ok && !seen[user] {
+			seen[user] = true
+			authors = append(authors, user)
+		}
+	}
+	records := member(evidence, "records").([]any)
 	receipt := receiptOf(evidence, "read_slack_messages")
-	rows := append(member(receipt, "rows").([]any), member(record, "record_ref"))
+	rows := member(receipt, "rows").([]any)
+	for _, user := range authors {
+		record := change(member(evidence, "account_id").(string))
+		record.Set("id", "mem-"+user)
+		record.Set("user_id", user)
+		record.Set("record_ref", "slack/members/mem-"+user)
+		records, rows = append(records, record), append(rows, "slack/members/mem-"+user)
+	}
+	evidence.Set("records", records)
 	receipt.Set("rows", rows)
 	receipt.Set("row_count", len(rows))
-	evidence.Set("sellers", sellers)
+	var listed []any
+	for _, seller := range sellers {
+		if seller != placeholderAuthor {
+			listed = append(listed, seller)
+			continue
+		}
+		for _, user := range authors {
+			listed = append(listed, user)
+		}
+	}
+	evidence.Set("sellers", append([]any{}, listed...))
 	evidence.Set("people", settings)
+	// The account's first contact holds contactEmail.
+	recordOf(evidence, "crm/contacts").Set("email", contactEmail)
 	return evidence
 }
+
+// placeholderAuthor is the author a test names; withMember gives its member record to every author.
+const placeholderAuthor = "UF26F5BFF47"
 
 func TestSlackAuthorsByProfile(t *testing.T) {
 	const author = "UF26F5BFF47"
@@ -259,7 +295,7 @@ func TestSlackAuthorsByProfile(t *testing.T) {
 			}
 			checked := 0
 			for _, u := range units {
-				if u.Kind != "sentence" || u.Quoted {
+				if u.Kind != "sentence" || u.Quoted || u.Source != "slack" {
 					continue
 				}
 				checked++
@@ -342,7 +378,7 @@ func TestAProfileNotReadIsStated(t *testing.T) {
 		}, " Authors' profile emails were not read: the Slack sign-in lacks users:read.email."},
 		{func(a string) *strictjson.Object {
 			return slackMember(a, "UF26F5BFF47", "", false, nil, "over_limit")
-		}, " 1 author's profile past the read's limit was not read."},
+		}, " 2 authors' profiles past the read's limit were not read."}, // the thread has two authors
 		{func(a string) *strictjson.Object {
 			return slackMember(a, "UF26F5BFF47", "T0OTHER01", false, contactEmail, "read")
 		}, "every other thread.\n"},
