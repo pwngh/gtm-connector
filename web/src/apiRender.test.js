@@ -98,7 +98,7 @@ test('a card renders every unit with its number, exact text, speaker, role, basi
   assert.match(unit(1), /Record crm\/accounts\/acc-003 ?\. A record unit carries its reference, not field values\./);
   assert.match(unit(5), /Read by read_call_notes Status ok · HTTP 200 Started 15 Jan 2027, 15:00:00 UTC Finished 15 Jan 2027, 15:00:01 UTC Rows 2/);
   assert.match(unit(5), /Sentence unit · Call · 12 Jan 2027, 15:00:00 UTC/);
-  assert.match(html, /href="\/renewals\/thornfield\/evidence\?account=acc-003&amp;card=card-1&amp;unit=5"/);
+  assert.match(html, /href="\/ops\/evidence\?account=acc-003&amp;card=card-1&amp;unit=5"/);
   const gaps = [...html.matchAll(/data-gap-code="([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(gaps, sealed.gaps.map(gap => gap.code));
   for (const gap of sealed.gaps) assert.ok(text(html).includes(gap.text));
@@ -132,7 +132,7 @@ test('a refused receipt or card list says Not permitted, never an empty list', (
 });
 
 test('Readiness from the card: unread or unshown gaps as open items, notes apart, and no rule evaluated', () => {
-  const html = inRouter(React.createElement(readiness.CardReadiness, {card, evidenceHref: '/renewals/thornfield/evidence?account=acc-003'}), serverPaths.readiness);
+  const html = inRouter(React.createElement(readiness.CardReadiness, {card, evidenceHref: '/ops/evidence?account=acc-003'}), serverPaths.readiness);
   const open = [...html.matchAll(/data-open-gap="([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(open, sealed.gaps.filter(gap => gap.disposition !== 'note').map(gap => gap.code));
   const results = [...html.matchAll(/data-check-result="([^"]+)"/g)].map(match => match[1]);
@@ -169,7 +169,7 @@ for (const [page, path] of [['evidence', serverPaths.evidence], ['readiness', se
 }
 
 // Paths the server sends to the app that are not a server page.
-const otherPaths = ['/renewals', '/queue', '/playbooks', '/operations', '/renewals/thornfield/workplan', '/renewals/thornfield/history'];
+const otherPaths = ['/deals', '/deals/acc-003', '/ops/nothing', '/ops/workplan', '/ops/history', '/ops/evidence/extra'];
 // What the navigation, the header and the footer offer.
 function shell(html) {
   const between = (open, close) => html.slice(html.indexOf(open)).split(close)[0];
@@ -189,22 +189,22 @@ const serverShell = (state, crumbs, query = '') => ({label: 'READ FROM THE SERVE
   profile: state.session?.signed_in ? `Signed in as ${principal.display_name}` : 'Not signed in'});
 
 for (const path of otherPaths) {
-  for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${path}, ${name}: not available here, with a link home`, async () => {
+  for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${path}, ${name}: no page at this address, with one link home`, async () => {
     const html = await renderServer(path, storeOf(state));
     const main = html.slice(html.indexOf('<main'));
-    assert.match(main, /<h1>Not available here<span class="company-dot">/);
-    assert.match(text(main), name === 'unreachable' ? /The server did not answer, so nothing is shown\. Reload the page to ask it again\./ : /The server does not provide this page, so nothing is shown\. It provides Evidence and Readiness\./);
-    assert.match(main, new RegExp(`<a class="button primary" href="${serverPaths.evidence}"[^>]*>Go to Evidence</a>`));
+    assert.match(main, /<h1>There is no page at this address<span class="company-dot">\.<\/span><\/h1>/);
+    assert.match(text(main), name === 'unreachable' ? /The server did not answer, so nothing is shown\. Reload the page to ask it again\./ : /The server provides Evidence and Readiness\. Check the address, or start again from Evidence\./);
+    assert.deepEqual([...main.matchAll(/<a [^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(match => [match[1], match[2]]), [[serverPaths.evidence, 'Go to Evidence']]);
     assert.doesNotMatch(html, /api-frame|name="login"|api-renewal-header/);
     assert.doesNotMatch(text(html), /Revenue Workflow Lab|prototype|Demo workspace|Invented|walkthrough|Work queue|Playbooks|Operations|Work plan|History/i);
-    assert.deepEqual(shell(html), serverShell(state, 'Not available here'));
+    assert.deepEqual(shell(html), serverShell(state, 'No page here'));
   });
 }
 
-test('API mode: a path that only resembles a server page is not available either', async () => {
-  for (const path of [serverPaths.evidence + '/extra', '/queue/evidence', serverPaths.readiness + '/']) {
+test('API mode: a path that only resembles a server page has no page either', async () => {
+  for (const path of [serverPaths.evidence + '/extra', '/deals/evidence', serverPaths.readiness + '/']) {
     const html = await renderServer(path, storeOf(signedIn));
-    assert.match(html, /<h1>Not available here</, path);
+    assert.match(html, /<h1>There is no page at this address</, path);
     assert.doesNotMatch(html, /api-frame/, path);
   }
 });
@@ -265,7 +265,7 @@ test('the API header shows the open card, and Sources and gaps targets the gaps 
   assert.match(text(named), /Account ID acc-002/);
   const none = inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'evidence', selection: {account: null, cardId: null, card: {status: 'idle'}}}));
   assert.match(none, /<h1>No account chosen<span/);
-  assert.match(none, /href="\/renewals\/thornfield\/evidence"/);
+  assert.match(none, /href="\/ops\/evidence"/);
 });
 
 // The picker's states, from what GET /api/v1/accounts returns.

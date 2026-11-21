@@ -87,7 +87,7 @@ test('a card in the URL that is not in the account list is not read or shown', (
 test('unit links pin the open card, so a later publication cannot change what a link opens', () => {
   const card = cardOf('acc-003');
   const html = inRouter(React.createElement(evidence.CardEvidence, {card, receiptFor: () => ({status: 'loading'}), params: new URLSearchParams('account=acc-003'), generation: 1}));
-  assert.match(html, /href="\/renewals\/thornfield\/evidence\?account=acc-003&amp;card=card-acc-003&amp;unit=5"/);
+  assert.match(html, /href="\/ops\/evidence\?account=acc-003&amp;card=card-acc-003&amp;unit=5"/);
 });
 
 // Minor: the URL's account is shown only from the granted list, or marked unverified.

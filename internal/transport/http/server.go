@@ -52,9 +52,9 @@ type Config struct {
 	MCP http.Handler
 }
 
-// DefaultClientRoutes are the web app's routes today: "/" and these
-// prefixes, each with anything below it.
-var DefaultClientRoutes = []string{"/renewals", "/queue", "/playbooks", "/operations"}
+// DefaultClientRoutes are the web app's routes: "/" and these prefixes,
+// each with anything below it.
+var DefaultClientRoutes = []string{"/deals", "/ops"}
 
 // Sessions is the storage the surface needs: sessions, and for /healthz
 // whether the applied migrations are this binary's.

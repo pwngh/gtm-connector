@@ -65,7 +65,7 @@ $compose exec -T app /app/gtm-connector health
 test "$(curl -sS --cacert "$creds/tls.pem" -o /dev/null -w '%{http_code}' -H "Host: evil.example:$GTM_PORT" "$base/healthz")" = 421
 # The image holds the binary and no web folder; a deep link gets the app's page, whose script is served.
 test "$($compose exec -T app ls /app)" = gtm-connector
-asset="$(fetch "$base/renewals/r-1/evidence" | grep -o '/assets/[^"]*\.js' | head -n 1)"
+asset="$(fetch "$base/ops/evidence" | grep -o '/assets/[^"]*\.js' | head -n 1)"
 test "$(fetch -o /dev/null -w '%{content_type}' "$base$asset")" = 'text/javascript; charset=utf-8'
 sign_in
 fetch "$base/api/v1/session" | python3 -c '

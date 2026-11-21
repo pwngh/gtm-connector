@@ -41,12 +41,12 @@ export function ServerNav({onNavigate}) {
 }
 
 // Any path that is not a server page.
-export function NotAvailable() {
+export function NoPage() {
   const {state} = useServer();
   return <div className="page-heading secondary-heading api-unavailable"><div><div className="eyebrow">READ FROM THE SERVER</div>
-    <h1>Not available here<span className="company-dot">.</span></h1>
+    <h1>There is no page at this address<span className="company-dot">.</span></h1>
     <p className="page-description">{state.mode === 'unreachable' ? 'The server did not answer, so nothing is shown. Reload the page to ask it again.'
-      : 'The server does not provide this page, so nothing is shown. It provides Evidence and Readiness.'}</p>
+      : 'The server provides Evidence and Readiness. Check the address, or start again from Evidence.'}</p>
     <Link className="button primary" to={serverHome}>Go to Evidence</Link></div></div>;
 }
 
@@ -54,7 +54,7 @@ export function NotAvailable() {
 // the page heading shows the verified one.
 export function ApiCrumbs() {
   const {pathname} = useLocation();
-  if (!serverPageAt(pathname)) return <span className="api-crumb-alone">Not available here</span>;
+  if (!serverPageAt(pathname)) return <span className="api-crumb-alone">No page here</span>;
   return <><span>Renewal</span><ChevronRight size={14}/><span>Read from the server</span></>;
 }
 

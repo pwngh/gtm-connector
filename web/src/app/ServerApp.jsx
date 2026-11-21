@@ -5,7 +5,7 @@ import Dialog from '../WorkspaceDialog.jsx';
 import CommandPalette from '../CommandPalette.jsx';
 import RouteContent from '../RouteContent.jsx';
 import {focusElement, holdPendingFocus} from '../focusElement.js';
-import {ApiCrumbs, NotAvailable, PrincipalMark, ServerContext, ServerNav, apiCommandItems, serverHome, serverPageAt} from '../ServerSwitch.jsx';
+import {ApiCrumbs, NoPage, PrincipalMark, ServerContext, ServerNav, apiCommandItems, serverHome, serverPageAt} from '../ServerSwitch.jsx';
 // The styles the server pages use. Later files override earlier ones, so the order matters.
 import '../readiness.css';
 import '../styles.css';
@@ -102,7 +102,7 @@ export function ServerShell() {
   });
 
   const closeNavigation = () => {setMobile(false); menuRef.current?.focus();};
-  const {Page, label} = serverPageAt(location.pathname) || {Page: NotAvailable, label: 'page'};
+  const {Page, label} = serverPageAt(location.pathname) || {Page: NoPage, label: 'page'};
   return <div className="app">
     <a className="skip" inert={overlayOpen} href="#main" onClick={event => {event.preventDefault(); focusElement(document.getElementById('main'), {block: 'start'});}}>Skip to content</a>
     <aside id="workspace-navigation" role={compact && mobile ? 'dialog' : undefined} aria-modal={compact && mobile ? true : undefined} aria-label={compact && mobile ? 'Workspace navigation' : undefined}
@@ -140,10 +140,11 @@ export function ServerPalette({opener, onClose}) {
   </Dialog>;
 }
 
-// The app the server serves. "/" opens the first server page.
+// The app the server serves. "/" and /ops open the first server page.
 export default function ServerApp({store}) {
   return <ServerContext value={store}><BrowserRouter><Routes>
     <Route path="/" element={<Navigate to={serverHome} replace/>}/>
+    <Route path="/ops" element={<Navigate to={serverHome} replace/>}/>
     <Route path="*" element={<ServerShell/>}/>
   </Routes></BrowserRouter></ServerContext>;
 }
