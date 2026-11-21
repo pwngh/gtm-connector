@@ -62,7 +62,7 @@ func TestThePageIsAskedAboutEachTimeAndTaggedByItsBytes(t *testing.T) {
 	for name, s := range builds(t) {
 		page := send(s, http.MethodGet, "/", publicHost, nil).Body.Bytes()
 		tag := tagOf(page)
-		for _, path := range []string{"/", "/index.html", "/renewals/r-1/evidence", "/operations", "/queue/q-7?tab=2"} {
+		for _, path := range []string{"/", "/index.html", "/ops/evidence", "/ops", "/deals/d-7?tab=2"} {
 			for _, method := range []string{http.MethodGet, http.MethodHead} {
 				w := send(s, method, path, publicHost, nil)
 				if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-cache" || w.Header().Get("ETag") != tag ||
@@ -162,7 +162,7 @@ func TestThePagesTagIsOfTheBytesItSends(t *testing.T) {
 	first := []byte("<!doctype html><title>the first build</title>")
 	second := []byte("<!doctype html><title>the second build</title>")
 	s := serving(t, httptransport.Config{Web: rebuilt{first, second}})
-	for _, path := range []string{"/", "/renewals/r-1/evidence"} {
+	for _, path := range []string{"/", "/ops/evidence"} {
 		w := send(s, http.MethodGet, path, publicHost, nil)
 		if w.Code != http.StatusOK || w.Header().Get("ETag") != tagOf(w.Body.Bytes()) {
 			t.Errorf("%s: %d, the body %q under the tag %s, which is not its own", path, w.Code, w.Body.String(),
@@ -181,12 +181,12 @@ func TestThePagesTagIsOfTheBytesItSends(t *testing.T) {
 func TestANewBuildHasANewTag(t *testing.T) {
 	dir := webDir(t)
 	s := serving(t, httptransport.Config{WebDir: dir})
-	first := send(s, http.MethodGet, "/renewals/r-1", publicHost, nil)
+	first := send(s, http.MethodGet, "/deals/d-1", publicHost, nil)
 	rebuilt := []byte("<!doctype html><title>" + appMarker + "</title><script type=module src=/assets/next.js></script>")
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), rebuilt, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	second := send(s, http.MethodGet, "/renewals/r-1", publicHost, http.Header{"If-None-Match": {first.Header().Get("ETag")}})
+	second := send(s, http.MethodGet, "/deals/d-1", publicHost, http.Header{"If-None-Match": {first.Header().Get("ETag")}})
 	if first.Header().Get("ETag") != tagOf(first.Body.Bytes()) || second.Code != http.StatusOK ||
 		second.Body.String() != string(rebuilt) || second.Header().Get("ETag") != tagOf(rebuilt) {
 		t.Errorf("after a new build: %d, ETag %q, not %s", second.Code, second.Header().Get("ETag"), tagOf(rebuilt))

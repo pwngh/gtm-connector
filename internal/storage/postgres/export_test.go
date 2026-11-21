@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"io"
-	"strings"
 	"time"
 )
 
@@ -21,15 +20,7 @@ func SetPublishTimeouts(s *Store, lock, statement time.Duration) {
 func MigrateTo(s *Store, ctx context.Context, version int) error { return s.migrateTo(ctx, version) }
 
 // MigrationVersion is the number of the embedded migration with this name, or 0.
-func MigrationVersion(name string) int {
-	list, _ := migrations()
-	for _, m := range list {
-		if strings.HasSuffix(m.name, "_"+name+".sql") {
-			return m.version
-		}
-	}
-	return 0
-}
+func MigrationVersion(name string) int { return migrationVersion(name) }
 
 // MigrationSQL gives the text of each embedded migration, in order.
 func MigrationSQL() []string {

@@ -159,6 +159,10 @@ func (rs *ReceiptStore) Publish(ctx context.Context, p receipts.Publication) (re
 			gaps[i].Count = &n
 		}
 	}
+	lines := make([]Line, len(p.Lines))
+	for i, l := range p.Lines {
+		lines[i] = Line{Section: l.Section, Body: append(json.RawMessage(nil), l.Value...)}
+	}
 	var rules *string
 	if p.RulesVersion != "" {
 		rules = &p.RulesVersion
@@ -174,7 +178,7 @@ func (rs *ReceiptStore) Publish(ctx context.Context, p receipts.Publication) (re
 	card, err := rs.Store.publishCard(ctx, CardPublication{WorkspaceID: p.WorkspaceID, AccountRef: p.AccountRef,
 		BriefID: p.BriefID, ParentReceiptID: p.Seal.AuditID, PrincipalID: p.PrincipalID,
 		SealReceiptID: p.Seal.AuditID, SealLeaseToken: ticketLease(p.Seal), Kind: "go",
-		SchemaVersion: p.SchemaVersion, RulesVersion: rules, Bytes: p.Bytes, Units: units, Gaps: gaps,
+		SchemaVersion: p.SchemaVersion, RulesVersion: rules, Bytes: p.Bytes, Units: units, Gaps: gaps, Lines: lines,
 		ReadReceiptIDs: p.Reads, ElapsedMS: p.ElapsedMS},
 		func(tx pgx.Tx, card Card, seal Receipt) error {
 			var err error
@@ -255,6 +259,22 @@ func committed(ctx context.Context, q querier, card Card, seal Receipt) (receipt
 			row.ByRole = []byte(g.ByRole)
 		}
 		out.Gaps = append(out.Gaps, row)
+	}
+	held, err := lines(ctx, q, card.WorkspaceID, card.ID)
+	if err != nil {
+		return receipts.Card{}, err
+	}
+	// A line's value is written as the maker encodes it; jsonb keeps it as data, not as those bytes.
+	for _, l := range held {
+		value, err := strictjson.Loads(l.Body)
+		if err != nil {
+			return receipts.Card{}, err
+		}
+		encoded, err := strictjson.Dumps(value, strictjson.Prepared)
+		if err != nil {
+			return receipts.Card{}, err
+		}
+		out.Lines = append(out.Lines, receipts.LineRow{Section: l.Section, Value: []byte(encoded)})
 	}
 	return out, nil
 }

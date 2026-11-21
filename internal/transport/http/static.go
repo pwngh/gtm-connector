@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -89,7 +90,8 @@ func underReserved(p string) bool {
 // serveApp serves a file of the web app's build, or index.html for a client
 // route. Only "/" and the client route prefixes fall back to index.html; a
 // path with a file extension, anything under /assets/, and any reserved
-// prefix (routed elsewhere) never does.
+// prefix (routed elsewhere) never does. Any other path without an extension
+// gets the build's 404.html, when it has one.
 //
 // A browser keeps a file under assets/ for a year without asking again: the
 // build names each by its content's hash. It asks about every other file on
@@ -122,13 +124,33 @@ func (s *Server) serveApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.clientRoute(clean) {
-		http.Error(w, "Not found.", http.StatusNotFound)
+		asset := clean == "/assets" || strings.HasPrefix(clean, "/assets/")
+		if asset || path.Ext(clean) != "" || !s.serveNotFoundPage(w, r) {
+			http.Error(w, "Not found.", http.StatusNotFound)
+		}
 		return
 	}
 	if !s.serveFile(w, r, "index.html") {
 		w.Header().Set("Cache-Control", "no-cache")
 		http.Error(w, "The web app is not built.", http.StatusNotFound)
 	}
+}
+
+// serveNotFoundPage answers with the build's 404.html and status 404. It
+// reports whether the build has that page.
+func (s *Server) serveNotFoundPage(w http.ResponseWriter, r *http.Request) bool {
+	page, err := fs.ReadFile(s.web, "404.html")
+	if err != nil {
+		return false
+	}
+	w.Header().Set("Content-Type", contentTypes[".html"])
+	w.Header().Set("Content-Length", strconv.Itoa(len(page)))
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusNotFound)
+	if r.Method != http.MethodHead {
+		w.Write(page)
+	}
+	return true
 }
 
 func (s *Server) clientRoute(clean string) bool {

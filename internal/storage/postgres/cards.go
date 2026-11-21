@@ -63,6 +63,8 @@ type Card struct {
 	SHA256                               []byte
 	ParentReceiptID, SealReceiptID       string
 	PublishedAt                          time.Time
+	// LineCount is how many lines the card holds, nil for a card published before lines were projected.
+	LineCount *int
 }
 
 // Unit is one numbered unit of a card, as projected from its sealed bytes.
@@ -86,6 +88,12 @@ type Gap struct {
 	Text              string
 }
 
+// Line is one line a card prints under ATTENTION or RECORD VALUES, as data.
+type Line struct {
+	Section string          // signal or value
+	Body    json.RawMessage // evidence.Line.Value
+}
+
 // CardPublication is everything step 3 writes together.
 type CardPublication struct {
 	WorkspaceID, AccountRef, BriefID string
@@ -104,10 +112,12 @@ type CardPublication struct {
 	RulesVersion  *string
 	// Bytes is the card. Its "units" and "gaps" arrays are exactly Units'
 	// bodies and Gaps, and its evidence.receipts embeds exactly the reads in
-	// ReadReceiptIDs, in order.
+	// ReadReceiptIDs, in order. Its text prints exactly Lines under ATTENTION
+	// and RECORD VALUES, signals first.
 	Bytes          []byte
 	Units          []Unit
 	Gaps           []Gap
+	Lines          []Line
 	ReadReceiptIDs []string
 	ElapsedMS      float64
 }
@@ -117,8 +127,8 @@ type CardPublication struct {
 // owner when it has none), the bytes against everything the store holds for
 // them (receipts.CheckPublication), and the generation of every read, holding
 // share locks on the grant, the reads and their connections until commit.
-// Then it writes the card bytes and digest, the unit and gap projections and
-// the read set, and finishes the seal naming the digest. The database checks
+// Then it writes the card bytes and digest, the unit, gap and line
+// projections and the read set, and finishes the seal naming the digest. The database checks
 // the same again at commit.
 //
 // A seal that cannot seal this card gives ErrSealMismatch and stays pending.
@@ -153,9 +163,10 @@ func (s *Store) publishCard(ctx context.Context, in CardPublication,
 	seal := ReceiptFinish{ReceiptID: in.SealReceiptID, LeaseToken: in.SealLeaseToken, Status: "ok",
 		HTTPStatus: 200, ElapsedMS: in.ElapsedMS,
 		Rows: []string{"briefs/" + in.BriefID + "/" + hex.EncodeToString(digest[:])}}
+	lineCount := len(in.Lines)
 	card := Card{WorkspaceID: in.WorkspaceID, AccountRef: in.AccountRef, BriefID: in.BriefID, Kind: in.Kind,
 		SchemaVersion: in.SchemaVersion, RulesVersion: in.RulesVersion, Bytes: in.Bytes, SHA256: digest[:],
-		ParentReceiptID: in.ParentReceiptID, SealReceiptID: in.SealReceiptID}
+		ParentReceiptID: in.ParentReceiptID, SealReceiptID: in.SealReceiptID, LineCount: &lineCount}
 	var refused error
 	lock, statement := s.publishTimeouts()
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
@@ -209,11 +220,13 @@ func (s *Store) publishCard(ctx context.Context, in CardPublication,
 		}
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO cards (workspace_id, account_ref, brief_id, kind, schema_version, rules_version,
-				card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, sha256($7), $8, $9, $10, $11, $12)
+				card_bytes, card_sha256, parent_receipt_id, seal_receipt_id, unit_count, gap_count, read_count,
+				line_count)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, sha256($7), $8, $9, $10, $11, $12, $13)
 			RETURNING id, published_at`,
 			in.WorkspaceID, in.AccountRef, in.BriefID, in.Kind, in.SchemaVersion, in.RulesVersion,
-			in.Bytes, in.ParentReceiptID, in.SealReceiptID, len(in.Units), len(in.Gaps), len(in.ReadReceiptIDs)).
+			in.Bytes, in.ParentReceiptID, in.SealReceiptID, len(in.Units), len(in.Gaps), len(in.ReadReceiptIDs),
+			lineCount).
 			Scan(&card.ID, &card.PublishedAt); err != nil {
 			return err
 		}
@@ -232,6 +245,10 @@ func (s *Store) publishCard(ctx context.Context, in CardPublication,
 				INSERT INTO gaps (workspace_id, card_id, ordinal, code, disposition, count, by_role, text)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 				in.WorkspaceID, card.ID, i, g.Code, g.Disposition, g.Count, nullJSON(g.ByRole), g.Text)
+		}
+		for i, l := range in.Lines {
+			batch.Queue(`INSERT INTO card_lines (workspace_id, card_id, ordinal, section, body)
+				VALUES ($1, $2, $3, $4, $5)`, in.WorkspaceID, card.ID, i, l.Section, l.Body)
 		}
 		for i, id := range in.ReadReceiptIDs {
 			batch.Queue(`INSERT INTO card_reads (workspace_id, card_id, ordinal, receipt_id) VALUES ($1, $2, $3, $4)`,
@@ -299,6 +316,9 @@ func (in CardPublication) view(versions map[string]string) receipts.Publication 
 			row.Count = big.NewInt(int64(*g.Count))
 		}
 		p.Gaps = append(p.Gaps, row)
+	}
+	for _, l := range in.Lines {
+		p.Lines = append(p.Lines, receipts.LineRow{Section: l.Section, Value: l.Body})
 	}
 	return p
 }
@@ -427,12 +447,13 @@ func nullJSON(raw json.RawMessage) any {
 }
 
 const cardColumns = `c.id, c.workspace_id, c.account_ref, c.brief_id, c.kind, c.schema_version,
-	c.rules_version, c.card_bytes, c.card_sha256, c.parent_receipt_id, c.seal_receipt_id, c.published_at`
+	c.rules_version, c.card_bytes, c.card_sha256, c.parent_receipt_id, c.seal_receipt_id, c.published_at,
+	c.line_count`
 
 func scanCard(row pgx.Row) (Card, error) {
 	var c Card
 	err := row.Scan(&c.ID, &c.WorkspaceID, &c.AccountRef, &c.BriefID, &c.Kind, &c.SchemaVersion,
-		&c.RulesVersion, &c.Bytes, &c.SHA256, &c.ParentReceiptID, &c.SealReceiptID, &c.PublishedAt)
+		&c.RulesVersion, &c.Bytes, &c.SHA256, &c.ParentReceiptID, &c.SealReceiptID, &c.PublishedAt, &c.LineCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Card{}, ErrNotFound
 	}
@@ -498,5 +519,19 @@ func gaps(ctx context.Context, q querier, workspaceID, cardID string) ([]Gap, er
 		var g Gap
 		err := row.Scan(&g.Code, &g.Disposition, &g.Count, &g.ByRole, &g.Text)
 		return g, err
+	})
+}
+
+// lines lists a card's lines in order.
+func lines(ctx context.Context, q querier, workspaceID, cardID string) ([]Line, error) {
+	rows, err := q.Query(ctx, `SELECT section, body FROM card_lines
+		WHERE workspace_id = $1 AND card_id = $2 ORDER BY ordinal`, workspaceID, cardID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Line, error) {
+		var l Line
+		err := row.Scan(&l.Section, &l.Body)
+		return l, err
 	})
 }
