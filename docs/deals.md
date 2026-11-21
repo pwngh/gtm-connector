@@ -5,9 +5,11 @@
 Deals is the home page for sales reps and CSMs. It shows quotes, sources and times. The plumbing
 behind them is in Ops.
 
+This page describes the product as designed. The [roadmap](ROADMAP.md) says which parts are built.
+
 ```sh
-gtm deal thornfield-2027            # the card, in a terminal
-gtm deal thornfield-2027 --refresh  # read the sources again first
+gtm deal thornfield-2027-2e3hke            # the card, in a terminal
+gtm deal thornfield-2027-2e3hke --refresh  # read the sources again first
 ```
 
 ## The page
@@ -33,20 +35,31 @@ card until someone decides it.
 
 ## What flags a deal
 
-| Flag | When it is raised |
+One list of rules flags a deal, and any raised rule turns it red. The first seven read record fields
+and dates alone, and [Deal cards](cards.md#signals) gives each one's exact wording. The last five
+read what people said.
+
+| Rule | When it is raised |
 | --- | --- |
+| Still open near the renewal | An opportunity is open and the renewal is 30 days away or less |
+| Renewal passed | The renewal date is before the card's date and no opportunity is open |
+| Contract ended | No contract ends on or after the card's date, and one ended before it |
+| Close date after the renewal | An open opportunity closes after the renewal date |
+| Contact with no role | A contact has no title |
+| Stale call | The newest dated call that was read is more than 60 days old |
+| CRM at risk | The CRM marks the account at risk |
 | Customer silence | No customer reply near the renewal, in the sources that were read |
 | Close-date slippage | The renewal date was pushed again |
 | Single-threaded deal | Only one person on the customer side is talking |
 | Pricing or seat conflict | A figure in Slack or on a call differs from the CRM. A person resolves it. |
-| Legal or security blocker | Redlines or riders are holding up signature |
+| Legal or security blocker | A person marked a sentence as a legal or security blocker. Wording alone never raises it. |
 
 If a source was not read, a rule answers unknown, not silence.
 
 ## The card
 
 - **Renewal countdown and ARR,** from typed CRM fields.
-- **What changed since last time:** the sentences, record values and unread sources that differ from the card you last saw. Your position is your own. A teammate reading the card does not clear your changes.
+- **What changed.** Two things carry that name. New to you is the sentences, record values and unread sources that differ from the card you last opened: it is yours alone, and a teammate reading the card does not clear it. New on the card is what differs from the card published before it: it is the same for everyone, and it is what an alert or a webhook reports.
 - **Exact buyer quotes and titles.** A quotation is one whole sentence, never a cut one.
 - **Promises you made:** seller sentences marked as commitments.
 - **Missing or unread sources.**

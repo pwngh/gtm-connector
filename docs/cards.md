@@ -313,7 +313,7 @@ comes from.
 
 | Signal | When |
 | --- | --- |
-| The renewal is in N days (or is today, or passed N days ago) and this opportunity is still open at stage "S" | An opportunity is not closed, and the renewal date, or the Salesforce contract end, is 30 days away or less, today, or past. More than five make one line that cites the first five and ends `and N more`. |
+| The renewal is in N days (or is today, or passed N days ago) and this opportunity is still open at stage "S" | An opportunity is not closed, and the renewal date, or the Salesforce contract end, is 30 days away or less, or today. On the demo CRM it is also raised when the renewal date has passed. On Salesforce a contract that has ended is never the one the card counts to, so a lapsed contract raises only the contract end signal below. More than five make one line that cites the first five and ends `and N more`. |
 | The renewal date passed N days ago | The demo CRM's renewal date is before the planning date and no opportunity is open. |
 | The latest contract end date, D, was N days ago | Salesforce returned no contract ending on or after the planning date, and at least one that ended before it. |
 | CRM marks this account at risk | The demo CRM's risk status is `at_risk`. |
@@ -398,6 +398,7 @@ below. `unknown` says why in its `basis`:
 | `the email's domain contradicts the person's side, by ...` | A contact's address is on the company's domain, or a seller's on the account's. |
 | `the person is both a contact and a seller, by ...` | The person is a contact and also a user or a listed seller. |
 | `the attendees behind this label are on different sides` | The rows of the attendee list under the label are not all on one side. |
+| `the person is a contact of another account` | The identifier names a contact, and not one of this card's account. |
 
 A label is what the source wrote, and an attendee list or an alias is what the operator gave. Neither
 proves who spoke: another person of the same name, or a name typed into a file, gets the same role. A

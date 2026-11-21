@@ -91,7 +91,8 @@ NOT READ
   system-of-record fact.
 - **Identity-resolved speakers:** a role comes from who the speaker is, never from wording.
   - **Resolution order:** Slack author profile → call attendee list → configured alias → the label
-    matched as a name. The strongest identifier the source carries wins.
+    matched as a name → a name variant of a person the attendee list names. The strongest
+    identifier the source carries wins.
   - **Roles:** a seller is a Salesforce user or a listed seller. A customer is a contact of the
     account, printed with that contact's title and the day the record was read.
   - **Explicit uncertainty:** each line names how its speaker was matched, here `by name`. Two
@@ -200,11 +201,11 @@ PostgreSQL URL. More in [running it](docs/operations.md).
 
 ## Adversarial Test Suite
 
-Ten invented deals, each built to break one property. Each card was checked against its property
-when it was recorded in [`testdata/oracle/cards/cases.jsonl.gz`](testdata/oracle/cards/cases.jsonl.gz),
-and the [parity test](internal/cards/parity_test.go) rebuilds every one of them byte for byte. The
-rules that enforce two of the properties, marked blockers and the channel cap, are still on the
-[roadmap](docs/ROADMAP.md).
+Ten invented deals, each built to break one property. The [parity test](internal/cards/parity_test.go)
+rebuilds every card in [`testdata/oracle/cards/cases.jsonl.gz`](testdata/oracle/cards/cases.jsonl.gz)
+byte for byte. Eight of the ten hold their property today. The two whose rules are still on the
+[roadmap](docs/ROADMAP.md), marked blockers and the channel cap, are recorded as the card is now,
+and are recorded again when the rule lands.
 
 | Case | Property it guards |
 | :--- | :--- |
@@ -223,8 +224,9 @@ rules that enforce two of the properties, marked blockers and the channel cap, a
 
 ## System Guarantees
 
-- **Receipt-first execution:** a tool runs only after its receipt is committed. A refused call still
-  gets a receipt.
+- **Receipt-first execution:** a tool runs only after its receipt is committed. A refused call keeps
+  its receipt, with the one exception the
+  [security review](SECURITY_REVIEW.md#1-a-receipt-comes-before-every-tool-call) names.
 - **Privilege isolation:** one source's grant never opens another, and a person reads only the deals
   granted to them.
 - **Unambiguous deal binding:** a call or thread joins a deal only by a rule you configured. One that
@@ -248,10 +250,12 @@ rules that enforce two of the properties, marked blockers and the channel cap, a
 - **Real-renewal trial:** the counts from a trial on five real renewals go here once it has run.
 - **What a card shows:** up to twelve sentences, dealt by speaker role and by time, with the rest
   counted. Every sentence read is in `inspect` and in the web app's proof drawer.
-- **People decide blockers:** a person, not wording, marks a blocker. A readiness rule reports what
+- **People decide blockers:** a person, not wording, marks a blocker. A rule reports what
   it observed in the sources it read, and unknown when a read is missing. A model only proposes
   marks, and a person accepts or rejects each one.
-- **Live verification:** No live org has been verified.
+- **Live verification:** one development Salesforce org, read-only, and one development Slack
+  workspace, both on invented records, on 2026-11-21. No sandbox, no production org and no real
+  identity provider has been verified.
 - **Platforms:** macOS and Linux. One CRM: Salesforce.
 
 ---

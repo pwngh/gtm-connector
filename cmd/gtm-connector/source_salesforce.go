@@ -46,7 +46,7 @@ var salesforceOptions salesforce.Options
 var salesforceFailures = map[string][2]string{
 	"salesforce_invalid_configuration": {
 		"Salesforce credentials or the sf CLI configuration are unavailable.",
-		"Run sf org login web --alias gtm-de, then repeat with --sf-org gtm-de."},
+		"Run sf org login web --alias acme-dev, then repeat with --sf-org acme-dev."},
 	"salesforce_edition_required": {
 		"The selected org did not report Developer Edition.",
 		"Select a Developer Edition alias with --sf-org."},
@@ -61,7 +61,7 @@ var salesforceFailures = map[string][2]string{
 		"Run gtm-connector debug salesforce check with the same alias and environment to see the missing fields."},
 	"salesforce_auth_required": {
 		"The sf CLI login or token refresh did not provide usable credentials.",
-		"Install Salesforce CLI if missing. Run sf org login web --alias gtm-de, then repeat with --sf-org gtm-de."},
+		"Install Salesforce CLI if missing. Run sf org login web --alias acme-dev, then repeat with --sf-org acme-dev."},
 	"salesforce_cli_timeout": {
 		"The Salesforce CLI (sf) did not answer within its time limit, so no login was read.",
 		"The computer may be busy. Repeat the command. To time sf alone, run sf org display with the same alias."},
@@ -494,8 +494,8 @@ options:
                         UTC).
 
 Examples:
-  gtm-connector debug salesforce check --sf-org gtm-de --state-dir gtm-de
-  gtm-connector debug salesforce check --state-dir gtm-de
+  gtm-connector debug salesforce check --sf-org acme-dev --state-dir acme-dev
+  gtm-connector debug salesforce check --state-dir acme-dev
 `
 
 // debugSalesforce runs debug salesforce and gives its exit code. A failed check prints its report and then

@@ -419,7 +419,7 @@ options:
 
 Examples:
   gtm-connector connect demo
-  gtm-connector connect salesforce --org gtm-de --state-dir gtm-de --seller 'Morgan Reed'
+  gtm-connector connect salesforce --org acme-dev --state-dir acme-dev --seller 'Morgan Reed'
   gtm-connector connect status
   gtm-connector connect demo --remove
 

@@ -32,7 +32,9 @@ call ──▶ receipt committed (pending) ──▶ checks, read ──▶ rece
 ```
 
 > **A refused call keeps its receipt.** A bad token, a missing scope, a rate limit or invalid arguments
-> each finish the call's receipt as `error`. Only a request that is no tool call gets none.
+> each finish the call's receipt as `error`. Two requests get none: one that is no tool call, and a
+> call refused because `serve` could not read which workspace its bearer was issued in
+> ([security review](../SECURITY_REVIEW.md#1-a-receipt-comes-before-every-tool-call)).
 
 When the receipt cannot be committed, the call does not run. `serve`'s `/mcp` answers HTTP 503 with
 `{"error":"audit_unavailable; call was not executed"}`, and `mcp stdio` answers a JSON-RPC error in the
@@ -160,6 +162,7 @@ A tool name that is not 1 to 100 characters is recorded as `<invalid>`.
 | The account lookup of `debug calls import` and `debug slack map` | `import-` and 32 hex digits. |
 | A step of `debug salesforce check` | `check-` and 32 hex digits. |
 | The read of `debug slack check` | `slack-check-` and 32 hex digits. |
+| A request `connect salesforce` or a Slack sign-in command makes to its source | `sign-in-` and 32 hex digits. |
 | An MCP call | The `gtm.demo/briefId` value of the call's `_meta`, up to 128 characters, or `null`. A `prepare_renewal_brief` call records none. |
 | A seal | `null`. |
 
@@ -203,7 +206,9 @@ reads inside it are its child receipts, whose `request_id` is
 | The connector's own decisions | One `decide_match` per call or thread it decides, naming no principal, when `deal new`, `POST /v1/deals`, `debug calls import`, `debug slack map` or `brief` finds an undecided one while its account has an open deal. |
 | `debug calls import`, `debug slack map` | One `get_account` in an `import-` run, also on the demo book. On a real CRM, one more in an `inspect-` run before it. |
 | `grant` | One: `grant_account`, `revoke_grant` with `--revoke`, `disable_person` with `--disable` or `enable_person` with `--enable`, whose arguments are the account and the `to` or `subject` given. It finishes ok with the row `grants/PRINCIPAL_ID/ACCOUNT_ID`, or `people/PRINCIPAL_ID` for a person, in the transaction that makes the change, or as an error that changes nothing: `person_not_found` or `account_not_found` (404), or `person_ambiguous` (409). |
-| `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `connect`, `grants` | None. |
+| `connect salesforce` | One per request it makes to sign in and check the org, in a `sign-in-` run: `connect_salesforce_login_display` and `connect_salesforce_login_token` for the two `sf` commands, then `connect_salesforce_org`, `connect_salesforce_userinfo` and one `connect_salesforce_describe_` step for each object. |
+| `debug slack connect`, `debug slack status --check`, `debug slack disconnect --revoke` | One per request to Slack, in a `sign-in-` run: `slack_sign_in_exchange`, `slack_sign_in_refresh`, `slack_sign_in_identity` or `slack_sign_in_revoke`. |
+| `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `grants`, and every other form of `connect` | None. |
 | MCP calls through `serve` or `mcp stdio` | One per tool call, and one per read inside a prepared brief. |
 
 ## Rate limit and writes
