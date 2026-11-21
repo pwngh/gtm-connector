@@ -230,10 +230,10 @@ func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 		if requestID == nil || isRequestID(requestID) {
 			receiptID = plain(requestID)
 		}
-		recorded := plain(arguments)
+		recorded := arguments
 		if request == nil {
 			sum := sha256.Sum256(body)
-			recorded = map[string]any{"unparsed_sha256": hex.EncodeToString(sum[:])}
+			recorded = strictjson.NewObject("unparsed_sha256", hex.EncodeToString(sum[:]))
 		}
 		if auditID, err = g.start(ctx, Start{Token: callerToken, Tool: tool, Arguments: recorded, RequestID: receiptID,
 			BriefID: briefID}); err != nil {
@@ -266,7 +266,7 @@ func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 		g.dispatch(r, object, tool, arguments, nil).write(w, false)
 	default:
 		inv := &Invocation{AuditID: auditID, Tool: tool, TokenID: fingerprint(rawToken), Scopes: token.Scopes,
-			Selected: g.selected, token: rawToken}
+			Principal: token.Principal, Selected: g.selected, token: rawToken}
 		g.dispatch(r, object, tool, arguments, inv).write(w, false)
 	}
 }

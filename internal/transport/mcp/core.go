@@ -107,11 +107,12 @@ func (c *core) admit(facts RequestFacts, token *Token) Decision {
 // Invocation is one admitted tool call: the receipt committed for it and the principal it was admitted for.
 // The gateway verifies the bearer once; the tool reads the scopes from here and never verifies again.
 type Invocation struct {
-	AuditID  string
-	Tool     string
-	TokenID  string // the bearer's SHA-256 fingerprint, as receipts record it
-	Scopes   []string
-	Selected bool // the connector serves a selection; E3 carries the selection itself
+	AuditID   string
+	Tool      string
+	TokenID   string // the bearer's SHA-256 fingerprint, as receipts record it
+	Scopes    []string
+	Principal string // who holds the bearer, as its verifier named them
+	Selected  bool   // the connector serves a selection
 
 	token  string
 	core   *core
@@ -119,20 +120,34 @@ type Invocation struct {
 }
 
 // Recheck verifies the caller's own bearer again and charges its rate window once more, as a composite
-// read's child read does (gateway.child_read). E3's child reads are built on it.
+// read's child read does (gateway.child_read).
 func (i *Invocation) Recheck() (*Token, *RequestError) {
 	token := i.core.verify(i.token)
-	if token == nil || token.ExpiresAt == nil || *token.ExpiresAt <= i.core.wall() || token.Resource != i.core.policy.Resource {
+	if !validToken(token, i.core.policy, i.core.wall()) {
 		return nil, &RequestError{Reason: "invalid_token", Message: "invalid or expired access token"}
 	}
+	if limited := i.charge(); limited != nil {
+		return nil, limited
+	}
+	return token, nil
+}
+
+// Live reports whether the caller's own bearer still verifies now. It charges nothing: a composite call asks
+// before each child read and once more before it releases its result (authority.verify_token_now).
+func (i *Invocation) Live() bool {
+	return validToken(i.core.verify(i.token), i.core.policy, i.core.wall())
+}
+
+// Charge counts one more attempt against the caller's rate window, as each child read of a composite call
+// does, and reports whether the window had room for it.
+func (i *Invocation) Charge() bool { return i.charge() == nil }
+
+func (i *Invocation) charge() *RequestError {
 	i.core.mu.Lock()
 	defer i.core.mu.Unlock()
 	updated, limited := ChargeRate(i.core.windows, i.token, i.core.clock(), i.core.policy)
 	i.core.windows = updated
-	if limited != nil {
-		return nil, limited
-	}
-	return token, nil
+	return limited
 }
 
 // dispatchKey carries an admitted call's dispatch id in the _meta the gateway writes for the SDK. A

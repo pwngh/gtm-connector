@@ -16,7 +16,7 @@ const vectorMeta = `{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.
 
 func vectorHeaders(method, name string, extra ...[2]string) [][2]string {
 	h := [][2]string{{"Content-Type", "application/json"}, {"Accept", "application/json, text/event-stream"},
-		{"Mcp-Protocol-Version", testVersion}, {"Mcp-Method", method}, {"Authorization", "Bearer " + tokenValue("full")}}
+		{"Mcp-Protocol-Version", testVersion}, {"Mcp-Method", method}, {"Authorization", "Bearer " + tokenValue("read")}}
 	if name != "" {
 		h = append(h, [2]string{"Mcp-Name", name})
 	}
@@ -264,7 +264,7 @@ func TestOtherHTTPMethodsAsPython(t *testing.T) {
 	h := newHarness(t)
 	for _, method := range []string{http.MethodPut, http.MethodOptions, http.MethodPatch, http.MethodHead} {
 		request := newRequest(method, testResource, nil)
-		request.Header.Set("Authorization", "Bearer "+tokenValue("full"))
+		request.Header.Set("Authorization", "Bearer "+tokenValue("read"))
 		recorder := httptest.NewRecorder()
 		h.gateway.ServeHTTP(recorder, request)
 		want := `{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"Method Not Allowed"}}`
@@ -284,7 +284,7 @@ func TestOtherHTTPMethodsAsPython(t *testing.T) {
 // upgrade that changes either fails here and is decided deliberately.
 func TestToolOrderAndDiscoveryArePinned(t *testing.T) {
 	h := newHarness(t)
-	listing := h.rpc("tools/list", nil, "full", nil, true)
+	listing := h.rpc("tools/list", nil, "read", nil, true)
 	var names []string
 	for _, tool := range path(decode(t, listing.Body.Bytes()), "result", "tools").([]any) {
 		names = append(names, tool.(map[string]any)["name"].(string))
@@ -292,7 +292,7 @@ func TestToolOrderAndDiscoveryArePinned(t *testing.T) {
 	if want := unlistedTools(t, "tools/list order"); !reflect.DeepEqual(names, want) {
 		t.Errorf("tool order %v", names)
 	}
-	discovery := h.rpc("server/discover", nil, "full", nil, true)
+	discovery := h.rpc("server/discover", nil, "read", nil, true)
 	want := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"gtm-connector","version":"0.2.0"}},`+
 		`"cacheScope":"private","capabilities":{"prompts":{},"resources":{},"tools":{}},"resultType":"complete","supportedVersions":["2026-07-28"],"ttlMs":0}}`, h.number)
 	if !reflect.DeepEqual(decode(t, discovery.Body.Bytes()), decode(t, []byte(want))) {

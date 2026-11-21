@@ -201,3 +201,77 @@ func TestAnUpgradeFrom0001RefusesRowsItCannotKeep(t *testing.T) {
 		t.Fatalf("a refused restore left schema %d", v)
 	}
 }
+
+// 0004 takes crm:write out of what a machine token and a receipt may hold. A database at schema 3 that
+// holds either is refused by name and left as it was, and a migrated one refuses both.
+func TestAnUpgradeTo0004RefusesAWriteScope(t *testing.T) {
+	const workspace, machine = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+	token := func(id, scopes string) string {
+		return `INSERT INTO machine_tokens (id, workspace_id, principal_id, token_sha256, scopes, expires_at) VALUES
+			('` + id + `', '` + workspace + `', '` + machine + `', sha256('` + id + `'), ARRAY[` + scopes + `],
+			now() + interval '1 day')`
+	}
+	receipt := func(id, scope string) string {
+		return `INSERT INTO receipts (id, workspace_id, operation_id, token_id, tool, scope, arguments, request_id,
+			lease_token, lease_expires_at) VALUES ('` + id + `', '` + workspace + `', '` + id + `', 'anonymous',
+			'log_activity', '` + scope + `', '{}', 'null', gen_random_uuid(), now() + interval '1 hour')`
+	}
+	const writeToken, mixedToken, writeReceipt = "88888888-8888-4888-8888-888888888888",
+		"99999999-9999-4999-8999-999999999999", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	three := func() (*postgres.Store, string) {
+		url := pgtest.URL(t)
+		store, err := postgres.Open(ctx, url)
+		ok(t, err)
+		t.Cleanup(store.Close)
+		ok(t, postgres.MigrateTo(store, ctx, 3))
+		exec(t, url,
+			`INSERT INTO workspaces (id, slug, kind, display_name) VALUES ('`+workspace+`', 'demo', 'demo', 'Demo workspace')`,
+			`INSERT INTO principals (id, workspace_id, workspace_kind, kind, display_name) VALUES
+				('`+machine+`', '`+workspace+`', 'demo', 'machine', 'Machine')`,
+			token("77777777-7777-4777-8777-777777777777", `'crm:read', 'calls:read', 'slack:read'`),
+			receipt("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "crm:read"))
+		return store, url
+	}
+	const rows = "SELECT ((SELECT count(*) FROM machine_tokens) + (SELECT count(*) FROM receipts))::text"
+
+	for _, held := range []struct{ label, row, id string }{
+		{"a token with crm:write alone", token(writeToken, `'crm:write'`), writeToken},
+		{"a token with crm:write beside a read scope", token(mixedToken, `'crm:read', 'crm:write'`), mixedToken},
+		{"a receipt naming crm:write", receipt(writeReceipt, "crm:write"), writeReceipt},
+	} {
+		store, url := three()
+		exec(t, url, held.row)
+		err := store.Migrate(ctx)
+		if code(err) != "GT018" || !strings.Contains(err.Error(), held.id) {
+			t.Fatalf("%s: the upgrade answered %v", held.label, err)
+		}
+		if v, _ := store.SchemaVersion(ctx); v != 3 {
+			t.Fatalf("%s: left at schema %d", held.label, v)
+		}
+		if n := scalar(t, url, rows); n != "3" {
+			t.Fatalf("%s: %s rows are left of 3", held.label, n)
+		}
+	}
+
+	// With read scopes only, the database migrates, keeps its rows, and then refuses the write scope.
+	store, url := three()
+	ok(t, store.Migrate(ctx))
+	if v, _ := store.SchemaVersion(ctx); v != postgres.LatestSchemaVersion() {
+		t.Fatalf("migrated to schema %d", v)
+	}
+	if n := scalar(t, url, rows); n != "2" {
+		t.Fatalf("%s rows are left of 2", n)
+	}
+	conn, err := pgx.Connect(ctx, url)
+	ok(t, err)
+	defer conn.Close(ctx)
+	for _, refused := range []string{token(writeToken, `'crm:write'`), token(mixedToken, `'crm:read', 'crm:write'`),
+		token(mixedToken, `'crm:read', 'admin'`), receipt(writeReceipt, "crm:write")} {
+		if _, err := conn.Exec(ctx, refused); code(err) != "23514" {
+			t.Fatalf("after 0004 the store answered %v to %s", err, refused)
+		}
+	}
+	if _, err := conn.Exec(ctx, receipt("cccccccc-cccc-4ccc-8ccc-cccccccccccc", "slack:read")); err != nil {
+		t.Fatalf("a read scope on a receipt: %v", err)
+	}
+}

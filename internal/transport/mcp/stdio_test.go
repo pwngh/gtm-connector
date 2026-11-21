@@ -174,10 +174,10 @@ func TestStdioExpiredPrincipalIsRefusedNotRetried(t *testing.T) {
 	}
 }
 
-// test_a_selected_server_prepares_a_brief_through_the_bridge: even a principal holding crm:write cannot
+// test_a_selected_server_prepares_a_brief_through_the_bridge: a principal holding every read scope cannot
 // write to a selected server. Preparing the brief itself is E3's composite read, not this spike's.
 func TestStdioSelectedServerRefusesWrites(t *testing.T) {
-	h := newStdio(t, []string{"crm:read", "calls:read", "slack:read", "crm:write"}, func(c *StdioConfig) { c.Selected = true })
+	h := newStdio(t, []string{"crm:read", "calls:read", "slack:read"}, func(c *StdioConfig) { c.Selected = true })
 	h.send(legacyStart, legacyReady, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 		call(3, "log_activity", `{"account_id":"acc-007","kind":"note","body":"x","idempotency_key":"k"}`))
 	h.answer(1)
@@ -269,7 +269,7 @@ func TestStdioCurrentRevisionChargesScopeDenials(t *testing.T) {
 
 // test_audit_start_failure_prevents_writes and test_audit_finish_failure_withholds_data, on stdio.
 func TestStdioReceiptFailures(t *testing.T) {
-	h := newStdio(t, []string{"crm:read", "crm:write"}, nil)
+	h := newStdio(t, []string{"crm:read"}, nil)
 	h.send(legacyStart, legacyReady)
 	h.answer(1)
 	h.receipts.FailStart = true

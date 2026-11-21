@@ -173,7 +173,7 @@ func reasonOf(t *testing.T, response *httptest.ResponseRecorder) (string, string
 // test_current_discovery_and_tool_scope_declarations, with the result shapes the Python SDK sends.
 func TestCurrentDiscoveryAndToolScopeDeclarations(t *testing.T) {
 	h := newHarness(t)
-	discovery := h.rpc("server/discover", nil, "full", nil, true)
+	discovery := h.rpc("server/discover", nil, "read", nil, true)
 	if discovery.Code != 200 {
 		t.Fatalf("discover %d %s", discovery.Code, discovery.Body)
 	}
@@ -184,7 +184,7 @@ func TestCurrentDiscoveryAndToolScopeDeclarations(t *testing.T) {
 		!reflect.DeepEqual(path(result, "_meta", "io.modelcontextprotocol/serverInfo"), map[string]any{"name": "gtm-connector", "version": "0.2.0"}) {
 		t.Fatalf("discover result %v", result)
 	}
-	listing := h.rpc("tools/list", nil, "full", nil, true)
+	listing := h.rpc("tools/list", nil, "read", nil, true)
 	result = path(decode(t, listing.Body.Bytes()), "result").(map[string]any)
 	if listing.Code != 200 || result["resultType"] != "complete" || result["cacheScope"] != "private" || fmt.Sprint(result["ttlMs"]) != "0" {
 		t.Fatalf("tools/list %d %v", listing.Code, result)
@@ -309,7 +309,7 @@ func TestDuplicateAuthorizationHeaders(t *testing.T) {
 	h := newHarness(t)
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001"}}}`)
 	response := h.post(body, [][2]string{{"Content-Type", "application/json"}, {"Mcp-Method", "tools/call"},
-		{"Authorization", "Bearer " + tokenValue("crm")}, {"Authorization", "Bearer " + tokenValue("full")}})
+		{"Authorization", "Bearer " + tokenValue("crm")}, {"Authorization", "Bearer " + tokenValue("read")}})
 	reason, code := reasonOf(t, response)
 	if response.Code != 401 || reason != "invalid_token" || code != "1001" || !strings.Contains(response.Header().Get("WWW-Authenticate"), `error="invalid_token"`) {
 		t.Fatalf("%d %s", response.Code, response.Body)
@@ -336,9 +336,9 @@ func TestEveryToolAttemptHasOneCompleteReceipt(t *testing.T) {
 		{"log_activity", fixtureActivity, "write", nil},
 		{"read_call_notes", map[string]any{"account_id": "acc-007"}, "crm", nil},
 		{"get_account", map[string]any{"account_id": "acc-001"}, "expired", nil},
-		{"unknown_fixture_tool", map[string]any{}, "full", nil},
+		{"unknown_fixture_tool", map[string]any{}, "read", nil},
 		{"get_account", map[string]any{}, "crm", nil},
-		{"get_account", map[string]any{"account_id": "acc-001"}, "full", map[string]string{"Mcp-Name": "search_accounts"}},
+		{"get_account", map[string]any{"account_id": "acc-001"}, "read", map[string]string{"Mcp-Name": "search_accounts"}},
 	}
 	expected := [][]string{{"crm/accounts/acc-001"}, {"crm/accounts/acc-001", "crm/contacts/con-001"}, {"crm/opportunities/opp-003"}}
 	for i, a := range attempts {
@@ -452,12 +452,16 @@ func TestRateLimitCountsScopeDenials(t *testing.T) {
 func TestDuplicateWriteAttemptsConsumeRateLimit(t *testing.T) {
 	h := newHarness(t, func(c *GatewayConfig) { c.RateLimit = 1 })
 	arguments := map[string]any{"account_id": "acc-001", "kind": "renewal_call", "body": "x", "idempotency_key": "fixture-write-001"}
+	// The recorded bearer carries crm:write, so both attempts stop at the token check and charge nothing.
 	h.replayWrite("test_duplicate_write_attempts_also_consume_rate_limit: first", arguments, "write")
-	if retry := h.tool("log_activity", arguments, "write", nil); retry.Code != 429 {
+	h.unauthorized(writeTool, arguments, "write")
+	// Under a read grant each refused write is charged, so the second meets the limit.
+	h.writeRefused(arguments, "crm")
+	if retry := h.tool("log_activity", arguments, "crm", nil); retry.Code != 429 {
 		t.Fatalf("retry %d", retry.Code)
 	}
 	h.noWrite()
-	if len(h.receipts.Read()) != 2 {
+	if len(h.receipts.Read()) != 4 {
 		t.Fatal("counts")
 	}
 }
@@ -470,7 +474,7 @@ func TestHeaderMismatchesAreRejectedAndAudited(t *testing.T) {
 		{"Mcp-Protocol-Version": unset}, {"Mcp-Protocol-Version": "2025-11-25"},
 	}
 	for _, headers := range cases {
-		response := h.tool("get_account", map[string]any{"account_id": "acc-001"}, "full", headers)
+		response := h.tool("get_account", map[string]any{"account_id": "acc-001"}, "read", headers)
 		reason, code := reasonOf(t, response)
 		_, version := headers["Mcp-Protocol-Version"]
 		if response.Code != 400 || code != "-32020" || (version && reason != "protocol_version_mismatch") ||
@@ -482,13 +486,13 @@ func TestHeaderMismatchesAreRejectedAndAudited(t *testing.T) {
 		t.Fatal("receipts or runs")
 	}
 	encoded := "=?base64?" + base64.StdEncoding.EncodeToString([]byte("get_account")) + "?="
-	h.records(h.tool("get_account", map[string]any{"account_id": "acc-001"}, "full", map[string]string{"Mcp-Name": encoded}), "crm")
+	h.records(h.tool("get_account", map[string]any{"account_id": "acc-001"}, "read", map[string]string{"Mcp-Name": encoded}), "crm")
 }
 
 // test_hostile_browser_origin_is_rejected_without_data, and a wrong Host or plain HTTP likewise.
 func TestHostileOriginOrHostIsRejected(t *testing.T) {
 	h := newHarness(t)
-	response := h.tool("get_account", map[string]any{"account_id": "acc-001"}, "full", map[string]string{"Origin": "https://untrusted.example"})
+	response := h.tool("get_account", map[string]any{"account_id": "acc-001"}, "read", map[string]string{"Origin": "https://untrusted.example"})
 	reason, code := reasonOf(t, response)
 	if response.Code != 403 || reason != "untrusted_origin_or_host" || code != "1003" || strings.Contains(response.Body.String(), "Alder Vale") {
 		t.Fatalf("%d %s", response.Code, response.Body)
@@ -500,7 +504,7 @@ func TestHostileOriginOrHostIsRejected(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": map[string]any{}})
 		request := newRequest(http.MethodPost, target, bytes.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("Authorization", "Bearer "+tokenValue("full"))
+		request.Header.Set("Authorization", "Bearer "+tokenValue("read"))
 		recorder := httptest.NewRecorder()
 		h.gateway.ServeHTTP(recorder, request)
 		if reason, _ := reasonOf(t, recorder); recorder.Code != 403 || reason != "untrusted_origin_or_host" {
@@ -611,7 +615,7 @@ func TestGetAndDeleteAreNotAllowed(t *testing.T) {
 		method, allow, message string
 	}{{http.MethodGet, "POST", "Method Not Allowed"}, {http.MethodDelete, "", "Method Not Allowed: Session termination not supported"}} {
 		request := newRequest(c.method, testResource, nil)
-		request.Header.Set("Authorization", "Bearer "+tokenValue("full"))
+		request.Header.Set("Authorization", "Bearer "+tokenValue("read"))
 		recorder := httptest.NewRecorder()
 		h.gateway.ServeHTTP(recorder, request)
 		want := decode(t, []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32600,"message":"`+c.message+`"}}`))
@@ -625,10 +629,10 @@ func TestGetAndDeleteAreNotAllowed(t *testing.T) {
 // (captured from Connector under mcp 2.3.0).
 func TestSDKLadderAfterAdmission(t *testing.T) {
 	h := newHarness(t)
-	full := "Bearer " + tokenValue("full")
+	read := "Bearer " + tokenValue("read")
 	headers := func(method string, extra ...[2]string) [][2]string {
 		return append([][2]string{{"Content-Type", "application/json"}, {"Accept", "application/json, text/event-stream"},
-			{"Mcp-Protocol-Version", testVersion}, {"Mcp-Method", method}, {"Authorization", full}}, extra...)
+			{"Mcp-Protocol-Version", testVersion}, {"Mcp-Method", method}, {"Authorization", read}}, extra...)
 	}
 	cases := []struct {
 		label   string
@@ -640,7 +644,7 @@ func TestSDKLadderAfterAdmission(t *testing.T) {
 		{"missing client capabilities", `{"jsonrpc":"2.0","id":7,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
 			headers("tools/list"), 400, `{"jsonrpc":"2.0","id":7,"error":{"code":-32602,"message":"params._meta is missing the required envelope key(s): io.modelcontextprotocol/clientCapabilities"}}`},
 		{"Mcp-Method missing on a list", `{"jsonrpc":"2.0","id":8,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
-			[][2]string{{"Content-Type", "application/json"}, {"Accept", "application/json"}, {"Mcp-Protocol-Version", testVersion}, {"Authorization", full}},
+			[][2]string{{"Content-Type", "application/json"}, {"Accept", "application/json"}, {"Mcp-Protocol-Version", testVersion}, {"Authorization", read}},
 			400, `{"jsonrpc":"2.0","id":8,"error":{"code":-32020,"message":"mcp-method header does not match the request body's method"}}`},
 		{"Mcp-Method twice", `{"jsonrpc":"2.0","id":11,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
 			headers("tools/list", [2]string{"Mcp-Method", "tools/list"}),
@@ -654,7 +658,7 @@ func TestSDKLadderAfterAdmission(t *testing.T) {
 		{"prompts/get", `{"jsonrpc":"2.0","id":9,"method":"prompts/get","params":{"name":"x","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
 			headers("prompts/get", [2]string{"Mcp-Name", "x"}), 404, `{"jsonrpc":"2.0","id":9,"error":{"code":-32601,"message":"Method not found","data":{"reason":"method_not_found"}}}`},
 		{"Accept without JSON", `{"jsonrpc":"2.0","id":10,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`,
-			[][2]string{{"Content-Type", "application/json"}, {"Accept", "text/plain"}, {"Mcp-Protocol-Version", testVersion}, {"Mcp-Method", "tools/list"}, {"Authorization", full}},
+			[][2]string{{"Content-Type", "application/json"}, {"Accept", "text/plain"}, {"Mcp-Protocol-Version", testVersion}, {"Mcp-Method", "tools/list"}, {"Authorization", read}},
 			406, ""},
 		{"missing metadata", `{"jsonrpc":"2.0","id":99,"method":"tools/list","params":{}}`,
 			headers("tools/list"), 400, `{"jsonrpc":"2.0","id":99,"error":{"code":-32602,"message":"request metadata requires protocolVersion","data":{"reason":"missing_protocol_version"}}}`},
@@ -669,14 +673,14 @@ func TestSDKLadderAfterAdmission(t *testing.T) {
 	}
 	// Methods the 2026-07-28 revision removed are answered as the Python SDK answers them.
 	for _, method := range []string{"ping", "initialize"} {
-		response := h.rpc(method, nil, "full", nil, false)
+		response := h.rpc(method, nil, "read", nil, false)
 		want := decode(t, []byte(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"error":{"code":-32601,"message":"Method not found","data":%q}}`, h.number, method)))
 		if response.Code != 404 || !reflect.DeepEqual(decode(t, response.Body.Bytes()), want) {
 			t.Errorf("%s: %d %s", method, response.Code, response.Body)
 		}
 	}
 	// An unknown tool is a tool error with HTTP 200 and the Python SDK's text.
-	unknown := h.tool("unknown_fixture_tool", nil, "full", nil)
+	unknown := h.tool("unknown_fixture_tool", nil, "read", nil)
 	result := path(decode(t, unknown.Body.Bytes()), "result")
 	if unknown.Code != 200 || path(result, "isError") != true || path(result, "resultType") != "complete" ||
 		!strings.Contains(fmt.Sprint(path(result, "content")), "Unknown tool: unknown_fixture_tool") {

@@ -245,7 +245,7 @@ func (s *stdioConn) frame(raw []byte) jsonrpc.Message {
 			sum := sha256.Sum256(raw)
 			token := s.token
 			auditID, err := c.start(ctx, Start{Token: &token, Tool: "<unparsed>",
-				Arguments: map[string]any{"unparsed_sha256": hex.EncodeToString(sum[:])}})
+				Arguments: strictjson.NewObject("unparsed_sha256", hex.EncodeToString(sum[:]))})
 			if err != nil {
 				s.send(rpcError(nil, -32603, "audit_unavailable; call was not executed", nil))
 				return nil
@@ -297,7 +297,7 @@ func (s *stdioConn) frame(raw []byte) jsonrpc.Message {
 			requestID = plain(id)
 		}
 		token := s.token
-		if auditID, err = c.start(ctx, Start{Token: &token, Tool: tool, Arguments: plain(memberOr(params, "arguments", &strictjson.Object{})),
+		if auditID, err = c.start(ctx, Start{Token: &token, Tool: tool, Arguments: memberOr(params, "arguments", &strictjson.Object{}),
 			RequestID: requestID}); err != nil {
 			if hasID {
 				s.send(rpcError(echoID(id), -32603, "audit_unavailable; call was not executed", nil))
@@ -346,7 +346,7 @@ func (s *stdioConn) frame(raw []byte) jsonrpc.Message {
 	if isCall {
 		tool, _ := member(params, "name")
 		inv = &Invocation{AuditID: auditID, Tool: tool.(string), TokenID: fingerprint(s.token), Scopes: token.Scopes,
-			Selected: c.selected, token: s.token}
+			Principal: token.Principal, Selected: c.selected, token: s.token}
 	}
 	dispatchID := c.register(inv)
 	message := s.decode(object, &dispatchID)
