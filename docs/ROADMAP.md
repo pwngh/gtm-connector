@@ -32,11 +32,11 @@ cards read the recorded rows through the Go reader, served by an invented org.
 | Step | What it will do | On main today | Done when |
 | --- | --- | --- | --- |
 | Gate | Confirm that Go matches Python on what is ported so far | The parity tests pass at 450 of 450. `make verify-real` compares Python and Go on public text and JSON. | Both pass at the final head, the time to publish a card is measured, and a cold Compose start reaches sign-in and a sealed card read |
-| Evidence | Print `[link unknown host]` for the link forms where the printed host can still differ from where a browser goes: a tab or a newline inside the link, a Markdown link with one slash after its scheme, a `www.` target with a port, and a host a browser rewrites or rejects, such as a hexadecimal address or a port past 65535 | A link with a backslash or a control character before its path, or with a scheme and no `//` after it, shows `[link unknown host]`. Go checks imported transcripts and live Slack threads as Python does. | Each of those forms has a test and shows `[link unknown host]`, and real text still matches |
+| Evidence | Neutralize a bare mail address such as `dana@files.example`, which a GitHub Markdown client links. Raise the neutralizer version, so a card sealed under older rules is shown under the current ones. Show the host of an `xn--` label that decodes to a valid name, which takes the IDNA tables. | A link shows the host a browser opens, read as the URL Standard reads it and without a leading `www.`, or `[link unknown host]` when a browser would open another host or none: a backslash, a control character, a tab or a line break before the path, no `//` after the scheme, a scheme other than `http`, `https`, `ftp`, `ws` and `wss`, a numeric host a browser rewrites, a port past 65535, a host in brackets, or an `xn--` label. A Markdown link is replaced whole, and an angle-bracket link, a mail address in angle brackets and a reference definition where a paragraph starts are neutralized, with their escapes and character references read. Neutralizing twice gives the same text. Go checks imported transcripts and live Slack threads as Python does. | Each of those forms has a test, and real text still matches |
 | Sources | Port transcript import (one TXT, VTT or SRT file, with an excerpt), one mapped Slack thread per account, and Salesforce through the `sf` CLI or a token given to the container | Go reads the demo book and a Salesforce org through `sf`. `connect salesforce --org ALIAS --state-dir NAME` signs in, checks the org against `--environment` and pins the workspace to its identity and the user it reads as, and refuses another org or user there, also after a removal and after a login refresh. An `--org` that cannot be an `sf` alias, such as a token, never reaches `sf`. `accounts`, `inspect`, `brief` and `audit` then read it, each read under a receipt, and `debug salesforce check` reports the sign-in, the environment, each object's fields and, in a connected workspace, the contract a renewal plans from. Tests run every command against an invented org and an invented `sf`: `brief` makes the CRM part of all 78 recorded Salesforce cards byte for byte (the recording read calls and Slack from demo data, which Go never reads beside a real CRM), and a cancelled `connect` ends the `sf` process group and saves nothing. `connect salesforce --token-env` reads the org's address and a token from `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` or the file `SALESFORCE_ACCESS_TOKEN_FILE` names, with the same checks and pin as an `sf` login, and on a first HTTP 401 reads them once more and keeps only a token of the same org and user, in tests against the invented org. `connect calls` connects imported transcripts beside the demo CRM, or beside a CRM a test registers, and `debug calls import`, `list` and `inspect` work as the Python CLI's do, except `--account-number`, which is refused as not in this build. An import's account is resolved by a `get_account` read under its own receipt, and `brief` reads the account's active import. `demo` and the MCP tools read calls through the same source, untested with imports. Go signs in to Slack (`debug slack connect`, with PKCE and the loopback callback), keeps the sign-in in the credentials folder, connects it (`connect slack`) beside a real CRM, maps one thread per account (`debug slack map`), checks its read (`debug slack check`) and reads it onto a card, in tests against an invented Slack. | Go builds all 450 recorded cards, in memory and on PostgreSQL. Recorded source requests and responses replay offline. A cancelled read ends the `sf` process group and publishes no card. |
 | Commands and MCP | Port the seven commands and `debug` to PostgreSQL, where `--state-dir` names a workspace. Serve MCP over HTTPS and stdio with the read tools, under the same Host, scope, selection and expiry checks. One outer receipt per tool call, plus one per read inside a prepared brief. | Go has `setup`, `serve`, `demo`, `backup`, `restore`, `health` and `version`, and `connect`, `accounts`, `brief`, `inspect` and `audit` on demo data and Salesforce, where `--state-dir` names a workspace and the default is `demo`. `connect` attaches and detaches the demo data, Salesforce and imported transcripts and shows what is connected. Salesforce goes in a workspace named with `--state-dir`, because the default one holds demo data. `connect slack` connects the saved Slack sign-in beside a real CRM. `connect` refuses the assistant apps as not in this build, and nothing reads demo data in their place. `demo --state-dir` is the recorded demo: one renewal with a lookup and a refused read. The binary matches 33 of the 33 recorded steps, 8 of them apart from the recorder's clock. `debug calls`, `debug salesforce check` and `debug slack` are ported. The rest of `debug` is not. `serve` answers MCP over HTTPS at `/mcp` for each token in the workspace it was issued in: the read tools over the demo book or a Salesforce org, for the accounts the token's principal is granted, and with `--selection FILE` the two brief tools, for the demo workspace only. The recorded request vectors pass there, and the write vectors are refused with a receipt. A token that carries any scope but the three read scopes is refused. `token new` issues a read-only token for one workspace, shown once, and `token list` and `token revoke` manage them. `mcp stdio` serves a workspace's read tools on stdin and stdout under the same gate, reading the sources as they are connected at each call, and the recorded stdio bridge tests pass through it on PostgreSQL. The Inspector runs against the binary over HTTPS and stdio. | The recorded command session replays against the binary, and source and client setup work through it. The recorded request vectors pass on both transports, except the write vectors, which are refused with a receipt. The Inspector runs against the binary. |
 | Existing cards | Open the cards and receipts the Python package made. They are verified and kept byte for byte, never rebuilt. | Go verifies both kinds of Python card in tests. No command admits them yet. | The four recorded card folders are admitted and inspected, a changed byte is refused, and admitting twice adds nothing |
-| Cutover | Ship one binary with the web app inside it (`go:embed`), for macOS and Linux on arm64 and amd64, with checksums. Remove the Python package, its tests, `tools/oracle/` and their CI jobs, and rewrite the docs for Go. | `make build` and the image build one binary with the web app inside it. `make release` builds it for macOS and Linux on arm64 and amd64 and writes `SHA256SUMS`; CI runs it and checks the four binaries against their sums. A version tag attaches the five files to a GitHub release. No tag has been pushed, so there is no release to download, and the Python package is still here. | The binary, run outside a checkout, serves a deep-linked Evidence page and its assets. A backup taken before the cutover restores. The Go tests pass with Python gone, and real text still matches the digests recorded before the removal. |
+| Cutover | Ship one binary with the web app inside it (`go:embed`), for macOS and Linux on arm64 and amd64, with checksums. Remove the Python package, its tests, `tools/oracle/` and their CI jobs, and rewrite the docs for Go. | `make build` and the image build one binary with the web app inside it. `make release` builds it for macOS and Linux on arm64 and amd64 and writes `SHA256SUMS`; CI runs it and checks the four binaries against their sums. A version tag attaches the five files to a GitHub release. No tag has been pushed, so there is no release to download, and the Python package is still here. The guides under `docs/` describe the Go binary. The Python package's guides, in [`docs/python/`](python/), go with the package. | The binary, run outside a checkout, serves a deep-linked Evidence page and its assets. A backup taken before the cutover restores. The Go tests pass with Python gone, and real text still matches the digests recorded before the removal. |
 
 ### What changes for you at cutover
 
@@ -53,9 +53,14 @@ will connect your sources again, import your transcripts again, map your Slack t
 set your seller lists and selection files again. You will also set up your assistant apps again,
 because their saved entries start the Python package.
 
-The web app the binary serves shows Evidence and Readiness after sign-in and nothing else, at
-`/ops/evidence` and `/ops/readiness`; `/` opens Evidence. Any other address shows a page that says
-there is no page there and links back. Served from a static host, it says only that it needs its server.
+The web app the binary serves shows the deal list at `/deals`, which `/` opens, each deal's card at
+`/deals/{account}`, and the Ops pages Coverage and Evidence at `/ops/coverage` and `/ops/evidence`,
+which `/ops` opens with Coverage. It shows nothing else after sign-in. A deal's card shows what
+people said and what the card did not read; its countdown, ARR and record values are on the
+plain-text card. Coverage lists each granted deal with its newest card time and number of cards,
+counts the deals with a card and with none, and says whether `/healthz` answers. Any other address
+shows a page that says there is no page there and links back. Served from a static host, it says
+only that it needs its server.
 Real cards will be read with the CLI and the MCP tools.
 
 No live org has been verified. v0.1.0 does not wait for one.
@@ -68,7 +73,7 @@ Nothing below is started unless it says so. Each links to the guide that describ
 
 One rep reads one real renewal before a call.
 
-- A deal as one renewal of an account, with a readable ID, registered by hand ([the API](api.md#one-deal-one-id)).
+- A deal as one renewal of an account, with a readable ID, registered by hand ([the API](api.md#one-deal-one-id)), the `/v1/deals` routes ([deal routes](api.md#deal-routes)) and the `deal` command.
 - Sign-in through the company's identity provider, and each person reading only their deals.
 - Calls and Slack threads matched to the deal ([setting it up](config.md#how-a-deal-gets-its-evidence)).
 - The Deals page: the deal list, the card, the proof drawer and communications ([working a deal](deals.md#the-page)).
@@ -90,13 +95,14 @@ RevOps covers every renewal and sees which have no current card.
 - A participant directory that matches speakers to contacts by email or phone first.
 - The five flags, with thresholds and a preview ([what flags a deal](deals.md#what-flags-a-deal)).
 - Scheduled reads under leases, each as a named service identity.
-- The Ops screens: Coverage, Setup and Activity ([the Ops area](config.md#the-ops-area)).
+- The Ops screens: Setup and Activity, and on Coverage each source's state, why a deal has no current card, and the matches left off by rule ([the Ops area](config.md#the-ops-area)).
 - Pause and resume, and one size cap on every card.
 
 ### 3. Delivery
 
 - Slack alerts, signed webhooks and the three events ([the API](api.md#webhooks-and-slack-alerts)).
 - Tokens for scripts and assistants, the flagged-deals feed, and the OpenAPI file.
+- `setup` printing the MCP configuration for each assistant client.
 - MCP tools that read deals, cards and proof. Clients are named in the docs only after a live test: Claude Desktop, Claude Code, ChatGPT, Codex and Cursor are untested today.
 
 ### 4. Your own data
@@ -143,9 +149,9 @@ integrations use HTTP or MCP.
 
 ## Checks the docs still need
 
-The other docs make the statements below, and no test asserts them yet. Each will get a test, or
-narrower wording, when the docs are rewritten for Go. The statements are grouped by the v0.1.0 step
-that owns the check.
+The other docs make the statements below, and no test asserts them yet. Each was checked against the
+Go source or by running the binary, and each will get a test or narrower wording. The statements are
+grouped by the v0.1.0 step that owns the check.
 
 <details>
 <summary>Gate and the Go server today (README, real-data guide)</summary>
@@ -171,80 +177,65 @@ that owns the check.
 </details>
 
 <details>
-<summary>Sources (Salesforce, transcripts, Slack)</summary>
+<summary>Sources (sources guide)</summary>
 
 - **Salesforce:**
-  - each `sf` command's 120-second limit and the shared 180-second login deadline;
-  - `debug salesforce check` without `--sf-org` reading `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN`, and that path not refreshing the token;
-  - each request's network timeout being the remaining deadline, up to 5 seconds;
-  - `salesforce_invalid_configuration` exiting 2.
+  - the request, byte, page and row limits of one operation;
+  - each `sf` command's 120-second limit, the shared 180-second login deadline, and the 1 MiB limit on `sf` output;
+  - the rules for the instance address and the token, and the one retry after an HTTP 401;
+  - the error code each HTTP 403 answer maps to;
+  - the `con-sf-`, `opp-sf-` and `ctr-sf-` record IDs;
+  - `salesforce_invalid_configuration` exiting 2, and `salesforce_cli_timeout`.
 - **Transcripts:**
-  - an import needing exactly one of `--account` and `--account-number`, with `--lines` only for TXT and `--cues` only for VTT and SRT;
-  - the file extension choosing the parser, and an unsupported one refused through the CLI;
-  - an import resolving the account through a local grant that holds only `crm:read`;
-  - `connect calls --remove` detaching transcripts and deleting nothing;
-  - `debug calls inspect` showing whether an import states speaker names;
-  - a missing association publishing nothing;
+  - the parsing rules: cue settings, the lines under `WEBVTT`, `NOTE`, `STYLE` and `REGION` blocks, and control characters;
+  - cues under one label joining within two seconds, or ten when the first stops mid-sentence;
   - the exit codes:
-    - `calls_import_not_found` and `calls_account_not_found` exit 2;
     - `calls_association_changed` and `calls_source_mismatch` exit 3;
     - `calls_import_corrupt`, `calls_association_invalid` and `calls_association_failed` exit 4;
     - `calls_source_unavailable` exits 5.
 - **Slack:**
-  - the redirect port range, 1024 to 65535;
-  - one 20-second deadline across the Slack requests of one `debug slack` command;
-  - `connect slack` working beside Salesforce;
-  - `debug slack map --account-number`, which the Go binary refuses as not in this build;
-  - the fields `disconnect` returns, the order of scope lists, and `check` naming the first failed step's recovery command;
-  - a `slack:read` grant reading every mapped account the server serves;
-  - the exit code of each error reason in the Slack guide;
-  - verified TLS for Slack requests, ignoring proxy settings from the environment;
-  - live messages ordered by their Slack timestamp, and demo times with different UTC offsets sorting by their text;
-  - a demo database without the Slack file-count column being rejected.
+  - the accepted and refused message subtypes, and every read limit;
+  - one retry after HTTP 429 when its `Retry-After` is at most five seconds;
+  - a backup leaving the Slack sign-in out.
+- **Demo data:** the cases of `acc-001`, `acc-002` and `acc-004` to `acc-007`, checked by running `brief`.
+- **Every source:** a read whose source was connected again meanwhile finishing as `source_changed`, error/409.
 
 </details>
 
 <details>
-<summary>Commands and MCP (CLI, audit, selection, clients, protocol)</summary>
+<summary>Commands, cards and MCP (CLI, cards, audit and MCP guides)</summary>
 
 - **The CLI:**
-  - JSON keys added within 0.1 keeping existing keys' meaning and type;
-  - help staying plain text with `--json`;
-  - `brief` exiting 1 with `local_failure` when a running connector holds the state folder, and 4 with `check_failed` when evidence fails a check;
-  - `brief` with a connected calls source and no imported transcript exiting 0 with the gap on the card;
-  - `inspect ACCOUNT_ID` and the names `accounts` lists being neutralized as card text is;
-  - `mcp stdio --json` changing only how a startup error is written;
-  - `debug completion --json` returning `shell` and `script`;
-  - `debug serve`'s startup lines and its fixed shutdown line;
-  - `connect demo` keeping an already-read Slack thread connected.
-- **Audit and the request path:**
-  - `audit --caller`, `--since` and `--until`, and a tool filter other than `save_brief`;
-  - `audit --follow` polling every half second, and `--status pending` never printing the later `ok` version;
-  - an incomplete request that disconnects before it is classified getting no receipt;
-  - the default rate limit of 60 calls per 60 seconds per token, reset by a restart;
-  - response bodies left out of the audit log;
-  - `log_activity` requiring its four arguments, and a changed payload returning `idempotency_conflict`. Both leave with the tool at cutover.
-- **Selection and prepared briefs:**
-  - the selection file owned by you, and never reloaded;
-  - `prepare_renewal_brief` and `read_renewal_brief` requiring `crm:read`;
-  - `as_of` requiring `YYYY-MM-DD`, and Salesforce defaulting to today;
-  - a prepared brief giving the same evidence and gaps as `brief` for the same inputs, scopes and cutoff;
-  - the reads inside a prepared brief printing no `debug serve` event lines;
-  - the 45-second deadline, with a read in progress keeping its 20-second limit;
-  - the 4 MiB limit, with its `brief_too_large` and `brief_storage_failed` errors;
-  - `brief_rejected` when evidence fails its checks;
-  - logging out of `sf` not withholding saved Salesforce content;
-  - an unmapped selected Slack thread stopping `debug serve` with exit 3;
-  - a saved-brief read refusing release when its grant expired after admission, and what an ordinary call does when its grant expires mid-call. The final check in `prepare_renewal_brief` is tested.
-- **Clients and the protocol:**
-  - `connect APP` launching no application;
-  - absolute state-folder paths in printed commands;
-  - the merged configuration and its backup written under temporary names and renamed into place;
-  - the bridge keeping its grant in memory and applying the rate limit;
-  - a restarted `debug serve` ending earlier grants, endpoints and certificates, so the app must restart too;
-  - Inspector 2.15.0's `npx` and Node requirements, and its exact exit code and error text for a missing scope;
-  - an authorization code lasting 60 seconds, and a restart ending every code and token;
-  - subscriptions and legacy initialization sessions being unsupported;
-  - each start generating a one-day loopback certificate.
+  - the text output: the bold heading row and `NO_COLOR`, the `accounts` table and its ASCII-case search, the `connect status` lines, and an `inspect` trace of a record;
+  - the JSON keys of `token`, `debug calls list`, `debug calls inspect`, `debug salesforce check` and the `debug slack` commands, and the keys of the progress lines;
+  - which commands make a workspace, and a `dir-` name being hashed again;
+  - the fixed line printed for an error the connector did not word itself;
+  - `demo` alone leaving a removed source as it is;
+  - `debug slack disconnect --revoke` exiting 5 when Slack does not confirm;
+  - `debug calls import` and `debug slack map` adding an `inspect-` receipt on a real CRM.
+- **Cards:**
+  - `brief` exiting 4 with `check_failed`, and exit 130;
+  - `brief` exiting 2 for a bad `--as-of` or brief ID;
+  - card, unit, gap and line rows never changing once written (the test covers receipts only);
+  - `brief_save_failed` on a save that does not finish;
+  - `inspect` neutralizing again a sentence with an older `sanitizer_version`;
+  - the seller list replaced or kept by `connect`, and `connect demo --seller` refused;
+  - the extra account read of `brief` on a real CRM.
+- **Audit:**
+  - a pending receipt finished as `interrupted` after its five-minute lease, and `serve` doing so every 30 seconds;
+  - a restart resetting the rate counts;
+  - a tool name over 100 characters recorded as `<invalid>`, and `brief_id` taken from `_meta`, up to 128 characters;
+  - `audit --since` and `--until`, and `--follow` reading every half second.
+- **MCP:**
+  - the tool error text, and `Unknown tool: NAME` for a tool that is not served;
+  - `account_number_requires_salesforce`, and `invalid_as_of` through `serve`;
+  - `tools/list` not counting against the rate;
+  - the two `.well-known` paths answering 200, and `GET /mcp` answering 405 with `Allow: POST`;
+  - `token revoke` of a revoked token exiting 0, and of an unknown ID exiting 2;
+  - `read_renewal_brief` answering `brief_not_found` for a card saved by `demo`;
+  - the keys of a prepared brief and its `notice`;
+  - a stdio call still running when input ends getting a receipt and no answer;
+  - the `--selection` refusals, and the stdio `initialize` of a client that sends no protocol metadata;
+  - the 45-second deadline and the 4 MiB limit of a prepared brief, with `brief_deadline_exceeded`, `brief_too_large` and `brief_storage_failed`.
 
 </details>

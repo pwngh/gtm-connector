@@ -46,8 +46,10 @@ export class RouteError extends Component {
   }
 }
 
-export default function RouteContent({path, label, onReady, children}) {
-  return <RouteError key={path}>
+// A page stays mounted while its address changes below it (pageKey), as the
+// deal list does when a deal opens; a new page starts afresh.
+export default function RouteContent({path, pageKey = path, label, onReady, children}) {
+  return <RouteError key={pageKey}>
     <Suspense fallback={<RouteLoading label={label}/>}>
       <Ready path={path} onReady={onReady}>{children}</Ready>
     </Suspense>

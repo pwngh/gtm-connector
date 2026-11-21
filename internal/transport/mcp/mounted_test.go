@@ -164,6 +164,19 @@ func mount(t *testing.T, selection cards.Selection, change func(*mcptools.Config
 func (m *mounted) serve(selection cards.Selection, change func(*mcptools.Config)) {
 	m.t.Helper()
 	m.selection = selection
+	gateway, err := mcptools.New(m.tools(change))
+	must(m.t, err)
+	surface, err := httptransport.New(httptransport.Config{PublicOrigin: mountedOrigin,
+		AllowedHosts: []string{mountedHost, "localhost:8765"}, SessionKey: bytes.Repeat([]byte{7}, 32), MCP: gateway},
+		m.store, authz.Evidence{Store: m.store})
+	must(m.t, err)
+	m.t.Cleanup(func() { surface.Close() })
+	m.surface, m.gateway = surface, gateway
+}
+
+// tools is the configuration the tools are built from: the database as it stands and the selection served.
+func (m *mounted) tools(change func(*mcptools.Config)) mcptools.Config {
+	m.t.Helper()
 	connections := map[string]string{}
 	for _, source := range []string{"crm", "calls", "slack"} {
 		connection, err := m.store.EnsureConnection(ctx, m.workspace, source, "demo")
@@ -172,7 +185,7 @@ func (m *mounted) serve(selection cards.Selection, change func(*mcptools.Config)
 	}
 	config := mcptools.Config{Resource: mountedOrigin + "/mcp", Issuer: mountedOrigin, WorkspaceID: m.workspace.ID,
 		Store: m.store, Receipts: &postgres.ReceiptStore{Store: m.store}, Source: m.book, Sources: demoSources,
-		Connections: connections, Selection: selection, RateLimit: 1000, WindowSeconds: 60,
+		Connections: connections, Selection: m.selection, RateLimit: 1000, WindowSeconds: 60,
 		Wall: func() float64 {
 			if m.wall != nil {
 				return m.wall()
@@ -182,14 +195,7 @@ func (m *mounted) serve(selection cards.Selection, change func(*mcptools.Config)
 	if change != nil {
 		change(&config)
 	}
-	gateway, err := mcptools.New(config)
-	must(m.t, err)
-	surface, err := httptransport.New(httptransport.Config{PublicOrigin: mountedOrigin,
-		AllowedHosts: []string{mountedHost, "localhost:8765"}, SessionKey: bytes.Repeat([]byte{7}, 32), MCP: gateway},
-		m.store, authz.Evidence{Store: m.store})
-	must(m.t, err)
-	m.t.Cleanup(func() { surface.Close() })
-	m.surface, m.gateway = surface, gateway
+	return config
 }
 
 func must(t *testing.T, err error) {

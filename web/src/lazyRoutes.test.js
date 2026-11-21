@@ -43,15 +43,17 @@ function stream(element) {
   return {done, shell, firstChunk, html: () => chunks.join(''), abort: () => renderer.abort()};
 }
 const routes = [
-  {path: serverPaths.evidence, module: 'ApiEvidence', marker: 'api-frame'},
-  {path: serverPaths.readiness, module: 'ApiReadiness', marker: 'api-readiness'},
+  {path: serverPaths.coverage, module: 'Coverage', marker: 'cv', subnav: true},
+  {path: serverPaths.deals, module: 'Deals', marker: 'deals-list', subnav: false},
+  {path: serverPaths.evidence, module: 'ApiEvidence', marker: 'api-frame', subnav: true},
 ];
 
 for (const route of routes) test('a direct lazy route resolves its page and keeps shared chrome: ' + route.path, async () => {
   const html = await stream(framed(route.path)).done;
   assert.match(html, new RegExp('class="[^"]*' + route.marker));
   assert.match(html, /class="fr-bar"/);
-  assert.match(html, /class="fr-pages"/);
+  // Ops lists its pages under the top bar; Deals has no sub-navigation.
+  if (route.subnav) assert.match(html, /class="fr-pages"/); else assert.doesNotMatch(html, /class="fr-pages"/);
   assert.match(html, /aria-label="Dark theme" aria-pressed="false"/);
   assert.doesNotMatch(html, /Page unavailable/);
   const module = await pageLoaders[route.module]();
@@ -130,12 +132,15 @@ const startupBytesBefore = 737_028;
 // The modules the server's app starts with.
 const serverStartup = ['entry.tsx', 'app/boot.tsx', 'app/ServerApp.tsx', 'app/routes.ts', 'app/lazyPage.ts', 'lazyPages.js',
   'app/frame/Frame.tsx', 'app/frame/SignIn.tsx', 'app/frame/NoPage.tsx', 'app/frame/pages.ts', 'app/frame/frame.css',
+  'app/deals/deals.ts', 'app/deals/deals.css', 'app/deals/card/card.css',
   'api/client.ts', 'api/session.ts', 'api/reads.ts', 'RouteContent.jsx', 'focusElement.js',
   'ui/Button.tsx', 'ui/Field.tsx', 'ui/Refusal.tsx', 'ui/Placeholder.tsx', 'ui/Dialog.tsx', 'ui/Palette.tsx', 'ui/theme.ts',
-  'ui/tokens.css', 'ui/button.css', 'ui/field.css', 'ui/refusal.css', 'ui/placeholder.css', 'ui/dialog.css', 'ui/palette.css',
-  'readiness.css', 'styles.css', 'refinements.css', 'modern.css', 'atelier.css', 'workplan.css', 'chrome.css', 'api.css'];
+  'ui/tokens.css', 'app/ops/coverage.css', 'ui/button.css', 'ui/field.css', 'ui/refusal.css', 'ui/placeholder.css', 'ui/dialog.css', 'ui/palette.css',
+  'styles.css', 'refinements.css', 'modern.css', 'atelier.css', 'workplan.css', 'chrome.css', 'api.css'];
 // The modules the server's pages load after it.
-const serverPages = ['ApiEvidence.jsx', 'ApiReadiness.jsx', 'ApiFrame.jsx', 'api/selection.ts', 'WorkspaceControls.jsx'];
+const serverPages = ['app/deals/Deals.tsx', 'app/ops/Coverage.tsx', 'app/ops/coverageRows.ts', 'app/ops/pooledReads.ts', 'ApiEvidence.jsx', 'ApiFrame.jsx', 'api/selection.ts', 'WorkspaceControls.jsx',
+  ...['DealCard.tsx', 'Title.tsx', 'sections.ts', 'card.ts', 'Cite.tsx', 'Sentence.tsx', 'Notices.tsx', 'PeopleSaid.tsx', 'MoreRead.tsx', 'TheRecord.tsx', 'NotRead.tsx', 'Seal.tsx']
+    .map(name => `app/deals/card/${name}`)];
 
 test('production chunks: the server app starts with its shell alone, and each page loads on its own', async t => {
   const previous = process.env.NODE_ENV;
@@ -167,9 +172,10 @@ test('production chunks: the server app starts with its shell alone, and each pa
   t.diagnostic(`server app start-up: ${bytes} bytes of JavaScript and CSS, ${startupBytesBefore} before`);
   assert.ok(bytes <= startupBytesBefore - 120_000, `${bytes} bytes at start-up`);
   const serverCss = String(asset(css[0]).source);
-  assert.ok(serverCss.indexOf('.rd-page{') < serverCss.indexOf('--ink:#17243a'));
+  // The older sheets come first, so the app's own tokens and components override them.
+  assert.ok(serverCss.indexOf('--ink:#17243a') < serverCss.indexOf('--gc-canvas'));
   // The server pages load on their own.
-  for (const page of ['ApiEvidence.jsx', 'ApiReadiness.jsx']) assert.ok(holding(page).isDynamicEntry && !startup.has(holding(page).fileName), page);
+  for (const page of ['app/deals/Deals.tsx', 'app/ops/Coverage.tsx', 'ApiEvidence.jsx']) assert.ok(holding(page).isDynamicEntry && !startup.has(holding(page).fileName), page);
   for (const chunk of chunks) assert.ok(Buffer.byteLength(chunk.code) < 500_000, chunk.fileName + ' exceeds 500 kB');
   // The palette ships with the shell, so the first keystrokes reach its input.
   assert.ok(sources(entry).includes('ui/Palette.tsx'));

@@ -22,8 +22,9 @@ test('one shared CSS contract gives every chrome control a 44px target and 16px 
 });
 
 test('page styles cannot resize the shared shell, renewal heading or tabs, and the loading state holds the viewport', () => {
-  const readiness = readFileSync(new URL('./readiness.css', import.meta.url), 'utf8');
-  assert.doesNotMatch(readiness, /\.(sidebar|topbar|main-content|main-shell|page-heading|detail-nav|nav-item|brand)(?=[\s.:>{,#])/);
+  for (const page of ['./app/deals/deals.css', './app/deals/card/card.css']) {
+    assert.doesNotMatch(readFileSync(new URL(page, import.meta.url), 'utf8'), /\.(sidebar|topbar|main-content|main-shell|page-heading|detail-nav|nav-item|brand)(?=[\s.:>{,#])/, page);
+  }
   assert.equal(rule('.main-shell,.main-content')['min-width'], '0');
   assert.equal(cssRules.find(rule => rule.selector === '.detail-nav').declarations['flex-wrap'], 'wrap');
   assert.ok(css.includes('.main-content>.route-loading:not(.route-error) {min-height:max(160px, calc(100dvh - var(--route-top, 0px)))}'));

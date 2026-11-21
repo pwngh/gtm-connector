@@ -10,6 +10,12 @@ curl https://HOST/v1/deals/thornfield-2027
 gtm deal thornfield-2027
 ```
 
+> **What the binary serves today.** The `/api/v1` routes under
+> [the server today](#the-server-today), MCP at `/mcp` ([MCP](mcp.md)) and `/healthz`
+> ([running it](operations.md#health)). Deal IDs, the `/v1/deals` routes, pushing your own data,
+> webhooks, Slack alerts and the read-only SQL views below are the design, and the
+> [roadmap](ROADMAP.md) lists them as not built.
+
 ## One deal, one ID
 
 A deal is a bundle of IDs from many tools. Register it and bind them once. After that the deal ID
@@ -25,7 +31,9 @@ is all you pass.
 A watch rule registers most deals for you. Register one by hand when its records live in your own
 system.
 
-## Routes
+## Deal routes
+
+These are designed and not built yet.
 
 | Route | What it does |
 | --- | --- |
@@ -39,17 +47,35 @@ system.
 
 The routes are described in an OpenAPI file served with the API.
 
-## A card on the Go server today
+## The server today
 
-Until deals exist, the Go server serves cards by card ID. Each route needs a signed-in person with a
-grant on the card's account. Anyone else gets `403 not_permitted`, whether the card exists or not.
+Until deals exist, the server serves accounts and cards by their own IDs, to a person signed in to
+the web app. The API takes the session cookie and nothing else.
 
 | Route | What it returns |
 | --- | --- |
+| `GET /api/v1/session` | Whether the caller is signed in, who as, and the CSRF token for the next write |
+| `POST /api/v1/session` | Signs in with `login` and `password`, the demo sign-in that `setup` writes |
+| `DELETE /api/v1/session` | Signs out |
+| `GET /api/v1/accounts` | The accounts the person may read, each with its neutralized name |
+| `GET /api/v1/accounts/{account}/cards` | The account's published cards: ID, brief ID, SHA-256, size, seal receipt and when it was published |
 | `GET /api/v1/cards/{card}` | The card as JSON: its head, `as_of`, `sources`, `units`, `gaps` and `lines` |
 | `GET /api/v1/cards/{card}/text` | The text card whole, as `text/plain` |
-| `GET /api/v1/cards/{card}/bytes` | The sealed bytes exactly, so a client can hash them again |
+| `GET /api/v1/cards/{card}/bytes` | The sealed bytes exactly, with their SHA-256 in `X-Content-SHA256`, so a client can hash them again |
 | `GET /api/v1/cards/{card}/units/{n}` | One unit and the receipt of the read that returned it |
+| `GET /api/v1/receipts/{receipt}` | One receipt |
+
+Each read needs a signed-in person with a grant on the account. Anyone else gets
+`403 not_permitted`, whether the card or receipt exists or not, so a refusal says nothing about what
+the person may not read.
+
+| Refusal | When |
+| --- | --- |
+| `401 sign_in_required` | A read or a sign-out with no live session |
+| `401 sign_in_refused` | The login or password is not right |
+| `401 authorization_refused` | A request under `/api/` carries an `Authorization` header |
+| `403 csrf_invalid` | A write without the CSRF token of `GET /api/v1/session` in `X-CSRF-Token` |
+| `404 not_found` | Any other path under `/api/`, or a unit number that is not a positive integer |
 
 Each of `lines` is one line under ATTENTION or RECORD VALUES, as data, so a page, an alert or a
 script reads a value without reading the text. The renewal date line of the README's card:
@@ -102,6 +128,9 @@ blocking thornfield?" from any client below.
 | Cursor | stdio or HTTP |
 
 `gtm setup` prints the configuration for each client.
+
+Today `serve`'s `/mcp` and `mcp stdio` serve five read tools over a workspace's sources, not deals,
+and the Inspector CLI is the one client tested. [MCP](mcp.md) describes them.
 
 ## Webhooks and Slack alerts
 

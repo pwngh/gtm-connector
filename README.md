@@ -24,7 +24,7 @@ is approved. The card shows both, and where each came from.
 
 ```sh
 make up      # PostgreSQL and the server, in Docker Compose
-make demo    # the demo book, and the ten hard cases as ready-to-open workspaces
+make demo    # a sealed card for each account of the demo book, for the demo sign-in
 ```
 
 Open `https://127.0.0.1:8443/` and sign in with the demo sign-in. It runs on invented data, with no
@@ -183,13 +183,10 @@ The card shows what the records say, not whether a source is true.
 
 ## More
 
-- **Sales and CS:** [working a deal](docs/deals.md), [reading a Deal card](docs/python/briefs.md).
-- **RevOps and GTM engineers:** [setting it up](docs/config.md), [the API](docs/api.md), [audit receipts](docs/python/audit.md).
+- **Sales and CS:** [working a deal](docs/deals.md), [reading a Deal card](docs/cards.md).
+- **Daily use:** [the command line](docs/cli.md), [connecting Salesforce, calls and Slack](docs/sources.md).
+- **RevOps and GTM engineers:** [setting it up](docs/config.md), [the API](docs/api.md), [MCP](docs/mcp.md), [audit receipts](docs/audit.md).
 - **Operators:** [running it](docs/operations.md), [security review](SECURITY_REVIEW.md).
 - **The project:** [roadmap](docs/ROADMAP.md), [working on the code](AGENTS.md).
-
-Until the cutover, the Python package's guides stay in `docs/`: [commands](docs/python/cli.md),
-[Salesforce](docs/python/salesforce.md), [calls](docs/python/calls.md), [Slack](docs/python/slack.md),
-[selection](docs/python/selection.md), [clients](docs/python/clients.md) and [tools](docs/python/tools.md).
 
 All checked-in companies, people, and records are invented. MIT licensed.

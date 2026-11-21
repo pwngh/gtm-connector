@@ -2,17 +2,18 @@ import {Menu, Moon, Search} from 'lucide-react';
 import {type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {Link, useLocation, useNavigate} from 'react-router';
 import {ApiError, sessionExpired} from '../../api/client.ts';
-import {useServer} from '../../api/reads.ts';
+import {useRead, useServer} from '../../api/reads.ts';
 import type {PrincipalView} from '../../api/types.ts';
 import {focusElement, holdPendingFocus} from '../../focusElement.js';
 import RouteContent from '../../RouteContent.jsx';
 import {Button} from '../../ui/Button.tsx';
 import {Dialog} from '../../ui/Dialog.tsx';
 import {Palette} from '../../ui/Palette.tsx';
-import {Refusal} from '../../ui/Refusal.tsx';
+import {Refusal, refusalText} from '../../ui/Refusal.tsx';
 import {type Theme, useTheme} from '../../ui/theme.ts';
+import {byName} from '../deals/deals.ts';
 import {NoPage} from './NoPage.tsx';
-import {type Area, areaAt, areaHome, keptQuery, pageAt, pageItems, shownAreas} from './pages.ts';
+import {type Area, areaAt, areaHome, dealItems, keptQuery, pageAt, pageItems, shownAreas} from './pages.ts';
 import {SignIn} from './SignIn.tsx';
 import './frame.css';
 
@@ -80,11 +81,12 @@ interface LinksProps {
   onNavigate?: () => void;
 }
 
-function AreaLinks({search, current, className, onNavigate}: Omit<LinksProps, 'pathname'>) {
+// An area with listed pages keeps the chosen account and open card; Deals starts afresh.
+function AreaLinks({search, current, pathname, className, onNavigate}: LinksProps) {
   return shownAreas.map(area => (
     <Link
       key={area.id}
-      to={areaHome(area) + keptQuery(search)}
+      to={areaHome(area) + (area.subnav ? keptQuery(search, pathname) : '')}
       className={className}
       aria-current={current?.id === area.id ? 'page' : undefined}
       onClick={onNavigate}
@@ -98,7 +100,7 @@ function PageLinks({search, current, pathname, className, onNavigate}: LinksProp
   return (current?.pages ?? []).map(page => (
     <Link
       key={page.id}
-      to={page.path + keptQuery(search)}
+      to={page.path + keptQuery(search, pathname)}
       className={className}
       aria-current={page.path === pathname ? 'page' : undefined}
       onClick={onNavigate}
@@ -109,6 +111,25 @@ function PageLinks({search, current, pathname, className, onNavigate}: LinksProp
 }
 
 const asError = (error: unknown) => (error instanceof ApiError ? error : new ApiError());
+
+// The palette: the granted deals by name, then the Ops pages. The deals are
+// the account list the server answers; until it answers only the pages show,
+// and a refusal is said, never shown as no deals.
+function Finder({go, search, pathname}: {go: (to: string) => void; search: string; pathname: string}) {
+  const accounts = useRead('accounts', (api, signal) => api.accounts({signal}));
+  const granted = accounts.status === 'ready' && Array.isArray(accounts.data?.accounts) ? byName(accounts.data.accounts) : [];
+  const notice =
+    accounts.status === 'failed' ? `Deals not read: ${refusalText(accounts.error).title}` : accounts.status === 'loading' ? 'Reading your deals' : undefined;
+  return (
+    <Palette
+      inputLabel="Deal or page name"
+      placeholder="A deal’s name, or Evidence"
+      empty="No deal or page matches."
+      notice={notice}
+      items={[...dealItems(go, granted), ...pageItems(go, search, pathname)]}
+    />
+  );
+}
 
 // The frame of the app the server serves: signed out, the mark and the
 // sign-in screen at whatever address was opened; signed in, the top bar with
@@ -249,7 +270,7 @@ export function Frame() {
   const announce = signedIn ? `Signed in as ${principal.display_name}.` : state.ended || expired ? 'Your session ended. You are signed out.' : '';
   const noSession = state.mode === 'unreachable' || (!state.session && state.error !== null);
   const closeMenu = () => setMenu(false);
-  const {Page, label} = page ? {Page: page.Page, label: page.label} : {Page: NoPage, label: 'page'};
+  const {Page, label, key} = page ? {Page: page.Page, label: page.label, key: page.path} : {Page: NoPage, label: 'page', key: location.pathname};
 
   return (
     <div className="fr">
@@ -286,6 +307,7 @@ export function Frame() {
                 <AreaLinks
                   search={location.search}
                   current={area}
+                  pathname={location.pathname}
                   className="fr-link"
                 />
               </nav>
@@ -303,7 +325,7 @@ export function Frame() {
                     size={20}
                     aria-hidden="true"
                   />
-                  Find a page
+                  Find a deal
                 </Button>
                 <ThemeButton
                   theme={theme}
@@ -340,7 +362,7 @@ export function Frame() {
             <span className="fr-demo">Demo, invented records</span>
           </p>
         )}
-        {signedIn && area && area.pages.length > 0 && (
+        {signedIn && area?.subnav && area.pages.length > 0 && (
           <nav
             className="fr-pages"
             aria-label={`${area.label} pages`}
@@ -377,6 +399,7 @@ export function Frame() {
             )}
             <RouteContent
               path={location.pathname}
+              pageKey={key}
               label={label}
               onReady={pageReady}
             >
@@ -387,19 +410,18 @@ export function Frame() {
       </main>
       {overlay && palette && (
         <Dialog
-          title="Find a page"
+          title="Find a deal"
           returnFocus={opener}
           focusInput
           onClose={() => setPalette(false)}
         >
-          <Palette
-            inputLabel="Page name"
-            placeholder="Evidence or Readiness"
-            empty="No page matches."
-            items={pageItems(to => {
+          <Finder
+            go={to => {
               setPalette(false);
               navigate(to);
-            }, location.search)}
+            }}
+            search={location.search}
+            pathname={location.pathname}
           />
         </Dialog>
       )}
@@ -453,6 +475,7 @@ function PhoneMenu({returnFocus, principal, area, search, pathname, theme, choos
           <AreaLinks
             search={search}
             current={area}
+            pathname={pathname}
             className="fr-menu__item"
             onNavigate={onClose}
           />

@@ -67,6 +67,7 @@ export interface UnitBody {
   speaker?: string | null;
   role?: string | null;
   basis?: string | null;
+  contact?: number | null;
   text?: string;
   partial?: boolean;
   shown?: string;
@@ -127,6 +128,11 @@ export interface AccountList {
 export interface AccountCards {
   account: string;
   cards: CardView[];
+}
+
+/** GET /healthz, a map in Go: 200 when status is "ok", 503 otherwise. */
+export interface Health {
+  status: string;
 }
 
 /** The body of every refusal. */

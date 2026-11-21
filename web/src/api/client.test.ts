@@ -105,6 +105,9 @@ test('unit facts keep cut and not-shown units labelled and read the body defensi
   assert.equal(unitFacts({n: 1, kind: 'sentence', shown: 'yes', body: {text: 'Yes.'}}).notShown, null);
   assert.equal(unitFacts({n: 2, kind: 'sentence', shown: 'odd', body: {}}).notShown, 'Reason odd');
   assert.equal(unitFacts({n: 3, kind: 'record', body: null}).text, null);
+  // A contact is a unit number or nothing.
+  assert.equal(unitFacts({n: 5, kind: 'sentence', body: {contact: 2}}).contact, 2);
+  for (const contact of [null, 0, -1, 2.5, '2']) assert.equal(unitFacts({n: 5, kind: 'sentence', body: {contact} as never}).contact, null);
 });
 
 // Review round: the probe, deadlines and redirects.
@@ -171,4 +174,27 @@ test('a read whose caller stops waiting is aborted, as its own kind, and an abor
   await assert.rejects(read, kindOf('aborted'));
   await assert.rejects(api.card('c-1', {signal: stop.signal}), kindOf('aborted'));
   assert.equal(calls.length, 1);
+});
+
+test('health takes 200 and 503 with a status as answers, and anything else as an error', async () => {
+  const {fetch, calls} = fakeFetch(
+    {json: {status: 'ok'}},
+    {status: 503, json: {status: 'migrations_behind'}},
+    {status: 503, json: {status: 'database_unavailable'}},
+    {status: 503, text: 'Service Unavailable', type: 'text/plain'},
+    {status: 200, json: {}},
+    {status: 404, json: {error: {code: 'not_found', message: 'Not found.'}}},
+    {status: 200, broken: true},
+  );
+  const api = createApiClient(fetch);
+  assert.deepEqual(await api.health(), {status: 'ok'});
+  assert.deepEqual(await api.health(), {status: 'migrations_behind'});
+  assert.deepEqual(await api.health(), {status: 'database_unavailable'});
+  assert.equal(calls[0]?.path, '/healthz');
+  assert.equal(calls[0]?.method, 'GET');
+  assert.equal(calls[0]?.headers['X-CSRF-Token'], undefined);
+  await assert.rejects(api.health(), kindOf('server'));
+  await assert.rejects(api.health(), kindOf('unexpected'));
+  await assert.rejects(api.health(), error => error instanceof ApiError && error.kind === 'not_found' && error.code === 'not_found');
+  await assert.rejects(api.health(), kindOf('unreachable'));
 });

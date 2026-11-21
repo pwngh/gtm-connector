@@ -1642,7 +1642,7 @@
    "text": "<@U0ABC123>\nwe agree <https://renewal.example/x|the\nrider> holds.",
    "outputs": {
     "safe_text": [
-     "[user U0ABC123]\nwe agree <[link renewal.example]\nrider> holds.",
+     "[user U0ABC123]\nwe agree the\nrider [link renewal.example] holds.",
      [
       1,
       1,
@@ -1659,12 +1659,12 @@
      "rider> holds."
     ],
     "sentences_safe": [
-     "[user U0ABC123] we agree <[link renewal.example] rider> holds."
+     "[user U0ABC123] we agree the rider [link renewal.example] holds."
     ],
     "sentences_safe_lines": [
      "[user U0ABC123]",
-     "we agree <[link renewal.example]",
-     "rider> holds."
+     "we agree the",
+     "rider [link renewal.example] holds."
     ],
     "units_target": null,
     "units_raw_link": [

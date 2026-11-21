@@ -143,7 +143,7 @@ export function EvidenceFromServer({selection}) {
   const receiptFor = useReceipts(card.status === 'ready' ? card.data : null);
   return <section className="plain-panel evidence-library api-evidence">
     <div className="panel-header"><div><div className="section-kicker">SOURCE LIBRARY · FROM THE SERVER</div><h2>The sealed card, unit by unit.</h2></div></div>
-    <AccountPicker selection={selection}/>
+    {!selection.fixed && <AccountPicker selection={selection}/>}
     <CardList selection={selection}/>
     {selection.cardId && selection.listed && (card.status === 'failed' ? <Refusal error={card.error} retry={card.retry}/>
       : card.status !== 'ready' ? <p className="api-loading" role="status">Reading the card…</p>
@@ -152,9 +152,11 @@ export function EvidenceFromServer({selection}) {
   </section>;
 }
 
-export default function ApiEvidence() {
+// With an account, as a deal's address gives one, the page reads that account and offers no other.
+/** @param {{account?: string | null}} props */
+export default function ApiEvidence({account = null}) {
   const {state} = useServer();
-  const selection = useCardSelection(state.session?.signed_in ? state.session : null);
+  const selection = useCardSelection(state.session?.signed_in ? state.session : null, account);
   return <>
     <ApiRenewalHeader page="evidence" selection={selection}/>
     <ApiFrame>{() => <EvidenceFromServer selection={selection}/>}</ApiFrame>
