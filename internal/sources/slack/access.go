@@ -336,7 +336,7 @@ func storeError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case code(err) != "" || errors.Is(err, context.Canceled):
+	case code(err) != "" || errors.Is(err, context.Canceled) || errors.As(err, new(*AuditFailed)):
 		return err
 	}
 	return refuse("slack_storage_failed")
@@ -626,6 +626,16 @@ func (r *Reader) authRequest(ctx context.Context, b *budget, tokens *echo.Tokens
 // refresh spends the refresh token for a new pair. The client is public: no secret is sent. The answer holds
 // the new pair, so it is not searched for tokens, and nothing of it but those two tokens is kept as text.
 func (r *Reader) refresh(ctx context.Context, b *budget, document *Credentials) (*strictjson.Object, error) {
+	var granted *strictjson.Object
+	err := r.audited(ctx, "slack_sign_in_refresh", func(ctx context.Context) error {
+		var err error
+		granted, err = r.refreshRequest(ctx, b, document)
+		return err
+	})
+	return granted, err
+}
+
+func (r *Reader) refreshRequest(ctx context.Context, b *budget, document *Credentials) (*strictjson.Object, error) {
 	form := "grant_type=refresh_token&client_id=" + url.QueryEscape(document.ClientID) +
 		"&refresh_token=" + url.QueryEscape(document.RefreshToken.Reveal())
 	return r.authRequest(ctx, b, nil, func(ctx context.Context) (*http.Request, error) {
@@ -655,6 +665,16 @@ func noBot(document *strictjson.Object) error {
 // origin Slack states, or "" when that is not a slack.com root. The origin is lowered from what Slack
 // stated, so it is searched for tokens once more as it will be saved.
 func (r *Reader) identity(ctx context.Context, b *budget, candidate *Credentials) (string, error) {
+	var workspace string
+	err := r.audited(ctx, "slack_sign_in_identity", func(ctx context.Context) error {
+		var err error
+		workspace, err = r.identityRequest(ctx, b, candidate)
+		return err
+	})
+	return workspace, err
+}
+
+func (r *Reader) identityRequest(ctx context.Context, b *budget, candidate *Credentials) (string, error) {
 	document, err := r.authRequest(ctx, b, &b.tokens, func(ctx context.Context) (*http.Request, error) {
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, identityURL, nil)
 		if err != nil {

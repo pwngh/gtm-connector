@@ -128,6 +128,9 @@ type attaching struct {
 	// refuses any other identity, so attach need not compare. It is here for a source that can say more
 	// than a refusal, such as which sign-in to use.
 	pinned string
+	// step runs one request attach makes to the source, such as a sign-in, under a receipt of its own tool
+	// name, committed first in the workspace (signInSteps).
+	step func(ctx context.Context, tool string, request func(context.Context) error) error
 }
 
 // attached is what a source's row is saved with.
@@ -624,6 +627,33 @@ func (r *reads) call(ctx context.Context, c toolCall,
 		return fail(receipts.Failed(200, "request_failed"), err)
 	}
 	return finished, records, nil
+}
+
+// signInSteps runs the requests a command makes to a source outside any read, as connect salesforce signs in
+// and checks the org and the Slack sign-in commands call Slack. Each request runs under a receipt of its
+// step, a tool name that is no MCP tool, with the scope of its source, committed first in the command's
+// workspace; one that fails leaves its receipt finished as an error. The receipts name no connection and
+// bind no record. A workspace that does not exist is made, to hold what holds, on the first step. The run's
+// store must be open.
+func (r *run) signInSteps(scope, holds string) func(ctx context.Context, tool string, request func(context.Context) error) error {
+	var steps *checkRun
+	return func(ctx context.Context, tool string, request func(context.Context) error) error {
+		if steps == nil {
+			if !r.exists {
+				slug := workspaceSlug(r.name)
+				var err error
+				if r.workspace, err = r.store.EnsureWorkspace(ctx, slug, holds, "Workspace "+slug); err != nil {
+					return err
+				}
+				r.exists = true
+			}
+			steps = &checkRun{from: &reads{store: r.store, workspace: r.workspace, rows: map[string]postgres.Connection{},
+				kinds: map[string]*sourceKind{}, bindings: map[string]*strictjson.Object{}},
+				run:   "sign-in-" + strings.ReplaceAll(receipts.RandomID(), "-", ""),
+				token: receipts.Fingerprint(randomToken()), scope: scope}
+		}
+		return steps.step(ctx, tool, nil, request)
+	}
 }
 
 // referenced gives each account of a search its record_ref, as the search_accounts tool returns it.

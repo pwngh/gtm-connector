@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -188,7 +187,8 @@ func TestSalesforceIsReadByEveryCommand(t *testing.T) {
 		!strings.Contains(string(payload.Bytes), `"crm_backend": "salesforce"`) {
 		t.Errorf("the saved card does not hold the workspace's sellers and its CRM: %v", err)
 	}
-	if got := d.audited(t, "invented-books"); got != "search_accounts:ok:200: get_account:ok:200: "+
+	if got := d.audited(t, "invented-books"); got != "connect_salesforce_login:ok:200: connect_salesforce_org:ok:200: "+
+		"search_accounts:ok:200: get_account:ok:200: "+
 		"get_account:error:200:request_failed get_account:ok:200: get_account:ok:200: list_opportunities:ok:200: "+
 		"save_brief:ok:200:" {
 		t.Errorf("the receipts: %s", got)
@@ -359,8 +359,15 @@ func TestConnectSalesforceRefusesWhatItCannotPin(t *testing.T) {
 			t.Errorf("%s: %s (%s)", c.name, message, next)
 		}
 	}
-	if _, err := d.owner.Workspace(ctx, "refused-books"); !errors.Is(err, postgres.ErrNotFound) {
-		t.Errorf("a refused connect made its workspace: %v", err)
+	// Each refusal after the arguments keeps its receipts, the last one finished as an error, and connects
+	// nothing.
+	if got := d.audited(t, "refused-books"); got != "connect_salesforce_login:ok:200: "+
+		"connect_salesforce_org:error:200:request_failed connect_salesforce_login:ok:200: "+
+		"connect_salesforce_org:error:200:request_failed connect_salesforce_login:error:200:request_failed" {
+		t.Errorf("the receipts of the refused connects: %s", got)
+	}
+	if n := d.count(t, "SELECT count(*) FROM connections"); n != 0 {
+		t.Errorf("a refused connect saved %d connections", n)
 	}
 	if strings.Contains(strings.Join(org.Requests, " "), "FROM Account") || len(sf.Commands) != 5 {
 		t.Errorf("sf ran %d commands, and the org was sent %q", len(sf.Commands), org.Requests)
@@ -531,7 +538,8 @@ func TestDebugSalesforceCheckReportsEachStep(t *testing.T) {
 			"opportunity_read:fail:prerequisite_failed") {
 		t.Errorf("no candidate: exit %d, %v %s", code, err, report.shown())
 	}
-	if got := d.audited(t, "invented-books"); got != metadata+" search_accounts:ok:200: find_renewal_candidate:ok:200:" {
+	if got := d.audited(t, "invented-books"); got != "connect_salesforce_login:ok:200: connect_salesforce_org:ok:200: "+
+		metadata+" search_accounts:ok:200: find_renewal_candidate:ok:200:" {
 		t.Errorf("the receipts: %s", got)
 	}
 }
@@ -589,7 +597,10 @@ func TestACancelEndsTheSFProcessGroup(t *testing.T) {
 	if running(pids[0]) || running(pids[1]) {
 		t.Errorf("sf runs: %t; its child runs: %t", running(pids[0]), running(pids[1]))
 	}
-	if _, err := d.owner.Workspace(ctx, "cancelled-books"); !errors.Is(err, postgres.ErrNotFound) {
-		t.Errorf("the cancelled connect made its workspace: %v", err)
+	if got := d.audited(t, "cancelled-books"); got != "connect_salesforce_login:error:200:request_failed" {
+		t.Errorf("the cancelled connect's receipts: %s", got)
+	}
+	if n := d.count(t, "SELECT count(*) FROM connections"); n != 0 {
+		t.Errorf("the cancelled connect saved %d connections", n)
 	}
 }

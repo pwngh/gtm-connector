@@ -56,7 +56,10 @@ func TestASavedSignInReadsBackAsItWasSaved(t *testing.T) {
 }
 
 // The callback takes only the request Slack's redirect makes: a GET of the callback path, with the Host
-// localhost:PORT, no body, this sign-in's state and a code. Each other request is answered and ignored.
+// localhost:PORT, no body, this sign-in's state and a code, from the browser that loaded the start page. The
+// start page is answered once, and sets the cookie that binds the callback to that browser: a second request
+// of it is refused, and so is a callback without the cookie or with another value. Each other request is
+// answered and ignored.
 func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -68,6 +71,8 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// cookie is the Set-Cookie header of the last answer that had one.
+	var cookie string
 	send := func(request string) string {
 		conn, err := net.Dial("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
 		if err != nil {
@@ -77,19 +82,30 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 		fmt.Fprint(conn, request)
 		reader := bufio.NewReader(conn)
 		status, _ := reader.ReadString('\n')
+		led := ""
 		for {
 			line, err := reader.ReadString('\n')
 			if location, found := strings.CutPrefix(line, "Location: "); found {
 				// A redirect gives where it leads.
-				return strings.TrimSpace(status) + " " + strings.TrimSpace(location)
+				led = " " + strings.TrimSpace(location)
+			}
+			if set, found := strings.CutPrefix(line, "Set-Cookie: "); found {
+				cookie = strings.TrimSpace(set)
 			}
 			if err != nil || line == "\r\n" {
-				return strings.TrimSpace(status)
+				return strings.TrimSpace(status) + led
 			}
 		}
 	}
 	host := fmt.Sprintf("Host: localhost:%d\r\n", port)
+	// bound is the Cookie header the browser sends the callback, once the start page set it.
+	bound := ""
 	stray := []struct{ request, want string }{
+		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 400 Bad Request"},
+		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "Cookie: gtm_slack_sign_in=guessed\r\n\r\n",
+			"HTTP/1.1 400 Bad Request"},
+		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "Cookie: gtm_slack_sign_in=VALUE; gtm_slack_sign_in=VALUE\r\n\r\n",
+			"HTTP/1.1 400 Bad Request"},
 		{"POST /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 405 Method Not Allowed"},
 		{"GET /other?code=abc&state=STATE HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 404 Not Found"},
 		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "HTTP/1.1 400 Bad Request"},
@@ -113,17 +129,28 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 			return fmt.Errorf("the browser was given %q", page)
 		}
 		go func() {
-			led := send("GET /start/" + start + " HTTP/1.1\r\n" + host + "\r\n")
+			led := send("GET /start/" + start + " HTTP/1.1\r\n" + host + "Sec-Fetch-Site: none\r\n\r\n")
 			state, found := strings.CutPrefix(led, "HTTP/1.1 302 Found https://slack.com/x?state=")
+			value, _ := strings.CutPrefix(cookie, "gtm_slack_sign_in=")
+			value, attributes, _ := strings.Cut(value, ";")
+			if attributes != " Path=/slack/callback; Max-Age=600; HttpOnly; SameSite=Lax" || len(value) < 43 {
+				answers <- fmt.Sprintf("the start page set the cookie %q", cookie)
+			}
+			bound = "Cookie: other=1; gtm_slack_sign_in=" + value + "\r\n"
 			if again := send("GET /start/" + start + " HTTP/1.1\r\n" + host + "\r\n"); !found || again != "HTTP/1.1 404 Not Found" {
 				answers <- fmt.Sprintf("the start page led to %q, then %q", led, again)
 			}
-			for _, s := range stray {
-				if got := send(strings.ReplaceAll(s.request, "STATE", state)); got != s.want {
+			for i, s := range stray {
+				request := strings.ReplaceAll(strings.ReplaceAll(s.request, "STATE", state), "VALUE", value)
+				if i > 2 {
+					// Each stray after the first three carries the cookie, so it is refused for what it is.
+					request = strings.Replace(request, host, host+bound, 1)
+				}
+				if got := send(request); got != s.want {
 					answers <- fmt.Sprintf("%q: %s", s.request, got)
 				}
 			}
-			answers <- send("GET /slack/callback?code=invented-code&state=" + state + " HTTP/1.1\r\n" + host + "\r\n")
+			answers <- send("GET /slack/callback?code=invented-code&state=" + state + " HTTP/1.1\r\n" + host + bound + "\r\n")
 		}()
 		return nil
 	}
@@ -134,6 +161,30 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 	}
 	if got := <-answers; got != "HTTP/1.1 200 OK" {
 		t.Errorf("a stray request was taken or the callback answered: %s", got)
+	}
+
+	// A start page asked for first by a request from another site, or one that carries a sign-in cookie, is
+	// refused and gone: the browser that comes after is answered 404, and no callback is taken.
+	for _, first := range []string{"Sec-Fetch-Site: cross-site\r\n", "Sec-Fetch-Site: same-site\r\n",
+		"Origin: http://localhost:3000\r\n", "Cookie: gtm_slack_sign_in=earlier\r\n"} {
+		answers := make(chan string, 2)
+		open := func(_ context.Context, page string) error {
+			start := strings.TrimPrefix(page, fmt.Sprintf("http://localhost:%d", port))
+			go func() {
+				answers <- send("GET " + start + " HTTP/1.1\r\n" + host + first + "\r\n")
+				answers <- send("GET " + start + " HTTP/1.1\r\n" + host + "\r\n")
+			}()
+			return nil
+		}
+		saved := loginTime
+		loginTime = 300 * time.Millisecond
+		err := receiveConsent(context.Background(), cfg, func(state string) string { return "https://slack.com/x?state=" + state },
+			open, func(context.Context, string) error { t.Error("a callback was taken"); return nil })
+		loginTime = saved
+		if refused, browser := <-answers, <-answers; codeOf(err) != "slack_login_timeout" ||
+			refused != "HTTP/1.1 400 Bad Request" || browser != "HTTP/1.1 404 Not Found" {
+			t.Errorf("a start page asked for first with %q: %q, then %q (%v)", first, refused, browser, err)
+		}
 	}
 
 	// With no callback, the wait ends at its time.

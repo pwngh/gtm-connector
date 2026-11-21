@@ -223,6 +223,16 @@ func (r *Reader) Connect(ctx context.Context, cfg Configuration, open Browser, p
 // exchange spends the approval's code for the grant, with the PKCE verifier and no secret. Its answer
 // holds the new tokens, so it is not searched for them. A refusal of the code is slack_oauth_rejected.
 func (r *Reader) exchange(ctx context.Context, b *budget, grant, verifier string, cfg Configuration) (*strictjson.Object, error) {
+	var document *strictjson.Object
+	err := r.audited(ctx, "slack_sign_in_exchange", func(ctx context.Context) error {
+		var err error
+		document, err = r.exchangeRequest(ctx, b, grant, verifier, cfg)
+		return err
+	})
+	return document, err
+}
+
+func (r *Reader) exchangeRequest(ctx context.Context, b *budget, grant, verifier string, cfg Configuration) (*strictjson.Object, error) {
 	form := "grant_type=authorization_code&client_id=" + url.QueryEscape(cfg.ClientID) + "&code=" +
 		url.QueryEscape(grant) + "&redirect_uri=" + url.QueryEscape(cfg.RedirectURI) + "&code_verifier=" +
 		url.QueryEscape(verifier)
@@ -452,6 +462,12 @@ type Erasable interface {
 
 // revoke asks Slack to revoke the access token, without a refresh, and requires Slack to confirm it.
 func (r *Reader) revoke(ctx context.Context, document *Credentials) error {
+	return r.audited(ctx, "slack_sign_in_revoke", func(ctx context.Context) error {
+		return r.revokeRequest(ctx, document)
+	})
+}
+
+func (r *Reader) revokeRequest(ctx context.Context, document *Credentials) error {
 	b := newBudget(r.Clock)
 	b.hold(document)
 	answer, err := r.authRequest(ctx, b, &b.tokens, func(ctx context.Context) (*http.Request, error) {

@@ -27,8 +27,10 @@ import (
 )
 
 // debug slack: connect, status and disconnect work on the workspace's saved
-// sign-in and need no database; map saves the thread of one account after an audited CRM read; check reads
-// that thread through read_slack_messages under a receipt and reports its steps in counts, never in text.
+// sign-in, and each request they make to Slack runs under a receipt of its step in the workspace; status
+// without --check and disconnect without --revoke make none and need no database. map saves the thread of one
+// account after an audited CRM read; check reads that thread through read_slack_messages under a receipt
+// and reports its steps in counts, never in text.
 
 // slackActions are debug slack's actions, each with its options and help.
 var slackActions = map[string]arguments{
@@ -269,12 +271,25 @@ func (r *run) slackSignIn(ctx context.Context) (*strictjson.Object, error) {
 				}
 			}
 		}
+		reader.Audit = r.signInSteps("slack:read", "live")
 		return reader.Connect(ctx, cfg, openBrowser, r.slackProgress)
 	case "status":
 		_, check := r.args.text("--check")
+		if check {
+			if err := r.open(ctx); err != nil {
+				return nil, err
+			}
+			reader.Audit = r.signInSteps("slack:read", "live")
+		}
 		return reader.Status(ctx, check, r.slackProgress)
 	}
 	_, revoke := r.args.text("--revoke")
+	if revoke {
+		if err := r.open(ctx); err != nil {
+			return nil, err
+		}
+		reader.Audit = r.signInSteps("slack:read", "live")
+	}
 	return reader.Disconnect(ctx, revoke, r.slackProgress)
 }
 

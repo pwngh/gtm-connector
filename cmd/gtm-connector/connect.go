@@ -270,7 +270,8 @@ func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string)
 				pinned, present = row.IdentitySHA256, true
 			}
 		}
-		saved, err := kind.attach(ctx, attaching{args: r.args, crm: crm, pinned: pinned})
+		saved, err := kind.attach(ctx, attaching{args: r.args, crm: crm, pinned: pinned,
+			step: r.signInSteps(kind.source+":read", holds)})
 		if err != nil {
 			return nil, nil, err
 		}

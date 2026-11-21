@@ -247,7 +247,8 @@ func validEnvironment(environment string) bool {
 }
 
 // attachSalesforce is what connect salesforce checks: the alias, the sign-in, the environment and, outside
-// Developer Edition, the four objects' fields. It reads no record. The row is saved with the alias and the
+// Developer Edition, the four objects' fields, the sign-in and the check each under a receipt of its step. It
+// reads no record. The row is saved with the alias and the
 // environment, and pinned to the org's identity and the user it reads as. The alias is saved, and so shown,
 // only once sf has named a login under it.
 //
@@ -270,8 +271,17 @@ func attachSalesforce(ctx context.Context, a attaching) (attached, error) {
 	if chosen, given := a.args.text("--environment"); given {
 		environment = chosen
 	}
+	// The sign-in and the org's check each run under a receipt of their step, committed first.
 	crm := &salesforceCRM{alias: alias, environment: environment, token: token}
-	identity, err := crm.identify(ctx, true)
+	var identity string
+	err := a.step(ctx, "connect_salesforce_login", crm.signIn)
+	if err == nil {
+		err = a.step(ctx, "connect_salesforce_org", func(ctx context.Context) error {
+			var err error
+			identity, err = crm.identify(ctx, true)
+			return err
+		})
+	}
 	switch {
 	case err != nil:
 		return attached{}, err
@@ -611,7 +621,7 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 
 	// Every request the check makes to sf or to the org runs under a receipt of its step, committed first.
 	c := &checkRun{from: from, run: "check-" + strings.ReplaceAll(receipts.RandomID(), "-", ""),
-		token: receipts.Fingerprint(randomToken())}
+		token: receipts.Fingerprint(randomToken()), scope: "crm:read"}
 	steps, passed := []any{}, true
 	var aborted error
 	step := func(name string, ready bool, operation func() (int, string, error)) bool {
@@ -741,12 +751,12 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 		"sf_cli_definition", "Attempted sf subprocess invocations, including failed launches."), nil
 }
 
-// checkRun is one run of the check: its receipts, each a crm:read call of a check tool in the run, in order.
-// A tool name of the check is no MCP tool, so it carries its scope itself.
+// checkRun is one run of a check or a sign-in: its receipts, each a call of one of its steps in the run, in
+// order, under its scope. A step's tool name is no MCP tool, so it carries its scope itself.
 type checkRun struct {
-	from       *reads
-	run, token string
-	requests   int
+	from              *reads
+	run, token, scope string
+	requests          int
 }
 
 // call reads under a receipt of the check, committed before the read.
@@ -756,8 +766,8 @@ func (c *checkRun) call(ctx context.Context, tool string, arguments *strictjson.
 		arguments = &strictjson.Object{}
 	}
 	c.requests++
-	_, records, err := c.from.call(ctx, toolCall{token: c.token, scopes: []string{"crm:read"}, run: c.run,
-		request: c.requests, tool: tool, scope: "crm:read", arguments: arguments}, read)
+	_, records, err := c.from.call(ctx, toolCall{token: c.token, scopes: []string{c.scope}, run: c.run,
+		request: c.requests, tool: tool, scope: c.scope, arguments: arguments}, read)
 	return records, err
 }
 

@@ -166,8 +166,13 @@ func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 	if _, message, _ := d.refusal(t, 5, "connect", "salesforce", "--org", "invented-alias", "--state-dir", "invented"); !strings.HasPrefix(message, "salesforce_auth_required:") {
 		t.Fatal(message)
 	}
-	if n := d.count(t, "SELECT (SELECT count(*) FROM workspaces WHERE slug <> 'demo') + (SELECT count(*) FROM connections)"); n != 0 {
-		t.Fatalf("a refused connect wrote %d rows", n)
+	// The refused sign-in keeps its receipt, finished as an error, in the workspace it was asked for, which
+	// is connected to nothing.
+	if n := d.count(t, "SELECT count(*) FROM connections"); n != 0 {
+		t.Fatalf("a refused connect wrote %d connections", n)
+	}
+	if got := d.audited(t, "invented"); got != "connect_salesforce_login:error:200:request_failed" {
+		t.Fatalf("the receipts of a refused connect: %s", got)
 	}
 	for _, tokens := range [][]string{{"accounts"}, {"brief", "acc-003"}, {"inspect", "acc-003"}} {
 		if _, message, _ := d.refusal(t, 2, append(tokens, "--state-dir", "invented")...); !strings.HasPrefix(message, "No CRM is connected.") {
@@ -197,7 +202,9 @@ func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 	if status.Sources["crm"]["provider"] != "salesforce" || removed.Status != "removed" || len(removed.Sources) != 0 {
 		t.Errorf("a Salesforce row: %+v, then %+v", status, removed)
 	}
-	if n := d.count(t, "SELECT (SELECT count(*) FROM receipts) + (SELECT count(*) FROM accounts) + (SELECT count(*) FROM cards)"); n != 0 {
+	// Past the refused sign-in's own receipt, the refused commands wrote nothing.
+	if n := d.count(t, "SELECT (SELECT count(*) FROM receipts WHERE tool <> 'connect_salesforce_login') + "+
+		"(SELECT count(*) FROM accounts) + (SELECT count(*) FROM cards)"); n != 0 {
 		t.Errorf("the refused commands wrote %d rows", n)
 	}
 }

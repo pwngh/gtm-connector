@@ -40,11 +40,17 @@ var (
 )
 
 // receiveConsent listens on the redirect's port and opens the browser at a start page of that listener:
-// http://localhost:PORT/start/ and a random path, which holds no state and no challenge. The first request
-// of that page is redirected to the authorization page made for a new state, and the page is gone after it.
-// The authorization page never reaches a process argument. The wait for the callback that carries the state
-// ends only at loginTime: the opener is not waited on, and its exit changes nothing. Given an approval's code
-// it runs finish, and answers the browser only after finish returns.
+// http://localhost:PORT/start/ and a random path, which holds no state and no challenge. The page is
+// answered once: the first request of its path is the only one, and the page is gone after it, whether it
+// was taken or refused. It is taken only from a request that comes from no other site and carries no
+// sign-in cookie, and then it redirects to the authorization page made for a new state and sets a cookie
+// of a random value, for the callback's path only. The callback is taken only with that cookie, so it comes
+// from the browser that loaded the start page. A process that reads the opener's argument and asks for the
+// page first leaves the operator's browser a 404, and the sign-in ends with no callback rather than with
+// that process's approval in the operator's name. The authorization page never reaches a process argument.
+// The wait for the callback that carries the state ends only at loginTime: the opener is not waited on, and
+// its exit changes nothing. Given an approval's code it runs finish, and answers the browser only after
+// finish returns.
 func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state string) string, open Browser,
 	finish func(ctx context.Context, code string) error) error {
 	ctx, cancel := context.WithTimeout(ctx, loginTime)
@@ -55,7 +61,7 @@ func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state
 		}
 		return refuse("slack_login_timeout")
 	}
-	state, start := randomText(32), "/start/"+randomText(32)
+	state, start, binding := randomText(32), "/start/"+randomText(32), randomText(32)
 	listeners, err := listenLoopback(cfg.port)
 	if err != nil {
 		return err
@@ -101,18 +107,24 @@ func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state
 			return timedOut()
 		}
 		path, query, headers, status := readRequest(ctx, conn, cfg.port)
-		if status == 0 && start != "" && path == start && query == "" && !fromElsewhere(headers) {
-			// The start page is served once, then is gone.
+		if status == 0 && start != "" && path == start {
+			// The start page is answered once, then is gone.
 			start = ""
-			respond(conn, 302, nil, "Location: "+page)
-			_ = conn.Close()
-			continue
+			if query == "" && !fromElsewhere(headers) && !crossSite(headers) && !carriesBinding(headers) {
+				respond(conn, 302, nil, "Location: "+page, "Set-Cookie: "+bindingCookie+"="+binding+
+					"; Path=/slack/callback; Max-Age="+strconv.Itoa(max(1, int(loginTime/time.Second)))+"; HttpOnly; SameSite=Lax")
+				_ = conn.Close()
+				continue
+			}
+			status = 400
 		}
 		var fields map[string]string
 		switch {
 		case status != 0:
 		case path != "/slack/callback":
 			status = 404
+		case !boundTo(headers, binding):
+			status = 400
 		default:
 			fields, status = callbackFields(query, headers, state)
 		}
@@ -152,6 +164,37 @@ func receiveConsent(ctx context.Context, cfg Configuration, authorize func(state
 func fromElsewhere(headers map[string]string) bool {
 	given, stated := headers["origin"]
 	return stated && given != "https://slack.com" && origin(given) != given
+}
+
+// bindingCookie names the cookie the start page sets and the callback must carry.
+const bindingCookie = "gtm_slack_sign_in"
+
+// crossSite is whether a browser says a request was made from a page of another site, or of another port of
+// this host. A browser that opens a page it was given says neither of the start page.
+func crossSite(headers map[string]string) bool {
+	site, stated := headers["sec-fetch-site"]
+	return stated && site != "none"
+}
+
+// cookies gives the values of the cookie named, among a Cookie header's pairs. A browser sends every cookie
+// of localhost to every port, so the pairs of other local programs are passed over.
+func cookies(headers map[string]string, name string) []string {
+	var values []string
+	for pair := range strings.SplitSeq(headers["cookie"], ";") {
+		if key, value, found := strings.Cut(strings.TrimSpace(pair), "="); found && key == name {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+// carriesBinding is whether a request carries a sign-in cookie already.
+func carriesBinding(headers map[string]string) bool { return len(cookies(headers, bindingCookie)) > 0 }
+
+// boundTo is whether a request carries the sign-in cookie once, with this sign-in's value.
+func boundTo(headers map[string]string, binding string) bool {
+	values := cookies(headers, bindingCookie)
+	return len(values) == 1 && subtle.ConstantTimeCompare([]byte(values[0]), []byte(binding)) == 1
 }
 
 // listenLoopback listens on 127.0.0.1 and ::1 at the port. A machine without one of the two families
