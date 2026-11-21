@@ -18,16 +18,17 @@ gtm deal thornfield-2027 --refresh  # read the sources again first
 | Deal card, in the main pane | What changed since you last looked, then the risks and blockers. |
 | Proof drawer | The record, or the whole sentence with its speaker, time and source, behind the line you clicked. |
 | Communications | The deal's calls and Slack threads in time order. |
+| Work queue | Your open blockers and playbook work, across all your deals. |
 
 ## The five steps
 
 1. **Your calls and Slack threads find the deal.** The connector matches them to your account by email, domain and channel. You do nothing.
 2. **Get a Slack alert when a renewal turns risky.** The alert names the rule that fired and links to the card.
 3. **Refresh before your call,** if you want the last few minutes. Scheduled reads already keep the card current.
-4. **Read the Deal card.** Click any line for its proof, work the checklist, or ask an assistant what is blocking the renewal.
+4. **Read the Deal card,** your 30-second renewal snapshot. Click any line for its source proof, track blockers on the checklist and playbook, or ask the council what is blocking the renewal.
 5. **The deal closes.** On Closed Won or Closed Lost the reads stop and the final card is sealed and archived.
 
-If your team turns approval on, new calls and threads wait for your OK before they reach the card.
+If your engineer has turned the matches queue on, new calls and threads wait for your OK first.
 
 ## What flags a deal
 
@@ -49,6 +50,9 @@ If a source was not read, a rule answers unknown, not silence.
 - **Promises you made:** seller sentences marked as commitments.
 - **Missing or unread sources.**
 
+If the account has two open deals, a call or thread about the account is on both cards, marked as
+shared.
+
 ## The checklist and playbooks
 
 The checklist lists the deal's open blockers, filled in from the flags. You can also mark any whole
@@ -62,11 +66,11 @@ A playbook turns a blocker into a plan. There are three: obtain the current ride
 renewal condition, and reconcile an approval conflict. A reviewer approves one plan revision and
 the evidence it cites. If either changes, then the review reopens.
 
-## Ask an assistant
+## Ask the council
 
-Claude, Codex or a local model reads the same deal, card and proof over MCP. Ask it what is
-blocking the renewal. Its answer cites stored records. It can propose marks, and you accept or
-reject each one.
+Ask "what is blocking this renewal?" and Claude, Codex and your local models each answer from the
+same deal, card and proof, over MCP. Where they disagree, you see it. Each answer cites stored
+records. A model can also propose marks, and you accept or reject each one.
 
 > **No model writes the card.** A model's answer is never card text, and a proposal becomes a mark
 > only when you accept it.

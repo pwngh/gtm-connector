@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,8 +30,11 @@ type Config struct {
 	// 127.0.0.1:8443 and localhost:8443. Anything else is refused, which
 	// also blocks DNS rebinding.
 	AllowedHosts []string
-	// WebDir holds the web app's build (index.html and assets/). Empty
-	// serves the API without the app.
+	// Web is the web app's build (index.html and assets/), such as the one
+	// inside the binary. Its files must be seekable, as an embed.FS's are.
+	// Nil serves the API without the app.
+	Web fs.FS
+	// WebDir, when set, is a folder holding the build, served instead of Web.
 	WebDir string
 	// SessionTTL is how long a signed-in session lasts; PreSessionTTL how
 	// long a sign-in CSRF token does.
@@ -49,13 +53,14 @@ type Config struct {
 // prefixes, each with anything below it.
 var DefaultClientRoutes = []string{"/renewals", "/queue", "/playbooks", "/operations"}
 
-// Sessions is the session storage the surface needs.
+// Sessions is the storage the surface needs: sessions, and for /healthz
+// whether the applied migrations are this binary's.
 type Sessions interface {
 	LiveSession(ctx context.Context, idSHA256 []byte) (postgres.Session, error)
 	SignIn(ctx context.Context, admitted postgres.Admission, idSHA256 []byte, principal postgres.Principal, ttl time.Duration) (time.Time, error)
 	RevokeSession(ctx context.Context, idSHA256 []byte) error
 	DemoPrincipalByLogin(ctx context.Context, login string) (postgres.Principal, []byte, error)
-	Ping(ctx context.Context) error
+	MigrationsCurrent(ctx context.Context) (bool, error)
 }
 
 // Server is the browser surface.
@@ -65,8 +70,9 @@ type Server struct {
 	evidence authz.Evidence
 	hosts    map[string]bool
 	host     string // the public origin's host
-	web      *os.Root
-	policy   string // the Content-Security-Policy of every response
+	web      fs.FS
+	webDir   *os.Root // the folder behind web, when it is one
+	policy   string   // the Content-Security-Policy of every response
 	mux      *http.ServeMux
 }
 
@@ -93,7 +99,7 @@ func New(cfg Config, sessions Sessions, evidence authz.Evidence) (*Server, error
 		cfg.ClientRoutes = DefaultClientRoutes
 	}
 	s := &Server{cfg: cfg, sessions: sessions, evidence: evidence, hosts: map[string]bool{},
-		host: strings.ToLower(origin.Host), policy: basePolicy}
+		host: strings.ToLower(origin.Host), policy: fmt.Sprintf(basePolicy, ""), web: cfg.Web}
 	for _, host := range cfg.AllowedHosts {
 		s.hosts[strings.ToLower(host)] = true
 	}
@@ -105,9 +111,11 @@ func New(cfg Config, sessions Sessions, evidence authz.Evidence) (*Server, error
 		if err != nil {
 			return nil, fmt.Errorf("web app folder: %w", err)
 		}
-		s.web = root
-		if s.policy, err = policyFor(root); err != nil {
-			root.Close()
+		s.webDir, s.web = root, root.FS()
+	}
+	if s.web != nil {
+		if s.policy, err = policyFor(s.web); err != nil {
+			s.Close()
 			return nil, err
 		}
 	}
@@ -117,8 +125,8 @@ func New(cfg Config, sessions Sessions, evidence authz.Evidence) (*Server, error
 
 // Close releases the web app folder.
 func (s *Server) Close() error {
-	if s.web != nil {
-		return s.web.Close()
+	if s.webDir != nil {
+		return s.webDir.Close()
 	}
 	return nil
 }
@@ -273,6 +281,9 @@ func (s *Server) checkOrigin(r *http.Request) (code, message string) {
 	return "", ""
 }
 
+// healthz answers ok when the database answers and its applied migrations
+// are this binary's. Otherwise it answers 503 with one of two fixed
+// statuses, never with the error, which can name the database.
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET.")
@@ -280,11 +291,13 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	if err := s.sessions.Ping(ctx); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "database_unavailable"})
-		return
+	code, status := http.StatusOK, "ok"
+	if current, err := s.sessions.MigrationsCurrent(ctx); err != nil {
+		code, status = http.StatusServiceUnavailable, "database_unavailable"
+	} else if !current {
+		code, status = http.StatusServiceUnavailable, "migrations_not_current"
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, code, map[string]string{"status": status})
 }
 
 type apiError struct {

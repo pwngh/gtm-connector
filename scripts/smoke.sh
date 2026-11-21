@@ -2,14 +2,25 @@
 # After `make up`.
 #
 #   scripts/smoke.sh        the server answers over TLS with this install's certificate, refuses a
-#                           foreign Host, signs in the demo principal, and runs the commit it was built from
+#                           foreign Host, serves the web app from the binary alone, signs in the demo
+#                           principal, and runs the commit it was built from
 #   scripts/smoke.sh demo   publish the demo cards, as the app role inside the app container
 #   scripts/smoke.sh card   print acc-003's newest card, ID and SHA-256, after checking the bytes the API
 #                           gives against both digests it states
 set -eu
 cd "$(dirname "$0")/.."
 . ./.env
-compose="${COMPOSE:-docker compose}"
+# The same choice the Makefile makes: the Compose plugin, or the standalone docker-compose.
+if [ -n "${COMPOSE:-}" ]; then
+  compose="$COMPOSE"
+elif docker compose version >/dev/null 2>&1; then
+  compose="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  compose="docker-compose"
+else
+  echo "Docker Compose was not found (docker compose or docker-compose)." >&2
+  exit 1
+fi
 creds="$GTM_HOME/credentials"
 base="https://127.0.0.1:$GTM_PORT"
 jar="$(mktemp)"
@@ -52,6 +63,10 @@ esac
 
 $compose exec -T app /app/gtm-connector health
 test "$(curl -sS --cacert "$creds/tls.pem" -o /dev/null -w '%{http_code}' -H "Host: evil.example:$GTM_PORT" "$base/healthz")" = 421
+# The image holds the binary and no web folder; a deep link gets the app's page, whose script is served.
+test "$($compose exec -T app ls /app)" = gtm-connector
+asset="$(fetch "$base/renewals/r-1/evidence" | grep -o '/assets/[^"]*\.js' | head -n 1)"
+test "$(fetch -o /dev/null -w '%{content_type}' "$base$asset")" = 'text/javascript; charset=utf-8'
 sign_in
 fetch "$base/api/v1/session" | python3 -c '
 import json, sys

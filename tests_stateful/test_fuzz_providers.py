@@ -47,7 +47,7 @@ def fuzz(quick, share=1.0):
 
 def documented(page, prefix):
     """The reason codes listed under Errors in one docs page."""
-    errors = (ROOT / "docs" / page).read_text().split("\n## Errors\n", 1)[1].split("\n## ", 1)[0]
+    errors = (ROOT / "docs" / "python" / page).read_text().split("\n## Errors\n", 1)[1].split("\n## ", 1)[0]
     return frozenset(re.findall(rf"`({prefix}_[a-z_]+)`", errors))
 
 
@@ -622,7 +622,7 @@ def flag_of(row, field):
 
 
 def account(row):
-    """The record docs/salesforce.md maps one Account row to. The other builders follow the same table."""
+    """The record docs/python/salesforce.md maps one Account row to. The other builders follow the same table."""
     return {"id": "acc-sf-" + native(row["Id"]), "source_id": row["Id"], "backend": "salesforce",
             "name": text_of(row, "Name"), "industry": text_of(row, "Industry", True),
             "account_number": text_of(row, "AccountNumber", True)}
@@ -1072,7 +1072,7 @@ def micros(value):
 
 
 def observed(row):
-    """What docs/slack.md says one accepted row becomes. Anything it says to refuse raises."""
+    """What docs/python/slack.md says one accepted row becomes. Anything it says to refuse raises."""
     stamp, subtype, body = row["ts"], row.get("subtype"), row["text"]
     # The placeholder Slack leaves for a deleted parent is kept, hidden or not. Nothing else may be hidden.
     placeholder = (subtype == "tombstone" and stamp == PARENT and row.get("user") == "USLACKBOT"

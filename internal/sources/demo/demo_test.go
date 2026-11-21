@@ -2,6 +2,7 @@ package demo
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"math/big"
 	"testing"
@@ -43,8 +44,8 @@ func refs(records []*strictjson.Object) []string {
 }
 
 func TestReads(t *testing.T) {
-	s := book(t)
-	system, records, err := s.Read("get_account", "acc-003")
+	s, ctx := book(t), context.Background()
+	system, records, err := s.Read(ctx, "get_account", "acc-003")
 	if err != nil || system != "crm" {
 		t.Fatal(system, err)
 	}
@@ -59,14 +60,14 @@ func TestReads(t *testing.T) {
 	if arr, _ := account.Get("arr_cents"); arr.(*big.Int).Sign() <= 0 {
 		t.Fatalf("arr_cents: %v", arr)
 	}
-	_, notes, _ := s.Read("read_call_notes", "acc-003")
+	_, notes, _ := s.Read(ctx, "read_call_notes", "acc-003")
 	if got := refs(notes); len(got) != 2 || got[0] != "calls/call_notes/note-003" || got[1] != "calls/call_notes/note-003b" {
 		t.Fatalf("call notes by ID: %v", got)
 	}
-	if _, _, err := s.Read("get_account", "acc-999"); !errors.Is(err, ErrAccountNotFound) {
+	if _, _, err := s.Read(ctx, "get_account", "acc-999"); !errors.Is(err, ErrAccountNotFound) {
 		t.Fatalf("an unknown account: %v", err)
 	}
-	if _, messages, err := s.Read("read_slack_messages", "acc-005"); err != nil || len(messages) != 0 {
+	if _, messages, err := s.Read(ctx, "read_slack_messages", "acc-005"); err != nil || len(messages) != 0 {
 		t.Fatalf("an account with no message: %v %v", messages, err)
 	}
 }
@@ -77,7 +78,7 @@ func TestInsert(t *testing.T) {
 	if err := s.Insert("slack", "messages", row); err != nil {
 		t.Fatal(err)
 	}
-	_, messages, _ := s.Read("read_slack_messages", "acc-003")
+	_, messages, _ := s.Read(context.Background(), "read_slack_messages", "acc-003")
 	if got := refs(messages); len(got) != 2 || got[0] != "slack/messages/msg-003" || got[1] != "slack/messages/msg-900-001" {
 		t.Fatalf("messages by ID: %v", got)
 	}

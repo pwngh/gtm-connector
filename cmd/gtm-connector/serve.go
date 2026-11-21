@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -17,6 +18,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/authz"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	httptransport "github.com/pwngh/gtm-connector/internal/transport/http"
+	"github.com/pwngh/gtm-connector/web"
 )
 
 // openAppStore connects as the app role, as serve and demo do. It refuses a
@@ -81,9 +83,11 @@ func serve(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	app := web.App()
 	surface, err := httptransport.New(httptransport.Config{
 		PublicOrigin: c.publicOrigin,
 		AllowedHosts: c.allowedHosts,
+		Web:          app,
 		WebDir:       c.webDir,
 		SessionKey:   key,
 	}, store, authz.Evidence{Store: store})
@@ -100,11 +104,15 @@ func serve(ctx context.Context, args []string) error {
 	go housekeeping(ctx, store, logger)
 	served := make(chan error, 1)
 	go func() { served <- server.ServeTLS(listener, "", "") }()
-	web := c.webDir
-	if web == "" {
-		web = "none (API only)"
+	from := c.webDir
+	switch {
+	case from != "":
+	case app != nil:
+		from = "the build inside the binary"
+	default:
+		from = "none (API only)"
 	}
-	logger.Info("serving", "origin", c.publicOrigin, "listen", c.listen, "web", web,
+	logger.Info("serving", "origin", c.publicOrigin, "listen", c.listen, "web", from,
 		"credentials", c.credentialsDir)
 	select {
 	case err := <-served:
@@ -215,7 +223,7 @@ func health(ctx context.Context, args []string) error {
 	defer response.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("healthz answered %d: %s", response.StatusCode, body)
+		return fmt.Errorf("healthz answered %d: %s", response.StatusCode, bytes.TrimSpace(body))
 	}
 	fmt.Printf("%s", body)
 	return nil

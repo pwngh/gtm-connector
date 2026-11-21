@@ -2,6 +2,7 @@
 #
 #   make dev                  PostgreSQL in Compose, the connector on this machine
 #   make up                   everything in Compose
+#   make build                build/gtm-connector, one binary with the web app inside it
 #   make demo                 publish a card for each demo account that holds none
 #   make down                 stop; the database and credentials are kept
 #   make backup               back up the database and the credentials folder
@@ -11,8 +12,8 @@
 #
 # Add POSTGRES=18.7 to any of them to use the pinned fallback PostgreSQL, on
 # its own volume. Go and Node are pinned too (pins.json): dev, test and every
-# Go build here refuse another Go, and dev another Node (nvm use reads
-# .nvmrc). The first run writes .env (random passwords for the owner
+# Go build here refuse another Go, and dev and build another Node (nvm use
+# reads .nvmrc). The first run writes .env (random passwords for the owner
 # and app roles, your user IDs, and GTM_HOME, the folder holding
 # credentials/ and backups/). Recipes never name a password: scripts read
 # .env when they run, so `make -n` shows none.
@@ -43,10 +44,10 @@ GTM_PORT = $(shell sed -n 's/^GTM_PORT=//p' .env 2>/dev/null)
 GTM_DB_PORT = $(shell sed -n 's/^GTM_DB_PORT=//p' .env 2>/dev/null)
 
 WEB_SOURCES := $(shell find web/src web/public web/index.html web/vite.config.js web/package.json web/package-lock.json -type f 2>/dev/null)
-GO_SOURCES := go.mod go.sum $(shell find cmd internal -name '*.go' -o -name '*.sql')
+GO_SOURCES := go.mod go.sum web/embed.go $(shell find cmd internal -name '*.go' -o -name '*.sql')
 
-.PHONY: help env dev up down db demo backup restore test vet psql logs clean require-compose state verify-real \
-	go-version node-version
+.PHONY: help env dev build up down db demo backup restore test vet psql logs clean require-compose state \
+	verify-real go-version node-version
 
 help: ## List the targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -76,8 +77,13 @@ db: require-compose state ## Start PostgreSQL and make its port answer on 127.0.
 web/dist/index.html: $(WEB_SOURCES) | node-version
 	cd web && npm ci --no-audit --no-fund && npm run build
 
+# Go compiles in whatever build web/dist holds (web/embed.go). dev and demo
+# do not need one inside the binary, so this rule does not ask for Node.
 build/gtm-connector: $(GO_SOURCES) | go-version
 	go build -o $@ ./cmd/gtm-connector
+
+build: go-version web/dist/index.html ## Build build/gtm-connector with the current web app inside it
+	go build -o build/gtm-connector ./cmd/gtm-connector
 
 dev: go-version node-version db web/dist/index.html build/gtm-connector ## Run the connector here, on PostgreSQL in Compose
 	@$(COMPOSE) stop app >/dev/null 2>&1 || true
