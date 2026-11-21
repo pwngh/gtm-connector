@@ -7,14 +7,15 @@ import (
 )
 
 // debug is the Python CLI's group of commands that work on one source by hand. This build runs debug calls
-// (calls.go) and debug slack; each other command of the group is refused by name.
+// (calls.go), debug salesforce (source_salesforce.go) and debug slack; each other command of the group is
+// refused by name.
 
 // debugCommands are the commands under debug, as the Python CLI lists them.
 var debugCommands = []string{"serve", "doctor", "verify", "completion", "salesforce", "calls", "slack"}
 
 // debugInBuild are the commands under debug this build runs, each with its runner.
 var debugInBuild = map[string]func(ctx context.Context, tokens []string, s screen) int{
-	"calls": runCalls, "slack": debugSlack}
+	"calls": runCalls, "salesforce": debugSalesforce, "slack": debugSlack}
 
 const debugHelp = `usage: gtm-connector debug [-h] [--json] COMMAND ...
 
@@ -24,6 +25,9 @@ positional arguments:
   COMMAND
     calls     Import and inspect private transcript exports without
               contacting a call provider.
+    salesforce
+              Check Salesforce setup and a renewal brief without printing
+              org records.
     slack     Manage Slack authentication, select a thread, or check its
               audited read.
 
@@ -31,7 +35,7 @@ options:
   -h, --help  show this help message and exit
   --json      Write the documented JSON result for scripts.
 
-Not in this build: serve, doctor, verify, completion, salesforce.
+Not in this build: serve, doctor, verify, completion.
 
 Example: gtm-connector debug slack status
 `

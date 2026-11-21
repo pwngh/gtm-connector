@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -207,12 +208,13 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 }
 
 // notConnected is the refusal of a workspace with no CRM, with what this build connects. When Salesforce
-// can be attached, it is the Python CLI's own advice.
+// can be attached, it is the Python CLI's own advice, with the workspace named: the default one holds demo
+// data, so Salesforce goes in one named with --state-dir.
 func (r *run) notConnected() *failure {
 	advice := "Run gtm-connector connect demo" + r.here() + " for invented data."
 	if kindsNamed("salesforce")[0].attach != nil {
-		advice = "Run gtm-connector connect salesforce --org ALIAS" + r.here() + ", or gtm-connector connect demo" +
-			r.here() + " for invented data."
+		advice = "Run gtm-connector connect salesforce --org ALIAS" + cmp.Or(r.here(), " --state-dir NAME") +
+			", or gtm-connector connect demo" + r.here() + " for invented data."
 	}
 	return &failure{code: 2, next: "gtm-connector connect --help", message: "No CRM is connected. " + advice}
 }

@@ -72,6 +72,44 @@ gtm brief acc-007 --state-dir renewals
   finishes meanwhile is either seen or refused.
 - With `--json`, format characters such as bidirectional controls are written as `\uXXXX` escapes.
 
+## Connect Salesforce
+
+Sign in with [`sf`](https://developer.salesforce.com/tools/salesforcecli) under an alias, then
+connect a workspace of its own to that org. The default workspace holds demo data, so name one
+with `--state-dir` and give every later command the same name.
+
+```sh
+sf org login web --alias gtm-de
+gtm debug salesforce check --sf-org gtm-de --state-dir gtm-de
+gtm connect salesforce --org gtm-de --state-dir gtm-de --seller 'Morgan Reed'
+gtm debug salesforce check --state-dir gtm-de
+gtm accounts --query SEARCH_TEXT --state-dir gtm-de
+gtm brief ACCOUNT_ID --state-dir gtm-de
+gtm mcp stdio --scope crm:read --state-dir gtm-de
+```
+
+- `--org` takes an `sf` alias only: 1 to 64 letters, digits, dots, hyphens or underscores. Anything
+  else, such as a username or a token, is refused before `sf` runs, and the alias is saved only once
+  `sf org display` names a login under it.
+- `connect salesforce` reads the alias's login through `sf`, checks the org against `--environment`
+  (`developer` by default, `sandbox` or `production`) and pins the workspace to the org's address,
+  ID and environment and to the user the login reads as. It saves the alias, the environment and a
+  digest of that identity, never the token, address, org ID or user, and reads no record. The
+  workspace refuses any other org or user, also after `connect salesforce --remove`.
+- Each later command signs in again on its first read and compares the pin before it describes or
+  reads anything. A login refreshed during a read must be the same org and user. Every read is a
+  tool call under a receipt that `audit` lists.
+- `debug salesforce check --sf-org ALIAS --state-dir NAME` checks the sign-in, the environment and
+  the four objects' fields before anything is connected, and reads no record. `--state-dir NAME`
+  alone checks a connected workspace and adds an account search, the contract a renewal plans from,
+  and that account's reads. Every step's requests to `sf` and the org run under a receipt committed
+  first, kept in the named workspace. The report holds counts and codes, no record. A failed check
+  prints its report and exits 4.
+- `mcp stdio --state-dir NAME` and `serve`'s `/mcp` serve the workspace's CRM to MCP clients. `serve`
+  answers each token in the workspace it was issued in. A token reads the accounts the workspace
+  holds, which `brief` lists there.
+- A token handed to the container instead of `sf` is not read yet.
+
 ## Health
 
 `/healthz` answers 200 `{"status":"ok"}` when the database is reachable and its applied migrations
@@ -196,18 +234,12 @@ Until it finishes, setup and the server refuse to start.
 
 ## Slack
 
-Live Slack sits beside a real CRM. Connect one to the workspace first; `gtm connect --help` lists the
-sources this build connects, and a workspace that reads the demo data refuses live Slack. The sign-in
-needs no CRM, so it can come first.
+Live Slack sits beside a real CRM, so it goes in a workspace of its own; a workspace that reads the
+demo data refuses it.
 
 ```sh
+gtm connect salesforce --org ALIAS --state-dir acme
 gtm debug slack connect --client-id PUBLIC_CLIENT_ID --redirect-uri http://localhost:8765/slack/callback --state-dir acme
-gtm debug slack status --check --state-dir acme
-```
-
-With a real CRM connected to `acme`:
-
-```sh
 gtm connect slack --state-dir acme
 gtm debug slack map --account ACCOUNT_ID --thread-url 'COPIED_THREAD_LINK' --state-dir acme
 gtm debug slack check --account ACCOUNT_ID --state-dir acme

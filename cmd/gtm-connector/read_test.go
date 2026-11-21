@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -219,16 +220,17 @@ func TestBriefWithoutCallsInANamedWorkspace(t *testing.T) {
 // source the read commands do not read is refused by name and never read as demo data.
 func TestReadCommandsRefuseWhatIsNotConnected(t *testing.T) {
 	d := setUpDemo(t)
-	const advice = "No CRM is connected. Run gtm-connector connect demo%[1]s for invented data."
+	const advice = "No CRM is connected. Run gtm-connector connect salesforce --org ALIAS%[1]s, or gtm-connector " +
+		"connect demo%[2]s for invented data."
 	for _, tokens := range [][]string{{"accounts"}, {"brief", "acc-003"}, {"inspect", "acc-003"},
 		{"brief", "not an account"}} {
 		if code, message, next := d.refusal(t, 2, tokens...); code != "usage_error" ||
-			message != strings.ReplaceAll(advice, "%[1]s", "") || next != "gtm-connector connect --help" {
+			message != fmt.Sprintf(advice, " --state-dir NAME", "") || next != "gtm-connector connect --help" {
 			t.Errorf("%v: %s, %s", tokens, message, next)
 		}
 	}
 	if _, message, _ := d.refusal(t, 2, "accounts", "--state-dir", "other"); message !=
-		strings.ReplaceAll(advice, "%[1]s", " --state-dir other") {
+		fmt.Sprintf(advice, " --state-dir other", " --state-dir other") {
 		t.Errorf("accounts in a workspace that does not exist: %s", message)
 	}
 	if code, stdout, stderr := d.read(t, "audit", "--json"); code != 0 || stdout != "[]\n" || stderr != "" {
@@ -258,12 +260,14 @@ func TestReadCommandsRefuseWhatIsNotConnected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.owner.EnsureConnection(ctx, live, "crm", "sf"); err != nil {
+	// A Salesforce token handed to the container is not read in this build.
+	if _, err := d.owner.EnsureConnection(ctx, live, "crm", "env_token"); err != nil {
 		t.Fatal(err)
 	}
 	for _, tokens := range [][]string{{"accounts"}, {"brief", "acc-003"}, {"inspect", "acc-003"}} {
 		code, message, _ := d.refusal(t, 3, append(tokens, "--state-dir", "live-one")...)
-		if code != "refused" || message != "This workspace is connected to Salesforce, which this command does not read yet." {
+		if code != "refused" || message != "This workspace is connected to a Salesforce token handed to the container, "+
+			"which this command does not read yet." {
 			t.Errorf("%v on Salesforce: %s, %s", tokens, code, message)
 		}
 	}

@@ -7,9 +7,11 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -19,8 +21,21 @@ const ConnectTime = 3 * time.Second
 // Dial opens the TCP connection to an address.
 type Dial func(ctx context.Context, network, address string) (net.Conn, error)
 
-// Direct dials the address itself.
-var Direct Dial = (&net.Dialer{Timeout: ConnectTime}).DialContext
+// Live is whether this process may reach a real source: dial out with Direct, or run the sf program. Only
+// the program's main sets it. A test that reads a source gives the reader its own transport and runner, and
+// any path left to the defaults is refused before it dials or starts anything.
+var Live atomic.Bool
+
+// ErrNotLive is a dial or a program refused in a process where Live is not set.
+var ErrNotLive = errors.New("sourcehttp: this process does not reach real sources")
+
+// Direct dials the address itself, once Live is set.
+var Direct Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+	if !Live.Load() {
+		return nil, ErrNotLive
+	}
+	return (&net.Dialer{Timeout: ConnectTime}).DialContext(ctx, network, address)
+}
 
 // Transport is a transport that checks the server's certificate against roots, where nil is the system's,
 // for the name the request is sent to, with TLS 1.2 or later. It takes no proxy and asks for no
