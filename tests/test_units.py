@@ -104,6 +104,28 @@ class NeutralizedText(unittest.TestCase):
             safe = safe_text(raw)[0]
             self.assertEqual(safe_text(safe), (safe, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}))
 
+    def test_a_link_with_an_ambiguous_host_shows_no_host(self):
+        # A browser reads a backslash before the path as a slash, so it opens evil.example here.
+        for raw, safe in (("<http://evil.example\\@good.example/|deck>", "deck [link unknown host]"),
+                          ("http://evil.example\\@good.example/ now", "[link unknown host] now"),
+                          ("[deck](http://evil.example\\@good.example/)", "deck [link unknown host]"),
+                          ("<//evil.example\\@good.example|deck>", "deck [link unknown host]"),
+                          ("<C:\\path|deck>", "deck [link unknown host]"),
+                          # A control character in the host, or anywhere before the path.
+                          ("<http://a\tb.example/x|deck>", "deck [link unknown host]"),
+                          ("<http://a\rb.example/x|deck>", "deck [link unknown host]"),
+                          ("<http://user\x00@good.example/|deck>", "deck [link unknown host]"),
+                          ("<ht\ttp://good.example/|deck>", "deck [link unknown host]"),
+                          ("http://good\x7f.example/x now", "[link unknown host] now"),
+                          ("http://\x9f@good.example/x now", "[link unknown host] now"),
+                          # An ordinary link, and a link with either character after its host, keep the host.
+                          ("<http://files.example/x|deck>", "deck [link files.example]"),
+                          ("<https://user@files.example:8443/x?q=1#f|deck>", "deck [link files.example]"),
+                          ("<http://files.example/a\\b|deck>", "deck [link files.example]"),
+                          ("<http://files.example/a\tb|deck>", "deck [link files.example]"),
+                          ("<http://files.example?a\\@b|deck>", "deck [link files.example]")):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+
     def test_sentences_are_whole_and_lose_nothing(self):
         text = 'Dr. No will not sign. "We agreed." Then what? e.g. nothing here!\n\nA new line (v. 3.5) ends'
         found = sentences(text)

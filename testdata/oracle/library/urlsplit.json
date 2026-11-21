@@ -37,7 +37,7 @@
    "port": {
     "ok": null
    },
-   "host": "ab.example"
+   "host": "unknown host"
   },
   {
    "input": "http://evil.example\\@good.example/",
@@ -56,7 +56,7 @@
    "port": {
     "ok": null
    },
-   "host": "good.example"
+   "host": "unknown host"
   },
   {
    "input": "https://A.Example:8443/p",
@@ -584,7 +584,7 @@
    "port": {
     "ok": null
    },
-   "host": "ab.example"
+   "host": "unknown host"
   },
   {
    "input": "http://a\u0000b.example/",
@@ -1116,7 +1116,7 @@
    "port": {
     "ok": null
    },
-   "host": "c"
+   "host": "unknown host"
   },
   {
    "input": "\\\\server\\share",
@@ -1365,6 +1365,272 @@
     "ok": null
    },
    "host": "unknown host"
+  },
+  {
+   "input": "//evil.example\\@good.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "evil.example\\@good.example",
+     "",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "evil.example\\@good.example",
+   "urlsplit": {
+    "ok": [
+     "",
+     "",
+     "evil.example\\@good.example",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://good.example:80\\@evil.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "good.example:80\\@evil.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "evil.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://user\u0000@good.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "user\u0000@good.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "ht\ttp://good.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "good.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "\u0001http://good.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "good.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://good\u007f.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "good\u007f.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good\u007f.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://\u009f@good.example/",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "\u009f@good.example",
+     "/",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http:/\t/evil.example\\@good.example/x//",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "evil.example\\@good.example",
+     "/x//",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "unknown host"
+  },
+  {
+   "input": "http://good.example/a\\b",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "good.example",
+     "/a\\b",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "http://good.example/a\tb",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "good.example",
+     "/ab",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "http://good.example?a\\@b",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "good.example",
+     "",
+     "a\\@b",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "http://good.example#a\\@b",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "good.example",
+     "",
+     "",
+     "a\\@b"
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": null
+   },
+   "host": "good.example"
+  },
+  {
+   "input": "http://user@good.example:8443/x",
+   "urlsplit": {
+    "ok": [
+     "http",
+     "user@good.example:8443",
+     "/x",
+     "",
+     ""
+    ]
+   },
+   "hostname": {
+    "ok": "good.example"
+   },
+   "port": {
+    "ok": 8443
+   },
+   "host": "good.example"
   },
   {
    "input": "<https://a.example/x|label>",
@@ -1877,7 +2143,7 @@
    "port": {
     "ok": null
    },
-   "host": "webvttkind"
+   "host": "unknown host"
   },
   {
    "input": "WEBVTT\n\n00:00.000 --> 00:01.000\nhello\n\nNOTE ",
@@ -1896,7 +2162,7 @@
    "port": {
     "ok": null
    },
-   "host": "webvtt00"
+   "host": "unknown host"
   },
   {
    "input": "WEBVTT\n\n00:00.000 --> 00:01.000 ",
@@ -1915,7 +2181,7 @@
    "port": {
     "ok": null
    },
-   "host": "webvtt00"
+   "host": "unknown host"
   },
   {
    "input": "WEBVTT\n\n00:00.000 ",
@@ -1934,7 +2200,7 @@
    "port": {
     "ok": null
    },
-   "host": "webvtt00"
+   "host": "unknown host"
   },
   {
    "input": "WEBVTT\n\n00:00.000 --> 00:01.000\n",
@@ -1953,7 +2219,7 @@
    "port": {
     "ok": null
    },
-   "host": "webvtt00"
+   "host": "unknown host"
   },
   {
    "input": "00:",
@@ -1991,7 +2257,7 @@
    "port": {
     "ok": null
    },
-   "host": "language"
+   "host": "unknown host"
   },
   {
    "input": "00:00.000 --> 00:01.000\nhi\n\n",
@@ -2010,7 +2276,7 @@
    "port": {
     "ok": null
    },
-   "host": "00"
+   "host": "unknown host"
   },
   {
    "input": "1\n00:00.000 --> 00:01.000\nhi\n\n",
@@ -2029,7 +2295,7 @@
    "port": {
     "ok": null
    },
-   "host": "100"
+   "host": "unknown host"
   },
   {
    "input": "\n\n00:00.000 --> 00:01.000\nhello\n",
@@ -2048,7 +2314,7 @@
    "port": {
     "ok": null
    },
-   "host": "00"
+   "host": "unknown host"
   },
   {
    "input": "--> 00:01.000\nhello",
@@ -2086,7 +2352,7 @@
    "port": {
     "ok": null
    },
-   "host": "00"
+   "host": "unknown host"
   },
   {
    "input": "Seats: 40 -> 55? [crm/accounts/acc-001]",

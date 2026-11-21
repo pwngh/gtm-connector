@@ -98,7 +98,7 @@ var ErrNoOracle = errors.New("no oracle digests")
 const (
 	oraclePython  = "3.14.6"
 	oracleUnicode = "16.0.0"
-	oraclePackage = "061bdd04ce4937d48f6d60117117aebfc2275d222022def853e664365f69736c"
+	oraclePackage = "12a496d931618c7072e0921d371afd364a7114c4807445a5e347a57b44a6af1f"
 )
 
 // portOutputs runs the Go port on an item; a test replaces it to check that every function is counted.

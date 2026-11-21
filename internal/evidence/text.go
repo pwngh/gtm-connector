@@ -52,6 +52,9 @@ func linkHost(target []rune) string {
 	if !strings.Contains(string(head), "//") {
 		url = append([]rune("//"), target...)
 	}
+	if ambiguousAuthority(url) {
+		return "unknown host"
+	}
 	host := []rune{}
 	if parts, err := splitURL(url); err == nil {
 		host = u.Lower([]rune(hostName(parts.Netloc)))
@@ -68,6 +71,26 @@ func linkHost(target []rune) string {
 		}
 	}
 	return string(host)
+}
+
+// ambiguousAuthority is whether a link holds a backslash or a control character between its start and the
+// end of its authority: through the first //, up to the next /, ? or #. A browser reads a backslash there as
+// a slash and drops a tab or a line break, so urlsplit and a browser can name different hosts.
+func ambiguousAuthority(link []rune) bool {
+	end := len(link)
+	for i := 0; i+1 < len(link); i++ {
+		if link[i] == '/' && link[i+1] == '/' {
+			for end = i + 2; end < len(link) && !in(link[end], "/?#"); end++ {
+			}
+			break
+		}
+	}
+	for _, c := range link[:end] {
+		if c < 0x20 || c >= 0x7F && c <= 0x9F || c == '\\' {
+			return true
+		}
+	}
+	return false
 }
 
 // id is _ID.fullmatch: a letter or digit, then up to 127 letters, digits, underscores or hyphens.

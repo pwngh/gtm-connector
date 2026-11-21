@@ -122,6 +122,9 @@ _MARKDOWN_LINK = re.compile(r"\[([^\[\]\n]*)\]\(\s*([^\s()]+)\s*\)")
 _RAW_LINK = re.compile(r"(?:[a-z][a-z0-9+.-]{0,31}://|mailto:|(?<![a-z0-9])www\.|(?<![a-z0-9:/])//(?=[a-z0-9]))"
                        r"[^\s<>\"']*", re.IGNORECASE)
 _IS_TARGET = re.compile(_TARGET, re.IGNORECASE)
+# A browser reads a backslash before a link's path as a slash and drops a tab or a line break, so urlsplit and a
+# browser can name different hosts. A link with a backslash or a control character there is shown with no host.
+_AMBIGUOUS = re.compile(r"[\x00-\x1f\x7f-\x9f\\]")
 # The longest speaker label a card shows. A longer one is no label.
 MAX_LABEL = 200
 # A time in this form is shown as given. Any other time is source text and is shown as a neutralized literal.
@@ -149,8 +152,13 @@ _ENDED = re.compile(r"""[.!?\u3002\uff01\uff1f\u0964\u061f\u06d4]["')\]\u201d\u2
 def _host(target):
     if target.lower().startswith("mailto:"):
         return "mail"
+    link = target if "//" in target[:40] else "//" + target
+    # The scheme and the authority: what comes before the first //, and after it up to the next /, ? or #.
+    scheme, _, rest = link.partition("//")
+    if _AMBIGUOUS.search(scheme + re.split("[/?#]", rest, maxsplit=1)[0]):
+        return "unknown host"
     try:
-        host = (urlsplit(target if "//" in target[:40] else "//" + target).hostname or "").lower()
+        host = (urlsplit(link).hostname or "").lower()
     except ValueError:
         host = ""
     # A host is shown without a leading www., which a client would turn back into a link.

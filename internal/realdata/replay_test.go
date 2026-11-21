@@ -13,7 +13,7 @@ import (
 )
 
 // The package digest the oracle fixtures were made from (testdata/oracle/manifest.json).
-const frozenPackage = "061bdd04ce4937d48f6d60117117aebfc2275d222022def853e664365f69736c"
+const frozenPackage = "12a496d931618c7072e0921d371afd364a7114c4807445a5e347a57b44a6af1f"
 
 func readGzipLines(t *testing.T, path string) []string {
 	t.Helper()

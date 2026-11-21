@@ -351,10 +351,6 @@ func TestDifferencesStillMatchOracle(t *testing.T) {
 			Input     string   `json:"input"`
 			Sentences []string `json:"sentences"`
 		} `json:"sentences"`
-		Hosts map[string]struct {
-			Input    string `json:"input"`
-			SafeText string `json:"safe_text"`
-		} `json:"hosts"`
 	}
 	oracletest.JSON(t, "library/differences.json", &fixture)
 	once, _, _ := SafeText(fixture.SafeTextTwice.Input)
@@ -367,9 +363,35 @@ func TestDifferencesStillMatchOracle(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", name, got, c.Sentences)
 		}
 	}
-	for name, c := range fixture.Hosts {
-		if got, _, _ := SafeText(c.Input); got != c.SafeText {
-			t.Errorf("%s: got %q, want %q", name, got, c.SafeText)
+}
+
+// A link with a backslash or a control character up to the end of its authority shows no host. The cases are
+// those of test_a_link_with_an_ambiguous_host_shows_no_host in tests/test_units.py.
+func TestAmbiguousLinkHost(t *testing.T) {
+	for _, c := range [][2]string{
+		// A browser reads a backslash before the path as a slash, so it opens evil.example here.
+		{`<http://evil.example\@good.example/|deck>`, "deck [link unknown host]"},
+		{`http://evil.example\@good.example/ now`, "[link unknown host] now"},
+		{`[deck](http://evil.example\@good.example/)`, "deck [link unknown host]"},
+		{`<//evil.example\@good.example|deck>`, "deck [link unknown host]"},
+		{`<C:\path|deck>`, "deck [link unknown host]"},
+		// A control character in the host, or anywhere before the path.
+		{"<http://a\tb.example/x|deck>", "deck [link unknown host]"},
+		{"<http://a\rb.example/x|deck>", "deck [link unknown host]"},
+		{"<http://user\x00@good.example/|deck>", "deck [link unknown host]"},
+		{"<ht\ttp://good.example/|deck>", "deck [link unknown host]"},
+		{"http://good\x7f.example/x now", "[link unknown host] now"},
+		{"http://\u009f@good.example/x now", "[link unknown host] now"},
+		// An ordinary link, and a link with either character after its host, keep the host.
+		{"<http://files.example/x|deck>", "deck [link files.example]"},
+		{"<https://user@files.example:8443/x?q=1#f|deck>", "deck [link files.example]"},
+		{`<http://files.example/a\b|deck>`, "deck [link files.example]"},
+		{"<http://files.example/a\tb|deck>", "deck [link files.example]"},
+		{`<http://files.example?a\@b|deck>`, "deck [link files.example]"},
+	} {
+		text, counts, err := SafeText(c[0])
+		if err != nil || text != c[1] || counts != (Counts{Links: 1}) {
+			t.Errorf("SafeText(%q): got %q %+v %v, want %q", c[0], text, counts, err, c[1])
 		}
 	}
 }
