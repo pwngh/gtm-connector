@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -77,27 +78,30 @@ func setUpDemo(t *testing.T) *demoDatabase {
 	return d
 }
 
-// connectDemo connects the workspace a --state-dir names to the demo data, as "connect demo" leaves a
-// folder. connect is not ported, so a test does it.
+// connectDemo connects the workspace a --state-dir names to the demo data with "connect demo", and gives
+// the workspace.
 func (d *demoDatabase) connectDemo(t *testing.T, name string) postgres.Workspace {
 	t.Helper()
-	workspace, err := d.owner.EnsureWorkspace(ctx, workspaceSlug(name), "demo", "Connected by a test")
+	if code, _, stderr := d.read(t, "connect", "demo", "--state-dir", name); code != 0 {
+		t.Fatalf("connect demo --state-dir %s: exit %d\n%s", name, code, stderr)
+	}
+	workspace, err := d.owner.Workspace(ctx, workspaceSlug(name))
 	if err != nil {
 		t.Fatal(err)
-	}
-	for _, source := range []string{"crm", "calls", "slack"} {
-		if _, err := d.owner.EnsureConnection(ctx, workspace, source, "demo"); err != nil {
-			t.Fatal(err)
-		}
 	}
 	return workspace
 }
 
-// demo runs the command as a person does, with GTM_DATABASE_URL naming databaseURL.
+// demo runs the command as a person does, with GTM_DATABASE_URL naming databaseURL. A run that fails is
+// an error that holds what it printed.
 func (d *demoDatabase) demo(t *testing.T, databaseURL string, args ...string) error {
 	t.Helper()
 	t.Setenv("GTM_DATABASE_URL", databaseURL)
-	return demoCommand(ctx, args)
+	var out, errs bytes.Buffer
+	if code := runCommand(ctx, "demo", args, screen{out: &out, err: &errs}); code != 0 {
+		return fmt.Errorf("exit %d: %s", code, errs.String())
+	}
+	return nil
 }
 
 func (d *demoDatabase) count(t *testing.T, query string, args ...any) int {

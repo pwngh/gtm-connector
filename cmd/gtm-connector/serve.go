@@ -13,7 +13,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/pwngh/gtm-connector/internal/authz"
 	"github.com/pwngh/gtm-connector/internal/cards"
@@ -22,31 +25,45 @@ import (
 	"github.com/pwngh/gtm-connector/web"
 )
 
-// openAppStore connects as the app role, as serve and demo do. It refuses a
-// role that owns the tables, a database setup has not migrated, and one
-// whose restore has not installed its credentials.
+// openAppStore connects as the app role, as serve and the commands do. It
+// refuses a role that owns the tables, a database setup has not migrated,
+// and one whose restore has not installed its credentials. Each of its own
+// refusals is a failure in this program's words. Any other error is the
+// driver's.
 func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 	if c.databaseURL == "" {
-		return nil, errors.New("set GTM_DATABASE_URL to the app role's PostgreSQL URL")
+		return nil, local("set GTM_DATABASE_URL to the app role's PostgreSQL URL")
 	}
 	store, err := openStore(ctx, c.databaseURL)
+	if errors.Is(err, postgres.ErrDatabaseURL) {
+		return nil, local("GTM_DATABASE_URL could not be parsed")
+	}
+	// The server answered and refused the role or the database: the codes of a wrong password, a role
+	// that may not sign in, and a database that does not exist.
+	var answered *pgconn.PgError
+	if errors.As(err, &answered) && slices.Contains([]string{"28P01", "28000", "3D000"}, answered.Code) {
+		return nil, local("PostgreSQL refused the role or the database GTM_DATABASE_URL names (%s). Run setup, "+
+			"which makes the app role, or correct the URL.", answered.Code)
+	}
 	if err != nil {
 		return nil, err
 	}
 	check := func() error {
-		if err := store.CheckAppRole(ctx); err != nil {
+		if err := store.CheckAppRole(ctx); errors.Is(err, postgres.ErrNotAppRole) {
+			return local("%s", err)
+		} else if err != nil {
 			return err
 		}
 		if version, err := store.SchemaVersion(ctx); err != nil {
 			return err
 		} else if version != postgres.LatestSchemaVersion() {
-			return fmt.Errorf("the database is at schema %d, not %d; run setup first", version,
+			return local("the database is at schema %d, not %d; run setup first", version,
 				postgres.LatestSchemaVersion())
 		}
 		if pending, err := store.PendingRestore(ctx); err != nil {
 			return err
 		} else if pending != "" {
-			return errors.New("a restore has not installed its credentials; run restore again with the same backup")
+			return local("a restore has not installed its credentials; run restore again with the same backup")
 		}
 		return nil
 	}
