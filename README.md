@@ -179,7 +179,7 @@ The card shows what the records say, not whether a source is true.
 ## The Go server (in progress)
 
 The Go program at the root serves a read-only evidence API and the web app over HTTPS, on PostgreSQL.
-It reads only the invented demo book so far, and `make demo` publishes its cards. It needs Docker
+It reads only the invented demo book so far: its `demo` command publishes those cards. It needs Docker
 with Compose (Docker Desktop, or Colima with `docker-compose`). The [roadmap](docs/ROADMAP.md) lists
 what is left before it replaces the Python package.
 
@@ -230,7 +230,7 @@ are stored in the backup itself, so they do not prove who made it. A restore nee
 database, and each credential must be absent or the same as the backup's. It refuses any row the
 server would refuse on writing, such as a card whose seal does not name its bytes. If a restore
 stops after the database is in, run the same command again to finish it; until then, setup, the server and `demo` refuse to
-start and say to run the restore again. On Colima, if a port does not answer, the Makefile forwards it with
+start and say to run `restore` again with the same backup. On Colima, if a port does not answer, the Makefile forwards it with
 `scripts/colima-forward.sh`.
 
 ## Limits
@@ -247,7 +247,7 @@ start and say to run the restore again. On Colima, if a port does not answer, th
 - `web/` is a prototype of the renewal workflow on invented data. Served by the Go server, its
   Evidence and Readiness pages sign in a demo principal and read sealed cards from `/api/v1`; Readiness
   shows the sources a card did not read or show as open items, and the server has no workflow rules yet.
-  `scripts/api-browser.mjs` tests both pages in a browser against a stub of the API. Everything else, and every page
+  `web/scripts/api-browser.mjs` tests both pages in a browser against a stub of the API. Everything else, and every page
   when it runs alone, is a walkthrough whose state lives in the browser, and whose reviews and
   approvals are demonstrations, not authorization. Run it alone with `npm ci`, `npm test`, and
   `npm run dev` inside `web/`.

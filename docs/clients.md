@@ -12,8 +12,8 @@ local bridge. `debug serve` serves the sources its state folder is [connected](c
 `connect APP` prints the setup commands and limits for one client. It does not launch an
 application. With `--scope`, an HTTP client (Inspector, Claude Code or Cursor) gets a local grant,
 saved in `APP.json` in the state folder, mode 0600, without printing the bearer token. Claude Desktop
-gets none over HTTP, and a stdio entry holds no grant (below). Without `--scope`, it previews the setup and
-creates nothing. Repeat `--scope` for each of `crm:read`, `calls:read`, `slack:read`, and
+gets none over HTTP, and a stdio entry holds no grant (below). Without `--scope`, HTTP setup previews
+the instructions and creates nothing; stdio setup requires explicit scopes. Repeat `--scope` for each of `crm:read`, `calls:read`, `slack:read`, and
 `crm:write`.
 
 | `APP` | Status | `REST_OF_COMMAND` |
@@ -23,8 +23,8 @@ creates nothing. Repeat `--scope` for each of `crm:read`, `calls:read`, `slack:r
 | `cursor` | Untested. The configuration follows Cursor's [MCP guide](https://cursor.com/docs/mcp). Protocol and local certificate compatibility are unverified. | `cursor .` First merge only the `gtm-connector` entry from `cursor.json` into your project's `.cursor/mcp.json`, keep the other entries, and quit Cursor completely. |
 | `claude-desktop` | Untested in the app. It starts local servers as processes, so it uses the [local bridge](#a-local-bridge-for-assistant-apps). Its [remote connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp) need public HTTPS on port 443 and cannot reach `127.0.0.1`. | None over HTTP. With `--transport stdio`, restart the app after `connect` writes its entry. |
 
-The printed commands use absolute paths for the state folder. Each starts with the same
-environment, shown here with `$PWD/var/clients`:
+The printed commands use absolute paths for the state folder. Start the HTTP clients below with
+this environment, shown here with `$PWD/var/clients`:
 
 ```sh
 NODE_EXTRA_CA_CERTS="$PWD/var/clients/tls.pem" \
@@ -58,7 +58,7 @@ gtm-connector connect claude-desktop --transport stdio --scope crm:read --scope 
   Python starts isolated (`-I`), so a folder the app runs in cannot stand in for the connector.
 - A call the bridge would refuse for its shape is still sent to the gateway, which records it and
   refuses it.
-- The app starts that Python with `-I` and the connector, as `mcp stdio --state-dir DIR --scope ...`. The bridge attaches to the
+- The app starts that Python, isolated with `-I`, running the connector's `mcp stdio --state-dir DIR --scope ...`. The bridge attaches to the
   `debug serve` already running in that folder, obtains a grant for exactly those scopes, keeps it in
   memory, and renews only those scopes. Every call still goes through the HTTPS gateway, with its
   scope check, rate limit, and audit receipt. A call outside the scopes is refused.

@@ -11,9 +11,9 @@ scopes. Administration commands read local files directly and bypass MCP authori
 This is not multi-user isolation or production identity.
 
 Both services bind HTTPS to `127.0.0.1`. Each start generates a fresh P-256 key and a one-day
-loopback certificate that the client trusts explicitly. Browser origins are rejected. A folder
-starts with nothing connected, and a command that reads a source refuses until one is. Invented data
-is used only after `connect demo` or `demo`, and a real source only when the operator connects it.
+loopback certificate that the client trusts explicitly. Browser origins are rejected. A new state
+folder has no connected source. Daily reads and `debug serve` require a connected CRM, `demo` uses
+invented data, and live sources are opt-in.
 
 ## Scopes
 
@@ -52,10 +52,10 @@ untrusted data and cannot request a tool, a grant, or a write.
 | Area | Behavior |
 | --- | --- |
 | Local authority | Authorization needs the owner credential and an explicit scope list, for one preregistered public client. [docs/tools.md](docs/tools.md) has the code and token lifetimes. |
-| Client grants | `connect` writes a bearer grant for only the named scopes to a mode-0600 file in the state directory. The client receives that grant, never the owner credential, and its calls pass through the same gateway, audit log, and rate limit. Keep these files out of Git. |
+| Client grants | With `--scope`, `connect` writes an HTTP client's bearer grant for only the named scopes to a mode-0600 file in the state directory; a stdio entry holds no grant. The client receives that grant, never the owner credential, and its calls pass through the same gateway, audit log, and rate limit. Keep these files out of Git. |
 | Audit receipts | `audit.sqlite3` stores, for each tool attempt, a SHA-256 token fingerprint, the tool, its arguments, a UTC timestamp, request and brief IDs, the outcome, and returned record references. Saving a card adds one more receipt, `save_brief`, that holds the saved file's SHA-256. Arguments can include activity text, search terms, and IDs. Bearer tokens and response bodies are not logged. A fingerprint establishes neither identity nor a valid grant. [docs/audit.md](docs/audit.md) has the HTTP 503 cases, the requests that get no receipt, and the rate limit. |
 | Retention | Runtime directories use mode 0700 and files use mode 0600. Nothing expires automatically. Saved briefs include source evidence and receipt copies. |
-| Cards | `units.py` builds a card from checked evidence alone. No model runs and no inference service is called. A seller is whoever the operator lists with `connect ... --seller NAME`, saved as `sellers.json`, and that list is the operator's own claim. The demo's invented sellers are the default only when every source is demo data. See [docs/briefs.md](docs/briefs.md). |
+| Cards | `units.py` builds a card from checked evidence alone. No model runs and no inference service is called. A seller is whoever the operator lists with `connect ... --seller NAME`, saved as `sellers.json`, and that list is the operator's own claim. Each demo source adds the demo's invented sellers; a live source uses the operator's list. See [docs/briefs.md](docs/briefs.md). |
 | Imported transcripts | `debug calls import` is a local operator command. It parses a selected TXT, VTT, or SRT export, obtains only `crm:read`, and resolves the account through the audited gateway before committing an association. A missing, ambiguous, changed, or unreceipted association publishes nothing. An account with nothing imported gets a card that says so, and demo content never stands in. Local `debug calls inspect --full` returns the complete original and is not an MCP tool. See [docs/calls.md](docs/calls.md). |
 
 ## Salesforce (optional, read-only)
@@ -63,8 +63,8 @@ untrusted data and cannot request a tool, a grant, or a write.
 `connect salesforce --org ALIAS` saves the alias and environment in the state folder's
 `profile.json`, which holds no credential, org ID, or address. Each command in that folder then
 captures the existing Salesforce CLI login of that alias inside the connector process. The provider invokes only `sf org display` and `sf org auth show-access-token`,
-with an explicit alias and `--json`, using argument arrays and no shell. Stdin is closed, stdout
-is captured, and stderr is discarded. CLI telemetry, automatic updates, and file logging are disabled for these
+with an explicit alias and `--json`, using argument arrays and no shell. Stdin and stderr go to
+the null device, and the connector captures stdout. CLI telemetry, automatic updates, and file logging are disabled for these
 child commands. Errors expose a fixed code, never the alias, child output, arguments, or token.
 A command has at most 120 seconds, and both share a 180-second login deadline that is separate from
 each read's budget. An `sf` that outlasts its limit is stopped and reported as

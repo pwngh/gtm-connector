@@ -91,9 +91,13 @@ Python package and stays read-only. Until then:
    units and gaps match as values. Character classes come from generated tables, never Go's or
    RE2's. Work the fixtures cannot check waits until after v0.1.0, unless the cutover cannot ship
    without it.
-3. The PR that ships the Go CLI passes the fixtures and replays the recorded command session. It
-   opens existing cards and receipts, lists every change a user sees, and removes the Python package
-   and `tools/oracle/`.
+3. Sign-in, grants, selection, expiry and the Host check come before any evidence is served. MCP
+   passes the recorded gateway vectors on both transports, HTTP and stdio.
+4. The PR that ships the Go CLI passes the fixtures and replays the recorded command session. It
+   opens existing cards and receipts, keeps source and client setup working through the binary, lists
+   every change a user sees, and removes the Python package and `tools/oracle/`.
+
+Planned work is stated only in `docs/ROADMAP.md`. A statement leaves it with the test that shows it.
 
 After each step, use the product end to end as a stranger and fix what only shows from there.
 

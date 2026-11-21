@@ -59,9 +59,10 @@ connected is never called, and the card and `sources` name it as not connected. 
 ## Errors
 
 A bad selection file stops `debug serve` with exit `2`, and an unmapped Slack thread with exit `3`. A
-write is refused before any tool runs, with HTTP 403 and `crm_write_disabled`. `rate_limited` and
-`invalid_token` are tool errors inside `prepare_renewal_brief`; on a direct call they are HTTP 429 and
-401. The other codes are tool errors, or a failed source's own code, such as `calls_not_connected`.
+selected server offers no write tool. A `log_activity` call that passes the token, rate and scope
+checks is refused with HTTP 403 and `crm_write_disabled`. A rate or token failure at admission is
+HTTP 429 or 401; during a prepared brief, or at a saved brief's final token check, it is a tool error.
+The other codes are tool errors, or a failed source's own code, such as `calls_not_connected`.
 
 | Code | Cause | Fix |
 | --- | --- | --- |
