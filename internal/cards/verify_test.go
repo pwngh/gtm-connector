@@ -65,8 +65,9 @@ func (f *Folder) setPayload(brief string, data []byte) {
 	}
 }
 
-// sameLog compares a Go store's receipts with a folder's rows, column by column.
-func sameLog(t *testing.T, store *receipts.Memory, f *Folder) {
+// sameLog compares a Go store's receipts with a folder's rows, column by column, with each row the folder
+// names written as renamed gives it.
+func sameLog(t *testing.T, store *receipts.Memory, f *Folder, renamed *strings.Replacer) {
 	t.Helper()
 	all := store.All()
 	if len(all) != len(f.Log) {
@@ -76,6 +77,14 @@ func sameLog(t *testing.T, store *receipts.Memory, f *Folder) {
 		rows, err := f.Log.Receipts(context.Background(), []string{r.AuditID})
 		if err != nil {
 			t.Fatalf("%s: %v", r.AuditID, err)
+		}
+		if names, ok := rows[0].Get("rows"); ok {
+			list := slices.Clone(names.([]any))
+			for i, name := range list {
+				list[i] = renamed.Replace(name.(string))
+			}
+			rows[0] = rows[0].Copy()
+			rows[0].Set("rows", list)
 		}
 		logged, err := receipts.Decode(rows[0])
 		if err != nil || !r.Same(logged) {
@@ -91,9 +100,19 @@ func prepareOf(token string, account string, slack bool, arguments *strictjson.O
 		RequestID: receipts.RPC(1), Arguments: arguments}
 }
 
+// todaysRules is a folder card or brief as Go makes it under today's rules. The folders hold cards sealed
+// under rules version 3, which stay as sealed so that an old card is still admitted; the rules since change
+// nothing on these cards but the version they state.
+func todaysRules(payload []byte) []byte {
+	return []byte(strings.NewReplacer(`"rules_version": 3,`, `"rules_version": 4,`,
+		`"sanitizer_version": 3`, `"sanitizer_version": 4`, `"sanitizer_version":3`, `"sanitizer_version":4`).
+		Replace(string(payload)))
+}
+
 // TestGoMakesTheFolderCards makes the folder cards in Go, under the oracle's scopes, and compares the bytes
 // and every receipt: the CLI card's JSON-RPC reads and save_brief seal, and each prepared brief's outer
-// receipt, with its arguments as given, and its child reads.
+// receipt, with its arguments as given, and its child reads. Each card is compared as todaysRules gives it,
+// and the receipt that seals it names it by its digest.
 func TestGoMakesTheFolderCards(t *testing.T) {
 	ctx := context.Background()
 	for _, c := range folders {
@@ -123,10 +142,11 @@ func TestGoMakesTheFolderCards(t *testing.T) {
 				t.Fatal(err)
 			}
 			f := openFolder(t, c.name)
-			if want := *f.payload(c.brief); sealed.BriefID != c.brief || !bytes.Equal(sealed.Payload, want) {
+			sealedThen := *f.payload(c.brief)
+			if want := todaysRules(sealedThen); sealed.BriefID != c.brief || !bytes.Equal(sealed.Payload, want) {
 				t.Fatalf("%s differs at %s", sealed.BriefID, oracletest.FirstDifference(string(sealed.Payload), string(want)))
 			}
-			sameLog(t, store, f)
+			sameLog(t, store, f, strings.NewReplacer(Reference(c.brief, sealedThen), Reference(c.brief, sealed.Payload)))
 		})
 	}
 }

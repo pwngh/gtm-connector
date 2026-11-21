@@ -86,18 +86,24 @@ func TestOutputsMatchOracleFixtures(t *testing.T) {
 // The invented items in testdata/patterns.jsonl stand for text patterns real data showed: sentences over 300
 // characters, character references, format characters other than ZWJ, control characters, a sentence split
 // after a Spanish abbreviation, and line breaks inside a message. Every R0 function gives, for each, what
-// Python recorded in corpora/patterns.json.
+// corpora/patterns.json records. With -update, the file is written again from Go's outputs.
 func TestInventedPatternsMatchTheOracle(t *testing.T) {
 	items, _ := readItems(t, filepath.Join("testdata", "patterns.jsonl"), true)
-	value, err := strictjson.Loads(oracletest.Read(t, "corpora/patterns.json"))
+	data := oracletest.Read(t, "corpora/patterns.json")
+	value, err := strictjson.Loads(data)
 	if err != nil {
 		t.Fatal(err)
+	}
+	pretty := strictjson.DumpOptions{EnsureASCII: true, Indent: 1}
+	if was, err := pretty.Dumps(value); oracletest.Update() && (err != nil || was+"\n" != string(data)) {
+		t.Fatalf("corpora/patterns.json: the file's encoding is not reproduced (%v)", err)
 	}
 	cases, _ := value.(*strictjson.Object).Get("cases")
 	if len(cases.([]any)) != len(items) {
 		t.Fatalf("%d items and %d recorded cases; regenerate the oracle fixtures", len(items), len(cases.([]any)))
 	}
 	m := oracletest.NewMismatches(t, "corpora/patterns.json")
+	changed := 0
 	for i, it := range items {
 		m.Row()
 		recorded := cases.([]any)[i].(*strictjson.Object)
@@ -110,10 +116,25 @@ func TestInventedPatternsMatchTheOracle(t *testing.T) {
 		got := Outputs(it)
 		for j, name := range TextFunctions {
 			want, _ := outputs.(*strictjson.Object).Get(name)
-			if encoded, err := canonical(want); err != nil || got[j] != encoded {
-				m.Add("%s: %s", it.ID, name)
+			if encoded, err := canonical(want); err == nil && got[j] == encoded {
+				continue
 			}
+			if !oracletest.Update() {
+				m.Add("%s: %s", it.ID, name)
+				continue
+			}
+			now, err := strictjson.Loads([]byte(got[j]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			outputs.(*strictjson.Object).Set(name, now)
+			changed++
 		}
+	}
+	if changed > 0 {
+		now, _ := pretty.Dumps(value)
+		oracletest.Write(t, "corpora/patterns.json", []byte(now+"\n"))
+		t.Logf("corpora/patterns.json: %d outputs written again", changed)
 	}
 }
 

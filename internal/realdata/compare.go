@@ -46,6 +46,8 @@ type Report struct {
 	// Unlisted counts the differences past the first maxListed, which are counted but not listed.
 	Unlisted int     `json:"unlisted_differences"`
 	Seconds  float64 `json:"seconds"`
+	// made is the block digests of Go's outputs, for a run against recorded digests.
+	made *Recorded
 }
 
 // FunctionCount is one function's tally over a run. NonEmpty counts the items whose Go output is not [] or

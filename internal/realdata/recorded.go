@@ -10,6 +10,8 @@ import (
 	"hash"
 	"io"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"time"
@@ -170,6 +172,20 @@ func (rec *recorder) finish(itemsSHA256 string) *Recorded {
 	return &rec.r
 }
 
+// WriteRecorded writes the block digests a comparison against recorded digests made, as the dataset's
+// recorded digests, into dir. A comparison where Go decodes an item differently is refused, so that only what
+// a function gives can change.
+func (r *Report) WriteRecorded(dir string) error {
+	if r.made == nil || r.Decoding.Differences > 0 {
+		return fmt.Errorf("%s: only a comparison whose items all decode alike writes recorded digests", r.Run)
+	}
+	data, err := json.MarshalIndent(r.made, "", " ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, r.made.Dataset+".json"), append(data, '\n'), 0o644)
+}
+
 // CompareRecorded runs the Go port over a dataset run's items and compares its block digests with the
 // recorded ones. The recorded digests must be for this very items file. A function's matches and
 // differences count items: every item of a block whose digest differs counts as a difference, and each such
@@ -262,6 +278,7 @@ func CompareRecorded(run Run, want *Recorded) (*Report, error) {
 		return nil, fmt.Errorf("%s: the recorded digests hold %d items and the items file %d", run.Name, want.Items, len(rows))
 	}
 	have := got.finish(items.SHA256())
+	report.made = have
 	report.Decoding.Items = len(rows)
 	// blockRows gives the rows of a block, and the first and last line among them.
 	blockRows := func(b int) ([]row, string) {

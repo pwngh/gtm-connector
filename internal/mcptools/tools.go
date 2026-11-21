@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/pwngh/gtm-connector/internal/cards"
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/sources/demo"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
@@ -242,7 +243,10 @@ func (s *server) prepare(ctx context.Context, view Opened, inv *mcp.Invocation, 
 		return nil, errors.New("the saved brief does not read back")
 	}
 	snapshot, _ := member(artifact, "evidence").(*strictjson.Object)
-	brief := released(sealed.BriefID, artifact)
+	brief, err := released(sealed.BriefID, artifact)
+	if err != nil {
+		return nil, err
+	}
 	brief.Set("notes_status", member(snapshot, "notes_status"))
 	brief.Set("slack_status", member(snapshot, "slack_status"))
 	return envelope(sealed.BriefID, sealed.Payload, brief), nil
@@ -308,7 +312,10 @@ func (s *server) reread(ctx context.Context, view Opened, inv *mcp.Invocation, a
 	case !covered(scopes):
 		return nil, mcp.ToolError("brief_scope_not_covered")
 	}
-	brief := released(id, artifact)
+	brief, err := released(id, artifact)
+	if err != nil {
+		return nil, mcp.ToolError("brief_invalid")
+	}
 	brief.Set("provider_rechecked", false)
 	brief.Set("notice", notice)
 	return envelope(id, card.Bytes, brief), nil
@@ -323,11 +330,24 @@ func member(object *strictjson.Object, key string) any {
 	return value
 }
 
-// released is what both brief tools return of a saved brief: its text, units and gaps as saved.
-func released(id string, artifact *strictjson.Object) *strictjson.Object {
+// released is what both brief tools return of a saved brief: its text and gaps as saved, and its units as
+// evidence.AsShown gives them.
+func released(id string, artifact *strictjson.Object) (*strictjson.Object, error) {
+	saved, _ := member(artifact, "units").([]any)
+	units := make([]any, len(saved))
+	for i, value := range saved {
+		units[i] = value
+		if unit, ok := value.(*strictjson.Object); ok {
+			shown, err := evidence.AsShown(unit)
+			if err != nil {
+				return nil, err
+			}
+			units[i] = shown
+		}
+	}
 	return strictjson.NewObject("brief_id", id, "account_id", member(artifact, "account_id"),
-		"as_of", member(artifact, "as_of"), "text", member(artifact, "text"), "units", member(artifact, "units"),
-		"gaps", member(artifact, "gaps"), "sources", member(artifact, "sources"))
+		"as_of", member(artifact, "as_of"), "text", member(artifact, "text"), "units", units,
+		"gaps", member(artifact, "gaps"), "sources", member(artifact, "sources")), nil
 }
 
 // envelope is a brief tool's result. Its one record is the saved brief, named by the digest of its bytes.

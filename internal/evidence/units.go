@@ -17,7 +17,7 @@ import (
 
 // Rules, as units.py names them.
 const (
-	SanitizerVersion = 3
+	SanitizerVersion = 4
 	ShownSentences   = 12
 	ShownRecords     = 5
 	MaxSentence      = 300
@@ -151,6 +151,35 @@ func GapValues(gaps []Gap) []any {
 		out[i] = g.Value()
 	}
 	return out
+}
+
+// AsShown is a saved unit as anything shows it. A unit sealed under today's rules is shown as sealed. One
+// sealed under other rules has its text and speaker neutralized again, so it shows nothing that today's
+// rules replace; the unit given, and the bytes it was sealed in, stay as they are. A unit that neutralizing
+// again leaves as it is is given back itself.
+func AsShown(unit *strictjson.Object) (*strictjson.Object, error) {
+	if version, _ := unit.Get("sanitizer_version"); Equal(version, SanitizerVersion) {
+		return unit, nil
+	}
+	shown := unit
+	for _, key := range []string{"text", "speaker"} {
+		value, _ := unit.Get(key)
+		text, ok := value.(string)
+		if !ok {
+			continue
+		}
+		safe, _, err := SafeText(text)
+		if err != nil {
+			return nil, err
+		}
+		if safe != text {
+			if shown == unit {
+				shown = unit.Copy()
+			}
+			shown.Set(key, safe)
+		}
+	}
+	return shown, nil
 }
 
 // Build checks the evidence and returns its numbered units, the card, the lines of NOT READ, and the lines

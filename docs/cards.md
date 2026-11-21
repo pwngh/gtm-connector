@@ -87,8 +87,9 @@ the same record, or `null`.
 
 `inspect` answers from the sealed units and evidence, never from the card's text, and rebuilds
 nothing. A later change to the rules cannot move or refuse a number. A sentence sealed under an
-older version of the neutralizer rules (`sanitizer_version` below 3) is neutralized again under
-today's before `inspect` shows it.
+older version of the neutralizer rules (`sanitizer_version` below 4) has its text and speaker
+neutralized again under today's before `inspect`, the web API or a brief tool shows it. The card's
+bytes stay as sealed, so it still verifies, and the sentence keeps the version it was sealed under.
 
 ### Unit keys
 
@@ -107,7 +108,7 @@ A record unit has `n`, `kind` (`record`), `source` (`crm`, `calls` or `slack`), 
 | `shown` | `yes`, or why the sentence is not under `SAID` (below). |
 | `span` | `null`, except in an imported transcript: `first` and `last`, the cues or lines the sentence lies in, and `start_ms` and `end_ms`, which cover every cue it lies in, whatever order the file wrote them in. Lines have no times, so both are `null` for a TXT file. |
 | `raw_sha256` | The SHA-256 of the record's text as stored. |
-| `sanitizer_version` | The version of the neutralizer rules, `3`. |
+| `sanitizer_version` | The version of the neutralizer rules, `4`. |
 
 | `shown` | Why the sentence is not shown |
 | --- | --- |
@@ -171,7 +172,7 @@ with the account and brief in its `arguments`, and [receipts](audit.md) says how
 | `schema_version` | `3` |
 | `brief_id`, `account_id`, `as_of` | The card's identity and planning date. |
 | `status` | `accepted` |
-| `rules_version` | `3`, the version of the rules the text was made under. |
+| `rules_version` | `4`, the version of the rules the text was made under. |
 | `sealed_by` | The `audit_id` of the seal. |
 | `sources` | `crm`: `demo_fixture` or `salesforce`. `calls`: `demo_fixture`, `imported_transcript` or `not_connected`. `slack`: `demo_fixture`, `slack` or `not_connected`. |
 | `text` | The card. |
@@ -201,9 +202,10 @@ Name a gap by its `code`, never by its text.
 
 A sentence ends at closing punctuation or at a blank line.
 
-- A single line break inside a call note or a cue is a wrap, so a sentence written over two lines
-  stays whole.
-- In a Slack message each line is the author's own, so a line break ends a sentence there.
+- A single line break is a wrap, so a sentence written over two lines stays whole.
+- In a Slack message a line break also ends a sentence before a list item: a line that starts with
+  `-`, `+`, `*`, `•`, `◦` or `▪` and a space, or a number with `.` or `)` and a space. A line that
+  ends in closing punctuation ends its sentence there as anywhere else.
 - A period after a title, a legal or state short form, a list marker, or a dotted short form such as
   "e.g." does not end a sentence, so "28 U.S.C. § 1332" and "Fed. R. Civ. P. 26(b)(3)" stay in one
   piece.

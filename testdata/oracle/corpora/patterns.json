@@ -1299,8 +1299,7 @@
      "Next steps follow."
     ],
     "sentences_lines": [
-     "We will",
-     "sign Friday.",
+     "We will sign Friday.",
      "The rider holds.",
      "Next steps follow."
     ],
@@ -1310,8 +1309,7 @@
      "Next steps follow."
     ],
     "sentences_safe_lines": [
-     "We will",
-     "sign Friday.",
+     "We will sign Friday.",
      "The rider holds.",
      "Next steps follow."
     ],
@@ -1577,12 +1575,9 @@
      "No. 14 goes on."
     ],
     "sentences_lines": [
-     "We met Dr.",
-     "Example today.",
-     "La Sra.",
-     "Directora firm\u00f3.",
-     "No.",
-     "14 goes on."
+     "We met Dr. Example today.",
+     "La Sra. Directora firm\u00f3.",
+     "No. 14 goes on."
     ],
     "sentences_safe": [
      "We met Dr. Example today.",
@@ -1590,12 +1585,9 @@
      "No. 14 goes on."
     ],
     "sentences_safe_lines": [
-     "We met Dr.",
-     "Example today.",
-     "La Sra.",
-     "Directora firm\u00f3.",
-     "No.",
-     "14 goes on."
+     "We met Dr. Example today.",
+     "La Sra. Directora firm\u00f3.",
+     "No. 14 goes on."
     ],
     "units_target": null,
     "units_raw_link": [],
@@ -1654,17 +1646,13 @@
      "<@U0ABC123> we agree <https://renewal.example/x|the rider> holds."
     ],
     "sentences_lines": [
-     "<@U0ABC123>",
-     "we agree <https://renewal.example/x|the",
-     "rider> holds."
+     "<@U0ABC123> we agree <https://renewal.example/x|the rider> holds."
     ],
     "sentences_safe": [
      "[user U0ABC123] we agree the rider [link renewal.example] holds."
     ],
     "sentences_safe_lines": [
-     "[user U0ABC123]",
-     "we agree the",
-     "rider [link renewal.example] holds."
+     "[user U0ABC123] we agree the rider [link renewal.example] holds."
     ],
     "units_target": null,
     "units_raw_link": [

@@ -25,7 +25,8 @@ func fields(s []rune) [][]rune {
 	return found
 }
 
-// paragraphs is re.split on "\n", or on a blank line: \n[ \t]*\n.
+// paragraphs splits text at a blank line: \n[ \t]*\n. With lines, a single line break before a list item
+// also ends a paragraph.
 func paragraphs(s []rune, lines bool) [][]rune {
 	var found [][]rune
 	start := 0
@@ -34,14 +35,16 @@ func paragraphs(s []rune, lines bool) [][]rune {
 			continue
 		}
 		j := i + 1
-		if !lines {
-			for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
-				j++
-			}
-			if j >= len(s) || s[j] != '\n' {
-				continue
-			}
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
 			j++
+		}
+		switch {
+		case j < len(s) && s[j] == '\n':
+			j++
+		case lines && listItem(s, i+1):
+			j = i + 1
+		default:
+			continue
 		}
 		found = append(found, s[start:i])
 		start = j
@@ -50,9 +53,28 @@ func paragraphs(s []rune, lines bool) [][]rune {
 	return append(found, s[start:])
 }
 
-// Sentences splits neutralized text into whole sentences (units.sentences). A line break inside a
-// paragraph is a wrap; only a blank line or closing punctuation ends a sentence. With lines, every line
-// break ends one.
+// listItem is whether the line starting at s[i] starts a list item: after at most three spaces, a
+// Markdown marker (-, +, *, or one to nine digits then . or )) or a bullet Slack writes for a list
+// (•, ◦ or ▪), then a space or the end of the line.
+func listItem(s []rune, i int) bool {
+	end := i
+	for end < len(s) && s[end] != '\n' {
+		end++
+	}
+	line := s[i:end]
+	if itemEnd(line, 0) >= 0 {
+		return true
+	}
+	j := 0
+	for j < len(line) && j < 3 && line[j] == ' ' {
+		j++
+	}
+	return j < len(line) && in(line[j], "•◦▪") && (j+1 == len(line) || line[j+1] == ' ')
+}
+
+// Sentences splits neutralized text into whole sentences. A line break inside a paragraph is a wrap;
+// only a blank line or closing punctuation ends a sentence. With lines, as in a Slack message, a line
+// break before a list item also ends one, so each item is its own sentence.
 func Sentences(safe string, lines bool) ([]string, error) {
 	if !utf8.ValidString(safe) {
 		return nil, ErrInvalidText

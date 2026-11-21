@@ -14,6 +14,9 @@
 // -local FILE runs verify or compare on a private JSON Lines file of {"id", "text"} items instead of the
 // datasets, against the oracle's records an earlier run left in FILE.r0 beside it.
 //
+// -update makes verify or compare write Go's block digests of each dataset that differs into
+// internal/realdata/recorded, after a deliberate change to a text function.
+//
 // The cache is $GTM_REAL_CACHE, or ~/.cache/gtm-connector/real. Nothing it prints holds an item's text.
 package main
 
@@ -58,6 +61,7 @@ func run(args []string) (code int) {
 	}()
 	flags := flag.NewFlagSet("realdata", flag.ContinueOnError)
 	local := flags.String("local", "", "a private JSON Lines file of {\"id\", \"text\"} items, outside the repository")
+	update := flags.Bool("update", false, "write Go's digests of each dataset that differs into internal/realdata/recorded")
 	flags.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
 		flags.PrintDefaults()
@@ -72,7 +76,7 @@ func run(args []string) (code int) {
 	command, names := flags.Arg(0), flags.Args()[1:]
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	differences, err := dispatchCommand(ctx, command, names, *local)
+	differences, err := dispatchCommand(ctx, command, names, *local, *update)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "realdata: %v\n", err)
 		return 2
@@ -86,6 +90,7 @@ func run(args []string) (code int) {
 type state struct {
 	cache, root string
 	explicit    bool // the datasets were named
+	update      bool // a comparison that differs writes Go's digests
 }
 
 // runnable says why a dataset cannot be compared, if it cannot.
@@ -105,12 +110,18 @@ func runnable(d realdata.Dataset) error {
 	return nil
 }
 
-func dispatch(ctx context.Context, command string, names []string, local string) (int, error) {
+func dispatch(ctx context.Context, command string, names []string, local string, update bool) (int, error) {
 	root, err := repository()
 	if err != nil {
 		return 0, err
 	}
-	s := state{root: root}
+	s := state{root: root, update: update}
+	switch {
+	case update && local != "":
+		return 0, errors.New("-update writes the recorded digests of datasets; a -local run has none")
+	case update && command != "verify" && command != "compare":
+		return 0, fmt.Errorf("-update goes with verify or compare, not %s", command)
+	}
 	if local != "" {
 		if len(names) > 0 {
 			return 0, errors.New("-local runs one file; name no dataset with it")
@@ -122,7 +133,7 @@ func dispatch(ctx context.Context, command string, names []string, local string)
 		if err != nil {
 			return 0, err
 		}
-		return compare([]realdata.Run{r})
+		return s.compare([]realdata.Run{r})
 	}
 	if s.cache, err = realdata.CacheDir(); err != nil {
 		return 0, err
@@ -164,7 +175,7 @@ func dispatch(ctx context.Context, command string, names []string, local string)
 				runs = append(runs, realdata.DatasetRun(s.cache, d))
 			}
 		}
-		return compare(runs)
+		return s.compare(runs)
 	case "verify":
 		started := time.Now()
 		fetched, err := s.fetch(ctx, datasets)
@@ -178,7 +189,7 @@ func dispatch(ctx context.Context, command string, names []string, local string)
 		if err != nil {
 			return 0, err
 		}
-		differences, err := compare(runs)
+		differences, err := s.compare(runs)
 		fmt.Printf("verify-real took %.1f s in all\n", time.Since(started).Seconds())
 		return differences, err
 	}
@@ -256,8 +267,10 @@ func (s state) convert(datasets []realdata.Dataset) ([]realdata.Run, error) {
 }
 
 // compare compares each run and prints its report: a dataset's run against its recorded digests, and a local
-// run against the records in its results folder. A run that fails is reported, and the others go on.
-func compare(runs []realdata.Run) (int, error) {
+// run against the records in its results folder. A run that fails is reported, and the others go on. With
+// -update, a dataset's run that differs writes Go's digests as its recorded ones, and its differences are
+// not counted.
+func (s state) compare(runs []realdata.Run) (int, error) {
 	total, failed := 0, 0
 	for _, r := range runs {
 		var report *realdata.Report
@@ -276,6 +289,16 @@ func compare(runs []realdata.Run) (int, error) {
 			continue
 		}
 		realdata.PrintReport(os.Stdout, report, r)
+		if s.update && !r.Local && report.Total() > 0 {
+			dir := filepath.Join(s.root, "internal", "realdata", "recorded")
+			if err := report.WriteRecorded(dir); err != nil {
+				fmt.Fprintf(os.Stderr, "realdata: %v\n", err)
+				failed++
+				continue
+			}
+			logf("  wrote Go's digests to %s", filepath.Join(dir, r.Name+".json"))
+			continue
+		}
 		total += report.Total()
 	}
 	if failed > 0 {
