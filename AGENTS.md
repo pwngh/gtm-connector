@@ -36,11 +36,14 @@ rules every store applies, and `receiptstest`, which every store runs), `cards` 
 `postgres.CallImports`) and `sources/salesforce` (the `sf` login and the REST reads, with an invented org in
 `salesforcetest`). Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate.
 `sources/slack` reads one mapped Slack thread; no command uses it yet.
+`people` resolves a speaker to a person and a side by the strongest identifier a source carries; its
+package comment states the ladder and the rules, and nothing calls it yet.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with the read commands
 `accounts`, `brief`, `inspect` and `audit` on demo data. `postgres.ReceiptStore` runs the card maker on
 PostgreSQL.
+`mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
 
 ```sh

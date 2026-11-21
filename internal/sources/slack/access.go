@@ -13,7 +13,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unique"
 
+	"github.com/pwngh/gtm-connector/internal/sources/echo"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -33,17 +35,47 @@ const (
 // allowedScopes are the Slack user scopes a sign-in may hold, in the order every scope list is kept.
 var allowedScopes = []string{"channels:history", "groups:history"}
 
-// Secret is an access or refresh token. It prints as "[redacted]" under every format verb and refuses to
-// be marshalled, so a token leaves the program only where code converts it to a string on purpose.
-type Secret string
+// Secret is an access or refresh token. It guards against a token being written out as plain text by
+// accident: it prints as "[redacted]" under every format verb and refuses to be marshalled, as a value or as
+// the key of a map, so a token leaves the program only where code calls Reveal on purpose. It is no guard
+// against code that sets out to read it, with reflect, unsafe or a printer that follows pointers.
+//
+// The text is kept behind an unexported handle, not as a string of the Secret itself. encoding/json and
+// reflect's String do not reach it. Two Secrets of the same text are equal, and the zero Secret is no token.
+//
+// A struct that holds a Secret in an unexported field is printed by reflection, with no method of the
+// Secret or of the struct called, so no Format or GoString can make that print "[redacted]". fmt then prints
+// the handle's address in place of the text. The address is the same for equal tokens within one process,
+// so such output can show that two Secrets are equal, though never what they are. A type that holds a
+// Secret keeps it in an exported field, as Credentials does, or prints itself.
+type Secret struct{ text unique.Handle[string] }
+
+// NewSecret is the Secret of a token's text. Empty text gives the zero Secret.
+func NewSecret(text string) Secret {
+	if text == "" {
+		return Secret{}
+	}
+	return Secret{unique.Make(text)}
+}
+
+// Reveal is the token's text, for the request that sends it and the store that saves it.
+func (s Secret) Reveal() string {
+	if s == (Secret{}) {
+		return ""
+	}
+	return s.text.Value()
+}
 
 // Format writes the redaction for every verb, %v and %#v included.
 func (Secret) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, redacted) }
 
-// MarshalJSON refuses: a store writes a token by converting it, never by marshalling the sign-in.
-func (Secret) MarshalJSON() ([]byte, error) {
-	return nil, errors.New("slack: a credential is not marshalled")
-}
+var errSecretMarshalled = errors.New("slack: a credential is not marshalled")
+
+// MarshalJSON refuses: a store writes a token by revealing it, never by marshalling the sign-in.
+func (Secret) MarshalJSON() ([]byte, error) { return nil, errSecretMarshalled }
+
+// MarshalText refuses, which is what an encoder asks of a map key.
+func (Secret) MarshalText() ([]byte, error) { return nil, errSecretMarshalled }
 
 // Identity is who a sign-in was verified for. EnterpriseID is empty outside an Enterprise Grid.
 type Identity struct{ AppID, TeamID, UserID, EnterpriseID string }
@@ -69,15 +101,18 @@ type Connection interface {
 	// Hold runs held with the saved sign-in while holding the connection's lock, so that no other command
 	// reads, refreshes or replaces it meanwhile, and returns what held returns. A lock that is taken refuses
 	// with the code slack_connection_busy. A failure that is not an *Error reads as slack_storage_failed.
+	// ctx ends when the read's time does, and a store that waits stops waiting then.
 	Hold(ctx context.Context, held func(Saved) error) error
 }
 
-// Saved is the sign-in under its lock.
+// Saved is the sign-in under its lock. Each ctx ends when the read's time does, and a store that waits
+// stops waiting then. The ctx of a Save does not end when the caller cancels the read: a sign-in that
+// records a spent refresh token, or the pair that replaced it, is saved though the caller has gone.
 type Saved interface {
 	// Load gives the saved sign-in, or nil when none is saved.
-	Load() (*Credentials, error)
+	Load(ctx context.Context) (*Credentials, error)
 	// Save replaces the saved sign-in durably before it returns.
-	Save(*Credentials) error
+	Save(ctx context.Context, document *Credentials) error
 }
 
 // access is a usable token with the identity and scopes it was saved for. Its fields are exported so that
@@ -145,18 +180,15 @@ func isInt(value any, want int) bool {
 	return ok && n == want
 }
 
-// validToken reports whether a token is 1 to 8192 visible ASCII characters.
+// validToken reports whether a token is 20 to 8,192 characters, each a printable ASCII character other
+// than a space. A shorter one would be found in every answer Slack gives: a one-letter token is in the name
+// of the member "ok".
 func validToken(value any) (Secret, bool) {
 	s, isText := value.(string)
-	if !isText || len(s) < 1 || len(s) > 8192 {
-		return "", false
+	if !isText || !echo.Usable(s, 8192) {
+		return Secret{}, false
 	}
-	for i := 0; i < len(s); i++ {
-		if s[i] < 33 || s[i] > 126 {
-			return "", false
-		}
-	}
-	return Secret(s), true
+	return NewSecret(s), true
 }
 
 // scopeList puts a list of scopes in the kept order. A list that is empty, repeats a scope or names one
@@ -254,16 +286,16 @@ func (c *Credentials) valid() bool {
 	if c.WorkspaceOrigin != "" && origin(c.WorkspaceOrigin) != c.WorkspaceOrigin {
 		return false
 	}
-	if _, usable := validToken(string(c.AccessToken)); !usable || c.AccessObtainedAt.IsZero() {
+	if _, usable := validToken(c.AccessToken.Reveal()); !usable || c.AccessObtainedAt.IsZero() {
 		return false
 	}
-	if c.RefreshToken == "" {
+	if c.RefreshToken == (Secret{}) {
 		if !c.AccessExpiresAt.IsZero() || !c.RefreshObtainedAt.IsZero() {
 			return false
 		}
 	} else {
 		life := c.AccessExpiresAt.Sub(c.AccessObtainedAt)
-		if _, usable := validToken(string(c.RefreshToken)); !usable || c.AccessExpiresAt.IsZero() ||
+		if _, usable := validToken(c.RefreshToken.Reveal()); !usable || c.AccessExpiresAt.IsZero() ||
 			life < time.Second || life > maxAccessLife || !c.RefreshObtainedAt.Equal(c.AccessObtainedAt) {
 			return false
 		}
@@ -310,8 +342,20 @@ func storeError(err error) error {
 	return refuse("slack_storage_failed")
 }
 
-func load(saved Saved) (*Credentials, error) {
-	found, err := saved.Load()
+// kept is the saved sign-in under its lock, as one read uses it: every Load and Save runs within the read's
+// time, and every token loaded joins those the read looks for in what Slack sends back.
+type kept struct {
+	under Saved
+	ctx   context.Context
+	b     *budget
+}
+
+func (k kept) load() (*Credentials, error) {
+	var found *Credentials
+	err := k.b.store(k.ctx, func(limited context.Context) (err error) {
+		found, err = k.under.Load(limited)
+		return err
+	})
 	if err != nil {
 		return nil, storeError(err)
 	}
@@ -322,12 +366,16 @@ func load(saved Saved) (*Credentials, error) {
 		return nil, refuse("slack_credentials_invalid")
 	}
 	document := found.copy()
+	k.b.hold(&document)
 	return &document, nil
 }
 
-func save(saved Saved, document Credentials) error {
+// save is not ended by the caller's cancel, only by the read's deadline.
+func (k kept) save(document Credentials) error {
 	document = document.copy()
-	return storeError(saved.Save(&document))
+	return storeError(k.b.store(context.WithoutCancel(k.ctx), func(limited context.Context) error {
+		return k.under.Save(limited, &document)
+	}))
 }
 
 // acquire gets a usable token under the connection's lock. Given the access a page request just refused as
@@ -338,12 +386,10 @@ func (r *Reader) acquire(ctx context.Context, b *budget, p *progress, expired *a
 	if !validBinding(r.Binding) {
 		return nil, refuse("slack_invalid_configuration")
 	}
-	if _, err := b.remaining(); err != nil {
-		return nil, err
-	}
 	var held *access
-	err := r.Connection.Hold(ctx, func(saved Saved) error {
-		document, err := load(saved)
+	bind := func(under Saved) error {
+		saved := kept{under, ctx, b}
+		document, err := saved.load()
 		if err != nil {
 			return err
 		}
@@ -369,7 +415,8 @@ func (r *Reader) acquire(ctx context.Context, b *budget, p *progress, expired *a
 		}
 		held = &access{usable.AccessToken, usable.Identity, slices.Clone(usable.GrantedScopes)}
 		return nil
-	})
+	}
+	err := b.store(ctx, func(limited context.Context) error { return r.Connection.Hold(limited, bind) })
 	if err = storeError(err); err != nil {
 		return nil, err
 	}
@@ -385,7 +432,7 @@ func (r *Reader) acquire(ctx context.Context, b *budget, p *progress, expired *a
 // checked. A token at its expiry, or one Slack just refused as expired, is refreshed once: the sign-in is
 // first saved as needing a login, so a refresh that fails halfway never leaves a spent refresh token
 // looking usable.
-func (r *Reader) usable(ctx context.Context, b *budget, saved Saved, document *Credentials, force bool) (*Credentials, error) {
+func (r *Reader) usable(ctx context.Context, b *budget, saved kept, document *Credentials, force bool) (*Credentials, error) {
 	if document == nil {
 		return nil, refuse("slack_not_connected")
 	}
@@ -408,16 +455,16 @@ func (r *Reader) usable(ctx context.Context, b *budget, saved Saved, document *C
 	}
 	quarantined := document.copy()
 	quarantined.State = pending
-	if document.RefreshToken == "" {
+	if document.RefreshToken == (Secret{}) {
 		if force {
-			if err := save(saved, quarantined); err != nil {
+			if err := saved.save(quarantined); err != nil {
 				return nil, err
 			}
 		}
 		return nil, refuse("slack_reconnect_required")
 	}
 	if force && b.refreshAttempts >= 1 {
-		if err := save(saved, quarantined); err != nil {
+		if err := saved.save(quarantined); err != nil {
 			return nil, err
 		}
 	}
@@ -431,7 +478,7 @@ func (r *Reader) usable(ctx context.Context, b *budget, saved Saved, document *C
 		// The caller has gone. The refresh token has not been sent, so the sign-in is left as it is.
 		return nil, err
 	}
-	if err := save(saved, quarantined); err != nil {
+	if err := saved.save(quarantined); err != nil {
 		return nil, err
 	}
 	if _, err := b.remaining(); err != nil {
@@ -446,7 +493,9 @@ func (r *Reader) usable(ctx context.Context, b *budget, saved Saved, document *C
 	if err != nil {
 		return nil, err
 	}
-	if err := save(saved, replacement); err != nil {
+	// The pair that was replaced stays among the tokens the read looks for, beside the new one.
+	b.hold(&replacement)
+	if err := saved.save(replacement); err != nil {
 		return nil, err
 	}
 	return r.verify(ctx, b, saved, replacement)
@@ -454,7 +503,7 @@ func (r *Reader) usable(ctx context.Context, b *budget, saved Saved, document *C
 
 // verify checks a token's identity with Slack and saves the sign-in as ready. An answer that shows the
 // token is for someone else, or is no longer accepted, saves the sign-in as needing a login.
-func (r *Reader) verify(ctx context.Context, b *budget, saved Saved, candidate Credentials) (*Credentials, error) {
+func (r *Reader) verify(ctx context.Context, b *budget, saved kept, candidate Credentials) (*Credentials, error) {
 	if _, err := b.remaining(); err != nil {
 		return nil, err
 	}
@@ -464,7 +513,7 @@ func (r *Reader) verify(ctx context.Context, b *budget, saved Saved, candidate C
 		case "slack_identity_mismatch", "slack_reconnect_required", "slack_token_type_unsupported":
 			quarantined := candidate.copy()
 			quarantined.State = pending
-			if err := save(saved, quarantined); err != nil {
+			if err := saved.save(quarantined); err != nil {
 				return nil, err
 			}
 		}
@@ -483,7 +532,7 @@ func (r *Reader) verify(ctx context.Context, b *budget, saved Saved, candidate C
 	if _, err := b.remaining(); err != nil {
 		return nil, err
 	}
-	if err := save(saved, verified); err != nil {
+	if err := saved.save(verified); err != nil {
 		return nil, err
 	}
 	if _, err := b.remaining(); err != nil {
@@ -494,9 +543,10 @@ func (r *Reader) verify(ctx context.Context, b *budget, saved Saved, candidate C
 
 // reject saves a sign-in that Slack just refused as needing a login, without a request. A token or an
 // identity that another command saved since is left alone.
-func (r *Reader) reject(ctx context.Context, refused *access) error {
-	return storeError(r.Connection.Hold(ctx, func(saved Saved) error {
-		document, err := load(saved)
+func (r *Reader) reject(ctx context.Context, b *budget, refused *access) error {
+	quarantine := func(under Saved) error {
+		saved := kept{under, ctx, b}
+		document, err := saved.load()
 		if err != nil || document == nil {
 			return err
 		}
@@ -504,7 +554,10 @@ func (r *Reader) reject(ctx context.Context, refused *access) error {
 			return nil
 		}
 		document.State = pending
-		return save(saved, *document)
+		return saved.save(*document)
+	}
+	return storeError(b.store(ctx, func(limited context.Context) error {
+		return r.Connection.Hold(limited, quarantine)
 	}))
 }
 
@@ -534,8 +587,9 @@ func authResult(document *strictjson.Object) error {
 	return refuse("slack_oauth_rejected")
 }
 
-// authRequest makes one request that keeps the sign-in usable and returns Slack's accepted document.
-func (r *Reader) authRequest(ctx context.Context, b *budget, build func(context.Context) (*http.Request, error)) (*strictjson.Object, error) {
+// authRequest makes one request that keeps the sign-in usable and returns Slack's accepted document. An
+// answer that holds one of tokens is refused. Nil looks for none.
+func (r *Reader) authRequest(ctx context.Context, b *budget, tokens *echo.Tokens, build func(context.Context) (*http.Request, error)) (*strictjson.Object, error) {
 	got, err := r.send(ctx, b, "auth", build)
 	if err != nil {
 		return nil, err
@@ -550,7 +604,7 @@ func (r *Reader) authRequest(ctx context.Context, b *budget, build func(context.
 	case got.status != http.StatusOK:
 		return nil, refuse("slack_response_invalid")
 	}
-	document, err := decode(got.body)
+	document, err := decode(got.body, tokens)
 	if err != nil {
 		return nil, err
 	}
@@ -563,11 +617,12 @@ func (r *Reader) authRequest(ctx context.Context, b *budget, build func(context.
 	return document, nil
 }
 
-// refresh spends the refresh token for a new pair. The client is public: no secret is sent.
+// refresh spends the refresh token for a new pair. The client is public: no secret is sent. The answer holds
+// the new pair, so it is not searched for tokens, and nothing of it but those two tokens is kept as text.
 func (r *Reader) refresh(ctx context.Context, b *budget, document *Credentials) (*strictjson.Object, error) {
 	form := "grant_type=refresh_token&client_id=" + url.QueryEscape(document.ClientID) +
-		"&refresh_token=" + url.QueryEscape(string(document.RefreshToken))
-	return r.authRequest(ctx, b, func(ctx context.Context) (*http.Request, error) {
+		"&refresh_token=" + url.QueryEscape(document.RefreshToken.Reveal())
+	return r.authRequest(ctx, b, nil, func(ctx context.Context) (*http.Request, error) {
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form))
 		if err != nil {
 			return nil, err
@@ -591,22 +646,27 @@ func noBot(document *strictjson.Object) error {
 }
 
 // identity asks Slack who the token is for and requires the saved team and user. It returns the workspace
-// origin Slack states, or "" when that is not a slack.com root.
+// origin Slack states, or "" when that is not a slack.com root. The origin is lowered from what Slack
+// stated, so it is searched for tokens once more as it will be saved.
 func (r *Reader) identity(ctx context.Context, b *budget, candidate *Credentials) (string, error) {
-	document, err := r.authRequest(ctx, b, func(ctx context.Context) (*http.Request, error) {
+	document, err := r.authRequest(ctx, b, &b.tokens, func(ctx context.Context) (*http.Request, error) {
 		request, err := http.NewRequestWithContext(ctx, http.MethodPost, identityURL, nil)
 		if err != nil {
 			return nil, err
 		}
 		request.Header.Set("Accept", "application/json")
 		request.Header.Set("Accept-Encoding", "identity")
-		request.Header.Set("Authorization", "Bearer "+string(candidate.AccessToken))
+		request.Header.Set("Authorization", "Bearer "+candidate.AccessToken.Reveal())
 		return request, nil
 	})
 	if err != nil {
 		return "", err
 	}
-	return verifyIdentity(document, candidate.Identity)
+	workspace, err := verifyIdentity(document, candidate.Identity)
+	if err == nil && b.tokens.InText(workspace) {
+		return "", refuse("slack_response_invalid")
+	}
+	return workspace, err
 }
 
 // verifyIdentity reads Slack's accepted answer to the identity request against the saved identity.

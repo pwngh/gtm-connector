@@ -88,6 +88,7 @@ var (
 	ErrInvalidAsOf        = &CodeError{"invalid_as_of"}
 	ErrDeadline           = &CodeError{"brief_deadline_exceeded"}
 	ErrInvalidToken       = &CodeError{"invalid_token"}
+	ErrRateLimited        = &CodeError{"rate_limited"}
 	ErrTooLarge           = &CodeError{"brief_too_large"}
 	ErrRejected           = &CodeError{"brief_rejected"}
 	ErrEvidenceInvalid    = &CodeError{"brief_evidence_invalid"}
@@ -117,12 +118,22 @@ type Principal struct {
 	WorkspaceID string
 	PrincipalID string
 	TokenID     string   // receipts.Fingerprint of the verified bearer
-	Scopes      []string // what the token grants
-	// Live is whether the credential still verifies now. Nil means it does.
-	Live func() bool
+	Scopes      []string // what the token granted when the call was admitted
+	// Verify reads the credential again: the scopes it grants now, and whether it still verifies. Each read
+	// and the publication go by what it answers then, never by Scopes. Nil means the credential still
+	// verifies with Scopes.
+	Verify func() (scopes []string, live bool)
+	// Charge counts one source read against the caller's rate window and reports whether the window had
+	// room for it, as the gateway counts each read inside a prepared brief. Nil counts nothing.
+	Charge func() bool
 }
 
-func (p Principal) live() bool { return p.Live == nil || p.Live() }
+func (p Principal) current() (scopes []string, live bool) {
+	if p.Verify == nil {
+		return p.Scopes, true
+	}
+	return p.Verify()
+}
 
 // Selection is what a selected-mode server opens: each selected account, and whether its Slack is.
 type Selection map[string]bool
@@ -249,9 +260,9 @@ func checkRequest(s evidence.Sources, accountID, asOf string) error {
 	return nil
 }
 
-// versions are the records a read returned, as the record versions their receipt binds: each record's
+// RecordVersions are the records a read returned, as the record versions their receipt binds: each record's
 // canonical encoding is its body.
-func versions(records []*strictjson.Object) ([]receipts.RecordVersion, error) {
+func RecordVersions(records []*strictjson.Object) ([]receipts.RecordVersion, error) {
 	out := make([]receipts.RecordVersion, len(records))
 	for i, record := range records {
 		ref, _ := record.Get("record_ref")
@@ -338,10 +349,14 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 		o.ElapsedMS = elapsed()
 		return m.finish(ctx, r.started.Ticket(), o)
 	}
-	if !r.principal.live() {
+	granted, live := r.principal.current()
+	if !live {
 		return nil, nil, nil, "", errors.Join(ErrInvalidToken, finish(receipts.Failed(401, "request_failed")))
 	}
-	if !slices.Contains(r.principal.Scopes, scopes[r.tool]) {
+	if r.principal.Charge != nil && !r.principal.Charge() {
+		return nil, nil, nil, "", errors.Join(ErrRateLimited, finish(receipts.Failed(429, "request_failed")))
+	}
+	if !slices.Contains(granted, scopes[r.tool]) {
 		return nil, nil, nil, "denied", finish(receipts.Denied())
 	}
 	if own, bound := m.Source.(WorkspaceSource); bound && own.Workspace() != r.principal.WorkspaceID {
@@ -377,7 +392,7 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool},
 			finish(receipts.Failed(200, "request_failed")))
 	}
-	bound, err = versions(found)
+	bound, err = RecordVersions(found)
 	if err != nil {
 		return nil, nil, nil, "", errors.Join(err, finish(receipts.Failed(200, "request_failed")))
 	}
@@ -556,19 +571,24 @@ func projections(units []evidence.Unit, gaps []evidence.Gap, c collected) ([]rec
 // other failure leaves it pending, so it is finished here as the save failure.
 //
 // The caller's cancel counts up to the call of Publish and not after it. A caller who has left by then gets
-// no card, and the seal finishes as the failure. From that call on the publication runs under a context the
-// caller cannot cancel, for no longer than SettleLimit: a cancel in the middle of the store's transaction
-// could leave the caller told of a failure while the card and its seal are committed. A publication that
-// has not finished by the limit gives ErrNotPublished, with its seal finished as the failure.
+// no card, and the seal finishes as the failure. admit, when given, is asked as the last thing before that
+// call, and its refusal publishes nothing. From that call on the publication runs under a context the caller
+// cannot cancel, for no longer than SettleLimit, whatever the caller or the credential does: a cancel in
+// the middle of the store's transaction could leave the caller told of a failure while the card and its
+// seal are committed. A publication that has not finished by the limit gives ErrNotPublished, with its seal
+// finished as the failure.
 func (m *Maker) publish(ctx context.Context, p receipts.Publication, units []evidence.Unit, gaps []evidence.Gap,
-	text string, c collected, failure receipts.Outcome) (*Sealed, error) {
+	text string, c collected, failure receipts.Outcome, admit func() error) (*Sealed, error) {
 	sealed := func(card receipts.Card) *Sealed {
 		return &Sealed{BriefID: p.BriefID, Payload: card.Bytes, SHA256: card.SHA256, Seal: card.Seal, Units: units,
 			Gaps: gaps, Text: text}
 	}
 	var err error
 	if p.Units, p.Gaps, err = projections(units, gaps, c); err == nil {
-		if err = gone(ctx); err == nil {
+		if err = gone(ctx); err == nil && admit != nil {
+			err = admit()
+		}
+		if err == nil {
 			var card receipts.Card
 			var late bool
 			if card, late, err = m.published(ctx, p); err == nil {
@@ -703,15 +723,18 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	}
 	return m.publish(ctx, receipts.Publication{WorkspaceID: p.WorkspaceID, AccountRef: b.AccountID, BriefID: id,
 		PrincipalID: p.PrincipalID, Seal: seal.Ticket(), Kind: "card", SchemaVersion: 3, RulesVersion: rulesVersion, Bytes: []byte(encoded),
-		Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c, receipts.Failed(500, "brief_save_failed"))
+		Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c, receipts.Failed(500, "brief_save_failed"), nil)
 }
 
 // Prepare is prepare_renewal_brief, run as the gateway runs it: the outer call's receipt is committed first
 // and records the call's arguments as given; each source read is a child read of it; and the outer
 // receipt, finished with the published bytes' digest, is the brief's seal.
 type Prepare struct {
-	Principal   Principal
-	Selection   Selection
+	Principal Principal
+	Selection Selection
+	// Outer is the call's receipt when the gateway has committed it. The maker then starts none: the call
+	// has the one outer receipt its gateway gave it, and OperationID and RequestID are not read.
+	Outer       *receipts.Receipt
 	OperationID string
 	RequestID   receipts.RequestID
 	// Arguments are the call's arguments as received: account_id, and as_of when the caller gave one.
@@ -742,11 +765,20 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 	principal := p.Principal
 	accountValue, _ := p.Arguments.Get("account_id")
 	accountID, _ := accountValue.(string)
-	outer, err := m.Receipts.Start(ctx, receipts.Start{WorkspaceID: principal.WorkspaceID, OperationID: p.OperationID,
-		PrincipalID: principal.PrincipalID, TokenID: principal.TokenID, Tool: receipts.Composite, Scope: "crm:read",
-		AccountRef: accountID, Arguments: p.Arguments, RequestID: p.RequestID})
-	if err != nil {
-		return nil, err
+	var outer receipts.Receipt
+	if p.Outer != nil {
+		outer = *p.Outer
+		if outer.Tool != receipts.Composite || outer.Status != "pending" || outer.AuditID == "" {
+			return nil, fmt.Errorf("%w: the outer receipt is not a pending %s call", receipts.ErrInvalid, receipts.Composite)
+		}
+	} else {
+		var err error
+		outer, err = m.Receipts.Start(ctx, receipts.Start{WorkspaceID: principal.WorkspaceID, OperationID: p.OperationID,
+			PrincipalID: principal.PrincipalID, TokenID: principal.TokenID, Tool: receipts.Composite, Scope: "crm:read",
+			AccountRef: accountID, Arguments: p.Arguments, RequestID: p.RequestID})
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Only the worker whose start committed the call runs it and settles it.
 	if err := ownStart(outer); err != nil {
@@ -813,13 +845,20 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 		return fail(ErrTooLarge)
 	case !m.now().Before(deadline):
 		return fail(ErrDeadline)
-	case !principal.live():
-		return fail(ErrInvalidToken)
+	}
+	// The bearer is verified once more as the last thing before the publication starts. That is its last
+	// check: one that expires or is revoked after it, while the publication's transaction runs, still gets
+	// this brief, as a grant that ends while any tool runs still gets that one response.
+	stillLive := func() error {
+		if _, live := principal.current(); !live {
+			return ErrInvalidToken
+		}
+		return nil
 	}
 	return m.publish(ctx, receipts.Publication{WorkspaceID: principal.WorkspaceID, AccountRef: accountID, BriefID: id,
 		PrincipalID: principal.PrincipalID, Seal: outer.Ticket(), Kind: "selected_brief", SchemaVersion: 3, RulesVersion: rulesVersion,
 		Bytes: []byte(encoded), Reads: c.ids, ElapsedMS: elapsed()}, units, gaps, text, c,
-		receipts.Failed(200, "request_failed"))
+		receipts.Failed(200, "request_failed"), stillLive)
 }
 
 // ownStart refuses to run work whose receipt another start committed: it is running under that start
