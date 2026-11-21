@@ -69,9 +69,16 @@ type watched struct {
 }
 
 func (w *watched) note(tool string) {
+	// The receipt is looked for first. A caller who leaves in before has its read's receipt finished at
+	// once, while the read it no longer waits for is still returning.
+	w.receipted(tool)
 	if w.before != nil {
 		w.before(tool)
 	}
+}
+
+// receipted keeps the read, and whether its pending receipt is committed as it starts.
+func (w *watched) receipted(tool string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.reads = append(w.reads, tool)

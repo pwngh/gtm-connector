@@ -105,9 +105,9 @@ func TestConnectDemoStatusAndRemove(t *testing.T) {
 	}
 }
 
-// connect knows calls, slack and the assistant apps by name and refuses each plainly, before it opens the
-// database. A Salesforce sign-in that sf cannot give is refused before anything is saved. Nothing is
-// connected, and no later command reads demo data in a refused source's place.
+// connect knows slack and the assistant apps by name and refuses each plainly, before it opens the database.
+// A Salesforce sign-in that sf cannot give is refused before anything is saved. Nothing is connected, and no
+// later command reads demo data in a refused source's place.
 func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 	t.Setenv("GTM_DATABASE_URL", "")
 	refuse := func(code int, tokens ...string) string {
@@ -118,7 +118,7 @@ func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 		}
 		return errs.String()
 	}
-	for _, tokens := range [][]string{{"calls"}, {"slack", "--seller", "Dana Crest"},
+	for _, tokens := range [][]string{{"slack", "--seller", "Dana Crest"},
 		{"inspector", "--scope", "crm:read"}, {"cursor"}} {
 		want := "Error: connect " + tokens[0] + " is not available in this build. "
 		if message := refuse(3, append(tokens, "--state-dir", "invented")...); !strings.HasPrefix(message, want) ||

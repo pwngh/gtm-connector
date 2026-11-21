@@ -149,6 +149,9 @@ type sourceKind struct {
 	detail   string // what connect's table and a refusal say the source is connected to
 	// live is a real source. Its workspace is made as one that holds no demo data.
 	live bool
+	// besideDemo is a real source that a demo workspace may also hold, beside the demo CRM: the one
+	// exception to the kind of workspace.
+	besideDemo bool
 	// options are the options connect takes with it, besides --remove.
 	options []string
 	// backend is the source as a card records it: "sqlite" or "salesforce" for the CRM, "fixture" or
@@ -191,13 +194,13 @@ var sourceKinds = []*sourceKind{
 			return "Salesforce (" + oneLine(cellText(get(binding, "environment"))) + "), identity verified"
 		},
 		attach: attachSalesforce, crm: openSalesforce},
-	// internal/sources/calls reads them. Nothing opens them here yet. Imports are bound to their CRM.
+	// Imports are bound to their CRM, and may sit beside the demo CRM (source_calls.go).
 	{provider: "calls", source: "calls", mode: "imported", shown: "imported", title: "Call transcripts", plural: true,
-		detail: "imported transcripts", live: true, options: []string{"--seller"},
+		detail: "imported transcripts", live: true, besideDemo: true, options: []string{"--seller"},
 		backend: "imported", bound: func(_ postgres.Connection, crm any) any { return crm },
 		described: func(*strictjson.Object) string {
 			return "imported transcripts, whose provider and statements are unverified"
-		}},
+		}, attach: attachTranscripts, calls: openTranscripts},
 	// internal/sources/slack reads it. Nothing opens it here yet.
 	{provider: "slack", source: "slack", mode: "slack", shown: "slack", title: "Slack",
 		detail: "the saved Slack sign-in", live: true, options: []string{"--seller"},

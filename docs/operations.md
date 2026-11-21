@@ -35,7 +35,42 @@ The database must be encoded as UTF8. Setup refuses any other encoding before it
 with one line: `the database is encoded as SQL_ASCII; create it with ENCODING 'UTF8' TEMPLATE template0`.
 
 > **Demo data and real sources never share a workspace.** The database refuses a real connection in
-> the demo workspace.
+> the demo workspace. Imported call transcripts are the one exception: they may sit beside the demo CRM.
+
+## Call transcripts
+
+`debug calls import` reads one UTF-8 TXT, WebVTT or SRT export and binds it to one account. The card
+of that account then quotes the excerpt as whole sentences. Nothing contacts a call provider.
+
+```sh
+gtm setup
+gtm connect demo --state-dir renewals
+gtm connect calls --state-dir renewals --seller 'Morgan Reed'
+gtm debug calls import meeting.vtt --account acc-007 --state-dir renewals
+gtm debug calls list --state-dir renewals
+gtm debug calls inspect IMPORT_ID --full --state-dir renewals
+gtm brief acc-007 --state-dir renewals
+```
+
+- `import` takes `--account ID`, and `--cues FIRST:LAST` or `--lines FIRST:LAST`, `--called-at
+  TIMESTAMP`, `--speaker-names` and `--reassign`, as the Python CLI does
+  ([reference](python/calls.md)). `--account-number` is not available yet.
+- The account is resolved by a `get_account` read under a receipt of its own, in a run named
+  `import-`. `audit` lists it, and an import is saved only under a finished read that returned the
+  account in the same workspace.
+- The file's bytes, every revision and the active excerpt of each account are kept in PostgreSQL and
+  never changed or deleted. Every read checks a revision against its stored bytes.
+- The file itself must not be a symbolic link. A file replaced after it is checked, or changed while
+  it is read, is refused.
+- An import is saved only while the CRM and the calls are connected as the command found them. One
+  detached or connected again meanwhile refuses it, and nothing is saved.
+- `connect calls --remove` detaches the transcripts and deletes nothing: a card then says
+  `Calls: not connected.` `connect demo` keeps connected transcripts connected and leaves detached ones
+  detached. Only `connect calls` connects them again.
+- A workspace whose cards already read the demo call notes refuses `connect calls`. Import into a
+  workspace of its own. The database makes this check as the calls are connected, so a demo read that
+  finishes meanwhile is either seen or refused.
+- With `--json`, format characters such as bidirectional controls are written as `\uXXXX` escapes.
 
 ## Connect Salesforce
 
@@ -78,15 +113,21 @@ gtm mcp stdio --scope crm:read --state-dir gtm-de
 ## Health
 
 `/healthz` answers 200 `{"status":"ok"}` when the database is reachable and its applied migrations
-are exactly the ones the binary carries. Otherwise it answers 503 with one of two statuses:
+are exactly the ones the binary carries. Otherwise it answers 503 with one of four statuses:
 
 | Status | Meaning |
 | --- | --- |
-| `migrations_not_current` | The database answers, but its schema is behind the binary, ahead of it, or from other migration files. |
+| `migrations_behind` | A migration the binary carries is not applied. Run `gtm setup`. |
+| `migrations_ahead` | A migration is applied that the binary does not carry. The binary is older than the database. |
+| `migrations_changed` | An applied migration's contents differ from the binary's file of that number. |
 | `database_unavailable` | The database did not answer within three seconds. |
 
 `gtm health` asks the same question from a terminal. It exits 1 with the status unless the answer
 is ok.
+
+`gtm serve` asks it before it starts. On a database that is behind, ahead or changed it does not
+start, and it prints one line that says which. `gtm setup` migrates a database that is behind, and
+refuses one that is ahead or changed with the same line.
 
 ## MCP clients
 

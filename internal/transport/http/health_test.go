@@ -22,16 +22,16 @@ import (
 // long the check was given.
 type schema struct {
 	noSessions
-	current bool
-	err     error
-	given   *time.Duration
+	state postgres.MigrationState
+	err   error
+	given *time.Duration
 }
 
-func (s schema) MigrationsCurrent(ctx context.Context) (bool, error) {
+func (s schema) MigrationState(ctx context.Context) (postgres.MigrationState, error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		*s.given = time.Until(deadline)
 	}
-	return s.current, s.err
+	return s.state, s.err
 }
 
 func healthz(t *testing.T, s *httptransport.Server, code int, status, state string) {
@@ -42,23 +42,25 @@ func healthz(t *testing.T, s *httptransport.Server, code int, status, state stri
 	}
 }
 
-// The body is one of three fixed statuses, whatever the store's error says,
+// The body is one of five fixed statuses, whatever the store's error says,
 // and the check is given three seconds at most.
 func TestHealthzStatesTheDatabaseAndItsMigrations(t *testing.T) {
 	driver := errors.New(`failed to connect to "host=db.internal.example user=gtm_app password=app-password"`)
 	for _, c := range []struct {
-		state   string
-		current bool
-		err     error
-		code    int
-		status  string
+		state      string
+		migrations postgres.MigrationState
+		err        error
+		code       int
+		status     string
 	}{
-		{"current migrations", true, nil, http.StatusOK, "ok"},
-		{"other migrations", false, nil, http.StatusServiceUnavailable, "migrations_not_current"},
-		{"no answer", false, driver, http.StatusServiceUnavailable, "database_unavailable"},
+		{"current migrations", postgres.MigrationsCurrent, nil, http.StatusOK, "ok"},
+		{"a migration not applied", postgres.MigrationsBehind, nil, http.StatusServiceUnavailable, "migrations_behind"},
+		{"a later migration applied", postgres.MigrationsAhead, nil, http.StatusServiceUnavailable, "migrations_ahead"},
+		{"a migration that changed", postgres.MigrationsChanged, nil, http.StatusServiceUnavailable, "migrations_changed"},
+		{"no answer", "", driver, http.StatusServiceUnavailable, "database_unavailable"},
 	} {
 		var given time.Duration
-		healthz(t, surfaceOn(t, schema{current: c.current, err: c.err, given: &given}), c.code, c.status, c.state)
+		healthz(t, surfaceOn(t, schema{state: c.migrations, err: c.err, given: &given}), c.code, c.status, c.state)
 		if given <= 0 || given > 3*time.Second {
 			t.Errorf("%s: the check was given %s", c.state, given)
 		}
@@ -147,7 +149,21 @@ func TestHealthzOnPostgreSQL(t *testing.T) {
 		postgres.LatestSchemaVersion()); err != nil {
 		t.Fatal(err)
 	}
-	healthz(t, s, http.StatusServiceUnavailable, "migrations_not_current", "one migration behind")
+	healthz(t, s, http.StatusServiceUnavailable, "migrations_behind", "one migration behind")
+
+	// A migration this binary does not hold is applied, as a newer binary's
+	// setup leaves it. Its version is whatever follows the embedded ones.
+	if _, err := conn.Exec(ctx, "INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, 'later.sql', 'x')",
+		postgres.LatestSchemaVersion()+1); err != nil {
+		t.Fatal(err)
+	}
+	healthz(t, s, http.StatusServiceUnavailable, "migrations_ahead", "one migration ahead")
+
+	// The first migration's recorded digest is not this binary's file's.
+	if _, err := conn.Exec(ctx, "UPDATE schema_migrations SET sha256 = 'changed' WHERE version = 1"); err != nil {
+		t.Fatal(err)
+	}
+	healthz(t, s, http.StatusServiceUnavailable, "migrations_changed", "a migration that changed")
 
 	stop()
 	healthz(t, s, http.StatusServiceUnavailable, "database_unavailable", "an unreachable database")

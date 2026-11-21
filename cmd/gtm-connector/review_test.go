@@ -295,7 +295,8 @@ func TestOptionsStarMeetsTheHostCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	surface, err := httptransport.New(httptransport.Config{PublicOrigin: "https://127.0.0.1:8443",
-		AllowedHosts: []string{"127.0.0.1:8443"}, SessionKey: key}, schema{current: true}, authz.Evidence{})
+		AllowedHosts: []string{"127.0.0.1:8443"}, SessionKey: key}, schema{state: postgres.MigrationsCurrent},
+		authz.Evidence{})
 	if err != nil {
 		t.Fatal(err)
 	}

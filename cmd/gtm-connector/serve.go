@@ -26,10 +26,10 @@ import (
 )
 
 // openAppStore connects as the app role, as serve and the commands do. It
-// refuses a role that owns the tables, a database setup has not migrated,
-// and one whose restore has not installed its credentials. Each of its own
-// refusals is a failure in this program's words. Any other error is the
-// driver's.
+// refuses a role that owns the tables, a database whose migrations are not
+// exactly this binary's (behind, ahead or changed), and one whose restore has
+// not installed its credentials. Each of its own refusals is a failure in
+// this program's words. Any other error is the driver's.
 func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 	if c.databaseURL == "" {
 		return nil, local("set GTM_DATABASE_URL to the app role's PostgreSQL URL")
@@ -54,11 +54,10 @@ func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 		} else if err != nil {
 			return err
 		}
-		if version, err := store.SchemaVersion(ctx); err != nil {
+		if state, err := store.MigrationState(ctx); err != nil {
 			return err
-		} else if version != postgres.LatestSchemaVersion() {
-			return local("the database is at schema %d, not %d; run setup first", version,
-				postgres.LatestSchemaVersion())
+		} else if err := state.Err(); err != nil {
+			return local("%s", err)
 		}
 		if pending, err := store.PendingRestore(ctx); err != nil {
 			return err
@@ -74,10 +73,11 @@ func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 	return store, nil
 }
 
-// serve runs the HTTPS server as the app role. It refuses to start before
-// setup has run, while a restore is unfinished, or as a role that owns the
-// tables. With --selection it reads the selection file first, before the
-// database or any credential, and never reads it again.
+// serve runs the HTTPS server as the app role. It refuses to start on a
+// database whose migrations are behind this binary's, ahead of them or
+// changed, while a restore is unfinished, or as a role that owns the tables.
+// With --selection it reads the selection file first, before the database
+// or any credential, and never reads it again.
 func serve(ctx context.Context, args []string) error {
 	selection, err := serveSelection(args)
 	if err != nil {

@@ -533,7 +533,7 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 			"fix", "Apply the fix for the earlier failed step, then repeat the check.")
 		commands, requests, started := crm.commands.Load(), crm.requests.Load(), time.Now()
 		if ready && aborted == nil {
-			r.progress(name, "running", nil)
+			r.checkProgress(name, "running", nil)
 			count, message, err := operation()
 			var missing *missingFields
 			switch code := failureCode(err); {
@@ -569,7 +569,7 @@ func (r *run) salesforceCheck(ctx context.Context) (*strictjson.Object, error) {
 		ok := get(row, "status") == "pass"
 		if aborted == nil {
 			steps = append(steps, row)
-			r.progress(name, get(row, "status").(string), get(row, "count"))
+			r.checkProgress(name, get(row, "status").(string), get(row, "count"))
 		}
 		passed = passed && ok
 		return ok
@@ -738,9 +738,9 @@ func (c *checkRun) renewalCandidate(ctx context.Context, crm *salesforceCRM, asO
 	return account, nil
 }
 
-// progress says on stderr which step of the check runs and how it ended: a line of text, or with --json an
+// checkProgress says on stderr which step of the check runs and how it ended: a line of text, or with --json an
 // object with one progress key.
-func (r *run) progress(step, status string, count any) {
+func (r *run) checkProgress(step, status string, count any) {
 	if r.screen.json {
 		r.screen.err.Write([]byte(mustLine(strictjson.NewObject("progress", strictjson.NewObject(
 			"command", r.command, "step", step, "status", status, "count", count))) + "\n"))
