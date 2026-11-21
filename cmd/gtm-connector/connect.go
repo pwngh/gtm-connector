@@ -212,6 +212,10 @@ func (r *run) connect(ctx context.Context) (any, error) {
 			saved.aliases = aliases
 		}
 		speakers = saved.encode()
+		if len(speakers) > evidence.MaxSettingsBytes {
+			return nil, refused("The speaker settings would take %d bytes, and a workspace holds at most %d. Name "+
+				"fewer or shorter aliases. Nothing was saved.", len(speakers), evidence.MaxSettingsBytes)
+		}
 	}
 	before, after, err := r.attach(ctx, kinds, sellers, speakers)
 	if err != nil {

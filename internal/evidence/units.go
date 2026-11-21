@@ -33,7 +33,7 @@ const (
 
 // GapCodes is every line NOT READ can print, by code, with its disposition.
 var GapCodes = map[string]string{
-	"crm_unmapped_fields": "not_read", "calls_denied": "not_read", "calls_excerpt": "not_read",
+	"crm_unmapped_fields": "not_read", "crm_users_not_read": "not_read", "calls_denied": "not_read", "calls_excerpt": "not_read",
 	"calls_outside_records": "not_read", "slack_not_requested": "not_read", "slack_denied": "not_read",
 	"slack_thread": "not_read", "slack_channel": "not_read", "calls_not_connected": "not_read",
 	"slack_not_connected": "not_read", "slack_not_selected": "not_read",
@@ -497,6 +497,14 @@ func validate(evidence *strictjson.Object) validated {
 		reject("Evidence names an unknown source or outcome.")
 	}
 	salesforce, imported := crm == "salesforce", calls == "imported"
+	// Evidence under the speaker rules states whether the org's users were read: on a Salesforce CRM only.
+	usersStatus := UsersNone
+	if speakerRules {
+		usersStatus = str(field(object(settings), "users"))
+		if (usersStatus == UsersNone) == salesforce {
+			reject("Evidence has unsupported speaker settings.")
+		}
+	}
 	withCalls := calls != "none"
 	withSlack := oneOf(slackStatus, "available", "denied", "not_selected")
 	liveSlack := withSlack && slack == "slack"
@@ -652,7 +660,8 @@ func validate(evidence *strictjson.Object) validated {
 		}
 		denied := toolName == "read_call_notes" && notesStatus == "denied" ||
 			toolName == "read_slack_messages" && slackStatus == "denied"
-		unselected := toolName == "read_slack_messages" && slackStatus == "not_selected"
+		unselected := toolName == "read_slack_messages" && slackStatus == "not_selected" ||
+			toolName == "list_users" && usersStatus == UsersNotRead
 		status, code := "ok", 200
 		switch {
 		case denied:
@@ -705,7 +714,7 @@ type Sources struct {
 
 // Assemble is briefing.assemble_evidence's snapshot: the records and receipts of one card's reads, the
 // outcome of each optional source, and the sellers its roles come from.
-func Assemble(briefID, accountID, asOf string, records, receipts []any, notesStatus, slackStatus string,
+func Assemble(briefID, accountID, asOf string, records, receipts []any, notesStatus, slackStatus, usersStatus string,
 	threadSnapshot any, s Sources) *strictjson.Object {
 	sellers := make([]any, len(s.Sellers))
 	for i, seller := range s.Sellers {
@@ -721,12 +730,16 @@ func Assemble(briefID, accountID, asOf string, records, receipts []any, notesSta
 		"records", records, "receipts", receipts, "notes_status", notesStatus, "slack_status", slackStatus,
 		"crm_backend", s.CRMBackend, "crm_binding", s.CRMBinding, "calls_backend", s.CallsBackend,
 		"calls_binding", s.CallsBinding, "slack_backend", s.SlackBackend, "slack_binding", s.SlackBinding,
-		"thread_snapshot", threadSnapshot, "sellers", sellers, "demo_sellers", demo, "people", s.People())
+		"thread_snapshot", threadSnapshot, "sellers", sellers, "demo_sellers", demo, "people", s.people(usersStatus))
 }
 
-// People is the evidence's people object: the version of the speaker rules, the company's domains and the
-// aliases.
-func (s Sources) People() *strictjson.Object {
+// People is the evidence's people object of a card on a CRM other than Salesforce: the version of the
+// speaker rules, the company's domains and the aliases.
+func (s Sources) People() *strictjson.Object { return s.people(UsersNone) }
+
+// people is the people object with the state of the org's users read: UsersNone for a CRM other than
+// Salesforce, UsersRead, or UsersNotRead.
+func (s Sources) people(users string) *strictjson.Object {
 	domains := make([]any, len(s.CompanyDomains))
 	for i, d := range s.CompanyDomains {
 		domains[i] = d
@@ -739,7 +752,8 @@ func (s Sources) People() *strictjson.Object {
 		}
 		aliases[i] = strictjson.NewObject("label", a.Label, "call", call, "target", a.Target)
 	}
-	return strictjson.NewObject("rules_version", SpeakerRules, "company_domains", domains, "aliases", aliases)
+	return strictjson.NewObject("rules_version", SpeakerRules, "company_domains", domains, "aliases", aliases,
+		"users", users)
 }
 
 // FixtureCRMBinding is the binding of the demo CRM: the digest of its fixed identity

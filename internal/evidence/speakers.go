@@ -17,18 +17,31 @@ import (
 //
 // People are the account's contacts, the org's Salesforce Users (Standard users only, read by list_users),
 // and the listed sellers. Records of one human are merged into one person: a contact and a user with the
-// same email address, and a listed seller whose entry equals the name of exactly one user. The account's
-// domains are the email domains of its contacts. The company's domains and the aliases are the workspace's
-// own settings, sealed in the evidence's people object. A free or shared mail domain never shows a side.
+// same email address, and a listed seller whose entry equals the name of exactly one user. A user is known
+// by email and user ID; an active user's name is compared only within a call's known participants (rung 5),
+// never with a label on its own. The account's domains are its Website's domain, and each email domain
+// that at least two of its contacts hold; a free or shared mail domain, a page on a shared host, and any
+// domain that is the company's, a user's or a listed seller's are never the account's. The company's
+// domains and the aliases are the workspace's own settings, sealed in the evidence's people object.
 
 // SpeakerRules is the version of the rules a sentence's role is decided under: people.RulesVersion, which
 // also covers how this file reads the evidence. A unit seals it.
 const SpeakerRules = people.RulesVersion
 
-// Limits of the workspace's speaker settings.
+// Limits of the workspace's speaker settings. MaxSettingsBytes is the most the workspace's column holds of
+// them, encoded.
 const (
 	MaxCompanyDomains = 50
 	MaxAliases        = 200
+	MaxSettingsBytes  = 65536
+)
+
+// The states of an org's users read: no Salesforce CRM, read, or not read because the org holds more
+// Standard users than a card reads.
+const (
+	UsersNone    = "none"
+	UsersRead    = "read"
+	UsersNotRead = "not_read"
 )
 
 // SharedMailDomains are free and shared mail domains. An address on one names its holder but never shows a
@@ -62,6 +75,52 @@ func (m *Matched) value() any {
 // ValidDomain is whether a text is a mail domain as the settings hold it: lower-case ASCII labels of
 // letters, digits and hyphens, with at least one dot.
 func ValidDomain(domain string) bool { return ValidEmail("x@" + domain) }
+
+// sharedHosts are hosts whose pages and subdomains belong to many organisations: a Website on one is a page
+// of a shared host, not a domain of the account's own.
+var sharedHosts = []string{"blogspot.com", "carrd.co", "facebook.com", "github.io", "gitlab.io", "google.com",
+	"herokuapp.com", "instagram.com", "linkedin.com", "linktr.ee", "medium.com", "myshopify.com", "netlify.app",
+	"notion.site", "squarespace.com", "twitter.com", "vercel.app", "webflow.io", "weebly.com", "wixsite.com",
+	"wordpress.com", "x.com", "youtube.com"}
+
+// websiteDomain is the domain an account's Website names: its host, in lower case and without "www.", when
+// that is a domain of its own. A page on a shared host, a free-mail domain, and anything that is no domain
+// name none.
+func websiteDomain(value any) (string, bool) {
+	text, ok := value.(string)
+	if !ok {
+		return "", false
+	}
+	host := []byte(oneLine(text))
+	for i, c := range host {
+		if c >= 'A' && c <= 'Z' {
+			host[i] = c + 'a' - 'A'
+		}
+	}
+	h := string(host)
+	for _, scheme := range []string{"https://", "http://", "//"} {
+		h = strings.TrimPrefix(h, scheme)
+	}
+	if end := strings.IndexAny(h, "/?#"); end >= 0 {
+		h = h[:end]
+	}
+	if strings.Contains(h, "@") || strings.Contains(h, " ") {
+		return "", false
+	}
+	if colon := strings.LastIndex(h, ":"); colon >= 0 {
+		h = h[:colon]
+	}
+	h = strings.TrimPrefix(strings.TrimSuffix(h, "."), "www.")
+	if !ValidDomain(h) {
+		return "", false
+	}
+	for _, shared := range append(append([]string(nil), sharedHosts...), SharedMailDomains...) {
+		if h == shared || strings.HasSuffix(h, "."+shared) {
+			return "", false
+		}
+	}
+	return h, true
+}
 
 var slackUserID = regexp.MustCompile(`^[UW][A-Z0-9]{2,}$`)
 
@@ -115,7 +174,11 @@ func newSpeakers(c *card, contacts []*strictjson.Object, numbers map[string]int,
 		drafts = append(drafts, d)
 		return d
 	}
-	domains := map[string]bool{}
+	// holders are the contacts that hold each email domain; excluded are domains that are never the account's.
+	holders, excluded := map[string]map[string]bool{}, map[string]bool{}
+	for _, d := range SharedMailDomains {
+		excluded[d] = true
+	}
 	for _, row := range contacts {
 		ref, id := str(field(row, "record_ref")), rowID(row)
 		s.contacts[ref] = numbers[id]
@@ -127,15 +190,27 @@ func newSpeakers(c *card, contacts []*strictjson.Object, numbers map[string]int,
 		}
 		email, _ := field(row, "email").(string)
 		if _, at, ok := people.Address(email); ok {
-			domains[at] = true
+			if holders[at] == nil {
+				holders[at] = map[string]bool{}
+			}
+			holders[at][id] = true
 		}
 		add(d, field(row, "email"), ref)
 	}
+	// A user is known by user ID and email. An active user's name is a participant name: rung 5 compares it
+	// for a user the call's attendee list names, and no rung compares it with a label on its own.
 	for _, row := range byID(c.groups["users"]) {
 		ref, id := str(field(row, "record_ref")), rowID(row)
 		name := str(field(row, "name"))
 		d := &draft{key: "user:" + id, user: true, nameKey: label(name), ids: []people.Identifier{
-			{Kind: people.SalesforceUser, Value: id, From: ref}, {Kind: people.Name, Value: name, From: ref}}}
+			{Kind: people.SalesforceUser, Value: id, From: ref}}}
+		if field(row, "is_active") == true {
+			d.ids = append(d.ids, people.Identifier{Kind: people.ParticipantName, Value: name, From: ref})
+		}
+		email, _ := field(row, "email").(string)
+		if _, at, ok := people.Address(email); ok {
+			excluded[at] = true
+		}
 		add(d, field(row, "email"), ref)
 	}
 	// A listed seller whose entry is the name of exactly one user is that user.
@@ -160,6 +235,9 @@ func newSpeakers(c *card, contacts []*strictjson.Object, numbers map[string]int,
 			drafts = append(drafts, d)
 		}
 		d.ids = append(d.ids, id)
+		if _, at, ok := people.Address(entry); ok {
+			excluded[at] = true
+		}
 		if s.known.HomeTeam != "" && slackUserID.MatchString(entry) {
 			d.ids = append(d.ids, people.Identifier{Kind: people.SlackUser, Value: entry, Scope: s.known.HomeTeam,
 				From: "sellers"})
@@ -168,14 +246,11 @@ func newSpeakers(c *card, contacts []*strictjson.Object, numbers map[string]int,
 	for _, d := range drafts {
 		s.known.People = append(s.known.People, people.Person{Key: d.key, Identifiers: d.ids})
 	}
-	for domain := range domains {
-		s.known.AccountDomains = append(s.known.AccountDomains, domain)
-	}
-	sort.Strings(s.known.AccountDomains)
 	settings, _ := c.evidence.Get("people")
 	if settings, ok := settings.(*strictjson.Object); ok {
 		for _, domain := range list(field(settings, "company_domains")) {
 			s.known.CompanyDomains = append(s.known.CompanyDomains, str(domain))
+			excluded[str(domain)] = true
 		}
 		for _, value := range list(field(settings, "aliases")) {
 			alias := object(value)
@@ -189,6 +264,40 @@ func newSpeakers(c *card, contacts []*strictjson.Object, numbers map[string]int,
 			}
 		}
 	}
+	// The account's domains: its Website's, and each one two of its contacts hold, but never one excluded.
+	account := map[string]bool{}
+	if website, ok := c.groups["accounts"][0].Get("website"); ok {
+		if domain, named := websiteDomain(website); named {
+			account[domain] = true
+		}
+	}
+	for domain, ids := range holders {
+		if len(ids) >= 2 {
+			account[domain] = true
+		}
+	}
+	for domain := range account {
+		if !excluded[domain] {
+			s.known.AccountDomains = append(s.known.AccountDomains, domain)
+		}
+	}
+	sort.Strings(s.known.AccountDomains)
+	return s
+}
+
+// speakersOf is the people of the card as the source of one backend reads them. The calls and Slack read
+// the same people unless one is demo data, whose demo sellers the other does not list, so the index is
+// built once for each seller list.
+func (c *card) speakersOf(backend string) *speakers {
+	key := strings.Join(c.sellers(backend), "\n")
+	if c.indexes == nil {
+		c.indexes = map[string]*speakers{}
+	}
+	if s, built := c.indexes[key]; built {
+		return s
+	}
+	s := newSpeakers(c, c.contactRows, c.contactNumbers, backend)
+	c.indexes[key] = s
 	return s
 }
 
@@ -277,8 +386,14 @@ func (s *speakers) resolve(c *card, r people.Ref) role {
 	result := people.Resolve(s.known, r)
 	words := basisWords[result.Basis]
 	who := role{role: string(result.Role), rung: int(result.Rung)}
+	domain := c.line(result.Domain)
 	if id := result.Matched; id.Kind != "" {
-		m := &Matched{Kind: string(id.Kind), Value: c.line(id.Value)}
+		// A person outside the CRM is shown by their domain alone.
+		value := id.Value
+		if result.Basis == people.ByDomain {
+			value = result.Domain
+		}
+		m := &Matched{Kind: string(id.Kind), Value: c.line(value)}
 		if strings.Contains(id.From, "/") {
 			from := id.From
 			m.RecordRef = &from
@@ -301,11 +416,11 @@ func (s *speakers) resolve(c *card, r people.Ref) role {
 	case result.Basis == people.ByDomain:
 		switch result.Role {
 		case people.CustomerNotInCRM:
-			who.basis = "customer side by domain " + result.Domain + ", not a contact"
+			who.basis = "customer side by domain " + domain + ", not a contact"
 		case people.Seller:
-			who.basis = "seller side by domain " + result.Domain
+			who.basis = "seller side by domain " + domain
 		default:
-			who.basis = "other party by domain " + result.Domain
+			who.basis = "other party by domain " + domain
 		}
 	default:
 		who.basis = words
@@ -351,10 +466,13 @@ func (s *speakers) contactOf(p people.Person, matched people.Identifier) *int {
 // the thread's line under NOT READ: the scopes the sign-in lacks, and the authors past the read's limit.
 // It is "" when every profile was read whole, or when the evidence holds no members.
 func (c *card) profilesNotRead() string {
-	missing, over := map[string]bool{}, 0
+	missing, over, unread := map[string]bool{}, 0, 0
 	for _, member := range c.groups["members"] {
-		if field(member, "profile") == "over_limit" {
+		switch field(member, "profile") {
+		case "over_limit":
 			over++
+		case "not_read":
+			unread++
 		}
 		for _, scope := range list(field(member, "missing_scopes")) {
 			missing[str(scope)] = true
@@ -372,6 +490,12 @@ func (c *card) profilesNotRead() string {
 		text += " 1 author's profile past the read's limit was not read."
 	case over > 1:
 		text += fmt.Sprintf(" %d authors' profiles past the read's limit were not read.", over)
+	}
+	switch {
+	case unread == 1:
+		text += " 1 author's profile could not be read."
+	case unread > 1:
+		text += fmt.Sprintf(" %d authors' profiles could not be read.", unread)
 	}
 	return text
 }
@@ -399,7 +523,7 @@ func flagInt(set bool) int {
 }
 
 var (
-	peopleKeys = []string{"rules_version", "company_domains", "aliases"}
+	peopleKeys = []string{"rules_version", "company_domains", "aliases", "users"}
 	aliasKeys  = []string{"label", "call", "target"}
 	userKeys   = []string{"id", "source_id", "backend", "name", "email", "is_active", "record_ref"}
 	memberKeys = []string{"id", "account_id", "user_id", "team_id", "home", "email", "profile",
@@ -423,11 +547,14 @@ func ValidAliasTarget(text string) bool {
 	return ValidAliasLabel(text)
 }
 
-// validPeople checks the evidence's people object: this version of the rules, the company's domains and the
-// aliases.
+// validPeople checks the evidence's people object: this version of the rules, the company's domains, the
+// aliases, and the state of the org's users read.
 func validPeople(value any) bool {
 	o, ok := value.(*strictjson.Object)
-	if !ok || !hasKeys(o, peopleKeys...) {
+	if !ok || !hasKeys(o, peopleKeys...) || !oneOf(field(o, "users"), UsersNone, UsersRead, UsersNotRead) {
+		return false
+	}
+	if encoded, err := strictjson.Dumps(o, strictjson.Prepared); err != nil || len(encoded) > MaxSettingsBytes {
 		return false
 	}
 	_, current := intIn(field(o, "rules_version"), SpeakerRules, SpeakerRules)
@@ -479,12 +606,12 @@ func validMember(record *strictjson.Object) bool {
 	user, okUser := field(record, "user_id").(string)
 	team, email := field(record, "team_id"), field(record, "email")
 	_, teamText := team.(string)
-	_, emailText := email.(string)
+	address, emailText := email.(string)
 	_, home := field(record, "home").(bool)
 	missing, okMissing := field(record, "missing_scopes").([]any)
 	if !okUser || !slackUserID.MatchString(user) || field(record, "id") != "mem-"+user ||
-		team != nil && !teamText || email != nil && !emailText || !home || !okMissing ||
-		!oneOf(field(record, "profile"), "read", "missing_scope", "over_limit") {
+		team != nil && !teamText || email != nil && !(emailText && ValidEmail(address)) || !home || !okMissing ||
+		!oneOf(field(record, "profile"), "read", "missing_scope", "over_limit", "not_read") {
 		return false
 	}
 	for _, scope := range missing {

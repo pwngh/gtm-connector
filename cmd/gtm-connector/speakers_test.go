@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +12,8 @@ import (
 )
 
 // A call of the demo account acc-007, whose one contact is Dana Crest (dana@juniper-crest.example): an
-// unnamed speaker, two people the attendee list names by address only, and the listed seller.
+// unnamed speaker, two people the attendee list names by address only, and the listed seller. One contact
+// alone does not make juniper-crest.example the account's domain, so its holder is another party.
 const anonymousMeeting = "WEBVTT\n\n" +
 	"1\n00:00:01.000 --> 00:00:04.000\n<v Speaker 1>We will sign the renewal this quarter.\n\n" +
 	"2\n00:00:05.000 --> 00:00:08.000\n<v Lee Park>I will send the order form today.\n\n" +
@@ -60,7 +62,8 @@ func TestSpeakerSettingsDecideACardsRoles(t *testing.T) {
 	for _, line := range []string{
 		"  Customer side\n",
 		`; "Speaker 1", role Missing [2], by alias` + "\n        \"We will sign the renewal this quarter.\"\n",
-		`; "Pat Quill", customer side by domain juniper-crest.example, not a contact` + "\n",
+		"  Other party\n",
+		`; "Pat Quill", other party by domain juniper-crest.example` + "\n",
 		"  Seller side\n",
 		`; "Lee Park", seller side by domain northwind.example` + "\n",
 		`; "Morgan Reed", by name` + "\n",
@@ -100,7 +103,7 @@ func TestSpeakerSettingsDecideACardsRoles(t *testing.T) {
 	}
 	matched, _ := get(domain, "matched").(*strictjson.Object)
 	receipt, _ := get(matched, "receipt").(*strictjson.Object)
-	if get(domain, "role") != "customer_side_not_in_crm" || get(matched, "value") != "pat@juniper-crest.example" ||
+	if get(domain, "role") != "other_party" || get(matched, "value") != "juniper-crest.example" ||
 		!strings.HasPrefix(cellText(get(matched, "record_ref")), "calls/call_notes/") ||
 		get(receipt, "tool") != "read_call_notes" || get(receipt, "status") != "ok" {
 		t.Errorf("the domain's sentence: %s", stdout)
@@ -130,5 +133,25 @@ func TestSpeakerSettingsDecideACardsRoles(t *testing.T) {
 	if message := d.failed(t, 2, with("connect", "demo", "--alias", "A=a@b.example")...); !strings.HasPrefix(message,
 		"Error: connect demo does not take --alias.") {
 		t.Errorf("connect demo --alias: %s", message)
+	}
+}
+
+// Settings that the workspace's column cannot hold are refused by name, and nothing is saved.
+func TestSpeakerSettingsOverTheirSizeAreRefused(t *testing.T) {
+	d := setUpDemo(t)
+	where := []string{"--state-dir", "speakers-size"}
+	d.succeeded(t, append([]string{"connect", "demo"}, where...)...)
+	argv := []string{"connect", "calls"}
+	for i := range 200 {
+		argv = append(argv, "--alias", fmt.Sprintf("%s %03d=%s", strings.Repeat("話", 195), i,
+			"someone@example.com"))
+	}
+	if message := d.failed(t, 2, append(argv, where...)...); !strings.HasPrefix(message,
+		"Error: The speaker settings would take ") {
+		t.Errorf("settings over their size: %s", message)
+	}
+	stdout, _ := d.succeeded(t, append([]string{"--json", "connect", "status"}, where...)...)
+	if get(object(t, stdout), "aliases") != nil {
+		t.Errorf("settings over their size were saved: %s", stdout)
 	}
 }

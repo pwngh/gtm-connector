@@ -21,7 +21,10 @@
 // seller (for Slack, only a member of the seller's own workspace), the account's domain makes
 // customer_side_not_in_crm, and any other domain makes other_party, shown with the domain. A free or
 // shared domain never shows a side, and a domain on both the seller's list and the account's counts as
-// shared.
+// shared. A member of the seller's own Slack workspace is never put on the customer side by a domain.
+//
+// A ParticipantName, such as a Salesforce user's, is compared only by rung 5, for a person the attendee
+// list names by email, and never with a label on its own.
 //
 // # The ladder
 //

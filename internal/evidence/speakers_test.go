@@ -27,7 +27,7 @@ func speakerSettings(domains []string, aliases ...*strictjson.Object) *strictjso
 	for i, alias := range aliases {
 		a[i] = alias
 	}
-	return strictjson.NewObject("rules_version", SpeakerRules, "company_domains", d, "aliases", a)
+	return strictjson.NewObject("rules_version", SpeakerRules, "company_domains", d, "aliases", a, "users", UsersNone)
 }
 
 // namedTranscript is the evidence of a card that read one imported text transcript whose lines each open
@@ -122,6 +122,8 @@ func TestSpeakerLadderOnACall(t *testing.T) {
 		return speakerSettings([]string{sellerDomain},
 			strictjson.NewObject("label", "Speaker 1", "call", call, "target", contactEmail))
 	})
+	// A second contact on the account's domain makes it the account's.
+	addContact(t, evidence, "ladder-2", "Kit Vale", "kit@"+accountDomain)
 	units, text := spoken(t, evidence)
 	for _, c := range []struct {
 		label, role, basis string
@@ -278,45 +280,6 @@ func TestSlackAuthorsByProfile(t *testing.T) {
 				t.Fatal("no sentence")
 			}
 		})
-	}
-}
-
-func TestSalesforceUsersAreSellers(t *testing.T) {
-	evidence := sealedEvidence(t, "books_salesforce", "exports-gemini/0")
-	native := "005000000000000AAA"
-	user := strictjson.NewObject("id", "usr-sf-"+native, "source_id", native, "backend", "salesforce",
-		"name", "Invented author", "email", "author@"+sellerDomain, "is_active", false,
-		"record_ref", "crm/users/usr-sf-"+native)
-	evidence.Set("records", append(member(evidence, "records").([]any), user))
-	receipt := receiptOf(evidence, "list_users")
-	if receipt == nil {
-		t.Fatal("a Salesforce card has no list_users read")
-	}
-	receipt.Set("rows", []any{"crm/users/usr-sf-" + native})
-	receipt.Set("row_count", 1)
-	units, _, _, _, err := Build(evidence)
-	if err != nil {
-		t.Fatal(err)
-	}
-	checked := 0
-	for _, u := range units {
-		if u.Kind != "sentence" || u.Quoted {
-			continue
-		}
-		checked++
-		// A Slack author's name makes a seller only: an inactive user still is one.
-		if u.Role != "seller" || u.Basis != "by name" || u.Matched == nil || u.Matched.RecordRef == nil ||
-			*u.Matched.RecordRef != "crm/users/usr-sf-"+native {
-			t.Errorf("role %s, %q, matched %+v", u.Role, u.Basis, u.Matched)
-		}
-	}
-	if checked == 0 {
-		t.Fatal("no sentence")
-	}
-	// A user record in evidence made before the speaker rules is no table it can hold.
-	evidence.Delete("people")
-	if _, _, _, _, err := Build(evidence); err == nil || err.Error() != "Unknown or duplicate source reference." {
-		t.Errorf("evidence with no people object and a user: %v", err)
 	}
 }
 

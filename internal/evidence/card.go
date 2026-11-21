@@ -29,6 +29,8 @@ type card struct {
 	// contactRows are the account's contacts in ID order, and contactNumbers their unit numbers by ID.
 	contactRows    []*strictjson.Object
 	contactNumbers map[string]int
+	// indexes are the people of the card, built once for each seller list a source reads.
+	indexes map[string]*speakers
 	// known is whether a label names a known person of the card, as speakerRole compares one: a contact of
 	// the account or a listed seller. A line of a message that opens with such a label is that person's turn.
 	known func(name string) bool
@@ -626,6 +628,10 @@ func (c *card) crm(asOf time.Time) []contact {
 		}
 		c.gap("crm_unmapped_fields", "CRM: annual recurring revenue and renewal risk are not mapped "+
 			"from standard Salesforce fields.", nil, false, nil)
+		if people, ok := c.evidence.Get("people"); ok && field(object(people), "users") == UsersNotRead {
+			c.gap("crm_users_not_read", "CRM: the org's users were not read: it holds more than 50,000 Standard users, "+
+				"so no speaker is matched to a Salesforce user.", nil, false, nil)
+		}
 	} else {
 		renewal := dayOf(field(account, "renewal_date"))
 		renewalDay = &renewal
@@ -871,7 +877,7 @@ func (c *card) calls(asOf time.Time) {
 		}
 		return
 	}
-	who := newSpeakers(c, c.contactRows, c.contactNumbers, "calls_backend")
+	who := c.speakersOf("calls_backend")
 	sorted := append([]*strictjson.Object(nil), notes...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		a, b := pyStr(field(sorted[i], "called_at")), pyStr(field(sorted[j], "called_at"))
@@ -949,7 +955,7 @@ func (c *card) slack(contacts []contact) {
 		c.gap("slack_denied", "Slack: not read. The grant lacks slack:read.", nil, false, nil)
 		return
 	}
-	who := newSpeakers(c, c.contactRows, c.contactNumbers, "slack_backend")
+	who := c.speakersOf("slack_backend")
 	roleOf := func(message *strictjson.Object) func(*string) role {
 		return func(l *string) role { return who.resolve(c, c.slackRef(message, labelOf(l))) }
 	}
