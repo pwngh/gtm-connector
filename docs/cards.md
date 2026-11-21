@@ -336,6 +336,13 @@ listed below with inert words.
 - A link with a backslash or a control character before the end of its host shows
   `[link unknown host]`, because a browser may open a different host than the one written. So does
   a Slack link `<target|label>` whose target names a scheme with no `//` after it.
+- A host with an internationalised label (`xn--` and Punycode) is shown in that ASCII form, lowercased,
+  as `[link xn--bcher-kva.example]`: the name a browser looks up, never the Unicode form it decodes to,
+  whose letters can look like other letters. A label shows `[link unknown host]` when it fails the
+  checks the URL Standard's host parser makes (UTS #46 with Unicode 16.0.0 characters): the Punycode
+  does not decode or encode back to the same label, the decoded name holds a character the mapping
+  changes or refuses, starts with a combining mark or with `xn--`, is only ASCII, or breaks the
+  right-to-left or joiner rules.
 - A control, direction-changing or invisible format character becomes its code, such as `[U+202E]`.
 - A bracketed number such as `[3]` becomes `(3)`, because a card cites its units that way.
 

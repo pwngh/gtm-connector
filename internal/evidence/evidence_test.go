@@ -184,8 +184,12 @@ func TestWindowedSearches(t *testing.T) {
 	}
 }
 
+// A row whose text differs from the recorded one only where Go shows the host of a valid xn-- label is a known
+// difference: Python showed every such host as unknown host.
 func TestSafeTextCorpus(t *testing.T) {
 	m := oracletest.NewMismatches(t, "safe_text")
+	known := 0
+	defer func() { t.Logf("safe_text: %d rows show the host of a valid xn-- label", known) }()
 	for _, line := range oracletest.Lines(t, "corpora/safe_text.jsonl.gz") {
 		var row struct {
 			input, text string
@@ -202,6 +206,10 @@ func TestSafeTextCorpus(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := [4]int{counts.Mentions, counts.Links, counts.Controls, counts.Brackets}
+		if text != row.text && oracletest.PythonHosts(text) == row.text {
+			known++
+			text = row.text
+		}
 		if text != row.text || got != row.counts {
 			m.Add("%q: got %q %v, want %q %v", row.input, text, got, row.text, row.counts)
 		}
@@ -233,7 +241,8 @@ func TestSentencesCorpus(t *testing.T) {
 	}
 }
 
-// The host a card shows for each recorded link target, and for a www. address in running text.
+// The host a card shows for each recorded link target, and for a www. address in running text. The host of a
+// valid xn-- label, which Python showed as unknown host, is a known difference.
 func TestLinkHost(t *testing.T) {
 	var fixture struct {
 		Cases []struct {
@@ -250,12 +259,14 @@ func TestLinkHost(t *testing.T) {
 		if c.Host != unknownHost {
 			named++
 		}
-		if got := linkHost([]rune(c.Input), false); got != c.Host {
+		if got := linkHost([]rune(c.Input), false); got != c.Host &&
+			oracletest.PythonHosts("[link "+got+"]") != "[link "+c.Host+"]" {
 			m.Add("_host(%q): got %q, want %q", c.Input, got, c.Host)
 		}
 		if c.RunningText != nil {
 			running++
-			if got := linkHost([]rune(c.Input), true); got != *c.RunningText {
+			if got := linkHost([]rune(c.Input), true); got != *c.RunningText &&
+				oracletest.PythonHosts("[link "+got+"]") != "[link "+*c.RunningText+"]" {
 				m.Add("_host(%q, bare=True): got %q, want %q", c.Input, got, *c.RunningText)
 			}
 		}

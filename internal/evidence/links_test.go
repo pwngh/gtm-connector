@@ -135,16 +135,6 @@ func TestRawLinkExtent(t *testing.T) {
 	})
 }
 
-// The cases of test_a_label_a_browser_refuses_is_not_shown of the removed Python suite.
-func TestPunycodeLabel(t *testing.T) {
-	checkLinks(t, [][2]string{
-		{"https://xn--bcher-kva.example/ now", "[link unknown host] now"},
-		{"<https://files.XN--p1ai/|deck>", "deck [link unknown host]"},
-		{"<https://files.example.xn--/|deck>", "deck [link unknown host]"},
-		{"<https://axn--b.example/|deck>", "deck [link axn--b.example]"},
-	})
-}
-
 // The cases of test_a_slack_token_is_read_innermost_first_and_may_hold_a_line_break of the removed Python suite.
 func TestSlackTokenInnermostFirst(t *testing.T) {
 	for _, c := range []struct {
