@@ -11,8 +11,8 @@ import (
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/postgrestest"
 )
 
-// sentences is a prepared brief whose card holds this many invented sentence units, perNote to each
-// invented note, all resting on one read of the notes.
+// sentences is a prepared brief whose card holds its account's record and this many invented sentence units,
+// perNote to each invented note, all resting on one read of the account and the notes.
 func sentences(tb testing.TB, f *postgrestest.Fixture, brief string, units, perNote int) postgres.CardPublication {
 	tb.Helper()
 	said := make([]string, units)
@@ -25,20 +25,23 @@ func sentences(tb testing.TB, f *postgrestest.Fixture, brief string, units, perN
 		notes[i] = postgrestest.Record("notes", id, "id", id,
 			"text", strings.Join(said[i*perNote:min(units, (i+1)*perNote)], " "))
 	}
+	// The account comes first: unit 1 is its record, which the card's one line cites.
+	records := append([]postgres.RecordVersion{postgrestest.Record("accounts", postgrestest.Account, "id",
+		postgrestest.Account, "v", brief)}, notes...)
 	pub, call, read := postgrestest.Prepared(tb, f.Store, f, brief+"-call", brief, f.Reader.ID,
-		postgres.TokenID("raw-token"), notes...)
+		postgres.TokenID("raw-token"), records...)
 	bound := map[string]string{}
 	for _, u := range pub.Units {
 		bound[u.RecordRef] = u.SourceRecordID
 	}
-	pub.Units = make([]postgres.Unit, units)
-	for i := range pub.Units {
+	pub.Units = append(pub.Units[:1], make([]postgres.Unit, units)...)
+	for i := range units {
 		ref := notes[i/perNote].RecordRef()
-		pub.Units[i] = postgres.Unit{N: i + 1, Kind: "sentence", RecordRef: ref, Tool: "get_account", Shown: "yes",
+		pub.Units[i+1] = postgres.Unit{N: i + 2, Kind: "sentence", RecordRef: ref, Tool: "get_account", Shown: "yes",
 			ReceiptID: read.ID, SourceRecordID: bound[ref],
-			Body: postgrestest.UnitBody(i+1, "sentence", ref, "get_account", "yes", map[string]any{"text": said[i]})}
+			Body: postgrestest.UnitBody(i+2, "sentence", ref, "get_account", "yes", map[string]any{"text": said[i]})}
 	}
-	pub.Bytes = postgrestest.CardBytes(tb, call, pub.AccountRef, brief, []postgres.Receipt{read}, notes, pub.Units,
+	pub.Bytes = postgrestest.CardBytes(tb, call, pub.AccountRef, brief, []postgres.Receipt{read}, records, pub.Units,
 		pub.Gaps)
 	return pub
 }

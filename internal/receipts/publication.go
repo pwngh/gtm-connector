@@ -313,7 +313,7 @@ func checkProjection(payload *Payload, units []UnitRow, gaps []GapRow, lines []L
 			return refuse("line %d", i+1)
 		}
 	}
-	if err := evidence.CheckLines(parsed, payload.Text, len(payload.Units), payload.AsOf); err != nil {
+	if err := evidence.CheckLines(parsed, payload.Text, payload.Units, payload.AsOf); err != nil {
 		return refuse("%v", err)
 	}
 	return nil

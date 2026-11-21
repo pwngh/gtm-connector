@@ -324,12 +324,17 @@ func ParseLine(value any) (Line, error) {
 	return l, nil
 }
 
-// CheckLines is whether lines are exactly a card's own: the signals first, then the values; together they
-// render the lines its text prints under ATTENTION and RECORD VALUES, byte for byte; each cites a unit of
-// the card; and each line's facts are what its text prints. asOf is the card's as_of day, which a countdown
-// counts from.
-func CheckLines(lines []Line, text string, units int, asOf string) error {
+// CheckLines is whether lines are exactly a card's own. The signals come first, then the values, and there
+// is at least one value, as every card prints RECORD VALUES. Rendered, they are the lines its text prints
+// under ATTENTION and RECORD VALUES, byte for byte. Each line's text has the form its code states, each
+// cites units of the records that code rests on, and each carries exactly the facts its code implies, which
+// are what its text prints. units are the card's units as its bytes hold them; asOf is its as_of day, which
+// a countdown counts from.
+func CheckLines(lines []Line, text string, units []any, asOf string) error {
 	signals, values := PrintedLines(text)
+	if len(values) == 0 {
+		return errors.New("the text prints no record values")
+	}
 	var gotSignals, gotValues []Line
 	for i, l := range lines {
 		if l.Section == "signal" && len(gotValues) > 0 {
@@ -340,10 +345,11 @@ func CheckLines(lines []Line, text string, units int, asOf string) error {
 		} else {
 			gotValues = append(gotValues, l)
 		}
-		for _, n := range l.Cites {
-			if n < 1 || n > units {
-				return fmt.Errorf("line %d cites a unit the card does not hold", i+1)
-			}
+		if err := l.citesItsRecords(units); err != nil {
+			return fmt.Errorf("line %d: %w", i+1, err)
+		}
+		if !l.form(asOf) {
+			return fmt.Errorf("line %d: its text is not the form its code states", i+1)
 		}
 		if err := l.facts(asOf); err != nil {
 			return fmt.Errorf("line %d: %w", i+1, err)
@@ -358,24 +364,254 @@ func CheckLines(lines []Line, text string, units int, asOf string) error {
 	return nil
 }
 
-// facts is whether a line's countdown, amount or contact is what its text prints.
+// restsOn is the tables of the records each code's citations come from: the first citation's, then each
+// other's. A code with no others cites exactly one unit.
+var restsOn = map[string][2][]string{
+	"renewal_date": {{"accounts"}}, "arr": {{"accounts"}}, "crm_risk": {{"accounts"}}, "account": {{"accounts"}},
+	"crm_at_risk": {{"accounts"}}, "contract_end": {{"accounts", "contracts"}}, "opportunity": {{"opportunities"}},
+	"contract": {{"contracts"}}, "contact": {{"contacts"}}, "contract_ended": {{"contracts"}},
+	"renewal_passed":      {{"accounts", "contracts"}},
+	"still_open":          {{"accounts", "contracts"}, {"opportunities"}},
+	"close_after_renewal": {{"accounts", "contracts"}, {"opportunities"}},
+	"contact_no_role":     {{"contacts"}, {"contacts"}},
+	"call_stale":          {{"call_notes"}},
+}
+
+// unitRecord is the kind of a card's unit n and the source and table of the record it was read from, or
+// empty strings when the card holds no unit n.
+func unitRecord(units []any, n int) (kind, source, table string) {
+	if n < 1 || n > len(units) {
+		return "", "", ""
+	}
+	u, _ := units[n-1].(*strictjson.Object)
+	if u == nil {
+		return "", "", ""
+	}
+	k, _ := u.Get("kind")
+	r, _ := u.Get("record_ref")
+	kind, _ = k.(string)
+	ref, _ := r.(string)
+	if parts := strings.SplitN(ref, "/", 3); len(parts) == 3 {
+		source, table = parts[0], parts[1]
+	}
+	return kind, source, table
+}
+
+// citesItsRecords is whether a line cites units of the records its code rests on: CRM records for every
+// code but call_stale, which cites a call. A contract end line with a countdown cites the contract that
+// ends; one without cites the account.
+func (l Line) citesItsRecords(units []any) error {
+	rule, known := restsOn[l.Code]
+	if !known || len(l.Cites) == 0 {
+		return errors.New("its code is not a line's")
+	}
+	if len(rule[1]) == 0 && len(l.Cites) != 1 ||
+		(l.Code == "still_open" || l.Code == "close_after_renewal") && len(l.Cites) < 2 {
+		return errors.New("it cites another number of units than its code does")
+	}
+	for i, n := range l.Cites {
+		allowed := rule[0]
+		if i > 0 {
+			allowed = rule[1]
+		}
+		kind, source, table := unitRecord(units, n)
+		call := table == "call_notes" && source == "calls"
+		crm := source == "crm" && kind == "record"
+		if !slices.Contains(allowed, table) || !call && !crm {
+			return errors.New("it cites a unit of a record its code does not rest on")
+		}
+		if i == 0 && l.Code == "contract_end" && (l.Countdown != nil) != (table == "contracts") {
+			return errors.New("its contract end cites another record than its countdown counts to")
+		}
+	}
+	return nil
+}
+
+// cutDay reads a YYYY-MM-DD day off the front of s.
+func cutDay(s string) (string, bool) {
+	if len(s) < 10 {
+		return s, false
+	}
+	_, err := Day(s[:10])
+	return s[10:], err == nil
+}
+
+// cutCount reads a positive count, written without leading zeros, off the front of s.
+func cutCount(s string) (int, string, bool) {
+	end := 0
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end++
+	}
+	n, ok := digits(s[:end])
+	return n, s[end:], ok && end > 0 && end < 10 && s[0] != '0'
+}
+
+// cutDays reads "1 day" or "N days" off the front of s.
+func cutDays(s string) (string, bool) {
+	n, rest, ok := cutCount(s)
+	unit := " days"
+	if n == 1 {
+		unit = " day"
+	}
+	if !ok || !strings.HasPrefix(rest, unit) || n == 1 && strings.HasPrefix(rest, " days") {
+		return s, false
+	}
+	return rest[len(unit):], true
+}
+
+// what reads what a countdown counts to off the front of s: "renewal" or "contract end".
+func what(s string) (string, bool) {
+	for _, w := range []string{"renewal", "contract end"} {
+		if rest, ok := strings.CutPrefix(s, w); ok {
+			return rest, true
+		}
+	}
+	return s, false
+}
+
+// when reads how far off the renewal is, as a signal says it, off the front of s, and whether it has passed.
+func when(s string) (rest string, passed, ok bool) {
+	if rest, ok = strings.CutPrefix(s, "The "); ok {
+		rest, ok = what(rest)
+	}
+	if !ok {
+		return s, false, false
+	}
+	if after, today := strings.CutPrefix(rest, " is today"); today {
+		return after, false, true
+	}
+	if after, ahead := strings.CutPrefix(rest, " is in "); ahead {
+		after, ok = cutDays(after)
+		return after, false, ok
+	}
+	if after, gone := strings.CutPrefix(rest, " date passed "); gone {
+		if after, ok = cutDays(after); ok {
+			after, ok = strings.CutPrefix(after, " ago")
+			return after, true, ok
+		}
+	}
+	return s, false, false
+}
+
+// form is whether a line's text has the form its code states, with a count that agrees with its citations
+// and its "and N more".
+func (l Line) form(asOf string) bool {
+	t, single := l.Text, l.More == 0
+	switch l.Code {
+	case "renewal_date":
+		return l.Countdown != nil && t == l.Countdown.text()
+	case "contract_end":
+		if l.Countdown == nil {
+			return t == "Missing: no contract ends on or after "+asOf
+		}
+		return strings.HasPrefix(t, l.Countdown.text()+"; status ")
+	case "arr":
+		return l.Amount != nil && t == l.Amount.text()
+	case "crm_risk":
+		head, _, _ := strings.Cut(t, "; reason ")
+		return head == "healthy" || head == "at risk"
+	case "account":
+		return strings.Contains(t, "; industry ")
+	case "opportunity":
+		return strings.Contains(t, "; stage ") && strings.Contains(t, "; amount ") && strings.Contains(t, "; close date ")
+	case "contract":
+		return strings.HasPrefix(t, "status ") && (strings.HasSuffix(t, "; no end date") || strings.Contains(t, "; ends "))
+	case "contact":
+		return l.Contact != nil && strings.HasPrefix(t, l.Contact.opening())
+	case "crm_at_risk":
+		return single && t == "CRM marks this account at risk."
+	case "contract_ended":
+		rest, ok := strings.CutPrefix(t, "The latest contract end date, ")
+		if ok {
+			rest, ok = cutDay(rest)
+		}
+		if ok {
+			rest, ok = strings.CutPrefix(rest, ", was ")
+		}
+		if ok {
+			rest, ok = cutDays(rest)
+		}
+		return single && ok && rest == " ago."
+	case "renewal_passed":
+		rest, passed, ok := when(t)
+		return single && ok && passed && rest == "."
+	case "still_open":
+		rest, _, ok := when(t)
+		if ok {
+			rest, ok = strings.CutPrefix(rest, " and ")
+		}
+		if !ok {
+			return false
+		}
+		if single {
+			return strings.HasPrefix(rest, "this opportunity is still open at stage ") && strings.HasSuffix(rest, ".")
+		}
+		n, rest, ok := cutCount(rest)
+		return ok && n == len(l.Cites)-1+l.More && rest == " opportunities are still open."
+	case "close_after_renewal":
+		rest, ok, n := t, false, 1
+		if single {
+			rest, ok = strings.CutPrefix(rest, "This open opportunity's close date, ")
+			if ok {
+				rest, ok = cutDay(rest)
+			}
+			if ok {
+				rest, ok = strings.CutPrefix(rest, ", is after the ")
+			}
+		} else if n, rest, ok = cutCount(rest); ok {
+			rest, ok = strings.CutPrefix(rest, " open opportunities have a close date after the ")
+		}
+		if ok {
+			rest, ok = what(rest)
+		}
+		if ok {
+			rest, ok = strings.CutPrefix(rest, " date, ")
+		}
+		if ok {
+			rest, ok = cutDay(rest)
+		}
+		return ok && rest == "." && n == len(l.Cites)-1+l.More
+	case "contact_no_role":
+		if single {
+			return t == "This contact has no role recorded."
+		}
+		n, rest, ok := cutCount(t)
+		return ok && n == len(l.Cites)+l.More && rest == " contacts have no role recorded."
+	case "call_stale":
+		rest, ok := strings.CutPrefix(t, "The latest dated call that was read is ")
+		if ok {
+			rest, ok = cutDays(rest)
+		}
+		return single && ok && rest == " old."
+	}
+	return false
+}
+
+// facts is whether a line carries exactly the facts its code implies, and whether they are what its text
+// prints: a countdown counts the days from the card's day to its date, an amount is a decimal with two
+// places in a three-letter currency or none, and a contact is the name and title its line opens with.
 func (l Line) facts(asOf string) error {
+	dated := l.Code == "renewal_date" || l.Code == "contract_end" && !strings.HasPrefix(l.Text, "Missing: ")
+	if (l.Countdown != nil) != dated || (l.Amount != nil) != (l.Code == "arr") ||
+		(l.Contact != nil) != (l.Code == "contact") {
+		return errors.New("it does not carry the facts its code implies")
+	}
 	if c := l.Countdown; c != nil {
 		date, errDate := Day(c.Date)
 		from, errFrom := Day(asOf)
-		if errDate != nil || errFrom != nil || daysBetween(date, from) != c.Days {
+		if errDate != nil || errFrom != nil || daysBetween(date, from) != c.Days ||
+			c.CountsTo != map[string]string{"renewal_date": "renewal", "contract_end": "contract_end"}[l.Code] {
 			return errors.New("its countdown is not the days from the card's day to its date")
 		}
-		if l.Code == "renewal_date" && l.Text != c.text() ||
-			l.Code == "contract_end" && !strings.HasPrefix(l.Text, c.text()+"; status ") {
-			return errors.New("its countdown is not what its text prints")
+	}
+	if a := l.Amount; a != nil {
+		whole, fraction, dotted := strings.Cut(a.Amount, ".")
+		_, wholeOK := digits(whole)
+		_, fractionOK := digits(fraction)
+		if !dotted || whole == "" || !wholeOK || len(whole) > 1 && whole[0] == '0' || len(fraction) != 2 ||
+			!fractionOK || a.Currency != nil && !currencyCode(*a.Currency) || l.Text != a.text() {
+			return errors.New("its amount is not what its text prints")
 		}
-	}
-	if a := l.Amount; a != nil && (!decimalText(a.Amount) || strings.HasPrefix(a.Amount, "-") || l.Text != a.text()) {
-		return errors.New("its amount is not what its text prints")
-	}
-	if p := l.Contact; p != nil && !strings.HasPrefix(l.Text, p.opening()) {
-		return errors.New("its contact is not what its text prints")
 	}
 	return nil
 }

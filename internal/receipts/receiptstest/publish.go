@@ -370,6 +370,17 @@ func publishRefusals(t *testing.T, f *Fixture) {
 		{name: "a line the text prints left out",
 			edit: func(t *testing.T, c *card) { c.pub.Lines = c.pub.Lines[1:] },
 			err:  receipts.ErrProjection, seal: "422 projection"},
+		{name: "a signal under another code, with its sentence and citations",
+			edit: func(t *testing.T, c *card) {
+				altered := lines()
+				altered[0].Code = "call_stale"
+				c.pub.Lines = lineRows(t, altered)
+			}, err: receipts.ErrProjection, seal: "422 projection"},
+		{name: "a text that prints no record values, and no lines",
+			edit: func(t *testing.T, c *card) {
+				c.doc.Set("text", "DEAL CARD "+c.f.Account+"\n")
+				c.pub.Lines = nil
+			}, err: receipts.ErrProjection, seal: "422 projection"},
 		{name: "a line in another section",
 			edit: func(t *testing.T, c *card) { c.pub.Lines[0].Section = "value" },
 			err:  receipts.ErrProjection, seal: "422 projection"},
