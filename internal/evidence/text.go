@@ -50,7 +50,14 @@ func linkHost(target []rune) string {
 	}
 	url := target
 	if !strings.Contains(string(head), "//") {
+		// A browser reads https:files.example as https://files.example, and urlsplit would give https as the host.
+		if startsWithScheme(target) {
+			return "unknown host"
+		}
 		url = append([]rune("//"), target...)
+	}
+	if ambiguousAuthority(url) {
+		return "unknown host"
 	}
 	host := []rune{}
 	if parts, err := splitURL(url); err == nil {
@@ -68,6 +75,42 @@ func linkHost(target []rune) string {
 		}
 	}
 	return string(host)
+}
+
+// startsWithScheme is _SCHEME.match(target): a name and a colon at the start of a target. A www. address is a
+// host, and a colon in it starts a port.
+func startsWithScheme(target []rune) bool {
+	if len(target) == 0 || !asciiLetter(target[0]) {
+		return false
+	}
+	if len(target) > 3 && in(target[0], "Ww") && in(target[1], "Ww") && in(target[2], "Ww") && target[3] == '.' {
+		return false
+	}
+	i := 1
+	for i < len(target) && (asciiLetter(target[i]) || asciiDigit(target[i]) || in(target[i], "+.-")) {
+		i++
+	}
+	return i < len(target) && target[i] == ':'
+}
+
+// ambiguousAuthority is whether a link holds a backslash or a control character between its start and the
+// end of its authority: through the first //, up to the next /, ? or #. A browser reads a backslash there as
+// a slash and drops a tab or a line break, so urlsplit and a browser can name different hosts.
+func ambiguousAuthority(link []rune) bool {
+	end := len(link)
+	for i := 0; i+1 < len(link); i++ {
+		if link[i] == '/' && link[i+1] == '/' {
+			for end = i + 2; end < len(link) && !in(link[end], "/?#"); end++ {
+			}
+			break
+		}
+	}
+	for _, c := range link[:end] {
+		if c < 0x20 || c >= 0x7F && c <= 0x9F || c == '\\' {
+			return true
+		}
+	}
+	return false
 }
 
 // id is _ID.fullmatch: a letter or digit, then up to 127 letters, digits, underscores or hyphens.

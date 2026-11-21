@@ -31,7 +31,18 @@ HOSTS = (
     "http://a\uff20b.example/", "http://a\u2100.example/", "http://us\uff0fer@good.example/",
     "http://evil\uff03@good.example/", "http://good.example\ufe55443/", "http://\ufe56x.example/",
     "http://\u00aa@good.example/", "http://user\u00e9@good.example/", "http://\u2460.example/",
-    "http://\u2474.example/", "http://x\u2044y.example/")
+    "http://\u2474.example/", "http://x\u2044y.example/",
+    # A backslash or a control character up to the end of the authority gives no host; after it, the host is read.
+    "//evil.example\\@good.example", "evil.example\\@good.example", "http://good.example:80\\@evil.example/",
+    "http://user\x00@good.example/", "ht\ttp://good.example/", "\x01http://good.example/",
+    "http://good\x7f.example/", "http://\x9f@good.example/", "http:/\t/evil.example\\@good.example/x//",
+    "http://good.example/a\\b", "http://good.example/a\tb", "http://good.example?a\\@b",
+    "http://good.example#a\\@b", "http://user@good.example:8443/x",
+    # A scheme with no // after it gives no host. A www. address and a // address keep the host before a port.
+    "https:good.example/x", "https:/good.example", "HTTP:8080", "tel:5551234", "good.example:8443/x",
+    "user:pass@good.example", "a" * 40 + "://good.example/", "https:good.example" + "/a" * 20 + "//x",
+    "www.good.example:8443/x", "WWW.good.example:8443", "wwww.example:8443", "//good.example:8443/x",
+    "good.example/a:b", "1.example:8443")
 JSON_VALUES: tuple[Any, ...] = (
     "", "plain", 'quote " and backslash \\ and slash /', "\x00\x01\x1f\x7f\x80\x9f", "\t\n\r\x0b\x0c\x08",
     "\u2028\u2029\u0085", "\u00e9\u00df\u4e2d\U0001f642", "\ufeff\u200b\u202e", "</script>&<>'", "\ud83d\ude00",
@@ -110,8 +121,6 @@ DIFFERENCES = {
     "sentence_opener_quote": 'They said yes. "maybe later" was the reply.',
     "sentence_opener_accent": 'They said yes. "\u00e9lan" was the word.',
     "sentence_unicode_16_letter": "He agreed. \U00010d70xyz goes on.",
-    "ambiguous_host": "<http://evil.example\\@good.example/|deck>",
-    "control_in_host": "<http://a\tb.example/x|deck>",
 }
 
 
@@ -222,6 +231,5 @@ def generate(writer: Writer) -> None:
         "safe_text_twice": {"input": DIFFERENCES["safe_text_twice"], "once": once,
                             "twice": units.safe_text(once)[0]},
         "sentences": {name: {"input": DIFFERENCES[name], "sentences": units.sentences(DIFFERENCES[name])}
-                      for name in ("sentence_opener_quote", "sentence_opener_accent", "sentence_unicode_16_letter")},
-        "hosts": {name: {"input": DIFFERENCES[name], "safe_text": units.safe_text(DIFFERENCES[name])[0]}
-                  for name in ("ambiguous_host", "control_in_host")}}, len(DIFFERENCES))
+                      for name in ("sentence_opener_quote", "sentence_opener_accent", "sentence_unicode_16_letter")}},
+        len(DIFFERENCES))

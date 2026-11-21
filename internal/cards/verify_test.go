@@ -388,6 +388,20 @@ func TestVerifyRefuses(t *testing.T) {
 			}
 		})
 	}
+	t.Run("a card nested past the JSON limit", func(t *testing.T) {
+		f := openFolder(t, "cli_card")
+		levels := strictjson.MaxDepth + 1
+		deep := []byte(strings.Repeat(`{"units":`, levels) + "1" + strings.Repeat("}", levels))
+		if _, err := VerifyCard(ctx, deep, folders[0].brief, f.Log, demoSources(nil)); !errors.Is(err, ErrInvalidCard) {
+			t.Fatalf("got %v", err)
+		}
+		if _, err := VerifyPrepared(ctx, deep, folders[1].brief, f.Log, demoSources(nil)); !errors.Is(err, ErrBriefInvalid) {
+			t.Fatalf("got %v", err)
+		}
+		if _, err := ReadTrustedRows(deep); !errors.Is(err, strictjson.ErrTooDeep) {
+			t.Fatalf("got %v", err)
+		}
+	})
 	t.Run("a card of another folder", func(t *testing.T) {
 		card, other := openFolder(t, "cli_card"), openFolder(t, "prepared")
 		if _, err := VerifyCard(ctx, card.Cards[folders[0].brief], folders[0].brief, other.Log, demoSources(nil)); !errors.Is(err, ErrSealUnread) {

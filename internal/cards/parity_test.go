@@ -371,7 +371,7 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 // builtCards pins how many cards of each family Go builds. Raise a count when a port builds more.
 var builtCards = map[string]int{
 	"demo": 33, "books_demo": 78, "varied_demo": 46, "cases": 19, "books_calls": 82,
-	"books_slack": 78, "slack_threads": 36, "books_salesforce": 0,
+	"books_slack": 78, "slack_threads": 36, "books_salesforce": 78,
 }
 
 func TestCardsFromDemoStores(t *testing.T) { demoStoreFamilies(t, newMemoryCards) }
@@ -467,11 +467,7 @@ func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 			return slackThread(t, row, input)
 		})
 	})
-	t.Run("books_salesforce", func(t *testing.T) {
-		runFamily(t, "books_salesforce", newStore, func(fixtureRow, *strictjson.Object) setup {
-			return setup{skip: "CRM records: org_rows are Salesforce API rows, which only the Salesforce adapter maps"}
-		})
-	})
+	t.Run("books_salesforce", func(t *testing.T) { salesforceBooks(t, newStore, book) })
 }
 
 func intOf(v any) int {

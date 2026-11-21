@@ -7,7 +7,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {prerenderToNodeStream} from 'react-dom/static';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
-import {renewalFixture} from './renewalFixtures.js';
+import {fixturePeople, renewalFixture} from './renewalFixtures.js';
 
 // The card is the connector demo's sealed acc-003 card from the oracle fixtures,
 // shaped as GET /api/v1/cards/{card} returns it. Only IDs and times are made up.
@@ -168,7 +168,7 @@ for (const [page, path] of [['evidence', renewalFixture.paths.evidence], ['readi
     const shown = text(html);
     assert.doesNotMatch(html, /class="nav-count"|save-failure-notice|wl-return-context|rd-return-context|hs-return-context/);
     assert.doesNotMatch(html, />Evidence<span>\d/);
-    assert.match(html, /class="nav-label">WALKTHROUGH PAGES</);
+    assert.deepEqual(shell(html), serverShell(state, 'Renewal Read from the server', '?account=acc-003'));
     // The account from the link is not verified until the account list is read.
     assert.match(html, /<h1>Account not verified<span class="company-dot">/);
     assert.match(shown, /Account ID acc-003 ?, not verified/);
@@ -178,6 +178,80 @@ for (const [page, path] of [['evidence', renewalFixture.paths.evidence], ['readi
     assert.deepEqual(tabs, ['Readiness', 'Evidence']);
   });
 }
+
+// The walkthrough's pages, and what each one renders in the static build.
+const walkthroughRoutes = [
+  ['/renewals', 'wl-page'], ['/queue', 'wl-page'], ['/playbooks', 'pb-page'], ['/operations', 'ops-page'],
+  [renewalFixture.paths.workplan, 'work-grid'], [renewalFixture.paths.history, 'hs-page'],
+];
+const walkthroughContent = /wl-page|pb-page|ops-page|work-grid|hs-page|evidence-library|evidence-flow|class="rd-page|detail-nav|data-record-id|nav-count|demo-account|reset-link|save-indicator|save-failure-notice/;
+// What the navigation, the header and the footer offer.
+function shell(html) {
+  const between = (open, close) => html.slice(html.indexOf(open)).split(close)[0];
+  const sidebar = between('id="workspace-navigation"', '</aside>');
+  const links = [...between('<nav aria-label="Workspace"', '</nav>').matchAll(/<a [^>]*href="([^"]+)"[^>]*>.*?<span>([^<]+)<\/span>/g)].map(match => [match[2], match[1].replaceAll('&amp;', '&')]);
+  return {label: sidebar.match(/class="nav-label">([^<]*)</)[1], links, brand: sidebar.match(/<a [^>]*class="brand[^"]*"[^>]*>/)[0].match(/href="([^"]+)"/)[1],
+    belowNav: text(sidebar.split('</nav>')[1]).trim(), crumbs: text(between('class="breadcrumbs', '</div>').split('</button>')[1]).trim(),
+    profile: between('class="workspace-toolbar"', '</header>').match(/class="profile"[^>]*aria-label="([^"]+)"/)[1], footer: html.match(/<span>([^<]*)<\/span><\/footer>/)[1]};
+}
+// The whole of it when the server serves the app: the two server pages and the signed-in principal.
+const serverShell = (state, crumbs, query = '') => ({label: 'READ FROM THE SERVER', brand: renewalFixture.paths.evidence, belowNav: '', crumbs, footer: 'Read from the server',
+  links: [['Evidence', renewalFixture.paths.evidence + query], ['Readiness', renewalFixture.paths.root + '/readiness' + query]],
+  profile: state.session?.signed_in ? `Signed in as ${principal.display_name}` : 'Not signed in'});
+
+for (const [path] of walkthroughRoutes) {
+  for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${path}, ${name}: not available here, with a link home and no walkthrough page, account or count`, async () => {
+    const html = await renderApp(path + '?selection=work-item%3Aexample&returnTo=%2Fqueue', storeOf(state));
+    const main = html.slice(html.indexOf('<main'));
+    assert.match(main, /<h1>Not available here<span class="company-dot">/);
+    assert.match(text(main), name === 'unreachable' ? /The server did not answer, so nothing is shown\. Reload the page to ask it again\./ : /The server does not provide this page, so nothing is shown\. It provides Evidence and Readiness\./);
+    assert.match(main, new RegExp(`<a class="button primary" href="${renewalFixture.paths.evidence}"[^>]*>Go to Evidence</a>`));
+    assert.doesNotMatch(html, walkthroughContent);
+    assert.doesNotMatch(html, /api-frame|name="login"|api-renewal-header/);
+    assert.ok(!text(html).includes(renewalFixture.account.name) && !text(html).includes(fixturePeople.workspaceProfile.split(' ')[0]));
+    assert.doesNotMatch(text(html), /Demo workspace|Invented|walkthrough|Work queue|Playbooks|Operations|Work plan|History/i);
+    assert.deepEqual(shell(html), serverShell(state, 'Not available here'));
+  });
+}
+
+test('API mode: a path that only resembles a server page is not available either', async () => {
+  for (const path of [renewalFixture.paths.evidence + '/extra', '/queue/evidence', renewalFixture.paths.root + '/readiness/']) {
+    const html = await renderApp(path, storeOf(signedIn));
+    assert.match(html, /<h1>Not available here</, path);
+    assert.doesNotMatch(html, walkthroughContent, path);
+    assert.doesNotMatch(html, /api-frame/, path);
+  }
+});
+
+test('while the server is being asked, no page and no navigation shows: only the loading state', () => {
+  const asking = {api: {}, subscribe: () => () => {}, getSnapshot: () => ({mode: 'probing', session: null, error: null}), start: () => new Promise(() => {})};
+  for (const [path] of [...walkthroughRoutes, [renewalFixture.paths.evidence], [renewalFixture.paths.root + '/readiness']]) {
+    const html = renderToStaticMarkup(React.createElement(ServerContext, {value: asking}, React.createElement(MemoryRouter, {initialEntries: [path]}, React.createElement(App))));
+    assert.match(html, /class="route-loading" role="status"/, path);
+    assert.doesNotMatch(html, walkthroughContent, path);
+    assert.doesNotMatch(html, /class="nav-item|Not available here|api-frame|<h1/, path);
+    assert.ok(!text(html).includes(renewalFixture.account.name), path);
+  }
+});
+
+for (const [path, marker] of walkthroughRoutes) test(`the static build still shows the walkthrough at ${path}`, async () => {
+  const asked = await renderApp(path, storeOf({mode: 'probing', session: null, error: null}, {mode: 'walkthrough', session: null, error: null}));
+  assert.match(asked, new RegExp(`class="[^"]*${marker}`));
+  const html = await renderApp(path, storeOf({mode: 'walkthrough', session: null, error: null}));
+  assert.match(html, new RegExp(`class="[^"]*${marker}`));
+  assert.doesNotMatch(html, /Not available here|api-frame/);
+  const {label, links, brand, belowNav, footer} = shell(html);
+  assert.deepEqual({label, links, brand, footer}, {label: 'WORKSPACE', brand: '/renewals', footer: 'Interactive prototype · Invented data',
+    links: [['Renewals', '/renewals'], ['Work queue', '/queue'], ['Playbooks', '/playbooks'], ['Operations', '/operations']]});
+  assert.match(belowNav, /^Evidence into action\. .* Demo workspace Invented records Reset walkthrough$/);
+  assert.match(html, /class="profile" aria-label="Demo workspace details"/);
+  assert.match(html, /class="nav-count"/);
+  if (path.startsWith(renewalFixture.paths.root)) {
+    assert.match(html, new RegExp(`<h1>${renewalFixture.account.name}<span`));
+    const tabs = [...html.slice(html.indexOf('aria-label="Renewal sections"')).split('</nav>')[0].matchAll(/<a [^>]*>([^<]+)/g)].map(match => match[1]);
+    assert.deepEqual(tabs, ['Readiness', 'Work plan', 'Evidence', 'History']);
+  }
+});
 
 test('the API header shows the open card, and Sources and gaps targets the gaps section on each page', () => {
   const selection = {account: 'acc-003', verified: true, cardId: card.id, card: {status: 'ready', data: card}};

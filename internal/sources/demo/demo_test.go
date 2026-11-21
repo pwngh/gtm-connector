@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/pwngh/gtm-connector/internal/oracletest"
@@ -150,5 +151,14 @@ func TestInsert(t *testing.T) {
 		if err := s.Insert("crm", "accounts", []any{id, "", "", "", nil, nil, "", ""}); err == nil {
 			t.Fatalf("an account with the ID %v was inserted", id)
 		}
+	}
+}
+
+// A dump nested past the reader's limit is refused, as a dump that is not JSON is.
+func TestLoadRefusesADumpNestedTooDeep(t *testing.T) {
+	levels := strictjson.MaxDepth + 1
+	deep := strings.Repeat(`{"crm":`, levels) + "1" + strings.Repeat("}", levels)
+	if s, err := Load([]byte(deep)); s != nil || !errors.Is(err, strictjson.ErrTooDeep) {
+		t.Fatalf("got %v, %v", s, err)
 	}
 }

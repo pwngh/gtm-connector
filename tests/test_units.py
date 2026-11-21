@@ -104,6 +104,48 @@ class NeutralizedText(unittest.TestCase):
             safe = safe_text(raw)[0]
             self.assertEqual(safe_text(safe), (safe, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}))
 
+    def test_a_link_with_an_ambiguous_host_shows_no_host(self):
+        # A browser reads a backslash before the path as a slash, so it opens evil.example here.
+        for raw, safe in (("<http://evil.example\\@good.example/|deck>", "deck [link unknown host]"),
+                          ("http://evil.example\\@good.example/ now", "[link unknown host] now"),
+                          ("[deck](http://evil.example\\@good.example/)", "deck [link unknown host]"),
+                          ("<//evil.example\\@good.example|deck>", "deck [link unknown host]"),
+                          ("<C:\\path|deck>", "deck [link unknown host]"),
+                          # A control character in the host, or anywhere before the path.
+                          ("<http://a\tb.example/x|deck>", "deck [link unknown host]"),
+                          ("<http://a\rb.example/x|deck>", "deck [link unknown host]"),
+                          ("<http://user\x00@good.example/|deck>", "deck [link unknown host]"),
+                          ("<ht\ttp://good.example/|deck>", "deck [link unknown host]"),
+                          ("http://good\x7f.example/x now", "[link unknown host] now"),
+                          ("http://\x9f@good.example/x now", "[link unknown host] now"),
+                          # An ordinary link, and a link with either character after its host, keep the host.
+                          ("<http://files.example/x|deck>", "deck [link files.example]"),
+                          ("<https://user@files.example:8443/x?q=1#f|deck>", "deck [link files.example]"),
+                          ("<http://files.example/a\\b|deck>", "deck [link files.example]"),
+                          ("<http://files.example/a\tb|deck>", "deck [link files.example]"),
+                          ("<http://files.example?a\\@b|deck>", "deck [link files.example]")):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+
+    def test_a_link_with_no_slashes_after_its_scheme_shows_no_host(self):
+        # A browser reads https:files.example as https://files.example. Read as a host, it would be https.
+        for raw, safe in (("<https:files.example/x|deck>", "deck [link unknown host]"),
+                          ("<https:/files.example|deck>", "deck [link unknown host]"),
+                          ("<HTTP:8080|deck>", "deck [link unknown host]"),
+                          ("<tel:5551234|deck>", "deck [link unknown host]"),
+                          ("<javascript:alert(1)|deck>", "deck [link unknown host]"),
+                          # A name before a colon is a scheme to a browser, whatever follows the colon.
+                          ("<files.example:8443/x|deck>", "deck [link unknown host]"),
+                          # A scheme too long for its // to be found is not read as a host either.
+                          (f"[deck]({'a' * 40}://files.example/)", "deck [link unknown host]"),
+                          # A www. address, a // address and a link with its // keep the host before a port or a colon.
+                          ("<files.example/x|deck>", "deck [link files.example]"),
+                          ("www.files.example:8443/x now", "[link files.example] now"),
+                          ("<WWW.files.example:8443|deck>", "deck [link files.example]"),
+                          ("<//files.example:8443/x|deck>", "deck [link files.example]"),
+                          ("<https://files.example/a:b|deck>", "deck [link files.example]"),
+                          ("<mailto:a@files.example|deck>", "deck [link mail]")):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+
     def test_sentences_are_whole_and_lose_nothing(self):
         text = 'Dr. No will not sign. "We agreed." Then what? e.g. nothing here!\n\nA new line (v. 3.5) ends'
         found = sentences(text)
