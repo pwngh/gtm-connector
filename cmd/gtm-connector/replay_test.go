@@ -31,11 +31,7 @@ import (
 // notPorted names the recorded steps the Go binary does not reproduce yet, each with why. Each one is still
 // run and must still differ from the recording. Porting a command removes its steps from this list, and a
 // step that is not listed must match the recording.
-var notPorted = map[string]string{
-	"mcp help":               "the mcp command, the stdio bridge, is not ported: the binary refuses it as not in this build",
-	"mcp without its action": "the mcp command is not ported, so the binary refuses it before it reads its arguments",
-	"mcp without a scope":    "the mcp command is not ported, so the binary refuses it before it reads its arguments",
-}
+var notPorted = map[string]string{}
 
 // clocked names the steps that print what the recorder's clock decided: a receipt's started_at, the card
 // line that names its first and last read, which is one time when both fall in one second, and elapsed_ms.
@@ -456,6 +452,9 @@ func TestRecordedCommandSession(t *testing.T) {
 				// The step prints nothing here, so what it numbers in the recording is counted as issued.
 				r.skip(r.numbered(), s)
 				t.Skip("GTM_TEST_DATABASE_URL is not set")
+			}
+			if change := recordedHelp[s.Label]; change != nil {
+				s.Stdout, s.Compared = change(t, s.Stdout), "exactly"
 			}
 			compared := func(text string) string { return text }
 			if timed[s.Label] {

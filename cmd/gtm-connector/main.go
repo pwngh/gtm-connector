@@ -10,6 +10,10 @@
 //	gtm-connector brief ACCOUNT      make and print the Deal card for one account
 //	gtm-connector inspect ID         show an account, a saved card, numbers on it, or a receipt
 //	gtm-connector audit              list the receipts of the audit log
+//	gtm-connector mcp stdio --scope SCOPE
+//	                                 serve MCP on stdin and stdout, for an assistant app that starts it
+//	gtm-connector token new --scope SCOPE
+//	                                 make a bearer token for an MCP client; also token list and token revoke ID
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
 //	gtm-connector health             check that the local server answers
@@ -60,13 +64,13 @@ const description = "Build a Deal card for a renewal from scoped CRM, call, and 
 var firstCommands = []string{"gtm-connector demo", "gtm-connector connect demo", "gtm-connector brief acc-007"}
 
 // listedCommands are the commands the refusal of an unknown command names: the Python CLI's own. This
-// binary answers each by name, mcp and debug with a refusal until they are ported. setup, serve, backup,
+// binary answers each by name, debug with a refusal until it is ported. setup, serve, token, backup,
 // restore, health and version are this binary's besides, and --help lists them all.
 var listedCommands = []string{"demo", "connect", "accounts", "brief", "inspect", "audit", "mcp", "debug"}
 
 // notInBuild are the commands among them that this binary does not run yet. Each is refused by name, here
 // and nowhere else: a command leaves this list when it is ported.
-var notInBuild = []string{"mcp", "debug"}
+var notInBuild = []string{"debug"}
 
 var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
 
@@ -81,12 +85,14 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   brief ACCOUNT               make and print the Deal card for one account
   inspect ID                  show an account, a saved card, numbers on it, or a receipt
   audit                       list the receipts of the audit log
+  mcp stdio --scope SCOPE     serve MCP on stdin and stdout, for an assistant app that starts it
+  token new --scope SCOPE     make a bearer token for an MCP client; also token list and token revoke ID
   backup --out FILE           write PostgreSQL and the credentials folder to FILE
   restore --in FILE           restore FILE into an empty database and credentials folder
   health                      check that the local server answers
   version                     print the commit this binary was built from
 
-demo, connect, accounts, brief, inspect and audit take --json, --state-dir WORKSPACE and --help.
+demo, connect, accounts, brief, inspect, audit, mcp and token take --json, --state-dir WORKSPACE and --help.
 Not in this build: ` + strings.Join(notInBuild, ", ") + ".\n"
 
 func main() {
@@ -119,13 +125,17 @@ func dispatch(ctx context.Context, argv []string, s screen) int {
 		return 0
 	case tokens[0] == "help" && len(tokens) > 1:
 		// Help for a command that has none of its own is the list of commands.
-		if _, known := commands[tokens[1]]; known {
+		_, known := commands[tokens[1]]
+		if _, client := clientCommands[tokens[1]]; known || client {
 			tokens = append(tokens[1:], "--help")
 		}
 	}
 	name, args := tokens[0], tokens[1:]
 	if _, known := commands[name]; known {
 		return runCommand(ctx, name, args, s)
+	}
+	if runClient, client := clientCommands[name]; client {
+		return runClient(ctx, args, s)
 	}
 	var err error
 	switch name {
@@ -228,6 +238,9 @@ func loadConfig() (config, error) {
 	if err != nil || origin.Host == "" {
 		return c, errors.New("GTM_PUBLIC_ORIGIN is not an origin")
 	}
+	if origin.User != nil {
+		return c, errors.New("GTM_PUBLIC_ORIGIN must not hold a user name or password")
+	}
 	hosts := envOr("GTM_ALLOWED_HOSTS", origin.Host+",localhost:"+origin.Port())
 	for _, host := range strings.Split(hosts, ",") {
 		if host = strings.TrimSpace(host); host != "" {
@@ -320,6 +333,9 @@ func setUp(ctx context.Context, c config) error {
 	if err := store.EnsureAppRole(ctx, app.User, app.Password); err != nil {
 		return err
 	}
+	if err := finishExpired(ctx, store); err != nil {
+		return err
+	}
 	workspace, err := store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace")
 	if err == nil {
 		_, err = store.EnsureDemoPrincipal(ctx, workspace, demo.Login, "Demo reviewer", demoDigest(demo))
@@ -331,8 +347,12 @@ func setUp(ctx context.Context, c config) error {
 // or says it is starting, as one started beside this process does. Any
 // other failure is final: a URL that cannot be parsed, or a server that
 // answered and refused. A wait that is interrupted gives the last failure
-// with the interruption.
+// with the interruption. A password file others can access is refused
+// before any connection.
 func openStore(ctx context.Context, url string) (*postgres.Store, error) {
+	if err := checkPassfile(url); err != nil {
+		return nil, err
+	}
 	deadline := time.Now().Add(time.Minute)
 	for {
 		store, err := postgres.Open(ctx, url)

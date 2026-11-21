@@ -10,10 +10,11 @@ import (
 
 // option is one option of a command.
 type option struct {
-	name    string
-	value   bool     // whether it takes one argument
-	choices []string // the values it takes, when they are fixed
-	repeat  bool     // whether it may be given again, each time adding its argument to a list
+	name     string
+	value    bool     // whether it takes one argument
+	choices  []string // the values it takes, when they are fixed
+	repeat   bool     // whether it may be given again, each time adding its argument to a list
+	required bool     // whether the command needs it
 }
 
 // arguments is how one command reads its command line.
@@ -22,7 +23,7 @@ type arguments struct {
 	required string   // the name of the one positional argument it needs, or ""
 	numbers  bool     // whether card numbers may follow that argument
 	optional string   // the name of the one positional argument it may be given, or ""
-	choices  []string // the values that argument takes
+	choices  []string // the values the required or the optional argument takes, when they are fixed
 	help     string
 }
 
@@ -187,11 +188,23 @@ func (a arguments) parse(tokens []string) (parsed, error) {
 		}
 	}
 	taken := 0
+	var missing []string
 	if a.required != "" {
-		if len(p.positionals) == 0 {
-			return p, usageError("the following arguments are required: " + a.required)
+		switch {
+		case len(p.positionals) == 0:
+			missing = append(missing, a.required)
+		case a.choices != nil && !slices.Contains(a.choices, p.positionals[0]):
+			return p, usageError("argument " + a.required + ": invalid choice (choose from " + quotedChoices(a.choices) + ")")
 		}
 		taken = 1
+	}
+	for _, o := range a.options {
+		if _, given := p.values[o.name]; o.required && !given {
+			missing = append(missing, o.name)
+		}
+	}
+	if len(missing) > 0 {
+		return p, usageError("the following arguments are required: " + strings.Join(missing, ", "))
 	}
 	if a.optional != "" {
 		taken = min(1, len(p.positionals))

@@ -168,15 +168,15 @@ func TestTheBuildFilesUseThePins(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("testdata/oracle/manifest.json", "python_version", []string{oracle.PythonVersion}, m.Python.Oracle)
-	check("scripts/check-inspector.py", "INSPECTOR", all(read(t, "scripts/check-inspector.py"),
-		`(?m)^INSPECTOR = "([^"]+)"$`), m.MCPInspector)
-	check("inspector_test.go", "inspector", all(read(t, "internal/transport/mcp/inspector_test.go"),
-		`const inspector = "([^"]+)"`), m.MCPInspector)
+	for _, file := range []string{"internal/transport/mcp/inspector_test.go", "cmd/gtm-connector/inspector_test.go"} {
+		check(file, "inspector", all(read(t, file), `const inspector = "([^"]+)"`), m.MCPInspector)
+	}
 
 	workflow := read(t, ".github/workflows/test.yml")
 	const ci = ".github/workflows/test.yml"
 	check(ci, "the Go job's PostgreSQL images", all(workflow, `(?m)^\s+- (postgres:\S+)$`),
 		m.Images.Postgres, m.Images.PostgresFallback)
+	check(ci, "the Inspector job's PostgreSQL image", all(workflow, `(?m)^\s+image: (postgres:\S+)$`), m.Images.Postgres)
 	check(ci, "the smoke job's PostgreSQL versions", all(workflow, `(?m)^\s+postgres: (\[.+\])$`),
 		"['"+strings.Join([]string{versionOf(m.Images.Postgres), versionOf(m.Images.PostgresFallback)}, "', '")+"']")
 	pythons := all(workflow, `(?m)^\s+python-version: (\[.+\]|'[^']+')$`)

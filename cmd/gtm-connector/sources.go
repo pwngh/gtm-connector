@@ -19,8 +19,8 @@ import (
 )
 
 // The sources of a workspace. This file is the one place where a workspace's stored connections become
-// the reads its commands use. accounts, brief, inspect, audit, demo, connect and serve's MCP tools name
-// no source of their own: they go through workspaceReads and sourceKinds.
+// the reads its commands use. accounts, brief, inspect, audit, demo, connect, token and the MCP tools of
+// serve and mcp stdio name no source of their own: they go through workspaceReads and sourceKinds.
 //
 // A workspace's connections are rows, one for each of "crm", "calls" and "slack" (postgres.Connection).
 // A row holds a mode, which names the kind of source it is connected to; a binding, the JSON object of

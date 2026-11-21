@@ -41,15 +41,17 @@ func TestTheCommandLineWithoutACommand(t *testing.T) {
 		{[]string{"--json", "--version"}, 0, `{"version": "0.1.0"}` + "\n", ""},
 		{[]string{"postgres://owner:invented-password@db.invented.example/gtm"}, 2, "",
 			"Error: " + listed + "\nNext: gtm-connector --help\n"},
-		{[]string{"mcp", "stdio", "--scope", "crm:read"}, 3, "",
-			"Error: mcp is not available in this build.\nNext: gtm-connector --help\n"},
+		{[]string{"mcp", "stdio", "--scope", "crm:write"}, 2, "", "Error: argument --scope: invalid choice " +
+			"(choose from 'crm:read', 'calls:read', 'slack:read')\nNext: gtm-connector mcp --help\n"},
 		{[]string{"debug", "doctor", "--json"}, 3, "", `{"error": {"code": "refused", "message": "debug is not ` +
 			`available in this build.", "next": "gtm-connector --help"}}` + "\n"},
 		{[]string{"setup", "--json"}, 2, "", `{"error": {"code": "usage_error", "message": "setup writes text and ` +
 			`takes no --json.", "next": "gtm-connector --help"}}` + "\n"},
 		{[]string{"--help"}, 0, usage, ""},
 		{[]string{"help"}, 0, usage, ""},
-		{[]string{"help", "mcp"}, 0, usage, ""},
+		{[]string{"help", "mcp"}, 0, mcpHelp, ""},
+		{[]string{"help", "token"}, 0, tokenHelp, ""},
+		{[]string{"help", "debug"}, 0, usage, ""},
 		{[]string{"help", "connect"}, 0, connectHelp, ""},
 		{[]string{"demo", "-h"}, 0, demoHelp, ""},
 		{[]string{"demo", "--json"}, 2, "", `{"error": {"code": "usage_error", "message": "demo prints the cards it ` +
