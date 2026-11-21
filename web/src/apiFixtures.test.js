@@ -8,8 +8,8 @@ import {prerenderToNodeStream} from 'react-dom/static';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
 
-// The pages that read from the server must render no walkthrough fixture value
-// at all. Every human-readable string in the fixture modules is replaced by a
+// When the server serves the app, no page may render a walkthrough fixture
+// value at all. Every human-readable string in the fixture modules is replaced by a
 // marker, every date moves to 1999 and every number above 9 gains 7,000,000,
 // so any fixture value that reaches an API page shows up in its markup.
 // Routes, identifiers and enum values stay as they are: the app runs on them.
@@ -82,11 +82,23 @@ async function renderApp(path, state) {
 }
 const found = html => html.match(leak)?.[0];
 
+const walkthroughRoutes = ['/renewals', '/queue', '/playbooks', '/operations', '/renewals/thornfield/workplan', '/renewals/thornfield/history'];
+
 test('the markers are live: the walkthrough pages render fixture values', async () => {
   assert.match(fixtures.renewalFixture.account.name, /^⟦fx\d+⟧$/);
-  const html = await renderApp(fixtures.renewalFixture.paths.evidence, {mode: 'walkthrough', session: null, error: null});
-  assert.ok(found(html), 'the walkthrough Evidence page shows marked fixture values');
+  for (const path of [fixtures.renewalFixture.paths.evidence, '/renewals/thornfield/readiness', ...walkthroughRoutes]) {
+    const html = await renderApp(path, {mode: 'walkthrough', session: null, error: null});
+    assert.ok(found(html.slice(html.indexOf('<main'))), `the walkthrough page at ${path} shows marked fixture values`);
+  }
 });
+
+for (const path of walkthroughRoutes) {
+  for (const [name, state] of Object.entries(states)) test(`API mode, ${path}, ${name}: no fixture value anywhere on the page`, async () => {
+    const html = await renderApp(path + '?selection=work-item%3Aexample&entry=example', state);
+    assert.equal(found(html), undefined, `fixture value at ${path} in API mode: ${found(html)}`);
+    assert.match(html, /<h1>Not available here</);
+  });
+}
 
 for (const [page, path] of [['evidence', '/renewals/thornfield/evidence'], ['readiness', '/renewals/thornfield/readiness']]) {
   for (const [name, state] of Object.entries(states)) test(`API ${page}, ${name}: no fixture value anywhere on the page`, async () => {
