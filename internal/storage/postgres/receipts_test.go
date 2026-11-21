@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -105,12 +106,12 @@ func finishOK(r postgres.Receipt, rows ...string) postgres.ReceiptFinish {
 func TestMigrateIsRepeatableAndRefusesAChangedFile(t *testing.T) {
 	f := postgrestest.New(t)
 	ok(t, f.Store.Migrate(ctx))
-	version, err := f.Store.SchemaVersion(ctx)
+	applied, err := f.Store.AppliedMigrations(ctx)
 	ok(t, err)
-	if version != postgres.LatestSchemaVersion() {
-		t.Fatalf("schema %d", version)
+	if !slices.Equal(applied, postgres.MigrationNames()) {
+		t.Fatalf("migrations %v", applied)
 	}
-	ok(t, sql(t, f, "UPDATE schema_migrations SET sha256 = 'changed' WHERE version = 1"))
+	ok(t, sql(t, f, "UPDATE schema_migrations SET sha256 = 'changed' WHERE name = '"+applied[0]+"'"))
 	if err := f.Store.Migrate(ctx); err == nil || !strings.Contains(err.Error(), "changed") {
 		t.Fatalf("a changed migration was accepted: %v", err)
 	}

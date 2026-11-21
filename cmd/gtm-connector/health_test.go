@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -102,8 +103,8 @@ func TestHealthReadsTheMigrationsAsTheAppRole(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close(ctx)
-	if _, err := conn.Exec(ctx, "DELETE FROM schema_migrations WHERE version = $1",
-		postgres.LatestSchemaVersion()); err != nil {
+	if _, err := conn.Exec(ctx, "DELETE FROM schema_migrations WHERE name = $1",
+		slices.Max(postgres.MigrationNames())); err != nil {
 		t.Fatal(err)
 	}
 	if err := health(ctx, nil); err == nil || err.Error() != `healthz answered 503: {"status":"migrations_behind"}` {
@@ -114,8 +115,8 @@ func TestHealthReadsTheMigrationsAsTheAppRole(t *testing.T) {
 // serve does not start on a database whose migrations are not exactly this
 // binary's. Each of the three states refuses with its own line, before the
 // credentials are opened or a port is taken, and a current database gets past
-// the check. No migration is named by its number: the newest is whatever
-// LatestSchemaVersion says, and a later one is one past it.
+// the check. No migration is named: the newest is the last of MigrationNames,
+// and a later one is one this binary does not hold.
 func TestServeRefusesADatabaseWhoseMigrationsAreNotItsOwn(t *testing.T) {
 	d := setUpDemo(t)
 	conn, err := pgx.Connect(ctx, d.ownerURL)
@@ -142,9 +143,9 @@ func TestServeRefusesADatabaseWhoseMigrationsAreNotItsOwn(t *testing.T) {
 			t.Errorf("%s: serve answered %v, not %v", state, err, want)
 		}
 	}
-	latest := postgres.LatestSchemaVersion()
+	latest := slices.Max(postgres.MigrationNames())
 	var newest struct{ name, digest string }
-	if err := conn.QueryRow(ctx, "SELECT name, sha256 FROM schema_migrations WHERE version = $1", latest).
+	if err := conn.QueryRow(ctx, "SELECT name, sha256 FROM schema_migrations WHERE name = $1", latest).
 		Scan(&newest.name, &newest.digest); err != nil {
 		t.Fatal(err)
 	}
@@ -154,19 +155,19 @@ func TestServeRefusesADatabaseWhoseMigrationsAreNotItsOwn(t *testing.T) {
 		t.Fatalf("current migrations: serve stopped at %v, not at the missing credentials", err)
 	}
 
-	run("DELETE FROM schema_migrations WHERE version = $1", latest)
+	run("DELETE FROM schema_migrations WHERE name = $1", latest)
 	refusal("behind", postgres.MigrationsBehind.Err())
-	run("INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, $2, $3)", latest, newest.name, newest.digest)
+	run("INSERT INTO schema_migrations (name, sha256) VALUES ($1, $2)", newest.name, newest.digest)
 
-	run("INSERT INTO schema_migrations (version, name, sha256) VALUES ($1, 'later.sql', 'x')", latest+1)
+	run("INSERT INTO schema_migrations (name, sha256) VALUES ('29991231T2359_later.sql', 'x')")
 	refusal("ahead", postgres.MigrationsAhead.Err())
-	run("DELETE FROM schema_migrations WHERE version = $1", latest+1)
+	run("DELETE FROM schema_migrations WHERE name = '29991231T2359_later.sql'")
 
-	// The schema is at this binary's version, as the check before this one
-	// asked, and one applied migration's contents are not this binary's.
-	run("UPDATE schema_migrations SET sha256 = $2 WHERE version = $1", latest, strings.Repeat("0", 64))
+	// Every migration this binary holds is applied, as the check before this
+	// one asked, and one applied migration's contents are not this binary's.
+	run("UPDATE schema_migrations SET sha256 = $2 WHERE name = $1", latest, strings.Repeat("0", 64))
 	refusal("changed", postgres.MigrationsChanged.Err())
-	run("UPDATE schema_migrations SET sha256 = $2 WHERE version = $1", latest, newest.digest)
+	run("UPDATE schema_migrations SET sha256 = $2 WHERE name = $1", latest, newest.digest)
 
 	if err := serve(ctx, nil); err == nil || strings.Contains(err.Error(), "the database") {
 		t.Fatalf("current migrations again: %v", err)

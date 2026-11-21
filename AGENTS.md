@@ -30,7 +30,7 @@ rules every store applies, and `receiptstest`, which every store runs), `cards` 
 `sources/slack` reads one mapped Slack thread and runs the Slack sign-in; `debug slack`,
 `connect slack` and a card's read use it.
 `people` resolves a speaker to a person and a side by the strongest identifier a source carries; its
-package comment states the ladder and the rules; `evidence` calls it for every sentence of a card.
+package comment states the ladder and the rules, and nothing calls it yet.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with `connect` and the

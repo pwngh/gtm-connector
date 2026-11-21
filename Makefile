@@ -9,6 +9,7 @@
 #   make backup               back up the database and the credentials folder
 #   make restore BACKUP=NAME  restore a backup into an empty database
 #   make test                 go vet and the Go tests against the Compose database
+#   make migration NAME=WORDS an empty migration named by the UTC minute
 #   make verify-real          real public text through Go, against the oracle's recorded digests (downloads; never in CI)
 #
 # Add POSTGRES=18.7 to any of them to use the pinned fallback PostgreSQL, on
@@ -47,8 +48,8 @@ GTM_DB_PORT = $(shell sed -n 's/^GTM_DB_PORT=//p' .env 2>/dev/null)
 WEB_SOURCES := $(shell find web/src web/public web/index.html web/vite.config.js web/package.json web/package-lock.json -type f 2>/dev/null)
 GO_SOURCES := go.mod go.sum web/embed.go $(shell find cmd internal -name '*.go' -o -name '*.sql')
 
-.PHONY: help env dev build release up down db demo backup restore test vet psql logs clean require-compose state \
-	verify-real go-version node-version
+.PHONY: help env dev build release up down db demo backup restore test vet migration psql logs clean require-compose \
+	state verify-real go-version node-version
 
 help: ## List the targets
 	@awk 'BEGIN { FS = ":.*## " } /^[a-z-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -126,6 +127,13 @@ restore: db ## Restore GTM_HOME/backups/$(BACKUP) into an empty database
 
 vet: go-version ## go vet
 	go vet ./...
+
+# A migration is named by the UTC minute it is written, so two written apart never take one name.
+migration: ## Write an empty migration named by the UTC minute: make migration NAME=deal_matches
+	@echo '$(NAME)' | grep -Eqx '[a-z0-9_]+' || { echo "usage: make migration NAME=lowercase_words" >&2; exit 2; }
+	@file=internal/storage/postgres/migrations/$$(date -u +%Y%m%dT%H%M)_$(NAME).sql; \
+		test ! -e "$$file" || { echo "$$file exists" >&2; exit 1; }; \
+		printf -- '-- %s.\n' '$(NAME)' > "$$file" && echo "$$file"
 
 test: go-version db vet ## The Go tests, with the race detector, against PostgreSQL in Compose
 	scripts/host.sh test
