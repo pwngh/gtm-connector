@@ -69,7 +69,9 @@ make verify-real                                   # real public text, Python ag
 - Have a view and argue for it. If a request leads somewhere worse, say so and show the better way.
 - State things plainly. Give a reason only when it is concrete. Never explain by history.
 - The repository holds code, tests, user docs, and this page. No logs, results, or review notes.
-- A doc claims only what a test shows. Keep "No live org has been verified." until one has been.
+- The README states the product as designed. `docs/ROADMAP.md` lists every part of it that is not
+  built yet. Every other doc claims only what a test shows. Keep "No live org has been verified."
+  on the roadmap until one has been.
 - `tests/test_cases.py` holds ten invented deals, one property each. A change to cards keeps them
   passing. A case that waits for a feature says which assertion does not hold yet and why.
 - Live checks use the development org and workspace only. Never create or edit a Slack app. Never
@@ -97,7 +99,7 @@ Python package and stays read-only. Until then:
    opens existing cards and receipts, keeps source and client setup working through the binary, lists
    every change a user sees, and removes the Python package and `tools/oracle/`.
 
-Planned work is stated only in `docs/ROADMAP.md`. A statement leaves it with the test that shows it.
+Planned work is listed in `docs/ROADMAP.md`. A statement leaves it with the test that shows it.
 
 After each step, use the product end to end as a stranger and fix what only shows from there.
 

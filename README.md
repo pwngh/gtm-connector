@@ -10,6 +10,9 @@ figure, date, name, and quotation on the card points to a stored record. Each se
 with who said it and on what basis, and the card says what it did not read. The connector writes
 every character. No model does.
 
+Some of what this page describes is still being built. The [roadmap](docs/ROADMAP.md) says which
+parts.
+
 | No model | Cited | Sealed | Tested | Surfaces |
 | --- | --- | --- | --- | --- |
 | **0** model calls on a card | every figure and quotation numbered to its record | **SHA-256** seal on each card | **10 of 10** invented hard cases pass | web app, CLI, HTTP API, **MCP** `2026-07-28` |
@@ -114,34 +117,77 @@ Neutralizer version   3
 > **A changed card is refused.** `inspect` checks a card against its seal first, and refuses one
 > that was changed.
 
-## For sales reps and CSMs
+## For sales and CS teams
 
-The Deals area is your home. It shows quotes, sources and times, and none of the plumbing.
+Deals is your home in the web app. Active deals sit on the left, sorted by urgency: red for a risk
+or blocker, amber for new changes, green for on track. A badge shows when new calls or Slack
+threads need your approval. The Deal card fills the main pane, with a proof drawer and the deal's
+communications beside it.
 
-1. **Approve what belongs to your deal.** A badge counts the calls and Slack threads proposed for it. Nothing joins a deal until someone approves it.
-2. **Get the alert.** Slack tells you when a renewal turns risky, with the rule that fired and a link to the card. It never quotes the customer.
-3. **See why it flagged.** Red is an open blocker or a failed rule: customer silence, a close date that keeps slipping, one contact doing all the talking, or a stated price that disagrees with the record. Unknown means a source was not read.
-4. **Refresh before the call.** One click reads every approved source again and publishes a new card. If a read fails, you keep the last card, with its time and the reason.
-5. **Read the card.** What changed since you last looked comes first, then the risks and blockers. Below them: days to renewal, buyer quotes with names and titles, your commitments, and what was not read.
-6. **Open the proof.** Any line opens the record, or the whole sentence with its speaker, time and source.
-7. **Ask an assistant.** An assistant app reads the same deal, card and proof over MCP.
-8. **Mark and resolve.** Mark a sentence as a blocker or as your commitment. Resolve a blocker with later proof and a reason. When the opportunity closes, the deal is archived with its final card.
+1. **Confirm suggested calls and Slack threads.** The connector proposes the ones that match your account.
+2. **Get a Slack alert when a renewal turns risky.** It says what flagged the deal:
+   - customer silence: no reply near renewal;
+   - close-date slippage: the renewal date was pushed again;
+   - single-threaded deal: only one person is talking;
+   - pricing or seat conflict: a figure in Slack or on a call differs from the CRM;
+   - legal or security blocker: redlines or riders holding up signature.
+3. **Refresh before your call.** Pull the latest updates on demand.
+4. **Read the Deal card,** your 30-second renewal snapshot. It shows the renewal countdown and ARR, what changed since last time, exact buyer quotes and titles, promises you made, and missing or unread sources. From the card:
+   - click any line for its source proof, straight to the exact call or Slack message;
+   - track blockers on the renewal checklist and playbook until they are resolved;
+   - ask Claude, Codex or a local model what is blocking this renewal.
+5. **The deal closes.** It is archived with its final card.
 
 ## For RevOps and GTM engineers
 
-The Ops area shows all of the plumbing: Coverage, Setup and Activity.
+Ops shows all of the plumbing that reps never see.
 
-1. **Write one configuration file.** `gtm.yaml` holds the sources, your field mappings, sellers and excluded people, the time zone, watch rules, thresholds and access. It holds no credential. Keep it in Git, preview it, and activate an exact revision.
-2. **Let watch rules propose the deals.** For example, open renewals closing within 90 days. Each deal gets one handle that binds its Salesforce account, opportunity, contract and contacts, its Slack threads, its transcripts and your own record keys.
-3. **Bring the data in two ways.** Scheduled reads cover the CRM, transcript folders and Slack channel windows. The push API and a read-only view of your own database cover everything else.
-4. **Approve the matches.** Every proposed deal, call, thread and pushed record waits for a person. A rejected match adds nothing to any card.
-5. **Set what counts as risk.** Pick the readiness rules, set their thresholds, and preview who would turn red before a change applies. Every result cites its records, receipts and rule version.
-6. **Send results where people work.** The web app, the HTTP API with its OpenAPI description, MCP, Slack alerts, signed webhooks, and read-only SQL views for reporting.
-7. **Watch coverage through to close.** Coverage lists every deal and shows which have no current card, and why. When an opportunity closes, the reads stop and the final card is sealed.
+1. **Write one config file,** `gtm.yaml`. It connects Salesforce, Slack, calls, and SQL or webhook push.
+2. **Set auto-watch rules,** such as all open renewal opportunities closing in the next 90 days. Data then enters two ways:
+   - scheduled background pulls: the CRM, Slack channels and threads, Gong and Zoom;
+   - the push API or custom SQL: internal email, SMS or database tables.
+3. **Approve the discovered matches.** Calls and Slack messages matched by email and domain wait in a queue. Slack is matched by dedicated channel, such as `#deal-thornfield`, or by threads in a shared channel that mention the account.
+4. **Leave the rest to deterministic parsing and guardrails:**
+   - a whole-sentence splitter;
+   - an HTML and link neutralizer;
+   - speaker and role matching, sellers against buyers;
+   - a versioned PostgreSQL store with audit receipts;
+   - risk and diff rules for silence, slippage and conflicts.
+5. **Auto-stop and archive.** On Closed Won or Closed Lost, polling halts and the final card is sealed.
+
+Results go out four ways:
+
+| Output | What it gives |
+| --- | --- |
+| REST API, `/v1/deals` | refresh on demand, the card as JSON, proof lookup |
+| MCP server, stdio or HTTP | Claude Desktop, Claude Code, ChatGPT, Codex |
+| Outbound webhooks and Slack alerts | deep links to flagged deals |
+| Web UI | work queue, diffs, receipt drawer |
+
+### One deal, one ID
+
+A deal is a bundle of IDs from many tools. Register the deal and bind them once:
+
+| Tool | IDs |
+| --- | --- |
+| Salesforce | account, opportunity and contact IDs |
+| Slack | channel ID and thread, or channel name |
+| Gong or Zoom | participant emails and the account domain |
+| Your own database | contact, client or contract IDs |
+
+After that, pass the deal ID to get the card:
+
+```sh
+gtm deal thornfield-2027
+curl https://HOST/v1/deals/thornfield-2027
+```
 
 ## For operators
 
-1. **Install.** The binary carries the web app. Run it with a PostgreSQL 19 or 18.7 URL, or run `make up`.
+Deployment is one step. A GitHub Actions release pipeline publishes prebuilt static binaries for
+each platform and Docker images, with the web app embedded in the binary.
+
+1. **Install.** Download the binary and give it a PostgreSQL 19 or 18.7 URL, or run the Docker image.
 2. **Set up.** `gtm-connector setup` runs the migrations as the database owner and writes the credentials folder. The server then runs as an app role that cannot change the schema.
 3. **Check.** `/healthz` answers when the database is reachable and the migrations are current.
 4. **Back up and upgrade.** `backup` and `restore` cover the database and the credentials. Rehearse an upgrade on a restored copy first.
