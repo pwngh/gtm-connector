@@ -1,0 +1,112 @@
+{
+ "dataset": "earnings22",
+ "python": "3.14.6",
+ "unicode": "16.0.0",
+ "package_sha256": "40bce05115e84755a52ffe8b7153d1759d34286f7ed2065d673b08a20804b987",
+ "items_sha256": "6abf8ebe35bc0c6b4d75ed01c2ece87af1f41a95a2cfa3f63977ac9eee5eaaae",
+ "items": 8037,
+ "block_items": 8192,
+ "decoding": [
+  "487daf1f9a39a1bdcce97aafc2a55df8e1a94449d39c4515b19cdc3a4bd6e8ff"
+ ],
+ "functions": [
+  {
+   "function": "safe_text",
+   "items": 8037,
+   "blocks": [
+    "6359c9dd0db64b0aa6f21ecd685df16dc332b6c0bb81274635745f918a5e688a"
+   ]
+  },
+  {
+   "function": "sentences",
+   "items": 8037,
+   "blocks": [
+    "a90d0133c0f7324f4c5847d2e0f2d115a6b0056f40f3b24d415b5e3d028a6c38"
+   ]
+  },
+  {
+   "function": "sentences_lines",
+   "items": 8037,
+   "blocks": [
+    "a90d0133c0f7324f4c5847d2e0f2d115a6b0056f40f3b24d415b5e3d028a6c38"
+   ]
+  },
+  {
+   "function": "sentences_safe",
+   "items": 8037,
+   "blocks": [
+    "c2e1d04eddd4ca9d7c6130a6e332ff0a58feeb67fc5a6914340901a60e06ca02"
+   ]
+  },
+  {
+   "function": "sentences_safe_lines",
+   "items": 8037,
+   "blocks": [
+    "c2e1d04eddd4ca9d7c6130a6e332ff0a58feeb67fc5a6914340901a60e06ca02"
+   ]
+  },
+  {
+   "function": "units_target",
+   "items": 8037,
+   "blocks": [
+    "68c1f26cda49f7e8a8142d500c76e1af3b4a617e47180a32e9297b3af0f5aa62"
+   ]
+  },
+  {
+   "function": "units_raw_link",
+   "items": 8037,
+   "blocks": [
+    "e79efc0d916e54310db5059b2d5c4f32c10fee5d75253f8763e21deb24fb3d74"
+   ]
+  },
+  {
+   "function": "units_sentence_end",
+   "items": 8037,
+   "blocks": [
+    "89e35bdfb2635cf857460e49c60de2123cff1bb625ae00e6f916c8cb3d6b0fbe"
+   ]
+  },
+  {
+   "function": "units_opener",
+   "items": 8037,
+   "blocks": [
+    "b7eae12ed8f34197d77d2d72ca9839c203fd78609e41eaa3046524cd58d8bb7b"
+   ]
+  },
+  {
+   "function": "units_named",
+   "items": 8037,
+   "blocks": [
+    "f39672c3adfdf041bf4c09a90c6edb092bf5a033b895c19e632ef03bccdef5c9"
+   ]
+  },
+  {
+   "function": "slack_mapping_percent",
+   "items": 8037,
+   "blocks": [
+    "098de20bc70e355769ab7d2833386d1dfa4bdd78f8fb36f7a5cb525b1de9dd22"
+   ]
+  },
+  {
+   "function": "slack_callback_percent",
+   "items": 8037,
+   "blocks": [
+    "098de20bc70e355769ab7d2833386d1dfa4bdd78f8fb36f7a5cb525b1de9dd22"
+   ]
+  },
+  {
+   "function": "strict_json",
+   "items": 0,
+   "blocks": [
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  },
+  {
+   "function": "strict_json_decimal",
+   "items": 0,
+   "blocks": [
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   ]
+  }
+ ]
+}

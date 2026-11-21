@@ -14,7 +14,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// writeOracle records outputs in a run's folder as tools/oracle/real.py does: one line of outputs and one of
+// writeOracle records outputs in a run's folder as the Python oracle did: one line of outputs and one of
 // digests per item, then oracle.json.
 func writeOracle(t *testing.T, run Run, items []Item, outputs [][]string, itemsSHA256 string) {
 	t.Helper()

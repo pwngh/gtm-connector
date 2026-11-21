@@ -1,5 +1,5 @@
 // Package demo is the invented CRM, calls and Slack stores of the demo book, and their four reads as the
-// gateway's tool bodies give them (gtm_connector/store.py, calls.py and slack.py).
+// gateway's tool bodies give them.
 //
 // A Store is loaded from a dump of the three SQLite stores, every table with its columns and its rows in
 // rowid order, as testdata/oracle/cards/demo_book.json holds them, and takes rows inserted later. Values are

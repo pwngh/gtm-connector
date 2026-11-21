@@ -19,7 +19,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// scope reproduces tools/oracle/freeze.py's Scope: IDs, tokens and receipt times that depend on the
+// scope reproduces the recorder's scope: IDs, tokens and receipt times that depend on the
 // scope's name alone. Receipts start at 2027-01-15T15:00:00Z, one second apart.
 type scope struct {
 	space    uint32

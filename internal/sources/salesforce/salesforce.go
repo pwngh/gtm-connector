@@ -1,6 +1,6 @@
 // Package salesforce reads standard Account, Contact, Opportunity and Contract records of one Salesforce
-// org through REST v68.0, under the credentials of an existing sf CLI login (gtm_connector/salesforce.py
-// and sf_credentials.py). It never writes to Salesforce.
+// org through REST v68.0, under the credentials of an existing sf CLI login. It never writes to
+// Salesforce.
 //
 // FromSF asks sf for the instance address and the token of one alias and keeps both in memory. Every read
 // is one bounded operation: 20 seconds of read time, 12 GET attempts, 1 MiB of response data and 10 pages

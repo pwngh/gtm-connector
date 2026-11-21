@@ -9,7 +9,7 @@
 #   make backup               back up the database and the credentials folder
 #   make restore BACKUP=NAME  restore a backup into an empty database
 #   make test                 go vet and the Go tests against the Compose database
-#   make verify-real          real public text through the Python oracle and Go (downloads; never in CI)
+#   make verify-real          real public text through Go, against the oracle's recorded digests (downloads; never in CI)
 #
 # Add POSTGRES=18.7 to any of them to use the pinned fallback PostgreSQL, on
 # its own volume. Go and Node are pinned too (pins.json): dev, test and every
@@ -130,13 +130,10 @@ vet: go-version ## go vet
 test: go-version db vet ## The Go tests, with the race detector, against PostgreSQL in Compose
 	scripts/host.sh test
 
-# The pinned CPython 3.14.6 that runs the oracle. PYTHON= compares against the digests an earlier run
-# recorded. DATASETS='ID ...' narrows the run or names an opt-in dataset; LOCAL=FILE runs a private items
-# file outside the repository.
-PYTHON ?= .venv/bin/python
-
-verify-real: go-version ## Fetch the public datasets, run the Python oracle and Go over them, compare
-	go run ./cmd/realdata -python '$(PYTHON)' $(if $(LOCAL),-local '$(LOCAL)') verify $(DATASETS)
+# DATASETS='ID ...' narrows the run or names an opt-in dataset; LOCAL=FILE compares a private items file
+# outside the repository against the oracle records an earlier run left beside it.
+verify-real: go-version ## Fetch the public datasets, run Go over them, compare with the recorded digests
+	go run ./cmd/realdata $(if $(LOCAL),-local '$(LOCAL)') verify $(DATASETS)
 
 psql: require-compose ## A database shell, as the owner
 	$(COMPOSE) exec postgres psql -U gtm -d gtm

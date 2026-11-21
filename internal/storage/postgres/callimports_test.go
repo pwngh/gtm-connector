@@ -22,7 +22,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The import store, as tests/test_calls_import.py's StoreTests hold calls_import.py to it. Every file here is
+// The import store, as the removed Python suite's StoreTests held the Python store to it. Every file here is
 // invented.
 
 const (

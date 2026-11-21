@@ -10,7 +10,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// These transcribe tests/test_request_checks.py: the same facts, policy, clocks and expectations.
+// These transcribe the removed Python suite's request check tests: the same facts, policy, clocks and expectations.
 
 func object(pairs ...any) *strictjson.Object {
 	o := &strictjson.Object{}

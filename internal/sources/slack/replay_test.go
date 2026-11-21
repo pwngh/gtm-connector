@@ -14,8 +14,8 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// upstream is the invented Slack the oracle's threads were read from, as tests/test_books_slack.py serves
-// them: one thread in pages of a fixed size, each page the bytes Python's json.dumps gave. It checks every
+// upstream is the invented Slack the oracle's threads were read from, as the removed
+// Python suite served them: one thread in pages of a fixed size, each page the bytes Python's json.dumps gave. It checks every
 // request against the one the Python reader made at that point.
 type upstream struct {
 	t       *testing.T

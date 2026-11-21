@@ -1,5 +1,5 @@
 // Package mcp serves the connector's MCP tools on streamable HTTP and stdio. A request is admitted here, in
-// gtm_connector.request_checks' order and then the Python SDK's, under a receipt committed before anything
+// the Python package's order of request checks and then the Python SDK's, under a receipt committed before anything
 // runs. Every refusal a client can see is decided here. Only an admitted request reaches the Go MCP SDK,
 // rebuilt from its admitted fields under a dispatch id of the connector's own, and its reply leaves only after
 // the receipt is finished, carrying the client's own id.

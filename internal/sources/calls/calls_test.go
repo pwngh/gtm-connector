@@ -17,7 +17,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The parser and the excerpt, as tests/test_calls_import.py's ParsingTests hold calls_import.py to them, and
+// The parser and the excerpt, as the removed Python suite's ParsingTests held the Python parser to them, and
 // the record of an import. Every file here is invented.
 
 // Characters written by their UTF-8 bytes, so each is visible in this file.

@@ -1,18 +1,16 @@
 # Real data
 
-`make verify-real` runs real public text through the Python package and the Go port and compares what
-they do. It downloads datasets, so it runs only when you ask for it. The tests and CI never run it.
+`make verify-real` runs real public text through the Go binary's text functions and compares each output
+with what the Python package gave for the same text, as digests recorded in the repository. It downloads
+datasets, so it runs only when you ask for it. The tests and CI never run it.
 
 ```sh
 make verify-real                                  # every pinned dataset that is not opt-in
 make verify-real DATASETS='earnings21 irc-disentanglement'
-make verify-real DATASETS=aishell-4-test          # an opt-in dataset runs only when named
 make verify-real LOCAL=/path/to/messages.jsonl    # a private file, see below
 ```
 
-It needs Go, git, and the pinned CPython 3.14.6 with Unicode 16.0.0 (`PYTHON=`, as for the oracle fixtures).
-The default is `.venv/bin/python`. The oracle fixtures are the reference outputs in `testdata/oracle/`, which
-`tools/oracle/` writes from the Python package.
+It needs Go and git. No Python runs.
 
 ## What it does
 
@@ -24,16 +22,14 @@ The default is `.venv/bin/python`. The oracle fixtures are the reference outputs
 2. **Convert.** A converter in `internal/realdata` reads each dataset and writes its items: one per utterance,
    turn, message or field, and one per JSON file or JSON Lines line. Downloads are parsed by code in this
    repository and nothing in them is run.
-3. **Oracle.** `tools/oracle/real.py` runs the Python package over the items, under `-I`, and records each
-   output and its SHA-256. It refuses a package that differs from the one `testdata/oracle/` was made from.
-4. **Compare.** The Go port runs over the same items, and each output's SHA-256 is compared with Python's.
-   The records are checked first. They must:
+3. **Compare.** The Go port runs over the items, and its block digests are compared with the ones recorded
+   for the dataset in [`internal/realdata/recorded`](../internal/realdata/recorded) (see
+   [Recorded digests](#recorded-digests)). The recorded digests are checked first. They must:
    - come from CPython 3.14.6 with Unicode 16.0.0 and the package `testdata/oracle/` was made from
-   - name exactly each item's functions
-   - hold only SHA-256 digests
-   - when Python's outputs are there, be the digests of those outputs
+   - be for this very items file, by its SHA-256 and its count of items
+   - name exactly the functions below, with one SHA-256 digest for each block
 
-   Records that fail any check are refused, never compared.
+   Digests that fail any check are refused, never compared.
 
 | Input | Functions |
 | --- | --- |
@@ -50,9 +46,10 @@ The cache is `$GTM_REAL_CACHE`, or `~/.cache/gtm-connector/real`. Each dataset h
 | --- | --- |
 | `files/` | the downloads, as the pins give them |
 | `items.jsonl.gz`, `items.json` | the converted items, and what the converter counted |
-| `oracle.jsonl.gz` | Python's outputs |
-| `oracle-digests.jsonl.gz`, `oracle.json` | the SHA-256 of each input and each output, the interpreter and the items' digest |
 | `report.json` | the comparison |
+
+A cache filled before the Python package was removed may also hold `oracle.jsonl.gz`,
+`oracle-digests.jsonl.gz` and `oracle.json`, the oracle's own records. Nothing reads them now.
 
 The cache must be outside the repository. A path that reaches the repository through a link or in another
 case is refused too.
@@ -61,8 +58,8 @@ Every write stays in its dataset's folder. A link there that leads out of the ca
 is written fresh under an unpredictable name and renamed into place. A conversion reads each download through
 the file it checked, and checks it again before keeping the items.
 
-Nothing real is committed. The repository holds the manifest, the pins, the fetch, the converters, the
-comparison and the oracle runner.
+Nothing real is committed. The repository holds the manifest, the pins, the recorded digests (SHA-256
+digests and counts, no text), the fetch, the converters and the comparison.
 
 ## The report
 
@@ -72,18 +69,19 @@ For each dataset and each function it gives the items, how many of them gave a n
 and the differences. It gives the same split by kind: `natural`, `role-played`, `elicited` or `invented`, as
 the manifest gives it for a dataset or the converter for each meeting.
 
-Each difference names the dataset file, the item ID, its kind, the function, where the outputs first differ,
-and the SHA-256 of the input and of both outputs:
+Each difference names the function and the block it is in, by the first and last line of the items file
+the block covers:
 
 ```text
-segments/XX0001a.A.segments.xml XX0001a.sync.4 (role-played) sentences at output[2]: code point 17 (Python's string has 40 code points, Go's 41); input 3f2a..., Python 9c1b..., Go 0d7e...
+sentences at lines 16385 to 24576 (items 16385 to 24576); only block digests were recorded
 ```
 
-`output[2]` is the third element of the output, here the third sentence.
+Every item of a block whose digest differs counts as a difference of that function, so the counts are an
+upper bound and the block says where to look.
 
-The first row, `item (decoding the line)`, counts the items file's lines. A line Python and Go decode
-differently is a difference there, with its line, and its functions are not compared. Records of another
-items file are stale and refused.
+The first row, `item (decoding the line)`, counts the items file's lines. A line Go decodes differently from
+Python, or refuses, makes its block a difference there and in each function. Digests of another items file
+are stale and refused.
 
 ### Invented fixtures
 
@@ -103,7 +101,7 @@ A run that fails reports why and leaves no `report.json`. The other runs go on, 
 > fails.
 
 A dataset named in `DATASETS` that cannot be compared fails before anything is fetched: one with no
-converter, one waiting for the owner, or one not pinned. `realdata fetch ID` still fetches its files. Without
+converter, one waiting for the owner, one not pinned, or one with no recorded digests. `realdata fetch ID` still fetches its files. Without
 names, such datasets are skipped, each with what it waits for.
 
 | Limit or exit status | Value |
@@ -117,28 +115,44 @@ names, such datasets are skipped, each with what it waits for.
 
 ## A private file
 
-`LOCAL=FILE` runs the same comparison on a JSON Lines file outside the repository, one object a line with a
-string `id` and a string `text`. Other keys are ignored and blank lines skipped.
+`LOCAL=FILE` runs the Go port on a JSON Lines file outside the repository, one object a line with a string
+`id` and a string `text`, and compares it with the oracle's records of the same file, which a run made before
+the Python package was removed left in the folder `FILE.r0` beside it. Other keys are ignored and blank lines
+skipped. A file with no such records cannot be compared, and the run fails. The records are checked item by
+item: each difference is named by its line and, when Python's outputs are there, by where the outputs first
+differ.
 
-The results go to the folder `FILE.r0` beside it, never to the cache or the repository.
+The report goes to `FILE.r0`, never to the cache or the repository.
 
 - It is made with mode 0700 when absent.
 - One that exists must be a folder, not a link, that you own with mode 0700, or the run stops.
 - Each result is written as a fresh file with mode 0600 and renamed into place, so a link or a file left in
   `FILE.r0` is replaced, never written through.
 
-The report names each item by its line, never by its ID. A line that is not an item stops the run with its
-number and a fixed reason. A failure names its exception type only, and a crash in the Go port is counted as
-a difference without its message.
+The report names each item by its line, never by its ID. A crash in the Go port is counted as a difference
+without its message.
 
 > **`FILE.r0/oracle.jsonl.gz` holds Python's outputs, which contain the text.** Delete the folder when you
 > are done.
 
-## After the Python package is gone
+## Recorded digests
 
-`PYTHON=` skips the oracle and compares against `oracle-digests.jsonl.gz` from an earlier run. The
-differences are still found, without positions. The digests belong to one items file: if a converter
-changes what it writes, record the digests again while Python is still here.
+`internal/realdata/recorded/ID.json` holds, for each dataset below that runs by default, what the Python
+package gave on it: recorded on CPython 3.14.6 from the package `testdata/oracle/` was made from, before the
+package was removed. It holds:
+
+- the SHA-256 and the count of the items file it was recorded for
+- for each block of 8,192 items, in the items file's order, the SHA-256 of one row `LINE INPUT` per item,
+  where `INPUT` is the SHA-256 of the item's text or document
+- for each function and each block, the SHA-256 of one row `LINE OUTPUT` per item the function runs on,
+  where `OUTPUT` is the SHA-256 of the function's output in its canonical encoding, and the function's count
+  of items
+
+They hold digests and counts, never text. The digests belong to one items file: if a converter changes what it
+writes, the comparison refuses them as stale.
+
+`aishell-4-test` (opt-in) and `fomc-press-conferences` (no converter) were never recorded, so they cannot be
+compared. `realdata fetch` and `realdata convert` still run on them.
 
 ## Datasets
 
@@ -180,6 +194,9 @@ LEI files. Each needs an account, accepted terms or a decision only the owner ca
    which you commit.
 4. If no converter reads the format, add one to the `converters` map in `internal/realdata/convert.go`, with
    a test on an invented sample.
+
+A dataset added now has no recorded digests, since nothing records Python's outputs any more, so it is
+fetched and converted but not compared.
 
 A dataset that needs an account, a registration or accepted terms has `"access": "owner"` and says in
 `owner_steps` what the owner must do. Agents never fetch such a dataset. A dataset with `opt_in` runs only

@@ -139,7 +139,7 @@ func (f *fixture) activityCount() int {
 	return len(f.activities)
 }
 
-// fixtureTokens is tests/test_gateway.py's FixtureAuthority: seven bearers, one expired, one for another
+// fixtureTokens is the removed Python suite's FixtureAuthority: seven bearers, one expired, one for another
 // audience, and "read", a grant of every read scope. "write" and "full" carry crm:write, as the Python
 // fixture issues them, so the gate refuses both whole. Verification of an unknown or malformed value returns nil.
 const (

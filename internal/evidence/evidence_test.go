@@ -284,7 +284,7 @@ func TestDifferencesStillMatchOracle(t *testing.T) {
 }
 
 // A link with a backslash or a control character up to the end of its authority shows no host. The cases are
-// those of test_a_link_with_an_ambiguous_host_shows_no_host in tests/test_units.py.
+// those of test_a_link_with_an_ambiguous_host_shows_no_host of the removed Python suite.
 func TestAmbiguousLinkHost(t *testing.T) {
 	for _, c := range [][2]string{
 		// A browser reads a backslash before the path as a slash, so it opens evil.example here.
@@ -317,7 +317,7 @@ func TestAmbiguousLinkHost(t *testing.T) {
 }
 
 // A link with no // after its scheme shows no host. The cases are those of
-// test_a_link_with_no_slashes_after_its_scheme_shows_no_host in tests/test_units.py.
+// test_a_link_with_no_slashes_after_its_scheme_shows_no_host of the removed Python suite.
 func TestLinkHostWithNoSlashesAfterScheme(t *testing.T) {
 	for _, c := range [][2]string{
 		// A browser reads https:files.example as https://files.example. Read as a host, it would be https.
@@ -345,7 +345,7 @@ func TestLinkHostWithNoSlashesAfterScheme(t *testing.T) {
 }
 
 // A link cut by a tab or a line break before its host ends shows no host. The cases are those of
-// test_a_link_cut_by_a_tab_or_a_line_break_shows_no_host in tests/test_units.py.
+// test_a_link_cut_by_a_tab_or_a_line_break_shows_no_host of the removed Python suite.
 func TestLinkCutByTabOrLineBreak(t *testing.T) {
 	for _, c := range []struct {
 		raw, safe string
@@ -380,7 +380,7 @@ func TestLinkCutByTabOrLineBreak(t *testing.T) {
 }
 
 // A Markdown target with any scheme is a link. The cases are those of
-// test_a_markdown_link_with_any_scheme_is_a_link in tests/test_units.py.
+// test_a_markdown_link_with_any_scheme_is_a_link of the removed Python suite.
 func TestMarkdownLinkWithAnyScheme(t *testing.T) {
 	// A client renders [deck](HTTPS:/files.example) as a link, and a browser opens files.example.
 	for _, raw := range []string{"[deck](HTTPS:/files.example)", "[deck](https:files.example/x)",
@@ -432,8 +432,8 @@ func checkLinks(t *testing.T, cases [][2]string) {
 }
 
 // A www. address is a host only in running text, and a host after // or in running text is shown without a
-// leading www. The cases are those of test_a_www_address_is_a_host_only_in_running_text in
-// tests/test_units.py.
+// leading www. The cases are those of test_a_www_address_is_a_host_only_in_running_text of the removed
+// Python suite.
 func TestWWWAddress(t *testing.T) {
 	checkLinks(t, [][2]string{
 		// As a link target, www.files.example:8443/x has the scheme www.files.example and no host.
@@ -464,7 +464,7 @@ func TestWWWAddress(t *testing.T) {
 }
 
 // An angle-bracket link with a scheme is a link. The cases are those of
-// test_an_angle_bracket_link_with_a_scheme_is_a_link in tests/test_units.py.
+// test_an_angle_bracket_link_with_a_scheme_is_a_link of the removed Python suite.
 func TestAngleBracketLinkWithScheme(t *testing.T) {
 	// A Markdown client links <scheme:value>: a scheme of 2 to 32 characters, a colon, and no space.
 	for _, c := range []struct {
@@ -505,7 +505,7 @@ func TestAngleBracketLinkWithScheme(t *testing.T) {
 }
 
 // The destination of a reference definition is a link. The cases are those of
-// test_the_destination_of_a_reference_definition_is_a_link in tests/test_units.py.
+// test_the_destination_of_a_reference_definition_is_a_link of the removed Python suite.
 func TestReferenceDefinition(t *testing.T) {
 	// A Markdown client reads "[deck]: https:/files.example" on its own line as where [deck] leads.
 	for _, c := range []struct {
@@ -553,7 +553,7 @@ func TestReferenceDefinition(t *testing.T) {
 }
 
 // A host a browser rewrites or refuses is not shown. The cases are those of
-// test_a_host_a_browser_rewrites_or_refuses_is_not_shown in tests/test_units.py.
+// test_a_host_a_browser_rewrites_or_refuses_is_not_shown of the removed Python suite.
 func TestHostABrowserRewritesOrRefuses(t *testing.T) {
 	checkLinks(t, [][2]string{
 		// A browser reads each of these as the address 192.0.2.1.

@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// These transcribe tests/test_stdio_bridge.py. In Go, stdio is served in process as a machine principal,
+// These transcribe the removed Python suite's stdio bridge tests. In Go, stdio is served in process as a machine principal,
 // so each request passes the admission the bridge's forwarded HTTP request passes today.
 
 type stdioHarness struct {

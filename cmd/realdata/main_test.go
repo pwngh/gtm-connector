@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/realdata"
 )
 
@@ -41,30 +44,60 @@ func capture(t *testing.T, args ...string) (int, string) {
 	return code, <-done
 }
 
-// oraclePython is the pinned interpreter: $GTM_ORACLE_PYTHON, or .venv/bin/python in the repository.
-func oraclePython(t *testing.T) string {
+// writeRecords writes, in FILE.r0, the oracle's records of a local file as an earlier run left them: Go's own
+// digests of each item, which the oracle's equal when the two agree, and oracle.json.
+func writeRecords(t *testing.T, input string) {
 	t.Helper()
-	root, err := repository()
+	items, err := realdata.OpenItems(input, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	python := os.Getenv("GTM_ORACLE_PYTHON")
-	if python == "" {
-		python = filepath.Join(root, ".venv", "bin", "python")
+	defer items.Close()
+	var rows bytes.Buffer
+	count := 0
+	for {
+		it, err := items.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		sums := map[string]string{}
+		for i, output := range realdata.Outputs(it) {
+			sums[realdata.Functions(it)[i]] = realdata.Digest(output)
+		}
+		row, _ := json.Marshal([]any{it.Line, it.InputSHA256(), sums})
+		rows.Write(append(row, '\n'))
+		count++
 	}
-	out, err := exec.Command(python, "-I", "-c", "import sys, unicodedata; print(sys.version.split()[0], unicodedata.unidata_version)").Output()
-	if err != nil || strings.TrimSpace(string(out)) != "3.14.6 16.0.0" {
-		t.Skip("needs CPython 3.14.6 with Unicode 16.0.0: set GTM_ORACLE_PYTHON")
+	var frozen struct {
+		Package string `json:"package_sha256"`
 	}
-	return python
+	oracletest.JSON(t, "manifest.json", &frozen)
+	meta, _ := json.Marshal(realdata.OracleMeta{Python: "3.14.6", Unicode: "16.0.0", PackageSHA256: frozen.Package,
+		ItemsSHA256: items.SHA256(), Items: count, TextFunctions: realdata.TextFunctions,
+		JSONFunctions: realdata.JSONFunctions})
+	var zipped bytes.Buffer
+	w := gzip.NewWriter(&zipped)
+	w.Write(rows.Bytes())
+	w.Close()
+	out := input + ".r0"
+	if err := os.MkdirAll(out, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, data := range map[string][]byte{"oracle-digests.jsonl.gz": zipped.Bytes(), "oracle.json": meta} {
+		if err := os.WriteFile(filepath.Join(out, name), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 const secret = "Quarterly renewal blocked by Zanzibar clause"
 
-// A local run end to end: whatever links or files are left in FILE.r0, nothing is written outside it, every
-// file in it is private, and no output names the text.
+// A local run end to end: compare reads the records an earlier run left in FILE.r0, writes its report there
+// as a private file through no link, writes nothing outside, and no output names the text.
 func TestLocalEndToEnd(t *testing.T) {
-	python := oraclePython(t)
 	dir := t.TempDir()
 	input := filepath.Join(dir, "messages.jsonl")
 	lines := `{"id": "m1", "text": "We agree. ` + secret + ` until Friday."}` + "\n" +
@@ -72,29 +105,19 @@ func TestLocalEndToEnd(t *testing.T) {
 	if err := os.WriteFile(input, []byte(lines), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	writeRecords(t, input)
 	out := input + ".r0"
-	if err := os.Mkdir(out, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	outside := t.TempDir()
 	sentinel := filepath.Join(outside, "sentinel.txt")
 	if err := os.WriteFile(sentinel, []byte("untouched"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"oracle.jsonl.gz", "oracle-digests.jsonl.gz", "oracle.json", "report.json"} {
-		if err := os.Symlink(sentinel, filepath.Join(out, name+".partial")); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.Link(sentinel, filepath.Join(out, "oracle.jsonl.gz")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(out, "report.json"), nil, 0o644); err != nil {
+	if err := os.Symlink(sentinel, filepath.Join(out, "report.json")); err != nil {
 		t.Fatal(err)
 	}
 	before := listing(t, dir, out)
-	code, printed := capture(t, "-python", python, "-local", input, "verify")
-	if code != 0 {
+	code, printed := capture(t, "-local", input, "verify")
+	if code != 0 || !strings.Contains(printed, "no differences") {
 		t.Fatalf("exit %d:\n%s", code, printed)
 	}
 	if data, _ := os.ReadFile(sentinel); string(data) != "untouched" {
@@ -111,9 +134,6 @@ func TestLocalEndToEnd(t *testing.T) {
 		info, err := os.Lstat(filepath.Join(out, e.Name()))
 		if err != nil {
 			t.Fatal(err)
-		}
-		if strings.HasSuffix(e.Name(), ".partial") {
-			continue // the links left before the run
 		}
 		if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
 			t.Errorf("%s: %v", e.Name(), info.Mode())
@@ -150,7 +170,7 @@ func TestVerifyNamedDatasetThatCannotRun(t *testing.T) {
 		"fomc-press-conferences": "no converter",
 		"icsi-meetings":          "needs the owner",
 	} {
-		code, printed := capture(t, "-python", "", "verify", name)
+		code, printed := capture(t, "verify", name)
 		if code == 0 || !strings.Contains(printed, want) {
 			t.Errorf("verify %s: exit %d:\n%s", name, code, printed)
 		}
@@ -177,7 +197,7 @@ func TestCacheOutsideRepository(t *testing.T) {
 	}
 	for _, cache := range spellings {
 		t.Setenv("GTM_REAL_CACHE", cache)
-		code, printed := capture(t, "-python", "", "fetch", "lwc-recipes")
+		code, printed := capture(t, "fetch", "lwc-recipes")
 		if code == 0 || !strings.Contains(printed, "inside the repository") {
 			t.Errorf("GTM_REAL_CACHE=%s: exit %d:\n%s", cache, code, printed)
 		}
@@ -191,7 +211,7 @@ func TestCacheOutsideRepository(t *testing.T) {
 // A panic is reported by its type alone, with exit 2: its value could hold an item's text.
 func TestPanicShowsTypeOnly(t *testing.T) {
 	saved := dispatchCommand
-	dispatchCommand = func(context.Context, string, []string, string, string) (int, error) {
+	dispatchCommand = func(context.Context, string, []string, string) (int, error) {
 		panic(fmt.Errorf("while reading %q", secret))
 	}
 	defer func() { dispatchCommand = saved }()
@@ -207,7 +227,7 @@ func TestLocalRefusesOtherCommands(t *testing.T) {
 	os.WriteFile(input, []byte(`{"id": "a", "text": "x"}`+"\n"), 0o600)
 	for _, args := range [][]string{{"-local", input, "verify", "ami-manual-1.6.2"}, {"-local", input, "fetch"},
 		{"-local", input, "pin"}} {
-		code, printed := capture(t, append([]string{"-python", ""}, args...)...)
+		code, printed := capture(t, args...)
 		if code != 2 || !strings.Contains(printed, "-local") {
 			t.Errorf("%v: exit %d:\n%s", args, code, printed)
 		}
@@ -216,17 +236,14 @@ func TestLocalRefusesOtherCommands(t *testing.T) {
 
 // A run that fails does not stop the others: each is compared and reported, and the command fails.
 func TestCompareGoesOnAfterAFailure(t *testing.T) {
-	python := oraclePython(t)
 	dir := t.TempDir()
 	broken, fine := filepath.Join(dir, "broken.jsonl"), filepath.Join(dir, "fine.jsonl")
 	os.WriteFile(broken, []byte(`{"id": "a", "text": "one"}`+"\n"), 0o600)
 	os.WriteFile(fine, []byte(`{"id": "a", "text": "We agree. They sign."}`+"\n"), 0o600)
+	writeRecords(t, fine)
 	root, err := repository()
 	if err != nil {
 		t.Fatal(err)
-	}
-	if code, printed := capture(t, "-python", python, "-local", fine, "verify"); code != 0 {
-		t.Fatalf("exit %d:\n%s", code, printed)
 	}
 	runs := []realdata.Run{}
 	for _, input := range []string{broken, fine} {

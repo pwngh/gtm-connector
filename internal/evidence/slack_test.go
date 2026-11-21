@@ -63,8 +63,8 @@ const (
 	liveThread    = "gemini/0" // three messages of one thread, read in one page, with three blocks left out
 )
 
-// slackRefusals are the changes to a live Slack thread's evidence that tests/test_slack_reader.py and
-// tests/test_live_slack_briefing.py refuse, each with the refusal units.build gives for it. A change marked
+// slackRefusals are the changes to a live Slack thread's evidence that the removed
+// Python suite refused, each with the refusal units.build gives for it. A change marked
 // resealed has the digests and IDs of its changed snapshot, so only the check of the changed field can
 // refuse it.
 var slackRefusals = []struct {

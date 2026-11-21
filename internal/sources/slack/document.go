@@ -6,7 +6,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The saved sign-in as a file holds it: the document gtm_connector/slack_auth.py writes to a state folder's
+// The saved sign-in as a file holds it: the document the Python package wrote to a state folder's
 // slack-connection/credentials.json, with the same members, so a store keeps one format. The tokens are in
 // it as text. A store writes it only where no other user can read it, and nothing else prints it.
 
