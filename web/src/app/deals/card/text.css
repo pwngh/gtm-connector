@@ -1,0 +1,120 @@
+/* The deal's tabs, its Text tab and the panel in place of a card that failed
+   its seal check. The plain-text card is in the reference face at 14 on the
+   sunken surface, white-space kept and long lines wrapped, so the page never
+   scrolls sideways. */
+.dc-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gc-space-1);
+  border-bottom: var(--gc-rule-width) solid var(--gc-rule);
+}
+
+.dc-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--gc-target);
+  min-height: var(--gc-target);
+  margin-bottom: calc(-1 * var(--gc-rule-width));
+  padding: 0 var(--gc-space-4);
+  border-bottom: 3px solid transparent;
+  color: var(--gc-ink-2);
+  font: var(--gc-body);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.dc-tab:hover {
+  color: var(--gc-ink);
+}
+
+.dc-tab[aria-current="page"] {
+  border-bottom-color: var(--gc-accent);
+  color: var(--gc-ink);
+}
+
+.dc-tab:focus-visible,
+.dc-values-note__link:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
+.dc-values-note__link {
+  display: inline-flex;
+  align-items: center;
+  min-width: var(--gc-target);
+  min-height: var(--gc-target);
+  color: var(--gc-accent);
+  font: inherit;
+  font-weight: 600;
+}
+
+.dc-plain {
+  display: grid;
+  gap: var(--gc-space-3);
+  min-width: 0;
+}
+
+.dc-plain__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gc-space-2) var(--gc-space-4);
+}
+
+.fr .dc-plain__status {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+}
+
+.fr .dc-plain__text {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: var(--gc-space-4);
+  overflow: visible;
+  border-radius: var(--gc-radius-panel);
+  background: var(--gc-sunken);
+  color: var(--gc-ink);
+  font: 400 0.875rem / 1.375rem var(--gc-face-reference);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 8;
+}
+
+.fr .dc-failed {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gc-space-3);
+  padding: var(--gc-space-4);
+  border: var(--gc-rule-width) solid var(--gc-rule);
+  border-left: 3px solid var(--gc-ink);
+  border-radius: var(--gc-radius-panel);
+  background: var(--gc-surface);
+  color: var(--gc-ink);
+}
+
+.dc-failed__icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+.dc-failed__body {
+  display: grid;
+  gap: var(--gc-space-2);
+  min-width: 0;
+}
+
+.fr .dc-failed__title {
+  margin: 0;
+  font: var(--gc-body);
+  font-weight: 600;
+}
+
+.fr .dc-failed__card {
+  margin: 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+  overflow-wrap: anywhere;
+}
