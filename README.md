@@ -227,6 +227,7 @@ The card shows what the records say, not whether a source is true.
 - The card shows up to twelve sentences, dealt by speaker role and by time, and counts the rest. Every sentence read is in `inspect` and in the proof drawer.
 - A person, not wording, decides what is a blocker. A readiness rule reports what it observed in the sources it read, and unknown when a read is missing.
 - A model only proposes marks. A person accepts or rejects each one.
+- No live org has been verified.
 - macOS and Linux. One CRM: Salesforce.
 
 ## More
