@@ -195,7 +195,7 @@ var sourceKinds = []*sourceKind{
 		described: func(*strictjson.Object) string {
 			return "imported transcripts, whose provider and statements are unverified"
 		}},
-	// internal/sources/slack reads it. Nothing opens it here yet.
+	// source_slack.go opens it: the mapped thread of an account, read through internal/sources/slack.
 	{provider: "slack", source: "slack", mode: "slack", shown: "slack", title: "Slack",
 		detail: "the saved Slack sign-in", live: true, options: []string{"--seller"},
 		backend: "slack", bound: func(row postgres.Connection, _ any) any {
@@ -203,7 +203,7 @@ var sourceKinds = []*sourceKind{
 		},
 		described: func(*strictjson.Object) string {
 			return "the mapped thread, whose access is checked when it is read"
-		}},
+		}, attach: attachSlack, slack: openSlack},
 }
 
 // sameKind are the two modes the schema allows beside the kinds' own, each a row of the kind it names.

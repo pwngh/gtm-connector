@@ -66,6 +66,10 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	// One transcript imported through an AccountNumber fills the five tables of imports.
 	publish(t, imports(t, f), importing{binding: salesforceBinding, account: "acc-sf-001000000000001AAA",
 		number: "INVENTED-1"})
+	// One mapped thread fills the Slack mappings.
+	_, _, err = f.Store.SaveSlackMapping(ctx, f.Workspace.ID,
+		slackMapping(t, "acc-004", "C0123", "1790000000.000001", strings.Repeat("7", 64)), false, false)
+	ok(t, err)
 }
 
 // A backup restores every row of every table it holds, column for column,

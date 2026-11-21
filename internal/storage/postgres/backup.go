@@ -51,6 +51,7 @@ var backupTables = []struct {
 	{"call_import_active", "workspace_id, account_ref", 4},
 	{"card_lines", "card_id, ordinal", migrationVersion("card_lines")},
 	{"cards_before_lines", "card_id", migrationVersion("card_lines")},
+	{"slack_mappings", "workspace_id, account_ref", migrationVersion("slack_mappings")},
 }
 
 // TableCopy describes one table in a backup.

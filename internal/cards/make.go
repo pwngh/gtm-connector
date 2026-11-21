@@ -357,7 +357,8 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 	case errors.Is(readErr, ErrNotSelected):
 		return nil, nil, nil, "not_selected", finish(receipts.NotSelected())
 	case readErr != nil || system != r.system:
-		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool},
+		// The source's own error stays with the read's, so a refusal a person can act on reaches them.
+		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool}, readErr,
 			finish(receipts.Failed(200, "request_failed")))
 	}
 	bound, err = RecordVersions(found)

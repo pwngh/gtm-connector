@@ -208,6 +208,13 @@ func stampOf(micros int64) string {
 	return moment.Format("2006-01-02T15:04:05.000000Z")
 }
 
+// ValidSlackSnapshot is validSlackSnapshot for a check of one read outside a card, as debug slack check
+// makes it.
+func ValidSlackSnapshot(records []*strictjson.Object, snapshot *strictjson.Object, accountID string, crmBinding,
+	slackBinding any) bool {
+	return validSlackSnapshot(records, snapshot, accountID, crmBinding, slackBinding)
+}
+
 // validSlackSnapshot is slack_reader.validate_slack_snapshot: whether the messages are, one for one and in
 // order, the thread the snapshot describes, read whole within its bounds for this account under these
 // bindings. A field that is missing or of another type fails the check.

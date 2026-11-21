@@ -14,6 +14,7 @@
 //	                                 serve MCP on stdin and stdout, for an assistant app that starts it
 //	gtm-connector token new --scope SCOPE
 //	                                 make a bearer token for an MCP client; also token list and token revoke ID
+//	gtm-connector debug slack ACTION sign in to Slack, map a thread to an account, check its read
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
 //	gtm-connector health             check that the local server answers
@@ -43,7 +44,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
-	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -68,10 +68,6 @@ var firstCommands = []string{"gtm-connector demo", "gtm-connector connect demo",
 // restore, health and version are this binary's besides, and --help lists them all.
 var listedCommands = []string{"demo", "connect", "accounts", "brief", "inspect", "audit", "mcp", "debug"}
 
-// notInBuild are the commands among them that this binary does not run yet. Each is refused by name, here
-// and nowhere else: a command leaves this list when it is ported.
-var notInBuild = []string{"debug"}
-
 var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
 
 ` + description + `
@@ -87,13 +83,15 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   audit                       list the receipts of the audit log
   mcp stdio --scope SCOPE     serve MCP on stdin and stdout, for an assistant app that starts it
   token new --scope SCOPE     make a bearer token for an MCP client; also token list and token revoke ID
+  debug slack ACTION          sign in to Slack, map a thread to an account, or check its read
   backup --out FILE           write PostgreSQL and the credentials folder to FILE
   restore --in FILE           restore FILE into an empty database and credentials folder
   health                      check that the local server answers
   version                     print the commit this binary was built from
 
-demo, connect, accounts, brief, inspect, audit, mcp and token take --json, --state-dir WORKSPACE and --help.
-Not in this build: ` + strings.Join(notInBuild, ", ") + ".\n"
+demo, connect, accounts, brief, inspect, audit, mcp, token and debug slack take --json, --state-dir WORKSPACE
+and --help. Not in this build: every debug command but debug slack.
+`
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -137,6 +135,9 @@ func dispatch(ctx context.Context, argv []string, s screen) int {
 	if runClient, client := clientCommands[name]; client {
 		return runClient(ctx, args, s)
 	}
+	if name == "debug" {
+		return debugCommand(ctx, args, s)
+	}
 	var err error
 	switch name {
 	case "serve", "setup", "backup", "restore", "health", "version":
@@ -161,10 +162,6 @@ func dispatch(ctx context.Context, argv []string, s screen) int {
 	case "-h", "--help", "help":
 		fmt.Fprint(s.out, usage)
 	default:
-		if slices.Contains(notInBuild, name) {
-			return s.fail(name, &failure{code: 3, next: "gtm-connector --help",
-				message: name + " is not available in this build."})
-		}
 		// What was typed is not repeated back.
 		return s.fail(name, &failure{code: 2, next: "gtm-connector --help",
 			message: "argument COMMAND: invalid choice (choose from " + quotedChoices(listedCommands) + ")"})

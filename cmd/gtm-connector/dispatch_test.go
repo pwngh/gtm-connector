@@ -43,8 +43,8 @@ func TestTheCommandLineWithoutACommand(t *testing.T) {
 			"Error: " + listed + "\nNext: gtm-connector --help\n"},
 		{[]string{"mcp", "stdio", "--scope", "crm:write"}, 2, "", "Error: argument --scope: invalid choice " +
 			"(choose from 'crm:read', 'calls:read', 'slack:read')\nNext: gtm-connector mcp --help\n"},
-		{[]string{"debug", "doctor", "--json"}, 3, "", `{"error": {"code": "refused", "message": "debug is not ` +
-			`available in this build.", "next": "gtm-connector --help"}}` + "\n"},
+		{[]string{"debug", "doctor", "--json"}, 3, "", `{"error": {"code": "refused", "message": "debug doctor is not ` +
+			`available in this build.", "next": "gtm-connector debug --help"}}` + "\n"},
 		{[]string{"setup", "--json"}, 2, "", `{"error": {"code": "usage_error", "message": "setup writes text and ` +
 			`takes no --json.", "next": "gtm-connector --help"}}` + "\n"},
 		{[]string{"--help"}, 0, usage, ""},

@@ -348,6 +348,9 @@ type kept struct {
 	under Saved
 	ctx   context.Context
 	b     *budget
+	// fresh is a sign-in that is not saved yet, as a new login's is until its identity is checked. A check
+	// that fails saves nothing for it, so the sign-in saved before stays as it was.
+	fresh bool
 }
 
 func (k kept) load() (*Credentials, error) {
@@ -388,7 +391,7 @@ func (r *Reader) acquire(ctx context.Context, b *budget, p *progress, expired *a
 	}
 	var held *access
 	bind := func(under Saved) error {
-		saved := kept{under, ctx, b}
+		saved := kept{under, ctx, b, false}
 		document, err := saved.load()
 		if err != nil {
 			return err
@@ -511,6 +514,9 @@ func (r *Reader) verify(ctx context.Context, b *budget, saved kept, candidate Cr
 	if err != nil {
 		switch code(err) {
 		case "slack_identity_mismatch", "slack_reconnect_required", "slack_token_type_unsupported":
+			if saved.fresh {
+				break
+			}
 			quarantined := candidate.copy()
 			quarantined.State = pending
 			if err := saved.save(quarantined); err != nil {
@@ -545,7 +551,7 @@ func (r *Reader) verify(ctx context.Context, b *budget, saved kept, candidate Cr
 // identity that another command saved since is left alone.
 func (r *Reader) reject(ctx context.Context, b *budget, refused *access) error {
 	quarantine := func(under Saved) error {
-		saved := kept{under, ctx, b}
+		saved := kept{under, ctx, b, false}
 		document, err := saved.load()
 		if err != nil || document == nil {
 			return err

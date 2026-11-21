@@ -153,6 +153,28 @@ A restore needs an empty database. It refuses any row the server would refuse on
 card whose seal does not name its bytes. If a restore stops part way, run the same command again.
 Until it finishes, setup and the server refuse to start.
 
+## Slack
+
+```sh
+gtm connect salesforce --org ALIAS --state-dir acme
+gtm debug slack connect --client-id PUBLIC_CLIENT_ID --redirect-uri http://localhost:8765/slack/callback --state-dir acme
+gtm connect slack --state-dir acme
+gtm debug slack map --account ACCOUNT_ID --thread-url 'COPIED_THREAD_LINK' --state-dir acme
+gtm debug slack check --account ACCOUNT_ID --state-dir acme
+gtm brief ACCOUNT_ID --state-dir acme
+```
+
+`debug slack connect` signs in to a Slack app you already have, through the browser, as the
+[Slack guide](python/slack.md) states. It saves the sign-in in the credentials folder, in
+`slack-WORKSPACE.json` (mode 0600, one file for each workspace, replaced whole on every change),
+beside its lock `slack-WORKSPACE.lock`. `WORKSPACE` is the workspace's slug. The database holds the
+mapped threads and the identity digest the workspace is pinned to, never a token.
+
+> **A backup leaves the Slack sign-in out.** Slack spends a refresh token once, so a restored copy is
+> one Slack no longer accepts. After a restore, run `debug slack connect` again.
+
+Live Slack sits beside a real CRM only. A workspace that reads the demo data refuses it.
+
 ## Upgrade
 
 1. Restore last night's backup into a spare database.

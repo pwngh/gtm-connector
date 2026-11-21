@@ -104,7 +104,7 @@ func TestConnectDemoStatusAndRemove(t *testing.T) {
 	}
 }
 
-// connect knows salesforce, calls, slack and the assistant apps by name and refuses each plainly, before
+// connect knows salesforce, calls and the assistant apps by name and refuses each plainly, before
 // it opens the database. Nothing is connected, and no later command reads demo data in a refused source's
 // place.
 func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
@@ -117,7 +117,7 @@ func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 		}
 		return errs.String()
 	}
-	for _, tokens := range [][]string{{"salesforce", "--org", "invented-alias"}, {"calls"}, {"slack", "--seller", "Dana Crest"},
+	for _, tokens := range [][]string{{"salesforce", "--org", "invented-alias"}, {"calls"},
 		{"inspector", "--scope", "crm:read"}, {"cursor"}} {
 		want := "Error: connect " + tokens[0] + " is not available in this build. "
 		if message := refuse(3, append(tokens, "--state-dir", "invented")...); !strings.HasPrefix(message, want) ||
