@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"slices"
+	"syscall"
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/cards"
@@ -20,8 +22,13 @@ import (
 // as a process (gtm_connector/stdio_bridge.py). It reads the workspace --state-dir names from PostgreSQL
 // itself, as the app role, so no server needs to run. Each request passes the gate the HTTPS endpoint uses,
 // as a machine principal: the workspace's MCP clients principal, holding a token made for this process with
-// exactly the scopes given. The token is never shown. It lasts five minutes, is renewed every minute while
-// the process runs, and is revoked when it ends; one that expired or was revoked is never renewed.
+// exactly the scopes given. The token is never shown. It lasts two minutes, is renewed every 30 seconds while
+// the process runs, and is revoked when it ends; one that expired or was revoked is never renewed. A process
+// that is killed leaves its token usable for at most two minutes.
+//
+// A client that closes its end of stdout, or stops reading it, ends the session through the same path as the
+// end of its input: SIGPIPE is ignored, so a failed write is an error the transport sees, and each write is
+// bounded by mcp.DefaultWriteTimeout.
 
 var mcpArguments = arguments{options: []option{
 	{name: "--scope", value: true, repeat: true, required: true, choices: mcp.ReadScopes},
@@ -33,12 +40,19 @@ var clientCommands = map[string]func(context.Context, []string, screen) int{"mcp
 
 // stdioLifetime is how long the process's token lasts unless it is renewed, and stdioRenewal how often it is.
 const (
-	stdioLifetime = 5 * time.Minute
-	stdioRenewal  = time.Minute
+	stdioLifetime = 2 * time.Minute
+	stdioRenewal  = 30 * time.Second
 )
+
+// revokeWait bounds the revocation of the process's token as it ends.
+const revokeWait = 5 * time.Second
+
+// notRevoked is what the process says on stderr when its token could not be revoked.
+const notRevoked = "gtm-connector mcp: the session token could not be revoked; it stops working within two minutes."
 
 // runMCP runs the mcp command and gives its exit code. stdout carries only MCP messages once it serves.
 func runMCP(ctx context.Context, tokens []string, s screen) int {
+	signal.Ignore(syscall.SIGPIPE)
 	return mcpCommand(ctx, tokens, s, os.Stdin)
 }
 
@@ -86,21 +100,20 @@ func (r *run) serveStdio(ctx context.Context, in io.Reader, out io.Writer) error
 	if err := r.open(ctx); err != nil {
 		return err
 	}
+	// Receipts that an earlier process left pending when it was killed or lost the database are finished
+	// here, as serve finishes them, so an install that only runs stdio keeps none.
+	if err := finishExpired(ctx, r.store); err != nil {
+		return mountError(err)
+	}
 	from, err := r.reads(ctx)
 	if err != nil {
 		return mountError(err)
 	}
-	principal, err := grantClients(ctx, r.store, r.workspace, from)
+	raw, issued, err := issueClientToken(ctx, r.store, r.workspace, from, scopeSet(r.args.lists["--scope"]), stdioLifetime)
 	if err != nil {
-		return clientsError(err)
+		return err
 	}
-	raw := randomToken()
-	digest := sha256.Sum256([]byte(raw))
-	issued, err := r.store.CreateMachineToken(ctx, principal, digest[:], scopeSet(r.args.lists["--scope"]), stdioLifetime)
-	if err != nil {
-		return mountError(err)
-	}
-	defer r.store.RevokeMachineToken(context.WithoutCancel(ctx), r.workspace.ID, issued.ID)
+	defer revokeSession(context.WithoutCancel(ctx), r.store, r.workspace.ID, issued.ID, r.screen.err)
 	serving, stop := context.WithCancel(ctx)
 	defer stop()
 	go renew(serving, r.store, r.workspace.ID, issued.ID)
@@ -130,32 +143,46 @@ func renew(ctx context.Context, store *postgres.Store, workspaceID, tokenID stri
 	}
 }
 
-// grantClients is the workspace's MCP clients principal, with a grant on every account of the connected
-// book that it was never granted. A grant that was revoked stays revoked, so an account taken from the
-// clients is never given back by issuing a token.
-func grantClients(ctx context.Context, store *postgres.Store, workspace postgres.Workspace, from reads) (postgres.Principal, error) {
-	principal, err := store.ClientsPrincipal(ctx, workspace)
-	if err != nil {
-		return principal, err
+// revokeSession revokes the process's token within revokeWait, and says so on stderr in one fixed line when
+// it cannot.
+func revokeSession(ctx context.Context, store *postgres.Store, workspaceID, tokenID string, stderr io.Writer) {
+	revoking, cancel := context.WithTimeout(ctx, revokeWait)
+	defer cancel()
+	if _, err := store.RevokeMachineToken(revoking, workspaceID, tokenID); err != nil {
+		fmt.Fprintln(stderr, notRevoked)
 	}
-	for _, account := range from.book.Accounts() {
-		if err := store.EnsureAccount(ctx, workspace.ID, account.ID, account.Name); err != nil {
-			return principal, err
-		}
-		if _, err := store.EnsureAccountGrant(ctx, workspace.ID, principal.ID, account.ID); err != nil {
-			return principal, err
-		}
-	}
-	return principal, nil
 }
 
-// clientsError is what a command says when the clients principal cannot be had.
-func clientsError(err error) error {
-	if errors.Is(err, postgres.ErrDisabled) {
-		return &failure{code: 3, message: "The " + postgres.ClientsName + " principal of this workspace is disabled, " +
-			"so no client token is issued for it."}
+// finishExpired finishes, as interrupted, every pending receipt whose worker's lease has expired.
+func finishExpired(ctx context.Context, store *postgres.Store) error {
+	for {
+		n, err := store.AbandonExpired(ctx, 100)
+		if err != nil || n < 100 {
+			return err
+		}
 	}
-	return mountError(err)
+}
+
+// issueClientToken makes a token for the workspace's MCP clients principal and gives it, never stored, with
+// its row. The principal's grants on the connected book's accounts and the token are written in one
+// transaction, so a token that cannot be stored widens no other token's access.
+func issueClientToken(ctx context.Context, store *postgres.Store, workspace postgres.Workspace, from reads,
+	scopes []string, lifetime time.Duration) (string, postgres.ClientToken, error) {
+	var accounts []postgres.ClientAccount
+	for _, account := range from.book.Accounts() {
+		accounts = append(accounts, postgres.ClientAccount{Ref: account.ID, Name: account.Name})
+	}
+	raw := randomToken()
+	digest := sha256.Sum256([]byte(raw))
+	issued, err := store.IssueClientToken(ctx, workspace, accounts, digest[:], scopes, lifetime)
+	switch {
+	case errors.Is(err, postgres.ErrDisabled):
+		return "", issued, &failure{code: 3, message: "The " + postgres.ClientsName + " principal of this workspace is " +
+			"disabled, so no client token is issued for it."}
+	case err != nil:
+		return "", issued, mountError(err)
+	}
+	return raw, issued, nil
 }
 
 // scopeSet is the scopes given, each once, in the order mcp.ReadScopes lists them.

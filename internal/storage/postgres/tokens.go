@@ -14,8 +14,10 @@ type MachineToken struct {
 	WorkspaceID, PrincipalID string
 	Scopes                   []string
 	ExpiresAt                time.Time
-	// Usable is false for a token that was revoked, whose principal is disabled, or that is limited to a
-	// selection of accounts, which no server applies yet. Expiry is the caller's check, by its own clock.
+	// Usable is false for a token that was revoked, that has expired by the database's clock, whose principal
+	// is disabled, or that is limited to a selection of accounts, which no server applies yet. The database's
+	// clock both sets an expiry and decides it has come, so a process whose clock is behind cannot admit a
+	// token past it. A caller may also refuse it earlier by its own clock.
 	Usable bool
 }
 
@@ -29,7 +31,7 @@ func (s *Store) MachineToken(ctx context.Context, workspaceID string, tokenSHA25
 	var stored []byte
 	err := s.pool.QueryRow(ctx, `
 		SELECT t.token_sha256, t.principal_id::text, t.scopes, t.expires_at,
-		       t.revoked_at IS NULL AND p.disabled_at IS NULL AND t.selection IS NULL
+		       t.revoked_at IS NULL AND t.expires_at > now() AND p.disabled_at IS NULL AND t.selection IS NULL
 		  FROM machine_tokens t
 		  JOIN principals p ON p.workspace_id = t.workspace_id AND p.id = t.principal_id
 		 WHERE t.workspace_id = $1 AND t.token_sha256 = $2`, workspaceID, tokenSHA256).
@@ -48,36 +50,63 @@ func (s *Store) MachineToken(ctx context.Context, workspaceID string, tokenSHA25
 // to.
 const ClientsName = "MCP clients"
 
-// ClientsPrincipal is the machine principal the MCP client tokens of a workspace belong to, made the first
-// time a workspace issues one. Every client token of the workspace holds that principal's grants, so a grant
-// revoked for it stays revoked for every token. A disabled one gives ErrDisabled and is never replaced.
-func (s *Store) ClientsPrincipal(ctx context.Context, w Workspace) (Principal, error) {
-	p := Principal{WorkspaceID: w.ID, WorkspaceKind: w.Kind, Kind: "machine", DisplayName: ClientsName}
+// ClientAccount is an account of a workspace's connected CRM, by its ref and its name.
+type ClientAccount struct{ Ref, Name string }
+
+// IssueClientToken stores a new MCP client token of a workspace by its SHA-256, in one transaction with
+// everything it opens. The token belongs to the workspace's MCP clients principal, made the first time a
+// workspace issues one; a disabled one gives ErrDisabled and is never replaced. That principal is granted
+// each of accounts it was never granted, so every live client token of the workspace gains an account the
+// CRM newly holds, and a grant revoked for it stays revoked. When the token cannot be stored, no account or
+// grant is added either. The token carries these scopes and expires after lifetime by the database's clock.
+func (s *Store) IssueClientToken(ctx context.Context, w Workspace, accounts []ClientAccount, tokenSHA256 []byte,
+	scopes []string, lifetime time.Duration) (ClientToken, error) {
+	if len(tokenSHA256) != 32 || lifetime <= 0 {
+		return ClientToken{}, errors.New("a token needs its SHA-256 and a lifetime")
+	}
+	var issued ClientToken
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		// One transaction at a time looks for the principal and makes it, so a workspace gets only one.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('gtm mcp clients ' || $1, 0))`,
 			w.ID); err != nil {
 			return err
 		}
+		var principal string
 		var disabled bool
 		err := tx.QueryRow(ctx, `
 			SELECT id, disabled_at IS NOT NULL FROM principals
 			 WHERE workspace_id = $1 AND kind = 'machine' AND display_name = $2
-			 ORDER BY created_at, id LIMIT 1`, w.ID, ClientsName).Scan(&p.ID, &disabled)
+			 ORDER BY created_at, id LIMIT 1`, w.ID, ClientsName).Scan(&principal, &disabled)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			return tx.QueryRow(ctx, `
+			err = tx.QueryRow(ctx, `
 				INSERT INTO principals (workspace_id, workspace_kind, kind, display_name)
-				VALUES ($1, $2, 'machine', $3) RETURNING id`, w.ID, w.Kind, ClientsName).Scan(&p.ID)
+				VALUES ($1, $2, 'machine', $3) RETURNING id`, w.ID, w.Kind, ClientsName).Scan(&principal)
 		case err == nil && disabled:
 			return ErrDisabled
 		}
+		if err != nil {
+			return err
+		}
+		for _, account := range accounts {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO accounts (workspace_id, ref, display_name) VALUES ($1, $2, $3)
+				ON CONFLICT (workspace_id, ref) DO NOTHING`, w.ID, account.Ref, account.Name); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO account_grants (workspace_id, principal_id, account_ref) VALUES ($1, $2, $3)
+				ON CONFLICT (workspace_id, principal_id, account_ref) DO NOTHING`, w.ID, principal, account.Ref); err != nil {
+				return err
+			}
+		}
+		issued, err = scanClientToken(tx.QueryRow(ctx, `
+			INSERT INTO machine_tokens (workspace_id, principal_id, token_sha256, scopes, expires_at)
+			VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5))
+			RETURNING `+clientTokenColumns, w.ID, principal, tokenSHA256, scopes, lifetime.Seconds()))
 		return err
 	})
-	if err != nil {
-		return Principal{}, err
-	}
-	return p, nil
+	return issued, err
 }
 
 // ClientToken is one machine token as the token commands show it. Fingerprint is the hex SHA-256 of the
@@ -95,18 +124,6 @@ func scanClientToken(row pgx.Row) (ClientToken, error) {
 	var t ClientToken
 	err := row.Scan(&t.ID, &t.PrincipalID, &t.Fingerprint, &t.Scopes, &t.CreatedAt, &t.ExpiresAt, &t.RevokedAt)
 	return t, err
-}
-
-// CreateMachineToken stores a new token of a machine principal by its SHA-256, with these scopes, expiring
-// after lifetime by the database's clock.
-func (s *Store) CreateMachineToken(ctx context.Context, p Principal, tokenSHA256 []byte, scopes []string, lifetime time.Duration) (ClientToken, error) {
-	if len(tokenSHA256) != 32 || lifetime <= 0 {
-		return ClientToken{}, errors.New("a token needs its SHA-256 and a lifetime")
-	}
-	return scanClientToken(s.pool.QueryRow(ctx, `
-		INSERT INTO machine_tokens (workspace_id, principal_id, token_sha256, scopes, expires_at)
-		VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5))
-		RETURNING `+clientTokenColumns, p.WorkspaceID, p.ID, tokenSHA256, scopes, lifetime.Seconds()))
 }
 
 // MachineTokens lists the machine tokens of a workspace, oldest first, revoked and expired ones too.

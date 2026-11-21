@@ -235,8 +235,11 @@ func TestInspector(t *testing.T) {
 	messages := run("tools/call", "read_slack_messages", true)
 	denied("get_account", "crm:read")
 	denied("read_call_notes", "calls:read")
+	// An unknown bearer is refused for its authentication, HTTP 401, not for any other reason.
 	overHTTPS("invalid-fixture-token")
-	run("initialize", "", false)
+	if refused := message(run("initialize", "", false)); !strings.Contains(refused, "requires authorization (HTTP 401)") {
+		t.Fatalf("an unknown bearer was not refused as unauthorized: %s", refused)
+	}
 
 	// Over stdio, the Inspector starts mcp stdio for each call.
 	overStdio("crm:read")

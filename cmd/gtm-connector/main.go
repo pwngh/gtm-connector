@@ -183,6 +183,9 @@ func loadConfig() (config, error) {
 	if err != nil || origin.Host == "" {
 		return c, errors.New("GTM_PUBLIC_ORIGIN is not an origin")
 	}
+	if origin.User != nil {
+		return c, errors.New("GTM_PUBLIC_ORIGIN must not hold a user name or password")
+	}
 	hosts := envOr("GTM_ALLOWED_HOSTS", origin.Host+",localhost:"+origin.Port())
 	for _, host := range strings.Split(hosts, ",") {
 		if host = strings.TrimSpace(host); host != "" {
@@ -274,6 +277,9 @@ func setUp(ctx context.Context, c config) error {
 	if err := store.EnsureAppRole(ctx, app.User, app.Password); err != nil {
 		return err
 	}
+	if err := finishExpired(ctx, store); err != nil {
+		return err
+	}
 	workspace, err := store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace")
 	if err == nil {
 		_, err = store.EnsureDemoPrincipal(ctx, workspace, demo.Login, "Demo reviewer", demoDigest(demo))
@@ -282,12 +288,18 @@ func setUp(ctx context.Context, c config) error {
 }
 
 // openStore waits up to a minute for the database, which may still be
-// starting beside this process.
+// starting beside this process. A refused sign-in is not waited on. A
+// password file others can read is refused first.
 func openStore(ctx context.Context, url string) (*postgres.Store, error) {
+	if err := checkPassfile(url); err != nil {
+		return nil, err
+	}
 	deadline := time.Now().Add(time.Minute)
 	for {
 		store, err := postgres.Open(ctx, url)
-		if err == nil || time.Now().After(deadline) || ctx.Err() != nil {
+		var refused *pgconn.PgError
+		if err == nil || time.Now().After(deadline) || ctx.Err() != nil ||
+			errors.As(err, &refused) && strings.HasPrefix(refused.Code, "28") {
 			return store, err
 		}
 		select {

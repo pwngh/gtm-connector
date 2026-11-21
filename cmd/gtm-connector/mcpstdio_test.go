@@ -572,6 +572,8 @@ func TestStdioCommandNeedsAConnectedWorkspace(t *testing.T) {
 }
 
 // An app's entry can hold the database URL without its password: the binary reads it from ~/.pgpass.
+// It needs a server that checks passwords, so that only the file's password can open the connection, and a
+// wrong one in the file is refused.
 func TestStdioCommandReadsThePasswordFromPgpass(t *testing.T) {
 	d := stdioDemo(t)
 	parsed, err := url.Parse(d.appURL)
@@ -579,15 +581,34 @@ func TestStdioCommandReadsThePasswordFromPgpass(t *testing.T) {
 		t.Fatal(err)
 	}
 	password, _ := parsed.User.Password()
-	home := t.TempDir()
-	entry := strings.Join([]string{parsed.Hostname(), parsed.Port(), strings.TrimPrefix(parsed.Path, "/"),
-		parsed.User.Username(), password}, ":")
-	if err := os.WriteFile(filepath.Join(home, ".pgpass"), []byte(entry+"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	wrong := *parsed
+	wrong.User = url.UserPassword(parsed.User.Username(), "not-the-password")
+	if check, err := postgres.Open(ctx, wrong.String()); err == nil {
+		check.Close()
+		t.Skip("the test server accepts a wrong password, so it cannot show the password file was read")
 	}
-	parsed.User = url.User(parsed.User.Username())
-	p := startStdioWith(t, []string{"PATH=/usr/bin:/bin", "HOME=" + home, "GTM_DATABASE_URL=" + parsed.String()},
-		"--scope", "crm:read")
+	home := t.TempDir()
+	passfile := func(password string) {
+		t.Helper()
+		entry := strings.Join([]string{parsed.Hostname(), parsed.Port(), strings.TrimPrefix(parsed.Path, "/"),
+			parsed.User.Username(), password}, ":")
+		if err := os.WriteFile(filepath.Join(home, ".pgpass"), []byte(entry+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bare := *parsed
+	bare.User = url.User(parsed.User.Username())
+	env := []string{"PATH=/usr/bin:/bin", "HOME=" + home, "GTM_DATABASE_URL=" + bare.String()}
+
+	passfile("not-the-password")
+	refused := exec.Command(buildBinary(t), "mcp", "stdio", "--scope", "crm:read")
+	refused.Env, refused.Stdin = env, strings.NewReader("")
+	if out, err := refused.Output(); err == nil || len(out) != 0 {
+		t.Fatalf("a wrong password in the file was not refused: %v %q", err, out)
+	}
+
+	passfile(password)
+	p := startStdioWith(t, env, "--scope", "crm:read")
 	p.send(stdioStart, stdioReady, stdioCall(2, "get_account", `{"account_id":"acc-003"}`))
 	p.answer(1)
 	if read := p.answer(2); dig(read, "result", "isError") != false {

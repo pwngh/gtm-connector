@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"regexp"
@@ -117,16 +116,10 @@ func (r *run) newToken(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, mountError(err)
 	}
-	principal, err := grantClients(ctx, r.store, r.workspace, from)
-	if err != nil {
-		return nil, clientsError(err)
-	}
-	raw := randomToken()
-	digest := sha256.Sum256([]byte(raw))
-	issued, err := r.store.CreateMachineToken(ctx, principal, digest[:], scopeSet(r.args.lists["--scope"]),
+	raw, issued, err := issueClientToken(ctx, r.store, r.workspace, from, scopeSet(r.args.lists["--scope"]),
 		time.Duration(minutes)*time.Minute)
 	if err != nil {
-		return nil, mountError(err)
+		return nil, err
 	}
 	result := tokenObject(issued, time.Now())
 	result.Keys = append([]string{"token", "workspace"}, result.Keys...)
@@ -274,7 +267,9 @@ options:
                         Grant this scope. Repeat for each explicit grant.
   --minutes MINUTES     Let it last this many minutes, from 1 to 60 (default: 5).
 
-The token reads the accounts the workspace's MCP clients principal is granted.
+The token reads the accounts the workspace's MCP clients principal is granted, and issuing it grants that
+principal every account of the connected CRM it was never granted. Anyone who can run this command with
+GTM_DATABASE_URL for the app role can issue a token for any connected workspace, with no other sign-in.
 Example: gtm-connector token new --scope crm:read --scope calls:read
 `
 

@@ -20,6 +20,63 @@ func shallowCall(body []byte) (method, name string, named bool) {
 	return method, name, named
 }
 
+// prefixCall reads the method and tool name from the start of a line too long to keep whole: the members of
+// the request, and of its params, in order, until both are found or the kept bytes end. A value cut off by
+// the end of the bytes ends the scan, but a cut-off params is still read as far as it goes.
+func prefixCall(start []byte) (method, name string, named bool) {
+	eachMember(bytes.TrimPrefix(start, []byte("\xef\xbb\xbf")), func(key string, value []byte, whole bool) bool {
+		switch {
+		case key == "method" && whole:
+			method, _ = shallowString(value)
+		case key == "params":
+			eachMember(value, func(key string, value []byte, whole bool) bool {
+				if key == "name" && whole {
+					name, named = shallowString(value)
+				}
+				return named
+			})
+		}
+		return method != "" && named
+	})
+	return method, name, named
+}
+
+// eachMember visits the members of the object that opens data, in order, until visit returns true. A value
+// that runs past the end of data is visited with whole false, as far as it goes, and ends the scan.
+func eachMember(data []byte, visit func(key string, value []byte, whole bool) bool) {
+	i := skipSpace(data, 0)
+	if i >= len(data) || data[i] != '{' {
+		return
+	}
+	for i = skipSpace(data, i+1); ; {
+		end := stringEnd(data, i)
+		if end < 0 {
+			return
+		}
+		key, isText := shallowString(data[i:end])
+		i = skipSpace(data, end)
+		if !isText || i >= len(data) || data[i] != ':' {
+			return
+		}
+		i = skipSpace(data, i+1)
+		end = valueEnd(data, i)
+		if end < 0 {
+			if i < len(data) {
+				visit(key, data[i:], false)
+			}
+			return
+		}
+		if visit(key, data[i:end], true) {
+			return
+		}
+		i = skipSpace(data, end)
+		if i >= len(data) || data[i] != ',' {
+			return
+		}
+		i = skipSpace(data, i+1)
+	}
+}
+
 // shallowString is a member's value when it is a JSON string.
 func shallowString(value []byte) (string, bool) {
 	if len(value) == 0 || value[0] != '"' {

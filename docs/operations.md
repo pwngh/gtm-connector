@@ -54,6 +54,11 @@ HTTPS with a bearer token, or it starts `gtm-connector mcp stdio` itself. Both s
 under the same gate: one receipt committed before each call runs, a refused call still receipted,
 each scope opening only its own source, and the accounts the token's principal is granted.
 
+> **The database URL is the authority.** Anyone who can run the binary with `GTM_DATABASE_URL` set
+> to the app role's URL can issue a token for any connected workspace, with any read scope, and can
+> start `mcp stdio` for one. Neither asks for a browser session or any other sign-in. Give that URL,
+> and the password behind it, only to people who may read every connected workspace.
+
 ### A token for `/mcp`
 
 ```sh
@@ -80,26 +85,37 @@ curl --cacert "$GTM_CREDENTIALS_DIR/tls.pem" https://127.0.0.1:8443/mcp \
 | --- | --- |
 | Workspace | One: the one `--state-dir` names, `demo` by default. `serve` answers `/mcp` for the demo workspace only. |
 | Scopes | Only those given, from `crm:read`, `calls:read` and `slack:read`. Repeat `--scope` for each. |
-| Lifetime | Five minutes, or `--minutes N` up to 60. Run `token new` again for another. |
-| Accounts | Those the workspace's `MCP clients` principal is granted. Every client token of a workspace belongs to that principal. `token new` grants it each account of the connected CRM it was never granted, and leaves a revoked grant revoked. |
+| Lifetime | Five minutes, or `--minutes N` up to 60, by the database's clock, which also decides when it has expired. Run `token new` again for another. |
+| Accounts | Those the workspace's `MCP clients` principal is granted. Every client token of a workspace belongs to that principal. |
 | Storage | Only its SHA-256, which is the token ID its receipts name. `gtm-connector audit --caller CALLER` lists its calls. |
 
 `gtm-connector token list` shows each token's ID, scopes, state (`live`, `expired` or `revoked`),
 expiry and `CALLER`, never the token. `gtm-connector token revoke ID` refuses it from the next call.
+
+> **Issuing widens every client token of the workspace.** Issuing a token, or starting `mcp stdio`,
+> grants the shared `MCP clients` principal every account of the connected CRM it was never granted.
+> So when the CRM holds a new account, every live client token of that workspace can read it after
+> the next issuance. A grant revoked for the principal stays revoked. The grants and the token are
+> written in one transaction: an issuance that fails adds no grant.
 
 ### Stdio, started by the app
 
 An app that starts a local MCP server runs `gtm-connector mcp stdio --scope crm:read`, with
 `GTM_DATABASE_URL` set to the app role's URL. No server needs to run. The command reads the
 workspace from PostgreSQL itself and serves it as the workspace's `MCP clients` principal, with a
-token made for the process and never shown: it carries exactly the given scopes, lasts five
-minutes, is renewed every minute while the process runs, and is revoked when it ends. A token that
-expired or was revoked is not renewed, and the app must start the command again.
+token made for the process and never shown: it carries exactly the given scopes, lasts two
+minutes, is renewed every 30 seconds while the process runs, and is revoked when it ends, within
+five seconds; a revocation that fails is said on stderr in one line. A killed process leaves its
+token usable for at most two minutes. A token that expired or was revoked is not renewed, and the
+app must start the command again. At start the command also finishes, as interrupted, any receipt
+an earlier process left pending; `setup` and `serve` do the same.
 `--selection FILE` limits it to a selection's accounts and adds the two brief tools, as it does for
 `serve`.
 
 Keep the database password out of the app's configuration: give the URL without it, and put it in
-`~/.pgpass` (mode 0600), which the binary reads.
+`~/.pgpass`, or the file `PGPASSFILE` names, which the binary reads. The binary refuses that file
+when anyone but its owner has access to it (make it mode 0600). A password that ends in a space is
+not supported there: the driver trims each line of the file.
 
 ```json
 {"mcpServers": {"gtm-connector": {"type": "stdio", "command": "/usr/local/bin/gtm-connector",
@@ -107,13 +123,17 @@ Keep the database password out of the app's configuration: give the URL without 
   "env": {"GTM_DATABASE_URL": "postgres://gtm_app@127.0.0.1:55432/gtm"}}}}
 ```
 
-The process writes only MCP messages on stdout. When its input ends, it stops, and a call it was
-still running gets a finished receipt all the same.
+The process writes only MCP messages on stdout. It stops when its input ends, when the app closes
+its end of stdout, or when one line has waited ten seconds to be written because the app stopped
+reading. A call it was still running gets a finished receipt all the same, and a line it was still
+admitting is waited for, up to ten seconds, before it stops. A line is measured as written: a call
+over 65,536 bytes is refused with its receipt, and a call over 4 MiB with one too, under the tool
+name its start shows.
 
 CI runs the pinned Inspector CLI (2.15.0) against the binary: `setup`, `demo` and `token new`,
 then `/mcp` over HTTPS with each token, then `mcp stdio` started by the Inspector. It checks
 discovery, the five tools and their schemas, the three source reads, the cross-source denials, an
-unknown bearer, one finished receipt for each tool call, and that no token reaches the Inspector's
+unknown bearer refused with HTTP 401, one finished receipt for each tool call, and that no token reaches the Inspector's
 output, the audit log or the server's log. No assistant app has been tested.
 
 ## Backup and restore
