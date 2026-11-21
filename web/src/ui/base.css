@@ -1,0 +1,54 @@
+/* The base every page starts from: border-box sizing, no page margin, the
+   canvas and the body type from the tokens, headings and paragraphs without
+   their own margins, controls in the page's type, links that take their
+   colour from the component, and a focus ring. Components and pages set
+   everything else, motion included, under their own classes. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--gc-canvas);
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  font-synthesis: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+svg {
+  flex-shrink: 0;
+}
+
+:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}

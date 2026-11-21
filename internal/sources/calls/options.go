@@ -113,8 +113,11 @@ func readExport(path string, step func(stage string)) ([]byte, error) {
 	switch {
 	case err != nil:
 		return nil, ErrIO
-	case !opened.Mode().IsRegular() || !os.SameFile(checked, opened):
-		// The device and inode opened are not the ones checked: the file was replaced.
+	case !opened.Mode().IsRegular() || !os.SameFile(checked, opened) || opened.Size() != checked.Size() ||
+		!opened.ModTime().Equal(checked.ModTime()):
+		// The file opened is not the one checked: it was replaced. A file system may give a new file the
+		// inode a removed one had, so its size and modification time are compared too. A replacement with the
+		// same inode, size and modification time cannot be told apart by these, and is read as the file it is.
 		return nil, ErrInvalid
 	case opened.Size() > evidence.MaxRawBytes:
 		return nil, ErrTooLarge

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node node_modules/vite/bin/vite.js --host 127.0.0.1",
     "build": "node node_modules/vite/bin/vite.js build",
-    "test": "npm run typecheck && npm run lint && node --test 'src/*.test.js' 'src/**/*.test.ts'",
+    "test": "npm run typecheck && npm run lint && node --test 'src/**/*.test.ts'",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit -p .",
     "lint": "node node_modules/@biomejs/biome/bin/biome check",
     "format": "node node_modules/@biomejs/biome/bin/biome check --write",

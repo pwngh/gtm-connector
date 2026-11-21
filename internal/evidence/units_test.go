@@ -75,7 +75,8 @@ func TestEvidenceVectors(t *testing.T) {
 	oracletest.JSON(t, "cards/evidence_index.json", &index)
 	mismatches := oracletest.NewMismatches(t, "cards/evidence")
 	rejected, accepted := 0, 0
-	for _, line := range oracletest.Lines(t, "cards/evidence.jsonl.gz") {
+	golden := oracletest.NewGolden(t, "cards/evidence.jsonl.gz", strictjson.Canonical.Dumps)
+	for i, line := range golden.Lines() {
 		value, err := strictjson.Loads(line)
 		if err != nil {
 			t.Fatal(err)
@@ -101,6 +102,14 @@ func TestEvidenceVectors(t *testing.T) {
 		if err != nil {
 			mismatches.Add("%s: refused: %v", test, err)
 			continue
+		}
+		if oracletest.Update() {
+			renewed := vector.Copy()
+			renewed.Set("units", UnitValues(units))
+			renewed.Set("text", text)
+			renewed.Set("gaps", GapValues(gaps))
+			golden.Set(i, vector, renewed)
+			vector = renewed
 		}
 		wantText, _ := vector.Get("text")
 		wantUnits, _ := vector.Get("units")

@@ -118,7 +118,7 @@ test('every recorded card: each shown sentence once as its whole text, every oth
       `${at}: the gaps in Not read's order`,
     );
   }
-  assert.equal(sentences, 90 + 1297 + 444);
+  assert.equal(sentences, 90 + 1297 + 375);
 });
 
 test('people said: three groups in order, each with its count, newest first, attribution as recorded', () => {
@@ -150,6 +150,17 @@ test('people said: three groups in order, each with its count, newest first, att
     /No established role \(3\) author is not a listed seller; Slack identities cannot show a customer \(2\) · no speaker label \(1\)/,
   );
   assert.match(text(unknown), /No speaker label Unknown \(no speaker label\) call/);
+});
+
+test('a sentence its author quoted in a Slack message is labelled as quoted, under no established role', () => {
+  const card = structuredClone(thornfield());
+  const unit = card.units?.find(unit => unit.n === 8);
+  assert.ok(unit?.body && typeof unit.body === 'object');
+  Object.assign(unit.body, {quoted: true, role: 'unknown', basis: "quoted by the message's author", contact: null});
+  const html = body(card);
+  const unknown = html.slice(html.indexOf('data-group="unknown"'), html.indexOf('data-group="seller"'));
+  assert.match(text(unknown), /Avery Linden Quoted in the author's message Unknown \(quoted by the message's author\) Slack/);
+  assert.equal(count(decode(html), /Quoted in the author's message/g), 1);
 });
 
 test('a time that cannot be ordered is shown as written and placed last', () => {
@@ -439,7 +450,15 @@ test('a card with no renewal line shows No renewal date and no number', () => {
 });
 
 test('the focal step is used by the countdown and ARR and nothing else', () => {
-  const sheets = ['ui/tokens.css', 'ui/help.css', 'app/deals/card/card.css', 'app/deals/card/lines.css', 'app/deals/deals.css', 'chrome.css', 'api.css'];
+  const sheets = [
+    'ui/base.css',
+    'ui/tokens.css',
+    'ui/help.css',
+    'app/deals/card/card.css',
+    'app/deals/card/lines.css',
+    'app/deals/deals.css',
+    'app/ops/activity.css',
+  ];
   const users: string[] = [];
   for (const sheet of sheets) {
     const css = readFileSync(new URL(`../../../${sheet}`, import.meta.url), 'utf8');
@@ -551,6 +570,8 @@ const drawnFrom: Record<string, [string, string]> = {
   arr: ['docs/config.md', 'Opportunity amount never stands in for'],
   'ops.coverage': ['docs/config.md', 'Which deals have a current card'],
   'ops.receipt': ['docs/config.md', 'A read gets its receipt before it runs.'],
+  'ops.activity': ['docs/audit.md', 'every card seal leaves a receipt'],
+  'receipt.arguments': ['docs/audit.md', 'The arguments as the call sent them'],
 };
 // GitHub's anchor for a heading.
 const anchorOf = (heading: string) =>

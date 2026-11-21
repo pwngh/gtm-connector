@@ -72,12 +72,16 @@ func (r *run) human(result any) string {
 	return r.auditTable([]any{receipt}) + "\n\nArguments\n" + arguments + "\n\nReturned rows\n" + strings.Join(rows, "\n")
 }
 
-// cardText is a card, its brief ID, and the two commands that list its units and resolve one of its
-// numbers, with the card's workspace.
+// cardText is a card's text as evidence.AsShownText gives it, its brief ID, and the two commands that list
+// its units and resolve one of its numbers, with the card's workspace.
 func (r *run) cardText(card *strictjson.Object) string {
 	brief := get(card, "brief_id").(string)
+	text, err := evidence.AsShownText(card)
+	if err != nil {
+		text = "This card's text cannot be shown under today's rules. inspect lists its units."
+	}
 	// A workspace's name can hold any byte. Escaped, the hint never writes a control character.
-	return fmt.Sprintf("%s\nBrief: %s\n%s\n%s", get(card, "text"), brief,
+	return fmt.Sprintf("%s\nBrief: %s\n%s\n%s", text, brief,
 		oneLine("List every unit: gtm-connector inspect "+brief+r.folder()),
 		oneLine("Resolve a number: gtm-connector inspect "+brief+" N"+r.folder()))
 }

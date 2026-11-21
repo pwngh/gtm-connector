@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -444,7 +445,14 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 	var cards cardStore
 	checked, identical, skipped := 0, 0, map[string]int{}
 	signalLines, valueLines := 0, 0
-	for _, line := range oracletest.Lines(t, "cards/"+family+".jsonl.gz") {
+	golden := oracletest.NewGolden(t, "cards/"+family+".jsonl.gz", strictjson.Canonical.Dumps)
+	changes := renewal{members: map[string]int{}}
+	defer func() {
+		if changes.of > 0 {
+			t.Logf("-update: cards/%s.jsonl.gz: %s", family, changes)
+		}
+	}()
+	for i, line := range golden.Lines() {
 		var row fixtureRow
 		if err := json.Unmarshal(line, &row); err != nil {
 			t.Fatal(err)
@@ -471,6 +479,11 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 		if err != nil {
 			mismatches.Add("%s: no card: %v", row.Key, err)
 			continue
+		}
+		// Only the memory store makes a card under the recorder's IDs, so only it writes the fixture again.
+		if memory, ok := cards.(*memoryCards); ok && oracletest.Update() {
+			log := StoreLog{Store: memory.stores[s.scope], WorkspaceID: testWorkspace}
+			row = renewed(t, golden, i, line, row, sealed, log, s.sources, &changes)
 		}
 		payload, sha, sealReceipt := cards.published(t, sealed, s, row, mismatches)
 		if string(payload) == row.Card {
@@ -506,6 +519,93 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 		t.Errorf("%s: %d cards built, want %d; a card that stops being built must not pass as skipped", family,
 			checked, want)
 	}
+}
+
+// renewal is what -update changed in one family: cards, units, and how many times each member changed, a
+// card's as "card KEY" and a unit's as "unit KEY".
+type renewal struct {
+	cards, units, of int
+	members          map[string]int
+}
+
+func (r renewal) String() string {
+	keys := slices.Sorted(maps.Keys(r.members))
+	listed := make([]string, len(keys))
+	for i, key := range keys {
+		listed[i] = fmt.Sprintf("%s %d", key, r.members[key])
+	}
+	return fmt.Sprintf("%d of %d cards and %d units changed; changed members: %s", r.cards, r.of, r.units,
+		strings.Join(listed, ", "))
+}
+
+// add counts how a card made now differs from the recorded one.
+func (r *renewal) add(was, now *strictjson.Object) {
+	r.of++
+	if evidence.Equal(was, now) {
+		return
+	}
+	r.cards++
+	for _, key := range now.Keys {
+		if a, b := get(was, key), get(now, key); !evidence.Equal(a, b) && key != "units" {
+			r.members["card "+key]++
+		}
+	}
+	before, _ := get(was, "units").([]any)
+	after, _ := get(now, "units").([]any)
+	for i := range max(len(before), len(after)) {
+		var a, b *strictjson.Object
+		if i < len(before) {
+			a, _ = before[i].(*strictjson.Object)
+		}
+		if i < len(after) {
+			b, _ = after[i].(*strictjson.Object)
+		}
+		if a != nil && b != nil && evidence.Equal(a, b) {
+			continue
+		}
+		r.units++
+		if a == nil || b == nil {
+			r.members["unit added or removed"]++
+			continue
+		}
+		keys := slices.Compact(slices.Sorted(slices.Values(slices.Concat(a.Keys, b.Keys))))
+		for _, key := range keys {
+			_, had := a.Get(key)
+			_, has := b.Get(key)
+			if had != has || !evidence.Equal(get(a, key), get(b, key)) {
+				r.members["unit "+key]++
+			}
+		}
+	}
+}
+
+// renewable is why a card made now may not be written as golden data: it fails the checks VerifyCard makes of
+// its seal and its read receipts, against the log it was made in and the sources it was read from.
+func renewable(sealed *Sealed, log Log, sources evidence.Sources) error {
+	_, err := VerifyCard(context.Background(), sealed.Payload, sealed.BriefID, log, sources)
+	return err
+}
+
+// renewed gives a fixture row the card Go made from its inputs, that card's digest and the seal that names
+// it, and sets them in the fixture. A card that fails its own seal and receipt checks against the log it was
+// made in is never written.
+func renewed(t *testing.T, golden *oracletest.Golden, i int, line []byte, row fixtureRow, sealed *Sealed, log Log,
+	sources evidence.Sources, changes *renewal) fixtureRow {
+	t.Helper()
+	if err := renewable(sealed, log, sources); err != nil {
+		t.Fatalf("%s: the card made now fails its own checks, so it is not written: %v", row.Key, err)
+	}
+	changes.add(load(t, []byte(row.Card)).(*strictjson.Object), load(t, sealed.Payload).(*strictjson.Object))
+	old := load(t, line).(*strictjson.Object)
+	// The seal names the card by its digest, in its one row.
+	seal := strings.ReplaceAll(string(row.Seal), row.SHA256, sealed.SHA256)
+	value := old.Copy()
+	value.Set("sha256", sealed.SHA256)
+	value.Set("card", string(sealed.Payload))
+	value.Set("seal", load(t, []byte(seal)))
+	golden.Set(i, old, value)
+	row.SHA256, row.Card, row.Seal = sealed.SHA256, string(sealed.Payload), json.RawMessage(seal)
+	return row
 }
 
 // builtCards pins how many cards of each family Go builds. Raise a count when a port builds more.

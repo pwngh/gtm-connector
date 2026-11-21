@@ -1,0 +1,72 @@
+{
+  "id": "evt_01",
+  "type": "risk.changed",
+  "occurred_at": "2027-01-15T15:00:05Z",
+  "deal": {
+    "id": "acc-003",
+    "status": "red",
+    "previous_status": "amber"
+  },
+  "card": {
+    "id": "card-dbd6af736631",
+    "sha256": "dbd6af7366310410d452a4d8b9abc604c22d66025d12d693e6ed1f9ddd627462",
+    "as_of": "2027-01-15"
+  },
+  "renewal": {
+    "days": 24,
+    "date": "2027-02-08",
+    "counts_to": "renewal"
+  },
+  "rules": [
+    {
+      "code": "legal_security_blocker",
+      "state": "raised",
+      "previous_state": "clear",
+      "units": [
+        5
+      ],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "pricing_seat_conflict",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "customer_silence",
+      "state": "unknown",
+      "previous_state": "unknown",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "close_date_slippage",
+      "state": "raised",
+      "previous_state": "clear",
+      "units": [
+        3
+      ],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "single_threaded",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    }
+  ],
+  "unread": [
+    {
+      "source": "slack",
+      "code": "slack_denied"
+    }
+  ],
+  "changes": null,
+  "links": {
+    "card": "https://gtm.example.internal/deals/acc-003?card=card-dbd6af736631",
+    "api": "https://gtm.example.internal/api/v1/cards/card-dbd6af736631"
+  }
+}

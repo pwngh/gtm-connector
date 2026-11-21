@@ -343,7 +343,7 @@ Role                  customer (label matches contact [2])
 Time                  2027-01-12T15:00:00Z
 On the card           yes
 Source text SHA-256   105807d242e8f55965e938a24bc94a445f157178cbb28569e9b5ce4234bc100c
-Neutralizer version   3
+Neutralizer version   4
 ```
 
 A sentence in an imported transcript adds a `Cues or lines` row. A record's table lists its fields by

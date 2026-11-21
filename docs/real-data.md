@@ -151,6 +151,14 @@ package was removed. It holds:
 They hold digests and counts, never text. The digests belong to one items file: if a converter changes what it
 writes, the comparison refuses them as stale.
 
+The digests are Go's golden data. After a deliberate change to text functions, `go run ./cmd/realdata
+-update=sentences_lines,sentences_safe_lines verify` writes Go's digests of the named functions, for each
+dataset where one of them differs, in place of the recorded ones. Every other function keeps its recorded
+digests, and its differences still count in the exit status. A dataset whose items Go decodes differently,
+and a named function whose output is an error or a panic for any item, are refused. The digests of
+`sentences` with `lines` on `hyperledger-slack` and `archival-slack` are Go's; the others are what the
+Python package gave.
+
 `aishell-4-test` (opt-in) and `fomc-press-conferences` (no converter) were never recorded, so they cannot be
 compared. `realdata fetch` and `realdata convert` still run on them.
 

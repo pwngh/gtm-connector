@@ -1,0 +1,62 @@
+{
+  "blocks": [
+    {
+      "type": "section",
+      "text": {
+        "type": "plain_text",
+        "emoji": false,
+        "text": "Thornfield Wren LLP"
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "*Status*\n:red_circle: At risk"
+        },
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "*Renewal*\n24 days, to renewal date 2027-02-08"
+        },
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "*Flags*\nLegal or security blocker, Close-date slippage"
+        },
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "*Card*\n2027-01-15 15:00 UTC"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": ":grey_question: Not read: Slack. Customer silence is unknown."
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "Sign-in required. No quotation is sent to Slack."
+        },
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "<https://gtm.example.internal/deals/acc-003#flags|What do these mean on this card?>"
+        }
+      ]
+    }
+  ]
+}

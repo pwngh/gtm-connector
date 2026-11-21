@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pwngh/gtm-connector/internal/oracletest"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 func decode(t *testing.T, data []byte, value any) {
@@ -219,7 +220,8 @@ func TestSafeTextCorpus(t *testing.T) {
 func TestSentencesCorpus(t *testing.T) {
 	split := oracletest.NewMismatches(t, "sentences")
 	byLine := oracletest.NewMismatches(t, "sentences with lines")
-	for _, line := range oracletest.Lines(t, "corpora/sentences.jsonl.gz") {
+	golden := oracletest.NewGolden(t, "corpora/sentences.jsonl.gz", strictjson.Canonical.Dumps)
+	for i, line := range golden.Lines() {
 		var raw [3]json.RawMessage
 		var input string
 		var want, wantLines []string
@@ -227,6 +229,22 @@ func TestSentencesCorpus(t *testing.T) {
 		decode(t, raw[0], &input)
 		decode(t, raw[1], &want)
 		decode(t, raw[2], &wantLines)
+		if oracletest.Update() {
+			// The third member is the sentences with lines, or null where they are the sentences without.
+			row, err := strictjson.Loads(line)
+			if err != nil {
+				t.Fatal(err)
+			}
+			old := row.([]any)
+			var lines any
+			wantLines, _ = Sentences(input, true)
+			if reflect.DeepEqual(wantLines, want) {
+				wantLines = nil
+			} else {
+				lines = wantLines
+			}
+			golden.Set(i, old, []any{old[0], old[1], lines})
+		}
 		if wantLines == nil {
 			wantLines = want
 		}
