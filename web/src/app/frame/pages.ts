@@ -16,8 +16,8 @@ export interface Page {
   sub: string;
   icon: LucideIcon;
   Page: ComponentType;
-  /** The page is also at every address one segment below its own, as /deals/{account}. */
-  nested?: boolean;
+  /** The page is also at the addresses below its own that this accepts, as /deals/{account}. */
+  nested?: (pathname: string) => boolean;
 }
 
 export interface Area {
@@ -35,7 +35,17 @@ export const areas: Area[] = [
     label: 'Deals',
     path: serverPaths.deals,
     subnav: false,
-    pages: [{id: 'deals', label: 'Deals', path: serverPaths.deals, icon: List, sub: 'Every deal the server grants you', Page: Deals, nested: true}],
+    pages: [
+      {
+        id: 'deals',
+        label: 'Deals',
+        path: serverPaths.deals,
+        icon: List,
+        sub: 'Every deal the server grants you',
+        Page: Deals,
+        nested: pathname => dealAt(pathname) !== null,
+      },
+    ],
   },
   {
     id: 'ops',
@@ -72,9 +82,7 @@ const allPages = areas.flatMap(area => area.pages);
 export const home = serverPaths.deals;
 
 export const pageAt = (pathname: string): Page | undefined =>
-  allPages.find(
-    page => page.path === pathname || (page.nested && pathname.startsWith(`${page.path}/`) && /^[^/]+$/.test(pathname.slice(page.path.length + 1))),
-  );
+  allPages.find(page => page.path === pathname || (pathname.startsWith(`${page.path}/`) && page.nested?.(pathname) === true));
 
 /** The area an address is in, whether or not a page is there. */
 export const areaAt = (pathname: string): Area | undefined => areas.find(area => pathname === area.path || pathname.startsWith(`${area.path}/`));

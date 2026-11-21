@@ -8,15 +8,32 @@ import type {AccountCards, AccountView, CardView} from '../../api/types.ts';
 
 export const dealsPath = '/deals';
 
-/** The address of one deal. */
-export function dealHref(account: string, query = ''): string {
-  const q = query.trim() ? `?${new URLSearchParams({q: query})}` : '';
-  return `${dealsPath}/${encodeURIComponent(account)}${q}`;
+/** A deal's tabs: the card at the deal's own address, and its plain text at /text below it. */
+export type DealTab = 'card' | 'text';
+
+/** The address of one deal on one of its tabs, with a pinned card and the list's filter kept. */
+export function dealHref(account: string, query = '', {tab = 'card', card = null}: {tab?: DealTab; card?: string | null} = {}): string {
+  const params = new URLSearchParams();
+  if (card) {
+    params.set('card', card);
+  }
+  if (query.trim()) {
+    params.set('q', query);
+  }
+  const search = params.size ? `?${params}` : '';
+  return `${dealsPath}/${encodeURIComponent(account)}${tab === 'text' ? '/text' : ''}${search}`;
 }
 
-/** The deal an address opens: the one segment after /deals/, or null. */
+const dealPath = /^\/deals\/([^/]+)(\/text)?$/;
+
+/** The tab a deal's address opens. */
+export function tabAt(pathname: string): DealTab {
+  return dealPath.exec(pathname)?.[2] ? 'text' : 'card';
+}
+
+/** The deal an address opens: the one segment after /deals/, on the card or at /text, or null. */
 export function dealAt(pathname: string): string | null {
-  const match = /^\/deals\/([^/]+)$/.exec(pathname);
+  const match = dealPath.exec(pathname);
   if (!match?.[1]) {
     return null;
   }

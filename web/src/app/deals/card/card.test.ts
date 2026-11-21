@@ -90,6 +90,7 @@ const deal = (card: CardDetail, reads: Partial<Record<'accounts' | 'cards' | 'ca
         accounts: ready({accounts: [{account: card.account, name: 'Thornfield Wren LLP'}]}),
         cards: ready({account: card.account, cards: [card]}),
         card: ready(card),
+        sealed: ready({outcome: 'verified', text: ''}),
         ...reads,
       },
     }),
@@ -267,7 +268,10 @@ test('the title is the server’s name and the ID, with one line on where the va
   const card = thornfield();
   const html = deal(card);
   assert.match(html, /<h1 id="dc-title" class="dc-title">Thornfield Wren LLP<\/h1><p class="dc-id">acc-003<\/p>/);
-  assert.match(html, /<p class="dc-values-note">The countdown and ARR are on the plain-text card\. This page does not show them yet\.<\/p>/);
+  assert.match(
+    html,
+    /<p class="dc-values-note">The countdown and ARR are on <a class="dc-values-note__link" href="\/deals\/acc-003\/text"[^>]*>the plain-text card<\/a>\.<\/p>/,
+  );
   assert.match(text(html), /This page shows each record’s reference\. Its values are on the plain-text card\./);
   assert.match(text(html), /Sealed 15 Jan 2027, 15:00:04 UTC Card card-demo-2/);
   assert.doesNotMatch(html, /At risk|On track|Changed|days/);
