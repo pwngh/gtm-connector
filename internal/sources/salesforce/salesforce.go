@@ -41,6 +41,8 @@ const (
 	queryPath         = "/services/data/" + apiVersion + "/query"
 	organizationQuery = "SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1"
 	accountFields     = "Id, Name, Industry, AccountNumber"
+	// A card's account read adds the Website, whose domain is one of the account's own.
+	cardAccountFields = accountFields + ", Website"
 	contactFields     = "Id, AccountId, Name, Title, Email"
 	contractFields    = "Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate"
 	opportunityFields = "Id, AccountId, Name, StageName, Amount, CloseDate, IsClosed, IsWon"
@@ -49,8 +51,13 @@ const (
 	usersQuery = "SELECT Id, Name, Email, IsActive FROM User WHERE UserType = 'Standard' ORDER BY Id LIMIT %d"
 )
 
-// MaxUsers is how many Standard users a users read returns. An org with more is refused whole.
-const MaxUsers = 2000
+// MaxUsers is the most Standard users a users read keeps in memory. An org with more is read no further than
+// its first page: ListUsers gives ErrTooManyUsers and no users.
+const MaxUsers = 50000
+
+// ErrTooManyUsers is a users read of an org with more than MaxUsers Standard users. Nothing is returned, and a
+// card goes on without the org's users.
+var ErrTooManyUsers = errors.New("salesforce: the org has more Standard users than a users read keeps")
 
 // The bounds of one operation.
 const (
@@ -62,6 +69,14 @@ const (
 	maxBytes      = 1024 * 1024
 	operationTime = 20 * time.Second
 	requestTime   = 5 * time.Second
+)
+
+// The budgets of an operation: every read's, and the users read's, which pages through up to MaxUsers rows
+// in pages as small as 200, of a few hundred bytes a row.
+var (
+	readBudget  = budget{pages: maxPages, requests: maxRequests, bytes: maxBytes, time: operationTime}
+	usersBudget = budget{pages: MaxUsers/200 + 1, requests: MaxUsers/200 + 1 + maxRequests, bytes: 32 << 20,
+		time: 120 * time.Second}
 )
 
 // The codes a read fails with.
@@ -114,7 +129,7 @@ var required = []struct {
 	object string
 	fields []string
 }{
-	{"Account", []string{"Id", "Name", "Industry", "AccountNumber"}},
+	{"Account", []string{"Id", "Name", "Industry", "AccountNumber", "Website"}},
 	{"Contact", []string{"Id", "AccountId", "Name", "Title", "Email"}},
 	{"Opportunity", []string{"Id", "AccountId", "Name", "StageName", "Amount", "CloseDate", "IsClosed", "IsWon"}},
 	{"Contract", []string{"Id", "AccountId", "Status", "StatusCode", "StartDate", "ContractTerm", "EndDate"}},
@@ -356,18 +371,18 @@ func DefaultTransport() http.RoundTripper { return sourcehttp.Transport(sourceht
 // operation runs one bounded read, after the checks every first read makes: the org against the selected
 // environment, and outside Developer Edition the four objects' fields.
 func (r *Reader) operation(ctx context.Context, run func(o *operation) error) error {
-	return r.bounded(ctx, true, run)
+	return r.bounded(ctx, true, readBudget, run)
 }
 
-// bounded is operation, with the fields of the four objects checked or not.
-func (r *Reader) bounded(ctx context.Context, capabilities bool, run func(o *operation) error) error {
+// bounded is operation, with the fields of the four objects checked or not, under one budget.
+func (r *Reader) bounded(ctx context.Context, capabilities bool, limits budget, run func(o *operation) error) error {
 	select {
 	case r.turn <- struct{}{}:
 	case <-ctx.Done():
 		return stopped(ctx)
 	}
 	defer func() { <-r.turn }()
-	o := &operation{reader: r, ctx: ctx, token: r.accessToken, deadline: r.now().Add(operationTime)}
+	o := &operation{reader: r, ctx: ctx, token: r.accessToken, deadline: r.now().Add(limits.time), limits: limits}
 	if !r.editionVerified {
 		if err := o.firstCheck(); err != nil {
 			return err
@@ -516,7 +531,7 @@ func (r *Reader) PrepareConnection(ctx context.Context) (Identity, error) {
 // describes no object and reads no record, so that the fields of each object can be checked apart.
 func (r *Reader) CheckEnvironment(ctx context.Context) (Identity, error) {
 	var identity Identity
-	err := r.bounded(ctx, false, func(*operation) error {
+	err := r.bounded(ctx, false, readBudget, func(*operation) error {
 		identity = r.identity()
 		return nil
 	})
@@ -535,7 +550,7 @@ func Objects() []string {
 // MissingFields describes one of the four objects and gives how many fields of it are mapped, and those it
 // does not expose, in the order they are mapped. An object that is not queryable is salesforce_forbidden.
 func (r *Reader) MissingFields(ctx context.Context, object string) (mapped int, missing []string, err error) {
-	err = r.bounded(ctx, false, func(o *operation) error {
+	err = r.bounded(ctx, false, readBudget, func(o *operation) error {
 		for _, each := range required {
 			if each.object != object {
 				continue
@@ -606,7 +621,7 @@ func (r *Reader) GetAccount(ctx context.Context, accountID string) (*Account, er
 	}
 	var account *Account
 	err = r.operation(ctx, func(o *operation) error {
-		rows, err := o.query("SELECT "+accountFields+" FROM Account WHERE Id = '"+native+"' ORDER BY Id LIMIT 101", 1, nil)
+		rows, err := o.query("SELECT "+cardAccountFields+" FROM Account WHERE Id = '"+native+"' ORDER BY Id LIMIT 101", 1, nil)
 		if err != nil || len(rows) == 0 {
 			return err
 		}
@@ -614,6 +629,11 @@ func (r *Reader) GetAccount(ctx context.Context, accountID string) (*Account, er
 			return refuse(invalidResponse)
 		}
 		record, err := accountRecord(rows[0])
+		if err == nil {
+			f := fields{row: rows[0]}
+			record.Set("website", f.text("Website", true))
+			err = f.err
+		}
 		if err != nil {
 			return err
 		}
@@ -761,16 +781,20 @@ func (r *Reader) SearchAccounts(ctx context.Context, query string, accountNumber
 	return accounts, false, nil
 }
 
-// ListUsers reads the org's Standard users, active or not, ordered by ID: at most MaxUsers. An org with more
-// is refused with salesforce_result_limit.
+// ListUsers reads every Standard user of the org, active or not, ordered by ID, over as many pages as the org
+// sends, under a budget of its own. An org with more than MaxUsers gives ErrTooManyUsers once its first page
+// states the total, and no users.
 func (r *Reader) ListUsers(ctx context.Context) ([]*strictjson.Object, error) {
 	var found []*strictjson.Object
-	err := r.operation(ctx, func(o *operation) error {
+	err := r.bounded(ctx, true, usersBudget, func(o *operation) error {
 		var err error
 		found, err = o.records(fmt.Sprintf(usersQuery, MaxUsers+1), MaxUsers, userRecord)
 		return err
 	})
-	if err != nil {
+	switch {
+	case errors.Is(err, errOverLimit):
+		return nil, ErrTooManyUsers
+	case err != nil:
 		return nil, err
 	}
 	return found, nil

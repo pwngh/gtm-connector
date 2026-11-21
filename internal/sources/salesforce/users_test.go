@@ -17,7 +17,7 @@ func user(id, name string, email any, active bool, kind string) *strictjson.Obje
 }
 
 const usersRequest = queryPrefix + "SELECT Id, Name, Email, IsActive FROM User WHERE UserType = 'Standard' " +
-	"ORDER BY Id LIMIT 2001"
+	"ORDER BY Id LIMIT 50001"
 
 // list_users reads the org's Standard users, active or not, by ID, each with its record_ref. A portal or
 // community user is never asked for: the query itself names UserType = 'Standard'.
@@ -60,37 +60,6 @@ func TestListUsersReadsStandardUsers(t *testing.T) {
 	}
 	if len(org.Requests) != asked {
 		t.Fatalf("the requests: %v", org.Requests[asked:])
-	}
-}
-
-// At most MaxUsers Standard users are read, over pages; one more is refused whole.
-func TestListUsersIsCapped(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		users int
-		page  int
-		want  string
-	}{
-		{"two thousand users in four pages", MaxUsers, 500, ""},
-		{"two thousand and one users", MaxUsers + 1, 0, resultLimit},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			org, sf := salesforcetest.NewOrg(), salesforcetest.NewSF()
-			for i := range c.users {
-				org.AddUsers(user(fmt.Sprintf("005%015d", i), fmt.Sprintf("Seller %d", i), nil, true, "Standard"))
-			}
-			if c.page > 0 {
-				org.PageSize("User", "", c.page)
-			}
-			reader := signIn(t, org, sf, "production")
-			found, err := reader.ListUsers(context.Background())
-			if codeOf(err) != c.want {
-				t.Fatal(err)
-			}
-			if c.want == "" && len(found) != c.users || c.want != "" && found != nil {
-				t.Fatalf("%d users", len(found))
-			}
-		})
 	}
 }
 

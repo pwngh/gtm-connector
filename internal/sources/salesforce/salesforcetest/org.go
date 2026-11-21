@@ -33,7 +33,7 @@ const (
 
 // Objects are the four objects the org holds, with the fields each exposes.
 var Objects = map[string][]string{
-	"Account":     {"Id", "Name", "Industry", "AccountNumber"},
+	"Account":     {"Id", "Name", "Industry", "AccountNumber", "Website"},
 	"Contact":     {"Id", "AccountId", "Name", "Title", "Email"},
 	"Opportunity": {"Id", "AccountId", "Name", "StageName", "Amount", "CloseDate", "IsClosed", "IsWon"},
 	"Contract":    {"Id", "AccountId", "Status", "StatusCode", "StartDate", "ContractTerm", "EndDate"},
@@ -265,6 +265,10 @@ func (o *Org) answer(request *http.Request, path, query string) *http.Response {
 			"url", "/services/data/v68.0/sobjects/"+page.object+"/"+idOf(row)))
 		for i, key := range row.Keys {
 			record.Set(key, row.Values[i])
+		}
+		// An account recorded before the Website was read holds none, which the org answers as null.
+		if _, held := row.Get("Website"); page.object == "Account" && !held {
+			record.Set("Website", nil)
 		}
 		records = append(records, record)
 	}

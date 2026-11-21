@@ -23,6 +23,7 @@ type operation struct {
 	ctx      context.Context
 	token    string
 	deadline time.Time
+	limits   budget
 	bytes    int
 	requests int
 	// refreshed is whether this operation has asked sf for credentials again. It may once.
@@ -30,6 +31,15 @@ type operation struct {
 	// unproved is a token sf gave before the org's first check passed. It is kept once that check passes.
 	unproved string
 }
+
+// budget is what one operation may spend: pages of one query, requests, response bytes and time.
+type budget struct {
+	pages, requests, bytes int
+	time                   time.Duration
+}
+
+// errOverLimit is a query that matches more rows than it may return. Its code is salesforce_result_limit.
+var errOverLimit = &Error{Code: resultLimit}
 
 // stopped is the error of a read whose context ended. It names the cause and nothing of the request.
 func stopped(ctx context.Context) error {
@@ -53,14 +63,14 @@ func (o *operation) records(soql string, limit int,
 }
 
 // query reads every page of one SOQL query. More than limit rows, by the total the org states or by the
-// rows it sends, is refused, and so is a tenth page that is not the last. Each page is read and checked
+// rows it sends, is refused (errOverLimit), and so is a page past the operation's budget. Each page is read and checked
 // within its own request, and so is final, when it is given, with every row, on the last page.
 func (o *operation) query(soql string, limit int, final func([]*strictjson.Object) error) ([]*strictjson.Object, error) {
 	rows := []*strictjson.Object{}
 	seenIDs, seenLocators := map[string]bool{}, map[string]bool{}
 	path, first := queryPath, &soql
 	var total *big.Int
-	for page := 0; page < maxPages; page++ {
+	for page := 0; page < o.limits.pages; page++ {
 		finished := false
 		_, err := o.request(path, first, func(value any) error {
 			next, done, err := o.page(value, limit, &rows, &total, seenIDs, seenLocators)
@@ -109,7 +119,7 @@ func (o *operation) page(value any, limit int, rowsOut *[]*strictjson.Object, to
 			return "", false, refuse(invalidResponse)
 		}
 		if total.Cmp(big.NewInt(int64(limit))) > 0 || len(rows)+len(records) > limit {
-			return "", false, refuse(resultLimit)
+			return "", false, errOverLimit
 		}
 		for _, item := range records {
 			row, ok := item.(*strictjson.Object)
@@ -186,7 +196,7 @@ func (o *operation) refresh() (string, error) {
 		return "", refuse(authRequired)
 	case !r.now().Before(o.deadline):
 		return "", refuse(timedOut)
-	case o.requests+3 > maxRequests:
+	case o.requests+3 > o.limits.requests:
 		// No room is left to confirm the org and the user and retry, so sf is not run.
 		return "", refuse(resultLimit)
 	}
@@ -316,7 +326,7 @@ func (o *operation) attempt(path string, soql *string) (any, error) {
 		return nil, refuse(timedOut)
 	}
 	o.requests++
-	if o.requests > maxRequests {
+	if o.requests > o.limits.requests {
 		return nil, refuse(resultLimit)
 	}
 	target := r.instanceURL + path
@@ -360,10 +370,10 @@ func (o *operation) attempt(path string, soql *string) (any, error) {
 		// A page from a proxy or a sign-in wall is not a Salesforce answer, whatever its body parses to.
 		return nil, refuse(invalidResponse)
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, int64(maxBytes-o.bytes)+1))
+	body, err := io.ReadAll(io.LimitReader(response.Body, int64(o.limits.bytes-o.bytes)+1))
 	o.bytes += len(body)
 	switch {
-	case o.bytes > maxBytes:
+	case o.bytes > o.limits.bytes:
 		return nil, refuse(resultLimit)
 	case err != nil:
 		return nil, o.transportError(ctx, err)
