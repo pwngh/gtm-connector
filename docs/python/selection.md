@@ -59,7 +59,7 @@ and Slack when they are connected and Slack is selected for the account.
   4 MiB. `inspect` reads the cards the `brief` command saves, not these, so a caller resolves a
   number from `units`.
 - `read_renewal_brief` releases a saved brief, with the same `text`, `units`, and `gaps`, to any
-  caller that passes the rule in the [security review](../SECURITY_REVIEW.md). A brief saved before
+  caller that passes the rule in the [security review](../../SECURITY_REVIEW.md). A brief saved before
   gaps existed releases `gaps: null`.
 
 > **Logging out of the `sf` CLI does not withhold saved Salesforce content.** The result of

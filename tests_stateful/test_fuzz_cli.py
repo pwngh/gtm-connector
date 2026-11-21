@@ -59,7 +59,7 @@ class CommandLineFuzz(unittest.TestCase):
                         code = stop.code
             finally:
                 os.chdir(here)
-        # docs/cli.md: 0 done, 1 local failure, 2 usage, 3 refused, 4 check failed, 5 upstream.
+        # docs/python/cli.md: 0 done, 1 local failure, 2 usage, 3 refused, 4 check failed, 5 upstream.
         self.assertIn(code, (0, 1, 2, 3, 4, 5, None), argv)
         self.assertNotIn("Traceback", out.getvalue() + err.getvalue(), argv)
 

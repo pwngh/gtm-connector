@@ -1,13 +1,8 @@
 # Roadmap
 
-What we are building, in the order we will build it. None of it is a promise. The other docs say
-what the code does today and claim only what a test shows, so planned work is written here and
-nowhere else. An item leaves this page when it ships with its test.
-
-On this page "will" means planned. The present tense means it is on main today.
-
-The goal has not changed: find what blocks a renewal in the evidence, turn it into reviewed work,
-and keep the history of what resolved it. No model writes text on a card.
+The [README](../README.md) and the guides describe the product as designed. This page says what is
+built, what is not, and the order it will be built in. An item leaves this page when it ships with
+its test.
 
 ## v0.1.0: one Go binary replaces the Python package
 
@@ -57,304 +52,86 @@ Real cards will be read with the CLI and the MCP tools.
 
 No live org has been verified. v0.1.0 does not wait for one.
 
-## After v0.1.0, in order
+## Not built yet, in order
 
-There will be one web app with two areas, Deals and Ops, behind one sign-in. Both will read one
-HTTP API, and the CLI, the MCP tools and the alerts will carry the same facts. Reps will never see
-the plumbing. Ops will show all of it.
+Nothing below is started unless it says so. Each links to the guide that describes it.
 
 ### 1. First call
 
-A rep or CSM will read one real renewal before a call. Everything in this milestone is here
-because that reading needs it.
+One rep reads one real renewal before a call.
 
-**The deal.** Today a card is for an account. A deal will be one renewal of an account, so an
-account with two renewals will have two deals. A person with the Ops grant will register a deal by
-hand and grant it to named people. A deal ID will be readable, such as `thornfield-2027`: `gtm deal
-thornfield-2027` will print its card, and the API will serve it at `/v1/deals/thornfield-2027`. The deal's handle will bind its
-Salesforce account, opportunity, contract and contacts, its Slack threads and its imported
-transcripts. The card will read the standard opportunity fields. If the org keeps a renewal field
-somewhere else, the card will show a gap until milestone 2.
+- A deal as one renewal of an account, with a readable ID, registered by hand ([the API](api.md#one-deal-one-id)).
+- Sign-in through the company's identity provider, and each person reading only their deals.
+- Calls and Slack threads matched to the deal ([setting it up](config.md#how-a-deal-gets-its-evidence)).
+- The Deals page: the deal list, the card, the proof drawer and communications ([working a deal](deals.md#the-page)).
+- What changed since the reader last looked, and marks for blockers and commitments ([working a deal](deals.md#the-card)).
+- Refresh on demand, and close with a final sealed card.
+- Underneath: a Slack message keeps one identity across reads, and an import stays readable after a parser upgrade.
 
-**Sign-in.** Named people will sign in through the company's identity provider, and every action
-will be recorded under that sign-in. The connector will store no password for them. A
-person will read only the deals granted to them. They will see a source's sentences only if their
-own grant opens that source; otherwise the card will show the source as not read. The security
-review covers one operator today. It will be redone for more than one person before real people
-sign in.
-
-**Matching.** A call or a Slack thread that fits a deal by the rules in the configuration is a
-match, and it will join the deal on its own. Nobody has to click. A match that fits more than one
-deal will wait for a person. A match will cover exactly what was read: one transcript revision, or
-the messages of a thread up to the last one read. If a message is added or edited afterwards, then
-the next read will pick it up.
-
-A team will be able to turn approval on. Then every match will wait for a person who may see both
-the deal and the source, and a rejected match will add nothing to any card.
-
-This needs two things the Python package does not have. A Slack message will keep one identity
-across reads, with an edit or a verified deletion superseding the version it changes. An import
-will stay readable after a parser upgrade, and a reparse will be a new revision.
-
-**The Deals area** will be home for reps and CSMs. It will show quotes, sources and times. It will
-not show receipts, digests or connections.
-
-The deal list will sit on the left, sorted by urgency, nearest renewal first within each colour:
-
-- red: a risk or a blocker;
-- amber: new changes since this reader last saw the card;
-- green: on track.
-
-A deal whose source was not read, or whose last refresh failed, will say so on its row and will
-not show green. Until the readiness rules run, red will mean a sentence someone marked as a blocker
-and has not resolved. When approval is on, a badge at the top will count
-the matches waiting for this person, and open them.
-
-The deal card will fill the main pane. What changed will come first, then the risks and blockers.
-Below them: days to renewal, the recurring revenue when the source supplies it, buyer quotes with
-names and titles, the seller's commitments, and the sources that were not read. "What changed"
-will compare the current card with the one this reader last saw: the units, record versions and
-gaps that differ. Each person's position will be their own, so one rep reading a card will not
-clear a teammate's amber.
-
-Any line will open the proof drawer: the record and field behind a figure, or the whole sentence
-with its speaker, time and source behind a quote. The drawer will not show the read's receipt.
-`inspect` and `audit` show it today, and Ops will from milestone 2. Communications will list the
-deal's calls and Slack threads in time order, each opening its sentences. Each label and
-status will carry its definition, and what it leads to, beside the value.
-
-**Marks.** A mark is a person's label on a sentence, and it is how a blocker gets onto a deal. A
-rep will mark one whole, uncut sentence as a blocker or as a seller's commitment. The
-label will come from a fixed list and be checked against the speaker's role, and a mark will hold
-no free text. Wording alone will never make a blocker, because source text decides nothing. A mark
-will record who made it and the sentence it cites. It will be stored beside the sealed card, not
-in it, and will follow its sentence across refreshes. If the sentence changes or is withdrawn,
-then the mark will come back for review. Resolving a blocker will take later proof, a person's
-decision, and a reason from a fixed list such as resolved or no longer applies. The resolved
-blocker will stay in the deal's history with its proof, who decided and when.
-
-**The checklist.** The card will carry a renewal checklist: its open blockers, tracked until each
-is resolved. Playbooks, in milestone 6, add plans and reviews to it.
-
-**Refresh.** A button, a command and an API call will read every source of the deal again, under the
-caller's grants, with a receipt before each read. If the refresh finds new evidence, versions or
-gaps, then it will publish a new sealed card. If it finds none, then it will record the time and
-publish nothing. If a read fails or the evidence fails its checks, then no card will be published:
-the last sealed card will stay for those still allowed to see it, with its read time and a fixed
-failure reason, and the deal's row will say so. With no earlier card, only the failure
-will show.
-
-**Close.** If a refresh finds the opportunity Closed Won or Closed Lost, then it will publish the
-final card and the deal will be closing. The deal will be archived once that card verifies. If it
-does not verify, then an allowed person will retry. After that, refreshes will be refused, and the
-deal's cards, receipts and history will stay readable to those allowed. If the renewal date passes
-while the opportunity is still open, then the deal will stay active.
-
-**The trial.** The owner will run the connector on five real renewals the team consents to,
-outside the repository. A rep who has not read the sources will have 30 seconds per renewal to
-find the status, the change, who said what, the commitment and the blocker, with proof or a stated
-gap. Blockers found only because someone marked them first will be counted apart. Only counts will
-be recorded, and each parser failure will become an invented test fixture. The README's first
-limit, that nothing was tried on a real deal, will change only then. No later milestone waits for
-the trial.
+Before real people sign in, the security review is redone for more than one person. Then the
+trial: five real renewals, run outside the repository, with a rep given 30 seconds per renewal to
+find the status, the change, who said what, the commitment and the blocker. Only counts are
+recorded. The README's limit about real deals changes only then.
 
 ### 2. Whole book
 
-RevOps will cover every renewal, and see which ones have no current card.
+RevOps covers every renewal and sees which have no current card.
 
-**Field mapping.** RevOps will map the renewal date, recurring revenue and stage to the org's own
-typed fields or objects. Setup will refuse an ambiguous or mistyped mapping. Opportunity amount
-will never stand in for recurring revenue.
-
-**Finding deals and evidence.** A watch rule will propose deals on its own, for example open
-renewals closing within a set number of days. A proposed deal will be watched at once. Setup will set
-how far back the first read goes, and the card will say where its history begins. A folder of
-transcripts will be connected once, replacing one-file imports and hand-picked excerpts. A bounded
-window of a Slack channel will be read, replacing one mapped thread per account; the card will
-count what was not read and say when more exists. Threads will be found by dedicated channel, such
-as `#deal-thornfield`, or in a shared channel where the account's name or domain is mentioned.
-Calls from Gong and Zoom will be read on the same schedule. Because a tool may then read twice, each unit
-will bind to the receipt of the read that returned it.
-
-**People.** A participant directory will match call speakers to contacts by email or phone first,
-and by name only when the name is unique. With it, a call will be proposed for a deal by
-participant email or account domain. The card will say when a speaker is ambiguous. People whose
-words must never appear on a card will be excluded.
-
-**Readiness rules.** RevOps will pick rules from a short list and set their thresholds. Each
-result will cite its records, receipts and rule version, and will be one of: not evaluated, not
-applicable, unknown, failed or passed. A failed rule is what the rest of this page calls a risk,
-and it turns the deal red. What can flag a deal:
-
-- Customer silence will fail when no customer replied in the named sources during the window before renewal. If a read is missing, then the result will be unknown, not silence.
-- Close-date slippage will be counted from the versions of the close-date field the connector has seen.
-- One speaking contact will fail when only one identified customer contact spoke in the window read.
-- A possible price or seat conflict will be raised when a sentence states an amount that differs from the record, for the same item, currency and period. A person will resolve it.
-- A legal or security blocker, such as redlines or riders holding up signature, will flag the deal when a person marks it. No rule will read it from wording.
-
-A changed mapping, rule or threshold will be previewed against the book before it applies: who
-would turn red, and what would become unknown.
-
-**Scheduled reads** will run in the background under leases, so one stuck read blocks nothing
-else. Each will run as a named service identity with its own grant, and its receipts will name it.
-Temporary failures will be retried with backoff. A bad or expired credential will stop the read.
-
-**One configuration file** (planned name `gtm.yaml`) will hold sources and field mappings, sellers
-and excluded people, the time zone, watch rules, thresholds and access. It will hold no
-credential. It will be kept in Git, previewed, and activated by exact revision.
-
-**One size cap** will apply to every card, stated on the card when it leaves evidence unshown.
-
-**The Ops area** will have three screens.
-
-- Coverage will be the home screen. It will list every deal a watch rule proposed or a person registered, each in one state: proposed, paused, closing, no current card, or current card. A deal with no current card will open the pending match or the failed read behind it.
-- Setup will show each source's state (not connected, denied, partial, failed, stale or current), its last read, and what to do about it. The active configuration will sit beside a draft, with the preview and the activation.
-- Activity will show what ran and whether it is safe to retry: reads, matches, refusals and refreshes, each with its receipt. A seal will be rechecked here.
-
-RevOps will be able to pause a deal, which stops its scheduled reads, and resume it. A deal's
-lifecycle will be proposed, active, paused, closing, archived. Risk and freshness will not be
-lifecycle states.
+- `gtm.yaml`, previewed and activated by exact revision ([setting it up](config.md)).
+- Field mapping, watch rules, transcript folders, Slack channel windows, Gong and Zoom.
+- A participant directory that matches speakers to contacts by email or phone first.
+- The five flags, with thresholds and a preview ([what flags a deal](deals.md#what-flags-a-deal)).
+- Scheduled reads under leases, each as a named service identity.
+- The Ops screens: Coverage, Setup and Activity ([the Ops area](config.md#the-ops-area)).
+- Pause and resume, and one size cap on every card.
 
 ### 3. Delivery
 
-A rep will hear about a new risk in Slack, and a team's scripts and assistants will read the same
-deals.
-
-**Slack alerts** will be the first thing the connector sends anywhere. They will be off until
-configured, and the connector will still write nothing to the CRM. They will need a Slack app with
-a posting scope, which the operator will create. An alert will go out when a risk opens, not on
-every read. It will carry the deal, the rule and a link to the card and its proof, never a
-quotation, and every name in it will be neutralized as card text is. A paused deal will send none.
-
-**Webhooks** will be signed, and each delivery will carry a stable event ID so a receiver can drop
-repeats. A subscription will be limited to selected deals and scopes. There will be three events:
-a risk changed, a card changed, a deal closed.
-
-For every delivery, the audience and its grants will be checked again before each attempt. A
-temporary failure will be retried, and a refused credential will stop delivery. If the outcome of
-an attempt is unknown, then it will be shown as uncertain and not sent again until it is checked.
-Activity will show each attempt.
-
-**For scripts and assistants:**
-
-- A token will be limited to selected deals and scopes, and will expire.
-- The deal list's route, filtered to red and unknown, will be a feed a team's own bot can post from.
-- The deal, card, change, proof and refresh routes will be published as an OpenAPI description.
-- The MCP tools will read deals, cards and proof, not only accounts. The clients to test are Claude Desktop, Claude Code, ChatGPT and Codex. The docs name a client only after it is tested live; Inspector is the tested client today.
+- Slack alerts, signed webhooks and the three events ([the API](api.md#webhooks-and-slack-alerts)).
+- Tokens for scripts and assistants, the flagged-deals feed, and the OpenAPI file.
+- MCP tools that read deals, cards and proof. Clients are named in the docs only after a live test: Claude Desktop, Claude Code, ChatGPT, Codex and Cursor are untested today.
 
 ### 4. Your own data
 
-An engineer will send in records the built-in sources do not read, and RevOps will report on what
-is stored.
+- The push API and retractions ([pushing your own data](api.md#pushing-your-own-data)).
+- A read-only view of a customer's database as a source.
+- Read-only SQL views for reporting.
+- A retention period, and deletion on request with a receipt.
 
-**The push API** will take field records and messages in a published JSON schema, each with a
-stable key and a revision. Each push will get a receipt before it is staged or refused. If a push
-repeats a key with the same content, then it will get the same result. If it repeats a key with
-different content, then it will be refused. A cursor will track progress. A pushed record will
-name its deal by the handle, or by a key the handle binds, and it will join that deal on its own, or wait for a
-person when approval is on. Rows from another CRM, a spreadsheet, email, SMS or product usage will come in
-this way, and HTML email will be turned into text first.
+### 5. The council and measurement
 
-**A customer's own database** will be read through a read-only connection and an approved view,
-with an ordered cursor and explicit deletions. Its records will join their deals like pushed
-ones.
-
-**Retractions.** A record entered by mistake will be retracted by a new version. Later cards will
-stop citing it, and its history will stay.
-
-**Read-only SQL** will be views over cards, units, gaps, receipts and readiness. They will never
-expose credentials or sign-ins. Each view will state what it counts, its time basis and its as-of
-time, and each row will lead back to its records. They will answer questions such as how often
-close dates slip, how long customers go silent before renewal, how often blockers recur, and how
-often a stated figure disagrees with the record.
-
-**Retention and deletion.** There will be a retention period per workspace, and deletion on
-request with a receipt of the deletion. A card that stays readable will still resolve every
-citation it shows.
-
-### 5. A model proposes, a person decides
-
-An operator will be able to turn on a model that proposes marks. A person will accept or reject
-each one, and an accepted proposal will become a mark under that person's sign-in.
-
-It will be opt-in. A local model will be able to make the proposals, so that no source text leaves
-the machine. A hosted model will receive source text only when the operator chooses one.
-
-Two assistant tools will work on one sealed card. The evidence tool will return numbered units.
-The submit tool will accept unit numbers, a label from the fixed list checked against each
-speaker's role, and pairs labelled as in tension. A cut sentence, an unknown label or a unit of
-another card will be refused with a receipt.
-
-The model, prompt and checks will be chosen by measurement:
-
-- Every run, local or hosted, will get a benchmark score on the same frozen inputs: useful claims, wrong claims, facts covered, time and cost.
-- Judges will come from more than one model family. A person will check their disagreements and a sample of their agreements.
-- Facts covered will be measured two ways. One is against a pool of confirmed facts from every run, re-scored when a new fact is confirmed, so a model that finds something new gets credit. The other is against a census, in which a grader who has seen no model output lists the important facts.
-- Tuning will use development data. A ceiling for wrong claims and a floor for facts covered will be fixed before one confirming run on held-out data, and results will be published only after it.
-
-`evaluate` will run the ten cases as a table, with a model's unchecked answers on the same deals
-kept as test inputs and scored offline. Two of the ten cases wait for features: a blocker buried
-under routine messages waits for a mark or an accepted proposal, which will put it first, and a
-channel over the cap waits for the Slack channel window.
+- Models that answer from the card and propose marks ([ask the council](deals.md#ask-the-council)).
+- The model, prompt and checks chosen by measurement: a benchmark score per run, judges from more than one model family, and one confirming run on held-out data.
+- Facts covered measured against a pool of confirmed facts and against a census made without model output.
+- `evaluate`, running the ten cases as a table. Two of the ten wait: a buried blocker waits for marks, and a channel over the cap waits for the channel window.
 
 ### 6. Playbooks
 
-Reps will work a blocker through a plan and a review, from the checklist on the card:
+- The checklist and the three playbooks, with review of one plan revision ([the checklist and playbooks](deals.md#the-checklist-and-playbooks)).
+- The work queue across a rep's deals.
+- As reps ask: stakeholders on the card, an email connector, rollups by team and rule, alert digests and quiet hours.
 
-- a rep will open work on a marked blocker from one of three playbooks: obtain the current rider, review a renewal condition, or reconcile an approval conflict;
-- a reviewer will approve one plan revision and the evidence it cites, and a change to either will reopen the review;
-- a document handoff or other resolution will be recorded with cited proof;
-- a work queue will list the work across a rep's deals.
+### 7. Running it anywhere
 
-Later in this milestone, as reps ask for them: stakeholders on the card (each contact's role, when
-they last spoke, and who has gone quiet), an email connector if pushing email is not enough,
-rollups of recurring revenue at risk by team and by rule (computed by the connector, never by a
-model), and alert digests and quiet hours.
+- The release pipeline, Docker images and a Homebrew tap ([running it](operations.md#install)).
+- systemd and launchd templates.
+- The ten cases as ready-to-open demo workspaces.
 
-### 7. Install and run it like any server
+## Later
 
-An operator will install, run and upgrade the connector without a checkout:
-
-- a GitHub Actions release pipeline that publishes prebuilt static binaries for each platform and Docker images, with the web app embedded;
-- a Homebrew tap;
-- systemd and launchd templates;
-- backup, restore, and an upgrade rehearsed on the restored copy, checked as one loop;
-- the ten cases as ready-to-open demo workspaces, so a new user sees each one in the web app without credentials.
-
-Three deployment shapes will each be documented once tested: a local CLI with an assistant app
-over stdio MCP, a server in Docker Compose for a team, and a headless API for another system to
-call.
-
-## Docs, as each part ships
-
-- A page for each audience, with its flow drawn.
-- A setup guide for each source.
-- An inventory that marks each part built or planned.
-- A deployment guide.
-- An FAQ: other deal types, offline use, permissions, outages and retractions.
-- A comparison with vendor MCP servers, revenue intelligence products and retrieval pipelines.
-
-## Later, when a real user needs them
-
-- An idempotent display for units sealed under older rules, labelled when it differs from the stored text.
-- Salesforce sign-in through a connected app.
-- DOCX tracked changes as a source.
-- Salesforce task creation.
-- A second CRM.
-- Windows.
-- MCP Apps.
-
-Not planned: language SDKs, WASM or CGO builds. Integrations use HTTP or MCP.
+Salesforce sign-in through a connected app, DOCX tracked changes as a source, Salesforce task
+creation, a second CRM, Windows, and MCP Apps. Language SDKs, WASM and CGO builds are not planned:
+integrations use HTTP or MCP.
 
 ## Open questions
 
-- **Ops access.** Is a grant enough, or is Ops a separate role?
-- **Closing by hand.** May a person close a deal, or does only the CRM stage close it?
-- **A bad unit.** Today one unit that fails a check stops the card. Should it be refused alone, with the card saying how many were?
-- **Slippage before a deal is watched.** Should the connector also read the CRM's field history, so changes before its first read count?
-- **Silence and Slack.** Should Slack authors be matched to contacts? Until they are, silence will count calls only.
-- **The edges of a deal.** A call or thread that fits two deals of one account. A deal with no CRM record. A closed opportunity that reopens: the same deal, or a new one?
-- **Reporting SQL.** A database role that BI tools connect to, or queries through the API so each one has a receipt?
+- May a person close a deal, or does only the CRM stage close it?
+- Should one bad unit stop the card, as today, or be refused alone with the card saying so?
+- Should slippage count changes from before the connector's first read, using the CRM's field history?
+- Should Slack authors be matched to contacts, so that silence can count Slack?
+- A call or thread that fits two deals of one account. A deal with no CRM record. A closed opportunity that reopens.
+- Reporting SQL through a database role that BI tools connect to, or through the API with a receipt for each query?
+- Is a grant enough to see Ops, or is it a separate role?
 
 ## Checks the docs still need
 
