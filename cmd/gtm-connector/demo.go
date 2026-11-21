@@ -11,7 +11,6 @@ import (
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
-	"github.com/pwngh/gtm-connector/internal/sources/demo"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
@@ -70,18 +69,16 @@ func makeDemoCards(ctx context.Context, store *postgres.Store, login string, aga
 	case err != nil:
 		return run, err
 	}
-	book, err := demo.Seeded()
+	for _, source := range []string{"crm", "calls", "slack"} {
+		if _, err := store.EnsureConnection(ctx, workspace, source, "demo"); err != nil {
+			return run, err
+		}
+	}
+	from, err := workspaceReads(ctx, store, workspace)
 	if err != nil {
 		return run, err
 	}
-	connections := map[string]string{}
-	for _, source := range []string{"crm", "calls", "slack"} {
-		connection, err := store.EnsureConnection(ctx, workspace, source, "demo")
-		if err != nil {
-			return run, err
-		}
-		connections[source] = connection.ID
-	}
+	book := from.book
 	held, err := store.AccountsWithCards(ctx, workspace.ID, principal.ID, cards.DemoAsOf)
 	if err != nil {
 		return run, err
@@ -103,8 +100,7 @@ func makeDemoCards(ctx context.Context, store *postgres.Store, login string, aga
 			todo = append(todo, account.ID)
 		}
 	}
-	maker := &cards.Maker{Receipts: &postgres.ReceiptStore{Store: store}, Source: book, Sources: demoSources,
-		Connections: connections}
+	maker := from.maker(store)
 	actor := cards.Principal{WorkspaceID: workspace.ID, PrincipalID: principal.ID,
 		TokenID: receipts.Fingerprint(randomToken()), Scopes: []string{"crm:read", "calls:read", "slack:read"}}
 	operation := receipts.RandomID()

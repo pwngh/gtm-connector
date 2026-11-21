@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 
@@ -105,5 +107,67 @@ func TestLoadRefusesADumpNestedTooDeep(t *testing.T) {
 	deep := strings.Repeat(`{"crm":`, levels) + "1" + strings.Repeat("}", levels)
 	if s, err := Load([]byte(deep)); s != nil || !errors.Is(err, strictjson.ErrTooDeep) {
 		t.Fatalf("got %v, %v", s, err)
+	}
+}
+
+// The expected IDs are what store.search_accounts gives for the same rows.
+func TestSearchAccounts(t *testing.T) {
+	s := book(t)
+	account := func(id, name string) {
+		t.Helper()
+		if err := s.Insert("crm", "accounts", []any{id, name, "Testing", "2027-01-01", big.NewInt(1), "USD",
+			"healthy", ""}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	account("acc-901", "alder vale packaging")
+	account("acc-902", "ALDER VALE PACKAGING")
+	account("acc-903", "Élan Works")
+	account("acc-904", "élan works")
+	ids := func(query string) (found []string, more bool) {
+		rows, more := s.SearchAccounts(query)
+		for _, row := range rows {
+			id, _ := row.Get("id")
+			found = append(found, id.(string))
+		}
+		return found, more
+	}
+	// Only the letters A to Z fold, in the match and in the order, and the query is literal.
+	for query, want := range map[string][]string{"alder vale": {"acc-001", "acc-901", "acc-902"},
+		"élan": {"acc-904"}, "ÉLAN": {"acc-903"}, "ELAN": nil, "%": nil, "THORN": {"acc-003"}} {
+		if got, more := ids(query); more || !slices.Equal(got, want) {
+			t.Errorf("%q finds %v (more: %v), not %v", query, got, more, want)
+		}
+	}
+	found, _ := s.SearchAccounts("Thorn")
+	if want := []string{"id", "name", "industry", "renewal_date", "arr_cents", "currency", "risk_status",
+		"risk_reason"}; !slices.Equal(found[0].Keys, want) {
+		t.Errorf("an account's columns: %v", found[0].Keys)
+	}
+	// The first hundred by name and then ID, and whether more matched.
+	for n := range 100 {
+		account(fmt.Sprintf("acc-%03d", n+100), fmt.Sprintf("Many %03d", n))
+	}
+	if got, more := ids("many"); more || len(got) != 100 || got[0] != "acc-100" || got[99] != "acc-199" {
+		t.Errorf("a hundred matches: %d from %s to %s, more: %v", len(got), got[0], got[len(got)-1], more)
+	}
+	if got, more := ids(""); !more || len(got) != 100 || got[0] != "acc-001" || got[99] != "acc-181" {
+		t.Errorf("every account: %d from %s to %s, more: %v", len(got), got[0], got[len(got)-1], more)
+	}
+}
+
+func TestGetAccount(t *testing.T) {
+	s := book(t)
+	account, ok := s.GetAccount("acc-003")
+	contacts, _ := account.Get("contacts")
+	if !ok || len(account.Keys) != 9 || account.Keys[8] != "contacts" || len(contacts.([]any)) != 1 {
+		t.Fatalf("acc-003: %v %v", ok, account)
+	}
+	contact := contacts.([]any)[0].(*strictjson.Object)
+	if want := []string{"id", "account_id", "name", "title", "email"}; !slices.Equal(contact.Keys, want) {
+		t.Errorf("a contact's columns: %v", contact.Keys)
+	}
+	if _, ok := s.GetAccount("acc-999"); ok {
+		t.Error("an account the book does not hold was found")
 	}
 }

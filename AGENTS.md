@@ -37,8 +37,9 @@ rules every store applies, and `receiptstest`, which every store runs), `cards` 
 `salesforcetest`). Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
-surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`. `postgres.ReceiptStore`
-runs the card maker on PostgreSQL.
+surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with the read commands
+`accounts`, `brief`, `inspect` and `audit` on demo data. `postgres.ReceiptStore` runs the card maker on
+PostgreSQL.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
 
 ```sh

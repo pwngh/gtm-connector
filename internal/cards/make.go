@@ -36,6 +36,28 @@ var ErrNotSelected = errors.New("cards: no selection for this account in this so
 // ErrBriefing is a read that failed, so no card is made (briefing.BriefingError).
 var ErrBriefing = errors.New("cards: required evidence could not be collected; no brief generated")
 
+// ReadError is ErrBriefing for one read: its tool, and 403 when the read was refused for a scope the card
+// cannot go without.
+type ReadError struct {
+	Tool       string
+	HTTPStatus int // 0 unless the read was refused
+}
+
+func (e *ReadError) Error() string {
+	if e.HTTPStatus != 0 {
+		return fmt.Sprintf("%s: HTTP %d: %s", e.Tool, e.HTTPStatus, ErrBriefing)
+	}
+	return e.Tool + ": " + ErrBriefing.Error()
+}
+
+func (e *ReadError) Unwrap() error { return ErrBriefing }
+
+// RequestError refuses a card before any read: its account ID or its day is not one (collect_evidence's
+// ValueError).
+type RequestError struct{ Message string }
+
+func (e *RequestError) Error() string { return e.Message }
+
 // CodeError is a refusal of a prepared brief, by the code the tool result names.
 type CodeError struct{ Code string }
 
@@ -168,14 +190,14 @@ func briefID(uuid string) string { return "brief-" + strings.ReplaceAll(uuid, "-
 func checkRequest(s evidence.Sources, accountID, asOf string) error {
 	if !evidence.ValidAccountID(accountID, s.CRMBackend == "salesforce") {
 		if s.CRMBackend == "salesforce" {
-			return errors.New("account ID must use acc-sf- followed by the 18-character Salesforce ID")
+			return &RequestError{"account ID must use acc-sf- followed by the 18-character Salesforce ID"}
 		}
-		return errors.New("account ID must have the form acc-001")
+		return &RequestError{"account ID must have the form acc-001"}
 	}
 	// One message for every day that is not YYYY-MM-DD: date.fromisoformat's own quotes the text, which can
 	// carry a real org's names.
 	if _, err := evidence.Day(asOf); err != nil {
-		return errors.New("as-of date must use YYYY-MM-DD")
+		return &RequestError{"as-of date must use YYYY-MM-DD"}
 	}
 	return nil
 }
@@ -225,7 +247,7 @@ func (m *Maker) replayed(ctx context.Context, r reading) (records []any, bound [
 	// A read that failed and a read with no selection finish with the same receipt, error/200. A replay
 	// cannot tell them apart, so it makes no card: a card saying that nothing was selected would be false
 	// after a failed read. The command runs again under a new operation.
-	return nil, nil, nil, "", fmt.Errorf("%s: %w", r.tool, ErrBriefing)
+	return nil, nil, nil, "", &ReadError{Tool: r.tool}
 }
 
 // reading is one read's receipt, started by the caller; read runs it.
@@ -294,12 +316,12 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 	case errors.Is(stopped, context.DeadlineExceeded):
 		return nil, nil, nil, "", errors.Join(ErrDeadline, finish(receipts.Failed(504, "request_failed")))
 	case stopped != nil:
-		return nil, nil, nil, "", errors.Join(fmt.Errorf("%s: %w", r.tool, ErrBriefing), stopped,
+		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool}, stopped,
 			finish(receipts.Failed(200, "request_failed")))
 	case errors.Is(readErr, ErrNotSelected):
 		return nil, nil, nil, "not_selected", finish(receipts.NotSelected())
 	case readErr != nil || system != r.system:
-		return nil, nil, nil, "", errors.Join(fmt.Errorf("%s: %w", r.tool, ErrBriefing),
+		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool},
 			finish(receipts.Failed(200, "request_failed")))
 	}
 	bound, err = versions(found)
@@ -366,12 +388,12 @@ func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, 
 			*status = "denied"
 			continue
 		case outcome == "denied":
-			return c, fmt.Errorf("%s: HTTP 403: %w", p.tool, ErrBriefing)
+			return c, &ReadError{Tool: p.tool, HTTPStatus: 403}
 		case outcome == "not_selected" && p.tool == "read_slack_messages" && m.Sources.SlackBackend == "slack":
 			c.slackStatus = "not_selected"
 			continue
 		case outcome == "not_selected":
-			return c, fmt.Errorf("%s: %w", p.tool, ErrBriefing)
+			return c, &ReadError{Tool: p.tool}
 		}
 		for _, v := range bound {
 			c.versionOf[v.Ref()] = v.Version()
