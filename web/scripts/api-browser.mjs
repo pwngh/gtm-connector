@@ -1,7 +1,8 @@
-// Browser tests for Evidence and Readiness in API mode, against the built app
-// (web/dist) and a stub of /api/v1 that each test steers: delayed and refused
-// answers, two accounts, blocked browser storage, a session that expires, and
-// hostile text in names, gaps and receipts. The stub keeps the Go server's
+// Browser tests for the app in API mode, against the built app (web/dist) and
+// a stub of /api/v1 that each test steers: delayed and refused answers, two
+// accounts, blocked browser storage, a session that expires, hostile text in
+// names, gaps and receipts, and the walkthrough's paths, which are not
+// available in API mode and whole on a static host. The stub keeps the Go server's
 // shapes: the session view, the {"error": {code, message}} envelope, the CSRF
 // header and Origin checks, and 403 not_permitted for an ungranted account.
 //
@@ -371,15 +372,91 @@ for (const [width, scheme] of [[320, 'light'], [1440, 'light'], [320, 'dark'], [
     await tab.keyboard.press('Control+k');
     await tab.waitForSelector('.command-option');
     const groups = await tab.locator('.command-group-title').allTextContents();
-    check(groups.every(group => ['Read from the server', 'Walkthrough'].includes(group)) && await tab.locator('.command-option', {hasText: 'E-0'}).count() === 0, `${width} ${scheme}: the palette offers server pages and labelled walkthrough entries only`);
+    const options = await tab.locator('.command-option strong').allTextContents();
+    check(groups.join() === 'Read from the server' && options.join() === 'Evidence,Readiness', `${width} ${scheme}: the palette offers the server pages only (${options.join()})`);
     await tab.locator('.command-option', {hasText: 'Readiness'}).first().click();
     await until(tab, () => location.pathname.endsWith('/readiness') && new URL(location.href).searchParams.get('account') === 'acc-003');
-    await tab.goto(`${base}/renewals/thornfield/workplan`, {waitUntil: 'networkidle'});
-    check(await tab.locator('.detail-nav a[href$="/evidence"] span').count() === 0, `${width} ${scheme}: the walkthrough tabs show no evidence count that the server page does not share`);
     check(tab.errors.length === 0, `${width} ${scheme}: no page errors (${tab.errors.join(' | ')})`);
     await tab.context().close();
   });
 }
+
+// 11. A walkthrough path when the server serves the app: not available here, the server pages only, and the way home.
+const walkthroughPaths = ['/renewals', '/queue', '/playbooks', '/operations', '/renewals/thornfield/workplan', '/renewals/thornfield/history'];
+const walkthroughParts = '.wl-page,.pb-page,.ops-page,.work-grid,.hs-page,.evidence-flow,.rd-page:not(.api-readiness),.evidence-library:not(.api-evidence),.detail-nav,.nav-count,.demo-account,.reset-link,.save-indicator,.save-failure-notice';
+const shellOf = tab => tab.evaluate(parts => ({heading: document.querySelector('main h1')?.textContent, parts: document.querySelectorAll(parts).length,
+  nav: [...document.querySelectorAll('#workspace-navigation nav a')].map(link => link.textContent).join(), crumbs: document.querySelector('.breadcrumbs').textContent,
+  footer: document.querySelector('.page-footer').textContent}), walkthroughParts);
+async function tabTo(tab, selector) {
+  for (let presses = 0; presses < 40; presses++) {
+    await tab.keyboard.press('Tab');
+    if (await tab.evaluate(target => Boolean(document.activeElement?.matches(target)), selector)) return true;
+  }
+  return false;
+}
+const focusShows = tab => tab.evaluate(() => {const style = getComputedStyle(document.activeElement); return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) >= 2;});
+const evidencePath = new URL(evidence).pathname, readinessPath = new URL(readiness).pathname;
+for (const width of [320, 1440]) {
+  await scenario(`walkthrough paths ${width}`, async () => {
+    const tab = await page({width});
+    for (const path of walkthroughPaths) {
+      await tab.goto(`${base}${path}?selection=work-item%3Aexample`, {waitUntil: 'networkidle'});
+      await tab.waitForSelector('.api-unavailable h1');
+      const seen = await shellOf(tab);
+      check(seen.heading === 'Not available here.' && seen.parts === 0 && seen.nav === 'Evidence,Readiness' && seen.crumbs === 'Not available here' && !/Invented|prototype/.test(seen.footer),
+        `${width}: ${path} is not available here: no walkthrough page, and the navigation lists only the server pages (${seen.nav})`);
+    }
+    const home = await tab.locator('.api-unavailable a').boundingBox();
+    check(home.height >= 44 && home.width >= 44, `${width}: the way home is at least 44px (${Math.round(home.width)} by ${Math.round(home.height)})`);
+    check(await tabTo(tab, '.api-unavailable a') && await focusShows(tab), `${width}: the way home shows keyboard focus`);
+    await tab.keyboard.press('Enter');
+    await until(tab, path => location.pathname === path, evidencePath);
+    await signIn(tab);
+    await tab.goto(`${base}/`, {waitUntil: 'networkidle'});
+    await until(tab, path => location.pathname === path, evidencePath);
+    await tab.waitForSelector('.api-session');
+    check(await noWalkthrough(tab), `${width}: / opens Evidence, read from the server`);
+    await tab.goto(`${base}/queue`, {waitUntil: 'networkidle'});
+    await tab.waitForSelector('.api-unavailable h1');
+    const mark = await tab.evaluate(() => {const el = document.querySelector('.topbar .profile'); return {tag: el.tagName, label: el.getAttribute('aria-label')};});
+    check(mark.tag === 'SPAN' && mark.label.startsWith('Signed in as Demo reviewer'), `${width}: the header names the signed-in principal, and opens nothing of the walkthrough (${mark.tag})`);
+    await tab.keyboard.press('Control+k');
+    await tab.waitForSelector('.command-option');
+    const options = await tab.locator('.command-option strong').allTextContents();
+    check(options.join() === 'Evidence,Readiness', `${width}: the palette on a walkthrough path offers the server pages only (${options.join()})`);
+    await tab.keyboard.press('Escape');
+    if (width === 320) await tab.click('.mobile-menu');
+    const links = await tab.evaluate(() => [...document.querySelectorAll('#workspace-navigation a')].map(link => {const box = link.getBoundingClientRect(); return {href: link.getAttribute('href'), width: box.width, height: box.height};}));
+    check(links.map(link => link.href).join() === [evidencePath, evidencePath, readinessPath].join() && links.every(link => link.width >= 44 && link.height >= 44),
+      `${width}: the brand and the navigation link the server pages only, each at least 44px (${links.map(link => `${link.href} ${Math.round(link.height)}`).join(', ')})`);
+    check(await tabTo(tab, '#workspace-navigation nav a') && await focusShows(tab), `${width}: a navigation link shows keyboard focus`);
+    await tab.keyboard.press('Enter');
+    await until(tab, path => location.pathname === path, evidencePath);
+    await tab.waitForSelector('.api-session');
+    check(await noWalkthrough(tab), `${width}: the navigation opens Evidence, read from the server`);
+    check(tab.errors.length === 0, `${width}: no page errors (${tab.errors.join(' | ')})`);
+    await tab.context().close();
+  });
+}
+
+// 12. A static host's answer keeps the whole walkthrough.
+await scenario('the static build', async () => {
+  stub.steer = (method, path) => path === '/api/v1/session' ? {status: 404, type: 'text/html', raw: '<html>Not found</html>'} : null;
+  const tab = await page();
+  for (const [path, part] of [['/renewals', '.wl-page'], ['/queue', '.wl-page'], ['/playbooks', '.pb-page'], ['/operations', '.ops-page'], ['/renewals/thornfield/workplan', '.work-grid'],
+    ['/renewals/thornfield/history', '.hs-page'], ['/renewals/thornfield/evidence', '.evidence-library:not(.api-evidence)'], ['/renewals/thornfield/readiness', '.rd-page:not(.api-readiness)']]) {
+    await tab.goto(base + path, {waitUntil: 'networkidle'});
+    await tab.waitForSelector(part);
+    const seen = await shellOf(tab);
+    check(/^Renewals,Work queue\d+,Playbooks,Operations$/.test(seen.nav) && await tab.locator('.api-unavailable, .api-frame').count() === 0 && await tab.locator('.demo-account, .reset-link, button.profile').count() === 3,
+      `the static build shows the walkthrough at ${path} (${seen.nav})`);
+  }
+  await tab.goto(`${base}/`, {waitUntil: 'networkidle'});
+  await tab.waitForSelector('.work-grid');
+  check(await tab.evaluate(() => location.pathname) === '/renewals/thornfield/workplan', 'the static build opens / on the walkthrough work plan');
+  check(tab.errors.length === 0, `the static build: no page errors (${tab.errors.join(' | ')})`);
+  await tab.context().close();
+});
 
 await browser.close();
 server.close();
