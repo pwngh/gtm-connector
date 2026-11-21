@@ -171,6 +171,8 @@ grouped by the v0.1.0 step that owns the check.
 - `POSTGRES=18.7` keeping the fallback database on its own volume.
 - `make dev` and `make test` refusing a Go other than 1.27.4, and `make dev` a Node other than 22.23.4.
 - The first run writing `.env` with mode 0600 and random passwords for the two database roles.
+- Compose and `scripts/host.sh` building `GTM_DATABASE_URL` from `GTM_APP_PASSWORD`, and a changed
+  `GTM_APP_PASSWORD` rotating the app role's password through `make dev` or `make up`.
 - The Makefile forwarding a port on Colima from a cold start.
 - macOS as a supported platform alongside Linux.
 - `serve` refusing to start while a restore is unfinished (setup and `demo` are tested).
