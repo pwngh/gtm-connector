@@ -43,6 +43,15 @@ var ErrNotSelected = errors.New("cards: no selection for this account in this so
 // ErrOtherWorkspace is a read through a source that states another workspace than the caller's.
 var ErrOtherWorkspace = errors.New("cards: the source reads another workspace than the caller's")
 
+// ErrSourcePanicked is a read whose source panicked. The read finishes as error/200 like any failed read, and
+// nothing the panic carried reaches its receipt or the caller.
+var ErrSourcePanicked = errors.New("cards: the source panicked during a read")
+
+// ErrNotPublished is a publication that did not finish in time: within SettleLimit, or within the store's
+// own limit. No card is returned, and the maker finishes the seal as an error. If the store does not answer
+// that either, the seal stays pending until its lease runs out.
+var ErrNotPublished = errors.New("cards: the card was not published in time; no card made")
+
 // ErrBriefing is a read that failed, so no card is made (briefing.BriefingError).
 var ErrBriefing = errors.New("cards: required evidence could not be collected; no brief generated")
 
@@ -91,6 +100,14 @@ const (
 	MaxArtifactBytes = 4 * 1024 * 1024
 )
 
+// SettleLimit is how long the publication may take, and each step that settles a receipt on a context the
+// caller's cancel does not end. Each is one short transaction, which a working store finishes in
+// milliseconds, so fifteen seconds means the store is stuck, not slow. It is above the five seconds on a lock
+// and the ten on a statement after which the PostgreSQL store gives up on a publication by itself, so the
+// store gives up first and says why, and far inside a receipt's five-minute lease, so the maker still holds
+// the seal when it finishes it as an error.
+const SettleLimit = 15 * time.Second
+
 // DemoAsOf is the day the demo book is planned from.
 const DemoAsOf = "2027-01-15"
 
@@ -122,6 +139,26 @@ type Maker struct {
 	NewID func() string
 	// Now is the clock elapsed times and deadlines are read from. Nil is time.Now.
 	Now func() time.Time
+	// limit, when a test sets it, stands in for SettleLimit.
+	limit time.Duration
+}
+
+// settling gives the context of one step that must not stop when the caller leaves: the publication, or the
+// finishing of a receipt. The caller's cancel and deadline do not end it, and SettleLimit does.
+func (m *Maker) settling(ctx context.Context) (context.Context, context.CancelFunc) {
+	limit := m.limit
+	if limit == 0 {
+		limit = SettleLimit
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), limit)
+}
+
+// finish finishes a receipt with an outcome that binds no records, whether or not the caller has left.
+func (m *Maker) finish(ctx context.Context, ticket receipts.Ticket, o receipts.Outcome) error {
+	settling, cancel := m.settling(ctx)
+	defer cancel()
+	_, err := m.Receipts.Finish(settling, ticket, o)
+	return err
 }
 
 func (m *Maker) newID() string {
@@ -299,8 +336,7 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 	// A failed read's receipt is finished even when the caller has gone.
 	finish := func(o receipts.Outcome) error {
 		o.ElapsedMS = elapsed()
-		_, err := m.Receipts.Finish(context.WithoutCancel(ctx), r.started.Ticket(), o)
-		return err
+		return m.finish(ctx, r.started.Ticket(), o)
 	}
 	if !r.principal.live() {
 		return nil, nil, nil, "", errors.Join(ErrInvalidToken, finish(receipts.Failed(401, "request_failed")))
@@ -334,6 +370,9 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 			finish(receipts.Failed(200, "request_failed")))
 	case errors.Is(readErr, ErrNotSelected):
 		return nil, nil, nil, "not_selected", finish(receipts.NotSelected())
+	case errors.Is(readErr, ErrSourcePanicked):
+		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool}, ErrSourcePanicked,
+			finish(receipts.Failed(200, "request_failed")))
 	case readErr != nil || system != r.system:
 		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool},
 			finish(receipts.Failed(200, "request_failed")))
@@ -343,7 +382,18 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 		return nil, nil, nil, "", errors.Join(err, finish(receipts.Failed(200, "request_failed")))
 	}
 	if _, err := m.Receipts.FinishRead(ctx, r.started.Ticket(), bound, elapsed()); err != nil {
-		return nil, nil, nil, "", err
+		stopped := ctx.Err()
+		if stopped == nil {
+			return nil, nil, nil, "", err
+		}
+		// The caller left while the versions were being bound, so the store may have bound nothing. The read
+		// is not left pending: it finishes as an error, unless the binding did commit, in which case its
+		// receipt stands as finished ok. Either way the caller has gone and no card is made.
+		failed := finish(receipts.Failed(200, "request_failed"))
+		if errors.Is(failed, receipts.ErrFinished) {
+			failed = nil
+		}
+		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool}, stopped, failed)
 	}
 	records = make([]any, len(found))
 	for i, record := range found {
@@ -431,29 +481,29 @@ func gone(ctx context.Context) error {
 
 // await makes one read of the source and waits for it no longer than ctx lasts. The read runs in its own
 // goroutine. A source that ignores its context does not hold the maker: when ctx ends first, await returns
-// ctx's error, and the read's answer is discarded whenever it comes. A read that panics in time panics here.
+// ctx's error, and the read's answer is discarded whenever it comes. A source that panics is a read that
+// failed with ErrSourcePanicked, whether the panic comes before ctx ends or after: the goroutine recovers
+// it, and what it carried is dropped there.
 func (m *Maker) await(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, any, error) {
 	type answer struct {
 		system   string
 		records  []*strictjson.Object
 		snapshot any
 		err      error
-		panicked any
 	}
 	answered := make(chan answer, 1)
 	go func() {
 		var a answer
 		defer func() {
-			a.panicked = recover()
+			if recover() != nil {
+				a = answer{err: ErrSourcePanicked}
+			}
 			answered <- a
 		}()
 		a.system, a.records, a.snapshot, a.err = m.source(ctx, tool, accountID)
 	}()
 	select {
 	case a := <-answered:
-		if a.panicked != nil {
-			panic(a.panicked)
-		}
 		return a.system, a.records, a.snapshot, a.err
 	case <-ctx.Done():
 		return "", nil, nil, ctx.Err()
@@ -506,27 +556,83 @@ func projections(units []evidence.Unit, gaps []evidence.Gap, c collected) ([]rec
 // other failure leaves it pending, so it is finished here as the save failure.
 //
 // The caller's cancel counts up to the call of Publish and not after it. A caller who has left by then gets
-// no card, and the seal finishes as the failure. From that call on the publication runs to its end under a
-// context the caller cannot cancel: a cancel in the middle of the store's transaction could leave the caller
-// told of a failure while the card and its seal are committed.
+// no card, and the seal finishes as the failure. From that call on the publication runs under a context the
+// caller cannot cancel, for no longer than SettleLimit: a cancel in the middle of the store's transaction
+// could leave the caller told of a failure while the card and its seal are committed. A publication that
+// has not finished by the limit gives ErrNotPublished, with its seal finished as the failure.
 func (m *Maker) publish(ctx context.Context, p receipts.Publication, units []evidence.Unit, gaps []evidence.Gap,
 	text string, c collected, failure receipts.Outcome) (*Sealed, error) {
-	uncancelled := context.WithoutCancel(ctx)
+	sealed := func(card receipts.Card) *Sealed {
+		return &Sealed{BriefID: p.BriefID, Payload: card.Bytes, SHA256: card.SHA256, Seal: card.Seal, Units: units,
+			Gaps: gaps, Text: text}
+	}
 	var err error
 	if p.Units, p.Gaps, err = projections(units, gaps, c); err == nil {
 		if err = gone(ctx); err == nil {
 			var card receipts.Card
-			if card, err = m.Receipts.Publish(uncancelled, p); err == nil {
-				return &Sealed{BriefID: p.BriefID, Payload: card.Bytes, SHA256: card.SHA256, Seal: card.Seal,
-					Units: units, Gaps: gaps, Text: text}, nil
+			var late bool
+			if card, late, err = m.published(ctx, p); err == nil {
+				return sealed(card), nil
+			}
+			if late {
+				// One fixed error: what the store said of its wait can name the database.
+				err = ErrNotPublished
 			}
 		}
 	}
 	if !errors.Is(err, receipts.ErrNotPermitted) && !errors.Is(err, receipts.ErrSourceChanged) {
 		failure.ElapsedMS = p.ElapsedMS
-		_, _ = m.Receipts.Finish(uncancelled, p.Seal, failure)
+		if failed := m.finish(ctx, p.Seal, failure); errors.Is(failed, receipts.ErrFinished) {
+			// The seal finished another way. If it finished ok, the publication committed and only its
+			// acknowledgement was lost: the card is stored, and asking for it again returns it.
+			if card, stored := m.stored(ctx, p); stored {
+				return sealed(card), nil
+			}
+		}
 	}
 	return nil, err
+}
+
+// published publishes the card on a settling context. late reports a publication that failed because its
+// time ran out, by the maker's limit or by the store's own.
+func (m *Maker) published(ctx context.Context, p receipts.Publication) (card receipts.Card, late bool, err error) {
+	settling, cancel := m.settling(ctx)
+	defer cancel()
+	card, err = m.Receipts.Publish(settling, p)
+	late = err != nil && (settling.Err() != nil || errors.Is(err, receipts.ErrTimeout))
+	return card, late, err
+}
+
+// stored gives the card of a publication whose seal stands finished ok, as the store holds it.
+func (m *Maker) stored(ctx context.Context, p receipts.Publication) (receipts.Card, bool) {
+	settling, cancel := m.settling(ctx)
+	defer cancel()
+	seal, err := m.Receipts.Read(settling, p.WorkspaceID, []string{p.Seal.AuditID})
+	if err != nil || len(seal) != 1 || seal[0].Status != "ok" {
+		return receipts.Card{}, false
+	}
+	card, err := m.Receipts.Publish(settling, p)
+	return card, err == nil
+}
+
+// sealStart commits a card's pending seal. A start that the caller's cancel cut short may have committed all
+// the same, with its acknowledgement lost. The seal is then looked up by its operation, taken by starting
+// the same request again, which gives its lease, and finished as the failure, so it is not left pending.
+// The request carries this card's brief ID, so the seal found is this maker's own.
+func (m *Maker) sealStart(ctx context.Context, start receipts.Start, failure receipts.Outcome) (receipts.Receipt, error) {
+	seal, err := m.Receipts.Start(ctx, start)
+	if err == nil || ctx.Err() == nil {
+		return seal, err
+	}
+	settling, cancel := m.settling(ctx)
+	defer cancel()
+	if found, lookupErr := m.Receipts.ByOperation(settling, start.WorkspaceID, start.OperationID); lookupErr == nil &&
+		found.Status == "pending" {
+		if seal, startErr := m.Receipts.Start(settling, start); startErr == nil && seal.Status == "pending" {
+			_ = m.finish(ctx, seal.Ticket(), failure)
+		}
+	}
+	return receipts.Receipt{}, err
 }
 
 // Brief is briefing.create_brief: the card a person asks for with brief or demo. Each read is its own
@@ -573,9 +679,10 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	if err := gone(ctx); err != nil {
 		return nil, err
 	}
-	seal, err := m.Receipts.Start(ctx, receipts.Start{WorkspaceID: p.WorkspaceID, OperationID: b.OperationID + "/seal",
+	seal, err := m.sealStart(ctx, receipts.Start{WorkspaceID: p.WorkspaceID, OperationID: b.OperationID + "/seal",
 		PrincipalID: p.PrincipalID, TokenID: p.TokenID, Tool: receipts.SaveBrief, AccountRef: b.AccountID,
-		Arguments: strictjson.NewObject("account_id", b.AccountID, "brief_id", id), RequestID: receipts.Null()})
+		Arguments: strictjson.NewObject("account_id", b.AccountID, "brief_id", id), RequestID: receipts.Null()},
+		receipts.Failed(500, "brief_save_failed"))
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +698,7 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	if err != nil {
 		failure := receipts.Failed(500, "brief_save_failed")
 		failure.ElapsedMS = elapsed()
-		_, _ = m.Receipts.Finish(ctx, seal.Ticket(), failure)
+		_ = m.finish(ctx, seal.Ticket(), failure)
 		return nil, err
 	}
 	return m.publish(ctx, receipts.Publication{WorkspaceID: p.WorkspaceID, AccountRef: b.AccountID, BriefID: id,
@@ -650,8 +757,7 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 	fail := func(err error) (*Sealed, error) {
 		outcome := receipts.Failed(200, "request_failed")
 		outcome.ElapsedMS = elapsed()
-		_, finishErr := m.Receipts.Finish(context.WithoutCancel(ctx), outer.Ticket(), outcome)
-		return nil, errors.Join(err, finishErr)
+		return nil, errors.Join(err, m.finish(ctx, outer.Ticket(), outcome))
 	}
 	if !slices.Contains(principal.Scopes, "crm:read") {
 		return fail(ErrBriefing)

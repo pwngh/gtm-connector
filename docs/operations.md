@@ -50,7 +50,8 @@ are exactly the ones the binary carries. Otherwise it answers 503 with one of fo
 is ok.
 
 `gtm serve` asks it before it starts. On a database that is behind, ahead or changed it does not
-start, and it prints one line that says which.
+start, and it prints one line that says which. `gtm setup` migrates a database that is behind, and
+refuses one that is ahead or changed with the same line.
 
 ## Backup and restore
 

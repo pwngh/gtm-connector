@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,6 +27,30 @@ var (
 	ErrProjection = errors.New("the units and gaps differ from the card's bytes")
 	// ErrSealMismatch: the seal receipt is of another account or brief.
 	ErrSealMismatch = errors.New("the seal receipt names another account or brief")
+	// ErrPublishTimeout: the publication's transaction waited longer on a lock
+	// or ran a statement longer than it may. Nothing was written.
+	ErrPublishTimeout = errors.New("the publication waited too long on the database")
+)
+
+// A publication's transaction gives up on a lock after publishLockTimeout
+// and on any one statement after publishStatementTimeout, so a transaction
+// that another one blocks ends by itself and frees its connection. A
+// publication is a few statements on rows only this card writes, which takes
+// milliseconds: five seconds on a lock means its holder is stuck, and ten
+// seconds leaves room for the commit checks of a card of the largest size.
+// Both are under the card maker's own limit of fifteen seconds
+// (cards.SettleLimit), so the database gives up first and says why.
+const (
+	publishLockTimeout      = 5 * time.Second
+	publishStatementTimeout = 10 * time.Second
+)
+
+// lockNotAvailable and queryCanceled are the SQLSTATEs of a lock timeout and
+// of a statement timeout. A cancel request ends a statement with the second
+// too, so it is a timeout only while the caller's context has not ended.
+const (
+	lockNotAvailable = "55P03"
+	queryCanceled    = "57014"
 )
 
 // Card is a stored card: its bytes, their digest, and how it was sealed.
@@ -101,7 +126,22 @@ type CardPublication struct {
 // ErrNotPermitted (403), ErrSourceChanged (409), ErrProvenance or
 // ErrProjection (422). A retry after a lost acknowledgement, by the holder of
 // the seal's lease, returns the card.
+//
+// The transaction waits on a lock or runs one statement only so long
+// (publishLockTimeout, publishStatementTimeout). Past either it writes
+// nothing, leaves the seal pending and returns ErrPublishTimeout.
 func (s *Store) PublishCard(ctx context.Context, in CardPublication) (Card, error) {
+	return s.publishCard(ctx, in, nil)
+}
+
+// publishCard is PublishCard. held, when set, runs inside the transaction
+// once the card is written and its seal finished, with the card and the seal
+// as that transaction holds them; an error from it writes nothing. A caller
+// that needs more of the stored rows reads them there, so nothing is left to
+// fail once the commit has succeeded. held does not run for a retry, whose
+// card an earlier transaction wrote.
+func (s *Store) publishCard(ctx context.Context, in CardPublication,
+	held func(tx pgx.Tx, card Card, seal Receipt) error) (Card, error) {
 	if !validUUID(in.WorkspaceID) || !validUUID(in.SealReceiptID) || !validUUID(in.SealLeaseToken) {
 		return Card{}, ErrNotFound
 	}
@@ -117,7 +157,13 @@ func (s *Store) PublishCard(ctx context.Context, in CardPublication) (Card, erro
 		SchemaVersion: in.SchemaVersion, RulesVersion: in.RulesVersion, Bytes: in.Bytes, SHA256: digest[:],
 		ParentReceiptID: in.ParentReceiptID, SealReceiptID: in.SealReceiptID}
 	var refused error
+	lock, statement := s.publishTimeouts()
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		// For this transaction only: the settings end with it.
+		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true)`,
+			strconv.FormatInt(lock.Milliseconds(), 10), strconv.FormatInt(statement.Milliseconds(), 10)); err != nil {
+			return err
+		}
 		var live bool
 		sealed, err := scanReceiptWith(tx.QueryRow(ctx, `SELECT `+receiptColumns+`,
 			r.lease_expires_at > clock_timestamp()
@@ -204,12 +250,20 @@ func (s *Store) PublishCard(ctx context.Context, in CardPublication) (Card, erro
 		if err := s.at("publish:written"); err != nil {
 			return err
 		}
-		if _, err := finishLocked(ctx, tx, seal, false); err != nil {
+		finished, err := finishLocked(ctx, tx, seal, false)
+		if err != nil {
 			return err
+		}
+		if held != nil {
+			if err := held(tx, card, finished); err != nil {
+				return err
+			}
 		}
 		return s.at("publish:sealed")
 	})
 	switch {
+	case sqlState(err) == lockNotAvailable, sqlState(err) == queryCanceled && ctx.Err() == nil:
+		return Card{}, ErrPublishTimeout
 	case errors.Is(err, errNotPending):
 		// A retry after a lost acknowledgement: the same bytes under this seal.
 		published, lookupErr := s.cardBySeal(ctx, in.WorkspaceID, in.SealReceiptID)

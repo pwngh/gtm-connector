@@ -1,6 +1,7 @@
 package httptransport
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"path"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // basePolicy is the Content-Security-Policy of every response: only this
@@ -90,10 +92,11 @@ func underReserved(p string) bool {
 // prefix (routed elsewhere) never does.
 //
 // A browser keeps a file under assets/ for a year without asking again: the
-// build names each by its content's hash. It asks about index.html, and so
-// about every client route, on each use: the page names the build's assets,
-// so it is served as no-cache with an ETag of its bytes, and a request whose
-// If-None-Match names them gets 304.
+// build names each by its content's hash. It asks about every other file on
+// each use, index.html and so every client route among them: the page names
+// the build's assets, and a file such as robots.txt keeps its name from one
+// build to the next. Those are served as no-cache with an ETag of their
+// bytes, and a request whose If-None-Match names them gets 304.
 func (s *Server) serveApp(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET.")
@@ -143,6 +146,10 @@ func (s *Server) clientRoute(clean string) bool {
 // serveFile serves one regular file from the build, with a content type
 // from the fixed table. A folder is read through os.Root, so no path or link
 // leads outside it. It reports whether it served the file.
+//
+// A file outside assets/ is read once into memory, and its tag and its body
+// both come from those bytes. A folder that is built again while a request
+// is served cannot send one build's bytes under another's tag.
 func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) bool {
 	file, err := s.web.Open(name)
 	if err != nil {
@@ -160,23 +167,21 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, name string) 
 		w.Header().Set("Content-Disposition", "attachment")
 	}
 	w.Header().Set("Content-Type", kind)
-	switch {
-	case strings.HasPrefix(name, "assets/"):
+	if strings.HasPrefix(name, "assets/") {
 		// Vite names assets by their content's hash.
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	case name == "index.html":
-		// The tag is read from the file on each request, so a folder that is
-		// built again gives a new one. ServeContent answers If-None-Match.
-		digest := sha256.New()
-		if _, err := io.Copy(digest, content); err != nil {
-			return false
-		}
-		if _, err := content.Seek(0, io.SeekStart); err != nil {
-			return false
-		}
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("ETag", `"`+hex.EncodeToString(digest.Sum(nil))+`"`)
+		http.ServeContent(w, r, info.Name(), info.ModTime(), content)
+		return true
 	}
-	http.ServeContent(w, r, info.Name(), info.ModTime(), content)
+	body, err := io.ReadAll(content)
+	if err != nil {
+		return false
+	}
+	digest := sha256.Sum256(body)
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", `"`+hex.EncodeToString(digest[:])+`"`)
+	// ServeContent answers If-None-Match from the tag. The file's time is left out: the tag alone says
+	// whether a browser's copy is these bytes.
+	http.ServeContent(w, r, info.Name(), time.Time{}, bytes.NewReader(body))
 	return true
 }

@@ -74,8 +74,9 @@ func LatestSchemaVersion() int {
 }
 
 // Migrate applies every pending migration, each in its own transaction. It
-// refuses a database whose applied migrations differ from the embedded files,
-// and one that is newer than this binary.
+// refuses a database whose applied migrations differ from the embedded files
+// (changed), and one that is newer than this binary (ahead), in the lines
+// MigrationState.Err gives.
 func (s *Store) Migrate(ctx context.Context) error {
 	return s.migrateTo(ctx, LatestSchemaVersion())
 }
@@ -113,7 +114,8 @@ const (
 )
 
 // Err is why a server does not run on a database in this state, in one line,
-// and nil for a current one.
+// and nil for a current one. Setup refuses an ahead or a changed database
+// with the same lines.
 func (m MigrationState) Err() error {
 	switch m {
 	case MigrationsCurrent:
@@ -139,13 +141,28 @@ func (s *Store) MigrationState(ctx context.Context) (MigrationState, error) {
 	}
 	rows, _ := s.pool.Query(ctx, "SELECT version, sha256 FROM schema_migrations")
 	defer rows.Close()
-	same, ahead, changed := 0, false, false
+	applied := map[int]string{}
 	for rows.Next() {
 		var version int
 		var digest string
 		if err := rows.Scan(&version, &digest); err != nil {
 			return "", err
 		}
+		applied[version] = digest
+	}
+	if err := rows.Err(); sqlState(err) == undefinedTable {
+		return MigrationsBehind, nil
+	} else if err != nil {
+		return "", err
+	}
+	return standing(list, applied), nil
+}
+
+// standing is the state of these applied migrations, each version with its
+// recorded digest, against the embedded list.
+func standing(list []migration, applied map[int]string) MigrationState {
+	same, ahead, changed := 0, false, false
+	for version, digest := range applied {
 		switch {
 		case version < 1 || version > len(list):
 			ahead = true
@@ -155,20 +172,15 @@ func (s *Store) MigrationState(ctx context.Context) (MigrationState, error) {
 			same++
 		}
 	}
-	if err := rows.Err(); sqlState(err) == undefinedTable {
-		return MigrationsBehind, nil
-	} else if err != nil {
-		return "", err
-	}
 	switch {
 	case changed:
-		return MigrationsChanged, nil
+		return MigrationsChanged
 	case ahead:
-		return MigrationsAhead, nil
+		return MigrationsAhead
 	case same < len(list):
-		return MigrationsBehind, nil
+		return MigrationsBehind
 	}
-	return MigrationsCurrent, nil
+	return MigrationsCurrent
 }
 
 // undefinedTable is the SQLSTATE of a read from a table that does not exist.
@@ -208,13 +220,8 @@ func (s *Store) migrateTo(ctx context.Context, target int) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	for version, digest := range applied {
-		if version > len(list) {
-			return fmt.Errorf("the database is at schema %d, newer than this binary (%d)", version, len(list))
-		}
-		if list[version-1].sha256 != digest {
-			return fmt.Errorf("migration %s changed after it was applied", list[version-1].name)
-		}
+	if state := standing(list, applied); state == MigrationsAhead || state == MigrationsChanged {
+		return state.Err()
 	}
 	for _, m := range list {
 		if m.version > target {

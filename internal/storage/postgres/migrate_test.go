@@ -86,6 +86,38 @@ func TestEachMigrationStateRefusesInOneLine(t *testing.T) {
 	}
 }
 
+// Setup refuses a database that is ahead or changed in the lines serve
+// refuses it with, and says changed before ahead. It applies nothing.
+func TestSetupRefusesAnAheadOrAChangedDatabaseInTheSameLines(t *testing.T) {
+	url := pgtest.URL(t)
+	store, err := postgres.Open(ctx, url)
+	ok(t, err)
+	t.Cleanup(store.Close)
+	latest := postgres.LatestSchemaVersion()
+	ok(t, postgres.MigrateTo(store, ctx, latest-1))
+	refused := func(state string, want postgres.MigrationState) {
+		t.Helper()
+		if err := store.Migrate(ctx); err == nil || err.Error() != want.Err().Error() {
+			t.Fatalf("%s: setup answered %v", state, err)
+		}
+		if v, err := store.SchemaVersion(ctx); err != nil || v == latest {
+			t.Fatalf("%s: a refused setup migrated to schema %d (%v)", state, v, err)
+		}
+	}
+	digest := scalar(t, url, "SELECT sha256 FROM schema_migrations WHERE version = 1")
+
+	exec(t, url, fmt.Sprintf("INSERT INTO schema_migrations (version, name, sha256) VALUES (%d, 'later.sql', 'x')", latest+1))
+	refused("ahead", postgres.MigrationsAhead)
+	exec(t, url, "UPDATE schema_migrations SET sha256 = 'changed' WHERE version = 1")
+	refused("changed and ahead", postgres.MigrationsChanged)
+	exec(t, url, fmt.Sprintf("DELETE FROM schema_migrations WHERE version = %d", latest+1))
+	refused("changed", postgres.MigrationsChanged)
+
+	exec(t, url, fmt.Sprintf("UPDATE schema_migrations SET sha256 = '%s' WHERE version = 1", digest))
+	ok(t, store.Migrate(ctx))
+	stands(t, store, postgres.MigrationsCurrent, "behind, and so migrated")
+}
+
 // A migration holds the migration lock and writes its row before it commits,
 // and a restore creates schema_migrations inside its one transaction. The
 // check answers during both, from what is committed, and holds neither up.

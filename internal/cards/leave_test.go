@@ -18,12 +18,13 @@ import (
 
 // leaving is a store whose caller leaves at one step: after the last read has finished, after the reads'
 // receipts are read back for the evidence, after the seal has started, or as the publication begins. It keeps
-// whether the context each publication was given had ended.
+// how often the receipts were read back, and whether the context each publication was given had ended.
 type leaving struct {
 	*watched
 	at       string // "last read", "evidence", "seal" or "publish"
 	leave    func()
 	finished int
+	readBack int
 	ended    []bool
 }
 
@@ -39,7 +40,7 @@ func (l *leaving) FinishRead(ctx context.Context, ticket receipts.Ticket, versio
 
 func (l *leaving) Read(ctx context.Context, workspaceID string, auditIDs []string) ([]receipts.Receipt, error) {
 	read, err := l.watched.Read(ctx, workspaceID, auditIDs)
-	if l.at == "evidence" {
+	if l.readBack++; l.at == "evidence" {
 		l.leave()
 	}
 	return read, err
@@ -72,6 +73,19 @@ func (w *world) finishedOK(t *testing.T, operation string) {
 	}
 }
 
+// left fails the test unless the maker stopped where the caller left. After the last read it is the check at
+// the end of the reads that stops it: the receipts are never read back for the evidence. A caller who leaves
+// once they have been read back is stopped by the next check.
+func (l *leaving) left(t *testing.T) {
+	t.Helper()
+	if want := map[string]int{"last read": 0, "evidence": 1, "seal": 1}[l.at]; l.readBack != want {
+		t.Fatalf("the receipts were read back %d times, not %d", l.readBack, want)
+	}
+	if l.published != 0 {
+		t.Fatalf("%d cards published", l.published)
+	}
+}
+
 func TestACallerWhoLeftBeforeThePublicationGetsNoCard(t *testing.T) {
 	for name, fresh := range worlds(t) {
 		for _, at := range []string{"last read", "evidence", "seal"} {
@@ -84,9 +98,7 @@ func TestACallerWhoLeftBeforeThePublicationGetsNoCard(t *testing.T) {
 				if sealed != nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("a card: %t; %v", sealed != nil, err)
 				}
-				if store.published != 0 {
-					t.Fatalf("%d cards published", store.published)
-				}
+				store.left(t)
 				w.finishedOK(t, "brief-left/%d")
 				seal, err := w.store.ByOperation(context.Background(), w.workspace, "brief-left/seal")
 				if at != "seal" {
@@ -113,9 +125,7 @@ func TestACallerWhoLeftBeforeThePublicationGetsNoCard(t *testing.T) {
 				if sealed != nil || !errors.Is(err, context.Canceled) {
 					t.Fatalf("a card: %t; %v", sealed != nil, err)
 				}
-				if store.published != 0 {
-					t.Fatalf("%d cards published", store.published)
-				}
+				store.left(t)
 				w.finishedOK(t, "prepare-left#%d")
 				// The call's own receipt would be the seal; it finished as an error.
 				outer := must(w.store.ByOperation(context.Background(), w.workspace, "prepare-left"))
@@ -282,6 +292,13 @@ func TestTheDeadlineDoesNotWaitForAStuckRead(t *testing.T) {
 			})
 			if sealed != nil || !errors.Is(err, ErrDeadline) {
 				t.Fatalf("a card: %t; %v", sealed != nil, err)
+			}
+			// The maker gives the read up at the deadline whether or not the read's goroutine has run yet, so
+			// the read is counted only once the source says it has started.
+			select {
+			case <-source.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the read never started")
 			}
 			for range 2 {
 				w.stoppedAt(t, store, "prepare-stuck-late#3", 504)

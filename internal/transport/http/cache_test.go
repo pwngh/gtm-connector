@@ -1,19 +1,23 @@
 package httptransport_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	httptransport "github.com/pwngh/gtm-connector/internal/transport/http"
 )
 
 // These tests state what a browser may keep of each class of response: a
-// hashed asset for a year, the app's page only to ask about it again, and
-// nothing from the API.
+// hashed asset for a year, the app's page and any other file of the build
+// only to ask about it again, and nothing from the API.
 
 const (
 	keptForAYear = "public, max-age=31536000, immutable"
@@ -81,12 +85,93 @@ func TestThePageIsAskedAboutEachTimeAndTaggedByItsBytes(t *testing.T) {
 				}
 			}
 		}
-		// A path that does not fall back to the page gets neither its tag nor a 304.
+		// A path that does not fall back to the page gets neither its tag nor a 304 for it.
 		for _, path := range []string{"/assets/app.js", "/robots.txt", "/missing.png", "/random", "/api/v1/session", "/healthz"} {
 			w := send(s, http.MethodGet, path, publicHost, http.Header{"If-None-Match": {tag}})
 			if w.Code == http.StatusNotModified || w.Header().Get("ETag") == tag {
 				t.Errorf("%s: %s with the page's tag: %d, ETag %q", name, path, w.Code, w.Header().Get("ETag"))
 			}
+		}
+	}
+}
+
+// A file of the build outside assets/ keeps its name from one build to the
+// next, so it is asked about each time and tagged by its bytes, as the page
+// is, and carries no time of its own to be checked against.
+func TestAnyOtherFileOfTheBuildIsAskedAboutEachTime(t *testing.T) {
+	for name, s := range builds(t) {
+		tag := tagOf([]byte("User-agent: *"))
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			w := send(s, method, "/robots.txt", publicHost, nil)
+			if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != "no-cache" || w.Header().Get("ETag") != tag ||
+				w.Header().Get("Last-Modified") != "" || (method == http.MethodGet && w.Body.String() != "User-agent: *") {
+				t.Errorf("%s: %s /robots.txt: %d, Cache-Control %q, ETag %q, Last-Modified %q", name, method, w.Code,
+					w.Header().Get("Cache-Control"), w.Header().Get("ETag"), w.Header().Get("Last-Modified"))
+			}
+			w = send(s, method, "/robots.txt", publicHost, http.Header{"If-None-Match": {tag}})
+			if w.Code != http.StatusNotModified || w.Body.Len() != 0 || w.Header().Get("ETag") != tag {
+				t.Errorf("%s: %s /robots.txt with its tag: %d, %d bytes", name, method, w.Code, w.Body.Len())
+			}
+		}
+	}
+}
+
+// rebuilt is a build whose index.html is overwritten while a request reads
+// it: the file's first pass gives one build's page, and a second pass from
+// its start gives the next build's.
+type rebuilt struct{ first, second []byte }
+
+func (b rebuilt) Open(name string) (fs.File, error) {
+	if name != "index.html" {
+		return nil, fs.ErrNotExist
+	}
+	return &overwritten{Reader: bytes.NewReader(b.first), second: b.second}, nil
+}
+
+type overwritten struct {
+	*bytes.Reader
+	second []byte
+}
+
+func (o *overwritten) Seek(offset int64, whence int) (int64, error) {
+	if offset == 0 && whence == io.SeekStart && o.second != nil {
+		o.Reader, o.second = bytes.NewReader(o.second), nil
+	}
+	return o.Reader.Seek(offset, whence)
+}
+
+func (o *overwritten) Close() error { return nil }
+
+func (o *overwritten) Stat() (fs.FileInfo, error) { return stat(o.Reader.Size()), nil }
+
+// stat is a regular file of this size.
+type stat int64
+
+func (s stat) Name() string       { return "index.html" }
+func (s stat) Size() int64        { return int64(s) }
+func (s stat) Mode() fs.FileMode  { return 0o644 }
+func (s stat) ModTime() time.Time { return time.Time{} }
+func (s stat) IsDir() bool        { return false }
+func (s stat) Sys() any           { return nil }
+
+// The tag and the body come from one read of the file, so a build that
+// overwrites the page while it is served never sends one build's bytes under
+// the other's tag, and never answers 304 to the old tag for bytes it has not
+// read.
+func TestThePagesTagIsOfTheBytesItSends(t *testing.T) {
+	first := []byte("<!doctype html><title>the first build</title>")
+	second := []byte("<!doctype html><title>the second build</title>")
+	s := serving(t, httptransport.Config{Web: rebuilt{first, second}})
+	for _, path := range []string{"/", "/renewals/r-1/evidence"} {
+		w := send(s, http.MethodGet, path, publicHost, nil)
+		if w.Code != http.StatusOK || w.Header().Get("ETag") != tagOf(w.Body.Bytes()) {
+			t.Errorf("%s: %d, the body %q under the tag %s, which is not its own", path, w.Code, w.Body.String(),
+				w.Header().Get("ETag"))
+		}
+		w = send(s, http.MethodGet, path, publicHost, http.Header{"If-None-Match": {tagOf(second)}})
+		if w.Code != http.StatusOK || w.Header().Get("ETag") != tagOf(w.Body.Bytes()) {
+			t.Errorf("%s with the next build's tag: %d, the body %q under the tag %s", path, w.Code, w.Body.String(),
+				w.Header().Get("ETag"))
 		}
 	}
 }
