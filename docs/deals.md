@@ -18,7 +18,7 @@ gtm deal thornfield-2027 --refresh  # read the sources again first
 | Deal card, in the main pane | What changed since you last looked, then the risks and blockers. |
 | Proof drawer | The record, or the whole sentence with its speaker, time and source, behind the line you clicked. |
 | Communications | The deal's calls and Slack threads in time order. |
-| Work queue | What needs a person, across all your deals: open blockers, playbook work, and any call or thread that fits two deals and needs assigning. |
+| Work queue | Your open blockers and playbook work, across all your deals. |
 
 ## The five steps
 

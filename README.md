@@ -164,7 +164,7 @@ the binary. More in [running it](docs/operations.md).
 
 - A tool runs only after its receipt is committed. A refused call still gets a receipt.
 - One source's grant does not open another, and a person reads only the deals granted to them.
-- A call or thread joins a deal only by a rule you configured. One that fits two deals joins neither, both cards say so, and it shows as needing attention.
+- A call or thread joins a deal only by a rule you configured. One that fits two deals joins neither, both cards say so, and the engineer sees it as needing attention.
 - A card is built only from checked evidence. Evidence that fails a check gives no card.
 - A note cannot direct the workflow. An instruction inside one appears quoted and creates nothing.
 - The connector writes nothing to the CRM. Alerts and webhooks are off until you configure them.
