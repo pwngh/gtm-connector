@@ -1,8 +1,9 @@
 # Deal cards
 
 A Deal card is what the connector prints about one account before a renewal conversation. The
-connector writes every character of it. No model takes part. The `brief` command makes a card and
-saves it. A brief is a saved card with its evidence, and its brief ID starts with `brief-`.
+connector writes every character of it. No model takes part.
+
+The `brief` command makes a card and saves it:
 
 ```sh
 .venv/bin/python -m gtm_connector connect demo
@@ -11,97 +12,168 @@ saves it. A brief is a saved card with its evidence, and its brief ID starts wit
 .venv/bin/python -m gtm_connector inspect brief-REPLACE_WITH_ID 5
 ```
 
+A brief is a saved card with its evidence, and its brief ID starts with `brief-`.
+
 A card reads the sources its [state folder](cli.md) is connected to, and `brief` takes no source
-option.
+option. Each `brief`:
+
+1. starts local services,
+2. calls `get_account` and `list_opportunities`,
+3. calls `read_call_notes` and `read_slack_messages` for each of the two that is connected, in that
+   order,
+4. stops the services.
+
+It requests `crm:read`, `calls:read`, and `slack:read`, never `crm:write`. A source that is not
+connected is never called, and the card says "Calls: not connected." or "Slack: not connected."
 
 | Option | Meaning |
 | --- | --- |
 | `--without-calls` | Leaves `calls:read` out of the grant. The card says calls were not read. |
-| `--as-of YYYY-MM-DD` | Sets the planning date: the UTC day the card counts from. With no flag it is today in UTC, or `2027-01-15` on the demo CRM. A sentence of a call or message dated after it is counted and not shown. The date is the record's own time read in UTC, not a cue's place in a recording, and a time with no offset decides nothing. It is not a view of the past: the records are the ones read now, and the card's second line says when. |
+| `--as-of YYYY-MM-DD` | Sets the planning date: the UTC day the card counts from. With no flag it is today in UTC, or `2027-01-15` on the demo CRM. |
 | `--json` | Prints the card as `text` with its `units` and `gaps`. The raw records stay in the saved file. |
 
-Each `brief` starts local services, calls `get_account` and `list_opportunities`, then
-`read_call_notes` and `read_slack_messages` for each of the two that is connected, in that order,
-and stops the services. It requests `crm:read`, `calls:read`, and `slack:read`, never `crm:write`.
-A source that is not connected is never called, and the card says "Calls: not connected." or
-"Slack: not connected."
+A sentence of a call or message dated after the planning date is counted and not shown. That date
+is the record's own time read in UTC, not a cue's place in a recording, and a time with no offset
+decides nothing.
+
+The planning date is not a view of the past: the records are the ones read now, and the card's
+second line says when.
 
 ## Units
 
-A unit is one numbered piece of evidence, and a number on a card cites one. Evidence becomes
-numbered units in a fixed order: the account, its contacts, contracts, and
-opportunities by ID, then call text in the order of its time as written and then its ID, then Slack
-messages: demo messages in the order of their time as written, live messages by their Slack
-timestamp. On demo data, times written with different UTC offsets sort by their text, not by the
-moment they name. A transcript import converts its times to UTC first. A CRM record is one unit.
-Call and Slack text is one unit for each whole sentence, and a call or message with no sentence is
-one unit, so every record that was read has a number. Every number on a card is one of these.
-`inspect BRIEF_ID` lists them all, one per line. `inspect BRIEF_ID N` resolves a number to the source
-record, the [receipt](audit.md) of the read that returned it, and, for a sentence, its neutralized
-text, its speaker, the next sentence under the same speaker label in the same record, and the SHA-256 of the
-record's text as stored.
+A unit is one numbered piece of evidence, and every number on a card cites one. `inspect BRIEF_ID`
+lists them all, one per line.
+
+- A CRM record is one unit.
+- Call and Slack text is one unit for each whole sentence.
+- A call or message with no sentence is one unit, so every record that was read has a number.
+
+Evidence becomes numbered units in a fixed order:
+
+1. The account, its contacts, contracts, and opportunities by ID.
+2. Call text in the order of its time as written and then its ID.
+3. Slack messages: demo messages in the order of their time as written, live messages by their
+   Slack timestamp.
+
+On demo data, times written with different UTC offsets sort by their text, not by the moment they
+name. A transcript import converts its times to UTC first.
+
+`inspect BRIEF_ID N` resolves a number to the source record, the [receipt](audit.md) of the read
+that returned it, and, for a sentence, its neutralized text, its speaker, the next sentence under
+the same speaker label in the same record, and the SHA-256 of the record's text as stored.
+
+### The seal
 
 A saved card is sealed. Saving it commits one more receipt, `save_brief`, that holds the SHA-256 of
 the saved file: the evidence, the units, the card text, the seller list, and the date. That receipt
-is the card's seal. `inspect`
-reads the file, and refuses it unless that receipt is finished and names the digest of the file as
-it is now, and the receipts of the card's reads are the ones in the audit log. A changed amount,
-sentence, speaker, seller, date, or card text is refused. A card keeps the numbers it was sealed
-with: `inspect` answers from the sealed units and rebuilds nothing, so a later change to the rules
-cannot move or refuse them. It shows a sentence as sealed, and neutralizes one sealed under older
-neutralizer rules again under today's before showing it. A card saved
-before sealing says so and has to be made again. A save that does not finish leaves no file, and
-its receipt ends as an error; after a hard stop the receipt stays `pending` and names the card in
-`arguments`. The owner of the state folder can still rewrite the file and the audit log together:
-the log is not tamper-proof.
+is the card's seal.
+
+`inspect` reads the file, and refuses it unless that receipt is finished and names the digest of the
+file as it is now, and the receipts of the card's reads are the ones in the audit log.
+
+> **A changed card is refused.** That covers a changed amount, sentence, speaker, seller, date, or
+> card text.
+
+A card keeps the numbers it was sealed with. `inspect` answers from the sealed units and rebuilds
+nothing, so a later change to the rules cannot move or refuse them. It shows a sentence as sealed,
+and neutralizes one sealed under older neutralizer rules again under today's before showing it.
+
+A card saved before sealing says so and has to be made again. A save that does not finish leaves no
+file, and its receipt ends as an error. After a hard stop the receipt stays `pending` and names the
+card in `arguments`.
+
+> **The log is not tamper-proof.** The owner of the state folder can still rewrite the file and the
+> audit log together.
+
+### Unit keys
 
 A record unit has `n`, `kind`, `source`, `record_ref`, and `tool`. A sentence unit adds `at`,
 `speaker`, `role`, `basis`, `text`, `partial`, `raw_sha256`, `sanitizer_version` (the version of
 the neutralizer rules), and three more.
-`contact` is the number of the one contact a customer's label equals, or `null`. `shown` says
-whether the sentence is under `SAID`: `yes`, or why not: `cut` (not a whole sentence), `later`
-(its record is dated after the planning date), `long` (over 300 characters), `more` (whole, and past the 12
-places). Exactly one holds, in that order. `span` is `null` except in an imported
-transcript, where it names the first and last cue or line the sentence lies in and their times.
-The times of a `span` cover every cue the sentence lies in, whatever order the file wrote them in.
-A gap is one line under `NOT READ`. `gaps` holds one entry for each, in order: a `code` from a
-fixed list, a `disposition` (`not_read`, `read_not_shown`, or `note`), a `count`, `by_role`, and the line itself
-as `text`. `count` is how many records or sentences the line says were read and are not shown, how
-many its note is about, or how many files, attachments and blocks of a Slack read it says were not
-read; it is `null` when the line gives no such number. `by_role` is that count by speaker role, for
-a line that counts sentences. The codes are the keys of `GAP_CODES` in `gtm_connector/units.py`. A gap has no
-number. Read a unit's `kind` before any other key, and name a gap by its `code`, never by its
-text. A card sealed by an earlier version keeps the keys it was sealed with: `inspect` shows it
-without `contact`, `shown`, or `span`, and says `not recorded` for whether a sentence is shown.
+
+- `contact` is the number of the one contact a customer's label equals, or `null`.
+- `span` is `null` except in an imported transcript, where it names the first and last cue or line
+  the sentence lies in and their times. The times of a `span` cover every cue the sentence lies in,
+  whatever order the file wrote them in.
+- `shown` says whether the sentence is under `SAID`: `yes`, or why not.
+
+| `shown` | Why not |
+| --- | --- |
+| `cut` | Not a whole sentence. |
+| `later` | Its record is dated after the planning date. |
+| `long` | Over 300 characters. |
+| `more` | Whole, and past the 12 places. |
+
+Exactly one holds, in that order.
+
+A card sealed by an earlier version keeps the keys it was sealed with: `inspect` shows it without
+`contact`, `shown`, or `span`, and says `not recorded` for whether a sentence is shown.
+
+### Gaps
+
+A gap is one line under `NOT READ`. It has no number. `gaps` holds one entry for each, in order.
+
+| Key | Value |
+| --- | --- |
+| `code` | From a fixed list: the keys of `GAP_CODES` in `gtm_connector/units.py`. |
+| `disposition` | `not_read`, `read_not_shown`, or `note`. |
+| `count` | How many records or sentences the line says were read and are not shown, how many its note is about, or how many files, attachments and blocks of a Slack read it says were not read. It is `null` when the line gives no such number. |
+| `by_role` | That count by speaker role, for a line that counts sentences. |
+| `text` | The line itself. |
+
+Read a unit's `kind` before any other key, and name a gap by its `code`, never by its text.
 
 ## Sentences
 
-A sentence ends at closing punctuation or a blank line. A single line break inside a call note or
-a cue is a wrap, so a sentence written over two lines stays whole. In a Slack message each line is
-the author's own, so a line break ends a sentence there. A period after a title, a legal or
-state short form, a list marker, or a dotted short form such as "e.g." does not end a sentence, so
-"28 U.S.C. § 1332" and "Fed. R. Civ. P. 26(b)(3)" stay in one piece. A firm suffix or a capitalized
-initialism ("LLP.", "U.S.A.") ends one only before a word that opens a sentence. Where the text does not settle it, two sentences
-stay joined: a fragment is never shown as a sentence.
+A sentence ends at closing punctuation or a blank line.
+
+- A single line break inside a call note or a cue is a wrap, so a sentence written over two lines
+  stays whole.
+- In a Slack message each line is the author's own, so a line break ends a sentence there.
+- A period after a title, a legal or state short form, a list marker, or a dotted short form such as
+  "e.g." does not end a sentence, so "28 U.S.C. § 1332" and "Fed. R. Civ. P. 26(b)(3)" stay in one
+  piece.
+- A firm suffix or a capitalized initialism ("LLP.", "U.S.A.") ends one only before a word that
+  opens a sentence.
+
+Where the text does not settle it, two sentences stay joined: a fragment is never shown as a
+sentence.
 
 Two transcript cues join into one run only when they have the same speaker label and the second
 starts within two seconds of the first, or within ten when the first stops mid-sentence and the
-second goes on in lower case. Cues or lines with no label, or with no times, never join. In a
-transcript, a run that stops mid-sentence is counted and not shown. So is what may be its other
-half: the start of that speaker's next run, the next words of anyone when they go on in lower
-case, and each speaker's first words in an excerpt that starts inside a call. The end of a Slack
-message or a call note is an end. A sentence over 300 characters is counted and not shown, because
-a quotation is never cut.
+second goes on in lower case. Cues or lines with no label, or with no times, never join.
+
+In a transcript, a run that stops mid-sentence is counted and not shown. So is what may be its
+other half:
+
+- the start of that speaker's next run,
+- the next words of anyone when they go on in lower case,
+- each speaker's first words in an excerpt that starts inside a call.
+
+The end of a Slack message or a call note is an end.
+
+> **A quotation is never cut.** A sentence over 300 characters is counted and not shown.
 
 ## Sections
 
 | Section | What it holds |
 | --- | --- |
-| First two lines | The account as a quoted literal, its ID, and the planning date; then when the sources were read, to the second, from the receipts of the reads that were allowed. |
-| `ATTENTION` | Signals derived from record fields and dates. Omitted when there are none. |
+| First two lines | The account as a quoted literal, its ID, and the planning date. Then when the sources were read, to the second, from the receipts of the reads that were allowed. |
+| `ATTENTION` | The [signals](#signals). Omitted when there are none. |
 | `RECORD VALUES` | Typed CRM fields and connector arithmetic. An empty field prints `Missing`. An amount prints a currency only when the record carries one. At most five opportunities, contracts, and contacts are shown, and the rest are counted under `NOT READ`. |
-| `SAID` | Whole sentences under one line per role: the customer's first, then the seller's, then those of no established role. Each has its source, time, and speaker label. A customer's also has the title and number of the contact its label equals; one of no role says why. At most 12 are shown. The places are dealt one at a time to each role that still has a sentence, newest first (inside one call a later cue time is newer, and at one time the later sentence is), so sixty messages from a seller cannot push the customer's one sentence off the card. What is kept is printed in the order it was said. `NOT READ` counts what is not shown, by role. When sentences were read and none can be shown, the section says so. A figure inside a sentence stays there and never becomes a record value. |
+| `SAID` | Whole sentences under one line per role: the customer's first, then the seller's, then those of no established role. At most 12 are shown. |
 | `NOT READ` | What each source did not return or was not asked for, the fields that are empty, how many sentences are not shown, how many speakers have no role, and what was neutralized. When call sentences carry speaker labels and none equals any contact's name, one line says so. |
+
+Under `SAID`:
+
+- Each sentence has its source, time, and speaker label. A customer's also has the title and number
+  of the contact its label equals. One of no role says why.
+- The 12 places are dealt one at a time to each role that still has a sentence, newest first, so
+  sixty messages from a seller cannot push the customer's one sentence off the card. Inside one
+  call a later cue time is newer, and at one time the later sentence is.
+- What is kept is printed in the order it was said. `NOT READ` counts what is not shown, by role.
+- When sentences were read and none can be shown, the section says so.
+- A figure inside a sentence stays there and never becomes a record value.
 
 ## Signals
 
@@ -125,16 +197,28 @@ file, gets the same role.
 
 | Role | When |
 | --- | --- |
-| `seller` | The speaker label or Slack author equals a seller you listed with `--seller NAME` on `connect salesforce`, `connect calls`, or `connect slack`. The list is saved as `sellers.json` in the state folder: `{"schema_version": 1, "sellers": ["a name or Slack ID"]}`, at most 200 entries of 1 to 200 characters. Demo calls and demo Slack also count the demo's own invented sellers. An imported transcript or live Slack never does. |
+| `seller` | The speaker label or Slack author equals a seller you listed with `--seller NAME` on `connect salesforce`, `connect calls`, or `connect slack`. |
 | `customer` | A call's speaker label equals the name of exactly one contact of the account, and no listed seller. Slack authors are never customers. |
 | `unknown` | Everything else: no label, a label that matches nobody, two contacts with the name, or a name shared by a seller and a contact. |
 
-A report of what someone else said keeps the role of the person reporting it. In a WebVTT transcript
-the label is a voice tag, or a cue identifier that is not a number. A cue with two voice tags gives
-each span its own speaker, and text after a closing tag belongs to the cue again. The tag is the
-label and is not part of the sentence. In a transcript imported with
-[`--speaker-names`](calls.md), the label is the name that opens each line, and a cue identifier
-is not a label.
+The seller list is saved as `sellers.json` in the state folder, at most 200 entries of 1 to 200
+characters:
+
+```json
+{"schema_version": 1, "sellers": ["a name or Slack ID"]}
+```
+
+Demo calls and demo Slack also count the demo's own invented sellers. An imported transcript or live
+Slack never does.
+
+A report of what someone else said keeps the role of the person reporting it.
+
+In a WebVTT transcript the label is a voice tag, or a cue identifier that is not a number. A cue
+with two voice tags gives each span its own speaker, and text after a closing tag belongs to the
+cue again. The tag is the label and is not part of the sentence.
+
+In a transcript imported with [`--speaker-names`](calls.md), the label is the name that opens each
+line, and a cue identifier is not a label.
 
 ## Neutralized text
 
@@ -152,9 +236,10 @@ SHA-256 of the record's stored text. The account name in the heading is a quoted
 
 ## Saved result
 
-Each card and its evidence are saved in `briefs/<brief_id>.json` in the state folder, with `schema_version`
-(`3`), `brief_id`, `account_id`, `as_of`, `status`, `rules_version`, `sealed_by`, `sources`, `text`,
-`units`, `gaps`, and `evidence`.
+Each card and its evidence are saved in `briefs/<brief_id>.json` in the state folder, with
+`schema_version` (`3`), `brief_id`, `account_id`, `as_of`, `status`, `rules_version`, `sealed_by`,
+`sources`, `text`, `units`, `gaps`, and `evidence`.
+
 `brief --json` prints every key but `evidence`, which holds the raw records and one receipt per
 read. The saved file preserves the records read, not later CRM changes. Evidence that fails a check
 gives no card and saves nothing.

@@ -1,35 +1,32 @@
 # Audit, rate limits, and writes
 
-An audit receipt is a saved row for one tool attempt and its outcome. It has `audit_id`,
-`started_at`, `token_id`, `tool`, `arguments`, `request_id`, `brief_id`, `status`, `http_status`,
-`row_count`, `rows`, `elapsed_ms`, and `error`. `token_id` is the SHA-256 fingerprint of the
-presented bearer token, even a rejected one, or `anonymous`. `rows` holds record references.
-`inspect BRIEF_ID N` shows the receipt behind any number on a [Deal card](briefs.md), and
-`inspect RECEIPT_ID` shows one receipt with its arguments and the rows it returned.
-
-Saving a card adds one receipt that is not a tool attempt: `save_brief`, the card's
-[seal](briefs.md). Its
-`arguments` name the account and the card, its `rows` hold `briefs/<brief_id>/<SHA-256 of the saved
-file>`, and its `brief_id` is empty, so `--brief ID` lists the card's reads only. `--tool save_brief`
-lists the seals.
+An audit receipt is a saved row for one tool attempt and its outcome.
 
 ```sh
 gtm-connector audit --brief brief-REPLACE_WITH_ID --state-dir var/renewal-demo
 gtm-connector audit --caller anonymous --follow --json
 ```
 
-| Flag | Selects |
-| --- | --- |
-| `--state-dir PATH` | The [state folder](cli.md). The default is `var/v2`. |
-| `--brief ID`, `--tool NAME` | One card's reads or one run, or one exact tool name. |
-| `--caller VALUE` | A complete lowercase SHA-256 fingerprint from a receipt, or `anonymous`. Never a bearer token. |
-| `--status` | `ok`, `error`, or `pending`. |
-| `--since`, `--until` | Receipts started at or after `--since` and before `--until`, in ISO 8601 with `Z` or a UTC offset. `--since` must be the earlier one. |
-| `--follow` | Current matches, then new or changed ones, until Ctrl-C, which exits `130`. It polls every half second and can miss a change made and reversed between polls. A pending receipt and its final version share an `audit_id` and can both appear. `--status pending` never prints the later `ok` version. |
-| `--json` | The receipt array, or with `--follow` one receipt object per line. |
+`inspect BRIEF_ID N` shows the receipt behind any number on a [Deal card](briefs.md), and
+`inspect RECEIPT_ID` shows one receipt with its arguments and the rows it returned.
 
 Filters combine with AND. The command opens the database read-only and creates nothing. A missing
 database or receipt table is an error.
+
+| Flag | Selects |
+| --- | --- |
+| `--state-dir PATH` | The [state folder](cli.md). The default is `var/v2`. |
+| `--brief ID` | One card's reads or one run. |
+| `--tool NAME` | One exact tool name. |
+| `--caller VALUE` | A complete lowercase SHA-256 fingerprint from a receipt, or `anonymous`. Never a bearer token. |
+| `--status` | `ok`, `error`, or `pending`. |
+| `--since`, `--until` | Receipts started at or after `--since` and before `--until`, in ISO 8601 with `Z` or a UTC offset. `--since` must be the earlier one. |
+| `--follow` | Current matches, then new or changed ones, until Ctrl-C, which exits `130`. |
+| `--json` | The receipt array, or with `--follow` one receipt object per line. |
+
+`--follow` polls every half second and can miss a change made and reversed between polls. A pending
+receipt and its final version share an `audit_id` and can both appear. `--status pending` never
+prints the later `ok` version.
 
 ## What is recorded
 
@@ -37,13 +34,28 @@ The gateway is the service every tool call passes through. For each recognizable
 attempt, it commits one `pending` receipt before the tool runs. Success or rejection finalizes that
 same receipt.
 
-- If the first audit write fails, the tool does not run and the response is HTTP 503.
+> **The receipt comes first.** If the first audit write fails, the tool does not run and the
+> response is HTTP 503.
+
 - If finalizing fails, the response is HTTP 503 and no result is released. The receipt stays
   `pending` if the error cannot be recorded either.
 - After a 503 on `log_activity`, the activity may already exist. Retry with the same idempotency
   key and reconcile any pending receipt.
 - Unparseable traffic with no tool-call marker and requests that disconnect before execution get
   no receipt.
+
+A receipt has `audit_id`, `started_at`, `token_id`, `tool`, `arguments`, `request_id`, `brief_id`,
+`status`, `http_status`, `row_count`, `rows`, `elapsed_ms`, and `error`. `token_id` is the SHA-256
+fingerprint of the presented bearer token, even a rejected one, or `anonymous`. `rows` holds record
+references.
+
+Saving a card adds one receipt that is not a tool attempt: `save_brief`, the card's
+[seal](briefs.md).
+
+- `arguments` name the account and the card.
+- `rows` hold `briefs/<brief_id>/<SHA-256 of the saved file>`.
+- `brief_id` is empty, so `--brief ID` lists the card's reads only. `--tool save_brief` lists
+  the seals.
 
 ## Rate limits and writes
 

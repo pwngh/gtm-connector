@@ -1,25 +1,25 @@
 # Tools and source data
 
-The connector serves six tools over CRM, calls, and Slack. `connect demo` gives each of the three sources its
-own local SQLite store of invented records. A scope is the access a tool requires. A grant is a bearer token
-issued for a list of scopes.
+The connector serves six tools over CRM, calls, and Slack. A scope is the access a tool requires. A
+grant is a bearer token issued for a list of scopes.
 
 | Tool | Scope | Returns |
 | --- | --- | --- |
-| `search_accounts` | `crm:read` | The first 100 accounts whose name contains the literal query, ordered by name and then ID, or at most two exact Salesforce AccountNumber matches. Salesforce orders names by the user's locale, and the demo CRM ignores ASCII case. |
+| `search_accounts` | `crm:read` | The first 100 accounts whose name contains the literal query, ordered by name and then ID, or at most two exact Salesforce AccountNumber matches. |
 | `get_account` | `crm:read` | One account, its contacts, and with Salesforce its standard Contracts. |
 | `list_opportunities` | `crm:read` | Opportunities, for one account when given. |
 | `read_call_notes` | `calls:read` | Demo call notes, or the selected excerpt of an [imported transcript](calls.md). |
 | `read_slack_messages` | `slack:read` | Demo Slack messages, or the mapped [live thread](slack.md). |
 | `log_activity` | `crm:write` | The activity created, or the existing one for that idempotency key. |
 
-- Each tool declares its scope in `gtm.demo/requiredScope` metadata, and a call without it gets
-  HTTP 403.
+> **A call without the tool's scope gets HTTP 403.** Each tool declares its scope in
+> `gtm.demo/requiredScope` metadata.
+
 - Every record carries a reference such as `crm/accounts/acc-001`, `calls/call_notes/note-007`, or
   `slack/messages/msg-007`. Results are marked as untrusted data.
-- When more than 100 accounts match a name search, `search_accounts` returns the first 100 and adds
-  `has_more: true` beside `records`. Otherwise the field is absent. The receipt lists the records
-  returned.
+- For `search_accounts`, Salesforce orders names by the user's locale, and the demo CRM ignores
+  ASCII case. When more than 100 accounts match a name search, it adds `has_more: true` beside
+  `records`. Otherwise the field is absent. The receipt lists the records returned.
 - `debug serve --selection FILE` limits reads to the selected accounts and replaces `log_activity` with
   `prepare_renewal_brief` and `read_renewal_brief`, which return a [Deal card](briefs.md) as `text`
   with its numbered `units` and its `gaps`. See [selection](selection.md).
@@ -28,16 +28,25 @@ issued for a list of scopes.
 
 ## Fixtures
 
-The fixtures are the records of the demo data. The JSON value `"demo_fixture"` names them as a
-source. Every company, person, and message is invented, with `.example` email domains. `crm.sqlite3` holds
-30 accounts, 30 contacts, and 30 opportunities, each amount with a currency. `calls.sqlite3` holds
-30 notes, and `slack.sqlite3` holds 29 messages. The fixed demo date is `2027-01-15`.
+`connect demo` gives each of the three sources its own local SQLite store of invented records. The
+fixtures are the records of the demo data. The JSON value `"demo_fixture"` names them as a source.
+
+Every company, person, and message is invented, with `.example` email domains. The fixed demo date
+is `2027-01-15`.
+
+- `crm.sqlite3` holds 30 accounts, 30 contacts, and 30 opportunities, each amount with a currency.
+- `calls.sqlite3` holds 30 notes.
+- `slack.sqlite3` holds 29 messages.
 
 | Record | Case |
 | --- | --- |
-| `acc-001`, `acc-002` | `acc-001` renews in 17 days. `acc-002` is at risk. |
-| `acc-003` | Thornfield Wren LLP, the demo account. Its opportunity is in negotiation for USD 450,000.00. On one call (`note-003`, `note-003b`) a named seller promises a date and a named contact sets a condition. `msg-003` is a seller's report with a channel mention, a link, a second-hand figure, and one attached file that is not read. |
-| `acc-004`, `acc-005` | `acc-004` has no call notes. `acc-005` has no Slack messages. |
+| `acc-001` | Renews in 17 days. |
+| `acc-002` | Is at risk. |
+| `acc-003` | Thornfield Wren LLP, the demo account. Its opportunity is in negotiation for USD 450,000.00. |
+| `note-003`, `note-003b` | One call of `acc-003`. A named seller promises a date and a named contact sets a condition. |
+| `msg-003` | On `acc-003`, a seller's report with a channel mention, a link, a second-hand figure, and one attached file that is not read. |
+| `acc-004` | Has no call notes. |
+| `acc-005` | Has no Slack messages. |
 | `acc-006` | An October call note and a January Slack message disagree on seats. Both are quoted, and only the note's age is a signal. |
 | `acc-007` | Juniper Crest Learning renews on `2027-01-29`. Its contact has no role. |
 | `note-007`, `msg-007` | Each asks for a write. Both stay quoted data, and no activity is created. |
@@ -47,11 +56,12 @@ fixture set is rejected, and so are a combined CRM and calls database and a data
 currency, speaker, or file-count column. Nothing is migrated, so use a fresh `--state-dir`.
 
 In a folder connected to the demo data, `accounts --query 'Alder Vale'` and `inspect acc-003` read
-the demo book directly, outside MCP authorization: the folder's own `crm.sqlite3` once its services
-have run, and otherwise a copy in memory, so reading accounts writes nothing. A book that is a link,
-or a folder pinned to Salesforce, is refused. The account view leaves out opportunities and call
-notes. In a folder connected to
-Salesforce, `accounts` and `inspect` read the account through the scoped, audited gateway instead.
+the demo book directly, outside MCP authorization. They read the folder's own `crm.sqlite3` once its
+services have run, and otherwise a copy in memory, so reading accounts writes nothing.
+
+A book that is a link, or a folder pinned to Salesforce, is refused. The account view leaves out
+opportunities and call notes. In a folder connected to Salesforce, `accounts` and `inspect` read the
+account through the scoped, audited gateway instead.
 
 ## Run the guarantee checks
 
@@ -66,12 +76,16 @@ apart from the demo's.
 | Field | Result |
 | --- | --- |
 | `accounts` | `30` |
-| `notes_without_scope.status`, `rate_limit.status` | HTTP `403` and HTTP `429` |
+| `notes_without_scope.status` | HTTP `403` |
+| `rate_limit.status` | HTTP `429` |
 | `empty_notes` | `[]` for `acc-004` |
 | `idempotent_write` | `requests: 2`, `activities: 1` |
-| `audit_rows`, `brief_audit_rows`, `seal_audit_rows` | `12` connector receipts, `9` reads across the three cards, and `3` receipts that seal the saved cards |
+| `audit_rows` | `12` connector receipts |
+| `brief_audit_rows` | `9` reads across the three cards |
+| `seal_audit_rows` | `3` receipts that seal the saved cards |
 | `briefs` | Two [Deal cards](briefs.md): `acc-003` with calls access, `acc-001` without it |
-| `injection_note.activities_created`, `injection_brief.activities_created` | `0`, the second across all three cards, including `acc-007` |
+| `injection_note.activities_created` | `0` |
+| `injection_brief.activities_created` | `0` across all three cards, including `acc-007` |
 
 `debug verify --with-slack` adds a Slack read to each card and checks the CRM-to-Slack, Slack-to-CRM,
 and Slack-to-calls denials. `audit_rows` becomes `16` and `brief_audit_rows` becomes `12`. See
@@ -84,19 +98,25 @@ The server implements
 [authorization](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
 section. The official Python SDK is pinned to **2.3.0**.
 
+> **Authorization is a local owner emulator, not production login or consent.** `debug serve`
+> grants no scopes at startup. See the [security review](../SECURITY_REVIEW.md).
+
 - The transport is stateless Streamable HTTP with per-request protocol metadata and
   `server/discover`. Only revision 2026-07-28 is accepted. Subscriptions and legacy initialization
   sessions are not supported.
-- Requests with an `Origin` header or a body over 65,536 bytes are refused.
-- Authorization is a local owner emulator, not production login or consent. `debug serve` grants no
-  scopes at startup. See the [security review](../SECURITY_REVIEW.md).
-- S256 PKCE, state, and issuer are checked. A code lasts 60 seconds and works once. A token is
-  opaque, bound to the resource, and lasts five minutes.
+- Requests with an `Origin` header are refused.
+- S256 PKCE, state, and issuer are checked. A token is opaque and bound to the resource.
 - A restart invalidates every code and token. There are no refresh tokens and no dynamic client
   registration.
 - Keep `owner.json` and bearer tokens out of model inputs.
 - Inspector CLI 2.15.0 is tested with `protocolEra: modern` and an explicit bearer grant. See
   [clients](clients.md).
+
+| Limit | Value |
+| --- | --- |
+| Request body | Over 65,536 bytes is refused. |
+| Code | Lasts 60 seconds and works once. |
+| Token | Lasts five minutes. |
 
 ### Request refusals
 

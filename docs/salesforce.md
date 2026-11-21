@@ -1,16 +1,9 @@
 # Read an existing Salesforce org
 
 The Salesforce backend reads standard Account, Contact, Opportunity, and Contract records through
-REST v68.0 and never writes to Salesforce. Beside Salesforce, calls and Slack are not connected
-until you connect [imported transcripts](calls.md) or [live Slack](slack.md): a card says so, a
-direct tool call is refused with `calls_not_connected` or `slack_not_connected`, and demo data
-never stands in. Tests use invented HTTP responses and a fake `sf` executable.
-No live org has been verified.
-
-## Commands
-
-Sign in with [`sf`](https://developer.salesforce.com/tools/salesforcecli) under an alias, then
-connect a [state folder](cli.md) to it once:
+REST v68.0 and never writes to Salesforce. Sign in with
+[`sf`](https://developer.salesforce.com/tools/salesforcecli) under an alias, then connect a
+[state folder](cli.md) to it once:
 
 ```sh
 sf org login web --alias gtm-de
@@ -22,6 +15,31 @@ gtm-connector brief ACCOUNT_ID
 gtm-connector debug serve
 ```
 
+> **Demo data never stands in.** Beside Salesforce, calls and Slack are not connected until you
+> connect [imported transcripts](calls.md) or [live Slack](slack.md): a card says so, and a direct
+> tool call is refused with `calls_not_connected` or `slack_not_connected`.
+
+Tests use invented HTTP responses and a fake `sf` executable. No live org has been verified.
+
+## Commands
+
+`debug salesforce check` tests the credentials, the edition or environment, the four objects'
+fields, an account search, and one renewal candidate's account, opportunities, and card. A failed
+step fails the steps that depend on it with `prerequisite_failed`.
+
+`connect salesforce` writes the instance origin, org ID, and environment to private
+`crm-connection.json` in the state folder and saves nothing when the check fails. Every later
+command must match all three, or it fails with `source_identity_mismatch`. A folder that has read
+demo data also refuses, so connect Salesforce in a folder of its own.
+
+- One process holds a state folder at a time, so while `debug serve` runs, connect another folder
+  for the other commands.
+- Account IDs are `acc-sf-` followed by the 18-character Salesforce ID.
+- `--query` is a literal part of the account name. `accounts` returns the first 100 matches by name
+  and then ID and says when more match.
+- To connect a client, see [client setup](clients.md). To serve only named accounts, see
+  [selection](selection.md).
+
 | Option | Meaning |
 | --- | --- |
 | `connect salesforce --org ALIAS` | Reads credentials from this signed-in `sf` alias, checks the org's identity and environment, pins them to the folder, and saves the alias and environment in the folder's `profile.json`. It starts no services and reads no record. `accounts`, `inspect`, `brief`, `debug serve`, `debug calls import`, and `debug slack map` then read that org with no further option. An alias is never a username. |
@@ -29,45 +47,37 @@ gtm-connector debug serve
 | `--seller NAME` | Lists a seller's name or Slack user ID for [speaker roles](briefs.md). Repeat it for each. |
 | `--remove` | Detaches Salesforce, with its calls and Slack. The folder's files stay. |
 | `--state-dir PATH` | The private state folder, `var/v2` by default. Give `connect` and every later command the same one. |
-| `debug salesforce check --sf-org ALIAS`, `--sf-environment` | The setup check takes the alias and environment itself and reads no profile, so it runs before anything is connected. |
-
-Account IDs are `acc-sf-` followed by the 18-character Salesforce ID. `--query` is a literal part of
-the account name, at most 200 characters. `accounts` returns the first 100 matches by name and then
-ID and says when more match. To connect a client, see [client setup](clients.md). To serve only
-named accounts, see [selection](selection.md).
-
-`debug salesforce check` tests the credentials, the edition or environment, the four objects'
-fields, an account search, and one renewal candidate's account, opportunities, and card. A failed
-step fails the steps that depend on it with `prerequisite_failed`. A failed report exits `4`.
-
-`connect salesforce` writes the instance origin, org ID, and environment to private
-`crm-connection.json` in the state folder and saves nothing when the check fails. Every later
-command must match all three, or it fails with `source_identity_mismatch`. A folder that has read
-demo data also refuses, so connect Salesforce in a folder of its own. One process holds a state
-folder at a time, so while `debug serve` runs, connect another folder for the other commands.
+| `debug salesforce check --sf-org ALIAS`, `--sf-environment` | The setup check takes the alias and environment itself and reads no profile, so it runs before anything is connected. A failed report exits `4`. |
 
 ## Credentials
 
-Each command captures `sf org display` for the instance address and `sf org auth show-access-token`
-for the token of the connected alias. Each command may take 120 seconds, and both share a 180-second login deadline that
-is separate from each read's 20 seconds. Without `--json`, a command that waits on `sf` at startup
-says so on stderr after 2 seconds and then every 10. If a token expires during a read that still
-has time and requests left, the read runs `sf` again and then continues. stderr says when `sf`
-starts and when it answers, and `debug serve` says so with `--json` too. An `sf` that outlasts its limit
-is stopped with anything it started, and so is one still running when the connector exits. The
-connector keeps the token in memory and does not launch a login flow. `debug salesforce check` without
-`--sf-org` reads `SALESFORCE_INSTANCE_URL` and `SALESFORCE_ACCESS_TOKEN` from its environment, and
-no other command does. No default CLI org is ever selected. The instance address must be an HTTPS My Domain origin ending in
-`.my.salesforce.com`, with no path, query, credentials, or nonstandard port.
+Each command captures `sf org display` for the instance address and
+`sf org auth show-access-token` for the token of the connected alias. The instance address must be
+an HTTPS My Domain origin ending in `.my.salesforce.com`, with no path, query, credentials, or
+nonstandard port.
+
+> **No default CLI org is ever selected.** The connector keeps the token in memory and does not
+> launch a login flow.
+
+- Without `--json`, a command that waits on `sf` at startup says so on stderr after 2 seconds and
+  then every 10.
+- If a token expires during a read that still has time and requests left, the read runs `sf` again
+  and then continues. stderr says when `sf` starts and when it answers, and `debug serve` says so
+  with `--json` too.
+- An `sf` that outlasts its [limit](#limits) is stopped with anything it started, and so is one
+  still running when the connector exits.
+- `debug salesforce check` without `--sf-org` reads `SALESFORCE_INSTANCE_URL` and
+  `SALESFORCE_ACCESS_TOKEN` from its environment, and no other command does.
 
 ## Cards
 
 A [Deal card](briefs.md) for a Salesforce account plans from the Contract with the earliest non-null
 `EndDate` on or after the planning date, the UTC day the card counts from, breaking ties by
-Contract ID. Its status category must be
-`Draft`, `InApproval`, or `Activated`. The connector uses the `EndDate` that Salesforce returns and
-never calculates one. Salesforce fills `EndDate` from `StartDate` and `ContractTerm` only when the
-org's automatic calculation setting is on.
+Contract ID. Its status category must be `Draft`, `InApproval`, or `Activated`.
+
+> **The connector uses the `EndDate` that Salesforce returns and never calculates one.**
+> Salesforce fills `EndDate` from `StartDate` and `ContractTerm` only when the org's automatic
+> calculation setting is on.
 
 | The org returns | The card prints |
 | --- | --- |
@@ -98,11 +108,13 @@ standard fields.
 | Pages per query | 10. |
 | Contacts, opportunities, and contracts of one account | 1,000 each. One more fails with `salesforce_result_limit`. The account, its contacts, and its contracts are one read and share its 12 requests and 1 MiB, so wide rows or many small pages can fail below 1,000. A brief prepared for a client also has to fit that tool's 4 MiB. No partial records are returned. |
 | Rows of an opportunity list across accounts | 100. Excess rows fail the same way. |
+| `--query` text | 200 characters. |
 | Rows of an account search | The first 100 by name and then ID. When more match, the result adds `has_more: true`, and the match count alone no longer refuses the search. The read budgets above still apply. |
 | AccountNumber lookup | 2 rows. |
 | Operation deadline | 20 seconds of read time, checked around reads. A wait on `sf` for a login refresh is not counted. It is not a hard cancellation. |
 | Network timeout per request | The remaining deadline, up to 5 seconds. |
 | Local CLI client | 25 seconds for a response, and 205 seconds for a tool call that reads the CRM, which can wait for a login refresh. |
+| `sf` commands for credentials | 120 seconds each. Both share a 180-second login deadline that is separate from each read's 20 seconds. |
 | Retries | The first HTTP 401 in an operation asks `sf` for credentials once and confirms the org identity before retrying the GET, inside the same request and size limits. The `sf` wait has its own 180-second limit. No other upstream error is retried. |
 
 ## Errors
