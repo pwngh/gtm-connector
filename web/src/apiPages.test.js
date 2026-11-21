@@ -167,15 +167,13 @@ test('no app source renders HTML from a string', () => {
   }
 });
 
-// 4. On a server page the command palette offers server pages and an explicit way into the walkthrough.
-test('on a server page the palette offers only server pages and labelled walkthrough entries', () => {
+// 4. When the server serves the app, the command palette offers the server pages and nothing of the walkthrough.
+test('the server palette offers only the server pages, with the chosen account and open card kept', () => {
   const visited = [];
   const items = switcher.apiCommandItems(to => visited.push(to), '?account=acc-002&card=card-two&unit=4');
-  for (const item of items) assert.ok(['Read from the server', 'Walkthrough'].includes(item.group), item.group);
-  assert.deepEqual(items.filter(item => item.group === 'Read from the server').map(item => item.label), ['Evidence', 'Readiness']);
-  for (const item of items.filter(item => item.group === 'Walkthrough')) assert.match(item.sub, /invented records/i);
+  assert.deepEqual(items.map(item => [item.group, item.label]), [['Read from the server', 'Evidence'], ['Read from the server', 'Readiness']]);
   for (const item of items) item.onSelect();
-  assert.deepEqual(visited.slice(0, 2), [renewalFixture.paths.evidence + '?account=acc-002&card=card-two', renewalFixture.paths.root + '/readiness?account=acc-002&card=card-two']);
+  assert.deepEqual(visited, [renewalFixture.paths.evidence + '?account=acc-002&card=card-two', renewalFixture.paths.root + '/readiness?account=acc-002&card=card-two']);
 });
 
 // Minor: the picker commits a choice, it does not navigate on every change.
