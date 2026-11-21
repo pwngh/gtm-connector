@@ -39,78 +39,161 @@ func strip(s []rune) []rune {
 
 func hasPrefix(s []rune, prefix string) bool { return literal(s, 0, len(s), prefix) }
 
-// linkHost is the host a card shows for a link target (units._host).
-func linkHost(target []rune) string {
-	if hasPrefix(u.Lower(target), "mailto:") {
-		return "mail"
-	}
-	head := target
-	if len(head) > 40 {
-		head = head[:40]
-	}
-	url := target
-	if !strings.Contains(string(head), "//") {
-		// A browser reads https:files.example as https://files.example, and urlsplit would give https as the host.
-		if startsWithScheme(target) {
-			return "unknown host"
-		}
-		url = append([]rune("//"), target...)
-	}
-	if ambiguousAuthority(url) {
-		return "unknown host"
-	}
-	host := []rune{}
-	if parts, err := splitURL(url); err == nil {
-		host = u.Lower([]rune(hostName(parts.Netloc)))
-	}
-	for hasPrefix(host, "www.") {
-		host = host[4:]
-	}
-	if len(host) < 1 || len(host) > 80 || strings.Contains(string(host), "www.") {
-		return "unknown host"
-	}
-	for _, c := range host {
-		if !(c >= 'a' && c <= 'z' || asciiDigit(c) || c == '.' || c == '-') {
-			return "unknown host"
-		}
-	}
-	return string(host)
-}
+const unknownHost = "unknown host"
 
-// startsWithScheme is _SCHEME.match(target): a name and a colon at the start of a target. A www. address is a
-// host, and a colon in it starts a port.
-func startsWithScheme(target []rune) bool {
+// schemeEnd is where _SCHEME.match(target) ends: a name and a colon at the start of a link target. It is 0
+// when the target starts with no scheme.
+func schemeEnd(target []rune) int {
 	if len(target) == 0 || !asciiLetter(target[0]) {
-		return false
-	}
-	if len(target) > 3 && in(target[0], "Ww") && in(target[1], "Ww") && in(target[2], "Ww") && target[3] == '.' {
-		return false
+		return 0
 	}
 	i := 1
 	for i < len(target) && (asciiLetter(target[i]) || asciiDigit(target[i]) || in(target[i], "+.-")) {
 		i++
 	}
-	return i < len(target) && target[i] == ':'
+	if i < len(target) && target[i] == ':' {
+		return i + 1
+	}
+	return 0
 }
 
-// ambiguousAuthority is whether a link holds a backslash or a control character between its start and the
-// end of its authority: through the first //, up to the next /, ? or #. A browser reads a backslash there as
-// a slash and drops a tab or a line break, so urlsplit and a browser can name different hosts.
-func ambiguousAuthority(link []rune) bool {
-	end := len(link)
-	for i := 0; i+1 < len(link); i++ {
-		if link[i] == '/' && link[i+1] == '/' {
-			for end = i + 2; end < len(link) && !in(link[end], "/?#"); end++ {
+// linkAuthority is units._authority: the part of a link target that names its host, and whether the target
+// ends inside it. ok is false when a browser reads no host there. A bare target is a www. address in running
+// text, which a client opens as a web address, so a colon in it starts a port. Any other target that starts
+// with a name and a colon has a scheme.
+func linkAuthority(target []rune, bare bool) (authority []rune, open, ok bool) {
+	start, scheme := 0, 0
+	if !bare {
+		scheme = schemeEnd(target)
+	}
+	switch {
+	case scheme > 0:
+		// A browser reads https:files.example and https:/files.example as https://files.example, and a file
+		// link as a path on the reader's computer. A scheme longer than _RAW_LINK reads names no host either.
+		if !literal(target, scheme, len(target), "//") || scheme > 33 ||
+			strings.ToLower(string(target[:scheme])) == "file:" { // ASCII only
+			return nil, false, false
+		}
+		start = scheme + 2
+	case !bare && hasPrefix(target, "//"):
+		start = 2
+	}
+	end := start
+	for end < len(target) && !in(target[end], "/?#") {
+		end++
+	}
+	return target[start:end], end == len(target), true
+}
+
+// linkHost is units._host: the host a browser opens for a link target, read as the URL Standard reads it, or
+// "unknown host" when a browser would open another host, or none.
+func linkHost(target []rune, bare bool) string {
+	if hasPrefix(u.Lower(target), "mailto:") {
+		return "mail"
+	}
+	authority, _, ok := linkAuthority(target, bare)
+	if !ok {
+		return unknownHost
+	}
+	// A backslash, a control character or a bracket gives no host, and so does a character whose compatibility
+	// form is one of / ? # @ :.
+	for _, c := range authority {
+		if c < 0x20 || c >= 0x7F && c <= 0x9F || in(c, `\[]`) || c > 0x7F && u.NFKCNetloc(c) {
+			return unknownHost
+		}
+	}
+	// The host follows the last @ and ends at the first colon. A browser refuses a port that is not a number
+	// up to 65535.
+	_, hostPort, _ := partition(authority, '@', true)
+	name, port, _ := partition(hostPort, ':', false)
+	number, digits := 0, 0
+	for _, c := range port {
+		if !asciiDigit(c) {
+			return unknownHost
+		}
+		if digits > 0 || c != '0' {
+			digits++
+			if number = number*10 + int(c-'0'); digits > 5 || number > 65535 {
+				return unknownHost
 			}
-			break
 		}
 	}
-	for _, c := range link[:end] {
-		if c < 0x20 || c >= 0x7F && c <= 0x9F || c == '\\' {
-			return true
+	if len(name) < 1 || len(name) > 80 {
+		return unknownHost
+	}
+	for _, c := range name {
+		if !(asciiLetter(c) || asciiDigit(c) || c == '.' || c == '-') {
+			return unknownHost
 		}
 	}
-	return false
+	// A host that holds www. is not shown, because a client would turn it back into a link.
+	host := strings.ToLower(string(name)) // ASCII only
+	if strings.Contains(host, "www.") {
+		return unknownHost
+	}
+	// A browser reads a host whose last label is a number as an address and rewrites or refuses it: 0xc0000201
+	// and 3221225985 both open 192.0.2.1. Only four plain decimal parts stay as written.
+	labels := strings.Split(host, ".")
+	last := labels[len(labels)-1]
+	if len(labels) > 1 && last == "" {
+		last = labels[len(labels)-2]
+	}
+	if numberLabel(last) && !plainAddress(labels) {
+		return unknownHost
+	}
+	return host
+}
+
+// numberLabel is _NUMBER.fullmatch(label): decimal digits, or 0x and any hexadecimal digits.
+func numberLabel(label string) bool {
+	digits := []rune(label)
+	hex := strings.HasPrefix(label, "0x")
+	if hex {
+		digits = digits[2:]
+	} else if label == "" {
+		return false
+	}
+	for _, c := range digits {
+		if !(asciiDigit(c) || hex && c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// plainAddress is _IPV4.fullmatch(host) on the host's labels: four decimal numbers up to 255, none with a
+// leading zero.
+func plainAddress(labels []string) bool {
+	if len(labels) != 4 {
+		return false
+	}
+	for _, label := range labels {
+		if label == "" || len(label) > 3 || len(label) > 1 && label[0] == '0' {
+			return false
+		}
+		value := 0
+		for _, c := range label {
+			if !asciiDigit(c) {
+				return false
+			}
+			value = value*10 + int(c-'0')
+		}
+		if value > 255 {
+			return false
+		}
+	}
+	return true
+}
+
+// linkContinues is _CONTINUES.match(s, i): tabs or line breaks, then a character that is not a space and
+// does not start a path, a query or a fragment. A browser drops a tab or a line break from a link, so a link
+// cut by one goes on in what follows.
+func linkContinues(s []rune, i int) bool {
+	j := i
+	for j < len(s) && in(s[j], "\t\n\r") {
+		j++
+	}
+	return j > i && j < len(s) && !u.ReSpace(s[j]) && !in(s[j], "/?#")
 }
 
 // id is _ID.fullmatch: a letter or digit, then up to 127 letters, digits, underscores or hyphens.
@@ -155,9 +238,9 @@ func token(kind rune, target, label, whole []rune, counts *Counts) string {
 		// Slack renders any target|label pair as a link, whatever the target is.
 		counts.Links++
 		if text := strip(label); len(text) > 0 {
-			return string(text) + " [link " + linkHost(target) + "]"
+			return string(text) + " [link " + linkHost(target, false) + "]"
 		}
-		return "[link " + linkHost(target) + "]"
+		return "[link " + linkHost(target, false) + "]"
 	}
 	return string(whole)
 }
@@ -263,27 +346,36 @@ func SafeText(raw string) (string, Counts, error) {
 		if len(target) == 0 || k >= n || text[k] != ')' {
 			return 0, "", false
 		}
-		if _, ok := Target(target); !ok {
+		// A client renders a target with any scheme as a link, whatever follows the colon.
+		if _, ok := Target(target); !ok && schemeEnd(target) == 0 {
 			return k + 1, string(text[i : k+1]), true
 		}
 		counts.Links++
-		return k + 1, string(text[i+1:j]) + " [link " + linkHost(target) + "]", true
+		return k + 1, string(text[i+1:j]) + " [link " + linkHost(target, false) + "]", true
 	})
 	// _RAW_LINK, with closing punctuation around a link left outside it.
-	links := RawLinks(text)
+	links := rawLinks(text)
 	text = substitute(text, func(i int) (int, string, bool) {
 		if len(links) == 0 || links[0].Start != i {
 			return 0, "", false
 		}
-		link := text[links[0].Start:links[0].End]
-		end := links[0].End
+		link, end, bare := text[links[0].Start:links[0].End], links[0].End, links[0].www
 		links = links[1:]
 		kept := len(link)
 		for kept > 0 && in(link[kept-1], ".,;:!?)]}'\"") {
 			kept--
 		}
+		host := linkHost(link[:kept], bare)
+		// A dot right after the host or its port may end the link or the sentence, and a browser opens a
+		// different host for each, or none. A link cut by a tab or a line break before its host ends goes on in
+		// a browser, to another host.
+		_, open, _ := linkAuthority(link, bare)
+		if kept < len(link) && link[kept] == '.' && linkHost(link[:kept+1], bare) != host ||
+			open && linkContinues(text, end) {
+			host = unknownHost
+		}
 		counts.Links++
-		return end, "[link " + linkHost(link[:kept]) + "]" + string(link[kept:]), true
+		return end, "[link " + host + "]" + string(link[kept:]), true
 	})
 
 	visible := make([]rune, 0, len(text))
@@ -300,6 +392,27 @@ func SafeText(raw string) (string, Counts, error) {
 			visible = append(visible, c)
 		}
 	}
+	// _OPEN_TARGET: (\]\(\s*)([A-Za-z][A-Za-z0-9+.-]*:[^\s<>"']*), a Markdown target with a scheme that
+	// still follows a ]( in the finished text.
+	visible = substitute(visible, func(i int) (int, string, bool) {
+		n := len(visible)
+		if visible[i] != ']' || i+1 >= n || visible[i+1] != '(' {
+			return 0, "", false
+		}
+		j := i + 2
+		for j < n && u.ReSpace(visible[j]) {
+			j++
+		}
+		k := j + schemeEnd(visible[j:])
+		if k == j {
+			return 0, "", false
+		}
+		for k < n && !u.ReSpace(visible[k]) && !in(visible[k], `<>"'`) {
+			k++
+		}
+		counts.Links++
+		return k, string(visible[i:j]) + "[link " + linkHost(visible[j:k], false) + "]", true
+	})
 	// _CITATION: a bracketed integer is how a card cites a unit, so source text never keeps one.
 	result := substitute(visible, func(i int) (int, string, bool) {
 		if visible[i] != '[' {
