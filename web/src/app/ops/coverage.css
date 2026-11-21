@@ -191,6 +191,12 @@
 }
 
 @media (min-width: 720px) {
+  /* With a zero minimum, WebKit keeps the table's first column widths as the
+     rows fill in, and the links run past its edge. */
+  .fr .cv {
+    grid-template-columns: minmax(auto, 1fr);
+  }
+
   .fr .cv-table .cv-cards {
     text-align: right;
   }
