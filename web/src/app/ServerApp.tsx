@@ -15,6 +15,7 @@ import './deals/deals.css';
 import './deals/card/card.css';
 import './deals/card/proof.css';
 import './deals/card/text.css';
+import './deals/card/communications.css';
 import './deals/card/lines.css';
 import '../ui/help.css';
 import './ops/coverage.css';
