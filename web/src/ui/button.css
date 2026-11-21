@@ -1,0 +1,46 @@
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gc-space-2);
+  min-width: var(--gc-target);
+  min-height: var(--gc-target);
+  margin: 0;
+  padding: 0 var(--gc-space-4);
+  border: var(--gc-rule-width) solid var(--gc-control);
+  border-radius: var(--gc-radius-control);
+  background: var(--gc-surface);
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ui-button:hover {
+  border-color: var(--gc-accent);
+}
+
+.ui-button:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
+.ui-button--primary {
+  border-color: var(--gc-accent);
+  background: var(--gc-accent);
+  color: var(--gc-on-accent);
+}
+
+.ui-button--quiet {
+  border-color: transparent;
+  background: transparent;
+}
+
+.ui-button--quiet:hover {
+  border-color: var(--gc-control);
+}
+
+.ui-button[aria-disabled="true"] {
+  cursor: progress;
+}

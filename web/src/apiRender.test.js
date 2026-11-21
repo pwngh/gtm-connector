@@ -7,7 +7,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {prerenderToNodeStream} from 'react-dom/static';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
-import {serverPaths} from './app/routes.js';
+import {serverPaths} from './app/routes.ts';
 
 // The card is the connector demo's sealed acc-003 card from the oracle fixtures,
 // shaped as GET /api/v1/cards/{card} returns it. Only IDs and times are made up.
@@ -27,14 +27,15 @@ const receipt = tool => ({id: readId(tool), operation_id: 'op#1', parent_id: 're
   row_count: 2, rows: [], elapsed_ms: 1, error: null, started_at: '2027-01-15T15:00:00Z', finished_at: '2027-01-15T15:00:01.25Z', delivered_at: null});
 const principal = {id: 'p-1', display_name: 'Demo reviewer', kind: 'person', workspace_id: 'w-1', workspace_kind: 'demo', demo: true};
 
-let server, ServerShell, ServerPalette, ServerContext, boot, RouteError, CommandPalette, evidence, readiness, frame;
+let server, Frame, ServerContext, boot, RouteError, Palette, pageItems, evidence, readiness, frame;
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error'});
-  ({ServerShell, ServerPalette} = await server.ssrLoadModule('/src/app/ServerApp.jsx'));
-  ({boot} = await server.ssrLoadModule('/src/app/boot.jsx'));
+  ({Frame} = await server.ssrLoadModule('/src/app/frame/Frame.tsx'));
+  ({pageItems} = await server.ssrLoadModule('/src/app/frame/pages.ts'));
+  ({boot} = await server.ssrLoadModule('/src/app/boot.tsx'));
   ({RouteError} = await server.ssrLoadModule('/src/RouteContent.jsx'));
-  CommandPalette = (await server.ssrLoadModule('/src/CommandPalette.jsx')).default;
-  ServerContext = (await server.ssrLoadModule('/src/ServerSwitch.jsx')).ServerContext;
+  ({Palette} = await server.ssrLoadModule('/src/ui/Palette.tsx'));
+  ({ServerContext} = await server.ssrLoadModule('/src/api/reads.ts'));
   evidence = await server.ssrLoadModule('/src/ApiEvidence.jsx');
   readiness = await server.ssrLoadModule('/src/ApiReadiness.jsx');
   frame = await server.ssrLoadModule('/src/ApiFrame.jsx');
@@ -47,7 +48,7 @@ function storeOf(state, settle = state) {
 }
 async function renderServer(path, store) {
   const {prelude} = await prerenderToNodeStream(React.createElement(ServerContext, {value: store},
-    React.createElement(MemoryRouter, {initialEntries: [path]}, React.createElement(ServerShell))));
+    React.createElement(MemoryRouter, {initialEntries: [path]}, React.createElement(Frame))));
   let html = '';
   for await (const chunk of prelude) html += chunk;
   return html;
@@ -59,30 +60,38 @@ test('API mode: Evidence and Readiness read from the server', async () => {
   const session = {signed_in: true, principal, csrf_token: 't', expires_at: '2027-01-15T23:00:00Z'};
   const page = await renderServer(serverPaths.evidence, storeOf({mode: 'api', session, error: null, ended: false}));
   assert.match(page, /class="plain-panel evidence-library api-evidence"/);
-  assert.match(text(page), /Signed in as a demo principal Demo reviewer Demo principal · demo workspace/);
+  assert.match(text(page.slice(0, page.indexOf('<main'))), /Demo, invented records .*Find a page .*Demo reviewer Sign out/);
   // Without ?account= the page waits for the principal's accounts before it reads any cards.
   assert.match(text(page), /Reading your accounts…/);
   assert.doesNotMatch(text(page), /Reading cards for/);
-  assert.doesNotMatch(page, /class="evidence-flow|data-record-id|library-row/);
+  assert.doesNotMatch(page, /class="evidence-flow|data-record-id|library-row|name="login"/);
   const rd = await renderServer(serverPaths.readiness + '?account=acc-001', storeOf({mode: 'api', session, error: null, ended: false}));
   assert.match(rd, /class="rd-page api-readiness"/);
   assert.match(text(rd), /Reading your accounts… Reading cards for acc-001/);
   assert.doesNotMatch(rd, /data-check-result="(passed|failed)"/);
 });
 
-test('API mode: signed out, ended, and unreachable states show no evidence', async () => {
+test('API mode: signed out, ended, and unreachable states show the sign-in screen and no evidence', async () => {
   const out = await renderServer(serverPaths.evidence, storeOf({mode: 'api', session: {signed_in: false, principal: null, csrf_token: 'p'}, error: null, ended: false}));
-  assert.match(out, /name="login"/);
-  assert.match(out, /type="password"/);
-  assert.match(out, /autoComplete="current-password"|autocomplete="current-password"/);
-  assert.doesNotMatch(out, /ended or was revoked|library-row/);
+  assert.match(out, /<h1 id="fr-signin-title" class="fr-signin__title" tabindex="-1">Sign in<\/h1>/);
+  assert.match(text(out), /This install signs in a demo principal\. Its records are invented\./);
+  const field = label => out.match(new RegExp(`<label class="ui-field__label" for="([^"]+)">${label}</label><input ([^>]*)/>`));
+  const [, loginFor, login] = field('Login');
+  assert.match(login, new RegExp(`autoComplete="username".* id="${loginFor}" .*name="login"`, 'i'));
+  const [, passwordFor, password] = field('Password');
+  assert.match(password, new RegExp(`type="password" autoComplete="current-password".* id="${passwordFor}" .*name="password"`, 'i'));
+  assert.match(text(out), /The login is demo-reviewer \. The password is in demo-credentials\.json in this install’s credentials folder\. setup printed the folder’s path\./);
+  assert.match(out, /<button type="submit" class="ui-button ui-button--primary">Sign in<\/button>/);
+  assert.doesNotMatch(out, /Your session ended|library-row|api-renewal-header|fr-areas|Sign out/);
   const ended = await renderServer(serverPaths.evidence, storeOf({mode: 'api', session: {signed_in: false, principal: null, csrf_token: 'p'}, error: null, ended: true}));
-  assert.match(text(ended), /Your session ended or was revoked. You are signed out./);
+  assert.match(text(ended), /Your session ended\. Sign in again\./);
+  assert.match(ended, /name="login"/);
   const gone = await renderServer(serverPaths.evidence, storeOf({mode: 'unreachable', session: null, error: {kind: 'unreachable'}}));
-  assert.match(text(gone), /The server did not answer. Nothing was read, and nothing is shown in its place./);
+  assert.match(text(gone), /The server did not answer\. Nothing was read, and nothing is shown in its place\. Try again/);
   assert.doesNotMatch(gone, /library-row|name="login"/);
   const refused = await renderServer(serverPaths.readiness, storeOf({mode: 'api', session: null, error: {kind: 'server', code: 'internal'}}));
-  assert.match(text(refused), /The server could not answer. .* Server code: internal/);
+  assert.match(text(refused), /The server could not answer\. .* Server code: internal/);
+  assert.doesNotMatch(refused, /name="login"|api-readiness/);
 });
 
 test('a card renders every unit with its number, exact text, speaker, role, basis and receipt, and its gaps by code', () => {
@@ -143,7 +152,7 @@ test('Readiness from the card: unread or unshown gaps as open items, notes apart
   assert.deepEqual(readiness.unitCounts(card.units), {total: 9, sentences: 6, records: 3, notShown: 0, partial: 0, customer: 2});
 });
 
-// What the shell shows on a server page.
+// What the frame shows on a server page.
 const returns = '?account=acc-003';
 const signedIn = {mode: 'api', session: {signed_in: true, principal, csrf_token: 't', expires_at: '2099-01-15T23:00:00Z'}, error: null, ended: false};
 const apiStates = {
@@ -153,58 +162,89 @@ const apiStates = {
   unreachable: {mode: 'unreachable', session: null, error: {kind: 'unreachable'}},
 };
 
+// The frame's own parts: the top bar's links and controls, and the area's page links.
+function chrome(html) {
+  const bar = html.slice(html.indexOf('<header class="fr-bar"'), html.indexOf('</header>'));
+  const links = part => [...part.matchAll(/<a [^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map(match => [match[2], match[1].replaceAll('&amp;', '&'), /aria-current="page"/.test(match[0])]);
+  const pages = html.includes('class="fr-pages"') ? html.slice(html.indexOf('class="fr-pages"')).split('</nav>')[0] : '';
+  const controls = [...bar.matchAll(/<button [^>]*>([\s\S]*?)<\/button>/g)].map(match => (match[0].match(/aria-label="([^"]+)"/)?.[1] ?? text(match[1]).trim()));
+  return {mark: text(bar.split('</span></span>')[0]).trim(), areas: links(bar), pages: links(pages), controls,
+    demo: /Demo, invented records/.test(bar), name: bar.match(/class="fr-who">([^<]*)</)?.[1] ?? null};
+}
+const signedInChrome = (path, query) => ({mark: 'gtm-connector', areas: [['Ops', serverPaths.evidence + query, true]],
+  pages: [['Evidence', serverPaths.evidence + query, path === serverPaths.evidence], ['Readiness', serverPaths.readiness + query, path === serverPaths.readiness]],
+  controls: ['Find a page', 'Dark theme', 'Sign out', 'Menu'], demo: true, name: 'Demo reviewer'});
+const signedOutChrome = {mark: 'gtm-connector', areas: [], pages: [], controls: [], demo: false, name: null};
+
 for (const [page, path] of [['evidence', serverPaths.evidence], ['readiness', serverPaths.readiness]]) {
-  for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${page}, ${name}: the shell shows only what the server supports`, async () => {
+  for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${page}, ${name}: the frame shows only what the server supports`, async () => {
     const html = await renderServer(path + returns, storeOf(state));
-    const shown = text(html);
-    assert.deepEqual(shell(html), serverShell(state, 'Renewal Read from the server', '?account=acc-003'));
+    assert.deepEqual(chrome(html), name === 'signed in' ? signedInChrome(path, returns) : signedOutChrome);
+    if (name !== 'signed in') {
+      assert.doesNotMatch(html, /api-renewal-header|library-row|data-open-gap/);
+      return;
+    }
     // The account from the link is not verified until the account list is read.
+    const shown = text(html);
     assert.match(html, /<h1>Account not verified<span class="company-dot">/);
     assert.match(shown, /Account ID acc-003 ?, not verified/);
     assert.match(shown, /Renewal date, agreement and owner: not available from the server yet/);
-    assert.match(shown, /Renewal Read from the server/);
-    const tabs = [...html.slice(html.indexOf('aria-label="Renewal sections"')).split('</nav>')[0].matchAll(/<a [^>]*>([^<]+)<\/a>/g)].map(match => match[1]);
-    assert.deepEqual(tabs, ['Readiness', 'Evidence']);
+    // The page's own navigation is gone: the frame links the pages.
+    assert.doesNotMatch(html, /aria-label="Renewal sections"|class="detail-nav"/);
   });
 }
 
-// Paths the server sends to the app that are not a server page.
+test('the frame keeps the account and open card in its links, never the open unit, and names no area without a page', async () => {
+  const html = await renderServer(serverPaths.readiness + '?account=acc-002&card=card-two&unit=4', storeOf(signedIn));
+  const {areas, pages} = chrome(html);
+  assert.deepEqual(areas, [['Ops', serverPaths.evidence + '?account=acc-002&card=card-two', true]]);
+  assert.deepEqual(pages.map(([label, href]) => [label, href]), [['Evidence', serverPaths.evidence + '?account=acc-002&card=card-two'], ['Readiness', serverPaths.readiness + '?account=acc-002&card=card-two']]);
+  assert.doesNotMatch(html, />Deals</);
+});
+
+test('the demo tag shows for a principal with demo true and not for one with demo false', async () => {
+  const shownFor = async demo => {
+    const html = await renderServer(serverPaths.evidence, storeOf({...signedIn, session: {...signedIn.session, principal: {...principal, demo, workspace_kind: demo ? 'demo' : 'customer'}}}));
+    return (html.match(/Demo, invented records/g) || []).length;
+  };
+  // Once in the top bar and once in the row a phone shows under it.
+  assert.equal(await shownFor(true), 2);
+  assert.equal(await shownFor(false), 0);
+});
+
+test('a session past its expiry is never shown as signed in, and nothing read is on screen', async () => {
+  const late = {...signedIn, session: {...signedIn.session, expires_at: '2020-01-01T00:00:00Z'}};
+  const html = await renderServer(serverPaths.evidence + returns, {...storeOf(late), check: () => Promise.resolve(late)});
+  assert.deepEqual(chrome(html), signedOutChrome);
+  assert.match(text(html), /Your session ended\. Sign in again\./);
+  assert.doesNotMatch(html, /api-renewal-header|api-evidence|Demo reviewer/);
+});
+
+// Paths the server sends to the app that are not a page.
 const otherPaths = ['/deals', '/deals/acc-003', '/ops/nothing', '/ops/workplan', '/ops/history', '/ops/evidence/extra'];
-// What the navigation, the header and the footer offer.
-function shell(html) {
-  const between = (open, close) => html.slice(html.indexOf(open)).split(close)[0];
-  const sidebar = between('id="workspace-navigation"', '</aside>');
-  const links = [...between('<nav aria-label="Workspace"', '</nav>').matchAll(/<a [^>]*href="([^"]+)"[^>]*>.*?<span>([^<]+)<\/span>/g)].map(match => [match[2], match[1].replaceAll('&amp;', '&')]);
-  const brand = sidebar.match(/<a [^>]*class="brand[^"]*"[^>]*>[\s\S]*?<\/a>/)[0];
-  return {label: sidebar.match(/class="nav-label">([^<]*)</)[1], links, brand: brand.match(/href="([^"]+)"/)[1], name: brand.replace(/<[^>]+>/g, ''),
-    beforeNav: text(sidebar.slice(sidebar.indexOf(brand) + brand.length).split('<nav')[0]).trim(),
-    belowNav: text(sidebar.split('</nav>')[1]).trim(), crumbs: text(between('class="breadcrumbs', '</div>').split('</button>')[1]).trim(),
-    profile: between('class="workspace-toolbar"', '</header>').match(/class="profile"[^>]*aria-label="([^"]+)"/)[1], footer: html.match(/<span>([^<]*)<\/span><\/footer>/)[1],
-    site: text(between('<footer', '</footer>').replace(/^[^>]*>/, '')).trim()};
-}
-// The whole of it when the server serves the app: its own name, the two server pages and the signed-in principal.
-const serverShell = (state, crumbs, query = '') => ({label: 'READ FROM THE SERVER', brand: serverPaths.evidence, name: 'gtm-connector', beforeNav: 'READ FROM THE SERVER',
-  belowNav: '', crumbs, footer: 'Read from the server', site: 'gtm-connector Read from the server',
-  links: [['Evidence', serverPaths.evidence + query], ['Readiness', serverPaths.readiness + query]],
-  profile: state.session?.signed_in ? `Signed in as ${principal.display_name}` : 'Not signed in'});
 
 for (const path of otherPaths) {
-  for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${path}, ${name}: no page at this address, with one link home`, async () => {
+  for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${path}, ${name}: ${name === 'signed in' ? 'no page at this address, with one link home' : 'the sign-in screen'}`, async () => {
     const html = await renderServer(path, storeOf(state));
     const main = html.slice(html.indexOf('<main'));
-    assert.match(main, /<h1>There is no page at this address<span class="company-dot">\.<\/span><\/h1>/);
-    assert.match(text(main), name === 'unreachable' ? /The server did not answer, so nothing is shown\. Reload the page to ask it again\./ : /The server provides Evidence and Readiness\. Check the address, or start again from Evidence\./);
+    assert.doesNotMatch(html, /api-frame|api-renewal-header/);
+    assert.doesNotMatch(text(html), /Revenue Workflow Lab|prototype|walkthrough|Work queue|Playbooks|Operations|Work plan|History/i);
+    if (name !== 'signed in') {
+      assert.match(main, name === 'unreachable' ? /data-refusal="unreachable"/ : /name="login"/);
+      assert.deepEqual(chrome(html), signedOutChrome);
+      return;
+    }
+    assert.match(main, /<h1 class="fr-nopage__title">There is no page at this address\.<\/h1>/);
+    assert.match(text(main), /The server provides Evidence and Readiness\. Check the address, or start again from Evidence\./);
     assert.deepEqual([...main.matchAll(/<a [^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(match => [match[1], match[2]]), [[serverPaths.evidence, 'Go to Evidence']]);
-    assert.doesNotMatch(html, /api-frame|name="login"|api-renewal-header/);
-    assert.doesNotMatch(text(html), /Revenue Workflow Lab|prototype|Demo workspace|Invented|walkthrough|Work queue|Playbooks|Operations|Work plan|History/i);
-    assert.deepEqual(shell(html), serverShell(state, 'No page here'));
+    assert.equal(chrome(html).pages.some(([, , current]) => current), false);
   });
 }
 
 test('API mode: a path that only resembles a server page has no page either', async () => {
   for (const path of [serverPaths.evidence + '/extra', '/deals/evidence', serverPaths.readiness + '/']) {
     const html = await renderServer(path, storeOf(signedIn));
-    assert.match(html, /<h1>There is no page at this address</, path);
+    assert.match(html, /<h1 class="fr-nopage__title">There is no page at this address/, path);
     assert.doesNotMatch(html, /api-frame/, path);
   }
 });
@@ -223,7 +263,7 @@ for (const mode of ['api', 'unreachable', 'static']) test(`the entry shows only 
   const run = booting(mode);
   assert.equal(run.shown.length, 1);
   const html = renderToStaticMarkup(run.shown[0]);
-  assert.match(html, /^<div class="route-loading" role="status"[^>]*><p>Loading page…<\/p><\/div>$/);
+  assert.match(html, /^<div class="ui-placeholder"><div class="ui-placeholder__shape" aria-hidden="true">(<span class="ui-placeholder__line"><\/span>){3}<\/div><p class="ui-placeholder__status" role="status" aria-live="polite">Loading the page<\/p><\/div>$/);
   run.answer();
   assert.equal(await run.done, mode === 'static' ? 'static' : 'server');
   assert.equal(run.shown.length, 2);
@@ -232,13 +272,13 @@ for (const mode of ['api', 'unreachable', 'static']) test(`the entry shows only 
 });
 
 test('the server app names itself, and its palette and page failure use its own words', () => {
-  const palette = renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: [serverPaths.evidence + '?account=acc-003']},
-    React.createElement(ServerContext, {value: storeOf(signedIn)}, React.createElement(ServerPalette, {onClose() {}, opener: {current: null}}))));
-  assert.match(palette, /<h2 id="[^"]+">Go to<\/h2>/);
-  assert.match(palette, /aria-label="Find a page"[^>]*placeholder="Find a page"/);
-  assert.deepEqual([...palette.matchAll(/<strong>([^<]+)<\/strong>/g)].map(match => match[1]), ['Evidence', 'Readiness']);
+  const items = pageItems(() => {}, '?account=acc-003');
+  const palette = renderToStaticMarkup(React.createElement(Palette, {items, inputLabel: 'Page name', placeholder: 'Evidence or Readiness', empty: 'No page matches.'}));
+  assert.match(palette, /aria-label="Page name"[^>]*placeholder="Evidence or Readiness"/);
+  assert.deepEqual([...palette.matchAll(/<strong class="ui-palette__label">([^<]+)<\/strong>/g)].map(match => match[1]), ['Evidence', 'Readiness']);
+  assert.deepEqual([...palette.matchAll(/class="ui-palette__group" role="presentation">([^<]+)</g)].map(match => match[1]), ['Ops']);
   assert.doesNotMatch(text(palette), /record/i);
-  const empty = renderToStaticMarkup(React.createElement(CommandPalette, {items: [], placeholder: 'Find a page', inputLabel: 'Find a page', empty: React.createElement('h3', null, 'No page matches.')}));
+  const empty = renderToStaticMarkup(React.createElement(Palette, {items: [], inputLabel: 'Page name', placeholder: '', empty: 'No page matches.'}));
   assert.match(text(empty), /No page matches\./);
   const failed = new RouteError({children: null});
   Object.assign(failed.state, RouteError.getDerivedStateFromError(new Error('offline')));
@@ -255,7 +295,6 @@ test('the API header shows the open card, and Sources and gaps targets the gaps 
     assert.equal(target, frame.gapsTarget[page]);
     const body = inRouter(React.createElement(View, props));
     assert.match(body, new RegExp(`id="${target}" tabindex="-1"`, 'i'));
-    assert.match(header, /href="[^"]*\?account=acc-003&amp;card=card-1"/);
   }
   const closed = inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'readiness', selection: {account: 'acc-001', cardId: null, card: {status: 'idle'}}}));
   assert.match(text(closed), /No card open/);
@@ -265,7 +304,7 @@ test('the API header shows the open card, and Sources and gaps targets the gaps 
   assert.match(text(named), /Account ID acc-002/);
   const none = inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'evidence', selection: {account: null, cardId: null, card: {status: 'idle'}}}));
   assert.match(none, /<h1>No account chosen<span/);
-  assert.match(none, /href="\/ops\/evidence"/);
+  assert.doesNotMatch(none, /<a /);
 });
 
 // The picker's states, from what GET /api/v1/accounts returns.
