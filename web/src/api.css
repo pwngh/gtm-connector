@@ -1,7 +1,6 @@
-/* Evidence and Readiness read from the server: the card picker and receipts.
+/* Evidence read from the server: the card picker and receipts.
    44px targets, 16px content and controls, 14px labels. */
 .api-frame {display:grid; gap:20px; min-width:0; overflow-wrap:anywhere}
-.api-readiness .api-frame {margin-bottom:24px}
 .api-label {display:block; font-size:.875rem; line-height:1.5; color:var(--muted)}
 /* Record references, receipt rows and the digest are content: 16px. */
 .api-mono,.api-digest {font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:1rem; word-break:break-all}
@@ -51,11 +50,6 @@
 .api-renewal-header .page-heading>div:first-child {flex:1 1 380px; min-width:0}
 .api-renewal-header .account-meta>span {min-width:0; overflow-wrap:anywhere}
 .api-renewal-header h1 {overflow-wrap:anywhere}
-.api-picker {display:grid; gap:4px; margin-bottom:22px}
-.api-unit-summary,.api-card-notes {padding:18px 20px; margin-top:16px}
-.api-card-notes ul {margin:0; padding:0; list-style:none; display:grid; gap:10px}
-.api-card-notes p {margin:0}
-.api-no-rules {padding-top:4px}
 .api-unit-summary h3 {margin-bottom:8px}
 
 html[data-theme='dark'] .api-frame .field :is(input,select) {background:#0f1720; border-color:#4b637c; color:#edf2f8; color-scheme:dark}

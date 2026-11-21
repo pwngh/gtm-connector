@@ -53,12 +53,14 @@ will connect your sources again, import your transcripts again, map your Slack t
 set your seller lists and selection files again. You will also set up your assistant apps again,
 because their saved entries start the Python package.
 
-The web app the binary serves shows the deal list at `/deals`, which `/` opens, and the Ops pages
-Coverage, Evidence and Readiness at `/ops/coverage`, `/ops/evidence` and `/ops/readiness`, which
-`/ops` opens with Coverage. It shows nothing else after sign-in. Coverage lists each granted deal
-with its newest card time and number of cards, counts the deals with a card and with none, and says
-whether `/healthz` answers. Any other address shows a page that says there is no page there and
-links back. Served from a static host, it says only that it needs its server.
+The web app the binary serves shows the deal list at `/deals`, which `/` opens, each deal's card at
+`/deals/{account}`, and the Ops pages Coverage and Evidence at `/ops/coverage` and `/ops/evidence`,
+which `/ops` opens with Coverage. It shows nothing else after sign-in. A deal's card shows what
+people said and what the card did not read; its countdown, ARR and record values are on the
+plain-text card. Coverage lists each granted deal with its newest card time and number of cards,
+counts the deals with a card and with none, and says whether `/healthz` answers. Any other address
+shows a page that says there is no page there and links back. Served from a static host, it says
+only that it needs its server.
 Real cards will be read with the CLI and the MCP tools.
 
 No live org has been verified. v0.1.0 does not wait for one.

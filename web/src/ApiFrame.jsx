@@ -1,6 +1,6 @@
 import React, {useEffect, useId, useState} from 'react';
 import {Link, useSearchParams} from 'react-router';
-import {GitBranch, Info, Server} from 'lucide-react';
+import {Info, Server} from 'lucide-react';
 import {formatUtc} from './api/client.ts';
 import {useRead, useServer} from './api/reads.ts';
 import {checkCard, resolveAccount, resolveCard} from './api/selection.ts';
@@ -8,7 +8,7 @@ import {Refusal} from './ui/Refusal.tsx';
 import {focusElement} from './focusElement.js';
 import {Pill} from './WorkspaceControls.jsx';
 
-// Shared by the Evidence and Readiness pages, which the frame shows only to a
+// Used by the Evidence page, which the frame shows only to a
 // signed-in principal: refusals, and which account and card are open.
 
 export function Time({value}) {
@@ -119,14 +119,7 @@ export function CardFacts({card}) {
   </dl>;
 }
 
-export const gapsTarget = {evidence: 'api-evidence-gaps', readiness: 'api-readiness-gaps'};
-
-// The query that keeps the chosen account and open card across the two server pages.
-export function keepQuery(account, cardId) {
-  const keep = new URLSearchParams(account ? {account} : {});
-  if (cardId) keep.set('card', cardId);
-  return String(keep) ? `?${keep}` : '';
-}
+export const gapsTarget = {evidence: 'api-evidence-gaps'};
 
 // The renewal header on a page that reads from the server. It shows only what
 // the API supports: a granted account by its server name, an account from the
@@ -143,7 +136,7 @@ export function ApiRenewalHeader({page, selection}) {
         {invalid ? <><span>The account in this link is not an account ID. It was not read.</span><i/></>
           : account && <><span>Account ID {account}{!verified && ', not verified'}</span><i/></>}
         {card ? <span data-card-id={card.id}>Card {card.id} · published <Time value={card.published_at}/></span> : <span>No card open</span>}<i/><span>Renewal date, agreement and owner: not available from the server yet</span></div></div>
-      <div className="heading-actions">{page === 'readiness' ? <Pill icon={GitBranch}>Readiness by transition</Pill> : <Pill icon={Server}>Read from the server</Pill>}
+      <div className="heading-actions"><Pill icon={Server}>Read from the server</Pill>
         {card && <button type="button" className="text-button" data-target={gapsTarget[page]} onClick={() => focusElement(document.getElementById(gapsTarget[page]), {block: 'start'})}><Info size={16}/>Sources and gaps</button>}</div></div>
   </header>;
 }

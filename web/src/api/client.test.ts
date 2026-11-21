@@ -105,6 +105,9 @@ test('unit facts keep cut and not-shown units labelled and read the body defensi
   assert.equal(unitFacts({n: 1, kind: 'sentence', shown: 'yes', body: {text: 'Yes.'}}).notShown, null);
   assert.equal(unitFacts({n: 2, kind: 'sentence', shown: 'odd', body: {}}).notShown, 'Reason odd');
   assert.equal(unitFacts({n: 3, kind: 'record', body: null}).text, null);
+  // A contact is a unit number or nothing.
+  assert.equal(unitFacts({n: 5, kind: 'sentence', body: {contact: 2}}).contact, 2);
+  for (const contact of [null, 0, -1, 2.5, '2']) assert.equal(unitFacts({n: 5, kind: 'sentence', body: {contact} as never}).contact, null);
 });
 
 // Review round: the probe, deadlines and redirects.

@@ -27,12 +27,12 @@ const signedInState = {mode: 'api', error: null, ended: false, generation: 1, el
   principal: {id: 'p-1', display_name: 'Demo reviewer', kind: 'person', workspace_id: 'w-1', workspace_kind: 'demo', demo: true}}};
 const ready = data => ({status: 'ready', data});
 
-let server, frame, evidence, readiness, selection, pages, shell, reads;
+let server, frame, evidence, selection, pages, shell, reads;
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error'});
   // Each module loads on its own, so a missing one fails only the tests that use it.
   const load = path => server.ssrLoadModule(path).catch(error => new Proxy({}, {get(target, name) {if (name === 'then') return undefined; throw error;}}));
-  [frame, evidence, readiness, selection, pages, shell, reads] = await Promise.all(['/src/ApiFrame.jsx', '/src/ApiEvidence.jsx', '/src/ApiReadiness.jsx', '/src/api/selection.ts',
+  [frame, evidence, selection, pages, shell, reads] = await Promise.all(['/src/ApiFrame.jsx', '/src/ApiEvidence.jsx', '/src/api/selection.ts',
     '/src/app/frame/pages.ts', '/src/app/frame/Frame.tsx', '/src/api/reads.ts'].map(load));
 });
 after(async () => {await server?.close();});
@@ -53,13 +53,6 @@ test('a refused card on Evidence shows the refusal, never an empty card', () => 
   const html = inRouter(React.createElement(evidence.EvidenceFromServer, {selection: chosen({cards: ready({cards: [card]}), cardId: card.id, card: notPermitted})}));
   assert.match(html, /data-refusal="not_permitted"/);
   assert.doesNotMatch(text(html), /numbered unit|has no unit|states no gaps|No card is published/);
-});
-
-test('a refused card on Readiness shows the refusal, never zero gaps or units', () => {
-  const card = cardOf('acc-003');
-  const html = inRouter(React.createElement(readiness.ReadinessFromServer, {selection: chosen({cards: ready({cards: [card]}), cardId: card.id, card: notPermitted})}), serverPaths.readiness);
-  assert.match(html, /data-refusal="not_permitted"/);
-  assert.doesNotMatch(text(html), /states no gaps|numbered unit|open item|0 units/);
 });
 
 test('a refused unit read shows the refusal, never "no receipt"', () => {
@@ -105,28 +98,6 @@ test('an account from the URL is never the heading unless it is granted, and a m
   assert.doesNotMatch(chrome.replace(/href="[^"]*"/g, ''), /locked/);
 });
 
-// 4. Readiness claims only what the card supports.
-test('Readiness evaluates no rule, counts only unread or unshown gaps as open, and scopes its claims', () => {
-  const card = cardOf('acc-003');
-  const html = inRouter(React.createElement(readiness.CardReadiness, {card, evidenceHref: '/'}), serverPaths.readiness);
-  assert.doesNotMatch(text(html), /\d+ blockers?\b|\d+ transition checks?/);
-  assert.match(text(html), /Not evaluated/);
-  const open = [...html.matchAll(/data-open-gap="([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(open, ['calls_outside_records', 'slack_channel']);
-  const notes = [...html.matchAll(/data-note-gap="([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(notes, ['neutralized']);
-  const note = html.slice(html.indexOf('data-note-gap="neutralized"')).split('</li>')[0];
-  assert.doesNotMatch(note, /Open|What closes it/);
-  assert.doesNotMatch(text(html), /No requirement is recorded on the server|Commercial outcome Not recorded/);
-  assert.match(text(html), /Commercial outcome Not read here/);
-  assert.match(text(html), /This page reads no requirement records/);
-  // A card whose only gaps are notes has no open items, and says so without claiming nothing is open.
-  const quiet = {...card, gaps: card.gaps.filter(gap => gap.disposition === 'note')};
-  const calm = inRouter(React.createElement(readiness.CardReadiness, {card: quiet, evidenceHref: '/'}), serverPaths.readiness);
-  assert.doesNotMatch(calm, /data-open-gap/);
-  assert.match(text(calm), /The card states nothing it did not read or show\. That is not evidence that nothing is open\./);
-});
-
 // 5. Server text is data everywhere: every server string comes out escaped.
 const hostile = '<img src=x onerror=alert(1)>';
 test('every server string renders as text, never markup', () => {
@@ -143,13 +114,12 @@ test('every server string renders as text, never markup', () => {
   const pages = [
     inRouter(React.createElement(evidence.CardEvidence, {card, receiptFor: () => ready(receipt), params: new URLSearchParams('account=acc-003'), generation: 1})),
     inRouter(React.createElement(evidence.UnitDetailView, {n: 5, cardId: card.id, params: new URLSearchParams(), unit: ready({...card.units[4], card: card.id, receipt})})),
-    inRouter(React.createElement(readiness.CardReadiness, {card, evidenceHref: '/'})),
     inRouter(React.createElement(frame.AccountPicker, {selection: chosen({granted: named})})),
     inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'evidence', selection: chosen({accountName: `Name${hostile}`, cardId: card.id, card: ready(card)})})),
     inRouter(React.createElement(frame.CardList, {selection: chosen({cards: ready({cards: [{...card, published_at: `2027${hostile}`}]}), cardId: card.id})})),
     renderToStaticMarkup(React.createElement(reads.ServerContext, {value: {api: {}, subscribe: () => () => {}, getSnapshot: () => ({...signedInState,
       session: {...signedInState.session, principal: {...signedInState.session.principal, display_name: `Reviewer${hostile}`}}})}},
-    React.createElement(MemoryRouter, {initialEntries: [serverPaths.readiness]}, React.createElement(shell.Frame)))),
+    React.createElement(MemoryRouter, {initialEntries: [serverPaths.evidence]}, React.createElement(shell.Frame)))),
     inRouter(React.createElement(frame.Refusal, {error: {kind: 'server', code: `code${hostile}`}})),
   ];
   for (const html of pages) {
@@ -172,9 +142,9 @@ test('no app source renders HTML from a string', () => {
 test('the server palette offers only the server pages, with the chosen account and open card kept', () => {
   const visited = [];
   const items = pages.pageItems(to => visited.push(to), '?account=acc-002&card=card-two&unit=4');
-  assert.deepEqual(items.map(item => [item.group, item.label]), [['Ops', 'Coverage'], ['Ops', 'Evidence'], ['Ops', 'Readiness']]);
+  assert.deepEqual(items.map(item => [item.group, item.label]), [['Ops', 'Coverage'], ['Ops', 'Evidence']]);
   for (const item of items) item.onSelect();
-  assert.deepEqual(visited, [serverPaths.coverage + '?account=acc-002&card=card-two', serverPaths.evidence + '?account=acc-002&card=card-two', serverPaths.readiness + '?account=acc-002&card=card-two']);
+  assert.deepEqual(visited, [serverPaths.coverage + '?account=acc-002&card=card-two', serverPaths.evidence + '?account=acc-002&card=card-two']);
 });
 
 // Minor: the picker commits a choice, it does not navigate on every change.

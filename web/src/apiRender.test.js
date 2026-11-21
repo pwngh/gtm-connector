@@ -27,7 +27,7 @@ const receipt = tool => ({id: readId(tool), operation_id: 'op#1', parent_id: 're
   row_count: 2, rows: [], elapsed_ms: 1, error: null, started_at: '2027-01-15T15:00:00Z', finished_at: '2027-01-15T15:00:01.25Z', delivered_at: null});
 const principal = {id: 'p-1', display_name: 'Demo reviewer', kind: 'person', workspace_id: 'w-1', workspace_kind: 'demo', demo: true};
 
-let server, Frame, ServerContext, boot, RouteError, Palette, pageItems, evidence, readiness, frame;
+let server, Frame, ServerContext, boot, RouteError, Palette, pageItems, evidence, frame;
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error'});
   ({Frame} = await server.ssrLoadModule('/src/app/frame/Frame.tsx'));
@@ -37,7 +37,6 @@ before(async () => {
   ({Palette} = await server.ssrLoadModule('/src/ui/Palette.tsx'));
   ({ServerContext} = await server.ssrLoadModule('/src/api/reads.ts'));
   evidence = await server.ssrLoadModule('/src/ApiEvidence.jsx');
-  readiness = await server.ssrLoadModule('/src/ApiReadiness.jsx');
   frame = await server.ssrLoadModule('/src/ApiFrame.jsx');
 });
 after(async () => {await server?.close();});
@@ -56,7 +55,7 @@ async function renderServer(path, store) {
 const inRouter = (element, path = serverPaths.evidence) => renderToStaticMarkup(React.createElement(MemoryRouter, {initialEntries: [path]}, element));
 const text = html => html.replace(/<[^>]+>/g, ' ').replaceAll('&#x27;', '\'').replaceAll('&quot;', '"').replaceAll('&amp;', '&').replace(/\s+/g, ' ');
 
-test('API mode: Evidence and Readiness read from the server', async () => {
+test('API mode: Evidence reads from the server', async () => {
   const session = {signed_in: true, principal, csrf_token: 't', expires_at: '2027-01-15T23:00:00Z'};
   const page = await renderServer(serverPaths.evidence, storeOf({mode: 'api', session, error: null, ended: false}));
   assert.match(page, /class="plain-panel evidence-library api-evidence"/);
@@ -65,10 +64,8 @@ test('API mode: Evidence and Readiness read from the server', async () => {
   assert.match(text(page), /Reading your accounts…/);
   assert.doesNotMatch(text(page), /Reading cards for/);
   assert.doesNotMatch(page, /class="evidence-flow|data-record-id|library-row|name="login"/);
-  const rd = await renderServer(serverPaths.readiness + '?account=acc-001', storeOf({mode: 'api', session, error: null, ended: false}));
-  assert.match(rd, /class="rd-page api-readiness"/);
-  assert.match(text(rd), /Reading your accounts… Reading cards for acc-001/);
-  assert.doesNotMatch(rd, /data-check-result="(passed|failed)"/);
+  const chosen = await renderServer(serverPaths.evidence + '?account=acc-001', storeOf({mode: 'api', session, error: null, ended: false}));
+  assert.match(text(chosen), /Reading your accounts… Reading cards for acc-001/);
 });
 
 test('API mode: signed out, ended, and unreachable states show the sign-in screen and no evidence', async () => {
@@ -89,9 +86,9 @@ test('API mode: signed out, ended, and unreachable states show the sign-in scree
   const gone = await renderServer(serverPaths.evidence, storeOf({mode: 'unreachable', session: null, error: {kind: 'unreachable'}}));
   assert.match(text(gone), /The server did not answer\. Nothing was read, and nothing is shown in its place\. Try again/);
   assert.doesNotMatch(gone, /library-row|name="login"/);
-  const refused = await renderServer(serverPaths.readiness, storeOf({mode: 'api', session: null, error: {kind: 'server', code: 'internal'}}));
+  const refused = await renderServer(serverPaths.evidence, storeOf({mode: 'api', session: null, error: {kind: 'server', code: 'internal'}}));
   assert.match(text(refused), /The server could not answer\. .* Server code: internal/);
-  assert.doesNotMatch(refused, /name="login"|api-readiness/);
+  assert.doesNotMatch(refused, /name="login"|api-evidence/);
 });
 
 test('a card renders every unit with its number, exact text, speaker, role, basis and receipt, and its gaps by code', () => {
@@ -140,18 +137,6 @@ test('a refused receipt or card list says Not permitted, never an empty list', (
   assert.match(text(empty), /No card is published for acc-001\. Nothing about its sources is inferred from that\./);
 });
 
-test('Readiness from the card: unread or unshown gaps as open items, notes apart, and no rule evaluated', () => {
-  const html = inRouter(React.createElement(readiness.CardReadiness, {card, evidenceHref: '/ops/evidence?account=acc-003'}), serverPaths.readiness);
-  const open = [...html.matchAll(/data-open-gap="([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(open, sealed.gaps.filter(gap => gap.disposition !== 'note').map(gap => gap.code));
-  const results = [...html.matchAll(/data-check-result="([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(results, ['not_evaluated']);
-  assert.doesNotMatch(html, /0 blockers|rd-result passed|rd-result failed/);
-  assert.match(text(html), /CRM stage Not read here .* Requirement readiness Not evaluated 2 open items from the card’s gaps\. .* Commercial outcome Not read here/);
-  assert.match(text(html), /9 numbered units: 6 sentences and 3 records\. 2 sentences by a speaker in the customer role\. 0 units not shown on the card, 0 units cut\./);
-  assert.deepEqual(readiness.unitCounts(card.units), {total: 9, sentences: 6, records: 3, notShown: 0, partial: 0, customer: 2});
-});
-
 // What the frame shows on a server page.
 const returns = '?account=acc-003';
 const signedIn = {mode: 'api', session: {signed_in: true, principal, csrf_token: 't', expires_at: '2099-01-15T23:00:00Z'}, error: null, ended: false};
@@ -172,16 +157,16 @@ function chrome(html) {
     demo: /Demo, invented records/.test(bar), name: bar.match(/class="fr-who">([^<]*)</)?.[1] ?? null};
 }
 const signedInChrome = (path, query) => ({mark: 'gtm-connector', areas: [['Deals', serverPaths.deals, false], ['Ops', serverPaths.coverage + query, true]],
-  pages: [['Coverage', serverPaths.coverage + query, path === serverPaths.coverage], ['Evidence', serverPaths.evidence + query, path === serverPaths.evidence], ['Readiness', serverPaths.readiness + query, path === serverPaths.readiness]],
+  pages: [['Coverage', serverPaths.coverage + query, path === serverPaths.coverage], ['Evidence', serverPaths.evidence + query, path === serverPaths.evidence]],
   controls: ['Find a deal', 'Dark theme', 'Sign out', 'Menu'], demo: true, name: 'Demo reviewer'});
 const signedOutChrome = {mark: 'gtm-connector', areas: [], pages: [], controls: [], demo: false, name: null};
 
-for (const [page, path] of [['evidence', serverPaths.evidence], ['readiness', serverPaths.readiness]]) {
+for (const [page, path] of [['evidence', serverPaths.evidence]]) {
   for (const [name, state] of Object.entries(apiStates)) test(`API mode, ${page}, ${name}: the frame shows only what the server supports`, async () => {
     const html = await renderServer(path + returns, storeOf(state));
     assert.deepEqual(chrome(html), name === 'signed in' ? signedInChrome(path, returns) : signedOutChrome);
     if (name !== 'signed in') {
-      assert.doesNotMatch(html, /api-renewal-header|library-row|data-open-gap/);
+      assert.doesNotMatch(html, /api-renewal-header|library-row|data-gap-code/);
       return;
     }
     // The account from the link is not verified until the account list is read.
@@ -195,10 +180,10 @@ for (const [page, path] of [['evidence', serverPaths.evidence], ['readiness', se
 }
 
 test('the frame keeps the account and open card in its Ops links, never the open unit, and lists Deals first', async () => {
-  const html = await renderServer(serverPaths.readiness + '?account=acc-002&card=card-two&unit=4', storeOf(signedIn));
+  const html = await renderServer(serverPaths.evidence + '?account=acc-002&card=card-two&unit=4', storeOf(signedIn));
   const {areas, pages} = chrome(html);
   assert.deepEqual(areas, [['Deals', serverPaths.deals, false], ['Ops', serverPaths.coverage + '?account=acc-002&card=card-two', true]]);
-  assert.deepEqual(pages.map(([label, href]) => [label, href]), [['Coverage', serverPaths.coverage + '?account=acc-002&card=card-two'], ['Evidence', serverPaths.evidence + '?account=acc-002&card=card-two'], ['Readiness', serverPaths.readiness + '?account=acc-002&card=card-two']]);
+  assert.deepEqual(pages.map(([label, href]) => [label, href]), [['Coverage', serverPaths.coverage + '?account=acc-002&card=card-two'], ['Evidence', serverPaths.evidence + '?account=acc-002&card=card-two']]);
   // From an open deal, Ops opens on that deal's account.
   const fromDeal = chrome(await renderServer('/deals/acc-003?q=wren', storeOf(signedIn)));
   assert.deepEqual(fromDeal.areas, [['Deals', serverPaths.deals, true], ['Ops', serverPaths.coverage + '?account=acc-003', false]]);
@@ -218,13 +203,14 @@ test('Deals: signed in, the list is read with six placeholder rows, the title, t
   assert.equal(chrome(html).pages.length, 0);
 });
 
-test('Deals: an open deal is the Evidence page for that account, with no account picker and a way back to the list', async () => {
+test('Deals: an open deal is its Deal card, read as the server answers, with a way back to the list', async () => {
   const html = await renderServer('/deals/acc-003?q=wren', storeOf(signedIn));
   const main = html.slice(html.indexOf('<main'));
   assert.match(main, /<a class="deals-back" href="\/deals\?q=wren"[^>]*>.*Deals<\/a>/);
-  assert.match(main, /class="plain-panel evidence-library api-evidence"/);
-  assert.match(text(main), /Account ID acc-003 ?, not verified/);
-  assert.doesNotMatch(main, /class="api-account"|name="account"/);
+  // Until the account list answers, no name is shown and the card is being read.
+  assert.match(main, /<article class="dc" aria-labelledby="dc-title"><header class="dc-head"><h1 id="dc-title" class="dc-title">Reading the deal<\/h1><\/header>/);
+  assert.match(text(main), /Reading the card/);
+  assert.doesNotMatch(main, /api-evidence|class="api-account"|name="account"|acc-003<|dc-id/);
   const odd = await renderServer('/deals/%3Cimg%20src%3Dx%3E', storeOf(signedIn));
   assert.match(text(odd), /The account in this link is not an account ID\. It was not read\./);
   assert.doesNotMatch(odd, /<img src=x>/);
@@ -270,7 +256,7 @@ for (const path of otherPaths) {
 }
 
 test('API mode: a path that only resembles a server page has no page either', async () => {
-  for (const path of [serverPaths.evidence + '/extra', '/deals/acc-003/units', '/deals/', serverPaths.readiness + '/']) {
+  for (const path of [serverPaths.evidence + '/extra', '/deals/acc-003/units', '/deals/', '/ops/readiness']) {
     const html = await renderServer(path, storeOf(signedIn));
     assert.match(html, /<h1 class="fr-nopage__title">There is no page at this address/, path);
     assert.doesNotMatch(html, /api-frame/, path);
@@ -301,9 +287,9 @@ for (const mode of ['api', 'unreachable', 'static']) test(`the entry shows only 
 
 test('the server app names itself, and its palette and page failure use its own words', () => {
   const items = pageItems(() => {}, '?account=acc-003');
-  const palette = renderToStaticMarkup(React.createElement(Palette, {items, inputLabel: 'Page name', placeholder: 'Evidence or Readiness', empty: 'No page matches.'}));
-  assert.match(palette, /aria-label="Page name"[^>]*placeholder="Evidence or Readiness"/);
-  assert.deepEqual([...palette.matchAll(/<strong class="ui-palette__label">([^<]+)<\/strong>/g)].map(match => match[1]), ['Coverage', 'Evidence', 'Readiness']);
+  const palette = renderToStaticMarkup(React.createElement(Palette, {items, inputLabel: 'Page name', placeholder: 'Coverage or Evidence', empty: 'No page matches.'}));
+  assert.match(palette, /aria-label="Page name"[^>]*placeholder="Coverage or Evidence"/);
+  assert.deepEqual([...palette.matchAll(/<strong class="ui-palette__label">([^<]+)<\/strong>/g)].map(match => match[1]), ['Coverage', 'Evidence']);
   assert.deepEqual([...palette.matchAll(/class="ui-palette__group" role="presentation">([^<]+)</g)].map(match => match[1]), ['Ops']);
   assert.doesNotMatch(text(palette), /record/i);
   const empty = renderToStaticMarkup(React.createElement(Palette, {items: [], inputLabel: 'Page name', placeholder: '', empty: 'No page matches.'}));
@@ -315,8 +301,7 @@ test('the server app names itself, and its palette and page failure use its own 
 
 test('the API header shows the open card, and Sources and gaps targets the gaps section on each page', () => {
   const selection = {account: 'acc-003', verified: true, cardId: card.id, card: {status: 'ready', data: card}};
-  for (const [page, View, props] of [['evidence', evidence.CardEvidence, {card, receiptFor: () => ({status: 'loading'}), params: new URLSearchParams(), generation: 1}],
-    ['readiness', readiness.CardReadiness, {card, evidenceHref: '/'}]]) {
+  for (const [page, View, props] of [['evidence', evidence.CardEvidence, {card, receiptFor: () => ({status: 'loading'}), params: new URLSearchParams(), generation: 1}]]) {
     const header = inRouter(React.createElement(frame.ApiRenewalHeader, {page, selection}));
     assert.match(text(header), /Card card-1 · published 15 Jan 2027, 15:00:04 UTC/);
     const target = header.match(/data-target="([^"]+)"[^>]*>.*?Sources and gaps/)?.[1];
@@ -324,7 +309,7 @@ test('the API header shows the open card, and Sources and gaps targets the gaps 
     const body = inRouter(React.createElement(View, props));
     assert.match(body, new RegExp(`id="${target}" tabindex="-1"`, 'i'));
   }
-  const closed = inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'readiness', selection: {account: 'acc-001', cardId: null, card: {status: 'idle'}}}));
+  const closed = inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'evidence', selection: {account: 'acc-001', cardId: null, card: {status: 'idle'}}}));
   assert.match(text(closed), /No card open/);
   assert.doesNotMatch(closed, /Sources and gaps/);
   const named = inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'evidence', selection: {account: 'acc-002', verified: true, accountName: 'Named by the server', cardId: null, card: {status: 'idle'}}}));

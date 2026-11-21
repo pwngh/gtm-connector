@@ -1,7 +1,7 @@
-import {Building2, FileText, GitBranch, List, ListChecks, type LucideIcon} from 'lucide-react';
+import {Building2, FileText, List, ListChecks, type LucideIcon} from 'lucide-react';
 import type {ComponentType} from 'react';
 import type {AccountView} from '../../api/types.ts';
-import {ApiEvidence, ApiReadiness, Coverage, Deals} from '../../lazyPages.js';
+import {ApiEvidence, Coverage, Deals} from '../../lazyPages.js';
 import type {PaletteItem} from '../../ui/Palette.tsx';
 import {dealAt, dealHref} from '../deals/deals.ts';
 import {serverPaths} from '../routes.ts';
@@ -58,14 +58,6 @@ export const areas: Area[] = [
         icon: FileText,
         sub: 'The chosen account’s cards, units, receipts and gaps',
         Page: ApiEvidence,
-      },
-      {
-        id: 'readiness',
-        label: 'Readiness',
-        path: serverPaths.readiness,
-        icon: GitBranch,
-        sub: 'The open card’s gaps; the server has no workflow rules yet',
-        Page: ApiReadiness,
       },
     ],
   },
