@@ -180,6 +180,13 @@ jobs:
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version-file: .nvmrc
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          # The pinned patch (pins.json), never the newest of a range.
+          go-version: '1.27.4'
       - run: npm ci --no-audit --no-fund
       - run: npm test
       - run: npm run build
+      - name: The release target builds four binaries with this web app inside them, and their sums match
+        working-directory: .
+        run: make release

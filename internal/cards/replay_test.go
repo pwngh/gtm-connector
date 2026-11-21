@@ -206,6 +206,33 @@ func TestANotSelectedReadIsListedWithTheCard(t *testing.T) {
 	}
 }
 
+// failing is a source whose Slack read fails.
+type failing struct{ Source }
+
+func (f failing) Read(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, error) {
+	if tool == "read_slack_messages" {
+		return "", nil, errors.New("the read did not finish")
+	}
+	return f.Source.Read(ctx, tool, accountID)
+}
+
+// A Slack read that failed gives no card, and neither does the same command run again: its receipt reads
+// the same as a read with no selection, so the replay must not make a card that says nothing was selected.
+func TestAFailedReadGivesNoCardWhenTheCommandRunsAgain(t *testing.T) {
+	ctx := context.Background()
+	for name, fresh := range worlds(t) {
+		t.Run(name, func(t *testing.T) {
+			w := fresh(t)
+			maker := w.maker(t, w.store, failing{demoBook(t)}, "slack")
+			for attempt := 1; attempt <= 2; attempt++ {
+				if sealed, err := maker.Brief(ctx, w.brief("failed-read")); err == nil {
+					t.Fatalf("attempt %d made a card: %s", attempt, sealed.Payload)
+				}
+			}
+		})
+	}
+}
+
 // must is the value of a call that cannot fail here; a failure panics, which fails the test with its stack.
 func must[T any](value T, err error) T {
 	if err != nil {

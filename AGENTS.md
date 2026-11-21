@@ -31,13 +31,15 @@ app. Until the Go CLI ships, the Python package is the product and the reference
 
 The Go port is the module at the root, in `internal/`: `unicodetab` (generated from `testdata/oracle/unicode`),
 `strictjson`, `evidence` (neutralized text, sentences, the card), `receipts` (the contract, the publication
-rules every store applies, and `receiptstest`, which every store runs), `cards` (make, seal, verify, admit)
-and `sources/demo`. Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate.
+rules every store applies, and `receiptstest`, which every store runs), `cards` (make, seal, verify, admit),
+`sources/demo` and `sources/salesforce` (the `sf` login and the REST reads, with an invented org in
+`salesforcetest`). Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate.
 `sources/slack` reads one mapped Slack thread; no command uses it yet.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
-surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`. `postgres.ReceiptStore`
-runs the card maker on PostgreSQL.
+surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with the read commands
+`accounts`, `brief`, `inspect` and `audit` on demo data. `postgres.ReceiptStore` runs the card maker on
+PostgreSQL.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
 
 ```sh

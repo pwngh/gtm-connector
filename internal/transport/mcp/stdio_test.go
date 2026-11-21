@@ -123,19 +123,14 @@ func toolNames(t *testing.T, listing map[string]any) []string {
 	return names
 }
 
-func defaultNames() []string {
-	names := slices.Clone(DefaultTools)
-	sort.Strings(names)
-	return names
-}
-
 // test_a_crm_only_bridge_reads_crm_through_the_gateway_and_never_widens
 func TestStdioCRMOnlyPrincipalReadsCRMAndNeverWidens(t *testing.T) {
 	h := newStdio(t, []string{"crm:read"}, nil)
 	h.send(legacyStart, legacyReady, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
 		call(3, "get_account", `{"account_id":"acc-007"}`), call(4, "read_call_notes", `{"account_id":"acc-007"}`))
 	h.answer(1)
-	if names := toolNames(t, h.answer(2)); !reflect.DeepEqual(names, defaultNames()) {
+	want := unlistedTools(t, "test_a_crm_only_bridge_reads_crm_through_the_gateway_and_never_widens: tools/list")
+	if names := toolNames(t, h.answer(2)); !reflect.DeepEqual(names, want) {
 		t.Fatalf("tools %v", names)
 	}
 	account := h.answer(3)
@@ -202,7 +197,8 @@ func TestStdioStdoutCarriesOnlyProtocolAndStopsAtEndOfInput(t *testing.T) {
 	h := newStdio(t, []string{"crm:read"}, nil)
 	h.send(legacyStart, legacyReady, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	first, second := h.answer(1), h.answer(2)
-	if first["jsonrpc"] != "2.0" || second["jsonrpc"] != "2.0" || !reflect.DeepEqual(toolNames(t, second), defaultNames()) {
+	want := unlistedTools(t, "test_stdout_carries_only_protocol_and_the_bridge_stops_at_end_of_input: tools/list")
+	if first["jsonrpc"] != "2.0" || second["jsonrpc"] != "2.0" || !reflect.DeepEqual(toolNames(t, second), want) {
 		t.Fatalf("%v %v", first, second)
 	}
 	h.in.Close()

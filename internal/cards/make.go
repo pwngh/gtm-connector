@@ -22,12 +22,41 @@ type Source interface {
 	Read(ctx context.Context, tool, accountID string) (system string, records []*strictjson.Object, err error)
 }
 
+// ThreadReader is a Source of live Slack. Its read of read_slack_messages is one mapped thread: the messages,
+// and the snapshot of the read that they are checked against. A Maker whose Slack is live reads the thread
+// through ReadThread, under the same context as any other read, and puts the snapshot in the card's evidence.
+type ThreadReader interface {
+	ReadThread(ctx context.Context, accountID string) (records []*strictjson.Object, snapshot *strictjson.Object, err error)
+}
+
 // ErrNotSelected is a Source's answer when the account has no selection in that source, such as a Slack
 // thread that was never mapped. The read finishes as error/200 and the card states it.
 var ErrNotSelected = errors.New("cards: no selection for this account in this source")
 
 // ErrBriefing is a read that failed, so no card is made (briefing.BriefingError).
 var ErrBriefing = errors.New("cards: required evidence could not be collected; no brief generated")
+
+// ReadError is ErrBriefing for one read: its tool, and 403 when the read was refused for a scope the card
+// cannot go without.
+type ReadError struct {
+	Tool       string
+	HTTPStatus int // 0 unless the read was refused
+}
+
+func (e *ReadError) Error() string {
+	if e.HTTPStatus != 0 {
+		return fmt.Sprintf("%s: HTTP %d: %s", e.Tool, e.HTTPStatus, ErrBriefing)
+	}
+	return e.Tool + ": " + ErrBriefing.Error()
+}
+
+func (e *ReadError) Unwrap() error { return ErrBriefing }
+
+// RequestError refuses a card before any read: its account ID or its day is not one (collect_evidence's
+// ValueError).
+type RequestError struct{ Message string }
+
+func (e *RequestError) Error() string { return e.Message }
 
 // CodeError is a refusal of a prepared brief, by the code the tool result names.
 type CodeError struct{ Code string }
@@ -161,14 +190,14 @@ func briefID(uuid string) string { return "brief-" + strings.ReplaceAll(uuid, "-
 func checkRequest(s evidence.Sources, accountID, asOf string) error {
 	if !evidence.ValidAccountID(accountID, s.CRMBackend == "salesforce") {
 		if s.CRMBackend == "salesforce" {
-			return errors.New("account ID must use acc-sf- followed by the 18-character Salesforce ID")
+			return &RequestError{"account ID must use acc-sf- followed by the 18-character Salesforce ID"}
 		}
-		return errors.New("account ID must have the form acc-001")
+		return &RequestError{"account ID must have the form acc-001"}
 	}
 	// One message for every day that is not YYYY-MM-DD: date.fromisoformat's own quotes the text, which can
 	// carry a real org's names.
 	if _, err := evidence.Day(asOf); err != nil {
-		return errors.New("as-of date must use YYYY-MM-DD")
+		return &RequestError{"as-of date must use YYYY-MM-DD"}
 	}
 	return nil
 }
@@ -192,30 +221,33 @@ func versions(records []*strictjson.Object) ([]receipts.RecordVersion, error) {
 
 // replayed is the committed outcome of a read whose start found its receipt already there: its work ran,
 // or is running, under the first start, so it does not run again. A pending read is another worker's
-// (ErrInProgress); a finished one gives back what it bound.
-func (m *Maker) replayed(ctx context.Context, r reading) (records []any, bound []receipts.RecordVersion, outcome string, err error) {
+// (ErrInProgress); a finished one gives back what it bound. A receipt binds no thread snapshot, so a replayed
+// read of a live Slack thread gives none, and no card is built from its messages.
+func (m *Maker) replayed(ctx context.Context, r reading) (records []any, bound []receipts.RecordVersion,
+	snapshot any, outcome string, err error) {
 	started := r.started
 	switch {
 	case started.Status == "pending":
-		return nil, nil, "", fmt.Errorf("%s: %w", r.tool, receipts.ErrInProgress)
+		return nil, nil, nil, "", fmt.Errorf("%s: %w", r.tool, receipts.ErrInProgress)
 	case started.Status == "ok":
 		bound, err = m.Receipts.Records(ctx, started.WorkspaceID, started.AuditID)
 		if err != nil {
-			return nil, nil, "", err
+			return nil, nil, nil, "", err
 		}
 		records = make([]any, len(bound))
 		for i, v := range bound {
 			if records[i], err = strictjson.Loads(v.Body); err != nil {
-				return nil, nil, "", err
+				return nil, nil, nil, "", err
 			}
 		}
-		return records, bound, "ok", nil
+		return records, bound, nil, "ok", nil
 	case started.Error != nil && *started.Error == "request_failed" && *started.HTTPStatus == 403:
-		return nil, nil, "denied", nil
-	case started.Error != nil && *started.Error == "request_failed" && *started.HTTPStatus == 200:
-		return nil, nil, "not_selected", nil
+		return nil, nil, nil, "denied", nil
 	}
-	return nil, nil, "", fmt.Errorf("%s: %w", r.tool, ErrBriefing)
+	// A read that failed and a read with no selection finish with the same receipt, error/200. A replay
+	// cannot tell them apart, so it makes no card: a card saying that nothing was selected would be false
+	// after a failed read. The command runs again under a new operation.
+	return nil, nil, nil, "", &ReadError{Tool: r.tool}
 }
 
 // reading is one read's receipt, started by the caller; read runs it.
@@ -226,14 +258,33 @@ type reading struct {
 	deadline                time.Time // zero for none
 }
 
+// source makes one read of the source. A live Slack read goes through the source's ThreadReader, which gives
+// the thread's snapshot with its messages.
+func (m *Maker) source(ctx context.Context, tool, accountID string) (system string,
+	records []*strictjson.Object, snapshot any, err error) {
+	threads, live := m.Source.(ThreadReader)
+	if !live || tool != "read_slack_messages" || m.Sources.SlackBackend != "slack" {
+		system, records, err = m.Source.Read(ctx, tool, accountID)
+		return system, records, nil, err
+	}
+	records, thread, err := threads.ReadThread(ctx, accountID)
+	if thread != nil {
+		// The maker keeps its own copy, so the source cannot change the snapshot after it is checked.
+		snapshot = strictjson.Clone(thread)
+	}
+	return "slack", records, snapshot, err
+}
+
 // read runs one read whose receipt is committed. The scope, the credential and the deadline are checked
 // first; then the source is read, and its records are released only once FinishRead has bound their
-// versions to the receipt. The outcome is "ok", "denied" or "not_selected".
+// versions to the receipt. The outcome is "ok", "denied" or "not_selected". A live Slack read also gives the
+// thread's snapshot.
 //
 // The source reads under the caller's context, bounded by the time left to the deadline. A read whose
 // context is done when it returns releases nothing, whatever the source answered: its receipt finishes as
 // error/504 past the deadline and as error/200 after a cancel.
-func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []receipts.RecordVersion, outcome string, err error) {
+func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []receipts.RecordVersion,
+	snapshot any, outcome string, err error) {
 	elapsed := m.stopwatch()
 	// A failed read's receipt is finished even when the caller has gone.
 	finish := func(o receipts.Outcome) error {
@@ -242,16 +293,16 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 		return err
 	}
 	if !r.principal.live() {
-		return nil, nil, "", errors.Join(ErrInvalidToken, finish(receipts.Failed(401, "request_failed")))
+		return nil, nil, nil, "", errors.Join(ErrInvalidToken, finish(receipts.Failed(401, "request_failed")))
 	}
 	if !slices.Contains(r.principal.Scopes, scopes[r.tool]) {
-		return nil, nil, "denied", finish(receipts.Denied())
+		return nil, nil, nil, "denied", finish(receipts.Denied())
 	}
 	bounded := ctx
 	if !r.deadline.IsZero() {
 		now := m.now()
 		if !now.Before(r.deadline) {
-			return nil, nil, "", errors.Join(ErrDeadline, finish(receipts.Failed(504, "request_failed")))
+			return nil, nil, nil, "", errors.Join(ErrDeadline, finish(receipts.Failed(504, "request_failed")))
 		}
 		var cancel context.CancelFunc
 		bounded, cancel = context.WithTimeout(ctx, r.deadline.Sub(now))
@@ -259,32 +310,32 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 	}
 	system, found, readErr := "", []*strictjson.Object(nil), bounded.Err()
 	if readErr == nil {
-		system, found, readErr = m.Source.Read(bounded, r.tool, r.accountID)
+		system, found, snapshot, readErr = m.source(bounded, r.tool, r.accountID)
 	}
 	switch stopped := bounded.Err(); {
 	case errors.Is(stopped, context.DeadlineExceeded):
-		return nil, nil, "", errors.Join(ErrDeadline, finish(receipts.Failed(504, "request_failed")))
+		return nil, nil, nil, "", errors.Join(ErrDeadline, finish(receipts.Failed(504, "request_failed")))
 	case stopped != nil:
-		return nil, nil, "", errors.Join(fmt.Errorf("%s: %w", r.tool, ErrBriefing), stopped,
+		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool}, stopped,
 			finish(receipts.Failed(200, "request_failed")))
 	case errors.Is(readErr, ErrNotSelected):
-		return nil, nil, "not_selected", finish(receipts.NotSelected())
+		return nil, nil, nil, "not_selected", finish(receipts.NotSelected())
 	case readErr != nil || system != r.system:
-		return nil, nil, "", errors.Join(fmt.Errorf("%s: %w", r.tool, ErrBriefing),
+		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool},
 			finish(receipts.Failed(200, "request_failed")))
 	}
 	bound, err = versions(found)
 	if err != nil {
-		return nil, nil, "", errors.Join(err, finish(receipts.Failed(200, "request_failed")))
+		return nil, nil, nil, "", errors.Join(err, finish(receipts.Failed(200, "request_failed")))
 	}
 	if _, err := m.Receipts.FinishRead(ctx, r.started.Ticket(), bound, elapsed()); err != nil {
-		return nil, nil, "", err
+		return nil, nil, nil, "", err
 	}
 	records = make([]any, len(found))
 	for i, record := range found {
 		records[i] = record
 	}
-	return records, bound, "ok", nil
+	return records, bound, snapshot, "ok", nil
 }
 
 // collected is what the reads of one card gathered.
@@ -294,6 +345,7 @@ type collected struct {
 	receiptOf                map[string]string // tool to its read receipt
 	versionOf                map[string]string // record_ref to its content version
 	notesStatus, slackStatus string
+	threadSnapshot           any // of a live Slack read that returned messages
 }
 
 // collect makes the planned reads. start commits the receipt of the n-th read, from 1.
@@ -326,7 +378,7 @@ func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, 
 		if started.Replay {
 			run = m.replayed
 		}
-		records, bound, outcome, err := run(ctx, r)
+		records, bound, snapshot, outcome, err := run(ctx, r)
 		if err != nil {
 			return c, err
 		}
@@ -336,17 +388,20 @@ func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, 
 			*status = "denied"
 			continue
 		case outcome == "denied":
-			return c, fmt.Errorf("%s: HTTP 403: %w", p.tool, ErrBriefing)
+			return c, &ReadError{Tool: p.tool, HTTPStatus: 403}
 		case outcome == "not_selected" && p.tool == "read_slack_messages" && m.Sources.SlackBackend == "slack":
 			c.slackStatus = "not_selected"
 			continue
 		case outcome == "not_selected":
-			return c, fmt.Errorf("%s: %w", p.tool, ErrBriefing)
+			return c, &ReadError{Tool: p.tool}
 		}
 		for _, v := range bound {
 			c.versionOf[v.Ref()] = v.Version()
 		}
 		c.records = append(c.records, records...)
+		if p.tool == "read_slack_messages" {
+			c.threadSnapshot = snapshot
+		}
 	}
 	return c, nil
 }
@@ -360,7 +415,8 @@ func (m *Maker) evidence(ctx context.Context, workspaceID, id, accountID, asOf s
 	for i, r := range read {
 		values[i] = r.Value()
 	}
-	return evidence.Assemble(id, accountID, asOf, c.records, values, c.notesStatus, c.slackStatus, nil, m.Sources), nil
+	return evidence.Assemble(id, accountID, asOf, c.records, values, c.notesStatus, c.slackStatus, c.threadSnapshot,
+		m.Sources), nil
 }
 
 // projections are a card's units and gaps as its publication writes them.
@@ -543,6 +599,12 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 	}
 	id := briefID(m.newID())
 	includeSlack := p.Selection[accountID] && m.Sources.SlackBackend != "none"
+	if includeSlack && m.Sources.SlackBackend == "slack" {
+		// A prepared card that holds live Slack text records the scopes of the Slack credential that read
+		// it, and a later release is checked against them. No reader reports those scopes yet, so a
+		// prepared card with live Slack is refused rather than sealed without them.
+		return fail(ErrBriefing)
+	}
 	c, err := m.collect(ctx, plan(m.Sources, includeSlack), accountID, principal, deadline, includeSlack,
 		func(n int, read planned) (receipts.Receipt, error) {
 			return m.Receipts.StartChild(ctx, receipts.ChildStart{Parent: outer.AuditID, Ordinal: n, Tool: read.tool,

@@ -24,17 +24,16 @@ const MaxFrame = 4 << 20
 
 // StdioConfig is one stdio server's machine principal and limits.
 type StdioConfig struct {
-	Token          string // the machine principal's bearer, verified once for each request that needs it
-	Resource       string
-	RateLimit      int
-	WindowSeconds  float64
-	WritesDisabled bool
-	Selected       bool
-	Verify         Verifier
-	Receipts       Recorder
-	Run            ToolFunc
-	Clock          func() float64
-	Wall           func() float64
+	Token         string // the machine principal's bearer, verified once for each request that needs it
+	Resource      string
+	RateLimit     int
+	WindowSeconds float64
+	Selected      bool
+	Verify        Verifier
+	Receipts      Recorder
+	Run           ToolFunc
+	Clock         func() float64
+	Wall          func() float64
 }
 
 // stdioMethods are the requests the stdio server answers. initialize and ping serve legacy clients, as the
@@ -49,7 +48,7 @@ var gatedMethods = map[string]bool{"tools/list": true, "tools/call": true, "prom
 // the connector's own, and its reply goes out to the client's exact id, after a call's receipt is finished.
 func ServeStdio(ctx context.Context, config StdioConfig, in io.Reader, out io.Writer) error {
 	c, err := newCore(settings{resource: config.Resource, rateLimit: config.RateLimit, windowSeconds: config.WindowSeconds,
-		writesDisabled: config.WritesDisabled, selected: config.Selected, verify: config.Verify, receipts: config.Receipts,
+		selected: config.Selected, verify: config.Verify, receipts: config.Receipts,
 		run: config.Run, clock: config.Clock, wall: config.Wall}, nil)
 	if err != nil {
 		return err

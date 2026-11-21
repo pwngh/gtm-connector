@@ -30,17 +30,16 @@ type Verifier func(raw string) *Token
 
 // GatewayConfig is what one HTTP gateway serves and how it checks callers.
 type GatewayConfig struct {
-	Resource       string // the exact https://host:port/path URL tokens are issued for
-	Issuer         string
-	RateLimit      int
-	WindowSeconds  float64
-	WritesDisabled bool
-	Selected       bool // a selection offers the brief tools and refuses writes
-	Verify         Verifier
-	Receipts       Recorder
-	Run            ToolFunc
-	Clock          func() float64 // the rate clock, in seconds
-	Wall           func() float64 // the wall clock, in seconds since the epoch
+	Resource      string // the exact https://host:port/path URL tokens are issued for
+	Issuer        string
+	RateLimit     int
+	WindowSeconds float64
+	Selected      bool // a selection offers the brief tools
+	Verify        Verifier
+	Receipts      Recorder
+	Run           ToolFunc
+	Clock         func() float64 // the rate clock, in seconds
+	Wall          func() float64 // the wall clock, in seconds since the epoch
 }
 
 // Gateway is the /mcp endpoint and its protected-resource metadata.
@@ -55,7 +54,7 @@ type Gateway struct {
 // restricted to ProtocolVersion.
 func NewGateway(config GatewayConfig) (*Gateway, error) {
 	c, err := newCore(settings{resource: config.Resource, rateLimit: config.RateLimit, windowSeconds: config.WindowSeconds,
-		writesDisabled: config.WritesDisabled, selected: config.Selected, verify: config.Verify, receipts: config.Receipts,
+		selected: config.Selected, verify: config.Verify, receipts: config.Receipts,
 		run: config.Run, clock: config.Clock, wall: config.Wall}, []string{ProtocolVersion})
 	if err != nil {
 		return nil, err

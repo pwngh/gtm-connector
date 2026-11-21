@@ -137,7 +137,7 @@ func RawLinks(s []rune) []Span {
 // it at End2.
 type SentenceEnd struct{ Start, End1, End2 int }
 
-// SentenceEnds is _SENTENCE_END.finditer(line) (units.py line 222).
+// SentenceEnds is _SENTENCE_END.finditer(line) (units.py line 235).
 func SentenceEnds(s []rune) []SentenceEnd {
 	var found []SentenceEnd
 	n := len(s)
@@ -169,7 +169,7 @@ var openers = []string{"We", "Our", "They", "Their", "He", "She", "It", "Its", "
 	"This", "That", "These", "Those", "The", "A", "An", "In", "On", "At", "For", "If", "When", "As", "There",
 	"But", "And", "So", "Then", "However", "Therefore"}
 
-// Opener is _OPENER.match(line, pos, endpos) (units.py line 253): the first alternative, in order, that
+// Opener is _OPENER.match(line, pos, endpos) (units.py line 266): the first alternative, in order, that
 // is not followed by a word character, a dot or a hyphen.
 func Opener(s []rune, pos, end int) (int, bool) {
 	pos, end = clamp(s, pos, end)
@@ -185,7 +185,7 @@ func Opener(s []rune, pos, end int) (int, bool) {
 	return 0, false
 }
 
-// Named is _NAMED.match(text) (units.py line 342): the speaker's name runs from Start to NameEnd, and
+// Named is _NAMED.match(text) (units.py line 355): the speaker's name runs from Start to NameEnd, and
 // the words start at End.
 type Named struct{ Start, NameEnd, End int }
 
@@ -467,4 +467,153 @@ func Ended(s []rune, pos, end int) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// ---- the patterns voices reads a WebVTT cue with ----
+
+// classes is where (?:\.[^\s>.]*)* ends from i: each class is a dot and what follows it, up to whitespace,
+// a dot or a closing bracket. With angle, an opening bracket ends a class too ([^\s<>.]).
+func classes(s []rune, i int, angle bool) int {
+	for i < len(s) && s[i] == '.' {
+		i++
+		for i < len(s) && !u.ReSpace(s[i]) && s[i] != '>' && s[i] != '.' && !(angle && s[i] == '<') {
+			i++
+		}
+	}
+	return i
+}
+
+// VoiceTag is one match of _VOICE: a voice tag with its speaker's name, or the tag that closes a voice,
+// which has no name.
+type VoiceTag struct {
+	Start, End         int
+	NameStart, NameEnd int
+	Named              bool
+}
+
+// voiceTag is _VOICE.match(s, i) (units.py line 136).
+func voiceTag(s []rune, i int) (VoiceTag, bool) {
+	n := len(s)
+	if literal(s, i, n, "</v>") {
+		return VoiceTag{Start: i, End: i + 4}, true
+	}
+	if !literal(s, i, n, "<v") {
+		return VoiceTag{}, false
+	}
+	p := classes(s, i+2, false)
+	q := p
+	for q < n && (s[q] == ' ' || s[q] == '\t') {
+		q++
+	}
+	r := q
+	for r < n && !in(s[r], "<>\n") {
+		r++
+	}
+	if q == p || r == n || s[r] != '>' {
+		return VoiceTag{}, false
+	}
+	// The name is what follows the spaces. When nothing does, the last of two or more spaces is the name.
+	switch {
+	case r > q:
+		return VoiceTag{i, r + 1, q, r, true}, true
+	case q-p >= 2:
+		return VoiceTag{i, r + 1, q - 1, q, true}, true
+	}
+	return VoiceTag{}, false
+}
+
+// VoiceTags is _VOICE.finditer(text).
+func VoiceTags(s []rune) []VoiceTag {
+	var found []VoiceTag
+	for i := 0; i < len(s); {
+		tag, ok := voiceTag(s, i)
+		if !ok {
+			i++
+			continue
+		}
+		found = append(found, tag)
+		i = tag.End
+	}
+	return found
+}
+
+// cueStamp is where (?:\d{2,}:)?[0-5]\d:[0-5]\d\.\d{3}> ends from i, the character after the opening bracket.
+func cueStamp(s []rune, i int) (int, bool) {
+	n := len(s)
+	clock := func(j int) (int, bool) {
+		if j+10 > n || s[j] < '0' || s[j] > '5' || !u.ReDigit(s[j+1]) || s[j+2] != ':' || s[j+3] < '0' ||
+			s[j+3] > '5' || !u.ReDigit(s[j+4]) || s[j+5] != '.' || !u.ReDigit(s[j+6]) || !u.ReDigit(s[j+7]) ||
+			!u.ReDigit(s[j+8]) || s[j+9] != '>' {
+			return 0, false
+		}
+		return j + 10, true
+	}
+	hours := i
+	for hours < n && u.ReDigit(s[hours]) {
+		hours++
+	}
+	if hours-i >= 2 && hours < n && s[hours] == ':' {
+		if end, ok := clock(hours + 1); ok {
+			return end, true
+		}
+	}
+	return clock(i)
+}
+
+// cueMarkup is _CUE_MARKUP.match(s, i) (units.py line 146): the end of the match.
+func cueMarkup(s []rune, i int) (int, bool) {
+	n := len(s)
+	if i >= n || s[i] != '<' {
+		return 0, false
+	}
+	// A ruby reading, with the text it carries.
+	if literal(s, i, n, "<rt") {
+		if j := classes(s, i+3, true); j < n && s[j] == '>' {
+			j++
+			for j < n && s[j] != '<' && s[j] != '>' {
+				j++
+			}
+			if literal(s, j, n, "</rt>") {
+				return j + 5, true
+			}
+		}
+	}
+	j := i + 1
+	if j < n && s[j] == '/' {
+		j++
+	}
+	// A bold, italic, underline, class or ruby span, opening or closing.
+	for _, name := range []string{"b", "i", "u", "c", "ruby", "rt"} {
+		if literal(s, j, n, name) {
+			if k := classes(s, j+len(name), true); k < n && s[k] == '>' {
+				return k + 1, true
+			}
+		}
+	}
+	// A language span, which alone takes an annotation.
+	if literal(s, j, n, "lang") {
+		k := classes(s, j+4, true)
+		if k < n && s[k] == '>' {
+			return k + 1, true
+		}
+		if k < n && (s[k] == ' ' || s[k] == '\t') {
+			k++
+			for k < n && !in(s[k], "<>\n") {
+				k++
+			}
+			if k < n && s[k] == '>' {
+				return k + 1, true
+			}
+		}
+	}
+	// A cue timestamp. It has no closing form.
+	return cueStamp(s, i+1)
+}
+
+// StripCueMarkup is _CUE_MARKUP.sub("", text).
+func StripCueMarkup(s []rune) []rune {
+	return substitute(s, func(i int) (int, string, bool) {
+		end, ok := cueMarkup(s, i)
+		return end, "", ok
+	})
 }

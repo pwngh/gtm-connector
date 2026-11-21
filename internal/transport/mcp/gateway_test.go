@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/pwngh/gtm-connector/internal/oracletest"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // These transcribe tests/test_gateway.py and the prepared folder's read rows; each test names its source.
@@ -207,6 +208,8 @@ func TestCurrentDiscoveryAndToolScopeDeclarations(t *testing.T) {
 	}
 	want := map[string]any{"search_accounts": "crm:read", "get_account": "crm:read", "list_opportunities": "crm:read",
 		"read_call_notes": "calls:read", "read_slack_messages": "slack:read", "log_activity": "crm:write"}
+	replay(t, "test_current_discovery_and_tool_scope_declarations: tools/list", wantUnlisted)
+	delete(want, writeTool)
 	if !reflect.DeepEqual(scopes, want) {
 		t.Fatalf("scopes %v", scopes)
 	}
@@ -222,7 +225,6 @@ func TestScopesSeparateBothSourcesAndWrites(t *testing.T) {
 	if !reflect.DeepEqual(refs(account), []string{"crm/accounts/acc-007", "crm/contacts/con-007"}) {
 		t.Fatalf("refs %v", refs(account))
 	}
-	activity := map[string]any{"account_id": "acc-001", "kind": "renewal_call", "body": "Fixture owner requested a renewal call.", "idempotency_key": "fixture-write-001"}
 	denied := []struct {
 		name      string
 		arguments map[string]any
@@ -233,10 +235,14 @@ func TestScopesSeparateBothSourcesAndWrites(t *testing.T) {
 		{"get_account", map[string]any{"account_id": "acc-001"}, "calls", "crm:read"},
 		{"search_accounts", nil, "calls", "crm:read"},
 		{"list_opportunities", nil, "calls", "crm:read"},
-		{"log_activity", activity, "crm", "crm:write"},
-		{"log_activity", activity, "calls", "crm:write"},
+		{"log_activity", fixtureActivity, "crm", "crm:write"},
+		{"log_activity", fixtureActivity, "calls", "crm:write"},
 	}
 	for _, d := range denied {
+		if d.name == writeTool {
+			h.replayWrite("test_scopes_separate_both_sources_and_writes: log_activity with "+d.token+":read", d.arguments, d.token)
+			continue
+		}
 		response := h.tool(d.name, d.arguments, d.token, nil)
 		reason, code := reasonOf(t, response)
 		challenge := response.Header().Get("WWW-Authenticate")
@@ -246,9 +252,7 @@ func TestScopesSeparateBothSourcesAndWrites(t *testing.T) {
 			t.Fatalf("%s with %s: %d %s %q", d.name, d.token, response.Code, response.Body, challenge)
 		}
 	}
-	if h.fx.activityCount() != 0 {
-		t.Fatal("a write ran")
-	}
+	h.noWrite()
 	notes := h.records(h.tool("read_call_notes", map[string]any{"account_id": "acc-001"}, "calls", nil), "calls")
 	if !reflect.DeepEqual(refs(notes), []string{"calls/call_notes/note-001"}) {
 		t.Fatalf("notes %v", refs(notes))
@@ -320,7 +324,6 @@ func TestDuplicateAuthorizationHeaders(t *testing.T) {
 // test_every_tool_attempt_has_one_complete_audit_row
 func TestEveryToolAttemptHasOneCompleteReceipt(t *testing.T) {
 	h := newHarness(t)
-	activity := map[string]any{"account_id": "acc-001", "kind": "renewal_call", "body": "Fixture owner requested a renewal call.", "idempotency_key": "fixture-write-001"}
 	attempts := []struct {
 		name      string
 		arguments map[string]any
@@ -331,7 +334,7 @@ func TestEveryToolAttemptHasOneCompleteReceipt(t *testing.T) {
 		{"get_account", map[string]any{"account_id": "acc-001"}, "crm", nil},
 		{"list_opportunities", map[string]any{"account_id": "acc-003"}, "crm", nil},
 		{"read_call_notes", map[string]any{"account_id": "acc-004"}, "calls", nil},
-		{"log_activity", activity, "write", nil},
+		{"log_activity", fixtureActivity, "write", nil},
 		{"read_call_notes", map[string]any{"account_id": "acc-007"}, "crm", nil},
 		{"get_account", map[string]any{"account_id": "acc-001"}, "expired", nil},
 		{"unknown_fixture_tool", map[string]any{}, "full", nil},
@@ -341,9 +344,16 @@ func TestEveryToolAttemptHasOneCompleteReceipt(t *testing.T) {
 	expected := [][]string{{"crm/accounts/acc-001"}, {"crm/accounts/acc-001", "crm/contacts/con-001"}, {"crm/opportunities/opp-003"}}
 	for i, a := range attempts {
 		number := i + 1
-		response := h.tool(a.name, a.arguments, a.token, a.headers)
+		var response *httptest.ResponseRecorder
+		if a.name == writeTool {
+			response = h.replayWrite("test_every_tool_attempt_has_one_complete_audit_row: attempt 5", a.arguments, a.token)
+		} else {
+			response = h.tool(a.name, a.arguments, a.token, a.headers)
+		}
 		document := decode(t, response.Body.Bytes())
 		switch {
+		case a.name == writeTool:
+			// replayWrite has checked the refusal.
 		case number <= 5:
 			source := "crm"
 			if a.name == "read_call_notes" {
@@ -400,20 +410,15 @@ func plainJSON(t *testing.T, value any) any {
 func TestIdempotentWriteRejectsChangedPayload(t *testing.T) {
 	h := newHarness(t)
 	arguments := map[string]any{"account_id": "acc-001", "kind": "renewal_call", "body": "Fixture owner requested a renewal call.", "idempotency_key": "fixture-write-001"}
-	first := h.records(h.tool("log_activity", arguments, "write", nil), "crm")
-	second := h.records(h.tool("log_activity", arguments, "write", nil), "crm")
-	if !reflect.DeepEqual(first, second) || len(first) != 1 {
-		t.Fatal("retry differs")
-	}
+	const vector = "test_idempotent_write_returns_one_activity_and_rejects_changed_payload: "
+	h.replayWrite(vector+"first", arguments, "write")
+	h.replayWrite(vector+"retry", arguments, "write")
 	changed := map[string]any{}
 	for k, v := range arguments {
 		changed[k] = v
 	}
 	changed["body"] = "Changed fixture payload."
-	conflict := h.tool("log_activity", changed, "write", nil)
-	if conflict.Code != 200 || path(decode(t, conflict.Body.Bytes()), "result", "isError") != true {
-		t.Fatalf("conflict %d %s", conflict.Code, conflict.Body)
-	}
+	h.replayWrite(vector+"changed payload", changed, "write")
 	if rows := h.receipts.Read(); len(rows) != 3 || rows[2].Status != "error" {
 		t.Fatalf("receipts %+v", rows)
 	}
@@ -448,11 +453,12 @@ func TestRateLimitCountsScopeDenials(t *testing.T) {
 func TestDuplicateWriteAttemptsConsumeRateLimit(t *testing.T) {
 	h := newHarness(t, func(c *GatewayConfig) { c.RateLimit = 1 })
 	arguments := map[string]any{"account_id": "acc-001", "kind": "renewal_call", "body": "x", "idempotency_key": "fixture-write-001"}
-	h.records(h.tool("log_activity", arguments, "write", nil), "crm")
+	h.replayWrite("test_duplicate_write_attempts_also_consume_rate_limit: first", arguments, "write")
 	if retry := h.tool("log_activity", arguments, "write", nil); retry.Code != 429 {
 		t.Fatalf("retry %d", retry.Code)
 	}
-	if h.fx.activityCount() != 1 || len(h.receipts.Read()) != 2 {
+	h.noWrite()
+	if len(h.receipts.Read()) != 2 {
 		t.Fatal("counts")
 	}
 }
@@ -529,6 +535,47 @@ func TestDeeplyNestedMarkedRequestIsAudited(t *testing.T) {
 	}
 }
 
+// nestedArgument is a value with this many objects open around a 1.
+func nestedArgument(levels int) any {
+	var value any = 1
+	for i := 0; i < levels; i++ {
+		value = map[string]any{"a": value}
+	}
+	return value
+}
+
+// A tool call nested past strictjson.MaxDepth is refused as invalid JSON and runs nothing. The request,
+// its params and its arguments are three levels, so the argument's own levels decide.
+func TestCallNestedPastTheLimitIsInvalidJSON(t *testing.T) {
+	h := newHarness(t)
+	atLimit := h.tool("get_account", map[string]any{"account_id": "acc-001", "extra": nestedArgument(strictjson.MaxDepth - 3)}, "crm", nil)
+	// A call at the limit is read: it is refused for its unknown argument, not as JSON.
+	if reason, _ := reasonOf(t, atLimit); reason != "invalid_arguments" {
+		t.Fatalf("a call at the limit: %d %s", atLimit.Code, atLimit.Body)
+	}
+	before, ran := len(h.receipts.Read()), len(h.fx.ran())
+	response := h.tool("get_account", map[string]any{"account_id": "acc-001", "extra": nestedArgument(strictjson.MaxDepth - 2)}, "crm", nil)
+	reason, code := reasonOf(t, response)
+	rows := h.receipts.Read()
+	if response.Code != 400 || reason != "invalid_json" || code != "-32700" || len(rows) != before+1 {
+		t.Fatalf("%d %s, %d receipts", response.Code, response.Body, len(rows)-before)
+	}
+	// The Mcp-Method header says it is a call, so it keeps a receipt under the name the Mcp-Name header gives.
+	if last := rows[len(rows)-1]; last.Tool != "get_account" || last.Status != "error" || *last.HTTPStatus != 400 || last.RowCount != 0 {
+		t.Fatalf("%+v", last)
+	}
+	// Without the header nothing readable says it is a call, as for any body no parser reads.
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001","extra":` +
+		strings.Repeat(`{"a":`, strictjson.MaxDepth-2) + "1" + strings.Repeat("}", strictjson.MaxDepth-2) + "}}}"
+	unmarked := h.post([]byte(body), [][2]string{{"Authorization", "Bearer unused"}})
+	if reason, _ := reasonOf(t, unmarked); unmarked.Code != 400 || reason != "invalid_json" || len(h.receipts.Read()) != before+1 {
+		t.Fatalf("%d %s, %d receipts", unmarked.Code, unmarked.Body, len(h.receipts.Read())-before)
+	}
+	if len(h.fx.ran()) != ran {
+		t.Fatalf("a call ran: %v", h.fx.ran())
+	}
+}
+
 // test_a_tool_call_the_strict_parser_refuses_keeps_one_receipt
 func TestStrictParserRefusalKeepsOneReceipt(t *testing.T) {
 	h := newHarness(t)
@@ -559,12 +606,8 @@ func TestStrictParserRefusalKeepsOneReceipt(t *testing.T) {
 // test_unknown_account_write_returns_an_explicit_audited_tool_error
 func TestUnknownAccountWriteIsAnAuditedToolError(t *testing.T) {
 	h := newHarness(t)
-	response := h.tool("log_activity", map[string]any{"account_id": "acc-missing", "kind": "k", "body": "b", "idempotency_key": "i"}, "write", nil)
-	result := path(decode(t, response.Body.Bytes()), "result")
-	text := fmt.Sprint(path(result, "content"))
-	if response.Code != 200 || path(result, "isError") != true || !strings.Contains(text, "Error executing tool log_activity: account not found") {
-		t.Fatalf("%d %s", response.Code, response.Body)
-	}
+	h.replayWrite("test_unknown_account_write_returns_an_explicit_audited_tool_error",
+		map[string]any{"account_id": "acc-missing", "kind": "k", "body": "b", "idempotency_key": "i"}, "write")
 	if rows := h.receipts.Read(); len(rows) != 1 || rows[0].Status != "error" || rows[0].RowCount != 0 {
 		t.Fatalf("%+v", rows)
 	}
@@ -584,17 +627,20 @@ func TestReceiptFinishFailureWithholdsData(t *testing.T) {
 func TestWriteCommittedBeforeReceiptFailureIsReused(t *testing.T) {
 	h := newHarness(t)
 	arguments := map[string]any{"account_id": "acc-001", "kind": "renewal_call", "body": "b", "idempotency_key": "fixture-write-001"}
+	const vector = "test_write_committed_before_audit_failure_is_reused_on_retry: "
 	h.receipts.FailFinish = true
-	if response := h.tool("log_activity", arguments, "write", nil); response.Code != 503 {
-		t.Fatalf("%d", response.Code)
+	replay(t, vector+"first", wantWithheld)
+	response := h.tool("log_activity", arguments, "write", nil)
+	if response.Code != 503 || strings.TrimSpace(response.Body.String()) != `{"error":"execution_or_audit_unavailable; no result released"}` {
+		t.Fatalf("%d %s", response.Code, response.Body)
 	}
 	h.receipts.FailFinish = false
-	if rows := h.receipts.Read(); len(rows) != 1 || rows[0].Status != "pending" || h.fx.activityCount() != 1 {
+	if rows := h.receipts.Read(); len(rows) != 1 || rows[0].Status != "pending" {
 		t.Fatalf("%+v", rows)
 	}
-	h.records(h.tool("log_activity", arguments, "write", nil), "crm")
-	rows := h.receipts.Read()
-	if rows[0].Status != "pending" || rows[1].Status != "ok" || !reflect.DeepEqual(rows[1].Rows, []string{"crm/activities/act-fixture-write-001"}) || h.fx.activityCount() != 1 {
+	h.noWrite()
+	h.replayWrite(vector+"retry", arguments, "write")
+	if rows := h.receipts.Read(); len(rows) != 2 || rows[0].Status != "pending" {
 		t.Fatalf("%+v", rows)
 	}
 }
