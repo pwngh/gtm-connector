@@ -1,5 +1,4 @@
 import React from 'react';
-import './worklistEntry.css';
 
 export default function WorklistStepEntry({item, onAction}) {
   return <section className="wl-step-entry" aria-labelledby={item.entryTargetId} data-work-item={item.id}>

@@ -8,7 +8,6 @@ import {
 import {closeReadinessOnEscape, focusReadinessElement, moveReadinessFocus, readinessFocusTarget, restoreReadinessFocus} from './readinessBrowser.js';
 import {historyHref} from './historyLocation.js';
 import {sourceReadLabel} from './renewalEvidence.js';
-import './readiness.css';
 
 const icons = {passed: CheckCircle2, failed: CircleX, not_evaluated: CircleDashed, not_applicable: MinusCircle};
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`;

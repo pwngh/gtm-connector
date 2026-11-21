@@ -4,8 +4,7 @@ import {ArrowUpRight, CircleDashed, Clock, GitBranch, ShieldCheck} from 'lucide-
 import {gapDispositions, unitFacts} from './api.js';
 import {ApiFrame, ApiRenewalHeader, AccountPicker, CardList, Refusal, Time, gapsTarget, keepQuery, useCardSelection} from './ApiFrame.jsx';
 import {useServer} from './ServerSwitch.jsx';
-import {renewalFixture} from './renewalFixtures.js';
-import './readiness.css';
+import {serverPaths} from './app/routes.js';
 
 // Readiness when the Go server serves the app, from one card's gaps and units
 // only. The server has no workflow rules yet, so none is listed or evaluated:
@@ -75,7 +74,7 @@ export function ReadinessFromServer({selection}) {
     <div className="api-picker"><AccountPicker selection={selection}/><CardList selection={selection}/></div>
     {selection.cardId && selection.listed && (card.status === 'failed' ? <Refusal error={card.error} retry={card.retry}/>
       : card.status !== 'ready' ? <p className="api-loading" role="status">Reading the card…</p>
-        : <CardReadiness card={card.data} evidenceHref={renewalFixture.paths.evidence + keepQuery(account, cardId)}/>)}
+        : <CardReadiness card={card.data} evidenceHref={serverPaths.evidence + keepQuery(account, cardId)}/>)}
   </>;
 }
 
@@ -88,7 +87,7 @@ export default function ApiReadiness() {
     <div className="rd-intro"><div><span className="rd-kicker">READINESS · FROM THE SERVER’S CARD</span><h2 tabIndex={-1}>Know what can move next.</h2>
       <p>Open items come from the sources the card says it did not read or show. The server has no workflow rules yet, so none is evaluated.</p></div></div>
     <ApiFrame>{() => <ReadinessFromServer selection={selection}/>}</ApiFrame>
-    <p className="rd-footnote">Read from the server as the signed-in principal. Nothing here is a walkthrough record.</p>
+    <p className="rd-footnote">Read from the server as the signed-in principal.</p>
   </div>
   </>;
 }
