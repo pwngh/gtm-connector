@@ -1,6 +1,7 @@
-// Every recorded card in testdata/oracle/cards, as the server stores it: the
-// sealed file's exact bytes, their SHA-256 as the oracle recorded it, and the
-// plain-text card the file holds. Only tests import it.
+// Every golden card in testdata/oracle/cards, as the server stores it: the
+// sealed file's exact bytes, their SHA-256 as the row records it, and the
+// plain-text card the file holds. A row that holds inputs alone is left out.
+// Only tests import it.
 
 import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
@@ -24,8 +25,9 @@ export const sealedCards: SealedCard[] = cardFiles.flatMap(file =>
     .toString()
     .split('\n')
     .filter(Boolean)
-    .map(line => {
-      const row = JSON.parse(line) as {key: string; account_id: string; card: string; sha256: string};
+    .map(line => JSON.parse(line) as {key: string; account_id: string; card?: string; sha256?: string})
+    .filter((row): row is {key: string; account_id: string; card: string; sha256: string} => row.card !== undefined)
+    .map(row => {
       return {
         file,
         key: row.key,

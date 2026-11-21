@@ -92,6 +92,18 @@ func childStart(f *postgrestest.Fixture, p postgres.Receipt, ordinal int, lease 
 		ConnectionID: f.Connection.ID, Arguments: json.RawMessage(`{"account_id":"acc-003"}`), Lease: lease}
 }
 
+// lapsed waits until the database's own clock, which sets and checks every lease, is past the receipt's
+// lease, and fails the test after twenty seconds.
+func lapsed(t *testing.T, f *postgrestest.Fixture, receiptID string) {
+	t.Helper()
+	for deadline := time.Now().Add(20 * time.Second); count(t, f, `SELECT count(*) FROM receipts
+		WHERE id = $1 AND lease_expires_at <= clock_timestamp()`, receiptID) != 1; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the lease never ran out")
+		}
+	}
+}
+
 func records(tag string) []postgres.RecordVersion {
 	return []postgres.RecordVersion{
 		{Source: "crm", Table: "accounts", RecordID: "acc-003", Body: []byte(`{"v":"` + tag + `"}`)},
@@ -214,10 +226,11 @@ func TestTwoFinishersRace(t *testing.T) {
 
 func TestExpiredLeaseCannotFinish(t *testing.T) {
 	f := postgrestest.New(t)
-	r := parent(t, f, "lease", 300*time.Millisecond)
-	_, err := f.Store.RenewLease(ctx, r.ID, r.LeaseToken, 400*time.Millisecond)
+	// The renewal must reach the lease while it is live, so the lease gives it a second.
+	r := parent(t, f, "lease", time.Second)
+	_, err := f.Store.RenewLease(ctx, r.ID, r.LeaseToken, 1500*time.Millisecond)
 	ok(t, err)
-	time.Sleep(600 * time.Millisecond)
+	lapsed(t, f, r.ID)
 	_, err = f.Store.FinishReceipt(ctx, finishOK(r))
 	is(t, err, postgres.ErrLeaseLost)
 	_, err = f.Store.RenewLease(ctx, r.ID, r.LeaseToken, time.Minute)

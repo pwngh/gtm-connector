@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
 import type {CardDetail, GapView, Json} from '../../../api/types.ts';
 
-// For the tests: every recorded card from testdata/oracle/cards, shaped as
+// For the tests: every golden card from testdata/oracle/cards, shaped as
 // GET /api/v1/cards/{card} returns it, with the lines the server builds for it
 // from testdata/card_lines.jsonl.gz, which a Go test holds to the server's own
 // builder. Only the IDs and the publish time are made up, as the server makes
@@ -62,11 +62,13 @@ function shaped(account: string, id: string, sealed: Record<string, unknown>, sh
 
 const recordedFiles = (names: string[]): Recorded[] =>
   names.flatMap(file =>
-    gunzipped(`oracle/cards/${file}.jsonl.gz`).map((line, at) => {
-      const row = JSON.parse(line) as {key: string; account_id: string; card: string; sha256: string};
-      const lines = recordedLines.get(`${file} ${row.key}`) ?? null;
-      return {file, key: row.key, card: shaped(row.account_id, `card-${file}-${at}`, JSON.parse(row.card), row.sha256, row.card.length, lines)};
-    }),
+    gunzipped(`oracle/cards/${file}.jsonl.gz`)
+      .map(line => JSON.parse(line) as {key: string; account_id: string; card?: string; sha256?: string})
+      .filter((row): row is {key: string; account_id: string; card: string; sha256: string} => row.card !== undefined)
+      .map((row, at) => {
+        const lines = recordedLines.get(`${file} ${row.key}`) ?? null;
+        return {file, key: row.key, card: shaped(row.account_id, `card-${file}-${at}`, JSON.parse(row.card), row.sha256, row.card.length, lines)};
+      }),
   );
 
 export const recorded: Recorded[] = recordedFiles(files);

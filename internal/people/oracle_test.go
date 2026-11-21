@@ -119,7 +119,7 @@ func equivalent(role, basis string, rung int, contact *int, r people.Result, con
 	return nil
 }
 
-// TestRecordedCards feeds the resolver, for every sentence of the recorded cards, what their evidence holds
+// TestRecordedCards feeds the resolver, for every sentence of the golden cards, what their evidence holds
 // of people: the label, the account's contacts and the listed sellers. The evidence holds no attendee
 // list, Slack profile, alias or user, so only the name rung can decide. Each result must be the role, basis,
 // rung and contact the card sealed.
@@ -261,7 +261,7 @@ func TestRecordedCards(t *testing.T) {
 		"their message's author, under no role", cards, sentences, cut, quoted)
 	t.Logf("by role: customer %d, seller %d, unknown %d", roles["customer"], roles["seller"], roles["unknown"])
 	t.Logf("unknown by reason: %v", reasons)
-	if cards != 450 {
-		t.Errorf("%d recorded cards, want 450", cards)
+	if cards != 90 {
+		t.Errorf("%d golden cards, want 90", cards)
 	}
 }

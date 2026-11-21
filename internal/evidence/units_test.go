@@ -10,13 +10,15 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// rebuilt pins how many cards of each family are rebuilt from the evidence they seal: every card.
+// rebuilt pins how many golden cards each family holds, every one of which is rebuilt from the evidence it
+// seals. The other rows of a family hold inputs alone; internal/cards builds them and checks their
+// properties.
 var rebuilt = map[string]int{
-	"demo": 33, "books_demo": 78, "varied_demo": 46, "cases": 19, "books_calls": 82, "books_salesforce": 78,
-	"books_slack": 78, "slack_threads": 36,
+	"demo": 33, "books_demo": 7, "varied_demo": 7, "cases": 19, "books_calls": 12, "books_salesforce": 4,
+	"books_slack": 2, "slack_threads": 6,
 }
 
-// TestBuildFromSealedEvidence rebuilds every oracle card from the evidence its file seals and compares the
+// TestBuildFromSealedEvidence rebuilds every golden card from the evidence its file seals and compares the
 // text, units and gaps.
 func TestBuildFromSealedEvidence(t *testing.T) {
 	for family, want := range rebuilt {
@@ -30,6 +32,9 @@ func TestBuildFromSealedEvidence(t *testing.T) {
 				}
 				if err := json.Unmarshal(line, &row); err != nil {
 					t.Fatal(err)
+				}
+				if row.Card == "" {
+					continue
 				}
 				mismatches.Row()
 				value, err := strictjson.LoadsText(row.Card)

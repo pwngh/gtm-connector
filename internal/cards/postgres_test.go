@@ -42,8 +42,8 @@ import (
 // against the oracle's units and gaps, each unit's read and record version against the verifier's binding.
 
 func TestCardsOnPostgres(t *testing.T) {
-	demoStoreFamilies(t, newPostgresCards)
-	recordedInputFamilies(t, newPostgresCards)
+	demoStoreFamilies(t, newPostgresCards, nil)
+	recordedInputFamilies(t, newPostgresCards, nil)
 }
 
 // postgresCards builds a family's cards in one demo workspace of a fresh database, as its local owner.

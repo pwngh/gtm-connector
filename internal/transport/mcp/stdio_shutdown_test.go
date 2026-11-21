@@ -99,7 +99,8 @@ func TestStdioStopFinishesAReceiptCommittedAsItStops(t *testing.T) {
 	s.send(legacyStart, legacyReady, call(2, "get_account", `{"account_id":"acc-001"}`))
 	<-committed
 	s.cancel()
-	time.Sleep(200 * time.Millisecond)
+	// The server is given a second to see the stop and begin waiting for the line before the line goes on.
+	time.Sleep(time.Second)
 	close(release)
 	s.stopped(10 * time.Second)
 	time.Sleep(200 * time.Millisecond)

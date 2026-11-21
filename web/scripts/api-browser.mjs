@@ -80,10 +80,11 @@ function cardOf(account, row = oracle[account], id = `card-${account}`, lines = 
     gaps: sealed.gaps.map(gap => ({...gap, text: `${gap.text} ${hostile}`}))};
 }
 const cards = Object.fromEntries(Object.keys(oracle).filter(key => /^acc-\d+$/.test(key)).map(key => [key, cardOf(key)]));
-// Every recorded card in testdata/oracle/cards, each family the index lists, as cards of one more account.
+// Every golden card in testdata/oracle/cards, each family the index lists, as cards of one more account. A row
+// that holds inputs alone has no card.
 const families = Object.keys(JSON.parse(readFileSync(new URL('../../testdata/oracle/cards/index.json', import.meta.url), 'utf8')).families);
 const recorded = families.flatMap(file => gunzipSync(readFileSync(new URL(`../../testdata/oracle/cards/${file}.jsonl.gz`, import.meta.url))).toString()
-  .split('\n').filter(Boolean).map(line => ({file, row: JSON.parse(line)})))
+  .split('\n').filter(Boolean).map(line => ({file, row: JSON.parse(line)})).filter(({row}) => row.card !== undefined))
   .map(({file, row}, at) => cardOf('acc-900', row, `rec-${at}`, recordedLines.get(`${file} ${row.key}`) ?? null));
 // Serves the recorded cards under acc-900, newest first in file order.
 function serveRecorded() {
@@ -1537,7 +1538,7 @@ await scenario('text tab: every recorded card byte for byte, and copied the same
     const copied = await tab.evaluate(() => navigator.clipboard.readText());
     if (shown !== text || copied !== text || said !== 'Copied') wrong.push(card.id);
   }
-  check(recorded.length === 450 && wrong.length === 0, `each of ${recorded.length} recorded cards shows its sealed text byte for byte and copies the same string (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
+  check(recorded.length === 90 && wrong.length === 0, `each of ${recorded.length} golden cards shows its sealed text byte for byte and copies the same string (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
   check(tab.errors.length === 0 && violations(tab).length === 0, `recorded cards: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
   await tab.context().close();
 });
@@ -1872,8 +1873,8 @@ await scenario('communications: every recorded card lists each sentence unit onc
       await tab.screenshot({path: join(options.screenshots, 'deal-communications-recorded-390.png'), fullPage: true});
     }
   }
-  check(recorded.length === 450 && wrong.length === 0 && untimedCards > 0 && hidden > 0,
-    `each of ${recorded.length} recorded cards lists its ${units} sentence units once (${hidden} not on the card), groups oldest first, ${untimedCards} cards with groups under No time recorded (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
+  check(recorded.length === 90 && wrong.length === 0 && untimedCards > 0 && hidden > 0,
+    `each of ${recorded.length} golden cards lists its ${units} sentence units once (${hidden} not on the card), groups oldest first, ${untimedCards} cards with groups under No time recorded (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
   check(tab.errors.length === 0 && violations(tab).length === 0, `recorded cards: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
   await tab.context().close();
 });

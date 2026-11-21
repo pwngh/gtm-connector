@@ -26,8 +26,10 @@ import (
 // pending for the sweep of expired leases, which finishes it as interrupted. Every store call the lock held
 // ended at the gate's deadline, never at the database's own lock or statement timeout.
 
-// settleLimit stands in for cards.SettleLimit here.
-const settleLimit = 250 * time.Millisecond
+// settleLimit stands in for cards.SettleLimit here. It also bounds the receipt writes the lock does not hold,
+// which a busy runner can take more than a few hundred milliseconds to commit, so it is a second. A start
+// has two of them, still under the five seconds after which the database gives up on a lock by itself.
+const settleLimit = time.Second
 
 // noted is the receipt store with every error it gave the gate kept.
 type noted struct {

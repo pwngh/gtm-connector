@@ -96,8 +96,9 @@ func withoutTimes(text string) string {
 }
 
 // Each recorded transcript a books_calls card read is imported through debug calls import, beside the demo
-// CRM holding the rows the card's book inserted, and brief then prints the recorded card. Card text is
-// compared byte for byte, and units and gaps as values, except for what the recorder decided by itself:
+// CRM holding the rows the card's book inserted, and the import is the recorded one. brief then makes every
+// card, and for a golden row prints the card the row holds. Card text is compared byte for byte, and units
+// and gaps as values, except for what the recorder decided by itself:
 //
 //   - its clock, which wrote the times of the line naming when the sources were read and the time of each
 //     import;
@@ -112,7 +113,7 @@ func TestImportedTranscriptsMakeTheRecordedCards(t *testing.T) {
 	d := setUpDemo(t)
 	books := recordedBooks(t)
 	folder := exports(t)
-	imported, cards := 0, 0
+	imported, cards, golden := 0, 0, 0
 	for i, line := range oracletest.Lines(t, "cards/books_calls.jsonl.gz") {
 		var row struct {
 			Key       string          `json:"key"`
@@ -177,8 +178,20 @@ func TestImportedTranscriptsMakeTheRecordedCards(t *testing.T) {
 
 		asOf, _ := get(options, "as_of").(string)
 		stdout, _ := d.succeeded(t, append([]string{"--json", "brief", row.AccountID, "--as-of", asOf}, where...)...)
-		got, want := object(t, stdout), object(t, row.Card)
 		cards++
+		if row.Card == "" {
+			// A row of inputs alone: the card quotes the import, or says none is imported.
+			said := "\n  Calls: no transcript is imported for this account.\n"
+			if recordedID != "" {
+				said = "\n  Calls: one transcript excerpt was read, "
+			}
+			if !strings.Contains(get(object(t, stdout), "text").(string), said) {
+				t.Errorf("%s: the card does not say what was imported", row.Key)
+			}
+			continue
+		}
+		golden++
+		got, want := object(t, stdout), object(t, row.Card)
 		gotText, wantText := withoutTimes(get(got, "text").(string)), withoutTimes(get(want, "text").(string))
 		// The one Slack line: the recorder did not request Slack, and brief reads the demo Slack, which holds
 		// no message for these accounts.
@@ -213,8 +226,8 @@ func TestImportedTranscriptsMakeTheRecordedCards(t *testing.T) {
 			t.Errorf("%s: the card's gaps differ", row.Key)
 		}
 	}
-	if imported != 50 || cards != 82 {
-		t.Errorf("%d transcripts imported and %d cards made, want 50 and 82", imported, cards)
+	if imported != 50 || cards != 82 || golden != 12 {
+		t.Errorf("%d transcripts imported, %d cards made and %d golden, want 50, 82 and 12", imported, cards, golden)
 	}
 }
 

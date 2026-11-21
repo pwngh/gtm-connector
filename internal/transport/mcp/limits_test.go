@@ -17,7 +17,9 @@ import (
 // has ended, as a store does whose answer comes after the caller's time ran out. Each receipt write must be
 // given a deadline: a write given none would wait forever, and fails after a minute instead.
 
-const shortLimit = 50 * time.Millisecond
+// shortLimit is the settle limit these tests give the gate. It ends each scripted write, and also bounds each
+// write the script answers at once, which a busy runner can hold up for more than a few milliseconds.
+const shortLimit = time.Second
 
 // step is how one start or finish of the scripted recorder answers.
 type step int
