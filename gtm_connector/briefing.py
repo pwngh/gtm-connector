@@ -40,7 +40,12 @@ def collect_evidence(client, token, audit, account_id, brief_id, as_of=DEMO_AS_O
     if not isinstance(account_id, str) or not re.fullmatch(pattern, account_id):
         raise ValueError("account ID must use acc-sf- followed by the 18-character Salesforce ID"
                          if crm_backend == "salesforce" else "account ID must have the form acc-001")
-    if not isinstance(as_of, str) or date.fromisoformat(as_of).isoformat() != as_of:
+    try:
+        valid = isinstance(as_of, str) and date.fromisoformat(as_of).isoformat() == as_of
+    except ValueError:
+        # Its message quotes the text, which can carry a real org's names.
+        valid = False
+    if not valid:
         raise ValueError("as-of date must use YYYY-MM-DD")
     # A source that is not connected is never called. The card says so.
     records, statuses = [], {"notes_status": "not_connected" if calls_backend == "none" else "available",

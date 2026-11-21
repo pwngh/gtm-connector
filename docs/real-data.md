@@ -72,6 +72,12 @@ differences and `report.json` lists the first 1,000; past those, differences are
 differences, and 2 when the run fails. A regression fixture made from a difference is invented text that
 reproduces it.
 
+A pattern the real text shows is kept the same way, as invented items in
+[`internal/realdata/testdata/patterns.jsonl`](../internal/realdata/testdata/patterns.jsonl): sentences over
+300 characters, character references such as `&amp;`, format characters other than ZWJ, control characters, a
+sentence split after a Spanish abbreviation, and line breaks inside a message. The oracle fixtures record every
+function of each item, and the Go tests compare against them, so the tests and CI hold both runtimes to it.
+
 The first row, `item (decoding the line)`, counts the items file's lines: a line Python and Go decode
 differently is a difference there, with its line, and its functions are not compared. Records of another
 items file are stale and refused. A run that fails reports why and leaves no `report.json`; the other runs go

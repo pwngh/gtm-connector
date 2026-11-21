@@ -308,6 +308,27 @@ runpy.run_module("gtm_connector", run_name="__main__")
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertEqual(result.stdout, "")
 
+    def test_what_was_typed_is_not_repeated_in_an_error(self):
+        # An invented canary stands for a real org's name or URL typed where it does not belong.
+        canary = "zz-canary-renewal-7Q4"
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(self.run_cli("connect", "demo", "--state-dir", directory).returncode, 0)
+            for arguments, message in (
+                    (("brief", "acc-003", "--as-of", canary), "as-of date must use YYYY-MM-DD"),
+                    (("brief", "acc-003", "--as-of", "2027-02-30"), "as-of date must use YYYY-MM-DD"),
+                    (("brief", "acc-003", canary, "--state-dir", directory), "unrecognized arguments"),
+                    (("connect", "salesforce", "--s=" + canary), "ambiguous option, which could match --state-dir"),
+                    (("brief", "--without-calls=" + canary, "acc-003"), "ignored explicit argument"),
+                    ((canary,), "invalid choice (choose from"),
+                    (("connect", "x (choose from " + canary), "invalid choice (choose from")):
+                for output in ("--json", None):
+                    with self.subTest(arguments=arguments, output=output):
+                        state = () if "--state-dir" in arguments else ("--state-dir", directory)
+                        result = self.run_cli(*arguments, *state, *((output,) if output else ()))
+                        self.assertEqual((result.returncode, result.stdout), (2, ""), result.stderr)
+                        self.assertIn(message, result.stderr)
+                        self.assertNotIn(canary, result.stderr)
+
     def test_busy_state_and_failed_checks_keep_recovery_context(self):
         from contextlib import redirect_stderr, redirect_stdout
         import io

@@ -135,11 +135,20 @@ class ParserError(ValueError):
     pass
 
 
+# argparse's messages that quote what was typed, each cut to what it says about the parser. What was typed is not
+# repeated back: it may be a URL or a username.
+_TYPED = ((r"invalid choice: .* \(choose from", "invalid choice (choose from"),
+          (r"invalid (\S+) value: .*", r"invalid \1 value"),
+          (r"unrecognized arguments: .*", "unrecognized arguments"),
+          (r"ambiguous option: .* could match", "ambiguous option, which could match"),
+          (r"ignored explicit argument .*", "ignored explicit argument"))
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
-        # A value that is not one of the choices is not repeated back: it may be a URL or a username.
-        raise ParserError(re.sub(r"invalid choice: .*? \(choose from", "invalid choice (choose from", message,
-                                 flags=re.DOTALL))
+        for typed, kept in _TYPED:
+            message = re.sub(typed, kept, message, flags=re.DOTALL)
+        raise ParserError(message)
 
 
 class RootParser(Parser):

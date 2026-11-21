@@ -1,7 +1,9 @@
-"""Matches of every pattern with a lookaround, the windowed searches of the sentence rules, and the two large
-corpora: safe_text and sentence splitting over seeded random strings."""
+"""Matches of every pattern with a lookaround, the windowed searches of the sentence rules, the two large
+corpora: safe_text and sentence splitting over seeded random strings, and every R0 function of the invented
+pattern items."""
 
 import ast
+import json
 from pathlib import Path
 import random
 import re
@@ -18,6 +20,8 @@ FUZZ = ROOT / "tests_stateful" / "test_fuzz_inputs.py"
 FUZZ_NAMES = ("HOSTILE", "PLAIN", "DATES", "WORDS", "METADATA", "FRAGMENTS", "HEADS", "PIECES", "TAILS")
 # The fuzz tests' sampled strings of speech and speaker names.
 FUZZ_SAMPLED = ("SPEAKERS", "SPOKEN")
+# Invented R0 items, one or more for each text pattern that real data showed.
+PATTERNS = ROOT / "internal" / "realdata" / "testdata" / "patterns.jsonl"
 RANDOM_SCANNER = 20_000
 RANDOM_LARGE = 100_000
 # A few code points from every class that decides a rule, so random text reaches each branch.
@@ -305,6 +309,16 @@ def generate(writer: Writer, *, large: int = RANDOM_LARGE, scanner_random: int =
         "scanners": {name: description for name, (description, _) in SCANNERS.items()}}, len(SCANNERS))
     writer.lines("corpora/safe_text.jsonl.gz", _safe_text(fuzz, large))
     writer.lines("corpora/sentences.jsonl.gz", _sentences(large))
+    patterns = _patterns()
+    writer.json("corpora/patterns.json", {
+        "note": ("every R0 function of each invented item in internal/realdata/testdata/patterns.jsonl, as "
+                 "tools/oracle/real.py records it"), "cases": patterns}, len(patterns))
+
+
+def _patterns() -> list[dict]:
+    from oracle.real import text_outputs
+    items = [json.loads(line) for line in PATTERNS.read_text(encoding="ascii").splitlines()]
+    return [{"id": item["id"], "text": item["text"], "outputs": text_outputs(item["text"])} for item in items]
 
 
 def _safe_text(fuzz: list[str], count: int) -> Iterator[list]:

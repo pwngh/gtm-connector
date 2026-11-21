@@ -1,0 +1,30 @@
+{"id": "long-sentence-300", "text": "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last May call. Then we stopped."}
+{"id": "long-sentence-301", "text": "We confirmed that the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause as the legal team wrote it after the last two calls. Then we stopped."}
+{"id": "long-sentence-accented-300", "text": "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras esa llamada. Firmamos el viernes."}
+{"id": "long-sentence-accented-301", "text": "Acordamos que la renovaci\u00f3n del contrato inventado mantiene el precio actual durante el primer a\u00f1o, a\u00f1ade el soporte que el comprador pidi\u00f3 en la revisi\u00f3n de primavera, ampl\u00eda el plazo de aviso de sesenta a noventa d\u00edas y deja la cl\u00e1usula de datos como la redact\u00f3 el equipo jur\u00eddico tras las llamadas. Firmamos el viernes."}
+{"id": "long-sentence-run-on", "text": "So the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call, and nobody wrote an end to it"}
+{"id": "long-sentence-near-bracket", "text": "We said (the buyer asked whether the price holds? Ask legal) that it does."}
+{"id": "long-sentence-far-bracket", "text": "We said (the buyer asked whether the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call? Ask legal) that it holds. The next item is pricing."}
+{"id": "long-sentence-far-abbreviation", "text": "We met Dr. Example and the renewal rider for the invented account keeps the current price for the first year, adds the support tier the buyer asked about in the spring review, moves the notice window from sixty to ninety days, and leaves the data clause exactly as the legal team wrote it after the last call v. the old terms. Next we sign."}
+{"id": "references-named", "text": "Terms &amp; conditions stay. The &lt;draft&gt; says &quot;net 30&quot; today."}
+{"id": "references-numeric", "text": "We don&#39;t sign until Friday&#x27;s call. It&#8217;s fine &#x1F642; we agree."}
+{"id": "references-double", "text": "R&amp;amp;D asked again.&nbsp;The rider is &unknown; to us. Done &#0; now."}
+{"id": "references-at-end", "text": "Approved by legal &amp;"}
+{"id": "format-zero-width-space", "text": "We\u200b agree.\u200bThe rider\u200bholds. Next\u200b steps follow."}
+{"id": "format-word-joiner", "text": "We agree.\u2060 The rider holds.\u2060\u2060Then we sign. No.\u2060 14 goes on."}
+{"id": "format-bom-mid-text", "text": "We agree. \ufeffThe rider holds\ufeff. Then \ufeffwe sign."}
+{"id": "format-soft-hyphen-and-marks", "text": "Re\u00adnewal is set.\u200e The rider\u200f holds. \u2066Then\u2069 we sign."}
+{"id": "format-others", "text": "We agree.\u061c The rider\u180e holds. \udb40\udc01Then\ufff9 we sign\ufffb."}
+{"id": "controls-c0", "text": "We agree.\u0007 The rider\u0000 holds. \u001b[31mThen\u001b[0m we sign.\b Done."}
+{"id": "controls-c1-and-delete", "text": "We agree.\u007f The rider\u009b holds.\u0090 Then we sign.\u009f"}
+{"id": "controls-alone", "text": "\u0001\u0002\u0003"}
+{"id": "spanish-sra-lic", "text": "La Sra. Directora aprob\u00f3 el anexo. El Lic. Responsable pidi\u00f3 otra revisi\u00f3n."}
+{"id": "spanish-others", "text": "El Ing. Asesor y la Dra. Auditora firmaron. Ud. revise la p\u00e1g. 4 y el n\u00fam. 12. Atte. El equipo."}
+{"id": "spanish-company", "text": "La C\u00eda. Ejemplo S.A. de C.V. renueva. Sres. Compradores, gracias. Aprox. 30 d\u00edas."}
+{"id": "spanish-lower-after", "text": "La Sra. directora aprob\u00f3. El Lic. responsable firm\u00f3."}
+{"id": "lines-newline", "text": "We will\nsign Friday.\nThe rider holds.\n\nNext steps follow."}
+{"id": "lines-windows-and-bare-cr", "text": "We agree.\r\nThe rider holds.\rThen we sign.\r\n\r\nDone."}
+{"id": "lines-unicode-separators", "text": "We agree.\u2028The rider holds.\u2029Then we sign.\u0085Done."}
+{"id": "lines-vertical-and-file", "text": "We agree.\u000bThe rider holds.\fThen\u001cwe\u001dsign\u001e now."}
+{"id": "lines-after-abbreviation", "text": "We met Dr.\nExample today. La Sra.\nDirectora firm\u00f3. No.\n14 goes on."}
+{"id": "lines-in-a-mention", "text": "<@U0ABC123>\nwe agree <https://renewal.example/x|the\nrider> holds."}

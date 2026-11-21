@@ -213,25 +213,48 @@ func CheckPublication(p Publication, payload *Payload, seal Receipt, reads map[s
 			return refuse("read %s is not a finished read of this brief", id)
 		}
 	}
+	cited := IndexBound(bound)
+	// The record the bytes show for each reference, encoded once however many units cite it; nil when the
+	// bytes show none or it does not encode.
+	shown := map[string]*string{}
 	for _, u := range p.Units {
 		r, found := reads[u.ReceiptID]
 		if !inCard[u.ReceiptID] || !found || r.Status != "ok" || r.Tool != u.Tool {
 			return refuse("unit %d cites a read the card does not rest on", u.N)
 		}
-		var version *RecordVersion
-		for _, v := range bound[u.ReceiptID] {
-			if v.Ref() == u.RecordRef && v.Version() == u.ContentVersion {
-				version = &v
-				break
+		version, isBound := cited[Citation{u.ReceiptID, u.RecordRef, u.ContentVersion}]
+		body, done := shown[u.RecordRef]
+		if !done {
+			if record, inBytes := payload.Record(u.RecordRef); inBytes {
+				if text, err := strictjson.Dumps(record, strictjson.Prepared); err == nil {
+					body = &text
+				}
 			}
+			shown[u.RecordRef] = body
 		}
-		record, shown := payload.Record(u.RecordRef)
-		body, err := strictjson.Dumps(record, strictjson.Prepared)
-		if version == nil || !shown || err != nil || body != string(version.Body) {
+		if !isBound || body == nil || *body != string(version.Body) {
 			return refuse("unit %d's record is not the version its read bound", u.N)
 		}
 	}
 	return nil
+}
+
+// Citation names a record version by the read that bound it, its reference and its content version.
+type Citation struct{ ReceiptID, Ref, Version string }
+
+// IndexBound gives, for each citation, the first version its read bound under that reference and content
+// version, so a card's units find theirs in time that does not grow with the read.
+func IndexBound(bound map[string][]RecordVersion) map[Citation]RecordVersion {
+	index := map[Citation]RecordVersion{}
+	for receipt, versions := range bound {
+		for _, v := range versions {
+			key := Citation{receipt, v.Ref(), v.Version()}
+			if _, seen := index[key]; !seen {
+				index[key] = v
+			}
+		}
+	}
+	return index
 }
 
 // checkProjection requires units and gaps to be exactly the payload's, in order and type for type.

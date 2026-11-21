@@ -148,6 +148,11 @@ def _session(folder: Path) -> list[dict]:
     session.run("help mcp", "help", "mcp")
     session.run("mcp without its action", "mcp", "--json")
     session.run("mcp without a scope", "mcp", "stdio", "--json")
+    # What was typed is not repeated back in an error; an invented canary stands for an org's name.
+    session.run("brief on a text that is not a day", "brief", "acc-003", "--as-of", "zz-canary-renewal-7Q4",
+                *where, "--json")
+    session.run("brief with an argument it does not take", "brief", "acc-003", "zz-canary-renewal-7Q4", *where,
+                "--json")
     return session.rows
 
 
