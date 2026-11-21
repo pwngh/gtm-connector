@@ -360,8 +360,8 @@ listed below with inert words.
 - A link of any scheme (`scheme://`), a `mailto:` address, a `//host` address or a `www.` address
   becomes its label, if it has one, and `[link host]`. A `mailto:` link shows `[link mail]`.
 - In the text a quotation is made from, a bare mail address such as `dana@files.example`, which a
-  Markdown client links, shows `[link mail]` too. A contact's email is a record value and is shown as
-  the CRM holds it.
+  Markdown client links, shows `[link mail]` too, and a `]` right before a `(` gets a space between, so
+  no quotation is a Markdown link. A contact's email is a record value and is shown as the CRM holds it.
 - A link with a backslash or a control character before the end of its host shows
   `[link unknown host]`, because a browser may open a different host than the one written. So does
   a Slack link `<target|label>` whose target names a scheme with no `//` after it.

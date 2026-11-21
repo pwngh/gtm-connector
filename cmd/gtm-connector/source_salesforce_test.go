@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -187,7 +189,10 @@ func TestSalesforceIsReadByEveryCommand(t *testing.T) {
 		!strings.Contains(string(payload.Bytes), `"crm_backend": "salesforce"`) {
 		t.Errorf("the saved card does not hold the workspace's sellers and its CRM: %v", err)
 	}
-	if got := d.audited(t, "invented-books"); got != "connect_salesforce_login:ok:200: connect_salesforce_org:ok:200: "+
+	if got := d.audited(t, "invented-books"); got != "connect_salesforce_login_display:ok:200: connect_salesforce_login_token:ok:200: connect_salesforce_org:ok:200: "+
+		"connect_salesforce_userinfo:ok:200: connect_salesforce_describe_account:ok:200: "+
+		"connect_salesforce_describe_contact:ok:200: connect_salesforce_describe_opportunity:ok:200: "+
+		"connect_salesforce_describe_contract:ok:200: "+
 		"search_accounts:ok:200: get_account:ok:200: "+
 		"get_account:error:200:request_failed get_account:ok:200: get_account:ok:200: list_opportunities:ok:200: "+
 		"save_brief:ok:200:" {
@@ -361,9 +366,10 @@ func TestConnectSalesforceRefusesWhatItCannotPin(t *testing.T) {
 	}
 	// Each refusal after the arguments keeps its receipts, the last one finished as an error, and connects
 	// nothing.
-	if got := d.audited(t, "refused-books"); got != "connect_salesforce_login:ok:200: "+
-		"connect_salesforce_org:error:200:request_failed connect_salesforce_login:ok:200: "+
-		"connect_salesforce_org:error:200:request_failed connect_salesforce_login:error:200:request_failed" {
+	if got := d.audited(t, "refused-books"); got != "connect_salesforce_login_display:ok:200: "+
+		"connect_salesforce_login_token:ok:200: connect_salesforce_org:error:200:request_failed "+
+		"connect_salesforce_login_display:ok:200: connect_salesforce_login_token:ok:200: "+
+		"connect_salesforce_org:error:200:request_failed connect_salesforce_login_display:error:200:request_failed" {
 		t.Errorf("the receipts of the refused connects: %s", got)
 	}
 	if n := d.count(t, "SELECT count(*) FROM connections"); n != 0 {
@@ -538,7 +544,10 @@ func TestDebugSalesforceCheckReportsEachStep(t *testing.T) {
 			"opportunity_read:fail:prerequisite_failed") {
 		t.Errorf("no candidate: exit %d, %v %s", code, err, report.shown())
 	}
-	if got := d.audited(t, "invented-books"); got != "connect_salesforce_login:ok:200: connect_salesforce_org:ok:200: "+
+	if got := d.audited(t, "invented-books"); got != "connect_salesforce_login_display:ok:200: connect_salesforce_login_token:ok:200: connect_salesforce_org:ok:200: "+
+		"connect_salesforce_userinfo:ok:200: connect_salesforce_describe_account:ok:200: "+
+		"connect_salesforce_describe_contact:ok:200: connect_salesforce_describe_opportunity:ok:200: "+
+		"connect_salesforce_describe_contract:ok:200: "+
 		metadata+" search_accounts:ok:200: find_renewal_candidate:ok:200:" {
 		t.Errorf("the receipts: %s", got)
 	}
@@ -597,10 +606,90 @@ func TestACancelEndsTheSFProcessGroup(t *testing.T) {
 	if running(pids[0]) || running(pids[1]) {
 		t.Errorf("sf runs: %t; its child runs: %t", running(pids[0]), running(pids[1]))
 	}
-	if got := d.audited(t, "cancelled-books"); got != "connect_salesforce_login:error:200:request_failed" {
+	if got := d.audited(t, "cancelled-books"); got != "connect_salesforce_login_display:error:200:request_failed" {
 		t.Errorf("the cancelled connect's receipts: %s", got)
 	}
 	if n := d.count(t, "SELECT count(*) FROM connections"); n != 0 {
 		t.Errorf("the cancelled connect saved %d connections", n)
+	}
+}
+
+// pendingAt runs a request after noting which receipts are pending in the workspace as it starts.
+type pendingAt struct {
+	t         *testing.T
+	d         *demoDatabase
+	workspace string
+	seen      *[]string
+}
+
+func (p pendingAt) note() {
+	var tools []string
+	if err := conn(p.t, p.d.ownerURL).QueryRow(ctx, `SELECT coalesce(array_agg(r.tool ORDER BY r.started_at), '{}')
+		FROM receipts r JOIN workspaces w ON w.id = r.workspace_id WHERE w.slug = $1 AND r.status = 'pending'`,
+		p.workspace).Scan(&tools); err != nil {
+		p.t.Error(err)
+	}
+	*p.seen = append(*p.seen, strings.Join(tools, ","))
+}
+
+type pendingRunner struct {
+	pendingAt
+	next salesforce.Runner
+}
+
+func (p pendingRunner) Run(ctx context.Context, arguments []string) ([]byte, int, error) {
+	p.note()
+	return p.next.Run(ctx, arguments)
+}
+
+type pendingTransport struct {
+	pendingAt
+	next http.RoundTripper
+}
+
+func (p pendingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	p.note()
+	return p.next.RoundTrip(request)
+}
+
+// Every request connect salesforce makes, each sf command and each request to the org, has a receipt of its
+// own, committed before the request runs, as a second connection to the database sees it. A request that
+// fails, here the last describe, finishes its own receipt as an error, and those before it stay ok.
+func TestEachSalesforceConnectRequestHasItsReceiptFirst(t *testing.T) {
+	d := setUpDemo(t)
+	org, sf, _ := inventedSalesforce(t)
+	var seen []string
+	at := pendingAt{t: t, d: d, workspace: "ordered-books", seen: &seen}
+	salesforceOptions = salesforce.Options{Runner: pendingRunner{at, sf}, Transport: pendingTransport{at, org}}
+	org.Intercept = func(request *http.Request) *http.Response {
+		if strings.HasSuffix(request.URL.Path, "/sobjects/Contract/describe") {
+			return &http.Response{StatusCode: 500, Header: http.Header{"Content-Type": {"application/json"}},
+				Body: io.NopCloser(strings.NewReader(`[]`)), Request: request}
+		}
+		return nil
+	}
+	if _, message, _ := d.refusal(t, 5, "connect", "salesforce", "--org", salesforcetest.Alias, "--environment",
+		"production", "--state-dir", "ordered-books"); !strings.HasPrefix(message, "salesforce_") {
+		t.Fatalf("a connect whose last describe fails: %s", message)
+	}
+	steps := []string{"login_display", "login_token", "org", "userinfo", "describe_account", "describe_contact",
+		"describe_opportunity", "describe_contract"}
+	want := make([]string, len(steps))
+	for i, step := range steps {
+		want[i] = "connect_salesforce_" + step
+	}
+	if !slices.Equal(seen, want) {
+		t.Errorf("the receipts pending as each request started: %q", seen)
+	}
+	var finished []string
+	for i, step := range want {
+		status := ":ok:200:"
+		if i == len(want)-1 {
+			status = ":error:200:request_failed"
+		}
+		finished = append(finished, step+status)
+	}
+	if got := d.audited(t, "ordered-books"); got != strings.Join(finished, " ") {
+		t.Errorf("the receipts: %s", got)
 	}
 }

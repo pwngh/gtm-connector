@@ -159,6 +159,10 @@ type Reader struct {
 	// the request, and runs the request only once the request's receipt is committed. A failure of the
 	// receipt itself comes back as an *AuditFailed.
 	Audit func(ctx context.Context, step string, request func(context.Context) error) error
+	// Confirm is asked, after Connect has checked a new approval's identity with Slack and before it saves
+	// anything, whether the Slack user and workspace that approved are the operator's own. Only a yes saves
+	// the sign-in.
+	Confirm func(ctx context.Context, identity Identity, workspace string) (bool, error)
 
 	sleep func(context.Context, time.Duration) error // the wait before the retry after a 429; nil sleeps
 	idle  time.Duration                              // how long a body may stop arriving; zero is readTimeout

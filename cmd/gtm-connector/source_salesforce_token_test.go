@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce"
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce/salesforcetest"
+	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
 // The refusals of a token handed to the process, as a command prints them.
@@ -249,13 +251,10 @@ func TestASalesforceTokenHandedToTheProcessIsReadByEveryCommand(t *testing.T) {
 	if len(org.Requests) != 0 {
 		t.Errorf("invalid variables sent %q", org.Requests)
 	}
-	if got := d.audited(t, "missing-books"); got != strings.TrimSpace(strings.Repeat(
-		"connect_salesforce_login:error:200:request_failed ", 7)) {
-		t.Errorf("the receipts of the refused connects: %s", got)
-	}
-	if missing, err := d.owner.Workspace(ctx, "missing-books"); err != nil ||
-		d.count(t, "SELECT count(*) FROM connections WHERE workspace_id = $1", missing.ID) != 0 {
-		t.Errorf("a refused connect saved a connection: %v", err)
+	// Reading the variables is no request to a source, so a connect refused there keeps no receipt and
+	// makes no workspace.
+	if _, err := d.owner.Workspace(ctx, "missing-books"); !errors.Is(err, postgres.ErrNotFound) {
+		t.Error("a refused connect made its workspace")
 	}
 
 	// The check of the connected workspace runs every step through the token, and no sf.

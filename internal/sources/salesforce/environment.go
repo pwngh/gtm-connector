@@ -135,5 +135,6 @@ func newReader(environmentName, origin string, given login, source loginSource, 
 		client: &http.Client{Transport: transport,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	r.tokens.Add(given.accessToken)
+	r.audit = o.Audit
 	return r
 }

@@ -171,7 +171,7 @@ func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 	if n := d.count(t, "SELECT count(*) FROM connections"); n != 0 {
 		t.Fatalf("a refused connect wrote %d connections", n)
 	}
-	if got := d.audited(t, "invented"); got != "connect_salesforce_login:error:200:request_failed" {
+	if got := d.audited(t, "invented"); got != "connect_salesforce_login_display:error:200:request_failed" {
 		t.Fatalf("the receipts of a refused connect: %s", got)
 	}
 	for _, tokens := range [][]string{{"accounts"}, {"brief", "acc-003"}, {"inspect", "acc-003"}} {
@@ -203,7 +203,7 @@ func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 		t.Errorf("a Salesforce row: %+v, then %+v", status, removed)
 	}
 	// Past the refused sign-in's own receipt, the refused commands wrote nothing.
-	if n := d.count(t, "SELECT (SELECT count(*) FROM receipts WHERE tool <> 'connect_salesforce_login') + "+
+	if n := d.count(t, "SELECT (SELECT count(*) FROM receipts WHERE tool <> 'connect_salesforce_login_display') + "+
 		"(SELECT count(*) FROM accounts) + (SELECT count(*) FROM cards)"); n != 0 {
 		t.Errorf("the refused commands wrote %d rows", n)
 	}

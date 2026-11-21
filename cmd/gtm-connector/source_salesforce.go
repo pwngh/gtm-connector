@@ -213,6 +213,8 @@ type salesforceCRM struct {
 	token bool
 	// pinned is the identity digest of the workspace's row, or "" while connect attaches it.
 	pinned string
+	// audit runs each request to sf or the org under a receipt of its own, as connect's are, or is nil.
+	audit func(ctx context.Context, step string, request func(context.Context) error) error
 
 	mu sync.Mutex
 	// login is the reader once sf has given the login, and reader is the same once the org is checked.
@@ -247,8 +249,8 @@ func validEnvironment(environment string) bool {
 }
 
 // attachSalesforce is what connect salesforce checks: the alias, the sign-in, the environment and, outside
-// Developer Edition, the four objects' fields, the sign-in and the check each under a receipt of its step. It
-// reads no record. The row is saved with the alias and the
+// Developer Edition, the four objects' fields, each sf command and each request under a receipt of its own.
+// It reads no record. The row is saved with the alias and the
 // environment, and pinned to the org's identity and the user it reads as. The alias is saved, and so shown,
 // only once sf has named a login under it.
 //
@@ -271,17 +273,13 @@ func attachSalesforce(ctx context.Context, a attaching) (attached, error) {
 	if chosen, given := a.args.text("--environment"); given {
 		environment = chosen
 	}
-	// The sign-in and the org's check each run under a receipt of their step, committed first.
-	crm := &salesforceCRM{alias: alias, environment: environment, token: token}
-	var identity string
-	err := a.step(ctx, "connect_salesforce_login", crm.signIn)
-	if err == nil {
-		err = a.step(ctx, "connect_salesforce_org", func(ctx context.Context) error {
-			var err error
-			identity, err = crm.identify(ctx, true)
-			return err
-		})
-	}
+	// Each request to sf or to the org runs under a receipt of its own step, committed first:
+	// connect_salesforce_login_display, _login_token, _org, _userinfo and _describe_account and the rest.
+	crm := &salesforceCRM{alias: alias, environment: environment, token: token,
+		audit: func(ctx context.Context, step string, request func(context.Context) error) error {
+			return a.step(ctx, "connect_salesforce_"+step, request)
+		}}
+	identity, err := crm.identify(ctx, true)
 	switch {
 	case err != nil:
 		return attached{}, err
@@ -304,6 +302,7 @@ func (c *salesforceCRM) options() salesforce.Options {
 	}
 	o.Runner = countedRunner{o.Runner, &c.commands}
 	o.Transport = countedTransport{o.Transport, &c.requests}
+	o.Audit = c.audit
 	return o
 }
 

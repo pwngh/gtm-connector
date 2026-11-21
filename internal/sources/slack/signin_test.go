@@ -57,8 +57,9 @@ func TestASavedSignInReadsBackAsItWasSaved(t *testing.T) {
 
 // The callback takes only the request Slack's redirect makes: a GET of the callback path, with the Host
 // localhost:PORT, no body, this sign-in's state and a code, from the browser that loaded the start page. The
-// start page is answered once, and sets the cookie that binds the callback to that browser: a second request
-// of it is refused, and so is a callback without the cookie or with another value. Each other request is
+// start page is answered once, and sets the cookie that binds the callback to that browser, named for the
+// sign-in's port and a random suffix: a second request of it is refused, and so is a callback without the
+// cookie, with another value, or with the value under another sign-in's name. Each other request is
 // answered and ignored.
 func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -102,10 +103,12 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 	bound := ""
 	stray := []struct{ request, want string }{
 		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 400 Bad Request"},
-		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "Cookie: gtm_slack_sign_in=guessed\r\n\r\n",
+		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "Cookie: NAME=guessed\r\n\r\n",
 			"HTTP/1.1 400 Bad Request"},
-		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "Cookie: gtm_slack_sign_in=VALUE; gtm_slack_sign_in=VALUE\r\n\r\n",
+		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "Cookie: NAME=VALUE; NAME=VALUE\r\n\r\n",
 			"HTTP/1.1 400 Bad Request"},
+		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "Cookie: " +
+			fmt.Sprintf("gtm_slack_sign_in_%d_another", port) + "=VALUE\r\n\r\n", "HTTP/1.1 400 Bad Request"},
 		{"POST /slack/callback?code=abc&state=STATE HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 405 Method Not Allowed"},
 		{"GET /other?code=abc&state=STATE HTTP/1.1\r\n" + host + "\r\n", "HTTP/1.1 404 Not Found"},
 		{"GET /slack/callback?code=abc&state=STATE HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", "HTTP/1.1 400 Bad Request"},
@@ -131,19 +134,23 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 		go func() {
 			led := send("GET /start/" + start + " HTTP/1.1\r\n" + host + "Sec-Fetch-Site: none\r\n\r\n")
 			state, found := strings.CutPrefix(led, "HTTP/1.1 302 Found https://slack.com/x?state=")
-			value, _ := strings.CutPrefix(cookie, "gtm_slack_sign_in=")
-			value, attributes, _ := strings.Cut(value, ";")
-			if attributes != " Path=/slack/callback; Max-Age=600; HttpOnly; SameSite=Lax" || len(value) < 43 {
+			// The cookie is named for this sign-in: its port and a random suffix.
+			pair, attributes, _ := strings.Cut(cookie, ";")
+			name, value, _ := strings.Cut(pair, "=")
+			suffix, named := strings.CutPrefix(name, fmt.Sprintf("gtm_slack_sign_in_%d_", port))
+			if attributes != " Path=/slack/callback; Max-Age=600; HttpOnly; SameSite=Lax" || len(value) < 43 ||
+				!named || len(suffix) != 16 {
 				answers <- fmt.Sprintf("the start page set the cookie %q", cookie)
 			}
-			bound = "Cookie: other=1; gtm_slack_sign_in=" + value + "\r\n"
+			bound = "Cookie: other=1; " + name + "=" + value + "\r\n"
 			if again := send("GET /start/" + start + " HTTP/1.1\r\n" + host + "\r\n"); !found || again != "HTTP/1.1 404 Not Found" {
 				answers <- fmt.Sprintf("the start page led to %q, then %q", led, again)
 			}
 			for i, s := range stray {
-				request := strings.ReplaceAll(strings.ReplaceAll(s.request, "STATE", state), "VALUE", value)
-				if i > 2 {
-					// Each stray after the first three carries the cookie, so it is refused for what it is.
+				request := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(s.request, "STATE", state),
+					"VALUE", value), "NAME", name)
+				if i > 3 {
+					// Each stray after the first four carries the cookie, so it is refused for what it is.
 					request = strings.Replace(request, host, host+bound, 1)
 				}
 				if got := send(request); got != s.want {
@@ -166,7 +173,7 @@ func TestTheCallbackTakesOnlyItsOwnRequest(t *testing.T) {
 	// A start page asked for first by a request from another site, or one that carries a sign-in cookie, is
 	// refused and gone: the browser that comes after is answered 404, and no callback is taken.
 	for _, first := range []string{"Sec-Fetch-Site: cross-site\r\n", "Sec-Fetch-Site: same-site\r\n",
-		"Origin: http://localhost:3000\r\n", "Cookie: gtm_slack_sign_in=earlier\r\n"} {
+		"Origin: http://localhost:3000\r\n", "Cookie: gtm_slack_sign_in_8765_earlier=x\r\n"} {
 		answers := make(chan string, 2)
 		open := func(_ context.Context, page string) error {
 			start := strings.TrimPrefix(page, fmt.Sprintf("http://localhost:%d", port))

@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net"
@@ -290,15 +291,25 @@ func TestTheServerEndsATransactionLeftIdle(t *testing.T) {
 			t.Errorf("%s is %s, not %s", name, got, want)
 		}
 	}
-	raw, err := conn.Conn().PgConn().Conn().(*net.TCPConn).SyscallConn()
+	// A database reached over TLS gives the TLS connection, which wraps the socket.
+	socket := conn.Conn().PgConn().Conn()
+	if secured, isTLS := socket.(*tls.Conn); isTLS {
+		socket = secured.NetConn()
+	}
+	tcp, isTCP := socket.(*net.TCPConn)
+	if !isTCP {
+		t.Fatalf("the test database is reached over %T, not TCP", socket)
+	}
+	raw, err := tcp.SyscallConn()
 	ok(t, err)
 	ok(t, raw.Control(func(fd uintptr) {
 		// SO_KEEPALIVE reads as any value but 0 when it is on.
 		if on, err := unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_KEEPALIVE); err != nil || on == 0 {
 			t.Errorf("the connector's keepalives are off (%v)", err)
 		}
-		for name, option := range map[string][3]int{"TCP_KEEPINTVL": {unix.IPPROTO_TCP, unix.TCP_KEEPINTVL, 10},
-			"TCP_KEEPCNT": {unix.IPPROTO_TCP, unix.TCP_KEEPCNT, 3}} {
+		for name, option := range map[string][3]int{"the first probe's delay": {unix.IPPROTO_TCP, keepIdleOption, 30},
+			"TCP_KEEPINTVL": {unix.IPPROTO_TCP, unix.TCP_KEEPINTVL, 10},
+			"TCP_KEEPCNT":   {unix.IPPROTO_TCP, unix.TCP_KEEPCNT, 3}} {
 			if got, err := unix.GetsockoptInt(int(fd), option[0], option[1]); err != nil || got != option[2] {
 				t.Errorf("the connector's %s is %d (%v), not %d", name, got, err, option[2])
 			}
