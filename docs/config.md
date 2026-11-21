@@ -84,7 +84,15 @@ Under the hood:
 Any line on any card opens a receipt drawer in Ops: the read that returned it, and its seal. Diffs
 between two cards of a deal open the same way.
 
+## Access
+
+People sign in through your company's identity provider. The connector stores no password for
+them. A grant names the deals a person reads, and whether they see Ops. A script or an assistant
+gets a token limited to selected deals and scopes, and the token expires.
+
 ## Auto-stop and archive
 
 On Closed Won or Closed Lost, polling halts and the final card is sealed. The deal leaves the
 active list. Its cards, receipts and history stay readable.
+
+Pause a deal to stop its scheduled reads and alerts without closing it, and resume it later.

@@ -118,79 +118,30 @@ Neutralizer version   3
 
 ## For sales and CS teams
 
-Deals is your home in the web app. Active deals sit on the left, sorted by urgency: red for a risk
-or blocker, amber for new changes, green for on track. The Deal card fills the main pane, with a proof drawer and the deal's
-communications beside it.
-
-1. **Your calls and Slack threads find the deal.** The connector matches them to your account. You do nothing.
-2. **Get a Slack alert when a renewal turns risky.** It says what flagged the deal:
-   - customer silence: no reply near renewal;
-   - close-date slippage: the renewal date was pushed again;
-   - single-threaded deal: only one person is talking;
-   - pricing or seat conflict: a figure in Slack or on a call differs from the CRM;
-   - legal or security blocker: redlines or riders holding up signature.
-3. **Refresh before your call,** if you want the last few minutes. Scheduled reads already keep the card current.
-4. **Read the Deal card,** your 30-second renewal snapshot. It shows the renewal countdown and ARR, what changed since last time, exact buyer quotes and titles, promises you made, and missing or unread sources. From the card:
-   - click any line for its source proof, straight to the exact call or Slack message;
-   - track blockers on the renewal checklist and playbook until they are resolved;
-   - ask the council (Claude, Codex and local models) what is blocking this renewal.
+1. **Your calls and Slack threads find the deal.** You do nothing.
+2. **Slack alerts you when a renewal turns risky,** and says [what flagged it](docs/deals.md#what-flags-a-deal).
+3. **Refresh before your call,** if you want the last few minutes.
+4. **Read the Deal card,** your 30-second renewal snapshot. Click any line for its source proof, track blockers on the checklist and playbook, or ask the council what is blocking the renewal.
 5. **The deal closes.** It is archived with its final card.
 
 If your team turns approval on, new calls and threads wait for your OK before they reach the card.
+More in [working a deal](docs/deals.md).
 
 ## For RevOps and GTM engineers
 
-Ops shows all of the plumbing that reps never see.
-
 1. **Write one config file,** `gtm.yaml`. It connects Salesforce, Slack, calls, and SQL or webhook push.
-2. **Set auto-watch rules,** such as all open renewal opportunities closing in the next 90 days. Data then enters two ways:
-   - scheduled background pulls: the CRM, Slack channels and threads, Gong and Zoom;
-   - the push API or custom SQL: internal email, SMS or database tables.
-3. **Let the matches join their deals.** Calls and Slack messages matched by email and domain attach on their own. Slack is matched by dedicated channel, such as `#deal-thornfield`, or by threads in a shared channel that mention the account.
-4. **Leave the rest to deterministic parsing and guardrails:**
-   - a whole-sentence splitter;
-   - an HTML and link neutralizer;
-   - speaker and role matching, sellers against buyers;
-   - a versioned PostgreSQL store with audit receipts;
-   - risk and diff rules for silence, slippage and conflicts.
+2. **Set auto-watch rules,** such as all open renewal opportunities closing in the next 90 days.
+3. **Let the matches join their deals.** Scheduled pulls and pushed data are matched by email, domain and channel.
+4. **Leave the rest to deterministic parsing and guardrails.** Whole sentences, neutralized text, speaker roles, receipts, and risk and diff rules.
 5. **Auto-stop and archive.** On Closed Won or Closed Lost, polling halts and the final card is sealed.
 
-Results go out four ways:
-
-| Output | What it gives |
-| --- | --- |
-| REST API, `/v1/deals` | refresh on demand, the card as JSON, proof lookup |
-| MCP server, stdio or HTTP | Claude Desktop, Claude Code, ChatGPT, Codex, Cursor |
-| Outbound webhooks and Slack alerts | deep links to flagged deals |
-| Web UI | work queue, diffs, receipt drawer |
-
-### One deal, one ID
-
-A deal is a bundle of IDs from many tools. Register the deal and bind them once:
-
-| Tool | IDs |
-| --- | --- |
-| Salesforce | account, opportunity and contact IDs |
-| Slack | channel ID and thread, or channel name |
-| Gong or Zoom | participant emails and the account domain |
-| Your own database | contact, client or contract IDs |
-
-After that, pass the deal ID to get the card:
-
-```sh
-gtm deal thornfield-2027
-curl https://HOST/v1/deals/thornfield-2027
-```
+One deal ID gets the card from the REST API, the MCP server, a webhook, a Slack alert or the web
+app. More in [setting it up](docs/config.md) and [the API](docs/api.md).
 
 ## For operators
 
-Deployment is one step. A GitHub Actions release pipeline publishes prebuilt static binaries for
-each platform and Docker images, with the web app embedded in the binary.
-
-1. **Install.** Download the binary and give it a PostgreSQL 19 or 18.7 URL, or run the Docker image.
-2. **Set up.** `gtm setup` runs the migrations as the database owner and writes the credentials folder. The server then runs as an app role that cannot change the schema.
-3. **Check.** `/healthz` answers when the database is reachable and the migrations are current.
-4. **Back up and upgrade.** `backup` and `restore` cover the database and the credentials. Rehearse an upgrade on a restored copy first.
+Download one binary, or run the Docker image, and give it a PostgreSQL URL. The web app is inside
+the binary. More in [running it](docs/operations.md).
 
 ## What it is tested against
 
