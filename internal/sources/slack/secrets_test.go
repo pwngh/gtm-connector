@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -46,9 +47,12 @@ func TestNoCredentialIsPrinted(t *testing.T) {
 			show(report)
 		}
 		for _, request := range b.slack.sent {
-			// A token travels in a header or a form body, never in a URL.
+			// A token travels in a header or a form body, never in a URL. A request a test prints when it
+			// fails shows neither.
 			printed.WriteString(request.url + "\n")
+			show(request, &request)
 		}
+		show(b.slack.sent)
 	}
 
 	scenarios := map[string]struct {
@@ -62,7 +66,7 @@ func TestNoCredentialIsPrinted(t *testing.T) {
 		"an error that echoes the tokens": {replies: []reply{ok(`{"ok":false,"error":"` + echo + `","detail":"Bearer ` + accessToken + `"}`)},
 			want: "slack_response_invalid"},
 		"a known error with the tokens beside it": {replies: []reply{ok(`{"ok":false,"error":"invalid_auth","token":"` + echo + `"}`)},
-			want: "slack_reconnect_required"},
+			want: "slack_response_invalid"},
 		"a body that is not JSON": {replies: []reply{ok(`Bearer ` + echo)}, want: "slack_response_invalid"},
 		"a 429 body":              {replies: []reply{status(429, echo)}, want: "slack_rate_limited"},
 		"a 500 body":              {replies: []reply{status(500, echo)}, want: "slack_unavailable"},
@@ -79,7 +83,7 @@ func TestNoCredentialIsPrinted(t *testing.T) {
 		"an identity for another team": {replies: []reply{ok(expiredAnswer)},
 			auth: []reply{ok(replacement), ok(strings.Replace(strings.Replace(identified, "T12345678", "T87654321", 1),
 				`{`, `{"token":"`+echo+`",`, 1))},
-			want: "slack_source_mismatch"},
+			want: "slack_response_invalid"},
 		"a sign-in store that fails": {change: func(b *bench) { b.saved.holdErr = fmt.Errorf("open: %s", echo) },
 			want: "slack_storage_failed"},
 		"a save that fails": {replies: []reply{ok(expiredAnswer)},
@@ -112,17 +116,55 @@ func TestNoCredentialIsPrinted(t *testing.T) {
 
 	// The sign-in types, printed and logged as a caller might by mistake.
 	document := signIn(newClock().wall, true, false)
-	held := &access{document.AccessToken, document.Identity, document.GrantedScopes}
+	held := &access{document.AccessToken, document.RefreshToken, document.Identity, document.GrantedScopes}
+	fresh := NewSecret(newAccessToken)
+	// A holder with unexported fields is printed by reflection, with no method of a Secret called.
+	type holder struct {
+		token   Secret
+		pointer *Secret
+		signIn  Credentials
+		held    access
+		keys    map[Secret]bool
+	}
 	show(document, *document, document.AccessToken, &document.RefreshToken, held, *held,
-		[]Secret{accessToken}, map[string]Secret{"token": refreshToken}, struct{ Token Secret }{newAccessToken})
+		[]Secret{document.AccessToken}, map[string]Secret{"token": document.RefreshToken}, struct{ Token Secret }{fresh},
+		map[Secret]bool{fresh: true}, map[Secret]Secret{document.AccessToken: document.RefreshToken},
+		holder{fresh, &fresh, *document, *held, map[Secret]bool{document.RefreshToken: true}},
+		&holder{fresh, &fresh, *document, *held, map[Secret]bool{document.RefreshToken: true}})
+	// What reflection gives of a Secret without calling Reveal.
+	for _, token := range []Secret{document.AccessToken, document.RefreshToken, fresh} {
+		value := reflect.ValueOf(token)
+		show(value.String(), value.Kind().String(), value.Type().String(), value.NumField())
+		for i := range value.NumField() {
+			show(value.Field(i).String())
+		}
+	}
 	var logged bytes.Buffer
 	slog.New(slog.NewJSONHandler(&logged, nil)).Info("sign-in", "document", document, "token", document.AccessToken)
 	slog.New(slog.NewTextHandler(&logged, nil)).Info("sign-in", "document", document, "token", document.AccessToken)
 	printed.Write(logged.Bytes())
-	if marshalled, err := json.Marshal(document); err == nil {
-		t.Errorf("a sign-in was marshalled: %s", marshalled)
-	} else {
+	// encoding/json writes a map's key without asking the value: every one of these is refused.
+	for name, value := range map[string]any{
+		"a sign-in":                    document,
+		"a token":                      document.AccessToken,
+		"a pointer to a token":         &document.RefreshToken,
+		"a map keyed by a token":       map[Secret]bool{document.AccessToken: true},
+		"a map of tokens":              map[string]Secret{"token": document.RefreshToken},
+		"a struct keyed by a token":    struct{ Seen map[Secret]int }{map[Secret]int{fresh: 1}},
+		"a list of tokens":             []Secret{fresh},
+		"an access":                    held,
+		"a token keyed map in a slice": []map[Secret]string{{document.AccessToken: "seen"}},
+	} {
+		marshalled, err := json.Marshal(value)
+		if err == nil {
+			t.Errorf("%s was marshalled to %d bytes", name, len(marshalled))
+		}
+		printed.Write(marshalled)
 		show(err)
+	}
+	if got := fresh.Reveal(); got != newAccessToken || NewSecret("") != (Secret{}) || (Secret{}).Reveal() != "" ||
+		NewSecret(newAccessToken) != fresh || NewSecret(accessToken) == fresh {
+		t.Error("a Secret does not keep its text, or two of the same text differ")
 	}
 
 	text := printed.String()

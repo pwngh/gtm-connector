@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -50,6 +51,23 @@ func (b *budget) remaining() (time.Duration, error) {
 	return left, nil
 }
 
+// store runs one call to a store under a context that ends when the read's time does. A call that failed
+// with that context ended is refused as slack_timeout, whatever the store made of it. The caller's own
+// cancel stays what it is.
+func (b *budget) store(ctx context.Context, call func(context.Context) error) error {
+	left, err := b.remaining()
+	if err != nil {
+		return err
+	}
+	limited, cancel := context.WithTimeout(ctx, left)
+	defer cancel()
+	err = call(limited)
+	if err != nil && limited.Err() != nil && !errors.Is(ctx.Err(), context.Canceled) {
+		return refuse("slack_timeout")
+	}
+	return err
+}
+
 // beginRequest counts one HTTP attempt, of a page ("messages") or of the sign-in ("auth").
 func (b *budget) beginRequest(kind string) error {
 	if _, err := b.remaining(); err != nil {
@@ -66,6 +84,9 @@ func (b *budget) beginRequest(kind string) error {
 	}
 	return nil
 }
+
+// room is how many response bytes the read may still take.
+func (b *budget) room() int { return maxResponseBytes - b.responseBytes }
 
 // addBytes counts response bytes as they arrive, so an oversized body is refused before it is held.
 func (b *budget) addBytes(amount int, kind string) error {
@@ -216,10 +237,12 @@ func (r *Reader) send(ctx context.Context, b *budget, kind string, build func(co
 			return nil, refuse("slack_response_invalid")
 		}
 		size, _ := strconv.Atoi(value)
+		// A body stated to be larger than the read may still take is refused before any of it is read,
+		// for a sign-in answer as for a page.
 		switch {
 		case kind == "auth" && size > maxAuthResponseBytes:
 			return nil, refuse("slack_response_invalid")
-		case kind != "auth" && size > maxResponseBytes-b.responseBytes:
+		case size > b.room():
 			return nil, refuse("slack_resource_limit")
 		}
 	}
@@ -237,7 +260,13 @@ func (r *Reader) send(ctx context.Context, b *budget, kind string, build func(co
 	chunk := make([]byte, 32<<10)
 	for {
 		idle.Reset(pause)
-		n, readErr := response.Body.Read(chunk)
+		// No read takes more than one byte past what is left, of the read's bytes or of a sign-in answer's
+		// own. That one byte is the refusal.
+		most := min(len(chunk), b.room()+1)
+		if kind == "auth" {
+			most = min(most, maxAuthResponseBytes-len(body)+1)
+		}
+		n, readErr := response.Body.Read(chunk[:most])
 		if n > 0 {
 			if err := b.addBytes(n, kind); err != nil {
 				return nil, err
@@ -264,17 +293,57 @@ func (r *Reader) send(ctx context.Context, b *budget, kind string, build func(co
 	return &answer{response.StatusCode, response.Header, body}, nil
 }
 
-// decode parses a response body as strict JSON and requires an object.
-func decode(body []byte) (*strictjson.Object, error) {
+// decode parses a response body as strict JSON and requires an object. A body that holds one of the tokens
+// the request was made with, byte for byte, is refused unparsed: a token Slack sends back as text or as a
+// cursor never becomes a record or part of the next request. So is one whose parsed text holds a token that
+// the JSON wrote with an escape.
+func decode(body []byte, sent ...Secret) (*strictjson.Object, error) {
+	var tokens []string
+	for _, token := range sent {
+		if text := token.Reveal(); text != "" {
+			if bytes.Contains(body, []byte(text)) {
+				return nil, refuse("slack_response_invalid")
+			}
+			tokens = append(tokens, text)
+		}
+	}
 	value, err := strictjson.LoadsText(string(body))
 	if err != nil {
 		return nil, refuse("slack_response_invalid")
 	}
 	document, isObject := value.(*strictjson.Object)
-	if !isObject || document == nil {
+	if !isObject || document == nil || spelled(document, tokens) {
 		return nil, refuse("slack_response_invalid")
 	}
 	return document, nil
+}
+
+// spelled reports whether any text of a parsed answer, a key or a value, holds one of the tokens.
+func spelled(value any, tokens []string) bool {
+	switch v := value.(type) {
+	case string:
+		for _, token := range tokens {
+			if strings.Contains(v, token) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if spelled(item, tokens) {
+				return true
+			}
+		}
+	case *strictjson.Object:
+		if v == nil {
+			return false
+		}
+		for i, key := range v.Keys {
+			if spelled(key, tokens) || spelled(v.Values[i], tokens) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // providerErrors are Slack's error names a page request is refused with, by the reader's code for each.
@@ -311,7 +380,7 @@ func providerResult(document *strictjson.Object) error {
 }
 
 // replies gets one page of the thread: the fixed endpoint, never a URL the source gave.
-func (r *Reader) replies(ctx context.Context, b *budget, token Secret, channel, parent, latest string, cursor *string, limit int) (*strictjson.Object, error) {
+func (r *Reader) replies(ctx context.Context, b *budget, held *access, channel, parent, latest string, cursor *string, limit int) (*strictjson.Object, error) {
 	query := "channel=" + url.QueryEscape(channel) + "&ts=" + url.QueryEscape(parent) +
 		"&latest=" + url.QueryEscape(latest) + "&inclusive=true&limit=" + strconv.Itoa(limit)
 	if cursor != nil {
@@ -322,7 +391,7 @@ func (r *Reader) replies(ctx context.Context, b *budget, token Secret, channel, 
 		if err != nil {
 			return nil, err
 		}
-		request.Header.Set("Authorization", "Bearer "+string(token))
+		request.Header.Set("Authorization", "Bearer "+held.Token.Reveal())
 		request.Header.Set("Accept", "application/json")
 		request.Header.Set("Accept-Encoding", "identity")
 		return request, nil
@@ -346,7 +415,7 @@ func (r *Reader) replies(ctx context.Context, b *budget, token Secret, channel, 
 		return nil, refuse("slack_unavailable")
 	case got.status == http.StatusUnauthorized:
 		// Only the exact token_expired answer leads to a refresh. Any other 401 is refused.
-		document, err := decode(got.body)
+		document, err := decode(got.body, held.Token, held.Refresh)
 		if err != nil {
 			return nil, err
 		}
@@ -359,7 +428,7 @@ func (r *Reader) replies(ctx context.Context, b *budget, token Secret, channel, 
 	case got.status != http.StatusOK:
 		return nil, refuse("slack_response_invalid")
 	}
-	document, err := decode(got.body)
+	document, err := decode(got.body, held.Token, held.Refresh)
 	if err != nil {
 		return nil, err
 	}

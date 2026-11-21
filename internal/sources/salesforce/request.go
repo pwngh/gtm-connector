@@ -1,6 +1,7 @@
 package salesforce
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,8 @@ type operation struct {
 	requests int
 	// refreshed is whether this operation has asked sf for credentials again. It may once.
 	refreshed bool
+	// replaced is the token this operation was sending before sf gave another.
+	replaced string
 	// unproved is a token sf gave before the org's first check passed. It is kept once that check passes.
 	unproved string
 }
@@ -176,7 +179,7 @@ func (o *operation) refresh() (string, error) {
 		// is sent.
 		return "", refuse(authRequired)
 	}
-	o.token = accessToken
+	o.replaced, o.token = o.token, accessToken
 	return accessToken, nil
 }
 
@@ -236,6 +239,14 @@ func (o *operation) requestOnce(path string, soql *string) (any, error) {
 	case !r.now().Before(o.deadline):
 		return nil, refuse(timedOut)
 	}
+	// An answer that holds a token of this read is refused before it is parsed, so a token the org sends
+	// back as a field never becomes a record.
+	tokens := []string{o.token, r.accessToken, o.replaced}
+	for _, token := range tokens {
+		if token != "" && bytes.Contains(body, []byte(token)) {
+			return nil, refuse(invalidResponse)
+		}
+	}
 	document, err := strictjson.LoadsDecimal(body)
 	if err != nil {
 		if status == 403 {
@@ -243,10 +254,42 @@ func (o *operation) requestOnce(path string, soql *string) (any, error) {
 		}
 		return nil, refuse(invalidResponse)
 	}
+	if spelled(document, tokens) {
+		return nil, refuse(invalidResponse)
+	}
 	if status == 403 {
 		return nil, refuse(denial(document))
 	}
 	return document, nil
+}
+
+// spelled reports whether any text of a parsed answer, a key or a value, holds one of the tokens. It finds
+// a token that the JSON wrote with an escape, which the answer's bytes do not show.
+func spelled(value any, tokens []string) bool {
+	switch v := value.(type) {
+	case string:
+		for _, token := range tokens {
+			if token != "" && strings.Contains(v, token) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if spelled(item, tokens) {
+				return true
+			}
+		}
+	case *strictjson.Object:
+		if v == nil {
+			return false
+		}
+		for i, key := range v.Keys {
+			if spelled(key, tokens) || spelled(v.Values[i], tokens) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // headerSpace is the ASCII whitespace around a media type.

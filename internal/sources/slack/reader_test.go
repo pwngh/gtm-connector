@@ -227,6 +227,86 @@ func TestACursorIsSentAsAFormValue(t *testing.T) {
 	}
 }
 
+// escaped is an answer in which a token is written as JSON may write it, its first hyphen as a code point,
+// so that the answer's bytes no longer hold the token and its parsed text does.
+func escaped(t *testing.T, answer reply, token string) reply {
+	t.Helper()
+	hyphen := `\` + "u002d"
+	answer.body = strings.Replace(answer.body, token, strings.Replace(token, "-", hyphen, 1), 1)
+	if strings.Contains(answer.body, token) || !strings.Contains(answer.body, hyphen) {
+		t.Fatal("the answer does not hold the token with an escape")
+	}
+	return answer
+}
+
+// An answer that holds a token of the sign-in is refused whole, before it is parsed. As message text the
+// token would become a record, as a cursor part of the next request's URL, and as a workspace address part
+// of the saved sign-in. A failure here names counts and a code, never the token or the answer.
+func TestAnAnswerHoldingATokenIsRefused(t *testing.T) {
+	sentInURL := func(b *bench) bool {
+		for _, request := range b.slack.sent {
+			for _, token := range []string{accessToken, refreshToken, newAccessToken, newRefresh} {
+				if strings.Contains(request.url, token) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for name, given := range map[string]reply{
+		"the access token as text":           page(msg(parentTS, `"text":"`+accessToken+`"`)),
+		"the refresh token inside text":      page(msg(parentTS, `"text":"It said `+refreshToken+` aloud."`)),
+		"the access token as a cursor":       page(msg(parentTS), cursor(accessToken)),
+		"the refresh token as a cursor":      page(msg(parentTS), cursor(refreshToken)),
+		"in a member the reader ignores":     page(msg(parentTS), `"ignored":"`+accessToken+`"`),
+		"in a refusal":                       ok(`{"ok":false,"error":"thread_not_found","detail":"` + accessToken + `"}`),
+		"in a 401":                           status(401, `{"ok":false,"error":"token_expired","token":"`+accessToken+`"}`),
+		"written with an escape as text":     escaped(t, page(msg(parentTS, `"text":"`+accessToken+`"`)), accessToken),
+		"written with an escape as a cursor": escaped(t, page(msg(parentTS), cursor(refreshToken)), refreshToken),
+		"written with an escape as a key":    escaped(t, page(msg(parentTS), `"`+accessToken+`":1`), accessToken),
+	} {
+		b := newBench(t)
+		read, err := b.read([]reply{given, page(msg(replyTS))}, ok(replacement), ok(identified))
+		if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 1 || sentInURL(b) {
+			t.Errorf("%s: a result (%t), the code %s, %d requests, a token in a URL (%t)", name, read != nil,
+				codeOf(err), len(b.slack.sent), sentInURL(b))
+		}
+		if len(b.saved.saves) != 0 {
+			t.Errorf("%s: the sign-in was saved %d times", name, len(b.saved.saves))
+		}
+	}
+	t.Run("the tokens a refresh gave", func(t *testing.T) {
+		for _, token := range []string{newAccessToken, newRefresh} {
+			b := newBench(t)
+			read, err := b.read([]reply{ok(expiredAnswer), page(msg(parentTS, `"text":"`+token+`"`))}, ok(replacement), ok(identified))
+			if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 4 {
+				t.Errorf("a result (%t), the code %s, %d requests", read != nil, codeOf(err), len(b.slack.sent))
+			}
+		}
+	})
+	t.Run("as the workspace address of an identity answer", func(t *testing.T) {
+		for _, token := range []string{accessToken, refreshToken} {
+			b := newBench(t)
+			b.saved.saved.State = unchecked
+			named := strings.Replace(identified, "invented-workspace", token, 1)
+			read, err := b.read([]reply{page(msg(parentTS))}, ok(named))
+			if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 1 {
+				t.Errorf("a result (%t), the code %s, %d requests", read != nil, codeOf(err), len(b.slack.sent))
+			}
+			if b.saved.saved.WorkspaceOrigin != testOrigin || len(b.saved.saves) != 0 {
+				t.Errorf("the sign-in was saved %d times, with another workspace address (%t)", len(b.saved.saves),
+					b.saved.saved.WorkspaceOrigin != testOrigin)
+			}
+		}
+	})
+	t.Run("a token nobody holds is text", func(t *testing.T) {
+		b := newBench(t)
+		if read := b.reads([]reply{page(msg(parentTS, `"text":"`+newAccessToken+`"`))}); len(read.Records) != 1 {
+			t.Fatalf("%d records", len(read.Records))
+		}
+	})
+}
+
 func TestAThreadThatCannotBeReadWholeIsRefused(t *testing.T) {
 	cases := map[string][]reply{
 		"a reply selected as the parent":  {page(msg(replyTS))},
@@ -470,14 +550,37 @@ func TestLimitsOfOneRead(t *testing.T) {
 		if b.last().APICalls != 2 || b.last().ResponseBytes > maxResponseBytes {
 			t.Fatalf("report %+v", b.last())
 		}
-		// A page that states no length is counted as it arrives, and is cut off once it passes the limit.
+		// A page that states no length is counted as it arrives, and is cut off at the first byte past the
+		// limit.
 		b = newBench(t)
 		second := page(msg(replyTS), padding)
 		second.stream, second.body = io.NopCloser(strings.NewReader(second.body)), ""
 		b.refuses("slack_resource_limit", []reply{page(msg(parentTS), cursor("next"), padding), second})
-		if b.last().APICalls != 2 || b.last().ResponseBytes <= maxResponseBytes ||
-			b.last().ResponseBytes > maxResponseBytes+32<<10 {
+		if b.last().APICalls != 2 || b.last().ResponseBytes != maxResponseBytes+1 {
 			t.Fatalf("report %+v", b.last())
+		}
+	})
+	t.Run("one byte past 1 MiB is the most that is read", func(t *testing.T) {
+		// A body with no stated length, of as many bytes as the page's "ignored" member is padded to.
+		sized := func(size int) reply {
+			unpadded := len(page(msg(parentTS), `"ignored":""`).body)
+			whole := page(msg(parentTS), `"ignored":"`+strings.Repeat("x", size-unpadded)+`"`)
+			if len(whole.body) != size {
+				t.Fatalf("the page is %d bytes", len(whole.body))
+			}
+			return reply{status: 200, stream: stream(whole.body)}
+		}
+		b := newBench(t)
+		b.reads([]reply{sized(maxResponseBytes)})
+		if b.last().ResponseBytes != maxResponseBytes {
+			t.Fatalf("report %+v", b.last())
+		}
+		for _, size := range []int{maxResponseBytes + 1, maxResponseBytes + 5000, 2 * maxResponseBytes} {
+			b = newBench(t)
+			b.refuses("slack_resource_limit", []reply{sized(size)})
+			if b.last().ResponseBytes != maxResponseBytes+1 {
+				t.Fatalf("a page of %d bytes: report %+v", size, b.last())
+			}
 		}
 	})
 	t.Run("a stated length past what is left", func(t *testing.T) {

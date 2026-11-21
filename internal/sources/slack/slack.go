@@ -8,9 +8,11 @@
 // attempts and 1 MiB of response bytes. Files, attachments and blocks are counted and left out.
 //
 // The reader holds no storage of its own. Mappings gives the thread selected for an account, and Connection
-// the saved sign-in under its lock. A refusal is an *Error holding one fixed code: no provider text, no
-// identifier and no credential reaches an error, a Report or a result. A read stops when its context is
-// cancelled. A Reader keeps no state between reads, so reads may run at once when its stores allow it.
+// the saved sign-in under its lock. Each is called under a context that ends at the read's deadline. A
+// refusal is an *Error holding one fixed code: no provider text, no identifier and no credential reaches an
+// error, a Report or a result, and an answer that holds a token of the sign-in is refused whole. A read
+// stops when its context is cancelled. A Reader keeps no state between reads, so reads may run at once when
+// its stores allow it.
 package slack
 
 import (
@@ -106,7 +108,8 @@ func (c Clock) monotonic() time.Duration {
 type Mappings interface {
 	// Mapping gives the entry saved for the account, as `debug slack map` saved it and checked against the
 	// folder's CRM and Slack connections. With no thread selected for the account it refuses with the code
-	// slack_mapping_missing. A failure that is not an *Error reads as slack_storage_failed.
+	// slack_mapping_missing. A failure that is not an *Error reads as slack_storage_failed. ctx ends when
+	// the read's time does, and a store that waits stops waiting then.
 	Mapping(ctx context.Context, accountID string) (*strictjson.Object, error)
 }
 
@@ -267,8 +270,12 @@ type selected struct {
 
 // selection loads the account's mapping. The store has checked it; the reader refuses one that is for
 // another account or another Slack identity, or that it could not use.
-func (r *Reader) selection(ctx context.Context, accountID string) (selected, error) {
-	found, err := r.Mappings.Mapping(ctx, accountID)
+func (r *Reader) selection(ctx context.Context, b *budget, accountID string) (selected, error) {
+	var found *strictjson.Object
+	err := b.store(ctx, func(limited context.Context) (err error) {
+		found, err = r.Mappings.Mapping(limited, accountID)
+		return err
+	})
 	if err != nil {
 		reason := code(err)
 		if reason == "" {
@@ -299,7 +306,7 @@ func (r *Reader) selection(ctx context.Context, accountID string) (selected, err
 }
 
 func (r *Reader) read(ctx context.Context, b *budget, p *progress, accountID string) (*ThreadRead, error) {
-	chosen, err := r.selection(ctx, accountID)
+	chosen, err := r.selection(ctx, b, accountID)
 	if err != nil {
 		return nil, err
 	}
@@ -339,11 +346,11 @@ func (r *Reader) read(ctx context.Context, b *budget, p *progress, accountID str
 			return nil, refuse("slack_resource_limit")
 		}
 		limit := maxRows - p.rawRows
-		document, err := r.replies(ctx, b, held.Token, chosen.channel, chosen.parent, cutoff, cursor, limit)
+		document, err := r.replies(ctx, b, held, chosen.channel, chosen.parent, cutoff, cursor, limit)
 		if errors.Is(err, errTokenExpired) {
 			// Only Slack's exact token_expired answer earns the one retry, with the one refresh.
 			if b.tokenRetried {
-				if err := r.reject(ctx, held); err != nil {
+				if err := r.reject(ctx, b, held); err != nil {
 					return nil, err
 				}
 				return nil, refuse("slack_reconnect_required")
@@ -360,7 +367,7 @@ func (r *Reader) read(ctx context.Context, b *budget, p *progress, accountID str
 				return nil, err
 			}
 			if refused.Code == "slack_reconnect_required" {
-				if err := r.reject(ctx, held); err != nil {
+				if err := r.reject(ctx, b, held); err != nil {
 					return nil, err
 				}
 			}

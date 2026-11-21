@@ -9,7 +9,8 @@
 // operation asks sf for credentials once more, confirms the org is the same one, and retries.
 //
 // A failure is an *Error holding one fixed code. It never holds an upstream message, a URL or a credential.
-// A read whose context ends returns that context's error, and ends sf with anything sf started.
+// An answer that holds a token of the read is refused whole, so a token never becomes a record. A read whose
+// context ends returns that context's error, and ends sf with anything sf started.
 package salesforce
 
 import (
@@ -19,7 +20,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"net/http"
 	"regexp"
 	"sort"
@@ -240,7 +240,8 @@ type Options struct {
 	Environment string
 	// Runner runs sf. Nil is Exec{}, the sf on PATH.
 	Runner Runner
-	// Transport carries the HTTPS requests. Nil dials the instance with certificate checks and no proxy.
+	// Transport carries the HTTPS requests. Nil dials the instance with certificate checks and no proxy, over
+	// HTTP/1.1 with one connection a request.
 	Transport http.RoundTripper
 	// Now is the clock the operation budget is read from. Nil is time.Now.
 	Now func() time.Time
@@ -292,9 +293,7 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 	}
 	transport := o.Transport
 	if transport == nil {
-		transport = &http.Transport{DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
-			TLSHandshakeTimeout: 3 * time.Second, DisableCompression: true, ForceAttemptHTTP2: true,
-			IdleConnTimeout: 30 * time.Second}
+		transport = ownTransport(direct, nil)
 	}
 	now := o.Now
 	if now == nil {

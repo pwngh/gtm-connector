@@ -130,6 +130,107 @@ func (s slow) Mapping(ctx context.Context, accountID string) (*strictjson.Object
 	return s.Mappings.Mapping(ctx, accountID)
 }
 
+// waiting is a mapping store that waits for its context to end and fails with its error.
+type waiting struct{}
+
+func (waiting) Mapping(ctx context.Context, _ string) (*strictjson.Object, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A store that waits on the context it is given is stopped when the read's 20 seconds end, and the read is
+// refused as timed out. The caller gave no deadline of its own.
+func TestAStoreThatWaitsIsStoppedAtTheDeadline(t *testing.T) {
+	// almostOver is a bench whose read has 40 milliseconds left from its first moment on.
+	almostOver := func(t *testing.T) *bench {
+		b := newBench(t)
+		started, asked := b.clock.tick, 0
+		b.reader.Clock.Monotonic = func() time.Duration {
+			if asked++; asked == 1 {
+				return started
+			}
+			return started + operationTime - 40*time.Millisecond
+		}
+		return b
+	}
+	run := func(t *testing.T, b *bench, ctx context.Context, replies ...reply) error {
+		t.Helper()
+		b.slack.replies = replies
+		done := make(chan error, 1)
+		go func() {
+			read, err := b.reader.ReadSlackMessages(ctx, accountID)
+			if read != nil {
+				err = errors.New("the read gave a result")
+			}
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(3 * time.Second):
+			t.Fatal("the read was still waiting on a store 3 seconds after its deadline")
+			return nil
+		}
+	}
+	t.Run("the mapping store", func(t *testing.T) {
+		b := almostOver(t)
+		b.reader.Mappings = waiting{}
+		if err := run(t, b, context.Background()); codeOf(err) != "slack_timeout" || b.last().Phase != "mapping" ||
+			b.saved.holds != 0 {
+			t.Fatalf("got %v: %+v", codeOf(err), b.last())
+		}
+	})
+	t.Run("the sign-in store", func(t *testing.T) {
+		b := almostOver(t)
+		b.saved.waitOn = 1
+		if err := run(t, b, context.Background()); codeOf(err) != "slack_timeout" ||
+			b.last().Phase != "credential_binding" || len(b.slack.sent) != 0 {
+			t.Fatalf("got %v: %+v", codeOf(err), b.last())
+		}
+	})
+	t.Run("the sign-in store when a refused token is set aside", func(t *testing.T) {
+		b := almostOver(t)
+		b.saved.waitOn = 2
+		err := run(t, b, context.Background(), ok(`{"ok":false,"error":"invalid_auth"}`))
+		if codeOf(err) != "slack_timeout" || b.last().Phase != "thread_read" || len(b.slack.sent) != 1 {
+			t.Fatalf("got %v: %+v", codeOf(err), b.last())
+		}
+	})
+	t.Run("a store that was not waiting keeps its own failure", func(t *testing.T) {
+		b := almostOver(t)
+		b.saved.holdErr = errors.New("disk full")
+		if err := run(t, b, context.Background()); codeOf(err) != "slack_storage_failed" {
+			t.Fatalf("got %v", codeOf(err))
+		}
+	})
+	t.Run("the caller's cancel stays a cancel", func(t *testing.T) {
+		for name, change := range map[string]func(*bench){
+			"the mapping store": func(b *bench) { b.reader.Mappings = waiting{} },
+			"the sign-in store": func(b *bench) { b.saved.waitOn = 1 },
+		} {
+			b := newBench(t)
+			change(b)
+			ctx, cancel := context.WithCancel(context.Background())
+			timer := time.AfterFunc(30*time.Millisecond, cancel)
+			err := run(t, b, ctx)
+			timer.Stop()
+			cancel()
+			if !errors.Is(err, context.Canceled) || b.last().Code != "cancelled" {
+				t.Fatalf("%s: got %v: %+v", name, err, b.last())
+			}
+		}
+	})
+	t.Run("the caller's deadline is a timeout", func(t *testing.T) {
+		b := newBench(t)
+		b.reader.Mappings = waiting{}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		defer cancel()
+		if err := run(t, b, ctx); codeOf(err) != "slack_timeout" {
+			t.Fatalf("got %v", codeOf(err))
+		}
+	})
+}
+
 func TestTheReadersOwnTransport(t *testing.T) {
 	own, isHTTP := (&Reader{}).transport().(*http.Transport)
 	if !isHTTP || own.Proxy != nil || own.TLSClientConfig != nil || own.ResponseHeaderTimeout != readTimeout {
@@ -150,7 +251,7 @@ func TestOverAConnection(t *testing.T) {
 		seen = append(seen, r.Method+" "+r.Host+r.URL.RequestURI())
 		mu.Unlock()
 		if r.Header.Get("Accept-Encoding") != "identity" || r.Header.Get("Authorization") != "Bearer "+accessToken {
-			t.Errorf("headers %v", r.Header)
+			t.Errorf("headers %v", shown(r.Header))
 		}
 		flusher := w.(http.Flusher)
 		switch r.URL.Query().Get("cursor") {

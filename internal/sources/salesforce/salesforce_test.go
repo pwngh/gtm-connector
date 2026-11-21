@@ -602,6 +602,94 @@ func TestSearchesAreFixedQueries(t *testing.T) {
 
 func failure(_ []*strictjson.Object, _ bool, err error) error { return err }
 
+// An answer that holds a token of the read is refused whole, before it is parsed: a token the org sends back
+// as a field gives no record. A failure here names counts and a code, never the token or the answer.
+func TestAnAnswerHoldingATokenIsRefused(t *testing.T) {
+	const rotated = "invented-rotated-token"
+	named := func(t *testing.T, name string) (*salesforcetest.Org, *salesforcetest.SF, string) {
+		org, sf := salesforcetest.NewOrg(), salesforcetest.NewSF()
+		rows := sized(t, 1, 0)
+		accounts, _ := rows.Get("Account")
+		accounts.([]any)[0].(*strictjson.Object).Set("Name", name)
+		return org, sf, org.Add(rows)
+	}
+	refused := func(t *testing.T, reader *Reader, accountID string) {
+		t.Helper()
+		found, err := reader.GetAccount(context.Background(), accountID)
+		if found != nil || codeOf(err) != invalidResponse {
+			t.Fatalf("an answer holding a token gave a record (%t) and the code %q", found != nil, codeOf(err))
+		}
+		_, records, err := reader.Read(context.Background(), "get_account", accountID)
+		if records != nil || codeOf(err) != invalidResponse {
+			t.Fatalf("an answer holding a token gave %d records and the code %q", len(records), codeOf(err))
+		}
+	}
+	t.Run("the token the reader holds", func(t *testing.T) {
+		org, sf, accountID := named(t, salesforcetest.Token)
+		refused(t, signIn(t, org, sf, "production"), accountID)
+	})
+	t.Run("inside longer text", func(t *testing.T) {
+		org, sf, accountID := named(t, "Bearer "+salesforcetest.Token+" and more")
+		refused(t, signIn(t, org, sf, "production"), accountID)
+	})
+	t.Run("the token sf gave during the read", func(t *testing.T) {
+		org, sf, accountID := named(t, rotated)
+		reader := signIn(t, org, sf, "production")
+		org.Token, sf.Token = rotated, rotated
+		refused(t, reader, accountID)
+	})
+	t.Run("the token sf replaced during the read", func(t *testing.T) {
+		org, sf, accountID := named(t, salesforcetest.Token)
+		reader := signIn(t, org, sf, "production")
+		org.Token, sf.Token = rotated, rotated
+		found, err := reader.GetAccount(context.Background(), accountID)
+		if found != nil || codeOf(err) != invalidResponse || reader.accessToken != rotated {
+			t.Fatalf("an answer holding a token gave a record (%t) and the code %q", found != nil, codeOf(err))
+		}
+	})
+	t.Run("written with escapes", func(t *testing.T) {
+		// The same text as JSON may write it: one character as its code point, and a solidus escaped.
+		const slashed = "invented/salesforce-token"
+		hyphen := `\` + "u002d"
+		for token, written := range map[string]string{
+			salesforcetest.Token: strings.Replace(salesforcetest.Token, "-", hyphen, 1),
+			slashed:              strings.Replace(slashed, "/", `\/`, 1),
+		} {
+			if strings.Contains(written, token) || !strings.Contains(written, `\`) {
+				t.Fatal("the name does not hold the token with an escape")
+			}
+			org, sf, accountID := named(t, "Invented Account")
+			org.Token, sf.Token = token, token
+			reader := signIn(t, org, sf, "production")
+			org.Intercept = func(request *http.Request) *http.Response {
+				if !strings.Contains(request.URL.Query().Get("q"), "FROM Account") {
+					return nil
+				}
+				return salesforcetest.Respond(200, `{"totalSize": 1, "done": true, "records": [{"Id": "`+account+
+					`", "Name": "`+written+`", "Industry": null, "AccountNumber": null}]}`)
+			}
+			refused(t, reader, accountID)
+		}
+	})
+	t.Run("in a denial", func(t *testing.T) {
+		org, sf, accountID := named(t, "Invented Account")
+		reader := signIn(t, org, sf, "production")
+		org.Intercept = func(*http.Request) *http.Response {
+			return salesforcetest.Respond(403, `[{"errorCode": "API_DISABLED_FOR_ORG", "message": "`+salesforcetest.Token+`"}]`)
+		}
+		if _, err := reader.GetAccount(context.Background(), accountID); codeOf(err) != invalidResponse {
+			t.Fatalf("a denial holding a token gave the code %q", codeOf(err))
+		}
+	})
+	t.Run("a token nobody holds is text", func(t *testing.T) {
+		org, sf, accountID := named(t, rotated)
+		found, err := signIn(t, org, sf, "production").GetAccount(context.Background(), accountID)
+		if err != nil || found == nil {
+			t.Fatalf("an account named for a token nobody holds was refused with %q", codeOf(err))
+		}
+	})
+}
+
 // The address sf gives must be an HTTPS My Domain origin, and the token printable ASCII. These cases were
 // run through the Python adapter, and agree with it.
 func TestTheInstanceAndTokenAreChecked(t *testing.T) {
