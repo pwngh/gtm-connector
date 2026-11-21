@@ -6,33 +6,33 @@
  "generator": "tools/oracle/generate.py",
  "files": {
   "cards/books_calls.jsonl.gz": {
-   "sha256": "5577a38f0e7020fc9d3bc5fa2c901387c8c7e992f54b2ab25b11db65315bec89",
-   "bytes": 2667729,
+   "sha256": "71756438cd5750a06d18b2b4c19f5c3f7c3526f1af4c914f22fc6d9dc575079e",
+   "bytes": 2670025,
    "records": 82
   },
   "cards/books_demo.jsonl.gz": {
-   "sha256": "66e14225c530476bc22c23392a79971d7d655572f261b4ca74e03325bad8fcb0",
-   "bytes": 2328516,
+   "sha256": "8de4b2a44dd802b2a9bb75fc49eb8fc2d4e9705d6d4f92b202288906acea1e7d",
+   "bytes": 2330700,
    "records": 78
   },
   "cards/books_salesforce.jsonl.gz": {
-   "sha256": "e09b4afc98e8edc7b218b636a20800c11810b89d017d5b4bd639509789961957",
-   "bytes": 2293585,
+   "sha256": "3bf61b8a904e1c3d8c4a7d543638ecd666b2d309fd66731b11950bf504adc421",
+   "bytes": 2297953,
    "records": 78
   },
   "cards/books_slack.jsonl.gz": {
-   "sha256": "4d9f2260613a092f731190cc3c1898909af1ca3b664b22c516a1c7f34aa983a9",
-   "bytes": 2306503,
+   "sha256": "bc032b01173e80b783035e822c789a38bdd7bedca491056455efc49609946742",
+   "bytes": 2308687,
    "records": 78
   },
   "cards/cases.jsonl.gz": {
-   "sha256": "11c55a28c1ca6a91ad332aeefdccd8327390ccb765ed562a0d8a3e776569abdc",
-   "bytes": 1837190,
+   "sha256": "13b514c0b6c43f14b2727778bb2ea6091ef9ed77d2c9ac6158f03030d861ccab",
+   "bytes": 1837722,
    "records": 19
   },
   "cards/demo.jsonl.gz": {
-   "sha256": "0f021de673bb0017213c1e06168707967819f454f3427ecc50c092bf2d4f6b58",
-   "bytes": 371972,
+   "sha256": "74aaf44f5d455f7557747a521570bb6178877307dc6a59969a35797856fbc43d",
+   "bytes": 372896,
    "records": 33
   },
   "cards/demo_book.json": {
@@ -56,13 +56,13 @@
    "records": 8
   },
   "cards/slack_threads.jsonl.gz": {
-   "sha256": "1e13bf2d479bc46efce11caa4dd5f48f9b36b33e5d9dbd9832c6cb8b6336480e",
-   "bytes": 812672,
+   "sha256": "bdb30130e4dc56913c600ad1d9d8e7eed988bfdacaa06570c691fca8a39a1000",
+   "bytes": 813680,
    "records": 36
   },
   "cards/varied_demo.jsonl.gz": {
-   "sha256": "b48a5fb8a880b2c7a8bf8ef38bcfe32a120578bdad55fa232ce8757ffcf81f86",
-   "bytes": 2306658,
+   "sha256": "87fa23fbe42910693b6b535cb13f726e22f1886f8dc25d79a5489fe7743b2acd",
+   "bytes": 2307946,
    "records": 46
   },
   "commands/index.json": {
