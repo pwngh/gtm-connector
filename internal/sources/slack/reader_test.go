@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -225,6 +226,154 @@ func TestACursorIsSentAsAFormValue(t *testing.T) {
 	if got := b.lastSent().query; !strings.HasSuffix(got, "&limit=99&cursor=a+b%2Bc%2Fd%3De%26f%25g~h") {
 		t.Fatalf("query %s", got)
 	}
+}
+
+// escaped is an answer in which a token is written as JSON may write it, its first hyphen as a code point,
+// so that the answer's bytes no longer hold the token and its parsed text does.
+func escaped(t *testing.T, answer reply, token string) reply {
+	t.Helper()
+	hyphen := `\` + "u002d"
+	answer.body = strings.Replace(answer.body, token, strings.Replace(token, "-", hyphen, 1), 1)
+	if strings.Contains(answer.body, token) || !strings.Contains(answer.body, hyphen) {
+		t.Fatal("the answer does not hold the token with an escape")
+	}
+	return answer
+}
+
+// An answer that holds a token of the sign-in is refused whole, before it is parsed. As message text the
+// token would become a record, as a cursor part of the next request's URL, and as a workspace address part
+// of the saved sign-in. A failure here names counts and a code, never the token or the answer.
+func TestAnAnswerHoldingATokenIsRefused(t *testing.T) {
+	sentInURL := func(b *bench) bool {
+		for _, request := range b.slack.sent {
+			for _, token := range []string{accessToken, refreshToken, newAccessToken, newRefresh} {
+				if strings.Contains(request.url, token) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for name, given := range map[string]reply{
+		"the access token as text":           page(msg(parentTS, `"text":"`+accessToken+`"`)),
+		"the refresh token inside text":      page(msg(parentTS, `"text":"It said `+refreshToken+` aloud."`)),
+		"the access token as a cursor":       page(msg(parentTS), cursor(accessToken)),
+		"the refresh token as a cursor":      page(msg(parentTS), cursor(refreshToken)),
+		"in a member the reader ignores":     page(msg(parentTS), `"ignored":"`+accessToken+`"`),
+		"in a refusal":                       ok(`{"ok":false,"error":"thread_not_found","detail":"` + accessToken + `"}`),
+		"in a 401":                           status(401, `{"ok":false,"error":"token_expired","token":"`+accessToken+`"}`),
+		"written with an escape as text":     escaped(t, page(msg(parentTS, `"text":"`+accessToken+`"`)), accessToken),
+		"written with an escape as a cursor": escaped(t, page(msg(parentTS), cursor(refreshToken)), refreshToken),
+		"written with an escape as a key":    escaped(t, page(msg(parentTS), `"`+accessToken+`":1`), accessToken),
+	} {
+		b := newBench(t)
+		read, err := b.read([]reply{given, page(msg(replyTS))}, ok(replacement), ok(identified))
+		if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 1 || sentInURL(b) {
+			t.Errorf("%s: a result (%t), the code %s, %d requests, a token in a URL (%t)", name, read != nil,
+				codeOf(err), len(b.slack.sent), sentInURL(b))
+		}
+		if len(b.saved.saves) != 0 {
+			t.Errorf("%s: the sign-in was saved %d times", name, len(b.saved.saves))
+		}
+	}
+	t.Run("the tokens a refresh gave", func(t *testing.T) {
+		for _, token := range []string{newAccessToken, newRefresh} {
+			b := newBench(t)
+			read, err := b.read([]reply{ok(expiredAnswer), page(msg(parentTS, `"text":"`+token+`"`))}, ok(replacement), ok(identified))
+			if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 4 {
+				t.Errorf("a result (%t), the code %s, %d requests", read != nil, codeOf(err), len(b.slack.sent))
+			}
+		}
+	})
+	t.Run("as the workspace address of an identity answer", func(t *testing.T) {
+		for _, token := range []string{accessToken, refreshToken} {
+			b := newBench(t)
+			b.saved.saved.State = unchecked
+			named := strings.Replace(identified, "invented-workspace", token, 1)
+			read, err := b.read([]reply{page(msg(parentTS))}, ok(named))
+			if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 1 {
+				t.Errorf("a result (%t), the code %s, %d requests", read != nil, codeOf(err), len(b.slack.sent))
+			}
+			if b.saved.saved.WorkspaceOrigin != testOrigin || len(b.saved.saves) != 0 {
+				t.Errorf("the sign-in was saved %d times, with another workspace address (%t)", len(b.saved.saves),
+					b.saved.saved.WorkspaceOrigin != testOrigin)
+			}
+		}
+	})
+	t.Run("the tokens a refresh replaced", func(t *testing.T) {
+		// The read goes on under the new pair. What Slack sends after the refresh holds the old one.
+		for name, later := range map[string][]reply{
+			"the old access token as text":          {page(msg(parentTS, `"text":"`+accessToken+`"`))},
+			"the old refresh token as text":         {page(msg(parentTS, `"text":"`+refreshToken+`"`))},
+			"the old access token as a cursor":      {page(msg(parentTS), cursor(accessToken)), page(msg(replyTS))},
+			"the old refresh token as a cursor":     {page(msg(parentTS), cursor(refreshToken)), page(msg(replyTS))},
+			"the old refresh token on a later page": {page(msg(parentTS), cursor("next")), page(msg(replyTS, `"text":"`+refreshToken+`"`))},
+		} {
+			b := newBench(t)
+			read, err := b.read(append([]reply{ok(expiredAnswer)}, later...), ok(replacement), ok(identified))
+			if read != nil || codeOf(err) != "slack_response_invalid" || sentInURL(b) {
+				t.Errorf("%s: a result (%t), the code %s, %d requests, a token in a URL (%t)", name, read != nil,
+					codeOf(err), len(b.slack.sent), sentInURL(b))
+			}
+		}
+		// The identity answer that follows the refresh names the old token as the workspace.
+		b := newBench(t)
+		named := strings.Replace(identified, "invented-workspace", refreshToken, 1)
+		read, err := b.read([]reply{ok(expiredAnswer), page(msg(parentTS))}, ok(replacement), ok(named))
+		if read != nil || codeOf(err) != "slack_response_invalid" || b.saved.saved.WorkspaceOrigin != testOrigin {
+			t.Errorf("a result (%t), the code %s, another workspace address (%t)", read != nil, codeOf(err),
+				b.saved.saved.WorkspaceOrigin != testOrigin)
+		}
+	})
+	t.Run("text a card would turn into the token", func(t *testing.T) {
+		// A card composes source text, which turns the Kelvin sign into the letter K, and lowers the host
+		// of a link. No text below holds the token; each would once it is on a card.
+		const token = "invented-Kelvin-access-token"
+		kelvin := strings.Replace(token, "K", string(rune(0x212A)), 1)
+		shown, _, err := evidence.SafeText(kelvin)
+		if err != nil || strings.Contains(kelvin, token) || !strings.Contains(shown, token) {
+			t.Fatal("the text with a Kelvin sign is not one a card turns into the token")
+		}
+		for name, text := range map[string]string{
+			"a Kelvin sign for the letter K": kelvin,
+			"capitals":                       "INVENTED-KELVIN-ACCESS-TOKEN",
+			"small letters":                  "invented-kelvin-access-token",
+			"the host of a link":             "See https://INVENTED-KELVIN-ACCESS-TOKEN/ for more.",
+		} {
+			b := newBench(t)
+			b.saved.saved.AccessToken = NewSecret(token)
+			read, err := b.read([]reply{page(msg(parentTS, `"text":`+strictjson.Quote(text)))})
+			if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 1 {
+				t.Errorf("%s: a result (%t), the code %s, %d requests", name, read != nil, codeOf(err), len(b.slack.sent))
+			}
+		}
+	})
+	t.Run("a workspace address that is lowered into the token", func(t *testing.T) {
+		// The reader lowers the address Slack states before it saves it.
+		for _, written := range []string{"INVENTED-PRIVATE-ACCESS-TOKEN", "Invented-Private-Refresh-Token"} {
+			b := newBench(t)
+			b.saved.saved.State = unchecked
+			named := strings.Replace(identified, "invented-workspace", written, 1)
+			if lowered := origin("https://" + written + ".slack.com/"); !strings.Contains(lowered, accessToken) &&
+				!strings.Contains(lowered, refreshToken) {
+				t.Fatal("the address is not one the reader lowers into a token")
+			}
+			read, err := b.read([]reply{page(msg(parentTS))}, ok(named))
+			if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 1 {
+				t.Errorf("a result (%t), the code %s, %d requests", read != nil, codeOf(err), len(b.slack.sent))
+			}
+			if b.saved.saved.WorkspaceOrigin != testOrigin || len(b.saved.saves) != 0 {
+				t.Errorf("the sign-in was saved %d times, with another workspace address (%t)", len(b.saved.saves),
+					b.saved.saved.WorkspaceOrigin != testOrigin)
+			}
+		}
+	})
+	t.Run("a token nobody holds is text", func(t *testing.T) {
+		b := newBench(t)
+		if read := b.reads([]reply{page(msg(parentTS, `"text":"`+newAccessToken+`"`))}); len(read.Records) != 1 {
+			t.Fatalf("%d records", len(read.Records))
+		}
+	})
 }
 
 func TestAThreadThatCannotBeReadWholeIsRefused(t *testing.T) {
@@ -470,14 +619,37 @@ func TestLimitsOfOneRead(t *testing.T) {
 		if b.last().APICalls != 2 || b.last().ResponseBytes > maxResponseBytes {
 			t.Fatalf("report %+v", b.last())
 		}
-		// A page that states no length is counted as it arrives, and is cut off once it passes the limit.
+		// A page that states no length is counted as it arrives, and is cut off at the first byte past the
+		// limit.
 		b = newBench(t)
 		second := page(msg(replyTS), padding)
 		second.stream, second.body = io.NopCloser(strings.NewReader(second.body)), ""
 		b.refuses("slack_resource_limit", []reply{page(msg(parentTS), cursor("next"), padding), second})
-		if b.last().APICalls != 2 || b.last().ResponseBytes <= maxResponseBytes ||
-			b.last().ResponseBytes > maxResponseBytes+32<<10 {
+		if b.last().APICalls != 2 || b.last().ResponseBytes != maxResponseBytes+1 {
 			t.Fatalf("report %+v", b.last())
+		}
+	})
+	t.Run("one byte past 1 MiB is the most that is read", func(t *testing.T) {
+		// A body with no stated length, of as many bytes as the page's "ignored" member is padded to.
+		sized := func(size int) reply {
+			unpadded := len(page(msg(parentTS), `"ignored":""`).body)
+			whole := page(msg(parentTS), `"ignored":"`+strings.Repeat("x", size-unpadded)+`"`)
+			if len(whole.body) != size {
+				t.Fatalf("the page is %d bytes", len(whole.body))
+			}
+			return reply{status: 200, stream: stream(whole.body)}
+		}
+		b := newBench(t)
+		b.reads([]reply{sized(maxResponseBytes)})
+		if b.last().ResponseBytes != maxResponseBytes {
+			t.Fatalf("report %+v", b.last())
+		}
+		for _, size := range []int{maxResponseBytes + 1, maxResponseBytes + 5000, 2 * maxResponseBytes} {
+			b = newBench(t)
+			b.refuses("slack_resource_limit", []reply{sized(size)})
+			if b.last().ResponseBytes != maxResponseBytes+1 {
+				t.Fatalf("a page of %d bytes: report %+v", size, b.last())
+			}
 		}
 	})
 	t.Run("a stated length past what is left", func(t *testing.T) {

@@ -29,8 +29,11 @@ type upstream struct {
 
 func (u *upstream) RoundTrip(request *http.Request) (*http.Response, error) {
 	t := u.t
+	// The Python reader asked for 100 rows less those it had. The number is written here, not taken from
+	// the reader under test, so a change to the reader's own limit shows as a different request.
+	const asked = 100
 	want := fmt.Sprintf("channel=%s&ts=%s&latest=%s&inclusive=true&limit=%d", u.channel,
-		member(t, u.rows[0], "ts"), u.cutoff, maxRows-u.next)
+		member(t, u.rows[0], "ts"), u.cutoff, asked-u.next)
 	if u.next > 0 {
 		want += fmt.Sprintf("&cursor=page-%d", u.next)
 	}
@@ -40,7 +43,7 @@ func (u *upstream) RoundTrip(request *http.Request) (*http.Response, error) {
 	}
 	if got := request.Header; len(got) != 3 || got.Get("Authorization") != "Bearer "+accessToken ||
 		got.Get("Accept") != "application/json" || got.Get("Accept-Encoding") != "identity" {
-		t.Errorf("request %d: headers %v", u.served, got)
+		t.Errorf("request %d: headers %v", u.served, shown(got))
 	}
 	if request.Body != nil {
 		t.Errorf("request %d has a body", u.served)
@@ -52,7 +55,7 @@ func (u *upstream) RoundTrip(request *http.Request) (*http.Response, error) {
 			sent = append(sent, row)
 		}
 	}
-	end := min(u.next+min(u.page, maxRows-u.next), len(sent))
+	end := min(u.next+min(u.page, asked-u.next), len(sent))
 	more, cursor := end < len(sent), ""
 	if more {
 		cursor = fmt.Sprintf("page-%d", end)

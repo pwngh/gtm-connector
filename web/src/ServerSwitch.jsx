@@ -1,13 +1,15 @@
-import React, {createContext, use, useContext, useSyncExternalStore} from 'react';
-import {Link, NavLink, Navigate, useLocation} from 'react-router';
+import React, {createContext, useContext, useSyncExternalStore} from 'react';
+import {Link, NavLink, useLocation} from 'react-router';
 import {ChevronRight, FileText, GitBranch, UserRound} from 'lucide-react';
-import {renewalFixture} from './renewalFixtures.js';
-import {walkthroughStore} from './serverSession.js';
-import {ApiEvidence, ApiReadiness} from './lazyPages.js';
+import {serverPaths} from './app/routes.js';
+import {lazyPage} from './app/lazyPage.js';
 import {Avatar} from './WorkspaceControls.jsx';
 
-// Without a provider the app is the walkthrough: tests and the static build.
-export const ServerContext = createContext(walkthroughStore);
+// The server's store: the signed-in session and how the server answered.
+// Without a provider, as when one view renders alone, nothing is signed in
+// and nothing is read.
+const detachedState = Object.freeze({mode: 'detached', session: null, error: null, ended: false, generation: 0, elsewhere: null});
+export const ServerContext = createContext({subscribe: () => () => {}, getSnapshot: () => detachedState});
 
 export function useServer() {
   const store = useContext(ServerContext);
@@ -15,14 +17,17 @@ export function useServer() {
   return {store, state};
 }
 
+const ApiEvidence = lazyPage(() => import('./ApiEvidence.jsx'));
+const ApiReadiness = lazyPage(() => import('./ApiReadiness.jsx'));
+
 // The pages that read from the server, in the order the navigation lists
-// them. The first is home. Every other path belongs to the walkthrough.
+// them. The first is home. Every other path is not available here.
 export const serverPages = [
-  {id: 'evidence', label: 'Evidence', path: renewalFixture.paths.evidence, icon: FileText, sub: 'The chosen account’s cards, units, receipts and gaps', Page: ApiEvidence},
-  {id: 'readiness', label: 'Readiness', path: `${renewalFixture.paths.root}/readiness`, icon: GitBranch, sub: 'The open card’s gaps; the server has no workflow rules yet', Page: ApiReadiness},
+  {id: 'evidence', label: 'Evidence', path: serverPaths.evidence, icon: FileText, sub: 'The chosen account’s cards, units, receipts and gaps', Page: ApiEvidence},
+  {id: 'readiness', label: 'Readiness', path: serverPaths.readiness, icon: GitBranch, sub: 'The open card’s gaps; the server has no workflow rules yet', Page: ApiReadiness},
 ];
 export const serverHome = serverPages[0].path;
-const serverPageAt = pathname => serverPages.find(page => page.path === pathname);
+export const serverPageAt = pathname => serverPages.find(page => page.path === pathname);
 
 // Each server page with the chosen account and open card kept in its link.
 function serverLinks(search) {
@@ -32,50 +37,13 @@ function serverLinks(search) {
   return serverPages.map(page => ({...page, to: page.path + query}));
 }
 
-// The page at the current path. The walkthrough shows its own page. When the
-// server serves the app, a server page reads from it and every other path
-// says it is not available here. While the server is being asked, the page
-// waits under the route's loading state; it never shows walkthrough data first.
-export default function ServerSwitch({children}) {
-  const {store, state} = useServer();
-  const {pathname} = useLocation();
-  if (state.mode === 'probing') use(store.start());
-  if (store.getSnapshot().mode === 'walkthrough') return children;
-  const {Page} = serverPageAt(pathname) || {Page: NotAvailable};
-  return <Page/>;
-}
-
-// Shell content that comes from walkthrough data. It shows only in walkthrough
-// mode. When the server serves the app, `api` shows instead. Nothing shows
-// while the server is being asked, so walkthrough data never flashes first.
-export function ByMode({api = null, children = null}) {
-  const {state} = useServer();
-  if (state.mode === 'walkthrough') return children;
-  if (state.mode === 'probing') return null;
-  return api;
-}
-
-// "/" opens the first page of whichever app this is, once the server has been asked.
-export function Home({walkthrough}) {
-  const {store, state} = useServer();
-  if (state.mode === 'probing') use(store.start());
-  return <Navigate to={store.getSnapshot().mode === 'walkthrough' ? walkthrough : serverHome} replace/>;
-}
-
-// A link to the walkthrough page `to`, or to home when the server serves the app.
-export function HomeLink({to, ...props}) {
-  const {state} = useServer();
-  return <NavLink to={{walkthrough: to, probing: '/'}[state.mode] || serverHome} {...props}/>;
-}
-
-// The navigation when the server serves the app: the server pages only.
+// The navigation: the server pages only.
 export function ServerNav({onNavigate}) {
   const {search} = useLocation();
   return serverLinks(search).map(({id, label, icon: Icon, to}) => <NavLink key={id} to={to} onClick={onNavigate} className={({isActive}) => `nav-item ${isActive ? 'active' : ''}`}><Icon size={19}/><span>{label}</span></NavLink>);
 }
 
-// A walkthrough path, or any unknown one, when the server serves the app or
-// did not say which app this is. It shows nothing of the walkthrough.
+// Any path that is not a server page.
 export function NotAvailable() {
   const {state} = useServer();
   return <div className="page-heading secondary-heading api-unavailable"><div><div className="eyebrow">READ FROM THE SERVER</div>
@@ -85,8 +53,8 @@ export function NotAvailable() {
     <Link className="button primary" to={serverHome}>Go to Evidence</Link></div></div>;
 }
 
-// The breadcrumb when the server serves the app. It names no account: the
-// link's text is not trusted, and the page heading shows the verified one.
+// The breadcrumb. It names no account: the link's text is not trusted, and
+// the page heading shows the verified one.
 export function ApiCrumbs() {
   const {pathname} = useLocation();
   if (!serverPageAt(pathname)) return <span className="api-crumb-alone">Not available here</span>;
@@ -101,8 +69,7 @@ export function PrincipalMark() {
     {name ? <Avatar name={name}/> : <span className="avatar" aria-hidden="true"><UserRound size={16}/></span>}</span>;
 }
 
-// The palette when the server serves the app: the server pages, with the
-// chosen account and open card kept. No walkthrough record, page or action.
+// The palette: the server pages, with the chosen account and open card kept.
 export function apiCommandItems(go, search) {
   return serverLinks(search).map(({label, icon, sub, to}) => ({group: 'Read from the server', icon, label, sub, onSelect: () => go(to)}));
 }

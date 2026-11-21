@@ -1,8 +1,7 @@
-import React from 'react';
 import {createRoot} from 'react-dom/client';
-import App, {browserServer} from './main';
+import {boot} from './app/boot.jsx';
+import {createServerStore} from './serverSession.js';
+import {createApiClient} from './api.js';
 
-// Ask the server before the first page needs the answer.
-browserServer.start();
-
-createRoot(document.getElementById('root')).render(<App/>);
+const root = createRoot(document.getElementById('root'));
+boot({store: createServerStore(createApiClient()), show: view => root.render(view), loadWalkthrough: () => import('./main.jsx')});
