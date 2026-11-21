@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/pwngh/gtm-connector/internal/oracletest"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // These transcribe tests/test_gateway.py and the prepared folder's read rows; each test names its source.
@@ -531,6 +532,47 @@ func TestDeeplyNestedMarkedRequestIsAudited(t *testing.T) {
 	if response.Code != 400 || len(rows) != 1 || rows[0].Tool != "get_account" || rows[0].Status != "error" ||
 		*rows[0].HTTPStatus != 400 || rows[0].RowCount != 0 {
 		t.Fatalf("%d %+v", response.Code, rows)
+	}
+}
+
+// nestedArgument is a value with this many objects open around a 1.
+func nestedArgument(levels int) any {
+	var value any = 1
+	for i := 0; i < levels; i++ {
+		value = map[string]any{"a": value}
+	}
+	return value
+}
+
+// A tool call nested past strictjson.MaxDepth is refused as invalid JSON and runs nothing. The request,
+// its params and its arguments are three levels, so the argument's own levels decide.
+func TestCallNestedPastTheLimitIsInvalidJSON(t *testing.T) {
+	h := newHarness(t)
+	atLimit := h.tool("get_account", map[string]any{"account_id": "acc-001", "extra": nestedArgument(strictjson.MaxDepth - 3)}, "crm", nil)
+	// A call at the limit is read: it is refused for its unknown argument, not as JSON.
+	if reason, _ := reasonOf(t, atLimit); reason != "invalid_arguments" {
+		t.Fatalf("a call at the limit: %d %s", atLimit.Code, atLimit.Body)
+	}
+	before, ran := len(h.receipts.Read()), len(h.fx.ran())
+	response := h.tool("get_account", map[string]any{"account_id": "acc-001", "extra": nestedArgument(strictjson.MaxDepth - 2)}, "crm", nil)
+	reason, code := reasonOf(t, response)
+	rows := h.receipts.Read()
+	if response.Code != 400 || reason != "invalid_json" || code != "-32700" || len(rows) != before+1 {
+		t.Fatalf("%d %s, %d receipts", response.Code, response.Body, len(rows)-before)
+	}
+	// The Mcp-Method header says it is a call, so it keeps a receipt under the name the Mcp-Name header gives.
+	if last := rows[len(rows)-1]; last.Tool != "get_account" || last.Status != "error" || *last.HTTPStatus != 400 || last.RowCount != 0 {
+		t.Fatalf("%+v", last)
+	}
+	// Without the header nothing readable says it is a call, as for any body no parser reads.
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001","extra":` +
+		strings.Repeat(`{"a":`, strictjson.MaxDepth-2) + "1" + strings.Repeat("}", strictjson.MaxDepth-2) + "}}}"
+	unmarked := h.post([]byte(body), [][2]string{{"Authorization", "Bearer unused"}})
+	if reason, _ := reasonOf(t, unmarked); unmarked.Code != 400 || reason != "invalid_json" || len(h.receipts.Read()) != before+1 {
+		t.Fatalf("%d %s, %d receipts", unmarked.Code, unmarked.Body, len(h.receipts.Read())-before)
+	}
+	if len(h.fx.ran()) != ran {
+		t.Fatalf("a call ran: %v", h.fx.ran())
 	}
 }
 
