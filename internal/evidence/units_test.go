@@ -11,17 +11,15 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// rebuilt pins how many cards of each family are rebuilt from the evidence they seal. The rest hold an
-// imported transcript or live Slack messages, whose checks are not ported yet.
+// rebuilt pins how many cards of each family are rebuilt from the evidence they seal. The rest hold live
+// Slack messages, whose checks are not ported yet.
 var rebuilt = map[string]int{
-	"demo": 33, "books_demo": 78, "varied_demo": 46, "cases": 19, "books_calls": 32, "books_salesforce": 78,
+	"demo": 33, "books_demo": 78, "varied_demo": 46, "cases": 19, "books_calls": 82, "books_salesforce": 78,
 	"books_slack": 10, "slack_threads": 0,
 }
 
-// notPorted is whether evidence holds what Build may refuse as not ported: an imported call note, or a live
-// Slack message.
+// notPorted is whether evidence holds what Build may refuse as not ported: a live Slack message.
 func notPorted(evidence *strictjson.Object) bool {
-	calls, _ := evidence.Get("calls_backend")
 	slack, _ := evidence.Get("slack_backend")
 	records, _ := evidence.Get("records")
 	list, _ := records.([]any)
@@ -29,8 +27,7 @@ func notPorted(evidence *strictjson.Object) bool {
 		record, _ := value.(*strictjson.Object)
 		ref, _ := record.Get("record_ref")
 		text, _ := ref.(string)
-		if calls == "imported" && strings.HasPrefix(text, "calls/call_notes/") ||
-			slack == "slack" && strings.HasPrefix(text, "slack/messages/") {
+		if slack == "slack" && strings.HasPrefix(text, "slack/messages/") {
 			return true
 		}
 	}
@@ -85,7 +82,7 @@ func TestBuildFromSealedEvidence(t *testing.T) {
 			if built != want {
 				t.Errorf("%s: %d rebuilt, want %d", family, built, want)
 			}
-			t.Logf("%s: %d rebuilt from sealed evidence, %d hold an imported transcript or live Slack", family, built, refused)
+			t.Logf("%s: %d rebuilt from sealed evidence, %d hold live Slack messages", family, built, refused)
 		})
 	}
 }

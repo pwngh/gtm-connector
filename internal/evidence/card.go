@@ -169,11 +169,51 @@ func speakerRole(value any, sellers []string, contacts []contact, slack bool) ro
 	return role{"unknown", noContact[1], nil}
 }
 
-// spoken is _Card.spoken for a record that is not a transcript: one speaker label and one text, whose
-// sentences are never cut and never joined to another record's. It returns the number of the record's first
-// unit; a record with no sentence still gets one unit, so every record resolves. Transcript runs, cuts and
-// spans come with the transcript port, where its fixtures cover them.
-func (c *card) spoken(row *strictjson.Object, table string, speakerValue, raw, at any, roleOf func(*string) role) int {
+// part is one piece of a record's speech, in order: its speaker label, its text and, in an imported
+// transcript, its cue or line and that cue's times.
+type part struct {
+	label, raw any
+	start, end *int
+	cue        *int
+}
+
+// run is neighbouring parts under one speaker label: the label, the parts' text joined by line breaks, when
+// the last part ended, and one piece for each cue.
+type run struct {
+	label  *string
+	raw    any
+	end    *int
+	pieces []part
+}
+
+// whole is the one part of a record that is not a transcript: one speaker label and one text.
+func whole(speaker, raw any) []part { return []part{{label: speaker, raw: raw}} }
+
+// joins is whether a part goes on the run before it. Both have the same speaker label and times, at most
+// two seconds apart, or at most ten when the run stops mid-sentence and the part goes on in lower case.
+func (r *run) joins(l *string, p part) bool {
+	if r == nil || l == nil || r.label == nil || *r.label != *l || p.start == nil || r.end == nil {
+		return false
+	}
+	gap := *p.start - *r.end
+	return gap >= -runGapMS && gap <= runGapMS ||
+		gap > 0 && gap <= bridgeGapMS && unfinished(str(r.raw)) && goesOn(str(p.raw))
+}
+
+// bisect is how many of the sorted ends are below n, or at most n when right is set (bisect_left and
+// bisect_right).
+func bisect(ends []int, n int, right bool) int {
+	return sort.Search(len(ends), func(i int) bool { return ends[i] > n || !right && ends[i] == n })
+}
+
+// spoken is _Card.spoken: the units of one record's speech. Neighbouring parts under one speaker label are
+// one run, so a sentence wrapped across cues stays whole. Parts with no label or no times never join. In a
+// transcript, a run that stops mid-sentence is not a quotation, and neither is the opening of that speaker's
+// next run; with openStart, the excerpt starts inside the call, and neither are each speaker's first words.
+// It returns the number of the record's first unit; a record with no sentence still gets one unit, so every
+// record resolves.
+func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any, roleOf func(*string) role,
+	transcript, openStart bool) int {
 	var shownAt *string
 	if at != nil {
 		if text, ok := at.(string); ok && PlainInstant(text) {
@@ -182,37 +222,128 @@ func (c *card) spoken(row *strictjson.Object, table string, speakerValue, raw, a
 			shownAt = &text
 		}
 	}
-	var l *string
-	if text := label(speakerValue); text != "" {
-		l = &text
+	var runs []*run
+	for _, p := range parts {
+		var l *string
+		if text := label(p.label); text != "" {
+			l = &text
+		}
+		var last *run
+		if len(runs) > 0 {
+			last = runs[len(runs)-1]
+		}
+		if !last.joins(l, p) {
+			runs = append(runs, &run{label: l, raw: p.raw, end: p.end, pieces: []part{p}})
+			continue
+		}
+		last.raw, last.end = str(last.raw)+"\n"+str(p.raw), p.end
+		// One piece for each cue: a link or a mention written across two voices of a cue is still one.
+		if tail := &last.pieces[len(last.pieces)-1]; tail.cue != nil && p.cue != nil && *tail.cue == *p.cue ||
+			tail.cue == nil && p.cue == nil {
+			tail.raw, tail.end = str(tail.raw)+"\n"+str(p.raw), p.end
+		} else {
+			last.pieces = append(last.pieces, p)
+		}
 	}
 	before := len(c.units)
 	// The digest is of the record's text as stored, so it can be checked against the source.
 	rawDigest := digest(str(field(row, "body")))
-	who := roleOf(l)
-	var speaker *string
-	if l != nil {
-		if text := c.line(*l); text != "" {
-			speaker = &text
+	// A speaker is a label, or no label.
+	speakerOf := func(l *string) string {
+		if l == nil {
+			return ""
 		}
+		return "=" + *l
 	}
-	if speaker != nil && length(*speaker) > MaxLabel {
-		speaker, who = nil, role{"unknown", fmt.Sprintf("speaker label over %d characters", MaxLabel), nil}
-	}
-	found, err := Sentences(c.lines(raw), table == "messages")
-	if err != nil {
-		panic(invalid)
-	}
+	waiting := map[string]bool{} // speakers whose last run stopped mid-sentence
+	heard := map[string]bool{}   // speakers who have spoken in this excerpt
+	cut := false                 // whether the sentence before this one, by anyone, stopped mid-sentence
 	rule := sourceRules[table]
-	for _, sentence := range found {
-		shown := "more"
-		if length(sentence) > MaxSentence {
-			shown = "long"
+	for _, r := range runs {
+		who := roleOf(r.label)
+		// A speaker label is source text too. The role was derived from the label as given.
+		var speaker *string
+		if r.label != nil {
+			if text := c.line(*r.label); text != "" {
+				speaker = &text
+			}
 		}
-		c.units = append(c.units, Unit{N: len(c.units) + 1, Kind: "sentence", Source: rule.system,
-			RecordRef: str(field(row, "record_ref")), Tool: rule.tool, At: shownAt, Speaker: speaker,
-			Role: who.role, Basis: who.basis, Contact: who.contact, Text: sentence, Shown: shown,
-			RawSHA256: rawDigest, SanitizerVersion: SanitizerVersion})
+		if speaker != nil && length(*speaker) > MaxLabel {
+			speaker, who = nil, role{"unknown", fmt.Sprintf("speaker label over %d characters", MaxLabel), nil}
+		}
+		// Each cue is neutralized on its own, so a sentence can be placed among the cues by counting its
+		// characters, spaces apart.
+		texts, ends, total := make([]string, len(r.pieces)), make([]int, len(r.pieces)), 0
+		for i, piece := range r.pieces {
+			texts[i] = c.lines(piece.raw)
+			total += nonSpace(texts[i])
+			ends[i] = total
+		}
+		safe := strings.Join(texts, "\n")
+		found, err := Sentences(safe, table == "messages")
+		if err != nil {
+			panic(invalid)
+		}
+		// What follows a sentence that stopped may be its other half: the same speaker's next words, or
+		// anyone's when they go on in lower case.
+		name := speakerOf(r.label)
+		follows := openStart && !heard[name] || waiting[name] || cut && goesOn(safe)
+		if len(found) > 0 {
+			delete(waiting, name)
+			heard[name] = true
+		}
+		reached, size := 0, 0
+		for position, sentence := range found {
+			// Inside a run only a paragraph break can leave a sentence without its end. At the end of a
+			// run, a short form that expects more does too.
+			cut = false
+			if transcript && position == len(found)-1 {
+				cut = unfinished(sentence)
+			} else if transcript {
+				s := []rune(sentence)
+				_, ended := Ended(s, 0, len(s))
+				cut = !ended
+			}
+			partial := follows || cut
+			follows = cut
+			reached, size = reached+size, nonSpace(sentence)
+			from := bisect(ends, reached, true)
+			if from == len(ends) {
+				panic(invalid)
+			}
+			lies := r.pieces[from:min(bisect(ends, reached+size, false)+1, len(ends))]
+			shown := "more"
+			switch {
+			case partial:
+				shown = "cut"
+			case length(sentence) > MaxSentence:
+				shown = "long"
+			}
+			// Joined cues may be out of time order: the times cover every cue the sentence lies in.
+			var span *UnitSpan
+			if lies[0].cue != nil {
+				span = &UnitSpan{First: *lies[0].cue, Last: *lies[len(lies)-1].cue}
+				if lies[0].start != nil {
+					span.StartMS = intp(*lies[0].start)
+					for _, piece := range lies {
+						*span.StartMS = min(*span.StartMS, *piece.start)
+					}
+				}
+				if lies[0].end != nil {
+					span.EndMS = intp(*lies[0].end)
+					for _, piece := range lies {
+						*span.EndMS = max(*span.EndMS, *piece.end)
+					}
+				}
+			}
+			c.units = append(c.units, Unit{N: len(c.units) + 1, Kind: "sentence", Source: rule.system,
+				RecordRef: str(field(row, "record_ref")), Tool: rule.tool, At: shownAt, Speaker: speaker,
+				Role: who.role, Basis: who.basis, Contact: who.contact, Text: sentence, Partial: partial,
+				Shown: shown, Span: span, RawSHA256: rawDigest, SanitizerVersion: SanitizerVersion})
+		}
+		if len(found) > 0 && cut {
+			waiting[name] = true
+		}
 	}
 	if len(c.units) == before {
 		c.record(row, table)
@@ -684,9 +815,6 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 		}
 		return
 	}
-	if imported {
-		panic(ErrNotPorted)
-	}
 	roleOf := func(l *string) role {
 		var v any
 		if l != nil {
@@ -701,16 +829,33 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 	})
 	firstUnit := map[string]int{}
 	for _, note := range sorted {
-		speaker, _ := note.Get("speaker")
-		firstUnit[str(field(note, "record_ref"))] = c.spoken(note, "call_notes", speaker,
-			field(note, "body"), field(note, "called_at"), roleOf)
+		ref := str(field(note, "record_ref"))
+		if !imported {
+			speaker, _ := note.Get("speaker")
+			firstUnit[ref] = c.spoken(note, "call_notes", whole(speaker, field(note, "body")),
+				field(note, "called_at"), roleOf, false, false)
+			continue
+		}
+		manifest := object(field(note, "manifest"))
+		cited := object(field(manifest, "cited_range"))
+		first, last, total := field(cited, "first"), field(cited, "last"), field(manifest, "total_units")
+		firstUnit[ref] = c.spoken(note, "call_notes", cues(manifest), field(note, "called_at"), roleOf, true,
+			!equal(first, 1))
+		rest := "The rest of that call and every other call were not read."
+		if equal(first, 1) && equal(last, total) {
+			rest = "Every other call was not read."
+		}
+		c.gap("calls_excerpt", fmt.Sprintf("Calls: one transcript excerpt was read, %s %s to %s of %s. %s",
+			str(field(manifest, "unit_kind")), pyStr(first), pyStr(last), pyStr(total), rest), nil, false, nil)
 	}
-	noun := "records were"
-	if len(notes) == 1 {
-		noun = "record was"
+	if !imported {
+		noun := "records were"
+		if len(notes) == 1 {
+			noun = "record was"
+		}
+		c.gap("calls_outside_records", fmt.Sprintf("Calls: %d call %s read. Recordings and anything outside "+
+			"those records were not read.", len(notes), noun), nil, false, nil)
 	}
-	c.gap("calls_outside_records", fmt.Sprintf("Calls: %d call %s read. Recordings and anything outside those "+
-		"records were not read.", len(notes), noun), nil, false, nil)
 	var latest *time.Time
 	var latestRef string
 	for _, note := range notes {
@@ -777,8 +922,8 @@ func (c *card) slack() {
 			reject("A Slack file count must be a nonnegative integer.")
 		}
 		files.Add(files, attached)
-		first := c.spoken(message, "messages", field(message, "author"), field(message, "body"),
-			field(message, "sent_at"), roleOf)
+		first := c.spoken(message, "messages", whole(field(message, "author"), field(message, "body")),
+			field(message, "sent_at"), roleOf, false, false)
 		if attached.Sign() != 0 {
 			attachedTo = append(attachedTo, fmt.Sprintf("[%d]", first))
 		}

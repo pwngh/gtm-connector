@@ -100,14 +100,35 @@ func insert(t *testing.T, store *demo.Store, rows *strictjson.Object, databases 
 	}
 }
 
-// noTranscripts is the imported calls source of a folder with nothing imported for the account.
-type noTranscripts struct{ *demo.Store }
+// transcripts is the imported calls source of a folder: the transcript imported for the account, as the
+// oracle card's evidence records it, or none. The transcript parser and the import store that made the
+// record are not ported yet, so the record is served as recorded.
+type transcripts struct {
+	*demo.Store
+	notes []*strictjson.Object
+}
 
-func (s noTranscripts) Read(tool, accountID string) (string, []*strictjson.Object, error) {
+func (s transcripts) Read(tool, accountID string) (string, []*strictjson.Object, error) {
 	if tool == "read_call_notes" {
-		return "calls", nil, nil
+		return "calls", s.notes, nil
 	}
 	return s.Store.Read(tool, accountID)
+}
+
+// recordedRows are the records of one source table that an oracle card's evidence holds, in their order.
+func recordedRows(t *testing.T, row fixtureRow, table string) []*strictjson.Object {
+	t.Helper()
+	card, _ := load(t, []byte(row.Card)).(*strictjson.Object)
+	evidence, _ := card.Get("evidence")
+	records, _ := evidence.(*strictjson.Object).Get("records")
+	var found []*strictjson.Object
+	for _, value := range records.([]any) {
+		record := value.(*strictjson.Object)
+		if ref, _ := record.Get("record_ref"); strings.HasPrefix(ref.(string), table+"/") {
+			found = append(found, record)
+		}
+	}
+	return found
 }
 
 type fixtureRow struct {
@@ -150,6 +171,9 @@ type setup struct {
 	source  Source
 	sources evidence.Sources
 	skip    string // why this card is not built from its recorded inputs
+	// What the scope spent before the card, on work the oracle did in it first: IDs, receipt times and
+	// tokens. An import of a transcript resolves its account under a receipt of its own.
+	ids, receipts, tokens int
 }
 
 func load(t *testing.T, data []byte) any {
@@ -242,7 +266,8 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 			cards = newStore(t)
 		}
 		sc := newScope(s.scope)
-		m, b := cards.maker(t, sc, s, row, o.brief(row.AccountID, sc.token(accessToken)))
+		sc.ids, sc.receipts = s.ids, s.receipts
+		m, b := cards.maker(t, sc, s, row, o.brief(row.AccountID, sc.token(s.tokens+accessToken)))
 		sealed, err := m.Brief(context.Background(), b)
 		if err != nil {
 			mismatches.Add("%s: no card: %v", row.Key, err)
@@ -282,7 +307,7 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 
 // builtCards pins how many cards of each family Go builds. Raise a count when a port builds more.
 var builtCards = map[string]int{
-	"demo": 33, "books_demo": 78, "varied_demo": 46, "cases": 19, "books_calls": 32,
+	"demo": 33, "books_demo": 78, "varied_demo": 46, "cases": 19, "books_calls": 82,
 	"books_slack": 0, "slack_threads": 0, "books_salesforce": 0,
 }
 
@@ -338,9 +363,6 @@ func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 	book := oracletest.Read(t, "cards/demo_book.json")
 	t.Run("books_calls", func(t *testing.T) {
 		runFamily(t, "books_calls", newStore, func(row fixtureRow, input *strictjson.Object) setup {
-			if _, ok := input.Get("transcript"); ok {
-				return setup{skip: "imported transcript: needs the transcript parser and import store"}
-			}
 			store, err := demo.Load(book)
 			if err != nil {
 				t.Fatal(err)
@@ -351,8 +373,21 @@ func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 			index, _ := input.Get("index")
 			sources := demoSources(nil)
 			sources.CallsBackend, sources.CallsBinding = "imported", evidence.FixtureCRMBinding()
-			return setup{scope: fmt.Sprintf("books/calls/%s/%d", name, 300+intOf(index)),
-				source: noTranscripts{store}, sources: sources}
+			transcript, imported := input.Get("transcript")
+			if !imported {
+				return setup{scope: fmt.Sprintf("books/calls/%s/%d", name, 300+intOf(index)),
+					source: transcripts{store, nil}, sources: sources}
+			}
+			// The card reads the record the recorded import made. The import ran in the card's scope and
+			// spent two IDs, one receipt time and four tokens there, resolving the account.
+			notes := recordedRows(t, row, "calls/call_notes")
+			result, _ := transcript.(*strictjson.Object).Get("import")
+			id, _ := result.(*strictjson.Object).Get("import_id")
+			if len(notes) != 1 || get(notes[0], "id") != id {
+				t.Fatalf("%s: the card does not hold the transcript its import recorded", row.Key)
+			}
+			return setup{scope: "books/calls/" + row.Key, source: transcripts{store, notes}, sources: sources,
+				ids: 2, receipts: 1, tokens: 4}
 		})
 	})
 	// What each skipped card lacks among its recorded inputs.

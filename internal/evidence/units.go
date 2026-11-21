@@ -15,10 +15,8 @@ import (
 // from one evidence snapshot. Evidence is the JSON object briefing.assemble_evidence makes and a card file
 // keeps, and Build checks it as units._validated does before it renders a character.
 //
-// Not ported yet: imported transcripts that hold a transcript (their voices, the declared speaker names and
-// calls_import.validate_imported_record) and live Slack threads that returned messages
-// (slack_reader.validate_slack_snapshot). Build refuses such evidence with ErrNotPorted rather than render
-// it under rules that were not checked.
+// Not ported yet: live Slack threads that returned messages (slack_reader.validate_slack_snapshot). Build
+// refuses such evidence with ErrNotPorted rather than render it under rules that were not checked.
 
 // Rules, as units.py names them.
 const (
@@ -56,7 +54,7 @@ type Rejected struct{ Message string }
 func (e *Rejected) Error() string { return e.Message }
 
 // ErrNotPorted refuses evidence whose checks are not ported yet.
-var ErrNotPorted = &Rejected{"evidence: imported transcripts and live Slack messages are not ported yet"}
+var ErrNotPorted = &Rejected{"evidence: live Slack messages are not ported yet"}
 
 // invalid is a missing or mistyped field, which Python meets as KeyError, TypeError or ValueError.
 var invalid = &Rejected{"Evidence contains missing or invalid fields."}
@@ -566,8 +564,8 @@ func validate(evidence *strictjson.Object) validated {
 		if owner != accountID {
 			reject("Evidence contains a record for a different account.")
 		}
-		if imported && table == "call_notes" {
-			panic(ErrNotPorted)
+		if imported && table == "call_notes" && !validImportedRecord(record, accountID, callsBinding) {
+			reject("Imported transcript evidence does not match its immutable selected revision.")
 		}
 		seen[reference] = true
 		groups[table] = append(groups[table], record)
@@ -575,6 +573,9 @@ func validate(evidence *strictjson.Object) validated {
 	}
 	if len(groups["accounts"]) != 1 {
 		reject("Evidence must contain exactly one account.")
+	}
+	if imported && len(groups["call_notes"]) > 1 {
+		reject("Imported calls hold at most one selected transcript excerpt for an account.")
 	}
 	if liveSlack && slackStatus != "available" {
 		if len(groups["messages"]) > 0 || field(evidence, "thread_snapshot") != nil {
