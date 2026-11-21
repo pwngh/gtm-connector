@@ -44,7 +44,7 @@ func TestEveryTableIsBackedUpOrLeftOut(t *testing.T) {
 
 // fillEveryTable adds to the fixture a row for each table it leaves empty: a
 // machine principal and its token, a delivery, a revoked grant, a disabled
-// principal, a session and a consumed pre-session.
+// principal, a session, a consumed pre-session and an imported transcript.
 func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	t.Helper()
 	machine, err := f.Store.CreatePrincipal(ctx, f.Workspace, "machine", "Demo machine")
@@ -63,6 +63,9 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	_, err = f.Store.SignIn(ctx, postgres.Admission{PreSession: true, IDSHA256: pre[:],
 		ExpiresAt: time.Now().Add(time.Hour)}, id(10), f.Reader, time.Hour)
 	ok(t, err)
+	// One transcript imported through an AccountNumber fills the five tables of imports.
+	publish(t, imports(t, f), importing{binding: salesforceBinding, account: "acc-sf-001000000000001AAA",
+		number: "INVENTED-1"})
 }
 
 // A backup restores every row of every table it holds, column for column,

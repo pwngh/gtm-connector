@@ -29,9 +29,19 @@ type ThreadReader interface {
 	ReadThread(ctx context.Context, accountID string) (records []*strictjson.Object, snapshot *strictjson.Object, err error)
 }
 
+// WorkspaceSource is a Source that reads one workspace's own store, such as its imported transcripts. It
+// states that workspace, and a Maker makes no read through it for a principal of another workspace: the
+// read's receipt finishes as an error and no card is made.
+type WorkspaceSource interface {
+	Workspace() string
+}
+
 // ErrNotSelected is a Source's answer when the account has no selection in that source, such as a Slack
 // thread that was never mapped. The read finishes as error/200 and the card states it.
 var ErrNotSelected = errors.New("cards: no selection for this account in this source")
+
+// ErrOtherWorkspace is a read through a source that states another workspace than the caller's.
+var ErrOtherWorkspace = errors.New("cards: the source reads another workspace than the caller's")
 
 // ErrBriefing is a read that failed, so no card is made (briefing.BriefingError).
 var ErrBriefing = errors.New("cards: required evidence could not be collected; no brief generated")
@@ -297,6 +307,10 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 	}
 	if !slices.Contains(r.principal.Scopes, scopes[r.tool]) {
 		return nil, nil, nil, "denied", finish(receipts.Denied())
+	}
+	if own, bound := m.Source.(WorkspaceSource); bound && own.Workspace() != r.principal.WorkspaceID {
+		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool}, ErrOtherWorkspace,
+			finish(receipts.Failed(200, "request_failed")))
 	}
 	bounded := ctx
 	if !r.deadline.IsZero() {
