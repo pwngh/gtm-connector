@@ -116,7 +116,7 @@ func TestNoCredentialIsPrinted(t *testing.T) {
 
 	// The sign-in types, printed and logged as a caller might by mistake.
 	document := signIn(newClock().wall, true, false)
-	held := &access{document.AccessToken, document.RefreshToken, document.Identity, document.GrantedScopes}
+	held := &access{document.AccessToken, document.Identity, document.GrantedScopes}
 	fresh := NewSecret(newAccessToken)
 	// A holder with unexported fields is printed by reflection, with no method of a Secret called.
 	type holder struct {

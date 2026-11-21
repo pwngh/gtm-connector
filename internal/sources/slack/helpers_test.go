@@ -72,7 +72,14 @@ type connection struct {
 	saveErr  error // what Save fails with, when set
 	whenHeld func()
 	waitOn   int // the Hold, counted from one, that waits for its context to end and fails with its error
+	// loadWaits and saveWaits make a Load or a Save wait for its context to end and fail with its error.
+	loadWaits, saveWaits bool
+	// saveContexts are, for each Save, whether its context had ended when it was called, and whether it
+	// carried a deadline.
+	saveContexts []saveContext
 }
+
+type saveContext struct{ ended, bounded bool }
 
 func (c *connection) Hold(ctx context.Context, held func(Saved) error) error {
 	if c.holdErr != nil {
@@ -89,7 +96,11 @@ func (c *connection) Hold(ctx context.Context, held func(Saved) error) error {
 	return held(c)
 }
 
-func (c *connection) Load() (*Credentials, error) {
+func (c *connection) Load(ctx context.Context) (*Credentials, error) {
+	if c.loadWaits {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if c.saved == nil {
 		return nil, nil
 	}
@@ -97,7 +108,13 @@ func (c *connection) Load() (*Credentials, error) {
 	return &document, nil
 }
 
-func (c *connection) Save(document *Credentials) error {
+func (c *connection) Save(ctx context.Context, document *Credentials) error {
+	_, bounded := ctx.Deadline()
+	c.saveContexts = append(c.saveContexts, saveContext{ctx.Err() != nil, bounded})
+	if c.saveWaits {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if c.saveErr != nil {
 		return c.saveErr
 	}

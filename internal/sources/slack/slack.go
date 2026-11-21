@@ -120,7 +120,8 @@ type Reader struct {
 	// Binding names the Slack identity the folder is connected to, as IdentityBinding gives it. A mapping or
 	// a saved sign-in for any other identity is refused.
 	Binding *strictjson.Object
-	// Transport sends the requests. Nil is the package's own: verified TLS, and no proxy from the environment.
+	// Transport sends the requests. Nil is the package's own: verified TLS, no proxy from the environment,
+	// and HTTP/1.1 with one connection a request.
 	Transport http.RoundTripper
 	Clock     Clock
 	// OnRead, when set, is given the report of every read, passed or failed.

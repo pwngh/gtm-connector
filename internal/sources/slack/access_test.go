@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 const (
@@ -527,6 +529,45 @@ func TestStoreFailures(t *testing.T) {
 		b.saved.saveErr = errors.New("disk full")
 		b.refuses("slack_storage_failed", []reply{ok(`{"ok":false,"error":"invalid_auth"}`)})
 	})
+}
+
+// A token that an answer could hold by chance, or that is not made of what a Slack token is made of, is no
+// credential: saved, it is an invalid sign-in that sends nothing, and in a refresh answer it is refused.
+func TestATokenAnAnswerCouldHoldByChanceIsNoCredential(t *testing.T) {
+	twenty := strings.Repeat("x", 20)
+	for name, token := range map[string]string{
+		"one letter, as in the member ok": "o",
+		"nineteen characters":             twenty[1:],
+		"a quotation mark":                twenty + `"`,
+		"a brace":                         twenty + "{",
+		"a colon":                         twenty + ":",
+		"a slash":                         twenty + "/",
+	} {
+		for field, change := range map[string]func(*Credentials){
+			"access":  func(c *Credentials) { c.AccessToken = NewSecret(token) },
+			"refresh": func(c *Credentials) { c.RefreshToken = NewSecret(token) },
+		} {
+			b := newBench(t)
+			change(b.saved.saved)
+			read, err := b.read([]reply{page(msg(parentTS))})
+			if read != nil || codeOf(err) != "slack_credentials_invalid" || len(b.slack.sent) != 0 {
+				t.Errorf("%s as the saved %s token: the code %s after %d requests", name, field, codeOf(err), len(b.slack.sent))
+			}
+		}
+		for _, replaced := range []string{newAccessToken, newRefresh} {
+			b := newBench(t)
+			answer := strings.Replace(replacement, `"`+replaced+`"`, strictjson.Quote(token), 1)
+			read, err := b.read([]reply{ok(expiredAnswer), page(msg(parentTS))}, ok(answer), ok(identified))
+			if read != nil || codeOf(err) != "slack_response_invalid" || b.state() != pending ||
+				b.saved.saved.AccessToken != NewSecret(accessToken) {
+				t.Errorf("%s in a refresh answer: the code %s, saved %s", name, codeOf(err), b.state())
+			}
+		}
+	}
+	// Twenty characters of letters, digits, dots, hyphens and underscores are a token.
+	b := newBench(t)
+	b.saved.saved.AccessToken, b.saved.saved.RefreshToken = NewSecret("Abc123._-"+twenty), NewSecret(twenty)
+	b.reads([]reply{page(msg(parentTS))})
 }
 
 func TestRefreshAnswers(t *testing.T) {

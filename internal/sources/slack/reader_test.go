@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -289,6 +290,74 @@ func TestAnAnswerHoldingATokenIsRefused(t *testing.T) {
 			b := newBench(t)
 			b.saved.saved.State = unchecked
 			named := strings.Replace(identified, "invented-workspace", token, 1)
+			read, err := b.read([]reply{page(msg(parentTS))}, ok(named))
+			if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 1 {
+				t.Errorf("a result (%t), the code %s, %d requests", read != nil, codeOf(err), len(b.slack.sent))
+			}
+			if b.saved.saved.WorkspaceOrigin != testOrigin || len(b.saved.saves) != 0 {
+				t.Errorf("the sign-in was saved %d times, with another workspace address (%t)", len(b.saved.saves),
+					b.saved.saved.WorkspaceOrigin != testOrigin)
+			}
+		}
+	})
+	t.Run("the tokens a refresh replaced", func(t *testing.T) {
+		// The read goes on under the new pair. What Slack sends after the refresh holds the old one.
+		for name, later := range map[string][]reply{
+			"the old access token as text":          {page(msg(parentTS, `"text":"`+accessToken+`"`))},
+			"the old refresh token as text":         {page(msg(parentTS, `"text":"`+refreshToken+`"`))},
+			"the old access token as a cursor":      {page(msg(parentTS), cursor(accessToken)), page(msg(replyTS))},
+			"the old refresh token as a cursor":     {page(msg(parentTS), cursor(refreshToken)), page(msg(replyTS))},
+			"the old refresh token on a later page": {page(msg(parentTS), cursor("next")), page(msg(replyTS, `"text":"`+refreshToken+`"`))},
+		} {
+			b := newBench(t)
+			read, err := b.read(append([]reply{ok(expiredAnswer)}, later...), ok(replacement), ok(identified))
+			if read != nil || codeOf(err) != "slack_response_invalid" || sentInURL(b) {
+				t.Errorf("%s: a result (%t), the code %s, %d requests, a token in a URL (%t)", name, read != nil,
+					codeOf(err), len(b.slack.sent), sentInURL(b))
+			}
+		}
+		// The identity answer that follows the refresh names the old token as the workspace.
+		b := newBench(t)
+		named := strings.Replace(identified, "invented-workspace", refreshToken, 1)
+		read, err := b.read([]reply{ok(expiredAnswer), page(msg(parentTS))}, ok(replacement), ok(named))
+		if read != nil || codeOf(err) != "slack_response_invalid" || b.saved.saved.WorkspaceOrigin != testOrigin {
+			t.Errorf("a result (%t), the code %s, another workspace address (%t)", read != nil, codeOf(err),
+				b.saved.saved.WorkspaceOrigin != testOrigin)
+		}
+	})
+	t.Run("text a card would turn into the token", func(t *testing.T) {
+		// A card composes source text, which turns the Kelvin sign into the letter K, and lowers the host
+		// of a link. No text below holds the token; each would once it is on a card.
+		const token = "invented-Kelvin-access-token"
+		kelvin := strings.Replace(token, "K", string(rune(0x212A)), 1)
+		shown, _, err := evidence.SafeText(kelvin)
+		if err != nil || strings.Contains(kelvin, token) || !strings.Contains(shown, token) {
+			t.Fatal("the text with a Kelvin sign is not one a card turns into the token")
+		}
+		for name, text := range map[string]string{
+			"a Kelvin sign for the letter K": kelvin,
+			"capitals":                       "INVENTED-KELVIN-ACCESS-TOKEN",
+			"small letters":                  "invented-kelvin-access-token",
+			"the host of a link":             "See https://INVENTED-KELVIN-ACCESS-TOKEN/ for more.",
+		} {
+			b := newBench(t)
+			b.saved.saved.AccessToken = NewSecret(token)
+			read, err := b.read([]reply{page(msg(parentTS, `"text":`+strictjson.Quote(text)))})
+			if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 1 {
+				t.Errorf("%s: a result (%t), the code %s, %d requests", name, read != nil, codeOf(err), len(b.slack.sent))
+			}
+		}
+	})
+	t.Run("a workspace address that is lowered into the token", func(t *testing.T) {
+		// The reader lowers the address Slack states before it saves it.
+		for _, written := range []string{"INVENTED-PRIVATE-ACCESS-TOKEN", "Invented-Private-Refresh-Token"} {
+			b := newBench(t)
+			b.saved.saved.State = unchecked
+			named := strings.Replace(identified, "invented-workspace", written, 1)
+			if lowered := origin("https://" + written + ".slack.com/"); !strings.Contains(lowered, accessToken) &&
+				!strings.Contains(lowered, refreshToken) {
+				t.Fatal("the address is not one the reader lowers into a token")
+			}
 			read, err := b.read([]reply{page(msg(parentTS))}, ok(named))
 			if read != nil || codeOf(err) != "slack_response_invalid" || len(b.slack.sent) != 1 {
 				t.Errorf("a result (%t), the code %s, %d requests", read != nil, codeOf(err), len(b.slack.sent))

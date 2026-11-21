@@ -1,7 +1,6 @@
 package salesforce
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/sources/echo"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -27,8 +27,9 @@ type operation struct {
 	requests int
 	// refreshed is whether this operation has asked sf for credentials again. It may once.
 	refreshed bool
-	// replaced is the token this operation was sending before sf gave another.
-	replaced string
+	// tokens are every token this operation has sent or been given: the one the Reader kept, and the one
+	// sf gave in its place. An answer that holds any of them is refused, to the end of the operation.
+	tokens echo.Tokens
 	// unproved is a token sf gave before the org's first check passed. It is kept once that check passes.
 	unproved string
 }
@@ -179,7 +180,8 @@ func (o *operation) refresh() (string, error) {
 		// is sent.
 		return "", refuse(authRequired)
 	}
-	o.replaced, o.token = o.token, accessToken
+	o.tokens.Add(accessToken)
+	o.token = accessToken
 	return accessToken, nil
 }
 
@@ -208,11 +210,18 @@ func (o *operation) requestOnce(path string, soql *string) (any, error) {
 	request.Header.Set("Authorization", "Bearer "+o.token)
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Accept-Encoding", "identity")
+	// The connection is not kept for another request, whatever transport carries this one.
+	request.Close = true
 	response, err := r.client.Do(request)
 	if err != nil {
 		return nil, o.transportError(ctx, err)
 	}
-	defer response.Body.Close()
+	// The request is ended before its body is closed. net/http reads up to 256 KiB more of a body that is
+	// closed early on a connection it means to keep, past the bytes the operation may take.
+	defer func() {
+		cancel()
+		_ = response.Body.Close()
+	}()
 	status := response.StatusCode
 	switch {
 	case status == 401:
@@ -239,13 +248,10 @@ func (o *operation) requestOnce(path string, soql *string) (any, error) {
 	case !r.now().Before(o.deadline):
 		return nil, refuse(timedOut)
 	}
-	// An answer that holds a token of this read is refused before it is parsed, so a token the org sends
-	// back as a field never becomes a record.
-	tokens := []string{o.token, r.accessToken, o.replaced}
-	for _, token := range tokens {
-		if token != "" && bytes.Contains(body, []byte(token)) {
-			return nil, refuse(invalidResponse)
-		}
+	// An answer that holds a token of this operation is refused before it is parsed, so a token the org
+	// sends back as a field never becomes a record.
+	if o.tokens.InBytes(body) {
+		return nil, refuse(invalidResponse)
 	}
 	document, err := strictjson.LoadsDecimal(body)
 	if err != nil {
@@ -254,42 +260,14 @@ func (o *operation) requestOnce(path string, soql *string) (any, error) {
 		}
 		return nil, refuse(invalidResponse)
 	}
-	if spelled(document, tokens) {
+	// So is one whose parsed text holds a token, or would once a card composes it or lowers its case.
+	if o.tokens.InValue(document) {
 		return nil, refuse(invalidResponse)
 	}
 	if status == 403 {
 		return nil, refuse(denial(document))
 	}
 	return document, nil
-}
-
-// spelled reports whether any text of a parsed answer, a key or a value, holds one of the tokens. It finds
-// a token that the JSON wrote with an escape, which the answer's bytes do not show.
-func spelled(value any, tokens []string) bool {
-	switch v := value.(type) {
-	case string:
-		for _, token := range tokens {
-			if token != "" && strings.Contains(v, token) {
-				return true
-			}
-		}
-	case []any:
-		for _, item := range v {
-			if spelled(item, tokens) {
-				return true
-			}
-		}
-	case *strictjson.Object:
-		if v == nil {
-			return false
-		}
-		for i, key := range v.Keys {
-			if spelled(key, tokens) || spelled(v.Values[i], tokens) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // headerSpace is the ASCII whitespace around a media type.

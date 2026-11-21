@@ -28,6 +28,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
+	"github.com/pwngh/gtm-connector/internal/sources/echo"
+	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 	"github.com/pwngh/gtm-connector/internal/unicodetab"
 )
@@ -200,9 +202,14 @@ func validAccountSearch(query string, accountNumber *string) bool {
 	return !blank
 }
 
+// tokenMarks are the characters a Salesforce access token holds besides ASCII letters and digits: the mark
+// after the org ID of a session ID, and those of base64 in either alphabet with the dots of a signed token.
+const tokenMarks = "!._-+/="
+
 // configure checks an instance address and a token, and gives the origin every request goes to. The address
 // must be an HTTPS My Domain origin ending in .my.salesforce.com, with no path, query, credentials or
-// nonstandard port.
+// nonstandard port. The token must be 20 to 4,096 characters, each a letter, a digit or one of tokenMarks:
+// a shorter one would be found in every answer the org gives.
 func configure(instanceURL, accessToken string) (origin string, err error) {
 	if utf8.RuneCountInString(instanceURL) > 512 {
 		return "", refuse(invalidConfiguration)
@@ -218,13 +225,8 @@ func configure(instanceURL, accessToken string) (origin string, err error) {
 	if !found || len(host) > 253 || !hostPattern.MatchString(host) {
 		return "", refuse(invalidConfiguration)
 	}
-	if len(accessToken) < 1 || len(accessToken) > 4096 {
+	if !echo.Usable(accessToken, 4096, tokenMarks) {
 		return "", refuse(invalidConfiguration)
-	}
-	for i := 0; i < len(accessToken); i++ {
-		if accessToken[i] < 33 || accessToken[i] > 126 {
-			return "", refuse(invalidConfiguration)
-		}
 	}
 	return "https://" + host, nil
 }
@@ -293,7 +295,7 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 	}
 	transport := o.Transport
 	if transport == nil {
-		transport = ownTransport(direct, nil)
+		transport = sourcehttp.Transport(sourcehttp.Direct, nil)
 	}
 	now := o.Now
 	if now == nil {
@@ -316,6 +318,7 @@ func (r *Reader) operation(ctx context.Context, run func(o *operation) error) er
 	}
 	defer func() { <-r.turn }()
 	o := &operation{reader: r, ctx: ctx, token: r.accessToken, deadline: r.now().Add(operationTime)}
+	o.tokens.Add(r.accessToken)
 	if !r.editionVerified {
 		organization, err := o.query(organizationQuery, 1)
 		if err != nil {
