@@ -629,9 +629,9 @@ type during struct {
 	before func(tool string)
 }
 
-func (d during) Read(tool, accountID string) (string, []*strictjson.Object, error) {
+func (d during) Read(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, error) {
 	d.before(tool)
-	return d.Source.Read(tool, accountID)
+	return d.Source.Read(ctx, tool, accountID)
 }
 
 // maker reads the demo book; before runs before each read and counts it.

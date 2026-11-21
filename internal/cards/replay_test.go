@@ -53,11 +53,11 @@ type counted struct {
 	w *world
 }
 
-func (c counted) Read(tool, accountID string) (string, []*strictjson.Object, error) {
+func (c counted) Read(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, error) {
 	c.w.mu.Lock()
 	c.w.reads[tool]++
 	c.w.mu.Unlock()
-	return c.Source.Read(tool, accountID)
+	return c.Source.Read(ctx, tool, accountID)
 }
 
 func (w *world) total() int {
@@ -175,11 +175,11 @@ func TestAReplayedStartDoesNotRunAgain(t *testing.T) {
 // notSelected is the live Slack source of a folder with no thread mapped for the account.
 type notSelected struct{ Source }
 
-func (n notSelected) Read(tool, accountID string) (string, []*strictjson.Object, error) {
+func (n notSelected) Read(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, error) {
 	if tool == "read_slack_messages" {
 		return "", nil, ErrNotSelected
 	}
-	return n.Source.Read(tool, accountID)
+	return n.Source.Read(ctx, tool, accountID)
 }
 
 // A read with no selection for the account is listed with the card on both stores: it finished error/200,

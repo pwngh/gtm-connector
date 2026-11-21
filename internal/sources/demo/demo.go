@@ -10,6 +10,7 @@
 package demo
 
 import (
+	"context"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -185,8 +186,8 @@ func (s *Store) Insert(database, name string, values []any) error {
 }
 
 // Read is one of the four source reads a card makes, for one account: the records with their record_ref,
-// and the source they come from.
-func (s *Store) Read(tool, accountID string) (source string, records []*strictjson.Object, err error) {
+// and the source they come from. The book is in memory, so no read waits on ctx.
+func (s *Store) Read(_ context.Context, tool, accountID string) (source string, records []*strictjson.Object, err error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	switch tool {
