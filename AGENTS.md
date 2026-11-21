@@ -102,15 +102,15 @@ the Python package and stays read-only. To finish it:
    outside the product, such as the recorder's clock, is listed in its test with the reason.
    Character classes come from `internal/unicodetab`, never Go's or RE2's. A deliberate change to
    the card or text rules rewrites the golden files it changes with `go test -p 1 -v ./internal/cards
-   ./internal/evidence ./internal/realdata ./cmd/gtm-connector -update` (never with `-run`; it prints
-   what changed in each card family, and refuses a card that fails its own seal checks), with
-   `GTM_TEST_DATABASE_URL` set for the command replay, and the real-data digests of the changed functions
-   with `go run ./cmd/realdata -update=FUNCTION,... verify`. Its PR lists each rewritten file with how
-   many cards, units or rows changed, and why.
+   ./internal/evidence ./internal/realdata ./internal/render/... ./cmd/gtm-connector -update` (never
+   with `-run`; it prints what changed in each card family, and refuses a card that fails its own seal
+   checks), with `GTM_TEST_DATABASE_URL` set for the command replay, and the real-data digests of the
+   changed functions with `go run ./cmd/realdata -update=FUNCTION,... verify`. Its PR lists each
+   rewritten file with how many cards, units or rows changed, and why.
 2. Finish the Evidence row of the roadmap: show the host of a valid `xn--` label.
 3. Admit the cards and receipts the Python package made: the four recorded card folders are admitted
    and inspected, a changed byte is refused, and admitting twice adds nothing.
-4. Close the cutover: the binary, run outside a checkout, serves a deep-linked Evidence page; a
+4. Close the cutover: the binary, run outside a checkout, serves a deep-linked Deal card; a
    backup taken before the cutover restores; the time to publish a card is measured; and a tagged
    release attaches the binaries.
 

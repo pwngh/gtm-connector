@@ -342,7 +342,9 @@ func prepared(t *testing.T, folder string) (*mounted, recordedBrief, []auditRow,
 
 // todaysRules is a recorded result as a brief made now gives it. The recorded briefs were sealed under
 // rules version 3.
-func todaysRules(result []byte) []byte { return oracletest.TodaysRules(result, evidence.SanitizerVersion) }
+func todaysRules(result []byte) []byte {
+	return oracletest.TodaysRules(result, evidence.SanitizerVersion)
+}
 
 // The three recorded prepare_renewal_brief calls (folders/prepared, prepared_as_of and prepared_no_slack),
 // made at the mounted endpoint: the result the assistant received, as todaysRules gives it, and one outer

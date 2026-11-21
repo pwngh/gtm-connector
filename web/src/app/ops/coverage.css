@@ -173,6 +173,12 @@
   white-space: nowrap;
 }
 
+.fr .cv-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--gc-space-4);
+}
+
 .cv-label {
   display: none;
 }

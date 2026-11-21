@@ -6,32 +6,32 @@
  "generator": "tools/oracle/generate.py",
  "files": {
   "cards/books_calls.jsonl.gz": {
-   "sha256": "c52696f8553c4f198c5e24586ab47010542283adb7765309eb763cca81816daf",
-   "bytes": 2552375,
+   "sha256": "ae1025582875fdfd4a8605bf750461ab9d82921a9a5004781bf83783bea1cda4",
+   "bytes": 2549764,
    "records": 82
   },
   "cards/books_demo.jsonl.gz": {
-   "sha256": "8e6793cd8a18e3b3edb866829d458f0dd368096d8d5ec630c105541bd98b7211",
-   "bytes": 2254980,
+   "sha256": "96b475013ef791a74e2effd0a1e2828335953c51bdbdff1f281da9f7b1e8c750",
+   "bytes": 2255509,
    "records": 78
   },
   "cards/books_salesforce.jsonl.gz": {
-   "sha256": "ae474f3a9f1b5fdd1466b402b1e1f47548c826a70a2c59ede7c741b123b47d3e",
-   "bytes": 2171845,
+   "sha256": "e4b9d6c4f31d694a8399c294792e3e1ad77e5dc5f6eff2bcd7d5bf0be462daa4",
+   "bytes": 2172374,
    "records": 78
   },
   "cards/books_slack.jsonl.gz": {
-   "sha256": "2902770023e52567b43b092a4727577a1cdde836b32e5e80e591edc74eaf6af2",
-   "bytes": 2232967,
+   "sha256": "505da4de03d5a5ca37f93d51c64c86a7642809cb4e674e515edc3628f314a4cf",
+   "bytes": 2233496,
    "records": 78
   },
   "cards/cases.jsonl.gz": {
-   "sha256": "3e6ddf4f21b1ed08b9a53476d0277c42c77a251621aa7f1211c61605248592f8",
+   "sha256": "bc42c0fbbd3cfae91537bbb15b8227d52df7a25c61656b28c9af0ea85da89ab2",
    "bytes": 1614377,
    "records": 19
   },
   "cards/demo.jsonl.gz": {
-   "sha256": "3144745437e15b6a721b2fd992a1a76047a147cc5eeea5354abd47c37dcd18ac",
+   "sha256": "9a3469c374e1d3893975e864db978c386efef3258aaa6a398a55b6b4eb1a20b5",
    "bytes": 355531,
    "records": 33
   },
@@ -41,7 +41,7 @@
    "records": 3
   },
   "cards/evidence.jsonl.gz": {
-   "sha256": "5023503a02e50f658642282c3096006d76de085169a9450345dd7302a0d436ac",
+   "sha256": "08d180da9fc61fa179d18a97a8fbd1f7c963283056e49f2367fe2fbdfbd2ec05",
    "bytes": 510723,
    "records": 110
   },
@@ -56,13 +56,13 @@
    "records": 8
   },
   "cards/slack_threads.jsonl.gz": {
-   "sha256": "6563b0583cdaa02a92880dc389607d24d8bf9985d5dbed9f7a0cf7896eaf331d",
-   "bytes": 794983,
+   "sha256": "422def68298bb703ebf5b8d4e955d705d8563ab4b8d45f583fc2a07df9c1e58b",
+   "bytes": 792040,
    "records": 36
   },
   "cards/varied_demo.jsonl.gz": {
-   "sha256": "ab5ca2ce9465eded0adb2e4c012644bd028054122a2da3dc35768d568be02777",
-   "bytes": 2283608,
+   "sha256": "e60e7a6d3651d2423b93ee6244d3fda71b64173103f211a74dd2e05be9e0b909",
+   "bytes": 2273430,
    "records": 46
   },
   "commands/index.json": {
@@ -71,7 +71,7 @@
    "records": 33
   },
   "commands/session.jsonl": {
-   "sha256": "e1b30956559b9cee9f2ea11b98fee945b1cc4262dba0befdaf35f4b1c3b8c98f",
+   "sha256": "6d31ba3b25adc9890103ee56efff767fd6493e9e56ef3a8d412ae31b8cee663b",
    "bytes": 122867,
    "records": 33
   },
@@ -86,8 +86,8 @@
    "records": 104767
   },
   "corpora/sentences.jsonl.gz": {
-   "sha256": "f59e7fa6a9f6f34899af4b0ae425d449ba8752d12bf8dd9cf31bb9c69003d26e",
-   "bytes": 8147840,
+   "sha256": "65ffb695cff975900d3a2273c736740e56d230aca012cb093212f9cac5301aea",
+   "bytes": 8146622,
    "records": 100000
   },
   "folders/cli_card/audit.jsonl": {

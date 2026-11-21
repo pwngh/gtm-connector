@@ -1,9 +1,9 @@
-import {Building2, FileText, List, ListChecks, type LucideIcon} from 'lucide-react';
+import {Building2, History, List, ListChecks, type LucideIcon} from 'lucide-react';
 import type {ComponentType} from 'react';
 import type {AccountView} from '../../api/types.ts';
-import {ApiEvidence, Coverage, Deals} from '../../lazyPages.js';
 import type {PaletteItem} from '../../ui/Palette.tsx';
 import {dealAt, dealHref} from '../deals/deals.ts';
+import {Activity, Coverage, Deals} from '../lazyPages.ts';
 import {serverPaths} from '../routes.ts';
 
 // The app's two areas and the pages under each, in the order the frame
@@ -62,12 +62,12 @@ export const areas: Area[] = [
         Page: Coverage,
       },
       {
-        id: 'evidence',
-        label: 'Evidence',
-        path: serverPaths.evidence,
-        icon: FileText,
-        sub: 'The chosen account’s cards, units, receipts and gaps',
-        Page: ApiEvidence,
+        id: 'activity',
+        label: 'Activity',
+        path: serverPaths.activity,
+        icon: History,
+        sub: 'What ran to make a card, with each receipt in full',
+        Page: Activity,
       },
     ],
   },
@@ -95,27 +95,14 @@ const ops = areas.find(area => area.id === 'ops');
 /** The page the app opens for /ops: its first page. */
 export const opsHome = ops ? areaHome(ops) : '/ops';
 
-// The query an Ops page link keeps: the chosen account and the open card,
-// never the open unit. An open deal's address names its account.
-export function keptQuery(search: string, pathname = ''): string {
-  const params = new URLSearchParams(search);
-  const keep = new URLSearchParams();
-  const deal = dealAt(pathname);
-  if (deal) {
-    keep.set('account', deal);
-  }
-  for (const key of ['account', 'card']) {
-    const value = params.get(key);
-    if (value && !keep.has(key)) {
-      keep.set(key, value);
-    }
-  }
-  const query = keep.toString();
-  return query ? `?${query}` : '';
+// The query an Ops page link keeps: the open card, never the open receipt or unit.
+export function keptQuery(search: string): string {
+  const card = new URLSearchParams(search).get('card');
+  return card ? `?${new URLSearchParams({card})}` : '';
 }
 
-// The palette's pages: every listed page, under its area, with the chosen account and open card kept.
-export function pageItems(go: (to: string) => void, search: string, pathname = ''): PaletteItem[] {
+// The palette's pages: every listed page, under its area, with the open card kept.
+export function pageItems(go: (to: string) => void, search: string): PaletteItem[] {
   return shownAreas
     .filter(area => area.subnav)
     .flatMap(area =>
@@ -124,7 +111,7 @@ export function pageItems(go: (to: string) => void, search: string, pathname = '
         label: page.label,
         sub: page.sub,
         icon: page.icon,
-        onSelect: () => go(page.path + keptQuery(search, pathname)),
+        onSelect: () => go(page.path + keptQuery(search)),
       })),
     );
 }

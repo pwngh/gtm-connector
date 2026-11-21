@@ -60,6 +60,29 @@
   overflow-wrap: anywhere;
 }
 
+/* How the unit was read, and the link to its receipt in Ops under it. */
+.dc-proof__how {
+  display: grid;
+  justify-items: start;
+  gap: var(--gc-space-1);
+  min-width: 0;
+}
+
+.fr .dc-proof__receipt {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--gc-target);
+  color: var(--gc-accent);
+  font: var(--gc-body);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.dc-proof__receipt:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}
+
 .dc-proof__around {
   display: grid;
   gap: var(--gc-space-2);

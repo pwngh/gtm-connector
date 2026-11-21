@@ -103,7 +103,7 @@ test('every recorded card: each sentence unit once, in its own call or message, 
     }
     assert.doesNotMatch(html, /dc-ledger|data-quote-unit|data-more-unit/, `${at}: nothing of the Card tab`);
   }
-  assert.equal(sentences, 90 + 1297 + 390 + 884);
+  assert.equal(sentences, 90 + 1297 + 375 + 884);
   assert.ok(withHidden >= 60, `${withHidden} recorded cards have sentences the card does not show`);
 });
 

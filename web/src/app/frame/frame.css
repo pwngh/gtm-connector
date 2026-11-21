@@ -186,8 +186,36 @@
   outline: none;
 }
 
+/* The page: on the bar's left edge, 16 from the window's sides under 720 and 24 above, at most 1580 wide. */
 .fr-page {
   min-width: 0;
+  max-width: 1580px;
+  margin: 0 auto;
+  padding: var(--gc-space-4) var(--gc-space-4) 0;
+}
+
+/* A page loading holds the rest of the viewport, so the footer does not jump when it arrives. */
+.fr .fr-loading {
+  min-height: 160px;
+  padding: var(--gc-space-5) 0;
+  color: var(--gc-ink-2);
+  font: var(--gc-body);
+}
+
+.fr-page > .fr-loading:not(.fr-loading--failed) {
+  min-height: max(160px, calc(100dvh - var(--route-top, 0px)));
+}
+
+.fr .fr-loading--failed {
+  display: grid;
+  justify-items: start;
+  gap: var(--gc-space-4);
+  color: var(--gc-ink);
+}
+
+.fr-loading--failed:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
 }
 
 .fr-page > .ui-refusal {
@@ -329,6 +357,10 @@
 
   .fr-signin {
     padding-inline: var(--gc-space-5);
+  }
+
+  .fr-page {
+    padding: var(--gc-space-5) var(--gc-space-5) 0;
   }
 }
 

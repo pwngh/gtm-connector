@@ -1,0 +1,76 @@
+{
+  "text": "On track: acc-003. Renewal in 24 days.",
+  "mrkdwn": false,
+  "unfurl_links": false,
+  "unfurl_media": false,
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+        "type": "plain_text",
+        "emoji": false,
+        "text": "On track: acc-003"
+      }
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "plain_text",
+        "emoji": false,
+        "text": "Thornfield Wren LLP"
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "*Renewal*\n24 days, to renewal date 2027-02-08"
+        },
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "*Card*\n2027-01-15 15:00 UTC"
+        }
+      ]
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "verbatim": true,
+        "text": ":white_check_mark: *No flag is raised*\nClose-date slippage no longer holds. Every connected source was read."
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "section",
+      "text": {
+        "type": "mrkdwn",
+        "verbatim": true,
+        "text": "<https://gtm.example.internal/deals/acc-003|Open the card>"
+      }
+    },
+    {
+      "type": "context",
+      "elements": [
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "Sign-in required. You see the card only if this deal is granted to you. No quotation is sent to Slack."
+        },
+        {
+          "type": "mrkdwn",
+          "verbatim": true,
+          "text": "<https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal|What do these flags mean?>"
+        }
+      ]
+    }
+  ]
+}

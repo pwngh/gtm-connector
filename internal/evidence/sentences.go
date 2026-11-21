@@ -26,7 +26,7 @@ func fields(s []rune) [][]rune {
 }
 
 // block is a run of text that no sentence crosses: a paragraph, and in a message also a block quote, a code
-// block, a list item or a speaker's turn. quoted is whether it is a block quote.
+// block, a list item or a speaker's turn. quoted is whether it is a block quote or a speaker's turn.
 type block struct {
 	text   []rune
 	quoted bool
@@ -55,11 +55,12 @@ func paragraphs(s []rune) []block {
 }
 
 // messageBlocks splits a chat message into blocks. A line break is a wrap, except that a blank line ends a
-// block and each of these starts one: a line that starts a list item, a line that starts with a speaker
-// label, a run of lines that start a block quote (> or &gt;), which is marked quoted, and the line that
-// opens a code fence. The line after a block quote, and the line after the one that closes a code fence,
-// start one too. Inside a code block nothing else starts a block.
-func messageBlocks(s []rune) []block {
+// block and each of these starts one: a line that starts a list item, a known person's turn (see turn), a
+// run of lines that start a block quote (> or &gt;), and the line that opens a code fence. The line after a
+// block quote, and the line after the one that closes a code fence, start one too. Inside a code block
+// nothing else starts a block. A block quote and a turn are marked quoted: the author relays someone else's
+// words, and a turn keeps its label in the text to say whose.
+func messageBlocks(s []rune, known func(name string) bool) []block {
 	var found []block
 	ended, fenced, quoting := true, false, false
 	for start := 0; start <= len(s); {
@@ -74,7 +75,7 @@ func messageBlocks(s []rune) []block {
 			continue
 		}
 		trimmed := strip(line)
-		begins, closes, quoted := false, false, false
+		begins, closes, quote, label := false, false, false, false
 		switch {
 		case fenced:
 			closes = hasSuffix(trimmed, "```")
@@ -84,17 +85,18 @@ func messageBlocks(s []rune) []block {
 			closes = len(trimmed) > 3 && hasSuffix(trimmed, "```")
 			fenced = !closes
 		case hasPrefix(trimmed, ">") || hasPrefix(trimmed, "&gt;"):
-			begins, quoted = !quoting, true
+			begins, quote = !quoting, true
 		default:
-			begins = quoting || listItem(line) || speakerLabel(trimmed)
+			label = turn(trimmed, known)
+			begins = quoting || label || listItem(line)
 		}
 		if ended || begins {
-			found = append(found, block{quoted: quoted})
+			found = append(found, block{quoted: quote || label})
 		} else {
 			found[len(found)-1].text = append(found[len(found)-1].text, '\n')
 		}
 		found[len(found)-1].text = append(found[len(found)-1].text, line...)
-		ended, quoting = closes, quoted
+		ended, quoting = closes, quote
 	}
 	return found
 }
@@ -140,49 +142,35 @@ func listItem(line []rune) bool {
 	return j == len(line) || u.IsSpace(line[j])
 }
 
-// speakerLabel is whether a line starts with a speaker label, as a pasted exchange writes one: one to
-// three words of letters, the first capitalized and all of them at most 40 characters, then a colon, a
-// space and more, as in "Dana Reyes: we can sign".
-func speakerLabel(line []rune) bool {
-	i := 0
-	for range 3 {
-		if i >= len(line) || !u.IsAlpha(line[i]) || i == 0 && !u.IsUpper(line[i]) {
-			return false
-		}
-		for i < len(line) && (u.IsAlpha(line[i]) || in(line[i], "'’.-")) {
-			i++
-		}
-		if i > 40 {
-			return false
-		}
-		if i < len(line) && line[i] == ':' {
-			return i+2 < len(line) && u.IsSpace(line[i+1]) && !u.IsSpace(line[i+2])
-		}
-		if i >= len(line) || line[i] != ' ' {
-			return false
-		}
-		i++
+// turn is whether a line is a known person's turn, as a pasted exchange writes one: up to its first colon,
+// a label that known says names a person of the card, then a space and more, as in "Dana Ito: we can
+// sign". A label that names nobody known, such as "Update:", leaves the line the author's own.
+func turn(line []rune, known func(name string) bool) bool {
+	colon := index(line, ':', 0)
+	if known == nil || colon < 1 || colon+2 >= len(line) || !u.IsSpace(line[colon+1]) || u.IsSpace(line[colon+2]) {
+		return false
 	}
-	return false
+	return known(string(line[:colon]))
 }
 
 // Sentences splits neutralized text into whole sentences. A line break inside a paragraph is a wrap;
 // only a blank line or closing punctuation ends a sentence. With lines, as in a Slack message, the blocks
-// messageBlocks finds end sentences too.
+// messageBlocks finds end sentences too; with no person known, no line is a turn.
 func Sentences(safe string, lines bool) ([]string, error) {
-	found, _, err := sentences(safe, lines)
+	found, _, err := sentences(safe, lines, nil)
 	return found, err
 }
 
-// sentences is Sentences, with whether each sentence lies in a block quote.
-func sentences(safe string, lines bool) ([]string, []bool, error) {
+// sentences is Sentences, with the people a turn may name, and whether each sentence lies in a block quote
+// or a turn.
+func sentences(safe string, lines bool, known func(name string) bool) ([]string, []bool, error) {
 	if !utf8.ValidString(safe) {
 		return nil, nil, ErrInvalidText
 	}
 	text := []rune(safe)
 	parts := paragraphs(text)
 	if lines {
-		parts = messageBlocks(text)
+		parts = messageBlocks(text, known)
 	}
 	found, quoted := []string{}, []bool{}
 	for _, paragraph := range parts {

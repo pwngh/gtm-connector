@@ -13,8 +13,9 @@ gtm deal thornfield-2027
 > **What the binary serves today.** The `/api/v1` routes under
 > [the server today](#the-server-today), MCP at `/mcp` ([MCP](mcp.md)) and `/healthz`
 > ([running it](operations.md#health)). Deal IDs, the `/v1/deals` routes, pushing your own data,
-> webhooks, Slack alerts and the read-only SQL views below are the design, and the
-> [roadmap](ROADMAP.md) lists them as not built.
+> sending webhooks and Slack alerts, and the read-only SQL views below are the design, and the
+> [roadmap](ROADMAP.md) lists them as not built. The bodies of a webhook delivery and a Slack alert
+> are built ([what a delivery holds](#what-a-delivery-holds)); nothing sends them yet.
 
 ## One deal, one ID
 
@@ -146,6 +147,82 @@ the flagged deal. It never carries a quotation.
 Webhook deliveries are signed, and each carries a stable event ID so a receiver can drop repeats.
 A failed delivery is retried. If an attempt's outcome is unknown, then it is shown as uncertain and
 not sent again until it is checked.
+
+### What a delivery holds
+
+The binary builds both bodies from a card's units, gaps and lines, the deal's status and the rules'
+results, never from the card's text. Sending them is not built: no credential, address, retry,
+delivery log or alert rule exists yet, and no command calls the builders. A body is refused, not
+cut, when its event does not hold together, such as an at-risk deal with no raised rule or a rule
+unknown while every source it reads was read.
+
+Neither body carries a quotation or any part of a sentence, a contact's name, title or email, an
+amount, a receipt ID, or another deal's name. A rule's sentence is the connector's own words, with
+its numbers: ASCII letters, digits and plain punctuation, holding no sentence or contact of the
+card. The pricing or seat conflict's sentence holds no digit at all.
+
+**The Slack alert** for a deal that turned at risk, changed, back on track, or closed:
+
+| Block | What it holds |
+| --- | --- |
+| Notification text | The status word, the deal ID, the days to renewal, the raised flags' names and how many rules are unknown, with `&`, `<` and `>` written as entities. The message sets `mrkdwn`, `unfurl_links` and `unfurl_media` to false. |
+| Header | The status word and the deal ID, such as `At risk: acc-003`, as plain text |
+| Account | The account's name, alone in a `plain_text` object with emoji off, so Slack formats none of it. A name longer than a section allows is left out, and a context line says so. |
+| Fields | `Renewal`: the days and the date it counts to. `Card`: the card's time in UTC. |
+| Flags | At risk: one section per raised flag, in the guide's order, with the connector's sentence, the threshold and a link to the first unit it cites. Changed: what is new since the card before, counted by speaker role and record values. On track: which flags no longer hold. Closed: the final card's time. |
+| Unknown | One section per unknown rule with the connector's reason for each source it did not read, then one line: unknown is not the same as no risk |
+| Shared | One line when some evidence is also on another deal of the account, which it does not name |
+| Last | The card link, then who may open it and one link to [what flags a deal](deals.md#what-flags-a-deal) at the binary's revision |
+
+Every `mrkdwn` object sets `verbatim` and holds only the connector's words, dates, numbers and the
+links it built. The status is the first word of the header, and each flag section starts with a
+Slack emoji name, `:red_circle:`, `:large_orange_diamond:`, `:white_check_mark:`, `:grey_question:` or
+`:lock:`, so colour is never the only signal. A message is refused when it would pass one of Slack's
+limits: 50 blocks, a header of 150 characters, 10 fields of 2,000 characters, 10 context elements,
+or a text object outside 1 to 3,000 characters. There are no buttons or menus: nothing in a message
+needs Slack to call the server.
+
+The card summary under a pasted link to the deal holds no more: the account's name, the status,
+the flags' names, the countdown, the card's time, which sources were not read, and a link to the
+card.
+
+**The webhook body** is JSON in a fixed field order, so one event gives the same bytes on every
+build:
+
+```json
+{"id":"evt_01","type":"risk.changed","occurred_at":"2027-01-15T15:00:05Z",
+ "deal":{"id":"acc-003","status":"red","previous_status":"amber"},
+ "card":{"id":"card-8522b0661ccb","sha256":"8522b066...","as_of":"2027-01-15"},
+ "renewal":{"days":24,"date":"2027-02-08","counts_to":"renewal"},
+ "rules":[{"code":"close_date_slippage","state":"raised","previous_state":"clear","units":[3],
+           "help":"https://github.com/pwngh/gtm-connector/blob/REVISION/docs/deals.md#what-flags-a-deal"}],
+ "unread":[{"source":"slack","code":"slack_denied"}],
+ "changes":null,
+ "links":{"card":"https://HOST/deals/acc-003?card=card-8522b0661ccb",
+          "api":"https://HOST/api/v1/cards/card-8522b0661ccb"}}
+```
+
+`type` is `risk.changed`, `card.changed` or `deal.closed`. `status` is `red`, `amber`, `green`,
+`closed_won` or `closed_lost`. `rules` lists every rule's result; `state` is `raised`, `clear` or
+`unknown`. `changes` counts what is new since the card before on `card.changed`: `sentences` by
+`customer`, `seller` and `unknown` role, and `values`. A unit number resolves at `links.api` followed
+by `/units/N`, under the reader's own sign-in and grant.
+
+**The signature.** Each delivery carries one header:
+
+```text
+Gtm-Signature: t=1800025205,v1=14b8d148bb4dfd45a04acf5360dcd45758796f93fc7a99789c93a7d666c4473f
+```
+
+`t` is the time it was signed, in Unix seconds. `v1` is the hex HMAC-SHA-256, under the secret you
+share with the connector, of `t`, a full stop and the body's exact bytes. The secret is at least 32
+bytes. To check a delivery:
+
+1. Read `t` and `v1` from the header. Refuse any other form.
+2. Refuse it when `t` is more than five minutes from your clock, either way.
+3. Compute the HMAC of `t`, `.` and the raw body as received, before parsing it, and compare it with
+   `v1` in constant time.
+4. Drop an `id` you have already handled.
 
 ## Read-only SQL
 

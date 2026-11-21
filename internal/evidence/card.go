@@ -24,6 +24,9 @@ type card struct {
 	gaps          []Gap
 	titles        map[int]string
 	unshownTitles map[int]any
+	// known is whether a label names a known person of the card, as speakerRole compares one: a contact of
+	// the account or a listed seller. A line of a message that opens with such a label is that person's turn.
+	known func(name string) bool
 }
 
 // lines is source text neutralized, with what was replaced counted.
@@ -162,24 +165,40 @@ type contact struct {
 
 var noContact = [2]string{"listed seller identity", "label matches no listed seller and no contact"}
 
+// named is the contacts a speaker label equals, and whether it equals a listed seller, as speakerRole
+// compares them: each a label on one line.
+func named(name string, sellers []string, contacts []contact) (matches []contact, listed bool) {
+	for _, c := range contacts {
+		if label(c.name) == name {
+			matches = append(matches, c)
+		}
+	}
+	for _, seller := range sellers {
+		listed = listed || label(seller) == name
+	}
+	return matches, listed
+}
+
+// knownPerson is whether a label names a contact of the account or a listed seller.
+func knownPerson(value any, sellers []string, contacts []contact) bool {
+	name := label(value)
+	if name == "" {
+		return false
+	}
+	matches, listed := named(name, sellers, contacts)
+	return listed || len(matches) > 0
+}
+
 // speakerRole is units.speaker_role: a role from identity only.
 func speakerRole(value any, sellers []string, contacts []contact, slack bool) role {
 	name := label(value)
 	if name == "" {
 		return role{"unknown", "no speaker label", nil}
 	}
-	var matches []contact
-	if !slack {
-		for _, c := range contacts {
-			if label(c.name) == name {
-				matches = append(matches, c)
-			}
-		}
+	if slack {
+		contacts = nil
 	}
-	listed := false
-	for _, seller := range sellers {
-		listed = listed || label(seller) == name
-	}
+	matches, listed := named(name, sellers, contacts)
 	switch {
 	case listed && len(matches) > 0:
 		return role{"unknown", "label matches a listed seller and a contact", nil}
@@ -307,7 +326,11 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			ends[i] = total
 		}
 		safe := strings.Join(texts, "\n")
-		found, quotedAt, err := sentences(safe, table == "messages")
+		var known func(string) bool
+		if table == "messages" {
+			known = c.known
+		}
+		found, quotedAt, err := sentences(safe, table == "messages", known)
 		if err != nil {
 			panic(invalid)
 		}
@@ -336,8 +359,8 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			fragment := !transcript && !ended && position < len(found)-1
 			partial := follows || cut || fragment
 			follows = cut
-			// A block quote in a message is someone else's words, which the author quoted: its speaker
-			// label is the author's, and no role is established for it.
+			// A block quote or a speaker's turn in a message is someone else's words, which the author
+			// relayed: its speaker label is the author's, and no role is established for it.
 			spokenBy := who
 			if quotedAt[position] {
 				spokenBy = role{"unknown", QuotedBasis, nil}
@@ -919,8 +942,9 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 	}
 }
 
-func (c *card) slack() {
+func (c *card) slack(contacts []contact) {
 	sellers := c.sellers("slack_backend")
+	c.known = func(name string) bool { return knownPerson(name, sellers, contacts) }
 	switch field(c.evidence, "slack_status") {
 	case "not_connected":
 		c.gap("slack_not_connected", "Slack: not connected.", nil, false, nil)
@@ -1251,7 +1275,7 @@ func build(evidence *strictjson.Object) ([]Unit, string, []Gap, []Line) {
 	c := &card{evidence: evidence, groups: v.groups, titles: map[int]string{}, unshownTitles: map[int]any{}}
 	contacts := c.crm(asOf)
 	c.calls(asOf, contacts)
-	c.slack()
+	c.slack(contacts)
 	said := c.said()
 	if len(said) == 0 {
 		read := 0
