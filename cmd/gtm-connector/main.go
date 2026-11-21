@@ -40,6 +40,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -296,57 +297,62 @@ func (c config) owner() (string, error) {
 
 // setUp makes missing credentials, migrates the database, sets up the app
 // role and seeds the demo workspace with its demo principal, under the
-// install lock that restore also takes. It is safe to run again.
-func setUp(ctx context.Context, c config) error {
+// install lock that restore also takes. It is safe to run again. It says
+// whether the credentials folder holds the unused owner secret, which it
+// leaves as it is.
+func setUp(ctx context.Context, c config) (unused bool, err error) {
 	ownerURL, err := c.owner()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if c.databaseURL == "" {
-		return errors.New("set GTM_DATABASE_URL to the app role's URL; setup creates that role")
+		return false, errors.New("set GTM_DATABASE_URL to the app role's URL; setup creates that role")
 	}
 	app, err := pgconn.ParseConfig(c.databaseURL)
 	if err != nil {
-		return errors.New("GTM_DATABASE_URL could not be parsed")
+		return false, errors.New("GTM_DATABASE_URL could not be parsed")
 	}
 	store, err := openStore(ctx, ownerURL)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer store.Close()
 	unlock, err := store.LockInstall(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer unlock()
 	if pending, err := store.PendingRestore(ctx); err != nil {
-		return err
+		return false, err
 	} else if pending != "" {
-		return errors.New("a restore has not installed its credentials; run restore again with the same backup")
+		return false, errors.New("a restore has not installed its credentials; run restore again with the same backup")
 	}
 	creds, err := openCredentials(c.credentialsDir, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer creds.Close()
 	demo, err := creds.setUp(certificateHosts(c.allowedHosts))
 	if err != nil {
-		return err
+		return false, err
+	}
+	if _, err := creds.read(unusedSecretFile); !errors.Is(err, fs.ErrNotExist) {
+		unused = true
 	}
 	if err := store.Migrate(ctx); err != nil {
-		return err
+		return false, err
 	}
 	if err := store.EnsureAppRole(ctx, app.User, app.Password); err != nil {
-		return err
+		return false, err
 	}
 	if err := finishExpired(ctx, store); err != nil {
-		return err
+		return false, err
 	}
 	workspace, err := store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace")
 	if err == nil {
 		_, err = store.EnsureDemoPrincipal(ctx, workspace, demo.Login, "Demo reviewer", demoDigest(demo))
 	}
-	return err
+	return unused, err
 }
 
 // openStore waits up to a minute for a database that cannot be reached yet
@@ -393,11 +399,16 @@ func setupCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := setUp(ctx, c); err != nil {
+	unused, err := setUp(ctx, c)
+	if err != nil {
 		return err
 	}
 	fmt.Printf("Set up. Credentials: %s\nDemo sign-in: login %s, password in %s\n",
 		c.credentialsDir, demoLogin, filepath.Join(c.credentialsDir, demoFile))
+	if unused {
+		fmt.Printf("The credentials folder holds %s, which no command uses; setup left it, and it may be deleted.\n",
+			unusedSecretFile)
+	}
 	return nil
 }
 

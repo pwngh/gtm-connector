@@ -6,8 +6,10 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,14 +75,14 @@ func TestCredentialsFolderIsPrivate(t *testing.T) {
 	if _, err := openCredentials(link, false); err == nil || !strings.Contains(err.Error(), "symbolic link") {
 		t.Fatalf("a linked folder was accepted: %v", err)
 	}
-	os.Chmod(filepath.Join(dir, ownerSecretFile), 0o644)
-	if _, err := creds.read(ownerSecretFile); err == nil {
+	os.Chmod(filepath.Join(dir, sessionKeyFile), 0o644)
+	if _, err := creds.read(sessionKeyFile); err == nil {
 		t.Fatal("a readable secret was accepted")
 	}
 	if _, err := creds.setUp(hosts); err == nil {
 		t.Fatal("setup went on with a readable secret")
 	}
-	os.Chmod(filepath.Join(dir, ownerSecretFile), 0o600)
+	os.Chmod(filepath.Join(dir, sessionKeyFile), 0o600)
 	elsewhere := filepath.Join(t.TempDir(), "secret")
 	os.WriteFile(elsewhere, []byte("x"), 0o600)
 	os.Remove(filepath.Join(dir, demoFile))
@@ -147,7 +149,7 @@ func TestBackupAndRestoreKeepState(t *testing.T) {
 	if err := restore(ctx, openFresh(t), source, archive); err != nil {
 		t.Fatal(err)
 	}
-	if err := restored.write(ownerSecretFile, []byte("another install")); err != nil {
+	if err := restored.write(sessionKeyFile, []byte("another install")); err != nil {
 		t.Fatal(err)
 	}
 	untouched := openFresh(t)
@@ -332,7 +334,7 @@ func TestSetupRefusesADatabaseNotInUTF8(t *testing.T) {
 	url := pgtest.URLEncoded(t, "SQL_ASCII")
 	cfg := config{ownerDatabaseURL: url, databaseURL: url, credentialsDir: privateDir(t),
 		allowedHosts: []string{"127.0.0.1:8443"}}
-	err := setUp(ctx, cfg)
+	_, err := setUp(ctx, cfg)
 	want := "the database is encoded as SQL_ASCII; create it with ENCODING 'UTF8' TEMPLATE template0"
 	if err == nil || err.Error() != want {
 		t.Fatalf("got %v, want %s", err, want)
@@ -352,5 +354,126 @@ func TestSetupRefusesADatabaseNotInUTF8(t *testing.T) {
 	}
 	if version, err := store.SchemaVersion(ctx); err != nil || version != 0 {
 		t.Fatalf("schema %d after the restore was refused (%v)", version, err)
+	}
+}
+
+// archiveNames gives the names of an archive's entries, in order, with their bytes.
+func archiveNames(t *testing.T, archive string) ([]string, map[string][]byte) {
+	t.Helper()
+	in, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	zipped, err := gzip.NewReader(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	bodies := map[string][]byte{}
+	for entries := tar.NewReader(zipped); ; {
+		header, err := entries.Next()
+		if err == io.EOF {
+			return names, bodies
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, header.Name)
+		if bodies[header.Name], err = io.ReadAll(entries); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// No command uses an owner secret. setup writes none, and leaves one an earlier setup wrote as it is and
+// says so. A backup does not carry it, and a backup of an earlier setup, which carries it first among its
+// credentials, restores without installing it.
+func TestNoCommandKeepsTheUnusedOwnerSecret(t *testing.T) {
+	owner := pgtest.URL(t)
+	app, err := url.Parse(owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.User = url.UserPassword("gtm_app_unused_secret", "app-password-for-this-test")
+	dir := privateDir(t)
+	cfg := config{ownerDatabaseURL: owner, databaseURL: app.String(), credentialsDir: dir,
+		allowedHosts: []string{"127.0.0.1:8443"}}
+	if unused, err := setUp(ctx, cfg); err != nil || unused {
+		t.Fatalf("setup in an empty folder: unused %v, %v", unused, err)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, unusedSecretFile)); !os.IsNotExist(err) {
+		t.Fatalf("setup wrote %s: %v", unusedSecretFile, err)
+	}
+	earlier := []byte("an-owner-secret-an-earlier-setup-wrote")
+	if err := os.WriteFile(filepath.Join(dir, unusedSecretFile), earlier, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if unused, err := setUp(ctx, cfg); err != nil || !unused {
+		t.Fatalf("setup beside an earlier owner secret: unused %v, %v", unused, err)
+	}
+	if kept, err := os.ReadFile(filepath.Join(dir, unusedSecretFile)); err != nil || !bytes.Equal(kept, earlier) {
+		t.Fatalf("setup changed the earlier owner secret: %v", err)
+	}
+
+	store, err := postgres.Open(ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	creds, err := openCredentials(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer creds.Close()
+	archive := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if err := backup(ctx, store, creds, archive); err != nil {
+		t.Fatal(err)
+	}
+	names, bodies := archiveNames(t, archive)
+	for _, name := range names {
+		if strings.Contains(name, unusedSecretFile) {
+			t.Fatalf("the backup carries %s", name)
+		}
+	}
+
+	// The same backup as an earlier setup wrote it: the owner secret first among its credentials.
+	var m manifest
+	if err := json.Unmarshal(bodies["manifest.json"], &m); err != nil {
+		t.Fatal(err)
+	}
+	m.Credentials = append([]fileEntry{entryFor("credentials/"+unusedSecretFile, earlier)}, m.Credentials...)
+	bodies["manifest.json"], _ = json.MarshalIndent(m, "", "  ")
+	bodies["credentials/"+unusedSecretFile] = earlier
+	names = append([]string{"manifest.json", "credentials/" + unusedSecretFile}, names[1:]...)
+	var out bytes.Buffer
+	zipped := gzip.NewWriter(&out)
+	writer := tar.NewWriter(zipped)
+	for _, name := range names {
+		writer.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(bodies[name])), Typeflag: tar.TypeReg})
+		writer.Write(bodies[name])
+	}
+	writer.Close()
+	zipped.Close()
+	older := filepath.Join(t.TempDir(), "earlier.tar.gz")
+	if err := os.WriteFile(older, out.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "restored")
+	if err := restore(ctx, openFresh(t), target, older); err != nil {
+		t.Fatalf("a backup of an earlier setup: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(target, unusedSecretFile)); !os.IsNotExist(err) {
+		t.Fatalf("the restore installed %s: %v", unusedSecretFile, err)
+	}
+	restored, err := openCredentials(target, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	for _, name := range credentialFiles {
+		if !bytes.Equal(must(restored.read(name)), must(creds.read(name))) {
+			t.Errorf("%s differs after the restore", name)
+		}
 	}
 }

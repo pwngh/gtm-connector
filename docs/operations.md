@@ -25,7 +25,7 @@ images. The web app is embedded in the binary, so there is nothing else to deplo
 `gtm setup` does three things:
 
 1. It runs the migrations as the database owner.
-2. It writes the credentials folder (mode 0700, files 0600): the owner secret, the session key, and the TLS certificate and key.
+2. It writes the credentials folder (mode 0700, files 0600): the demo password, the session key, and the TLS certificate and key. An `owner-secret` file an earlier setup wrote is left as it is, with a note: no command uses it, a backup does not carry it, and it may be deleted.
 3. It makes the `demo` workspace and the demo sign-in, and prints the folder and the file that holds the demo password.
 
 The server then connects as an app role. That role reads and writes rows. It cannot change the

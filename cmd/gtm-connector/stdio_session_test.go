@@ -176,7 +176,7 @@ func TestStdioAndSetupFinishInterruptedReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := setUp(ctx, c); err != nil && !strings.Contains(err.Error(), "demo credential") {
+	if _, err := setUp(ctx, c); err != nil && !strings.Contains(err.Error(), "demo credential") {
 		t.Fatal(err)
 	}
 	if got := d.count(t, `SELECT count(*) FROM receipts WHERE status = 'pending'`); got != 0 {
