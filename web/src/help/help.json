@@ -38,7 +38,7 @@
   "seal": {
     "title": "the seal",
     "text": "A card is sealed when it is published: a receipt names the SHA-256 of its bytes. A changed card is refused.",
-    "guide": {"label": "README, How the card is built", "path": "README.md#how-the-card-is-built"}
+    "guide": {"label": "README, Architecture & Provenance", "path": "README.md#architecture--provenance"}
   },
   "countdown": {
     "title": "the countdown",
