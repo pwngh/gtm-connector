@@ -1,0 +1,156 @@
+/* What the card's lines draw: the countdown and ARR under the title, the
+   fixed signals under Flags, and the record's values. The focal step is used
+   here and nowhere else on the page: by the countdown and ARR. */
+.dc-focal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gc-space-4) var(--gc-space-7);
+  min-width: 0;
+}
+
+.dc-focal__item {
+  display: grid;
+  align-content: start;
+  gap: var(--gc-space-1);
+  min-width: 0;
+}
+
+.fr .dc-focal__figure,
+.fr .dc-focal__none,
+.fr .dc-focal__sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--gc-space-2);
+  margin: 0;
+  min-width: 0;
+}
+
+.dc-focal__number {
+  color: var(--gc-ink);
+  font: var(--gc-focal);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: break-word;
+}
+
+.dc-focal__unit {
+  color: var(--gc-ink);
+  font: var(--gc-body);
+}
+
+.dc-focal__figure .dc-cite,
+.dc-focal__none .dc-cite {
+  align-self: center;
+}
+
+.fr .dc-focal__none {
+  align-items: center;
+  color: var(--gc-ink);
+  font: var(--gc-title);
+}
+
+.dc-focal__ring {
+  margin-top: 0;
+}
+
+.fr .dc-focal__sub {
+  align-items: center;
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+}
+
+/* A fixed signal: the connector's sentence, then its numbers. */
+.dc-flag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--gc-space-2);
+  min-width: 0;
+}
+
+.dc-flag__text {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  overflow-wrap: anywhere;
+}
+
+.dc-flag__cites {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.dc-flag__more {
+  padding-left: var(--gc-space-1);
+  color: var(--gc-ink-2);
+  font: var(--gc-meta);
+}
+
+/* A value: its label, then the connector's value, wrapping under it. */
+.fr .dc-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--gc-space-2);
+  margin: 0;
+  padding-top: var(--gc-space-2);
+}
+
+.dc-value__label {
+  color: var(--gc-ink-2);
+  font: var(--gc-label);
+}
+
+.dc-value__text {
+  min-width: 0;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.dc-line__n:has(.dc-cite + .dc-cite) {
+  flex-direction: column;
+}
+
+/* Under 720: the countdown and ARR side by side at the 32 step, each
+   sub-line wrapping under its own number. The countdown is as wide as its
+   number, and its sub-lines add no width; ARR takes the rest, and goes under
+   the countdown only when its figure cannot fit beside it whole. */
+@container deal-card (max-width: 719px) {
+  .dc-focal {
+    gap: var(--gc-space-4);
+  }
+
+  .fr .dc-focal__item[data-focal="countdown"] .dc-focal__figure {
+    flex-wrap: nowrap;
+    min-width: auto;
+  }
+
+  .dc-focal__item[data-focal="countdown"]:not([data-missing]) {
+    flex: none;
+  }
+
+  .fr .dc-focal__item[data-focal="countdown"]:not([data-missing]) .dc-focal__sub {
+    width: 0;
+    min-width: 100%;
+  }
+
+  .dc-focal__item[data-focal="arr"],
+  .dc-focal__item[data-missing] {
+    flex: 1 1 0;
+    min-width: min-content;
+  }
+
+  .fr .dc-focal__item[data-focal="arr"] .dc-focal__figure {
+    min-width: auto;
+  }
+
+  .dc-focal__number {
+    font-size: 2rem;
+    line-height: 2.25rem;
+  }
+}

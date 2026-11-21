@@ -4,20 +4,29 @@ import {groupOf, roleWords, type Sentence as SentenceUnit, sourceWord, usableTim
 
 interface SentenceProps {
   sentence: SentenceUnit;
+  /** The title on the line of the contact the sentence's contact number points to, if the card shows one. */
+  title?: string | null;
 }
 
-// Who said it, as recorded: the speaker or "No speaker label", the contact's
-// number for a customer, the role and, for a role not established, its basis;
-// then the source and the time.
-export function Attribution({sentence}: SentenceProps) {
+// Who said it, as recorded: the speaker or "No speaker label", for a customer
+// the title from the contact's line and the contact's number, the role and,
+// for a role not established, its basis; then the source and the time.
+export function Attribution({sentence, title = null}: SentenceProps) {
   const group = groupOf(sentence);
   const time = usableTime(sentence.at);
+  const contact = group === 'customer' && sentence.contact !== null ? <Cite n={sentence.contact} /> : null;
   return (
     <p className="dc-attr">
       <span className="dc-attr__part">
         <span className="dc-attr__speaker">{sentence.speaker || 'No speaker label'}</span>
-        {group === 'customer' && sentence.contact !== null && <Cite n={sentence.contact} />}
+        {!title && contact}
       </span>
+      {contact && title && (
+        <span className="dc-attr__part">
+          <span className="dc-attr__title">{title}</span>
+          {contact}
+        </span>
+      )}
       <span className="dc-attr__part">
         {roleWords[group]}
         {group === 'unknown' && ` (${sentence.basis ?? 'basis not recorded'})`}
@@ -33,7 +42,7 @@ export function Attribution({sentence}: SentenceProps) {
 // One sentence on a ledger line: its number in the gutter, then the sentence
 // whole as a quotation and its attribution. A cut unit is never a quotation:
 // it is listed in the text face under its label.
-export function SentenceLine({sentence, mark}: SentenceProps & {mark: 'quote' | 'more'}) {
+export function SentenceLine({sentence, title = null, mark}: SentenceProps & {mark: 'quote' | 'more'}) {
   const whole = !sentence.partial && typeof sentence.text === 'string';
   return (
     <li
@@ -57,7 +66,10 @@ export function SentenceLine({sentence, mark}: SentenceProps & {mark: 'quote' | 
             {sentence.partial && sentence.text !== null && <span className="dc-cut__text">{sentence.text}</span>}
           </p>
         )}
-        <Attribution sentence={sentence} />
+        <Attribution
+          sentence={sentence}
+          title={title}
+        />
       </div>
     </li>
   );

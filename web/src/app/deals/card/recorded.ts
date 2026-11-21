@@ -1,10 +1,12 @@
 import {readFileSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
-import type {CardDetail, GapView} from '../../../api/types.ts';
+import type {CardDetail, GapView, Json} from '../../../api/types.ts';
 
 // For the tests: every recorded card from testdata/oracle/cards, shaped as
-// GET /api/v1/cards/{card} returns it. Only the IDs and the publish time are
-// made up, as the server makes its own.
+// GET /api/v1/cards/{card} returns it, with the lines the server builds for it
+// from testdata/card_lines.jsonl.gz, which a Go test holds to the server's own
+// builder. Only the IDs and the publish time are made up, as the server makes
+// its own.
 
 export interface Recorded {
   file: string;
@@ -14,7 +16,20 @@ export interface Recorded {
 
 export const files = ['demo', 'cases', 'varied_demo'];
 
-function shaped(account: string, id: string, sealed: Record<string, unknown>, sha256: string, size: number): CardDetail {
+const gunzipped = (path: string) =>
+  gunzipSync(readFileSync(new URL(`../../../../../testdata/${path}`, import.meta.url)))
+    .toString()
+    .split('\n')
+    .filter(Boolean);
+
+const recordedLines = new Map(
+  gunzipped('card_lines.jsonl.gz').map(line => {
+    const row = JSON.parse(line) as {family: string; key: string; lines: Json[]};
+    return [`${row.family} ${row.key}`, row.lines];
+  }),
+);
+
+function shaped(account: string, id: string, sealed: Record<string, unknown>, sha256: string, size: number, lines: Json[] | null): CardDetail {
   const units = sealed.units as Record<string, unknown>[];
   return {
     id,
@@ -29,7 +44,7 @@ function shaped(account: string, id: string, sealed: Record<string, unknown>, sh
     published_at: '2027-01-15T15:00:04Z',
     as_of: String(sealed.as_of),
     sources: null,
-    lines: null,
+    lines,
     units: units.map(body => ({
       card: id,
       n: body.n as number,
@@ -45,16 +60,22 @@ function shaped(account: string, id: string, sealed: Record<string, unknown>, sh
   };
 }
 
-export const recorded: Recorded[] = files.flatMap(file =>
-  gunzipSync(readFileSync(new URL(`../../../../../testdata/oracle/cards/${file}.jsonl.gz`, import.meta.url)))
-    .toString()
-    .split('\n')
-    .filter(Boolean)
-    .map((line, at) => {
+const recordedFiles = (names: string[]): Recorded[] =>
+  names.flatMap(file =>
+    gunzipped(`oracle/cards/${file}.jsonl.gz`).map((line, at) => {
       const row = JSON.parse(line) as {key: string; account_id: string; card: string; sha256: string};
-      return {file, key: row.key, card: shaped(row.account_id, `card-${file}-${at}`, JSON.parse(row.card), row.sha256, row.card.length)};
+      const lines = recordedLines.get(`${file} ${row.key}`) ?? null;
+      return {file, key: row.key, card: shaped(row.account_id, `card-${file}-${at}`, JSON.parse(row.card), row.sha256, row.card.length, lines)};
     }),
-);
+  );
+
+export const recorded: Recorded[] = recordedFiles(files);
+
+/** The Salesforce book's cards: each counts to a contract end or has none, and has no ARR line. */
+export const salesforce: Recorded[] = recordedFiles(['books_salesforce']);
+
+/** The card as one published before its lines were kept. */
+export const unlined = (card: CardDetail): CardDetail => ({...card, lines: null});
 
 export const find = (file: string, key: string) => recorded.find(item => item.file === file && item.key === key)?.card as CardDetail;
 

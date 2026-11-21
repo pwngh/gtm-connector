@@ -1,0 +1,12 @@
+{
+  "countdown": {
+    "term": "the countdown",
+    "text": "Days from the card's date to the renewal date on the record. The line under the number names the record it counts to. Nothing is inferred from the close date.",
+    "guide": {"title": "Setting it up, Field mapping", "path": "docs/config.md", "anchor": "field-mapping"}
+  },
+  "arr": {
+    "term": "ARR",
+    "text": "Annual recurring revenue, from the field mapped as recurring revenue. Opportunity amount never stands in for it. If no field is mapped, the card says the value is missing.",
+    "guide": {"title": "Setting it up, Field mapping", "path": "docs/config.md", "anchor": "field-mapping"}
+  }
+}

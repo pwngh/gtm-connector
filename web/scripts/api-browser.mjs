@@ -59,11 +59,14 @@ const accounts = [{account: 'acc-002', name: `Second ${hostile} Co.`}, {account:
 // The sealed files the stub serves at /bytes and /text, by card ID: the recorded bytes, their digest and the text they hold.
 const sealedFiles = new Map();
 const fileOf = (id, row) => sealedFiles.set(id, {bytes: Buffer.from(row.card, 'utf8'), sha256: row.sha256, text: JSON.parse(row.card).text});
-function cardOf(account, row = oracle[account], id = `card-${account}`) {
+// The lines the server builds for recorded cards, by family and key, from testdata/card_lines.jsonl.gz, which a Go test holds to its builder.
+const recordedLines = new Map(gunzipSync(readFileSync(new URL('../../testdata/card_lines.jsonl.gz', import.meta.url))).toString()
+  .split('\n').filter(Boolean).map(line => JSON.parse(line)).map(row => [`${row.family} ${row.key}`, row.lines]));
+function cardOf(account, row = oracle[account], id = `card-${account}`, lines = recordedLines.get(`demo ${account}`) ?? null) {
   const sealed = JSON.parse(row.card);
   fileOf(id, row);
   return {id, account, brief_id: sealed.brief_id, kind: 'go', schema_version: 3, rules_version: '3', sha256: row.sha256, size: 1,
-    seal_receipt_id: `seal-${account}`, published_at: '2027-01-15T15:00:04Z',
+    seal_receipt_id: `seal-${account}`, published_at: '2027-01-15T15:00:04Z', as_of: sealed.as_of, sources: null, lines,
     units: sealed.units.map(body => ({card: id, n: body.n, kind: body.kind, record_ref: body.record_ref, tool: body.tool, ...(body.kind === 'sentence' ? {shown: body.shown} : {}),
       receipt_id: `receipt-${account}-${body.tool}`, record_version_id: `version-${body.n}`, body: {...body, speaker: body.speaker && `${body.speaker} ${hostile}`}})),
     gaps: sealed.gaps.map(gap => ({...gap, text: `${gap.text} ${hostile}`}))};
@@ -72,12 +75,12 @@ const cards = Object.fromEntries(Object.keys(oracle).filter(key => /^acc-\d+$/.t
 // Every recorded card in testdata/oracle/cards, each family the index lists, as cards of one more account.
 const families = Object.keys(JSON.parse(readFileSync(new URL('../../testdata/oracle/cards/index.json', import.meta.url), 'utf8')).families);
 const recorded = families.flatMap(file => gunzipSync(readFileSync(new URL(`../../testdata/oracle/cards/${file}.jsonl.gz`, import.meta.url))).toString()
-  .split('\n').filter(Boolean).map(line => JSON.parse(line)))
-  .map((row, at) => cardOf('acc-900', row, `rec-${at}`));
+  .split('\n').filter(Boolean).map(line => ({file, row: JSON.parse(line)})))
+  .map(({file, row}, at) => cardOf('acc-900', row, `rec-${at}`, recordedLines.get(`${file} ${row.key}`) ?? null));
 // Serves the recorded cards under acc-900, newest first in file order.
 function serveRecorded() {
   stub.accounts = [...accounts, {account: 'acc-900', name: 'Recorded cards'}]; stub.granted.add('acc-900');
-  stub.extra = recorded; stub.lists['acc-900'] = recorded.map(({units, gaps, ...head}) => head);
+  stub.extra = recorded; stub.lists['acc-900'] = recorded.map(({units, gaps, as_of, sources, lines, ...head}) => head);
 }
 // The demo book's thirty accounts with their recorded names, by ID as the server lists them.
 const book = JSON.parse(readFileSync(new URL('../../testdata/oracle/cards/demo_book.json', import.meta.url), 'utf8')).crm.accounts.rows
@@ -165,7 +168,7 @@ async function api(request, response, path) {
     const account = decodeURIComponent(match[1]);
     if (stub.granted.has(account) && stub.lists[account]) return send(response, 200, {account, cards: stub.lists[account]});
     if (!stub.granted.has(account) || !cards[account]) return refuse(response, 403, 'not_permitted');
-    const {units, gaps, ...head} = cards[account];
+    const {units, gaps, as_of, sources, lines, ...head} = cards[account];
     if (stub.empty.has(account)) return send(response, 200, {account, cards: []});
     return send(response, 200, {account, cards: [{...head, published_at: stub.times?.(account) ?? head.published_at}]});
   }
@@ -683,7 +686,7 @@ const coverageUrl = `${base}/ops/coverage`;
 const many = ['c-01', 'c-02', 'c-03', 'c-04', 'c-05', 'c-06', 'c-07'];
 const manyAccounts = many.map((id, i) => ({account: id, name: i === 0 ? `Alder ${hostile} Ltd` : ['Birch', 'Cedar', 'Dogwood', 'Elm', 'Fir', 'Gum'][i - 1] + ' Co.'}));
 const listOf = id => {
-  const at = many.indexOf(id), head = account => ({...cards['acc-003'], units: undefined, gaps: undefined, account});
+  const at = many.indexOf(id), head = account => ({...cards['acc-003'], units: undefined, gaps: undefined, as_of: undefined, sources: undefined, lines: undefined, account});
   const made = Array.from({length: [2, 0, 1, 3, 0, 1, 0][at]}, (_, n) => ({...head(id), id: `card-${id}-${n}`, published_at: `2027-01-${String(15 - n - at).padStart(2, '0')}T15:00:04Z`}));
   return {account: id, cards: made};
 };
@@ -1162,11 +1165,13 @@ for (const width of [320, 390, 768, 1440]) {
 }
 
 // 16. The Deal card: the stub's acc-003 card, with hostile speakers and gaps, at
-// 320, 390 and 1440 wide; refusals; a card of another account; an older card.
+// 320, 390, 768 and 1440 wide, light and dark; the countdown and ARR, their
+// help, a changed clock, a card with no lines; refusals; a card of another
+// account; an older card.
 const dealCard = cards['acc-003'];
 const shownUnits = dealCard.units.filter(unit => unit.kind === 'sentence' && unit.shown === 'yes' && !unit.body.partial);
 const cardParts = '.fr-chrome, .dc';
-for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+for (const [width, scheme] of [320, 390, 768, 1440].flatMap(width => [[width, 'light'], [width, 'dark']])) {
   await scenario(`deal card ${width} ${scheme}`, async () => {
     const at = `deal card ${width} ${scheme}`;
     const tab = await page({width, scheme});
@@ -1179,7 +1184,19 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
       const rights = selector => [...new Set([...document.querySelectorAll(selector)].map(el => Math.round(el.getBoundingClientRect().right)))];
       const record = box('.dc-record'), words = box('.dc-words');
       return {title: document.title, heading: document.querySelector('.dc-title').textContent, id: document.querySelector('.dc-id').textContent,
-        note: document.querySelector('.dc-values-note').textContent, noteLink: document.querySelector('.dc-values-note a').getAttribute('href'),
+        note: document.querySelector('.dc-values-note')?.textContent ?? null,
+        focal: [...document.querySelectorAll('.dc-focal__item')].map(el => ({
+          kind: el.dataset.focal, number: el.querySelector('.dc-focal__number').textContent, size: getComputedStyle(el.querySelector('.dc-focal__number')).fontSize,
+          figure: el.querySelector('.dc-focal__figure').innerText.replace(/\s+/g, ' ').trim(), subs: [...el.querySelectorAll('.dc-focal__sub')].map(sub => sub.innerText.replace(/\s+/g, ' ').trim()),
+          left: Math.round(el.getBoundingClientRect().left), right: Math.round(el.getBoundingClientRect().right),
+          top: Math.round(el.querySelector('.dc-focal__number').getBoundingClientRect().top),
+          lines: Math.round(el.querySelector('.dc-focal__number').getBoundingClientRect().height / parseFloat(getComputedStyle(el.querySelector('.dc-focal__number')).lineHeight))})),
+        cardWidth: document.querySelector('.dc').getBoundingClientRect().width,
+        focalSizes: [...document.querySelectorAll('.dc *')].filter(el => ['40px', '32px'].includes(getComputedStyle(el).fontSize)).map(el => el.className),
+        focalFirst: box('.dc-focal').top < box('.dc-ledger').top && box('.dc-head').bottom <= box('.dc-focal').top,
+        values: [...document.querySelectorAll('.dc-the-record [data-value]')].map(el => `${el.dataset.value}: ${el.querySelector('.dc-value__label').textContent} ${el.querySelector('.dc-value__text').textContent}`),
+        flags: [...document.querySelectorAll('.dc-flags .dc-flag')].map(el => el.innerText.replace(/\s+/g, ' ').trim()),
+        titles: [...document.querySelectorAll('[data-group="customer"] .dc-attr__title')].map(el => el.textContent),
         quotes: [...document.querySelectorAll('blockquote')].map(el => ({n: Number(el.dataset.unit), text: el.textContent, children: el.children.length,
           face: getComputedStyle(el).fontFamily.split(',')[0], size: getComputedStyle(el).fontSize, rule: `${getComputedStyle(el).borderLeftWidth} ${getComputedStyle(el).borderLeftStyle}`})),
         injected: Boolean(window.__injected) || Boolean(document.querySelector('.dc img')),
@@ -1188,15 +1205,29 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
         peopleFirst: box('.dc-people').top < box('.dc-the-record').top, recordBeforeNotRead: box('.dc-the-record').bottom <= box('.dc-not-read').top,
         local: Object.keys(localStorage), session: Object.keys(sessionStorage)};
     });
-    check(facts.heading === 'Third Account Co.' && facts.title === 'Third Account Co.' && facts.id === 'acc-003' &&
-      facts.note === 'The countdown and ARR are on the plain-text card.' && facts.noteLink === '/deals/acc-003/text',
-      `${at}: the title is the server’s name, the tab is titled with it, the ID and the line on the values are under it, linking to the Text tab`);
+    check(facts.heading === 'Third Account Co.' && facts.title === 'Third Account Co.' && facts.id === 'acc-003' && facts.note === null,
+      `${at}: the title is the server’s name, the tab is titled with it, and the ID is under it`);
+    const [countdown, arr] = facts.focal;
+    const phone = facts.cardWidth < 720, narrow = width < 720;
+    check(facts.focalFirst && countdown?.kind === 'countdown' && countdown.figure === '24 days [1]' && countdown.subs.join(' | ') === 'to the renewal, 2027-02-08 | as of 2027-01-15' &&
+      arr?.kind === 'arr' && arr.figure === 'USD 450,000.00 [1]' && arr.subs.join() === 'ARR, from the mapped field',
+      `${at}: under the title, the countdown and ARR with their numbers and sub-lines (${JSON.stringify(facts.focal.map(item => [item.figure, item.subs]))})`);
+    // ARR sits beside the countdown on its first line, and goes under it only on a card too narrow for its figure whole
+    // (under 330 wide for USD 450,000.00 at 32); its figure breaks only at its space.
+    const beside = arr.left >= countdown.right && Math.abs(arr.top - countdown.top) <= 2;
+    check((beside || facts.cardWidth < 330) && arr.lines <= 2 && facts.focal.every(item => item.size === (phone ? '32px' : '40px')),
+      `${at}: ARR sits ${beside ? 'right of' : 'under'} the countdown, its figure on ${arr.lines} lines, both at ${phone ? 32 : 40} (card ${Math.round(facts.cardWidth)}; ${countdown.right}..${arr.left}; tops ${countdown.top} ${arr.top}; ${facts.focal.map(item => item.size)})`);
+    check(facts.focalSizes.length === 2 && facts.focalSizes.every(name => name.startsWith('dc-focal__number')), `${at}: only the countdown and ARR use the focal step (${facts.focalSizes.join()})`);
+    check(facts.values.join(' | ') === dealCard.lines.filter(line => line.section === 'value').map(line => `${line.code}: ${line.label} ${line.text}`).join(' | '),
+      `${at}: the record column is every value line in the card's order (${facts.values.length})`);
+    check(facts.flags.join() === 'The renewal is in 24 days and this opportunity is still open at stage "negotiation". [1] [3]' && facts.titles.join() === 'Deputy general counsel,Deputy general counsel',
+      `${at}: Flags holds the fixed signal with its numbers, and each buyer quote the contact's title (${facts.flags.join()}; ${facts.titles.join()})`);
     const expected = shownUnits.map(unit => `${unit.n} ${unit.body.text}`).sort().join('|');
     check(facts.quotes.map(quote => `${quote.n} ${quote.text}`).sort().join('|') === expected && facts.quotes.every(quote => quote.children === 0) && !facts.injected,
       `${at}: each shown sentence is one blockquote holding exactly its text, and hostile speakers and gaps stay text`);
     check(facts.quotes.every(quote => quote.face === 'Charter' || quote.face.includes('Charter') || quote.face.includes('Georgia')) && facts.quotes.every(quote => quote.size === '18px' && quote.rule === '3px solid'),
       `${at}: a quotation is in the quotation face at 18 with a 3px rule (${facts.quotes[0].face} ${facts.quotes[0].size} ${facts.quotes[0].rule})`);
-    if (width >= 1100) {
+    if (facts.recordLeft < facts.wordsLeft) {
       // The record's numbers end at the 1px rule, and the words' numbers start where it ends.
     check(facts.recordLeft < facts.wordsLeft && facts.border === '1px' && facts.recordRights.length === 1 && facts.rule - facts.recordRights[0] === 1 && facts.wordLefts.join() === String(facts.rule),
         `${at}: the record and the words sit either side of the rule, their numbers in a line against it (rule ${facts.rule}; record numbers end ${facts.recordRights}; words numbers start ${facts.wordLefts})`);
@@ -1214,6 +1245,21 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
     check(fits(focus) && focus.name.startsWith('Source') && sizes.every(([w, h]) => w >= 44 && h >= 44), `${at}: each of ${sizes.length} numbers is at least 44 by 44, and focus shows a ${focus.outline}px ring`);
     check(facts.local.every(key => ['gtm-connector-theme', 'gtm-connector-deals-hint', 'gtm-connector-proof-seen'].includes(key)) && facts.session.length === 0,
       `${at}: storage holds only display keys (local ${facts.local.join()}; session ${facts.session.join()})`);
+    // The countdown's help: focus shows it below its line, Escape hides it and focus stays on its button.
+    const help = '[data-focal="countdown"] .ui-help__button';
+    await tab.focus(help);
+    const opened = await tab.evaluate(selector => {
+      const button = document.querySelector(selector), panel = document.getElementById(button.getAttribute('aria-controls'));
+      const line = button.closest('.dc-focal__sub').getBoundingClientRect(), box = panel.getBoundingClientRect(), own = button.getBoundingClientRect();
+      return {expanded: button.getAttribute('aria-expanded'), shown: !panel.hidden && box.height > 0, role: panel.getAttribute('role'), text: panel.querySelector('.ui-help__text').textContent,
+        below: box.top >= own.bottom - 1, inFlow: getComputedStyle(panel).position === 'static', lineShown: line.height > 0, name: button.getAttribute('aria-label'), size: [own.width, own.height]};
+    }, help);
+    const focusRing = await ring(tab);
+    await tab.keyboard.press('Escape');
+    const closed = await tab.evaluate(selector => {const button = document.querySelector(selector); return {expanded: button.getAttribute('aria-expanded'), hidden: document.getElementById(button.getAttribute('aria-controls')).hidden, focused: document.activeElement === button};}, help);
+    check(opened.expanded === 'true' && opened.shown && opened.role === 'note' && opened.below && opened.inFlow === narrow && opened.name === 'About the countdown' &&
+      opened.text.startsWith('Days from the card') && fits(focusRing) && closed.expanded === 'false' && closed.hidden && closed.focused,
+      `${at}: the countdown's help opens on focus below its line${narrow ? ', in the flow' : ''}, and Escape closes it with focus on its button (${JSON.stringify(opened)}; ${JSON.stringify(closed)})`);
     if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `deal-card-${width}-${scheme}.png`), fullPage: true});
     check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
     await tab.context().close();
@@ -1273,6 +1319,61 @@ for (const [width, scheme] of [[390, 'light'], [1440, 'light'], [390, 'dark'], [
     await tab.context().close();
   });
 }
+
+await scenario('deal card: changing the browser’s clock changes nothing on the page', async () => {
+  const read = async time => {
+    const tab = await page({width: 1440});
+    await tab.clock.setFixedTime(new Date(time));
+    await tab.goto(thornfield, {waitUntil: 'networkidle'});
+    await signIn(tab);
+    await tab.waitForSelector('.dc-focal');
+    const shown = await tab.innerText('.dc');
+    const now = await tab.evaluate(() => new Date().toISOString());
+    await tab.context().close();
+    return {shown, now};
+  };
+  // The stub's session runs an hour from now, so both clocks sit before its end.
+  const early = await read('2020-02-29T09:00:00Z'), late = await read(new Date(Date.now() + 30 * 60_000).toISOString());
+  check(early.now.startsWith('2020-02-29') && early.shown === late.shown && /\b24\s+days\b/.test(early.shown),
+    `the card reads the same with the clock at ${early.now} and at ${late.now}`);
+});
+
+await scenario('deal card: help opens on hover and on a press, one at a time, and a press outside closes it', async () => {
+  const tab = await page({width: 1440});
+  await tab.goto(thornfield, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.dc-focal');
+  const state = () => tab.$$eval('.dc-focal .ui-help__button', buttons => buttons.map(button => button.getAttribute('aria-expanded')).join());
+  await tab.hover('[data-focal="arr"] .ui-help__button');
+  const hovered = await state();
+  await tab.hover('[data-focal="arr"] .ui-help__panel');
+  const onPanel = await state();
+  await tab.click('[data-focal="countdown"] .ui-help__button');
+  const pressed = await state();
+  await tab.mouse.move(5, 5);
+  const pinned = await state();
+  const guide = await tab.getAttribute('[data-focal="countdown"] .ui-help__guide', 'href');
+  await tab.mouse.click(5, 300);
+  const outside = await state();
+  check(hovered === 'false,true' && onPanel === 'false,true' && pressed === 'true,false' && pinned === 'true,false' && outside === 'false,false' &&
+    guide === 'https://github.com/pwngh/gtm-connector/blob/main/docs/config.md#field-mapping',
+    `hover shows ARR's help and the pointer may move onto it, a press pins the countdown's and closes ARR's, a press outside closes it (${[hovered, onPanel, pressed, pinned, outside].join(' / ')})`);
+  await tab.context().close();
+});
+
+await scenario('deal card: a card published before its lines were kept', async () => {
+  stub.steer = (method, path) => path === '/api/v1/cards/card-acc-003' ? {json: {...dealCard, lines: null}} : null;
+  const tab = await page({width: 390});
+  await tab.goto(thornfield, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.dc-ledger');
+  const note = (await tab.innerText('.dc-values-note')).replace(/\s+/g, ' ').trim();
+  const link = await tab.getAttribute('.dc-values-note a', 'href');
+  const drawn = await tab.locator('.dc-focal, .dc-flags, [data-value], .dc-attr__title').count();
+  check(note === 'The countdown and ARR are on the plain-text card.' && link === '/deals/acc-003/text' && drawn === 0,
+    `the card says where its values are and links to its Text tab (${note}; ${link}; ${drawn} line parts drawn)`);
+  await tab.context().close();
+});
 
 await scenario('proof drawer at 1100: pressing numbers, Left and Right, Before and After, and the close button', async () => {
   const tab = await page({width: 1100});
@@ -1372,7 +1473,7 @@ await scenario('deal card: a card of another account in ?card= is not read', asy
 });
 
 await scenario('deal card: an older card pinned in ?card=', async () => {
-  const {units, gaps, ...head} = dealCard;
+  const {units, gaps, as_of, sources, lines, ...head} = dealCard;
   stub.steer = (method, path) => path === '/api/v1/accounts/acc-003/cards'
     ? {json: {account: 'acc-003', cards: [{...head, id: 'card-acc-003-newer', published_at: '2027-01-16T09:00:00Z'}, head]}} : null;
   const tab = await page({width: 390});
@@ -1401,7 +1502,7 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
     await tab.goto(thornfield, {waitUntil: 'networkidle'});
     await signIn(tab);
     await tab.waitForSelector('.dc-ledger');
-    await tab.click('.dc-values-note a');
+    await tab.click('.dc-tab[href="/deals/acc-003/text"]');
     await tab.waitForSelector('.dc-plain__text');
     const sunken = await sunkenOf(tab);
     const facts = await tab.evaluate(() => {
@@ -1411,7 +1512,7 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
         overflow: document.documentElement.scrollWidth - innerWidth, wider: pre.scrollWidth - pre.clientWidth, injected: Boolean(window.__injected),
         local: Object.keys(localStorage), session: Object.keys(sessionStorage)};
     });
-    check(facts.path === '/deals/acc-003/text' && facts.tabs === 'Card /deals/acc-003, Text /deals/acc-003/text open', `${at}: the line under the title opens the Text tab (${facts.path}; ${facts.tabs})`);
+    check(facts.path === '/deals/acc-003/text' && facts.tabs === 'Card /deals/acc-003, Text /deals/acc-003/text open', `${at}: the Text tab opens the plain-text card (${facts.path}; ${facts.tabs})`);
     check(facts.text === sealedThornfield.text && facts.nodes === 1 && !facts.injected, `${at}: the Text tab holds the sealed text byte for byte, as one text node`);
     check(facts.face.startsWith('ui-monospace') && facts.size === '14px' && facts.space === 'pre-wrap' && facts.background === sunken,
       `${at}: the text is in the reference face at 14 on the sunken surface, white-space kept (${facts.face.split(',')[0]} ${facts.size} ${facts.space} ${facts.background})`);
@@ -1464,7 +1565,7 @@ for (const [width, scheme] of [[390, 'light'], [1440, 'dark']]) {
     const at = `seal check fails ${width} ${scheme}`;
     const altered = Buffer.from(sealedThornfield.bytes);
     altered[40] ^= 1;
-    const {units, gaps, ...head} = dealCard;
+    const {units, gaps, as_of, sources, lines, ...head} = dealCard;
     const older = {...head, id: 'card-acc-003-older', published_at: '2027-01-12T09:10:00Z'};
     fileOf(older.id, oracle['acc-003']);
     stub.extra = [{...dealCard, ...older}];
@@ -1477,7 +1578,7 @@ for (const [width, scheme] of [[390, 'light'], [1440, 'dark']]) {
     await tab.waitForSelector('[data-seal="failed"]');
     await apiSettled();
     const facts = await tab.evaluate(() => ({panel: document.querySelector('[data-seal="failed"]').innerText.replace(/\s+/g, ' ').trim(), page: document.querySelector('.dc').innerText,
-      link: document.querySelector('[data-seal="failed"] a')?.getAttribute('href'), drawn: document.querySelectorAll('.dc-section, .dc-tabs, .dc-plain, .dc-values-note, blockquote, .dc-ledger').length}));
+      link: document.querySelector('[data-seal="failed"] a')?.getAttribute('href'), drawn: document.querySelectorAll('.dc-section, .dc-tabs, .dc-plain, .dc-values-note, .dc-focal, blockquote, .dc-ledger').length}));
     check(facts.panel === 'This card failed its seal check. Nothing from it is shown. Card card-acc-003, published 15 Jan 2027, 15:00:04 UTC Open the card before it' &&
       facts.link === '/deals/acc-003?card=card-acc-003-older' && facts.drawn === 0, `${at}: one panel names the card and links to the one before it, and nothing of the card is drawn (${facts.panel}; ${facts.link})`);
     const pieces = [...units.map(unit => unit.body.text).filter(Boolean), ...gaps.map(gap => gap.text), ...sealedThornfield.text.split('\n').map(line => line.trim()).filter(line => line.length > 3)];
