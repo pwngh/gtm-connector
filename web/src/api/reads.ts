@@ -132,7 +132,15 @@ export function createReads(store: StoreLike): Reads {
 // The server's store: the signed-in session and how the server answered.
 // Without a provider, as when one view renders alone, nothing is signed in
 // and nothing is read.
-const detachedState: ServerState = Object.freeze({mode: 'detached', session: null, error: null, ended: false, generation: 0, elsewhere: null});
+const detachedState: ServerState = Object.freeze({
+  mode: 'detached',
+  session: null,
+  error: null,
+  ended: false,
+  generation: 0,
+  elsewhere: null,
+  endSessionUrl: null,
+});
 const detached = () => Promise.resolve(detachedState);
 const nothing = () => Promise.reject(new ApiError({kind: 'unreachable'}));
 const detachedStore: ServerStore = {

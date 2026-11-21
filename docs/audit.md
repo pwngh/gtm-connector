@@ -202,7 +202,8 @@ reads inside it are its child receipts, whose `request_id` is
 | `deal decide`, `POST /v1/matches/{id}` | One `decide_match`, naming the match, the decision, the deal, and for a known match its kind, item and account. Through the API it names the signed-in principal. A refused decision is finished as an error: error/403 naming no account for an unknown or ungranted match, error/403 naming the account for a grant revoked while the decision commits, error/400 `invalid_deal` for a deal of another account, error/409 `already_decided` for a superseded match. |
 | The connector's own decisions | One `decide_match` per call or thread it decides, naming no principal, when `deal new`, `POST /v1/deals`, `debug calls import`, `debug slack map` or `brief` finds an undecided one while its account has an open deal. |
 | `debug calls import`, `debug slack map` | One `get_account` in an `import-` run, also on the demo book. On a real CRM, one more in an `inspect-` run before it. |
-| `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `connect` | None. |
+| `grant` | One: `grant_account`, `revoke_grant` with `--revoke`, `disable_person` with `--disable` or `enable_person` with `--enable`, whose arguments are the account and the `to` or `subject` given. It finishes ok with the row `grants/PRINCIPAL_ID/ACCOUNT_ID`, or `people/PRINCIPAL_ID` for a person, in the transaction that makes the change, or as an error that changes nothing: `person_not_found` or `account_not_found` (404), or `person_ambiguous` (409). |
+| `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `connect`, `grants` | None. |
 | MCP calls through `serve` or `mcp stdio` | One per tool call, and one per read inside a prepared brief. |
 
 ## Rate limit and writes

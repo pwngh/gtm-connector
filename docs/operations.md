@@ -71,6 +71,74 @@ workspace of its own, named with `--state-dir`:
 > the app role's URL can issue a token for any connected workspace and start `mcp stdio` for one. The
 > [MCP guide](mcp.md) says what that grants.
 
+## Sign-in through your identity provider
+
+People sign in to the web app with their company account, through your identity provider, with OpenID
+Connect. The connector stores no password for them. They sign in to one workspace, and read only the
+accounts you grant them.
+
+1. Register a client at the provider. Its redirect URL is the server's public origin followed by
+   `/api/v1/session/oidc/callback`, such as `https://127.0.0.1:8443/api/v1/session/oidc/callback`.
+2. For a confidential client, put its secret in the file `oidc-client-secret` in the credentials folder,
+   with mode 0600. Leave the file out for a public client, which signs in with PKCE alone. The secret is
+   never an environment variable.
+3. Set the variables below and start `gtm serve`.
+
+```sh
+GTM_OIDC_ISSUER=https://login.invented.example \
+GTM_OIDC_CLIENT_ID=gtm-connector \
+GTM_OIDC_WORKSPACE=acme \
+GTM_OIDC_ALLOWED_DOMAINS=invented.example \
+GTM_DEMO_SIGN_IN=off \
+gtm serve
+```
+
+| Variable | What it sets |
+| --- | --- |
+| `GTM_OIDC_ISSUER` | The provider's issuer, an https URL exactly as the provider names itself. Setting it turns this sign-in on. The connector reads the provider's discovery document under it. |
+| `GTM_OIDC_CLIENT_ID` | The client's ID at the provider. |
+| `GTM_OIDC_WORKSPACE` | The workspace people sign in to. It must exist. |
+| `GTM_OIDC_ALLOWED_DOMAINS` | The email domains that may sign in, separated by commas. A person needs an email in one of them that the provider marked verified. |
+| `GTM_OIDC_TENANT_CLAIM`, `GTM_OIDC_TENANT` | A claim, `hd` or `tid`, and the value it must have, for a provider that vouches for its tenant. Set this, the domains, or both. |
+| `GTM_OIDC_REDIRECT_URL` | The redirect URL, if you set it: it must be the public origin followed by `/api/v1/session/oidc/callback`, which is the default. |
+| `GTM_OIDC_SESSION_MINUTES` | How long a session lasts, from 5 to 720 minutes. The default is 60. |
+| `GTM_DEMO_SIGN_IN` | `on`, the default, or `off`. |
+
+For Google Workspace, set `GTM_OIDC_TENANT_CLAIM=hd` and `GTM_OIDC_TENANT` to your domain; for
+Microsoft Entra ID, set `tid` and your tenant's ID. Use them rather than the domains alone: the tenant
+claim says the account is your organization's, where an email domain says only what the account's email
+is.
+
+`gtm serve` checks every setting before it listens, and refuses one it cannot serve with one line that
+does not repeat the issuer. It refuses the demo sign-in beside a provider that signs in a workspace of
+real sources: set `GTM_DEMO_SIGN_IN=off`. The line it prints when it starts names the sign-ins it offers,
+and it logs each sign-in through the provider, kept or refused, in one line with no token, code, secret
+or email. A sign-in gets no receipt.
+
+A person appears in the workspace the first time they sign in, found by the provider's issuer and
+subject, never by their email, and with no grant. Grant them accounts the workspace holds, with
+`GTM_OIDC_ISSUER` set as `serve` has it, since the grant commands name only that issuer's people:
+
+```sh
+gtm grants --state-dir acme                         # who has signed in, and what each reads
+gtm grant acc-sf-001000000000000AAA --to dana@invented.example --state-dir acme
+gtm grant acc-sf-001000000000000AAA --subject 00u-dana --state-dir acme --revoke
+gtm grant --disable --to dana@invented.example --state-dir acme
+```
+
+`--to` takes an email the provider verified, and `--subject` the subject `grants` lists. An email the
+provider did not verify names nobody, and one two people share is refused with the subjects it matched:
+give the subject. `--disable` ends the person's sessions at once and refuses their sign-ins, and keeps
+their grants for `--enable`. Each change gets a receipt, and so does a refused person or account.
+[The command line](cli.md#grant-and-grants) gives each command's output.
+
+A grant also opens the Ops pages: Coverage and Activity show only the deals, cards and receipts of the
+accounts a person is granted, as Deals does. Grant someone every account and they see the whole book.
+
+A person the provider disables keeps the session they hold until it expires, 60 minutes by default, or
+until `grant --disable`. Signing out ends the session here and offers the provider's own sign-out page
+when the provider publishes one. It leaves the provider's own session as it is.
+
 ## Health
 
 `/healthz` answers 200 `{"status":"ok"}` when the database is reachable and its applied migrations
@@ -112,6 +180,9 @@ in place of the names, as v0.1.0 writes, restores the same way.
 > **A backup leaves the Slack sign-in out.** Slack spends a refresh token once, so a restored copy is
 > one Slack no longer accepts. After a restore, run `debug slack connect` again for each workspace
 > that reads Slack.
+
+A backup also leaves the identity provider's client secret out. After a restore, put
+`oidc-client-secret` back in the credentials folder.
 
 ## Upgrade
 

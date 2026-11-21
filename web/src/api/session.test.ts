@@ -68,6 +68,33 @@ test('the store signs in with the pre-session token, retries once with a fresh o
   assert.equal(snapshot(wrong).session?.signed_in, false);
 });
 
+test('a sign-out keeps the identity provider’s sign-out page it offers, an https one only, until the next sign-in', async () => {
+  const offered = 'https://login.invented.example/logout?client_id=connector-invented-client';
+  const {fetch} = fakeFetch(
+    {json: signedIn('s1')},
+    {json: {signed_in: false, principal: null, end_session_url: offered}},
+    {json: signedOut},
+    {json: signedIn('s2')},
+  );
+  const store = createServerStore(createApiClient(fetch), quiet);
+  await store.start();
+  assert.equal(snapshot(store).endSessionUrl, null);
+  await store.signOut();
+  assert.deepEqual([snapshot(store).session?.signed_in, snapshot(store).endSessionUrl], [false, offered]);
+  await store.signIn('demo-reviewer', 'secret');
+  assert.deepEqual([snapshot(store).session?.signed_in, snapshot(store).endSessionUrl], [true, null]);
+
+  for (const page of ['javascript:alert(1)', 'http://login.invented.example/logout', 42]) {
+    const other = createServerStore(
+      createApiClient(fakeFetch({json: signedIn('s1')}, {json: {signed_in: false, principal: null, end_session_url: page}}, {json: signedOut}).fetch),
+      quiet,
+    );
+    await other.start();
+    await other.signOut();
+    assert.equal(snapshot(other).endSessionUrl, null, `${page} is not offered`);
+  }
+});
+
 // Review round: the session store.
 test('at expiry the view is signed out at once; a failed refresh stays signed out and nothing polls', async () => {
   const timers: Timer[] = [];

@@ -6,6 +6,8 @@
 import type {AccountCards, AccountList, CardDetail, Health, Json, ReceiptView, SessionView, UnitBody, UnitView} from './types.ts';
 
 export const sessionPath = '/api/v1/session';
+// Where the browser starts a sign-in through the company's identity provider.
+export const companySignInPath = '/api/v1/session/oidc';
 export const healthPath = '/healthz';
 export const csrfHeader = 'X-CSRF-Token';
 
@@ -28,7 +30,29 @@ export type ErrorKind =
   | 'redirect'
   | 'mismatch'
   | 'already_signed_in'
-  | 'aborted';
+  | 'aborted'
+  | 'sign_in_denied'
+  | 'sign_in_not_allowed'
+  | 'sign_in_disabled'
+  | 'sign_in_expired'
+  | 'sign_in_unavailable'
+  | 'sign_in_failed';
+
+// The reasons a sign-in through the identity provider comes back refused with, in its sign_in_error
+// parameter, as the kinds the sign-in screen shows.
+export const companyRefusals: Record<string, ErrorKind> = {
+  denied: 'sign_in_denied',
+  not_allowed: 'sign_in_not_allowed',
+  disabled: 'sign_in_disabled',
+  expired: 'sign_in_expired',
+  unavailable: 'sign_in_unavailable',
+  failed: 'sign_in_failed',
+};
+
+// The address that starts a sign-in through the identity provider and comes back to this page.
+export function companySignInHref(page: string): string {
+  return `${companySignInPath}?return=${encodeURIComponent(page)}`;
+}
 
 const kinds: Record<string, ErrorKind> = {
   not_permitted: 'not_permitted',

@@ -33,6 +33,8 @@ func (r *run) human(result any) string {
 		return r.connectText(result.(*strictjson.Object))
 	case "admit":
 		return r.admitText(result.(*strictjson.Object))
+	case "grant", "grants":
+		return r.grantText(result)
 	case "demo":
 		renewal := result.(*strictjson.Object)
 		return fmt.Sprintf("Call-note access was refused (HTTP %s) for a grant without calls:read.\n"+
@@ -186,6 +188,11 @@ func (r *run) connectText(result *strictjson.Object) string {
 	return text
 }
 
+// commandTools are the tools a command's receipt names besides MCP's: a card's seal, and the grant
+// commands' changes.
+var commandTools = map[string]bool{"save_brief": true, grantTool: true, revokeTool: true, disableTool: true,
+	enableTool: true}
+
 // auditTable is one row per receipt: when it started, its tool, its caller's token ID, how it ended, how
 // long it took, its ID and its error. A tool name the connector does not know prints as a quoted literal.
 func (r *run) auditTable(receipts []any) string {
@@ -193,7 +200,7 @@ func (r *run) auditTable(receipts []any) string {
 	for i, value := range receipts {
 		receipt := value.(*strictjson.Object)
 		tool := get(receipt, "tool")
-		if name, _ := tool.(string); mcp.Definitions[name].Scope == "" && cards.ReadScope(name) == "" && name != "save_brief" {
+		if name, _ := tool.(string); mcp.Definitions[name].Scope == "" && cards.ReadScope(name) == "" && !commandTools[name] {
 			tool = strictjson.Quote(name)
 		}
 		elapsed := get(receipt, "elapsed_ms")

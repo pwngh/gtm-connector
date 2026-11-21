@@ -36,6 +36,18 @@ export function refusalText(error: Problem | null | undefined): {title: string; 
         title: 'The server returned another card.',
         detail: 'It is not the card of this account that was asked for, so nothing from it is shown.',
       };
+    case 'sign_in_denied':
+      return {title: 'The sign-in was cancelled.', detail: 'Your company account did not approve it. Sign in again when you are ready.'};
+    case 'sign_in_not_allowed':
+      return {title: 'Your company account may not sign in here.', detail: 'Ask the person who runs this install to allow your account.'};
+    case 'sign_in_disabled':
+      return {title: 'Your access here is turned off.', detail: 'Ask the person who runs this install.'};
+    case 'sign_in_expired':
+      return {title: 'The sign-in took too long or was already used.', detail: 'Nothing was signed in. Sign in again.'};
+    case 'sign_in_unavailable':
+      return {title: 'Your company’s sign-in could not be reached.', detail: 'Nothing was signed in. Try again in a moment.'};
+    case 'sign_in_failed':
+      return {title: 'The sign-in could not be checked.', detail: 'Nothing was signed in. Sign in again.'};
     case 'origin':
     case 'csrf':
       return {title: 'The server refused this request.', detail: 'It was refused even with a fresh sign-in token. Reload the page and try again.'};

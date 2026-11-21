@@ -3,6 +3,8 @@
 // answers, two accounts, the demo book's thirty accounts on Deals, seven on
 // Coverage, blocked browser storage, a session that expires, hostile text in
 // names, gaps and receipts, a static host's answer, and wrong addresses. The
+// company sign-in goes through the stub's own stand-in for the identity
+// provider and back, and is refused, at 320, 390 and 1440. The
 // frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
 // and dark, Coverage at 320, 390 and 1440, Activity and its receipt drawer at
 // 320, 390, 768 and 1440, the Deal card's ledger, Text and
@@ -105,6 +107,9 @@ const sealReceiptOf = card => ({...receiptOf(card.seal_receipt_id, card.account,
 const principal = {id: 'p-1', display_name: `Demo reviewer ${hostile}`, kind: 'person', workspace_id: 'w-1', workspace_kind: 'demo', demo: true};
 const customer = {...principal, id: 'p-3', display_name: 'Customer reader', workspace_kind: 'customer', demo: false};
 const elsewhere = {...principal, id: 'p-2', display_name: 'Another principal'};
+// Who signs in through the company's identity provider, and the provider's own sign-out page.
+const company = {id: 'p-4', display_name: 'Dana Reed', kind: 'person', workspace_id: 'w-2', workspace_kind: 'live', demo: false};
+const providerSignOut = 'https://login.invented.example/logout?client_id=connector-invented-client';
 const login = 'demo-reviewer', password = 'stub-password-for-browser-tests';
 
 // The stub. `stub.steer` answers a request before the stub's own routes when it returns an answer.
@@ -113,7 +118,8 @@ const login = 'demo-reviewer', password = 'stub-password-for-browser-tests';
 // the status /healthz answers. `stub.extra` holds cards served beside the demo's, and `stub.lists`
 // an account's card list where it is not the demo's one card.
 const stub = {sessions: new Map(), pre: new Set(), ttlMs: 3600_000, steer: null, log: [], files: [], pending: 0, granted: new Set(['acc-002', 'acc-003']),
-  accounts, times: null, empty: new Set(), principal, cardLists: 0, mostCardLists: 0, health: 'ok', extra: [], lists: {}};
+  accounts, times: null, empty: new Set(), principal, cardLists: 0, mostCardLists: 0, health: 'ok', extra: [], lists: {},
+  signIn: {oidc: false, demo: true}, companyRefusal: null};
 let base = '';
 // Resolves once no API request has been open for 300 ms.
 async function apiSettled() {
@@ -125,15 +131,15 @@ async function apiSettled() {
 function reset() {
   stub.sessions.clear(); stub.pre.clear(); stub.ttlMs = 3600_000; stub.steer = null; stub.log = []; stub.files = []; stub.granted = new Set(['acc-002', 'acc-003']);
   stub.accounts = accounts; stub.times = null; stub.empty = new Set(); stub.principal = principal; stub.cardLists = 0; stub.mostCardLists = 0; stub.health = 'ok';
-  stub.extra = []; stub.lists = {};
+  stub.extra = []; stub.lists = {}; stub.signIn = {oidc: false, demo: true}; stub.companyRefusal = null;
 }
 // Serves the demo book: thirty granted accounts, each card on its own day.
 function serveBook() {stub.accounts = book; stub.granted = new Set(book.map(item => item.account)); stub.times = bookTime;}
 const token = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 const cookies = request => Object.fromEntries((request.headers.cookie || '').split(';').map(part => part.trim().split('=')).filter(([key]) => key));
 const live = request => {const id = cookies(request).stub_session, session = id && stub.sessions.get(id); return session && session.expires > Date.now() ? [id, session] : [null, null];};
-const view = (id, session) => session ? {signed_in: true, principal: session.principal, csrf_token: `c-${id}`, expires_at: new Date(session.expires).toISOString()}
-  : {signed_in: false, principal: null, csrf_token: `c-${id}`, expires_at: new Date(Date.now() + 3600_000).toISOString()};
+const view = (id, session) => ({...(session ? {signed_in: true, principal: session.principal, csrf_token: `c-${id}`, expires_at: new Date(session.expires).toISOString()}
+  : {signed_in: false, principal: null, csrf_token: `c-${id}`, expires_at: new Date(Date.now() + 3600_000).toISOString()}), sign_in: stub.signIn});
 function send(response, status, body, headers = {}) {
   response.writeHead(status, {...securityHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers});
   response.end(body === undefined ? '' : JSON.stringify(body));
@@ -149,6 +155,30 @@ async function api(request, response, path) {
     if (steered.json !== undefined) return send(response, steered.status ?? 200, steered.json);
   }
   const [id, session] = live(request);
+  // The company sign-in as the Go server runs it, with the stub's stand-in for the provider in between:
+  // the start keeps the page to return to and sends the browser to the provider, and the callback signs
+  // the company person in, or sends the browser back with the reason it was refused.
+  if (path === '/api/v1/session/oidc' || path === '/api/v1/session/oidc/callback') {
+    if (!stub.signIn.oidc) return refuse(response, 404, 'not_found');
+    if (path === '/api/v1/session/oidc') {
+      const back = new URL(request.url, base).searchParams.get('return') || '/';
+      response.writeHead(303, {...securityHeaders, 'Cache-Control': 'no-store', Location: '/stub-provider/authorize',
+        'Set-Cookie': `stub_flow=${encodeURIComponent(back)}; Path=/; HttpOnly; SameSite=Lax`});
+      return response.end();
+    }
+    const back = decodeURIComponent(cookies(request).stub_flow || '%2F');
+    const cleared = 'stub_flow=; Path=/; Max-Age=0';
+    if (stub.companyRefusal) {
+      response.writeHead(303, {...securityHeaders, 'Cache-Control': 'no-store', 'Set-Cookie': cleared,
+        Location: `${back}${back.includes('?') ? '&' : '?'}sign_in_error=${stub.companyRefusal}`});
+      return response.end();
+    }
+    if (id) stub.sessions.delete(id);
+    const next = token(); stub.sessions.set(next, {principal: company, company: true, expires: Date.now() + stub.ttlMs});
+    response.writeHead(303, {...securityHeaders, 'Cache-Control': 'no-store', Location: back,
+      'Set-Cookie': [cleared, `stub_session=${next}; Path=/; HttpOnly; SameSite=Lax`]});
+    return response.end();
+  }
   if (path === '/api/v1/session') {
     if (request.method === 'GET') {
       if (session) return send(response, 200, view(id, session));
@@ -161,7 +191,8 @@ async function api(request, response, path) {
       if (!session) return refuse(response, 401, 'sign_in_required');
       if (csrf !== `c-${id}`) return refuse(response, 403, 'csrf_invalid');
       stub.sessions.delete(id);
-      return send(response, 200, {signed_in: false, principal: null}, {'Set-Cookie': 'stub_session=; Path=/; Max-Age=0'});
+      return send(response, 200, {signed_in: false, principal: null, ...(session.company ? {end_session_url: providerSignOut} : {})},
+        {'Set-Cookie': 'stub_session=; Path=/; Max-Age=0'});
     }
     const pre = cookies(request).stub_pre;
     if (!(session && csrf === `c-${id}`) && !(pre && stub.pre.has(pre) && csrf === `c-${pre}`)) return refuse(response, 403, 'csrf_invalid');
@@ -221,6 +252,10 @@ const server = createServer(async (request, response) => {
     const cardList = /^\/api\/v1\/accounts\/[^/]+\/cards$/.test(path);
     if (cardList) {stub.cardLists++; stub.mostCardLists = Math.max(stub.mostCardLists, stub.cardLists);}
     try {return await api(request, response, path);} finally {stub.pending--; if (cardList) stub.cardLists--;}
+  }
+  if (path === '/stub-provider/authorize') {
+    response.writeHead(303, {Location: '/api/v1/session/oidc/callback?code=invented-code&state=invented-state'});
+    return response.end();
   }
   // /healthz as the Go server answers it: 200 with ok, 503 with any other status.
   if (path === '/healthz') return send(response, stub.health === 'ok' ? 200 : 503, {status: stub.health});
@@ -781,6 +816,80 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [390, 'dark'], [1
     await tab.context().close();
   });
 }
+
+// 13b. The company sign-in: one button that goes to the provider and back to the address that was open,
+// signed in as the company person with no demo tag; a sign-out that offers the provider's own sign-out
+// page; and a refusal that says why and leaves the address clean.
+for (const [width, scheme] of [[320, 'dark'], [390, 'light'], [1440, 'light'], [1440, 'dark']]) {
+  await scenario(`company sign-in ${width} ${scheme}`, async () => {
+    const at = `${width} ${scheme}`;
+    stub.signIn = {oidc: true, demo: false};
+    const tab = await page({width, scheme});
+    await tab.goto(thornfield, {waitUntil: 'networkidle'});
+    await tab.waitForSelector('.fr-signin__company');
+    check(await tab.locator('input[name=password]').count() === 0 && !(await tab.textContent('.fr-signin')).includes('demo-credentials.json'),
+      `${at}: with the demo sign-in off, the sign-in screen has no password field and no demo help`);
+    let facts = await measure(tab);
+    check(healthy(facts), `${at}: the company sign-in screen, ${reported(`${at} company sign-in`, facts)}`);
+    await tab.keyboard.press('Tab');
+    await tab.keyboard.press('Tab');
+    const button = await ring(tab);
+    check(button.name === 'Sign in with your company account' && fits(button),
+      `${at}: Tab reaches Sign in with your company account, at least 44 by 44 with a 3px outline (${button.name} ${Math.round(button.width)}x${Math.round(button.height)} ${button.outline}px)`);
+    if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `company-sign-in-${width}-${scheme}.png`), fullPage: true});
+    await tab.keyboard.press('Enter');
+    await tab.waitForSelector('.fr-who', {state: 'attached'});
+    await until(tab, () => document.querySelector('.fr > .fr-announce[role=status]')?.textContent.startsWith('Signed in as Dana Reed'));
+    check(new URL(tab.url()).pathname === '/deals/acc-003' && await tab.locator('.fr-demo').count() === 0,
+      `${at}: the sign-in comes back to ${new URL(tab.url()).pathname} as Dana Reed, with no demo tag`);
+    await signOut(tab);
+    await tab.waitForSelector('.fr-signin__provider');
+    const offered = await tab.getAttribute('.fr-signin__provider a', 'href');
+    check(offered === providerSignOut && (await tab.textContent('.fr-signin__provider')).includes('You are signed out here.'),
+      `${at}: signing out offers the provider's own sign-out page (${offered})`);
+    facts = await measure(tab);
+    check(healthy(facts), `${at}: signed out with the provider's page offered, ${reported(`${at} company signed out`, facts)}`);
+    check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+    await tab.context().close();
+  });
+}
+
+await scenario('company sign-in refused', async () => {
+  stub.signIn = {oidc: true, demo: false};
+  stub.companyRefusal = 'not_allowed';
+  const tab = await page({width: 390});
+  await tab.goto(`${base}/ops/coverage`, {waitUntil: 'networkidle'});
+  await tab.click('.fr-signin__company');
+  await tab.waitForSelector('.fr-signin [data-refusal="sign_in_not_allowed"]');
+  const url = new URL(tab.url());
+  check(url.pathname === '/ops/coverage' && !url.search.includes('sign_in_error') && !(await signedInNow(tab)) &&
+    (await tab.textContent('[data-refusal]')).includes('Your company account may not sign in here.'),
+    `a refused company sign-in says why on ${url.pathname}${url.search}, signed out, and the reason leaves the address`);
+  await tab.reload({waitUntil: 'networkidle'});
+  await tab.waitForSelector('.fr-signin__company');
+  check(await tab.locator('[data-refusal]').count() === 0, 'after a reload the refusal is gone');
+  check(tab.errors.length === 0 && violations(tab).length === 0, `refused: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+  await tab.context().close();
+});
+
+await scenario('company and demo sign-in side by side', async () => {
+  stub.signIn = {oidc: true, demo: true};
+  const tab = await page({width: 1440});
+  await tab.goto(activity, {waitUntil: 'networkidle'});
+  await tab.waitForSelector('.fr-signin__company');
+  const order = [];
+  for (let i = 0; i < 5; i++) {
+    await tab.keyboard.press('Tab');
+    order.push(await ring(tab));
+  }
+  check(order.map(focus => focus.name).join() === 'Skip to content,Sign in with your company account,login,password,Sign in' && order.every(fits),
+    `both ways in: Tab order is ${order.map(focus => focus.name).join(', ')}`);
+  check(await tab.locator('.fr-signin__subtitle', {hasText: 'The demo workspace'}).count() === 1 &&
+    await tab.locator('.fr-signin__form button.ui-button--plain').count() === 1, 'the demo form sits under its own heading, with the one primary action the company button');
+  await signIn(tab, 'click');
+  check((await tab.textContent('.fr > .fr-announce[role=status]')).startsWith('Signed in as Demo reviewer'), 'the demo sign-in still signs in beside the company one');
+  await tab.context().close();
+});
 
 // 14. The frame, sign-in and theme at 320, 390, 768 and 1440 wide, light and dark.
 for (const width of [320, 390, 768, 1440]) {

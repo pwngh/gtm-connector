@@ -20,6 +20,14 @@ export interface SessionView {
   principal: PrincipalView | null;
   csrf_token?: string;
   expires_at?: string;
+  sign_in?: SignInView;
+  end_session_url?: string;
+}
+
+/** The ways in the install offers: through the company's identity provider, and the demo sign-in. */
+export interface SignInView {
+  oidc: boolean;
+  demo: boolean;
 }
 
 export interface SignInRequest {

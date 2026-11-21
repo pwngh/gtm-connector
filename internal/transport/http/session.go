@@ -72,6 +72,11 @@ func (s *Server) newPreSession() (string, time.Time) {
 		base64.RawURLEncoding.EncodeToString(s.preMAC(payload)), expires
 }
 
+// cookieBase64 reads a signed cookie's parts: unpadded base64url whose
+// unused bits are zero, so each part has one spelling and a cookie that is
+// used up cannot come back respelled.
+var cookieBase64 = base64.RawURLEncoding.Strict()
+
 // preSession checks a pre-session token's signature and expiry.
 func (s *Server) preSession(r *http.Request) (string, time.Time, bool) {
 	cookie, err := r.Cookie(preCookieName)
@@ -82,8 +87,8 @@ func (s *Server) preSession(r *http.Request) (string, time.Time, bool) {
 	if len(parts) != 3 || parts[0] != "p1" {
 		return "", time.Time{}, false
 	}
-	payload, err1 := base64.RawURLEncoding.DecodeString(parts[1])
-	mac, err2 := base64.RawURLEncoding.DecodeString(parts[2])
+	payload, err1 := cookieBase64.DecodeString(parts[1])
+	mac, err2 := cookieBase64.DecodeString(parts[2])
 	if err1 != nil || err2 != nil || len(payload) != 24 || !hmac.Equal(mac, s.preMAC(payload)) {
 		return "", time.Time{}, false
 	}
@@ -94,7 +99,9 @@ func (s *Server) preSession(r *http.Request) (string, time.Time, bool) {
 	return cookie.Value, expires, true
 }
 
-// current gives the request's live signed-in session and its token, if any.
+// current gives the request's live signed-in session and its token, if any. A session of a sign-in this
+// install does not offer now is no session: a demo person's while the demo sign-in is off, and a
+// provider's person's unless the provider signs in that person's workspace here.
 func (s *Server) current(r *http.Request) (string, postgres.Session, bool, error) {
 	cookie, err := r.Cookie(cookieName)
 	if err != nil || !tokenPattern.MatchString(cookie.Value) {
@@ -106,6 +113,11 @@ func (s *Server) current(r *http.Request) (string, postgres.Session, bool, error
 	}
 	if err != nil {
 		return "", postgres.Session{}, false, err
+	}
+	p := session.Principal
+	if (p.Login != "" && s.cfg.DemoSignInOff) || (p.Issuer != "" && (s.cfg.OIDC == nil ||
+		p.Issuer != s.cfg.OIDC.Client.Issuer() || p.WorkspaceID != s.cfg.OIDC.Workspace.ID)) {
+		return "", postgres.Session{}, false, nil
 	}
 	return cookie.Value, session, true, nil
 }
@@ -137,10 +149,22 @@ type sessionView struct {
 	Principal *principalView `json:"principal"`
 	CSRFToken string         `json:"csrf_token,omitempty"`
 	ExpiresAt string         `json:"expires_at,omitempty"`
+	// SignIn is how a person signs in here, on every session view but a sign-out's.
+	SignIn *signInView `json:"sign_in,omitempty"`
+	// EndSessionURL is the identity provider's own sign-out page, which a sign-out of a person who signed
+	// in through it offers when the provider publishes one.
+	EndSessionURL string `json:"end_session_url,omitempty"`
 }
 
-func viewOf(p *postgres.Principal, token string, expires time.Time) sessionView {
-	view := sessionView{CSRFToken: csrfFor(token), ExpiresAt: expires.UTC().Format(time.RFC3339)}
+// signInView is the ways in this install offers: through the identity provider, and the demo sign-in.
+type signInView struct {
+	OIDC bool `json:"oidc"`
+	Demo bool `json:"demo"`
+}
+
+func (s *Server) viewOf(p *postgres.Principal, token string, expires time.Time) sessionView {
+	view := sessionView{CSRFToken: csrfFor(token), ExpiresAt: expires.UTC().Format(time.RFC3339),
+		SignIn: &signInView{OIDC: s.cfg.OIDC != nil, Demo: !s.cfg.DemoSignInOff}}
 	if p != nil {
 		view.SignedIn = true
 		view.Principal = &principalView{ID: p.ID, DisplayName: p.DisplayName, Kind: p.Kind,
@@ -159,7 +183,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok {
-		writeJSON(w, http.StatusOK, viewOf(session.Principal, token, session.ExpiresAt))
+		writeJSON(w, http.StatusOK, s.viewOf(session.Principal, token, session.ExpiresAt))
 		return
 	}
 	pre, expires, ok := s.preSession(r)
@@ -167,7 +191,7 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		pre, expires = s.newPreSession()
 		setCookie(w, preCookieName, pre, expires)
 	}
-	writeJSON(w, http.StatusOK, viewOf(nil, pre, expires))
+	writeJSON(w, http.StatusOK, s.viewOf(nil, pre, expires))
 }
 
 // csrfValid checks the CSRF header against a session's token: exactly one
@@ -224,8 +248,14 @@ type signInRequest struct {
 // signIn signs in a demo principal with its per-install credential. It is
 // admitted by the CSRF token of a live session or of a signed pre-session,
 // and the rotation consumes exactly that one, atomically: a pre-session
-// signs in once, and a session revoked meanwhile signs in nobody.
+// signs in once, and a session revoked meanwhile signs in nobody. While the
+// demo sign-in is off it signs nobody in.
 func (s *Server) signIn(w http.ResponseWriter, r *http.Request, admitted admission) {
+	if s.cfg.DemoSignInOff {
+		writeError(w, http.StatusForbidden, "demo_sign_in_off",
+			"The demo sign-in is off on this install. Sign in with your company account.")
+		return
+	}
 	var request signInRequest
 	if !readJSON(w, r, &request) {
 		return
@@ -256,17 +286,24 @@ func (s *Server) signIn(w http.ResponseWriter, r *http.Request, admitted admissi
 	}
 	clearCookie(w, preCookieName)
 	setCookie(w, cookieName, next, expires)
-	writeJSON(w, http.StatusOK, viewOf(&principal, next, expires))
+	writeJSON(w, http.StatusOK, s.viewOf(&principal, next, expires))
 }
 
-// signOut ends the session. It is a protected write like any other.
+// signOut ends the session here. It is a protected write like any other.
+// For a person who signed in through the identity provider, it also offers
+// the provider's own sign-out page, when the provider publishes one: the
+// provider's session is the provider's to end.
 func (s *Server) signOut(w http.ResponseWriter, r *http.Request, admitted admission) {
 	if err := s.sessions.RevokeSession(r.Context(), digest(admitted.token)); err != nil {
 		internal(w)
 		return
 	}
 	clearCookie(w, cookieName)
-	writeJSON(w, http.StatusOK, sessionView{})
+	view := sessionView{}
+	if s.cfg.OIDC != nil && admitted.principal != nil && admitted.principal.Issuer != "" {
+		view.EndSessionURL = s.cfg.OIDC.Client.EndSessionURL(r.Context())
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 // signedIn admits only a live, signed-in session, and passes its principal on.

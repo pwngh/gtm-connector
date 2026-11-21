@@ -241,6 +241,10 @@ func (r *run) result(ctx context.Context) (any, error) {
 		return r.demo(ctx)
 	case "admit":
 		return r.admit(ctx)
+	case "grant":
+		return r.grant(ctx)
+	case "grants":
+		return r.grants(ctx)
 	}
 	return r.audit(ctx)
 }
