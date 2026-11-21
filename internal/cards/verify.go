@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -94,26 +95,51 @@ var ErrFileTooLarge = errors.New("cards: larger than its kind of file can be")
 // ReadTrustedRows reads an export written one JSON object a line, a line at a time. A line over
 // maxAuditRowBytes is refused.
 func ReadTrustedRows(export io.Reader) (TrustedRows, error) {
-	log := TrustedRows{}
+	log, _, err := readTrustedLines(export)
+	return log, err
+}
+
+// readTrustedLines is ReadTrustedRows, with each row's line as the export held it, by audit ID.
+func readTrustedLines(export io.Reader) (TrustedRows, map[string][]byte, error) {
+	log, lines := TrustedRows{}, map[string][]byte{}
 	scanner := bufio.NewScanner(export)
 	scanner.Buffer(nil, maxAuditRowBytes)
 	for scanner.Scan() {
 		value, err := strictjson.Loads(scanner.Bytes())
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		row, ok := value.(*strictjson.Object)
 		id, _ := row.Get("audit_id")
 		text, isText := id.(string)
 		if !ok || !isText {
-			return nil, errors.New("cards: an audit row has no audit_id")
+			return nil, nil, errors.New("cards: an audit row has no audit_id")
 		}
 		if _, seen := log[text]; seen {
-			return nil, ErrDuplicateReceipt
+			return nil, nil, ErrDuplicateReceipt
 		}
 		log[text] = row
+		lines[text] = append([]byte(nil), scanner.Bytes()...)
 	}
-	return log, scanner.Err()
+	return log, lines, scanner.Err()
+}
+
+// RowsFromLines reads rows kept as the lines of an export, by audit ID, as ReadTrustedRows reads the
+// export. A line that is not the row of its ID is refused.
+func RowsFromLines(lines map[string][]byte) (TrustedRows, error) {
+	log := TrustedRows{}
+	for id, line := range lines {
+		value, err := strictjson.Loads(line)
+		if err != nil {
+			return nil, err
+		}
+		row, ok := value.(*strictjson.Object)
+		if !ok || get(row, "audit_id") != id {
+			return nil, errors.New("cards: an audit row is not the row of its ID")
+		}
+		log[id] = row
+	}
+	return log, nil
 }
 
 // Receipts is audit.read_ids: 1 to 16 distinct IDs, each row with its JSON columns decoded.
@@ -159,7 +185,16 @@ type Admitted struct {
 	AccountID string
 	SHA256    string
 	SealID    string
+	ReadIDs   []string // the read receipts the card sealed, in its order
 	Units     []UnitBinding
+}
+
+func readIDs(reads []receipts.Receipt) []string {
+	ids := make([]string, len(reads))
+	for i, r := range reads {
+		ids[i] = r.AuditID
+	}
+	return ids
 }
 
 func get(o *strictjson.Object, key string) any {
@@ -324,7 +359,7 @@ func VerifyCard(ctx context.Context, payload []byte, briefID string, log Log, bo
 		return nil, err
 	}
 	return &Admitted{Kind: "card", BriefID: briefID, AccountID: account, SHA256: sha(payload), SealID: sealID,
-		Units: admitted}, nil
+		ReadIDs: readIDs(reads), Units: admitted}, nil
 }
 
 var preparedKeys = []string{"kind", "schema_version", "brief_id", "account_id", "as_of", "prepared_by",
@@ -419,7 +454,7 @@ func VerifyPrepared(ctx context.Context, payload []byte, briefID string, log Log
 		return nil, err
 	}
 	return &Admitted{Kind: "selected_brief", BriefID: briefID, AccountID: account, SHA256: sha(payload),
-		SealID: outerID, Units: admitted}, nil
+		SealID: outerID, ReadIDs: readIDs(reads), Units: admitted}, nil
 }
 
 // Folder is a Python state folder as a trusted export holds it: the card files, the prepared briefs, and
@@ -428,6 +463,8 @@ type Folder struct {
 	Cards    map[string][]byte // briefs/<brief ID>.json
 	Prepared map[string][]byte // selected-briefs/<brief ID>.json
 	Log      TrustedRows
+	// Lines is each row of Log as the export held it, by audit ID.
+	Lines map[string][]byte
 	// tooLarge holds, by sub-folder and brief ID ("briefs/<brief ID>"), the refusal of each file over its
 	// size. Such a file was not read.
 	tooLarge map[string]error
@@ -484,7 +521,7 @@ func OpenTrustedExport(dir string) (*Folder, error) {
 		return nil, err
 	}
 	defer export.Close()
-	if f.Log, err = ReadTrustedRows(io.LimitReader(export, maxAuditBytes+1)); err != nil {
+	if f.Log, f.Lines, err = readTrustedLines(io.LimitReader(export, maxAuditBytes+1)); err != nil {
 		return nil, err
 	}
 	// An export that grew past its size while it was read is refused too.
@@ -550,6 +587,37 @@ func openRegular(path string, limit int64) (*os.File, error) {
 		return nil, err
 	}
 	return file, nil
+}
+
+// BriefIDs lists the brief ID of every card and prepared brief file of the folder, those over their size
+// included, in order.
+func (f *Folder) BriefIDs() []string {
+	seen := map[string]bool{}
+	for id := range f.Cards {
+		seen[id] = true
+	}
+	for id := range f.Prepared {
+		seen[id] = true
+	}
+	for key := range f.tooLarge {
+		_, id, _ := strings.Cut(key, "/")
+		seen[id] = true
+	}
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// Payload is the bytes Verify admits for a brief ID: the card file, or the prepared brief when there is
+// no card file.
+func (f *Folder) Payload(briefID string) []byte {
+	if payload, ok := f.Cards[briefID]; ok {
+		return payload
+	}
+	return f.Prepared[briefID]
 }
 
 // Verify admits one card or prepared brief of the folder, by its brief ID. The card file is read first, so a

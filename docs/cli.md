@@ -15,7 +15,7 @@ gtm-connector COMMAND --help
 ```
 
 `help COMMAND` is `COMMAND --help` for `demo`, `connect`, `accounts`, `brief`, `inspect`, `audit`,
-`mcp` and `token`. For any other name it prints the list of commands, as `--help` does. Run with no
+`admit`, `mcp` and `token`. For any other name it prints the list of commands, as `--help` does. Run with no
 command, the binary prints one sentence on what it does and three commands to try first.
 
 [Deal cards](cards.md) explains what a card says and how to read it. This page covers what each
@@ -196,6 +196,7 @@ they have reached. With `--json`, each progress line is one object with a single
 | [`inspect`](#inspect) | One of four results, by the ID given. |
 | [`audit`](#audit) | Array of receipts. |
 | [`demo`](#demo) | With `--state-dir`: one invented renewal. Without it: text only. |
+| [`admit`](#admit) | Object with `cards`, `cards_added` and `receipts_added`. |
 | [`connect`](#connect-results) | Object with `schema_version`, `sources`, and `sellers` or `provider` and `status`. |
 | [`mcp stdio`](#mcp-stdio-and-token) | MCP messages only. |
 | [`token`](#mcp-stdio-and-token) | A token's object, or an array of them. |
@@ -274,8 +275,10 @@ anything but a brief ID, or `--role` with anything but a brief ID alone, exits `
 > workspace is bound to, and every number on it resolves. Otherwise it exits `2`, as does a brief ID
 > this workspace holds no card for: "No saved card has this brief ID in this state folder."
 
-A brief that an assistant prepared with `prepare_renewal_brief` is read with `read_renewal_brief`, not
-with `inspect`, and `inspect` exits `2` and says so. See [MCP](mcp.md).
+A brief that an assistant prepared here with `prepare_renewal_brief` is read with `read_renewal_brief`,
+not with `inspect`, and `inspect` exits `2` and says so. See [MCP](mcp.md). A card or prepared brief
+the Python package saved, brought in with [`admit`](#admit), opens with `inspect` in all four forms,
+checked against the receipts admitted with it.
 
 #### `inspect ACCOUNT_ID`
 
@@ -414,6 +417,50 @@ acc-001  brief-7f121b379c65471babfba70ffe80fabc  5 units  sha256 4c1215e5...
 `--again` publishes a new card for every account, also those that hold one. A grant someone revoked
 stays revoked, and its account gets no card. This form writes text only: with `--json` it exits `2`.
 `--again` with `--state-dir` exits `2`. It needs `setup` first, and exits `1` without the demo sign-in.
+
+### `admit`
+
+`admit FOLDER` brings the cards a state folder of the Python package holds into a workspace, with the
+receipts they rest on. It reads the folder's `briefs/` and `selected-briefs/` files and its audit log
+as `audit.jsonl`, one receipt row a line, as exported from `audit.sqlite3`; the database itself is not
+read.
+
+```sh
+gtm-connector connect demo --state-dir old-cards
+gtm-connector admit ./state --state-dir old-cards
+gtm-connector inspect BRIEF_ID --state-dir old-cards
+```
+
+Each card is checked as `inspect` checks a card: its bytes are the ones its seal receipt names, its
+reads are rows of the log, it was read from the sources the workspace is connected to, and every
+number on it resolves. Then the card is kept as the folder holds it, byte for byte, never made again,
+and the receipts are kept as the log's rows. A card keeps the neutralizer version it was sealed under,
+and `inspect` shows its units as it shows any card's.
+
+A folder any card of which fails a check admits nothing and exits `4` with the card's brief ID and
+the check's sentence, for example:
+
+```text
+Error: brief-2430d066000040008000000000000001: This file is not the card that was sealed: the card or its seal receipt was changed. Nothing was admitted.
+```
+
+Admitting a folder again adds nothing. A card or receipt whose ID the workspace holds with other
+bytes, or a card made here with the same brief ID, exits `3` and admits nothing. A workspace that is
+connected to no CRM exits `2`, as `brief` does.
+
+`--json` gives an object with `cards`, one object per card with `brief_id`, `account_id`, `kind`
+(`cli` for a card saved by `brief` or `demo`, `prepared` for a brief saved by
+`prepare_renewal_brief`) and `added`, then `cards_added` and `receipts_added`. Text output is a table
+of the cards, then the counts:
+
+```text
+brief-2430d066000040008000000000000001  acc-003  saved by brief or demo  added
+1 cards and 5 receipts added.
+List every unit: gtm-connector inspect BRIEF_ID --state-dir old-cards
+```
+
+Admitted cards open with `inspect` and travel in a backup. `audit`, `inspect ACCOUNT_ID`, the web app
+and the MCP tools show only the cards and receipts made here.
 
 ### Connect results
 

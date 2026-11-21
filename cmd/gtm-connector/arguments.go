@@ -52,7 +52,8 @@ var commands = map[string]arguments{
 		{name: "--transport", value: true, choices: []string{"http", "stdio"}}, {name: "--config-file", value: true}},
 		optional: "provider", choices: append(append([]string{"status"}, providerNames()...), assistantApps...),
 		help: connectHelp},
-	"demo": {options: []option{{name: "--again"}}, help: demoHelp},
+	"demo":  {options: []option{{name: "--again"}}, help: demoHelp},
+	"admit": {required: "FOLDER", help: admitHelp},
 }
 
 // parsed is one command line, read.
@@ -301,6 +302,29 @@ Examples:
   gtm-connector inspect BRIEF_ID --role customer
   gtm-connector inspect BRIEF_ID 5 6
   gtm-connector inspect RECEIPT_ID
+`
+
+const admitHelp = `usage: gtm-connector admit [-h] [--json] [--state-dir STATE_DIR] FOLDER
+
+Admit the cards and receipts a Python state folder holds into a workspace.
+Each card is verified against its seal, its reads and the sources the
+workspace is connected to, and kept byte for byte. A folder that fails any
+check admits nothing. Admitting a folder again adds nothing.
+
+positional arguments:
+  FOLDER                A state folder of the Python package, with its audit
+                        log exported as audit.jsonl.
+
+options:
+  -h, --help            show this help message and exit
+  --json                Write the documented JSON result for scripts.
+  --state-dir STATE_DIR
+                        Admit into this workspace (default: demo).
+
+Examples:
+  gtm-connector connect demo --state-dir old-cards
+  gtm-connector admit ./state --state-dir old-cards
+  gtm-connector inspect BRIEF_ID --state-dir old-cards
 `
 
 const auditHelp = `usage: gtm-connector audit [-h] [--json] [--state-dir STATE_DIR]

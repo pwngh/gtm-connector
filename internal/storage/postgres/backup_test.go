@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/cards"
+	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/postgrestest"
 )
@@ -70,6 +72,17 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	_, _, err = f.Store.SaveSlackMapping(ctx, f.Workspace.ID,
 		slackMapping(t, "acc-004", "C0123", "1790000000.000001", strings.Repeat("7", 64)), false, false)
 	ok(t, err)
+	// The Python card of a recorded folder fills the admitted cards and receipts.
+	folder, err := cards.OpenTrustedExport(oracletest.Path(t, "folders/cli_card"))
+	ok(t, err)
+	brief := "brief-2430d066000040008000000000000001"
+	seal := "2430d066-0000-4000-8000-000000000006"
+	added, err := f.Store.Admit(ctx, f.Workspace.ID, []postgres.AdmittedCard{{BriefID: brief, Kind: "cli",
+		AccountID: "acc-003", Bytes: folder.Payload(brief), SealID: seal}}, folder.Lines)
+	ok(t, err)
+	if len(added.Cards) != 1 || len(added.Receipts) != len(folder.Lines) {
+		t.Fatalf("admitted %+v", added)
+	}
 }
 
 // A backup restores every row of every table it holds, column for column,

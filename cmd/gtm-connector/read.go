@@ -231,6 +231,8 @@ func (r *run) result(ctx context.Context) (any, error) {
 		return r.connect(ctx)
 	case "demo":
 		return r.demo(ctx)
+	case "admit":
+		return r.admit(ctx)
 	}
 	return r.audit(ctx)
 }
@@ -357,14 +359,15 @@ func (r *run) inspect(ctx context.Context) (any, error) {
 		if !r.exists {
 			return nil, r.noAuditLog()
 		}
+		var value *strictjson.Object
 		receipt, err := r.store.Receipt(ctx, r.workspace.ID, target)
-		if errors.Is(err, postgres.ErrNotFound) {
-			return nil, refused("Audit receipt not found.")
+		switch {
+		case errors.Is(err, postgres.ErrNotFound):
+			// A receipt the Python package wrote, admitted with its card.
+			value, err = r.admittedReceipt(ctx, target)
+		case err == nil:
+			value, err = receipt.AuditValue()
 		}
-		if err != nil {
-			return nil, err
-		}
-		value, err := receipt.AuditValue()
 		if err != nil {
 			return nil, err
 		}
@@ -446,7 +449,8 @@ func (r *run) account(ctx context.Context, id string) (any, error) {
 func (r *run) sealed(ctx context.Context, brief string, bound evidence.Sources) (*strictjson.Object, error) {
 	stored, err := r.store.CardByBrief(ctx, r.workspace.ID, brief)
 	if errors.Is(err, postgres.ErrNotFound) {
-		return nil, refused("%s", cards.ErrNoCard)
+		// A card the Python package made, admitted into this workspace.
+		return r.admittedCard(ctx, brief, bound)
 	}
 	if err != nil {
 		return nil, err
