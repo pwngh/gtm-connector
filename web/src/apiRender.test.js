@@ -171,8 +171,8 @@ function chrome(html) {
   return {mark: text(bar.split('</span></span>')[0]).trim(), areas: links(bar), pages: links(pages), controls,
     demo: /Demo, invented records/.test(bar), name: bar.match(/class="fr-who">([^<]*)</)?.[1] ?? null};
 }
-const signedInChrome = (path, query) => ({mark: 'gtm-connector', areas: [['Deals', serverPaths.deals, false], ['Ops', serverPaths.evidence + query, true]],
-  pages: [['Evidence', serverPaths.evidence + query, path === serverPaths.evidence], ['Readiness', serverPaths.readiness + query, path === serverPaths.readiness]],
+const signedInChrome = (path, query) => ({mark: 'gtm-connector', areas: [['Deals', serverPaths.deals, false], ['Ops', serverPaths.coverage + query, true]],
+  pages: [['Coverage', serverPaths.coverage + query, path === serverPaths.coverage], ['Evidence', serverPaths.evidence + query, path === serverPaths.evidence], ['Readiness', serverPaths.readiness + query, path === serverPaths.readiness]],
   controls: ['Find a deal', 'Dark theme', 'Sign out', 'Menu'], demo: true, name: 'Demo reviewer'});
 const signedOutChrome = {mark: 'gtm-connector', areas: [], pages: [], controls: [], demo: false, name: null};
 
@@ -197,11 +197,11 @@ for (const [page, path] of [['evidence', serverPaths.evidence], ['readiness', se
 test('the frame keeps the account and open card in its Ops links, never the open unit, and lists Deals first', async () => {
   const html = await renderServer(serverPaths.readiness + '?account=acc-002&card=card-two&unit=4', storeOf(signedIn));
   const {areas, pages} = chrome(html);
-  assert.deepEqual(areas, [['Deals', serverPaths.deals, false], ['Ops', serverPaths.evidence + '?account=acc-002&card=card-two', true]]);
-  assert.deepEqual(pages.map(([label, href]) => [label, href]), [['Evidence', serverPaths.evidence + '?account=acc-002&card=card-two'], ['Readiness', serverPaths.readiness + '?account=acc-002&card=card-two']]);
+  assert.deepEqual(areas, [['Deals', serverPaths.deals, false], ['Ops', serverPaths.coverage + '?account=acc-002&card=card-two', true]]);
+  assert.deepEqual(pages.map(([label, href]) => [label, href]), [['Coverage', serverPaths.coverage + '?account=acc-002&card=card-two'], ['Evidence', serverPaths.evidence + '?account=acc-002&card=card-two'], ['Readiness', serverPaths.readiness + '?account=acc-002&card=card-two']]);
   // From an open deal, Ops opens on that deal's account.
   const fromDeal = chrome(await renderServer('/deals/acc-003?q=wren', storeOf(signedIn)));
-  assert.deepEqual(fromDeal.areas, [['Deals', serverPaths.deals, true], ['Ops', serverPaths.evidence + '?account=acc-003', false]]);
+  assert.deepEqual(fromDeal.areas, [['Deals', serverPaths.deals, true], ['Ops', serverPaths.coverage + '?account=acc-003', false]]);
   assert.deepEqual(fromDeal.pages, []);
 });
 
@@ -264,7 +264,7 @@ for (const path of otherPaths) {
     }
     assert.match(main, /<h1 class="fr-nopage__title">There is no page at this address\.<\/h1>/);
     assert.match(text(main), /Check the address, or start again from Deals or Ops\./);
-    assert.deepEqual([...main.matchAll(/<a [^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(match => [match[1], match[2]]), [[serverPaths.deals, 'Go to Deals'], [serverPaths.evidence, 'Go to Ops']]);
+    assert.deepEqual([...main.matchAll(/<a [^>]*href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(match => [match[1], match[2]]), [[serverPaths.deals, 'Go to Deals'], [serverPaths.coverage, 'Go to Ops']]);
     assert.equal(chrome(html).pages.some(([, , current]) => current), false);
   });
 }
@@ -303,7 +303,7 @@ test('the server app names itself, and its palette and page failure use its own 
   const items = pageItems(() => {}, '?account=acc-003');
   const palette = renderToStaticMarkup(React.createElement(Palette, {items, inputLabel: 'Page name', placeholder: 'Evidence or Readiness', empty: 'No page matches.'}));
   assert.match(palette, /aria-label="Page name"[^>]*placeholder="Evidence or Readiness"/);
-  assert.deepEqual([...palette.matchAll(/<strong class="ui-palette__label">([^<]+)<\/strong>/g)].map(match => match[1]), ['Evidence', 'Readiness']);
+  assert.deepEqual([...palette.matchAll(/<strong class="ui-palette__label">([^<]+)<\/strong>/g)].map(match => match[1]), ['Coverage', 'Evidence', 'Readiness']);
   assert.deepEqual([...palette.matchAll(/class="ui-palette__group" role="presentation">([^<]+)</g)].map(match => match[1]), ['Ops']);
   assert.doesNotMatch(text(palette), /record/i);
   const empty = renderToStaticMarkup(React.createElement(Palette, {items: [], inputLabel: 'Page name', placeholder: '', empty: 'No page matches.'}));

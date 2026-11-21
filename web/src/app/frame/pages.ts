@@ -1,7 +1,7 @@
-import {Building2, FileText, GitBranch, List, type LucideIcon} from 'lucide-react';
+import {Building2, FileText, GitBranch, List, ListChecks, type LucideIcon} from 'lucide-react';
 import type {ComponentType} from 'react';
 import type {AccountView} from '../../api/types.ts';
-import {ApiEvidence, ApiReadiness, Deals} from '../../lazyPages.js';
+import {ApiEvidence, ApiReadiness, Coverage, Deals} from '../../lazyPages.js';
 import type {PaletteItem} from '../../ui/Palette.tsx';
 import {dealAt, dealHref} from '../deals/deals.ts';
 import {serverPaths} from '../routes.ts';
@@ -43,6 +43,14 @@ export const areas: Area[] = [
     path: '/ops',
     subnav: true,
     pages: [
+      {
+        id: 'coverage',
+        label: 'Coverage',
+        path: serverPaths.coverage,
+        icon: ListChecks,
+        sub: 'Which deals have a card, and whether the server is healthy',
+        Page: Coverage,
+      },
       {
         id: 'evidence',
         label: 'Evidence',

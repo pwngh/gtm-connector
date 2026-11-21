@@ -172,3 +172,26 @@ test('a read whose caller stops waiting is aborted, as its own kind, and an abor
   await assert.rejects(api.card('c-1', {signal: stop.signal}), kindOf('aborted'));
   assert.equal(calls.length, 1);
 });
+
+test('health takes 200 and 503 with a status as answers, and anything else as an error', async () => {
+  const {fetch, calls} = fakeFetch(
+    {json: {status: 'ok'}},
+    {status: 503, json: {status: 'migrations_behind'}},
+    {status: 503, json: {status: 'database_unavailable'}},
+    {status: 503, text: 'Service Unavailable', type: 'text/plain'},
+    {status: 200, json: {}},
+    {status: 404, json: {error: {code: 'not_found', message: 'Not found.'}}},
+    {status: 200, broken: true},
+  );
+  const api = createApiClient(fetch);
+  assert.deepEqual(await api.health(), {status: 'ok'});
+  assert.deepEqual(await api.health(), {status: 'migrations_behind'});
+  assert.deepEqual(await api.health(), {status: 'database_unavailable'});
+  assert.equal(calls[0]?.path, '/healthz');
+  assert.equal(calls[0]?.method, 'GET');
+  assert.equal(calls[0]?.headers['X-CSRF-Token'], undefined);
+  await assert.rejects(api.health(), kindOf('server'));
+  await assert.rejects(api.health(), kindOf('unexpected'));
+  await assert.rejects(api.health(), error => error instanceof ApiError && error.kind === 'not_found' && error.code === 'not_found');
+  await assert.rejects(api.health(), kindOf('unreachable'));
+});

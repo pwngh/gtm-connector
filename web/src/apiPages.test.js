@@ -172,9 +172,9 @@ test('no app source renders HTML from a string', () => {
 test('the server palette offers only the server pages, with the chosen account and open card kept', () => {
   const visited = [];
   const items = pages.pageItems(to => visited.push(to), '?account=acc-002&card=card-two&unit=4');
-  assert.deepEqual(items.map(item => [item.group, item.label]), [['Ops', 'Evidence'], ['Ops', 'Readiness']]);
+  assert.deepEqual(items.map(item => [item.group, item.label]), [['Ops', 'Coverage'], ['Ops', 'Evidence'], ['Ops', 'Readiness']]);
   for (const item of items) item.onSelect();
-  assert.deepEqual(visited, [serverPaths.evidence + '?account=acc-002&card=card-two', serverPaths.readiness + '?account=acc-002&card=card-two']);
+  assert.deepEqual(visited, [serverPaths.coverage + '?account=acc-002&card=card-two', serverPaths.evidence + '?account=acc-002&card=card-two', serverPaths.readiness + '?account=acc-002&card=card-two']);
 });
 
 // Minor: the picker commits a choice, it does not navigate on every change.

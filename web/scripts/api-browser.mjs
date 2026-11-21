@@ -1,13 +1,14 @@
 // Browser tests for the app in API mode, against the built app (web/dist) and
-// a stub of /api/v1 that each test steers: delayed and refused answers, two
-// accounts, the demo book's thirty accounts on Deals, blocked browser storage,
-// a session that expires, hostile text in names, gaps and receipts, a static
-// host's answer, and wrong addresses. The
+// a stub of /api/v1 and /healthz that each test steers: delayed and refused
+// answers, two accounts, the demo book's thirty accounts on Deals, seven on
+// Coverage, blocked browser storage, a session that expires, hostile text in
+// names, gaps and receipts, a static host's answer, and wrong addresses. The
 // frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
-// and dark: tab order, target sizes, focus outlines, Escape, overflow, text
-// contrast and what browser storage holds. The stub keeps the Go server's
-// shapes: the session view, the {"error": {code, message}} envelope, the CSRF
-// header and Origin checks, 403 not_permitted for an ungranted account, and the
+// and dark, and Coverage at 320, 390 and 1440: tab order, target sizes, focus
+// outlines, Escape, overflow, text contrast and what browser storage holds.
+// The stub keeps the Go server's shapes: the session view, the {"error":
+// {code, message}} envelope, the CSRF header and Origin checks, 403
+// not_permitted for an ungranted account, the /healthz answers, and the
 // security headers on every response, with the Content-Security-Policy built
 // from basePolicy in internal/transport/http/static.go as the server builds it.
 // The browser reaches nothing but the stub.
@@ -15,8 +16,9 @@
 // It drives the installed Chrome, so it is not part of `npm test`. To run it:
 //   npm run build
 //   npm run test:browser [-- --channel chrome --screenshots DIR --contrast]
-// With --screenshots, the frame's matrix saves one picture per width and theme
-// in DIR; with --contrast, it prints the lowest contrast of each text colour.
+// With --screenshots, the frame's matrix and Coverage save one picture per
+// width and theme in DIR; with --contrast, it prints the lowest contrast of
+// each text colour.
 // The exit code is 1 when any check fails.
 import {createServer} from 'node:http';
 import {createHash} from 'node:crypto';
@@ -75,9 +77,10 @@ const login = 'demo-reviewer', password = 'stub-password-for-browser-tests';
 
 // The stub. `stub.steer` answers a request before the stub's own routes when it returns an answer.
 // `stub.accounts` is the account list it serves, `stub.times` the publish time of each card it
-// lists, `stub.empty` the accounts with no card, and `stub.principal` who signs in.
+// lists, `stub.empty` the accounts with no card, `stub.principal` who signs in, and `stub.health`
+// the status /healthz answers.
 const stub = {sessions: new Map(), pre: new Set(), ttlMs: 3600_000, steer: null, log: [], files: [], pending: 0, granted: new Set(['acc-002', 'acc-003']),
-  accounts, times: null, empty: new Set(), principal, cardLists: 0, mostCardLists: 0};
+  accounts, times: null, empty: new Set(), principal, cardLists: 0, mostCardLists: 0, health: 'ok'};
 let base = '';
 // Resolves once no API request has been open for 300 ms.
 async function apiSettled() {
@@ -88,7 +91,7 @@ async function apiSettled() {
 }
 function reset() {
   stub.sessions.clear(); stub.pre.clear(); stub.ttlMs = 3600_000; stub.steer = null; stub.log = []; stub.files = []; stub.granted = new Set(['acc-002', 'acc-003']);
-  stub.accounts = accounts; stub.times = null; stub.empty = new Set(); stub.principal = principal; stub.cardLists = 0; stub.mostCardLists = 0;
+  stub.accounts = accounts; stub.times = null; stub.empty = new Set(); stub.principal = principal; stub.cardLists = 0; stub.mostCardLists = 0; stub.health = 'ok';
 }
 // Serves the demo book: thirty granted accounts, each card on its own day.
 function serveBook() {stub.accounts = book; stub.granted = new Set(book.map(item => item.account)); stub.times = bookTime;}
@@ -173,6 +176,8 @@ const server = createServer(async (request, response) => {
     if (cardList) {stub.cardLists++; stub.mostCardLists = Math.max(stub.mostCardLists, stub.cardLists);}
     try {return await api(request, response, path);} finally {stub.pending--; if (cardList) stub.cardLists--;}
   }
+  // /healthz as the Go server answers it: 200 with ok, 503 with any other status.
+  if (path === '/healthz') return send(response, stub.health === 'ok' ? 200 : 503, {status: stub.health});
   // As serveApp on the Go server: a reserved path is the API's 404, a file of
   // the build is served, "/" and the client routes get the app, any other path
   // without an extension outside /assets gets 404.html, and the rest plain text.
@@ -497,7 +502,7 @@ for (const [width, scheme] of [[320, 'light'], [1440, 'light'], [320, 'dark'], [
     await tab.waitForSelector('.ui-palette__group:has-text("Deals")');
     const groups = await tab.locator('.ui-palette__group').allTextContents();
     const options = await tab.locator('.ui-palette__label').allTextContents();
-    check(groups.join() === 'Deals,Ops' && options.join('|') === `Second ${hostile} Co.|Third Account Co.|Evidence|Readiness`,
+    check(groups.join() === 'Deals,Ops' && options.join('|') === `Second ${hostile} Co.|Third Account Co.|Coverage|Evidence|Readiness`,
       `${width} ${scheme}: the palette lists the deals by name, as text, then the Ops pages (${groups.join()}: ${options.join('|')})`);
     await tab.locator('.ui-palette__option', {hasText: 'Readiness'}).first().click();
     await until(tab, () => location.pathname.endsWith('/readiness') && new URL(location.href).searchParams.get('account') === 'acc-003');
@@ -563,11 +568,11 @@ await scenario('a static host', async () => {
   await tab.context().close();
 });
 
-// 13. Addresses: "/" opens Deals and /ops opens Evidence; a wrong address inside the app
+// 13. Addresses: "/" opens Deals and /ops opens Coverage; a wrong address inside the app
 // says so with links to both; any other address gets the static page, 404.
 await scenario('home addresses', async () => {
   const tab = await page();
-  for (const [path, opens] of [['/', '/deals'], ['/ops', '/ops/evidence'], ['/?account=acc-003', '/deals']]) {
+  for (const [path, opens] of [['/', '/deals'], ['/ops', '/ops/coverage'], ['/?account=acc-003', '/deals']]) {
     await tab.goto(base + path, {waitUntil: 'networkidle'});
     await tab.waitForSelector('.fr-signin');
     check(new URL(tab.url()).pathname === opens, `${path} opens ${opens} (${new URL(tab.url()).pathname})`);
@@ -582,7 +587,7 @@ await scenario('a wrong address in the app', async () => {
   await tab.waitForSelector('main h1.fr-nopage__title');
   const shown = await tab.evaluate(() => ({heading: document.querySelector('main h1').textContent,
     links: [...document.querySelectorAll('main a')].map(link => `${link.textContent} ${link.getAttribute('href')}`)}));
-  check(shown.heading === 'There is no page at this address.' && shown.links.join() === 'Go to Deals /deals,Go to Ops /ops/evidence',
+  check(shown.heading === 'There is no page at this address.' && shown.links.join() === 'Go to Deals /deals,Go to Ops /ops/coverage',
     `/ops/nothing shows the in-app page and its links (${shown.heading}; ${shown.links.join(', ')})`);
   await tab.click('main a');
   await tab.waitForSelector('.deals-list');
@@ -634,13 +639,145 @@ await scenario('answers that keep their form', async () => {
   await tab.context().close();
 });
 
-// 14. The frame, sign-in and theme at 320, 390, 768 and 1440 wide, light and dark.
+// What the frame and Coverage measure: the lowest contrast of each text colour, by width, theme and screen.
 const measured = [];
 const reported = (what, facts) => {
   measured.push(...Object.entries(facts.colours).map(([colour, ratio]) => `${what} ${colour} ${ratio.toFixed(2)}`));
   return `lowest contrast ${facts.lowest.toFixed(2)}:1, smallest text ${facts.smallest}px, small controls [${facts.small.join(', ')}], unnamed controls [${facts.unnamed.join(', ')}], overflow ${facts.overflow}px`;
 };
 const healthy = facts => facts.lowest >= 4.5 && facts.smallest >= 14 && facts.small.length === 0 && facts.unnamed.length === 0 && facts.overflow <= 0;
+
+// 13b. Coverage: seven deals whose card lists are slow, one refused. At most
+// four lists are read at once, a list not in yet says Reading, each count
+// filters the table by the address and equals its rows, sorting moves rows
+// and aria-sort, each health answer has its sentence, and a refused account
+// list replaces the table. Rows are blocks under 720 and a table above it.
+const coverageUrl = `${base}/ops/coverage`;
+const many = ['c-01', 'c-02', 'c-03', 'c-04', 'c-05', 'c-06', 'c-07'];
+const manyAccounts = many.map((id, i) => ({account: id, name: i === 0 ? `Alder ${hostile} Ltd` : ['Birch', 'Cedar', 'Dogwood', 'Elm', 'Fir', 'Gum'][i - 1] + ' Co.'}));
+const listOf = id => {
+  const at = many.indexOf(id), head = account => ({...cards['acc-003'], units: undefined, gaps: undefined, account});
+  const made = Array.from({length: [2, 0, 1, 3, 0, 1, 0][at]}, (_, n) => ({...head(id), id: `card-${id}-${n}`, published_at: `2027-01-${String(15 - n - at).padStart(2, '0')}T15:00:04Z`}));
+  return {account: id, cards: made};
+};
+const steerMany = (method, path) => {
+  if (path === '/api/v1/accounts') return {json: {accounts: manyAccounts}};
+  const match = path.match(/^\/api\/v1\/accounts\/([^/]+)\/cards$/);
+  if (!match) return null;
+  if (match[1] === 'c-07') return {delay: 400, status: 403, code: 'not_permitted'};
+  return {delay: match[1] === 'c-06' ? 2500 : 400, json: listOf(match[1])};
+};
+const coverageFacts = tab => tab.evaluate(() => ({
+  counts: Object.fromEntries([...document.querySelectorAll('.cv-count')].map(button => [button.dataset.filter, Number(button.querySelector('strong').textContent)])),
+  pressed: document.querySelector('.cv-count[aria-pressed="true"]')?.dataset.filter,
+  rows: [...document.querySelectorAll('.cv-table tbody tr')].map(row => row.dataset.account),
+  sorted: [...document.querySelectorAll('.cv-table th[aria-sort]')].map(th => `${th.querySelector('button').dataset.sort} ${th.getAttribute('aria-sort')}`),
+  display: document.querySelector('.cv-table tbody tr') && getComputedStyle(document.querySelector('.cv-table tbody tr')).display,
+  overflow: document.documentElement.scrollWidth - innerWidth,
+}));
+const allRead = tab => until(tab, () => document.querySelectorAll('.cv-count').length === 4 && !document.querySelector('.cv-reading'));
+
+await scenario('coverage reads', async () => {
+  stub.steer = steerMany;
+  const tab = await page();
+  await tab.goto(coverageUrl, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  await tab.waitForSelector('.cv-table');
+  await until(tab, () => document.querySelector('.cv-reading'));
+  const early = await coverageFacts(tab);
+  check(early.rows.length === 7 && await tab.locator('.cv-reading', {hasText: 'Reading'}).count() > 0, `a row whose list is not in yet says Reading (${early.rows.length} rows)`);
+  await allRead(tab);
+  check(stub.mostCardLists <= 4 && stub.mostCardLists > 1, `at most four card lists are read at once (${stub.mostCardLists} at most)`);
+  const facts = await coverageFacts(tab);
+  check(JSON.stringify(facts.counts) === '{"all":7,"card":4,"none":2,"unread":1}' && facts.pressed === 'all', `the summary counts 7 deals, 4 with a card, 2 with none, 1 not read (${JSON.stringify(facts.counts)})`);
+  const refusedRow = await tab.textContent('.cv-table tr[data-account="c-07"]');
+  check(refusedRow.includes('Not permitted') && refusedRow.includes('not_permitted'), `a refused list says Not permitted in its row (${refusedRow})`);
+  const none = await tab.textContent('.cv-table tr[data-account="c-02"]');
+  check(none.includes('No card') && none.includes('Nothing about its sources is inferred from that.'), 'No card is followed by the sentence that nothing is inferred');
+  const injected = await tab.evaluate(() => Boolean(window.__injected) || Boolean(document.querySelector('main img')));
+  check(!injected && (await tab.textContent('.cv-table tr[data-account="c-01"] th')).includes('<img src=x'), 'a hostile deal name renders as text');
+  // Each count filters the table through the address, and equals its rows.
+  for (const filter of ['card', 'none', 'unread', 'all']) {
+    await tab.click(`.cv-count[data-filter="${filter}"]`);
+    await until(tab, wanted => document.querySelector('.cv-count[aria-pressed="true"]')?.dataset.filter === wanted, filter);
+    const shown = await coverageFacts(tab);
+    const show = new URL(tab.url()).searchParams.get('show');
+    check(shown.rows.length === facts.counts[filter] && show === (filter === 'all' ? null : filter), `the ${filter} count (${facts.counts[filter]}) equals the rows it shows (${shown.rows.length}), with show=${show} in the address`);
+  }
+  await tab.goto(`${coverageUrl}?show=none`, {waitUntil: 'networkidle'});
+  await allRead(tab);
+  const linked = await coverageFacts(tab);
+  check(linked.pressed === 'none' && linked.rows.join() === 'c-02,c-05', `a link with show=none opens filtered (${linked.rows.join()})`);
+  // Sorting changes the order and aria-sort.
+  await tab.goto(coverageUrl, {waitUntil: 'networkidle'});
+  await allRead(tab);
+  const byDeal = await coverageFacts(tab);
+  await tab.click('.cv-sort[data-sort="newest"]');
+  const newest = await coverageFacts(tab);
+  await tab.click('.cv-sort[data-sort="newest"]');
+  const newestDown = await coverageFacts(tab);
+  await tab.click('.cv-sort[data-sort="cards"]');
+  const cardsUp = await coverageFacts(tab);
+  check(byDeal.sorted.join() === 'deal ascending' && byDeal.rows.join() === 'c-01,c-02,c-03,c-04,c-05,c-06,c-07', `by default rows sort by deal, ascending (${byDeal.rows.join()})`);
+  check(newest.sorted.join() === 'newest ascending' && newest.rows.join() === 'c-02,c-05,c-06,c-04,c-03,c-01,c-07', `Newest card sorts ascending with aria-sort (${newest.rows.join()})`);
+  check(newestDown.sorted.join() === 'newest descending' && newestDown.rows.join() === 'c-01,c-03,c-04,c-06,c-02,c-05,c-07', `pressed again it sorts descending (${newestDown.rows.join()})`);
+  check(cardsUp.sorted.join() === 'cards ascending' && cardsUp.rows.join() === 'c-02,c-05,c-03,c-06,c-01,c-04,c-07', `Cards sorts by count (${cardsUp.rows.join()})`);
+  // The link opens the newest card on Evidence.
+  await tab.click('.cv-table tr[data-account="c-04"] .cv-open');
+  await until(tab, () => location.pathname === '/ops/evidence');
+  const opened = new URL(tab.url()).searchParams;
+  check(opened.get('account') === 'c-04' && opened.get('card') === 'card-c-04-0', `Open the card leads to Evidence with its account and newest card (${opened})`);
+  check(tab.errors.length === 0 && violations(tab).length === 0, `coverage: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+  await tab.context().close();
+});
+
+await scenario('coverage health and refusal', async () => {
+  const tab = await page();
+  await tab.goto(coverageUrl, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  const said = {
+    ok: 'The database answers and its migrations are this binary’s.',
+    migrations_behind: 'The database answers, but its schema is not this binary’s.',
+    database_unavailable: 'The database did not answer.',
+  };
+  for (const [status, sentence] of Object.entries(said)) {
+    stub.health = status;
+    await tab.reload({waitUntil: 'networkidle'});
+    await tab.waitForSelector(`.cv-server[data-health="${status}"]`);
+    const line = (await tab.textContent('.cv-server')).replace(/\s+/g, ' ').trim();
+    check(line === `Server${sentence} ${status}` || line === `Server ${sentence} ${status}`, `/healthz ${status} shows its sentence (${line})`);
+  }
+  stub.health = 'ok';
+  stub.steer = (method, path) => path === '/api/v1/accounts' ? {status: 403, code: 'not_permitted'} : null;
+  await tab.reload({waitUntil: 'networkidle'});
+  await tab.waitForSelector('.cv [data-refusal="not_permitted"]');
+  const refused = await tab.evaluate(() => ({text: document.querySelector('.cv [data-refusal]').textContent, table: document.querySelectorAll('.cv-table, .cv-count').length}));
+  check(refused.text.startsWith('Not permitted.') && refused.table === 0, `a refused account list shows Not permitted in place of the table (${refused.text})`);
+  await tab.context().close();
+});
+
+for (const [width, scheme] of [[320, 'light'], [390, 'light'], [390, 'dark'], [1440, 'light'], [1440, 'dark']]) {
+  await scenario(`coverage layout ${width} ${scheme}`, async () => {
+    stub.steer = steerMany;
+    const tab = await page({width, scheme});
+    await tab.goto(coverageUrl, {waitUntil: 'networkidle'});
+    await signIn(tab);
+    await allRead(tab);
+    const facts = await coverageFacts(tab);
+    const phone = width < 720;
+    check(facts.display === (phone ? 'grid' : 'table-row') && facts.overflow <= 0, `${width} ${scheme}: rows are ${phone ? 'blocks' : 'a table'} (${facts.display}) and nothing scrolls sideways (${facts.overflow}px)`);
+    const seen = await measure(tab, '.cv');
+    check(healthy(seen), `${width} ${scheme}: Coverage, ${reported(`${width} ${scheme} coverage`, seen)}`);
+    await tab.focus('.cv-sort[data-sort="deal"]');
+    await tab.keyboard.press('Tab');
+    const sortRing = await ring(tab);
+    check(sortRing.name.startsWith('Newest card') && fits(sortRing), `${width} ${scheme}: a sort header takes focus with its ring (${sortRing.name} ${Math.round(sortRing.width)}x${Math.round(sortRing.height)} ${sortRing.outline}px)`);
+    if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `coverage-${width}-${scheme}.png`), fullPage: true});
+    await tab.context().close();
+  });
+}
+
+// 14. The frame, sign-in and theme at 320, 390, 768 and 1440 wide, light and dark.
 for (const width of [320, 390, 768, 1440]) {
   for (const scheme of ['light', 'dark']) {
     await scenario(`frame ${width} ${scheme}`, async () => {
@@ -718,7 +855,7 @@ for (const width of [320, 390, 768, 1440]) {
         }
         const box = await tab.locator('[role=dialog]').boundingBox();
         facts = await measure(tab);
-        check(items.join() === 'Deals,Ops,Evidence,Readiness,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.width === width,
+        check(items.join() === 'Deals,Ops,Coverage,Evidence,Readiness,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.width === width,
           `${at}: the menu fills the screen with ${items.join(', ')}, and Tab stays in it (${trapped.map(focus => focus.name).join(', ')})`);
         check(healthy(facts), `${at}: the menu, ${reported(`${at} menu`, facts)}`);
         if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `menu-${width}-${scheme}.png`)});

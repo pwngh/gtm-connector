@@ -43,6 +43,7 @@ function stream(element) {
   return {done, shell, firstChunk, html: () => chunks.join(''), abort: () => renderer.abort()};
 }
 const routes = [
+  {path: serverPaths.coverage, module: 'Coverage', marker: 'cv', subnav: true},
   {path: serverPaths.deals, module: 'Deals', marker: 'deals-list', subnav: false},
   {path: serverPaths.evidence, module: 'ApiEvidence', marker: 'api-frame', subnav: true},
   {path: serverPaths.readiness, module: 'ApiReadiness', marker: 'api-readiness', subnav: true},
@@ -135,10 +136,10 @@ const serverStartup = ['entry.tsx', 'app/boot.tsx', 'app/ServerApp.tsx', 'app/ro
   'app/deals/deals.ts', 'app/deals/deals.css',
   'api/client.ts', 'api/session.ts', 'api/reads.ts', 'RouteContent.jsx', 'focusElement.js',
   'ui/Button.tsx', 'ui/Field.tsx', 'ui/Refusal.tsx', 'ui/Placeholder.tsx', 'ui/Dialog.tsx', 'ui/Palette.tsx', 'ui/theme.ts',
-  'ui/tokens.css', 'ui/button.css', 'ui/field.css', 'ui/refusal.css', 'ui/placeholder.css', 'ui/dialog.css', 'ui/palette.css',
+  'ui/tokens.css', 'app/ops/coverage.css', 'ui/button.css', 'ui/field.css', 'ui/refusal.css', 'ui/placeholder.css', 'ui/dialog.css', 'ui/palette.css',
   'readiness.css', 'styles.css', 'refinements.css', 'modern.css', 'atelier.css', 'workplan.css', 'chrome.css', 'api.css'];
 // The modules the server's pages load after it.
-const serverPages = ['app/deals/Deals.tsx', 'ApiEvidence.jsx', 'ApiReadiness.jsx', 'ApiFrame.jsx', 'api/selection.ts', 'WorkspaceControls.jsx'];
+const serverPages = ['app/deals/Deals.tsx', 'app/ops/Coverage.tsx', 'app/ops/coverageRows.ts', 'app/ops/pooledReads.ts', 'ApiEvidence.jsx', 'ApiReadiness.jsx', 'ApiFrame.jsx', 'api/selection.ts', 'WorkspaceControls.jsx'];
 
 test('production chunks: the server app starts with its shell alone, and each page loads on its own', async t => {
   const previous = process.env.NODE_ENV;
@@ -172,7 +173,7 @@ test('production chunks: the server app starts with its shell alone, and each pa
   const serverCss = String(asset(css[0]).source);
   assert.ok(serverCss.indexOf('.rd-page{') < serverCss.indexOf('--ink:#17243a'));
   // The server pages load on their own.
-  for (const page of ['app/deals/Deals.tsx', 'ApiEvidence.jsx', 'ApiReadiness.jsx']) assert.ok(holding(page).isDynamicEntry && !startup.has(holding(page).fileName), page);
+  for (const page of ['app/deals/Deals.tsx', 'app/ops/Coverage.tsx', 'ApiEvidence.jsx', 'ApiReadiness.jsx']) assert.ok(holding(page).isDynamicEntry && !startup.has(holding(page).fileName), page);
   for (const chunk of chunks) assert.ok(Buffer.byteLength(chunk.code) < 500_000, chunk.fileName + ' exceeds 500 kB');
   // The palette ships with the shell, so the first keystrokes reach its input.
   assert.ok(sources(entry).includes('ui/Palette.tsx'));

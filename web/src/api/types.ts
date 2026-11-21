@@ -129,6 +129,11 @@ export interface AccountCards {
   cards: CardView[];
 }
 
+/** GET /healthz, a map in Go: 200 when status is "ok", 503 otherwise. */
+export interface Health {
+  status: string;
+}
+
 /** The body of every refusal. */
 export interface ErrorBody {
   error: {code: string; message: string};
