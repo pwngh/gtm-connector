@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
-
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
@@ -107,9 +105,9 @@ func (r *run) announce(line string) {
 }
 
 // reads is what the workspace is connected to. A workspace that does not exist has no CRM.
-func (r *run) reads(ctx context.Context) (reads, error) {
+func (r *run) reads(ctx context.Context) (*reads, error) {
 	if !r.exists {
-		return reads{}, errNotConnected
+		return nil, errNotConnected
 	}
 	return workspaceReads(ctx, r.store, r.workspace)
 }
@@ -180,9 +178,9 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 		return &failure{code: 130, message: "Interrupted. Completed local writes are retained.",
 			next: "gtm-connector audit --help"}
 	case errors.Is(err, errNotConnected):
-		return &failure{code: 2, next: "gtm-connector connect --help",
-			message: "No CRM is connected. Run gtm-connector connect salesforce --org ALIAS" + r.here() +
-				", or gtm-connector connect demo" + r.here() + " for invented data."}
+		return r.notConnected()
+	case errors.Is(err, postgres.ErrPinned):
+		return pinnedElsewhere
 	case errors.As(err, &unported):
 		return &failure{code: 3, message: unported.Error()}
 	case errors.As(err, &request):
@@ -201,26 +199,19 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 		return &failure{code: 3, message: "A source of this workspace was connected again while it was read; " +
 			"nothing was published. Run the command again."}
 	}
-	return &failure{code: 1, message: unexpected(err)}
+	return &failure{code: 1, message: plain(err)}
 }
 
-// unexpected is the one line printed for an error that is none of the kinds a command reports. It names
-// the kind and nothing of the error's own text: a driver's message can hold a host, a role, a database
-// name or part of a statement.
-func unexpected(err error) string {
-	var answered *pgconn.PgError
-	var unreached *pgconn.ConnectError
-	switch {
-	case errors.As(err, &answered) && sqlState.MatchString(answered.Code):
-		return "PostgreSQL error " + answered.Code
-	case errors.As(err, &unreached):
-		return "the database could not be reached"
+// notConnected is the refusal of a workspace with no CRM, with what this build connects. When Salesforce
+// can be attached, it is the Python CLI's own advice.
+func (r *run) notConnected() *failure {
+	advice := "Run gtm-connector connect demo" + r.here() + " for invented data."
+	if kindsNamed("salesforce")[0].attach != nil {
+		advice = "Run gtm-connector connect salesforce --org ALIAS" + r.here() + ", or gtm-connector connect demo" +
+			r.here() + " for invented data."
 	}
-	return "internal error"
+	return &failure{code: 2, next: "gtm-connector connect --help", message: "No CRM is connected. " + advice}
 }
-
-// sqlState is the form of a PostgreSQL error code.
-var sqlState = regexp.MustCompile(`^[0-9A-Z]{5}$`)
 
 func (r *run) result(ctx context.Context) (any, error) {
 	switch r.command {
@@ -248,9 +239,12 @@ func (r *run) accounts(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := from.open(ctx, "crm"); err != nil {
+		return nil, err
+	}
 	r.announce(from.crmLine())
 	query, _ := r.args.text("--query")
-	found, more, err := from.searchAccounts(ctx, r, query)
+	found, more, err := from.searchAccounts(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -280,19 +274,27 @@ func (r *run) brief(ctx context.Context) (any, error) {
 	if !given {
 		asOf = from.day()
 	}
-	r.announce(from.sourcesLine())
-	// A card belongs to an account of its workspace, so an account the CRM holds is listed there first.
-	// An ID or a day that is not one is refused by the maker below, and nothing is read or written for it.
-	if _, dayErr := time.Parse("2006-01-02", asOf); dayErr == nil && accountID.MatchString(account) {
-		if err := from.list(ctx, r, account); err != nil {
-			return nil, err
-		}
-	}
-	scopes := []string{"crm:read", "calls:read", "slack:read"}
+	// The card reads the CRM, Slack, and the calls unless its grant leaves them out. A source it will read
+	// and this build cannot is refused here, before anything is read or written. One it will not read is
+	// not opened.
+	scopes, reading := []string{"crm:read", "calls:read", "slack:read"}, []string{"crm", "calls", "slack"}
 	if _, without := r.args.text("--without-calls"); without {
-		scopes = []string{"crm:read", "slack:read"}
+		scopes, reading = []string{"crm:read", "slack:read"}, []string{"crm", "slack"}
 	}
-	sealed, err := from.maker(r.store).Brief(ctx, cards.Brief{
+	if err := from.open(ctx, reading...); err != nil {
+		return nil, err
+	}
+	r.announce(from.sourcesLine())
+	// The maker's own checks of the request come before any lookup or write: an account ID that is not of
+	// this workspace's CRM, or a day that is not one, is refused with nothing read and nothing written.
+	if err := cards.CheckRequest(from.sources(), account, asOf); err != nil {
+		return nil, err
+	}
+	// A card belongs to an account of its workspace, so an account the CRM holds is listed there first.
+	if err := from.list(ctx, account); err != nil {
+		return nil, err
+	}
+	sealed, err := from.maker().Brief(ctx, cards.Brief{
 		Principal: cards.Principal{WorkspaceID: r.workspace.ID, TokenID: receipts.Fingerprint(randomToken()),
 			Scopes: scopes},
 		OperationID: "brief-" + receipts.RandomID(), AccountID: account, AsOf: asOf, IncludeSlack: true})
@@ -401,8 +403,11 @@ func (r *run) account(ctx context.Context, id string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := from.open(ctx, "crm"); err != nil {
+		return nil, err
+	}
 	r.announce(from.crmLine())
-	found, ok, err := from.account(ctx, r, id)
+	found, ok, err := from.account(ctx, id)
 	if err != nil {
 		return nil, err
 	}

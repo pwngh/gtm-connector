@@ -2,9 +2,12 @@ package postgres_test
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/postgrestest"
@@ -40,17 +43,37 @@ func TestUpdateSourcesSavesAChangeAndFencesIt(t *testing.T) {
 	if strings.Join(sellers, ", ") != "Dana Crest, U0731P9Q2R" {
 		t.Fatalf("the saved sellers: %v", sellers)
 	}
-	for i, change := range [][3]string{{"sf", `{"org": "another-alias"}`, digest}, {"sf", `{"org": "another-alias"}`, ""},
-		{"none", "", ""}} {
+	// A change of binding is a change. An identity that is not given keeps the pin, so the same binding with
+	// none is no change, and detaching keeps it too.
+	for i, change := range [][4]string{{"sf", `{"org": "another-alias"}`, digest, "2"}, {"sf", `{"org": "another-alias"}`, "", "2"},
+		{"none", "", "", "3"}} {
 		after := connect(change[0], change[1], change[2], nil)
-		if after[0].ID != first[0].ID || after[0].Generation != int64(i+2) {
+		if after[0].ID != first[0].ID || fmt.Sprint(after[0].Generation) != change[3] || after[0].IdentitySHA256 != digest {
 			t.Fatalf("change %d left the connection at %+v", i+1, after[0])
 		}
 	}
 	listed, err := f.Store.Connections(ctx, live.ID)
 	ok(t, err)
-	if len(listed) != 1 || listed[0].Mode != "none" || listed[0].Binding != "{}" || listed[0].IdentitySHA256 != "" {
+	if len(listed) != 1 || listed[0].Mode != "none" || listed[0].Binding != "{}" || listed[0].IdentitySHA256 != digest {
 		t.Fatalf("a detached connection keeps %+v", listed)
+	}
+	// The pin holds for any writer: another identity is refused, here and by the database itself, and
+	// nothing is saved.
+	_, err = f.Store.UpdateSources(ctx, live, func([]postgres.Connection) (postgres.SourceUpdate, error) {
+		return postgres.SourceUpdate{Changes: []postgres.SourceChange{{Source: "crm", Mode: "sf",
+			IdentitySHA256: strings.Repeat("cd", 32)}}}, nil
+	})
+	is(t, err, postgres.ErrPinned)
+	conn, err := pgx.Connect(ctx, f.URL)
+	ok(t, err)
+	defer conn.Close(ctx)
+	for _, pin := range []any{nil, strings.Repeat("cd", 32)} {
+		if _, err := conn.Exec(ctx, `UPDATE connections SET identity_sha256 = $2 WHERE id = $1`, first[0].ID, pin); err == nil {
+			t.Errorf("the database changed a pin to %v", pin)
+		}
+	}
+	if after, _ := f.Store.Connections(ctx, live.ID); !slices.Equal(after, listed) {
+		t.Fatalf("a refused identity was saved: %+v", after)
 	}
 	// An empty list replaces the saved one.
 	connect("none", "", "", []string{})

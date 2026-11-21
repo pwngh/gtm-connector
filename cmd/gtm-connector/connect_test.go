@@ -79,7 +79,7 @@ func TestConnectDemoStatusAndRemove(t *testing.T) {
 		t.Fatalf("status after the removal: %+v", status)
 	}
 	if _, message, next := d.refusal(t, 2, append([]string{"accounts"}, where...)...); next != "gtm-connector connect --help" ||
-		!strings.HasPrefix(message, "No CRM is connected. Run gtm-connector connect salesforce --org ALIAS --state-dir 'var/renewals of 2027'") {
+		message != "No CRM is connected. Run gtm-connector connect demo --state-dir 'var/renewals of 2027' for invented data." {
 		t.Fatalf("accounts after the removal: %s", message)
 	}
 	var kept []receiptRow

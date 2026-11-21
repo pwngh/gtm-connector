@@ -53,7 +53,8 @@ type credentials struct {
 }
 
 // openCredentials checks the folder, creating it (and only it) when absent
-// and create is set.
+// and create is set. Its refusals, and those of the files in it, name the
+// folder and a file by what they are, never by their path.
 func openCredentials(dir string, create bool) (*credentials, error) {
 	if dir == "" {
 		return nil, errors.New("set GTM_CREDENTIALS_DIR to the private credentials folder")
@@ -61,12 +62,12 @@ func openCredentials(dir string, create bool) (*credentials, error) {
 	dir = filepath.Clean(dir)
 	if create {
 		if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-			return nil, fmt.Errorf("credentials folder: %w", err)
+			return nil, fmt.Errorf("the credentials folder could not be made: %w", err)
 		}
 	}
 	fd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, fmt.Errorf("credentials folder %s: %w", dir, describe(err))
+		return nil, fmt.Errorf("the credentials folder %w", describe(err))
 	}
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
@@ -75,19 +76,25 @@ func openCredentials(dir string, create bool) (*credentials, error) {
 	}
 	if err := private(stat, true); err != nil {
 		unix.Close(fd)
-		return nil, fmt.Errorf("credentials folder %s: %w", dir, err)
+		return nil, fmt.Errorf("the credentials folder %w", err)
 	}
 	return &credentials{dir: dir, fd: fd}, nil
 }
 
 func (c *credentials) Close() error { return unix.Close(c.fd) }
 
+// absent is a folder or a file that does not exist. It is fs.ErrNotExist to errors.Is.
+type absent struct{}
+
+func (absent) Error() string        { return "does not exist" }
+func (absent) Is(target error) bool { return target == fs.ErrNotExist }
+
 func describe(err error) error {
 	switch {
 	case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
 		return errors.New("is a symbolic link or not a folder")
 	case errors.Is(err, unix.ENOENT):
-		return fs.ErrNotExist
+		return absent{}
 	}
 	return err
 }
@@ -127,7 +134,7 @@ func (c *credentials) read(name string) ([]byte, error) {
 	}
 	fd, err := unix.Openat(c.fd, name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Join(c.dir, name), describe(err))
+		return nil, fmt.Errorf("the credential %s %w", name, describe(err))
 	}
 	file := os.NewFile(uintptr(fd), name)
 	defer file.Close()
@@ -136,7 +143,7 @@ func (c *credentials) read(name string) ([]byte, error) {
 		return nil, err
 	}
 	if err := private(stat, false); err != nil {
-		return nil, fmt.Errorf("%s %w", filepath.Join(c.dir, name), err)
+		return nil, fmt.Errorf("the credential %s %w", name, err)
 	}
 	return io.ReadAll(io.LimitReader(file, 1<<20))
 }
@@ -189,7 +196,7 @@ func (c *credentials) write(name string, data []byte) error {
 func (c *credentials) install(temp, name string) error {
 	if err := unix.Linkat(c.fd, temp, c.fd, name, 0); err != nil {
 		if errors.Is(err, unix.EEXIST) {
-			return fmt.Errorf("%s appeared meanwhile", filepath.Join(c.dir, name))
+			return fmt.Errorf("the credential %s appeared meanwhile", name)
 		}
 		return err
 	}
@@ -246,7 +253,7 @@ func (c *credentials) setUp(hosts []string) (demoCredential, error) {
 	}
 	demo, err := parseDemo(raw)
 	if err != nil {
-		return demoCredential{}, fmt.Errorf("%s: %w", filepath.Join(c.dir, demoFile), err)
+		return demoCredential{}, fmt.Errorf("the credential %s: %w", demoFile, err)
 	}
 	if err := c.ensureCertificate(hosts); err != nil {
 		return demoCredential{}, err

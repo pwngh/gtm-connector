@@ -1,12 +1,20 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"net"
 	"os"
+	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -35,6 +43,92 @@ func refused(format string, values ...any) *failure {
 // exit 1.
 func local(format string, values ...any) *failure {
 	return &failure{code: 1, message: fmt.Sprintf(format, values...)}
+}
+
+// plain is the one line any command prints for an error. A failure prints its own message: it was
+// written here, for the person who runs the install. Every other error prints as a fixed line that names
+// its kind and holds none of its text, because a driver's or a system's message can name a host, a role, a
+// database, a path or part of a statement.
+func plain(err error) string {
+	var (
+		known     *failure
+		answered  *pgconn.PgError
+		unreached *pgconn.ConnectError
+		file      *fs.PathError
+		link      *os.LinkError
+		network   net.Error
+	)
+	switch {
+	case errors.As(err, &known):
+		return known.message
+	case errors.As(err, &answered) && sqlState.MatchString(answered.Code):
+		return "PostgreSQL error " + answered.Code
+	case errors.As(err, &unreached):
+		return "the database could not be reached"
+	case errors.As(err, &file):
+		return "a file could not be read or written" + reason(file.Op, err)
+	case errors.As(err, &link):
+		return "a file could not be read or written" + reason(link.Op, err)
+	case errors.As(err, &network):
+		return "a network connection failed" + reason("", err)
+	}
+	return "internal error"
+}
+
+// sqlState is the form of a PostgreSQL error code.
+var sqlState = regexp.MustCompile(`^[0-9A-Z]{5}$`)
+
+// reason is what the system said went wrong, when it said so by an error number: the operation, and the
+// number's fixed text, such as "no such file or directory". It names no file and no address.
+func reason(operation string, err error) string {
+	var number syscall.Errno
+	if !errors.As(err, &number) {
+		return ""
+	}
+	if operation != "" && !strings.ContainsAny(operation, " /") {
+		return " (" + operation + ": " + number.Error() + ")"
+	}
+	return " (" + number.Error() + ")"
+}
+
+// modulePath opens the package path of every type this program defines.
+const modulePath = "github.com/pwngh/gtm-connector/"
+
+// madeHere is whether an error, and every error it wraps, was made by this program: by one of its own
+// types, or by errors.New, fmt.Errorf or errors.Join. An error of any other type came from a driver, the
+// network, the file system or another library.
+func madeHere(err error) bool {
+	switch wrapping := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, inner := range wrapping.Unwrap() {
+			if !madeHere(inner) {
+				return false
+			}
+		}
+	case interface{ Unwrap() error }:
+		if inner := wrapping.Unwrap(); inner != nil && !madeHere(inner) {
+			return false
+		}
+	}
+	made := reflect.TypeOf(err)
+	for made.Kind() == reflect.Pointer {
+		made = made.Elem()
+	}
+	// A type of this command's own package is in "main" in the binary.
+	packagePath := made.PkgPath() + "/"
+	return packagePath == "errors/" || packagePath == "fmt/" || packagePath == "main/" ||
+		strings.HasPrefix(packagePath, modulePath)
+}
+
+// ownWords marks an error of setup, serve, backup, restore or health that this program made, and nothing
+// else made any part of, as one to print as it is: those commands state their refusals as plain errors.
+// An error that holds one made elsewhere is returned as it is, and plain prints its fixed line.
+func ownWords(err error) error {
+	var known *failure
+	if err == nil || errors.As(err, &known) || !madeHere(err) {
+		return err
+	}
+	return local("%s", err)
 }
 
 // The JSON error code of each exit code.

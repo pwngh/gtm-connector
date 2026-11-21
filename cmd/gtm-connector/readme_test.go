@@ -8,6 +8,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/receipts"
+	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -47,19 +48,16 @@ func asShownInReadme(t *testing.T, printed string) string {
 // from the demo book through the maker the commands use, and traced and laid out by inspect's own code.
 func TestReadmeShowsATracedNumber(t *testing.T) {
 	shown := oracletest.ReadmeBlock(t, "$ gtm-connector inspect")
-	crm, err := demoCRM(ctx, opening{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls, _ := demoCalls(ctx, opening{crm: crm})
-	slack, _ := demoSlack(ctx, opening{crm: crm})
-	from := reads{crm: crm, calls: calls, slack: slack, connections: map[string]string{}}
+	// The demo workspace as its three rows describe it, with its receipts kept in memory.
+	from := &reads{rows: map[string]postgres.Connection{}, kinds: map[string]*sourceKind{},
+		bindings: map[string]*strictjson.Object{}}
 	log := receipts.NewMemory(nil, nil)
 	for _, source := range sourceNames {
-		from.connections[source] = "connection-" + source
-		log.SetGeneration("readme", from.connections[source], 1)
+		from.rows[source] = postgres.Connection{ID: "connection-" + source, Source: source, Mode: "demo", Generation: 1}
+		from.kinds[source], from.bindings[source] = kindOf(source, "demo"), &strictjson.Object{}
+		log.SetGeneration("readme", from.rows[source].ID, 1)
 	}
-	maker := from.maker(nil)
+	maker := from.maker()
 	maker.Receipts = log
 	sealed, err := maker.Brief(ctx, cards.Brief{
 		Principal: cards.Principal{WorkspaceID: "readme", TokenID: receipts.Fingerprint("an invented bearer"),

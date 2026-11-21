@@ -2,10 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -119,6 +123,70 @@ func TestAFailingStorePrintsItsCodeOnly(t *testing.T) {
 		{"demo", "--state-dir", "demo"}} {
 		if code, message, _ := d.refusal(t, 1, tokens...); code != "local_failure" || message != "PostgreSQL error 42501" {
 			t.Errorf("%v: %s, %s", tokens, code, message)
+		}
+	}
+}
+
+// setup, serve, backup, restore and health print a fixed line for what they were given and what failed
+// under them: a database URL set as the listen address is not quoted back, and a credentials folder that
+// does not exist is named by what it is, never by its path.
+func TestTheInstallCommandsPrintNoneOfWhatTheyWereGiven(t *testing.T) {
+	const url = "postgres://invented_owner:invented-password@db.invented.example/invented_database"
+	folder := filepath.Join(t.TempDir(), "invented-missing-folder")
+	t.Setenv("GTM_CONTAINER_LISTEN", "")
+	t.Setenv("GTM_PUBLIC_ORIGIN", "")
+	t.Setenv("GTM_ALLOWED_HOSTS", "")
+	t.Setenv("GTM_DATABASE_URL", url)
+	t.Setenv("GTM_OWNER_DATABASE_URL", url)
+	t.Setenv("GTM_CREDENTIALS_DIR", folder)
+	t.Setenv("GTM_LISTEN", url)
+	for _, argv := range [][]string{{"setup"}, {"serve"}, {"health"}, {"backup", "--out", filepath.Join(folder, "backup.tar")},
+		{"restore", "--in", filepath.Join(folder, "backup.tar")}} {
+		if code, stdout, stderr := line(t, argv...); code != 1 || stdout != "" || stderr != "gtm-connector: GTM_LISTEN is not host:port\n" {
+			t.Errorf("%v with a URL as GTM_LISTEN: exit %d\n%s%s", argv, code, stdout, stderr)
+		}
+	}
+	t.Setenv("GTM_LISTEN", "127.0.0.1:0")
+	if code, _, stderr := line(t, "backup", "--out", filepath.Join(folder, "backup.tar")); code != 1 ||
+		stderr != "gtm-connector: the credentials folder does not exist\n" {
+		t.Errorf("backup with no credentials folder: exit %d\n%s", code, stderr)
+	}
+}
+
+// serve with a database it cannot reach says so in a fixed line when its wait is cut short, and the URL's
+// role, password, host and database stay out of it.
+func TestServeWithAnUnreachableDatabasePrintsAFixedLine(t *testing.T) {
+	t.Setenv("GTM_CONTAINER_LISTEN", "")
+	t.Setenv("GTM_LISTEN", "127.0.0.1:0")
+	t.Setenv("GTM_CREDENTIALS_DIR", t.TempDir())
+	t.Setenv("GTM_DATABASE_URL", "postgres://invented_owner:invented-password@127.0.0.1:1/invented_database?connect_timeout=1")
+	waited, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	var out, errs bytes.Buffer
+	if code := dispatch(waited, []string{"serve"}, screen{out: &out, err: &errs}); code != 1 ||
+		errs.String() != "gtm-connector: the database could not be reached\n" {
+		t.Errorf("serve: exit %d\n%s%s", code, out.String(), errs.String())
+	}
+}
+
+// An error made elsewhere prints its kind, never its text, whatever wraps it; one this program made prints
+// as it is.
+func TestAnInstallCommandsErrorIsItsOwnOrAFixedLine(t *testing.T) {
+	_, missing := os.Open(filepath.Join(t.TempDir(), "invented-backup.tar"))
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("restore: %w", missing), "a file could not be read or written (open: no such file or directory)"},
+		{fmt.Errorf("backup: %w", &pgconn.PgError{Code: "42501", Message: "permission denied for invented_table"}),
+			"PostgreSQL error 42501"},
+		{errors.New("usage: gtm-connector backup --out FILE"), "usage: gtm-connector backup --out FILE"},
+		{fmt.Errorf("%w (run setup first)", absent{}), "does not exist (run setup first)"},
+		{errors.Join(errors.New("the stored archive does not match"), missing), "a file could not be read or written " +
+			"(open: no such file or directory)"},
+	} {
+		if got := plain(ownWords(c.err)); got != c.want {
+			t.Errorf("%v: %s", c.err, got)
 		}
 	}
 }

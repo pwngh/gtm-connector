@@ -50,6 +50,13 @@ type inventedCRM struct {
 	reader  *salesforce.Reader
 	failed  error
 	pending []string // for each read, the tools whose receipt was pending when the read ran
+
+	opened  int    // how many times the opener ran
+	offered string // the pin attach was last handed
+	// onOpen, when set, runs as the opener opens the CRM.
+	onOpen func(o opening)
+	// answer, when set, answers a read in place of the org when it gives true.
+	answer func(ctx context.Context, tool string) ([]*strictjson.Object, bool, error)
 }
 
 func (c *inventedCRM) signedIn(ctx context.Context) (*salesforce.Reader, error) {
@@ -79,6 +86,11 @@ func (c *inventedCRM) started() {
 
 func (c *inventedCRM) Read(ctx context.Context, tool, accountID string) ([]*strictjson.Object, error) {
 	c.started()
+	if c.answer != nil {
+		if records, answered, err := c.answer(ctx, tool); answered {
+			return records, err
+		}
+	}
 	reader, err := c.signedIn(ctx)
 	if err != nil {
 		return nil, err
@@ -92,6 +104,11 @@ func (c *inventedCRM) Read(ctx context.Context, tool, accountID string) ([]*stri
 
 func (c *inventedCRM) SearchAccounts(ctx context.Context, query string) ([]*strictjson.Object, bool, error) {
 	c.started()
+	if c.answer != nil {
+		if records, answered, err := c.answer(ctx, "search_accounts"); answered {
+			return records, false, err
+		}
+	}
 	reader, err := c.signedIn(ctx)
 	if err != nil {
 		return nil, false, err
@@ -106,19 +123,14 @@ func (c *inventedCRM) SearchAccounts(ctx context.Context, query string) ([]*stri
 // inventedAccount is the one account of the invented org: the first of the recorded Salesforce book.
 const inventedAccount = "acc-sf-0012AF6DF49DA83QNG"
 
-// A source is wired by filling its entry of sourceKinds: attach, and the opener of its source. This test
-// registers a CRM that way and changes nothing else. connect then attaches it, status shows it, accounts,
-// inspect and brief read it under receipts committed before each read, the seller list reaches the card,
-// and removing it leaves a workspace that reads nothing, never the demo data.
-func TestASourceRegisteredInItsKindIsReadByEveryCommand(t *testing.T) {
-	d := setUpDemo(t)
-	where := []string{"--state-dir", "invented-books"}
-	connect := append([]string{"connect", "salesforce", "--org", salesforcetest.Alias, "--seller", "Morgan Reed",
-		"--seller", "U0731P9Q2R"}, where...)
-	if _, message, _ := d.refusal(t, 3, connect...); !strings.Contains(message, "not available in this build") {
-		t.Fatalf("before the source is registered: %s", message)
-	}
+// otherOrg is an alias the registered CRM attaches as a second org, with an identity of its own, without
+// signing in.
+const otherOrg = "invented-other-org"
 
+// registerInventedCRM fills the salesforce entry of sourceKinds with the invented CRM, as a Salesforce
+// slice will fill it, until the test ends.
+func registerInventedCRM(t *testing.T, d *demoDatabase) *inventedCRM {
+	t.Helper()
 	crm := &inventedCRM{t: t, d: d, org: salesforcetest.NewOrg(), sf: salesforcetest.NewSF()}
 	var input struct {
 		Input struct {
@@ -132,14 +144,18 @@ func TestASourceRegisteredInItsKindIsReadByEveryCommand(t *testing.T) {
 	if err != nil || crm.org.Add(rows.(*strictjson.Object)) != inventedAccount {
 		t.Fatalf("the recorded org rows are not of %s: %v", inventedAccount, err)
 	}
-	opened := 0
 	kind := kindsNamed("salesforce")[0]
 	saved := *kind
 	t.Cleanup(func() { *kind = saved })
 	kind.attach = func(ctx context.Context, a attaching) (attached, error) {
+		crm.offered = a.pinned
 		alias, given := a.args.text("--org")
 		if !given {
 			return attached{}, refused("connect salesforce needs --org ALIAS.")
+		}
+		binding := strictjson.NewObject("org", alias, "environment", "production")
+		if alias == otherOrg {
+			return attached{binding: binding, identity: strings.Repeat("cd", 32)}, nil
 		}
 		reader, err := salesforce.FromSF(ctx, alias, salesforce.Options{Environment: "production", Runner: crm.sf,
 			Transport: crm.org})
@@ -148,17 +164,34 @@ func TestASourceRegisteredInItsKindIsReadByEveryCommand(t *testing.T) {
 		}
 		identity, err := reader.PrepareConnection(ctx)
 		digest, _ := get(identity.Binding(), "identity_sha256").(string)
-		return attached{binding: strictjson.NewObject("org", alias, "environment", "production"), identity: digest}, err
+		return attached{binding: binding, identity: digest}, err
 	}
-	kind.crm = func(_ context.Context, o opening) (connected[crmSource], error) {
+	kind.crm = func(_ context.Context, o opening) (crmSource, error) {
 		// The opener reads the row and nothing else: the reader signs in on its first read.
-		opened++
+		crm.opened++
 		crm.pinned = o.connection.IdentitySHA256
-		return connected[crmSource]{reads: crm, backend: "salesforce", described: "Salesforce (" +
-			cellText(get(o.binding, "environment")) + "), identity verified",
-			binding: strictjson.NewObject("schema_version", 1, "crm_backend", "salesforce",
-				"identity_sha256", o.connection.IdentitySHA256)}, nil
+		if crm.onOpen != nil {
+			crm.onOpen(o)
+		}
+		return crm, nil
 	}
+	return crm
+}
+
+// A source is wired by filling its entry of sourceKinds: attach, and the opener of its source. This test
+// registers a CRM that way and changes nothing else. connect then attaches it, status shows it, accounts,
+// inspect and brief read it under receipts committed before each read, the seller list reaches the card,
+// and removing it leaves a workspace that reads nothing, never the demo data.
+func TestASourceRegisteredInItsKindIsReadByEveryCommand(t *testing.T) {
+	d := setUpDemo(t)
+	where := []string{"--state-dir", "invented-books"}
+	connect := append([]string{"connect", "salesforce", "--org", salesforcetest.Alias, "--seller", "Morgan Reed",
+		"--seller", "U0731P9Q2R"}, where...)
+	if _, message, _ := d.refusal(t, 3, connect...); !strings.Contains(message, "not available in this build") {
+		t.Fatalf("before the source is registered: %s", message)
+	}
+
+	crm := registerInventedCRM(t, d)
 
 	var attached, status connectResult
 	d.result(t, &attached, connect...)
@@ -187,8 +220,8 @@ func TestASourceRegisteredInItsKindIsReadByEveryCommand(t *testing.T) {
 		t.Errorf("connect status:\n%s", stdout)
 	}
 	// Status opened nothing and no login ran for it: connect ran the two login commands once.
-	if opened != 0 || len(crm.sf.Commands) != 2 {
-		t.Errorf("status opened the source %d times, and sf ran %d commands", opened, len(crm.sf.Commands))
+	if crm.opened != 0 || len(crm.sf.Commands) != 2 {
+		t.Errorf("status opened the source %d times, and sf ran %d commands", crm.opened, len(crm.sf.Commands))
 	}
 	// The demo data never joins a real source, and a source with no entry filled stays refused.
 	if _, message, _ := d.refusal(t, 3, append([]string{"connect", "demo"}, where...)...); !strings.Contains(message, "real sources") {

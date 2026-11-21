@@ -44,10 +44,16 @@ func connections(ctx context.Context, q querier, workspaceID string) ([]Connecti
 // SourceChange is what one source of a workspace is to be connected to. Mode
 // "none" detaches it.
 type SourceChange struct {
-	Source, Mode   string
-	Binding        string // the text of one JSON object; "" is the empty object
-	IdentitySHA256 string // "" when the source is pinned to no identity
+	Source, Mode string
+	Binding      string // the text of one JSON object; "" is the empty object
+	// IdentitySHA256 pins the source to one identity. "" keeps the pin the
+	// connection has: a pin is never cleared, not even by detaching.
+	IdentitySHA256 string
 }
+
+// ErrPinned refuses a change that would connect a source to another identity
+// than the one it is pinned to.
+var ErrPinned = errors.New("the source is pinned to another identity")
 
 // SourceUpdate is one change to what a workspace reads.
 type SourceUpdate struct {
@@ -61,8 +67,10 @@ type SourceUpdate struct {
 // they are then, and saves what decide returns in the same transaction: each
 // source's connection, made if absent, and the seller list. A connection
 // whose mode, binding or identity changes moves to its next generation, so a
-// read that started before the change cannot finish ok. It returns the
-// connections as they are afterwards. When decide fails nothing is saved.
+// read that started before the change cannot finish ok. A connection pinned
+// to one identity is never given another (ErrPinned). It returns the
+// connections as they are afterwards. When decide fails, or any change is
+// refused, nothing is saved.
 func (s *Store) UpdateSources(ctx context.Context, w Workspace,
 	decide func(current []Connection) (SourceUpdate, error)) ([]Connection, error) {
 	if !validUUID(w.ID) {
@@ -98,11 +106,14 @@ func (s *Store) UpdateSources(ctx context.Context, w Workspace,
 				INSERT INTO connections (workspace_id, workspace_kind, source, mode, binding, identity_sha256)
 				VALUES ($1, $2, $3, $4, $5, $6)
 				ON CONFLICT (workspace_id, source) DO UPDATE
-				   SET mode = excluded.mode, binding = excluded.binding, identity_sha256 = excluded.identity_sha256,
+				   SET mode = excluded.mode, binding = excluded.binding,
+				       identity_sha256 = coalesce(excluded.identity_sha256, connections.identity_sha256),
 				       generation = connections.generation + 1, updated_at = now()
-				 WHERE (connections.mode, connections.binding, connections.identity_sha256)
-				       IS DISTINCT FROM (excluded.mode, excluded.binding, excluded.identity_sha256)`,
-				w.ID, w.Kind, c.Source, c.Mode, binding, identity); err != nil {
+				 WHERE (connections.mode, connections.binding, connections.identity_sha256) IS DISTINCT FROM
+				       (excluded.mode, excluded.binding, coalesce(excluded.identity_sha256, connections.identity_sha256))`,
+				w.ID, w.Kind, c.Source, c.Mode, binding, identity); sqlState(err) == "GT019" {
+				return ErrPinned
+			} else if err != nil {
 				return err
 			}
 		}

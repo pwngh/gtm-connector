@@ -39,6 +39,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -63,7 +64,11 @@ var firstCommands = []string{"gtm-connector demo", "gtm-connector connect demo",
 // restore, health and version are this binary's besides, and --help lists them all.
 var listedCommands = []string{"demo", "connect", "accounts", "brief", "inspect", "audit", "mcp", "debug"}
 
-const usage = `usage: gtm-connector [--version] [--json] COMMAND ...
+// notInBuild are the commands among them that this binary does not run yet. Each is refused by name, here
+// and nowhere else: a command leaves this list when it is ported.
+var notInBuild = []string{"mcp", "debug"}
+
+var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
 
 ` + description + `
 
@@ -82,8 +87,7 @@ const usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   version                     print the commit this binary was built from
 
 demo, connect, accounts, brief, inspect and audit take --json, --state-dir WORKSPACE and --help.
-The mcp and debug commands are not in this build.
-`
+Not in this build: ` + strings.Join(notInBuild, ", ") + ".\n"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -146,16 +150,19 @@ func dispatch(ctx context.Context, argv []string, s screen) int {
 		}
 	case "-h", "--help", "help":
 		fmt.Fprint(s.out, usage)
-	case "mcp", "debug":
-		return s.fail(name, &failure{code: 3, next: "gtm-connector --help",
-			message: name + " is not available in this build."})
 	default:
+		if slices.Contains(notInBuild, name) {
+			return s.fail(name, &failure{code: 3, next: "gtm-connector --help",
+				message: name + " is not available in this build."})
+		}
 		// What was typed is not repeated back.
 		return s.fail(name, &failure{code: 2, next: "gtm-connector --help",
 			message: "argument COMMAND: invalid choice (choose from " + quotedChoices(listedCommands) + ")"})
 	}
 	if err != nil {
-		fmt.Fprintln(s.err, "gtm-connector:", err)
+		// These commands state their refusals as plain errors, which print as they are. An error any part
+		// of which was made elsewhere prints as its fixed line.
+		fmt.Fprintln(s.err, "gtm-connector:", plain(ownWords(err)))
 		return 1
 	}
 	return 0
@@ -232,11 +239,12 @@ func loadConfig() (config, error) {
 
 // listenAddress is GTM_LISTEN, which must be a loopback address, unless a
 // container sets GTM_CONTAINER_LISTEN for its own network namespace (where
-// Compose publishes the port on the host's loopback only).
+// Compose publishes the port on the host's loopback only). A value that is
+// refused is not printed back: it may be a database URL set there by mistake.
 func listenAddress(listen, container string) (string, error) {
 	if container != "" {
 		if _, _, err := net.SplitHostPort(container); err != nil {
-			return "", fmt.Errorf("GTM_CONTAINER_LISTEN %q is not host:port", container)
+			return "", errors.New("GTM_CONTAINER_LISTEN is not host:port")
 		}
 		return container, nil
 	}
@@ -245,10 +253,10 @@ func listenAddress(listen, container string) (string, error) {
 	}
 	host, _, err := net.SplitHostPort(listen)
 	if err != nil {
-		return "", fmt.Errorf("GTM_LISTEN %q is not host:port", listen)
+		return "", errors.New("GTM_LISTEN is not host:port")
 	}
 	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-		return "", fmt.Errorf("GTM_LISTEN %q is not a loopback address; the server is for this machine only", listen)
+		return "", errors.New("GTM_LISTEN is not a loopback address; the server is for this machine only")
 	}
 	return listen, nil
 }
@@ -322,7 +330,8 @@ func setUp(ctx context.Context, c config) error {
 // openStore waits up to a minute for a database that cannot be reached yet
 // or says it is starting, as one started beside this process does. Any
 // other failure is final: a URL that cannot be parsed, or a server that
-// answered and refused.
+// answered and refused. A wait that is interrupted gives the last failure
+// with the interruption.
 func openStore(ctx context.Context, url string) (*postgres.Store, error) {
 	deadline := time.Now().Add(time.Minute)
 	for {
@@ -332,7 +341,7 @@ func openStore(ctx context.Context, url string) (*postgres.Store, error) {
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, errors.Join(ctx.Err(), err)
 		case <-time.After(time.Second):
 		}
 	}
@@ -369,7 +378,7 @@ func setupCommand(ctx context.Context, args []string) error {
 func urlHost(origin string) (string, error) {
 	parsed, err := url.Parse(origin)
 	if err != nil || parsed.Host == "" {
-		return "", fmt.Errorf("%q is not an origin", origin)
+		return "", errors.New("GTM_PUBLIC_ORIGIN is not an origin")
 	}
 	return parsed.Host, nil
 }

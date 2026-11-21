@@ -112,7 +112,7 @@ func makeDemoCards(ctx context.Context, store *postgres.Store, login string, aga
 			todo = append(todo, account.ID)
 		}
 	}
-	maker := from.maker(store)
+	maker := from.maker()
 	actor := cards.Principal{WorkspaceID: workspace.ID, PrincipalID: principal.ID,
 		TokenID: receipts.Fingerprint(randomToken()), Scopes: []string{"crm:read", "calls:read", "slack:read"}}
 	operation := receipts.RandomID()
@@ -172,17 +172,25 @@ func (r *run) renewal(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if from.crm.backend != "sqlite" || from.calls.backend != "fixture" || from.slack.backend != "fixture" {
+	if from.backend("crm") != "sqlite" || from.backend("calls") != "fixture" || from.backend("slack") != "fixture" {
 		return nil, elsewhere
+	}
+	crm, err := from.crm(ctx)
+	if err != nil {
+		return nil, err
+	}
+	calls, err := from.calls(ctx)
+	if err != nil {
+		return nil, err
 	}
 	run := "demo-" + strings.ReplaceAll(receipts.RandomID(), "-", "")
 	grant := toolCall{token: receipts.Fingerprint(randomToken()), scopes: []string{"crm:read"}, run: run}
 
 	lookup := grant
 	lookup.request, lookup.tool, lookup.arguments = 1, "search_accounts", strictjson.NewObject("query", renewalName)
-	searched, found, err := from.call(ctx, r.store, r.workspace.ID, lookup,
+	searched, found, err := from.call(ctx, lookup,
 		func(ctx context.Context) ([]*strictjson.Object, error) {
-			accounts, _, err := from.crm.reads.SearchAccounts(ctx, renewalName)
+			accounts, _, err := crm.SearchAccounts(ctx, renewalName)
 			return referenced(accounts), err
 		})
 	if err != nil {
@@ -199,15 +207,15 @@ func (r *run) renewal(ctx context.Context) (any, error) {
 	notes := grant
 	notes.request, notes.tool, notes.account = 2, "read_call_notes", renewalAccount
 	notes.arguments = strictjson.NewObject("account_id", renewalAccount)
-	denied, _, err := from.call(ctx, r.store, r.workspace.ID, notes,
+	denied, _, err := from.call(ctx, notes,
 		func(ctx context.Context) ([]*strictjson.Object, error) {
-			return from.calls.reads.CallNotes(ctx, renewalAccount)
+			return calls.CallNotes(ctx, renewalAccount)
 		})
 	if !errors.Is(err, errDenied) || denied.HTTPStatus == nil || *denied.HTTPStatus != 403 {
 		return nil, errors.Join(unfit("the call-note scope refusal was not enforced"), err)
 	}
 
-	sealed, err := from.maker(r.store).Brief(ctx, cards.Brief{
+	sealed, err := from.maker().Brief(ctx, cards.Brief{
 		Principal: cards.Principal{WorkspaceID: r.workspace.ID, TokenID: receipts.Fingerprint(randomToken()),
 			Scopes: []string{"crm:read", "calls:read", "slack:read"}},
 		OperationID: run + "/card", AccountID: renewalAccount, AsOf: cards.DemoAsOf, IncludeSlack: true})

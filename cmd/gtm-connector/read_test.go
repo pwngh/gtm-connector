@@ -219,8 +219,7 @@ func TestBriefWithoutCallsInANamedWorkspace(t *testing.T) {
 // source the read commands do not read is refused by name and never read as demo data.
 func TestReadCommandsRefuseWhatIsNotConnected(t *testing.T) {
 	d := setUpDemo(t)
-	const advice = "No CRM is connected. Run gtm-connector connect salesforce --org ALIAS%[1]s, or gtm-connector " +
-		"connect demo%[1]s for invented data."
+	const advice = "No CRM is connected. Run gtm-connector connect demo%[1]s for invented data."
 	for _, tokens := range [][]string{{"accounts"}, {"brief", "acc-003"}, {"inspect", "acc-003"},
 		{"brief", "not an account"}} {
 		if code, message, next := d.refusal(t, 2, tokens...); code != "usage_error" ||

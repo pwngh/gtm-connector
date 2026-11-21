@@ -207,10 +207,26 @@ func (r *run) connected(ctx context.Context) (any, error) {
 	return strictjson.NewObject("schema_version", 1, "sources", sources, "sellers", sellers), err
 }
 
+// pinnedElsewhere refuses a source whose identity is not the one its workspace is pinned to.
+var pinnedElsewhere = &failure{code: 3, next: "gtm-connector connect --help",
+	message: "This workspace belongs to a different connection of this source, and keeps the accounts, cards and " +
+		"receipts read through it. Connect the one it was first connected to, or connect this one in a workspace " +
+		"of its own with --state-dir NAME. Nothing was changed."}
+
+// unpinned refuses a CRM with an identity in a workspace that was connected to a CRM with none.
+var unpinned = &failure{code: 3, next: "gtm-connector connect --help",
+	message: "This workspace has no pinned connection of its CRM, so what it holds may belong to another. " +
+		"Connect this one in a workspace of its own with --state-dir NAME. Nothing was changed."}
+
 // attach connects the run's workspace to the kinds one name of connect stands for, and saves the seller
 // list when one is given. A workspace that does not exist is made, for demo data or for real sources as
 // the kinds are. Each kind checks what was asked before anything is saved, and the rows are saved together
 // or not at all. It returns the workspace's connections as they were and as they are.
+//
+// A source's row keeps the identity it was first connected to, also while it is detached, and an identity
+// that is not that one is refused here for every kind. A CRM with an identity is refused in a workspace
+// whose CRM row has no pin, as the Python package refuses a state folder with no pinned connection. So
+// calls and Slack, which belong to their CRM, are only ever kept beside the CRM they were connected to.
 func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string) (before, after []postgres.Connection, err error) {
 	holds := "demo"
 	if kinds[0].live {
@@ -239,9 +255,22 @@ func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string)
 	}
 	var changes []postgres.SourceChange
 	for _, kind := range kinds {
-		saved, err := kind.attach(ctx, attaching{args: r.args, crm: crm})
+		pinned, present := "", false
+		for _, row := range before {
+			if row.Source == kind.source {
+				pinned, present = row.IdentitySHA256, true
+			}
+		}
+		saved, err := kind.attach(ctx, attaching{args: r.args, crm: crm, pinned: pinned})
 		if err != nil {
 			return nil, nil, err
+		}
+		switch {
+		case pinned != "" && saved.identity != pinned:
+			return nil, nil, pinnedElsewhere
+		case kind.source == "crm" && present && pinned == "" && saved.identity != "":
+			// The workspace was read through a CRM with no pin, so this one is not known to be it.
+			return nil, nil, unpinned
 		}
 		change := postgres.SourceChange{Source: kind.source, Mode: kind.mode, IdentitySHA256: saved.identity}
 		if saved.binding != nil {
