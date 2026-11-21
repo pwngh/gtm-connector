@@ -71,8 +71,8 @@
    "records": 33
   },
   "commands/session.jsonl": {
-   "sha256": "6d31ba3b25adc9890103ee56efff767fd6493e9e56ef3a8d412ae31b8cee663b",
-   "bytes": 122867,
+   "sha256": "330b73ba7f17750c666fcbd5b083da14fc2faff8d4416cb8d0ae0e62fefd4d77",
+   "bytes": 123719,
    "records": 33
   },
   "corpora/patterns.json": {

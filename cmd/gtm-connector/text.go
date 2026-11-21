@@ -16,10 +16,7 @@ import (
 func (r *run) human(result any) string {
 	switch r.command {
 	case "accounts":
-		rows, whole := result.([]any)
-		if !whole {
-			rows, _ = get(result.(*strictjson.Object), "accounts").([]any)
-		}
+		rows, _ := get(result.(*strictjson.Object), "accounts").([]any)
 		cells := make([][]any, len(rows))
 		for i, row := range rows {
 			account := row.(*strictjson.Object)
