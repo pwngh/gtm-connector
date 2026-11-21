@@ -22,6 +22,22 @@ type Store struct {
 	// crash, when set by a test, is called at named points inside a
 	// transaction; an error it returns aborts that transaction there.
 	crash func(point string) error
+	// publishLock and publishStatement, when a test sets them, stand in for
+	// publishLockTimeout and publishStatementTimeout.
+	publishLock, publishStatement time.Duration
+}
+
+// publishTimeouts are how long a publication's transaction waits on a lock
+// and runs one statement.
+func (s *Store) publishTimeouts() (lock, statement time.Duration) {
+	lock, statement = publishLockTimeout, publishStatementTimeout
+	if s.publishLock > 0 {
+		lock = s.publishLock
+	}
+	if s.publishStatement > 0 {
+		statement = s.publishStatement
+	}
+	return lock, statement
 }
 
 // Open connects to the database at url and checks that it answers. It does

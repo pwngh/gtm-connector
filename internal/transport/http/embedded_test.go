@@ -91,13 +91,16 @@ var (
 )
 
 // An embedded build answers every path as the folder does: the same status,
-// body, content type, caching and policy. Only client routes get the app's
-// HTML, and a reserved path or a missing asset never does.
+// body, content type, caching, tag and policy. Only client routes get the
+// app's HTML under the page's own tag, and a reserved path or a missing asset
+// never does.
 func TestAnEmbeddedBuildIsServedAsAFolderIs(t *testing.T) {
 	folder := surface(t)
 	embedded := serving(t, httptransport.Config{Web: embeddedBuild(t)})
-	same := []string{"Content-Type", "Content-Length", "Cache-Control", "Content-Disposition",
+	same := []string{"Content-Type", "Content-Length", "Cache-Control", "ETag", "Content-Disposition",
 		"Content-Security-Policy", "X-Content-Type-Options", "Accept-Ranges", "Location"}
+	// The page's tag is true of the page alone: no other response carries it.
+	pageTag := tagOf(send(folder, http.MethodGet, "/", "127.0.0.1:8443", nil).Body.Bytes())
 	compare := func(method, path, host string, header http.Header) *httptest.ResponseRecorder {
 		t.Helper()
 		want, got := send(folder, method, path, host, header), send(embedded, method, path, host, header)
@@ -121,7 +124,7 @@ func TestAnEmbeddedBuildIsServedAsAFolderIs(t *testing.T) {
 			client, missing := slices.Contains(clientPaths, path), slices.Contains(notFoundPaths, path)
 			html := strings.HasPrefix(w.Header().Get("Content-Type"), "text/html")
 			body := w.Body.String()
-			if client != (html && w.Code == http.StatusOK && w.Header().Get("Cache-Control") == "no-cache") ||
+			if client != (html && w.Code == http.StatusOK && w.Header().Get("ETag") == pageTag) ||
 				missing != (html && w.Code == http.StatusNotFound) ||
 				(method == http.MethodGet && (client != strings.Contains(body, appMarker) || missing != strings.Contains(body, notFoundMarker))) {
 				t.Errorf("%s %s: %d %q, the app's HTML: %t, the not-found page: %t", method, path, w.Code,

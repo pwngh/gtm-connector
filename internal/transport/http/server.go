@@ -57,13 +57,13 @@ type Config struct {
 var DefaultClientRoutes = []string{"/deals", "/ops"}
 
 // Sessions is the storage the surface needs: sessions, and for /healthz
-// whether the applied migrations are this binary's.
+// how the applied migrations stand against this binary's.
 type Sessions interface {
 	LiveSession(ctx context.Context, idSHA256 []byte) (postgres.Session, error)
 	SignIn(ctx context.Context, admitted postgres.Admission, idSHA256 []byte, principal postgres.Principal, ttl time.Duration) (time.Time, error)
 	RevokeSession(ctx context.Context, idSHA256 []byte) error
 	DemoPrincipalByLogin(ctx context.Context, login string) (postgres.Principal, []byte, error)
-	MigrationsCurrent(ctx context.Context) (bool, error)
+	MigrationState(ctx context.Context) (postgres.MigrationState, error)
 }
 
 // Server is the browser surface.
@@ -204,6 +204,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header.Set("Cross-Origin-Opener-Policy", "same-origin")
 	header.Set("Cross-Origin-Resource-Policy", "same-origin")
 	header.Set("Content-Security-Policy", s.policy)
+	if underReserved(r.URL.Path) {
+		// No answer under the API, MCP, discovery or health paths is kept by a
+		// browser or a proxy, whoever writes it: a handler, the router, or
+		// the redirect to the public origin.
+		header.Set("Cache-Control", "no-store")
+	}
 	if s.cfg.MCP != nil && r.URL.Path == "/mcp" {
 		// The gateway admits only the public origin's own Host, with no
 		// Origin header, and refuses anything else itself. It is asked before
@@ -303,8 +309,10 @@ func (s *Server) checkOrigin(r *http.Request) (code, message string) {
 }
 
 // healthz answers ok when the database answers and its applied migrations
-// are this binary's. Otherwise it answers 503 with one of two fixed
-// statuses, never with the error, which can name the database.
+// are this binary's. Otherwise it answers 503 with one of four fixed
+// statuses, never with the error, which can name the database:
+// migrations_behind, migrations_ahead and migrations_changed are the states
+// serve refuses to start on, and database_unavailable is no answer.
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use GET.")
@@ -312,11 +320,13 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
-	code, status := http.StatusOK, "ok"
-	if current, err := s.sessions.MigrationsCurrent(ctx); err != nil {
-		code, status = http.StatusServiceUnavailable, "database_unavailable"
-	} else if !current {
-		code, status = http.StatusServiceUnavailable, "migrations_not_current"
+	code, status := http.StatusServiceUnavailable, "database_unavailable"
+	switch state, err := s.sessions.MigrationState(ctx); {
+	case err != nil:
+	case state == postgres.MigrationsCurrent:
+		code, status = http.StatusOK, "ok"
+	default:
+		status = "migrations_" + string(state)
 	}
 	writeJSON(w, code, map[string]string{"status": status})
 }
