@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/pwngh/gtm-connector/internal/strictjson"
+	"github.com/pwngh/gtm-connector/internal/unicodetab"
 )
 
 // The invented login every test reads with.
@@ -22,6 +23,11 @@ const (
 	Token          = "invented-salesforce-token-for-book-fixtures"
 	OrganizationID = "00D54481A5CC257EID"
 	QueryPath      = "/services/data/v68.0/query"
+	// UserID and Username are the user the login reads as.
+	UserID   = "0059F2C41D7EA03XKM"
+	Username = "reader@invented-books.example"
+	// UserInfoPath is where a token says which user it reads as.
+	UserInfoPath = "/services/oauth2/userinfo"
 )
 
 // Objects are the four objects the org holds, with the fields each exposes.
@@ -32,8 +38,22 @@ var Objects = map[string][]string{
 	"Contract":    {"Id", "AccountId", "Status", "StatusCode", "StartDate", "ContractTerm", "EndDate"},
 }
 
-var soql = regexp.MustCompile(`^SELECT ([A-Za-z, ]+) FROM (Account|Contact|Opportunity|Contract) ` +
-	`WHERE (Id|AccountId) = '([A-Za-z0-9]{18})' ORDER BY Id LIMIT (101|1001)$`)
+var (
+	soql = regexp.MustCompile(`^SELECT ([A-Za-z, ]+) FROM (Account|Contact|Opportunity|Contract) ` +
+		`WHERE (Id|AccountId) = '([A-Za-z0-9]{18})' ORDER BY Id LIMIT (101|1001)$`)
+	// An account search by a literal part of the name, or of every account, either within a selection.
+	search = regexp.MustCompile(`^SELECT Id, Name, Industry, AccountNumber FROM Account` +
+		`(?: WHERE (?:Name LIKE '%((?:[^\\']|\\.)*)%')?(?: AND )?(?:Id IN \(([^)]*)\))?)? ORDER BY Name, Id LIMIT 101$`)
+	// The opportunities of a selection of accounts.
+	selectedOpportunities = regexp.MustCompile(`^SELECT Id, AccountId, Name, StageName, Amount, CloseDate, IsClosed, ` +
+		`IsWon FROM Opportunity WHERE AccountId IN \(([^)]*)\) ORDER BY Id LIMIT 101$`)
+	quotedID = regexp.MustCompile(`'([A-Za-z0-9]{18})'`)
+	// The contract a renewal plans from.
+	candidate = regexp.MustCompile(`^SELECT Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate ` +
+		`FROM Contract WHERE EndDate >= ([0-9]{4}-[0-9]{2}-[0-9]{2}) AND StatusCode IN \('Draft', 'InApproval', ` +
+		`'Activated'\) ORDER BY EndDate, Id LIMIT 1$`)
+	unescaped = regexp.MustCompile(`\\(.)`)
+)
 
 type cursor struct {
 	object, account string
@@ -50,6 +70,9 @@ type Org struct {
 	Edition string
 	Sandbox bool
 	ID      string
+	// UserID and Username are the user every token reads as, unless Users names another for a token.
+	UserID, Username string
+	Users            map[string][2]string
 	// Intercept, when set, may answer a request in the org's place. Nil from it lets the org answer.
 	Intercept func(*http.Request) *http.Response
 
@@ -66,7 +89,8 @@ type Org struct {
 
 // NewOrg is an empty Enterprise Edition production org.
 func NewOrg() *Org {
-	o := &Org{Token: Token, Edition: "Enterprise Edition", ID: OrganizationID, pageSize: map[[2]string]int{},
+	o := &Org{Token: Token, Edition: "Enterprise Edition", ID: OrganizationID, UserID: UserID, Username: Username,
+		Users: map[string][2]string{}, pageSize: map[[2]string]int{},
 		cursors: map[string]cursor{}, rows: map[string]map[string][]*strictjson.Object{}}
 	for object := range Objects {
 		o.rows[object] = map[string][]*strictjson.Object{}
@@ -142,6 +166,14 @@ func (o *Org) answer(request *http.Request, path, query string) *http.Response {
 	if request.Method != http.MethodGet || request.URL.Scheme != "https" || "https://"+request.URL.Host != Instance {
 		return o.refuse(request)
 	}
+	if path == UserInfoPath && query == "" {
+		user, named := o.Users[strings.TrimPrefix(request.Header.Get("Authorization"), "Bearer ")]
+		if !named {
+			user = [2]string{o.UserID, o.Username}
+		}
+		return Respond(200, encode(strictjson.NewObject("sub", "https://login.salesforce.com/id/"+o.ID+"/"+user[0],
+			"user_id", user[0], "organization_id", o.ID, "preferred_username", user[1], "name", "Invented Reader")))
+	}
 	parts := strings.Split(path, "/")
 	if object := parts[len(parts)-2]; strings.HasSuffix(path, "/describe") && Objects[object] != nil {
 		fields := []any{}
@@ -160,6 +192,18 @@ func (o *Org) answer(request *http.Request, path, query string) *http.Response {
 	case query == "SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1":
 		page = cursor{object: "Organization", rows: []*strictjson.Object{
 			strictjson.NewObject("Id", o.ID, "OrganizationType", o.Edition, "IsSandbox", o.Sandbox)}}
+	case search.MatchString(query):
+		asked := search.FindStringSubmatch(query)
+		page = cursor{object: "Account", rows: o.named(asked[1], selected(asked[2]))}
+	case selectedOpportunities.MatchString(query):
+		var rows []*strictjson.Object
+		for account := range selected(selectedOpportunities.FindStringSubmatch(query)[1]) {
+			rows = append(rows, o.rows["Opportunity"][account]...)
+		}
+		sort.SliceStable(rows, func(i, j int) bool { return idOf(rows[i]) < idOf(rows[j]) })
+		page = cursor{object: "Opportunity", rows: rows[:min(len(rows), 101)]}
+	case candidate.MatchString(query):
+		page = cursor{object: "Contract", rows: o.ending(candidate.FindStringSubmatch(query)[1])}
 	default:
 		asked := soql.FindStringSubmatch(query)
 		if asked == nil || asked[1] != strings.Join(Objects[asked[2]], ", ") ||
@@ -196,6 +240,69 @@ func (o *Org) answer(request *http.Request, path, query string) *http.Response {
 		o.cursors[next] = page
 	}
 	return Respond(200, encode(document))
+}
+
+// selected is the account IDs of an IN list, or nil for none given.
+func selected(list string) map[string]bool {
+	if list == "" {
+		return nil
+	}
+	ids := map[string]bool{}
+	for _, quoted := range quotedID.FindAllStringSubmatch(list, -1) {
+		ids[quoted[1]] = true
+	}
+	return ids
+}
+
+// named is the accounts whose name holds this escaped LIKE text, in any letter case, among the selected ones
+// when there is a selection, by name and then ID, and at most 101 of them, as a search reads them.
+func (o *Org) named(escaped string, within map[string]bool) []*strictjson.Object {
+	part := unicodetab.LowerString(unescaped.ReplaceAllString(escaped, "$1"))
+	var found []*strictjson.Object
+	for account, rows := range o.rows["Account"] {
+		if within != nil && !within[account] {
+			continue
+		}
+		for _, row := range rows {
+			name, _ := row.Get("Name")
+			if text, _ := name.(string); strings.Contains(unicodetab.LowerString(text), part) {
+				found = append(found, row)
+			}
+		}
+	}
+	sort.Slice(found, func(i, j int) bool {
+		a, _ := found[i].Get("Name")
+		b, _ := found[j].Get("Name")
+		if a != b {
+			return a.(string) < b.(string)
+		}
+		return idOf(found[i]) < idOf(found[j])
+	})
+	return found[:min(len(found), 101)]
+}
+
+// ending is the one Draft, InApproval or Activated contract with the earliest EndDate on or after the day,
+// ties broken by ID, or none.
+func (o *Org) ending(day string) []*strictjson.Object {
+	var first *strictjson.Object
+	var firstEnd string
+	for _, rows := range o.rows["Contract"] {
+		for _, row := range rows {
+			value, _ := row.Get("EndDate")
+			status, _ := row.Get("StatusCode")
+			end, dated := value.(string)
+			if !dated || end < day || status != "Draft" && status != "InApproval" && status != "Activated" {
+				continue
+			}
+			if first == nil || end < firstEnd || end == firstEnd && idOf(row) < idOf(first) {
+				first, firstEnd = row, end
+			}
+		}
+	}
+	if first == nil {
+		return []*strictjson.Object{}
+	}
+	return []*strictjson.Object{first}
 }
 
 // refuse keeps a request this org does not know for the test to fail on, and answers it with no data.
@@ -235,8 +342,8 @@ func encode(value any) string {
 type SF struct {
 	// Instance and Token are what the login holds now.
 	Instance, Token string
-	// OrganizationID is the org sf org display names for the alias.
-	OrganizationID string
+	// OrganizationID and Username are the org and the user sf org display names for the alias.
+	OrganizationID, Username string
 	// Answer, when set, answers a command in the login's place.
 	Answer func(ctx context.Context, arguments []string) (output []byte, status int, err error)
 
@@ -245,21 +352,23 @@ type SF struct {
 }
 
 // NewSF is the invented login of Alias.
-func NewSF() *SF { return &SF{Instance: Instance, Token: Token, OrganizationID: OrganizationID} }
+func NewSF() *SF {
+	return &SF{Instance: Instance, Token: Token, OrganizationID: OrganizationID, Username: Username}
+}
 
 // Run answers sf org display and sf org auth show-access-token for Alias as sf --json does, and fails any
 // other command as sf fails one it cannot run.
 func (s *SF) Run(ctx context.Context, arguments []string) ([]byte, int, error) {
 	s.mu.Lock()
 	s.Commands = append(s.Commands, append([]string(nil), arguments...))
-	instance, token, named, answer := s.Instance, s.Token, s.OrganizationID, s.Answer
+	instance, token, named, username, answer := s.Instance, s.Token, s.OrganizationID, s.Username, s.Answer
 	s.mu.Unlock()
 	if answer != nil {
 		return answer(ctx, arguments)
 	}
 	result := map[string]*strictjson.Object{
 		"org display --target-org " + Alias + " --json": strictjson.NewObject("id", named,
-			"instanceUrl", instance, "alias", Alias, "connectedStatus", "Connected"),
+			"instanceUrl", instance, "username", username, "alias", Alias, "connectedStatus", "Connected"),
 		"org auth show-access-token --target-org " + Alias + " --json": strictjson.NewObject("accessToken", token),
 	}[strings.Join(arguments, " ")]
 	if result == nil {

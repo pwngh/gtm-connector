@@ -79,7 +79,8 @@ func TestConnectDemoStatusAndRemove(t *testing.T) {
 		t.Fatalf("status after the removal: %+v", status)
 	}
 	if _, message, next := d.refusal(t, 2, append([]string{"accounts"}, where...)...); next != "gtm-connector connect --help" ||
-		message != "No CRM is connected. Run gtm-connector connect demo --state-dir 'var/renewals of 2027' for invented data." {
+		message != "No CRM is connected. Run gtm-connector connect salesforce --org ALIAS --state-dir 'var/renewals of 2027', "+
+			"or gtm-connector connect demo --state-dir 'var/renewals of 2027' for invented data." {
 		t.Fatalf("accounts after the removal: %s", message)
 	}
 	var kept []receiptRow
@@ -104,9 +105,9 @@ func TestConnectDemoStatusAndRemove(t *testing.T) {
 	}
 }
 
-// connect knows salesforce, calls, slack and the assistant apps by name and refuses each plainly, before
-// it opens the database. Nothing is connected, and no later command reads demo data in a refused source's
-// place.
+// connect knows the assistant apps by name and refuses each plainly, before it opens the database.
+// A Salesforce sign-in that sf cannot give is refused before anything is saved. Nothing is connected, and no
+// later command reads demo data in a refused source's place.
 func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 	t.Setenv("GTM_DATABASE_URL", "")
 	refuse := func(code int, tokens ...string) string {
@@ -117,7 +118,7 @@ func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 		}
 		return errs.String()
 	}
-	for _, tokens := range [][]string{{"salesforce", "--org", "invented-alias"}, {"calls"}, {"slack", "--seller", "Dana Crest"},
+	for _, tokens := range [][]string{
 		{"inspector", "--scope", "crm:read"}, {"cursor"}} {
 		want := "Error: connect " + tokens[0] + " is not available in this build. "
 		if message := refuse(3, append(tokens, "--state-dir", "invented")...); !strings.HasPrefix(message, want) ||
@@ -161,7 +162,8 @@ func TestConnectRefusesWhatThisBuildDoesNotConnect(t *testing.T) {
 	}
 
 	d := setUpDemo(t)
-	if _, message, _ := d.refusal(t, 3, "connect", "salesforce", "--org", "invented-alias", "--state-dir", "invented"); !strings.Contains(message, "not available") {
+	inventedSalesforce(t)
+	if _, message, _ := d.refusal(t, 5, "connect", "salesforce", "--org", "invented-alias", "--state-dir", "invented"); !strings.HasPrefix(message, "salesforce_auth_required:") {
 		t.Fatal(message)
 	}
 	if n := d.count(t, "SELECT (SELECT count(*) FROM workspaces WHERE slug <> 'demo') + (SELECT count(*) FROM connections)"); n != 0 {

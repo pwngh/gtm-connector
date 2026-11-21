@@ -101,14 +101,18 @@ func (w *watched) Read(ctx context.Context, tool, account string) (string, []*st
 	return w.Store.Read(ctx, tool, account)
 }
 
-func (w *watched) Search(query string, accounts []string) ([]*strictjson.Object, bool) {
+func (w *watched) Search(_ context.Context, query string, number *string, accounts []string) ([]*strictjson.Object, bool, error) {
+	if number != nil {
+		return nil, false, mcp.ToolError("account_number_requires_salesforce")
+	}
 	w.note("search_accounts")
-	return w.Store.Search(query, accounts)
+	records, more := w.Store.Search(query, accounts)
+	return records, more, nil
 }
 
-func (w *watched) Opportunities(accounts []string) []*strictjson.Object {
+func (w *watched) Opportunities(_ context.Context, accounts []string) ([]*strictjson.Object, error) {
 	w.note("list_opportunities")
-	return w.Store.Opportunities(accounts)
+	return w.Store.Opportunities(accounts), nil
 }
 
 func (w *watched) made() []string {

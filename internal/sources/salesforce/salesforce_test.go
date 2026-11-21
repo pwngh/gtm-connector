@@ -158,6 +158,7 @@ func TestTheCardReadsMapTheFourObjects(t *testing.T) {
 	owned := " WHERE AccountId = '" + account + "' ORDER BY Id LIMIT 1001"
 	requests := []string{
 		queryPrefix + "SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1",
+		salesforcetest.UserInfoPath,
 		"/services/data/v68.0/sobjects/Account/describe",
 		"/services/data/v68.0/sobjects/Contact/describe",
 		"/services/data/v68.0/sobjects/Opportunity/describe",
@@ -284,13 +285,13 @@ func TestAnExpiredTokenAsksSFOnce(t *testing.T) {
 		if len(sf.Commands) != 4 || !reflect.DeepEqual(sf.Commands[2:], loginCommands) {
 			t.Fatalf("sf ran %v", sf.Commands)
 		}
-		// The refused read, the org's identity under the new token, then the read again.
-		if len(org.Requests) != 5 || org.Requests[0] != accountQuery || org.Requests[2] != accountQuery ||
-			org.Requests[1] != queryPrefix+organizationQuery {
+		// The refused read, the org's identity and the user under the new token, then the read again.
+		if len(org.Requests) != 6 || org.Requests[0] != accountQuery || org.Requests[3] != accountQuery ||
+			org.Requests[1] != queryPrefix+organizationQuery || org.Requests[2] != salesforcetest.UserInfoPath {
 			t.Fatalf("the requests:\n%s", strings.Join(org.Requests, "\n"))
 		}
 		// The proved token is kept: the next read asks neither sf nor twice.
-		if _, err := reader.ListOpportunities(context.Background(), accountID); err != nil || len(org.Requests) != 6 ||
+		if _, err := reader.ListOpportunities(context.Background(), accountID); err != nil || len(org.Requests) != 7 ||
 			len(sf.Commands) != 4 {
 			t.Fatal(err, org.Requests, sf.Commands)
 		}
@@ -438,12 +439,12 @@ func TestTheOrgMustBeTheSelectedEnvironment(t *testing.T) {
 		want                 string
 		requests             int
 	}{
-		{"developer", "Developer Edition", false, "", 1},
+		{"developer", "Developer Edition", false, "", 2},
 		{"developer", "Enterprise Edition", false, editionRequired, 1},
 		{"developer", "Developer Edition", true, environmentMismatch, 1},
-		{"sandbox", "Enterprise Edition", true, "", 5},
+		{"sandbox", "Enterprise Edition", true, "", 6},
 		{"sandbox", "Enterprise Edition", false, environmentMismatch, 1},
-		{"production", "Enterprise Edition", false, "", 5},
+		{"production", "Enterprise Edition", false, "", 6},
 		{"production", "Developer Edition", false, environmentMismatch, 1},
 		{"production", "Enterprise Edition", true, environmentMismatch, 1},
 		{"production", " Enterprise Edition", false, invalidResponse, 1},
@@ -460,7 +461,7 @@ func TestTheOrgMustBeTheSelectedEnvironment(t *testing.T) {
 			if codeOf(err) != c.want || len(org.Requests) != c.requests {
 				t.Fatalf("%v after %v", err, org.Requests)
 			}
-			want := Identity{salesforcetest.Instance, salesforcetest.OrganizationID, c.environment}
+			want := Identity{salesforcetest.Instance, salesforcetest.OrganizationID, c.environment, salesforcetest.UserID}
 			if c.want == "" && identity != want {
 				t.Fatalf("the identity: %+v", identity)
 			}

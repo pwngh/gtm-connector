@@ -109,6 +109,41 @@ func (s *Store) IssueClientToken(ctx context.Context, w Workspace, accounts []Cl
 	return issued, err
 }
 
+// TokenWorkspace is the workspace a token with this SHA-256 was issued in, usable or not, or ErrNotFound. It
+// tells a server which workspace's gate to ask; that gate verifies the token in full.
+func (s *Store) TokenWorkspace(ctx context.Context, tokenSHA256 []byte) (Workspace, error) {
+	if len(tokenSHA256) != 32 {
+		return Workspace{}, ErrNotFound
+	}
+	var w Workspace
+	err := s.pool.QueryRow(ctx, `
+		SELECT w.id, w.slug, w.kind, w.display_name FROM machine_tokens t JOIN workspaces w ON w.id = t.workspace_id
+		 WHERE t.token_sha256 = $1`, tokenSHA256).Scan(&w.ID, &w.Slug, &w.Kind, &w.DisplayName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Workspace{}, ErrNotFound
+	}
+	return w, err
+}
+
+// HeldAccounts are the accounts a workspace holds, by ref: those a command has listed in it.
+func (s *Store) HeldAccounts(ctx context.Context, workspaceID string) ([]ClientAccount, error) {
+	if !validUUID(workspaceID) {
+		return nil, ErrNotFound
+	}
+	rows, err := s.pool.Query(ctx, `SELECT ref, display_name FROM accounts WHERE workspace_id = $1 ORDER BY ref`,
+		workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	var held []ClientAccount
+	var account ClientAccount
+	_, err = pgx.ForEachRow(rows, []any{&account.Ref, &account.Name}, func() error {
+		held = append(held, account)
+		return nil
+	})
+	return held, err
+}
+
 // ClientToken is one machine token as the token commands show it. Fingerprint is the hex SHA-256 of the
 // token, which is the token ID a receipt names; the token itself is never stored.
 type ClientToken struct {

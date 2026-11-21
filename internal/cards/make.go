@@ -55,6 +55,26 @@ var ErrNotPublished = errors.New("cards: the card was not published in time; no 
 // ErrBriefing is a read that failed, so no card is made (briefing.BriefingError).
 var ErrBriefing = errors.New("cards: required evidence could not be collected; no brief generated")
 
+// Diagnostic is a source's refusal written for the person who runs a command: the command's exit code, a
+// fixed message that holds no source text, and the command to run next. A failed read keeps a Diagnostic its
+// source returned and drops every other error the source returned, so no upstream text reaches what a
+// command prints.
+type Diagnostic struct {
+	Exit          int
+	Message, Next string
+}
+
+func (d *Diagnostic) Error() string { return d.Message }
+
+// diagnosticOf is the Diagnostic among a source's error, or nil.
+func diagnosticOf(err error) error {
+	var diagnostic *Diagnostic
+	if errors.As(err, &diagnostic) {
+		return &Diagnostic{Exit: diagnostic.Exit, Message: diagnostic.Message, Next: diagnostic.Next}
+	}
+	return nil
+}
+
 // ReadError is ErrBriefing for one read: its tool, and 403 when the read was refused for a scope the card
 // cannot go without.
 type ReadError struct {
@@ -401,7 +421,8 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool}, ErrSourcePanicked,
 			finish(receipts.Failed(200, "request_failed")))
 	case readErr != nil || system != r.system:
-		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool},
+		// A refusal the source wrote for a person stays with the read's error. Nothing else of it does.
+		return nil, nil, nil, "", errors.Join(&ReadError{Tool: r.tool}, diagnosticOf(readErr),
 			finish(receipts.Failed(200, "request_failed")))
 	}
 	bound, err = RecordVersions(found)

@@ -140,12 +140,16 @@ func TestAWorkspaceKeepsTheCRMItWasPinnedTo(t *testing.T) {
 	}
 }
 
-// A command opens only the sources it reads. A stored row this build has no opener for, here imported
-// calls, does not stop accounts, inspect or a card without calls, and a card that reads calls refuses it by
-// name before anything is read or written.
+// A command opens only the sources it reads. A stored row that has no opener, here imported calls with
+// their opener taken out, does not stop accounts, inspect or a card without calls, and a card that reads
+// calls refuses it by name before anything is read or written.
 func TestACommandOpensOnlyTheSourcesItReads(t *testing.T) {
 	d := setUpDemo(t)
 	crm := registerInventedCRM(t, d)
+	imported := kindsNamed("calls")[0]
+	opener := imported.calls
+	imported.calls = nil
+	t.Cleanup(func() { imported.calls = opener })
 	const name = "invented-books"
 	d.connectInvented(t, name, salesforcetest.Alias)
 	workspace, err := d.owner.Workspace(ctx, name)

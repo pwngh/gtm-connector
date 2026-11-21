@@ -96,18 +96,23 @@ func (r *run) connectText(result *strictjson.Object) string {
 					detail = kind.detail
 				}
 			}
+			if org, named := get(entry, "org").(string); named {
+				detail = fmt.Sprintf("Salesforce org alias %s (%s)", org, cellText(get(entry, "environment")))
+			}
 			rows[i] = []any{source, "connected", detail}
 		}
 	}
 	text := ""
 	if name, named := get(result, "provider").(string); named {
 		kind := kindsNamed(name)[0]
-		switch get(result, "status") {
-		case "connected":
+		switch status := get(result, "status"); {
+		case status == "connected" && name == "salesforce":
+			text = "Salesforce connected. The org's identity and environment were checked.\n"
+		case status == "connected":
 			text = kind.title + " connected.\n"
-		case "removed":
+		case status == "removed":
 			text = kind.title + " removed. Its cards and receipts are kept.\n"
-		case "not_connected":
+		case status == "not_connected":
 			was := " was"
 			if kind.plural {
 				was = " were"

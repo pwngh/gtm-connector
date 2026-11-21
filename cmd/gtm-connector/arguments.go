@@ -374,11 +374,14 @@ options:
 
 Examples:
   gtm-connector connect demo
+  gtm-connector connect salesforce --org gtm-de --state-dir gtm-de --seller 'Morgan Reed'
   gtm-connector connect status
   gtm-connector connect demo --remove
 
-This build connects demo data. It refuses salesforce, calls, slack and the
-assistant apps, and never reads demo data in their place.
+This build connects demo data, Salesforce, imported call transcripts and the
+saved Slack sign-in. Salesforce goes in a workspace of its own: the default
+one holds demo data. Slack sits beside a real CRM. It refuses the assistant
+apps, and never reads demo data in their place.
 `
 
 const demoHelp = `usage: gtm-connector demo [-h] [--json] [--state-dir STATE_DIR] [--again]

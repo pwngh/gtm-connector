@@ -1,0 +1,27 @@
+.ui-field {
+  display: grid;
+  gap: var(--gc-space-2);
+}
+
+.ui-field__label {
+  color: var(--gc-ink);
+  font: var(--gc-label);
+}
+
+.ui-field__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--gc-target);
+  margin: 0;
+  padding: var(--gc-space-2) var(--gc-space-3);
+  border: var(--gc-rule-width) solid var(--gc-control);
+  border-radius: var(--gc-radius-control);
+  background: var(--gc-surface);
+  color: var(--gc-ink);
+  font: var(--gc-body);
+}
+
+.ui-field__input:focus-visible {
+  outline: var(--gc-focus);
+  outline-offset: 2px;
+}

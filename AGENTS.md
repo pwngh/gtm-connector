@@ -35,15 +35,16 @@ rules every store applies, and `receiptstest`, which every store runs), `cards` 
 `sources/demo`, `sources/calls` (the transcript parser, the excerpt and the record of an import, kept by
 `postgres.CallImports`) and `sources/salesforce` (the `sf` login and the REST reads, with an invented org in
 `salesforcetest`). Its tests check it against `testdata/oracle/`. `transport/mcp` is the MCP gate.
-`sources/slack` reads one mapped Slack thread; no command uses it yet.
+`sources/slack` reads one mapped Slack thread and runs the Slack sign-in; `debug slack`,
+`connect slack` and a card's read use it.
 `people` resolves a speaker to a person and a side by the strongest identifier a source carries; its
 package comment states the ladder and the rules, and nothing calls it yet.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with `connect` and the
-read commands `accounts`, `brief`, `inspect` and `audit` on demo data, `token` for MCP client tokens and
-`mcp stdio`. Its `sources.go` is the one place a source is wired into those commands. `postgres.ReceiptStore`
-runs the card maker on PostgreSQL.
+read commands `accounts`, `brief`, `inspect` and `audit` on demo data and Salesforce, `debug salesforce
+check`, `debug slack`, `token` for MCP client tokens and `mcp stdio`. Its `sources.go` is the one place a
+source is wired into those commands. `postgres.ReceiptStore` runs the card maker on PostgreSQL.
 `mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`
 and `mcp stdio` serves on stdin and stdout.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
