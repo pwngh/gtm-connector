@@ -145,10 +145,7 @@ test('people said: three groups in order, each with its count, newest first, att
   assert.doesNotMatch(seller, /listed seller identity/);
   // A unit with no established role shows its basis, and the heading counts the reasons.
   const unknown = body(find('cases', 'test_05_injected_markup_and_figures_stay_inert/2'));
-  assert.match(
-    text(unknown),
-    /No established role \(3\) author is not a listed seller; Slack identities cannot show a customer \(2\) · no speaker label \(1\)/,
-  );
+  assert.match(text(unknown), /No established role \(3\) Slack author not identified; a Slack name never shows a customer \(2\) · no speaker label \(1\)/);
   assert.match(text(unknown), /No speaker label Unknown \(no speaker label\) call/);
 });
 
@@ -561,7 +558,7 @@ const drawnFrom: Record<string, [string, string]> = {
   citation: ['README.md', 'one CRM record, or one sentence of a call or a Slack message'],
   quotation: ['README.md', 'A sentence too long to show is counted, never cut.'],
   record: ['README.md', 'typed CRM fields and connector arithmetic'],
-  'role.customer': ['docs/cards.md', 'Slack authors are never customers.'],
+  'role.customer': ['docs/cards.md', "A Slack author's name is compared with sellers only, so it never makes a customer"],
   'role.seller': ['docs/cards.md', "equals a name or ID on the workspace's seller list."],
   'role.unknown': ['docs/cards.md', 'two or more contacts with the name, a name shared by a seller and a contact, or a label over 200 characters'],
   not_read: ['docs/deals.md', 'was not read'],

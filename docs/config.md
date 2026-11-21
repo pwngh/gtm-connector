@@ -93,7 +93,7 @@ Under the hood:
 
 - **Whole-sentence splitter.** A quotation is one whole sentence.
 - **HTML and link neutralizer.** Mentions, links and control characters become inert words before anything shows them.
-- **Speaker and role matching.** Sellers come from your list, buyers from the account's contacts. Anyone else is unknown.
+- **Speaker and role matching.** A speaker is matched to a person by the strongest identifier the source carries: a Slack profile, the call's attendee list, an alias, then the name. Sellers are your Salesforce users and your list, buyers the account's contacts, and an email's domain shows a side for anyone else. Two candidates, or none, leave the role unknown.
 - **Versioned PostgreSQL store with audit receipts.** A read gets its receipt before it runs.
 - **Risk and diff rules.** Silence, slippage and conflicts, computed by the connector.
 

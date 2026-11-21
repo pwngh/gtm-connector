@@ -101,9 +101,21 @@ recorded. The README's limit about real deals changes only then.
 
 RevOps covers every renewal and sees which have no current card.
 
-- `gtm.yaml`, previewed and activated by exact revision ([setting it up](config.md)).
+- `gtm.yaml`, previewed and activated by exact revision ([setting it up](config.md)), holding the
+  sellers, the company's domains and the speaker aliases, which `connect` keeps on the workspace until
+  then ([speaker settings](cli.md#speaker-settings)).
 - Field mapping, watch rules, transcript folders, Slack channel windows, Gong and Zoom.
-- A participant directory that matches speakers to contacts by email or phone first.
+- A participant directory that matches speakers by a meeting tool's participant email or phone. A
+  card reads an email today only from an attendee list imported with a call and from a Slack author's
+  profile ([speaker roles](cards.md#speaker-roles)); no source gives a meeting tool's participant email.
+- Speaker roles, past their first rules:
+  - the account's domains from its Website as well as its contacts' email addresses, which are the
+    only source today;
+  - a Salesforce org with more than 2,000 Standard users, whose `list_users` read is refused today, so
+    no card is made;
+  - the team ID of each Slack message, where a card reads the team of the author's profile today;
+  - recall of each rung measured on real calls and threads, and reported beside the rule that no
+    sentence is put on the wrong side.
 - The five flags, with thresholds and a preview ([what flags a deal](deals.md#what-flags-a-deal)).
 - Scheduled reads under leases, each as a named service identity.
 - The Ops screens: Setup; on Activity, what ran across the book and whether a call is safe to retry; and on Coverage each source's state, why a deal has no current card, and the matches left off by rule ([the Ops area](config.md#the-ops-area)).
@@ -153,7 +165,7 @@ integrations use HTTP or MCP.
 - May a person close a deal, or does only the CRM stage close it?
 - Should one bad unit stop the card, as today, or be refused alone with the card saying so?
 - Should slippage count changes from before the connector's first read, using the CRM's field history?
-- Should Slack authors be matched to contacts, so that silence can count Slack?
+- Should silence count Slack, now that a Slack author can be matched to a contact by profile email?
 - A call or thread that fits two deals of one account. A deal with no CRM record. A closed opportunity that reopens.
 - Reporting SQL through a database role that BI tools connect to, or through the API with a receipt for each query?
 - Is a grant enough to see Ops, or is it a separate role?
@@ -194,7 +206,7 @@ grouped by the v0.1.0 step that owns the check.
   - each `sf` command's 120-second limit, the shared 180-second login deadline, and the 1 MiB limit on `sf` output;
   - the rules for the instance address and the token, and the one retry after an HTTP 401;
   - the error code each HTTP 403 answer maps to;
-  - the `con-sf-`, `opp-sf-` and `ctr-sf-` record IDs;
+  - the `con-sf-`, `opp-sf-`, `ctr-sf-` and `usr-sf-` record IDs;
   - `salesforce_invalid_configuration` exiting 2, and `salesforce_cli_timeout`.
 - **Transcripts:**
   - the parsing rules: cue settings, the lines under `WEBVTT`, `NOTE`, `STYLE` and `REGION` blocks, and control characters;
@@ -226,6 +238,9 @@ grouped by the v0.1.0 step that owns the check.
   - `brief` exiting 2 for a bad `--as-of` or brief ID;
   - `brief_save_failed` on a save that does not finish;
   - the seller list replaced or kept by `connect`, and `connect demo --seller` refused;
+  - the limits of 50 company domains and 200 aliases on `connect`;
+  - `inspect --role customer_side_not_in_crm` and `--role other_party`, and `inspect` exiting 2 for a
+    number whose `matched` names a record the card does not hold;
   - the extra account read of `brief` on a real CRM.
 - **Audit:**
   - the five-minute lease of a pending receipt, and `serve` finishing interrupted receipts every 30 seconds after its sweep at start;
