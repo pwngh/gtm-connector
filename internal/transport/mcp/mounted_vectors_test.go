@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"regexp"
 	"slices"
@@ -17,8 +18,10 @@ import (
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/mcptools"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
+	"github.com/pwngh/gtm-connector/internal/oracletest/speakerrules"
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 	"github.com/pwngh/gtm-connector/internal/transport/mcp"
 )
 
@@ -188,16 +191,18 @@ func TestMountedWriteVectors(t *testing.T) {
 // Receipt IDs, start times and so the digest of a saved brief are PostgreSQL's, where the recorder's were
 // fixed, and a test bearer is not the recorder's. Before a reply is compared with the recording, exactly
 // those values are put back: the digest in the brief's record reference, the card's "Sources read" line,
-// which states the first and last start time, and the receipt ID in _meta.
+// which states the first and last start time, the day a contact's title was read, and the receipt ID in
+// _meta.
 var (
 	referencePattern = regexp.MustCompile(`briefs/brief-[0-9a-f]{32}/[0-9a-f]{64}`)
 	readLinePattern  = regexp.MustCompile(`Sources read [0-9TZ:-]+( to [0-9TZ:-]+)?\.`)
 	auditPattern     = regexp.MustCompile(`"gtm\.demo/auditId": ?"[0-9a-f-]{36}"`)
+	titleReadPattern = regexp.MustCompile(` read [0-9]{4}-[0-9]{2}-[0-9]{2} \[`)
 )
 
 func putBack(t *testing.T, got, recorded []byte) []byte {
 	t.Helper()
-	for _, pattern := range []*regexp.Regexp{referencePattern, readLinePattern, auditPattern} {
+	for _, pattern := range []*regexp.Regexp{referencePattern, readLinePattern, auditPattern, titleReadPattern} {
 		want := pattern.Find(recorded)
 		if want == nil {
 			if pattern.Match(got) {
@@ -341,9 +346,22 @@ func prepared(t *testing.T, folder string) (*mounted, recordedBrief, []auditRow,
 }
 
 // todaysRules is a recorded result as a brief made now gives it. The recorded briefs were sealed under
-// rules version 3.
-func todaysRules(result []byte) []byte {
-	return oracletest.TodaysRules(result, evidence.SanitizerVersion)
+// rules version 3 and before the speaker rules: the brief the folder saved, made again under them, stands
+// in the result for the recorded one.
+func todaysRules(t *testing.T, folder string, result []byte) []byte {
+	t.Helper()
+	saved, err := os.ReadDir(oracletest.Path(t, "folders/"+folder+"/selected-briefs"))
+	if err != nil || len(saved) != 1 {
+		t.Fatalf("the folder %s does not hold one saved brief: %v", folder, err)
+	}
+	payload := oracletest.Read(t, "folders/"+folder+"/selected-briefs/"+saved[0].Name())
+	rebuilt, err := speakerrules.Payload(oracletest.TodaysRules(payload, evidence.SanitizerVersion))
+	must(t, err)
+	card, err := strictjson.Loads(rebuilt)
+	must(t, err)
+	reply, err := speakerrules.Reply(oracletest.TodaysRules(result, evidence.SanitizerVersion), card.(*strictjson.Object))
+	must(t, err)
+	return reply
 }
 
 // The three recorded prepare_renewal_brief calls (folders/prepared, prepared_as_of and prepared_no_slack),
@@ -360,7 +378,7 @@ func TestMountedPreparedBriefs(t *testing.T) {
 			records(t, response)
 			structured, err := json.Marshal(at(decode(t, response.Body.Bytes()), "result", "structuredContent"))
 			must(t, err)
-			want := todaysRules(recorded.Result)
+			want := todaysRules(t, folder, recorded.Result)
 			if got := putBack(t, structured, want); !sameJSON(t, got, want) {
 				t.Fatalf("the result differs from the recording:\n got %.900s\nwant %.900s", got, want)
 			}
@@ -444,7 +462,7 @@ func TestMountedPreparedFolderReads(t *testing.T) {
 				t.Fatalf("status %d, want %d: %s", response.Code, r.Status, response.Body)
 			}
 			// The brief read is the one prepared here, under today's rules.
-			want := todaysRules(r.Response)
+			want := todaysRules(t, "prepared", r.Response)
 			if got := putBack(t, response.Body.Bytes(), want); !sameJSON(t, got, want) {
 				t.Fatalf("the reply differs from the recording:\n got %.900s\nwant %.900s", got, want)
 			}

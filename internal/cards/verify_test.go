@@ -16,6 +16,7 @@ import (
 
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
+	"github.com/pwngh/gtm-connector/internal/oracletest/speakerrules"
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
@@ -102,33 +103,13 @@ func prepareOf(token string, account string, slack bool, arguments *strictjson.O
 
 // todaysRules is a folder card or brief as Go makes it under today's rules. The folders hold cards sealed
 // under rules version 3 and before the speaker rules, which stay as sealed so that an old card is still
-// admitted. Go makes the same reads, receipts and evidence, and seals the workspace's speaker settings in
-// the evidence: none, in a demo workspace. Its text, units and gaps are what Build makes of that evidence,
-// so a speaker's role and its basis are the speaker rules', and everything else is the oracle's.
+// admitted (speakerrules).
 func todaysRules(payload []byte) []byte {
-	value, err := strictjson.Loads(oracletest.TodaysRules(payload, evidence.SanitizerVersion))
+	rebuilt, err := speakerrules.Payload(oracletest.TodaysRules(payload, evidence.SanitizerVersion))
 	if err != nil {
 		panic(err)
 	}
-	card := value.(*strictjson.Object)
-	snapshot := get(card, "evidence").(*strictjson.Object)
-	snapshot.Set("people", evidence.Sources{}.People())
-	units, text, gaps, _, err := evidence.Build(snapshot)
-	if err != nil {
-		panic(err)
-	}
-	card.Set("text", text)
-	card.Set("units", evidence.UnitValues(units))
-	card.Set("gaps", evidence.GapValues(gaps))
-	options := strictjson.Artifact
-	if get(card, "kind") == "selected_brief" {
-		options = strictjson.Prepared
-	}
-	encoded, err := strictjson.Dumps(card, options)
-	if err != nil {
-		panic(err)
-	}
-	return []byte(encoded)
+	return rebuilt
 }
 
 // TestGoMakesTheFolderCards makes the folder cards in Go, under the oracle's scopes, and compares the bytes
