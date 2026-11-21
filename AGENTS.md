@@ -30,7 +30,7 @@ rules every store applies, and `receiptstest`, which every store runs), `cards` 
 `sources/slack` reads one mapped Slack thread and runs the Slack sign-in; `debug slack`,
 `connect slack` and a card's read use it.
 `people` resolves a speaker to a person and a side by the strongest identifier a source carries; its
-package comment states the ladder and the rules, and nothing calls it yet.
+package comment states the ladder and the rules, and `evidence` calls it for every sentence of a card.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with `connect` and the
@@ -40,6 +40,11 @@ check`, `debug slack`, `token` for MCP client tokens, `deal` for deals and `mcp 
 source is wired into those commands. `postgres.ReceiptStore` runs the card maker on PostgreSQL.
 `mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`
 and `mcp stdio` serves on stdin and stdout.
+`oidc` signs a person in through an identity provider. `render` builds the Slack alert and the webhook
+body from a card, and nothing sends them yet. `pins` checks the build files against `pins.json`.
+Under `sources/`, `sourcehttp` is the transport the Salesforce and Slack readers share, `echo` finds a
+credential in what a source sent back, and `childenv` is the environment a program the connector
+starts is given.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
 `realdata` (with `cmd/realdata`) fetches public datasets and compares Go's text functions on them with
 the digests in `internal/realdata/recorded`. `web/` is the web app, which `make build` puts inside the
@@ -81,16 +86,17 @@ make verify-real                                   # real public text against re
 - Have a view and argue for it. If a request leads somewhere worse, say so and show the better way.
 - State things plainly. Give a reason only when it is concrete. Never explain by history.
 - The repository holds code, tests, user docs, and this page. No logs, results, or review notes.
-- The README states the product as designed. `docs/ROADMAP.md` lists every part of it that is not
-  built yet. Every other doc claims only what a test shows, and the roadmap's "Checks the docs still
-  need" lists each guide statement no test asserts yet. Keep "No live org has been verified." on the
-  roadmap until one has been.
+- The README and the guides state the product as designed. `docs/ROADMAP.md` lists every part of it
+  that is not built yet, so a claim in a guide is either built or on the roadmap. A statement about
+  what the binary does today claims only what a test shows, and the roadmap's "Checks the docs still
+  need" lists each one no test asserts yet. Keep the live-verification line equal to what has been
+  verified live, and no wider.
 - `testdata/oracle/cards/cases.jsonl.gz` holds the cards of ten invented deals, one property each,
   and `internal/cards/parity_test.go` builds them byte for byte. A change to cards keeps them
   passing.
 - Feature PRs do not edit this page or the roadmap's status rows; those are updated in batches.
-- Live checks use the development org and workspace only. Never create or edit a Slack app. Never
-  use a credential pasted into a conversation.
+- Live checks use the development org and workspace only. Change a Slack app only in the
+  development workspace. Never use a credential pasted into a conversation.
 - Report the result first, then what changed, what failed, and what is unverified, with numbers.
 
 ## Next, in order
