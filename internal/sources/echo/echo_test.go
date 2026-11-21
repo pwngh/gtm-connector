@@ -117,6 +117,20 @@ func TestEveryTokenHeldIsLookedFor(t *testing.T) {
 	}
 }
 
+// A text the token rule refuses is never held: a fragment such as "e", read from a token file while it was
+// written, would otherwise be found in nearly every answer for as long as the tokens live.
+func TestAFragmentIsNotHeld(t *testing.T) {
+	tokens := held("e", "", strings.Repeat("x", MinLength-1), "invented token with spaces 0123", token)
+	for _, text := range []string{"every answer has an e", strings.Repeat("x", 40), "invented token with spaces 0123"} {
+		if tokens.InText(text) || tokens.InBytes([]byte(text)) {
+			t.Errorf("a refused text was held, and %q is refused", text)
+		}
+	}
+	if !tokens.InText(token) {
+		t.Error("the usable token beside them was not held")
+	}
+}
+
 // A credential is refused when an answer could hold it by chance, or when it holds a space, a control
 // character or anything outside ASCII. Any printable ASCII mark is allowed, because a service may change
 // what its tokens are made of.

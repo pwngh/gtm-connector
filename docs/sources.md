@@ -27,7 +27,7 @@ Sellers: "Morgan Reed"
 | Source | Reads | Connect with |
 | --- | --- | --- |
 | [Demo data](#demo-data) | The invented book: 30 accounts with their contacts, opportunities, call notes and Slack messages | `connect demo` |
-| [Salesforce](#salesforce) | Account, Contact, Opportunity and Contract records of one org, through an `sf` login | `connect salesforce --org ALIAS --state-dir NAME` |
+| [Salesforce](#salesforce) | Account, Contact, Opportunity and Contract records of one org, through an `sf` login or a token handed to the container | `connect salesforce --org ALIAS --state-dir NAME`, or `--token-env` |
 | [Call transcripts](#call-transcripts) | TXT, WebVTT and SRT files imported one at a time, one excerpt per account | `connect calls`, then `debug calls import` |
 | [Slack](#slack) | One mapped thread per account, read live | `debug slack connect`, `connect slack`, then `debug slack map` |
 
@@ -186,7 +186,8 @@ slack	not connected
 Outside Developer Edition, connect also checks that the four objects are queryable and expose every
 mapped field. Missing or malformed organization metadata is refused.
 
-A token handed to the container instead of `sf` is not read in this build.
+Where there is no `sf`, as in a container, connect with `--token-env` instead: see
+[a token handed to the container](#without-sf-a-token-handed-to-the-container).
 
 ### Sign-in and reads
 
@@ -195,7 +196,8 @@ and `sf org auth show-access-token` for the token. The token stays in memory. Th
 are compared with the workspace's pin before any object is described or any record read.
 
 > **No default `sf` org is ever selected, and no login flow is started.** `sf` runs with no input,
-> its error output discarded, and telemetry, updates and log files off. A command that is cancelled
+> its error output discarded, none of the connector's settings or credentials in its environment,
+> and telemetry, updates and log files off. A command that is cancelled
 > ends `sf` and everything it started.
 
 The instance address must be an HTTPS My Domain origin ending in `.my.salesforce.com`, with no path,
@@ -210,6 +212,86 @@ error is retried.
 An answer that holds the token is refused whole, so a token never becomes a record. In a workspace,
 `accounts` and `inspect` read the org as the `search_accounts` and `get_account` tools, each under a
 receipt committed before the read, which `audit` lists.
+
+### Without `sf`: a token handed to the container
+
+A container has no `sf`. Give the connector the org's address and an access token instead, and
+connect with `--token-env`:
+
+| Variable | Holds |
+| --- | --- |
+| `SALESFORCE_INSTANCE_URL` | The org's HTTPS My Domain origin, `https://NAME.my.salesforce.com`. |
+| `SALESFORCE_ACCESS_TOKEN_FILE` | The path of a file that holds the token on one line. |
+| `SALESFORCE_ACCESS_TOKEN` | The token itself, in place of the file. Set one of the two, never both. |
+
+- `connect salesforce --token-env --state-dir NAME` makes the checks `--org` makes, with the same
+  `--environment` and `--seller`. It pins the workspace to the identity an `sf` login of that org and
+  user would get. The row holds `{"credentials":"environment","environment":...}`: no token, address,
+  org ID or user.
+- Each command reads the variables on its first read. Missing or invalid variables fail with
+  `salesforce_invalid_configuration` and exit 2, in one fixed line that names the variables and never
+  their values.
+- The token file must be a regular file that only its owner can read (`chmod 600`). A file the group
+  or others can read is refused, and the refusal gives its mode. The file may be a symbolic link, as
+  an orchestrator's mounted secret is, when it leads to a regular file in a folder that others cannot
+  write to. A named pipe, or anything else, is refused at once and never waited on.
+- When the org refuses the token (HTTP 401), the read reads the variables and the file once more. This
+  also happens when the token expires between the first two checks of a command. A new token of the
+  same org and user is checked and kept, and the read goes on. In every other case the read fails with
+  `salesforce_auth_required` and exit 5: `The token expired or was refused; give the container a new
+  one of the same org and user.` That covers the same token, a token of another org or user, and
+  variables that are now missing or invalid. The connector never asks for a token itself.
+- A running `serve` sees a new token only through the file, because the variables of a process do not
+  change while it runs. A call in flight while the file is replaced can fail, and the next call reads
+  the new file. A token the workspace's pin refused is let go, so once the file holds a token of the
+  pinned user again, the next call reads it.
+- `sf` is never given the connector's settings or credentials: `GTM_*`, `PG*`, the three variables
+  above and any `*_TOKEN` or `*_TOKEN_FILE` are taken out of its environment.
+
+In Docker Compose, keep the token in a folder of its own, outside the repository and outside
+`GTM_HOME` so that no backup holds it. Write it without showing it on screen:
+
+```sh
+mkdir -p ~/.config/gtm-connector/salesforce && chmod 700 ~/.config/gtm-connector/salesforce
+# Type or paste the token at the prompt; it is not shown. Then press Return.
+(umask 077 && IFS= read -rs TOKEN && printf '%s\n' "$TOKEN" > ~/.config/gtm-connector/salesforce/token)
+```
+
+On macOS you can write it from the clipboard instead, and then clear the clipboard:
+
+```sh
+(umask 077 && pbpaste > ~/.config/gtm-connector/salesforce/token) && pbcopy < /dev/null
+```
+
+On Linux, `xclip -selection clipboard -o` takes the place of `pbpaste`, and
+`xclip -selection clipboard < /dev/null` clears the clipboard. Mount the folder read-only with a
+Compose file of your own, also kept outside the repository:
+
+```yaml
+# ~/.config/gtm-connector/salesforce.yaml
+services:
+  app: &salesforce
+    environment:
+      SALESFORCE_INSTANCE_URL: https://NAME.my.salesforce.com
+      SALESFORCE_ACCESS_TOKEN_FILE: /run/salesforce/token
+    volumes:
+      - ${HOME}/.config/gtm-connector/salesforce:/run/salesforce:ro
+  admin: *salesforce
+```
+
+```sh
+export COMPOSE_FILE=compose.yaml:$HOME/.config/gtm-connector/salesforce.yaml
+docker compose run --rm admin connect salesforce --token-env --environment production --state-dir acme
+docker compose up -d app
+```
+
+- The token is never in `compose.yaml`, `.env`, the image or the container's environment.
+  `docker inspect` shows the file's path and the mounted folder, not the token.
+- To rotate the token, write the new one to a file in the same folder in the same way, then rename
+  it over `token` (`mv token.new token`). The folder is mounted rather than the file, so the running
+  container sees the new file, and its next HTTP 401 takes it.
+- `SALESFORCE_ACCESS_TOKEN` is for a process started by hand. In a container it shows in
+  `docker inspect`, so Compose uses the file.
 
 ### Records
 

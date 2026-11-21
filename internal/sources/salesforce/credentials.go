@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/sources/childenv"
 	"github.com/pwngh/gtm-connector/internal/sources/sourcehttp"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
@@ -33,8 +34,8 @@ type Runner interface {
 // errTooMuchOutput is a command that wrote more than a login answer holds.
 var errTooMuchOutput = errors.New("salesforce: sf wrote too much")
 
-// Exec runs the sf program: with no input, its error output discarded, telemetry, updates and log files
-// off, and in a session of its own so that it can be ended with everything it started.
+// Exec runs the sf program: with no input, its error output discarded, none of the connector's settings
+// or credentials in its environment, telemetry, updates and log files off, and in a session of its own so that it can be ended with everything it started.
 type Exec struct {
 	// Path is the program. Empty is the sf on PATH.
 	Path string
@@ -48,18 +49,12 @@ func (e Exec) Run(ctx context.Context, arguments []string) ([]byte, int, error) 
 		// Only the program's main lets a process run sf, so no test reaches the sf of the machine it runs on.
 		return nil, 0, sourcehttp.ErrNotLive
 	}
-	path := e.Path
-	if path == "" {
-		path = "sf"
-	}
 	read, write, err := os.Pipe()
 	if err != nil {
 		return nil, 0, err
 	}
 	defer read.Close()
-	command := exec.Command(path, arguments...)
-	command.Env = append(os.Environ(), "SF_DISABLE_TELEMETRY=true", "SF_AUTOUPDATE_DISABLE=true",
-		"SF_DISABLE_AUTOUPDATE=true", "SF_DISABLE_LOG_FILE=true", "SFDX_DISABLE_LOG_FILE=true")
+	command := e.command(arguments)
 	command.Stdout = write
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	err = command.Start()
@@ -130,6 +125,21 @@ func (e Exec) Run(ctx context.Context, arguments []string) ([]byte, int, error) 
 	}
 }
 
+// command is sf with these arguments, given the connector's environment without its settings or any
+// credential (childenv), and with telemetry, updates and log files off. A token handed to the connector,
+// its file or its address never reaches sf.
+func (e Exec) command(arguments []string) *exec.Cmd {
+	path := e.Path
+	if path == "" {
+		path = "sf"
+	}
+	command := exec.Command(path, arguments...)
+	command.Env = append(childenv.WithoutSecrets(os.Environ()), "SF_DISABLE_TELEMETRY=true",
+		"SF_AUTOUPDATE_DISABLE=true", "SF_DISABLE_AUTOUPDATE=true", "SF_DISABLE_LOG_FILE=true",
+		"SFDX_DISABLE_LOG_FILE=true")
+	return command
+}
+
 // credentials reads the instance address and the token of one sf alias. Nothing sf writes, and neither
 // value, reaches an error.
 type credentials struct {
@@ -153,6 +163,11 @@ func newCredentials(alias string, runner Runner) (*credentials, error) {
 		return nil, refuse(authRequired)
 	}
 	return &credentials{alias: alias, runner: runner, commandTime: commandTime, loginTime: loginTime}, nil
+}
+
+// loginSource gives a login: sf for an alias, or the variables of the process.
+type loginSource interface {
+	read(ctx context.Context) (login, error)
 }
 
 // login is what one login read gives, held in memory: the origin, the org's ID, the user sf signed in as,

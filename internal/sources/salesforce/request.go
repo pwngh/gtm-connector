@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/sources/echo"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
@@ -114,7 +115,8 @@ func (o *operation) query(soql string, limit int) ([]*strictjson.Object, error) 
 	return nil, refuse(resultLimit)
 }
 
-// request is one GET, and after a first HTTP 401 one more under the credentials sf gives now. Before the
+// request is one GET, and after a first HTTP 401 one more under the credentials the login source gives now:
+// sf for an alias, or the variables of the process for a token handed to it. Before the
 // retry the org and the user are read again and must be the ones this Reader saw before. The retry shares
 // the operation's deadline, request count and byte budget.
 func (o *operation) request(path string, soql *string) (any, error) {
@@ -151,8 +153,9 @@ func (o *operation) request(path string, soql *string) (any, error) {
 	return o.requestOnce(path, soql)
 }
 
-// refresh asks sf for the alias's credentials once in this operation. The wait for sf does not use up the
-// read's own time. Credentials for another instance are refused.
+// refresh asks the login source for credentials once in this operation. The wait for sf does not use up
+// the read's own time. Credentials for another instance are refused, and so is the token the org has just
+// refused. Variables of the process that are now missing or invalid refuse as an expired token does.
 func (o *operation) refresh() (string, error) {
 	r := o.reader
 	switch {
@@ -168,32 +171,51 @@ func (o *operation) refresh() (string, error) {
 	started := r.now()
 	given, err := r.credentials.read(o.ctx)
 	o.deadline = o.deadline.Add(r.now().Sub(started))
+	var failed *Error
+	if errors.As(err, &failed) && failed.Code == invalidConfiguration && failed.Detail == "" {
+		return "", refuse(authRequired)
+	}
 	if err != nil {
 		return "", err
 	}
-	// Whatever sf gave is held from here on, so no answer of this Reader may hold it, sent or not.
+	// A token that breaks the token rule is refused before it is held: it is never sent, and held it would
+	// refuse every later answer that holds its text.
+	if !echo.Usable(given.accessToken, maxToken) {
+		return "", refuse(authRequired)
+	}
+	// Whatever usable token the source gave is held from here on, so no answer of this Reader may hold it,
+	// sent or not.
 	r.tokens.Add(given.accessToken)
 	if origin, err := configure(given.instanceURL, given.accessToken); err != nil || origin != r.instanceURL {
 		return "", refuse(authRequired)
 	}
-	if given.organizationID != r.signedInTo || given.username != r.username || given.accessToken == o.token {
-		// The alias now names another org or another user, or sf gave back the token the org has just
-		// refused. None is sent.
+	if r.signedInTo != "" && (given.organizationID != r.signedInTo || given.username != r.username) ||
+		given.accessToken == o.token {
+		// The alias now names another org or another user, or the source gave back the token the org has
+		// just refused. None is sent. A token handed to the process names no org or user ahead: the org and
+		// the user it reads as are checked before it is kept.
 		return "", refuse(authRequired)
 	}
 	o.token = given.accessToken
 	return given.accessToken, nil
 }
 
+// errUserRefused is an HTTP 401 to the question of which user the token reads as. Its code is
+// salesforce_auth_required. During the first check it starts the one replacement of the token.
+var errUserRefused = &Error{Code: authRequired}
+
 // userInfoPath is where a token says which user it reads as.
 const userInfoPath = "/services/oauth2/userinfo"
 
 // checkUser asks the org which user the operation's token reads as. It must be a user of the org this
-// Reader checked, under the username sf org display named, and, once a token has been checked, the same
-// user ID as before. A refusal says only that the login cannot be used.
+// Reader checked, under the username sf org display named when sf named one, and, once a token has been
+// checked, the same user ID as before. A refusal says only that the login cannot be used.
 func (o *operation) checkUser() error {
 	r := o.reader
 	value, err := o.requestOnce(userInfoPath, nil)
+	if codeOf(err) == authRequired {
+		return errUserRefused
+	}
 	if err != nil {
 		return err
 	}
@@ -205,7 +227,8 @@ func (o *operation) checkUser() error {
 	if err != nil || !strings.HasPrefix(userID, "005") {
 		return refuse(invalidResponse)
 	}
-	if organizationValue != r.organizationID || username != r.username || r.userID != "" && userID != r.userID {
+	if organizationValue != r.organizationID || r.username != "" && username != r.username ||
+		r.userID != "" && userID != r.userID {
 		return refuse(authRequired)
 	}
 	r.userID = userID

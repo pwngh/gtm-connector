@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -24,7 +25,7 @@ var assistantApps = []string{"inspector", "claude-code", "claude-desktop", "curs
 
 // connectOptions are connect's own options, in the order a refusal lists them.
 var connectOptions = []string{"--config-file", "--environment", "--org", "--remove", "--scope", "--seller",
-	"--transport"}
+	"--token-env", "--transport"}
 
 // validSellers is whether a list is one a workspace may hold as its sellers: at most 200 names or Slack
 // IDs, each of 1 to 200 characters.
@@ -280,7 +281,8 @@ func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string)
 			// The workspace was read through a CRM with no pin, so this one is not known to be it.
 			return nil, nil, unpinned
 		}
-		change := postgres.SourceChange{Source: kind.source, Mode: kind.mode, IdentitySHA256: saved.identity}
+		change := postgres.SourceChange{Source: kind.source, Mode: cmp.Or(saved.mode, kind.mode),
+			IdentitySHA256: saved.identity}
 		if saved.binding != nil {
 			if change.Binding, err = strictjson.Dumps(saved.binding, strictjson.Prepared); err != nil {
 				return nil, nil, err

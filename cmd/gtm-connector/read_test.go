@@ -260,14 +260,15 @@ func TestReadCommandsRefuseWhatIsNotConnected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A Salesforce token handed to the container is not read in this build.
+	// A row of a Salesforce token handed to the process that names no environment and no pin is refused
+	// before any variable is read.
 	if _, err := d.owner.EnsureConnection(ctx, live, "crm", "env_token"); err != nil {
 		t.Fatal(err)
 	}
 	for _, tokens := range [][]string{{"accounts"}, {"brief", "acc-003"}, {"inspect", "acc-003"}} {
-		code, message, _ := d.refusal(t, 3, append(tokens, "--state-dir", "live-one")...)
-		if code != "refused" || message != "This workspace is connected to a Salesforce token handed to the container, "+
-			"which this command does not read yet." {
+		code, message, _ := d.refusal(t, 1, append(tokens, "--state-dir", "live-one")...)
+		if code != "local_failure" || message != "This workspace's Salesforce connection names no environment or "+
+			"identity. Connect it again with gtm-connector connect salesforce --token-env." {
 			t.Errorf("%v on Salesforce: %s, %s", tokens, code, message)
 		}
 	}

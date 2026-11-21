@@ -98,6 +98,8 @@ func (r *run) connectText(result *strictjson.Object) string {
 			}
 			if org, named := get(entry, "org").(string); named {
 				detail = fmt.Sprintf("Salesforce org alias %s (%s)", org, cellText(get(entry, "environment")))
+			} else if source == "crm" && get(entry, "credentials") == "environment" {
+				detail = fmt.Sprintf("Salesforce token from the environment (%s)", cellText(get(entry, "environment")))
 			}
 			rows[i] = []any{source, "connected", detail}
 		}

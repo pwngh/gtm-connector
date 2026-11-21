@@ -2,11 +2,13 @@
 // org through REST v68.0, under the credentials of an existing sf CLI login. It never writes to
 // Salesforce.
 //
-// FromSF asks sf for the instance address and the token of one alias and keeps both in memory. Every read
-// is one bounded operation: 20 seconds of read time, 12 GET attempts, 1 MiB of response data and 10 pages
-// a query. The first operation checks the org against the selected environment and, outside Developer
-// Edition, that the four objects are queryable and expose the mapped fields. A first HTTP 401 in an
-// operation asks sf for credentials once more, confirms the org is the same one, and retries.
+// FromSF asks sf for the instance address and the token of one alias and keeps both in memory.
+// FromEnvironment takes them from the variables of the process instead, for a connector with no sf. Every
+// read is one bounded operation: 20 seconds of read time, 12 GET attempts, 1 MiB of response data and 10
+// pages a query. The first operation checks the org against the selected environment and, outside
+// Developer Edition, that the four objects are queryable and expose the mapped fields. A first HTTP 401 in
+// an operation asks sf, or the variables, for credentials once more, confirms the org and the user are the
+// same ones, and retries.
 //
 // A failure is an *Error holding one fixed code. It never holds an upstream message, a URL or a credential.
 // An answer that holds a token of the read is refused whole, so a token never becomes a record. A read whose
@@ -78,7 +80,12 @@ const (
 )
 
 // Error is a failed read: one fixed diagnostic code. Upstream messages and credentials stay private.
-type Error struct{ Code string }
+type Error struct {
+	Code string
+	// Detail is a fixed sentence that says more than the code, such as the mode of a token file refused
+	// for it, or "". It never holds a value read from a source, a path or a credential.
+	Detail string
+}
 
 func (e *Error) Error() string { return e.Code }
 
@@ -221,11 +228,14 @@ func configure(instanceURL, accessToken string) (origin string, err error) {
 	if !found || len(host) > 253 || !hostPattern.MatchString(host) {
 		return "", refuse(invalidConfiguration)
 	}
-	if !echo.Usable(accessToken, 4096) {
+	if !echo.Usable(accessToken, maxToken) {
 		return "", refuse(invalidConfiguration)
 	}
 	return "https://" + host, nil
 }
+
+// maxToken is the longest token a reader takes.
+const maxToken = 4096
 
 func validEnvironment(environment string) bool {
 	return environment == "developer" || environment == "sandbox" || environment == "production"
@@ -250,7 +260,8 @@ type Reader struct {
 	environment string
 	instanceURL string
 	client      *http.Client
-	credentials *credentials
+	// credentials give the login again on a first HTTP 401: sf for an alias, or the process environment.
+	credentials loginSource
 	now         func() time.Time
 	// turn holds the one operation that is running. The fields below belong to it.
 	turn            chan struct{}
@@ -258,7 +269,7 @@ type Reader struct {
 	editionVerified bool
 	organizationID  string
 	// signedInTo is the org ID sf org display named for the alias, and username the user it named. The token
-	// must open that org as that user.
+	// must open that org as that user. A token handed to the process names neither.
 	signedInTo, username string
 	// userID is the ID of the user the first token read as. Every later token must read as the same user.
 	userID  string
@@ -295,21 +306,7 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 		// What sf gave is not a usable login.
 		return nil, refuse(authRequired)
 	}
-	transport := o.Transport
-	if transport == nil {
-		transport = DefaultTransport()
-	}
-	now := o.Now
-	if now == nil {
-		now = time.Now
-	}
-	r := &Reader{environment: environment, instanceURL: origin, accessToken: given.accessToken, credentials: login,
-		signedInTo: given.organizationID, username: given.username,
-		now: now, turn: make(chan struct{}, 1), checked: map[string]bool{},
-		client: &http.Client{Transport: transport,
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
-	r.tokens.Add(given.accessToken)
-	return r, nil
+	return newReader(environment, origin, given, login, o), nil
 }
 
 // DefaultTransport is the transport a Reader makes when it is given none: sourcehttp's, which dials out
@@ -332,14 +329,7 @@ func (r *Reader) bounded(ctx context.Context, capabilities bool, run func(o *ope
 	defer func() { <-r.turn }()
 	o := &operation{reader: r, ctx: ctx, token: r.accessToken, deadline: r.now().Add(operationTime)}
 	if !r.editionVerified {
-		organization, err := o.query(organizationQuery, 1)
-		if err != nil {
-			return err
-		}
-		if err := r.validateEnvironment(organization); err != nil {
-			return err
-		}
-		if err := o.checkUser(); err != nil {
+		if err := o.firstCheck(); err != nil {
 			return err
 		}
 		// A token sf gave during this first check is kept only now that it has proved the org.
@@ -354,6 +344,31 @@ func (r *Reader) bounded(ctx context.Context, capabilities bool, run func(o *ope
 		}
 	}
 	return run(o)
+}
+
+// firstCheck reads the Organization row and checks it against the selected environment, then asks which
+// user the token reads as. A token that expires between the two, so that the org answers the first and
+// refuses the second, is replaced once, as any first HTTP 401 of an operation is, and both checks run again
+// under the replacement, inside the same operation's budget.
+func (o *operation) firstCheck() error {
+	for {
+		organization, err := o.query(organizationQuery, 1)
+		if err == nil {
+			err = o.reader.validateEnvironment(organization)
+		}
+		if err == nil {
+			err = o.checkUser()
+		}
+		if err != errUserRefused {
+			return err
+		}
+		token, err := o.refresh()
+		if err != nil {
+			return err
+		}
+		// Kept only once both checks pass under it.
+		o.unproved = token
+	}
 }
 
 // validateEnvironment checks the Organization row against the selected environment, and that the org is the
