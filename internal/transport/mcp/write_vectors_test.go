@@ -230,6 +230,9 @@ func TestWriteWithAReadGrantIsRefused(t *testing.T) {
 		if used := h.gateway.Windows()[fingerprint(tokenValue("crm"))].Used; used != 3 {
 			t.Fatalf("the crm grant was charged %d times", used)
 		}
+		// Nothing issues crm:write. A token that carries it beside crm:read still reads the CRM, because the
+		// read scope opens that source and the extra scope opens nothing.
+		h.records(h.tool("get_account", map[string]any{"account_id": "acc-001"}, "full", nil), "crm")
 
 		s := newStdio(t, []string{"crm:read", "calls:read", "slack:read"}, func(c *StdioConfig) { c.Selected = selected })
 		s.send(legacyStart, legacyReady, call(2, writeTool, jsonOf(fixtureActivity)), string(callBody("3", writeTool, "{}", vectorMeta)))
