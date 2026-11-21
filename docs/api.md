@@ -5,11 +5,6 @@
 The web app, the CLI, the MCP server and the alerts all read the same API. Every route checks the
 caller's grant, and a refusal is returned as a refusal, never as an empty list.
 
-```sh
-curl https://HOST/v1/deals/thornfield-2027-2e3hke
-gtm deal thornfield-2027-2e3hke
-```
-
 > **What the binary serves today.** The `/api/v1` routes under
 > [the server today](#the-server-today), the [deal routes](#deal-routes) and [matches](#matches) marked as served,
 > MCP at `/mcp` ([MCP](mcp.md)), `/healthz` ([running it](operations.md#health)) and the
@@ -17,6 +12,14 @@ gtm deal thornfield-2027-2e3hke
 > pushing your own data, and sending webhooks and Slack alerts are the design, and the
 > [roadmap](ROADMAP.md) lists them as not built. The bodies of a webhook delivery and a Slack alert are built
 > ([what a delivery holds](#what-a-delivery-holds)); nothing sends them yet.
+
+```sh
+curl https://HOST/v1/deals/thornfield-2027-2e3hke   # with a script's token, once tokens for scripts are built
+gtm deal thornfield-2027-2e3hke
+```
+
+Today the served routes take the session cookie of a person signed in to the web app, and nothing
+else ([deal routes](#deal-routes)).
 
 ## One deal, one ID
 
@@ -43,7 +46,7 @@ what those reads returned:
 | `account` | The account. |
 | `opportunity` | The open opportunity that closes first, by ID on a tie, or `null`. |
 | `contract` | On Salesforce, the contract a card counts the renewal to: the earliest that ends on or after the day of the read, by ID on a tie. Otherwise `null`. |
-| `renews_on` | The account's renewal date, or else that contract's end, or else that opportunity's close date, or `null`. |
+| `renews_on` | The account's renewal date, or else that contract's end, or else that opportunity's close date, or `null`. It is set once, when the deal is registered. A card's countdown is read again for every card and never counts to a close date, so the two can differ. |
 
 The database refuses a deal that binds a record its reads did not return.
 

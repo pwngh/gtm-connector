@@ -687,6 +687,3 @@ Each writes text only, prints a failure as `gtm-connector: MESSAGE`, and exits `
   available in this build." `serve` and `mcp stdio` serve MCP instead.
 - `connect inspector`, `connect claude-code`, `connect claude-desktop` and `connect cursor` exit `3`,
   print no setup, and grant nothing.
-- A workspace whose CRM is a Salesforce token handed to the container exits `3` from `accounts`,
-  `brief` and `inspect ACCOUNT_ID`: "This workspace is connected to a Salesforce token handed to the
-  container, which this command does not read yet."

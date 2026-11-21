@@ -143,13 +143,13 @@ connect a workspace of its own to that org. The default workspace holds demo dat
 `--state-dir` and give every later command the same name.
 
 ```sh
-sf org login web --alias gtm-de
-gtm-connector debug salesforce check --sf-org gtm-de --state-dir gtm-de
-gtm-connector connect salesforce --org gtm-de --state-dir gtm-de --seller 'Morgan Reed'
-gtm-connector debug salesforce check --state-dir gtm-de
-gtm-connector accounts --query SEARCH_TEXT --state-dir gtm-de
-gtm-connector brief ACCOUNT_ID --state-dir gtm-de
-gtm-connector mcp stdio --scope crm:read --state-dir gtm-de
+sf org login web --alias acme-dev
+gtm-connector debug salesforce check --sf-org acme-dev --state-dir acme-dev
+gtm-connector connect salesforce --org acme-dev --state-dir acme-dev --seller 'Morgan Reed'
+gtm-connector debug salesforce check --state-dir acme-dev
+gtm-connector accounts --query SEARCH_TEXT --state-dir acme-dev
+gtm-connector brief ACCOUNT_ID --state-dir acme-dev
+gtm-connector mcp stdio --scope crm:read --state-dir acme-dev
 ```
 
 The tests of this source run against an invented org and an invented `sf`. None of them reads a live
@@ -406,7 +406,7 @@ attempted). A step's `code` is `ok`, `missing_fields`, `renewal_fields_unmapped`
 | Code | Cause | Fix |
 | --- | --- | --- |
 | `salesforce_invalid_configuration` | The reader was given an environment that is not one of the three. | Repeat with `developer`, `sandbox` or `production`. |
-| `salesforce_auth_required` | The `sf` login or refresh gave no usable address or token, the alias names no login, a second 401 arrived, or the org or user behind the alias changed. | Install `sf` if it is missing, run `sf org login web --alias gtm-de`, then repeat with the alias. |
+| `salesforce_auth_required` | The `sf` login or refresh gave no usable address or token, the alias names no login, a second 401 arrived, or the org or user behind the alias changed. | Install `sf` if it is missing, run `sf org login web --alias acme-dev`, then repeat with the alias. |
 | `salesforce_cli_timeout` | `sf` did not answer within its time limit. | Repeat the command. To time `sf` alone, run `sf org display` with the same alias. |
 | `salesforce_edition_required` | `developer` saw another edition. | Connect a Developer Edition alias, or the intended `--environment`. |
 | `salesforce_environment_mismatch` | The org is not of the selected environment. | Check the alias and repeat with the intended environment. |

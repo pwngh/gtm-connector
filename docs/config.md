@@ -5,6 +5,8 @@
 Everything RevOps and GTM engineers set lives in one file, `gtm.yaml`. It is kept in Git, previewed
 against the book, and activated by exact revision. It holds no credential.
 
+This page describes the product as designed. The [roadmap](ROADMAP.md) says which parts are built.
+
 ```yaml
 sources:
   crm:   {kind: salesforce}
@@ -17,9 +19,11 @@ watch:
   renewals_closing_within_days: 90
 rules:
   customer_silence_days: 14
-sellers: [Morgan Reed, Avery Linden]
 timezone: America/Chicago
 ```
+
+The seller list, the aliases and your company's domains are not in this file. They are set on the
+workspace with `connect` ([the CLI](cli.md#speaker-settings)).
 
 ## How a deal gets its evidence
 
@@ -128,7 +132,7 @@ Under the hood:
 
 - **Whole-sentence splitter.** A quotation is one whole sentence.
 - **HTML and link neutralizer.** Mentions, links and control characters become inert words before anything shows them.
-- **Speaker and role matching.** A speaker is matched to a person by the strongest identifier the source carries: a Slack profile, the call's attendee list, an alias, then the name. Sellers are your Salesforce users and your list, buyers the account's contacts, and an email's domain shows a side for anyone else. Two candidates, or none, leave the role unknown.
+- **Speaker and role matching.** A speaker is matched to a person by the strongest identifier the source carries: a Slack profile, the call's attendee list, an alias, the name, then a name variant of a person the attendee list names. Sellers are your Salesforce users and your list, buyers the account's contacts, and an email's domain shows a side for anyone else. Two candidates, or none, leave the role unknown.
 - **Versioned PostgreSQL store with audit receipts.** A read gets its receipt before it runs.
 - **Risk and diff rules.** Silence, slippage and conflicts, computed by the connector.
 

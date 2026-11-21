@@ -9,6 +9,8 @@ gtm serve     # the web app, the API and MCP, over HTTPS
 
 `gtm` is the short name of the `gtm-connector` binary.
 
+This page describes the product as designed. The [roadmap](ROADMAP.md) says which parts are built.
+
 ## Install
 
 A GitHub Actions release pipeline (GoReleaser) publishes, with each release, prebuilt static binaries for macOS and Linux, on arm64 and amd64, and Docker
