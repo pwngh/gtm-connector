@@ -1,9 +1,9 @@
 # Import a call transcript
 
 Import a UTF-8 TXT, WebVTT, or SRT export and associate it with one account. The
-[Deal card](briefs.md) then shows a selected excerpt as whole sentences. The connector does not
-record, transcribe, connect to a call provider, or summarize. The original bytes stay in private
-local state.
+[Deal card](briefs.md) then shows a selected excerpt as whole sentences. The excerpt is the
+selected range of lines or cues. The connector does not record, transcribe, connect to a call
+provider, or summarize. The original bytes stay in private local state.
 
 ## Commands
 
@@ -27,7 +27,7 @@ Transcripts are added one at a time with `debug calls import`. Transcript folder
 | `--called-at TIMESTAMP` | The meeting time with a UTC offset. Without it the call time stays unknown. |
 | `--speaker-names` | States that every line or cue of the file is one line that opens with its speaker's name and a colon ("Dana Crest: We will sign."). Each name is then the speaker's label. A file with one line or cue that is not laid out that way refuses. |
 | `--reassign` | Moves known content, or a known AccountNumber, to another account. |
-| `--state-dir PATH` | The state folder, `var/v2` by default. Use the folder `connect calls` was given. |
+| `--state-dir PATH` | The [state folder](cli.md), `var/v2` by default. Use the folder `connect calls` was given. |
 | `--after IMPORT_ID` | For `list`: continues after the returned `next_after`. A page holds 100 rows. |
 | `--full` | For `inspect`: prints every unit and the original text. This is not available as an MCP tool. |
 
@@ -44,21 +44,23 @@ names a fresh `--state-dir` to connect, and beside the demo CRM a folder that ho
 
 - `import` resolves the account through a local `crm:read` grant and an audited MCP request. It
   writes no CRM record. Later reads need only `calls:read`.
-- Each account has one active excerpt. Fixture notes are never substituted for a missing one: the
+- Each account has one active excerpt. Demo call notes are never substituted for a missing one: the
   card of an account with nothing imported says "Calls: no transcript is imported for this
   account."
-- The default excerpt is the first 20 units, or fewer if they exceed a limit below. Every excerpt
-  adds one adjacent unit on each side where available. An explicit range that exceeds a limit
-  refuses and is never truncated.
-- Repeating the same bytes, account, call time, and range reuses the revision. Any change creates
-  a new active revision. Older revisions stay inspectable.
-- `.txt`, `.vtt`, or `.srt` selects the parser. TXT units are lines. VTT and SRT units are timed
-  cues, in file order. Cues may repeat or reorder start times, end where they start, and be
-  separated by lines of spaces where a cue follows. A cue that ends before it starts refuses, and so
-  does anything after an end time other than WebVTT cue settings.
+- `.txt`, `.vtt`, or `.srt` selects the parser. A transcript unit is one line of a TXT file, or one
+  timed cue of a VTT or SRT file, in file order. Cues may repeat or reorder start times, end where
+  they start, and be separated by lines of spaces where a cue follows. A cue that ends before it
+  starts refuses, and so does anything after an end time other than WebVTT cue settings.
+- The default excerpt is the first 20 transcript units, or fewer if they exceed a limit below. Every
+  excerpt adds one adjacent unit on each side where available. An explicit range that exceeds a
+  limit refuses and is never truncated.
+- A revision is one saved import, named by its import ID. Repeating the same bytes, account, call
+  time, and range reuses the revision. Any change creates a new active revision. Older revisions
+  stay inspectable.
 - A WebVTT identifier may repeat. Inline tags such as `<v Name>` are stored as the file has them. An
   SRT cue may be numbered and carries no other identifier.
-- On a card, each whole sentence is one numbered unit. A WebVTT voice tag names the speaker of the
+- On a card, each whole sentence is one numbered [unit](briefs.md), which is not a transcript
+  unit. A WebVTT voice tag names the speaker of the
   text after it and is not part of the sentence, and a cue with two tags has two speakers. A cue
   with no tag takes its identifier as the label when that is not a number. TXT lines and SRT cues
   have no label, so their role is `unknown`, unless the import states speaker names (below).

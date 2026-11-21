@@ -1,5 +1,7 @@
 # Connect a client
 
+A client is an assistant app, or the Inspector, that calls the connector's tools over MCP.
+
 ```sh
 gtm-connector connect demo --state-dir var/clients    # or connect salesforce --org ALIAS
 gtm-connector debug serve --state-dir var/clients     # keep it running in one terminal
@@ -7,10 +9,12 @@ gtm-connector debug doctor --state-dir var/clients    # second terminal, same di
 gtm-connector connect inspector --state-dir var/clients --scope crm:read
 ```
 
-An assistant app needs `debug serve` running in its state folder, for the HTTP transport and for the
-local bridge. `debug serve` serves the sources its state folder is [connected](cli.md) to.
+An assistant app needs `debug serve` running in its [state folder](cli.md), for the HTTP transport
+and for the [local bridge](#a-local-bridge-for-assistant-apps). `debug serve` serves the sources its
+state folder is [connected](cli.md) to.
 `connect APP` prints the setup commands and limits for one client. It does not launch an
-application. With `--scope`, an HTTP client (Inspector, Claude Code or Cursor) gets a local grant,
+application. A grant is a bearer token issued for a list of [scopes](tools.md). With `--scope`, an
+HTTP client (Inspector, Claude Code or Cursor) gets a local grant,
 saved in `APP.json` in the state folder, mode 0600, without printing the bearer token. Claude Desktop
 gets none over HTTP, and a stdio entry holds no grant (below). Without `--scope`, HTTP setup previews
 the instructions and creates nothing; stdio setup requires explicit scopes. Repeat `--scope` for each of `crm:read`, `calls:read`, `slack:read`, and
@@ -39,8 +43,9 @@ proxies. TLS verification stays on.
 
 ## A local bridge for assistant apps
 
-Some apps start a local MCP server as a process and speak to it on stdin and stdout. For those,
-`connect` writes an entry that starts the connector's bridge:
+Some apps start a local MCP server as a process and speak to it on stdin and stdout. The local
+bridge is that process: it forwards each call to the `debug serve` already running. For those apps,
+`connect` writes an entry that starts the bridge:
 
 ```sh
 gtm-connector debug serve --state-dir var/clients     # keep it running
@@ -80,7 +85,7 @@ it.
 - The local authorization server registers only `gtm-demo-cli`, with callback
   `http://127.0.0.1:8767/callback`, and requires the local owner header. An assistant app cannot
   complete its own interactive login. See [authorization](tools.md).
-- The configuration files hold bearer credentials. Keep `inspector.json`, `claude-code.json`,
+- The configuration files hold bearer tokens. Keep `inspector.json`, `claude-code.json`,
   `cursor.json`, `.cursor/mcp.json`, and the state folder out of commits, transcripts, and model
   prompts, and readable only by their owner. This repository's `.gitignore` covers them. Add the
   same rules in another project.

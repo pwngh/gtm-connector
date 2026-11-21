@@ -2,9 +2,10 @@
 
 [![Tests](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml?query=branch%3Amain)
 
-A Deal card for a renewal, built from Salesforce, call transcripts, and Slack. It prints no figure,
-date, name, or quotation it cannot point to in a stored record. It labels who said each sentence and
-on what basis, and it says what it did not read. No model writes any of it.
+gtm-connector builds a Deal card for a renewal from Salesforce, call transcripts, and Slack. A Deal
+card is what the connector prints about one account before a renewal conversation. The card prints
+no figure, date, name, or quotation it cannot point to in a stored record. It labels who said each
+sentence and on what basis, and it says what it did not read. No model writes any of it.
 
 `gtm-connector demo`, on an invented law firm whose CRM record looks healthy:
 
@@ -61,7 +62,11 @@ flowchart LR
     U --> C(["Deal card<br/>every character written by the connector"])
 ```
 
-Every number on a card resolves to its record and the receipt of the read that returned it.
+A unit is one numbered piece of evidence. A CRM record is one unit, and call and Slack text is one
+unit for each whole sentence. A receipt is the saved audit row of one tool attempt and its outcome.
+Every number on a card resolves to its record and the receipt of the read that returned it. Saving a
+card commits one more receipt, its seal, which holds the SHA-256 of the saved file. A saved card has
+a brief ID, `brief-…`, which the `brief` command prints.
 `gtm-connector inspect brief-…` lists every unit of the card, one per line, and a number shows one:
 
 ```text
@@ -98,7 +103,8 @@ Neutralizer version   3
 
 ## Try it
 
-Python 3.11 or later and pipx. Invented data, no model, no external service.
+It needs Python 3.11 or later and pipx. The demo runs on invented data, with no model and no
+external service.
 
 ```sh
 pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo
@@ -111,9 +117,10 @@ after a command, gives [stable output](docs/cli.md).
 
 ## Use your own sources
 
-Connect each source once. Every other command then reads what is connected and takes no source
-option. A source you have not connected is stated as not connected on the card, and nothing falls
-back to demo data.
+Connect each source once. `connect` saves what a state folder reads. A state folder is the private
+folder that `--state-dir` selects. Every other command then reads what is connected and takes no
+source option. A source you have not connected is stated as not connected on the card, and nothing
+falls back to demo data.
 
 ```sh
 gtm-connector connect salesforce --org ALIAS --seller 'Morgan Reed'
@@ -150,8 +157,9 @@ gtm-connector inspect acc-003                       # the account and its newest
 gtm-connector audit --tool get_account --follow
 ```
 
-An assistant app needs `debug serve` running in its folder, for the HTTP transport and for the stdio
-bridge. One process holds a folder at a time, so while it runs, connect a second folder for `brief`:
+An assistant app needs `debug serve` running in its state folder, for the HTTP transport and for the
+local bridge. One process holds a state folder at a time, so while `debug serve` runs, connect a
+second folder for `brief`:
 
 ```sh
 gtm-connector debug serve
@@ -164,6 +172,9 @@ gtm-connector debug doctor
 the tested client. Other assistant apps are untested. [Clients](docs/clients.md)
 
 ## What it guarantees
+
+A scope is the access a tool requires, such as `crm:read`. A grant is a bearer token issued for a
+list of scopes.
 
 | Guarantee | Tests |
 | --- | --- |

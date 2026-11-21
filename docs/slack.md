@@ -7,7 +7,8 @@ read never falls back to invented messages. The tests use invented responses.
 
 ## Sign in
 
-The app needs:
+A sign-in is the Slack credential that `debug slack connect` saves in the
+[state folder](cli.md). The app needs:
 
 - [PKCE](https://docs.slack.dev/authentication/using-pkce/) enabled as a public client.
 - The exact redirect `http://localhost:PORT/slack/callback` registered, `PORT` from 1024 to 65535.
@@ -16,7 +17,7 @@ The app needs:
 | Command | What it does | Slack requests |
 | --- | --- | ---: |
 | `debug slack connect --client-id PUBLIC_CLIENT_ID --redirect-uri http://localhost:REGISTERED_PORT/slack/callback` | Opens the browser, waits up to ten minutes for approval, exchanges the code with PKCE, checks the identity, and saves the credentials. | At most 2 |
-| `debug slack status` | Reads the saved file. A missing connection exits 0. A corrupt file is an error. | 0 |
+| `debug slack status` | Reads the saved file. A missing sign-in exits 0. A corrupt file is an error. | 0 |
 | `debug slack status --check` | Verifies authentication and refreshes an expiring token once. It does not show that a thread is readable. | 1 or 2 |
 | `debug slack disconnect` | Removes local credentials. Repeating it succeeds. | 0 |
 | `debug slack disconnect --revoke` | Asks Slack to revoke the saved access token, then removes local credentials. If Slack does not confirm, it exits 5. Remove the app itself in Slack settings. | At most 1 |
@@ -51,10 +52,10 @@ Slack threads are added one at a time with `debug slack map`. A Slack channel wi
 | Command or flag | Rule |
 | --- | --- |
 | `connect slack` | Connects the sign-in saved in the folder, beside Salesforce or beside the demo CRM. With no saved sign-in it exits `2` and names `debug slack connect`. With one that needs a new login it exits `3`. It contacts nobody. `connect slack --remove` detaches Slack and keeps the sign-in. |
-| `debug slack map` | Requires Slack connected and a `ready` sign-in, makes one audited CRM lookup, and saves the selection. It fetches no messages. |
+| `debug slack map` | Requires Slack connected and a `ready` sign-in, makes one audited CRM lookup, and saves the mapping: one thread for one account. It fetches no messages. |
 | `debug slack check` | Reads the mapped thread through `read_slack_messages` and validates its receipt. It reads no CRM or calls data. |
 | `--thread-url` | The saved workspace's HTTPS origin and the path `/archives/CHANNEL/pTIMESTAMP`. A reply link names its parent through `thread_ts`. An optional `cid` must match. Other query fields, fragments, and other workspaces are refused. |
-| `--channel` with `--thread-ts` | Needed when the saved connection has no workspace origin. The timestamp is whole seconds, a dot, and exactly six digits. |
+| `--channel` with `--thread-ts` | Needed when the saved sign-in has no workspace origin. The timestamp is whole seconds, a dot, and exactly six digits. |
 | `--account`, `--account-number` | The CRM account ID: `acc-007`, or the `acc-sf-` form with Salesforce. Or, Salesforce only, a number that matches exactly one account. |
 | `--replace`, `--reassign` | Needed when the account already has another thread, and when the thread belongs to another account. |
 
@@ -78,7 +79,7 @@ Slack threads are added one at a time with `debug slack map`. A Slack channel wi
 | All unique message text | 64 KiB of UTF-8 |
 | Normalized result | 256 KiB of ASCII JSON |
 | One cursor | 2,048 UTF-8 bytes |
-| Selections in one state folder | 100, one thread per account and one account per thread |
+| Mappings in one state folder | 100, one thread per account and one account per thread |
 | Retries | One after `token_expired`, with at most one refresh. One after HTTP 429 when its delay is at most five seconds. Nothing else retries, and a read never starts a login. |
 | Accepted messages | Plain messages, `bot_message`, `me_message`, `file_share`, `thread_broadcast`, and, as the selected parent only, the `tombstone` that Slack's system user leaves for a deleted message |
 | Refuse the whole read | Other hidden messages, edit or delete wrappers, other subtypes, and missing text |
@@ -164,7 +165,7 @@ card. It uses no Slack account, token, or network request.
 .venv/bin/python -m gtm_connector demo --state-dir var/renewal-demo   # always includes Slack
 ```
 
-- `read_slack_messages` requires `slack:read`. A Slack-only token cannot read CRM or call notes.
+- `read_slack_messages` requires `slack:read`. A Slack-only grant cannot read CRM or call notes.
 - A card with Slack makes four audited reads and never requests `crm:write`.
 - Messages live in `slack.sqlite3`: 29 of them, `msg-001` through `msg-030` without `msg-005`.
   Each has an author name and a count of attached files that were not read. On demo data the
