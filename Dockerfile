@@ -1,4 +1,4 @@
-# The connector image: the web app's build and one static Go binary.
+# The connector image: one static Go binary with the web app's build inside it.
 # It builds with the classic builder too (DOCKER_BUILDKIT=0), which is what
 # Colima with a standalone docker-compose uses. Every FROM is pinned in
 # pins.json; GTM_REVISION is the commit, which `make up` passes.
@@ -19,13 +19,15 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ cmd/
 COPY internal/ internal/
+# web/embed.go compiles the build into the binary.
+COPY web/*.go web/
+COPY --from=web /web/dist web/dist
 RUN go build -trimpath -ldflags="-s -w -X main.revision=$GTM_REVISION" -o /out/gtm-connector ./cmd/gtm-connector
 
 FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 ARG GTM_REVISION
 LABEL org.opencontainers.image.revision=$GTM_REVISION
 COPY --from=build /out/gtm-connector /app/gtm-connector
-COPY --from=web /web/dist /app/web
 # Never root, also outside Compose (which runs it as your own user).
 USER 65532:65532
 ENTRYPOINT ["/app/gtm-connector"]

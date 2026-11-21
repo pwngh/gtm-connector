@@ -39,7 +39,7 @@ FIELDS = {
 }
 SOQL = re.compile(r"SELECT ([A-Za-z, ]+) FROM (Account|Contact|Opportunity|Contract) "
                   r"WHERE (Id|AccountId) = '([A-Za-z0-9]{18})' ORDER BY Id LIMIT (101|1001)")
-# docs/salesforce.md, Field mapping: object -> (evidence table, id prefix, evidence field -> upstream field).
+# docs/python/salesforce.md, Field mapping: object -> (evidence table, id prefix, evidence field -> upstream field).
 MAPPING = {
     "Account": ("accounts", "acc", {"name": "Name", "industry": "Industry", "account_number": "AccountNumber"}),
     "Contact": ("contacts", "con", {"name": "Name", "title": "Title", "email": "Email"}),
@@ -153,7 +153,7 @@ class Org:
 
 
 def selected(contracts):
-    """docs/salesforce.md, Briefs: the earliest non-null EndDate on or after the date, ties by id, or None."""
+    """docs/python/salesforce.md, Briefs: the earliest non-null EndDate on or after the date, ties by id, or None."""
     eligible = [row for row in contracts if row["StatusCode"] in STATUS_CODES and row["EndDate"] is not None
                 and date.fromisoformat(row["EndDate"]) >= AS_OF]
     return min(eligible, key=lambda row: (row["EndDate"], row["Id"]), default=None)
@@ -188,14 +188,14 @@ def read_records(rows, notes, messages):
 
 
 def numbers(rows):
-    """docs/briefs.md, Units: the account is 1, then contacts, contracts, and opportunities, each by ID."""
+    """docs/python/briefs.md, Units: the account is 1, then contacts, contracts, and opportunities, each by ID."""
     ordered = [row["Id"] for name in ("Account", "Contact", "Contract", "Opportunity")
                for row in sorted(rows[name], key=lambda row: row["Id"])]
     return {native: number for number, native in enumerate(ordered, 1)}
 
 
 def expected(rows, notes, messages, brief):
-    """What a card must say about the served rows, written from them and docs/briefs.md: the fixed value lines,
+    """What a card must say about the served rows, written from them and docs/python/briefs.md: the fixed value lines,
     one line per opportunity and contact, the other contracts that are shown, the signals in order, and what
     was not read."""
     number = numbers(rows)
@@ -269,7 +269,7 @@ def expected(rows, notes, messages, brief):
         not_read.append("  CRM: no opportunity was returned for this account.")
     if len(unselected) > varied.SHOWN:
         not_read.append(varied.more(len(unselected), "contracts"))
-    # docs/briefs.md, Signals: the contract end, a late close date, contacts with no role, then the stale call.
+    # docs/python/briefs.md, Signals: the contract end, a late close date, contacts with no role, then the stale call.
     return {"fixed": fixed, "opportunities": offers, "contracts": others, "contacts": people,
             "signals": signals + still_open + late + roles + stale, "not_read": not_read}
 

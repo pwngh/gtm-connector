@@ -90,7 +90,6 @@ services:
       GTM_CONTAINER_LISTEN: 0.0.0.0:8443
       GTM_PUBLIC_ORIGIN: https://127.0.0.1:${GTM_PORT:-8443}
       GTM_ALLOWED_HOSTS: 127.0.0.1:${GTM_PORT:-8443},localhost:${GTM_PORT:-8443}
-      GTM_WEB_DIR: /app/web
     ports:
       - 127.0.0.1:${GTM_PORT:-8443}:8443
     depends_on:
