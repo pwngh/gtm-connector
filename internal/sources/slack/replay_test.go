@@ -129,7 +129,7 @@ func TestRecordedThreadsReplay(t *testing.T) {
 				}
 			}
 			got := make([]any, len(read.Records))
-			for i, record := range withRefs(read.Records) {
+			for i, record := range withRefs(read.Records, "messages") {
 				got[i] = record
 			}
 			if got, want := dump(t, got), dump(t, want); got != want {

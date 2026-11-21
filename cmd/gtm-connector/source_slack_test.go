@@ -797,7 +797,8 @@ func TestSlackCommandsRefuse(t *testing.T) {
 		{[]string{"connect", "--client-id", inventedClient}, "the following arguments are required: --redirect-uri"},
 		{[]string{"check"}, "the following arguments are required: --account"},
 		{[]string{"connect", "--client-id", inventedClient, "--redirect-uri", api.redirect, "--user-scope", "chat:write"},
-			"argument --user-scope: invalid choice (choose from 'channels:history', 'groups:history')"},
+			"argument --user-scope: invalid choice (choose from 'channels:history', 'groups:history', 'users:read', " +
+				"'users:read.email')"},
 		{[]string{"unknown"}, "argument ACTION: invalid choice (choose from 'connect', 'status', 'disconnect', 'map', 'check')"},
 	} {
 		if message := slackRefused(t, d, 2, append([]string{"debug", "slack"}, c.argv...)...); message != c.want {

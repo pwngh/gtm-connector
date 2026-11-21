@@ -57,9 +57,11 @@ func NewConfiguration(clientID, redirectURI string, scopes []string, teamID stri
 		scopes = []string{"channels:history"}
 	}
 	ordered, listed := scopeList(scopes)
+	// A sign-in reads a thread, so it holds a history scope; the profile scopes only add to one.
+	history := slices.Contains(ordered, "channels:history") || slices.Contains(ordered, "groups:history")
 	major, minor, dotted := strings.Cut(clientID, ".")
 	port, redirect := callbackPort(redirectURI)
-	if !dotted || !digits(major, 32) || !digits(minor, 32) || !listed || !redirect ||
+	if !dotted || !digits(major, 32) || !digits(minor, 32) || !listed || !history || !redirect ||
 		(teamID != "" && !identifierOf(teamID, "T", 8)) {
 		return Configuration{}, invalid
 	}

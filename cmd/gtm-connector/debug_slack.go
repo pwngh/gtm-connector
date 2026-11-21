@@ -33,7 +33,8 @@ import (
 // slackActions are debug slack's actions, each with its options and help.
 var slackActions = map[string]arguments{
 	"connect": {options: []option{{name: "--client-id", value: true}, {name: "--redirect-uri", value: true},
-		{name: "--user-scope", value: true, repeat: true, choices: []string{"channels:history", "groups:history"}},
+		{name: "--user-scope", value: true, repeat: true,
+			choices: []string{"channels:history", "groups:history", "users:read", "users:read.email"}},
 		{name: "--team-id", value: true}}, help: slackConnectHelp},
 	"status":     {options: []option{{name: "--check"}}, help: slackStatusHelp},
 	"disconnect": {options: []option{{name: "--revoke"}}, help: slackDisconnectHelp},
@@ -1068,7 +1069,7 @@ Examples:
 const slackConnectHelp = `usage: gtm-connector debug slack connect [-h] [--json] [--state-dir STATE_DIR]
                                          --client-id CLIENT_ID
                                          --redirect-uri REDIRECT_URI
-                                         [--user-scope {channels:history,groups:history}]
+                                         [--user-scope {channels:history,groups:history,users:read,users:read.email}]
                                          [--team-id TEAM_ID]
 
 Authorize an existing public Slack app through the system browser.
@@ -1083,9 +1084,11 @@ options:
   --redirect-uri REDIRECT_URI
                         Use the exact registered
                         http://localhost:PORT/slack/callback redirect.
-  --user-scope {channels:history,groups:history}
-                        Request this user scope. Repeat for both; default:
-                        channels:history.
+  --user-scope {channels:history,groups:history,users:read,users:read.email}
+                        Request this user scope. Repeat for each; default:
+                        channels:history. users:read and users:read.email
+                        let a card read each author's team and profile
+                        email.
   --team-id TEAM_ID     Require this workspace identity without displaying it.
 
 Example: gtm-connector debug slack connect --client-id EXISTING_PUBLIC_CLIENT_ID --redirect-uri http://localhost:8765/slack/callback
