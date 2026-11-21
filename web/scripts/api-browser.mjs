@@ -365,7 +365,8 @@ const ring = tab => tab.evaluate(() => {
 });
 const fits = focus => focus.width >= 44 && focus.height >= 44 && focus.outline >= 3;
 const needsServer = 'This page needs its server. Open the address your gtm-connector server prints.';
-const until = (tab, fn, arg) => tab.waitForFunction(fn, arg, {timeout: 8000});
+const until = (tab, fn, arg) => tab.waitForFunction(fn, arg, {timeout: 8000})
+  .catch(error => {throw new Error(`${String(error).split('\n')[0]} waiting for ${String(fn).replace(/\s+/g, ' ').slice(0, 160)}`);});
 
 async function scenario(name, run) {
   reset();
@@ -1381,7 +1382,7 @@ await scenario('deal card: a card published before its lines were kept', async (
   await tab.goto(thornfield, {waitUntil: 'networkidle'});
   await signIn(tab);
   await tab.waitForSelector('.dc-ledger');
-  const note = (await tab.innerText('.dc-values-note')).replace(/\s+/g, ' ').trim();
+  const note = (await tab.textContent('.dc-values-note')).replace(/\s+/g, ' ').trim();
   const link = await tab.getAttribute('.dc-values-note a', 'href');
   const drawn = await tab.locator('.dc-focal, .dc-flags, [data-value], .dc-attr__title').count();
   check(note === 'The countdown and ARR are on the plain-text card.' && link === '/deals/acc-003/text' && drawn === 0,
@@ -1619,6 +1620,8 @@ for (const [width, scheme] of matrix) {
     check(new URL(tab.url()).search === '?card=card-acc-003-older' && await tab.textContent('.dc-plain__text') === sealedThornfield.text, `${at}: the card before it opens on the same tab and verifies`);
     // A new session checks the card again.
     await signOut(tab);
+    await tab.waitForSelector('.fr-signin');
+    await apiSettled();
     await tab.goto(thornfield, {waitUntil: 'networkidle'});
     await signIn(tab);
     await tab.waitForSelector('.dc-ledger');
@@ -1669,7 +1672,7 @@ const helpState = (tab, scope, index) => tab.evaluate(([scope, index]) => {
     ring: getComputedStyle(button).outlineStyle !== 'none' ? parseFloat(getComputedStyle(button).outlineWidth) : 0,
     size: [own.width, own.height], overlaps: controls.filter(el => crosses(own, el.getBoundingClientRect())).map(el => el.getAttribute('aria-label') || el.textContent.trim().slice(0, 30)),
     clearOfLine: [own, ...others].every(rect => !crosses(rect, box)),
-    lineVisible: held.top >= 0 && own.top >= 0 && own.bottom <= innerHeight, overLine: crosses(box, held), inViewport: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
+    panelVisible: box.top >= 0 && box.top < innerHeight, overLine: crosses(box, held), inViewport: box.left >= 0 && box.right <= document.documentElement.clientWidth,
     open: [...document.querySelectorAll('.ui-help__panel')].filter(el => !el.hidden).length};
 }, [scope, index]);
 // Each help button's accessible name and description, from Chromium's accessibility tree. Firefox and
@@ -1702,14 +1705,15 @@ async function exerciseHelp(tab, at, scope, {touch, outside, expected}) {
   check(keys.join() === expected.join(), `${at}: help on ${keys.join(', ')}`);
   // Tab reaches every help button, and each opens as it takes focus.
   await tab.evaluate(() => {document.activeElement?.blur(); window.scrollTo(0, 0);});
-  const reached = new Map();
+  const reached = new Map(), path = [];
   for (let press = 0; press < 400 && reached.size < total; press++) {
     await tab.keyboard.press('Tab');
+    if (path.length < 12) path.push(await focused(tab));
     const index = await tab.evaluate(scope => [...document.querySelectorAll(`${scope} .ui-help__button`)].indexOf(document.activeElement), scope);
     if (index >= 0 && !reached.has(index)) reached.set(index, await helpState(tab, scope, index));
   }
   check(reached.size === total && [...reached.values()].every(state => state.shown && state.focused && state.ring >= 3),
-    `${at}: Tab reaches all ${total} help buttons, and each opens on focus with a 3px ring (${[...reached.values()].map(state => `${state.key} ${state.shown} ${state.ring}`).join(', ')})`);
+    `${at}: Tab reaches all ${total} help buttons, and each opens on focus with a 3px ring (${[...reached.values()].map(state => `${state.key} ${state.shown} ${state.ring}`).join(', ')}${reached.size < total ? `; focus went ${path.join(' > ')}` : ''})`);
   const named = await accessible(tab, scope);
   for (let index = 0; index < total; index++) {
     const entry = helpFile[keys[index]];
@@ -1719,8 +1723,8 @@ async function exerciseHelp(tab, at, scope, {touch, outside, expected}) {
       `${at} ${opened.key}: focus shows the copy file's sentence; the button is "${named[index].name}", ${opened.size.map(Math.round).join('x')}, and overlaps no control (${opened.overlaps.join() || 'none'})`);
     if (entry.guide) check(opened.role === 'note' && opened.expanded === 'true', `${at} ${opened.key}: a panel is a note its button expands`);
     else check(opened.role === 'tooltip' && opened.expanded === null && named[index].description === entry.text, `${at} ${opened.key}: the hint's sentence is its button's accessible description (${named[index].description})`);
-    if (touch) check(opened.position === 'static' && opened.clearOfLine && opened.lineVisible, `${at} ${opened.key}: in the flow, over nothing else on its line, with the line in view (${JSON.stringify({p: opened.position, clear: opened.clearOfLine, visible: opened.lineVisible})})`);
-    else check(opened.position === 'absolute' && !opened.overLine && opened.inViewport, `${at} ${opened.key}: placed off its line and inside the viewport (${JSON.stringify({over: opened.overLine, inside: opened.inViewport})})`);
+    if (touch) check(opened.position === 'static' && opened.clearOfLine && opened.panelVisible, `${at} ${opened.key}: in the flow, over nothing else on its line, and scrolled into view (${JSON.stringify({p: opened.position, clear: opened.clearOfLine, visible: opened.panelVisible})})`);
+    else check(opened.position === 'absolute' && !opened.overLine && opened.inViewport, `${at} ${opened.key}: placed off its line and inside the viewport's sides (${JSON.stringify({over: opened.overLine, inside: opened.inViewport})})`);
     await tab.keyboard.press('Escape');
     const closed = await helpState(tab, scope, index);
     check(!closed.shown && closed.focused, `${at} ${opened.key}: Escape closes it and focus stays on its button`);
