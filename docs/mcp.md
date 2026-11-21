@@ -86,7 +86,9 @@ text `Error executing tool TOOL: CODE`. Its receipt is finished as an error.
 | `account_not_granted` | The token's principal holds no live grant on the account. |
 | `account_not_selected`, `slack_not_selected` | A selection is served, and the account, or its Slack thread, is not in it. |
 | `deal_not_permitted` | `read_deal_card` named a deal that does not exist, one of an account the token's principal holds no live grant on, or one outside the selection. The three answer alike. |
-| `card_scope_not_covered` | The token lacks `calls:read` or `slack:read`, and the deal's card read that source. |
+| `card_scope_not_covered` | The token lacks `calls:read` or `slack:read`, and the deal's card read that source, when the call was admitted or as the card is released. |
+| `brief_source_changed` | The deal's card, or the saved brief, was read from other sources than the workspace is bound to now. |
+| `invalid_token` | A deal's card or a saved brief is released only while the bearer still verifies, and it no longer does. |
 | `crm_not_connected`, `calls_not_connected`, `slack_not_connected` | The workspace has no such source connected at the moment of the call. |
 | `crm_not_served` | The workspace's CRM is one the MCP tools do not serve in this build. |
 | `account_number_requires_salesforce` | `search_accounts` was given `account_number` on the demo CRM, which has no account numbers. |
@@ -133,8 +135,11 @@ instruction. The result leaves out the evidence the card was built from and any 
 A card holds what each source returned, so its release needs the scopes of every source it read, as a
 saved brief's does: `calls:read` when it read calls, and `slack:read` when it read Slack. A deal is read
 under the principal's live grant on its account, checked again as the card is read, and with a selection only
-when the selection holds its account, and the account's Slack when the card read Slack. Each call gets one
-receipt, whose rows are the deal and the card it released.
+when the selection holds its account, and the account's Slack when the card read Slack. The card must have
+been read from the sources the workspace is bound to now, as a saved brief must, and the bearer is
+verified again as the card is released. Each call gets one receipt, which names the deal's account when the
+deal exists, and whose rows are the deal and the card it released. Neither tool opens a source, so they
+answer while a workspace's CRM cannot be opened.
 
 ## Tokens
 

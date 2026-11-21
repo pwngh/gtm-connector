@@ -86,7 +86,7 @@ func TestReportingViewsCountTheStoredRows(t *testing.T) {
 		t.Fatalf("after a restore the views count %s, not %s, or hold other rows", again, views)
 	}
 	const inReporting = `pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace AND s.nspname = 'reporting'`
-	granted := `SELECT count(*)::text FROM ` + inReporting + ` WHERE has_table_privilege('gtm_reporting', c.oid, 'SELECT')`
+	granted := `SELECT count(*)::text FROM ` + inReporting + ` WHERE has_table_privilege(gtm_reporting_role(), c.oid, 'SELECT')`
 	if n := scalar(t, url, granted); n != "5" {
 		t.Fatalf("after a restore the role may read %s views", n)
 	}
@@ -119,7 +119,8 @@ func TestTheReportingRoleReadsOnlyTheViews(t *testing.T) {
 		card.ID, postgrestest.Account))
 	name := "gtm_report_" + strings.ReplaceAll(f.Workspace.ID[:8], "-", "")
 	const password = "report-password-for-this-test"
-	ok(t, sql(t, f, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD '%s' IN ROLE gtm_reporting", name, password)))
+	reporting := scalar(t, f.URL, "SELECT gtm_reporting_role()")
+	ok(t, sql(t, f, fmt.Sprintf("CREATE ROLE %s LOGIN PASSWORD '%s' IN ROLE %s", name, password, reporting)))
 	t.Cleanup(func() {
 		conn, err := pgx.Connect(context.Background(), f.URL)
 		if err != nil {
@@ -167,6 +168,12 @@ func TestTheReportingRoleReadsOnlyTheViews(t *testing.T) {
 		  JOIN reporting.card_lines l ON l.card_id = c.card_id AND l.code = 'renewal_date'
 		 WHERE d.state = 'open'`).Scan(&deal, &days); err != nil || deal == "" {
 		t.Errorf("the documented query: %q %d (%v)", deal, days, err)
+	}
+	// Every view holds the rows of every workspace of the database, each with its workspace_id.
+	if n := scalar(t, f.URL, `SELECT count(*)::text FROM information_schema.views v WHERE v.table_schema = 'reporting'
+		AND NOT EXISTS (SELECT 1 FROM information_schema.columns c WHERE c.table_schema = 'reporting'
+		AND c.table_name = v.table_name AND c.column_name = 'workspace_id')`); n != "0" {
+		t.Errorf("%s views have no workspace_id", n)
 	}
 	forbidden := regexp.MustCompile(`token|lease|password|secret|session|credential|argument|request|bytes|body|binding|digest_of`)
 	columns := strings.Fields(scalar(t, f.URL, `SELECT string_agg(table_name || '.' || column_name, ' ')

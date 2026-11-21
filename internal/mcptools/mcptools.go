@@ -14,9 +14,10 @@
 //   - prepare_renewal_brief runs the card maker under the gate's receipt, which is the brief's seal: the
 //     publication finishes it with the saved bytes' digest. Each read inside it commits a child receipt of
 //     its own, checks the bearer again and counts one attempt against its rate window.
-//   - list_deals and read_deal_card read no source. They give the deals of the accounts the principal is
-//     granted and the selection holds, and a deal's newest card whole, under the grant checks every surface
-//     applies (internal/authz).
+//   - list_deals and read_deal_card read no source and open none. They give the deals of the accounts the
+//     principal is granted and the selection holds, and a deal's newest card whole, under the grant checks
+//     every surface applies (internal/authz), and a card only on the terms read_renewal_brief releases a
+//     saved brief on.
 //   - read_renewal_brief reads no source. It releases a saved brief only while its seal, the selection, the
 //     source bindings, the principal's grant and the scopes the bearer carries at release still cover it.
 package mcptools
@@ -42,6 +43,8 @@ type Storage interface {
 	authz.Store
 	MachineToken(ctx context.Context, workspaceID string, tokenSHA256 []byte) (postgres.MachineToken, error)
 	CardByBrief(ctx context.Context, workspaceID, briefID string) (postgres.Card, error)
+	// Deal is a deal of the workspace with no grant checked, which a receipt names the account of.
+	Deal(ctx context.Context, workspaceID, ref string) (postgres.Deal, error)
 }
 
 // Book is a source that also answers the two CRM reads no card makes: a search, and the opportunities of
@@ -72,6 +75,10 @@ type Config struct {
 	// what it gave: a source detached or connected again is not read by a server that is still running. An
 	// error it returns is the call's refusal, under the call's receipt.
 	Open func(ctx context.Context) (Opened, error)
+	// Bound, when set, gives the sources the workspace is bound to at the moment of a call, read from the
+	// store without opening any source, in place of Sources. read_deal_card releases a card only when it was
+	// read from these.
+	Bound func(ctx context.Context) (evidence.Sources, error)
 	// Selection limits every read to its accounts, and Slack to those it marks, and adds the two brief
 	// tools. Nil serves every account the caller's principal is granted, and no brief tool.
 	Selection cards.Selection
@@ -108,14 +115,18 @@ func newServer(c Config) (*server, error) {
 	if c.RateLimit == 0 && c.WindowSeconds == 0 {
 		c.RateLimit, c.WindowSeconds = 60, 60
 	}
+	if c.Bound == nil {
+		fixed := c.Sources
+		c.Bound = func(context.Context) (evidence.Sources, error) { return fixed, nil }
+	}
 	s := &server{Config: c}
 	sources := c.Open
 	if sources == nil {
 		fixed := Opened{Source: c.Source, Sources: c.Sources, Connections: c.Connections}
 		sources = func(context.Context) (Opened, error) { return fixed, nil }
 	}
-	s.recorder = &recorder{store: c.Receipts, workspace: c.WorkspaceID, tokens: c.Store, sources: sources,
-		open: map[string]*pending{}}
+	s.recorder = &recorder{store: c.Receipts, workspace: c.WorkspaceID, tokens: c.Store, deals: c.Store,
+		sources: sources, open: map[string]*pending{}}
 	return s, nil
 }
 

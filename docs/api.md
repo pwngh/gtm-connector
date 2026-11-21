@@ -308,12 +308,22 @@ bytes. To check a delivery:
 **A reporting tool reads deals, cards, their lines and receipts with SQL, through one role that can
 read nothing else.**
 
-The views are in the schema `reporting` of the connector's database, and the role `gtm_reporting` may
-select from them and from no table. It cannot log in. Give it to a login role of your own, as the owner:
+The views are in the schema `reporting` of the connector's database. Each database has its own reporting
+role, which may select from that database's views and from no table, and cannot log in.
+`gtm_reporting_role()` names it: `gtm_reporting_`, the database's name in lower case with any other
+character as `_`, and 8 hex digits of its digest, such as `gtm_reporting_gtm_ccdd0722` for a database
+named `gtm`. To make a reader for one database, connect to it as the owner and give that role to a login
+role of your own:
 
 ```sql
-CREATE ROLE analyst LOGIN PASSWORD 'choose-one' IN ROLE gtm_reporting;
+SELECT gtm_reporting_role();                       -- gtm_reporting_gtm_ccdd0722
+CREATE ROLE analyst LOGIN PASSWORD 'choose-one';
+GRANT gtm_reporting_gtm_ccdd0722 TO analyst;
 ```
+
+The reader reads the views of that database only, since no other database grants its role anything.
+Whether it may connect to the server's other databases is PostgreSQL's own `CONNECT` privilege, which
+the connector does not change.
 
 ```sql
 -- Open deals, the days to each renewal, and the card that counts it.
@@ -330,7 +340,10 @@ SELECT d.deal_id, d.renews_on, l.countdown_days, c.card_id, c.as_of
 | `reporting.cards` | Sealed card | Its deal (`deal_id`, or null), its seal (`seal_receipt_id`), and the SHA-256 of its stored bytes. `as_of` is the day its bytes state. |
 | `reporting.card_lines` | Line under ATTENTION or RECORD VALUES | Its card and, in `cites`, the numbers of the units it cites. A renewal line has `countdown_date` and `countdown_days`, an ARR line `amount` and `currency`, a contact line `contact_name` and `contact_title`. |
 | `reporting.units` | Numbered unit of a card, without its text | The record it rests on (`record_ref`), the read that returned it (`receipt_id`) and that record's version (`record_version_id`). |
-| `reporting.receipts` | Receipt of a tool call, or of a read inside one | The record references it returned (`rows`), its parent call, and its principal. `error_code` is set when the failure was a code. |
+| `reporting.receipts` | Receipt of a tool call, or of a read inside one | The record references it returned (`rows`), its parent call, and its principal. `tool` is `<invalid>` for a name the connector does not define, `brief_id` is null unless it has a brief ID's form, and `error_code` is set when the failure was a code. |
+
+Every view holds every workspace of the database, each row with its `workspace_id`: filter on it to
+report on one.
 
 Every time is a `timestamptz` the database's clock wrote. `as_of` and `renews_on` are days as the
 card and the CRM state them. Each view and each of its time columns carries a comment saying what a row
@@ -342,6 +355,12 @@ is and which clock its times are on: `\d+ reporting.cards` in `psql` prints it.
 > read but does not show is in no view.
 
 A query through the role gets no receipt: the database answers it, not the connector. A restore makes
-the views again with the schema, and grants them to the role. The role belongs to the PostgreSQL server,
-not to one database: on a server that holds more than one connector database, it reads the views of
-each.
+the views again with the schema, and grants them to the role of the database it fills; it needs a
+database with no `reporting` schema.
+
+A migration takes a role that already holds the name only when it can do nothing more than the role it
+would make: no login, no password, no member, a member of no role, and no other attribute. Any other
+stops the migration with an error that names the role. So a restore into a new database with the name of
+an old one, whose role still has a reader as a member, stops until that role is dropped
+(`DROP OWNED BY gtm_reporting_gtm_ccdd0722` in each database that granted it anything, then `DROP ROLE gtm_reporting_gtm_ccdd0722`) or its members are
+revoked.

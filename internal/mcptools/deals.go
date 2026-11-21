@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/authz"
+	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
@@ -61,8 +62,9 @@ func (s *server) listDeals(ctx context.Context, inv *mcp.Invocation) (*strictjso
 }
 
 // readDealCard is read_deal_card: one deal and its newest card, whole, with no source read. The card is
-// released only while the scopes the caller's bearer carries cover every source the card read, and, with a
-// selection, while the account's Slack is selected when the card read Slack.
+// released only while it was read from the sources the workspace is bound to now, the scopes the caller's
+// bearer carries, as admitted and again as it is released, cover every source the card read, and, with a
+// selection, the account's Slack is selected when the card read Slack.
 func (s *server) readDealCard(ctx context.Context, inv *mcp.Invocation, arguments *strictjson.Object) (*strictjson.Object, error) {
 	ref, _ := member(arguments, "deal_id").(string)
 	reads, principal := s.evidenceOf(inv)
@@ -81,6 +83,7 @@ func (s *server) readDealCard(ctx context.Context, inv *mcp.Invocation, argument
 	}
 	records := []any{record}
 	var card any
+	calls, slack := false, false
 	if deal.LatestCard != nil {
 		view, err := reads.Card(ctx, principal, deal.LatestCard.ID)
 		switch {
@@ -90,16 +93,22 @@ func (s *server) readDealCard(ctx context.Context, inv *mcp.Invocation, argument
 		case err != nil:
 			return nil, err
 		}
-		calls, slack, err := cardReads(view)
+		if calls, slack, err = cardReads(view); err != nil {
+			return nil, err
+		}
+		foreign, err := s.readElsewhere(ctx, view.Card)
 		if err != nil {
 			return nil, err
 		}
+		// In read_renewal_brief's order: the selection, the scopes, then the bindings.
 		if err := s.requireSelected(deal.AccountRef, slack); err != nil {
 			return nil, err
 		}
-		if !slices.Contains(inv.Scopes, "crm:read") || calls && !slices.Contains(inv.Scopes, "calls:read") ||
-			slack && !slices.Contains(inv.Scopes, "slack:read") {
+		if !covers(inv.Scopes, calls, slack) {
 			return nil, mcp.ToolError("card_scope_not_covered")
+		}
+		if foreign {
+			return nil, mcp.ToolError("brief_source_changed")
 		}
 		released, err := cardValue(view)
 		if err != nil {
@@ -109,8 +118,48 @@ func (s *server) readDealCard(ctx context.Context, inv *mcp.Invocation, argument
 		records = append(records, strictjson.NewObject("id", view.Card.BriefID,
 			"record_ref", receipts.Reference(view.Card.BriefID, view.Card.Bytes)))
 	}
+	// The release goes by the bearer as it is now, not as the call was admitted with it.
+	scopes, live := inv.Current()
+	switch {
+	case !live:
+		return nil, mcp.ToolError("invalid_token")
+	case !covers(scopes, calls, slack):
+		return nil, mcp.ToolError("card_scope_not_covered")
+	}
 	return strictjson.NewObject("source", "deals", "records", records, "untrusted_data", true, "deal", record,
 		"card", card), nil
+}
+
+// covers reports whether scopes open every source a card read: the CRM always, and calls and Slack when it
+// read them.
+func covers(scopes []string, calls, slack bool) bool {
+	return slices.Contains(scopes, "crm:read") && (!calls || slices.Contains(scopes, "calls:read")) &&
+		(!slack || slices.Contains(scopes, "slack:read"))
+}
+
+// readElsewhere reports whether a card was read from other sources than the workspace is bound to now. A
+// prepared brief is checked whole, as read_renewal_brief checks one; a refusal for anything but its sources
+// is that tool's refusal. Any other card is checked by the backends and bindings its evidence names.
+func (s *server) readElsewhere(ctx context.Context, card postgres.Card) (bool, error) {
+	bound, err := s.Bound(ctx)
+	if err != nil {
+		return false, err
+	}
+	if payload, err := receipts.ParsePayload(card.Bytes); err != nil || !payload.Prepared {
+		return !cards.ReadFrom(card.Bytes, bound), nil
+	}
+	_, err = cards.VerifyPrepared(ctx, card.Bytes, card.BriefID, cards.StoreLog{Store: s.Receipts,
+		WorkspaceID: s.WorkspaceID}, bound)
+	var code *cards.CodeError
+	switch {
+	case err == nil:
+		return false, nil
+	case errors.Is(err, cards.ErrForeign):
+		return true, nil
+	case errors.As(err, &code):
+		return false, mcp.ToolError(code.Code)
+	}
+	return false, mcp.ToolError("brief_not_accepted")
 }
 
 // dealRecord is a deal as both tools give it. Its record_ref is deals/ID. The account's name is source text,

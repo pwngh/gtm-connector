@@ -150,13 +150,15 @@ func (s *Store) Restore(ctx context.Context, archiveSHA256 string, schemaVersion
 			return err
 		}
 		// Empty means no table, view, sequence or function in the schema at
-		// all, checked under the lock that migrations take.
+		// all, and no reporting schema, checked under the lock that
+		// migrations take.
 		var objects int
 		if err := tx.QueryRow(ctx, `
 			SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 			         WHERE n.nspname = current_schema())
 			     + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-			         WHERE n.nspname = current_schema())`).Scan(&objects); err != nil {
+			         WHERE n.nspname = current_schema())
+			     + (SELECT count(*) FROM pg_namespace WHERE nspname = 'reporting')`).Scan(&objects); err != nil {
 			return err
 		}
 		if objects != 0 {

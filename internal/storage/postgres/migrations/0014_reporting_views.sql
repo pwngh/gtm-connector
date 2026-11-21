@@ -1,29 +1,53 @@
--- Reporting views: deals, cards, card lines, units and receipts, read with SQL through the role
--- gtm_reporting, which may select from these views and from nothing else.
+-- Reporting views: deals, cards, card lines, units and receipts, read with SQL through this database's
+-- reporting role (gtm_reporting_role()), which may select from these views and from nothing else.
 --
 -- A view runs with its owner's rights, so the role reads the tables only through the views. No view has a
 -- column for a credential, a token or its fingerprint, a session, a lease, a call's arguments, a card's bytes
--- or a unit's body. The only text that came from a source is what a sealed card already prints: a line's
--- text, label and contact. Every time is a timestamptz the database's own clock wrote.
+-- or a unit's body, and a receipt's tool and brief ID show only when they are the connector's own. The only
+-- text that came from a source is what a sealed card already prints: a line's text, label and contact. Every
+-- view holds every workspace of the database, by workspace_id. Every time is a timestamptz the database's
+-- own clock wrote.
 --
--- Roles belong to the whole PostgreSQL cluster, so gtm_reporting is made once, by the first database that
--- migrates, and each database grants it its own views. A later migration that changes a column a view
--- reads drops the view and makes it again, with its comments and its grant.
+-- Roles belong to the whole PostgreSQL server, so the role is named for this database: gtm_reporting_, the
+-- database's name in lower case with each other character as _ and cut to 40 characters, _ and the first 8
+-- hex digits of the MD5 of the exact name. A role that already holds the name is taken only when it can do
+-- nothing more than the role this makes: no login, no password, no member, a member of no role, and no
+-- attribute. Any other stops the migration. A later migration that changes a column a view reads drops the
+-- view and makes it again, with its comments and its grant.
+
+CREATE FUNCTION gtm_reporting_role() RETURNS text LANGUAGE sql STABLE AS $$
+    SELECT 'gtm_reporting_' || left(regexp_replace(lower(current_database()), '[^a-z0-9_]', '_', 'g'), 40)
+        || '_' || left(md5(current_database()), 8)
+$$;
 
 DO $$
+DECLARE
+    name text := gtm_reporting_role();
+    held pg_roles;
+    password boolean;
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'gtm_reporting') THEN
-        CREATE ROLE gtm_reporting NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+    SELECT * INTO held FROM pg_roles WHERE rolname = name;
+    IF NOT FOUND THEN
+        EXECUTE format('CREATE ROLE %I NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION '
+            'NOBYPASSRLS', name);
+        RETURN;
     END IF;
-EXCEPTION WHEN duplicate_object OR unique_violation THEN
-    -- Another database's migration made it first.
-    NULL;
+    IF has_table_privilege('pg_catalog.pg_authid', 'SELECT') THEN
+        EXECUTE 'SELECT rolpassword IS NOT NULL FROM pg_catalog.pg_authid WHERE oid = $1' INTO password USING held.oid;
+    END IF;
+    IF held.rolcanlogin OR held.rolsuper OR held.rolinherit OR held.rolcreaterole OR held.rolcreatedb
+       OR held.rolreplication OR held.rolbypassrls OR password IS DISTINCT FROM false
+       OR EXISTS (SELECT 1 FROM pg_auth_members WHERE roleid = held.oid OR member = held.oid) THEN
+        RAISE EXCEPTION 'the role % already exists and can do more than read the reporting views; drop it, or '
+            'make it NOLOGIN NOINHERIT with no password, no member and no other attribute, and migrate again',
+            name USING ERRCODE = 'GTR01';
+    END IF;
 END
 $$;
 
 CREATE SCHEMA reporting;
 COMMENT ON SCHEMA reporting IS
-    'Read-only views for reporting. Grant gtm_reporting to a login role to read them; it reads nothing else.';
+    'Read-only views for reporting. Grant the role gtm_reporting_role() names to a login role to read them.';
 REVOKE ALL ON SCHEMA reporting FROM PUBLIC;
 
 CREATE VIEW reporting.deals AS
@@ -95,18 +119,30 @@ COMMENT ON VIEW reporting.units IS
     'receipt_id the read that returned it (reporting.receipts); both are null on an admitted card''s units.';
 
 CREATE VIEW reporting.receipts AS
-SELECT r.workspace_id, r.id AS receipt_id, r.parent_id, r.ordinal, r.principal_id, r.tool, r.scope,
-       r.account_ref, r.connection_id, r.connection_generation, r.brief_id, r.status, r.http_status,
+SELECT r.workspace_id, r.id AS receipt_id, r.parent_id, r.ordinal, r.principal_id,
+       CASE WHEN r.tool IN ('search_accounts', 'get_account', 'list_opportunities', 'read_call_notes',
+                            'read_slack_messages', 'prepare_renewal_brief', 'read_renewal_brief', 'list_deals',
+                            'read_deal_card', 'save_brief', 'log_activity')
+            THEN r.tool ELSE '<invalid>' END AS tool,
+       r.scope, r.account_ref, r.connection_id, r.connection_generation,
+       CASE WHEN r.brief_id ~ '^[A-Za-z0-9_-]{1,128}$' THEN r.brief_id END AS brief_id, r.status, r.http_status,
        CASE WHEN r.error ~ '^[a-z0-9_]{1,64}$' THEN r.error END AS error_code, r.row_count, r.rows,
        r.started_at, r.finished_at, r.elapsed_ms
   FROM receipts r;
 COMMENT ON VIEW reporting.receipts IS
     'One row per receipt: a tool call, or a read inside one (parent_id). rows are the record references it '
     'returned. A call''s arguments, its request ID and its token''s fingerprint are left out.';
+COMMENT ON COLUMN reporting.receipts.tool IS
+    'The tool called, when it is one the connector defines; <invalid> for any other name a caller sent.';
+COMMENT ON COLUMN reporting.receipts.brief_id IS 'The brief the call named, when it has a brief ID''s form; null otherwise.';
 COMMENT ON COLUMN reporting.receipts.error_code IS
     'Why the call failed, when that is a code such as request_failed; null otherwise.';
 COMMENT ON COLUMN reporting.receipts.started_at IS 'When the receipt was committed, before the call ran, by the database clock.';
 COMMENT ON COLUMN reporting.receipts.finished_at IS 'When the receipt was finished, by the database clock; null while pending.';
 
-GRANT USAGE ON SCHEMA reporting TO gtm_reporting;
-GRANT SELECT ON ALL TABLES IN SCHEMA reporting TO gtm_reporting;
+DO $$
+BEGIN
+    EXECUTE format('GRANT USAGE ON SCHEMA reporting TO %I', gtm_reporting_role());
+    EXECUTE format('GRANT SELECT ON ALL TABLES IN SCHEMA reporting TO %I', gtm_reporting_role());
+END
+$$;
