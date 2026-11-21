@@ -210,11 +210,11 @@ func TestRestoreRefusesLinesThePublicationRefuses(t *testing.T) {
 			}
 			edit(copied)
 			fresh := freshStore(t)
-			err := fresh.Restore(ctx, strings.Repeat("a", 64), files.version, recount(files.copies, copied), opener(copied))
+			err := fresh.Restore(ctx, strings.Repeat("a", 64), files.applied, recount(files.copies, copied), opener(copied))
 			if err == nil || !strings.Contains(err.Error(), "the backup holds rows the connector would refuse") {
 				t.Fatalf("restored: %v", err)
 			}
-			if v, _ := fresh.SchemaVersion(ctx); v != 0 {
+			if v, _ := fresh.AppliedMigrations(ctx); len(v) != 0 {
 				t.Fatal("a refused restore left a schema")
 			}
 		})
@@ -265,7 +265,7 @@ func TestACardFromBeforeLinesHasNone(t *testing.T) {
 	}
 	files := dump(t, f)
 	fresh, url := freshStoreURL(t)
-	ok(t, fresh.Restore(ctx, strings.Repeat("e", 64), files.version, files.copies, opener(files.data)))
+	ok(t, fresh.Restore(ctx, strings.Repeat("e", 64), files.applied, files.copies, opener(files.data)))
 	if got := scalar(t, url, `SELECT coalesce(line_count::text, 'null') FROM cards WHERE brief_id = 'brief-1'`); got != "null" {
 		t.Fatalf("restored with a line count of %s", got)
 	}

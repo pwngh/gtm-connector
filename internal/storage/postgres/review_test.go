@@ -274,11 +274,11 @@ func TestRestoreRefusesRowsTheWritePathRefuses(t *testing.T) {
 			edit(copied)
 			counts := files.copies
 			fresh := freshStore(t)
-			err := fresh.Restore(ctx, strings.Repeat("a", 64), files.version, recount(counts, copied), opener(copied))
+			err := fresh.Restore(ctx, strings.Repeat("a", 64), files.applied, recount(counts, copied), opener(copied))
 			if err == nil {
 				t.Fatal("restored")
 			}
-			if v, _ := fresh.SchemaVersion(ctx); v != 0 {
+			if v, _ := fresh.AppliedMigrations(ctx); len(v) != 0 {
 				t.Fatal("a refused restore left a schema")
 			}
 		})
@@ -290,7 +290,7 @@ func TestRestoreRefusesRowsTheWritePathRefuses(t *testing.T) {
 		_, err = conn.Exec(ctx, "CREATE TABLE unrelated (x int)")
 		conn.Close(ctx)
 		ok(t, err)
-		if err := fresh.Restore(ctx, strings.Repeat("a", 64), files.version, files.copies, opener(files.data)); err == nil {
+		if err := fresh.Restore(ctx, strings.Repeat("a", 64), files.applied, files.copies, opener(files.data)); err == nil {
 			t.Fatal("restored into a database with other tables")
 		}
 	})
@@ -444,7 +444,7 @@ func TestVersionConflictsAndLeaseErrors(t *testing.T) {
 }
 
 type dumped struct {
-	version int
+	applied []string
 	copies  []postgres.TableCopy
 	data    map[string]string
 }
@@ -454,7 +454,7 @@ func dump(t *testing.T, f *postgrestest.Fixture) dumped {
 	d := dumped{data: map[string]string{}}
 	buffers := map[string]*strings.Builder{}
 	var err error
-	d.version, d.copies, err = f.Store.Dump(ctx, func(table string) (io.WriteCloser, error) {
+	d.applied, d.copies, err = f.Store.Dump(ctx, func(table string) (io.WriteCloser, error) {
 		buffers[table] = &strings.Builder{}
 		return nopWriteCloser{buffers[table]}, nil
 	})
