@@ -14,6 +14,9 @@
 //   - prepare_renewal_brief runs the card maker under the gate's receipt, which is the brief's seal: the
 //     publication finishes it with the saved bytes' digest. Each read inside it commits a child receipt of
 //     its own, checks the bearer again and counts one attempt against its rate window.
+//   - list_deals and read_deal_card read no source. They give the deals of the accounts the principal is
+//     granted and the selection holds, and a deal's newest card whole, under the grant checks every surface
+//     applies (internal/authz).
 //   - read_renewal_brief reads no source. It releases a saved brief only while its seal, the selection, the
 //     source bindings, the principal's grant and the scopes the bearer carries at release still cover it.
 package mcptools
@@ -24,6 +27,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/authz"
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/receipts"
@@ -32,11 +36,11 @@ import (
 	"github.com/pwngh/gtm-connector/internal/transport/mcp"
 )
 
-// Storage is what the verifier and the tools read from the store: a token, a principal's account grants, and
-// a saved brief.
+// Storage is what the verifier and the tools read from the store: a token, a saved brief, and the evidence
+// reads a principal makes under its grants (its accounts, its deals and their cards).
 type Storage interface {
+	authz.Store
 	MachineToken(ctx context.Context, workspaceID string, tokenSHA256 []byte) (postgres.MachineToken, error)
-	ViewAccounts(ctx context.Context, viewer postgres.Viewer) ([]postgres.AccountView, error)
 	CardByBrief(ctx context.Context, workspaceID, briefID string) (postgres.Card, error)
 }
 

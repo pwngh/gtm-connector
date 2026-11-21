@@ -132,8 +132,7 @@ func TestMountedWriteVectors(t *testing.T) {
 			for _, tool := range tools {
 				listed = append(listed, at(tool, "name").(string))
 			}
-			recorded := slices.DeleteFunc(mcp.RecordedTools(), func(tool string) bool { return tool == mcp.WriteTool })
-			if listing.Code != 200 || !reflect.DeepEqual(listed, recorded) || strings.Contains(listing.Body.String(), "write") {
+			if listing.Code != 200 || !reflect.DeepEqual(listed, mcp.ListedTools()) || strings.Contains(listing.Body.String(), "write") {
 				t.Errorf("%s: %d %s", name, listing.Code, listing.Body)
 			}
 			replayed++

@@ -40,6 +40,10 @@ func (s *server) run(ctx context.Context, call mcp.Call) (json.RawMessage, error
 		result, err = s.prepare(ctx, view, call.Invocation, arguments)
 	case "read_renewal_brief":
 		result, err = s.reread(ctx, view, call.Invocation, arguments)
+	case "list_deals":
+		result, err = s.listDeals(ctx, call.Invocation)
+	case "read_deal_card":
+		result, err = s.readDealCard(ctx, call.Invocation, arguments)
 	default:
 		result, err = s.read(ctx, view, call, arguments)
 	}
