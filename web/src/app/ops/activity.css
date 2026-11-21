@@ -1,4 +1,4 @@
-/* Activity: the card's facts, then a table of its receipts; a row opens the
+/* Activity (probe): the card's facts, then a table of its receipts; a row opens the
    receipt whole in a drawer. Under 720 wide each receipt is a block of label
    and value lines, and nothing scrolls sideways. IDs, rows and the arguments
    are in the reference face at 14 or more. */
