@@ -72,8 +72,13 @@ export function Dialog({title, children, onClose, variant = 'dialog', returnFocu
         event.preventDefault();
         node.focus({preventScroll: true});
       } else if (!(active instanceof HTMLElement) || !nodes.includes(active)) {
+        // Focus on something the list does not hold, such as a scrolling box
+        // Firefox lets Tab stop on, moves to the next control after it.
         event.preventDefault();
-        (event.shiftKey ? last : first).focus();
+        const inside = active instanceof HTMLElement && node.contains(active);
+        const after = inside ? nodes.filter(item => active.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING) : [];
+        const before = inside ? nodes.filter(item => active.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_PRECEDING) : [];
+        (event.shiftKey ? (before.at(-1) ?? last) : (after[0] ?? first)).focus();
       } else if (event.shiftKey && active === first) {
         event.preventDefault();
         last.focus();

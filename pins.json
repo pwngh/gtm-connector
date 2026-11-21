@@ -23,9 +23,11 @@
     "runtime": "alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf"
   },
   "actions": {
+    "actions/cache": "55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-go": "d8cbb8045d7f43706b9177cceb36c1f91a6644d5",
-    "actions/setup-node": "53b83947a5a98c8d113130e565377fae1a50d02f"
+    "actions/setup-node": "53b83947a5a98c8d113130e565377fae1a50d02f",
+    "actions/upload-artifact": "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
   },
   "mcp_inspector": "2.15.0",
   "tested_with": {

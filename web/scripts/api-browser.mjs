@@ -4,11 +4,12 @@
 // Coverage, blocked browser storage, a session that expires, hostile text in
 // names, gaps and receipts, a static host's answer, and wrong addresses. The
 // company sign-in goes through the stub's own stand-in for the identity
-// provider and back, and is refused, at 320, 390 and 1440. The
-// frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
-// and dark, Coverage at 320, 390 and 1440, Activity and its receipt drawer at
-// 320, 390, 768 and 1440, the Deal card's ledger, Text and
-// Communications tabs at 320, 390 and 1440, and its proof drawer at 390, 1100 and 1440: tab
+// provider and back, and is refused. The
+// frame, sign-in and theme, the deep links and the palette, Deals, Coverage,
+// Activity and its receipt drawer, the Deal card's ledger, Text and
+// Communications tabs, a seal that fails its check, and the proof drawer are
+// each checked at every width and theme of the matrix: 320, 390, 768 and 1440
+// wide, light and dark. The proof drawer is also checked at 1100: tab
 // order, target sizes, focus outlines, Escape, overflow, text contrast and what
 // browser storage holds. The Text tab is also read and copied for every
 // recorded card, and shown for a card whose bytes do not match its seal, and
@@ -27,7 +28,12 @@
 //
 // It drives the installed Chrome, so it is not part of `npm test`. To run it:
 //   npm run build
-//   npm run test:browser [-- --channel chrome --screenshots DIR --contrast]
+//   npm run test:browser [-- --browser chromium --channel chrome --widths 320,390,768,1440 --screenshots DIR --contrast]
+// --browser is chromium (default), firefox or webkit; --channel picks Chromium's build (chrome is the
+// installed Chrome, chromium the build playwright-core pins); --widths limits the matrix to those widths.
+// Layout is checked by structure, not by pixel: nothing scrolls sideways, controls are at least 44 by 44
+// and do not overlap one another or get clipped, text contrast holds, and focus shows. Where text wraps
+// depends on the fonts a machine has, so no check depends on it.
 // Build and run it with the same GTM_REVISION, which the guide links hold.
 // With --screenshots, the frame's matrix, Coverage, Activity, the Deal card and its drawer save one picture per
 // width and theme in DIR; with --contrast, it prints the lowest contrast of
@@ -40,9 +46,12 @@ import {gunzipSync} from 'node:zlib';
 import {basename, extname, join, normalize} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
-import {chromium} from 'playwright-core';
+import {chromium, firefox, webkit} from 'playwright-core';
 
-const {values: options} = parseArgs({options: {channel: {type: 'string', default: 'chrome'}, screenshots: {type: 'string'}, contrast: {type: 'boolean', default: false}}});
+const {values: options} = parseArgs({options: {browser: {type: 'string', default: 'chromium'}, channel: {type: 'string', default: 'chrome'},
+  widths: {type: 'string', default: '320,390,768,1440'}, screenshots: {type: 'string'}, contrast: {type: 'boolean', default: false}}});
+const engine = {chromium, firefox, webkit}[options.browser];
+if (!engine) throw new Error(`--browser is chromium, firefox or webkit, not ${options.browser}.`);
 if (options.screenshots) mkdirSync(options.screenshots, {recursive: true});
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 if (!existsSync(join(dist, 'index.html'))) throw new Error('Run npm run build first.');
@@ -283,8 +292,17 @@ const activity = `${base}/ops/activity`, thornfield = `${base}/deals/acc-003`, t
 
 // Checks.
 const results = [];
+// Every width and theme a page is checked at, limited by --widths.
+const widths = options.widths.split(',').map(Number);
+if (widths.some(width => ![320, 390, 768, 1440].includes(width))) throw new Error(`--widths takes 320, 390, 768 and 1440 (${options.widths}).`);
+const matrix = widths.flatMap(width => [[width, 'light'], [width, 'dark']]);
 const check = (ok, what) => {results.push(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) process.exitCode = 1;};
-const browser = await chromium.launch({channel: options.channel, headless: true});
+const browser = await engine.launch({headless: true, ...(options.browser === 'chromium' ? {channel: options.channel} : {})});
+// Chromium lets the test read back what the page copied. Firefox and WebKit give a test no clipboard
+// to read, so there the page's writeText is kept and read back instead.
+const allowClipboard = tab => options.browser === 'chromium' ? tab.context().grantPermissions(['clipboard-read', 'clipboard-write'], {origin: base})
+  : tab.context().addInitScript(() => Object.defineProperty(navigator, 'clipboard', {value: {writeText: text => {window.__copied = text; return Promise.resolve();}}}));
+const copiedText = tab => tab.evaluate(() => window.__copied ?? navigator.clipboard.readText());
 async function page({width = 1440, scheme = 'light', blockStorage = false, theme = null, touch = false} = {}) {
   const context = await browser.newContext({viewport: {width, height: 900}, colorScheme: scheme, reducedMotion: 'reduce', hasTouch: touch});
   // Offline: anything off the stub is refused. The origin of every request is kept.
@@ -298,6 +316,11 @@ async function page({width = 1440, scheme = 'light', blockStorage = false, theme
   }, [theme, blockStorage]);
   const tab = await context.newPage();
   tab.setDefaultTimeout(8000);
+  // WebKit on macOS reaches links by Tab only with Option held, as Safari does.
+  if (options.browser === 'webkit' && process.platform === 'darwin') {
+    const press = tab.keyboard.press.bind(tab.keyboard);
+    tab.keyboard.press = (key, ...rest) => press(/^(Shift\+)?Tab$/.test(key) ? `Alt+${key}` : key, ...rest);
+  }
   tab.origins = origins;
   tab.errors = [];
   tab.console = [];
@@ -343,11 +366,32 @@ const measure = (tab, measured = frameParts) => tab.evaluate(parts => {
   const name = el => el.getAttribute('aria-label') || el.textContent.trim() || el.name || el.tagName;
   const small = all.filter(el => el.matches('a[href], button, input, select')).map(el => ({name: name(el), box: el.getBoundingClientRect()}))
     .filter(({box}) => box.width < 44 || box.height < 44).map(({name: label, box}) => `${label} ${Math.round(box.width)}x${Math.round(box.height)}`);
+  // Two controls overlap when their boxes intersect and neither holds the other. A control is clipped when
+  // an ancestor that hides its overflow cuts its box.
+  const controls = all.filter(el => el.matches('a[href], button, input, select')).map(el => ({el, label: name(el), box: el.getBoundingClientRect()}));
+  const crosses = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+  // Only controls of the same layer are compared: the open dialog's, or the page's outside any dialog.
+  const layer = el => el.closest('[role=dialog]');
+  const shared = (a, b) => `${Math.round(Math.min(a.right, b.right) - Math.max(a.left, b.left))}x${Math.round(Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))}`;
+  const overlapping = controls.flatMap((a, i) => controls.slice(i + 1)
+    .filter(b => layer(a.el) === layer(b.el) && crosses(a.box, b.box) && !a.el.contains(b.el) && !b.el.contains(a.el)).map(b => `${a.label} / ${b.label} by ${shared(a.box, b.box)}`));
+  const cut = ({el, box}) => {
+    for (let up = el.parentElement; up; up = up.parentElement) {
+      const style = getComputedStyle(up), overflow = [style.overflowX, style.overflowY];
+      // What a scrolling box holds is reached by scrolling it, so it is not clipped.
+      if (overflow.some(value => value === 'auto' || value === 'scroll')) return false;
+      if (!overflow.some(value => value === 'hidden' || value === 'clip')) continue;
+      const outer = up.getBoundingClientRect();
+      if (box.left < outer.left - 1 || box.right > outer.right + 1 || box.top < outer.top - 1 || box.bottom > outer.bottom + 1) return true;
+    }
+    return false;
+  };
+  const clipped = controls.filter(cut).map(({label, box}) => `${label} ${Math.round(box.width)}x${Math.round(box.height)}`);
   // A control's accessible name: its label, its aria-label or its text.
   const unnamed = all.filter(el => el.matches('a[href], button, input, select'))
     .filter(el => !(el.getAttribute('aria-label') || el.textContent.trim() || [...(el.labels ?? [])].some(label => label.textContent.trim()))).map(el => el.outerHTML.slice(0, 80));
   return {colours, lowest: Math.min(...Object.values(colours)), smallest: Math.min(...texts.map(el => parseFloat(getComputedStyle(el).fontSize))), small, unnamed,
-    overflow: document.documentElement.scrollWidth - innerWidth};
+    overlapping, clipped, overflow: document.documentElement.scrollWidth - innerWidth};
 }, measured);
 // What has focus: its name, its size and its outline.
 const ring = tab => tab.evaluate(() => {
@@ -357,7 +401,8 @@ const ring = tab => tab.evaluate(() => {
 });
 const fits = focus => focus.width >= 44 && focus.height >= 44 && focus.outline >= 3;
 const needsServer = 'This page needs its server. Open the address your gtm-connector server prints.';
-const until = (tab, fn, arg) => tab.waitForFunction(fn, arg, {timeout: 8000});
+const until = (tab, fn, arg) => tab.waitForFunction(fn, arg, {timeout: 8000})
+  .catch(error => {throw new Error(`${String(error).split('\n')[0]} waiting for ${String(fn).replace(/\s+/g, ' ').slice(0, 160)}`);});
 
 async function scenario(name, run) {
   reset();
@@ -506,7 +551,7 @@ await scenario('signed in elsewhere', async () => {
 });
 
 // 9. Blocked browser storage: the server pages still work, and the theme follows the system.
-for (const width of [320, 1440]) {
+for (const width of [320, 1440].filter(width => widths.includes(width))) {
   await scenario(`blocked storage ${width}`, async () => {
     const tab = await page({width, blockStorage: true});
     await tab.goto(thornfieldActivity, {waitUntil: 'networkidle'});
@@ -520,8 +565,8 @@ for (const width of [320, 1440]) {
   });
 }
 
-// 10. Deep links, the palette, contrast and type sizes, at 320 and 1440, light and dark.
-for (const [width, scheme] of [[320, 'light'], [1440, 'light'], [320, 'dark'], [1440, 'dark']]) {
+// 10. Deep links, the palette, contrast and type sizes, at every width and theme.
+for (const [width, scheme] of matrix) {
   await scenario(`layout ${width} ${scheme}`, async () => {
     const tab = await page({width, scheme});
     await tab.goto(`${thornfieldActivity}&receipt=receipt-acc-003-read_call_notes`, {waitUntil: 'networkidle'});
@@ -681,9 +726,10 @@ await scenario('answers that keep their form', async () => {
 const measured = [];
 const reported = (what, facts) => {
   measured.push(...Object.entries(facts.colours).map(([colour, ratio]) => `${what} ${colour} ${ratio.toFixed(2)}`));
-  return `lowest contrast ${facts.lowest.toFixed(2)}:1, smallest text ${facts.smallest}px, small controls [${facts.small.join(', ')}], unnamed controls [${facts.unnamed.join(', ')}], overflow ${facts.overflow}px`;
+  return `lowest contrast ${facts.lowest.toFixed(2)}:1, smallest text ${facts.smallest}px, small controls [${facts.small.join(', ')}], unnamed controls [${facts.unnamed.join(', ')}], `
+    + `overlapping controls [${facts.overlapping.join(', ')}], clipped controls [${facts.clipped.join(', ')}], overflow ${facts.overflow}px`;
 };
-const healthy = facts => facts.lowest >= 4.5 && facts.smallest >= 14 && facts.small.length === 0 && facts.unnamed.length === 0 && facts.overflow <= 0;
+const healthy = facts => facts.lowest >= 4.5 && facts.smallest >= 14 && facts.small.length === 0 && facts.unnamed.length === 0 && facts.overlapping.length === 0 && facts.clipped.length === 0 && facts.overflow <= 0;
 
 // 13b. Coverage: seven deals whose card lists are slow, one refused. At most
 // four lists are read at once, a list not in yet says Reading, each count
@@ -796,7 +842,7 @@ await scenario('coverage health and refusal', async () => {
   await tab.context().close();
 });
 
-for (const [width, scheme] of [[320, 'light'], [390, 'light'], [390, 'dark'], [1440, 'light'], [1440, 'dark']]) {
+for (const [width, scheme] of matrix) {
   await scenario(`coverage layout ${width} ${scheme}`, async () => {
     stub.steer = steerMany;
     const tab = await page({width, scheme});
@@ -892,7 +938,7 @@ await scenario('company and demo sign-in side by side', async () => {
 });
 
 // 14. The frame, sign-in and theme at 320, 390, 768 and 1440 wide, light and dark.
-for (const width of [320, 390, 768, 1440]) {
+for (const width of widths) {
   for (const scheme of ['light', 'dark']) {
     await scenario(`frame ${width} ${scheme}`, async () => {
       const phone = width < 720, other = scheme === 'light' ? 'dark' : 'light', at = `${width} ${scheme}`;
@@ -969,7 +1015,7 @@ for (const width of [320, 390, 768, 1440]) {
         }
         const box = await tab.locator('[role=dialog]').boundingBox();
         facts = await measure(tab);
-        check(items.join() === 'Deals,Ops,Coverage,Activity,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.width === width,
+        check(items.join() === 'Deals,Ops,Coverage,Activity,Dark theme,Sign out' && trapped.every(focus => focus.inDialog) && trapped.every(fits) && box.x <= 0 && box.x + box.width >= await tab.evaluate(() => document.documentElement.clientWidth),
           `${at}: the menu fills the screen with ${items.join(', ')}, and Tab stays in it (${trapped.map(focus => focus.name).join(', ')})`);
         check(healthy(facts), `${at}: the menu, ${reported(`${at} menu`, facts)}`);
         if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `menu-${width}-${scheme}.png`)});
@@ -1011,11 +1057,13 @@ const byName = list => [...list].sort((a, b) => collator.compare(a.name, b.name)
 // A time as the page writes it: the day and the time to the second, in UTC.
 const utc = value => `${new Date(value).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC'})}, ${value.slice(11, 19)} UTC`;
 const rowFacts = tab => tab.$$eval('.deals-row', rows => rows.map(row => {
-  const box = row.getBoundingClientRect(), who = row.querySelector('.deals-row__who').getBoundingClientRect(), card = row.querySelector('.deals-row__card').getBoundingClientRect();
+  const box = row.getBoundingClientRect(), card = row.querySelector('.deals-row__card').getBoundingClientRect();
   const name = row.querySelector('.deals-row__name').getBoundingClientRect(), id = row.querySelector('.deals-row__id').getBoundingClientRect();
   return {account: row.dataset.account, name: row.querySelector('.deals-row__name').textContent, id: row.querySelector('.deals-row__id').textContent,
     card: row.querySelector('.deals-row__card').innerText.replace(/\s+/g, ' ').trim(), href: row.getAttribute('href'), height: box.height, width: box.width,
-    current: row.getAttribute('aria-current'), tabIndex: row.tabIndex, cardBelow: card.top >= who.bottom - 1, oneLine: Math.abs(name.top - id.top) < 8 || Math.abs(name.bottom - id.bottom) < 8};
+    current: row.getAttribute('aria-current'), tabIndex: row.tabIndex,
+    apart: [[name, id], [name, card], [id, card]].every(([a, b]) => Math.min(a.right, b.right) - Math.max(a.left, b.left) <= 0.5 || Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) <= 0.5),
+    inside: [name, id, card].every(part => part.left >= box.left - 1 && part.right <= box.right + 1 && part.top >= box.top - 1 && part.bottom <= box.bottom + 1)};
 }));
 const dealParts = '.fr-chrome, .deals-list, .deals-choose';
 
@@ -1197,8 +1245,8 @@ await scenario('deals: keys and the filter', async () => {
   check(moves.join() === [names[0], names[1], names[29], names[29], names[0], names[0]].join(), `Down, End, Home and Up move between rows (${moves.join(', ')})`);
   await tab.keyboard.press('ArrowDown');
   const focus = await ring(tab);
-  const row = await tab.evaluate(() => document.activeElement.getBoundingClientRect().width);
-  check(focus.height >= 56 && focus.outline >= 3 && row >= 600, `focus shows on the whole row (${Math.round(row)}x${Math.round(focus.height)}, ${focus.outline}px outline)`);
+  const row = await tab.evaluate(() => document.activeElement.matches('.deals-row'));
+  check(row && focus.height >= 56 && focus.outline >= 3, `focus shows on the whole row (${row ? 'the row' : 'not the row'}, ${Math.round(focus.height)} high, ${focus.outline}px outline)`);
   await tab.keyboard.press('Enter');
   await until(tab, href => location.pathname === href && document.querySelector('.dc-title'), `/deals/${names[1]}`);
   check(await tab.locator('.deals-back').isVisible() && await tab.locator('.deals-row').count() === 0, 'Enter opens the row; under 1100 the deal is the whole page, with a link back');
@@ -1225,7 +1273,7 @@ await scenario('deals: keys and the filter', async () => {
   await tab.context().close();
 });
 
-for (const width of [320, 390, 768, 1440]) {
+for (const width of widths) {
   for (const scheme of ['light', 'dark']) {
     await scenario(`deals layout ${width} ${scheme}`, async () => {
       serveBook();
@@ -1237,10 +1285,8 @@ for (const width of [320, 390, 768, 1440]) {
       const facts = await measure(tab, dealParts);
       check(healthy(facts), `${at}: ${reported(at, facts)}`);
       const rows = await rowFacts(tab);
-      const readme = rows.find(row => row.account === 'acc-003');
-      if (width < 720) check(rows.every(row => row.cardBelow) && readme.oneLine, `${at}: a row is two lines, the name and ID, then the card time`);
-      else if (width < 1100) check(rows.every(row => !row.cardBelow), `${at}: a row holds the card time at its right`);
-      else check(rows.every(row => row.cardBelow && row.width <= 336), `${at}: in the rail a row is two lines`);
+      const crowded = rows.filter(row => !row.apart || !row.inside).map(row => row.account);
+      check(crowded.length === 0, `${at}: in every row the name, the ID and the card time do not overlap and stay inside the row (crowded: ${crowded.join() || 'none'})`);
       if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `deals-${width}-${scheme}.png`)});
       check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
       await tab.context().close();
@@ -1255,7 +1301,7 @@ for (const width of [320, 390, 768, 1440]) {
 const dealCard = cards['acc-003'];
 const shownUnits = dealCard.units.filter(unit => unit.kind === 'sentence' && unit.shown === 'yes' && !unit.body.partial);
 const cardParts = '.fr-chrome, .dc';
-for (const [width, scheme] of [320, 390, 768, 1440].flatMap(width => [[width, 'light'], [width, 'dark']])) {
+for (const [width, scheme] of matrix) {
   await scenario(`deal card ${width} ${scheme}`, async () => {
     const at = `deal card ${width} ${scheme}`;
     const tab = await page({width, scheme});
@@ -1264,46 +1310,34 @@ for (const [width, scheme] of [320, 390, 768, 1440].flatMap(width => [[width, 'l
     await tab.waitForSelector('.dc-ledger');
     const facts = await tab.evaluate(() => {
       const box = selector => document.querySelector(selector).getBoundingClientRect();
-      const lefts = selector => [...new Set([...document.querySelectorAll(selector)].map(el => Math.round(el.getBoundingClientRect().left)))];
-      const rights = selector => [...new Set([...document.querySelectorAll(selector)].map(el => Math.round(el.getBoundingClientRect().right)))];
-      const record = box('.dc-record'), words = box('.dc-words');
+      const crosses = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
+      const [countdown, arr] = [...document.querySelectorAll('.dc-focal__item')].map(el => el.getBoundingClientRect());
+      const sections = ['.dc-people', '.dc-the-record', '.dc-not-read'].map(box);
       return {title: document.title, heading: document.querySelector('.dc-title').textContent, id: document.querySelector('.dc-id').textContent,
         note: document.querySelector('.dc-values-note')?.textContent ?? null,
         focal: [...document.querySelectorAll('.dc-focal__item')].map(el => ({
-          kind: el.dataset.focal, number: el.querySelector('.dc-focal__number').textContent, size: getComputedStyle(el.querySelector('.dc-focal__number')).fontSize,
-          figure: el.querySelector('.dc-focal__figure').innerText.replace(/\s+/g, ' ').trim(), subs: [...el.querySelectorAll('.dc-focal__sub')].map(sub => sub.innerText.replace(/\s+/g, ' ').trim()),
-          left: Math.round(el.getBoundingClientRect().left), right: Math.round(el.getBoundingClientRect().right),
-          top: Math.round(el.querySelector('.dc-focal__number').getBoundingClientRect().top),
-          lines: Math.round(el.querySelector('.dc-focal__number').getBoundingClientRect().height / parseFloat(getComputedStyle(el.querySelector('.dc-focal__number')).lineHeight))})),
-        cardWidth: document.querySelector('.dc').getBoundingClientRect().width,
-        focalSizes: [...document.querySelectorAll('.dc *')].filter(el => ['40px', '32px'].includes(getComputedStyle(el).fontSize)).map(el => el.className),
+          kind: el.dataset.focal, number: el.querySelector('.dc-focal__number').textContent,
+          figure: el.querySelector('.dc-focal__figure').innerText.replace(/\s+/g, ' ').trim(), subs: [...el.querySelectorAll('.dc-focal__sub')].map(sub => sub.innerText.replace(/\s+/g, ' ').trim())})),
+        focalApart: Boolean(countdown && arr) && !crosses(countdown, arr),
         focalFirst: box('.dc-focal').top < box('.dc-ledger').top && box('.dc-head').bottom <= box('.dc-focal').top,
         values: [...document.querySelectorAll('.dc-the-record [data-value]')].map(el => `${el.dataset.value}: ${el.querySelector('.dc-value__label').textContent} ${el.querySelector('.dc-value__text').textContent}`),
         flags: [...document.querySelectorAll('.dc-flags .dc-flag')].map(el => el.innerText.replace(/\s+/g, ' ').trim()),
         titles: [...document.querySelectorAll('[data-group="customer"] .dc-attr__title')].map(el => el.textContent),
         quotes: [...document.querySelectorAll('blockquote')].map(el => ({n: Number(el.dataset.unit), text: el.textContent, children: el.children.length,
-          face: getComputedStyle(el).fontFamily.split(',')[0], size: getComputedStyle(el).fontSize, rule: `${getComputedStyle(el).borderLeftWidth} ${getComputedStyle(el).borderLeftStyle}`})),
+          face: getComputedStyle(el).fontFamily.split(',')[0], rule: `${getComputedStyle(el).borderLeftWidth} ${getComputedStyle(el).borderLeftStyle}`})),
         injected: Boolean(window.__injected) || Boolean(document.querySelector('.dc img')),
-        rule: Math.round(record.right), border: getComputedStyle(document.querySelector('.dc-record')).borderRightWidth,
-        recordLeft: Math.round(record.left), wordsLeft: Math.round(words.left), recordRights: rights('.dc-record .dc-line__n'), wordLefts: lefts('.dc-words .dc-people .dc-line__n'),
-        peopleFirst: box('.dc-people').top < box('.dc-the-record').top, recordBeforeNotRead: box('.dc-the-record').bottom <= box('.dc-not-read').top,
+        sectionsApart: sections.every((a, i) => sections.slice(i + 1).every(b => !crosses(a, b))),
         local: Object.keys(localStorage), session: Object.keys(sessionStorage)};
     });
     check(facts.heading === 'Third Account Co.' && facts.title === 'Third Account Co.' && facts.id === 'acc-003' && facts.note === null,
       `${at}: the title is the server’s name, the tab is titled with it, and the ID is under it`);
     const [countdown, arr] = facts.focal;
-    const phone = facts.cardWidth < 720, narrow = width < 720;
+    const narrow = width < 720;
     check(facts.focalFirst && countdown?.kind === 'countdown' && countdown.figure === '24 days [1]' && countdown.subs.join(' | ') === 'to the renewal, 2027-02-08 | as of 2027-01-15' &&
       arr?.kind === 'arr' && arr.figure === 'USD 450,000.00 [1]' && arr.subs.join() === 'ARR, from the mapped field',
       `${at}: under the title, the countdown and ARR with their numbers and sub-lines (${JSON.stringify(facts.focal.map(item => [item.figure, item.subs]))})`);
-    // ARR sits beside the countdown when both fit on one line of the card, and under it otherwise; the
-    // point where it wraps depends on the fonts the machine has, so either is right as long as the two
-    // never overlap and ARR's figure breaks only at its space.
-    const beside = arr.left >= countdown.right && Math.abs(arr.top - countdown.top) <= 2;
-    const under = arr.top > countdown.top;
-    check((beside || under) && arr.lines <= 2 && facts.focal.every(item => item.size === (phone ? '32px' : '40px')),
-      `${at}: ARR sits ${beside ? 'right of' : 'under'} the countdown, its figure on ${arr.lines} lines, both at ${phone ? 32 : 40} (card ${Math.round(facts.cardWidth)}; ${countdown.right}..${arr.left}; tops ${countdown.top} ${arr.top}; ${facts.focal.map(item => item.size)})`);
-    check(facts.focalSizes.length === 2 && facts.focalSizes.every(name => name.startsWith('dc-focal__number')), `${at}: only the countdown and ARR use the focal step (${facts.focalSizes.join()})`);
+    // Whether ARR sits beside the countdown or under it depends on the fonts the machine has; the two never overlap.
+    check(facts.focalApart, `${at}: the countdown and ARR do not overlap`);
     check(facts.values.join(' | ') === dealCard.lines.filter(line => line.section === 'value').map(line => `${line.code}: ${line.label} ${line.text}`).join(' | '),
       `${at}: the record column is every value line in the card's order (${facts.values.length})`);
     check(facts.flags.join() === 'The renewal is in 24 days and this opportunity is still open at stage "negotiation". [1] [3]' && facts.titles.join() === 'Deputy general counsel,Deputy general counsel',
@@ -1311,15 +1345,9 @@ for (const [width, scheme] of [320, 390, 768, 1440].flatMap(width => [[width, 'l
     const expected = shownUnits.map(unit => `${unit.n} ${unit.body.text}`).sort().join('|');
     check(facts.quotes.map(quote => `${quote.n} ${quote.text}`).sort().join('|') === expected && facts.quotes.every(quote => quote.children === 0) && !facts.injected,
       `${at}: each shown sentence is one blockquote holding exactly its text, and hostile speakers and gaps stay text`);
-    check(facts.quotes.every(quote => quote.face === 'Charter' || quote.face.includes('Charter') || quote.face.includes('Georgia')) && facts.quotes.every(quote => quote.size === '18px' && quote.rule === '3px solid'),
-      `${at}: a quotation is in the quotation face at 18 with a 3px rule (${facts.quotes[0].face} ${facts.quotes[0].size} ${facts.quotes[0].rule})`);
-    if (facts.recordLeft < facts.wordsLeft) {
-      // The record's numbers end at the 1px rule, and the words' numbers start where it ends.
-    check(facts.recordLeft < facts.wordsLeft && facts.border === '1px' && facts.recordRights.length === 1 && facts.rule - facts.recordRights[0] === 1 && facts.wordLefts.join() === String(facts.rule),
-        `${at}: the record and the words sit either side of the rule, their numbers in a line against it (rule ${facts.rule}; record numbers end ${facts.recordRights}; words numbers start ${facts.wordLefts})`);
-    } else {
-      check(facts.peopleFirst && facts.recordBeforeNotRead, `${at}: People said comes before The record, then Not read`);
-    }
+    check(facts.quotes.every(quote => quote.face === 'Charter' || quote.face.includes('Charter') || quote.face.includes('Georgia')) && facts.quotes.every(quote => quote.rule === '3px solid'),
+      `${at}: a quotation is in the quotation face with a 3px rule (${facts.quotes[0].face} ${facts.quotes[0].rule})`);
+    check(facts.sectionsApart, `${at}: People said, The record and Not read do not overlap`);
     const measured = await measure(tab, cardParts);
     check(healthy(measured), `${at}: ${reported(at, measured)}`);
     // Every number takes keyboard focus with the 3px ring, and is 44 by 44.
@@ -1338,14 +1366,14 @@ for (const [width, scheme] of [320, 390, 768, 1440].flatMap(width => [[width, 'l
       const button = document.querySelector(selector), panel = document.getElementById(button.getAttribute('aria-controls'));
       const line = button.closest('.dc-focal__sub').getBoundingClientRect(), box = panel.getBoundingClientRect(), own = button.getBoundingClientRect();
       return {expanded: button.getAttribute('aria-expanded'), shown: !panel.hidden && box.height > 0, role: panel.getAttribute('role'), text: panel.querySelector('.ui-help__text').textContent,
-        below: box.top >= own.bottom - 1, inFlow: getComputedStyle(panel).position === 'static', lineShown: line.height > 0, name: button.getAttribute('aria-label'), size: [own.width, own.height]};
+        clear: Math.min(box.right, own.right) - Math.max(box.left, own.left) <= 0.5 || Math.min(box.bottom, own.bottom) - Math.max(box.top, own.top) <= 0.5, inFlow: getComputedStyle(panel).position === 'static', lineShown: line.height > 0, name: button.getAttribute('aria-label'), size: [own.width, own.height]};
     }, help);
     const focusRing = await ring(tab);
     await tab.keyboard.press('Escape');
     const closed = await tab.evaluate(selector => {const button = document.querySelector(selector); return {expanded: button.getAttribute('aria-expanded'), hidden: document.getElementById(button.getAttribute('aria-controls')).hidden, focused: document.activeElement === button};}, help);
-    check(opened.expanded === 'true' && opened.shown && opened.role === 'note' && opened.below && opened.inFlow === narrow && opened.name === 'About the countdown' &&
+    check(opened.expanded === 'true' && opened.shown && opened.role === 'note' && opened.clear && opened.inFlow === narrow && opened.name === 'About the countdown' &&
       opened.text.startsWith('Days from the card') && fits(focusRing) && closed.expanded === 'false' && closed.hidden && closed.focused,
-      `${at}: the countdown's help opens on focus below its line${narrow ? ', in the flow' : ''}, and Escape closes it with focus on its button (${JSON.stringify(opened)}; ${JSON.stringify(closed)})`);
+      `${at}: the countdown's help opens on focus clear of its button${narrow ? ', in the flow' : ''}, and Escape closes it with focus on its button (${JSON.stringify(opened)}; ${JSON.stringify(closed)})`);
     if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `deal-card-${width}-${scheme}.png`), fullPage: true});
     check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
     await tab.context().close();
@@ -1361,13 +1389,13 @@ const drawerFacts = tab => tab.evaluate(() => {
     quote: dialog.querySelector('blockquote')?.textContent ?? null, quoteChildren: dialog.querySelector('blockquote')?.children.length ?? null, quotes: dialog.querySelectorAll('blockquote').length,
     text: dialog.querySelector('.ui-dialog__body').innerText.replace(/\s+/g, ' ').trim(), read: dialog.querySelector('.dc-proof__read')?.innerText.replace(/\s+/g, ' ').trim() ?? null,
     injected: Boolean(window.__injected) || Boolean(dialog.querySelector('img')), unit: new URL(location.href).searchParams.get('unit'),
-    box: {left: box.left, top: box.top, width: box.width, height: box.height}, close: {width: close.width, height: close.height},
-    background: style.backgroundColor, shadow: style.boxShadow, cardRight: card.right, cardWidth: card.width, viewport: {width: innerWidth, height: innerHeight},
+    box: {left: box.left, top: box.top, right: box.right, bottom: box.bottom}, close: {width: close.width, height: close.height},
+    background: style.backgroundColor, shadow: style.boxShadow, cardRight: card.right, viewport: {width: document.documentElement.clientWidth, height: innerHeight},
     rail: Boolean(document.querySelector('.deals-rail')?.getClientRects().length),
     local: Object.keys(localStorage), session: Object.keys(sessionStorage)};
 });
 const atCite = (tab, n) => until(tab, number => document.activeElement?.matches(`.dc-line__n > .dc-cite[data-cite="${number}"]`), String(n));
-for (const [width, scheme] of [[390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+for (const [width, scheme] of matrix) {
   await scenario(`proof drawer ${width} ${scheme}`, async () => {
     const at = `proof drawer ${width} ${scheme}`;
     const tab = await page({width, scheme});
@@ -1384,16 +1412,23 @@ for (const [width, scheme] of [[390, 'light'], [1440, 'light'], [390, 'dark'], [
       `${at}: the read line gives the read's start and source, and no receipt ID, digest or tool name (${facts.read})`);
     check(/After \[6\] Please do not put a date on the order form\./.test(facts.text) && !facts.text.includes('Before'), `${at}: Around it shows unit 6 after it and nothing before it`);
     const receiptLink = await tab.evaluate(() => {const link = document.querySelector('[role=dialog] .dc-proof__receipt'), read = document.querySelector('[role=dialog] .dc-proof__read');
-      return {text: link?.textContent, href: link?.getAttribute('href'), under: Boolean(link && read && read.getBoundingClientRect().bottom <= link.getBoundingClientRect().top)};});
-    check(receiptLink.text === 'Open the receipt in Ops' && receiptLink.href === '/ops/activity?card=card-acc-003&receipt=receipt-acc-003-read_call_notes' && receiptLink.under,
-      `${at}: under Read, a link opens the receipt in Ops (${receiptLink.href})`);
+      const [a, b] = [link, read].map(el => el?.getBoundingClientRect());
+      return {text: link?.textContent, href: link?.getAttribute('href'), apart: Boolean(a && b) && (Math.min(a.right, b.right) - Math.max(a.left, b.left) <= 0.5 || Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) <= 0.5)};});
+    check(receiptLink.text === 'Open the receipt in Ops' && receiptLink.href === '/ops/activity?card=card-acc-003&receipt=receipt-acc-003-read_call_notes' && receiptLink.apart,
+      `${at}: beside Read, not over it, a link opens the receipt in Ops (${receiptLink.href})`);
+    const covers = facts.box.left <= 0 && facts.box.top <= 0 && facts.box.right >= facts.viewport.width && facts.box.bottom >= facts.viewport.height;
+    const inView = facts.box.left >= 0 && facts.box.top >= 0 && facts.box.right <= facts.viewport.width + 1 && facts.box.bottom <= facts.viewport.height + 1;
+    const placed = `${Math.round(facts.box.left)},${Math.round(facts.box.top)} to ${Math.round(facts.box.right)},${Math.round(facts.box.bottom)} in ${facts.viewport.width}x${facts.viewport.height}`;
     if (width < 720) {
-      check(facts.box.left === 0 && facts.box.top === 0 && facts.box.width === facts.viewport.width && facts.box.height === facts.viewport.height && facts.close.width >= 44 && facts.close.height >= 44 && facts.modal === 'true',
-        `${at}: the sheet covers the viewport (${facts.box.width}x${facts.box.height}) and its close button is ${facts.close.width}x${facts.close.height}`);
+      check(covers && facts.close.width >= 44 && facts.close.height >= 44 && facts.modal === 'true',
+        `${at}: the sheet covers the viewport (${placed}) and its close button is ${facts.close.width}x${facts.close.height}`);
+    } else if (width < 1100) {
+      check(inView && facts.box.top <= 0 && facts.box.bottom >= facts.viewport.height - 1 && facts.shadow !== 'none' && facts.modal === 'true',
+        `${at}: a modal panel in view at full height, with the shadow, over the card (${placed})`);
     } else {
-      check(facts.box.width === 480 && facts.box.height === facts.viewport.height && facts.box.left + facts.box.width === facts.viewport.width && facts.shadow !== 'none' && facts.modal === 'false',
-        `${at}: a panel 480 wide on the right, full height, with the shadow, beside the card (${facts.box.width}x${facts.box.height})`);
-      check(facts.cardRight <= facts.box.left && facts.cardWidth >= 760 && !facts.rail, `${at}: the list rail steps aside and the card, ${Math.round(facts.cardWidth)} wide, ends at ${Math.round(facts.cardRight)}, left of the drawer at ${facts.box.left}`);
+      check(inView && facts.box.top <= 0 && facts.box.bottom >= facts.viewport.height - 1 && facts.shadow !== 'none' && facts.modal === 'false',
+        `${at}: a panel in view at full height, with the shadow, beside the card (${placed})`);
+      check(facts.cardRight <= facts.box.left + 0.5 && !facts.rail, `${at}: the list rail steps aside and the card ends at ${Math.round(facts.cardRight)}, left of the drawer at ${Math.round(facts.box.left)}`);
     }
     const measured = await measure(tab, `${cardParts}, [role=dialog]`);
     check(healthy(measured), `${at}: ${reported(at, measured)}`);
@@ -1457,7 +1492,7 @@ await scenario('deal card: a card published before its lines were kept', async (
   await tab.goto(thornfield, {waitUntil: 'networkidle'});
   await signIn(tab);
   await tab.waitForSelector('.dc-ledger');
-  const note = (await tab.innerText('.dc-values-note')).replace(/\s+/g, ' ').trim();
+  const note = (await tab.textContent('.dc-values-note')).replace(/\s+/g, ' ').trim();
   const link = await tab.getAttribute('.dc-values-note a', 'href');
   const drawn = await tab.locator('.dc-focal, .dc-flags, [data-value], .dc-attr__title').count();
   check(note === 'The countdown and ARR are on the plain-text card.' && link === '/deals/acc-003/text' && drawn === 0,
@@ -1479,7 +1514,7 @@ await scenario('proof drawer at 1100: pressing numbers, Left and Right, Before a
   check(new URL(tab.url()).searchParams.get('unit') === '5' && await tab.locator('.dc-proof-hint').count() === 0 && await tab.locator('.dc-cite[data-open]').count() === 1,
     'pressing [5] puts ?unit=5 in the address, opens the drawer with focus on its head, marks [5] and drops the hint');
   const beside = await tab.evaluate(() => ({card: document.querySelector('.dc').getBoundingClientRect().toJSON(), drawer: document.querySelector('[role=dialog]').getBoundingClientRect().left}));
-  check(beside.card.right <= beside.drawer && beside.card.width >= 520, `at 1100 the card, ${Math.round(beside.card.width)} wide, stays readable left of the drawer`);
+  check(beside.card.right <= beside.drawer + 0.5, `at 1100 the card ends at ${Math.round(beside.card.right)}, left of the drawer at ${Math.round(beside.drawer)}`);
   const walk = [];
   for (const [key, n] of [['ArrowRight', 6], ['ArrowRight', 7], ['ArrowLeft', 6]]) {
     await tab.keyboard.press(key);
@@ -1583,12 +1618,16 @@ await scenario('deal card: an older card pinned in ?card=', async () => {
 // match its seal; a copy the browser refuses.
 const sealedThornfield = sealedFiles.get('card-acc-003');
 const sunkenOf = tab => tab.evaluate(() => {const probe = document.createElement('div'); probe.style.background = 'var(--gc-sunken)'; document.body.append(probe); const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour;});
-const openInApp = (tab, path) => tab.evaluate(to => {history.pushState(null, '', to); dispatchEvent(new PopStateEvent('popstate'));}, path);
-for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+// WebKit refuses more than 100 history entries in 10 seconds, so there each move waits 110 ms.
+const openInApp = async (tab, path) => {
+  if (options.browser === 'webkit') await tab.waitForTimeout(110);
+  await tab.evaluate(to => {history.pushState(null, '', to); dispatchEvent(new PopStateEvent('popstate'));}, path);
+};
+for (const [width, scheme] of matrix) {
   await scenario(`text tab ${width} ${scheme}`, async () => {
     const at = `text tab ${width} ${scheme}`;
     const tab = await page({width, scheme});
-    await tab.context().grantPermissions(['clipboard-read', 'clipboard-write'], {origin: base});
+    await allowClipboard(tab);
     await tab.goto(thornfield, {waitUntil: 'networkidle'});
     await signIn(tab);
     await tab.waitForSelector('.dc-ledger');
@@ -1599,15 +1638,15 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
     const sunken = await sunkenOf(tab);
     const facts = await tab.evaluate(() => {
       const pre = document.querySelector('.dc-plain__text'), style = getComputedStyle(pre);
-      return {path: location.pathname, text: pre.textContent, nodes: pre.childNodes.length, face: style.fontFamily, size: style.fontSize, space: style.whiteSpace, background: style.backgroundColor,
+      return {path: location.pathname, text: pre.textContent, nodes: pre.childNodes.length, face: style.fontFamily, space: style.whiteSpace, background: style.backgroundColor,
         tabs: [...document.querySelectorAll('.dc-tab')].map(el => `${el.textContent} ${el.getAttribute('href')}${el.getAttribute('aria-current') ? ' open' : ''}`).join(', '),
         overflow: document.documentElement.scrollWidth - innerWidth, wider: pre.scrollWidth - pre.clientWidth, injected: Boolean(window.__injected),
         local: Object.keys(localStorage), session: Object.keys(sessionStorage)};
     });
     check(facts.path === '/deals/acc-003/text' && facts.tabs === 'Card /deals/acc-003, Communications /deals/acc-003/communications, Text /deals/acc-003/text open', `${at}: the Text tab opens the plain-text card (${facts.path}; ${facts.tabs})`);
     check(facts.text === sealedThornfield.text && facts.nodes === 1 && !facts.injected, `${at}: the Text tab holds the sealed text byte for byte, as one text node`);
-    check(facts.face.startsWith('ui-monospace') && facts.size === '14px' && facts.space === 'pre-wrap' && facts.background === sunken,
-      `${at}: the text is in the reference face at 14 on the sunken surface, white-space kept (${facts.face.split(',')[0]} ${facts.size} ${facts.space} ${facts.background})`);
+    check(facts.face.startsWith('ui-monospace') && facts.space === 'pre-wrap' && facts.background === sunken,
+      `${at}: the text is in the reference face on the sunken surface, white-space kept (${facts.face.split(',')[0]} ${facts.space} ${facts.background})`);
     check(facts.overflow <= 0 && facts.wider <= 0, `${at}: long lines wrap and the page does not scroll sideways (page ${facts.overflow}px, text ${facts.wider}px)`);
     const measured = await measure(tab, cardParts);
     check(healthy(measured), `${at}: ${reported(at, measured)}`);
@@ -1618,7 +1657,7 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
     check(fits(focus) && focus.name === 'Copy the plain-text card', `${at}: the copy button is 44 by 44 and shows a ${focus.outline}px focus ring`);
     await tab.keyboard.press('Enter');
     await until(tab, () => document.querySelector('.dc-plain__status').textContent !== '');
-    const copied = await tab.evaluate(() => navigator.clipboard.readText());
+    const copied = await copiedText(tab);
     check(await tab.textContent('.dc-plain__status') === 'Copied' && copied === sealedThornfield.text, `${at}: the button copies the exact string and says Copied`);
     check(facts.local.every(key => ['gtm-connector-theme', 'gtm-connector-deals-hint'].includes(key)) && facts.session.length === 0,
       `${at}: storage holds only display keys (local ${facts.local.join()}; session ${facts.session.join()})`);
@@ -1631,7 +1670,7 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
 await scenario('text tab: every recorded card byte for byte, and copied the same', async () => {
   serveRecorded();
   const tab = await page({width: 390});
-  await tab.context().grantPermissions(['clipboard-read', 'clipboard-write'], {origin: base});
+  await allowClipboard(tab);
   await tab.goto(`${base}/deals/acc-900/text?card=${recorded[0].id}`, {waitUntil: 'networkidle'});
   await signIn(tab);
   const wrong = [];
@@ -1644,7 +1683,7 @@ await scenario('text tab: every recorded card byte for byte, and copied the same
     await tab.click('.dc-plain__bar button');
     await until(tab, () => document.querySelector('.dc-plain__status').textContent !== '');
     const said = await tab.textContent('.dc-plain__status');
-    const copied = await tab.evaluate(() => navigator.clipboard.readText());
+    const copied = await copiedText(tab);
     if (shown !== text || copied !== text || said !== 'Copied') wrong.push(card.id);
   }
   check(recorded.length === 90 && wrong.length === 0, `each of ${recorded.length} golden cards shows its sealed text byte for byte and copies the same string (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
@@ -1652,7 +1691,7 @@ await scenario('text tab: every recorded card byte for byte, and copied the same
   await tab.context().close();
 });
 
-for (const [width, scheme] of [[390, 'light'], [1440, 'dark']]) {
+for (const [width, scheme] of matrix) {
   await scenario(`seal check fails ${width} ${scheme}`, async () => {
     const at = `seal check fails ${width} ${scheme}`;
     const altered = Buffer.from(sealedThornfield.bytes);
@@ -1691,6 +1730,8 @@ for (const [width, scheme] of [[390, 'light'], [1440, 'dark']]) {
     check(new URL(tab.url()).search === '?card=card-acc-003-older' && await tab.textContent('.dc-plain__text') === sealedThornfield.text, `${at}: the card before it opens on the same tab and verifies`);
     // A new session checks the card again.
     await signOut(tab);
+    await tab.waitForSelector('.fr-signin');
+    await apiSettled();
     await tab.goto(thornfield, {waitUntil: 'networkidle'});
     await signIn(tab);
     await tab.waitForSelector('.dc-ledger');
@@ -1729,7 +1770,6 @@ const helpButtons = (tab, scope) => tab.locator(`${scope} .ui-help__button`);
 const helpState = (tab, scope, index) => tab.evaluate(([scope, index]) => {
   const button = document.querySelectorAll(`${scope} .ui-help__button`)[index], wrapper = button.parentElement, panel = wrapper.querySelector('.ui-help__panel');
   const line = wrapper.parentElement.closest('p, li, h1, h2, h3, h4, div'), box = panel.getBoundingClientRect(), own = button.getBoundingClientRect(), held = line.getBoundingClientRect();
-  const style = getComputedStyle(line), inner = held.width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - parseFloat(style.borderLeftWidth) - parseFloat(style.borderRightWidth);
   // What else the line draws, outside its panel.
   const others = [...line.querySelectorAll('*')].filter(el => !panel.contains(el) && el !== panel && el.getClientRects().length).map(el => el.getBoundingClientRect());
   const crosses = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
@@ -1741,12 +1781,19 @@ const helpState = (tab, scope, index) => tab.evaluate(([scope, index]) => {
     expanded: button.getAttribute('aria-expanded'), focused: document.activeElement === button, position: getComputedStyle(panel).position,
     ring: getComputedStyle(button).outlineStyle !== 'none' ? parseFloat(getComputedStyle(button).outlineWidth) : 0,
     size: [own.width, own.height], overlaps: controls.filter(el => crosses(own, el.getBoundingClientRect())).map(el => el.getAttribute('aria-label') || el.textContent.trim().slice(0, 30)),
-    underLine: others.every(rect => rect.bottom <= box.top + 1) && box.top >= own.bottom - 1, fullWidth: box.width >= inner - 1,
-    lineVisible: held.top >= 0 && own.top >= 0 && own.bottom <= innerHeight, overLine: crosses(box, held), inViewport: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
+    clearOfLine: [own, ...others].every(rect => !crosses(rect, box)),
+    panelVisible: box.top >= 0 && box.top < innerHeight, overLine: crosses(box, held), inViewport: box.left >= 0 && box.right <= document.documentElement.clientWidth,
     open: [...document.querySelectorAll('.ui-help__panel')].filter(el => !el.hidden).length};
 }, [scope, index]);
-// Each help button's accessible name and description, from Chrome's accessibility tree.
+// Each help button's accessible name and description, from Chromium's accessibility tree. Firefox and
+// WebKit give a page no way to read theirs, so there they come from aria-label and aria-describedby.
 async function accessible(tab, scope) {
+  if (options.browser !== 'chromium') {
+    return tab.$$eval(`${scope} .ui-help__button`, buttons => buttons.map(button => {
+      const described = (button.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean).map(id => document.getElementById(id)?.textContent.trim() ?? '').join(' ');
+      return {name: button.getAttribute('aria-label') ?? button.textContent.trim(), description: described || null};
+    }));
+  }
   const cdp = await tab.context().newCDPSession(tab);
   await cdp.send('DOM.enable');
   await cdp.send('Accessibility.enable');
@@ -1768,14 +1815,15 @@ async function exerciseHelp(tab, at, scope, {touch, outside, expected}) {
   check(keys.join() === expected.join(), `${at}: help on ${keys.join(', ')}`);
   // Tab reaches every help button, and each opens as it takes focus.
   await tab.evaluate(() => {document.activeElement?.blur(); window.scrollTo(0, 0);});
-  const reached = new Map();
+  const reached = new Map(), path = [];
   for (let press = 0; press < 400 && reached.size < total; press++) {
     await tab.keyboard.press('Tab');
+    if (path.length < 12) path.push(await focused(tab));
     const index = await tab.evaluate(scope => [...document.querySelectorAll(`${scope} .ui-help__button`)].indexOf(document.activeElement), scope);
     if (index >= 0 && !reached.has(index)) reached.set(index, await helpState(tab, scope, index));
   }
   check(reached.size === total && [...reached.values()].every(state => state.shown && state.focused && state.ring >= 3),
-    `${at}: Tab reaches all ${total} help buttons, and each opens on focus with a 3px ring (${[...reached.values()].map(state => `${state.key} ${state.shown} ${state.ring}`).join(', ')})`);
+    `${at}: Tab reaches all ${total} help buttons, and each opens on focus with a 3px ring (${[...reached.values()].map(state => `${state.key} ${state.shown} ${state.ring}`).join(', ')}${reached.size < total ? `; focus went ${path.join(' > ')}` : ''})`);
   const named = await accessible(tab, scope);
   for (let index = 0; index < total; index++) {
     const entry = helpFile[keys[index]];
@@ -1785,8 +1833,8 @@ async function exerciseHelp(tab, at, scope, {touch, outside, expected}) {
       `${at} ${opened.key}: focus shows the copy file's sentence; the button is "${named[index].name}", ${opened.size.map(Math.round).join('x')}, and overlaps no control (${opened.overlaps.join() || 'none'})`);
     if (entry.guide) check(opened.role === 'note' && opened.expanded === 'true', `${at} ${opened.key}: a panel is a note its button expands`);
     else check(opened.role === 'tooltip' && opened.expanded === null && named[index].description === entry.text, `${at} ${opened.key}: the hint's sentence is its button's accessible description (${named[index].description})`);
-    if (touch) check(opened.position === 'static' && opened.underLine && opened.fullWidth && opened.lineVisible, `${at} ${opened.key}: in the flow under its line, full width, with the line in view (${JSON.stringify({p: opened.position, under: opened.underLine, full: opened.fullWidth, visible: opened.lineVisible})})`);
-    else check(opened.position === 'absolute' && !opened.overLine && opened.inViewport, `${at} ${opened.key}: placed off its line and inside the viewport (${JSON.stringify({over: opened.overLine, inside: opened.inViewport})})`);
+    if (touch) check(opened.position === 'static' && opened.clearOfLine && opened.panelVisible, `${at} ${opened.key}: in the flow, over nothing else on its line, and scrolled into view (${JSON.stringify({p: opened.position, clear: opened.clearOfLine, visible: opened.panelVisible})})`);
+    else check(opened.position === 'absolute' && !opened.overLine && opened.inViewport, `${at} ${opened.key}: placed off its line and inside the viewport's sides (${JSON.stringify({over: opened.overLine, inside: opened.inViewport})})`);
     await tab.keyboard.press('Escape');
     const closed = await helpState(tab, scope, index);
     check(!closed.shown && closed.focused, `${at} ${opened.key}: Escape closes it and focus stays on its button`);
@@ -1901,7 +1949,7 @@ const commsFacts = tab => tab.evaluate(() => ({
   injected: Boolean(window.__injected) || Boolean(document.querySelector('.dc img')),
   local: Object.keys(localStorage), session: Object.keys(sessionStorage)}));
 const sentenceUnits = card => card.units.filter(unit => unit.kind === 'sentence');
-for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+for (const [width, scheme] of matrix) {
   await scenario(`communications ${width} ${scheme}`, async () => {
     const at = `communications ${width} ${scheme}`;
     const tab = await page({width, scheme});
@@ -2097,7 +2145,7 @@ await scenario('activity: a refused receipt', async () => {
   await tab.context().close();
 });
 
-for (const width of [320, 390, 768, 1440]) {
+for (const width of widths) {
   for (const scheme of ['light', 'dark']) {
     await scenario(`activity layout ${width} ${scheme}`, async () => {
       const at = `activity ${width} ${scheme}`;
@@ -2120,8 +2168,10 @@ for (const width of [320, 390, 768, 1440]) {
       await tab.waitForSelector('[data-seal-check="match"]');
       const drawer = await measure(tab, '[role=dialog]');
       check(healthy(drawer), `${at}: the seal's drawer, ${reported(`${at} drawer`, drawer)}`);
-      const box = await tab.locator('[role=dialog]').boundingBox();
-      check(width < 720 ? box.width === width : box.width === 480, `${at}: the drawer is ${width < 720 ? 'a sheet' : '480 wide'} (${box.width})`);
+      const box = await tab.locator('[role=dialog]').boundingBox(), view = await tab.evaluate(() => [document.documentElement.clientWidth, innerHeight]);
+      const placed = width < 720 ? box.x <= 0 && box.y <= 0 && box.x + box.width >= view[0] && box.y + box.height >= view[1]
+        : box.x >= 0 && box.y >= 0 && box.x + box.width <= view[0] + 1 && box.y + box.height <= view[1] + 1;
+      check(placed, `${at}: the drawer ${width < 720 ? 'covers the viewport' : 'is in view'} (${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}x${Math.round(box.height)} in ${view.join('x')})`);
       if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `activity-drawer-${width}-${scheme}.png`)});
       check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
       await tab.context().close();

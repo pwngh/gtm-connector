@@ -115,7 +115,8 @@
 
 .fr .ac-table th,
 .fr .ac-table td {
-  padding: var(--gc-space-2) var(--gc-space-4);
+  /* Tall enough that the 44px targets of two rows' links do not overlap. */
+  padding: var(--gc-space-3) var(--gc-space-4);
   border-bottom: var(--gc-rule-width) solid var(--gc-rule);
   color: var(--gc-ink);
   font: var(--gc-body);

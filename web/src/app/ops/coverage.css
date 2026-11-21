@@ -191,6 +191,12 @@
 }
 
 @media (min-width: 720px) {
+  /* With a zero minimum, WebKit keeps the table's first column widths as the
+     rows fill in, and the links run past its edge. */
+  .fr .cv {
+    grid-template-columns: minmax(auto, 1fr);
+  }
+
   .fr .cv-table .cv-cards {
     text-align: right;
   }
@@ -198,6 +204,11 @@
   /* The link's 44px target is centred on the first line of its row. */
   .fr .cv-open {
     margin-block: calc((1.5rem - var(--gc-target)) / 2);
+  }
+
+  /* Two links that wrap onto two lines keep their targets apart. */
+  .fr .cv-links {
+    row-gap: calc(var(--gc-target) - 1.5rem);
   }
 }
 

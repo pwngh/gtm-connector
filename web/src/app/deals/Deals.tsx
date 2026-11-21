@@ -222,23 +222,21 @@ function FirstRunHint({deal, query}: {deal: AccountView; query: string}) {
 
 // The filter as typed, kept in the address as ?q=. The router applies an
 // address in a transition, after later keystrokes, so the field holds its own
-// value: an address it wrote itself, or the one it replaced, is never read
-// back into it; any other address, as a link to /deals, is.
+// value: an address the field wrote is marked in its state and never read back
+// into it; any other address, as a link to /deals, is.
 function useFilter(): [string, (value: string) => void] {
   const [params, setParams] = useSearchParams();
+  const location = useLocation();
   const query = params.get('q') ?? '';
   const [text, setText] = useState(query);
-  const written = useRef(new Set<string>());
+  const written = (location.state as {filter?: boolean} | null)?.filter === true;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new address, even with the same ?q=, is read again.
   useEffect(() => {
-    if (query === text) {
-      written.current.clear();
-    } else if (!written.current.has(query)) {
-      written.current.clear();
+    if (!written) {
       setText(query);
     }
-  }, [query, text]);
+  }, [query, written, location.key]);
   const setQuery = (value: string) => {
-    written.current.add(query).add(value);
     setText(value);
     setParams(
       current => {
@@ -250,7 +248,7 @@ function useFilter(): [string, (value: string) => void] {
         }
         return next;
       },
-      {replace: true, preventScrollReset: true},
+      {replace: true, preventScrollReset: true, state: {filter: true}},
     );
   };
   return [text, setQuery];
