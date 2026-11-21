@@ -76,7 +76,8 @@ Salesforce account, opportunity, contract and contacts, its Slack threads and it
 transcripts. The card will read the standard opportunity fields. If the org keeps a renewal field
 somewhere else, the card will show a gap until milestone 2.
 
-**Sign-in.** Named people will sign in, and every action will be recorded under that sign-in. A
+**Sign-in.** Named people will sign in through the company's identity provider, and every action
+will be recorded under that sign-in. The connector will store no password for them. A
 person will read only the deals granted to them. They will see a source's sentences only if their
 own grant opens that source; otherwise the card will show the source as not read. The security
 review covers one operator today. It will be redone for more than one person before real people
@@ -347,7 +348,6 @@ Not planned: language SDKs, WASM or CGO builds. Integrations use HTTP or MCP.
 
 ## Open questions
 
-- **Sign-in.** A password the connector stores, or an identity provider?
 - **Ops access.** Is a grant enough, or is Ops a separate role?
 - **Closing by hand.** May a person close a deal, or does only the CRM stage close it?
 - **A bad unit.** Today one unit that fails a check stops the card. Should it be refused alone, with the card saying how many were?
