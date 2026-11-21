@@ -1,11 +1,8 @@
 # Import a call transcript
 
 Import a UTF-8 TXT, WebVTT, or SRT export and associate it with one account. The
-[Deal card](briefs.md) then shows a selected excerpt as whole sentences. The excerpt is the
-selected range of lines or cues, with one adjacent line or cue on each side where there is one. The connector does not record, transcribe, connect to a call
-provider, or summarize. The original bytes stay in private local state.
-
-## Commands
+[Deal card](briefs.md) then shows a selected excerpt as whole sentences. The original bytes stay in
+private local state.
 
 ```sh
 gtm-connector connect calls --seller 'Morgan Reed'    # once, in a folder with a connected CRM; name every seller
@@ -17,90 +14,111 @@ gtm-connector debug calls inspect IMPORT_ID --full --json
 gtm-connector brief acc-007
 ```
 
-Transcripts are added one at a time with `debug calls import`. Transcript folders are on the
+The connector does not record, transcribe, connect to a call provider, or summarize. Transcripts
+are added one at a time with `debug calls import`. Transcript folders are on the
 [roadmap](ROADMAP.md).
+
+## Commands
+
+`connect calls` connects transcripts beside Salesforce or beside the demo CRM, and
+`connect calls --seller NAME` lists who the sellers are. `debug calls import` refuses until
+transcripts are connected. `brief` and `debug serve` then read the imports with no further option.
+
+`connect calls --remove` detaches them and deletes nothing. Stop `debug serve` before running a
+`debug calls` command on its folder.
+
+> **Demo call notes and imported transcripts never share a folder.** A folder that has read demo
+> call notes refuses an import and names a fresh `--state-dir` to connect. Beside the demo CRM, a
+> folder that holds imports refuses `connect calls --remove`, which would make its calls demo data
+> again.
 
 | Option | Meaning |
 | --- | --- |
-| `--account ID`, `--account-number NUMBER` | `import` requires exactly one. `--account-number` needs Salesforce. `list` accepts `--account` as a filter. |
+| `--account ID`, `--account-number NUMBER` | `import` requires exactly one. `list` accepts `--account` as a filter. `--account-number` needs Salesforce, is exact, and refuses a non-literal or second match. On a refusal, pass `--account acc-sf-NATIVE_ID`. See [Salesforce](salesforce.md) and [live Slack](slack.md). |
 | `--lines FIRST:LAST`, `--cues FIRST:LAST` | The excerpt, in TXT lines or in VTT or SRT cues. Ranges start at one and include the end. |
 | `--called-at TIMESTAMP` | The meeting time with a UTC offset. Without it the call time stays unknown. |
-| `--speaker-names` | States that every line or cue of the file is one line that opens with its speaker's name and a colon ("Dana Crest: We will sign."). Each name is then the speaker's label. A file with one line or cue that is not laid out that way refuses. |
+| `--speaker-names` | States that every line or cue of the file is one line that opens with its speaker's name and a colon ("Dana Crest: We will sign."). See [Speaker names](#speaker-names). |
 | `--reassign` | Moves known content, or a known AccountNumber, to another account. |
 | `--state-dir PATH` | The [state folder](cli.md), `var/v2` by default. Use the folder `connect calls` was given. |
 | `--after IMPORT_ID` | For `list`: continues after the returned `next_after`. A page holds 100 rows. |
 | `--full` | For `inspect`: prints every unit and the original text. This is not available as an MCP tool. |
 
-`connect calls` connects transcripts beside Salesforce or beside the demo CRM, and
-`connect calls --seller NAME` lists who the sellers are. `debug calls import` refuses until
-transcripts are connected. `brief` and `debug serve` then read the imports with no further option.
-`connect calls --remove` detaches them and deletes nothing. Demo call notes and imported
-transcripts never share a folder: a folder that has read demo call notes refuses an import and
-names a fresh `--state-dir` to connect, and beside the demo CRM a folder that holds imports refuses
-`connect calls --remove`, which would make its calls demo data again. Stop `debug serve` before running a
-`debug calls` command on its folder.
+## How a file is read
 
-## Rules
+`.txt`, `.vtt`, or `.srt` selects the parser. A transcript unit is one line of a TXT file, or one
+timed cue of a VTT or SRT file, in file order. No provider download has been tested.
 
-- `import` resolves the account through a local `crm:read` grant and an audited MCP request. It
-  writes no CRM record. Later reads need only `calls:read`.
-- Each account has one active excerpt. Demo call notes are never substituted for a missing one: the
-  card of an account with nothing imported says "Calls: no transcript is imported for this
-  account."
-- `.txt`, `.vtt`, or `.srt` selects the parser. A transcript unit is one line of a TXT file, or one
-  timed cue of a VTT or SRT file, in file order. Cues may repeat or reorder start times, end where
-  they start, and be separated by lines of spaces where a cue follows. A cue that ends before it
-  starts refuses, and so does anything after an end time other than WebVTT cue settings.
-- The default excerpt is the first 20 transcript units, or fewer if they exceed a limit below. Every
-  excerpt adds one adjacent unit on each side where available. An explicit range that exceeds a
-  limit refuses and is never truncated.
-- A revision is one saved import, named by its import ID. Repeating the same bytes, account, call
-  time, and range reuses the revision. Any change creates a new active revision. Older revisions
-  stay inspectable.
-- A WebVTT identifier may repeat. Inline tags such as `<v Name>` are stored as the file has them. An
-  SRT cue may be numbered and carries no other identifier.
-- On a card, each whole sentence is one numbered [unit](briefs.md), which is not a transcript
-  unit. A WebVTT voice tag names the speaker of the
-  text after it and is not part of the sentence, and a cue with two tags has two speakers. A cue
-  with no tag takes its identifier as the label when that is not a number. TXT lines and SRT cues
-  have no label, so their role is `unknown`, unless the import states speaker names (below).
-  WebVTT styling tags (`<b>`, `<i>`, `<u>`, `<c>`,
-  `<lang>`, `<ruby>`), the reading inside `<rt>`, and cue timestamps are not part of a sentence.
-- The connector never guesses that a file names its speakers at the start of each line. With
-  `--speaker-names` you state it, the whole file is checked, and the statement is saved with the
-  import, so a name is read the same whichever lines are cited. The name is the label and is not
-  part of the sentence, and a cue identifier is not a label in such an import. The file refuses
-  unless all of this holds for every line or cue with text:
-  - It is one line. On a second line of a cue nothing says whose words they are.
-  - It opens with a name, a colon, a space, and words.
-  - The name starts with a letter that is not lower case, is at most 100 characters, and holds no
-    colon, question or exclamation mark, angle bracket, or sentence end. "Dr. J. Vance" is a name.
-    "We have signed. Dana Crest" and "final word on the matter" are not.
-- The checks on a name are made when the file is imported. An import that was accepted is read
-  afterwards by the layout alone, so a later change to how sentences are split never unreads it.
-- A stated layout says how the file is read. It does not show who spoke: anyone who can start a
-  line of the file can write a name there, and a wrapped line that happens to open like a name
-  reads as one. State it only of an export whose lines the recorder wrote. `debug calls list` and
-  `debug calls inspect` show which imports state it.
-- Neighbouring cues under one speaker label are read together, so a sentence that runs across them
-  stays whole: when they are at most two seconds apart, or at most ten when the earlier cue stops
-  mid-sentence and the later one goes on in lower case. Cues or lines with no label are never
-  joined, because two people may be speaking. Lines of a TXT file have no times and are never
-  joined either.
-- A sentence is shown only whole. Text that stops without closing punctuation, or on a short form
-  that expects more ("28 U.S.C."), is counted in `NOT READ` and not shown. So is what the same
-  speaker says next, what anyone says next in lower case, and each speaker's first words when the
-  excerpt starts inside the call. In a TXT file,
-  keep each sentence on one line.
-- `NOT READ` says which lines or cues of how many were read.
-- An import saved by an earlier version of the parser reads as `calls_import_corrupt`. Import the
-  file again.
+The excerpt is the selected range of transcript units: by default the first 20, or fewer if they
+exceed a limit below. Every excerpt adds one adjacent unit on each side where there is one. An
+explicit range that exceeds a limit refuses and is never truncated.
+
+- Cues may repeat or reorder start times, end where they start, and be separated by lines of spaces
+  where a cue follows.
+- A cue that ends before it starts refuses, and so does anything after an end time other than
+  WebVTT cue settings.
+- A WebVTT identifier may repeat. An SRT cue may be numbered and carries no other identifier.
+- Inline tags such as `<v Name>` are stored as the file has them.
 - Well-formed `Kind:`, `Language:`, and `X-TIMESTAMP-MAP=` lines under the `WEBVTT` line are
-  skipped, and any other text there refuses. Control characters other than tabs and line endings
-  refuse. No provider download has been tested.
-- With Salesforce connected, `--account-number` is exact, at most 40 characters, and refuses a
-  non-literal or second match. On a refusal, pass `--account acc-sf-NATIVE_ID`. See
-  [Salesforce](salesforce.md) and [live Slack](slack.md).
+  skipped, and any other text there refuses.
+- Control characters other than tabs and line endings refuse.
+
+`import` resolves the account through a local `crm:read` grant and an audited MCP request. It
+writes no CRM record. Later reads need only `calls:read`.
+
+A revision is one saved import, named by its import ID, and each account has one active excerpt.
+Repeating the same bytes, account, call time, and range reuses the revision. Any change creates a
+new active revision, and older revisions stay inspectable.
+
+## Sentences and speakers
+
+On a card, each whole sentence is one numbered [unit](briefs.md), which is not a transcript unit.
+
+- A WebVTT voice tag names the speaker of the text after it and is not part of the sentence, and a
+  cue with two tags has two speakers.
+- A cue with no tag takes its identifier as the label when that is not a number.
+- TXT lines and SRT cues have no label, so their role is `unknown`, unless the import states
+  [speaker names](#speaker-names).
+- WebVTT styling tags (`<b>`, `<i>`, `<u>`, `<c>`, `<lang>`, `<ruby>`), the reading inside `<rt>`,
+  and cue timestamps are not part of a sentence.
+
+Neighbouring cues under one speaker label are read together, so a sentence that runs across them
+stays whole: when they are at most two seconds apart, or at most ten when the earlier cue stops
+mid-sentence and the later one goes on in lower case. Cues or lines with no label are never joined,
+because two people may be speaking. Lines of a TXT file have no times and are never joined either.
+
+> **A sentence is shown only whole.** Text that stops without closing punctuation, or on a short
+> form that expects more ("28 U.S.C."), is counted in `NOT READ` and not shown. So is what the same
+> speaker says next, what anyone says next in lower case, and each speaker's first words when the
+> excerpt starts inside the call.
+
+In a TXT file, keep each sentence on one line. `NOT READ` says which lines or cues of how many were
+read. Demo call notes are never substituted for a missing excerpt: the card of an account with
+nothing imported says "Calls: no transcript is imported for this account."
+
+## Speaker names
+
+With `--speaker-names` you state that a file names its speakers at the start of each line. The
+connector never guesses it. The whole file is checked, and the statement is saved with the import,
+so a name is read the same whichever lines are cited.
+
+The name is the label and is not part of the sentence, and a cue identifier is not a label in such
+an import. The file refuses unless all of this holds for every line or cue with text:
+
+- It is one line. On a second line of a cue nothing says whose words they are.
+- It opens with a name, a colon, a space, and words.
+- The name starts with a letter that is not lower case, is within the limit below, and holds no
+  colon, question or exclamation mark, angle bracket, or sentence end. "Dr. J. Vance" is a name.
+  "We have signed. Dana Crest" and "final word on the matter" are not.
+
+The checks on a name are made when the file is imported. An import that was accepted is read
+afterwards by the layout alone, so a later change to how sentences are split never unreads it.
+`debug calls list` and `debug calls inspect` show which imports state the layout.
+
+> **A stated layout does not show who spoke.** It says how the file is read. Anyone who can start a
+> line of the file can write a name there, and a wrapped line that happens to open like a name
+> reads as one. State it only of an export whose lines the recorder wrote.
+
+## Limits
 
 | Limit | Value |
 | --- | ---: |
@@ -109,8 +127,13 @@ names a fresh `--state-dir` to connect, and beside the demo CRM a folder that ho
 | Quoted text, including context | 16 KiB of UTF-8 |
 | Returned units, including context | 256 |
 | Quoted text with its units | 120 KiB of ASCII-escaped JSON. The saved record stays under 128 KiB. |
+| A name under `--speaker-names` | 100 characters |
+| An AccountNumber for `--account-number` | 40 characters |
 
 ## Errors
+
+An import saved by an earlier version of the parser reads as `calls_import_corrupt`. Import the
+file again.
 
 | Code | Exit | Cause | Fix |
 | --- | ---: | --- | --- |

@@ -1,10 +1,7 @@
 # Serve selected accounts
 
 A selection is a file you write that lists the accounts a connected [client](clients.md) may read,
-and whether each account's Slack thread is included. Each read still requires its scope. A server
-started with a selection also serves two more tools: one saves a [Deal card](briefs.md) with its
-evidence under the client's own [grant](tools.md), as a prepared brief, and the other reads it back
-after checking the client's access again.
+and whether each account's Slack thread is included. Each read still requires its scope.
 
 ```json
 {"schema_version": 1, "accounts": [
@@ -23,9 +20,14 @@ gtm-connector debug serve --selection selection.json
   mapped with `debug slack map`, or the server refuses to start.
 - The file must be a regular file you own that others cannot write, at most 64 KiB. Unknown keys,
   repeated keys or accounts, and non-finite numbers refuse.
-- To change the selection, restart `debug serve`. A restart also replaces every grant.
+
+> **To change the selection, restart `debug serve`.** A restart also replaces every grant.
 
 ## Tools
+
+A server started with a selection also serves two more tools. One saves a [Deal card](briefs.md)
+with its evidence under the client's own [grant](tools.md), as a prepared brief. The other reads it
+back after checking the client's access again.
 
 | Tool | Requires | Behavior |
 | --- | --- | --- |
@@ -41,13 +43,15 @@ gtm-connector debug serve --selection selection.json
 and its `units`: each number on the card with its record reference and, for a sentence, its
 neutralized text, speaker, and role. The units hold more than the card prints: every sentence that
 was read, shown or not, and for a transcript the cues it lies in and their times. A caller with
-`calls:read` receives those. Each read inside it writes its own receipt, linked to the outer call by
+`calls:read` receives those.
+
+Each read inside it writes its own receipt, linked to the outer call by
 `{"kind": "brief_child", "parent_audit_id": ..., "ordinal": N}`. A successful brief has one outer
 receipt and one read receipt for each source read: the account and its opportunities, then calls
-and Slack when they are connected and Slack is selected for the account. A source that is not
-connected is never called, and the card and `sources` name it as not connected. The reads write no
-`debug serve` event lines.
+and Slack when they are connected and Slack is selected for the account.
 
+- A source that is not connected is never called, and the card and `sources` name it as not
+  connected. The reads write no `debug serve` event lines.
 - Preparing a brief has 45 seconds. Writing the final receipt and sending the response come after
   that check. A read already in progress keeps its own limit, 20 seconds for Salesforce and live
   Slack, and a late result is discarded.
@@ -56,16 +60,21 @@ connected is never called, and the card and `sources` name it as not connected. 
   number from `units`.
 - `read_renewal_brief` releases a saved brief, with the same `text`, `units`, and `gaps`, to any
   caller that passes the rule in the [security review](../SECURITY_REVIEW.md). A brief saved before
-  gaps existed releases `gaps: null`. Its result includes `provider_rechecked: false` and a notice.
-  Logging out of the `sf` CLI does not withhold saved Salesforce content.
+  gaps existed releases `gaps: null`.
+
+> **Logging out of the `sf` CLI does not withhold saved Salesforce content.** The result of
+> `read_renewal_brief` includes `provider_rechecked: false` and a notice.
 
 ## Errors
 
-A bad selection file stops `debug serve` with exit `2`, and an unmapped Slack thread with exit `3`. A
-selected server offers no write tool. A `log_activity` call that passes the token, rate and scope
-checks is refused with HTTP 403 and `crm_write_disabled`. A rate or token failure at admission is
-HTTP 429 or 401; during a prepared brief, or at a saved brief's final token check, it is a tool error.
-The other codes are tool errors, or a failed source's own code, such as `calls_not_connected`.
+A bad selection file stops `debug serve` with exit `2`, and an unmapped Slack thread with exit `3`.
+
+> **A selected server offers no write tool.** A `log_activity` call that passes the token, rate and
+> scope checks is refused with HTTP 403 and `crm_write_disabled`.
+
+A rate or token failure at admission is HTTP 429 or 401. During a prepared brief, or at a saved
+brief's final token check, it is a tool error. The other codes are tool errors, or a failed
+source's own code, such as `calls_not_connected`.
 
 | Code | Cause | Fix |
 | --- | --- | --- |
