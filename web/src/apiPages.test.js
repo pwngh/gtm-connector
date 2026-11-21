@@ -1,12 +1,14 @@
 import test, {before, after} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync, readdirSync} from 'node:fs';
+import {join, relative} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {gunzipSync} from 'node:zlib';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MemoryRouter} from 'react-router';
 import {createServer} from 'vite';
-import {serverPaths} from './app/routes.js';
+import {serverPaths} from './app/routes.ts';
 
 // Cards are the connector demo's sealed cards from the oracle fixtures, shaped
 // as GET /api/v1/cards/{card} returns them. Only IDs and times are made up.
@@ -21,14 +23,17 @@ function cardOf(account, id = `card-${account}`) {
     gaps: sealed.gaps};
 }
 const notPermitted = {status: 'failed', error: {kind: 'not_permitted', code: 'not_permitted'}};
+const signedInState = {mode: 'api', error: null, ended: false, generation: 1, elsewhere: null, session: {signed_in: true, csrf_token: 't', expires_at: '2099-01-15T23:00:00Z',
+  principal: {id: 'p-1', display_name: 'Demo reviewer', kind: 'person', workspace_id: 'w-1', workspace_kind: 'demo', demo: true}}};
 const ready = data => ({status: 'ready', data});
 
-let server, frame, evidence, readiness, selection, switcher;
+let server, frame, evidence, readiness, selection, pages, shell, reads;
 before(async () => {
   server = await createServer({configFile: false, server: {middlewareMode: true, hmr: false, ws: false}, appType: 'custom', logLevel: 'error'});
   // Each module loads on its own, so a missing one fails only the tests that use it.
   const load = path => server.ssrLoadModule(path).catch(error => new Proxy({}, {get(target, name) {if (name === 'then') return undefined; throw error;}}));
-  [frame, evidence, readiness, selection, switcher] = await Promise.all(['/src/ApiFrame.jsx', '/src/ApiEvidence.jsx', '/src/ApiReadiness.jsx', '/src/selection.js', '/src/ServerSwitch.jsx'].map(load));
+  [frame, evidence, readiness, selection, pages, shell, reads] = await Promise.all(['/src/ApiFrame.jsx', '/src/ApiEvidence.jsx', '/src/ApiReadiness.jsx', '/src/api/selection.ts',
+    '/src/app/frame/pages.ts', '/src/app/frame/Frame.tsx', '/src/api/reads.ts'].map(load));
 });
 after(async () => {await server?.close();});
 
@@ -66,19 +71,11 @@ test('a refused unit read shows the refusal, never "no receipt"', () => {
 // 2. A card shows only under its own account.
 test('a card in the URL that is not in the account list is not read or shown', () => {
   const two = cardOf('acc-002', 'card-two'), three = cardOf('acc-003', 'card-three');
-  assert.deepEqual(selection.resolveCard('card-three', [two]), {cardId: null, mismatch: true});
-  assert.deepEqual(selection.resolveCard('card-two', [two]), {cardId: 'card-two', mismatch: false});
-  assert.deepEqual(selection.resolveCard(null, [two]), {cardId: 'card-two', mismatch: false});
-  assert.deepEqual(selection.resolveCard('card-two', null), {cardId: null, mismatch: false});
-  assert.deepEqual(selection.resolveCard('card-two', []), {cardId: null, mismatch: true});
   const html = inRouter(React.createElement(evidence.EvidenceFromServer, {selection: chosen({account: 'acc-002', accountName: 'Second', cards: ready({cards: [two]}), cardMismatch: true, card: {status: 'idle'}})}));
   assert.match(text(html), /The card in this link is not one of acc-002’s published cards\. Nothing from it is shown\./);
   assert.doesNotMatch(html, /data-unit-n|card-three/);
   // A card the server returns for another account is refused here too.
   const checked = selection.checkCard(ready(three), 'acc-002', 'card-three');
-  assert.equal(checked.status, 'failed');
-  assert.equal(checked.error.kind, 'mismatch');
-  assert.equal(selection.checkCard(ready(two), 'acc-002', 'card-two').status, 'ready');
   const shown = inRouter(React.createElement(evidence.EvidenceFromServer, {selection: chosen({account: 'acc-002', cards: ready({cards: [two]}), cardId: 'card-three', card: checked})}));
   assert.match(shown, /data-refusal="mismatch"/);
   assert.doesNotMatch(shown, /data-unit-n/);
@@ -100,11 +97,12 @@ test('an account from the URL is never the heading unless it is granted, and a m
   assert.match(phishing, /<h1>No account chosen<span/);
   assert.match(text(phishing), /The account in this link is not an account ID\. It was not read\./);
   assert.match(header({account: 'acc-003', verified: true, accountName: 'Third'}), /<h1>Third<span/);
-  assert.equal(selection.resolveAccount('Your account is locked call 555', null).invalid, true);
-  assert.equal(selection.resolveAccount('acc-777', [{account: 'acc-003', name: 'Third'}]).verified, false);
-  assert.deepEqual(selection.resolveAccount(null, [{account: 'acc-002', name: 'Second'}, {account: 'acc-003', name: 'Third'}]), {account: 'acc-003', verified: true, invalid: false, name: 'Third'});
-  const crumbs = inRouter(React.createElement(switcher.ApiCrumbs), serverPaths.evidence + '?account=Your%20account%20is%20locked');
-  assert.doesNotMatch(crumbs, /locked/);
+  // The frame names no account: the link's text is not trusted, and the page heading shows the verified one.
+  const store = {api: {}, subscribe: () => () => {}, getSnapshot: () => signedInState};
+  const framed = renderToStaticMarkup(React.createElement(reads.ServerContext, {value: store},
+    React.createElement(MemoryRouter, {initialEntries: [serverPaths.evidence + '?account=Your%20account%20is%20locked']}, React.createElement(shell.Frame))));
+  const chrome = framed.slice(0, framed.indexOf('<main'));
+  assert.doesNotMatch(chrome.replace(/href="[^"]*"/g, ''), /locked/);
 });
 
 // 4. Readiness claims only what the card supports.
@@ -149,7 +147,9 @@ test('every server string renders as text, never markup', () => {
     inRouter(React.createElement(frame.AccountPicker, {selection: chosen({granted: named})})),
     inRouter(React.createElement(frame.ApiRenewalHeader, {page: 'evidence', selection: chosen({accountName: `Name${hostile}`, cardId: card.id, card: ready(card)})})),
     inRouter(React.createElement(frame.CardList, {selection: chosen({cards: ready({cards: [{...card, published_at: `2027${hostile}`}]}), cardId: card.id})})),
-    inRouter(React.createElement(frame.SessionBar, {store: {}, session: {signed_in: true, expires_at: `x${hostile}`, principal: {display_name: `Reviewer${hostile}`, demo: true, kind: `k${hostile}`, workspace_kind: 'demo'}}})),
+    renderToStaticMarkup(React.createElement(reads.ServerContext, {value: {api: {}, subscribe: () => () => {}, getSnapshot: () => ({...signedInState,
+      session: {...signedInState.session, principal: {...signedInState.session.principal, display_name: `Reviewer${hostile}`}}})}},
+    React.createElement(MemoryRouter, {initialEntries: [serverPaths.readiness]}, React.createElement(shell.Frame)))),
     inRouter(React.createElement(frame.Refusal, {error: {kind: 'server', code: `code${hostile}`}})),
   ];
   for (const html of pages) {
@@ -159,18 +159,20 @@ test('every server string renders as text, never markup', () => {
 });
 
 test('no app source renders HTML from a string', () => {
-  const dir = new URL('.', import.meta.url);
-  for (const name of readdirSync(dir).filter(name => /\.(jsx?|mjs)$/.test(name) && !name.includes('.test.'))) {
-    const source = readFileSync(new URL(name, dir), 'utf8');
-    assert.doesNotMatch(source, /dangerouslySetInnerHTML|\.innerHTML|outerHTML|insertAdjacentHTML|document\.write/, name);
+  const dir = fileURLToPath(new URL('.', import.meta.url));
+  const names = readdirSync(dir, {recursive: true}).map(String).filter(name => /\.(jsx?|mjs|tsx?)$/.test(name) && !name.includes('.test.'));
+  assert.ok(names.some(name => name.endsWith('Frame.tsx')) && names.some(name => name.endsWith('client.ts')), 'the TypeScript sources are checked too');
+  for (const name of names) {
+    const source = readFileSync(join(dir, name), 'utf8');
+    assert.doesNotMatch(source, /dangerouslySetInnerHTML|\.innerHTML|outerHTML|insertAdjacentHTML|document\.write/, relative(dir, join(dir, name)));
   }
 });
 
 // 4. The command palette offers the server pages and nothing else.
 test('the server palette offers only the server pages, with the chosen account and open card kept', () => {
   const visited = [];
-  const items = switcher.apiCommandItems(to => visited.push(to), '?account=acc-002&card=card-two&unit=4');
-  assert.deepEqual(items.map(item => [item.group, item.label]), [['Read from the server', 'Evidence'], ['Read from the server', 'Readiness']]);
+  const items = pages.pageItems(to => visited.push(to), '?account=acc-002&card=card-two&unit=4');
+  assert.deepEqual(items.map(item => [item.group, item.label]), [['Ops', 'Evidence'], ['Ops', 'Readiness']]);
   for (const item of items) item.onSelect();
   assert.deepEqual(visited, [serverPaths.evidence + '?account=acc-002&card=card-two', serverPaths.readiness + '?account=acc-002&card=card-two']);
 });

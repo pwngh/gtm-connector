@@ -1,6 +1,6 @@
 import React, {Component, Suspense, createRef, useEffect, useLayoutEffect, useRef} from 'react';
 import {focusHoldingSpot, focusIsUnplaced} from './focusElement.js';
-import {forgetFailedPages} from './app/lazyPage.js';
+import {forgetFailedPages} from './app/lazyPage.ts';
 
 export function RouteLoading({label}) {
   const ref = useRef(null);
