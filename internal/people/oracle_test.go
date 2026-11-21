@@ -148,7 +148,7 @@ func TestRecordedCards(t *testing.T) {
 	}
 	sort.Strings(families)
 	roles, reasons := map[string]int{}, map[string]int{}
-	cards, sentences, cut := 0, 0, 0
+	cards, sentences, cut, quoted := 0, 0, 0, 0
 	for _, family := range families {
 		m := oracletest.NewMismatches(t, family)
 		for _, line := range oracletest.Lines(t, "cards/"+family+".jsonl.gz") {
@@ -228,6 +228,11 @@ func TestRecordedCards(t *testing.T) {
 					cut++
 					continue
 				}
+				if get(unit, "quoted") == true {
+					// A sentence the author quoted is no one's established words, whatever the author's label.
+					quoted++
+					continue
+				}
 				refName := text(get(unit, "record_ref"))
 				label := ""
 				if speaker, ok := get(unit, "speaker").(string); ok {
@@ -265,7 +270,8 @@ func TestRecordedCards(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("%d cards, %d sentences: %d with a label over the limit, decided before any rule", cards, sentences, cut)
+	t.Logf("%d cards, %d sentences: %d with a label over the limit, decided before any rule, and %d quoted by "+
+		"their message's author, under no role", cards, sentences, cut, quoted)
 	t.Logf("by role: customer %d, seller %d, unknown %d", roles["customer"], roles["seller"], roles["unknown"])
 	t.Logf("unknown by reason: %v", reasons)
 	if cards != 450 {

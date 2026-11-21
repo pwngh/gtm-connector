@@ -4,7 +4,7 @@ A local connector that builds a Deal card for a renewal from CRM records, call t
 Slack. One operator runs it. People use the CLI and the web app, assistants use the MCP tools. It is
 one Go program on PostgreSQL, with the web app inside it, and it is growing to run the renewal
 workflow. There is no Python in the repository: `testdata/oracle/` holds the outputs the Python
-package it replaced recorded, as frozen test data.
+package it replaced recorded, now Go's golden data.
 
 ## Never break these
 
@@ -98,13 +98,18 @@ work, and keep the history of what resolved it. No model writes text on a card.
 the Python package and stays read-only. To finish it:
 
 1. Keep the reference. `testdata/oracle/` holds the outputs the Python package recorded on CPython
-   3.14.6 with clocks and IDs fixed. It is frozen: nothing regenerates it, and a fixture that
-   disagrees with the code is the reference. Card text matches byte for byte, and units and gaps
-   match as values. A difference with a cause outside the product, such as the recorder's clock, is
-   listed in its test with the reason. Character classes come from `internal/unicodetab`, never Go's
-   or RE2's.
-2. Finish the Evidence row of the roadmap: neutralize a bare mail address, raise the neutralizer
-   version, and show the host of a valid `xn--` label.
+   3.14.6 with clocks and IDs fixed, and a fixture that disagrees with the code is the reference.
+   Card text matches byte for byte, and units and gaps match as values. A difference with a cause
+   outside the product, such as the recorder's clock, is listed in its test with the reason.
+   Character classes come from `internal/unicodetab`, never Go's or RE2's. A deliberate change to
+   the card or text rules rewrites the golden files it changes with `go test -p 1 -v ./internal/cards
+   ./internal/evidence ./internal/realdata ./internal/render/... ./cmd/gtm-connector -update` (never
+   with `-run`; it prints what changed in each card family, and refuses a card that fails its own seal
+   checks), with `GTM_TEST_DATABASE_URL` set for the command replay, and the real-data digests of the
+   changed functions with `go run ./cmd/realdata -update=FUNCTION,... verify`. Its PR lists each
+   rewritten file with how many cards, units or rows changed, and why.
+2. Finish the Evidence row of the roadmap: neutralize a bare mail address and show the host of a
+   valid `xn--` label.
 3. Close the cutover: a tagged release attaches the binaries.
 
 Sign-in, grants, selection, expiry and the Host check stay ahead of any evidence served. MCP passes
@@ -116,8 +121,7 @@ After each step, use the product end to end as a stranger and fix what only show
 
 Test on real data at every step. Public datasets are fetched into a cache outside the repository,
 checked against a committed manifest of links and digests, and run with `make verify-real`, never
-in CI. Real text goes through Go and must match the digests the Python package recorded on it, in
-`internal/realdata/recorded`. Reports hold counts, digests and positions, never text. A public corpus tests
+in CI. Real text goes through Go and must match the digests in `internal/realdata/recorded`. Reports hold counts, digests and positions, never text. A public corpus tests
 parsing and scale, not usefulness: the README's first limit stays until the owner has run the
 connector on five real renewals outside the repository. Agents never read those transcripts or
 results; each parser failure they report becomes an invented fixture.

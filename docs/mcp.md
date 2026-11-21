@@ -285,7 +285,7 @@ Both brief tools answer with `structuredContent` holding `source: "brief"`, one 
 | `brief` key | Holds |
 | --- | --- |
 | `brief_id`, `account_id`, `as_of` | Which card this is. |
-| `text` | The card as the `brief` command prints it. |
+| `text` | The card as the `brief` command prints it. A card with a sentence sealed under an older neutralizer version is rendered again for the model, with a first line that says so, and its sealed text stays in its bytes. See [cards](cards.md#units). |
 | `units` | Each number on the card with its record reference, and for a sentence its neutralized text, speaker and role. See [cards](cards.md). |
 | `gaps` | What the card did not read, as on the card. |
 | `sources` | Each source read, such as `"crm": "demo_fixture"`. |

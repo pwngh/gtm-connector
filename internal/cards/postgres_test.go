@@ -577,8 +577,8 @@ func normalise(stored, want []byte, prepared bool) ([]byte, error) {
 }
 
 // The folder cards on PostgreSQL: a card made by brief and three prepared briefs, the last for an account
-// selected without Slack. Each is compared with the oracle's file by bytes, and each receipt with the
-// oracle's audit row, with the IDs and times put back as above.
+// selected without Slack. Each is compared with the oracle's file as todaysRules gives it, by bytes, and each
+// receipt with the oracle's audit row, with the IDs and times put back as above.
 func TestFolderCardsOnPostgres(t *testing.T) {
 	ctx := context.Background()
 	for _, fc := range folders {
@@ -618,7 +618,8 @@ func TestFolderCardsOnPostgres(t *testing.T) {
 				t.Fatal(err)
 			}
 			f := openFolder(t, fc.name)
-			want := *f.payload(fc.brief)
+			sealedThen := *f.payload(fc.brief)
+			want := todaysRules(sealedThen)
 			stored, problems := c.check(t, sealed, demoSources(nil), want, fc.prepared)
 			for _, problem := range problems {
 				t.Error(problem)
@@ -654,7 +655,8 @@ func TestFolderCardsOnPostgres(t *testing.T) {
 					request.Set("parent_audit_id", wantPayload.SealID)
 				}
 				if mine == storedPayload.SealID {
-					row.Set("rows", []any{receipts.Reference(fc.brief, normalised)})
+					// The folder's seal names the card the folder holds, sealed under rules version 3.
+					row.Set("rows", []any{receipts.Reference(fc.brief, sealedThen)})
 				}
 				if !sameJSON(row, oracleRow) {
 					got, _ := strictjson.Dumps(row, strictjson.Quoted)

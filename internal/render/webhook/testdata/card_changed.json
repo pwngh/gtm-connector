@@ -1,0 +1,72 @@
+{
+  "id": "evt_02",
+  "type": "card.changed",
+  "occurred_at": "2027-01-15T15:00:05Z",
+  "deal": {
+    "id": "acc-003",
+    "status": "amber",
+    "previous_status": "green"
+  },
+  "card": {
+    "id": "card-e4bc634060d6",
+    "sha256": "e4bc634060d65c744adbc0f6d000a342b701fe0ebf8c4c6bf8cb32986ae8d3aa",
+    "as_of": "2027-01-15"
+  },
+  "renewal": {
+    "days": 24,
+    "date": "2027-02-08",
+    "counts_to": "renewal"
+  },
+  "rules": [
+    {
+      "code": "legal_security_blocker",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "pricing_seat_conflict",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "customer_silence",
+      "state": "clear",
+      "previous_state": "unknown",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "close_date_slippage",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "single_threaded",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    }
+  ],
+  "unread": [],
+  "changes": {
+    "since_card": "card-2deaa0d1ccd1",
+    "since": "2027-01-15T09:10:00Z",
+    "sentences": {
+      "customer": 2,
+      "seller": 1,
+      "unknown": 0
+    },
+    "values": 0
+  },
+  "links": {
+    "card": "https://gtm.example.internal/deals/acc-003?card=card-e4bc634060d6",
+    "api": "https://gtm.example.internal/api/v1/cards/card-e4bc634060d6"
+  }
+}
