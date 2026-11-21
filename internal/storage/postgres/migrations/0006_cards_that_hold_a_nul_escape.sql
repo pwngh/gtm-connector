@@ -2,23 +2,56 @@
 -- JSON escape \u0000. PostgreSQL's jsonb cannot hold that escape, so the checks of 0003 refused such a card
 -- as not a JSON document and the account got no card. The bytes are stored and sealed as before. Only the
 -- checks read them differently: as jsonb in which a stand-in character takes the place of each such escape.
+-- A stand-in is a character outside ASCII, so it is named only where a document holds the escape: a database
+-- whose encoding cannot hold it checks every other card as before.
 
--- A JSON document as jsonb, with stand_in in place of each \u0000 escape. A document without that escape is
--- cast as it is. In any other, each escaped backslash is set aside first, so that every \u0000 left is the
--- escape and never the six characters after an escaped backslash; U+0001, which no JSON document holds
--- unescaped, keeps the place of each. What is not JSON is still refused by the cast: the stand-in is a
--- character outside ASCII, which is JSON only inside a string, and nothing else is changed.
-CREATE FUNCTION gtm_jsonb_without_nul(document bytea, stand_in text) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $$
+-- Whether a JSON document holds the escape \u0000. Each escaped backslash is set aside first, so the six
+-- characters after one are not taken for the escape. Bytes that are not UTF-8 hold no escape; the cast
+-- refuses them.
+CREATE FUNCTION gtm_holds_nul_escape(document bytea) RETURNS boolean LANGUAGE plpgsql IMMUTABLE AS $$
+BEGIN
+    RETURN position(chr(92) || 'u0000' IN replace(convert_from(document, 'UTF8'), chr(92) || chr(92), '')) > 0;
+EXCEPTION WHEN others THEN
+    RETURN false;
+END
+$$;
+
+-- A JSON document as jsonb, with stand_in, or U+FFFD when it is NULL, in place of each \u0000 escape. A
+-- document without that escape is cast as it is, and the stand-in is not looked at. In any other, each
+-- escaped backslash is set aside first, so that every \u0000 left is the escape and never the six characters
+-- after an escaped backslash; U+0001, which no JSON document holds unescaped, keeps the place of each. What
+-- is not JSON is still refused by the cast: the stand-in is a character outside ASCII, which is JSON only
+-- inside a string, and nothing else is changed.
+CREATE FUNCTION gtm_jsonb_without_nul(document bytea, stand_in text DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE
     doc text := convert_from(document, 'UTF8');
     backslash constant text := chr(92);
 BEGIN
-    IF position(backslash || 'u0000' IN doc) = 0 OR position(chr(1) IN doc) > 0 THEN
+    IF NOT gtm_holds_nul_escape(document) OR position(chr(1) IN doc) > 0 THEN
         RETURN doc::jsonb;
     END IF;
-    RETURN replace(replace(replace(doc, backslash || backslash, chr(1)), backslash || 'u0000', stand_in),
+    RETURN replace(replace(replace(doc, backslash || backslash, chr(1)), backslash || 'u0000',
+                           coalesce(stand_in, chr(65533))),
                    chr(1), backslash || backslash)::jsonb;
 END
+$$;
+
+-- Whether a member name anywhere in a JSON value holds stand_in. jsonb keeps the last of two members of one
+-- name, so in a document that held the escape, a member whose name held it, or held the stand-in, can be
+-- overwritten by another and leave no trace in the comparisons. Such a document is refused instead.
+CREATE FUNCTION gtm_names_hold(document jsonb, stand_in text) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
+    WITH RECURSIVE v(value) AS (
+        SELECT document
+        UNION ALL
+        SELECT e.value FROM v, LATERAL (
+            SELECT o.value FROM jsonb_each(CASE WHEN jsonb_typeof(v.value) = 'object' THEN v.value END) o
+            UNION ALL
+            SELECT a.value FROM jsonb_array_elements(CASE WHEN jsonb_typeof(v.value) = 'array' THEN v.value END) a
+        ) e)
+    SELECT EXISTS (
+        SELECT 1 FROM v, jsonb_object_keys(CASE WHEN jsonb_typeof(v.value) = 'object' THEN v.value END) k
+         WHERE position(stand_in IN k) > 0)
 $$;
 
 -- A stored record body in that form, or NULL if it is not JSON.
@@ -62,6 +95,9 @@ BEGIN
     EXCEPTION WHEN others THEN
         RETURN 'card ' || c.id || ' is not a JSON document';
     END;
+    IF gtm_holds_nul_escape(c.card_bytes) AND gtm_names_hold(doc, stand_in) THEN
+        RETURN 'card ' || c.id || ' holds the escape \u0000 and a member name that holds it or its stand-in';
+    END IF;
     ev := doc -> 'evidence';
     IF doc ->> 'brief_id' IS DISTINCT FROM c.brief_id OR doc ->> 'account_id' IS DISTINCT FROM c.account_ref
        OR ev ->> 'brief_id' IS DISTINCT FROM c.brief_id OR ev ->> 'account_id' IS DISTINCT FROM c.account_ref
@@ -129,6 +165,7 @@ BEGIN
         OR r.status <> 'ok' OR r.tool <> k.tool
         OR v.source || '/' || v.record_table || '/' || v.record_id <> k.record_ref
         OR sh.rec IS DISTINCT FROM gtm_body_json(v.raw_body, stand_in)
+        OR (gtm_holds_nul_escape(v.raw_body) AND gtm_names_hold(gtm_body_json(v.raw_body, stand_in), stand_in))
      ORDER BY k.n
      LIMIT 1;
     IF bad IS NOT NULL THEN
@@ -142,17 +179,19 @@ $$;
 -- bytes that hold the escape would pass for rows that hold that stand-in in its place, and a record shown
 -- with the stand-in would pass for a stored body that holds the escape. Two values that are equal under two
 -- different stand-ins are equal, so a card whose bytes or whose cited records hold the escape is checked
--- under both. Every other card is checked once, as before.
+-- under both. Every other card is checked once, as before, with no stand-in named.
 CREATE OR REPLACE FUNCTION gtm_card_violation(card uuid, at_publication boolean) RETURNS text
 LANGUAGE plpgsql STABLE AS $$
 DECLARE
-    nul constant bytea := convert_to(chr(92) || 'u0000', 'UTF8');
-    problem text := gtm_card_violation_as(card, at_publication, chr(65533));
+    problem text;
 BEGIN
-    IF problem IS NULL AND (
-        EXISTS (SELECT 1 FROM cards c WHERE c.id = card AND position(nul IN c.card_bytes) > 0)
-        OR EXISTS (SELECT 1 FROM evidence_units u JOIN source_records v ON v.id = u.source_record_id
-                    WHERE u.card_id = card AND position(nul IN v.raw_body) > 0)) THEN
+    IF NOT EXISTS (SELECT 1 FROM cards c WHERE c.id = card AND gtm_holds_nul_escape(c.card_bytes))
+       AND NOT EXISTS (SELECT 1 FROM evidence_units u JOIN source_records v ON v.id = u.source_record_id
+                        WHERE u.card_id = card AND gtm_holds_nul_escape(v.raw_body)) THEN
+        RETURN gtm_card_violation_as(card, at_publication, NULL);
+    END IF;
+    problem := gtm_card_violation_as(card, at_publication, chr(65533));
+    IF problem IS NULL THEN
         problem := gtm_card_violation_as(card, at_publication, chr(9216));
     END IF;
     RETURN problem;

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -526,18 +527,22 @@ func TestTheTriggersReadACardThatHoldsANULEscape(t *testing.T) {
 	f := postgrestest.New(t)
 	const escape = `\u0000`
 	n := 0
-	// card is a prepared brief whose one record holds value, with a unit that holds shown.
-	card := func(t *testing.T, value, shown string) postgres.CardPublication {
+	// named is a prepared brief whose one record holds these fields, with a unit that holds these.
+	named := func(t *testing.T, fields []any, unit map[string]any) postgres.CardPublication {
 		t.Helper()
 		n++
 		brief := fmt.Sprintf("nul-%d", n)
-		record := postgrestest.Record("accounts", "acc-003", "id", "acc-003", "v", value)
+		record := postgrestest.Record("accounts", "acc-003", append([]any{"id", "acc-003"}, fields...)...)
 		pub, seal, read := postgrestest.Prepared(t, f.Store, f, brief+"-call", brief, f.Reader.ID,
 			postgres.TokenID("raw-token"), record)
-		pub.Units[0].Body = postgrestest.UnitBody(1, "record", "crm/accounts/acc-003", "get_account", "",
-			map[string]any{"value": shown})
+		pub.Units[0].Body = postgrestest.UnitBody(1, "record", "crm/accounts/acc-003", "get_account", "", unit)
 		embed(t, f, &pub, seal, []postgres.RecordVersion{record}, read)
 		return pub
+	}
+	// card is a prepared brief whose one record holds value, with a unit that holds shown.
+	card := func(t *testing.T, value, shown string) postgres.CardPublication {
+		t.Helper()
+		return named(t, []any{"v", value}, map[string]any{"value": shown})
 	}
 	stored := func(t *testing.T, brief string) []byte {
 		t.Helper()
@@ -594,6 +599,51 @@ func TestTheTriggersReadACardThatHoldsANULEscape(t *testing.T) {
 			}
 		})
 	}
+	// jsonb keeps the last of two members of one name. A member whose name holds the escape takes the
+	// stand-in's place in its name, so beside members named with each stand-in it is overwritten under both,
+	// and the two readings agree on a document that holds a member no row holds. In a document that holds the
+	// escape, a member name that holds it or a stand-in is refused, in the card's bytes and in a cited body.
+	collide := []any{"k\uFFFD", 1, "k\u2400", 1}
+	first := regexp.MustCompile(`"k(\\ufffd|\\u2400|\x{FFFD}|\x{2400})"`)
+	extra := `"k\u0000": "anything", `
+	withNUL := regexp.MustCompile(`"k\\u0000":\s*"anything",\s*`)
+	for _, c := range []struct {
+		name   string
+		fields []any
+		unit   map[string]any
+		change func(string) string
+		want   string
+	}{
+		{"the bytes add a member named with a NUL to a shown record", collide, map[string]any{"value": "x"},
+			func(doc string) string { i := first.FindStringIndex(doc)[0]; return doc[:i] + extra + doc[i:] },
+			"member name"},
+		{"the bytes add a member named with a NUL to a unit", []any{"v", "a\x00b"},
+			map[string]any{"value": "x", "k\uFFFD": 1, "k\u2400": 1},
+			func(doc string) string { i := first.FindStringIndex(doc)[0]; return doc[:i] + extra + doc[i:] },
+			"member name"},
+		{"the bytes leave out a member named with a NUL from a stored body",
+			append([]any{"k\x00", "anything"}, collide...), map[string]any{"value": "x"},
+			func(doc string) string { return withNUL.ReplaceAllString(doc, "") }, "cites a read or record"},
+		{"the bytes name a member with a stand-in beside a NUL", []any{"v", "a\x00b", "k\uFFFD", 1},
+			map[string]any{"value": "x"}, func(doc string) string { return doc }, "member name"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			pub := named(t, c.fields, c.unit)
+			changed := c.change(string(pub.Bytes))
+			if !strings.Contains(changed, `\u0000`) && !strings.Contains(c.name, "stored body") {
+				t.Fatalf("the bytes do not hold the escape:\n%s", changed)
+			}
+			pub.Bytes = []byte(changed)
+			code, text := refusal(sqlCardCounting(t, f, pub, 1, 1, 1))
+			if code != "GT009" || !strings.Contains(text, c.want) {
+				t.Fatalf("got %s %s, want GT009 %s", code, text, c.want)
+			}
+		})
+	}
+	// A member named with a stand-in in a card that holds no escape is held as any other name.
+	t.Run("a member named with a stand-in and no NUL", func(t *testing.T) {
+		ok(t, sqlCard(t, f, named(t, collide, map[string]any{"value": "x", "k\uFFFD": 1})))
+	})
 	for name, change := range map[string]func(string) string{
 		"cut short":                          func(doc string) string { return doc[:len(doc)-2] },
 		"with the escape outside a string":   func(doc string) string { return doc + escape },

@@ -161,7 +161,7 @@ func (s *Store) AccountsWithCards(ctx context.Context, workspaceID, principalID,
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT c.account_ref FROM cards c JOIN receipts r ON r.id = c.seal_receipt_id
 		 WHERE c.workspace_id = $1 AND c.kind = 'go' AND r.principal_id = $2
-		   AND gtm_jsonb_without_nul(c.card_bytes, chr(65533)) ->> 'as_of' = $3`, workspaceID, principalID, asOf)
+		   AND gtm_jsonb_without_nul(c.card_bytes) ->> 'as_of' = $3`, workspaceID, principalID, asOf)
 	if err != nil {
 		return nil, err
 	}

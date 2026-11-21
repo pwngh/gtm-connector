@@ -24,6 +24,16 @@ func MigrationVersion(name string) int {
 	return 0
 }
 
+// MigrationSQL gives the text of each embedded migration, in order.
+func MigrationSQL() []string {
+	list, _ := migrations()
+	var texts []string
+	for _, m := range list {
+		texts = append(texts, m.sql)
+	}
+	return texts
+}
+
 // MigrationLock is the advisory lock a migration and a restore hold.
 const MigrationLock int64 = migrationLock
 
