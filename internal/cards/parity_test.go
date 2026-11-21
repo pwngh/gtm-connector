@@ -283,7 +283,7 @@ func runFamily(t *testing.T, family string, newStore func(t *testing.T) cardStor
 // builtCards pins how many cards of each family Go builds. Raise a count when a port builds more.
 var builtCards = map[string]int{
 	"demo": 33, "books_demo": 78, "varied_demo": 46, "cases": 19, "books_calls": 32,
-	"books_slack": 0, "slack_threads": 0, "books_salesforce": 0,
+	"books_slack": 0, "slack_threads": 0, "books_salesforce": 78,
 }
 
 func TestCardsFromDemoStores(t *testing.T) { demoStoreFamilies(t, newMemoryCards) }
@@ -355,11 +355,9 @@ func recordedInputFamilies(t *testing.T, newStore func(*testing.T) cardStore) {
 				source: noTranscripts{store}, sources: sources}
 		})
 	})
+	t.Run("books_salesforce", func(t *testing.T) { salesforceBooks(t, newStore, book) })
 	// What each skipped card lacks among its recorded inputs.
 	reasons := map[string]func(input *strictjson.Object) string{
-		"books_salesforce": func(*strictjson.Object) string {
-			return "CRM records: org_rows are Salesforce API rows, which only the Salesforce adapter maps"
-		},
 		"books_slack": func(input *strictjson.Object) string {
 			if thread, _ := input.Get("thread"); thread == nil {
 				return "no thread mapped: the Slack connection's binding (identity_sha256) is not recorded"
