@@ -53,6 +53,8 @@ var commands = map[string]arguments{
 		optional: "provider", choices: append(append([]string{"status"}, providerNames()...), assistantApps...),
 		help: connectHelp},
 	"demo": {options: []option{{name: "--again"}}, help: demoHelp},
+	"admit": {options: []option{{name: "--from-org", value: true, required: true},
+		{name: "--export-sha256", value: true, required: true}}, required: "FOLDER", help: admitHelp},
 }
 
 // parsed is one command line, read.
@@ -301,6 +303,39 @@ Examples:
   gtm-connector inspect BRIEF_ID --role customer
   gtm-connector inspect BRIEF_ID 5 6
   gtm-connector inspect RECEIPT_ID
+`
+
+const admitHelp = `usage: gtm-connector admit [-h] [--json] [--state-dir STATE_DIR]
+                           --from-org IDENTITY --export-sha256 DIGEST FOLDER
+
+Admit the cards and receipts a Python state folder holds into a workspace, on
+the operator's word for where they came from: admission trusts the export
+folder, and reads nothing again from Salesforce or any other source. Each card
+is verified against its seal, every receipt line it rests on, its own evidence
+for each quotation, the workspace's imports and the sources the workspace is
+connected to, and kept byte for byte. A folder that fails any check admits
+nothing. Admitting a folder again adds nothing.
+
+positional arguments:
+  FOLDER                A state folder of the Python package, with its audit
+                        log exported as audit.jsonl.
+
+options:
+  -h, --help            show this help message and exit
+  --json                Write the documented JSON result for scripts.
+  --state-dir STATE_DIR
+                        Admit into this workspace (default: demo).
+  --from-org IDENTITY   The CRM identity the cards were read from: the
+                        identity_sha256 a card records under crm_binding. It
+                        must be the workspace's.
+  --export-sha256 DIGEST
+                        The SHA-256 of the folder's audit.jsonl, as exported.
+
+Examples:
+  gtm-connector connect demo --state-dir old-cards
+  gtm-connector admit ./state --state-dir old-cards --from-org IDENTITY \
+      --export-sha256 "$(shasum -a 256 < ./state/audit.jsonl | cut -c1-64)"
+  gtm-connector inspect BRIEF_ID --state-dir old-cards
 `
 
 const auditHelp = `usage: gtm-connector audit [-h] [--json] [--state-dir STATE_DIR]

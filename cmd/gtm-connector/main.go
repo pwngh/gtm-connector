@@ -86,6 +86,7 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   brief ACCOUNT               make and print the Deal card for one account
   inspect ID                  show an account, a saved card, numbers on it, or a receipt
   audit                       list the receipts of the audit log
+  admit FOLDER                admit the cards and receipts a Python state folder holds
   mcp stdio --scope SCOPE     serve MCP on stdin and stdout, for an assistant app that starts it
   token new --scope SCOPE     make a bearer token for an MCP client; also token list and token revoke ID
   debug calls ACTION          import a call transcript export for an account, list imports, inspect one
@@ -96,8 +97,8 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   health                      check that the local server answers
   version                     print the commit this binary was built from
 
-demo, connect, accounts, brief, inspect, audit, mcp, token, debug calls, debug salesforce and debug slack
-take --json, --state-dir WORKSPACE and --help. Not in this build: every other debug command.
+demo, connect, accounts, brief, inspect, audit, admit, mcp, token, debug calls, debug salesforce and
+debug slack take --json, --state-dir WORKSPACE and --help. Not in this build: every other debug command.
 `
 
 func main() {

@@ -70,6 +70,14 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	_, _, err = f.Store.SaveSlackMapping(ctx, f.Workspace.ID,
 		slackMapping(t, "acc-004", "C0123", "1790000000.000001", strings.Repeat("7", 64)), false, false)
 	ok(t, err)
+	// The Python card of a recorded folder fills the admitted cards and receipts.
+	folder, word := pythonFolder(t)
+	added, err := f.Store.Admit(ctx, f.Workspace.ID, word, []postgres.AdmittedCard{{BriefID: pythonBrief, Kind: "cli",
+		AccountID: "acc-003", Bytes: folder.Cards[pythonBrief], SealID: pythonSeal}}, folder.Lines)
+	ok(t, err)
+	if len(added.Cards) != 1 || len(added.Receipts) != len(folder.Lines) {
+		t.Fatalf("admitted %+v", added)
+	}
 }
 
 // A backup restores every row of every table it holds, column for column,
