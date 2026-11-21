@@ -1,6 +1,6 @@
 import React, {Component, Suspense, createRef, useEffect, useLayoutEffect, useRef} from 'react';
 import {focusHoldingSpot, focusIsUnplaced} from './focusElement.js';
-import {forgetFailedPages} from './lazyPages.js';
+import {forgetFailedPages} from './app/lazyPage.js';
 
 export function RouteLoading({label}) {
   const ref = useRef(null);
@@ -39,7 +39,7 @@ export class RouteError extends Component {
   render() {
     const what = this.props.dialog ? 'dialog' : 'page';
     if (this.state.failed) return <section ref={this.panel} tabIndex={-1} className='route-loading route-error' aria-label={this.props.dialog ? 'Dialog unavailable' : 'Page unavailable'}>
-      <p role='alert'>This {what} could not load. Your saved walkthrough has not been reset.</p>
+      {this.props.failure ? <p role='alert'>{this.props.failure}</p> : <p role='alert'>This {what} could not load. Your saved walkthrough has not been reset.</p>}
       <button type='button' className='button' onClick={this.retry}>Try again</button>
     </section>;
     // A new key remounts the content, so the import starts again.
@@ -47,8 +47,9 @@ export class RouteError extends Component {
   }
 }
 
-export default function RouteContent({path, label, dialog = false, onReady, children}) {
-  return <RouteError key={path} dialog={dialog}>
+// `failure` replaces the sentence shown when the page cannot load.
+export default function RouteContent({path, label, dialog = false, failure, onReady, children}) {
+  return <RouteError key={path} dialog={dialog} failure={failure}>
     <Suspense fallback={<RouteLoading label={label}/>}>
       <Ready path={path} onReady={onReady}>{children}</Ready>
     </Suspense>
