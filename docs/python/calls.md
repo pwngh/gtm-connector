@@ -16,7 +16,7 @@ gtm-connector brief acc-007
 
 The connector does not record, transcribe, connect to a call provider, or summarize. Transcripts
 are added one at a time with `debug calls import`. Transcript folders are on the
-[roadmap](ROADMAP.md).
+[roadmap](../ROADMAP.md).
 
 ## Commands
 

@@ -10,6 +10,9 @@ sources:
   crm:   {kind: salesforce}
   chat:  {kind: slack, channels: ["#deal-*", "#ext-*", "#renewals", "#deal-desk"]}
   calls: {kind: transcripts, folder: calls/}
+  gong:  {kind: gong}
+  inbox: {kind: push}                       # internal email, SMS, webhook push
+  app:   {kind: sql, view: renewal_contacts}  # a read-only view in your own database
 watch:
   renewals_closing_within_days: 90
 rules:
@@ -28,11 +31,35 @@ flowchart LR
 ```
 
 1. **The watch rule pulls** every open renewal opportunity that closes inside the window, with its account and contact emails.
-2. **The connector discovers** matching calls and Slack messages by those emails and domains. In Slack it looks in dedicated channels, such as `#deal-thornfield`, and in threads of shared channels that mention the account's name or domain.
-3. **Each match joins its deal.** Nobody has to click. A match that fits more than one deal waits in the matches queue for a person.
+2. **The connector discovers** matching calls and Slack messages by those emails and domains. In Slack it looks in a dedicated internal or Slack Connect channel, such as `#deal-thornfield` or `#ext-thornfield`, and in threads of shared channels, such as `#renewals` or `#deal-desk`, that mention the account's name or domain. No thread is hard-coded.
+3. **Each match joins its deal.** Nobody clicks.
 
-Set `approval: required` to hold every match in the queue for a person instead. A rejected match adds
-nothing to any card.
+A match can fit more than one deal, and there are two cases:
+
+| The match fits | What happens | Why |
+| --- | --- | --- |
+| Two deals of the same account, such as a renewal and an expansion | It goes on both cards, marked as shared with the other deal | It is the same customer, so nothing is misattributed, and leaving it off would empty the card |
+| Deals of two different accounts | It goes on neither card, and both say so under what was not read | One customer's words must never reach another customer's card |
+
+Nobody is asked to settle either case. Coverage counts the second kind by rule, so you can fix the
+rule that produces them, for example by excluding a domain two accounts share.
+
+## The matches queue is off
+
+Matching is automatic, and that is the point: nobody trains the connector by confirming its work.
+The queue exists for a team that wants a person in the loop, and the engineer chooses how much.
+
+| `approval` in `gtm.yaml` | What waits for a person |
+| --- | --- |
+| `off`, the default | Nothing |
+| `ambiguous` | Only a match that fits deals of two different accounts |
+| `all` | Every match, before it reaches a card |
+
+The setting can also be given per source, for example `all` for pushed records and `off` for the CRM.
+
+The engineer turns it on in two steps: set it in `gtm.yaml`, then sign in and confirm the change when
+the draft is previewed. Until both are done, the queue stays off. The web app only reads this
+setting. It shows the queue and its badge when the setting is on, and has no switch of its own.
 
 A deal can also be registered by hand, with the IDs it binds. See [the API](api.md).
 
@@ -60,7 +87,9 @@ Pick the rules and set their thresholds. Preview a change against the book befor
 turns red, and what becomes unknown. Every result cites its records, its receipts and the rule
 version that produced it.
 
-## Under the hood
+## Deterministic parsing and guardrails
+
+Under the hood:
 
 - **Whole-sentence splitter.** A quotation is one whole sentence.
 - **HTML and link neutralizer.** Mentions, links and control characters become inert words before anything shows them.
@@ -72,11 +101,22 @@ version that produced it.
 
 | Screen | What it answers |
 | --- | --- |
-| Coverage | Which deals have a current card, which do not, and why |
+| Coverage | Which deals have a current card, which do not, and why. It also counts, by rule, the matches left off because they fit two accounts. |
 | Setup | Each source's state and last read, and the active file beside a draft |
 | Activity | What ran, with its receipt, and whether it is safe to retry |
+
+Any line on any card opens a receipt drawer in Ops: the read that returned it, and its seal. Diffs
+between two cards of a deal open the same way.
+
+## Access
+
+People sign in through your company's identity provider. The connector stores no password for
+them. A grant names the deals a person reads, and whether they see Ops. A script or an assistant
+gets a token limited to selected deals and scopes, and the token expires.
 
 ## Auto-stop and archive
 
 On Closed Won or Closed Lost, polling halts and the final card is sealed. The deal leaves the
 active list. Its cards, receipts and history stay readable.
+
+Pause a deal to stop its scheduled reads and alerts without closing it, and resume it later.

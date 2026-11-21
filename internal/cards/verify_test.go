@@ -620,12 +620,12 @@ type countingSource struct {
 	during func()
 }
 
-func (s *countingSource) Read(tool, accountID string) (string, []*strictjson.Object, error) {
+func (s *countingSource) Read(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, error) {
 	s.reads++
 	if s.during != nil {
 		s.during()
 	}
-	return s.Source.Read(tool, accountID)
+	return s.Source.Read(ctx, tool, accountID)
 }
 
 func TestReceiptsComeFirstAndReleaseLast(t *testing.T) {

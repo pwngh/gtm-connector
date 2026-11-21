@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -222,7 +223,7 @@ func health(ctx context.Context, args []string) error {
 	defer response.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 512))
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("healthz answered %d: %s", response.StatusCode, body)
+		return fmt.Errorf("healthz answered %d: %s", response.StatusCode, bytes.TrimSpace(body))
 	}
 	fmt.Printf("%s", body)
 	return nil

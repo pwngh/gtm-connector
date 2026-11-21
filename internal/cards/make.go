@@ -16,9 +16,10 @@ import (
 
 // Source is the reads a card makes, one per tool: get_account, list_opportunities, read_call_notes and
 // read_slack_messages. It returns the source system the records come from and the records with their
-// record_ref. demo.Store is one.
+// record_ref. ctx carries the caller's cancellation and the card's deadline, and a read returns once it is
+// done. demo.Store is one.
 type Source interface {
-	Read(tool, accountID string) (system string, records []*strictjson.Object, err error)
+	Read(ctx context.Context, tool, accountID string) (system string, records []*strictjson.Object, err error)
 }
 
 // ErrNotSelected is a Source's answer when the account has no selection in that source, such as a Slack
@@ -228,11 +229,16 @@ type reading struct {
 // read runs one read whose receipt is committed. The scope, the credential and the deadline are checked
 // first; then the source is read, and its records are released only once FinishRead has bound their
 // versions to the receipt. The outcome is "ok", "denied" or "not_selected".
+//
+// The source reads under the caller's context, bounded by the time left to the deadline. A read whose
+// context is done when it returns releases nothing, whatever the source answered: its receipt finishes as
+// error/504 past the deadline and as error/200 after a cancel.
 func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []receipts.RecordVersion, outcome string, err error) {
 	elapsed := m.stopwatch()
+	// A failed read's receipt is finished even when the caller has gone.
 	finish := func(o receipts.Outcome) error {
 		o.ElapsedMS = elapsed()
-		_, err := m.Receipts.Finish(ctx, r.started.Ticket(), o)
+		_, err := m.Receipts.Finish(context.WithoutCancel(ctx), r.started.Ticket(), o)
 		return err
 	}
 	if !r.principal.live() {
@@ -241,11 +247,26 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 	if !slices.Contains(r.principal.Scopes, scopes[r.tool]) {
 		return nil, nil, "denied", finish(receipts.Denied())
 	}
-	if !r.deadline.IsZero() && !m.now().Before(r.deadline) {
-		return nil, nil, "", errors.Join(ErrDeadline, finish(receipts.Failed(504, "request_failed")))
+	bounded := ctx
+	if !r.deadline.IsZero() {
+		now := m.now()
+		if !now.Before(r.deadline) {
+			return nil, nil, "", errors.Join(ErrDeadline, finish(receipts.Failed(504, "request_failed")))
+		}
+		var cancel context.CancelFunc
+		bounded, cancel = context.WithTimeout(ctx, r.deadline.Sub(now))
+		defer cancel()
 	}
-	system, found, readErr := m.Source.Read(r.tool, r.accountID)
-	switch {
+	system, found, readErr := "", []*strictjson.Object(nil), bounded.Err()
+	if readErr == nil {
+		system, found, readErr = m.Source.Read(bounded, r.tool, r.accountID)
+	}
+	switch stopped := bounded.Err(); {
+	case errors.Is(stopped, context.DeadlineExceeded):
+		return nil, nil, "", errors.Join(ErrDeadline, finish(receipts.Failed(504, "request_failed")))
+	case stopped != nil:
+		return nil, nil, "", errors.Join(fmt.Errorf("%s: %w", r.tool, ErrBriefing), stopped,
+			finish(receipts.Failed(200, "request_failed")))
 	case errors.Is(readErr, ErrNotSelected):
 		return nil, nil, "not_selected", finish(receipts.NotSelected())
 	case readErr != nil || system != r.system:
@@ -503,10 +524,11 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 		return nil, err
 	}
 	elapsed, deadline := m.stopwatch(), m.now().Add(BriefDeadline)
+	// A call that fails is finished even when the caller has gone.
 	fail := func(err error) (*Sealed, error) {
 		outcome := receipts.Failed(200, "request_failed")
 		outcome.ElapsedMS = elapsed()
-		_, finishErr := m.Receipts.Finish(ctx, outer.Ticket(), outcome)
+		_, finishErr := m.Receipts.Finish(context.WithoutCancel(ctx), outer.Ticket(), outcome)
 		return nil, errors.Join(err, finishErr)
 	}
 	if !slices.Contains(principal.Scopes, "crm:read") {

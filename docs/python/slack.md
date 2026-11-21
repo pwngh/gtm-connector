@@ -68,7 +68,7 @@ Ctrl-C exits 130. An approval or save that already finished is not undone, so ru
    that says so.
 
 Slack threads are added one at a time with `debug slack map`. A Slack channel window is on the
-[roadmap](ROADMAP.md).
+[roadmap](../ROADMAP.md).
 
 - `connect slack --remove` detaches Slack and keeps the sign-in.
 - Use the same state folder every time. Stop a `debug serve` running on it first.

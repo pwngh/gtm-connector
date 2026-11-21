@@ -103,11 +103,11 @@ func insert(t *testing.T, store *demo.Store, rows *strictjson.Object, databases 
 // noTranscripts is the imported calls source of a folder with nothing imported for the account.
 type noTranscripts struct{ *demo.Store }
 
-func (s noTranscripts) Read(tool, accountID string) (string, []*strictjson.Object, error) {
+func (s noTranscripts) Read(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, error) {
 	if tool == "read_call_notes" {
 		return "calls", nil, nil
 	}
-	return s.Store.Read(tool, accountID)
+	return s.Store.Read(ctx, tool, accountID)
 }
 
 type fixtureRow struct {

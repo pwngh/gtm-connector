@@ -12,6 +12,9 @@ func SetCrash(s *Store, crash func(point string) error) { s.crash = crash }
 // MigrateTo migrates to exactly this schema version, as an older binary did.
 func MigrateTo(s *Store, ctx context.Context, version int) error { return s.migrateTo(ctx, version) }
 
+// MigrationLock is the advisory lock a migration and a restore hold.
+const MigrationLock int64 = migrationLock
+
 // DumpAt dumps a database at an older schema version, as an older binary did.
 func DumpAt(s *Store, ctx context.Context, version int, open func(table string) (io.WriteCloser, error)) ([]TableCopy, error) {
 	return s.dump(ctx, version, open)

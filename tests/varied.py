@@ -26,7 +26,7 @@ BOOKS = {path.stem: path for path in sorted((Path(__file__).parent / "books").gl
 STAGES = ("discovery", "evaluation", "proposal", "negotiation", "closed_won", "closed_lost")
 HEADINGS = ("ATTENTION, from record fields and dates", "RECORD VALUES, from CRM fields and connector arithmetic",
             "SAID, whole sentences as recorded; not record values", "NOT READ")
-SHOWN = 5  # docs/briefs.md: at most five opportunities, contracts, and contacts are shown.
+SHOWN = 5  # docs/python/briefs.md: at most five opportunities, contracts, and contacts are shown.
 _ROLE_HEADS = {"  Customer, by a speaker label equal to one contact's name": "customer",
                "  Seller, by a listed seller's name or ID": "seller", "  No established role": "unknown"}
 _CITED = re.compile(r" ((?:\[\d+\])+)(?: and \d+ more)?\Z")
@@ -241,7 +241,7 @@ def stale_call(calls, brief):
 
 def expected(rows, brief):
     """The demo CRM part of a card, restated from the rows: fixed value lines, one line per opportunity and per
-    contact, and the signals in order. Numbers follow docs/briefs.md: the account, then contacts and
+    contact, and the signals in order. Numbers follow docs/python/briefs.md: the account, then contacts and
     opportunities by ID."""
     (_, (_, name, industry, renewal, arr, currency, risk, reason)), *others = rows["crm"]
     contacts = sorted(row for table, row in others if table == "contacts")
@@ -265,7 +265,7 @@ def expected(rows, brief):
                       f"{cents % 100:02}; close date {close} [{number}]")
         if left <= 30 and not stage.startswith("closed_"):
             still_open.append((number, stage))
-    # docs/briefs.md, Signals: more than five records raising one signal are counted in one line, which
+    # docs/python/briefs.md, Signals: more than five records raising one signal are counted in one line, which
     # cites the first five of them.
     if left < 0 and not still_open:
         signals.append(f"  {when}. [1]")

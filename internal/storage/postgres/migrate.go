@@ -94,6 +94,41 @@ func (s *Store) SchemaVersion(ctx context.Context) (int, error) {
 	return version, err
 }
 
+// MigrationsCurrent reports whether the applied migrations are exactly the
+// embedded ones: the same versions, each with the same digest. A database
+// without schema_migrations is not current. It is one read of that table
+// outside any transaction, so a migration or a restore never waits for it,
+// and it waits for neither: they hold no lock that stops a reader.
+func (s *Store) MigrationsCurrent(ctx context.Context) (bool, error) {
+	list, err := migrations()
+	if err != nil {
+		return false, err
+	}
+	rows, _ := s.pool.Query(ctx, "SELECT version, sha256 FROM schema_migrations ORDER BY version")
+	defer rows.Close()
+	applied := 0
+	for rows.Next() {
+		var version int
+		var digest string
+		if err := rows.Scan(&version, &digest); err != nil {
+			return false, err
+		}
+		if applied == len(list) || list[applied].version != version || list[applied].sha256 != digest {
+			return false, nil
+		}
+		applied++
+	}
+	if err := rows.Err(); sqlState(err) == undefinedTable {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	return applied == len(list), nil
+}
+
+// undefinedTable is the SQLSTATE of a read from a table that does not exist.
+const undefinedTable = "42P01"
+
 func (s *Store) migrateTo(ctx context.Context, target int) error {
 	list, err := migrations()
 	if err != nil {
