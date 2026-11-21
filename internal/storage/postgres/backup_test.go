@@ -70,6 +70,10 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	_, _, err = f.Store.SaveSlackMapping(ctx, f.Workspace.ID,
 		slackMapping(t, "acc-004", "C0123", "1790000000.000001", strings.Repeat("7", 64)), false, false)
 	ok(t, err)
+	// A deal of the fixture's account, with the fixture's card bound to it.
+	deal := postgrestest.RegisterDeal(t, f, postgrestest.Account, "", "invented")
+	ok(t, sql(t, f, `INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref) VALUES ($1, $2, $3, $4)`,
+		f.Workspace.ID, f.Card.ID, deal.Ref, postgrestest.Account))
 }
 
 // A backup restores every row of every table it holds, column for column,

@@ -35,7 +35,7 @@ package comment states the ladder and the rules, and nothing calls it yet.
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with `connect` and the
 read commands `accounts`, `brief`, `inspect` and `audit` on demo data and Salesforce, `debug salesforce
-check`, `debug slack`, `token` for MCP client tokens and `mcp stdio`. Its `sources.go` is the one place a
+check`, `debug slack`, `token` for MCP client tokens, `deal` for deals and `mcp stdio`. Its `sources.go` is the one place a
 source is wired into those commands. `postgres.ReceiptStore` runs the card maker on PostgreSQL.
 `mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`
 and `mcp stdio` serves on stdin and stdout.

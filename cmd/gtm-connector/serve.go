@@ -179,6 +179,7 @@ func newSurface(ctx context.Context, store *postgres.Store, c config, sessionKey
 		WebDir:       c.webDir,
 		SessionKey:   sessionKey,
 		MCP:          gateway,
+		Deals:        dealRegistry{store},
 	}, store, authz.Evidence{Store: store})
 }
 

@@ -177,11 +177,13 @@ func csrfValid(r *http.Request, token string) bool {
 	return len(given) == 1 && subtle.ConstantTimeCompare([]byte(given[0]), []byte(csrfFor(token))) == 1
 }
 
-// admission is what admitted a write: a live session and its token, or, for
-// sign-in only, a signed pre-session (token empty).
+// admission is what admitted a write: a live session, its token and its
+// principal, or, for sign-in only, a signed pre-session (token empty and no
+// principal).
 type admission struct {
-	token  string
-	stored postgres.Admission
+	token     string
+	stored    postgres.Admission
+	principal *postgres.Principal
 }
 
 // write admits a write by its CSRF token, which must be the live session's
@@ -190,14 +192,14 @@ type admission struct {
 // apiRoutes is served through it.
 func (s *Server) write(signIn bool, next func(http.ResponseWriter, *http.Request, admission)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token, _, live, err := s.current(r)
+		token, session, live, err := s.current(r)
 		if err != nil {
 			internal(w)
 			return
 		}
 		switch {
 		case live && csrfValid(r, token):
-			next(w, r, admission{token, postgres.Admission{IDSHA256: digest(token)}})
+			next(w, r, admission{token, postgres.Admission{IDSHA256: digest(token)}, session.Principal})
 			return
 		case signIn:
 			if pre, expires, ok := s.preSession(r); ok && csrfValid(r, pre) {

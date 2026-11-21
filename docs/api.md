@@ -11,10 +11,10 @@ gtm deal thornfield-2027
 ```
 
 > **What the binary serves today.** The `/api/v1` routes under
-> [the server today](#the-server-today), MCP at `/mcp` ([MCP](mcp.md)) and `/healthz`
-> ([running it](operations.md#health)). Deal IDs, the `/v1/deals` routes, pushing your own data,
-> webhooks, Slack alerts and the read-only SQL views below are the design, and the
-> [roadmap](ROADMAP.md) lists them as not built.
+> [the server today](#the-server-today), the three [deal routes](#deal-routes) marked as served,
+> MCP at `/mcp` ([MCP](mcp.md)) and `/healthz` ([running it](operations.md#health)). A deal binds
+> the CRM's IDs only. The other deal routes, pushing your own data, webhooks, Slack alerts and the
+> read-only SQL views below are the design, and the [roadmap](ROADMAP.md) lists them as not built.
 
 ## One deal, one ID
 
@@ -31,25 +31,90 @@ is all you pass.
 A watch rule registers most deals for you. Register one by hand when its records live in your own
 system.
 
+Today a deal is registered by hand, with `gtm-connector deal new ACCOUNT_ID` or `POST /v1/deals`, and
+binds the CRM's IDs alone. Registering reads the account and then its opportunities from the
+workspace's CRM, each as a tool call under its own receipt, and the deal binds what those reads
+returned:
+
+| Binding | What it is |
+| --- | --- |
+| `account` | The account. |
+| `opportunity` | The open opportunity that closes first, by ID on a tie, or `null`. |
+| `contract` | On Salesforce, the contract a card counts the renewal to: the earliest that ends on or after the day of the read, by ID on a tie. Otherwise `null`. |
+| `renews_on` | The account's renewal date, or else that contract's end, or else that opportunity's close date, or `null`. |
+
+The database refuses a deal that binds a record its reads did not return.
+
+**The ID** is the first word of the account's name and the year the deal renews:
+`thornfield-2027` for Thornfield Wren LLP, renewing on 2027-02-08. The word is the first one that
+holds an ASCII letter or digit once its accents are taken off, lowered, with every other character
+dropped and cut to 40 characters, or `deal` when no word holds one. The year is that of `renews_on`,
+or of the day of the read when it is `null`. An ID that a deal of the workspace already holds, open or
+closed, takes the lowest free number from 2: `thornfield-2027-2`. An ID is never given twice.
+
+An account has one open deal at a time. While it has one, every card `brief` makes for the account
+belongs to that deal, and `GET /v1/deals/{id}` returns the newest. With none, `brief` makes the
+account's own card, which belongs to no deal. A card's bytes are the same either way: a deal is a
+binding around cards, not a new card format. A closed deal keeps its cards, and is never opened
+again or deleted.
+
 ## Deal routes
 
-These are designed and not built yet.
+| Route | What it does | Today |
+| --- | --- | --- |
+| `GET /v1/deals` | Lists the deals you may read, with their colour. `?status=needs_attention` keeps the flagged ones. | Served, without the colour or the filter |
+| `POST /v1/deals` | Registers a deal and binds its IDs | Served, for an account of the CRM |
+| `GET /v1/deals/{id}` | Returns the current card as JSON, with what changed | Served, without what changed |
+| `POST /v1/deals/{id}/refresh` | Reads every source of the deal again, on demand | Not built |
+| `GET /v1/deals/{id}/proof/{line}` | Returns the record or sentence behind one line, and its receipt | Not built |
+| `GET /v1/matches` | Lists the matches waiting for a person, when the queue is on | Not built |
+| `POST /v1/deals/{id}/sources` | Pushes records or messages from your own system | Not built |
 
-| Route | What it does |
+The routes are described in an OpenAPI file served with the API. That file is not built yet.
+
+The served routes take what `/api/v1` takes: the session cookie of a person signed in to the web app,
+and nothing else. A request with an `Authorization` header is refused, the Host must be an allowed
+one, a write needs the CSRF token of `GET /api/v1/session` in `X-CSRF-Token` and the public origin
+in `Origin`, and no answer is kept by a browser or a proxy (`Cache-Control: no-store`).
+
+A person reads a deal through their grant on its account, whoever registered it. A deal of an
+account they hold no live grant on answers `403 not_permitted`, as an unknown ID does, and the list
+leaves it out.
+
+| Route | Answer |
 | --- | --- |
-| `GET /v1/deals` | Lists the deals you may read, with their colour. `?status=needs_attention` keeps the flagged ones. |
-| `POST /v1/deals` | Registers a deal and binds its IDs |
-| `GET /v1/deals/{id}` | Returns the current card as JSON, with what changed |
-| `POST /v1/deals/{id}/refresh` | Reads every source of the deal again, on demand |
-| `GET /v1/deals/{id}/proof/{line}` | Returns the record or sentence behind one line, and its receipt |
-| `GET /v1/matches` | Lists the matches waiting for a person, when the queue is on |
-| `POST /v1/deals/{id}/sources` | Pushes records or messages from your own system |
+| `GET /v1/deals` | `{"deals": [DEAL, ...]}`, the open deals first, each group by ID |
+| `POST /v1/deals` with `{"account": "acc-003"}` | `201` and `{"deal": DEAL}` |
+| `GET /v1/deals/{id}` | `{"deal": DEAL, "card": CARD}`. `CARD` is the deal's newest card exactly as `GET /api/v1/cards/{card}` gives it, or `null` before `brief` has made one. |
 
-The routes are described in an OpenAPI file served with the API.
+```json
+{"id": "thornfield-2027", "account": "acc-003", "account_name": "Thornfield Wren LLP",
+ "state": "open", "opportunity": "opp-003", "contract": null, "renews_on": "2027-02-08",
+ "registered_by": "PRINCIPAL_ID", "registered_at": "2026-11-21T15:04:05.123456Z", "closed_at": null,
+ "reads": {"get_account": "RECEIPT_ID", "list_opportunities": "RECEIPT_ID"},
+ "latest_card": {"id": "CARD_ID", "brief_id": "brief-...", "published_at": "..."}}
+```
+
+`account_name` is source text, neutralized. `registered_by` is the principal that registered the deal
+through the API, or `null` for one `deal new` registered. `reads` are the receipts of the two reads it
+was registered on, which `GET /api/v1/receipts/{receipt}` serves. `latest_card` is `null` until
+`brief` makes the deal's card.
+
+`POST /v1/deals` registers the deal as the signed-in person: both reads name them. Without a live
+grant on the account the first read is refused under its receipt, nothing is read, and the answer is
+`403 not_permitted`.
+
+| Refusal | When |
+| --- | --- |
+| `400 invalid_json` | The body is not one JSON object with `account` |
+| `403 not_permitted` | No live grant on the account |
+| `409 deal_open` | The account already has an open deal |
+| `409 source_changed` | The CRM was connected again while it was read |
+| `502 source_failed` | The CRM read failed, or did not return the account; its receipt says why |
 
 ## The server today
 
-Until deals exist, the server serves accounts and cards by their own IDs, to a person signed in to
+Beside the deal routes, the server serves accounts and cards by their own IDs, to a person signed in to
 the web app. The API takes the session cookie and nothing else.
 
 | Route | What it returns |

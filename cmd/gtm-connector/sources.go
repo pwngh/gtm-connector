@@ -540,6 +540,8 @@ type toolCall struct {
 	tool      string
 	arguments *strictjson.Object
 	account   string // the account the call names, or ""
+	// principal is the principal the call is made for, or "" for the owner.
+	principal string
 	// scope is the scope of a read that is no registered tool, such as a check's. A registered tool takes none.
 	scope string
 }
@@ -573,9 +575,9 @@ func (r *reads) call(ctx context.Context, c toolCall,
 	}
 	row := r.rows[strings.TrimSuffix(scope, ":read")]
 	started, err := log.Start(ctx, receipts.Start{WorkspaceID: r.workspace.ID,
-		OperationID: fmt.Sprintf("%s/%d", c.run, c.request), TokenID: c.token, Tool: c.tool, Scope: scope,
-		AccountRef: c.account, ConnectionID: row.ID, Arguments: c.arguments, RequestID: receipts.RPC(c.request),
-		BriefID: &c.run})
+		OperationID: fmt.Sprintf("%s/%d", c.run, c.request), PrincipalID: c.principal, TokenID: c.token,
+		Tool: c.tool, Scope: scope, AccountRef: c.account, ConnectionID: row.ID, Arguments: c.arguments,
+		RequestID: receipts.RPC(c.request), BriefID: &c.run})
 	if err != nil {
 		return started, nil, err
 	}

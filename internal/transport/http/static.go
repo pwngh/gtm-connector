@@ -75,7 +75,7 @@ var contentTypes = map[string]string{
 }
 
 // reserved paths have their own handlers, or none; they never get the app.
-var reserved = []string{"/api", "/mcp", "/.well-known", "/healthz"}
+var reserved = []string{"/api", "/v1", "/mcp", "/.well-known", "/healthz"}
 
 // underReserved reports whether a path is a reserved prefix or below one.
 func underReserved(p string) bool {

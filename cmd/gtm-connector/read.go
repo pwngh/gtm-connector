@@ -203,6 +203,12 @@ func (r *run) failed(ctx context.Context, err error) *failure {
 	case errors.Is(err, receipts.ErrSourceChanged):
 		return &failure{code: 3, message: "A source of this workspace was connected again while it was read; " +
 			"nothing was published. Run the command again."}
+	case errors.Is(err, postgres.ErrDealOpen):
+		return &failure{code: 3, next: "gtm-connector deal list" + r.here(), message: "This account already has " +
+			"an open deal. An account has one open deal at a time; close it first with gtm-connector deal close ID."}
+	case errors.Is(err, postgres.ErrDealClosed):
+		return &failure{code: 3, message: "The account's deal was closed while its card was made; nothing was " +
+			"published. Run brief again for the account's card."}
 	}
 	return &failure{code: 1, message: plain(err)}
 }
@@ -300,7 +306,17 @@ func (r *run) brief(ctx context.Context) (any, error) {
 	if err := from.list(ctx, account); err != nil {
 		return nil, err
 	}
-	sealed, err := from.maker().Brief(ctx, cards.Brief{
+	// An account with an open deal gets that deal's card. One with none gets its own card.
+	maker := from.maker()
+	deal, open, err := r.store.OpenDeal(ctx, r.workspace.ID, account)
+	if err != nil {
+		return nil, err
+	}
+	if open {
+		maker.Receipts = &postgres.ReceiptStore{Store: r.store, Deal: deal.Ref}
+		r.announce("Deal: " + deal.Ref + ".")
+	}
+	sealed, err := maker.Brief(ctx, cards.Brief{
 		Principal: cards.Principal{WorkspaceID: r.workspace.ID, TokenID: receipts.Fingerprint(randomToken()),
 			Scopes: scopes},
 		OperationID: "brief-" + receipts.RandomID(), AccountID: account, AsOf: asOf, IncludeSlack: true})
