@@ -32,7 +32,7 @@ flowchart LR
 
 1. **The watch rule pulls** every open renewal opportunity that closes inside the window, with its account and contact emails.
 2. **The connector discovers** matching calls and Slack messages by those emails and domains. In Slack it looks in a dedicated internal or Slack Connect channel, such as `#deal-thornfield` or `#ext-thornfield`, and in threads of shared channels, such as `#renewals` or `#deal-desk`, that mention the account's name or domain. No thread is hard-coded.
-3. **Each match joins its deal.** Nobody clicks. A match that fits more than one deal goes on neither card. Both cards say so under what was not read, and the match shows in Ops, on Coverage, as needing attention, where the engineer assigns it to a deal. Nothing waits on that: the cards publish without it.
+3. **Each match joins its deal.** Nobody clicks. A match that fits more than one deal goes on neither card. Both cards list it under what was not read, and the owner of either deal can claim it there with one click. Nothing waits on that: the cards publish without it.
 
 ## The matches queue is off
 
@@ -41,7 +41,7 @@ The queue exists for a team that wants a person in the loop, and the engineer ch
 
 | `approval` in `gtm.yaml` | What waits for a person |
 | --- | --- |
-| `off`, the default | Nothing. A match that fits two deals is the one thing the engineer is asked to settle, and no card waits for it. |
+| `off`, the default | Nothing. A match that fits two deals stays off both cards until a deal's owner claims it. |
 | `ambiguous` | Only a match that fits more than one deal |
 | `all` | Every match, before it reaches a card |
 
@@ -91,7 +91,7 @@ Under the hood:
 
 | Screen | What it answers |
 | --- | --- |
-| Coverage | Which deals have a current card, which do not, and why. Matches that fit two deals wait here to be assigned. |
+| Coverage | Which deals have a current card, which do not, and why. It also counts the matches that fit two deals, by rule, so you can tighten the rule that keeps producing them. |
 | Setup | Each source's state and last read, and the active file beside a draft |
 | Activity | What ran, with its receipt, and whether it is safe to retry |
 
