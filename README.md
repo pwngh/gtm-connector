@@ -187,7 +187,7 @@ Deployment is one step. A GitHub Actions release pipeline publishes prebuilt sta
 each platform and Docker images, with the web app embedded in the binary.
 
 1. **Install.** Download the binary and give it a PostgreSQL 19 or 18.7 URL, or run the Docker image.
-2. **Set up.** `gtm-connector setup` runs the migrations as the database owner and writes the credentials folder. The server then runs as an app role that cannot change the schema.
+2. **Set up.** `gtm setup` runs the migrations as the database owner and writes the credentials folder. The server then runs as an app role that cannot change the schema.
 3. **Check.** `/healthz` answers when the database is reachable and the migrations are current.
 4. **Back up and upgrade.** `backup` and `restore` cover the database and the credentials. Rehearse an upgrade on a restored copy first.
 

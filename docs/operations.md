@@ -7,6 +7,8 @@ gtm setup     # migrations, credentials, client configuration
 gtm serve     # the web app, the API and MCP, over HTTPS
 ```
 
+`gtm` is the short name of the `gtm-connector` binary.
+
 ## Install
 
 Each release publishes prebuilt static binaries for macOS and Linux, on arm64 and amd64, and Docker
