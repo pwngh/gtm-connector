@@ -31,6 +31,7 @@ export function Attribution({sentence, title = null, help = false}: SentenceProp
           {contact}
         </span>
       )}
+      {sentence.quoted && <span className="dc-attr__part">Quoted in the author's message</span>}
       <span className="dc-attr__part">
         {roleWords[group]}
         {group === 'unknown' && ` (${sentence.basis ?? 'basis not recorded'})`}

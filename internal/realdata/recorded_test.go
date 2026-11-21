@@ -125,6 +125,58 @@ func TestParseRecordedRefusesOtherForms(t *testing.T) {
 	}
 }
 
+// Writing recorded digests takes only the named functions from Go: another function that differs keeps its
+// recorded digests and its differences still count, and a function whose output is an error or a panic for
+// any item is never recorded.
+func TestWriteRecordedTakesOnlyTheNamedFunctions(t *testing.T) {
+	run, recorded := recordedRun(t)
+	zero, one := strings.Repeat("0", 64), strings.Repeat("1", 64)
+	recorded.Functions[at("sentences_lines")].Blocks[0] = zero
+	recorded.Functions[at("sentences")].Blocks[0] = one
+	report, err := CompareRecorded(run, recorded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	named := []string{"sentences_lines"}
+	if err := report.WriteRecorded(dir, named); err != nil {
+		t.Fatal(err)
+	}
+	if kept := report.Kept(named); kept != 2 || report.Total() != 4 {
+		t.Errorf("%d differences kept of %d", kept, report.Total())
+	}
+	data, err := os.ReadFile(filepath.Join(dir, recorded.Dataset+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var written Recorded
+	if err := json.Unmarshal(data, &written); err != nil {
+		t.Fatal(err)
+	}
+	if written.Functions[at("sentences_lines")].Blocks[0] == zero || written.Functions[at("sentences")].Blocks[0] != one {
+		t.Errorf("written: %+v", written.Functions[:3])
+	}
+	if err := report.WriteRecorded(dir, []string{"nothing"}); err == nil {
+		t.Error("an unknown function was written")
+	}
+
+	saved := portOutputs
+	portOutputs = func(it Item) []string {
+		out := Outputs(it)
+		if !it.IsJSON {
+			out[at("sentences_lines")], _ = canonical(failed("go panic"))
+		}
+		return out
+	}
+	defer func() { portOutputs = saved }()
+	if report, err = CompareRecorded(run, recorded); err != nil {
+		t.Fatal(err)
+	}
+	if err := report.WriteRecorded(dir, named); err == nil || !strings.Contains(err.Error(), "error or a panic") {
+		t.Errorf("a function that panics was written: %v", err)
+	}
+}
+
 // Every pinned dataset with a converter that runs by default has recorded digests built in, each readable.
 func TestEveryDefaultDatasetIsRecorded(t *testing.T) {
 	m, err := LoadManifest()

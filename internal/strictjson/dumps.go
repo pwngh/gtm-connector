@@ -30,6 +30,9 @@ var (
 	// Prepared is a brief prepare_renewal_brief saves: json.dumps(artifact, ensure_ascii=False,
 	// allow_nan=False, sort_keys=True, separators=(",", ":")).
 	Prepared = DumpOptions{SortKeys: true, Compact: true}
+	// Canonical is json.dumps(value, separators=(",", ":")): a line of a JSON Lines file in
+	// testdata/oracle, and the encoding a real-data digest is taken of.
+	Canonical = DumpOptions{EnsureASCII: true, Compact: true}
 )
 
 // Dumps is json.dumps under these options. A value is nil, bool, string, int, int64, *big.Int, float64,
@@ -41,6 +44,9 @@ func Dumps(value any, options DumpOptions) (string, error) {
 	}
 	return b.String(), nil
 }
+
+// Dumps is Dumps(value, o).
+func (o DumpOptions) Dumps(value any) (string, error) { return Dumps(value, o) }
 
 // Quote is json.dumps(text, ensure_ascii=False), which cannot fail.
 func Quote(text string) string {

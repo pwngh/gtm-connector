@@ -17,7 +17,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
+	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
 // The command session is testdata/oracle/commands/session.jsonl: the Python CLI's arguments, exit code and
@@ -85,8 +87,14 @@ type step struct {
 
 func recordedSession(t *testing.T) []step {
 	t.Helper()
+	return sessionSteps(t, oracletest.Lines(t, "commands/session.jsonl"))
+}
+
+// sessionSteps are the steps of the recording's lines.
+func sessionSteps(t *testing.T, lines [][]byte) []step {
+	t.Helper()
 	var steps []step
-	for _, line := range oracletest.Lines(t, "commands/session.jsonl") {
+	for _, line := range lines {
 		var s step
 		if err := json.Unmarshal(line, &s); err != nil {
 			t.Fatal(err)
@@ -331,9 +339,9 @@ func (r *replay) skip(before numbering, s step) {
 }
 
 // run runs one recorded step as the recorder did, with the placeholders in its arguments filled from this
-// session, and returns what differs from the recording, or "" when nothing does. compared is what of a
-// normalized text is compared.
-func (r *replay) run(t *testing.T, s step, compared func(string) string) string {
+// session, and returns what differs from the recording, or "" when nothing does, and its stdout and stderr
+// normalized. compared is what of a normalized text is compared.
+func (r *replay) run(t *testing.T, s step, compared func(string) string) (string, string, string) {
 	t.Helper()
 	argv := make([]string, len(s.Argv))
 	for i, recorded := range s.Argv {
@@ -346,7 +354,7 @@ func (r *replay) run(t *testing.T, s step, compared func(string) string) string 
 			return value
 		})
 		if unknown != "" {
-			return fmt.Sprintf("the step did not run: no earlier step printed the value of %s", unknown)
+			return fmt.Sprintf("the step did not run: no earlier step printed the value of %s", unknown), "", ""
 		}
 		argv[i] = strings.ReplaceAll(strings.ReplaceAll(argv[i], "<state>", r.state), "<folder>", r.folder)
 	}
@@ -359,7 +367,7 @@ func (r *replay) run(t *testing.T, s step, compared func(string) string) string 
 	exit := 0
 	var exited *exec.ExitError
 	if err := command.Run(); ctx.Err() != nil {
-		return "the step did not end within a minute"
+		return "the step did not end within a minute", "", ""
 	} else if errors.As(err, &exited) {
 		exit = exited.ExitCode()
 	} else if err != nil {
@@ -386,11 +394,77 @@ func (r *replay) run(t *testing.T, s step, compared func(string) string) string 
 			differs = append(differs, "stderr "+oracletest.FirstDifference(errs, recorded))
 		}
 	}
-	return strings.Join(differs, "\n")
+	return strings.Join(differs, "\n"), out, errs
+}
+
+// renewed is the binary's output with each of its lines that the recording holds, by the longest common run
+// of lines alike where compared, taken from the recording. A line that differs only where compared leaves it
+// out, such as what the recorder's clock decided, so keeps the recording's; every other line is the binary's.
+func renewed(printed, recorded string, compared func(string) string) string {
+	got, want := strings.Split(printed, "\n"), strings.Split(recorded, "\n")
+	alike := func(i, j int) bool { return compared(got[i]) == compared(want[j]) }
+	// common[i][j] is the length of the longest common run of got[i:] and want[j:].
+	common := make([][]int, len(got)+1)
+	for i := range common {
+		common[i] = make([]int, len(want)+1)
+	}
+	for i := len(got) - 1; i >= 0; i-- {
+		for j := len(want) - 1; j >= 0; j-- {
+			if alike(i, j) {
+				common[i][j] = common[i+1][j+1] + 1
+			} else {
+				common[i][j] = max(common[i+1][j], common[i][j+1])
+			}
+		}
+	}
+	out := make([]string, 0, len(got))
+	for i, j := 0, 0; i < len(got); {
+		switch {
+		case j < len(want) && alike(i, j):
+			out = append(out, want[j])
+			i, j = i+1, j+1
+		case j < len(want) && common[i][j+1] >= common[i+1][j]:
+			j++
+		default:
+			out = append(out, got[i])
+			i++
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// rerecord writes a step's output again in the recording from what the binary printed, and its stdout parsed
+// as JSON when the recording holds that.
+func rerecord(t *testing.T, golden *oracletest.Golden, i int, out, errs string, compared func(string) string) {
+	t.Helper()
+	value, err := strictjson.Loads(golden.Lines()[i])
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := value.(*strictjson.Object)
+	line := old.Copy()
+	for key, printed := range map[string]string{"stdout": out, "stderr": errs} {
+		recorded, _ := old.Get(key)
+		line.Set(key, renewed(printed, recorded.(string), compared))
+	}
+	if parsed, ok := old.Get("json"); ok {
+		recorded, _ := old.Get("stdout")
+		if was, err := strictjson.LoadsText(recorded.(string)); err != nil || !evidence.Equal(was, parsed) {
+			t.Fatal("the recorded json is not the recorded stdout")
+		}
+		stdout, _ := line.Get("stdout")
+		now, err := strictjson.LoadsText(stdout.(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		line.Set("json", now)
+	}
+	golden.Set(i, old, line)
 }
 
 func TestRecordedCommandSession(t *testing.T) {
-	steps := recordedSession(t)
+	golden := oracletest.NewGolden(t, "commands/session.jsonl", strictjson.Canonical.Dumps)
+	steps := sessionSteps(t, golden.Lines())
 	labels := map[string]bool{}
 	for _, s := range steps {
 		if labels[s.Label] {
@@ -461,7 +535,12 @@ func TestRecordedCommandSession(t *testing.T) {
 				compared = withoutClock
 			}
 			before := r.numbered()
-			differs := r.run(t, s, compared)
+			differs, out, errs := r.run(t, s, compared)
+			if differs != "" && oracletest.Update() && !pending[s.Label] && recordedHelp[s.Label] == nil &&
+				!strings.HasPrefix(differs, "exit code") {
+				rerecord(t, golden, i, out, errs, compared)
+				differs = ""
+			}
 			switch {
 			case differs == "" && pending[s.Label]:
 				t.Errorf("the binary now matches this step: remove %q from notPorted", s.Label)

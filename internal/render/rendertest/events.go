@@ -7,15 +7,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/render"
 )
 
-// Golden holds got to the file testdata/NAME of the test's package. With GTM_WRITE_GOLDEN=1 it writes the
-// file instead.
+// Golden holds got to the file testdata/NAME of the test's package. With -update it writes the file
+// instead, in a run of the whole package.
 func Golden(t testing.TB, name string, got []byte) {
 	t.Helper()
 	path := filepath.Join("testdata", name)
-	if os.Getenv("GTM_WRITE_GOLDEN") == "1" {
+	if oracletest.Update() {
+		oracletest.RefuseNarrowRun(t)
 		if err := os.MkdirAll("testdata", 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -26,7 +28,7 @@ func Golden(t testing.TB, name string, got []byte) {
 	}
 	want, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("%v; run the test with GTM_WRITE_GOLDEN=1 to write it", err)
+		t.Fatalf("%v; run the package's tests with -update to write it", err)
 	}
 	if !bytes.Equal(got, want) {
 		t.Errorf("%s differs from what is built now:\n%s", path, got)
