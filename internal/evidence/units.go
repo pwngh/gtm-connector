@@ -399,7 +399,7 @@ func lowerHex64(s string) bool {
 // ValidBinding is units._valid_binding: {schema_version: 1, key: backend, identity_sha256}.
 func ValidBinding(value any, key, backend string) bool {
 	o, ok := value.(*strictjson.Object)
-	if !ok || len(o.Keys) != 3 {
+	if !ok || o == nil || len(o.Keys) != 3 {
 		return false
 	}
 	version, ok1 := o.Get("schema_version")
@@ -560,7 +560,7 @@ func validate(evidence *strictjson.Object) validated {
 		if owner != accountID {
 			reject("Evidence contains a record for a different account.")
 		}
-		if imported && table == "call_notes" && !validImportedRecord(record, accountID, callsBinding) {
+		if imported && table == "call_notes" && !ValidImportedRecord(record, accountID, callsBinding) {
 			reject("Imported transcript evidence does not match its immutable selected revision.")
 		}
 		seen[reference] = true

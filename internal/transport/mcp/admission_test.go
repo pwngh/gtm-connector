@@ -43,7 +43,9 @@ func pureSetup() (RequestFacts, Policy, *Token) {
 func TestRefusalsHaveFixedReasonsStatusesAndCodes(t *testing.T) {
 	base, policy, token := pureSetup()
 	expires := 2000.0
-	writeToken := &Token{Scopes: []string{"crm:write"}, ExpiresAt: &expires, Resource: policy.Resource}
+	// A token with a scope outside the read set is refused whole, whatever else it carries.
+	writeToken := &Token{Scopes: []string{"crm:read", "crm:write"}, ExpiresAt: &expires, Resource: policy.Resource}
+	unknownScope := &Token{Scopes: []string{"crm:read", "admin"}, ExpiresAt: &expires, Resource: policy.Resource}
 	with := func(change func(*RequestFacts)) RequestFacts {
 		request := base
 		request.Headers = maps.Clone(base.Headers)
@@ -69,7 +71,10 @@ func TestRefusalsHaveFixedReasonsStatusesAndCodes(t *testing.T) {
 		{"invalid_token", 401, 1001, base, nil, new((*Token)(nil))},
 		{"rate_limited", 429, 1002, base, Windows{key: {90, 2}}, nil},
 		{"insufficient_scope", 403, 1004, with(func(r *RequestFacts) { r.Tool = "read_call_notes" }), nil, nil},
-		{"crm_write_disabled", 403, 1005, with(func(r *RequestFacts) { r.Tool = "log_activity" }), nil, &writeToken},
+		{"invalid_token", 401, 1001, base, nil, &writeToken},
+		{"invalid_token", 401, 1001, base, nil, &unknownScope},
+		{"invalid_token", 401, 1001, with(func(r *RequestFacts) { r.Tool = "log_activity" }), nil, &writeToken},
+		{"crm_write_disabled", 403, 1005, with(func(r *RequestFacts) { r.Tool = "log_activity" }), nil, nil},
 		{"invalid_arguments", 400, -32602, with(func(r *RequestFacts) { r.Arguments = object() }), nil, nil},
 		{"missing_protocol_version", 400, -32602, with(func(r *RequestFacts) { r.Meta = object() }), nil, nil},
 		{"protocol_version_mismatch", 400, -32020, with(func(r *RequestFacts) {

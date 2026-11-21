@@ -75,6 +75,60 @@ func TestReads(t *testing.T) {
 	}
 }
 
+// The searches and lists below, with what store.search_accounts and store.list_opportunities answered to
+// each on the seeded demo CRM: names matched and ordered without ASCII case, then by ID, a selection applied
+// before the order.
+func TestSearchAndOpportunitiesAsThePythonStore(t *testing.T) {
+	s := book(t)
+	ids := func(records []*strictjson.Object) string {
+		out := ""
+		for _, r := range records {
+			id, _ := r.Get("id")
+			out += " " + id.(string)[4:]
+		}
+		return out
+	}
+	two := []string{"acc-003", "acc-001"}
+	for _, c := range []struct {
+		query    string
+		accounts []string
+		want     string
+	}{
+		{"", nil, " 001 017 028 022 011 024 005 018 002 025 021 009 006 029 007 015 019 014 008 027 010 016 013 030 012 020 023 003 004 026"},
+		{"a", nil, " 001 017 028 022 005 018 025 021 009 006 029 007 015 019 014 008 027 010 012 020 023 004 026"},
+		{"VALE", nil, " 001"}, {"llp", nil, " 003"}, {"Alder Vale Packaging", nil, " 001"}, {"zz", nil, ""},
+		{"", two, " 001 003"}, {"thorn", two, " 003"}, {"thorn", []string{"acc-001"}, ""},
+	} {
+		records, more := s.Search(c.query, c.accounts)
+		if got := ids(records); got != c.want || more {
+			t.Errorf("search %q in %v:%s (more %v)", c.query, c.accounts, got, more)
+		}
+	}
+	found, _ := s.Search("Alder Vale Packaging", nil)
+	if text, _ := strictjson.Dumps(found[0], strictjson.Prepared); text != `{"arr_cents":2050000,"currency":"USD",`+
+		`"id":"acc-001","industry":"Manufacturing","name":"Alder Vale Packaging","record_ref":"crm/accounts/acc-001",`+
+		`"renewal_date":"2027-02-01","risk_reason":"","risk_status":"healthy"}` {
+		t.Errorf("a found account: %s", text)
+	}
+	if all := s.Opportunities(nil); len(all) != 30 || ids(all[:3]) != " 001 002 003" || ids(all[29:]) != " 030" {
+		t.Errorf("every opportunity:%s", ids(all))
+	}
+	if got := ids(s.Opportunities(two)); got != " 001 003" {
+		t.Errorf("the opportunities of two accounts:%s", got)
+	}
+	// One more than a search returns: the first hundred by name, and the word that more matched.
+	for i := 0; i < SearchRows-29; i++ {
+		row := []any{fmt.Sprintf("acc-%03d", 900-i), fmt.Sprintf("Zeta %03d", i), "", "2027-03-01", nil, nil, "healthy", ""}
+		if err := s.Insert("crm", "accounts", row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	records, more := s.Search("", nil)
+	if last, _ := records[len(records)-1].Get("name"); len(records) != SearchRows || !more || last != "Zeta 069" {
+		t.Errorf("a search past the bound: %d rows, more %v, last %v", len(records), more, last)
+	}
+}
+
 func TestInsert(t *testing.T) {
 	s := book(t)
 	row := []any{"msg-900-001", "acc-003", "acct-x", "Quinn Moss", "2027-01-14T16:00:00Z", "Later.", big.NewInt(0)}

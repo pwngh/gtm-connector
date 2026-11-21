@@ -12,7 +12,7 @@ import (
 type Start struct {
 	Token     *string // the caller's credential as sent; nil records "anonymous"
 	Tool      string
-	Arguments any // a plain JSON value
+	Arguments any // the arguments as the request carried them: a strictjson value, in the caller's key order
 	RequestID any // nil, an integer, a string, "<invalid>", or a brief_child object
 	BriefID   *string
 }
@@ -86,7 +86,7 @@ func (m *MemoryRecorder) Start(_ context.Context, s Start) (string, error) {
 		tokenID = fingerprint(*s.Token)
 	}
 	m.rows = append(m.rows, &Receipt{AuditID: id, StartedAt: now, TokenID: tokenID, Tool: s.Tool,
-		Arguments: s.Arguments, RequestID: s.RequestID, BriefID: s.BriefID, Status: "pending", Rows: []string{}})
+		Arguments: plain(s.Arguments), RequestID: s.RequestID, BriefID: s.BriefID, Status: "pending", Rows: []string{}})
 	return id, nil
 }
 

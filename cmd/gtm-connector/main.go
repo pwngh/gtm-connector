@@ -1,7 +1,8 @@
 // Command gtm-connector is the connector and the workflow application.
 //
 //	gtm-connector setup              make credentials, migrate, set up the app role, seed the demo workspace
-//	gtm-connector serve              run the HTTPS server, as the app role
+//	gtm-connector serve [--selection FILE]
+//	                                 run the HTTPS server, with MCP at /mcp, as the app role
 //	gtm-connector demo [--again]     publish a card for each demo account that holds none, for the demo sign-in
 //	gtm-connector demo --state-dir WORKSPACE  open one invented renewal as a Deal card in that workspace
 //	gtm-connector connect [NAME]     connect a workspace to a source, detach one, or show what is connected
@@ -67,7 +68,7 @@ const usage = `usage: gtm-connector [--version] [--json] COMMAND ...
 ` + description + `
 
   setup                       make missing credentials, migrate, set up the app role, seed the demo workspace
-  serve                       run the HTTPS server, connecting as the app role
+  serve [--selection FILE]    run the HTTPS server, with MCP at /mcp, connecting as the app role
   demo [--again]              publish a card for each demo account that holds none, for the demo sign-in
   demo --state-dir WORKSPACE  open one invented renewal as a Deal card in that workspace
   connect [NAME]              connect a workspace to a source, detach one, or show what is connected
@@ -81,7 +82,7 @@ const usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   version                     print the commit this binary was built from
 
 demo, connect, accounts, brief, inspect and audit take --json, --state-dir WORKSPACE and --help.
-mcp and debug are not in this build.
+The mcp and debug commands are not in this build.
 `
 
 func main() {

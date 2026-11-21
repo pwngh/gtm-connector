@@ -491,8 +491,9 @@ type VoiceTag struct {
 	Named              bool
 }
 
-// voiceTag is _VOICE.match(s, i) (units.py line 136).
-func voiceTag(s []rune, i int) (VoiceTag, bool) {
+// voiceTag is _VOICE.match(s, i) (units.py line 136). classesEnd is where the tag's classes end from the
+// character after "<v".
+func voiceTag(s []rune, i int, classesEnd func(int) int) (VoiceTag, bool) {
 	n := len(s)
 	if literal(s, i, n, "</v>") {
 		return VoiceTag{Start: i, End: i + 4}, true
@@ -500,7 +501,7 @@ func voiceTag(s []rune, i int) (VoiceTag, bool) {
 	if !literal(s, i, n, "<v") {
 		return VoiceTag{}, false
 	}
-	p := classes(s, i+2, false)
+	p := classesEnd(i + 2)
 	q := p
 	for q < n && (s[q] == ' ' || s[q] == '\t') {
 		q++
@@ -523,10 +524,29 @@ func voiceTag(s []rune, i int) (VoiceTag, bool) {
 }
 
 // VoiceTags is _VOICE.finditer(text).
-func VoiceTags(s []rune) []VoiceTag {
+func VoiceTags(s []rune) []VoiceTag { return voiceTags(s, nil) }
+
+// voiceTags finds the voice tags in time that grows with the text. The classes of a tag run to the next
+// whitespace or closing bracket, through any "<v" on the way, so a run of class characters is scanned once:
+// a later tag that starts inside the run ends its classes where the run ends. scanned, when given, counts
+// the characters the class scans read.
+func voiceTags(s []rune, scanned *int) []VoiceTag {
+	from, run := 0, 0 // s[from:run] is the run of class characters scanned last
+	classesEnd := func(i int) int {
+		if i >= len(s) || s[i] != '.' {
+			return i
+		}
+		if i < from || i >= run {
+			from, run = i, classes(s, i, false)
+			if scanned != nil {
+				*scanned += run - from
+			}
+		}
+		return run
+	}
 	var found []VoiceTag
 	for i := 0; i < len(s); {
-		tag, ok := voiceTag(s, i)
+		tag, ok := voiceTag(s, i, classesEnd)
 		if !ok {
 			i++
 			continue

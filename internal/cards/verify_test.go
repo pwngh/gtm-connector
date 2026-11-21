@@ -765,7 +765,7 @@ func TestPrepareRefuses(t *testing.T) {
 	t.Run("a token that stops verifying", func(t *testing.T) {
 		checks := 0
 		store := run(t, func(m *Maker, p *Prepare) {
-			p.Principal.Live = func() bool { checks++; return checks < 3 }
+			p.Principal.Verify = func() ([]string, bool) { checks++; return p.Principal.Scopes, checks < 3 }
 		}, ErrInvalidToken)
 		reads := store.All()[1:]
 		if last := reads[len(reads)-1]; *last.HTTPStatus != 401 {
@@ -775,7 +775,7 @@ func TestPrepareRefuses(t *testing.T) {
 	t.Run("a token that stops verifying before publication", func(t *testing.T) {
 		checks := 0
 		run(t, func(m *Maker, p *Prepare) {
-			p.Principal.Live = func() bool { checks++; return checks <= 4 }
+			p.Principal.Verify = func() ([]string, bool) { checks++; return p.Principal.Scopes, checks <= 4 }
 		}, ErrInvalidToken)
 	})
 	t.Run("a brief over 4 MiB", func(t *testing.T) {

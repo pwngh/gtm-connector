@@ -38,12 +38,12 @@ var (
 	metadataKeys = append([]string{"schema_version", "snapshot_sha256"}, contentKeys...)
 )
 
-// canonicalASCII is json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).
-var canonicalASCII = strictjson.DumpOptions{EnsureASCII: true, SortKeys: true, Compact: true}
+// CanonicalASCII is json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).
+var CanonicalASCII = strictjson.DumpOptions{EnsureASCII: true, SortKeys: true, Compact: true}
 
 // asciiDigest is slack_reader._digest: the SHA-256 of a value's canonical ASCII encoding.
 func asciiDigest(value any) string {
-	encoded, err := strictjson.Dumps(value, canonicalASCII)
+	encoded, err := strictjson.Dumps(value, CanonicalASCII)
 	if err != nil {
 		panic(invalid)
 	}
@@ -84,7 +84,7 @@ func slackID(v any, prefixes string, most int) bool {
 // utcTime is slack_reader._date: a time written as its own isoformat in UTC, with Z for the offset.
 func utcTime(v any) (time.Time, bool) {
 	s, ok := v.(string)
-	if !ok || !utcStamp(s) {
+	if !ok || !UTCStamp(s) {
 		return time.Time{}, false
 	}
 	moment, err := time.Parse(time.RFC3339Nano, s)
@@ -121,7 +121,7 @@ func without(o *strictjson.Object, key string) *strictjson.Object {
 // validSlackMapping is slack_mapping.validate_slack_mapping: the selection of one thread for one account,
 // under the CRM and Slack bindings it was made with, named by the digest of its own fields.
 func validSlackMapping(v any, accountID string, crmBinding, slackBinding any) (*strictjson.Object, bool) {
-	backend, bound := crmBackend(crmBinding)
+	backend, bound := CRMBackend(crmBinding)
 	mapping, isObject := v.(*strictjson.Object)
 	if !bound || !ValidBinding(slackBinding, "provider", "slack") || !isObject || !hasKeys(mapping, mappingKeys...) {
 		return nil, false
@@ -316,6 +316,6 @@ func validSlackSnapshot(records []*strictjson.Object, v any, accountID string, c
 		rows[i] = referenced
 	}
 	encoded, err := strictjson.Dumps(strictjson.NewObject("source", "slack", "records", rows, "untrusted_data", true,
-		"thread_snapshot", snapshot), canonicalASCII)
+		"thread_snapshot", snapshot), CanonicalASCII)
 	return err == nil && len(encoded) <= maxSlackOutput
 }

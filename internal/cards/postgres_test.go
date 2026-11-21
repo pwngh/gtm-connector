@@ -18,6 +18,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/receipts"
+	"github.com/pwngh/gtm-connector/internal/sources/calls"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/pgtest"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -70,11 +71,20 @@ func newPostgresCards(t *testing.T) cardStore {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { c.conn.Close(context.Background()) })
-	workspace, err := c.store.EnsureWorkspace(ctx, "parity", "demo", "Parity workspace")
+	c.open(t, "parity", "Parity workspace")
+	c.receipts = &postgres.ReceiptStore{Store: c.store}
+	return c
+}
+
+// open makes a demo workspace, with a connection for each source, the one the store's cards are built in.
+func (c *postgresCards) open(t *testing.T, slug, name string) {
+	t.Helper()
+	ctx := context.Background()
+	workspace, err := c.store.EnsureWorkspace(ctx, slug, "demo", name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.workspace = workspace.ID
+	c.workspace, c.connections = workspace.ID, map[string]string{}
 	for _, source := range []string{"crm", "calls", "slack"} {
 		connection, err := c.store.EnsureConnection(ctx, workspace, source, "demo")
 		if err != nil {
@@ -82,13 +92,58 @@ func newPostgresCards(t *testing.T) cardStore {
 		}
 		c.connections[source] = connection.ID
 	}
-	c.receipts = &postgres.ReceiptStore{Store: c.store}
-	return c
+}
+
+// resolved commits the read an import's association names: a get_account read of the workspace's CRM that
+// returned the account. It gives the read's ID. A recorded import names the ID the oracle's read had, so
+// with id the read is committed under that ID, by a row this test writes itself; the store's own receipts
+// take the database's IDs.
+func (c *postgresCards) resolved(t *testing.T, account, id string) string {
+	t.Helper()
+	ctx := context.Background()
+	lease := id
+	if id == "" {
+		started, err := c.store.StartReceipt(ctx, postgres.ReceiptStart{WorkspaceID: c.workspace,
+			OperationID: "resolve " + account + " " + receipts.RandomID(), TokenID: receipts.Fingerprint("a bearer"),
+			Tool: "get_account", Scope: "crm:read", AccountRef: account, ConnectionID: c.connections["crm"],
+			Arguments: json.RawMessage(`{"account_id":"` + account + `"}`), Lease: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, lease = started.ID, started.LeaseToken
+	} else if _, err := c.conn.Exec(ctx, `
+		INSERT INTO receipts (id, workspace_id, operation_id, token_id, tool, scope, requested_account, account_ref,
+			connection_id, connection_generation, arguments, request_id, lease_token, lease_expires_at)
+		SELECT $1::uuid, k.workspace_id, 'resolve ' || $1::uuid::text, $2, 'get_account', 'crm:read', $3::text, $3::text, k.id,
+			k.generation, json_build_object('account_id', $3::text), '1', $1::uuid, clock_timestamp() + interval '1 minute'
+		  FROM connections k WHERE k.id = $4`, id, receipts.Fingerprint("a bearer"), account,
+		c.connections["crm"]); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"id":"` + account + `","record_ref":"crm/accounts/` + account + `"}`
+	if _, err := c.store.FinishRead(ctx, id, lease, []postgres.RecordVersion{{Source: "crm", Table: "accounts",
+		RecordID: account, Body: []byte(body)}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func (c *postgresCards) maker(t *testing.T, sc *scope, s setup, row fixtureRow, b Brief) (*Maker, Brief) {
+	if s.calls != nil {
+		// The oracle kept a state folder for each book, and the books number their accounts alike. So each
+		// book's imports, receipts and cards are in a workspace of their own: the store of imports and the
+		// maker's principal name the same one.
+		c.open(t, "calls-"+s.calls.book, "Call cards of "+s.calls.book)
+	}
 	if err := c.store.EnsureAccount(context.Background(), c.workspace, row.AccountID, "Invented account"); err != nil {
 		t.Fatal(err)
+	}
+	if s.calls != nil {
+		imports := postgres.CallImports{Store: c.store, WorkspaceID: c.workspace}
+		s.source = s.calls.source(t, row, imports, func(made calls.Import) (*strictjson.Object, error) {
+			c.resolved(t, row.AccountID, made.Association.ResolutionReceiptID)
+			return imports.Import(context.Background(), made)
+		})
 	}
 	b.Principal.WorkspaceID = c.workspace
 	// Operation IDs are unique in a workspace; the oracle's are per scope.
