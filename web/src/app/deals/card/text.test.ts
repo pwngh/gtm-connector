@@ -98,11 +98,11 @@ test('the Text tab has the copy button and an empty status line, and none of the
   assert.doesNotMatch(html, /dc-ledger|dc-section|dc-values-note/);
 });
 
-test('the tabs are links to the card and to its text, the open one marked, a pinned card kept', () => {
+test('the tabs are links to the card, its communications and its text, the open one marked, a pinned card kept', () => {
   const html = deal({tab: 'card', pinned: 'card-1'});
   assert.match(
     html,
-    /<nav class="dc-tabs" aria-label="Views of the card"><a class="dc-tab" aria-current="page" href="\/deals\/acc-003\?card=card-1"[^>]*>Card<\/a><a class="dc-tab" href="\/deals\/acc-003\/text\?card=card-1"[^>]*>Text<\/a><\/nav>/,
+    /<nav class="dc-tabs" aria-label="Views of the card"><a class="dc-tab" aria-current="page" href="\/deals\/acc-003\?card=card-1"[^>]*>Card<\/a><a class="dc-tab" href="\/deals\/acc-003\/communications\?card=card-1"[^>]*>Communications<\/a><a class="dc-tab" href="\/deals\/acc-003\/text\?card=card-1"[^>]*>Text<\/a><\/nav>/,
   );
   assert.match(deal(), /<a class="dc-tab" aria-current="page" href="\/deals\/acc-003\/text"[^>]*>Text<\/a>/);
   assert.match(html, /The countdown and ARR are on <a class="dc-values-note__link" href="\/deals\/acc-003\/text\?card=card-1"[^>]*>the plain-text card<\/a>\./);

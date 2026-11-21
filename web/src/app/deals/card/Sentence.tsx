@@ -44,11 +44,30 @@ export function Attribution({sentence, title = null, help = false}: SentenceProp
   );
 }
 
+// The sentence itself: whole, as a quotation of its text and nothing else. A
+// cut unit is never a quotation: it is listed in the text face under its label.
+export function Words({sentence}: {sentence: SentenceUnit}) {
+  if (!sentence.partial && typeof sentence.text === 'string') {
+    return (
+      <blockquote
+        className="dc-quote"
+        data-unit={sentence.n}
+      >
+        {sentence.text}
+      </blockquote>
+    );
+  }
+  return (
+    <p className="dc-cut">
+      <span className="dc-cut__label">{sentence.partial ? 'Cut, not a whole quotation' : 'Text not recorded'}</span>
+      {sentence.partial && sentence.text !== null && <span className="dc-cut__text">{sentence.text}</span>}
+    </p>
+  );
+}
+
 // One sentence on a ledger line: its number in the gutter, then the sentence
-// whole as a quotation and its attribution. A cut unit is never a quotation:
-// it is listed in the text face under its label.
+// and its attribution.
 export function SentenceLine({sentence, title = null, help = false, mark}: SentenceProps & {mark: 'quote' | 'more'}) {
-  const whole = !sentence.partial && typeof sentence.text === 'string';
   return (
     <li
       className="dc-line"
@@ -58,19 +77,7 @@ export function SentenceLine({sentence, title = null, help = false, mark}: Sente
         <Cite n={sentence.n} />
       </span>
       <div className="dc-line__body">
-        {whole ? (
-          <blockquote
-            className="dc-quote"
-            data-unit={sentence.n}
-          >
-            {sentence.text}
-          </blockquote>
-        ) : (
-          <p className="dc-cut">
-            <span className="dc-cut__label">{sentence.partial ? 'Cut, not a whole quotation' : 'Text not recorded'}</span>
-            {sentence.partial && sentence.text !== null && <span className="dc-cut__text">{sentence.text}</span>}
-          </p>
-        )}
+        <Words sentence={sentence} />
         <Attribution
           sentence={sentence}
           title={title}

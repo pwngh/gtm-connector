@@ -4,11 +4,12 @@
 // Coverage, blocked browser storage, a session that expires, hostile text in
 // names, gaps and receipts, a static host's answer, and wrong addresses. The
 // frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
-// and dark, Coverage at 320, 390 and 1440, the Deal card's ledger and Text
-// tab at 320, 390 and 1440, and its proof drawer at 390, 1100 and 1440: tab
+// and dark, Coverage at 320, 390 and 1440, the Deal card's ledger, Text and
+// Communications tabs at 320, 390 and 1440, and its proof drawer at 390, 1100 and 1440: tab
 // order, target sizes, focus outlines, Escape, overflow, text contrast and what
 // browser storage holds. The Text tab is also read and copied for every
-// recorded card, and shown for a card whose bytes do not match its seal.
+// recorded card, and shown for a card whose bytes do not match its seal, and
+// the Communications tab lists every sentence unit of every recorded card once.
 // Every help button on the Deal card, the drawer and Coverage is opened by
 // Tab, by hover at 1440 and by touch at 390.
 // The stub keeps the Go server's shapes: the session view, the {"error":
@@ -1507,6 +1508,8 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
     await tab.waitForSelector('.dc-ledger');
     await tab.click('.dc-tab[href="/deals/acc-003/text"]');
     await tab.waitForSelector('.dc-plain__text');
+    // A new address moves focus to the page heading on the next frame; wait for it before moving focus.
+    await until(tab, () => document.activeElement?.matches('main h1'));
     const sunken = await sunkenOf(tab);
     const facts = await tab.evaluate(() => {
       const pre = document.querySelector('.dc-plain__text'), style = getComputedStyle(pre);
@@ -1515,7 +1518,7 @@ for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], 
         overflow: document.documentElement.scrollWidth - innerWidth, wider: pre.scrollWidth - pre.clientWidth, injected: Boolean(window.__injected),
         local: Object.keys(localStorage), session: Object.keys(sessionStorage)};
     });
-    check(facts.path === '/deals/acc-003/text' && facts.tabs === 'Card /deals/acc-003, Text /deals/acc-003/text open', `${at}: the Text tab opens the plain-text card (${facts.path}; ${facts.tabs})`);
+    check(facts.path === '/deals/acc-003/text' && facts.tabs === 'Card /deals/acc-003, Communications /deals/acc-003/communications, Text /deals/acc-003/text open', `${at}: the Text tab opens the plain-text card (${facts.path}; ${facts.tabs})`);
     check(facts.text === sealedThornfield.text && facts.nodes === 1 && !facts.injected, `${at}: the Text tab holds the sealed text byte for byte, as one text node`);
     check(facts.face.startsWith('ui-monospace') && facts.size === '14px' && facts.space === 'pre-wrap' && facts.background === sunken,
       `${at}: the text is in the reference face at 14 on the sunken surface, white-space kept (${facts.face.split(',')[0]} ${facts.size} ${facts.space} ${facts.background})`);
@@ -1624,7 +1627,7 @@ await scenario('text tab: a copy the browser refuses', async () => {
   await tab.context().close();
 });
 
-// 18. Help on the page: every help button of the Deal card, the proof drawer
+// 19. Help on the page: every help button of the Deal card, the proof drawer
 // and Coverage, at 390 by touch and 1440 by mouse. Each is reached by Tab and
 // opens on focus, on hover or on a tap; Escape closes it and focus stays on
 // its button; each sentence is the copy file's, and a hint's is its button's
@@ -1766,6 +1769,11 @@ for (const [width, touch] of [[390, true], [1440, false]]) {
     await tab.keyboard.press('Escape');
     await tab.waitForSelector('[role=dialog]', {state: 'detached'});
     check(drawer === 1, `${at} drawer: the first Escape closes the receipt's hint and the drawer stays; the second closes the drawer`);
+    // The Communications tab: the first sentence of each role carries that role's help.
+    await openInApp(tab, '/deals/acc-003/communications');
+    await tab.waitForSelector('.dc-comms');
+    const talkRoles = await tab.$$eval('.dc-comms .dc-line', lines => [...new Set(lines.map(line => line.querySelector('.dc-attr__part:nth-child(2)').firstChild.textContent.split(' ')[0].toLowerCase()))].map(role => `role.${role}`));
+    await exerciseHelp(tab, `${at} communications`, '.dc-comms', {touch, outside: '.dc-title', expected: talkRoles});
     // Coverage: its title carries the help.
     await openInApp(tab, '/ops/coverage');
     await tab.waitForSelector('.cv-title');
@@ -1779,6 +1787,113 @@ for (const [width, touch] of [[390, true], [1440, false]]) {
     await tab.context().close();
   });
 }
+
+// 18. The Communications tab: every sentence the card read, call by call and
+// message by message, oldest first, at 320, 390 and 1440 wide, light and dark;
+// a number opens the proof drawer there; and for every recorded card each
+// sentence unit is listed once, the groups in time order, the ones with no
+// usable time last.
+const commsFacts = tab => tab.evaluate(() => ({
+  path: location.pathname,
+  tabs: [...document.querySelectorAll('.dc-tab')].map(el => `${el.textContent} ${el.getAttribute('href')}${el.getAttribute('aria-current') ? ' open' : ''}`).join(', '),
+  counts: document.querySelector('.dc-comms__counts')?.textContent ?? null,
+  heads: [...document.querySelectorAll('.dc-talk__head')].map(el => [...el.children].map(part => part.textContent).join(' ')),
+  refs: [...document.querySelectorAll('.dc-talk')].map(el => el.dataset.talk),
+  untimed: [...document.querySelectorAll('.dc-comms__untimed .dc-talk')].map(el => el.dataset.talk),
+  units: [...document.querySelectorAll('[data-comm-unit]')].map(el => Number(el.dataset.commUnit)),
+  quotes: [...document.querySelectorAll('.dc-comms blockquote')].map(el => ({n: Number(el.dataset.unit), text: el.textContent, children: el.children.length})),
+  speakers: [...document.querySelectorAll('.dc-comms .dc-attr')].map(el => el.textContent),
+  ledger: document.querySelectorAll('.dc-ledger, .dc-plain').length,
+  overflow: document.documentElement.scrollWidth - innerWidth,
+  injected: Boolean(window.__injected) || Boolean(document.querySelector('.dc img')),
+  local: Object.keys(localStorage), session: Object.keys(sessionStorage)}));
+const sentenceUnits = card => card.units.filter(unit => unit.kind === 'sentence');
+for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+  await scenario(`communications ${width} ${scheme}`, async () => {
+    const at = `communications ${width} ${scheme}`;
+    const tab = await page({width, scheme});
+    await tab.goto(thornfield, {waitUntil: 'networkidle'});
+    await signIn(tab);
+    await tab.waitForSelector('.dc-ledger');
+    await tab.click('.dc-tab[href="/deals/acc-003/communications"]');
+    await tab.waitForSelector('.dc-comms');
+    await until(tab, () => document.activeElement?.matches('main h1'));
+    const facts = await commsFacts(tab);
+    check(facts.path === '/deals/acc-003/communications' && facts.tabs === 'Card /deals/acc-003, Communications /deals/acc-003/communications open, Text /deals/acc-003/text' && facts.ledger === 0,
+      `${at}: the Communications tab opens at its own address beside Card and Text (${facts.path}; ${facts.tabs})`);
+    check(facts.counts === '2 calls, 1 Slack message and 6 sentences were read. The card shows every sentence.', `${at}: one line counts the calls, messages and sentences (${facts.counts})`);
+    check(facts.heads.join(' | ') === 'Call 12 Jan 2027, 15:00:00 UTC | Call 12 Jan 2027, 15:00:00 UTC | Slack message 12 Jan 2027, 16:00:00 UTC' &&
+      facts.refs.join() === 'calls/call_notes/note-003,calls/call_notes/note-003b,slack/messages/msg-003' && facts.untimed.length === 0,
+      `${at}: one group per call or message, oldest first, each headed by what it is and its time (${facts.heads.join(' | ')})`);
+    check(facts.units.join() === sentenceUnits(dealCard).map(unit => unit.n).join() &&
+      facts.quotes.map(quote => `${quote.n} ${quote.text}`).join('|') === sentenceUnits(dealCard).map(unit => `${unit.n} ${unit.body.text}`).join('|') && facts.quotes.every(quote => quote.children === 0),
+      `${at}: each sentence once, in unit order, as one blockquote holding exactly its text (${facts.units.join()})`);
+    check(!facts.injected && facts.speakers.every(line => line.includes(hostile)), `${at}: hostile speakers stay text`);
+    check(facts.overflow <= 0, `${at}: the page does not scroll sideways (${facts.overflow}px)`);
+    const measured = await measure(tab, cardParts);
+    check(healthy(measured), `${at}: ${reported(at, measured)}`);
+    await tab.focus('.dc-comms .dc-cite');
+    await tab.keyboard.press('Shift+Tab');
+    await tab.keyboard.press('Tab');
+    const focus = await ring(tab);
+    check(fits(focus) && focus.name === 'Source 4', `${at}: a number takes focus at 44 by 44 with a ${focus.outline}px ring (${focus.name})`);
+    if (options.screenshots) await tab.screenshot({path: join(options.screenshots, `deal-communications-${width}-${scheme}.png`), fullPage: true});
+    await tab.click('.dc-comms .dc-cite[data-cite="5"]');
+    await tab.waitForSelector('[role=dialog] [data-proof="unit"]');
+    const url = new URL(tab.url());
+    check(url.pathname === '/deals/acc-003/communications' && url.searchParams.get('unit') === '5' && await tab.textContent('[role=dialog] blockquote') === unitText(5),
+      `${at}: pressing [5] opens the proof drawer on unit 5 on this tab (${url.pathname}${url.search})`);
+    await tab.keyboard.press('Escape');
+    await tab.waitForSelector('[role=dialog]', {state: 'detached'});
+    await atCite(tab, 5);
+    check(!new URL(tab.url()).searchParams.has('unit') && new URL(tab.url()).pathname === '/deals/acc-003/communications', `${at}: Escape closes it and returns focus to [5]`);
+    check(facts.local.every(key => ['gtm-connector-theme', 'gtm-connector-deals-hint', 'gtm-connector-proof-seen'].includes(key)) && facts.session.length === 0,
+      `${at}: storage holds only display keys (local ${facts.local.join()}; session ${facts.session.join()})`);
+    check(tab.errors.length === 0 && violations(tab).length === 0, `${at}: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+    await tab.context().close();
+  });
+}
+
+await scenario('communications: every recorded card lists each sentence unit once, groups in time order', async () => {
+  serveRecorded();
+  const tab = await page({width: 390});
+  await tab.goto(`${base}/deals/acc-900/communications?card=${recorded[0].id}`, {waitUntil: 'networkidle'});
+  await signIn(tab);
+  // A time that can be ordered has an offset that parses, as the app reads it.
+  const usable = at => typeof at === 'string' && /(?:Z|[+-]\d\d:?\d\d)$/i.test(at) && Number.isFinite(Date.parse(at)) ? Date.parse(at) : null;
+  const wrong = [];
+  let units = 0, untimedCards = 0, hidden = 0, shot = null;
+  for (const card of recorded) {
+    const path = `/deals/acc-900/communications?card=${card.id}`;
+    await openInApp(tab, path);
+    await until(tab, to => document.querySelector('.dc-tab[aria-current="page"]')?.getAttribute('href') === to && document.querySelector('.dc-comms'), path);
+    const facts = await commsFacts(tab);
+    const sentences = sentenceUnits(card);
+    units += sentences.length;
+    hidden += sentences.filter(unit => unit.shown !== 'yes' || unit.body.partial).length;
+    const earliest = new Map();
+    for (const unit of sentences) {
+      const time = usable(unit.body.at), known = earliest.get(unit.record_ref);
+      earliest.set(unit.record_ref, time === null ? (known ?? null) : known == null ? time : Math.min(known, time));
+    }
+    const timed = facts.refs.slice(0, facts.refs.length - facts.untimed.length);
+    const times = timed.map(ref => earliest.get(ref));
+    const once = [...facts.units].sort((a, b) => a - b).join() === sentences.map(unit => unit.n).sort((a, b) => a - b).join();
+    const ordered = times.every((time, i) => time !== null && (i === 0 || times[i - 1] <= time)) && facts.untimed.every(ref => earliest.get(ref) === null) &&
+      facts.refs.slice(timed.length).join() === facts.untimed.join() && [...facts.refs].sort().join() === [...earliest.keys()].sort().join();
+    if (!once || !ordered || facts.overflow > 0) wrong.push(card.id);
+    if (facts.untimed.length) untimedCards += 1;
+    // One card with sentences the card leaves out and a group with no usable time, pictured.
+    if (options.screenshots && facts.untimed.length && sentences.some(unit => unit.shown !== 'yes') && !shot) {
+      shot = card.id;
+      await tab.screenshot({path: join(options.screenshots, 'deal-communications-recorded-390.png'), fullPage: true});
+    }
+  }
+  check(recorded.length === 450 && wrong.length === 0 && untimedCards > 0 && hidden > 0,
+    `each of ${recorded.length} recorded cards lists its ${units} sentence units once (${hidden} not on the card), groups oldest first, ${untimedCards} cards with groups under No time recorded (wrong: ${wrong.slice(0, 5).join(', ') || 'none'})`);
+  check(tab.errors.length === 0 && violations(tab).length === 0, `recorded cards: no page errors or policy violations (${[...tab.errors, ...violations(tab)].join(' | ')})`);
+  await tab.context().close();
+});
 
 await browser.close();
 server.close();

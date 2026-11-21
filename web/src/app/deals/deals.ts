@@ -25,8 +25,8 @@ export function useMedia(query: string): boolean {
   );
 }
 
-/** A deal's tabs: the card at the deal's own address, and its plain text at /text below it. */
-export type DealTab = 'card' | 'text';
+/** A deal's tabs: the card at the deal's own address, what was read at /communications and its plain text at /text below it. */
+export type DealTab = 'card' | 'communications' | 'text';
 
 /** The address of one deal on one of its tabs, with a pinned card and the list's filter kept. */
 export function dealHref(account: string, query = '', {tab = 'card', card = null}: {tab?: DealTab; card?: string | null} = {}): string {
@@ -38,17 +38,17 @@ export function dealHref(account: string, query = '', {tab = 'card', card = null
     params.set('q', query);
   }
   const search = params.size ? `?${params}` : '';
-  return `${dealsPath}/${encodeURIComponent(account)}${tab === 'text' ? '/text' : ''}${search}`;
+  return `${dealsPath}/${encodeURIComponent(account)}${tab === 'card' ? '' : `/${tab}`}${search}`;
 }
 
-const dealPath = /^\/deals\/([^/]+)(\/text)?$/;
+const dealPath = /^\/deals\/([^/]+)(?:\/(communications|text))?$/;
 
 /** The tab a deal's address opens. */
 export function tabAt(pathname: string): DealTab {
-  return dealPath.exec(pathname)?.[2] ? 'text' : 'card';
+  return (dealPath.exec(pathname)?.[2] as DealTab | undefined) ?? 'card';
 }
 
-/** The deal an address opens: the one segment after /deals/, on the card or at /text, or null. */
+/** The deal an address opens: the one segment after /deals/, on the card, at /communications or at /text, or null. */
 export function dealAt(pathname: string): string | null {
   const match = dealPath.exec(pathname);
   if (!match?.[1]) {
