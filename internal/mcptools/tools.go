@@ -59,12 +59,60 @@ func (s *server) requireSelected(account string, slack bool) error {
 	return nil
 }
 
+// granted are the accounts the caller's principal holds a live grant on, as the store has them now. A token
+// opens a source by its scope and an account by its principal's grant, and it needs both: no tool reads,
+// lists or releases anything of an account outside this set. A principal the store no longer serves has none.
+func (s *server) granted(ctx context.Context, inv *mcp.Invocation) (map[string]bool, error) {
+	accounts, err := s.Store.ViewAccounts(ctx, postgres.Viewer{WorkspaceID: s.WorkspaceID, PrincipalID: inv.Principal})
+	if err != nil && !errors.Is(err, postgres.ErrNotPermitted) {
+		return nil, err
+	}
+	granted := map[string]bool{}
+	for _, account := range accounts {
+		granted[account.Ref] = true
+	}
+	return granted, nil
+}
+
+// requireGranted refuses an account the caller's principal holds no live grant on, before any source is read.
+func (s *server) requireGranted(ctx context.Context, inv *mcp.Invocation, account string) error {
+	granted, err := s.granted(ctx, inv)
+	switch {
+	case err != nil:
+		return err
+	case !granted[account]:
+		return mcp.ToolError("account_not_granted")
+	}
+	return nil
+}
+
+// readable are the accounts a search or an account-wide list may hold for this caller, in order: those its
+// principal is granted, and with a selection only the selected ones among them. It is never nil, so the
+// source is always asked for these accounts and no others.
+func (s *server) readable(ctx context.Context, inv *mcp.Invocation) ([]string, error) {
+	granted, err := s.granted(ctx, inv)
+	if err != nil {
+		return nil, err
+	}
+	accounts := []string{}
+	for account := range granted {
+		if _, selected := s.Selection[account]; s.Selection == nil || selected {
+			accounts = append(accounts, account)
+		}
+	}
+	slices.Sort(accounts)
+	return accounts, nil
+}
+
 // read is one of the five direct reads: the records, from the tool's own source, bound to the call's receipt.
 func (s *server) read(ctx context.Context, call mcp.Call, arguments *strictjson.Object) (*strictjson.Object, error) {
 	account, given := arguments.Get("account_id")
 	accountID, _ := account.(string)
 	var records []*strictjson.Object
 	more := false
+	if err := ctx.Err(); err != nil {
+		return nil, err // the caller has gone: nothing is read
+	}
 	switch call.Tool {
 	case "search_accounts":
 		query, _ := arguments.Get("query")
@@ -72,16 +120,27 @@ func (s *server) read(ctx context.Context, call mcp.Call, arguments *strictjson.
 		if number, _ := arguments.Get("account_number"); number != nil {
 			return nil, mcp.ToolError("account_number_requires_salesforce")
 		}
-		records, more = s.Source.Search(text, s.selected)
+		accounts, err := s.readable(ctx, call.Invocation)
+		if err != nil {
+			return nil, err
+		}
+		records, more = s.Source.Search(text, accounts)
 	case "list_opportunities":
 		if !given || account == nil {
-			// With no account, a selection limits the list itself.
-			records = s.Source.Opportunities(s.selected)
+			// With no account, the grants and the selection limit the list itself.
+			accounts, err := s.readable(ctx, call.Invocation)
+			if err != nil {
+				return nil, err
+			}
+			records = s.Source.Opportunities(accounts)
 			break
 		}
 		fallthrough
 	case "get_account", "read_call_notes", "read_slack_messages":
 		if err := s.requireSelected(accountID, call.Tool == "read_slack_messages"); err != nil {
+			return nil, err
+		}
+		if err := s.requireGranted(ctx, call.Invocation, accountID); err != nil {
 			return nil, err
 		}
 		switch {
@@ -123,10 +182,11 @@ func (s *server) read(ctx context.Context, call mcp.Call, arguments *strictjson.
 }
 
 // principal is the caller as the card maker sees it: who the gate admitted, whose bearer is verified again
-// before each read and before the brief is released, and whose rate window each read is counted against.
+// before each read and before the brief is published, with the scopes it carries then, and whose rate window
+// each read is counted against.
 func (s *server) principal(inv *mcp.Invocation) cards.Principal {
 	return cards.Principal{WorkspaceID: s.WorkspaceID, PrincipalID: inv.Principal, TokenID: inv.TokenID,
-		Scopes: inv.Scopes, Live: inv.Live, Charge: inv.Charge}
+		Scopes: inv.Scopes, Verify: inv.Current, Charge: inv.Charge}
 }
 
 // prepare is prepare_renewal_brief. The maker runs under the receipt the gate committed for the call and
@@ -135,6 +195,15 @@ func (s *server) prepare(ctx context.Context, inv *mcp.Invocation, arguments *st
 	outer, found := s.recorder.outer(inv.AuditID)
 	if !found {
 		return nil, errors.New("the call has no pending receipt")
+	}
+	// Refused before the first read, as a direct read of the account is. The publication checks the grant
+	// once more, in its own transaction.
+	account, _ := member(arguments, "account_id").(string)
+	if err := s.requireSelected(account, false); err != nil {
+		return nil, err
+	}
+	if err := s.requireGranted(ctx, inv, account); err != nil {
+		return nil, err
 	}
 	sealed, err := s.maker.Prepare(ctx, cards.Prepare{Principal: s.principal(inv), Selection: s.Selection,
 		Outer: &outer, Arguments: arguments})
@@ -160,7 +229,8 @@ func (s *server) prepare(ctx context.Context, inv *mcp.Invocation, arguments *st
 
 // reread is read_renewal_brief (selected_briefs.read_brief): a saved brief again, with no source read. The
 // brief counts only if its own outer call finished ok for these exact bytes, and it is released only while
-// the selection, the caller's scopes and the source bindings still cover what it holds.
+// the selection, the source bindings, the principal's grant on its account and the scopes the caller's
+// bearer carries at that moment still cover what it holds.
 func (s *server) reread(ctx context.Context, inv *mcp.Invocation, arguments *strictjson.Object) (*strictjson.Object, error) {
 	id, _ := member(arguments, "brief_id").(string)
 	card, err := s.Store.CardByBrief(ctx, s.WorkspaceID, id)
@@ -195,15 +265,27 @@ func (s *server) reread(ctx context.Context, inv *mcp.Invocation, arguments *str
 	if err := s.requireSelected(account, slack); err != nil {
 		return nil, err
 	}
-	if !slices.Contains(inv.Scopes, "crm:read") || notes && !slices.Contains(inv.Scopes, "calls:read") ||
-		slack && !slices.Contains(inv.Scopes, "slack:read") {
+	covered := func(scopes []string) bool {
+		return slices.Contains(scopes, "crm:read") && (!notes || slices.Contains(scopes, "calls:read")) &&
+			(!slack || slices.Contains(scopes, "slack:read"))
+	}
+	if !covered(inv.Scopes) {
 		return nil, mcp.ToolError("brief_scope_not_covered")
 	}
 	if verifyErr != nil {
 		return nil, mcp.ToolError("brief_source_changed")
 	}
-	if !inv.Live() {
+	// The release itself: the grant and the bearer are read again now, and the brief goes by what they are
+	// at this moment, not by what the call was admitted with.
+	if err := s.requireGranted(ctx, inv, account); err != nil {
+		return nil, err
+	}
+	scopes, live := inv.Current()
+	switch {
+	case !live:
 		return nil, mcp.ToolError("invalid_token")
+	case !covered(scopes):
+		return nil, mcp.ToolError("brief_scope_not_covered")
 	}
 	brief := released(id, artifact)
 	brief.Set("provider_rechecked", false)

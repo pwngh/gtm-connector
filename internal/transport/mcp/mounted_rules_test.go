@@ -468,6 +468,25 @@ func TestMountedHostAndOriginChecks(t *testing.T) {
 	if remove := m.send(http.MethodDelete, "/mcp", mountedHost, nil, nil); remove.Code != 405 {
 		t.Errorf("DELETE /mcp: %d", remove.Code)
 	}
+	// Every other method meets the same Host and Origin checks before it is told the method is not allowed.
+	for _, method := range []string{http.MethodGet, http.MethodDelete, http.MethodPut, http.MethodPatch, http.MethodOptions, http.MethodHead} {
+		for label, send := range map[string]func() *httptest.ResponseRecorder{
+			"another Host":     func() *httptest.ResponseRecorder { return m.send(method, "/mcp", "evil.example", nil, nil) },
+			"an allowed alias": func() *httptest.ResponseRecorder { return m.send(method, "/mcp", "localhost:8765", nil, nil) },
+			"an Origin header": func() *httptest.ResponseRecorder {
+				return m.send(method, "/mcp", mountedHost, nil, [][2]string{{"Origin", mountedOrigin}})
+			},
+		} {
+			response := send()
+			if response.Code != 403 || response.Header().Get("Allow") != "" ||
+				method != http.MethodHead && refusal(t, response) != "untrusted_origin_or_host" {
+				t.Errorf("%s /mcp from %s: %d %q %s", method, label, response.Code, response.Header().Get("Allow"), response.Body)
+			}
+		}
+		if allowed := m.send(method, "/mcp", mountedHost, nil, nil); allowed.Code != 405 {
+			t.Errorf("%s /mcp: %d", method, allowed.Code)
+		}
+	}
 	if below := m.send(http.MethodPost, "/mcp/x", mountedHost, body, headers); below.Code != 404 {
 		t.Errorf("POST /mcp/x: %d %s", below.Code, below.Body)
 	}
@@ -519,7 +538,6 @@ func TestMountedCredentialsReachNothing(t *testing.T) {
 		m.call(next(), "prepare_renewal_brief", account, secret)
 		m.call(next(), "read_renewal_brief", map[string]any{"brief_id": "brief-" + strings.Repeat("0", 32)}, secret)
 		m.list(secret)
-		// The bearer as an argument and as a tool name is the caller's own text, so it is not sent here.
 		m.post([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":`), requestHeaders("tools/call", "get_account", secret))
 		m.send(http.MethodPost, "/mcp", "evil.example", callBody(next(), "get_account", account), requestHeaders("tools/call", "get_account", secret))
 		m.send(http.MethodGet, "/mcp", mountedHost, nil, [][2]string{{"Authorization", "Bearer " + secret}})

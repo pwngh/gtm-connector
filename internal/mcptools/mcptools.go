@@ -5,6 +5,9 @@
 // anything runs and finishes it before anything is released. Everything here works under that receipt and
 // never starts another for the call:
 //
+//   - A token opens a source by its scope and an account by its principal's live grant, and a tool needs
+//     both: an account the principal is not granted is refused before any read, and a search or a list holds
+//     granted accounts only.
 //   - A direct read (search_accounts, get_account, list_opportunities, read_call_notes, read_slack_messages)
 //     is a source read of its connection. Its body hands the recorder the record versions it returns, and
 //     the recorder finishes the receipt by binding exactly those.
@@ -12,14 +15,13 @@
 //     publication finishes it with the saved bytes' digest. Each read inside it commits a child receipt of
 //     its own, checks the bearer again and counts one attempt against its rate window.
 //   - read_renewal_brief reads no source. It releases a saved brief only while its seal, the selection, the
-//     caller's scopes and the source bindings still cover it.
+//     source bindings, the principal's grant and the scopes the bearer carries at release still cover it.
 package mcptools
 
 import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"sort"
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/cards"
@@ -30,9 +32,11 @@ import (
 	"github.com/pwngh/gtm-connector/internal/transport/mcp"
 )
 
-// Storage is what the verifier and read_renewal_brief read from the store.
+// Storage is what the verifier and the tools read from the store: a token, a principal's account grants, and
+// a saved brief.
 type Storage interface {
 	MachineToken(ctx context.Context, workspaceID string, tokenSHA256 []byte) (postgres.MachineToken, error)
+	ViewAccounts(ctx context.Context, viewer postgres.Viewer) ([]postgres.AccountView, error)
 	CardByBrief(ctx context.Context, workspaceID, briefID string) (postgres.Card, error)
 }
 
@@ -57,7 +61,7 @@ type Config struct {
 	// Connections names each source system's connection ("crm", "calls", "slack").
 	Connections map[string]string
 	// Selection limits every read to its accounts, and Slack to those it marks, and adds the two brief
-	// tools. Nil serves every account and no brief tool.
+	// tools. Nil serves every account the caller's principal is granted, and no brief tool.
 	Selection cards.Selection
 	// RateLimit is how many calls one token may make in WindowSeconds. Zero is 60 calls in 60 seconds.
 	RateLimit     int
@@ -73,7 +77,6 @@ type server struct {
 	Config
 	recorder *recorder
 	maker    *cards.Maker
-	selected []string // the selected account IDs in order, nil without a selection
 }
 
 // New builds the gateway that serves a workspace's tools at its resource.
@@ -89,13 +92,6 @@ func New(c Config) (*mcp.Gateway, error) {
 		open: map[string]*pending{}}
 	s.maker = &cards.Maker{Receipts: c.Receipts, Source: c.Source, Sources: c.Sources, Connections: c.Connections,
 		NewID: c.NewID, Now: c.Now}
-	if c.Selection != nil {
-		s.selected = []string{}
-		for account := range c.Selection {
-			s.selected = append(s.selected, account)
-		}
-		sort.Strings(s.selected)
-	}
 	return mcp.NewGateway(mcp.GatewayConfig{Resource: c.Resource, Issuer: c.Issuer, RateLimit: c.RateLimit,
 		WindowSeconds: c.WindowSeconds, Selected: c.Selection != nil, Verify: s.verify, Receipts: s.recorder,
 		Run: s.run, Clock: c.Clock, Wall: c.Wall})

@@ -568,12 +568,45 @@ func TestCallNestedPastTheLimitIsInvalidJSON(t *testing.T) {
 	if last := rows[len(rows)-1]; last.Tool != "get_account" || last.Status != "error" || *last.HTTPStatus != 400 || last.RowCount != 0 {
 		t.Fatalf("%+v", last)
 	}
-	// Without the header nothing readable says it is a call, as for any body no parser reads.
-	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001","extra":` +
-		strings.Repeat(`{"a":`, strictjson.MaxDepth-2) + "1" + strings.Repeat("}", strictjson.MaxDepth-2) + "}}}"
-	unmarked := h.post([]byte(body), [][2]string{{"Authorization", "Bearer unused"}})
-	if reason, _ := reasonOf(t, unmarked); unmarked.Code != 400 || reason != "invalid_json" || len(h.receipts.Read()) != before+1 {
-		t.Fatalf("%d %s, %d receipts", unmarked.Code, unmarked.Body, len(h.receipts.Read())-before)
+	// Without the header the body itself says it is a call. It is not parsed, so its method and its tool
+	// name are read without descending, and the call keeps its receipt under its own tool's name, wherever
+	// in the body the deep value sits and whatever the Mcp-Name header claims.
+	deep := strings.Repeat(`{"a":`, strictjson.MaxDepth-2) + "1" + strings.Repeat("}", strictjson.MaxDepth-2)
+	for label, c := range map[string]struct {
+		body    string
+		headers [][2]string
+		tool    string
+	}{
+		"the deep value last":            {`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_account","arguments":{"account_id":"acc-001","extra":` + deep + `}}}`, nil, "get_account"},
+		"the deep value first":           {`{"params":{"arguments":{"extra":` + deep + `,"account_id":"acc-001"},"name":"read_call_notes"},"method":"tools/call","id":1}`, nil, "read_call_notes"},
+		"another name in the header":     {`{"method":"tools/call","params":{"name":"get_account","arguments":{"x":` + deep + `}}}`, [][2]string{{"Mcp-Name", "search_accounts"}}, "get_account"},
+		"a name that is no string":       {`{"method":"tools/call","params":{"name":7,"arguments":{"x":` + deep + `}}}`, nil, "<unparsed>"},
+		"a method written with escapes":  {`{"method":"tools\u002fcall","params":{"name":"get_account","arguments":{"x":` + deep + `}}}`, nil, "get_account"},
+		"a brace inside a string before": {`{"note":"}{\"","method":"tools/call","params":{"name":"get_account","arguments":{"x":` + deep + `}}}`, nil, "get_account"},
+	} {
+		before := len(h.receipts.Read())
+		unmarked := h.post([]byte(c.body), append([][2]string{{"Authorization", "Bearer unused"}}, c.headers...))
+		rows := h.receipts.Read()[before:]
+		if reason, _ := reasonOf(t, unmarked); unmarked.Code != 400 || reason != "invalid_json" || len(rows) != 1 {
+			t.Fatalf("%s: %d %s, %d receipts", label, unmarked.Code, unmarked.Body, len(rows))
+		}
+		if last := rows[0]; last.Tool != c.tool || last.Status != "error" || *last.HTTPStatus != 400 || last.RowCount != 0 ||
+			path(last.Arguments, "unparsed_sha256") == nil {
+			t.Fatalf("%s: %+v", label, last)
+		}
+	}
+	// A deep body that is no tool call, or no object, leaves none.
+	before = len(h.receipts.Read())
+	for _, body := range []string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"cursor":{"x":` + deep + `}}}`,
+		`{"jsonrpc":"2.0","id":1,"params":{"method":"tools/call","name":"get_account","arguments":{"x":` + deep + `}}}`,
+		`[{"method":"tools/call","params":{"name":"get_account","arguments":{"x":` + deep + `}}}]`,
+		`{"method":"tools/call","params":{"name":"get_account","arguments":{"x":` + deep + `}}`,
+	} {
+		refused := h.post([]byte(body), [][2]string{{"Authorization", "Bearer unused"}})
+		if reason, _ := reasonOf(t, refused); refused.Code != 400 || reason != "invalid_json" || len(h.receipts.Read()) != before {
+			t.Fatalf("%.60s: %d %s, %d receipts", body, refused.Code, refused.Body, len(h.receipts.Read())-before)
+		}
 	}
 	if len(h.fx.ran()) != ran {
 		t.Fatalf("a call ran: %v", h.fx.ran())

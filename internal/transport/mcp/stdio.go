@@ -240,11 +240,22 @@ func (s *stdioConn) frame(raw []byte) jsonrpc.Message {
 	started := c.clock()
 	value, err := strictjson.Loads(raw)
 	if err != nil {
-		// A line the strict parser refuses but that json.loads reads as a tool call keeps its receipt.
-		if loose, err := strictjson.LoadsLoose(raw); err == nil && memberOr(loose, "method", nil) == "tools/call" {
+		// A line the strict parser refuses but that json.loads reads as a tool call keeps its receipt. So
+		// does one refused only for its depth, which is not parsed: its method and tool name are read
+		// without descending, and its receipt is under that tool's name.
+		tool, isCall := "<unparsed>", false
+		if errors.Is(err, strictjson.ErrTooDeep) {
+			method, name, named := shallowCall(raw)
+			if isCall = method == "tools/call"; isCall && named {
+				tool = name
+			}
+		} else if loose, err := strictjson.LoadsLoose(raw); err == nil {
+			isCall = memberOr(loose, "method", nil) == "tools/call"
+		}
+		if isCall {
 			sum := sha256.Sum256(raw)
 			token := s.token
-			auditID, err := c.start(ctx, Start{Token: &token, Tool: "<unparsed>",
+			auditID, err := c.start(ctx, Start{Token: &token, Tool: tool,
 				Arguments: strictjson.NewObject("unparsed_sha256", hex.EncodeToString(sum[:]))})
 			if err != nil {
 				s.send(rpcError(nil, -32603, "audit_unavailable; call was not executed", nil))
@@ -297,12 +308,20 @@ func (s *stdioConn) frame(raw []byte) jsonrpc.Message {
 			requestID = plain(id)
 		}
 		token := s.token
-		if auditID, err = c.start(ctx, Start{Token: &token, Tool: tool, Arguments: memberOr(params, "arguments", &strictjson.Object{}),
-			RequestID: requestID}); err != nil {
+		arguments := memberOr(params, "arguments", &strictjson.Object{})
+		unrecordable := holds(arguments, "\x00")
+		if unrecordable {
+			arguments = strictjson.NewObject("unrecorded", "the arguments hold a NUL character")
+		}
+		if auditID, err = c.start(ctx, Start{Token: &token, Tool: tool, Arguments: arguments, RequestID: requestID}); err != nil {
 			if hasID {
 				s.send(rpcError(echoID(id), -32603, "audit_unavailable; call was not executed", nil))
 			}
 			return nil
+		}
+		if unrecordable {
+			return refuse(rpcError(echoID(id), Refusals["invalid_arguments"].Code, "invalid tool arguments", reason("invalid_arguments")),
+				Refusals["invalid_arguments"].Status)
 		}
 	}
 	if !hasID {

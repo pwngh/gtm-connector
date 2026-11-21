@@ -116,7 +116,8 @@ type Invocation struct {
 
 	token  string
 	core   *core
-	failed atomic.Bool // the tool body panicked: nothing is released
+	caller context.Context // ends when the caller leaves; nil when the transport has no such moment
+	failed atomic.Bool     // the tool body panicked: nothing is released
 }
 
 // Recheck verifies the caller's own bearer again and charges its rate window once more, as a composite
@@ -132,10 +133,16 @@ func (i *Invocation) Recheck() (*Token, *RequestError) {
 	return token, nil
 }
 
-// Live reports whether the caller's own bearer still verifies now. It charges nothing: a composite call asks
-// before each child read and once more before it releases its result (authority.verify_token_now).
-func (i *Invocation) Live() bool {
-	return validToken(i.core.verify(i.token), i.core.policy, i.core.wall())
+// Current verifies the caller's own bearer again and gives the scopes it carries now, which may be fewer
+// than the call was admitted with. live is false when it no longer verifies, or now names another
+// principal. It charges nothing: a composite call asks before each child read and once more before it
+// releases its result (authority.verify_token_now), and goes by the scopes it is given then.
+func (i *Invocation) Current() (scopes []string, live bool) {
+	token := i.core.verify(i.token)
+	if !validToken(token, i.core.policy, i.core.wall()) || token.Principal != i.Principal {
+		return nil, false
+	}
+	return token.Scopes, true
 }
 
 // Charge counts one more attempt against the caller's rate window, as each child read of a composite call

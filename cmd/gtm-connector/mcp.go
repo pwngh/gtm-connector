@@ -8,6 +8,8 @@ import (
 	"os"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/mcptools"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
@@ -21,25 +23,39 @@ import (
 func mcpGateway(ctx context.Context, store *postgres.Store, publicOrigin string, selection cards.Selection) (*mcp.Gateway, error) {
 	workspace, err := store.EnsureWorkspace(ctx, "demo", "demo", "Demo workspace")
 	if err != nil {
-		return nil, err
+		return nil, mountError(err)
 	}
 	for _, source := range []string{"crm", "calls", "slack"} {
 		if _, err := store.EnsureConnection(ctx, workspace, source, "demo"); err != nil {
-			return nil, err
+			return nil, mountError(err)
 		}
 	}
 	from, err := workspaceReads(ctx, store, workspace)
 	if err != nil {
-		return nil, err
+		return nil, mountError(err)
 	}
 	for _, account := range from.book.Accounts() {
 		if err := store.EnsureAccount(ctx, workspace.ID, account.ID, account.Name); err != nil {
-			return nil, err
+			return nil, mountError(err)
 		}
 	}
 	return mcptools.New(mcptools.Config{Resource: publicOrigin + "/mcp", Issuer: publicOrigin, WorkspaceID: workspace.ID,
 		Store: store, Receipts: &postgres.ReceiptStore{Store: store}, Source: from.book, Sources: from.sources,
 		Connections: from.connections, Selection: selection})
+}
+
+// mountError is what serve says when the MCP endpoint cannot be set up. An error from PostgreSQL is told by
+// its SQLSTATE alone: its own text can name a role, a table or a host.
+func mountError(err error) error {
+	var refused *pgconn.PgError
+	var unported *unportedSource
+	switch {
+	case errors.As(err, &refused):
+		return fmt.Errorf("the MCP endpoint could not be set up: PostgreSQL error %s", refused.Code)
+	case errors.As(err, &unported), errors.Is(err, errNotConnected):
+		return err
+	}
+	return errors.New("the MCP endpoint could not be set up")
 }
 
 // maxSelectionBytes is the largest selection file read.
@@ -64,8 +80,16 @@ func loadSelection(path string) (cards.Selection, error) {
 	if !info.Mode().IsRegular() || !known || int(owner.Uid) != os.Getuid() || info.Mode().Perm()&0o022 != 0 {
 		return nil, errors.New("The selection file must be a regular file you own that others cannot write.")
 	}
+	return readSelection(file)
+}
+
+// readSelection reads an opened selection file to its end and parses it.
+func readSelection(file io.Reader) (cards.Selection, error) {
 	document, err := io.ReadAll(io.LimitReader(file, maxSelectionBytes+1))
-	if err != nil || len(document) > maxSelectionBytes {
+	switch {
+	case err != nil:
+		return nil, errors.New("The selection file could not be read.")
+	case len(document) > maxSelectionBytes:
 		return nil, fmt.Errorf("The selection file is larger than %d bytes.", maxSelectionBytes)
 	}
 	return cards.ParseSelection(document, demoSources.CRMBackend)

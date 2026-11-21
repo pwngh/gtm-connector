@@ -103,7 +103,8 @@ func TestRecheckChargesTheSameWindow(t *testing.T) {
 }
 
 // A child read refuses a bearer that has come to carry a scope outside the read set, as admission refuses
-// it, and charges nothing for it. Live says the same without a charge.
+// it, and charges nothing for it. Current says the same without a charge, and gives the scopes the bearer
+// carries now.
 func TestRecheckRefusesAScopeOutsideTheReadSet(t *testing.T) {
 	var h *harness
 	var seen []string
@@ -118,17 +119,17 @@ func TestRecheckRefusesAScopeOutsideTheReadSet(t *testing.T) {
 			return token
 		}
 		c.Run = func(ctx context.Context, call Call) (json.RawMessage, error) {
-			seen = append(seen, fmt.Sprint(call.Invocation.Live()))
+			seen = append(seen, fmt.Sprint(call.Invocation.Current()))
 			widened = true // the bearer gains crm:write between admission and the child read
 			if _, refused := call.Invocation.Recheck(); refused != nil {
 				seen = append(seen, refused.Reason)
 			}
-			seen = append(seen, fmt.Sprint(call.Invocation.Live()))
+			seen = append(seen, fmt.Sprint(call.Invocation.Current()))
 			return h.fx.Run(ctx, call)
 		}
 	})
 	h.records(h.tool("get_account", map[string]any{"account_id": "acc-001"}, "crm", nil), "crm")
-	if strings.Join(seen, " ") != "true invalid_token false" {
+	if strings.Join(seen, " ") != "[crm:read] true invalid_token [] false" {
 		t.Fatalf("rechecks %v", seen)
 	}
 	if used := h.gateway.Windows()[fingerprint(tokenValue("crm"))].Used; used != 1 {

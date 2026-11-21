@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"time"
 
@@ -25,15 +26,20 @@ func (s *Store) MachineToken(ctx context.Context, workspaceID string, tokenSHA25
 		return MachineToken{}, ErrNotFound
 	}
 	token := MachineToken{WorkspaceID: workspaceID}
+	var stored []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT t.principal_id::text, t.scopes, t.expires_at,
+		SELECT t.token_sha256, t.principal_id::text, t.scopes, t.expires_at,
 		       t.revoked_at IS NULL AND p.disabled_at IS NULL AND t.selection IS NULL
 		  FROM machine_tokens t
 		  JOIN principals p ON p.workspace_id = t.workspace_id AND p.id = t.principal_id
 		 WHERE t.workspace_id = $1 AND t.token_sha256 = $2`, workspaceID, tokenSHA256).
-		Scan(&token.PrincipalID, &token.Scopes, &token.ExpiresAt, &token.Usable)
-	if errors.Is(err, pgx.ErrNoRows) {
+		Scan(&stored, &token.PrincipalID, &token.Scopes, &token.ExpiresAt, &token.Usable)
+	// The row is fetched by the fingerprint and confirmed here in constant time, as a session's is.
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && subtle.ConstantTimeCompare(stored, tokenSHA256) != 1 {
 		return MachineToken{}, ErrNotFound
 	}
-	return token, err
+	if err != nil {
+		return MachineToken{}, err
+	}
+	return token, nil
 }

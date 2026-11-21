@@ -144,6 +144,9 @@ func toolHandler(name string, run ToolFunc, lookup func(string) *Invocation) sdk
 		if scope := Definitions[name].Scope; !slices.Contains(inv.Scopes, scope) {
 			return toolFailure(name, "Required scope: "+scope), nil
 		}
+		if inv.caller != nil {
+			ctx = callerContext{ctx, inv.caller}
+		}
 		structured, err := run(ctx, Call{Tool: name, Arguments: request.Params.Arguments, Invocation: inv})
 		var refusal ToolError
 		switch {
@@ -161,6 +164,16 @@ func toolHandler(name string, run ToolFunc, lookup func(string) *Invocation) sdk
 			StructuredContent: structured}, nil
 	}
 }
+
+// callerContext is a tool body's context: the values of the SDK's context, which runs every request to its
+// end, and the cancellation of the caller's, so the body learns at once that its caller has left.
+type callerContext struct {
+	context.Context
+	caller context.Context
+}
+
+func (c callerContext) Done() <-chan struct{} { return c.caller.Done() }
+func (c callerContext) Err() error            { return c.caller.Err() }
 
 func toolFailure(name, message string) *sdk.CallToolResult {
 	return &sdk.CallToolResult{IsError: true,

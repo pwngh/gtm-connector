@@ -27,13 +27,15 @@ type Refusal struct {
 
 // Refusals is request_checks.REFUSALS.
 var Refusals = map[string]Refusal{
-	"request_too_large":            {413, -32600},
-	"invalid_json":                 {400, -32700},
-	"unsupported_media_type":       {415, -32600},
-	"call_id_required":             {400, -32600},
-	"method_not_found":             {404, -32601},
-	"untrusted_origin_or_host":     {403, 1003},
-	"invalid_token":                {401, 1001},
+	"request_too_large":        {413, -32600},
+	"invalid_json":             {400, -32700},
+	"unsupported_media_type":   {415, -32600},
+	"call_id_required":         {400, -32600},
+	"method_not_found":         {404, -32601},
+	"untrusted_origin_or_host": {403, 1003},
+	"invalid_token":            {401, 1001},
+	// Not one of request_checks.REFUSALS: the Go gate refuses a request that repeats its own credential.
+	"credential_in_request":        {400, -32600},
 	"rate_limited":                 {429, 1002},
 	"insufficient_scope":           {403, 1004},
 	"crm_write_disabled":           {403, 1005},
@@ -143,10 +145,7 @@ func CheckRequest(request RequestFacts, policy Policy, windows Windows, definiti
 	if !ok || parsed == nil {
 		return refuse(nil, "invalid_json", "expected one valid JSON-RPC object", nil)
 	}
-	resource, err := url.Parse(policy.Resource)
-	_, hasOrigin := request.Headers["origin"]
-	if request.Scheme != "https" || hasOrigin || request.HeaderCounts["host"] != 1 || err != nil ||
-		request.Headers["host"] != resource.Host {
+	if !TrustedHost(request.Scheme, request.Headers, request.HeaderCounts, policy) {
 		return refuse(nil, "untrusted_origin_or_host", "untrusted origin or host", nil)
 	}
 	raw := request.RawToken
@@ -211,6 +210,14 @@ func CheckRequest(request RequestFacts, policy Policy, windows Windows, definiti
 		return refuse(updated, "method_not_found", "Method not found", nil)
 	}
 	return Decision{Windows: updated}
+}
+
+// TrustedHost reports whether a request came over TLS, with no Origin header, for exactly the resource's own
+// Host, named once. Header names are lowercase.
+func TrustedHost(scheme string, headers map[string]string, counts map[string]int, policy Policy) bool {
+	resource, err := url.Parse(policy.Resource)
+	_, hasOrigin := headers["origin"]
+	return scheme == "https" && !hasOrigin && counts["host"] == 1 && err == nil && headers["host"] == resource.Host
 }
 
 // validToken reports whether a verified token admits anything now: it states an expiry that has not come,

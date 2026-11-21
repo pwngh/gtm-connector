@@ -288,3 +288,28 @@ func TestStdioReceiptFailures(t *testing.T) {
 	}
 	_ = json.Valid
 }
+
+// Arguments with a NUL character, in a name or in a value, are refused over stdio too, under a receipt that
+// records a fixed note in their place: no store holds them as given.
+func TestStdioArgumentsWithANULAreRefused(t *testing.T) {
+	h := newStdio(t, []string{"crm:read"}, nil)
+	h.send(legacyStart, legacyReady,
+		call(2, "get_account", `{"account_id":"acc-001","a\u0000b":1}`),
+		call(3, "search_accounts", `{"query":"a\u0000b"}`),
+		call(4, "nope", `{"list":[{"\u0000":1}]}`))
+	h.answer(1)
+	for id := 2; id <= 4; id++ {
+		if refused := h.answer(id); path(refused, "error", "data", "reason") != "invalid_arguments" {
+			t.Fatalf("call %d: %v", id, refused)
+		}
+	}
+	rows := h.receipts.Read()
+	if len(rows) != 3 || len(h.fx.ran()) != 0 {
+		t.Fatalf("%d receipts, ran %v", len(rows), h.fx.ran())
+	}
+	for _, row := range rows {
+		if row.Status != "error" || *row.HTTPStatus != 400 || path(row.Arguments, "unrecorded") != "the arguments hold a NUL character" {
+			t.Fatalf("%+v", row)
+		}
+	}
+}

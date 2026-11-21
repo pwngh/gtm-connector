@@ -62,20 +62,13 @@ func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 // tables. With --selection it reads the selection file first, before the
 // database or any credential, and never reads it again.
 func serve(ctx context.Context, args []string) error {
-	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
-	selectionFile := flags.String("selection", "", "a selection `file`: MCP clients read only its accounts, and get the two brief tools")
-	if err := flags.Parse(args); err != nil {
+	selection, err := serveSelection(args)
+	if err != nil {
 		return err
 	}
 	c, err := loadConfig()
 	if err != nil {
 		return err
-	}
-	var selection cards.Selection
-	if *selectionFile != "" {
-		if selection, err = loadSelection(*selectionFile); err != nil {
-			return err
-		}
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	store, err := openAppStore(ctx, c)
@@ -126,6 +119,33 @@ func serve(ctx context.Context, args []string) error {
 	defer cancel()
 	logger.Info("stopping")
 	return server.Shutdown(shutdown)
+}
+
+// serveSelection reads serve's command line: the selection it was given, or nil when it was given none. A
+// --selection with no file name is refused, never read as "no selection", which would serve every account.
+func serveSelection(args []string) (cards.Selection, error) {
+	flags, file := serveFlags()
+	if err := flags.Parse(args); err != nil {
+		return nil, err
+	}
+	given := false
+	flags.Visit(func(f *flag.Flag) { given = given || f.Name == "selection" })
+	switch {
+	case flags.NArg() > 0:
+		return nil, fmt.Errorf("serve takes no argument but --selection FILE, not %q", flags.Arg(0))
+	case !given:
+		return nil, nil
+	case *file == "":
+		return nil, errors.New("--selection needs the name of a selection file; an empty name is not \"no selection\"")
+	}
+	return loadSelection(*file)
+}
+
+// serveFlags are serve's flags.
+func serveFlags() (*flag.FlagSet, *string) {
+	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	return flags, flags.String("selection", "", "a selection `file`: MCP clients read only its accounts, and get the "+
+		"two brief tools. It is read once, at start: restart serve to change the selection")
 }
 
 // newSurface is everything serve answers: the browser surface, with the

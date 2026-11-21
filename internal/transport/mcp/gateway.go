@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"math/big"
 	"net/http"
@@ -116,6 +117,11 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "Not Found")
 	case r.Method == http.MethodPost:
 		g.post(w, r)
+	case !g.trusted(r):
+		// Every method answers only the resource's own Host over TLS, with no Origin, before anything else
+		// is said. The Python gateway answers its 405 first.
+		jsonAnswer(http.StatusForbidden, rpcError(nil, Refusals["untrusted_origin_or_host"].Code, "untrusted origin or host",
+			reason("untrusted_origin_or_host")), nil).write(w, r.Method == http.MethodHead)
 	case r.Method == http.MethodGet:
 		// A GET would open a listening stream that never ends and passes none of the checks below.
 		jsonAnswer(http.StatusMethodNotAllowed, rpcError(nil, -32600, "Method Not Allowed", nil), map[string]string{"Allow": "POST"}).write(w, false)
@@ -170,18 +176,78 @@ func readCarrier(r *http.Request) carrier {
 	return c
 }
 
+// trusted is the Host and Origin check of a request that is no POST, as admission makes it of one that is.
+func (g *Gateway) trusted(r *http.Request) bool {
+	headers := readCarrier(r)
+	return TrustedHost(scheme(r), headers.last, headers.counts, g.policy)
+}
+
 func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 	headers := readCarrier(r)
-	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBody+1))
-	if err != nil {
-		return // the caller went away before sending the whole body
+	// A receipt is written under a context that outlives the caller: one who leaves after its call was read
+	// still has the call's receipt committed and finished.
+	ctx := context.WithoutCancel(r.Context())
+	started := g.clock()
+	rawAuth := headers.last["authorization"]
+	parts := strings.Split(rawAuth, " ")
+	rawToken := ""
+	if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" && parts[1] != "" {
+		rawToken = parts[1]
+	}
+	var callerToken *string
+	if rawToken != "" {
+		callerToken = &rawToken
+	} else if rawAuth != "" {
+		callerToken = &rawAuth
+	}
+	header, hasName := headers.last["mcp-name"]
+	if !hasName {
+		header = "<unparsed>"
 	}
 	marked := headers.last["mcp-method"] == "tools/call"
+	unparsed := func(body []byte) *strictjson.Object {
+		sum := sha256.Sum256(body)
+		return strictjson.NewObject("unparsed_sha256", hex.EncodeToString(sum[:]))
+	}
+	invalidJSON := jsonAnswer(Refusals["invalid_json"].Status, rpcError(nil, Refusals["invalid_json"].Code,
+		"expected one valid JSON-RPC object", reason("invalid_json")), nil)
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBody+1))
+	if err != nil {
+		// The body did not arrive whole, so nothing in it is read. A request its header marks as a tool call
+		// still gets its receipt, under the header's tool name, with what did arrive named by its digest.
+		if marked {
+			tool := header
+			if callerToken != nil && strings.Contains(tool, *callerToken) {
+				tool = "<invalid>"
+			}
+			auditID, err := g.start(ctx, Start{Token: callerToken, Tool: tool, Arguments: unparsed(body)})
+			if err != nil {
+				jsonAnswer(http.StatusServiceUnavailable, []byte(`{"error":"audit_unavailable; call was not executed"}`), nil).write(w, false)
+				return
+			}
+			if !g.refuseCall(ctx, auditID, invalidJSON.status, started) {
+				withheld.write(w, false)
+				return
+			}
+		}
+		invalidJSON.write(w, false)
+		return
+	}
 	request, err := strictjson.Loads(body)
+	tooDeepTool, tooDeep := "", false
 	if err != nil {
 		request = nil
-		// A refused body that still names a tool call, as json.loads reads it, keeps its receipt.
-		if refused, err := strictjson.LoadsLoose(body); err == nil {
+		if errors.Is(err, strictjson.ErrTooDeep) {
+			// A body refused only for its depth is not parsed at all. Its method and its tool name are read
+			// without descending, so a tool call it makes keeps its receipt, under its own tool's name.
+			method, name, named := shallowCall(body)
+			if method == "tools/call" {
+				marked, tooDeep = true, named
+				tooDeepTool = name
+			}
+		} else if refused, err := strictjson.LoadsLoose(body); err == nil {
+			// A refused body that still names a tool call, as json.loads reads it, keeps its receipt.
 			method, _ := memberOr(refused, "method", nil).(string)
 			marked = marked || method == "tools/call"
 		}
@@ -193,18 +259,11 @@ func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 	}
 	method, _ := member(object, "method")
 	isCall := method == "tools/call" || marked
-	rawAuth := headers.last["authorization"]
-	parts := strings.Split(rawAuth, " ")
-	rawToken := ""
-	if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" && parts[1] != "" {
-		rawToken = parts[1]
-	}
-	header, hasName := headers.last["mcp-name"]
-	if !hasName {
-		header = "<unparsed>"
-	}
 	tool, ok := memberOr(params, "name", header).(string)
-	if !ok {
+	switch {
+	case tooDeep:
+		tool = tooDeepTool
+	case !ok:
 		tool = "<invalid>"
 	}
 	arguments := memberOr(params, "arguments", &strictjson.Object{})
@@ -214,46 +273,67 @@ func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 		briefID = &value
 	}
 	requestID, _ := member(object, "id")
-	started := g.clock()
-	ctx := r.Context()
+	// A request that repeats the credential it presents, in its id, its tool name, its arguments or its
+	// brief id, is refused in fixed words, and its receipt holds none of them: a receipt and a reply never
+	// carry a credential, whoever put it there.
+	repeated := callerToken != nil && (holds(requestID, *callerToken) || holds(tool, *callerToken) ||
+		holds(arguments, *callerToken) || briefID != nil && strings.Contains(*briefID, *callerToken))
+	// PostgreSQL holds no NUL character in JSON text, so arguments with one, in a name or in a value, are
+	// refused and never recorded as given.
+	unrecordable := holds(arguments, "\x00")
 	auditID := ""
 	if isCall {
-		var callerToken *string
-		if rawToken != "" {
-			callerToken = &rawToken
-		} else if rawAuth != "" {
-			callerToken = &rawAuth
-		}
 		// JSON-RPC ids are strings or integers. Any other value is recorded as a fixed marker, so a caller
 		// cannot imitate the server's own correlation for brief reads.
 		var receiptID any = "<invalid>"
 		if requestID == nil || isRequestID(requestID) {
 			receiptID = plain(requestID)
 		}
-		recorded := arguments
-		if request == nil {
-			sum := sha256.Sum256(body)
-			recorded = strictjson.NewObject("unparsed_sha256", hex.EncodeToString(sum[:]))
+		recorded, recordedTool, recordedBrief := arguments, tool, briefID
+		switch {
+		case request == nil:
+			recorded = unparsed(body)
+			if callerToken != nil && strings.Contains(tool, *callerToken) {
+				recordedTool = "<invalid>"
+			}
+		case repeated:
+			recorded, receiptID, recordedBrief = strictjson.NewObject("unrecorded", "the request repeated its credential"), "<invalid>", nil
+			if holds(tool, *callerToken) {
+				recordedTool = "<invalid>"
+			}
+		case unrecordable:
+			recorded = strictjson.NewObject("unrecorded", "the arguments hold a NUL character")
 		}
-		if auditID, err = g.start(ctx, Start{Token: callerToken, Tool: tool, Arguments: recorded, RequestID: receiptID,
-			BriefID: briefID}); err != nil {
+		if auditID, err = g.start(ctx, Start{Token: callerToken, Tool: recordedTool, Arguments: recorded, RequestID: receiptID,
+			BriefID: recordedBrief}); err != nil {
 			jsonAnswer(http.StatusServiceUnavailable, []byte(`{"error":"audit_unavailable; call was not executed"}`), nil).write(w, false)
 			return
 		}
 	}
 
-	var token *Token
-	if rawToken != "" {
-		token = g.verify(rawToken) // the only verification of this bearer for this request
-	}
-	decision := g.admit(RequestFacts{BodySize: len(body), Parsed: request, Scheme: scheme(r), Headers: headers.last,
-		HeaderCounts: headers.counts, RawToken: rawToken, IsCall: isCall, Tool: tool, Arguments: arguments, Meta: meta}, token)
 	var refused *answer
-	if e := decision.Error; e != nil {
-		a := jsonAnswer(e.Status(), rpcError(echoID(requestID), e.Code(), e.Message, reason(e.Reason)), e.Headers)
+	var token *Token
+	if repeated && request != nil {
+		// Refused before anything else is checked, so no later refusal echoes the id.
+		e := &RequestError{Reason: "credential_in_request", Message: "the request repeats the credential it presents"}
+		a := jsonAnswer(e.Status(), rpcError(nil, e.Code(), e.Message, reason(e.Reason)), nil)
 		refused = &a
-	} else if a, ok := ladder(object, headers); ok {
-		refused = &a
+	} else {
+		if rawToken != "" {
+			token = g.verify(rawToken) // the only verification of this bearer for this request
+		}
+		decision := g.admit(RequestFacts{BodySize: len(body), Parsed: request, Scheme: scheme(r), Headers: headers.last,
+			HeaderCounts: headers.counts, RawToken: rawToken, IsCall: isCall, Tool: tool, Arguments: arguments, Meta: meta}, token)
+		if e := decision.Error; e != nil {
+			a := jsonAnswer(e.Status(), rpcError(echoID(requestID), e.Code(), e.Message, reason(e.Reason)), e.Headers)
+			refused = &a
+		} else if isCall && unrecordable {
+			e := &RequestError{Reason: "invalid_arguments", Message: "invalid tool arguments"}
+			a := jsonAnswer(e.Status(), rpcError(echoID(requestID), e.Code(), e.Message, reason(e.Reason)), nil)
+			refused = &a
+		} else if a, ok := ladder(object, headers); ok {
+			refused = &a
+		}
 	}
 	switch {
 	case refused != nil:
@@ -266,7 +346,7 @@ func (g *Gateway) post(w http.ResponseWriter, r *http.Request) {
 		g.dispatch(r, object, tool, arguments, nil).write(w, false)
 	default:
 		inv := &Invocation{AuditID: auditID, Tool: tool, TokenID: fingerprint(rawToken), Scopes: token.Scopes,
-			Principal: token.Principal, Selected: g.selected, token: rawToken}
+			Principal: token.Principal, Selected: g.selected, token: rawToken, caller: r.Context()}
 		g.dispatch(r, object, tool, arguments, inv).write(w, false)
 	}
 }
@@ -383,6 +463,10 @@ func scheme(r *http.Request) string {
 // dispatch sends an admitted request to the SDK, rebuilt from the admitted fields under a dispatch id, with
 // the client's carrier headers left behind. A call's reply is settled against its receipt before it is
 // returned; any other reply is returned to the client's id.
+//
+// A caller who leaves while its call runs is answered nothing, and the rule for the call is one: the tool is
+// told (its context ends), it publishes nothing unless a publication had already started, and the receipt
+// is finished all the same, as an error unless that publication sealed it.
 func (g *Gateway) dispatch(r *http.Request, object *strictjson.Object, tool string, arguments any, inv *Invocation) answer {
 	method, _ := member(object, "method")
 	name := method.(string)
@@ -403,7 +487,8 @@ func (g *Gateway) dispatch(r *http.Request, object *strictjson.Object, tool stri
 	body := &strictjson.Object{Keys: []string{"jsonrpc", "id", "method", "params"}, Values: []any{"2.0", dispatchID, name, params}}
 	var encoded bytes.Buffer
 	encodeValue(&encoded, body)
-	// The SDK finishes the call even if the caller leaves; the receipt then records 503.
+	// The SDK runs the request to its end even if the caller leaves, so the reply is always seen and settled
+	// here. The tool body learns that the caller left through its own context (toolHandler).
 	inner, _ := http.NewRequestWithContext(context.WithoutCancel(r.Context()), http.MethodPost, "/mcp", &encoded)
 	inner.Header.Set("Content-Type", "application/json")
 	inner.Header.Set("Accept", "application/json, text/event-stream")
@@ -422,7 +507,7 @@ func (g *Gateway) dispatch(r *http.Request, object *strictjson.Object, tool stri
 		if !ok {
 			result, rpcErr = nil, nil
 		}
-		settled := g.settle(r.Context(), inv, started, result, rpcErr, r.Context().Err() != nil)
+		settled := g.settle(context.WithoutCancel(r.Context()), inv, started, result, rpcErr, r.Context().Err() != nil)
 		switch {
 		case settled.withheld:
 			return withheld
@@ -468,6 +553,30 @@ func (h *holder) Write(p []byte) (int, error) {
 	return h.body.Write(p)
 }
 func (h *holder) Flush() {}
+
+// holds reports whether any string of a strictjson value, a member name included, contains text.
+func holds(value any, text string) bool {
+	switch v := value.(type) {
+	case string:
+		return strings.Contains(v, text)
+	case []any:
+		for _, item := range v {
+			if holds(item, text) {
+				return true
+			}
+		}
+	case *strictjson.Object:
+		if v == nil {
+			return false
+		}
+		for i, key := range v.Keys {
+			if strings.Contains(key, text) || holds(v.Values[i], text) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // memberOr is Python's dict.get(key, default) on a strictjson object; a non-object gives the default.
 func memberOr(object any, key string, fallback any) any {

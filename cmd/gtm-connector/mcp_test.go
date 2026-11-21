@@ -6,17 +6,21 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
 // lockedBuffer is a log sink the server and the test use at once.
@@ -263,5 +267,102 @@ func TestLoadSelection(t *testing.T) {
 		if err == nil || !strings.HasPrefix(err.Error(), c.refusal) || selection != nil {
 			t.Errorf("%s: %v (%v)", label, selection, err)
 		}
+	}
+}
+
+// serve's command line. No --selection serves no selection. A --selection with an empty name stops serve
+// before it opens anything: it is never read as "no selection", which would serve every account. So does a
+// file name given without the flag, and a file that does not load.
+func TestServeSelectionFlag(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "selection.json")
+	if err := os.WriteFile(file, []byte(`{"schema_version": 1, "accounts": [{"account_id": "acc-003", "slack": true}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if selection, err := serveSelection(nil); err != nil || selection != nil {
+		t.Fatalf("no flag: %v (%v)", selection, err)
+	}
+	for _, args := range [][]string{{"--selection", file}, {"--selection=" + file}, {"-selection", file}} {
+		if selection, err := serveSelection(args); err != nil || len(selection) != 1 || !selection["acc-003"] {
+			t.Fatalf("%v: %v (%v)", args, selection, err)
+		}
+	}
+	const empty = `--selection needs the name of a selection file; an empty name is not "no selection"`
+	for label, c := range map[string]struct {
+		args    []string
+		refusal string
+	}{
+		"an empty name":            {[]string{"--selection", ""}, empty},
+		"an empty name after =":    {[]string{"--selection="}, empty},
+		"the flag alone":           {[]string{"--selection"}, "flag needs an argument"},
+		"a file without the flag":  {[]string{file}, "serve takes no argument but --selection FILE"},
+		"a file after an empty":    {[]string{"--selection=", file}, "serve takes no argument but --selection FILE"},
+		"a file that is not there": {[]string{"--selection", file + ".missing"}, "The selection file was not found."},
+	} {
+		selection, err := serveSelection(c.args)
+		if err == nil || !strings.Contains(err.Error(), c.refusal) || selection != nil {
+			t.Errorf("%s: %v (%v)", label, selection, err)
+		}
+		// serve itself stops there, before it reads its settings or opens the database.
+		t.Setenv("GTM_LISTEN", "not an address")
+		if err := serve(ctx, c.args); err == nil || !strings.Contains(err.Error(), c.refusal) {
+			t.Errorf("%s: serve answered %v", label, err)
+		}
+	}
+	// The help says when the file is read.
+	flags, _ := serveFlags()
+	if usage := flags.Lookup("selection").Usage; !strings.Contains(usage, "read once, at start") || !strings.Contains(usage, "restart serve") {
+		t.Errorf("the flag's help: %s", usage)
+	}
+}
+
+// failingFile is a selection file whose read fails.
+type failingFile struct{}
+
+func (failingFile) Read([]byte) (int, error) { return 0, errors.New("input/output error on a device") }
+
+// A selection file that cannot be read says so. Only one that is too large is told it is too large.
+func TestSelectionReadErrors(t *testing.T) {
+	if _, err := readSelection(failingFile{}); err == nil || err.Error() != "The selection file could not be read." {
+		t.Fatalf("a read that fails: %v", err)
+	}
+	if _, err := readSelection(strings.NewReader(strings.Repeat(" ", maxSelectionBytes+1))); err == nil ||
+		err.Error() != "The selection file is larger than 65536 bytes." {
+		t.Fatalf("a file past the limit: %v", err)
+	}
+	if selection, err := readSelection(strings.NewReader(`{"schema_version": 1, "accounts": [{"account_id": "acc-003", "slack": false}]}`)); err != nil || len(selection) != 1 {
+		t.Fatalf("a file that reads: %v (%v)", selection, err)
+	}
+}
+
+// When PostgreSQL refuses what setting up the MCP endpoint writes, serve says so in one fixed line with the
+// SQLSTATE and nothing of PostgreSQL's own text, which names the table and can name a role or a host.
+func TestMCPStartupErrorsAreFixedLines(t *testing.T) {
+	d := setUpDemo(t)
+	app, err := url.Parse(d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := conn(t, d.ownerURL)
+	if _, err := owner.Exec(ctx, "REVOKE INSERT, UPDATE ON ALL TABLES IN SCHEMA public FROM "+app.User.Username()); err != nil {
+		t.Fatal(err)
+	}
+	store, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	_, err = mcpGateway(ctx, store, "https://127.0.0.1:8443", nil)
+	if err == nil || err.Error() != "the MCP endpoint could not be set up: PostgreSQL error 42501" {
+		t.Fatalf("a role that may not write: %v", err)
+	}
+	_, err = newSurface(ctx, store, config{publicOrigin: "https://127.0.0.1:8443", allowedHosts: []string{"127.0.0.1:8443"}},
+		bytes.Repeat([]byte("k"), 32), nil)
+	for _, leaked := range []string{"permission denied", "connections", "workspaces", app.User.Username(), "SQLSTATE"} {
+		if err == nil || strings.Contains(err.Error(), leaked) {
+			t.Errorf("serve's own error holds %q: %v", leaked, err)
+		}
+	}
+	if got := mountError(errors.New("dial tcp 10.0.0.7:5432: connection refused")).Error(); got != "the MCP endpoint could not be set up" {
+		t.Errorf("an error that is not PostgreSQL's: %s", got)
 	}
 }

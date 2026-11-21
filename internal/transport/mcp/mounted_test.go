@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -225,12 +226,33 @@ func (m *mounted) expiry(raw string) float64 {
 	return float64(micros) / 1e6
 }
 
-// issue stores a bearer of the machine principal that expires in an hour.
-func (m *mounted) issue(raw string, scopes ...string) {
+// issue stores a bearer of the machine principal, which is granted every account, that expires in an hour.
+func (m *mounted) issue(raw string, scopes ...string) { m.issueFor(m.machine, raw, scopes...) }
+
+// issueFor stores a bearer of a principal that expires in an hour.
+func (m *mounted) issueFor(principal postgres.Principal, raw string, scopes ...string) {
 	m.t.Helper()
 	digest := sha256.Sum256([]byte(raw))
 	must(m.t, m.sql(`INSERT INTO machine_tokens (workspace_id, principal_id, token_sha256, scopes, expires_at)
-		VALUES ($1, $2, $3, $4, now() + interval '1 hour')`, m.workspace.ID, m.machine.ID, digest[:], scopes))
+		VALUES ($1, $2, $3, $4, now() + interval '1 hour')`, m.workspace.ID, principal.ID, digest[:], scopes))
+}
+
+// grantee is a new machine principal granted exactly these accounts.
+func (m *mounted) grantee(accounts ...string) postgres.Principal {
+	m.t.Helper()
+	principal, err := m.store.CreatePrincipal(ctx, m.workspace, "machine", "Narrow assistant")
+	must(m.t, err)
+	for _, account := range accounts {
+		must(m.t, m.store.GrantAccount(ctx, m.workspace.ID, principal.ID, account))
+	}
+	return principal
+}
+
+// rescope gives a stored bearer other scopes, as an operator who narrows a grant does.
+func (m *mounted) rescope(raw string, scopes ...string) {
+	m.t.Helper()
+	digest := sha256.Sum256([]byte(raw))
+	must(m.t, m.sql("UPDATE machine_tokens SET scopes = $2 WHERE token_sha256 = $1", digest[:], scopes))
 }
 
 // fixture stores the gate fixture's bearers that the store can hold: each read grant, by its fixture value.
@@ -285,7 +307,12 @@ func (m *mounted) outerLabels() []string {
 
 // send gives the surface one request as the wire carries it: an origin-form target, a Host line and TLS.
 func (m *mounted) send(method, target, host string, body []byte, headers [][2]string) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(method, target, bytes.NewReader(body))
+	return m.sendFrom(ctx, method, target, host, bytes.NewReader(body), headers)
+}
+
+// sendFrom is send for a caller who may leave, which ends its context, and whose body may fail as it is read.
+func (m *mounted) sendFrom(caller context.Context, method, target, host string, body io.Reader, headers [][2]string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, target, body).WithContext(caller)
 	request.Host = host
 	request.TLS = &tls.ConnectionState{}
 	for _, header := range headers {
