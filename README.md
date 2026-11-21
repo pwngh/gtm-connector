@@ -2,12 +2,19 @@
 
 [![Tests](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/pwngh/gtm-connector/actions/workflows/test.yml?query=branch%3Amain)
 
-gtm-connector builds a Deal card for a renewal from Salesforce, call transcripts, and Slack. A Deal
-card is what the connector prints about one account before a renewal conversation. The card prints
-no figure, date, name, or quotation it cannot point to in a stored record. It labels who said each
-sentence and on what basis, and it says what it did not read. No model writes any of it.
+gtm-connector builds a Deal card for a renewal from Salesforce, call transcripts, and Slack: what the
+records say about one account, before the renewal conversation. Every figure, date, name, and
+quotation on the card points to a stored record. Each sentence is labelled with who said it and on
+what basis, and the card says what it did not read. The connector writes every character. No model
+does.
 
-`gtm-connector demo`, on an invented law firm whose CRM record looks healthy:
+Here is the demo, on an invented law firm. Its CRM record says healthy. Three days earlier, on a
+call, the customer's deputy general counsel said their general counsel will not sign until a rider
+is approved. The card shows both, and where each came from.
+
+```sh
+pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo
+```
 
 ```text
 DEAL CARD: "Thornfield Wren LLP" (acc-003) as of 2027-01-15
@@ -86,6 +93,9 @@ Source text SHA-256   105807d2…
 Neutralizer version   3
 ```
 
+> **A changed card is refused.** `inspect` checks a saved card against its seal first, and refuses
+> one that was changed or copied from another folder.
+
 ## What it is tested against
 
 [Ten invented deals](tests/test_cases.py), each built to break one property. These pass today:
@@ -103,12 +113,8 @@ Neutralizer version   3
 
 ## Try it
 
-The command below uses pipx and Python 3.11 or later. The demo runs on invented data, with no model
-and no external service.
-
-```sh
-pipx run --spec 'git+https://github.com/pwngh/gtm-connector.git' gtm-connector demo
-```
+The demo command at the top uses pipx and Python 3.11 or later. It runs on invented data, with no
+model and no external service.
 
 `pipx install` with the same source keeps the command on your PATH. From a checkout,
 `./scripts/demo.sh` installs the pinned dependencies, runs the tests, and runs the demo.
