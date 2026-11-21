@@ -31,27 +31,29 @@ cards read the recorded rows through the Go reader, served by an invented org.
 
 | Step | What it will do | On main today | Done when |
 | --- | --- | --- | --- |
-| Gate | Confirm that Go matches Python on what is ported so far | The parity tests pass at 450 of 450. `make verify-real` compares Python and Go on public text and JSON. | Both pass at the final head, the time to publish a card is measured, and a cold Compose start reaches sign-in and a sealed card read |
+| Gate | Confirm that Go matches Python on what is ported so far | The parity tests pass at 450 of 450. `make verify-real` compares Go on public text and JSON with the digests the Python package recorded there. | Both pass at the final head, the time to publish a card is measured, and a cold Compose start reaches sign-in and a sealed card read |
 | Evidence | Neutralize a bare mail address such as `dana@files.example`, which a GitHub Markdown client links. Raise the neutralizer version, so a card sealed under older rules is shown under the current ones. Show the host of an `xn--` label that decodes to a valid name, which takes the IDNA tables. | A link shows the host a browser opens, read as the URL Standard reads it and without a leading `www.`, or `[link unknown host]` when a browser would open another host or none: a backslash, a control character, a tab or a line break before the path, no `//` after the scheme, a scheme other than `http`, `https`, `ftp`, `ws` and `wss`, a numeric host a browser rewrites, a port past 65535, a host in brackets, or an `xn--` label. A Markdown link is replaced whole, and an angle-bracket link, a mail address in angle brackets and a reference definition where a paragraph starts are neutralized, with their escapes and character references read. Neutralizing twice gives the same text. Go checks imported transcripts and live Slack threads as Python does. | Each of those forms has a test, and real text still matches |
 | Sources | Port transcript import (one TXT, VTT or SRT file, with an excerpt), one mapped Slack thread per account, and Salesforce through the `sf` CLI or a token given to the container | Go reads the demo book and a Salesforce org through `sf`. `connect salesforce --org ALIAS --state-dir NAME` signs in, checks the org against `--environment` and pins the workspace to its identity and the user it reads as, and refuses another org or user there, also after a removal and after a login refresh. An `--org` that cannot be an `sf` alias, such as a token, never reaches `sf`. `accounts`, `inspect`, `brief` and `audit` then read it, each read under a receipt, and `debug salesforce check` reports the sign-in, the environment, each object's fields and, in a connected workspace, the contract a renewal plans from. Tests run every command against an invented org and an invented `sf`: `brief` makes the CRM part of all 78 recorded Salesforce cards byte for byte (the recording read calls and Slack from demo data, which Go never reads beside a real CRM), and a cancelled `connect` ends the `sf` process group and saves nothing. A token given to the container is not read. `connect calls` connects imported transcripts beside the demo CRM, or beside a CRM a test registers, and `debug calls import`, `list` and `inspect` work as the Python CLI's do, except `--account-number`, which is refused as not in this build. An import's account is resolved by a `get_account` read under its own receipt, and `brief` reads the account's active import. `demo` and the MCP tools read calls through the same source, untested with imports. Go signs in to Slack (`debug slack connect`, with PKCE and the loopback callback), keeps the sign-in in the credentials folder, connects it (`connect slack`) beside a real CRM, maps one thread per account (`debug slack map`), checks its read (`debug slack check`) and reads it onto a card, in tests against an invented Slack. | Go builds all 450 recorded cards, in memory and on PostgreSQL. Recorded source requests and responses replay offline. A cancelled read ends the `sf` process group and publishes no card. |
 | Commands and MCP | Port the seven commands and `debug` to PostgreSQL, where `--state-dir` names a workspace. Serve MCP over HTTPS and stdio with the read tools, under the same Host, scope, selection and expiry checks. One outer receipt per tool call, plus one per read inside a prepared brief. | Go has `setup`, `serve`, `demo`, `backup`, `restore`, `health` and `version`, and `connect`, `accounts`, `brief`, `inspect` and `audit` on demo data and Salesforce, where `--state-dir` names a workspace and the default is `demo`. `connect` attaches and detaches the demo data, Salesforce and imported transcripts and shows what is connected. Salesforce goes in a workspace named with `--state-dir`, because the default one holds demo data. `connect slack` connects the saved Slack sign-in beside a real CRM. `connect` refuses the assistant apps as not in this build, and nothing reads demo data in their place. `demo --state-dir` is the recorded demo: one renewal with a lookup and a refused read. The binary matches 33 of the 33 recorded steps, 8 of them apart from the recorder's clock. `debug calls`, `debug salesforce check` and `debug slack` are ported. The rest of `debug` is not. `serve` answers MCP over HTTPS at `/mcp` for each token in the workspace it was issued in: the read tools over the demo book or a Salesforce org, for the accounts the token's principal is granted, and with `--selection FILE` the two brief tools, for the demo workspace only. The recorded request vectors pass there, and the write vectors are refused with a receipt. A token that carries any scope but the three read scopes is refused. `token new` issues a read-only token for one workspace, shown once, and `token list` and `token revoke` manage them. `mcp stdio` serves a workspace's read tools on stdin and stdout under the same gate, reading the sources as they are connected at each call, and the recorded stdio bridge tests pass through it on PostgreSQL. The Inspector runs against the binary over HTTPS and stdio. | The recorded command session replays against the binary, and source and client setup work through it. The recorded request vectors pass on both transports, except the write vectors, which are refused with a receipt. The Inspector runs against the binary. |
 | Existing cards | Open the cards and receipts the Python package made. They are verified and kept byte for byte, never rebuilt. | Go verifies both kinds of Python card in tests. No command admits them yet. | The four recorded card folders are admitted and inspected, a changed byte is refused, and admitting twice adds nothing |
-| Cutover | Ship one binary with the web app inside it (`go:embed`), for macOS and Linux on arm64 and amd64, with checksums. Remove the Python package, its tests, `tools/oracle/` and their CI jobs, and rewrite the docs for Go. | `make build` and the image build one binary with the web app inside it. `make release` builds it for macOS and Linux on arm64 and amd64 and writes `SHA256SUMS`; CI runs it and checks the four binaries against their sums. A version tag attaches the five files to a GitHub release. No tag has been pushed, so there is no release to download, and the Python package is still here. The guides under `docs/` describe the Go binary. The Python package's guides, in [`docs/python/`](python/), go with the package. | The binary, run outside a checkout, serves a deep-linked Evidence page and its assets. A backup taken before the cutover restores. The Go tests pass with Python gone, and real text still matches the digests recorded before the removal. |
+| Cutover | Ship one binary with the web app inside it (`go:embed`), for macOS and Linux on arm64 and amd64, with checksums. Remove the Python package, its tests, `tools/oracle/` and their CI jobs, and rewrite the docs for Go. | `make build` and the image build one binary with the web app inside it. `make release` builds it for macOS and Linux on arm64 and amd64 and writes `SHA256SUMS`; CI runs it and checks the four binaries against their sums. A version tag attaches the five files to a GitHub release. No tag has been pushed, so there is no release to download. The Python package, its tests, `tools/oracle/` and their CI jobs are removed, and the guides under `docs/` describe the Go binary. The Go tests pass without Python, and `make verify-real` compares Go with the digests the Python package recorded on public text before its removal, kept in `internal/realdata/recorded`. | The binary, run outside a checkout, serves a deep-linked Evidence page and its assets. A backup taken before the cutover restores. |
 
 ### What changes for you at cutover
 
-You will install the binary, or run `make up` with Docker Compose, where you ran `pipx install`.
-The binary needs PostgreSQL 19 or 18.7; `make up` runs one.
+The Python package is gone from the repository. Build the binary with `make build`, or run
+`make up` with Docker Compose, where you ran `pipx install`. The binary needs PostgreSQL 19 or 18.7;
+`make up` runs one.
 
-The commands, their exit codes and their `--json` output will stay, and card text will be the same
-byte for byte. The one exception is writing: `log_activity` and the `crm:write` scope will be
-removed, and a write attempt will be refused with a receipt.
+The commands, their exit codes and their `--json` output stay, and card text is the same byte for
+byte. The one exception is writing: `log_activity` and the `crm:write` scope are removed, and a
+write attempt is refused with a receipt.
 
-State will live in PostgreSQL, so `--state-dir` will name a workspace there and not a folder. The
-cards and receipts the Python package made will still open and verify. Nothing else will move. You
-will connect your sources again, import your transcripts again, map your Slack threads again, and
-set your seller lists and selection files again. You will also set up your assistant apps again,
-because their saved entries start the Python package.
+State lives in PostgreSQL, so `--state-dir` names a workspace there and not a folder. The cards and
+receipts the Python package made verify in tests, and no command admits them yet (Existing cards,
+above). Nothing else moves. Connect your sources again, import your transcripts again, map your Slack
+threads again, and set your seller lists and selection files again. Set up your assistant apps again
+too: their saved entries start the Python package, which is no longer here. `token new` gives an
+HTTPS client its token, and `mcp stdio` is the command an assistant app starts.
 
 The web app the binary serves shows the deal list at `/deals`, which `/` opens, and the Ops pages
 Coverage, Evidence and Readiness at `/ops/coverage`, `/ops/evidence` and `/ops/readiness`, which
@@ -162,15 +164,14 @@ grouped by the v0.1.0 step that owns the check.
 - macOS as a supported platform alongside Linux.
 - `serve` refusing to start while a restore is unfinished (setup and `demo` are tested).
 - `make verify-real`:
-  - its `DATASETS`, `LOCAL` and `PYTHON` options;
+  - its `DATASETS` and `LOCAL` options;
   - its default cache folder and the counts in `items.json`;
   - the count of non-empty outputs per function;
   - the fields of a printed difference line;
   - `report.json` listing only the first 1,000 differences;
   - the `realdata` command exiting 1 on a difference;
   - `realdata fetch` for a pinned dataset with no converter, and an unnamed run reporting the datasets it skips;
-  - refusing an existing `FILE.r0` owned by someone else;
-  - refusing an oracle package that differs from the recorded one.
+  - refusing an existing `FILE.r0` owned by someone else.
 
 </details>
 

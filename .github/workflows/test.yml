@@ -10,63 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  quality:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      matrix:
-        python-version: ['3.11', '3.14.6']
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ matrix.python-version }}
-      - run: |
-          python3 -m venv .venv
-          .venv/bin/python -m pip install --disable-pip-version-check --require-hashes -r requirements-dev.lock
-          .venv/bin/python -m pip check
-          .venv/bin/python -m ruff check .
-          .venv/bin/python -m mypy
-      - name: Check all shell completion scripts
-        if: matrix.python-version == '3.11'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y fish zsh
-          GTM_REQUIRE_SHELLS=1 .venv/bin/python -m unittest discover -s tests -p test_completion.py -v
-      - name: Check the installed command outside the checkout
-        run: |
-          .venv/bin/python -m pip wheel --no-deps --no-build-isolation --wheel-dir "$RUNNER_TEMP/wheels" .
-          .venv/bin/python -m pip install --no-deps "$RUNNER_TEMP"/wheels/gtm_connector-*.whl
-          cd "$RUNNER_TEMP"
-          "$GITHUB_WORKSPACE/.venv/bin/gtm-connector" --version
-          "$GITHUB_WORKSPACE/.venv/bin/python" -m gtm_connector --help
-          "$GITHUB_WORKSPACE/.venv/bin/gtm-connector" demo --json > installed-demo.json
-          "$GITHUB_WORKSPACE/.venv/bin/python" -c 'import json; r=json.load(open("installed-demo.json")); assert r["status"] == "accepted" and r["account"]["id"] == "acc-003" and r["audit"]["rows"] == 7 and r["activities_created"] == 0 and r["brief"]["text"].startswith("DEAL CARD")'
-          "$GITHUB_WORKSPACE/.venv/bin/gtm-connector" debug verify --json --state-dir installed-verification > installed-verification.json
-          "$GITHUB_WORKSPACE/.venv/bin/python" -c 'import json; r=json.load(open("installed-verification.json")); assert r["accounts"] == 30 and r["audit_rows"] == 12 and r["brief_audit_rows"] == 9 and r["idempotent_write"]["activities"] == 1'
-      - name: Check generated audit sequences
-        run: .venv/bin/python -m unittest discover -s tests_stateful -v
-
-  test:
-    runs-on: ubuntu-latest
-    # The suite starts a local server for each end-to-end case and takes up to fifteen minutes here.
-    timeout-minutes: 25
-    strategy:
-      matrix:
-        python-version: ['3.11', '3.14.6']
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ matrix.python-version }}
-      - run: ./scripts/demo.sh
-        env:
-          GTM_REQUIRE_ORACLE: ${{ matrix.python-version == '3.14.6' && '1' || '' }}
-
   go:
     runs-on: ubuntu-latest
     timeout-minutes: 10

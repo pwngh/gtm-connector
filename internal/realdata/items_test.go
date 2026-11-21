@@ -137,7 +137,7 @@ func longWords(text string) []string {
 	return found
 }
 
-// Both readers accept and refuse the same lines (tools/oracle/real.py reads the same vectors).
+// The reader accepts and refuses each line as the oracle's reader did when the records were made.
 func TestItemLineVectors(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "item-lines.json"))
 	if err != nil {

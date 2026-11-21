@@ -13,7 +13,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The thread and the invented answers of tests/test_slack_reader.py.
+// The thread and the invented answers of the removed Python suite.
 const (
 	parentTS  = "1700000000.000001"
 	replyTS   = "1700000000.000002"
@@ -889,7 +889,7 @@ func TestTheReportHoldsNoSourceValue(t *testing.T) {
 }
 
 func TestExitCodes(t *testing.T) {
-	// The exit code docs/python/slack.md gives each reason a read can stop for.
+	// The exit code docs/sources.md gives each reason a read can stop for.
 	for reason, exit := range map[string]int{"slack_mapping_missing": 3, "slack_resource_limit": 3,
 		"slack_output_too_large": 3, "slack_thread_incomplete": 3, "slack_thread_unavailable": 3,
 		"slack_thread_changed": 3, "slack_forbidden": 3, "slack_source_mismatch": 3, "slack_clock_invalid": 3,

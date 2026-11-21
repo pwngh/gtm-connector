@@ -715,7 +715,7 @@ func slackRefused(t *testing.T, d *demoDatabase, code int, argv ...string) strin
 	return refused.Error.Message
 }
 
-// What the Slack commands refuse, with the exit codes docs/python/slack.md lists. A workspace that reads
+// What the Slack commands refuse, with the exit codes docs/sources.md lists. A workspace that reads
 // demo Slack never reads live Slack, and nothing is saved by a refusal.
 func TestSlackCommandsRefuse(t *testing.T) {
 	d, folder, wall := slackSetup(t)

@@ -3,6 +3,9 @@
 This review records the boundary and the evidence behind each guarantee. It covers one local
 connector process and one operator. No model takes part.
 
+> **This review is being rewritten for the Go binary**, and until then its text and the test files it
+> names describe the removed Python package.
+
 > **This review is not production approval.** Real data or shared deployment requires a separate
 > review.
 
@@ -46,21 +49,21 @@ Scopes do not imply one another. The gateway and the handlers both enforce them.
 
 | Guarantee | Tests |
 | --- | --- |
-| Each scope reaches only its own tools. A missing scope returns HTTP 403. | [test_gateway.py](tests/test_gateway.py), [test_slack_gateway.py](tests/test_slack_gateway.py) |
-| Invalid, expired, malformed, or wrong-resource tokens return HTTP 401. | [test_gateway.py](tests/test_gateway.py), [test_auth.py](tests/test_auth.py) |
-| Codes are single use, PKCE is S256, and no refresh token is issued. | [test_auth.py](tests/test_auth.py) |
-| Each recognizable tool attempt commits one `pending` receipt before execution. | [test_audit.py](tests/test_audit.py), [test_gateway.py](tests/test_gateway.py) |
-| An initial audit failure returns HTTP 503 and the tool does not run. A finalization failure returns HTTP 503 and releases no result. | [test_gateway.py](tests/test_gateway.py), [test_slack_gateway.py](tests/test_slack_gateway.py) |
-| An identical write retry reuses one activity. A changed payload returns `idempotency_conflict`. | [test_gateway.py](tests/test_gateway.py) |
-| The rate limit returns HTTP 429 with `rate_limited` and `Retry-After`. | [test_gateway.py](tests/test_gateway.py), [test_request_checks.py](tests/test_request_checks.py) |
-| The connector writes every character of a card. Each value and quotation carries a number that resolves to a stored record and the receipt of the read that returned it. | [test_units.py](tests/test_units.py), [test_cases.py](tests/test_cases.py) |
-| Evidence with a record of another account, a missing or mismatched receipt, a receipt with no valid start time, a changed transcript or Slack snapshot, or an unknown shape gives no card. | [test_units.py](tests/test_units.py), [test_imported_briefing.py](tests/test_imported_briefing.py), [test_live_slack_briefing.py](tests/test_live_slack_briefing.py) |
-| Source text is neutralized before anything displays it, in the card and in printed JSON: Slack mentions, links, control characters, and bracketed numbers become inert words. The raw records stay in the saved file. A quotation is one whole sentence, and a figure inside it never becomes a record value. | [test_units.py](tests/test_units.py), [test_cases.py](tests/test_cases.py), [test_briefing.py](tests/test_briefing.py), [test_cli.py](tests/test_cli.py) |
-| A speaker's role comes from a label, never from wording: a seller the operator listed, or a call label equal to exactly one contact of the account. Anything else is unknown, and a Slack author is never a customer. | [test_units.py](tests/test_units.py), [test_cases.py](tests/test_cases.py) |
-| Keys rotate per start, the certificate names loopback, and state files are private. | [test_runtime.py](tests/test_runtime.py) |
-| Server events carry no bearer token, argument, or source body. | [test_call_events.py](tests/test_call_events.py) |
-| A saved card's file is replaced atomically. Audit inspection is read-only. | [test_brief_persistence.py](tests/test_brief_persistence.py), [test_audit_reader.py](tests/test_audit_reader.py) |
-| `demo` records seven receipts, five successful reads, one refusal and the seal of the saved card (its `save_brief` receipt), and creates no activity. | [test_demo.py](tests/test_demo.py) |
+| Each scope reaches only its own tools. A missing scope returns HTTP 403. | `test_gateway.py`, `test_slack_gateway.py` |
+| Invalid, expired, malformed, or wrong-resource tokens return HTTP 401. | `test_gateway.py`, `test_auth.py` |
+| Codes are single use, PKCE is S256, and no refresh token is issued. | `test_auth.py` |
+| Each recognizable tool attempt commits one `pending` receipt before execution. | `test_audit.py`, `test_gateway.py` |
+| An initial audit failure returns HTTP 503 and the tool does not run. A finalization failure returns HTTP 503 and releases no result. | `test_gateway.py`, `test_slack_gateway.py` |
+| An identical write retry reuses one activity. A changed payload returns `idempotency_conflict`. | `test_gateway.py` |
+| The rate limit returns HTTP 429 with `rate_limited` and `Retry-After`. | `test_gateway.py`, `test_request_checks.py` |
+| The connector writes every character of a card. Each value and quotation carries a number that resolves to a stored record and the receipt of the read that returned it. | `test_units.py`, `test_cases.py` |
+| Evidence with a record of another account, a missing or mismatched receipt, a receipt with no valid start time, a changed transcript or Slack snapshot, or an unknown shape gives no card. | `test_units.py`, `test_imported_briefing.py`, `test_live_slack_briefing.py` |
+| Source text is neutralized before anything displays it, in the card and in printed JSON: Slack mentions, links, control characters, and bracketed numbers become inert words. The raw records stay in the saved file. A quotation is one whole sentence, and a figure inside it never becomes a record value. | `test_units.py`, `test_cases.py`, `test_briefing.py`, `test_cli.py` |
+| A speaker's role comes from a label, never from wording: a seller the operator listed, or a call label equal to exactly one contact of the account. Anything else is unknown, and a Slack author is never a customer. | `test_units.py`, `test_cases.py` |
+| Keys rotate per start, the certificate names loopback, and state files are private. | `test_runtime.py` |
+| Server events carry no bearer token, argument, or source body. | `test_call_events.py` |
+| A saved card's file is replaced atomically. Audit inspection is read-only. | `test_brief_persistence.py`, `test_audit_reader.py` |
+| `demo` records seven receipts, five successful reads, one refusal and the seal of the saved card (its `save_brief` receipt), and creates no activity. | `test_demo.py` |
 
 ## Local authority, audit receipts, cards, and transcripts
 
@@ -103,7 +106,7 @@ alias and `--json`, using argument arrays and no shell.
 | Writes | The write tool is omitted. A write attempt returns HTTP 403. |
 | HTTP 401 | The first 401 in an operation may reacquire credentials once through `sf`, read the Organization again to confirm the same org, and retry the same GET. Time spent waiting for `sf` is added back to the read's deadline. An `sf` that does not answer in time returns `salesforce_cli_timeout`. A second 401, a lookup failure, or a changed origin or org returns `salesforce_auth_required`. Other errors are not retried. |
 | `debug salesforce check` | A local diagnostic the operator runs. Its report holds fixed step names, outcomes, counts, timings, fixed errors, and missing required field names. It returns no source record, ID, org detail, or credential. |
-| Tests and guide | [test_sf_credentials.py](tests/test_sf_credentials.py), with a fake CLI on PATH. [docs/sources.md](docs/sources.md#salesforce). |
+| Tests and guide | `test_sf_credentials.py`, with a fake CLI on PATH. [docs/sources.md](docs/sources.md#salesforce). |
 
 ## Slack (optional, read-only)
 
@@ -121,7 +124,7 @@ alias and `--json`, using argument arrays and no shell.
 | Read budget | Ten HTTP attempts, 1 MiB of response bytes, and a 20-second deadline per read, covering pages, authentication, failures, and retries. One rate-limit retry, with a valid delay of at most five seconds. Only exact token expiry permits one retry, with at most one local refresh. An ambiguous refresh is not retried and then requires browser login. |
 | Content | Missing text, unsupported subtypes, and hidden content refuse the whole observation. Files, blocks, and attachments add omission counts only. A completed read does not establish a full archive or an atomic view while messages change. |
 | `debug slack check` | Reads the mapped thread through a temporary local service that enables only the Slack read tool. Its report holds no identifiers, paths, URLs, or message text. |
-| Tests and guides | [test_slack_auth.py](tests/test_slack_auth.py) and [test_slack_reader.py](tests/test_slack_reader.py). [docs/sources.md](docs/sources.md#slack). |
+| Tests and guides | `test_slack_auth.py` and `test_slack_reader.py`. [docs/sources.md](docs/sources.md#slack). |
 
 ## Selected sources and prepared briefs
 
@@ -141,7 +144,7 @@ caller's grant.
 | `prepare_renewal_brief`, missing scope or failure | A missing calls or Slack scope makes the card say that source was not read. Any other failure, including an audit write failure, an expired token, a rate limit, or a 45-second brief deadline, leaves no readable brief. |
 | `read_renewal_brief` | A saved brief counts only if its own outer call finished successfully and that receipt names the SHA-256 digest of the saved file. A brief ID alone grants nothing. The tool makes no source system call and reports that it did not recheck the source systems. |
 | `read_renewal_brief`, release | It releases the brief only while the account and any Slack thread it contains are still selected, the caller's current grant has every scope the brief's content needs, and the source bindings, transcript revision, and Slack mapping are unchanged. For live Slack it also requires a ready local credential for the same identity with at least the scopes of each credential that returned a page of the brief's thread. That decision is made while holding the Slack connection lock. A disconnect that finishes after the decision does not recall the response. |
-| Tests and guide | [test_selected_sources.py](tests/test_selected_sources.py). [docs/mcp.md](docs/mcp.md#selections-and-the-two-brief-tools). |
+| Tests and guide | `test_selected_sources.py`. [docs/mcp.md](docs/mcp.md#selections-and-the-two-brief-tools). |
 
 ## Known limits
 

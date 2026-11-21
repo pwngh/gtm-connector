@@ -23,11 +23,6 @@ type manifest struct {
 		Archives map[string]string `json:"archives"`
 		Packages string            `json:"packages"`
 	} `json:"node"`
-	Python struct {
-		Oracle   string   `json:"oracle"`
-		CI       []string `json:"ci"`
-		Packages []string `json:"packages"`
-	} `json:"python"`
 	Images struct {
 		Postgres         string `json:"postgres"`
 		PostgresFallback string `json:"postgres_fallback"`
@@ -123,7 +118,7 @@ func TestThePinsAreExact(t *testing.T) {
 			t.Errorf("%s is not pinned to a commit: %s", action, sha)
 		}
 	}
-	for _, name := range append([]string{m.Go.Modules, m.Node.Packages}, m.Python.Packages...) {
+	for _, name := range []string{m.Go.Modules, m.Node.Packages} {
 		if _, err := os.Stat(filepath.Join(root(t), filepath.FromSlash(name))); err != nil {
 			t.Errorf("the lock file %s: %v", name, err)
 		}
@@ -135,8 +130,8 @@ func TestThePinsAreExact(t *testing.T) {
 	}
 }
 
-// The Dockerfile, compose.yaml, the Makefile, .nvmrc, go.mod, the oracle's
-// manifest, the Inspector checks and both workflows all use the pins.
+// The Dockerfile, compose.yaml, the Makefile, .nvmrc, go.mod, the Inspector checks and both
+// workflows all use the pins.
 func TestTheBuildFilesUseThePins(t *testing.T) {
 	m := load(t)
 	check := func(file, what string, got []string, want ...string) {
@@ -161,13 +156,6 @@ func TestTheBuildFilesUseThePins(t *testing.T) {
 	minor, _, _ = strings.Cut(minor, ".")
 	check("go.mod", "the go line", all(read(t, "go.mod"), `(?m)^go (\S+)$`), major+"."+minor)
 
-	var oracle struct {
-		PythonVersion string `json:"python_version"`
-	}
-	if err := json.Unmarshal([]byte(read(t, "testdata/oracle/manifest.json")), &oracle); err != nil {
-		t.Fatal(err)
-	}
-	check("testdata/oracle/manifest.json", "python_version", []string{oracle.PythonVersion}, m.Python.Oracle)
 	for _, file := range []string{"internal/transport/mcp/inspector_test.go", "cmd/gtm-connector/inspector_test.go"} {
 		check(file, "inspector", all(read(t, file), `const inspector = "([^"]+)"`), m.MCPInspector)
 	}
@@ -179,16 +167,6 @@ func TestTheBuildFilesUseThePins(t *testing.T) {
 	check(ci, "the Inspector job's PostgreSQL image", all(workflow, `(?m)^\s+image: (postgres:\S+)$`), m.Images.Postgres)
 	check(ci, "the smoke job's PostgreSQL versions", all(workflow, `(?m)^\s+postgres: (\[.+\])$`),
 		"['"+strings.Join([]string{versionOf(m.Images.Postgres), versionOf(m.Images.PostgresFallback)}, "', '")+"']")
-	pythons := all(workflow, `(?m)^\s+python-version: (\[.+\]|'[^']+')$`)
-	want := "['" + strings.Join(m.Python.CI, "', '") + "']"
-	for _, p := range pythons {
-		if p != want && !slices.Contains(m.Python.CI, strings.Trim(p, "'")) {
-			t.Errorf("%s: python-version %s is not one of %v", ci, p, m.Python.CI)
-		}
-	}
-	if !slices.Contains(m.Python.CI, m.Python.Oracle) {
-		t.Errorf("CI does not run the oracle's Python %s", m.Python.Oracle)
-	}
 	// The test workflow and the release workflow set up Go and Node from the
 	// pins, and every action either uses is pinned to its commit.
 	used := map[string]bool{}

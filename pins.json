@@ -15,11 +15,6 @@
     },
     "packages": "web/package-lock.json"
   },
-  "python": {
-    "oracle": "3.14.6",
-    "ci": ["3.11", "3.14.6"],
-    "packages": ["requirements.lock", "requirements-dev.lock"]
-  },
   "images": {
     "postgres": "postgres:19.0-alpine3.24@sha256:8b0ff4cdf221f0c53d7fcda681d3b461be725c492cd881c5ec9c0ad25023f188",
     "postgres_fallback": "postgres:18.7-alpine3.24@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff",
@@ -30,8 +25,7 @@
   "actions": {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-go": "d8cbb8045d7f43706b9177cceb36c1f91a6644d5",
-    "actions/setup-node": "53b83947a5a98c8d113130e565377fae1a50d02f",
-    "actions/setup-python": "6d4fd22b20465ccc0f7354476588e8df7c9ca0e0"
+    "actions/setup-node": "53b83947a5a98c8d113130e565377fae1a50d02f"
   },
   "mcp_inspector": "2.15.0",
   "tested_with": {

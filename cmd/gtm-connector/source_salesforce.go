@@ -19,8 +19,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// Salesforce as a workspace's CRM: an org signed in with sf under an alias, read by internal/sources/salesforce
-// (gtm_connector/salesforce.py, sf_credentials.py and salesforce_check.py).
+// Salesforce as a workspace's CRM: an org signed in with sf under an alias, read by internal/sources/salesforce.
 //
 // connect salesforce --org ALIAS signs in through sf, checks the org against --environment and, outside
 // Developer Edition, the four objects' fields, and saves the alias and the environment with the digest of

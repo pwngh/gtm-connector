@@ -1,4 +1,4 @@
-// Package strictjson parses JSON as gtm_connector/strict_json.py does: it refuses duplicate keys,
+// Package strictjson parses JSON as the Python package's strict_json did: it refuses duplicate keys,
 // non-finite numbers and lone surrogates, and gives each refusal the type and message Python gives.
 // Nesting past MaxDepth is refused with ErrTooDeep, whose message is its own.
 //

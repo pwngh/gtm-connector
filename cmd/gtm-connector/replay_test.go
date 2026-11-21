@@ -22,7 +22,7 @@ import (
 
 // The command session is testdata/oracle/commands/session.jsonl: the Python CLI's arguments, exit code and
 // output for each step, run in order against one state folder. The replay runs the Go binary through the same
-// steps and compares it with the recording, after the normalization tools/oracle/commands.py applies.
+// steps and compares it with the recording, after the normalization the recorder applied.
 //
 // The recorder ran every step on its own clock: each receipt one whole second after the one before it, and no
 // elapsed time. The recording's card lines, receipt times and elapsed_ms hold that clock. The replay does not
@@ -198,7 +198,7 @@ func (r *replay) learn(text string) {
 	}
 }
 
-// normalize is Session.normalize of tools/oracle/commands.py: the folder becomes <state> or <folder>, each ID,
+// normalize is the recorder's normalization: the folder becomes <state> or <folder>, each ID,
 // port, token fingerprint and receipt time becomes a placeholder numbered by where its value first appears in
 // the session, and a seal's digest becomes <sha256>.
 func (r *replay) normalize(text string) string {
@@ -487,7 +487,7 @@ func TestRecordedCommandSession(t *testing.T) {
 	t.Log(summary)
 }
 
-// The expected texts are what Session.normalize of tools/oracle/commands.py gives for the same two texts, in
+// The expected texts are what the recorder's normalization gave for the same two texts, in
 // a folder whose name the shell quotes, with the same tokens and times known.
 func TestReplayNormalizesAsTheRecorderDoes(t *testing.T) {
 	const (

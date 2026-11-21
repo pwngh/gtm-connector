@@ -111,7 +111,7 @@ TOKEN
 This is the bearer token. It is shown once and not stored: keep it out of files others can read,
 commits and model prompts.
 ID 5e2229d8-ddd7-4c14-9762-ea42b8dddac8, for the workspace demo, with crm:read calls:read, expires 2027-01-15T09:05:00Z.
-Send it as Authorization: Bearer TOKEN to https://127.0.0.1:8443/mcp, which serve answers for the demo workspace.
+Send it as Authorization: Bearer TOKEN to https://127.0.0.1:8443/mcp, where serve answers it in the workspace demo.
 Its calls: gtm-connector audit --caller CALLER
 Revoke it: gtm-connector token revoke 5e2229d8-ddd7-4c14-9762-ea42b8dddac8
 ```

@@ -1,5 +1,5 @@
 // Package salesforcetest is an invented Salesforce org and an invented sf, for tests that read through the
-// Salesforce source without a network, a real sf or a credential (tests/test_books_salesforce.py's Org).
+// Salesforce source without a network, a real sf or a credential (the removed Python suite's Org).
 package salesforcetest
 
 import (

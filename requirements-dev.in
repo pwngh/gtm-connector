@@ -1,6 +1,0 @@
-# Development tools stay separate from the demo install.
--r requirements.in
-ruff==0.17.5
-mypy==2.4.1
-pip-tools==7.7.0
-hypothesis==6.170.15

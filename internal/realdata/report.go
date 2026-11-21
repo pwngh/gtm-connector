@@ -18,6 +18,9 @@ func PrintReport(w io.Writer, r *Report, run Run) {
 	}
 	fmt.Fprintf(w, "compare: %s against Python's %s (CPython %s, package %s), %d text items and %d JSON documents in %.1f s\n",
 		r.Run, r.Against, r.Python, shown, r.TextItems, r.JSONItems, r.Seconds)
+	if r.Against == "recorded digests" {
+		fmt.Fprintf(w, "  a difference counts each item of a block of %d whose digest differs\n", BlockItems)
+	}
 	fmt.Fprintf(w, "  %-24s %9s %10s %9s %12s\n", "function", "items", "non-empty", "matches", "differences")
 	fmt.Fprintf(w, "  %-24s %9d %10s %9d %12d\n", "item (decoding the line)", r.Decoding.Items, "",
 		r.Decoding.Matches, r.Decoding.Differences)
@@ -42,6 +45,10 @@ func PrintReport(w io.Writer, r *Report, run Run) {
 		if i == shownDifferences {
 			fmt.Fprintf(w, "  and %d more listed in the report\n", len(r.Differences)-shownDifferences)
 			break
+		}
+		if r.Against == "recorded digests" {
+			fmt.Fprintf(w, "  %s at %s\n", d.Function, d.Position)
+			continue
 		}
 		where := fmt.Sprintf("line %d", d.Line)
 		if !run.Local {

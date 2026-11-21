@@ -13,7 +13,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The invented sign-in of tests/test_slack_auth.py. No value here was ever issued by Slack.
+// The invented sign-in of the removed Python suite. No value here was ever issued by Slack.
 const (
 	testClient     = "123456789.987654321"
 	testRedirect   = "http://localhost:8765/slack/callback"

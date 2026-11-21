@@ -1,0 +1,112 @@
+{
+ "dataset": "earnings21",
+ "python": "3.14.6",
+ "unicode": "16.0.0",
+ "package_sha256": "40bce05115e84755a52ffe8b7153d1759d34286f7ed2065d673b08a20804b987",
+ "items_sha256": "69533a3bfaffcab11127e130f0523928863f0d6eac80566377ef32b2c1e7ae23",
+ "items": 3106,
+ "block_items": 8192,
+ "decoding": [
+  "6eff85ef44cd7b5b903d442fe4d6abcf1f3b10972458743c6f0c64284a458b28"
+ ],
+ "functions": [
+  {
+   "function": "safe_text",
+   "items": 3062,
+   "blocks": [
+    "0552eeef63a8853c5e02f320d50b8085a3fe53c56204cf2fc269823cae6deafb"
+   ]
+  },
+  {
+   "function": "sentences",
+   "items": 3062,
+   "blocks": [
+    "98322d6a24d58918131da3334f3e36e8d03ac2c67423eb1f085f62de086d675f"
+   ]
+  },
+  {
+   "function": "sentences_lines",
+   "items": 3062,
+   "blocks": [
+    "98322d6a24d58918131da3334f3e36e8d03ac2c67423eb1f085f62de086d675f"
+   ]
+  },
+  {
+   "function": "sentences_safe",
+   "items": 3062,
+   "blocks": [
+    "e20dafb2df35ed60a46a52bbce52b497ee123251de8dca7289df4bc3cf690b27"
+   ]
+  },
+  {
+   "function": "sentences_safe_lines",
+   "items": 3062,
+   "blocks": [
+    "e20dafb2df35ed60a46a52bbce52b497ee123251de8dca7289df4bc3cf690b27"
+   ]
+  },
+  {
+   "function": "units_target",
+   "items": 3062,
+   "blocks": [
+    "050ed46c2b4e733766baa6345e3202a35caeea271c3af307a8aa3044eaca759f"
+   ]
+  },
+  {
+   "function": "units_raw_link",
+   "items": 3062,
+   "blocks": [
+    "306cef2ba030006caba26d6ce16d4a91d70e417b529a1d4a73c8ee9177f0ecb8"
+   ]
+  },
+  {
+   "function": "units_sentence_end",
+   "items": 3062,
+   "blocks": [
+    "6889eec2d4ccc1cd1204332b0008e6eadda83e396423a7b6e65b0b979e6ae131"
+   ]
+  },
+  {
+   "function": "units_opener",
+   "items": 3062,
+   "blocks": [
+    "ece8f00b8cbdfa89d9d1dbc5fd0e90849c68daac1088e142688a391b87079336"
+   ]
+  },
+  {
+   "function": "units_named",
+   "items": 3062,
+   "blocks": [
+    "3b1923c0e033e5df73f9a0359f61bd44df32979818f6b43d1fccc4ffe479377e"
+   ]
+  },
+  {
+   "function": "slack_mapping_percent",
+   "items": 3062,
+   "blocks": [
+    "7fad35f89d88a4825f83a4a7d6c7ec552eca8e2e6f05cbaff316a74a5b14d442"
+   ]
+  },
+  {
+   "function": "slack_callback_percent",
+   "items": 3062,
+   "blocks": [
+    "7fad35f89d88a4825f83a4a7d6c7ec552eca8e2e6f05cbaff316a74a5b14d442"
+   ]
+  },
+  {
+   "function": "strict_json",
+   "items": 44,
+   "blocks": [
+    "b6511829b0fbf18a4ab78334f0a1052ee3daf2d4e8903ee6f591632ef0ed6bf5"
+   ]
+  },
+  {
+   "function": "strict_json_decimal",
+   "items": 44,
+   "blocks": [
+    "b6511829b0fbf18a4ab78334f0a1052ee3daf2d4e8903ee6f591632ef0ed6bf5"
+   ]
+  }
+ ]
+}

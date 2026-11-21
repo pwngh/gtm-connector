@@ -19,7 +19,7 @@ import (
 )
 
 // The mcp command serves the connector's MCP tools on stdin and stdout, for an assistant app that starts it
-// as a process (gtm_connector/stdio_bridge.py). It reads the workspace --state-dir names from PostgreSQL
+// as a process. It reads the workspace --state-dir names from PostgreSQL
 // itself, as the app role, so no server needs to run. Each request passes the gate the HTTPS endpoint uses,
 // as a machine principal: the workspace's MCP clients principal, holding a token made for this process with
 // exactly the scopes given. The token is never shown. It lasts two minutes, is renewed every 30 seconds while

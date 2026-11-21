@@ -443,7 +443,7 @@ func TestInspectShowsAReceiptsArgumentsInert(t *testing.T) {
 	}
 }
 
-// The messages are argparse's for the same arguments, as gtm_connector/cli.py reports them.
+// The messages are argparse's for the same arguments, as the recorded Python CLI reported them.
 func TestArgumentsAreRefusedAsTheRecordedParserRefusesThem(t *testing.T) {
 	for _, c := range []struct{ command, tokens, message string }{
 		{"brief", "", "the following arguments are required: account_id"},

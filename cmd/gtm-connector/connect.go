@@ -11,8 +11,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// connect is the one command that changes what a workspace reads, as gtm_connector/cli.py's connect does
-// for a state folder: it attaches or detaches one source, or shows what is connected. The sources it knows
+// connect is the one command that changes what a workspace reads: it attaches or detaches one source, or shows what is connected. The sources it knows
 // are sourceKinds (sources.go). What it saves are connection rows and the seller list, never a credential.
 //
 // A workspace is made for demo data or for real sources, and keeps that: demo data and a real source never

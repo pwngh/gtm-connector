@@ -25,7 +25,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// debug slack, as gtm_connector/cli.py runs it: connect, status and disconnect work on the workspace's saved
+// debug slack: connect, status and disconnect work on the workspace's saved
 // sign-in and need no database; map saves the thread of one account after an audited CRM read; check reads
 // that thread through read_slack_messages under a receipt and reports its steps in counts, never in text.
 
@@ -904,7 +904,7 @@ func slackDetails(code string) (string, string) {
 	return detail[0], detail[1]
 }
 
-// slackExits are the exit codes of every refusal of the Slack commands, as docs/python/slack.md lists them.
+// slackExits are the exit codes of every refusal of the Slack commands, as docs/sources.md lists them.
 var slackExits = map[string]int{
 	"slack_invalid_configuration": 2, "slack_connection_busy": 1, "slack_private_state_invalid": 3,
 	"slack_credentials_invalid": 4, "slack_not_connected": 3, "slack_reconnect_required": 3,

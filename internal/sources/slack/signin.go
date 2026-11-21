@@ -15,7 +15,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// The sign-in commands, as gtm_connector/slack_auth.py runs them: Connect, the browser sign-in with PKCE
+// The sign-in commands: Connect, the browser sign-in with PKCE
 // against an existing public client; Status, which reads the saved sign-in or checks it with Slack; and
 // Disconnect, which removes it and may first ask Slack to revoke its access token. Each runs under the saved
 // sign-in's lock. Each refusal is an *Error with one fixed code, and no token reaches a result or an error.
@@ -28,7 +28,7 @@ const (
 // loginTime is how long a sign-in waits for the browser's approval.
 var loginTime = 10 * time.Minute
 
-// signInExits are the exit codes of the refusals only the sign-in commands give, as docs/python/slack.md
+// signInExits are the exit codes of the refusals only the sign-in commands give, as docs/sources.md
 // lists them.
 var signInExits = map[string]int{
 	"slack_browser_unavailable": 1, "slack_callback_unavailable": 1, "slack_login_timeout": 1,
@@ -49,7 +49,7 @@ type Configuration struct {
 }
 
 // NewConfiguration checks what a sign-in was asked for before any file, browser or request is used. No
-// scopes asks for channels:history. Anything else that is not as docs/python/slack.md states it refuses
+// scopes asks for channels:history. Anything else that is not as docs/sources.md states it refuses
 // with slack_invalid_configuration.
 func NewConfiguration(clientID, redirectURI string, scopes []string, teamID string) (Configuration, error) {
 	invalid := refuse("slack_invalid_configuration")

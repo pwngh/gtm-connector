@@ -145,7 +145,9 @@ the binary. More in [running it](docs/operations.md).
 
 ## What it is tested against
 
-[Ten invented deals](tests/test_cases.py), each built to break one property. All ten pass:
+Ten invented deals, each built to break one property. Each card was checked against its property when
+it was recorded in [`testdata/oracle/cards/cases.jsonl.gz`](testdata/oracle/cards/cases.jsonl.gz), and the
+[parity test](internal/cards/parity_test.go) builds every one of them byte for byte:
 
 | Deal | The card must |
 | --- | --- |

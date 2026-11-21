@@ -17,7 +17,7 @@ import (
 	"github.com/pwngh/gtm-connector/internal/evidence"
 )
 
-// The one authorization callback of a sign-in, received as gtm_connector/slack_callback.py receives it: on
+// The one authorization callback of a sign-in, received as the Python package received it: on
 // loopback sockets of the registered port only, from a request whose every part is checked, and finished
 // before the browser is told the sign-in is saved. A request that is not the callback is answered and
 // ignored, up to maxCallbackRequests of them.

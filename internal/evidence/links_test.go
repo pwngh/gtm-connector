@@ -22,7 +22,7 @@ func neutral(t *testing.T, raw, safe string, want Counts) {
 }
 
 // A link in any form is reduced to its host, and a scheme a browser does not know gives none. The cases are
-// those added to test_a_link_in_any_form_is_reduced_to_its_host in tests/test_units.py.
+// those added to test_a_link_in_any_form_is_reduced_to_its_host of the removed Python suite.
 func TestLinkOfASchemeABrowserDoesNotKnow(t *testing.T) {
 	checkLinks(t, [][2]string{
 		{"<slack://channel?id=C1|open>", "open [link unknown host]"},
@@ -32,7 +32,7 @@ func TestLinkOfASchemeABrowserDoesNotKnow(t *testing.T) {
 	})
 }
 
-// The cases of test_a_link_in_the_finished_text_is_replaced_and_nothing_around_it in tests/test_units.py.
+// The cases of test_a_link_in_the_finished_text_is_replaced_and_nothing_around_it of the removed Python suite.
 func TestLinkInFinishedTextLeavesTextAroundIt(t *testing.T) {
 	raw := "See [deck](https:/files.example/deck(v2)). The deal is blocked."
 	neutral(t, raw, "See deck [link unknown host]. The deal is blocked.", Counts{Links: 1})
@@ -53,7 +53,7 @@ func TestLinkInFinishedTextLeavesTextAroundIt(t *testing.T) {
 	}
 }
 
-// The cases of test_a_link_with_its_target_in_angle_brackets_is_replaced_whole in tests/test_units.py.
+// The cases of test_a_link_with_its_target_in_angle_brackets_is_replaced_whole of the removed Python suite.
 func TestLinkWithTargetInAngleBrackets(t *testing.T) {
 	for _, c := range [][2]string{
 		{"[deck](<https:/files.example/a b>)", "deck [link unknown host]"},
@@ -68,7 +68,7 @@ func TestLinkWithTargetInAngleBrackets(t *testing.T) {
 	neutral(t, "[x](<@U1>)", "[x]([user U1])", Counts{Mentions: 1})
 }
 
-// The cases of test_a_reference_definition_is_read_only_where_a_paragraph_starts in tests/test_units.py.
+// The cases of test_a_reference_definition_is_read_only_where_a_paragraph_starts of the removed Python suite.
 func TestReferenceDefinitionStartsAParagraph(t *testing.T) {
 	for _, c := range []struct {
 		raw, safe string
@@ -91,7 +91,7 @@ func TestReferenceDefinitionStartsAParagraph(t *testing.T) {
 	}
 }
 
-// The cases of test_a_markdown_target_is_read_with_its_escapes_and_character_references in tests/test_units.py.
+// The cases of test_a_markdown_target_is_read_with_its_escapes_and_character_references of the removed Python suite.
 func TestMarkdownTargetEscapesAndReferences(t *testing.T) {
 	checkLinks(t, [][2]string{
 		{"[deck](https://files.example&sol;@other.example/)", "deck [link files.example]"},
@@ -119,7 +119,7 @@ func TestMarkdownTargetEscapesAndReferences(t *testing.T) {
 	}
 }
 
-// The cases of test_a_link_in_running_text_runs_as_a_github_client_reads_it in tests/test_units.py.
+// The cases of test_a_link_in_running_text_runs_as_a_github_client_reads_it of the removed Python suite.
 func TestRawLinkExtent(t *testing.T) {
 	checkLinks(t, [][2]string{
 		{"See https://files.example'@other.example/a then", "See [link unknown host] then"},
@@ -135,7 +135,7 @@ func TestRawLinkExtent(t *testing.T) {
 	})
 }
 
-// The cases of test_a_label_a_browser_refuses_is_not_shown in tests/test_units.py.
+// The cases of test_a_label_a_browser_refuses_is_not_shown of the removed Python suite.
 func TestPunycodeLabel(t *testing.T) {
 	checkLinks(t, [][2]string{
 		{"https://xn--bcher-kva.example/ now", "[link unknown host] now"},
@@ -145,7 +145,7 @@ func TestPunycodeLabel(t *testing.T) {
 	})
 }
 
-// The cases of test_a_slack_token_is_read_innermost_first_and_may_hold_a_line_break in tests/test_units.py.
+// The cases of test_a_slack_token_is_read_innermost_first_and_may_hold_a_line_break of the removed Python suite.
 func TestSlackTokenInnermostFirst(t *testing.T) {
 	for _, c := range []struct {
 		raw, safe       string
@@ -167,8 +167,8 @@ func TestSlackTokenInnermostFirst(t *testing.T) {
 	}
 }
 
-// Text that is already neutral stays as it is. The pieces are those of test_neutral_text_stays_as_it_is in
-// tests/test_units.py.
+// Text that is already neutral stays as it is. The pieces are those of test_neutral_text_stays_as_it_is of the removed
+// Python suite.
 func TestNeutralTextStaysAsItIs(t *testing.T) {
 	pieces := []string{"<", ">", "|", "<@U1>", "<#C1|", "<!here", "<https://a.example|", "<tel:1>", "<a@b.example>",
 		"[", "]", "](", ")", "(", "[deck](", "tel:1", "https:/x.example", "https://x.example", "www.",
