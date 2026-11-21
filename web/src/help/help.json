@@ -20,6 +20,11 @@
     "title": "the seller role",
     "text": "A Salesforce user of the org, or a speaker whose label or Slack author equals a name or ID on the workspace's seller list. An address on one of the company's domains shows the seller side."
   },
+  "role.other_party": {
+    "title": "the other party role",
+    "text": "A speaker the evidence names who is on neither side: their address is on another organisation's domain, which the line shows. The basis says other party by domain and names it.",
+    "guide": {"label": "Deal cards, Speaker roles", "path": "docs/cards.md#speaker-roles"}
+  },
   "role.unknown": {
     "title": "the unknown role",
     "text": "No label, a label that matches nobody, two or more contacts with the name, a name shared by a seller and a contact, or a label over 200 characters. The card does not guess. The line says which.",
