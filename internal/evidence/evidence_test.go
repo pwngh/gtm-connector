@@ -351,10 +351,6 @@ func TestDifferencesStillMatchOracle(t *testing.T) {
 			Input     string   `json:"input"`
 			Sentences []string `json:"sentences"`
 		} `json:"sentences"`
-		Hosts map[string]struct {
-			Input    string `json:"input"`
-			SafeText string `json:"safe_text"`
-		} `json:"hosts"`
 	}
 	oracletest.JSON(t, "library/differences.json", &fixture)
 	once, _, _ := SafeText(fixture.SafeTextTwice.Input)
@@ -367,9 +363,64 @@ func TestDifferencesStillMatchOracle(t *testing.T) {
 			t.Errorf("%s: got %q, want %q", name, got, c.Sentences)
 		}
 	}
-	for name, c := range fixture.Hosts {
-		if got, _, _ := SafeText(c.Input); got != c.SafeText {
-			t.Errorf("%s: got %q, want %q", name, got, c.SafeText)
+}
+
+// A link with a backslash or a control character up to the end of its authority shows no host. The cases are
+// those of test_a_link_with_an_ambiguous_host_shows_no_host in tests/test_units.py.
+func TestAmbiguousLinkHost(t *testing.T) {
+	for _, c := range [][2]string{
+		// A browser reads a backslash before the path as a slash, so it opens evil.example here.
+		{`<http://evil.example\@good.example/|deck>`, "deck [link unknown host]"},
+		{`http://evil.example\@good.example/ now`, "[link unknown host] now"},
+		{`[deck](http://evil.example\@good.example/)`, "deck [link unknown host]"},
+		{`<//evil.example\@good.example|deck>`, "deck [link unknown host]"},
+		{`<C:\path|deck>`, "deck [link unknown host]"},
+		// A control character in the host, or anywhere before the path.
+		{"<http://a\tb.example/x|deck>", "deck [link unknown host]"},
+		{"<http://a\rb.example/x|deck>", "deck [link unknown host]"},
+		{"<http://user\x00@good.example/|deck>", "deck [link unknown host]"},
+		{"<ht\ttp://good.example/|deck>", "deck [link unknown host]"},
+		{"http://good\x7f.example/x now", "[link unknown host] now"},
+		{"http://\u009f@good.example/x now", "[link unknown host] now"},
+		// An ordinary link, and a link with either character after its host, keep the host.
+		{"<http://files.example/x|deck>", "deck [link files.example]"},
+		{"<https://user@files.example:8443/x?q=1#f|deck>", "deck [link files.example]"},
+		{`<http://files.example/a\b|deck>`, "deck [link files.example]"},
+		{"<http://files.example/a\tb|deck>", "deck [link files.example]"},
+		{`<http://files.example?a\@b|deck>`, "deck [link files.example]"},
+	} {
+		text, counts, err := SafeText(c[0])
+		if err != nil || text != c[1] || counts != (Counts{Links: 1}) {
+			t.Errorf("SafeText(%q): got %q %+v %v, want %q", c[0], text, counts, err, c[1])
+		}
+	}
+}
+
+// A link with no // after its scheme shows no host. The cases are those of
+// test_a_link_with_no_slashes_after_its_scheme_shows_no_host in tests/test_units.py.
+func TestLinkHostWithNoSlashesAfterScheme(t *testing.T) {
+	for _, c := range [][2]string{
+		// A browser reads https:files.example as https://files.example. Read as a host, it would be https.
+		{"<https:files.example/x|deck>", "deck [link unknown host]"},
+		{"<https:/files.example|deck>", "deck [link unknown host]"},
+		{"<HTTP:8080|deck>", "deck [link unknown host]"},
+		{"<tel:5551234|deck>", "deck [link unknown host]"},
+		{"<javascript:alert(1)|deck>", "deck [link unknown host]"},
+		// A name before a colon is a scheme to a browser, whatever follows the colon.
+		{"<files.example:8443/x|deck>", "deck [link unknown host]"},
+		// A scheme too long for its // to be found is not read as a host either.
+		{"[deck](" + strings.Repeat("a", 40) + "://files.example/)", "deck [link unknown host]"},
+		// A www. address, a // address and a link with its // keep the host before a port or a colon.
+		{"<files.example/x|deck>", "deck [link files.example]"},
+		{"www.files.example:8443/x now", "[link files.example] now"},
+		{"<WWW.files.example:8443|deck>", "deck [link files.example]"},
+		{"<//files.example:8443/x|deck>", "deck [link files.example]"},
+		{"<https://files.example/a:b|deck>", "deck [link files.example]"},
+		{"<mailto:a@files.example|deck>", "deck [link mail]"},
+	} {
+		text, counts, err := SafeText(c[0])
+		if err != nil || text != c[1] || counts != (Counts{Links: 1}) {
+			t.Errorf("SafeText(%q): got %q %+v %v, want %q", c[0], text, counts, err, c[1])
 		}
 	}
 }

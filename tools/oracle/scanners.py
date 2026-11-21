@@ -204,10 +204,10 @@ SCANNERS: dict[str, tuple[str, Callable[[str], Any]]] = {
     "units_target": ("units.py:118 _TARGET as _IS_TARGET.match(text): the end of the match, or null", _target),
     "units_raw_link": ("units.py:122 _RAW_LINK.finditer(text): [start, end] of each match",
                        lambda text: _spans(units._RAW_LINK, text)),
-    "units_sentence_end": ("units.py:222 _SENTENCE_END.finditer(line): [start, end of group 1, end of group 2]",
+    "units_sentence_end": ("units.py:235 _SENTENCE_END.finditer(line): [start, end of group 1, end of group 2]",
                            _sentence_end),
-    "units_opener": ("units.py:253 _OPENER.match(line, pos) at every pos: [pos, end] where it matches", _opener),
-    "units_named": ("units.py:342 _NAMED.match(line): [start, end] of group 1 and the match end, or null", _named),
+    "units_opener": ("units.py:266 _OPENER.match(line, pos) at every pos: [pos, end] where it matches", _opener),
+    "units_named": ("units.py:355 _NAMED.match(line): [start, end] of group 1 and the match end, or null", _named),
     "slack_mapping_percent": (
         "slack_mapping.py:108 the pattern parse_thread_selection searches a thread link's query with, "
         f"{PERCENT['slack_mapping'].pattern}: [start, end] of each match",

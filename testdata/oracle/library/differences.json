@@ -26,15 +26,5 @@
     "He agreed. \ud803\udd70xyz goes on."
    ]
   }
- },
- "hosts": {
-  "ambiguous_host": {
-   "input": "<http://evil.example\\@good.example/|deck>",
-   "safe_text": "deck [link good.example]"
-  },
-  "control_in_host": {
-   "input": "<http://a\tb.example/x|deck>",
-   "safe_text": "deck [link ab.example]"
-  }
  }
 }
