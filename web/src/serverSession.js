@@ -8,13 +8,6 @@ import {ApiError, sessionExpired} from './api.js';
 // by it, so a read made under an earlier session is dropped, and an answer
 // that arrives after the session changed is ignored.
 
-export const walkthroughStore = {
-  subscribe: () => () => {},
-  getSnapshot: () => walkthroughState,
-  start: () => Promise.resolve(walkthroughState),
-};
-const walkthroughState = Object.freeze({mode: 'walkthrough', session: null, error: null, ended: false, generation: 0, elsewhere: null});
-
 const signedOutView = {signed_in: false, principal: null, csrf_token: null, expires_at: null};
 // A signed-in session is known by its CSRF token, which the server derives from the session ID.
 const identity = session => session?.signed_in ? `${session.principal?.id}:${session.csrf_token}` : null;

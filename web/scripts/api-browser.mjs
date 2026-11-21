@@ -4,24 +4,41 @@
 // names, gaps and receipts, and the walkthrough's paths, which are not
 // available in API mode and whole on a static host. The stub keeps the Go server's
 // shapes: the session view, the {"error": {code, message}} envelope, the CSRF
-// header and Origin checks, and 403 not_permitted for an ungranted account.
+// header and Origin checks, 403 not_permitted for an ungranted account, and the
+// security headers on every response, with the Content-Security-Policy built
+// from basePolicy in internal/transport/http/static.go as the server builds it.
+// The browser reaches nothing but the stub.
 //
-// It is not part of `npm test`, which runs without a browser. To run it:
+// It drives the installed Chrome, so it is not part of `npm test`. To run it:
 //   npm run build
-//   PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core node scripts/api-browser.mjs [--channel chrome]
+//   npm run test:browser [-- --channel chrome]
 // The exit code is 1 when any check fails.
 import {createServer} from 'node:http';
-import {createRequire} from 'node:module';
+import {createHash} from 'node:crypto';
 import {readFileSync, existsSync, statSync} from 'node:fs';
 import {gunzipSync} from 'node:zlib';
-import {extname, join, normalize} from 'node:path';
+import {basename, extname, join, normalize} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
+import {chromium} from 'playwright-core';
 
 const {values: options} = parseArgs({options: {channel: {type: 'string', default: 'chrome'}}});
-const {chromium} = createRequire(import.meta.url)(process.env.PLAYWRIGHT_CORE || 'playwright-core');
 const dist = fileURLToPath(new URL('../dist/', import.meta.url));
 if (!existsSync(join(dist, 'index.html'))) throw new Error('Run npm run build first.');
+
+// The headers the Go server sends with every response. The policy allows each
+// inline script of the build's index.html by its SHA-256, as policyFor does.
+const goSource = readFileSync(new URL('../../internal/transport/http/static.go', import.meta.url), 'utf8');
+const basePolicy = [...goSource.match(/const basePolicy = ([\s\S]*?)\n\n/)[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(match => match[1]).join('');
+const inlineHashes = [...readFileSync(join(dist, 'index.html'), 'utf8').matchAll(/<script(\s[^>]*)?>([\s\S]*?)<\/script>/gi)]
+  .filter(([, attributes = '', body]) => !/src=/i.test(attributes) && body.length > 0)
+  .map(([, , body]) => ` 'sha256-${createHash('sha256').update(body).digest('base64')}'`).join('');
+const securityHeaders = {
+  'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
+  'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Resource-Policy': 'same-origin',
+  'Content-Security-Policy': basePolicy.replace('%s', inlineHashes),
+};
+if (!basePolicy.includes("script-src 'self'%s") || !inlineHashes) throw new Error('The policy or the inline script hash could not be built.');
 
 // Server data: the oracle's sealed demo cards, with hostile text added to what the server sends.
 const hostile = '<img src=x onerror=window.__injected=1>';
@@ -45,16 +62,23 @@ const elsewhere = {...principal, id: 'p-2', display_name: 'Another principal'};
 const login = 'demo-reviewer', password = 'stub-password-for-browser-tests';
 
 // The stub. `stub.steer` answers a request before the stub's own routes when it returns an answer.
-const stub = {sessions: new Map(), pre: new Set(), ttlMs: 3600_000, steer: null, log: [], granted: new Set(['acc-002', 'acc-003'])};
+const stub = {sessions: new Map(), pre: new Set(), ttlMs: 3600_000, steer: null, log: [], files: [], pending: 0, granted: new Set(['acc-002', 'acc-003'])};
 let base = '';
-function reset() {stub.sessions.clear(); stub.pre.clear(); stub.ttlMs = 3600_000; stub.steer = null; stub.log = []; stub.granted = new Set(['acc-002', 'acc-003']);}
+// Resolves once no API request has been open for 300 ms.
+async function apiSettled() {
+  for (let quiet = 0; quiet < 3;) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    quiet = stub.pending ? 0 : quiet + 1;
+  }
+}
+function reset() {stub.sessions.clear(); stub.pre.clear(); stub.ttlMs = 3600_000; stub.steer = null; stub.log = []; stub.files = []; stub.granted = new Set(['acc-002', 'acc-003']);}
 const token = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 const cookies = request => Object.fromEntries((request.headers.cookie || '').split(';').map(part => part.trim().split('=')).filter(([key]) => key));
 const live = request => {const id = cookies(request).stub_session, session = id && stub.sessions.get(id); return session && session.expires > Date.now() ? [id, session] : [null, null];};
 const view = (id, session) => session ? {signed_in: true, principal: session.principal, csrf_token: `c-${id}`, expires_at: new Date(session.expires).toISOString()}
   : {signed_in: false, principal: null, csrf_token: `c-${id}`, expires_at: new Date(Date.now() + 3600_000).toISOString()};
 function send(response, status, body, headers = {}) {
-  response.writeHead(status, {'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers});
+  response.writeHead(status, {...securityHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...headers});
   response.end(body === undefined ? '' : JSON.stringify(body));
 }
 const refuse = (response, status, code) => send(response, status, {error: {code, message: 'Refused.'}});
@@ -63,7 +87,7 @@ async function api(request, response, path) {
   const steered = stub.steer?.(request.method, path);
   if (steered) {
     if (steered.delay) await new Promise(resolve => setTimeout(resolve, steered.delay));
-    if (steered.raw !== undefined) {response.writeHead(steered.status ?? 200, steered.type ? {'Content-Type': steered.type} : {}); response.end(steered.raw); return;}
+    if (steered.raw !== undefined) {response.writeHead(steered.status ?? 200, {...securityHeaders, ...(steered.type ? {'Content-Type': steered.type} : {})}); response.end(steered.raw); return;}
     if (steered.code) return refuse(response, steered.status, steered.code);
     if (steered.json !== undefined) return send(response, steered.status ?? 200, steered.json);
   }
@@ -120,10 +144,15 @@ async function api(request, response, path) {
 const types = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json'};
 const server = createServer(async (request, response) => {
   const path = new URL(request.url, 'http://stub').pathname;
-  if (path.startsWith('/api/')) {stub.log.push(`${request.method} ${path}`); return api(request, response, path);}
+  if (path.startsWith('/api/')) {
+    stub.log.push(`${request.method} ${path}`);
+    stub.pending++;
+    try {return await api(request, response, path);} finally {stub.pending--;}
+  }
   const file = normalize(join(dist, path));
   const target = file.startsWith(dist) && existsSync(file) && statSync(file).isFile() ? file : join(dist, 'index.html');
-  response.writeHead(200, {'Content-Type': types[extname(target)] || 'application/octet-stream'});
+  stub.files.push(basename(target));
+  response.writeHead(200, {...securityHeaders, 'Content-Type': types[extname(target)] || 'application/octet-stream'});
   response.end(readFileSync(target));
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -136,13 +165,18 @@ const check = (ok, what) => {results.push(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
 const browser = await chromium.launch({channel: options.channel, headless: true});
 async function page({width = 1440, scheme = 'light', blockStorage = false} = {}) {
   const context = await browser.newContext({viewport: {width, height: 900}, colorScheme: scheme, reducedMotion: 'reduce'});
+  // Offline: the font stylesheet and anything else off the stub is refused.
+  await context.route(url => !url.href.startsWith(base), route => route.abort());
   await context.addInitScript(([theme, block]) => {
+    document.addEventListener('securitypolicyviolation', event => console.error(`policy violation: ${event.violatedDirective} ${event.blockedURI}`));
     if (block) {for (const name of ['getItem', 'setItem', 'removeItem']) Storage.prototype[name] = () => {throw new DOMException('Blocked', 'SecurityError');};}
     else try {localStorage.setItem('gtm-workflow-theme', theme);} catch {}
   }, [scheme, blockStorage]);
   const tab = await context.newPage();
   tab.setDefaultTimeout(8000);
   tab.errors = [];
+  tab.console = [];
+  tab.on('console', message => tab.console.push(message.text()));
   tab.on('pageerror', error => tab.errors.push(String(error)));
   tab.on('dialog', dialog => {tab.errors.push('dialog: ' + dialog.message()); dialog.dismiss();});
   return tab;
@@ -306,6 +340,9 @@ await scenario('stale sign-out token', async () => {
   const tab = await page();
   await tab.goto(`${evidence}?account=acc-003`, {waitUntil: 'networkidle'});
   await signIn(tab);
+  // The page's own reads finish first, so none of them meets the rotated session.
+  await tab.waitForSelector('.api-unit');
+  await apiSettled();
   // Another tab signs out and in again: the session, and its CSRF token, rotate under the same cookie name.
   const [id] = [...stub.sessions.keys()];
   const next = token(); stub.sessions.set(next, stub.sessions.get(id)); stub.sessions.delete(id);
@@ -439,7 +476,44 @@ for (const width of [320, 1440]) {
   });
 }
 
-// 12. A static host's answer keeps the whole walkthrough.
+// 12. The server's app is all that loads: after sign-in, both pages and a reload, no
+// walkthrough chunk was asked for, browser storage holds nothing of the walkthrough,
+// nothing broke the policy, and no screen names the prototype. ApiReadiness is the
+// server's own page, so only a chunk named Readiness- is the walkthrough's.
+const walkthroughChunk = name => /renewalFixtures|workflow|Worklists|Playbooks|History|WorkPlan|WorkflowDialogContent/.test(name) || /^(Readiness|main)-/.test(name);
+const violations = tab => tab.console.filter(line => /policy violation|Content Security Policy|Refused to/i.test(line));
+for (const width of [390, 1440]) {
+  await scenario(`the server app alone ${width}`, async () => {
+    const tab = await page({width});
+    await tab.goto(`${evidence}?account=acc-003`, {waitUntil: 'networkidle'});
+    await signIn(tab);
+    await tab.waitForSelector('.api-unit');
+    await tab.goto(`${readiness}?account=acc-003`, {waitUntil: 'networkidle'});
+    await tab.waitForSelector('.api-readiness [data-open-gap]');
+    await tab.reload({waitUntil: 'networkidle'});
+    await tab.waitForSelector('.api-readiness [data-open-gap]');
+    // Long enough for anything loaded when the page is idle.
+    await tab.waitForTimeout(2500);
+    const keys = await tab.evaluate(() => Object.keys(localStorage));
+    check(!keys.some(key => key.startsWith('gtm-workflow-demo') || key.startsWith('gtm-readiness')), `${width}: browser storage holds nothing of the walkthrough (${keys.join(', ')})`);
+    const asked = [...new Set(stub.files.filter(walkthroughChunk))];
+    check(asked.length === 0 && stub.files.some(name => name.startsWith('ApiReadiness-')), `${width}: no walkthrough chunk was requested (${asked.join(', ')})`);
+    const shown = await tab.evaluate(() => `${document.title}\n${document.body.innerText}`);
+    check(!/Revenue Workflow Lab|walkthrough/i.test(shown), `${width}: no screen names the prototype or the walkthrough (title ${await tab.title()})`);
+    await tab.keyboard.press('Control+k');
+    await tab.waitForSelector('.command-option');
+    const palette = await tab.evaluate(() => ({title: document.querySelector('.dialog-head h2').textContent, placeholder: document.querySelector('.command-input input').placeholder}));
+    await tab.keyboard.type('nothing like this');
+    await tab.waitForSelector('.command-empty');
+    const empty = await tab.textContent('.command-empty');
+    check(palette.title === 'Go to' && palette.placeholder === 'Find a page' && empty === 'No page matches.', `${width}: the palette is titled ${palette.title}, asks to ${palette.placeholder} and says ${empty}`);
+    check(violations(tab).length === 0, `${width}: no policy violation (${violations(tab).join(' | ')})`);
+    check(tab.errors.length === 0, `${width}: no page errors (${tab.errors.join(' | ')})`);
+    await tab.context().close();
+  });
+}
+
+// 13. A static host's answer keeps the whole walkthrough.
 await scenario('the static build', async () => {
   stub.steer = (method, path) => path === '/api/v1/session' ? {status: 404, type: 'text/html', raw: '<html>Not found</html>'} : null;
   const tab = await page();
@@ -455,6 +529,7 @@ await scenario('the static build', async () => {
   await tab.waitForSelector('.work-grid');
   check(await tab.evaluate(() => location.pathname) === '/renewals/thornfield/workplan', 'the static build opens / on the walkthrough work plan');
   check(tab.errors.length === 0, `the static build: no page errors (${tab.errors.join(' | ')})`);
+  check(violations(tab).length === 0, `the static build: no policy violation (${violations(tab).join(' | ')})`);
   await tab.context().close();
 });
 
