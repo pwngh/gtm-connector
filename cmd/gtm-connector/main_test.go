@@ -167,6 +167,79 @@ func TestBackupAndRestoreKeepState(t *testing.T) {
 	}
 }
 
+// A backup carries the credential files setup makes and leaves a workspace's Slack sign-in and its lock out:
+// Slack spends a refresh token once, so a restored copy would be a sign-in Slack no longer accepts. A restore
+// puts no sign-in back.
+func TestABackupLeavesTheSlackSignInOut(t *testing.T) {
+	f := postgrestest.New(t)
+	source := privateDir(t)
+	creds, err := openCredentials(source, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer creds.Close()
+	if _, err := creds.setUp(certificateHosts([]string{"127.0.0.1:8443"})); err != nil {
+		t.Fatal(err)
+	}
+	const saved = "invented-slack-sign-in-0000000000000000"
+	for _, name := range []string{"slack-acme.json", "slack-acme.lock"} {
+		if err := creds.write(name, []byte(saved)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	archive := filepath.Join(t.TempDir(), "backup.tar.gz")
+	if err := backup(ctx, f.Store, creds, archive); err != nil {
+		t.Fatal(err)
+	}
+	in, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	zipped, err := gzip.NewReader(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := tar.NewReader(zipped)
+	carried := map[string]bool{}
+	for {
+		header, err := entries.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		carried[header.Name] = true
+		if strings.Contains(header.Name, "slack-acme") || bytes.Contains(body, []byte("slack-acme")) ||
+			bytes.Contains(body, []byte(saved)) {
+			t.Errorf("the backup carries the Slack sign-in in %s", header.Name)
+		}
+	}
+	for _, name := range credentialFiles {
+		if !carried["credentials/"+name] {
+			t.Errorf("the backup does not carry %s", name)
+		}
+	}
+	target := filepath.Join(t.TempDir(), "restored")
+	if err := restore(ctx, openFresh(t), target, archive); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := os.ReadDir(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range restored {
+		if strings.HasPrefix(entry.Name(), "slack-") {
+			t.Errorf("the restore wrote %s", entry.Name())
+		}
+	}
+}
+
 // testdata/backup-schema1.tar.gz was written by the schema 1 binary (main at
 // b342ab7): setup on a fresh database, a grant, a refused call and a brief
 // whose child read bound a record, then backup. Every later binary restores

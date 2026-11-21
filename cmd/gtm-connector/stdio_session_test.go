@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -178,6 +179,57 @@ func TestStdioAndSetupFinishInterruptedReceipts(t *testing.T) {
 	}
 	if got := d.count(t, `SELECT count(*) FROM receipts WHERE status = 'pending'`); got != 0 {
 		t.Fatalf("setup left %d interrupted receipts pending", got)
+	}
+}
+
+// serve finishes a pending receipt whose worker's lease expired too, as interrupted, when it starts and before
+// it is asked anything.
+func TestServeFinishesInterruptedReceiptsAsItStarts(t *testing.T) {
+	d := stdioDemo(t)
+	store := &postgres.ReceiptStore{Store: d.owner, Lease: time.Millisecond}
+	if _, err := store.Start(ctx, receipts.Start{WorkspaceID: d.workspace.ID, OperationID: "mcp-" + receipts.RandomID(),
+		TokenID: receipts.Anonymous, Tool: "get_account", Arguments: strictjson.NewObject(), RequestID: receipts.Null()}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	dir := privateDir(t)
+	creds, err := openCredentials(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = creds.setUp(certificateHosts(nil))
+	creds.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{"GTM_DATABASE_URL": d.appURL, "GTM_CREDENTIALS_DIR": dir,
+		"GTM_LISTEN": "127.0.0.1:0", "GTM_CONTAINER_LISTEN": "", "GTM_PUBLIC_ORIGIN": "", "GTM_ALLOWED_HOSTS": "",
+		"GTM_WEB_DIR": ""} {
+		t.Setenv(name, value)
+	}
+	running, stop := context.WithCancel(ctx)
+	defer stop()
+	served := make(chan error, 1)
+	go func() { served <- serve(running, nil) }()
+	for deadline := time.Now().Add(20 * time.Second); d.count(t, `SELECT count(*) FROM receipts WHERE status = 'pending'`) != 0; {
+		select {
+		case err := <-served:
+			t.Fatalf("serve stopped before it finished the receipt: %v", err)
+		case <-time.After(20 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			stop()
+			<-served
+			t.Fatal("serve left the interrupted receipt pending")
+		}
+	}
+	stop()
+	if err := <-served; err != nil {
+		t.Fatalf("serve: %v", err)
+	}
+	if got := d.count(t, `SELECT count(*) FROM receipts WHERE status = 'error' AND http_status = 503
+		AND error = 'interrupted'`); got != 1 {
+		t.Fatalf("%d receipts finished as interrupted", got)
 	}
 }
 
