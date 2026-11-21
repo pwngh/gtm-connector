@@ -291,18 +291,23 @@ func TestNestingLimit(t *testing.T) {
 }
 
 // An empty array or object counts as a level, a level that has closed does not, and a document that is
-// too deep is refused as too deep before it is refused for anything after that point.
+// too deep is refused as too deep whatever else is wrong with it, before or after that point. Brackets
+// inside strings are not levels, and a closing bracket with nothing open is the parser's to refuse.
 func TestNestingLimitCounts(t *testing.T) {
 	open, shut := strings.Repeat("[", MaxDepth), strings.Repeat("]", MaxDepth)
 	for document, tooDeep := range map[string]bool{
-		open + shut:                false,
-		open[1:] + "{}" + shut[1:]: false,
-		"[" + open + shut + "]":    true,
-		open + "{}" + shut:         true,
-		"[" + open:                 true,
-		open + "{":                 true,
-		"[" + open + "1" + shut:    true,
-		"[" + open + "x":           true,
+		open + shut:                           false,
+		open[1:] + "{}" + shut[1:]:            false,
+		"[" + open + shut + "]":               true,
+		open + "{}" + shut:                    true,
+		"[" + open:                            true,
+		open + "{":                            true,
+		"[" + open + "1" + shut:               true,
+		"[" + open + "x":                      true,
+		"x[" + open:                           true,
+		`["` + open + `[",` + open[1:] + shut: false,
+		`["\"` + open + `",` + open[1:] + `[]` + shut: true,
+		`["\\",` + open[1:] + `[]` + shut:             true,
 		// Many levels, one after the other, at the limit.
 		open[1:] + strings.Repeat("[1],{},", 2000) + "[]" + shut[1:]: false,
 		"[" + strings.Repeat(open[1:]+shut[1:]+",", 10) + "1]":       false,
@@ -312,11 +317,111 @@ func TestNestingLimitCounts(t *testing.T) {
 			t.Errorf("%.20q (%d bytes): too deep is %t, got %v", document, len(document), tooDeep, err)
 		}
 	}
+	_, err := Loads([]byte("][" + open))
+	if want := "JSONDecodeError: Expecting value: line 1 column 1 (char 0)"; err == nil || err.Error() != want {
+		t.Errorf("a closing bracket first: got %v, want %s", err, want)
+	}
 }
 
-// Ten million open arrays are refused at level MaxDepth+1. What the parser allocates is counted in frames,
-// not in the document's levels, and its stack does not grow. Only the text follows the document's size:
-// four bytes a character once decoded, and in LoadsLoose one copy of the bytes before that.
+// Refusals come in one order: the encoding, then the depth, then whatever the parser finds. A document that
+// is not UTF-8 is refused for that however deep it is, so no caller takes it for a document refused only for
+// its depth. One that is well encoded and too deep is refused as too deep whatever else is wrong with it.
+func TestRefusalsComeInOneOrder(t *testing.T) {
+	deep := strings.Repeat("[", MaxDepth+1)
+	readers := map[string]func(string) (any, error){
+		"Loads":        func(s string) (any, error) { return Loads([]byte(s)) },
+		"LoadsDecimal": func(s string) (any, error) { return LoadsDecimal([]byte(s)) },
+		"LoadsText":    LoadsText,
+		"LoadsLoose":   func(s string) (any, error) { return LoadsLoose([]byte(s)) },
+	}
+	for name, read := range readers {
+		for document, want := range map[string]string{
+			"\xff" + deep:                         "UnicodeDecodeError",
+			deep + "\xff":                         "UnicodeDecodeError",
+			"{\"a\":\"\xff\",\"b\":" + deep:       "UnicodeDecodeError",
+			"{\"a\":\"\xc3\",\"b\":" + deep + "}": "UnicodeDecodeError",
+			"x" + deep:                            "RecursionError",
+			`{"a":nope,"b":` + deep:               "RecursionError",
+			`{"a":1,"a":2,"b":` + deep:            "RecursionError",
+			`{"a":NaN,"b":` + deep:                "RecursionError",
+			`{"a":"\ud800","b":` + deep:           "RecursionError",
+			deep:                                  "RecursionError",
+			`{"a":nope,"b":` + deep[2:] + `1`:     "JSONDecodeError",
+			`{"a":1,"a":2,"b":` + deep[2:] + "":   "JSONDecodeError",
+		} {
+			_, err := read(document)
+			var refusal *Error
+			if !errors.As(err, &refusal) || refusal.Type != want {
+				t.Errorf("%s, %.24q: got %v, want %s", name, document, err, want)
+			}
+		}
+	}
+	// As text, a lone surrogate cannot be encoded, and that too comes before the depth.
+	_, err := LoadsText("\xed\xa0\x80" + deep)
+	var refusal *Error
+	if !errors.As(err, &refusal) || refusal.Type != "UnicodeEncodeError" {
+		t.Errorf("LoadsText, a lone surrogate before the depth: %v", err)
+	}
+}
+
+// measured runs read and gives the bytes it allocated.
+func measured(read func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	read()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// A document is refused for depth, or for bytes that are not UTF-8, before any of it is decoded or built:
+// 16 MiB that end in either fault cost under 64 KiB, in every reader. A document that is read costs its
+// values and no decoded copy of its text: one 16 MiB string costs under twice its bytes.
+func TestALargeDocumentIsRefusedBeforeItIsDecoded(t *testing.T) {
+	const size = 16 << 20
+	numbers := bytes.Repeat([]byte("1,"), size/2)
+	deep := append(append([]byte("["), numbers...), bytes.Repeat([]byte("["), MaxDepth)...)
+	notUTF8 := append(append([]byte("["), numbers...), 0xFF)
+	readers := map[string]func([]byte) (any, error){
+		"Loads": Loads, "LoadsDecimal": LoadsDecimal, "LoadsLoose": LoadsLoose,
+	}
+	for name, read := range readers {
+		for label, c := range map[string]struct {
+			document []byte
+			refusal  string
+		}{"too deep": {deep, "RecursionError"}, "not UTF-8": {notUTF8, "UnicodeDecodeError"}} {
+			var err error
+			used := measured(func() { _, err = read(c.document) })
+			var refusal *Error
+			if !errors.As(err, &refusal) || refusal.Type != c.refusal {
+				t.Fatalf("%s, %s: %v", name, label, err)
+			}
+			if used > 64<<10 {
+				t.Errorf("%s, %s: allocated %d bytes before refusing %d", name, label, used, len(c.document))
+			}
+		}
+	}
+	// LoadsText takes a string, and its one copy of that string is all it may allocate.
+	text := string(deep)
+	var err error
+	if used := measured(func() { _, err = LoadsText(text) }); !errors.Is(err, ErrTooDeep) || used > size+64<<10 {
+		t.Errorf("LoadsText, too deep: %v after %d bytes", err, used)
+	}
+	long := append(append([]byte(`"`), bytes.Repeat([]byte("a"), size)...), '"')
+	for name, read := range readers {
+		var value any
+		used := measured(func() { value, err = read(long) })
+		if text, _ := value.(string); err != nil || len(text) != size {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if used > 2*size {
+			t.Errorf("%s: allocated %d bytes to read a string of %d", name, used, size)
+		}
+	}
+}
+
+// Ten million open arrays are refused at level MaxDepth+1, by the pass that counts levels: nothing is
+// allocated for the document, whatever its size, and the stack does not grow.
 func TestTenMillionLevelsAreRefused(t *testing.T) {
 	document := bytes.Repeat([]byte("["), 10_000_000)
 	for name, read := range map[string]func([]byte) (any, error){"Loads": Loads, "LoadsLoose": LoadsLoose} {
@@ -337,8 +442,8 @@ func TestTenMillionLevelsAreRefused(t *testing.T) {
 		if objects > 8*MaxDepth {
 			t.Errorf("%s: %d allocations for %d levels read", name, objects, MaxDepth)
 		}
-		if limit := uint64(5*len(document) + 1<<20); bytesUsed > limit {
-			t.Errorf("%s: allocated %d bytes, more than the text and 1 MiB (%d)", name, bytesUsed, limit)
+		if bytesUsed > 64<<10 {
+			t.Errorf("%s: allocated %d bytes for a document refused by its depth", name, bytesUsed)
 		}
 		if stack > 1<<20 {
 			t.Errorf("%s: the stack grew by %d bytes", name, stack)

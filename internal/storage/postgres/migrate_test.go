@@ -89,3 +89,71 @@ func TestMigrationsCurrentWaitsForNoMigrationOrRestore(t *testing.T) {
 	current(t, fresh, false, "during a restore")
 	ok(t, restoring.Commit(ctx))
 }
+
+// A database that is not encoded as UTF-8 is refused before any migration, with one line that says how to make
+// one that is. The checks the migrations install name a character outside ASCII only for a document that holds
+// the escape \u0000, so on such a database, migrated by hand, every other card is still checked.
+func TestADatabaseNotInUTF8IsRefused(t *testing.T) {
+	for _, encoding := range []string{"SQL_ASCII", "LATIN1"} {
+		t.Run(encoding, func(t *testing.T) {
+			url := pgtest.URLEncoded(t, encoding)
+			store, err := postgres.Open(ctx, url)
+			ok(t, err)
+			defer store.Close()
+			want := "the database is encoded as " + encoding + "; create it with ENCODING 'UTF8' TEMPLATE template0"
+			if err := store.Migrate(ctx); err == nil || err.Error() != want {
+				t.Fatalf("got %v, want %s", err, want)
+			}
+			if version, err := store.SchemaVersion(ctx); err != nil || version != 0 {
+				t.Fatalf("schema %d after the refusal (%v)", version, err)
+			}
+			conn, err := pgx.Connect(ctx, url)
+			ok(t, err)
+			defer conn.Close(ctx)
+			for _, migration := range postgres.MigrationSQL() {
+				_, err := conn.Exec(ctx, migration)
+				ok(t, err)
+			}
+			var violation *string
+			ok(t, conn.QueryRow(ctx, "SELECT gtm_card_violation(gen_random_uuid(), true)").Scan(&violation))
+			if violation != nil {
+				t.Fatalf("a card that is not there: %s", *violation)
+			}
+			var value string
+			ok(t, conn.QueryRow(ctx, `SELECT gtm_jsonb_without_nul(convert_to('{"a": "x\\u0000"}', 'UTF8')) ->> 'a'`).
+				Scan(&value))
+			if value != `x\u0000` {
+				t.Fatalf("an escaped backslash before u0000: %q", value)
+			}
+		})
+	}
+}
+
+// A document holds the escape \u0000 only where its backslash is not itself escaped.
+func TestADocumentHoldsTheNULEscapeExactly(t *testing.T) {
+	conn, err := pgx.Connect(ctx, pgtest.URL(t))
+	ok(t, err)
+	defer conn.Close(ctx)
+	for _, migration := range postgres.MigrationSQL() {
+		_, err := conn.Exec(ctx, migration)
+		ok(t, err)
+	}
+	for document, want := range map[string]bool{
+		`"\u0000"`:        true,
+		`"\\u0000"`:       false,
+		`"\\\u0000"`:      true,
+		`"\\\\u0000"`:     false,
+		`"\\\\\u0000"`:    true,
+		`"a\u00001"`:      true,
+		`"\u00000\\"`:     true,
+		`"u0000"`:         false,
+		`"\u0001"`:        false,
+		"\"\xff\\u0000\"": false,
+	} {
+		var holds bool
+		ok(t, conn.QueryRow(ctx, "SELECT gtm_holds_nul_escape($1::bytea)", []byte(document)).Scan(&holds))
+		if holds != want {
+			t.Errorf("%q: holds the escape %v, want %v", document, holds, want)
+		}
+	}
+}

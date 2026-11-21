@@ -233,6 +233,16 @@ func TestSignInRotatesTheSessionAndCSRF(t *testing.T) {
 		map[string]any{"login": "demo-reader", "password": readerPassword, "admin": true}); r.status != 400 {
 		t.Fatalf("unknown field: %d", r.status)
 	}
+	// A body that names the password twice signs nobody in, whichever of the two is the right one.
+	for _, twice := range []string{
+		`{"login":"demo-reader","password":"` + outsiderPassword + `","password":"` + readerPassword + `"}`,
+		`{"login":"demo-reader","password":"` + readerPassword + `","password":"` + outsiderPassword + `"}`,
+	} {
+		if r := b.write(http.MethodPost, "/api/v1/session", json.RawMessage(twice)); r.status != 400 ||
+			r.code() != "invalid_json" {
+			t.Fatalf("a password named twice: %d %s", r.status, r.raw)
+		}
+	}
 
 	r := b.write(http.MethodPost, "/api/v1/session", login)
 	if r.status != 200 || r.body["signed_in"] != true {

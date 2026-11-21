@@ -155,12 +155,13 @@ func (s *Store) EnsureAccountGrant(ctx context.Context, workspaceID, principalID
 }
 
 // AccountsWithCards lists the accounts holding a card made here, sealed by
-// this principal, as of this day.
+// this principal, as of this day. A card's bytes may hold the escape \u0000,
+// which jsonb cannot, so the day is read from the form the checks read.
 func (s *Store) AccountsWithCards(ctx context.Context, workspaceID, principalID, asOf string) (map[string]bool, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT c.account_ref FROM cards c JOIN receipts r ON r.id = c.seal_receipt_id
 		 WHERE c.workspace_id = $1 AND c.kind = 'go' AND r.principal_id = $2
-		   AND convert_from(c.card_bytes, 'UTF8')::jsonb ->> 'as_of' = $3`, workspaceID, principalID, asOf)
+		   AND gtm_jsonb_without_nul(c.card_bytes) ->> 'as_of' = $3`, workspaceID, principalID, asOf)
 	if err != nil {
 		return nil, err
 	}

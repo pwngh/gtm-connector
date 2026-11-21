@@ -21,6 +21,12 @@ import (
 // and returns its URL.
 func URL(t testing.TB) string {
 	t.Helper()
+	return URLEncoded(t, "UTF8")
+}
+
+// URLEncoded is URL for a database in this encoding.
+func URLEncoded(t testing.TB, encoding string) string {
+	t.Helper()
 	admin := os.Getenv("GTM_TEST_DATABASE_URL")
 	if admin == "" {
 		if os.Getenv("GTM_REQUIRE_DATABASE") == "1" {
@@ -43,7 +49,7 @@ func URL(t testing.TB) string {
 		t.Fatalf("test database server: %v", err)
 	}
 	defer conn.Close(ctx)
-	if _, err := conn.Exec(ctx, "CREATE DATABASE "+name+" TEMPLATE template0 ENCODING 'UTF8' LOCALE 'C'"); err != nil {
+	if _, err := conn.Exec(ctx, "CREATE DATABASE "+name+" TEMPLATE template0 ENCODING '"+encoding+"' LOCALE 'C'"); err != nil {
 		t.Fatalf("create test database: %v", err)
 	}
 	t.Cleanup(func() {
