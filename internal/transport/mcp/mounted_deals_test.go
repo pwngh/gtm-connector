@@ -23,7 +23,7 @@ import (
 
 // bindToDeals publishes each prepared brief as brief publishes a card: bound to its account's open deal.
 func bindToDeals(c *mcptools.Config) {
-	c.Receipts = &postgres.ReceiptStore{Store: c.Store.(*postgres.Store), OpenDeal: true}
+	c.Receipts = &postgres.ReceiptStore{Store: c.Store.(*postgres.Store), OpenDeal: &postgres.CardDeal{}}
 }
 
 // The deal tools' vectors get the same status, reply and receipt at the mounted endpoint as at the gate.
