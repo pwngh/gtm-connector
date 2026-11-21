@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pwngh/gtm-connector/internal/cards"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
@@ -43,12 +44,23 @@ func (b *lockedBuffer) String() string {
 
 const mcpMeta = `{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}`
 
-// What serve itself builds, served as serve serves it: the surface with MCP mounted, connected as the app
-// role, on a TLS listener with the install's certificate. An assistant with a machine token lists the tools,
-// reads its own source and no other, and prepares a brief, each call under one receipt; a bearer the store
-// does not know and a request for another Host are refused; and no bearer reaches the server's log.
-func TestServeAnswersMCPOverTLS(t *testing.T) {
-	d := setUpDemo(t)
+// served is serve as it serves: the surface with MCP mounted, connected as the app role, on a TLS listener
+// with the install's certificate, and a client that calls its tools.
+type served struct {
+	address string
+	server  *http.Server
+	logs    *lockedBuffer
+	key     []byte
+	send    func(host, method, name, token string, params map[string]any) (int, map[string]any)
+	call    func(host, tool, token string, arguments map[string]any) (int, map[string]any)
+	result  func(document map[string]any) map[string]any
+	reason  func(document map[string]any) any
+}
+
+// startServe starts what serve itself builds, until the test ends. It fails the test when serve cannot
+// start.
+func startServe(t *testing.T, d *demoDatabase, selection cards.Selection) *served {
+	t.Helper()
 	store, err := openAppStore(ctx, config{databaseURL: d.appURL})
 	if err != nil {
 		t.Fatal(err)
@@ -71,14 +83,6 @@ func TestServeAnswersMCPOverTLS(t *testing.T) {
 		t.Fatal(err)
 	}
 	address := listener.Addr().String()
-	file := filepath.Join(t.TempDir(), "selection.json")
-	if err := os.WriteFile(file, []byte(`{"schema_version": 1, "accounts": [{"account_id": "acc-003", "slack": true}]}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	selection, err := loadSelection(file)
-	if err != nil {
-		t.Fatal(err)
-	}
 	surface, err := newSurface(ctx, store, config{publicOrigin: "https://" + address, allowedHosts: []string{address}}, key, selection)
 	if err != nil {
 		t.Fatal(err)
@@ -89,22 +93,6 @@ func TestServeAnswersMCPOverTLS(t *testing.T) {
 	go server.ServeTLS(listener, "", "")
 	t.Cleanup(func() { server.Close() })
 
-	// A machine principal with a token for CRM and calls, as an operator's command will issue one.
-	machine, err := d.owner.CreatePrincipal(ctx, d.workspace, "machine", "Test assistant")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.owner.GrantAccount(ctx, d.workspace.ID, machine.ID, "acc-003"); err != nil {
-		t.Fatal(err)
-	}
-	const bearer, unknown = "serve-test-bearer-0000000000000000000000000000", "serve-test-unknown-bearer-000000000000000000"
-	digest := sha256.Sum256([]byte(bearer))
-	owner := conn(t, d.ownerURL)
-	if _, err := owner.Exec(ctx, `INSERT INTO machine_tokens (workspace_id, principal_id, token_sha256, scopes, expires_at)
-		VALUES ($1, $2, $3, ARRAY['crm:read', 'calls:read'], now() + interval '5 minutes')`, d.workspace.ID, machine.ID, digest[:]); err != nil {
-		t.Fatal(err)
-	}
-
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +101,8 @@ func TestServeAnswersMCPOverTLS(t *testing.T) {
 	pool.AddCert(leaf)
 	client := &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS13}}}
-	send := func(host, method, name, token string, params map[string]any) (int, map[string]any) {
+	s := &served{address: address, server: server, logs: logs, key: key}
+	s.send = func(host, method, name, token string, params map[string]any) (int, map[string]any) {
 		t.Helper()
 		params["_meta"] = json.RawMessage(mcpMeta)
 		body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
@@ -143,18 +132,58 @@ func TestServeAnswersMCPOverTLS(t *testing.T) {
 		}
 		return response.StatusCode, document
 	}
-	call := func(host, tool, token string, arguments map[string]any) (int, map[string]any) {
-		return send(host, "tools/call", tool, token, map[string]any{"name": tool, "arguments": arguments})
+	s.call = func(host, tool, token string, arguments map[string]any) (int, map[string]any) {
+		return s.send(host, "tools/call", tool, token, map[string]any{"name": tool, "arguments": arguments})
 	}
-	result := func(document map[string]any) map[string]any {
+	s.result = func(document map[string]any) map[string]any {
 		found, _ := document["result"].(map[string]any)
 		return found
 	}
-	reason := func(document map[string]any) any {
+	s.reason = func(document map[string]any) any {
 		failure, _ := document["error"].(map[string]any)
 		data, _ := failure["data"].(map[string]any)
 		return data["reason"]
 	}
+	return s
+}
+
+// machineBearer issues a bearer for CRM and calls to a machine principal granted acc-003, as an operator's
+// command will issue one.
+func machineBearer(t *testing.T, d *demoDatabase, bearer string) string {
+	t.Helper()
+	machine, err := d.owner.CreatePrincipal(ctx, d.workspace, "machine", "Test assistant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.owner.GrantAccount(ctx, d.workspace.ID, machine.ID, "acc-003"); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(bearer))
+	if _, err := conn(t, d.ownerURL).Exec(ctx, `INSERT INTO machine_tokens (workspace_id, principal_id, token_sha256, scopes,
+		expires_at) VALUES ($1, $2, $3, ARRAY['crm:read', 'calls:read'], now() + interval '5 minutes')`,
+		d.workspace.ID, machine.ID, digest[:]); err != nil {
+		t.Fatal(err)
+	}
+	return bearer
+}
+
+// What serve itself builds, served as serve serves it: the surface with MCP mounted, connected as the app
+// role, on a TLS listener with the install's certificate. An assistant with a machine token lists the tools,
+// reads its own source and no other, and prepares a brief, each call under one receipt; a bearer the store
+// does not know and a request for another Host are refused; and no bearer reaches the server's log.
+func TestServeAnswersMCPOverTLS(t *testing.T) {
+	d := setUpDemo(t)
+	file := filepath.Join(t.TempDir(), "selection.json")
+	if err := os.WriteFile(file, []byte(`{"schema_version": 1, "accounts": [{"account_id": "acc-003", "slack": true}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	selection, err := loadSelection(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := startServe(t, d, selection)
+	address, server, logs, key, send, call, result, reason := s.address, s.server, s.logs, s.key, s.send, s.call, s.result, s.reason
+	bearer, unknown := machineBearer(t, d, "serve-test-bearer-0000000000000000000000000000"), "serve-test-unknown-bearer-000000000000000000"
 	account := map[string]any{"account_id": "acc-003"}
 
 	status, listing := send(address, "tools/list", "", bearer, map[string]any{})
@@ -364,5 +393,70 @@ func TestMCPStartupErrorsAreFixedLines(t *testing.T) {
 	}
 	if got := mountError(errors.New("dial tcp 10.0.0.7:5432: connection refused")).Error(); got != "the MCP endpoint could not be set up" {
 		t.Errorf("an error that is not PostgreSQL's: %s", got)
+	}
+}
+
+// serve's MCP tools read what the workspace is connected to when each call starts. A source removed while
+// the server runs is refused at once, under the call's receipt, which names no connection; connected again,
+// it is read again. A server started with no CRM serves the browser surface and refuses every tool by name.
+func TestServeFollowsWhatTheWorkspaceIsConnectedTo(t *testing.T) {
+	d := setUpDemo(t)
+	s := startServe(t, d, nil)
+	bearer := machineBearer(t, d, "serve-test-bearer-1111111111111111111111111111")
+	account := map[string]any{"account_id": "acc-003"}
+	read := func(s *served) (records int, refusal string) {
+		t.Helper()
+		status, document := s.call(s.address, "get_account", bearer, account)
+		result := s.result(document)
+		if status != 200 || result == nil {
+			t.Fatalf("get_account: %d %v", status, document)
+		}
+		if result["isError"] == true {
+			content, _ := result["content"].([]any)
+			text, _ := content[0].(map[string]any)["text"].(string)
+			return 0, text
+		}
+		structured, _ := result["structuredContent"].(map[string]any)
+		found, _ := structured["records"].([]any)
+		return len(found), ""
+	}
+	last := func() string {
+		t.Helper()
+		var status string
+		var named bool
+		if err := conn(t, d.ownerURL).QueryRow(ctx, `SELECT status, connection_id IS NOT NULL FROM receipts
+			WHERE tool = 'get_account' AND parent_id IS NULL ORDER BY started_at DESC, id DESC LIMIT 1`).Scan(&status, &named); err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprintf("%s %v", status, named)
+	}
+	const notConnected = "Error executing tool get_account: crm_not_connected"
+
+	if records, refusal := read(s); records != 2 || refusal != "" || last() != "ok true" {
+		t.Fatalf("before the removal: %d records, %q, receipt %s", records, refusal, last())
+	}
+	if code, _, stderr := d.read(t, "connect", "demo", "--remove"); code != 0 {
+		t.Fatalf("connect demo --remove: exit %d\n%s", code, stderr)
+	}
+	if records, refusal := read(s); records != 0 || refusal != notConnected || last() != "error false" {
+		t.Errorf("after the removal: %d records, %q, receipt %s", records, refusal, last())
+	}
+	if code, _, stderr := d.read(t, "connect", "demo"); code != 0 {
+		t.Fatalf("connect demo: exit %d\n%s", code, stderr)
+	}
+	if records, refusal := read(s); records != 2 || refusal != "" || last() != "ok true" {
+		t.Errorf("connected again: %d records, %q, receipt %s", records, refusal, last())
+	}
+
+	// A restart with no CRM: the whole surface starts, the MCP endpoint with it.
+	if code, _, stderr := d.read(t, "connect", "demo", "--remove"); code != 0 {
+		t.Fatalf("connect demo --remove: exit %d\n%s", code, stderr)
+	}
+	restarted := startServe(t, d, nil)
+	if records, refusal := read(restarted); records != 0 || refusal != notConnected || last() != "error false" {
+		t.Errorf("after a restart with no CRM: %d records, %q, receipt %s", records, refusal, last())
+	}
+	if status, _ := restarted.send(restarted.address, "tools/list", "", bearer, map[string]any{}); status != 200 {
+		t.Errorf("tools/list with no CRM: %d", status)
 	}
 }

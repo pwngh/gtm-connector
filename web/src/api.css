@@ -80,7 +80,7 @@
 .api-unit-summary h3 {margin-bottom:8px}
 /* A path the server does not provide: the way home is the only control, 44px by the heading's rule. */
 .api-unavailable .button {margin-top:20px; font-size:1rem; text-decoration:none}
-/* The signed-in principal's mark in the header is not a control. Like the walkthrough's, it is hidden at phone width. */
+/* The signed-in principal's mark in the header is not a control. It is hidden at phone width. */
 @media (min-width:651px) {.topbar span.profile {display:inline-flex}}
 
 html[data-theme='dark'] :is(.api-session,.api-signin) {background:#131d28; border-color:#2f3f51; color:var(--ink)}

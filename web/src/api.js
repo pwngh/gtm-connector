@@ -97,8 +97,8 @@ export function createApiClient(fetchImpl = (...args) => globalThis.fetch(...arg
     return view;
   }
   return {
-    // Which app this is. Only what a static host answers means the
-    // walkthrough: a 404, or a 2xx HTML page (its fallback for any path). The
+    // Whether a server is behind the page. Only what a static host answers
+    // means none: a 404, or a 2xx HTML page (its fallback for any path). The
     // Go server answers in JSON, so anything else, a refusal, an error page
     // in front of it or a body cut off, is the server's answer, shown as such.
     async probe() {
@@ -112,7 +112,7 @@ export function createApiClient(fetchImpl = (...args) => globalThis.fetch(...arg
       if (redirect) return {mode: 'api', session: null, error: new ApiError({status: response.status, kind: 'redirect'})};
       if (body.kind === 'broken') return {mode: 'api', session: null, error: new ApiError({status: response.status, kind: 'unreachable'})};
       if (body.kind === 'other') {
-        if (response.status === 404 || (response.ok && /^text\/html\b/i.test(body.type))) return {mode: 'walkthrough', session: null, error: null};
+        if (response.status === 404 || (response.ok && /^text\/html\b/i.test(body.type))) return {mode: 'static', session: null, error: null};
         return {mode: 'api', session: null, error: response.ok ? new ApiError({status: response.status, kind: 'unexpected'}) : refusal(response.status, null)};
       }
       if (response.ok && isSessionView(body.value)) return {mode: 'api', session: body.value, error: null};

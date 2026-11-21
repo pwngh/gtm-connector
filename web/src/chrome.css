@@ -82,7 +82,7 @@ html[data-theme='dark'] {--chrome-focus:#a9c1ff}
 }
 .hs-current-owner {font-size:.875rem; color:inherit; line-height:1.5}
 
-/* Short desktop screens: tighter spacing, same targets, so Reset walkthrough needs no sidebar scroll. */
+/* Short desktop screens: tighter spacing, same targets, so the sidebar needs no scroll. */
 @media(min-width:651px) and (max-height:800px) {
   .sidebar {padding-bottom:12px}
   .sidebar .workspace-name {margin-bottom:18px}

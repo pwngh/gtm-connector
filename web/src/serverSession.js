@@ -1,8 +1,8 @@
 import {ApiError, sessionExpired} from './api.js';
 
-// Which data the app shows, and the signed-in session when the Go server
-// serves it. The mode is decided once per page load by asking the server; a
-// server that answers and refuses stays the source, never the walkthrough.
+// How the server answered, and the signed-in session when the Go server
+// serves the app. The mode is decided once per page load by asking the
+// server; a server that answers and refuses is still the server.
 //
 // Each change of signed-in session starts a new generation. Reads are keyed
 // by it, so a read made under an earlier session is dropped, and an answer

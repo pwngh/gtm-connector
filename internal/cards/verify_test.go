@@ -689,6 +689,17 @@ func TestReceiptsComeFirstAndReleaseLast(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
+	t.Run("a source changed after it was opened is not read", func(t *testing.T) {
+		m, r, source := setup()
+		m.Generations = map[string]int64{"crm": 1}
+		r.SetGeneration(testWorkspace, "crm-1", 2)
+		if _, err := m.Brief(ctx, brief); !errors.Is(err, receipts.ErrSourceChanged) || source.reads != 0 || r.published != 0 {
+			t.Fatalf("got %v after %d reads", err, source.reads)
+		}
+		if first := r.All()[0]; first.Status != "error" || *first.HTTPStatus != 409 || *first.Error != "source_changed" {
+			t.Fatalf("the first read's receipt: %+v", first)
+		}
+	})
 	t.Run("a source changed before publication gives no card", func(t *testing.T) {
 		m, r, source := setup()
 		source.during = func() {

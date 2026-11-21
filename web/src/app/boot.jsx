@@ -3,21 +3,16 @@ import {RouteLoading} from '../RouteContent.jsx';
 import ServerApp from './ServerApp.jsx';
 
 // Asks the server once which app this is, showing only the loading state
-// while it asks. A server's answer, or none, mounts the server's app. Only a
-// static host's answer loads the walkthrough, with `loadWalkthrough`.
-export function boot({store, show, loadWalkthrough}) {
+// while it asks. A server's answer, or none, mounts the server's app. A
+// static host's answer means there is no server behind the page, so it says so.
+export function boot({store, show}) {
   show(<RouteLoading label="page"/>);
   return store.start().then(({mode}) => {
-    if (mode !== 'walkthrough') {
-      show(<ServerApp store={store}/>);
-      return 'server';
+    if (mode === 'static') {
+      show(<main className="main-content"><section className="route-loading route-error"><p role="alert">This page needs its server. Open the address your gtm-connector server prints.</p></section></main>);
+      return 'static';
     }
-    return loadWalkthrough().then(({default: Walkthrough}) => {
-      show(<Walkthrough/>);
-      return 'walkthrough';
-    }, () => {
-      show(<section className="route-loading route-error"><p role="alert">This page could not load. Reload the page to try again.</p></section>);
-      return 'failed';
-    });
+    show(<ServerApp store={store}/>);
+    return 'server';
   });
 }
