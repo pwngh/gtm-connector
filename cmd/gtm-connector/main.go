@@ -58,9 +58,9 @@ const description = "Build a Deal card for a renewal from scoped CRM, call, and 
 // firstCommands are the commands a person is told to try first.
 var firstCommands = []string{"gtm-connector demo", "gtm-connector connect demo", "gtm-connector brief acc-007"}
 
-// listedCommands are the commands the refusal of an unknown command names: the Python CLI's own, each of
-// which this binary takes. setup, serve, backup, restore, health and version are this binary's besides,
-// and --help lists them all.
+// listedCommands are the commands the refusal of an unknown command names: the Python CLI's own. This
+// binary answers each by name, mcp and debug with a refusal until they are ported. setup, serve, backup,
+// restore, health and version are this binary's besides, and --help lists them all.
 var listedCommands = []string{"demo", "connect", "accounts", "brief", "inspect", "audit", "mcp", "debug"}
 
 const usage = `usage: gtm-connector [--version] [--json] COMMAND ...
@@ -141,7 +141,7 @@ func dispatch(ctx context.Context, argv []string, s screen) int {
 			err = restoreCommand(ctx, args)
 		case "health":
 			err = health(ctx, args)
-		default:
+		case "version":
 			fmt.Fprintf(s.out, "gtm-connector %s %s\n", buildRevision(), runtime.Version())
 		}
 	case "-h", "--help", "help":
