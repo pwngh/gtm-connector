@@ -39,6 +39,7 @@ until its checks are ported.
   - Slack threads are mapped again;
   - seller lists and selection files are set again.
 - Assistant apps are set up again, because their saved entries start the Python package.
+- `log_activity` and the `crm:write` scope are removed. v0.1.0 offers read tools only, and a write attempt is refused with a receipt.
 - The web app shows Evidence and Readiness for the demo sign-in. Real cards are read with the CLI and the MCP tools.
 - No live CRM org has been verified, and v0.1.0 does not wait for one.
 
@@ -230,7 +231,6 @@ Each of these differs from the Python package on purpose, so each waits until af
 
 ## Open questions
 
-- **The write tool.** `log_activity` and `crm:write` exist today. v0.1.0 is read-only, so the cutover either removes them or keeps them for demo data only.
 - **Legal and security blockers.** Does a person record each one on the playbook, or does a rule find it in the records? A rule may not judge wording, because source text never decides anything.
 - **The seller's commitments.** Wording cannot decide which seller sentence is a commitment. Does a person mark it, or does the section hold every seller sentence with a date or an amount?
 - **Silence and Slack.** A Slack author is never a customer today, so silence counts calls and email only, until Slack authors are matched to contacts.
@@ -334,7 +334,6 @@ v0.1.0 step that ports the behavior.
   - `audit --follow` polling every half second, and `--status pending` never printing the later `ok` version;
   - an incomplete request that disconnects before it is classified getting no receipt;
   - the default rate limit of 60 calls per 60 seconds per token, reset by a restart;
-  - the exact `idempotency_conflict` error for a changed `log_activity` payload;
   - response bodies left out of the audit log.
 - **Selection and prepared briefs:**
   - the selection file owned by you, and never reloaded;

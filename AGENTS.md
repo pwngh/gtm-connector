@@ -61,9 +61,9 @@ make verify-real                                   # real public text, Python ag
    gateway, not internals.
 4. Build it, run it as a user, then clean it before review: no duplicate helpers, leftover flags,
    or filler in code, messages, and docs. Run the tests, ruff, and mypy.
-5. For the request path, briefs, credentials, or `SECURITY_REVIEW.md`, get a review by other models
-   against the seven rules: `gpt-6.2-sol`, then one round of `claude-fable-5-2` and `gpt-6.2-sol`,
-   with `grok-4.7` advisory. Fix simple findings without another round.
+5. For the request path, briefs, credentials, or `SECURITY_REVIEW.md`, get one review round by other
+   models against the seven rules: `claude-fable-5-2` and `gpt-6.2-sol`, with `grok-4.7` advisory.
+   Fix the findings without another round.
 6. Open a PR that says what changed, why, and how it was proven. Do not merge unless asked.
 
 - Have a view and argue for it. If a request leads somewhere worse, say so and show the better way.
