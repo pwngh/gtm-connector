@@ -22,8 +22,9 @@ import (
 )
 
 // openAppStore connects as the app role, as serve and demo do. It refuses a
-// role that owns the tables, a database setup has not migrated, and one
-// whose restore has not installed its credentials.
+// role that owns the tables, a database whose migrations are not exactly
+// this binary's (behind, ahead or changed), and one whose restore has not
+// installed its credentials.
 func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 	if c.databaseURL == "" {
 		return nil, errors.New("set GTM_DATABASE_URL to the app role's PostgreSQL URL")
@@ -36,11 +37,10 @@ func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 		if err := store.CheckAppRole(ctx); err != nil {
 			return err
 		}
-		if version, err := store.SchemaVersion(ctx); err != nil {
+		if state, err := store.MigrationState(ctx); err != nil {
 			return err
-		} else if version != postgres.LatestSchemaVersion() {
-			return fmt.Errorf("the database is at schema %d, not %d; run setup first", version,
-				postgres.LatestSchemaVersion())
+		} else if err := state.Err(); err != nil {
+			return err
 		}
 		if pending, err := store.PendingRestore(ctx); err != nil {
 			return err
@@ -56,9 +56,9 @@ func openAppStore(ctx context.Context, c config) (*postgres.Store, error) {
 	return store, nil
 }
 
-// serve runs the HTTPS server as the app role. It refuses to start before
-// setup has run, while a restore is unfinished, or as a role that owns the
-// tables.
+// serve runs the HTTPS server as the app role. It refuses to start on a
+// database whose migrations are behind this binary's, ahead of them or
+// changed, while a restore is unfinished, or as a role that owns the tables.
 func serve(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	if err := flags.Parse(args); err != nil {

@@ -310,7 +310,7 @@ func (m *Maker) read(ctx context.Context, r reading) (records []any, bound []rec
 	}
 	system, found, readErr := "", []*strictjson.Object(nil), bounded.Err()
 	if readErr == nil {
-		system, found, snapshot, readErr = m.source(bounded, r.tool, r.accountID)
+		system, found, snapshot, readErr = m.await(bounded, r.tool, r.accountID)
 	}
 	switch stopped := bounded.Err(); {
 	case errors.Is(stopped, context.DeadlineExceeded):
@@ -403,7 +403,47 @@ func (m *Maker) collect(ctx context.Context, reads []planned, accountID string, 
 			c.threadSnapshot = snapshot
 		}
 	}
-	return c, nil
+	// A caller who left once the last read had returned gets no card. The reads keep their receipts.
+	return c, gone(ctx)
+}
+
+// gone is why no card is made once the caller has left, and nil while the caller waits.
+func gone(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("the caller left before the card was published; no card made: %w", err)
+	}
+	return nil
+}
+
+// await makes one read of the source and waits for it no longer than ctx lasts. The read runs in its own
+// goroutine. A source that ignores its context does not hold the maker: when ctx ends first, await returns
+// ctx's error, and the read's answer is discarded whenever it comes. A read that panics in time panics here.
+func (m *Maker) await(ctx context.Context, tool, accountID string) (string, []*strictjson.Object, any, error) {
+	type answer struct {
+		system   string
+		records  []*strictjson.Object
+		snapshot any
+		err      error
+		panicked any
+	}
+	answered := make(chan answer, 1)
+	go func() {
+		var a answer
+		defer func() {
+			a.panicked = recover()
+			answered <- a
+		}()
+		a.system, a.records, a.snapshot, a.err = m.source(ctx, tool, accountID)
+	}()
+	select {
+	case a := <-answered:
+		if a.panicked != nil {
+			panic(a.panicked)
+		}
+		return a.system, a.records, a.snapshot, a.err
+	case <-ctx.Done():
+		return "", nil, nil, ctx.Err()
+	}
 }
 
 func (m *Maker) evidence(ctx context.Context, workspaceID, id, accountID, asOf string, c collected) (*strictjson.Object, error) {
@@ -450,19 +490,27 @@ func projections(units []evidence.Unit, gaps []evidence.Gap, c collected) ([]rec
 
 // publish writes the card and finishes its seal in one step. A refused recheck finishes the seal itself; any
 // other failure leaves it pending, so it is finished here as the save failure.
+//
+// The caller's cancel counts up to the call of Publish and not after it. A caller who has left by then gets
+// no card, and the seal finishes as the failure. From that call on the publication runs to its end under a
+// context the caller cannot cancel: a cancel in the middle of the store's transaction could leave the caller
+// told of a failure while the card and its seal are committed.
 func (m *Maker) publish(ctx context.Context, p receipts.Publication, units []evidence.Unit, gaps []evidence.Gap,
 	text string, c collected, failure receipts.Outcome) (*Sealed, error) {
+	uncancelled := context.WithoutCancel(ctx)
 	var err error
 	if p.Units, p.Gaps, err = projections(units, gaps, c); err == nil {
-		var card receipts.Card
-		if card, err = m.Receipts.Publish(ctx, p); err == nil {
-			return &Sealed{BriefID: p.BriefID, Payload: card.Bytes, SHA256: card.SHA256, Seal: card.Seal, Units: units,
-				Gaps: gaps, Text: text}, nil
+		if err = gone(ctx); err == nil {
+			var card receipts.Card
+			if card, err = m.Receipts.Publish(uncancelled, p); err == nil {
+				return &Sealed{BriefID: p.BriefID, Payload: card.Bytes, SHA256: card.SHA256, Seal: card.Seal,
+					Units: units, Gaps: gaps, Text: text}, nil
+			}
 		}
 	}
 	if !errors.Is(err, receipts.ErrNotPermitted) && !errors.Is(err, receipts.ErrSourceChanged) {
 		failure.ElapsedMS = p.ElapsedMS
-		_, _ = m.Receipts.Finish(ctx, p.Seal, failure)
+		_, _ = m.Receipts.Finish(uncancelled, p.Seal, failure)
 	}
 	return nil, err
 }
@@ -506,6 +554,10 @@ func (m *Maker) Brief(ctx context.Context, b Brief) (*Sealed, error) {
 	units, text, gaps, err := evidence.Build(snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("brief %s rejected; no card published: %w", id, err)
+	}
+	// No seal is started for a caller who has left.
+	if err := gone(ctx); err != nil {
+		return nil, err
 	}
 	seal, err := m.Receipts.Start(ctx, receipts.Start{WorkspaceID: p.WorkspaceID, OperationID: b.OperationID + "/seal",
 		PrincipalID: p.PrincipalID, TokenID: p.TokenID, Tool: receipts.SaveBrief, AccountRef: b.AccountID,
