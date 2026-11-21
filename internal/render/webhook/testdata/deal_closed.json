@@ -1,0 +1,63 @@
+{
+  "id": "evt_03",
+  "type": "deal.closed",
+  "occurred_at": "2027-01-15T15:00:05Z",
+  "deal": {
+    "id": "acc-003",
+    "status": "closed_won",
+    "previous_status": "green"
+  },
+  "card": {
+    "id": "card-f6efd0c24ab6",
+    "sha256": "f6efd0c24ab628e5a4fad86123243313c1e6d14f6c86b6967593c9a5ce379bda",
+    "as_of": "2027-01-15"
+  },
+  "renewal": {
+    "days": 24,
+    "date": "2027-02-08",
+    "counts_to": "renewal"
+  },
+  "rules": [
+    {
+      "code": "legal_security_blocker",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "pricing_seat_conflict",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "customer_silence",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "close_date_slippage",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    },
+    {
+      "code": "single_threaded",
+      "state": "clear",
+      "previous_state": "clear",
+      "units": [],
+      "help": "https://github.com/pwngh/gtm-connector/blob/0123456789abcdef0123456789abcdef01234567/docs/deals.md#what-flags-a-deal"
+    }
+  ],
+  "unread": [],
+  "changes": null,
+  "links": {
+    "card": "https://gtm.example.internal/deals/acc-003?card=card-f6efd0c24ab6",
+    "api": "https://gtm.example.internal/api/v1/cards/card-f6efd0c24ab6"
+  }
+}

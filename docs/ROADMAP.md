@@ -111,7 +111,7 @@ RevOps covers every renewal and sees which have no current card.
 
 ### 3. Delivery
 
-- Slack alerts, signed webhooks and the three events ([the API](api.md#webhooks-and-slack-alerts)).
+- Sending Slack alerts and signed webhooks for the three events: the destination and its secret, retries, the delivery log, alert rules, and the Slack link summary in a configured channel. The bodies and the signature are built ([what a delivery holds](api.md#what-a-delivery-holds)), from a deal status and rule results that the five flags will give.
 - Tokens for scripts and assistants, the flagged-deals feed, and the OpenAPI file.
 - `setup` printing the MCP configuration for each assistant client.
 - MCP tools that read deals, cards and proof. Clients are named in the docs only after a live test: Claude Desktop, Claude Code, ChatGPT, Codex and Cursor are untested today.
@@ -244,5 +244,6 @@ grouped by the v0.1.0 step that owns the check.
   - a stdio call still running when input ends getting a receipt and no answer;
   - the `--selection` refusals, and the stdio `initialize` of a client that sends no protocol metadata;
   - the 45-second deadline and the 4 MiB limit of a prepared brief, with `brief_deadline_exceeded`, `brief_too_large` and `brief_storage_failed`.
+- **Delivery bodies (API guide):** Slack showing an alert and a summary as the guide says, with the account's name unformatted, nothing linked by itself, and the limits as Slack counts them. No body has been posted to a Slack workspace.
 
 </details>
