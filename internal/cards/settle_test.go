@@ -530,3 +530,33 @@ func TestASourceThatPanicsAsItsContextEndsIsSettledInBothOrders(t *testing.T) {
 		w.stoppedAt(t, store.watched, "ending/3", 200)
 	}
 }
+
+// unstarted is a store whose child reads do not start, as a database whose parent row another session holds
+// does: each start waits until the context it was given ends. A start given no deadline fails after a minute.
+type unstarted struct{ *watched }
+
+func (u *unstarted) StartChild(ctx context.Context, s receipts.ChildStart) (receipts.Receipt, error) {
+	select {
+	case <-ctx.Done():
+		return receipts.Receipt{}, ctx.Err()
+	case <-time.After(time.Minute):
+		return receipts.Receipt{}, errors.New("the child start was given no deadline")
+	}
+}
+
+// A prepared brief's child read waits to start no longer than the limit: the brief fails within it, and its
+// seal finishes as an error.
+func TestAChildStartPastTheLimitIsGivenUp(t *testing.T) {
+	for name, fresh := range worlds(t) {
+		t.Run(name, func(t *testing.T) {
+			w := fresh(t)
+			m := w.maker(t, &unstarted{&watched{Store: w.store}}, demoBook(t))
+			m.limit = short
+			sealed, err := within(t, func() (*Sealed, error) { return m.Prepare(context.Background(), w.prepare("unstarted")) })
+			if sealed != nil || !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("a card: %t; %v", sealed != nil, err)
+			}
+			w.failedSeal(t, "prepare", "unstarted")
+		})
+	}
+}

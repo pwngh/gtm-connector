@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,7 +38,9 @@ var (
 // milliseconds: five seconds on a lock means its holder is stuck, and ten
 // seconds leaves room for the commit checks of a card of the largest size.
 // Both are under the card maker's own limit of fifteen seconds
-// (cards.SettleLimit), so the database gives up first and says why.
+// (cards.SettleLimit), so the database gives up first and says why. Each
+// transaction that starts or finishes a receipt runs under the same two,
+// which a single row's insert or update meets with the same room.
 const (
 	publishLockTimeout      = 5 * time.Second
 	publishStatementTimeout = 10 * time.Second
@@ -168,11 +169,8 @@ func (s *Store) publishCard(ctx context.Context, in CardPublication,
 		SchemaVersion: in.SchemaVersion, RulesVersion: in.RulesVersion, Bytes: in.Bytes, SHA256: digest[:],
 		ParentReceiptID: in.ParentReceiptID, SealReceiptID: in.SealReceiptID, LineCount: &lineCount}
 	var refused error
-	lock, statement := s.publishTimeouts()
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		// For this transaction only: the settings end with it.
-		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true), set_config('statement_timeout', $2, true)`,
-			strconv.FormatInt(lock.Milliseconds(), 10), strconv.FormatInt(statement.Milliseconds(), 10)); err != nil {
+		if err := s.bound(ctx, tx); err != nil {
 			return err
 		}
 		var live bool

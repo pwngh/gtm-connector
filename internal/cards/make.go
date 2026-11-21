@@ -179,14 +179,27 @@ type Maker struct {
 	limit time.Duration
 }
 
-// settling gives the context of one step that must not stop when the caller leaves: the publication, or the
-// finishing of a receipt. The caller's cancel and deadline do not end it, and SettleLimit does.
-func (m *Maker) settling(ctx context.Context) (context.Context, context.CancelFunc) {
-	limit := m.limit
+// Settling gives the context of one step that must not stop when the caller leaves: a publication, or the
+// start or finish of a receipt. The caller's cancel and deadline do not end it, and limit does. A zero limit
+// is SettleLimit.
+func Settling(ctx context.Context, limit time.Duration) (context.Context, context.CancelFunc) {
 	if limit == 0 {
 		limit = SettleLimit
 	}
 	return context.WithTimeout(context.WithoutCancel(ctx), limit)
+}
+
+// settling is Settling under the maker's limit.
+func (m *Maker) settling(ctx context.Context) (context.Context, context.CancelFunc) {
+	return Settling(ctx, m.settleLimit())
+}
+
+// settleLimit is SettleLimit, or what a test set.
+func (m *Maker) settleLimit() time.Duration {
+	if m.limit == 0 {
+		return SettleLimit
+	}
+	return m.limit
 }
 
 // finish finishes a receipt with an outcome that binds no records, whether or not the caller has left.
@@ -845,7 +858,10 @@ func (m *Maker) Prepare(ctx context.Context, p Prepare) (*Sealed, error) {
 	}
 	c, err := m.collect(ctx, plan(m.Sources, includeSlack), accountID, principal, deadline, includeSlack,
 		func(n int, read planned) (receipts.Receipt, error) {
-			return m.Receipts.StartChild(ctx, receipts.ChildStart{Parent: outer.AuditID, Ordinal: n, Tool: read.tool,
+			// A child's start is a receipt write: it ends with the caller and within the settle limit.
+			starting, cancel := context.WithTimeout(ctx, m.settleLimit())
+			defer cancel()
+			return m.Receipts.StartChild(starting, receipts.ChildStart{Parent: outer.AuditID, Ordinal: n, Tool: read.tool,
 				Scope: scopes[read.tool], ConnectionID: m.connection(read.system), AccountRef: accountID,
 				Arguments: strictjson.NewObject("account_id", accountID), BriefID: &id})
 		})

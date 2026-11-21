@@ -3,9 +3,10 @@
 // server handed out. Refusals become ApiError with a kind the pages show, so a
 // refusal is never read as an empty result.
 
-import type {AccountCards, AccountList, CardDetail, Json, ReceiptView, SessionView, UnitBody, UnitView} from './types.ts';
+import type {AccountCards, AccountList, CardDetail, Health, Json, ReceiptView, SessionView, UnitBody, UnitView} from './types.ts';
 
 export const sessionPath = '/api/v1/session';
+export const healthPath = '/healthz';
 export const csrfHeader = 'X-CSRF-Token';
 
 // The connector demo's account for this renewal: the default choice when the
@@ -126,6 +127,7 @@ export interface Api {
   card(id: string, options?: ReadOptions): Promise<CardDetail>;
   unit(card: string, n: number, options?: ReadOptions): Promise<UnitView>;
   receipt(id: string, options?: ReadOptions): Promise<ReceiptView>;
+  health(options?: ReadOptions): Promise<Health>;
 }
 
 interface SendOptions {
@@ -271,6 +273,22 @@ export function createApiClient(fetchImpl: Fetch = defaultFetch, {timeoutMs = re
     },
     async receipt(id, {signal} = {}) {
       return request('GET', `/api/v1/receipts/${segment(id)}`, {signal});
+    },
+    // The server's health: 200 with "ok", or 503 with the status that says
+    // why. Both are answers. Any other response is not, and is an error.
+    async health({signal} = {}) {
+      const {response, body, redirect} = await send('GET', healthPath, {signal});
+      if (redirect || body === null) {
+        throw new ApiError({status: response.status, kind: 'redirect'});
+      }
+      if (body.kind === 'broken') {
+        throw new ApiError({status: response.status, kind: 'unreachable'});
+      }
+      const json = body.kind === 'json' ? body.value : null;
+      if ((response.status === 200 || response.status === 503) && isObject(json) && typeof json.status === 'string' && json.status) {
+        return {status: json.status};
+      }
+      throw response.ok ? new ApiError({status: response.status, kind: 'unexpected'}) : refusal(response.status, json);
     },
   };
 }

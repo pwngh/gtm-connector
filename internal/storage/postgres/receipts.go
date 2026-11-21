@@ -214,24 +214,40 @@ func (s *Store) StartReceipt(ctx context.Context, in ReceiptStart) (Receipt, err
 	}
 	requested := requestedAccount(in.AccountRef)
 	// A connection of another workspace matches no row: ErrNotFound below.
-	row := s.pool.QueryRow(ctx, `
-		INSERT INTO receipts AS r (workspace_id, operation_id, principal_id, token_id, tool, scope,
-			requested_account, account_ref, connection_id, connection_generation, arguments, request_id,
-			brief_id, lease_token, lease_expires_at)
-		SELECT $1, $2, $3, $4, $5, $6, $7,
-			(SELECT ref FROM accounts WHERE workspace_id = $1 AND ref = $7),
-			c.id, c.generation, $8, $9, $10, gen_random_uuid(), clock_timestamp() + make_interval(secs => $11)
-		  FROM (SELECT 1) one
-		  LEFT JOIN connections c ON c.workspace_id = $1 AND c.id = $12
-		 WHERE $12::uuid IS NULL OR c.id IS NOT NULL
-		ON CONFLICT (workspace_id, operation_id) DO NOTHING
-		RETURNING `+receiptColumns,
-		in.WorkspaceID, in.OperationID, nullable(in.PrincipalID), in.TokenID, in.Tool, nullable(in.Scope),
-		requested, string(in.Arguments), in.requestID(), nullable(in.BriefID), in.Lease.Seconds(),
-		nullable(in.ConnectionID))
-	r, err := scanReceipt(row)
-	if err == nil {
+	// The insert runs in a transaction under the store's lock and statement
+	// timeouts (bound), so it commits only when the caller commits it: an
+	// insert its caller stopped waiting for writes nothing.
+	var r Receipt
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
+		var err error
+		r, err = scanReceipt(tx.QueryRow(ctx, `
+			INSERT INTO receipts AS r (workspace_id, operation_id, principal_id, token_id, tool, scope,
+				requested_account, account_ref, connection_id, connection_generation, arguments, request_id,
+				brief_id, lease_token, lease_expires_at)
+			SELECT $1, $2, $3, $4, $5, $6, $7,
+				(SELECT ref FROM accounts WHERE workspace_id = $1 AND ref = $7),
+				c.id, c.generation, $8, $9, $10, gen_random_uuid(), clock_timestamp() + make_interval(secs => $11)
+			  FROM (SELECT 1) one
+			  LEFT JOIN connections c ON c.workspace_id = $1 AND c.id = $12
+			 WHERE $12::uuid IS NULL OR c.id IS NOT NULL
+			ON CONFLICT (workspace_id, operation_id) DO NOTHING
+			RETURNING `+receiptColumns,
+			in.WorkspaceID, in.OperationID, nullable(in.PrincipalID), in.TokenID, in.Tool, nullable(in.Scope),
+			requested, string(in.Arguments), in.requestID(), nullable(in.BriefID), in.Lease.Seconds(),
+			nullable(in.ConnectionID)))
+		if err != nil {
+			return err
+		}
+		return s.at("start:inserted")
+	})
+	switch {
+	case err == nil:
 		return r, nil
+	case errors.Is(err, errCommitUnknown):
+		return s.startStored(ctx, r, err)
 	}
 	// The operation exists, or the insert was refused: a replay of another
 	// request is refused as such, whatever the insert's own refusal.
@@ -255,6 +271,20 @@ func (s *Store) StartReceipt(ctx context.Context, in ReceiptStart) (Receipt, err
 	}
 	existing.Replay = true
 	return existing, nil
+}
+
+// startStored settles a start whose commit got no answer by reading the
+// receipt it inserted back by its ID, within recoverWait. When that receipt
+// is there, pending under the lease the insert gave, the start committed and
+// is returned as committed. Otherwise the start's own error stands.
+func (s *Store) startStored(ctx context.Context, inserted Receipt, err error) (Receipt, error) {
+	reading, cancel := recovering(ctx)
+	defer cancel()
+	stored, readErr := s.receiptByID(reading, inserted.ID)
+	if readErr != nil || stored.Status != "pending" || stored.LeaseToken != inserted.LeaseToken {
+		return Receipt{}, err
+	}
+	return inserted, nil
 }
 
 // checkArguments refuses arguments strictjson would not read back: two
@@ -334,24 +364,35 @@ func (s *Store) StartChildRead(ctx context.Context, in ChildReadStart) (Receipt,
 	}
 	requestID, _ := json.Marshal(map[string]any{
 		"kind": "brief_child", "parent_audit_id": in.ParentID, "ordinal": in.Ordinal})
-	row := s.pool.QueryRow(ctx, `
-		INSERT INTO receipts AS r (workspace_id, operation_id, parent_id, ordinal, principal_id, token_id,
-			tool, scope, requested_account, account_ref, connection_id, connection_generation, arguments,
-			request_id, brief_id, lease_token, lease_expires_at)
-		SELECT p.workspace_id, p.operation_id || '#' || $2::integer, p.id, $2::integer, p.principal_id,
-			p.token_id, $3, $4, coalesce($5, p.requested_account),
-			CASE WHEN $5::text IS NULL THEN p.account_ref
-			     ELSE (SELECT ref FROM accounts a WHERE a.workspace_id = p.workspace_id AND a.ref = $5) END,
-			c.id, c.generation, $6, $7, $10, gen_random_uuid(), clock_timestamp() + make_interval(secs => $8)
-		  FROM receipts p
-		  JOIN connections c ON c.workspace_id = p.workspace_id AND c.id = $9
-		 WHERE p.id = $1
-		ON CONFLICT (workspace_id, operation_id) DO NOTHING
-		RETURNING `+receiptColumns,
-		in.ParentID, in.Ordinal, in.Tool, nullable(in.Scope), requestedAccount(in.AccountRef),
-		string(in.Arguments), requestID, in.Lease.Seconds(), in.ConnectionID, nullable(in.BriefID))
-	r, err := scanReceipt(row)
+	// The insert's trigger waits on the parent's row, so it runs under the
+	// store's lock and statement timeouts (bound), as a top-level start does.
+	var r Receipt
+	err = s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
+		var err error
+		r, err = scanReceipt(tx.QueryRow(ctx, `
+			INSERT INTO receipts AS r (workspace_id, operation_id, parent_id, ordinal, principal_id, token_id,
+				tool, scope, requested_account, account_ref, connection_id, connection_generation, arguments,
+				request_id, brief_id, lease_token, lease_expires_at)
+			SELECT p.workspace_id, p.operation_id || '#' || $2::integer, p.id, $2::integer, p.principal_id,
+				p.token_id, $3, $4, coalesce($5, p.requested_account),
+				CASE WHEN $5::text IS NULL THEN p.account_ref
+				     ELSE (SELECT ref FROM accounts a WHERE a.workspace_id = p.workspace_id AND a.ref = $5) END,
+				c.id, c.generation, $6, $7, $10, gen_random_uuid(), clock_timestamp() + make_interval(secs => $8)
+			  FROM receipts p
+			  JOIN connections c ON c.workspace_id = p.workspace_id AND c.id = $9
+			 WHERE p.id = $1
+			ON CONFLICT (workspace_id, operation_id) DO NOTHING
+			RETURNING `+receiptColumns,
+			in.ParentID, in.Ordinal, in.Tool, nullable(in.Scope), requestedAccount(in.AccountRef),
+			string(in.Arguments), requestID, in.Lease.Seconds(), in.ConnectionID, nullable(in.BriefID)))
+		return err
+	})
 	switch {
+	case errors.Is(err, errCommitUnknown):
+		return s.startStored(ctx, r, err)
 	case sqlState(err) == "GT006", sqlState(err) == "GT017":
 		return Receipt{}, ErrParent
 	case sqlState(err) == "GT012":
@@ -438,14 +479,33 @@ func (s *Store) FinishReceipt(ctx context.Context, f ReceiptFinish) (Receipt, er
 	}
 	var finished Receipt
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
 		var err error
 		finished, err = finishLocked(ctx, tx, f, false)
 		return err
 	})
-	if errors.Is(err, errNotPending) {
+	switch {
+	case errors.Is(err, errNotPending):
 		return s.settled(ctx, f, false)
+	case errors.Is(err, errCommitUnknown):
+		return s.finishStored(ctx, f, false, err)
 	}
 	return finished, err
+}
+
+// finishStored settles a finish whose commit got no answer by reading the
+// receipt back, within recoverWait: stored with this outcome under this
+// lease, the finish committed and the stored receipt is returned. Otherwise
+// the finish's own error stands.
+func (s *Store) finishStored(ctx context.Context, f ReceiptFinish, sourceRead bool, err error) (Receipt, error) {
+	reading, cancel := recovering(ctx)
+	defer cancel()
+	if stored, settledErr := s.settled(reading, f, sourceRead); settledErr == nil {
+		return stored, nil
+	}
+	return Receipt{}, err
 }
 
 var (
@@ -590,6 +650,9 @@ func (s *Store) FinishRead(ctx context.Context, receiptID, leaseToken string, re
 	var finished Receipt
 	var refused error
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
 		var status, workspaceID, source string
 		var connectionID *string
 		var generation *int64
@@ -668,6 +731,15 @@ func (s *Store) FinishRead(ctx context.Context, receiptID, leaseToken string, re
 	switch {
 	case errors.Is(err, errNotPending):
 		return s.settledRead(ctx, ok, records, failure)
+	case errors.Is(err, errCommitUnknown):
+		// Read back within recoverWait: an outcome stored under this lease,
+		// with these records, is what committed.
+		reading, cancel := recovering(ctx)
+		defer cancel()
+		if stored, settledErr := s.settledRead(reading, ok, records, failure); stored.ID != "" {
+			return stored, settledErr
+		}
+		return Receipt{}, err
 	case err != nil:
 		return Receipt{}, err
 	case refused != nil:
@@ -722,12 +794,18 @@ func (s *Store) FailRead(ctx context.Context, receiptID, leaseToken string, http
 	}
 	var finished Receipt
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
 		var err error
 		finished, err = finishLocked(ctx, tx, f, true)
 		return err
 	})
-	if errors.Is(err, errNotPending) {
+	switch {
+	case errors.Is(err, errNotPending):
 		return s.settled(ctx, f, true)
+	case errors.Is(err, errCommitUnknown):
+		return s.finishStored(ctx, f, true, err)
 	}
 	return finished, err
 }
@@ -889,6 +967,9 @@ func (s *Store) MarkDelivered(ctx context.Context, receiptID string) error {
 func (s *Store) abandon(ctx context.Context, id string) (Receipt, error) {
 	var finished Receipt
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if err := s.bound(ctx, tx); err != nil {
+			return err
+		}
 		var err error
 		finished, err = abandonLocked(ctx, tx, id)
 		return err

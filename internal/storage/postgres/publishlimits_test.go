@@ -77,6 +77,53 @@ func TestAPublicationGivesUpOnALock(t *testing.T) {
 	}
 }
 
+// A receipt's start and its finish wait on a lock no longer than a publication does, whatever the caller's
+// context allows, and write nothing when they give up. Each goes through once the lock is gone.
+func TestAReceiptStartOrFinishGivesUpOnALock(t *testing.T) {
+	f := postgrestest.New(t)
+	postgres.SetPublishTimeouts(f.Store, 200*time.Millisecond, time.Minute)
+	bounded, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	holder := session(t, f.URL)
+	hold := func(statement string, args ...any) {
+		_, err := holder.Exec(ctx, "BEGIN")
+		ok(t, err)
+		_, err = holder.Exec(ctx, statement, args...)
+		ok(t, err)
+	}
+	release := func() {
+		_, err := holder.Exec(ctx, "ROLLBACK")
+		ok(t, err)
+	}
+
+	hold("LOCK TABLE receipts IN EXCLUSIVE MODE")
+	began := time.Now()
+	_, err := f.Store.StartReceipt(bounded, postgres.ReceiptStart{WorkspaceID: f.Workspace.ID, OperationID: "held-start",
+		TokenID: "anonymous", Tool: "an_unknown_tool", Arguments: []byte(`{}`), RequestID: []byte(`1`), Lease: time.Minute})
+	if code(err) != "55P03" || time.Since(began) > 10*time.Second {
+		t.Fatalf("a start behind a lock: %v after %s", err, time.Since(began))
+	}
+	release()
+	if n := count(t, f, "SELECT count(*) FROM receipts WHERE operation_id = 'held-start'"); n != 0 {
+		t.Fatalf("%d receipts written", n)
+	}
+
+	started := cliRead(t, f, "held-finish", "", "anonymous")
+	hold("SELECT 1 FROM receipts WHERE id = $1 FOR UPDATE", started.ID)
+	began = time.Now()
+	_, err = f.Store.FailRead(bounded, started.ID, started.LeaseToken, 503, "unavailable", 0)
+	if code(err) != "55P03" || time.Since(began) > 10*time.Second {
+		t.Fatalf("a finish behind a lock: %v after %s", err, time.Since(began))
+	}
+	release()
+	if pending, err := f.Store.Receipt(ctx, f.Workspace.ID, started.ID); err != nil || pending.Status != "pending" {
+		t.Fatalf("the receipt: %+v (%v)", pending, err)
+	}
+	if _, err := f.Store.FailRead(ctx, started.ID, started.LeaseToken, 503, "unavailable", 0); err != nil {
+		t.Fatalf("the finish once the lock is gone: %v", err)
+	}
+}
+
 // reading is a demo workspace whose reader holds a grant on acc-003, with the card maker reading the demo
 // book through the store.
 type reading struct {

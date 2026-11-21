@@ -2,5 +2,6 @@
 // sends "/", /ops and /deals, with anything below them, to the app.
 export const serverPaths = {
   deals: '/deals',
+  coverage: '/ops/coverage',
   evidence: '/ops/evidence',
 };

@@ -10,8 +10,8 @@ import (
 // the process stopped there: the transaction is rolled back.
 func SetCrash(s *Store, crash func(point string) error) { s.crash = crash }
 
-// SetPublishTimeouts shortens how long a publication's transaction waits on
-// a lock and runs one statement.
+// SetPublishTimeouts shortens how long a publication's transaction, and each
+// that starts or finishes a receipt, waits on a lock and runs one statement.
 func SetPublishTimeouts(s *Store, lock, statement time.Duration) {
 	s.publishLock, s.publishStatement = lock, statement
 }
