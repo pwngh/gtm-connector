@@ -32,10 +32,24 @@ flowchart LR
 
 1. **The watch rule pulls** every open renewal opportunity that closes inside the window, with its account and contact emails.
 2. **The connector discovers** matching calls and Slack messages by those emails and domains. In Slack it looks in a dedicated internal or Slack Connect channel, such as `#deal-thornfield` or `#ext-thornfield`, and in threads of shared channels, such as `#renewals` or `#deal-desk`, that mention the account's name or domain. No thread is hard-coded.
-3. **Each match joins its deal.** Nobody has to click. A match that fits more than one deal waits in the matches queue for a person.
+3. **Each match joins its deal.** Nobody clicks. A match that fits more than one deal goes on neither card, and both cards say so under what was not read.
 
-Set `approval: required` to hold every match in the queue for a person instead. A rejected match adds
-nothing to any card.
+## The matches queue is off
+
+Matching is automatic, and that is the point: nobody trains the connector by confirming its work.
+The queue exists for a team that wants a person in the loop, and the engineer chooses how much.
+
+| `approval` in `gtm.yaml` | What waits for a person |
+| --- | --- |
+| `off`, the default | Nothing |
+| `ambiguous` | Only a match that fits more than one deal |
+| `all` | Every match, before it reaches a card |
+
+The setting can also be given per source, for example `all` for pushed records and `off` for the CRM.
+
+The engineer turns it on in two steps: set it in `gtm.yaml`, then sign in and confirm the change when
+the draft is previewed. Until both are done, the queue stays off. The web app only reads this
+setting. It shows the queue and its badge when the setting is on, and has no switch of its own.
 
 A deal can also be registered by hand, with the IDs it binds. See [the API](api.md).
 

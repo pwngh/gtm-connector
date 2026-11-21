@@ -124,7 +124,7 @@ Neutralizer version   3
 4. **Read the Deal card,** your 30-second renewal snapshot. Click any line for its source proof, track blockers on the checklist and playbook, or ask the council what is blocking the renewal.
 5. **The deal closes.** It is archived with its final card.
 
-If your team turns approval on, new calls and threads wait for your OK before they reach the card.
+If your engineer has turned the matches queue on, new calls and threads wait for your OK first.
 More in [working a deal](docs/deals.md).
 
 ## For RevOps and GTM engineers
@@ -164,7 +164,7 @@ the binary. More in [running it](docs/operations.md).
 
 - A tool runs only after its receipt is committed. A refused call still gets a receipt.
 - One source's grant does not open another, and a person reads only the deals granted to them.
-- A call or thread joins a deal only by a rule you configured, or by a person's approval.
+- A call or thread joins a deal only by a rule you configured. One that fits two deals joins neither, and both cards say so.
 - A card is built only from checked evidence. Evidence that fails a check gives no card.
 - A note cannot direct the workflow. An instruction inside one appears quoted and creates nothing.
 - The connector writes nothing to the CRM. Alerts and webhooks are off until you configure them.

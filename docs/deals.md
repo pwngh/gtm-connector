@@ -28,7 +28,7 @@ gtm deal thornfield-2027 --refresh  # read the sources again first
 4. **Read the Deal card,** your 30-second renewal snapshot. Click any line for its source proof, track blockers on the checklist and playbook, or ask the council what is blocking the renewal.
 5. **The deal closes.** On Closed Won or Closed Lost the reads stop and the final card is sealed and archived.
 
-If your team turns approval on, new calls and threads wait for your OK before they reach the card.
+If your engineer has turned the matches queue on, new calls and threads wait for your OK first.
 
 ## What flags a deal
 

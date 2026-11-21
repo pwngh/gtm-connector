@@ -34,7 +34,7 @@ system.
 | `GET /v1/deals/{id}` | Returns the current card as JSON, with what changed |
 | `POST /v1/deals/{id}/refresh` | Reads every source of the deal again, on demand |
 | `GET /v1/deals/{id}/proof/{line}` | Returns the record or sentence behind one line, and its receipt |
-| `GET /v1/matches` | Lists the matches that are waiting for a person |
+| `GET /v1/matches` | Lists the matches waiting for a person, when the queue is on |
 | `POST /v1/deals/{id}/sources` | Pushes records or messages from your own system |
 
 The routes are described in an OpenAPI file served with the API.
@@ -47,7 +47,7 @@ an idempotency key and gets a receipt.
 1. A push with a new key is staged.
 2. A repeat with the same key and the same content returns the same result.
 3. A repeat with the same key and different content is refused.
-4. A staged record joins its deal at once, or waits for a person when approval is on.
+4. A staged record joins its deal at once. It waits for a person only when the matches queue is on.
 
 To take a record back, push a retraction. Later cards stop citing it, and its history stays.
 
