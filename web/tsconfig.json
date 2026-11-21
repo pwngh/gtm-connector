@@ -20,5 +20,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/api", "src/ui", "src/app", "src/entry.tsx", "src/env.d.ts"]
+  "include": ["src/api", "src/ui", "src/app", "src/entry.tsx"]
 }

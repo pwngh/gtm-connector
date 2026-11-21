@@ -111,7 +111,7 @@ the Python package and stays read-only. To finish it:
    valid `xn--` label.
 3. Admit the cards and receipts the Python package made: the four recorded card folders are admitted
    and inspected, a changed byte is refused, and admitting twice adds nothing.
-4. Close the cutover: the binary, run outside a checkout, serves a deep-linked Evidence page; a
+4. Close the cutover: the binary, run outside a checkout, serves a deep-linked Deal card; a
    backup taken before the cutover restores; the time to publish a card is measured; and a tagged
    release attaches the binaries.
 

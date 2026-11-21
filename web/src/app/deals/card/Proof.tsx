@@ -8,6 +8,7 @@ import {Help} from '../../../ui/Help.tsx';
 import {Placeholder} from '../../../ui/Placeholder.tsx';
 import {Refusal} from '../../../ui/Refusal.tsx';
 import {displayStorage} from '../../../ui/theme.ts';
+import {activityHref} from '../../ops/activity.ts';
 import {useMedia, wideQuery} from '../deals.ts';
 import {groupOf, roleWords, type Sentence, sourceWord, usableTime} from './card.ts';
 import {type Asked, answers, around, askedUnit, firstLine, placeOf, proofSeenKey, readFrom, stepFrom, unitOf, unitParam, unitSearch} from './proof.ts';
@@ -51,8 +52,12 @@ function RecordProof({unit}: {unit: UnitView}) {
   );
 }
 
-/** How the unit was read: the start of its read and the source, with the receipt's help, or the refusal of the read alone. */
-function ReadLine({unit, refused}: {unit: UnitView; refused: boolean}) {
+/**
+ * How the unit was read: the start of its read and the source, with the
+ * receipt's help, or the refusal of the read alone; then a link to the
+ * receipt whole in Ops.
+ */
+function ReadLine({card, unit, refused}: {card: string; unit: UnitView; refused: boolean}) {
   const receipt = refused ? null : unit.receipt;
   let read: ReactNode = 'Not recorded';
   if (refused) {
@@ -66,14 +71,25 @@ function ReadLine({unit, refused}: {unit: UnitView; refused: boolean}) {
       </>
     );
   }
+  const id = typeof unit.receipt_id === 'string' && unit.receipt_id ? unit.receipt_id : null;
   return (
-    <p
-      className="dc-proof__read"
-      data-read={refused ? 'refused' : receipt ? 'read' : 'none'}
-    >
-      <span className="dc-proof__label">Read</span>
-      {receipt && <Help term="ops.receipt" />} <span>{read}</span>
-    </p>
+    <div className="dc-proof__how">
+      <p
+        className="dc-proof__read"
+        data-read={refused ? 'refused' : receipt ? 'read' : 'none'}
+      >
+        <span className="dc-proof__label">Read</span>
+        {receipt && <Help term="ops.receipt" />} <span>{read}</span>
+      </p>
+      {id && (
+        <Link
+          className="dc-proof__receipt"
+          to={activityHref(card, id)}
+        >
+          Open the receipt in Ops
+        </Link>
+      )}
+    </div>
   );
 }
 
@@ -180,6 +196,7 @@ export function ProofBody({card, asked, read}: ProofBodyProps) {
         n={held.n}
       />
       <ReadLine
+        card={card.id}
         unit={unit}
         refused={refused}
       />

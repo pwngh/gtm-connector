@@ -8,7 +8,8 @@ import {Button} from '../../ui/Button.tsx';
 import {Help} from '../../ui/Help.tsx';
 import {Placeholder} from '../../ui/Placeholder.tsx';
 import {Refusal, refusalText} from '../../ui/Refusal.tsx';
-import {serverPaths} from '../routes.ts';
+import {dealHref} from '../deals/deals.ts';
+import {activityHref} from './activity.ts';
 import {
   type CardList,
   type CoverageRow,
@@ -187,10 +188,6 @@ function NewestCell({list, row}: {list: CardList; row: CoverageRow}) {
   return <time dateTime={newest.published_at}>{formatUtc(newest.published_at)}</time>;
 }
 
-function cardHref(account: string, card: string): string {
-  return `${serverPaths.evidence}?${new URLSearchParams({account, card})}`;
-}
-
 function DealRow({row}: {row: CoverageRow}) {
   const newest = newestCard(row);
   return (
@@ -216,12 +213,20 @@ function DealRow({row}: {row: CoverageRow}) {
       </td>
       <td>
         {newest && (
-          <Link
-            className="cv-open"
-            to={cardHref(row.account, newest.id)}
-          >
-            Open the card<span className="cv-hidden"> of {row.name}</span>
-          </Link>
+          <span className="cv-links">
+            <Link
+              className="cv-open"
+              to={dealHref(row.account)}
+            >
+              Open the card<span className="cv-hidden"> of {row.name}</span>
+            </Link>
+            <Link
+              className="cv-open"
+              to={activityHref(newest.id)}
+            >
+              What ran<span className="cv-hidden"> for the card of {row.name}</span>
+            </Link>
+          </span>
         )}
       </td>
     </tr>
