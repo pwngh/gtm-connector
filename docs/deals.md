@@ -28,7 +28,8 @@ gtm deal thornfield-2027 --refresh  # read the sources again first
 4. **Read the Deal card,** your 30-second renewal snapshot. Click any line for its source proof, track blockers on the checklist and playbook, or ask the council what is blocking the renewal.
 5. **The deal closes.** On Closed Won or Closed Lost the reads stop and the final card is sealed and archived.
 
-If your engineer has turned the matches queue on, new calls and threads wait for your OK first.
+A call or thread that fits more than one deal waits in the matches queue for your OK, and reaches no
+card until someone decides it.
 
 ## What flags a deal
 
@@ -50,8 +51,8 @@ If a source was not read, a rule answers unknown, not silence.
 - **Promises you made:** seller sentences marked as commitments.
 - **Missing or unread sources.**
 
-If the account has two open deals, a call or thread about the account is on both cards, marked as
-shared.
+A call or thread that could belong to this deal or an earlier one of the account is on neither card
+until someone decides it, and the card says it was not read.
 
 ## The checklist and playbooks
 

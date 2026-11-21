@@ -35,6 +35,8 @@ type Store interface {
 	ViewReceipt(ctx context.Context, v postgres.Viewer, receiptID string) (postgres.Receipt, error)
 	ViewDeals(ctx context.Context, v postgres.Viewer) ([]postgres.Deal, error)
 	ViewDeal(ctx context.Context, v postgres.Viewer, ref string) (postgres.Deal, error)
+	ViewMatches(ctx context.Context, v postgres.Viewer) ([]postgres.Match, error)
+	DecideMatch(ctx context.Context, in postgres.MatchDecision) (postgres.Match, error)
 }
 
 // Evidence is the read side of cards, units and receipts, with grants enforced.
@@ -116,4 +118,19 @@ func (e Evidence) Deals(ctx context.Context, p Principal) ([]postgres.Deal, erro
 // Deal reads one deal; the principal needs a live grant on its account.
 func (e Evidence) Deal(ctx context.Context, p Principal, ref string) (postgres.Deal, error) {
 	return e.Store.ViewDeal(ctx, p.viewer(), ref)
+}
+
+// Matches lists the matches waiting for a person on the accounts the principal holds a live grant on.
+func (e Evidence) Matches(ctx context.Context, p Principal) ([]postgres.Match, error) {
+	return e.Store.ViewMatches(ctx, p.viewer())
+}
+
+// DecideMatch decides a match as the principal: onto one deal of its account, or with deal "" onto none. The
+// principal needs a live grant on the match's account; an unknown match is refused the same way.
+func (e Evidence) DecideMatch(ctx context.Context, p Principal, matchID, deal string) (postgres.Match, error) {
+	if p.ID == "" {
+		return postgres.Match{}, ErrNotPermitted
+	}
+	return e.Store.DecideMatch(ctx, postgres.MatchDecision{WorkspaceID: p.WorkspaceID, PrincipalID: p.ID,
+		MatchID: matchID, DealRef: deal})
 }

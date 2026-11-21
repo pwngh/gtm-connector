@@ -124,7 +124,7 @@ Neutralizer version   5
 4. **Read the Deal card,** your 30-second renewal snapshot. Click any line for its source proof, track blockers on the checklist and playbook, or ask the council what is blocking the renewal.
 5. **The deal closes.** It is archived with its final card.
 
-If your engineer has turned the matches queue on, new calls and threads wait for your OK first.
+A call or thread that fits more than one deal waits for your OK first, and reaches no card until then.
 More in [working a deal](docs/deals.md).
 
 ## For RevOps and GTM engineers

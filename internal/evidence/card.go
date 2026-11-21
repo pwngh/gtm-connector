@@ -867,6 +867,10 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 	case "denied":
 		c.gap("calls_denied", "Calls: not read. The grant lacks calls:read.", nil, false, nil)
 		return
+	case "not_matched":
+		c.gap("calls_not_matched", "Calls: not read. The account's transcript is not matched to this deal.", nil,
+			false, nil)
+		return
 	}
 	if len(notes) == 0 {
 		if imported {
@@ -957,6 +961,10 @@ func (c *card) slack(contacts []contact) {
 		return
 	case "denied":
 		c.gap("slack_denied", "Slack: not read. The grant lacks slack:read.", nil, false, nil)
+		return
+	case "not_matched":
+		c.gap("slack_not_matched", "Slack: not read. The account's thread is not matched to this deal.", nil, false,
+			nil)
 		return
 	}
 	roleOf := func(l *string) role {

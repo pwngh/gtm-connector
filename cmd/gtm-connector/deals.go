@@ -33,10 +33,13 @@ import (
 // free number from 2 after it: thornfield-2027-2e3hke-2.
 
 var dealActions = map[string]arguments{
-	"new":   {options: []option{{name: "--as-of", value: true}}, required: "account_id", help: dealNewHelp},
-	"list":  {help: dealListHelp},
-	"show":  {required: "deal_id", help: dealShowHelp},
-	"close": {required: "deal_id", help: dealCloseHelp},
+	"new":     {options: []option{{name: "--as-of", value: true}}, required: "account_id", help: dealNewHelp},
+	"list":    {help: dealListHelp},
+	"show":    {required: "deal_id", help: dealShowHelp},
+	"close":   {required: "deal_id", help: dealCloseHelp},
+	"matches": {options: []option{{name: "--all"}}, help: dealMatchesHelp},
+	"decide": {options: []option{{name: "--deal", value: true}, {name: "--reject"}}, required: "match_id",
+		help: dealDecideHelp},
 }
 
 // dealID is the form of a deal's ID.
@@ -57,7 +60,8 @@ func runDeal(ctx context.Context, tokens []string, s screen) int {
 	action := tokens[0]
 	spec, known := dealActions[action]
 	if !known {
-		return s.fail("deal", refused("argument action: invalid choice (choose from 'new', 'list', 'show', 'close')"))
+		return s.fail("deal", refused("argument action: invalid choice (choose from 'new', 'list', 'show', 'close', "+
+			"'matches', 'decide')"))
 	}
 	command := "deal " + action
 	args, err := spec.parse(tokens[1:])
@@ -85,6 +89,10 @@ func runDeal(ctx context.Context, tokens []string, s screen) int {
 		result, err = r.listDeals(ctx)
 	case "show":
 		result, err = r.showDeal(ctx)
+	case "matches":
+		result, err = r.listMatches(ctx)
+	case "decide":
+		result, err = r.decideMatch(ctx)
 	default:
 		result, err = r.closeDeal(ctx)
 	}
@@ -97,6 +105,10 @@ func runDeal(ctx context.Context, tokens []string, s screen) int {
 			return s.fail(command, r.failed(ctx, err))
 		}
 		fmt.Fprintln(s.out, text)
+		return 0
+	}
+	if action == "matches" || action == "decide" {
+		fmt.Fprintln(s.out, r.matchesText(result))
 		return 0
 	}
 	fmt.Fprintln(s.out, r.dealText(action, result))
@@ -209,7 +221,15 @@ func (r *run) showDeal(ctx context.Context) (any, error) {
 		sealed.Delete("evidence")
 		card = sealed
 	}
-	return strictjson.NewObject("deal", value, "card", card), nil
+	read := []any{}
+	for _, m := range deal.Read {
+		match, err := matchValue(m)
+		if err != nil {
+			return nil, err
+		}
+		read = append(read, match)
+	}
+	return strictjson.NewObject("deal", value, "card", card, "matches", read), nil
 }
 
 // closeDeal closes an open deal. A closed one is shown as it is.
@@ -279,7 +299,11 @@ func (r *reads) registerDeal(ctx context.Context, principal string, scopes []str
 	registration.WorkspaceID, registration.PrincipalID, registration.AccountRef = r.workspace.ID, principal, account
 	registration.Word = dealWord(name)
 	registration.AccountReadID, registration.OpportunitiesReadID = accountRead.AuditID, opportunitiesRead.AuditID
-	return r.store.RegisterDeal(ctx, registration)
+	deal, err := r.store.RegisterDeal(ctx, registration)
+	if err == nil {
+		settleMatches(ctx, r.store, r.workspace.ID, account)
+	}
+	return deal, err
 }
 
 // renewalOf is what a deal binds of the records its two reads returned, and the year it renews.
@@ -429,14 +453,22 @@ func (r *run) dealText(action string, result any) string {
 	}
 	deal, _ := result.(*strictjson.Object)
 	var card *strictjson.Object
+	var read []any
 	if action == "show" {
 		card, _ = get(deal, "card").(*strictjson.Object)
+		read, _ = get(deal, "matches").([]any)
 		deal = get(deal, "deal").(*strictjson.Object)
 	}
 	fields := [][]any{{"ID", get(deal, "id")}, {"Account", get(deal, "account")},
 		{"Name", strictjson.Quote(get(deal, "account_name").(string))}, {"State", get(deal, "state")},
 		{"Opportunity", orNone(get(deal, "opportunity"))}, {"Contract", orNone(get(deal, "contract"))},
 		{"Renews", orNone(get(deal, "renews_on"))}}
+	// The card names the call and the thread it read, each by its match.
+	for _, value := range read {
+		m := value.(*strictjson.Object)
+		fields = append(fields, []any{"Read " + get(m, "kind").(string), get(m, "item").(string) + " (match " +
+			get(m, "id").(string) + ")"})
+	}
 	text := r.screen.table([]string{"FIELD", "VALUE"}, fields)
 	switch {
 	case action != "show":
@@ -529,16 +561,19 @@ type noCRM struct{ error }
 
 func (e noCRM) Unwrap() error { return e.error }
 
-const dealHelp = `usage: gtm-connector deal [-h] {new,list,show,close} ...
+const dealHelp = `usage: gtm-connector deal [-h] {new,list,show,close,matches,decide} ...
 
-Register, list, show and close deals: one renewal of one account, under a readable ID.
+Register, list, show and close deals: one renewal of one account, under a readable ID. List the matches of
+calls and Slack threads that wait for a person, and decide one.
 
 positional arguments:
-  {new,list,show,close}
+  {new,list,show,close,matches,decide}
     new                 Register a deal for an account from the connected CRM.
     list                List the deals of a workspace.
     show                Show a deal's bindings and its newest card.
     close               Close a deal.
+    matches             List the matches that wait for a person.
+    decide              Match a call or thread to a deal, or keep it off every card.
 
 options:
   -h, --help            show this help message and exit
@@ -604,4 +639,38 @@ options:
   --json                Write the documented JSON result for scripts.
   --state-dir STATE_DIR
                         Read this workspace (default: demo).
+`
+
+const dealMatchesHelp = `usage: gtm-connector deal matches [-h] [--json] [--state-dir STATE_DIR] [--all]
+
+List the matches of calls and Slack threads that wait for a person: those that fit more than one deal of
+their account. With --all, list every call's and thread's current decision.
+
+options:
+  -h, --help            show this help message and exit
+  --json                Write the documented JSON result for scripts.
+  --state-dir STATE_DIR
+                        Read this workspace (default: demo).
+  --all                 List every current decision, not only those that wait.
+`
+
+const dealDecideHelp = `usage: gtm-connector deal decide [-h] [--json] [--state-dir STATE_DIR]
+                                 (--deal DEAL_ID | --reject)
+                                 match_id
+
+Decide a match as the owner: put its call or thread on one deal of its account, or keep it off every card.
+The decision gets a receipt and replaces the match's current one.
+
+positional arguments:
+  match_id              The match's ID, from gtm-connector deal matches.
+
+options:
+  -h, --help            show this help message and exit
+  --json                Write the documented JSON result for scripts.
+  --state-dir STATE_DIR
+                        Read this workspace (default: demo).
+  --deal DEAL_ID        The deal of the match's account it belongs to.
+  --reject              Keep the call or thread off every card.
+
+Example: gtm-connector deal decide MATCH_ID --deal thornfield-2027-2e3hke
 `

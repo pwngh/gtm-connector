@@ -156,6 +156,7 @@ A tool name that is not 1 to 100 characters is recorded as `<invalid>`.
 | A call of `demo --state-dir` outside the card | The run ID, `demo-` and 32 hex digits. The demo prints it as `audit.run_id`. |
 | A read by `accounts` or `inspect ACCOUNT_ID` on a real CRM | `inspect-` and 32 hex digits. |
 | A read that registers a deal, by `deal new` or `POST /v1/deals` | `deal-` and 32 hex digits. |
+| A decision of a match, by the connector, `deal decide` or `POST /v1/matches/{id}` | `match-` and 32 hex digits. |
 | The account lookup of `debug calls import` and `debug slack map` | `import-` and 32 hex digits. |
 | A step of `debug salesforce check` | `check-` and 32 hex digits. |
 | The read of `debug slack check` | `slack-check-` and 32 hex digits. |
@@ -196,7 +197,9 @@ reads inside it are its child receipts, whose `request_id` is
 | `demo` | Five for each card it publishes. |
 | `accounts`, `inspect ACCOUNT_ID` | One on a real CRM. None on the demo book, which is read without a tool call. |
 | `deal new`, `POST /v1/deals` | Two in a `deal-` run, also on the demo book: `get_account`, then `list_opportunities`. On a real CRM, `deal new` makes one `get_account` first, in an `inspect-` run, to list the account in the workspace. Through the API both name the signed-in principal, the grant is checked again just before each, and a read made without a live grant is refused as error/403, with no read after it. An API registration refused before any source is opened has one `get_account` receipt, refused as error/403 with no connection. |
-| `deal list`, `deal show`, `deal close` | None. |
+| `deal list`, `deal show`, `deal close`, `deal matches` | None. |
+| `deal decide`, `POST /v1/matches/{id}` | One `decide_match`, naming the match, the decision, the deal, and for a known match its kind, item and account. Through the API it names the signed-in principal. A refused decision is finished as an error: error/403 naming no account for an unknown or ungranted match, error/409 for a superseded one. |
+| The connector's own decisions | One `decide_match` per call or thread it decides, naming no principal, when `deal new`, `POST /v1/deals`, `debug calls import`, `debug slack map` or `brief` finds an undecided one while its account has an open deal. |
 | `debug calls import`, `debug slack map` | One `get_account` in an `import-` run, also on the demo book. On a real CRM, one more in an `inspect-` run before it. |
 | `inspect BRIEF_ID`, `inspect RECEIPT_ID`, `audit`, `connect` | None. |
 | MCP calls through `serve` or `mcp stdio` | One per tool call, and one per read inside a prepared brief. |

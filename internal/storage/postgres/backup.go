@@ -57,6 +57,9 @@ var backupTables = []struct {
 	{"admitted_cards", "workspace_id, brief_id", migrationVersion("admitted_python_cards")},
 	{"deals", "workspace_id, ref", migrationVersion("deals")},
 	{"deal_cards", "card_id", migrationVersion("deals")},
+	// A decision is restored after the one it supersedes.
+	{"deal_matches", "decided_at, id", migrationVersion("deal_matches")},
+	{"deal_card_matches", "card_id, match_id", migrationVersion("deal_matches")},
 }
 
 // TableCopy describes one table in a backup.
