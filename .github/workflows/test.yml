@@ -187,8 +187,8 @@ jobs:
         run: node node_modules/playwright-core/cli.js install --with-deps --no-shell chromium
       - name: The browser checks, every page at each width and theme
         run: npm run test:browser -- --channel chromium --screenshots "$RUNNER_TEMP/screenshots"
-      - if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
         with:
           name: browser-screenshots
           path: ${{ runner.temp }}/screenshots
