@@ -35,15 +35,26 @@ import (
 //     error", so the text of an upstream answer never reaches the screen. In a card's read, any error
 //     ends the read as failed and its receipt says so.
 //  2. In its entry of sourceKinds it sets the opener of its source (crm, calls or slack): the function
-//     that turns the connection's row into a connected source. An opener reads the row and nothing else.
-//     It makes no request and starts no process. A source that signs in does so on its first read, and
+//     that turns the connection's row into a connected source, with the backend and binding a card
+//     records for it and the words a command names it by. An opener reads the row and nothing else. It
+//     makes no request and starts no process. A source that signs in does so on its first read, and
 //     checks then that it reached the identity the row is pinned to.
 //  3. In the same entry it sets attach: what "connect NAME" checks before the row is saved, and the
 //     binding and identity digest the row is saved with.
 //
-// accounts, brief, inspect and audit do not change for a new source. An entry with no opener is refused
-// by name by every command that would read it, and an entry with no attach is refused by connect. Neither
-// is read as demo data: only a row whose mode is "demo" opens the demo book, and only beside the demo CRM.
+// accounts, brief, inspect and audit do not change for a new source. What they need beyond the reads is
+// here too: outside a card they read a real CRM as its tool, under a receipt committed before the read
+// (ownerRead); a card without --as-of is planned from today for a real CRM (day); and the workspace's
+// seller list reaches every card (sources). TestASourceRegisteredInItsKindIsReadByEveryCommand wires a
+// CRM this way, against an invented org.
+//
+// An entry with no opener is refused by name by every command that would read it, and an entry with no
+// attach is refused by connect. Neither is read as demo data: only a row whose mode is "demo" opens the
+// demo book, and only beside the demo CRM. A workspace is made for demo data or for real sources and
+// keeps that, so the two never share one.
+//
+// serve's MCP endpoint (mcp.go) serves the demo workspace. It takes that workspace's connections from
+// here and reads the demo book itself.
 
 // crmSource is a workspace's CRM.
 type crmSource interface {
@@ -88,6 +99,8 @@ type connected[R any] struct {
 
 // opening is what an opener is given.
 type opening struct {
+	// store and workspace are for a source whose records are kept in PostgreSQL, as imported transcripts
+	// and mapped threads are.
 	store     *postgres.Store
 	workspace postgres.Workspace
 	// connection is the source's own row, and binding is the row's binding, read.

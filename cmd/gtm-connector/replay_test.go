@@ -32,16 +32,16 @@ import (
 // run and must still differ from the recording. Porting a command removes its steps from this list, and a
 // step that is not listed must match the recording.
 var notPorted = map[string]string{
-	"mcp help":               "mcp is not ported",
-	"mcp without its action": "mcp is not ported",
-	"mcp without a scope":    "mcp is not ported",
+	"mcp help":               "the mcp command, the stdio bridge, is not ported: the binary refuses it as not in this build",
+	"mcp without its action": "the mcp command is not ported, so the binary refuses it before it reads its arguments",
+	"mcp without a scope":    "the mcp command is not ported, so the binary refuses it before it reads its arguments",
 }
 
 // clocked names the steps that print what the recorder's clock decided: a receipt's started_at, the card
 // line that names its first and last read, which is one time when both fall in one second, and elapsed_ms.
 // They are compared with exactly those values left out, and everything else as recorded. The recorder numbers
-// a time once it has issued it to a receipt it saw start. The demo's card names its last read by a time the
-// recorder issued where it did not see, so that card line holds the time as it was, and it is left out too.
+// the times it issued in a step. The demo's card names its last read by a time the recorder had not numbered
+// in that step, so the recording holds that time as the clock wrote it, and it is left out too.
 var clocked = []string{"demo", "brief", "brief without calls", "brief as of another day", "inspect a receipt",
 	"audit", "audit by tool", "audit by brief"}
 
@@ -139,10 +139,10 @@ func timeAt(value string) *regexp.Regexp {
 // instant is a receipt time as it is printed.
 const instant = `[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?Z`
 
-// recorderToken is the fingerprint of the bearer the recorded demo made its card under. The package made that
-// bearer where the recorder did not see it, so the recording prints its fingerprint as it was and gives it no
-// placeholder. The replay writes the fingerprint the binary gave the same card's receipts as this one, so the
-// receipts of that card are compared as sharing one token that no other receipt has.
+// recorderToken is the fingerprint the recording prints for the bearer of the demo's card. The recorder numbers
+// the tokens it issued, and this is not one of them, so the recording holds the fingerprint as it was, with no
+// placeholder. The replay writes the fingerprint the binary gave the same card's receipts as this one, so
+// those receipts are still compared as sharing one token that no other receipt has.
 const recorderToken = "de890ae4d2959b7ac12d463f093b68f6c5194ebb19182c94e077d292143a8b80"
 
 var (

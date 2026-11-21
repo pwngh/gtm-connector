@@ -168,7 +168,8 @@ func (r *run) connect(ctx context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Another CRM starts the workspace's sources over. The same one again keeps them where they were.
+	// The result lists the sources as the Python CLI's does: a CRM connected where it was not starts the
+	// list, and a source connected again keeps the place it had.
 	first := connectedSources(before)
 	if source == "crm" {
 		first = nil

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/pwngh/gtm-connector/internal/receipts"
 )
 
 // line runs one command line as main does and gives its exit code and what it wrote.
@@ -92,6 +94,16 @@ func TestAnUnexpectedErrorPrintsNoneOfItsText(t *testing.T) {
 				t.Errorf("%v: exit %d\n%s", c.want, code, printed)
 			}
 		}
+	}
+}
+
+// A source connected again while a card was being read fences the card's reads. The command says so and
+// exits as refused.
+func TestASourceChangedDuringAReadIsRefused(t *testing.T) {
+	changed := (&run{name: defaultWorkspace}).failed(ctx, fmt.Errorf("get_account: %w", receipts.ErrSourceChanged))
+	if changed.code != 3 || changed.message != "A source of this workspace was connected again while it was read; "+
+		"nothing was published. Run the command again." {
+		t.Errorf("exit %d: %s", changed.code, changed.message)
 	}
 }
 
