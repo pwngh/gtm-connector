@@ -279,10 +279,12 @@ func stdioDemo(t *testing.T) *demoDatabase {
 	return d
 }
 
-// The tools the recorded bridge listed, without the write tool the connector no longer has
+// The tools the recorded bridge listed, without the write tool the connector no longer has, and with the two
+// deal tools the Python bridge did not have, in the SDK's order
 // ("test_a_crm_only_bridge_reads_crm_through_the_gateway_and_never_widens: tools/list" and
 // "test_stdout_carries_only_protocol_and_the_bridge_stops_at_end_of_input: tools/list").
-var recordedStdioTools = []string{"get_account", "list_opportunities", "read_call_notes", "read_slack_messages", "search_accounts"}
+var recordedStdioTools = []string{"get_account", "list_deals", "list_opportunities", "read_call_notes", "read_deal_card",
+	"read_slack_messages", "search_accounts"}
 
 func listedTools(t *testing.T, listing map[string]any) []string {
 	t.Helper()

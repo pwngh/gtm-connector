@@ -22,8 +22,8 @@ type ToolDefinition struct {
 
 func required(n int) StringArgument { return StringArgument{MaxLength: n, Required: true} }
 
-// Definitions holds every tool the connector can serve: the read tools of tool_definitions.TOOL_DEFINITIONS.
-// Each requires a read scope.
+// Definitions holds every tool the connector can serve: the read tools of tool_definitions.TOOL_DEFINITIONS,
+// and the two deal tools, which the Python gateway did not have. Each requires a read scope.
 var Definitions = map[string]ToolDefinition{
 	"search_accounts": {Scope: "crm:read", Arguments: map[string]StringArgument{
 		"query":          {MaxLength: 200},
@@ -37,17 +37,23 @@ var Definitions = map[string]ToolDefinition{
 		"account_id": required(64), "as_of": {MaxLength: 10, Nullable: true},
 	}},
 	"read_renewal_brief": {Scope: "crm:read", Arguments: map[string]StringArgument{"brief_id": required(64)}},
+	"list_deals":         {Scope: "crm:read", Arguments: map[string]StringArgument{}},
+	"read_deal_card":     {Scope: "crm:read", Arguments: map[string]StringArgument{"deal_id": required(80)}},
 }
 
 // ReadScopes are the scopes a token may carry, each opening one source. A token that carries any other is
 // refused.
 var ReadScopes = []string{"crm:read", "calls:read", "slack:read"}
 
-// DefaultTools are the five tools the default server offers; SelectedTools add the brief tools.
+// DefaultTools are the five read tools and the two deal tools the default server offers; SelectedTools add
+// the brief tools.
 var (
-	DefaultTools  = []string{"search_accounts", "get_account", "list_opportunities", "read_call_notes", "read_slack_messages"}
-	SelectedTools = []string{"search_accounts", "get_account", "list_opportunities", "read_call_notes", "read_slack_messages", "prepare_renewal_brief", "read_renewal_brief"}
+	DefaultTools  = []string{"search_accounts", "get_account", "list_opportunities", "read_call_notes", "read_slack_messages", "list_deals", "read_deal_card"}
+	SelectedTools = []string{"search_accounts", "get_account", "list_opportunities", "read_call_notes", "read_slack_messages", "list_deals", "read_deal_card", "prepare_renewal_brief", "read_renewal_brief"}
 )
+
+// DealTools are the two deal tools. The Python gateway had neither, so no recorded listing holds them.
+var DealTools = []string{"list_deals", "read_deal_card"}
 
 // writeTool is the Python gateway's CRM write. The connector is read-only: it never lists, defines or runs
 // this tool, and CheckRequest refuses a call to it as crm_write_disabled.
