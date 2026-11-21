@@ -3,10 +3,11 @@
 // answers, two accounts, the demo book's thirty accounts on Deals, seven on
 // Coverage, blocked browser storage, a session that expires, hostile text in
 // names, gaps and receipts, a static host's answer, and wrong addresses. The
-// frame, sign-in and theme are checked at 320, 390, 768 and 1440 wide, light
-// and dark, Coverage at 320, 390 and 1440, Activity and its receipt drawer at
-// 320, 390, 768 and 1440, the Deal card's ledger, Text and
-// Communications tabs at 320, 390 and 1440, and its proof drawer at 390, 1100 and 1440: tab
+// frame, sign-in and theme, the deep links and the palette, Deals, Coverage,
+// Activity and its receipt drawer, the Deal card's ledger, Text and
+// Communications tabs, a seal that fails its check, and the proof drawer are
+// each checked at every width and theme of the matrix: 320, 390, 768 and 1440
+// wide, light and dark. The proof drawer is also checked at 1100: tab
 // order, target sizes, focus outlines, Escape, overflow, text contrast and what
 // browser storage holds. The Text tab is also read and copied for every
 // recorded card, and shown for a card whose bytes do not match its seal, and
@@ -26,6 +27,7 @@
 // It drives the installed Chrome, so it is not part of `npm test`. To run it:
 //   npm run build
 //   npm run test:browser [-- --channel chrome --screenshots DIR --contrast]
+// CI runs it with --channel chromium, the Chromium build pinned by playwright-core.
 // Build and run it with the same GTM_REVISION, which the guide links hold.
 // With --screenshots, the frame's matrix, Coverage, Activity, the Deal card and its drawer save one picture per
 // width and theme in DIR; with --contrast, it prints the lowest contrast of
@@ -247,6 +249,8 @@ const activity = `${base}/ops/activity`, thornfield = `${base}/deals/acc-003`, t
 
 // Checks.
 const results = [];
+// Every width and theme a page is checked at.
+const matrix = [320, 390, 768, 1440].flatMap(width => [[width, 'light'], [width, 'dark']]);
 const check = (ok, what) => {results.push(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) process.exitCode = 1;};
 const browser = await chromium.launch({channel: options.channel, headless: true});
 async function page({width = 1440, scheme = 'light', blockStorage = false, theme = null, touch = false} = {}) {
@@ -484,8 +488,8 @@ for (const width of [320, 1440]) {
   });
 }
 
-// 10. Deep links, the palette, contrast and type sizes, at 320 and 1440, light and dark.
-for (const [width, scheme] of [[320, 'light'], [1440, 'light'], [320, 'dark'], [1440, 'dark']]) {
+// 10. Deep links, the palette, contrast and type sizes, at every width and theme.
+for (const [width, scheme] of matrix) {
   await scenario(`layout ${width} ${scheme}`, async () => {
     const tab = await page({width, scheme});
     await tab.goto(`${thornfieldActivity}&receipt=receipt-acc-003-read_call_notes`, {waitUntil: 'networkidle'});
@@ -760,7 +764,7 @@ await scenario('coverage health and refusal', async () => {
   await tab.context().close();
 });
 
-for (const [width, scheme] of [[320, 'light'], [390, 'light'], [390, 'dark'], [1440, 'light'], [1440, 'dark']]) {
+for (const [width, scheme] of matrix) {
   await scenario(`coverage layout ${width} ${scheme}`, async () => {
     stub.steer = steerMany;
     const tab = await page({width, scheme});
@@ -1145,7 +1149,7 @@ for (const width of [320, 390, 768, 1440]) {
 const dealCard = cards['acc-003'];
 const shownUnits = dealCard.units.filter(unit => unit.kind === 'sentence' && unit.shown === 'yes' && !unit.body.partial);
 const cardParts = '.fr-chrome, .dc';
-for (const [width, scheme] of [320, 390, 768, 1440].flatMap(width => [[width, 'light'], [width, 'dark']])) {
+for (const [width, scheme] of matrix) {
   await scenario(`deal card ${width} ${scheme}`, async () => {
     const at = `deal card ${width} ${scheme}`;
     const tab = await page({width, scheme});
@@ -1257,7 +1261,7 @@ const drawerFacts = tab => tab.evaluate(() => {
     local: Object.keys(localStorage), session: Object.keys(sessionStorage)};
 });
 const atCite = (tab, n) => until(tab, number => document.activeElement?.matches(`.dc-line__n > .dc-cite[data-cite="${number}"]`), String(n));
-for (const [width, scheme] of [[390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+for (const [width, scheme] of matrix) {
   await scenario(`proof drawer ${width} ${scheme}`, async () => {
     const at = `proof drawer ${width} ${scheme}`;
     const tab = await page({width, scheme});
@@ -1280,6 +1284,9 @@ for (const [width, scheme] of [[390, 'light'], [1440, 'light'], [390, 'dark'], [
     if (width < 720) {
       check(facts.box.left === 0 && facts.box.top === 0 && facts.box.width === facts.viewport.width && facts.box.height === facts.viewport.height && facts.close.width >= 44 && facts.close.height >= 44 && facts.modal === 'true',
         `${at}: the sheet covers the viewport (${facts.box.width}x${facts.box.height}) and its close button is ${facts.close.width}x${facts.close.height}`);
+    } else if (width < 1100) {
+      check(facts.box.width === 480 && facts.box.height === facts.viewport.height && facts.box.left + facts.box.width === facts.viewport.width && facts.shadow !== 'none' && facts.modal === 'true',
+        `${at}: a modal panel 480 wide on the right, full height, with the shadow, over the card (${facts.box.width}x${facts.box.height})`);
     } else {
       check(facts.box.width === 480 && facts.box.height === facts.viewport.height && facts.box.left + facts.box.width === facts.viewport.width && facts.shadow !== 'none' && facts.modal === 'false',
         `${at}: a panel 480 wide on the right, full height, with the shadow, beside the card (${facts.box.width}x${facts.box.height})`);
@@ -1474,7 +1481,7 @@ await scenario('deal card: an older card pinned in ?card=', async () => {
 const sealedThornfield = sealedFiles.get('card-acc-003');
 const sunkenOf = tab => tab.evaluate(() => {const probe = document.createElement('div'); probe.style.background = 'var(--gc-sunken)'; document.body.append(probe); const colour = getComputedStyle(probe).backgroundColor; probe.remove(); return colour;});
 const openInApp = (tab, path) => tab.evaluate(to => {history.pushState(null, '', to); dispatchEvent(new PopStateEvent('popstate'));}, path);
-for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+for (const [width, scheme] of matrix) {
   await scenario(`text tab ${width} ${scheme}`, async () => {
     const at = `text tab ${width} ${scheme}`;
     const tab = await page({width, scheme});
@@ -1542,7 +1549,7 @@ await scenario('text tab: every recorded card byte for byte, and copied the same
   await tab.context().close();
 });
 
-for (const [width, scheme] of [[390, 'light'], [1440, 'dark']]) {
+for (const [width, scheme] of matrix) {
   await scenario(`seal check fails ${width} ${scheme}`, async () => {
     const at = `seal check fails ${width} ${scheme}`;
     const altered = Buffer.from(sealedThornfield.bytes);
@@ -1791,7 +1798,7 @@ const commsFacts = tab => tab.evaluate(() => ({
   injected: Boolean(window.__injected) || Boolean(document.querySelector('.dc img')),
   local: Object.keys(localStorage), session: Object.keys(sessionStorage)}));
 const sentenceUnits = card => card.units.filter(unit => unit.kind === 'sentence');
-for (const [width, scheme] of [[320, 'light'], [390, 'light'], [1440, 'light'], [390, 'dark'], [1440, 'dark']]) {
+for (const [width, scheme] of matrix) {
   await scenario(`communications ${width} ${scheme}`, async () => {
     const at = `communications ${width} ${scheme}`;
     const tab = await page({width, scheme});

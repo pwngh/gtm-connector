@@ -154,8 +154,42 @@ jobs:
         env:
           GTM_REQUIRE_WEB_BUILD: '1'
         run: go test -count=1 -run '^TestTheBuildInTheBinaryIsServed$' -v ./internal/transport/http
-      - name: The browser checks drive the runner's installed Chrome against the build
-        run: npm run test:browser
       - name: The release target builds four binaries with this web app inside them, and their sums match
         working-directory: .
         run: make release
+
+  # The browser checks against the build and a stub of the API, in the Chromium build pinned by
+  # playwright-core: every page at 320, 390, 768 and 1440 wide, light and dark. Any failed check fails
+  # the job, and its screenshots are kept.
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - name: The playwright-core version names the browser build
+        id: playwright
+        run: echo "version=$(node -p "require('playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium
+      - name: Install the pinned Chromium and the system libraries it needs
+        run: node node_modules/playwright-core/cli.js install --with-deps --no-shell chromium
+      - name: The browser checks, every page at each width and theme
+        run: npm run test:browser -- --channel chromium --screenshots "$RUNNER_TEMP/screenshots"
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: browser-screenshots
+          path: ${{ runner.temp }}/screenshots
+          retention-days: 7
