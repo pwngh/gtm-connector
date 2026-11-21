@@ -15,21 +15,19 @@ gtm deal thornfield-2027 --refresh  # read the sources again first
 | Part | What it shows |
 | --- | --- |
 | Deal list, on the left | Active deals sorted by urgency: red for a risk or blocker, amber for new changes, green for on track. A deal with an unread source says so and is never green. |
-| Badge, at the top | How many calls and Slack threads are waiting for your approval. Click it to open them. |
 | Deal card, in the main pane | What changed since you last looked, then the risks and blockers. |
 | Proof drawer | The record, or the whole sentence with its speaker, time and source, behind the line you clicked. |
-| Communications | The deal's approved calls and Slack threads in time order. |
+| Communications | The deal's calls and Slack threads in time order. |
 
 ## The five steps
 
-1. **Confirm suggested calls and Slack threads.** The connector proposes the ones that match your account. Approve or reject each one.
+1. **Your calls and Slack threads find the deal.** The connector matches them to your account by email, domain and channel. You do nothing.
 2. **Get a Slack alert when a renewal turns risky.** The alert names the rule that fired and links to the card.
-3. **Refresh before your call.** Refresh reads every approved source again and publishes a new card.
+3. **Refresh before your call,** if you want the last few minutes. Scheduled reads already keep the card current.
 4. **Read the Deal card.** Click any line for its proof, work the checklist, or ask an assistant what is blocking the renewal.
 5. **The deal closes.** On Closed Won or Closed Lost the reads stop and the final card is sealed and archived.
 
-> **Nothing joins a deal on its own.** A call or thread is on the card only after a person approved
-> it. An approval covers what was shown: new and edited messages come back for review.
+If your team turns approval on, new calls and threads wait for your OK before they reach the card.
 
 ## What flags a deal
 
@@ -39,7 +37,7 @@ gtm deal thornfield-2027 --refresh  # read the sources again first
 | Close-date slippage | The renewal date was pushed again |
 | Single-threaded deal | Only one person on the customer side is talking |
 | Pricing or seat conflict | A figure in Slack or on a call differs from the CRM. A person resolves it. |
-| Legal or security blocker | Redlines or riders are holding up signature. A person marks it. |
+| Legal or security blocker | Redlines or riders are holding up signature |
 
 If a source was not read, a rule answers unknown, not silence.
 
@@ -53,8 +51,9 @@ If a source was not read, a rule answers unknown, not silence.
 
 ## The checklist and playbooks
 
-The checklist lists the deal's open blockers. Mark any whole sentence as a blocker or as a
-commitment. The label comes from a fixed list and is checked against the speaker's role.
+The checklist lists the deal's open blockers, filled in from the flags. You can also mark any whole
+sentence as a blocker or as a commitment. The label comes from a fixed list and is checked against
+the speaker's role.
 
 Resolving a blocker takes later proof, your decision, and a reason. The resolved blocker stays in
 the deal's history.

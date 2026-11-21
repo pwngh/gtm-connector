@@ -24,13 +24,15 @@ timezone: America/Chicago
 flowchart LR
     W["Watch rule"] --> P["Opportunities, accounts,<br/>contact emails"]
     P --> D["Discover calls and Slack threads<br/>by email and domain"]
-    D --> Q["Matches queue"]
-    Q -->|"a person approves"| C["Deal card"]
+    D -->|"matched by your rules"| C["Deal card"]
 ```
 
 1. **The watch rule pulls** every open renewal opportunity that closes inside the window, with its account and contact emails.
 2. **The connector discovers** matching calls and Slack messages by those emails and domains. In Slack it looks in dedicated channels, such as `#deal-thornfield`, and in threads of shared channels that mention the account's name or domain.
-3. **Each match waits in the queue** until a person approves or rejects it. A rejected match adds nothing to any card.
+3. **Each match joins its deal.** Nobody has to click. A match that fits more than one deal waits in the matches queue for a person.
+
+Set `approval: required` to hold every match in the queue for a person instead. A rejected match adds
+nothing to any card.
 
 A deal can also be registered by hand, with the IDs it binds. See [the API](api.md).
 

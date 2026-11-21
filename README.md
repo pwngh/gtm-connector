@@ -82,7 +82,7 @@ NOT READ
 
 ```mermaid
 flowchart LR
-    S["Salesforce · transcripts · Slack · your own data"] -->|"scoped read, receipt first"| M["Matches<br/>approved by a person"]
+    S["Salesforce · transcripts · Slack · your own data"] -->|"scoped read, receipt first"| M["Matched to a deal<br/>by your rules"]
     M --> U["Numbered units<br/>typed fields · whole sentences · speaker roles"]
     U --> C(["Deal card, sealed<br/>every character written by the connector"])
     C --> O["Deals · Ops · API · MCP · alerts"]
@@ -119,23 +119,24 @@ Neutralizer version   3
 ## For sales and CS teams
 
 Deals is your home in the web app. Active deals sit on the left, sorted by urgency: red for a risk
-or blocker, amber for new changes, green for on track. A badge shows when new calls or Slack
-threads need your approval. The Deal card fills the main pane, with a proof drawer and the deal's
+or blocker, amber for new changes, green for on track. The Deal card fills the main pane, with a proof drawer and the deal's
 communications beside it.
 
-1. **Confirm suggested calls and Slack threads.** The connector proposes the ones that match your account.
+1. **Your calls and Slack threads find the deal.** The connector matches them to your account. You do nothing.
 2. **Get a Slack alert when a renewal turns risky.** It says what flagged the deal:
    - customer silence: no reply near renewal;
    - close-date slippage: the renewal date was pushed again;
    - single-threaded deal: only one person is talking;
    - pricing or seat conflict: a figure in Slack or on a call differs from the CRM;
    - legal or security blocker: redlines or riders holding up signature.
-3. **Refresh before your call.** Pull the latest updates on demand.
+3. **Refresh before your call,** if you want the last few minutes. Scheduled reads already keep the card current.
 4. **Read the Deal card,** your 30-second renewal snapshot. It shows the renewal countdown and ARR, what changed since last time, exact buyer quotes and titles, promises you made, and missing or unread sources. From the card:
    - click any line for its source proof, straight to the exact call or Slack message;
    - track blockers on the renewal checklist and playbook until they are resolved;
    - ask Claude, Codex or a local model what is blocking this renewal.
 5. **The deal closes.** It is archived with its final card.
+
+If your team turns approval on, new calls and threads wait for your OK before they reach the card.
 
 ## For RevOps and GTM engineers
 
@@ -145,7 +146,7 @@ Ops shows all of the plumbing that reps never see.
 2. **Set auto-watch rules,** such as all open renewal opportunities closing in the next 90 days. Data then enters two ways:
    - scheduled background pulls: the CRM, Slack channels and threads, Gong and Zoom;
    - the push API or custom SQL: internal email, SMS or database tables.
-3. **Approve the discovered matches.** Calls and Slack messages matched by email and domain wait in a queue. Slack is matched by dedicated channel, such as `#deal-thornfield`, or by threads in a shared channel that mention the account.
+3. **Let the matches join their deals.** Calls and Slack messages matched by email and domain attach on their own. Slack is matched by dedicated channel, such as `#deal-thornfield`, or by threads in a shared channel that mention the account.
 4. **Leave the rest to deterministic parsing and guardrails:**
    - a whole-sentence splitter;
    - an HTML and link neutralizer;
@@ -212,7 +213,7 @@ each platform and Docker images, with the web app embedded in the binary.
 
 - A tool runs only after its receipt is committed. A refused call still gets a receipt.
 - One source's grant does not open another, and a person reads only the deals granted to them.
-- Nothing joins a deal until a person approves it.
+- A call or thread joins a deal only by a rule you configured, or by a person's approval.
 - A card is built only from checked evidence. Evidence that fails a check gives no card.
 - A note cannot direct the workflow. An instruction inside one appears quoted and creates nothing.
 - The connector writes nothing to the CRM. Alerts and webhooks are off until you configure them.
