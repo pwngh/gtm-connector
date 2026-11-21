@@ -146,6 +146,7 @@ const detachedStore: ServerStore = {
     card: nothing,
     unit: nothing,
     receipt: nothing,
+    health: nothing,
   },
   subscribe: () => () => undefined,
   getSnapshot: () => detachedState,

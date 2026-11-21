@@ -53,9 +53,12 @@ will connect your sources again, import your transcripts again, map your Slack t
 set your seller lists and selection files again. You will also set up your assistant apps again,
 because their saved entries start the Python package.
 
-The web app the binary serves shows Evidence and Readiness after sign-in and nothing else, at
-`/ops/evidence` and `/ops/readiness`; `/` opens Evidence. Any other address shows a page that says
-there is no page there and links back. Served from a static host, it says only that it needs its server.
+The web app the binary serves shows the deal list at `/deals`, which `/` opens, and the Ops pages
+Coverage, Evidence and Readiness at `/ops/coverage`, `/ops/evidence` and `/ops/readiness`, which
+`/ops` opens with Coverage. It shows nothing else after sign-in. Coverage lists each granted deal
+with its newest card time and number of cards, counts the deals with a card and with none, and says
+whether `/healthz` answers. Any other address shows a page that says there is no page there and
+links back. Served from a static host, it says only that it needs its server.
 Real cards will be read with the CLI and the MCP tools.
 
 No live org has been verified. v0.1.0 does not wait for one.
@@ -90,7 +93,7 @@ RevOps covers every renewal and sees which have no current card.
 - A participant directory that matches speakers to contacts by email or phone first.
 - The five flags, with thresholds and a preview ([what flags a deal](deals.md#what-flags-a-deal)).
 - Scheduled reads under leases, each as a named service identity.
-- The Ops screens: Coverage, Setup and Activity ([the Ops area](config.md#the-ops-area)).
+- The Ops screens: Setup and Activity, and on Coverage each source's state, why a deal has no current card, and the matches left off by rule ([the Ops area](config.md#the-ops-area)).
 - Pause and resume, and one size cap on every card.
 
 ### 3. Delivery
