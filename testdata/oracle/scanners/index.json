@@ -4,11 +4,11 @@
  "random_inputs": 20000,
  "random_seed": 1,
  "scanners": {
-  "units_target": "units.py:118 _TARGET as _IS_TARGET.match(text): the end of the match, or null",
-  "units_raw_link": "units.py:122 _RAW_LINK.finditer(text): [start, end] of each match",
-  "units_sentence_end": "units.py:235 _SENTENCE_END.finditer(line): [start, end of group 1, end of group 2]",
-  "units_opener": "units.py:266 _OPENER.match(line, pos) at every pos: [pos, end] where it matches",
-  "units_named": "units.py:355 _NAMED.match(line): [start, end] of group 1 and the match end, or null",
+  "units_target": "units.py:117 _TARGET as _IS_TARGET.match(text): the end of the match, or null",
+  "units_raw_link": "units.py:121 _RAW_LINK.finditer(text): [start, end] of each match",
+  "units_sentence_end": "units.py:284 _SENTENCE_END.finditer(line): [start, end of group 1, end of group 2]",
+  "units_opener": "units.py:314 _OPENER.match(line, pos) at every pos: [pos, end] where it matches",
+  "units_named": "units.py:404 _NAMED.match(line): [start, end] of group 1 and the match end, or null",
   "slack_mapping_percent": "slack_mapping.py:108 the pattern parse_thread_selection searches a thread link's query with, %(?![0-9a-fA-F]{2}): [start, end] of each match",
   "slack_callback_percent": "slack_callback.py:163 the pattern _callback_fields searches the sign-in callback's query with, %(?![0-9A-Fa-f]{2}): [start, end] of each match"
  }

@@ -14,7 +14,6 @@ import json
 import re
 from typing import Any, Literal, TypedDict, cast
 import unicodedata
-from urllib.parse import urlsplit
 
 
 class BriefRejected(ValueError):
@@ -118,15 +117,25 @@ _OPEN_MENTION = re.compile(r"<([!@])([A-Za-z0-9^_-]*)()")
 _TARGET = r"(?:[a-z][a-z0-9+.-]*://|mailto:|www\.|//(?=[a-z0-9]))"
 _MARKDOWN_LINK = re.compile(r"\[([^\[\]\n]*)\]\(\s*([^\s()]+)\s*\)")
 # In running text a scheme or mailto: is a link wherever it starts. A bare www. or // is one only at the
-# start of a word, so a path such as a//b is left alone.
-_RAW_LINK = re.compile(r"(?:[a-z][a-z0-9+.-]{0,31}://|mailto:|(?<![a-z0-9])www\.|(?<![a-z0-9:/])//(?=[a-z0-9]))"
+# start of a word, so a path such as a//b is left alone. The group is set for a www. address.
+_RAW_LINK = re.compile(r"(?:[a-z][a-z0-9+.-]{0,31}://|mailto:|(?<![a-z0-9])(www\.)|(?<![a-z0-9:/])//(?=[a-z0-9]))"
                        r"[^\s<>\"']*", re.IGNORECASE)
 _IS_TARGET = re.compile(_TARGET, re.IGNORECASE)
-# A browser reads a backslash before a link's path as a slash and drops a tab or a line break, so urlsplit and a
-# browser can name different hosts. A link with a backslash or a control character there is shown with no host.
+# A browser reads a backslash before a link's path as a slash and drops a tab or a line break, so the host
+# written and the host opened can differ. A link with a backslash or a control character there is shown with no host.
 _AMBIGUOUS = re.compile(r"[\x00-\x1f\x7f-\x9f\\]")
-# A scheme at the start of a target: a name and a colon. A www. address is a host, and a colon in it starts a port.
-_SCHEME = re.compile(r"(?![Ww]{3}\.)[A-Za-z][A-Za-z0-9+.-]*:")
+# A scheme at the start of a link target: a name and a colon.
+_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
+# A Markdown target with a scheme that still follows a ]( in the finished text: after a label that holds a line
+# break or brackets, after a target cut by a control character, or after a bracketed word the connector wrote.
+_OPEN_TARGET = re.compile(r"(\]\(\s*)([A-Za-z][A-Za-z0-9+.-]*:[^\s<>\"']*)")
+# A last label that makes a browser read the whole host as a number, and the one address form it leaves as written.
+_NUMBER = re.compile(r"[0-9]+|0x[0-9a-f]*")
+_OCTET = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
+_IPV4 = re.compile(rf"{_OCTET}(?:\.{_OCTET}){{3}}")
+# A browser drops a tab or a line break from a link, so a link cut by one goes on in what follows unless that
+# is a space, the end of the text, or the start of a path, a query or a fragment.
+_CONTINUES = re.compile(r"[\t\n\r]+[^\s/?#]")
 # The longest speaker label a card shows. A longer one is no label.
 MAX_LABEL = 200
 # A time in this form is shown as given. Any other time is source text and is shown as a neutralized literal.
@@ -151,25 +160,52 @@ _CITATION = re.compile(r"\[(\d+)\]")
 _ENDED = re.compile(r"""[.!?\u3002\uff01\uff1f\u0964\u061f\u06d4]["')\]\u201d\u2019\u00bb\u300d\uff09]*\Z""")
 
 
-def _host(target):
+def _authority(target, bare):
+    """The part of a link target that names its host, and whether the target ends inside it. The part is None
+    when a browser reads no host there. A bare target is a www. address in running text, which a client opens
+    as a web address, so a colon in it starts a port. Any other target that starts with a name and a colon has
+    a scheme."""
+    start = 0
+    scheme = None if bare else _SCHEME.match(target)
+    if scheme:
+        # A browser reads https:files.example and https:/files.example as https://files.example, and a file
+        # link as a path on the reader's computer. A scheme longer than _RAW_LINK reads names no host either.
+        if not target.startswith("//", scheme.end()) or scheme.end() > 33 or scheme.group().lower() == "file:":
+            return None, False
+        start = scheme.end() + 2
+    elif not bare and target.startswith("//"):
+        start = 2
+    authority = re.split("[/?#]", target[start:], maxsplit=1)[0]
+    return authority, start + len(authority) == len(target)
+
+
+def _host(target, bare=False):
+    """The host a browser opens for a link target, read as the URL Standard reads it, or "unknown host" when a
+    browser would open another host, or none."""
     if target.lower().startswith("mailto:"):
         return "mail"
-    link = target if "//" in target[:40] else "//" + target
-    # A browser reads https:files.example as https://files.example, and urlsplit would give https as the host.
-    if link != target and _SCHEME.match(target):
+    authority, _ = _authority(target, bare)
+    # A bracketed address is never shown. A character whose compatibility form is one of / ? # @ : gives no host.
+    if authority is None or _AMBIGUOUS.search(authority) or "[" in authority or "]" in authority or any(
+            mark in unicodedata.normalize("NFKC", character) for character in authority if not character.isascii()
+            for mark in "/?#@:"):
         return "unknown host"
-    # The scheme and the authority: what comes before the first //, and after it up to the next /, ? or #.
-    scheme, _, rest = link.partition("//")
-    if _AMBIGUOUS.search(scheme + re.split("[/?#]", rest, maxsplit=1)[0]):
+    # The host follows the last @ and ends at the first colon. A browser refuses a port that is not a number
+    # up to 65535.
+    host, _, port = authority.rpartition("@")[2].partition(":")
+    if not re.fullmatch("[0-9]*", port) or len(port.lstrip("0")) > 5 or int(port.lstrip("0") or "0") > 65535:
         return "unknown host"
-    try:
-        host = (urlsplit(link).hostname or "").lower()
-    except ValueError:
-        host = ""
-    # A host is shown without a leading www., which a client would turn back into a link.
-    while host.startswith("www."):
-        host = host[4:]
-    return host if re.fullmatch(r"[a-z0-9.-]{1,80}", host) and "www." not in host else "unknown host"
+    # A host that holds www. is not shown, because a client would turn it back into a link.
+    if not re.fullmatch(r"[A-Za-z0-9.-]{1,80}", host) or "www." in host.lower():
+        return "unknown host"
+    host = host.lower()
+    # A browser reads a host whose last label is a number as an address and rewrites or refuses it: 0xc0000201
+    # and 3221225985 both open 192.0.2.1. Only four plain decimal parts stay as written.
+    labels = host.split(".")
+    last = labels[-2] if len(labels) > 1 and not labels[-1] else labels[-1]
+    if _NUMBER.fullmatch(last) and not _IPV4.fullmatch(host):
+        return "unknown host"
+    return host
 
 
 def safe_text(raw: object) -> tuple[str, dict[str, int]]:
@@ -197,16 +233,29 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
         return match.group(0)
 
     def markdown(match):
-        if not _IS_TARGET.match(match.group(2)):
+        # A client renders a target with any scheme as a link, whatever follows the colon.
+        if not (_IS_TARGET.match(match.group(2)) or _SCHEME.match(match.group(2))):
             return match.group(0)
         counts["links"] += 1
         return f"{match.group(1)} [link {_host(match.group(2))}]"
 
     def raw_link(match):
+        whole, bare = match.group(0), match.group(1) is not None
         # Punctuation that closes the sentence around a link is not part of the link.
-        link = match.group(0).rstrip(".,;:!?)]}'\"")
+        link = whole.rstrip(".,;:!?)]}'\"")
+        host = _host(link, bare)
+        # A dot right after the host or its port may end the link or the sentence, and a browser opens a
+        # different host for each, or none. A link cut by a tab or a line break before its host ends goes on
+        # in a browser, to another host.
+        if (whole.startswith(".", len(link)) and _host(link + ".", bare) != host
+                or _authority(whole, bare)[1] and _CONTINUES.match(match.string, match.end())):
+            host = "unknown host"
         counts["links"] += 1
-        return f"[link {_host(link)}]" + match.group(0)[len(link):]
+        return f"[link {host}]" + whole[len(link):]
+
+    def open_target(match):
+        counts["links"] += 1
+        return f"{match.group(1)}[link {_host(match.group(2))}]"
 
     def citation(match):
         counts["brackets"] += 1
@@ -228,7 +277,7 @@ def safe_text(raw: object) -> tuple[str, dict[str, int]]:
             visible.append(f"[U+{code:04X}]")
         else:
             visible.append(character)
-    return _CITATION.sub(citation, "".join(visible)), counts
+    return _CITATION.sub(citation, _OPEN_TARGET.sub(open_target, "".join(visible))), counts
 
 
 # A sentence may end at closing punctuation followed by a token that does not start in lower case.

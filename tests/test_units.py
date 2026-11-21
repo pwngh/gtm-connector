@@ -83,9 +83,9 @@ class NeutralizedText(unittest.TestCase):
                           ("see //evil.example/x now", "see [link evil.example] now"),
                           ("[a](//evil.example)", "a [link evil.example]"),
                           ("<//evil.example|x>", "x [link evil.example]"),
-                          # A shown host drops www., which a client would turn back into a link.
-                          ("www.evil.example/a now", "[link evil.example] now"),
-                          ("see:www.evil.example", "see:[link evil.example]"),
+                          # A host that begins with www. is not shown: a client would turn it back into a link.
+                          ("www.evil.example/a now", "[link unknown host] now"),
+                          ("see:www.evil.example", "see:[link unknown host]"),
                           # A scheme is a link wherever it starts, glued to a digit, a colon, or a slash.
                           ("1http://evil.example/x", "1[link evil.example]"),
                           ("x:https://evil.example", "x:[link evil.example]"),
@@ -137,13 +137,134 @@ class NeutralizedText(unittest.TestCase):
                           ("<files.example:8443/x|deck>", "deck [link unknown host]"),
                           # A scheme too long for its // to be found is not read as a host either.
                           (f"[deck]({'a' * 40}://files.example/)", "deck [link unknown host]"),
-                          # A www. address, a // address and a link with its // keep the host before a port or a colon.
+                          # A // address and a link with its // keep the host before a port or a colon.
                           ("<files.example/x|deck>", "deck [link files.example]"),
-                          ("www.files.example:8443/x now", "[link files.example] now"),
-                          ("<WWW.files.example:8443|deck>", "deck [link files.example]"),
                           ("<//files.example:8443/x|deck>", "deck [link files.example]"),
                           ("<https://files.example/a:b|deck>", "deck [link files.example]"),
                           ("<mailto:a@files.example|deck>", "deck [link mail]")):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+
+    def test_a_link_cut_by_a_tab_or_a_line_break_shows_no_host(self):
+        # A browser drops a tab or a line break from a link, so it opens first.example.second.example here.
+        for raw, safe, controls in (
+                ("https://first.example\t.second.example/x", "[link unknown host] .second.example/x", 0),
+                ("https://first.example\n.second.example/x", "[link unknown host]\n.second.example/x", 0),
+                ("https://first.example\r.second.example/x", "[link unknown host][U+000D].second.example/x", 1),
+                ("https://first.example\r\n\t.second.example/x", "[link unknown host]\n .second.example/x", 0),
+                # A line break ends a Slack token, so the link in it is read as running text.
+                ("<https://first.example\n.second.example/x|deck>",
+                 "<[link unknown host]\n.second.example/x|deck>", 0),
+                ("[deck](https://first.example\t.second.example/x)",
+                 "[deck]([link unknown host] .second.example/x)", 0),
+                # What follows can also turn the host into a user name, or go on after closing punctuation.
+                ("//first.example\t@second.example/x", "[link unknown host] @second.example/x", 0),
+                ("https://first.example,\tsecond.example", "[link unknown host], second.example", 0),
+                ("https://first.example\nNext line", "[link unknown host]\nNext line", 0),
+                # A link cut after its host, or followed by a space, the end, or the start of a path, keeps its host.
+                ("https://first.example/a\t.second.example", "[link first.example] .second.example", 0),
+                ("https://first.example?\t.second.example", "[link first.example]? .second.example", 0),
+                ("https://first.example\t/x", "[link first.example] /x", 0),
+                ("https://first.example\t next", "[link first.example]  next", 0),
+                ("https://first.example\n", "[link first.example]\n", 0),
+                ("https://first.example .second.example", "[link first.example] .second.example", 0),
+                ("mailto:a@first.example\t.second.example", "[link mail] .second.example", 0)):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": controls, "brackets": 0}),
+                             raw)
+
+    def test_a_markdown_link_with_any_scheme_is_a_link(self):
+        # A client renders [deck](HTTPS:/files.example) as a link, and a browser opens files.example.
+        for raw in ("[deck](HTTPS:/files.example)", "[deck](https:files.example/x)", "[deck](tel:5551234)",
+                    "[deck](javascript:alert)", "[deck]( x-app:open )", "[deck](C:\\path)"):
+            self.assertEqual(safe_text(raw), ("deck [link unknown host]",
+                                              {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+        # A target with no scheme is a path, and a time is not a scheme.
+        for plain in ("[docs](relative/path)", "[docs](a/b:c)", "[time](12:30)", "[docs](:x)", "(note: fine)",
+                      "[docs] (tel:5551234)"):
+            self.assertEqual(safe_text(plain), (plain, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}))
+        # A client also reads a target after a label that holds a line break or brackets, after a target cut by
+        # a control character, and after a bracketed word the connector wrote. No output keeps one with a scheme.
+        for raw, safe, links, controls in (
+                ("[de\nck](HTTPS:/files.example)", "[de\nck]([link unknown host]", 1, 0),
+                ("[a [b] c]( tel:5551234 )", "[a [b] c]( [link unknown host] )", 1, 0),
+                ("[deck](HTTPS:/files.example/\x1cx)", "[deck]([link unknown host]", 1, 1),
+                ("[deck](javascript:alert(1))", "[deck]([link unknown host]", 1, 0),
+                ("<https://files.example>(HTTPS:/second.example/x)", "link files.example [link unknown host]", 2, 0),
+                ("\x00(tel:5551234)(tel:5551234)", "[U+0000]([link unknown host]", 1, 1)):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": links, "controls": controls,
+                                                     "brackets": 0}), raw)
+            self.assertEqual(safe_text(safe), (safe, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}), raw)
+
+    def test_a_www_address_is_a_host_only_in_running_text(self):
+        for raw, safe in (
+                # As a link target, www.files.example:8443/x has the scheme www.files.example and no host.
+                ("[deck](www.files.example:8443/x)", "deck [link unknown host]"),
+                ("<www.files.example:8443/x|deck>", "deck [link unknown host]"),
+                ("<WWW.user:pass@files.example/x|deck>", "deck [link unknown host]"),
+                # In running text a client opens it as a web address, so the colon starts a password or a port.
+                ("www.user:pass@files.example/x now", "[link files.example] now"),
+                ("www.user@files.example:8443/a//b now", "[link files.example] now"),
+                # A host that begins with www. is never shown without it: files.example is another host.
+                ("<https://www.files.example/|deck>", "deck [link unknown host]"),
+                ("<www.files.example|deck>", "deck [link unknown host]"),
+                ("www.files.example:8443/x now", "[link unknown host] now"),
+                ("<https://files.www.example/|deck>", "deck [link unknown host]"),
+                # Two slashes in a path are not the start of a host.
+                ("<files.example/a//b|deck>", "deck [link files.example]"),
+                ("<https://files.example/a//b|deck>", "deck [link files.example]"),
+                ("<//files.example/a//b|deck>", "deck [link files.example]")):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+
+    def test_a_host_a_browser_rewrites_or_refuses_is_not_shown(self):
+        for raw, safe in (
+                # A browser reads each of these as the address 192.0.2.1.
+                ("<http://0xc0000201/|deck>", "deck [link unknown host]"),
+                ("<http://0XC0000201/|deck>", "deck [link unknown host]"),
+                ("<http://3221225985/|deck>", "deck [link unknown host]"),
+                ("<http://0300.0.2.1/|deck>", "deck [link unknown host]"),
+                ("<http://192.0.513/|deck>", "deck [link unknown host]"),
+                ("<http://192.0.2.1./|deck>", "deck [link unknown host]"),
+                ("<http://192.0.2.01/|deck>", "deck [link unknown host]"),
+                # A last label that is a number makes the whole host an address, which a browser then refuses.
+                ("<http://files.example.0x1/|deck>", "deck [link unknown host]"),
+                ("<http://files.example.7/|deck>", "deck [link unknown host]"),
+                ("<http://files.0x/|deck>", "deck [link unknown host]"),
+                ("<http://192.0.2.256/|deck>", "deck [link unknown host]"),
+                ("<http://1.2.3.4.5/|deck>", "deck [link unknown host]"),
+                # A port that is not a number up to 65535.
+                ("<https://files.example:65536/|deck>", "deck [link unknown host]"),
+                ("<https://files.example:80a/|deck>", "deck [link unknown host]"),
+                ("<https://files.example:80:80/|deck>", "deck [link unknown host]"),
+                ("<https://files.example:-1/|deck>", "deck [link unknown host]"),
+                (f"<https://files.example:{'9' * 5000}/|deck>", "deck [link unknown host]"),
+                # A bracketed host, whatever it holds, and a file link, which opens a path.
+                ("<http://[v1.files.example]/|deck>", "deck [link unknown host]"),
+                ("<http://[::1]:8443/|deck>", "deck [link unknown host]"),
+                ("<http://files.example]/|deck>", "deck [link unknown host]"),
+                ("<file://C:/x|deck>", "deck [link unknown host]"),
+                # Four plain decimal parts, a number in another label, and a port in range stay as written.
+                ("<http://192.0.2.1/|deck>", "deck [link 192.0.2.1]"),
+                ("<http://192.0.2.1:8443/|deck>", "deck [link 192.0.2.1]"),
+                ("<https://1.example/|deck>", "deck [link 1.example]"),
+                ("<https://0x10.files.example/|deck>", "deck [link 0x10.files.example]"),
+                ("<https://files.example:65535/|deck>", "deck [link files.example]"),
+                ("<https://files.example:00000080/|deck>", "deck [link files.example]"),
+                ("<https://files.example:/|deck>", "deck [link files.example]"),
+                # A dot that ends the host is part of it.
+                ("<https://files.example./x|deck>", "deck [link files.example.]"),
+                ("<https://files.example.|deck>", "deck [link files.example.]"),
+                ("see https://files.example./x now", "see [link files.example.] now"),
+                # In running text a dot right after the host or its port may be the link's or the sentence's.
+                ("see https://files.example. Next", "see [link unknown host]. Next"),
+                ("see https://user@files.example.) Next", "see [link unknown host].) Next"),
+                ("see //files.example... Next", "see [link unknown host]... Next"),
+                ("see https://files.example:8443. Next", "see [link unknown host]. Next"),
+                ("see http://192.0.2.1. Next", "see [link unknown host]. Next"),
+                # A dot after a path closes the sentence, and so does other punctuation after the host.
+                ("see https://files.example/x. Next", "see [link files.example]. Next"),
+                ("see https://files.example?. Next", "see [link files.example]?. Next"),
+                ("see (https://files.example). Next", "see ([link files.example]). Next"),
+                ("see https://files.example, then", "see [link files.example], then"),
+                ("see mailto:a@files.example. Next", "see [link mail]. Next")):
             self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
 
     def test_sentences_are_whole_and_lose_nothing(self):
@@ -270,9 +391,10 @@ class NeutralizedText(unittest.TestCase):
 
     def test_punctuation_that_closes_a_sentence_is_not_part_of_a_link(self):
         text, counts = safe_text("See www.x.example. Then ftp://y.example/a, and (http://z.example).")
-        self.assertEqual(text, "See [link x.example]. Then [link y.example], and ([link z.example]).")
+        self.assertEqual(text, "See [link unknown host]. Then [link y.example], and ([link z.example]).")
         self.assertEqual(counts["links"], 3)
-        self.assertEqual(sentences(text), ["See [link x.example].", "Then [link y.example], and ([link z.example])."])
+        self.assertEqual(sentences(text),
+                         ["See [link unknown host].", "Then [link y.example], and ([link z.example])."])
 
 
 class SpeakerRoles(unittest.TestCase):
