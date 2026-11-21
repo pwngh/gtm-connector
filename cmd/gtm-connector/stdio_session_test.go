@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/pwngh/gtm-connector/internal/receipts"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
@@ -178,6 +181,90 @@ func TestStdioAndSetupFinishInterruptedReceipts(t *testing.T) {
 	}
 	if got := d.count(t, `SELECT count(*) FROM receipts WHERE status = 'pending'`); got != 0 {
 		t.Fatalf("setup left %d interrupted receipts pending", got)
+	}
+}
+
+// serve finishes a pending receipt whose worker's lease expired too, as interrupted, when it starts and before
+// it is asked anything. Each wait is on the database's own answer, and each question to it is bounded, so a
+// stalled query fails the test at its deadline.
+func TestServeFinishesInterruptedReceiptsAsItStarts(t *testing.T) {
+	d := stdioDemo(t)
+	deadline := time.Now().Add(20 * time.Second)
+	count := func(query string) int {
+		t.Helper()
+		bounded, cancel := context.WithDeadline(ctx, deadline)
+		defer cancel()
+		c, err := pgx.Connect(bounded, d.ownerURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close(context.Background())
+		var n int
+		if err := c.QueryRow(bounded, query).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// waitFor waits until the database answers query with want, or fails at the deadline, or when serve has
+	// stopped (stopped is closed then; nil before serve runs).
+	var served error
+	waitFor := func(query string, want int, stopped <-chan struct{}) {
+		t.Helper()
+		for count(query) != want {
+			select {
+			case <-stopped:
+				t.Fatalf("serve stopped first: %v", served)
+			case <-time.After(20 * time.Millisecond):
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("the database never answered %d to %s", want, query)
+			}
+		}
+	}
+	store := &postgres.ReceiptStore{Store: d.owner, Lease: time.Millisecond}
+	if _, err := store.Start(ctx, receipts.Start{WorkspaceID: d.workspace.ID, OperationID: "mcp-" + receipts.RandomID(),
+		TokenID: receipts.Anonymous, Tool: "get_account", Arguments: strictjson.NewObject(), RequestID: receipts.Null()}); err != nil {
+		t.Fatal(err)
+	}
+	// The lease has expired once the database's own clock says so, which is what the sweep asks.
+	waitFor(`SELECT count(*) FROM receipts WHERE status = 'pending' AND lease_expires_at <= clock_timestamp()`, 1, nil)
+	dir := privateDir(t)
+	creds, err := openCredentials(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = creds.setUp(certificateHosts(nil))
+	creds.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{"GTM_DATABASE_URL": d.appURL, "GTM_CREDENTIALS_DIR": dir,
+		"GTM_LISTEN": "127.0.0.1:0", "GTM_CONTAINER_LISTEN": "", "GTM_PUBLIC_ORIGIN": "", "GTM_ALLOWED_HOSTS": "",
+		"GTM_WEB_DIR": ""} {
+		t.Setenv(name, value)
+	}
+	running, stop := context.WithCancel(ctx)
+	stopped := make(chan struct{})
+	go func() {
+		served = serve(running, nil)
+		close(stopped)
+	}()
+	// serve runs until the test ends, and is stopped and waited for then, also when a check fails first.
+	t.Cleanup(func() {
+		stop()
+		select {
+		case <-stopped:
+			if served != nil && !t.Failed() {
+				t.Errorf("serve: %v", served)
+			}
+		case <-time.After(20 * time.Second):
+			t.Error("serve did not stop")
+		}
+	})
+	waitFor(`SELECT count(*) FROM receipts WHERE status = 'pending'`, 0, stopped)
+	if got := count(`SELECT count(*) FROM receipts WHERE status = 'error' AND http_status = 503
+		AND error = 'interrupted'`); got != 1 {
+		t.Fatalf("%d receipts finished as interrupted", got)
 	}
 }
 

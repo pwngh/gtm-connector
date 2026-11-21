@@ -282,6 +282,22 @@ func TestServeListensOnLoopbackOnly(t *testing.T) {
 	}
 }
 
+// The server serve runs speaks TLS 1.3 only: a client that offers no later version than TLS 1.2 is refused
+// in the handshake.
+func TestServeSpeaksOnlyTLS13(t *testing.T) {
+	serveFor(t, schema{state: postgres.MigrationsCurrent})
+	for version, accepted := range map[uint16]bool{tls.VersionTLS12: false, tls.VersionTLS13: true} {
+		conn, err := tls.Dial("tcp", os.Getenv("GTM_LISTEN"), &tls.Config{InsecureSkipVerify: true,
+			MinVersion: tls.VersionTLS12, MaxVersion: version})
+		if err == nil {
+			conn.Close()
+		}
+		if (err == nil) != accepted {
+			t.Errorf("a client that offers up to %s: %v", tls.VersionName(version), err)
+		}
+	}
+}
+
 // Item 12: "OPTIONS *" reaches the Host check.
 func TestOptionsStarMeetsTheHostCheck(t *testing.T) {
 	dir := privateDir(t)

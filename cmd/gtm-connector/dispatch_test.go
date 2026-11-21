@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/pwngh/gtm-connector/internal/receipts"
+	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 )
 
 // line runs one command line as main does and gives its exit code and what it wrote.
@@ -125,6 +127,47 @@ func TestAFailingStorePrintsItsCodeOnly(t *testing.T) {
 		{"demo", "--state-dir", "demo"}} {
 		if code, message, _ := d.refusal(t, 1, tokens...); code != "local_failure" || message != "PostgreSQL error 42501" {
 			t.Errorf("%v: %s, %s", tokens, code, message)
+		}
+	}
+}
+
+// serve's housekeeping logs a store that fails under it the way a command prints one: by its fixed line,
+// here the SQLSTATE, and nothing of PostgreSQL's own text, which names the table and can name a role.
+func TestServeLogsAFailingStoreByItsCodeOnly(t *testing.T) {
+	d := setUpDemo(t)
+	role := d.appRole(t)
+	if _, err := conn(t, d.ownerURL).Exec(ctx, "REVOKE UPDATE ON receipts FROM "+role+"; REVOKE DELETE ON sessions FROM "+role); err != nil {
+		t.Fatal(err)
+	}
+	store, err := postgres.Open(ctx, d.appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	logs := &lockedBuffer{}
+	running, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		housekeeping(running, store, slog.New(slog.NewTextHandler(logs, nil)))
+	}()
+	for deadline := time.Now().Add(20 * time.Second); strings.Count(logs.String(), "level=WARN") < 2; {
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	stop()
+	<-done
+	logged := logs.String()
+	for _, step := range []string{"finishing interrupted receipts", "removing ended sessions"} {
+		if !strings.Contains(logged, `msg="`+step+`" error="PostgreSQL error 42501"`) {
+			t.Errorf("the log does not say %q failed by its code:\n%s", step, logged)
+		}
+	}
+	for _, leaked := range []string{"permission denied", "SQLSTATE", role} {
+		if strings.Contains(logged, leaked) {
+			t.Errorf("the log holds %q:\n%s", leaked, logged)
 		}
 	}
 }
