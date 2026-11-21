@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"io"
+	"strings"
 )
 
 // SetCrash makes the store fail at a named step inside a transaction, as if
@@ -11,6 +12,17 @@ func SetCrash(s *Store, crash func(point string) error) { s.crash = crash }
 
 // MigrateTo migrates to exactly this schema version, as an older binary did.
 func MigrateTo(s *Store, ctx context.Context, version int) error { return s.migrateTo(ctx, version) }
+
+// MigrationVersion is the number of the embedded migration with this name, or 0.
+func MigrationVersion(name string) int {
+	list, _ := migrations()
+	for _, m := range list {
+		if strings.HasSuffix(m.name, "_"+name+".sql") {
+			return m.version
+		}
+	}
+	return 0
+}
 
 // MigrationLock is the advisory lock a migration and a restore hold.
 const MigrationLock int64 = migrationLock

@@ -41,6 +41,7 @@ rules for any writer), `authz` the grant checks on evidence reads, `transport/ht
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with the read commands
 `accounts`, `brief`, `inspect` and `audit` on demo data. `postgres.ReceiptStore` runs the card maker on
 PostgreSQL.
+`mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
 
 ```sh

@@ -1,7 +1,8 @@
 // Command gtm-connector is the connector and the workflow application.
 //
 //	gtm-connector setup              make credentials, migrate, set up the app role, seed the demo workspace
-//	gtm-connector serve              run the HTTPS server, as the app role
+//	gtm-connector serve [--selection FILE]
+//	                                 run the HTTPS server, with MCP at /mcp, as the app role
 //	gtm-connector demo [--again]     publish a card for each demo account that holds none, for the demo sign-in
 //	gtm-connector accounts           search the connected CRM by account name
 //	gtm-connector brief ACCOUNT      make and print the Deal card for one account
@@ -48,7 +49,8 @@ const usage = `usage: gtm-connector <command> [flags]
 
 commands:
   setup              make missing credentials, migrate, set up the app role, seed the demo workspace
-  serve              run the HTTPS server, connecting as the app role
+  serve [--selection FILE]
+                     run the HTTPS server, with MCP at /mcp, connecting as the app role
   demo [--again]     publish a card for each demo account that holds none, for the demo sign-in
   accounts           search the connected CRM by account name
   brief ACCOUNT      make and print the Deal card for one account

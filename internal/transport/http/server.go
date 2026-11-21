@@ -2,7 +2,8 @@
 // JSON API under /api/v1, the web app's build with history fallback, and
 // /healthz. Every request's Host must be on a configured list, and every
 // browser write must come from the configured public origin with the
-// session's CSRF token.
+// session's CSRF token. It also mounts the MCP gateway at /mcp, which makes
+// every admission decision of its own.
 package httptransport
 
 import (
@@ -45,7 +46,9 @@ type Config struct {
 	// ClientRoutes are the path prefixes the web app routes itself; only
 	// they fall back to index.html. Empty means DefaultClientRoutes.
 	ClientRoutes []string
-	// MCP, when set, serves /mcp. It does its own admission checks.
+	// MCP, when set, serves /mcp and the protected-resource metadata that
+	// describes it. It does its own admission checks, the Host among them,
+	// and writes the receipt of every call it is sent.
 	MCP http.Handler
 }
 
@@ -180,6 +183,11 @@ func (s *Server) routes() {
 	}
 	mux.Handle("/mcp", mcp)
 	mux.Handle("/mcp/", mcp)
+	if s.cfg.MCP != nil {
+		for _, pattern := range []string{mcpMetadata, mcpMetadata + "/mcp"} {
+			mux.Handle(pattern, mcp)
+		}
+	}
 	mux.HandleFunc("/", s.serveApp)
 	s.mux = mux
 }
@@ -195,6 +203,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header.Set("Cross-Origin-Opener-Policy", "same-origin")
 	header.Set("Cross-Origin-Resource-Policy", "same-origin")
 	header.Set("Content-Security-Policy", s.policy)
+	if s.cfg.MCP != nil && r.URL.Path == "/mcp" {
+		// The gateway admits only the public origin's own Host, with no
+		// Origin header, and refuses anything else itself. It is asked before
+		// the checks below so that a call refused for its Host gets its
+		// receipt, as every refused call does.
+		s.cfg.MCP.ServeHTTP(w, r)
+		return
+	}
 	host := strings.ToLower(r.Host)
 	if !s.hosts[host] {
 		writeError(w, http.StatusMisdirectedRequest, "untrusted_host", "This Host is not served here.")
@@ -263,6 +279,10 @@ func isWrite(method string) bool {
 }
 
 func isMCP(path string) bool { return path == "/mcp" || strings.HasPrefix(path, "/mcp/") }
+
+// mcpMetadata is where a client finds the protected-resource metadata of
+// the MCP endpoint, alone or followed by the endpoint's path.
+const mcpMetadata = "/.well-known/oauth-protected-resource"
 
 // checkOrigin requires exactly one Origin header equal to the public origin.
 // A missing or "null" Origin is refused: a write must say where it came from.

@@ -599,9 +599,9 @@ func TestAGapNotReadShowsAnUnknownCount(t *testing.T) {
 }
 
 // Crossover, the browser half: the API takes no bearer token, alone or
-// beside the session cookie, and /mcp serves nothing for the cookie. The
-// MCP half (a cookie never admits a call at the mounted gateway) waits for
-// serve to mount MCP.
+// beside the session cookie, and without a gateway /mcp serves nothing for
+// the cookie. The MCP half, that a live session's cookie never admits a call
+// at the mounted gateway, is TestMountedBadTokensAreRefused in transport/mcp.
 func TestCookiesAndBearerTokensNeverCross(t *testing.T) {
 	s := newSite(t, 0)
 	reads, writes := httptransport.APIRoutes(s.api)

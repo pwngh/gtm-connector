@@ -22,6 +22,9 @@ import (
 const (
 	// wantRefused is HTTP 403 with code 1005 and reason crm_write_disabled, one finished receipt, and no effect.
 	wantRefused = "refused"
+	// wantUnauthorized is HTTP 401 with code 1001 and reason invalid_token, one finished receipt, and no
+	// effect: the vector's bearer carries crm:write, and a token with a scope outside the read set is refused.
+	wantUnauthorized = "unauthorized"
 	// wantWithheld is the 503 a refusal becomes when its receipt cannot finish: the receipt stays pending.
 	wantWithheld = "withheld"
 	// wantUnlisted is a tools/list answer with the recorded tools except log_activity.
@@ -43,21 +46,21 @@ var writeVectors = map[string]writeVector{
 	"test_scopes_separate_both_sources_and_writes: log_activity with calls:read": {
 		`403 insufficient_scope asking for scope="crm:write"`, wantRefused},
 	"test_every_tool_attempt_has_one_complete_audit_row: attempt 5": {
-		"200 with one crm/activities record", wantRefused},
+		"200 with one crm/activities record", wantUnauthorized},
 	"test_idempotent_write_returns_one_activity_and_rejects_changed_payload: first": {
-		"200 with one crm/activities record", wantRefused},
+		"200 with one crm/activities record", wantUnauthorized},
 	"test_idempotent_write_returns_one_activity_and_rejects_changed_payload: retry": {
-		"200 with the same record", wantRefused},
+		"200 with the same record", wantUnauthorized},
 	"test_idempotent_write_returns_one_activity_and_rejects_changed_payload: changed payload": {
-		"200 with the tool error idempotency_conflict", wantRefused},
+		"200 with the tool error idempotency_conflict", wantUnauthorized},
 	"test_duplicate_write_attempts_also_consume_rate_limit: first": {
-		"200 with one crm/activities record", wantRefused},
+		"200 with one crm/activities record", wantUnauthorized},
 	"test_unknown_account_write_returns_an_explicit_audited_tool_error": {
-		"200 with the tool error account not found", wantRefused},
+		"200 with the tool error account not found", wantUnauthorized},
 	"test_write_committed_before_audit_failure_is_reused_on_retry: first": {
 		"503 with the receipt pending and the activity written", wantWithheld},
 	"test_write_committed_before_audit_failure_is_reused_on_retry: retry": {
-		"200 with the activity written before", wantRefused},
+		"200 with the activity written before", wantUnauthorized},
 	"tools/list with a string cursor": {
 		"six tools", wantUnlisted},
 	"tools/list order": {
@@ -119,14 +122,15 @@ func writeRefusal(t *testing.T, id int) map[string]any {
 		`{"jsonrpc":"2.0","id":%d,"error":{"code":1005,"message":"crm_write_disabled","data":{"reason":"crm_write_disabled"}}}`, id)))
 }
 
-// refusedReceipts checks that each of a transport's receipts finished as a 403 error with no rows.
-func refusedReceipts(t *testing.T, rows []Receipt, count int) {
+// refusedReceipts checks that each of a transport's receipts finished as an error with this HTTP status and
+// no rows.
+func refusedReceipts(t *testing.T, rows []Receipt, count, status int) {
 	t.Helper()
 	if len(rows) != count {
 		t.Fatalf("%d receipts, want %d", len(rows), count)
 	}
 	for _, row := range rows {
-		if row.Status != "error" || *row.HTTPStatus != 403 || row.RowCount != 0 || len(row.Rows) != 0 ||
+		if row.Status != "error" || *row.HTTPStatus != status || row.RowCount != 0 || len(row.Rows) != 0 ||
 			row.Error == nil || *row.Error != "request_failed" {
 			t.Fatalf("receipt %+v", row)
 		}
@@ -144,11 +148,35 @@ func (h *harness) writeRefused(arguments map[string]any, token string) *httptest
 		h.t.Fatalf("write with %s: %d %s %q", token, response.Code, response.Body, response.Header().Get("WWW-Authenticate"))
 	}
 	rows := h.receipts.Read()[before:]
-	refusedReceipts(h.t, rows, 1)
+	refusedReceipts(h.t, rows, 1, 403)
 	if rows[0].Tool != writeTool {
 		h.t.Fatalf("receipt %+v", rows[0])
 	}
 	h.noWrite()
+	return response
+}
+
+// unauthorized calls a tool with a bearer the gate refuses whole and checks the one answer it gives: HTTP
+// 401, code 1001 and reason invalid_token, a challenge that names no scope, one receipt finished as an error,
+// no charge to any rate window and no tool run.
+func (h *harness) unauthorized(tool string, arguments map[string]any, token string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	before, ran := len(h.receipts.Read()), len(h.fx.ran())
+	response := h.tool(tool, arguments, token, nil)
+	reason, code := reasonOf(h.t, response)
+	challenge := response.Header().Get("WWW-Authenticate")
+	if response.Code != 401 || reason != "invalid_token" || code != "1001" || !strings.Contains(challenge, `error="invalid_token"`) ||
+		strings.Contains(response.Body.String()+challenge, "crm:write") || strings.Contains(challenge, "scope=") {
+		h.t.Fatalf("%s with %s: %d %s %q", tool, token, response.Code, response.Body, challenge)
+	}
+	rows := h.receipts.Read()[before:]
+	refusedReceipts(h.t, rows, 1, 401)
+	if rows[0].Tool != tool || len(h.fx.ran()) != ran || h.fx.activityCount() != 0 {
+		h.t.Fatalf("receipt %+v, ran %v", rows[0], h.fx.ran())
+	}
+	if _, charged := h.gateway.Windows()[fingerprint(tokenValue(token))]; charged {
+		h.t.Fatalf("the refused bearer %s was charged", token)
+	}
 	return response
 }
 
@@ -160,9 +188,14 @@ func (h *harness) noWrite() {
 	}
 }
 
-// replayWrite replays a named write vector that the gate refuses.
+// replayWrite replays a named write vector with the bearer it was recorded with. A read grant gets the write
+// refusal. A bearer that carries crm:write is refused at the token check, which comes first.
 func (h *harness) replayWrite(name string, arguments map[string]any, token string) *httptest.ResponseRecorder {
 	h.t.Helper()
+	if slices.Contains(h.tokens[tokenValue(token)].Scopes, "crm:write") {
+		replay(h.t, name, wantUnauthorized)
+		return h.unauthorized(writeTool, arguments, token)
+	}
 	replay(h.t, name, wantRefused)
 	return h.writeRefused(arguments, token)
 }
@@ -171,8 +204,9 @@ var fixtureActivity = map[string]any{"account_id": "acc-001", "kind": "renewal_c
 	"body": "Fixture owner requested a renewal call.", "idempotency_key": "fixture-write-001"}
 
 // tools/list shows the read tools only and names neither log_activity nor crm:write, on both transports,
-// with and without a selection, even to a token that carries crm:write. No tool is defined for a write
-// scope, and the resource metadata offers none.
+// with and without a selection. A bearer that carries crm:write lists nothing: it is refused with 401 and,
+// as for any request that is not a call, no receipt. No tool is defined for a write scope, and the resource
+// metadata offers none.
 func TestToolsListHasNoWriteTool(t *testing.T) {
 	check := func(label string, listing map[string]any, tools []string) {
 		t.Helper()
@@ -189,23 +223,36 @@ func TestToolsListHasNoWriteTool(t *testing.T) {
 			tools, label = SelectedTools, "selected"
 		}
 		h := newHarness(t, func(c *GatewayConfig) { c.Selected = selected })
-		for _, token := range []string{"crm", "write", "full"} {
+		for _, token := range []string{"crm", "read"} {
 			listing := h.rpc("tools/list", nil, token, nil, false)
 			if listing.Code != 200 {
 				t.Fatalf("%s tools/list with %s: %d %s", label, token, listing.Code, listing.Body)
 			}
 			check(label+" over HTTP with "+token, decode(t, listing.Body.Bytes()), tools)
 		}
-		s := newStdio(t, []string{"crm:read", "crm:write"}, func(c *StdioConfig) { c.Selected = selected })
+		for _, token := range []string{"write", "full"} {
+			listing := h.rpc("tools/list", nil, token, nil, false)
+			if reason, _ := reasonOf(t, listing); listing.Code != 401 || reason != "invalid_token" ||
+				strings.Contains(listing.Body.String(), "tools") {
+				t.Fatalf("%s tools/list with %s: %d %s", label, token, listing.Code, listing.Body)
+			}
+		}
+		s := newStdio(t, []string{"crm:read"}, func(c *StdioConfig) { c.Selected = selected })
 		s.send(legacyStart, legacyReady, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 		s.answer(1)
 		check(label+" over stdio", s.answer(2), tools)
-		if len(h.receipts.Read())+len(s.receipts.Read()) != 0 {
+		mixed := newStdio(t, []string{"crm:read", "crm:write"}, func(c *StdioConfig) { c.Selected = selected })
+		mixed.send(legacyStart, legacyReady, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+		mixed.answer(1)
+		if answer := mixed.answer(2); path(answer, "error", "data", "reason") != "invalid_token" {
+			t.Fatalf("%s tools/list over stdio as a principal with crm:write: %v", label, answer)
+		}
+		if len(h.receipts.Read())+len(s.receipts.Read())+len(mixed.receipts.Read()) != 0 {
 			t.Fatalf("%s: listing left receipts", label)
 		}
 	}
 	for name, definition := range Definitions {
-		if name == writeTool || !slices.Contains([]string{"crm:read", "calls:read", "slack:read"}, definition.Scope) {
+		if name == writeTool || !slices.Contains(ReadScopes, definition.Scope) {
 			t.Errorf("the gate defines %s requiring %q", name, definition.Scope)
 		}
 	}
@@ -222,7 +269,7 @@ func TestToolsListHasNoWriteTool(t *testing.T) {
 func TestWriteWithAReadGrantIsRefused(t *testing.T) {
 	for _, selected := range []bool{false, true} {
 		h := newHarness(t, func(c *GatewayConfig) { c.Selected = selected })
-		for _, token := range []string{"crm", "calls", "slack", "full"} {
+		for _, token := range []string{"crm", "calls", "slack", "read"} {
 			h.writeRefused(fixtureActivity, token)
 			h.writeRefused(map[string]any{}, token)
 		}
@@ -230,9 +277,8 @@ func TestWriteWithAReadGrantIsRefused(t *testing.T) {
 		if used := h.gateway.Windows()[fingerprint(tokenValue("crm"))].Used; used != 3 {
 			t.Fatalf("the crm grant was charged %d times", used)
 		}
-		// Nothing issues crm:write. A token that carries it beside crm:read still reads the CRM, because the
-		// read scope opens that source and the extra scope opens nothing.
-		h.records(h.tool("get_account", map[string]any{"account_id": "acc-001"}, "full", nil), "crm")
+		// A token that carries crm:write beside crm:read reads nothing: the read scope does not rescue it.
+		h.unauthorized("get_account", map[string]any{"account_id": "acc-001"}, "full")
 
 		s := newStdio(t, []string{"crm:read", "calls:read", "slack:read"}, func(c *StdioConfig) { c.Selected = selected })
 		s.send(legacyStart, legacyReady, call(2, writeTool, jsonOf(fixtureActivity)), string(callBody("3", writeTool, "{}", vectorMeta)))
@@ -243,16 +289,17 @@ func TestWriteWithAReadGrantIsRefused(t *testing.T) {
 			}
 		}
 		rows := s.receipts.Read()
-		refusedReceipts(t, rows, 2)
+		refusedReceipts(t, rows, 2, 403)
 		if rows[0].Tool != writeTool || rows[1].Tool != writeTool || s.fx.activityCount() != 0 || len(s.fx.ran()) != 0 {
 			t.Fatalf("stdio: receipts %+v, ran %v", rows, s.fx.ran())
 		}
 	}
 }
 
-// A token that carries only crm:write gets nothing: every tool refuses it with a receipt, no refusal asks
-// for crm:write, and no tool body runs. It may still list the tools, as any valid token may.
-func TestWriteScopeOpensNothing(t *testing.T) {
+// A token that carries crm:write, alone or beside every read scope, or a scope nobody defined, opens
+// nothing: every tool call is refused as invalid_token with one finished 401 receipt, no refusal names
+// crm:write or asks for a scope, the token is never charged, and no tool body runs. So is the write tool.
+func TestATokenWithAScopeOutsideTheReadSetOpensNothing(t *testing.T) {
 	arguments := map[string]map[string]any{
 		"search_accounts": {}, "get_account": {"account_id": "acc-001"}, "list_opportunities": {},
 		"read_call_notes": {"account_id": "acc-001"}, "read_slack_messages": {"account_id": "acc-003"},
@@ -264,33 +311,52 @@ func TestWriteScopeOpensNothing(t *testing.T) {
 			tools = SelectedTools
 		}
 		h := newHarness(t, func(c *GatewayConfig) { c.Selected = selected })
-		s := newStdio(t, []string{"crm:write"}, func(c *StdioConfig) { c.Selected = selected })
-		s.send(legacyStart, legacyReady)
-		s.answer(1)
-		for i, tool := range tools {
-			scope := Definitions[tool].Scope
-			response := h.tool(tool, arguments[tool], "write", nil)
-			reason, code := reasonOf(t, response)
-			challenge := response.Header().Get("WWW-Authenticate")
-			if response.Code != 403 || reason != "insufficient_scope" || code != "1004" || !strings.Contains(challenge, `scope="`+scope+`"`) ||
-				strings.Contains(response.Body.String()+challenge, "crm:write") {
-				t.Fatalf("%s with crm:write alone: %d %s %q", tool, response.Code, response.Body, challenge)
+		expires := h.wall + 3600
+		h.tokens[tokenValue("invented")] = &Token{Scopes: []string{"crm:read", "calls:read", "slack:read", "admin"},
+			ExpiresAt: &expires, Resource: testResource}
+		bearers := []string{"write", "full", "invented"}
+		for _, token := range bearers {
+			for _, tool := range tools {
+				h.unauthorized(tool, arguments[tool], token)
 			}
-			s.send(call(i+2, tool, jsonOf(arguments[tool])))
-			if answer := s.answer(i + 2); path(answer, "error", "data", "reason") != "insufficient_scope" ||
-				path(answer, "error", "message") != "insufficient_scope: "+scope+" required" {
-				t.Fatalf("stdio %s with crm:write alone: %v", tool, answer)
+			h.unauthorized(writeTool, fixtureActivity, token)
+		}
+		refusedReceipts(t, h.receipts.Read(), len(bearers)*(len(tools)+1), 401)
+
+		for _, scopes := range [][]string{{"crm:write"}, {"crm:read", "calls:read", "slack:read", "crm:write"}, {"crm:read", "admin"}} {
+			s := newStdio(t, scopes, func(c *StdioConfig) { c.Selected = selected })
+			s.send(legacyStart, legacyReady)
+			s.answer(1)
+			for i, tool := range append(slices.Clone(tools), writeTool) {
+				s.send(call(i+2, tool, jsonOf(arguments[tool])))
+				if answer := s.answer(i + 2); path(answer, "error", "data", "reason") != "invalid_token" ||
+					strings.Contains(fmt.Sprint(answer), "crm:write") {
+					t.Fatalf("stdio %s as a principal with %v: %v", tool, scopes, answer)
+				}
 			}
-		}
-		h.writeRefused(fixtureActivity, "write")
-		s.send(call(99, writeTool, jsonOf(fixtureActivity)))
-		if answer := s.answer(99); !reflect.DeepEqual(answer, writeRefusal(t, 99)) {
-			t.Fatalf("stdio write with crm:write alone: %v", answer)
-		}
-		refusedReceipts(t, h.receipts.Read(), len(tools)+1)
-		refusedReceipts(t, s.receipts.Read(), len(tools)+1)
-		if len(h.fx.ran())+len(s.fx.ran()) != 0 || h.fx.activityCount()+s.fx.activityCount() != 0 {
-			t.Fatalf("a tool ran: %v %v", h.fx.ran(), s.fx.ran())
+			refusedReceipts(t, s.receipts.Read(), len(tools)+1, 401)
+			if len(s.fx.ran()) != 0 || s.fx.activityCount() != 0 {
+				t.Fatalf("a tool ran over stdio: %v", s.fx.ran())
+			}
 		}
 	}
+}
+
+// The token check comes before the write refusal: a log_activity call with an expired bearer, or with none,
+// answers 401 and never the 403 a valid read grant gets.
+func TestWriteWithAnExpiredBearerIsUnauthorized(t *testing.T) {
+	h := newHarness(t)
+	for _, token := range []string{"expired", "wrong_audience", ""} {
+		before := len(h.receipts.Read())
+		response := h.tool(writeTool, fixtureActivity, token, nil)
+		if reason, code := reasonOf(t, response); response.Code != 401 || reason != "invalid_token" || code != "1001" {
+			t.Fatalf("log_activity with %q: %d %s", token, response.Code, response.Body)
+		}
+		rows := h.receipts.Read()[before:]
+		refusedReceipts(t, rows, 1, 401)
+		if rows[0].Tool != writeTool {
+			t.Fatalf("receipt %+v", rows[0])
+		}
+	}
+	h.noWrite()
 }

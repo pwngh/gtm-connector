@@ -39,6 +39,10 @@ var Definitions = map[string]ToolDefinition{
 	"read_renewal_brief": {Scope: "crm:read", Arguments: map[string]StringArgument{"brief_id": required(64)}},
 }
 
+// ReadScopes are the scopes a token may carry, each opening one source. A token that carries any other is
+// refused.
+var ReadScopes = []string{"crm:read", "calls:read", "slack:read"}
+
 // DefaultTools are the five tools the default server offers; SelectedTools add the brief tools.
 var (
 	DefaultTools  = []string{"search_accounts", "get_account", "list_opportunities", "read_call_notes", "read_slack_messages"}
