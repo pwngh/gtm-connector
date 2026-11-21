@@ -48,7 +48,7 @@ If a source was not read, a rule answers unknown, not silence.
 - **What changed since last time:** the sentences, record values and unread sources that differ from the card you last saw. Your position is your own. A teammate reading the card does not clear your changes.
 - **Exact buyer quotes and titles.** A quotation is one whole sentence, never a cut one.
 - **Promises you made:** seller sentences marked as commitments.
-- **Missing or unread sources.**
+- **Missing or unread sources.** A call or thread that could belong to two of the account's deals is listed here. If it is yours, claim it for this deal with one click. You know the account; the connector does not guess.
 
 ## The checklist and playbooks
 
