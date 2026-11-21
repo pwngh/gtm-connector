@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/cards"
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/mcptools"
 	"github.com/pwngh/gtm-connector/internal/oracletest"
 	"github.com/pwngh/gtm-connector/internal/receipts"
@@ -339,9 +340,13 @@ func prepared(t *testing.T, folder string) (*mounted, recordedBrief, []auditRow,
 	return m, recorded, rows, bearer
 }
 
+// todaysRules is a recorded result as a brief made now gives it. The recorded briefs were sealed under
+// rules version 3.
+func todaysRules(result []byte) []byte { return oracletest.TodaysRules(result, evidence.SanitizerVersion) }
+
 // The three recorded prepare_renewal_brief calls (folders/prepared, prepared_as_of and prepared_no_slack),
-// made at the mounted endpoint: the result the assistant received, and one outer receipt with one receipt
-// for each read inside it, as the recorder's audit log holds them.
+// made at the mounted endpoint: the result the assistant received, as todaysRules gives it, and one outer
+// receipt with one receipt for each read inside it, as the recorder's audit log holds them.
 func TestMountedPreparedBriefs(t *testing.T) {
 	replayed := 0
 	for _, folder := range []string{"prepared", "prepared_as_of", "prepared_no_slack"} {
@@ -353,8 +358,9 @@ func TestMountedPreparedBriefs(t *testing.T) {
 			records(t, response)
 			structured, err := json.Marshal(at(decode(t, response.Body.Bytes()), "result", "structuredContent"))
 			must(t, err)
-			if got := putBack(t, structured, recorded.Result); !sameJSON(t, got, recorded.Result) {
-				t.Fatalf("the result differs from the recording:\n got %.900s\nwant %.900s", got, recorded.Result)
+			want := todaysRules(recorded.Result)
+			if got := putBack(t, structured, want); !sameJSON(t, got, want) {
+				t.Fatalf("the result differs from the recording:\n got %.900s\nwant %.900s", got, want)
 			}
 			// The text content is the same result, as JSON indented by two.
 			text := at(decode(t, response.Body.Bytes()), "result", "content").([]any)[0].(map[string]any)["text"].(string)
@@ -435,8 +441,10 @@ func TestMountedPreparedFolderReads(t *testing.T) {
 			if response.Code != r.Status {
 				t.Fatalf("status %d, want %d: %s", response.Code, r.Status, response.Body)
 			}
-			if got := putBack(t, response.Body.Bytes(), r.Response); !sameJSON(t, got, r.Response) {
-				t.Fatalf("the reply differs from the recording:\n got %.900s\nwant %.900s", got, r.Response)
+			// The brief read is the one prepared here, under today's rules.
+			want := todaysRules(r.Response)
+			if got := putBack(t, response.Body.Bytes(), want); !sameJSON(t, got, want) {
+				t.Fatalf("the reply differs from the recording:\n got %.900s\nwant %.900s", got, want)
 			}
 			sameReceipts(t, []receipt{row}, r.Receipts, bearer)
 			if len(m.book.made()) != sources {

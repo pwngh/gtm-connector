@@ -289,7 +289,7 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			ends[i] = total
 		}
 		safe := strings.Join(texts, "\n")
-		found, err := Sentences(safe, table == "messages")
+		found, quotedAt, err := sentences(safe, table == "messages")
 		if err != nil {
 			panic(invalid)
 		}
@@ -306,15 +306,24 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			// Inside a run only a paragraph break can leave a sentence without its end. At the end of a
 			// run, a short form that expects more does too.
 			cut = false
+			s := []rune(sentence)
+			_, ended := Ended(s, 0, len(s))
 			if transcript && position == len(found)-1 {
 				cut = unfinished(sentence)
 			} else if transcript {
-				s := []rune(sentence)
-				_, ended := Ended(s, 0, len(s))
 				cut = !ended
 			}
-			partial := follows || cut
+			// In a note or a message, a sentence without its end that more text follows is a fragment. It
+			// is not whole, and what follows it is read on its own.
+			fragment := !transcript && !ended && position < len(found)-1
+			partial := follows || cut || fragment
 			follows = cut
+			// A block quote in a message is someone else's words, which the author quoted: its speaker
+			// label is the author's, and no role is established for it.
+			spokenBy := who
+			if quotedAt[position] {
+				spokenBy = role{"unknown", QuotedBasis, nil}
+			}
 			reached, size = reached+size, nonSpace(sentence)
 			from := bisect(ends, reached, true)
 			if from == len(ends) {
@@ -347,8 +356,8 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			}
 			c.units = append(c.units, Unit{N: len(c.units) + 1, Kind: "sentence", Source: rule.system,
 				RecordRef: str(field(row, "record_ref")), Tool: rule.tool, At: shownAt, Speaker: speaker,
-				Role: who.role, Basis: who.basis, Contact: who.contact, Text: sentence, Partial: partial,
-				Shown: shown, Span: span, RawSHA256: rawDigest, SanitizerVersion: SanitizerVersion})
+				Role: spokenBy.role, Basis: spokenBy.basis, Contact: spokenBy.contact, Text: sentence,
+				Partial: partial, Quoted: quotedAt[position], Shown: shown, Span: span, RawSHA256: rawDigest, SanitizerVersion: SanitizerVersion})
 		}
 		if len(found) > 0 && cut {
 			waiting[name] = true
@@ -1162,8 +1171,8 @@ func (c *card) said() []string {
 		return "were read and are"
 	}
 	withheld("cut", func(n int, roles string) string {
-		return fmt.Sprintf("Sentences: %d cut off at a pause, a change of speaker, or the edge of the excerpt "+
-			"%s not shown %s.", n, readNotShown(n), roles)
+		return fmt.Sprintf("Sentences: %d cut off at a pause, a change of speaker, a break before their end, "+
+			"or the edge of the excerpt %s not shown %s.", n, readNotShown(n), roles)
 	})
 	withheld("later", func(n int, roles string) string {
 		return fmt.Sprintf("Sentences: %d dated after %s %s not shown %s.", n, isoDay(asOf), readNotShown(n), roles)
@@ -1311,8 +1320,7 @@ func build(evidence *strictjson.Object) ([]Unit, string, []Gap, []Line) {
 		lines = append(append(append(lines, AttentionHeading), RenderLines(c.signals)...), "")
 	}
 	lines = append(append(lines, ValuesHeading), RenderLines(c.values)...)
-	lines = append(append(append(lines, "", "SAID, whole sentences as recorded; not record values"), said...), "",
-		"NOT READ")
+	lines = append(append(append(lines, "", SaidHeading), said...), "", NotReadHeading)
 	for _, g := range c.gaps {
 		lines = append(lines, "  "+g.Text)
 	}

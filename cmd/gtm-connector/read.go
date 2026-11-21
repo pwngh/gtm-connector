@@ -391,7 +391,7 @@ func (r *run) inspect(ctx context.Context) (any, error) {
 	units, _ := get(card, "units").([]any)
 	listed := []any{}
 	for _, value := range units {
-		unit, err := asShown(value.(*strictjson.Object))
+		unit, err := evidence.AsShown(value.(*strictjson.Object))
 		if err != nil {
 			return nil, err
 		}
@@ -470,26 +470,6 @@ func (r *run) sealed(ctx context.Context, brief string, bound evidence.Sources) 
 	return card, nil
 }
 
-// asShown is a sealed unit as it is shown. A unit sealed under today's rules is shown as sealed. One
-// sealed under older rules has its text and speaker neutralized again, so it shows nothing that today's
-// rules replace.
-func asShown(unit *strictjson.Object) (*strictjson.Object, error) {
-	if evidence.Equal(get(unit, "sanitizer_version"), evidence.SanitizerVersion) {
-		return unit, nil
-	}
-	shown := unit.Copy()
-	for _, key := range []string{"text", "speaker"} {
-		if text, ok := get(unit, key).(string); ok {
-			safe, _, err := evidence.SafeText(text)
-			if err != nil {
-				return nil, err
-			}
-			shown.Set(key, safe)
-		}
-	}
-	return shown, nil
-}
-
 // replaced is whether a speaker label holds what neutralizing can put there: a bracketed mention, user,
 // channel, link or character code, or a number in parentheses. Two labels that differ only where these
 // stand print alike.
@@ -546,7 +526,7 @@ func traces(card *strictjson.Object, brief string, numbers []string) (any, error
 			}
 			unit.Set("fields", fields)
 		}
-		if unit, err = asShown(unit); err != nil {
+		if unit, err = evidence.AsShown(unit); err != nil {
 			return nil, err
 		}
 		var following any

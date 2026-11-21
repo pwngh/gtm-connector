@@ -383,8 +383,8 @@ func TestExcerptEdgeCutsASentence(t *testing.T) {
 	for _, line := range []string{
 		"Calls: one transcript excerpt was read, lines 2 to 5 of 6. The rest of that call and every other call " +
 			"were not read.",
-		"Sentences: 2 cut off at a pause, a change of speaker, or the edge of the excerpt were read and are not " +
-			"shown (2 unknown).",
+		"Sentences: 2 cut off at a pause, a change of speaker, a break before their end, or the edge of the " +
+			"excerpt were read and are not shown (2 unknown).",
 	} {
 		if !strings.Contains(text, line) {
 			t.Errorf("the card lacks %q:\n%s", line, text)

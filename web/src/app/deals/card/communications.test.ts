@@ -85,7 +85,13 @@ test('every recorded card: each sentence unit once, in its own call or message, 
       assert.equal(decode(group ?? ''), sentence.recordRef, `${where}: in its record's group`);
       const line = lineOf(html, sentence.n);
       const quote = /<blockquote class="dc-quote" data-unit="(\d+)">([^<]*)<\/blockquote>/.exec(line);
-      assert.equal(decode(quote?.[2] ?? ''), sentence.text, `${where}: the whole text, exactly`);
+      if (sentence.partial) {
+        // A unit that is not whole is never a quotation: its text is listed under its label.
+        assert.equal(quote, null, `${where}: no quotation of a cut unit`);
+        assert.match(line, /Cut, not a whole quotation/, `${where}: listed as cut`);
+      } else {
+        assert.equal(decode(quote?.[2] ?? ''), sentence.text, `${where}: the whole text, exactly`);
+      }
       assert.match(line, new RegExp(`aria-label="Source ${sentence.n}"`), `${where}: its number`);
       const speaker = /<span class="dc-attr__part dc-attr__speaker">([^<]*)<\/span>/.exec(line)?.[1];
       assert.equal(decode(speaker ?? ''), sentence.speaker || 'No speaker label', `${where}: its speaker`);
@@ -97,7 +103,7 @@ test('every recorded card: each sentence unit once, in its own call or message, 
     }
     assert.doesNotMatch(html, /dc-ledger|data-quote-unit|data-more-unit/, `${at}: nothing of the Card tab`);
   }
-  assert.equal(sentences, 90 + 1297 + 444 + 904);
+  assert.equal(sentences, 90 + 1297 + 390 + 884);
   assert.ok(withHidden >= 60, `${withHidden} recorded cards have sentences the card does not show`);
 });
 

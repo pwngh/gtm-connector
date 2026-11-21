@@ -25,42 +25,169 @@ func fields(s []rune) [][]rune {
 	return found
 }
 
-// paragraphs is re.split on "\n", or on a blank line: \n[ \t]*\n.
-func paragraphs(s []rune, lines bool) [][]rune {
-	var found [][]rune
+// block is a run of text that no sentence crosses: a paragraph, and in a message also a block quote, a code
+// block, a list item or a speaker's turn. quoted is whether it is a block quote.
+type block struct {
+	text   []rune
+	quoted bool
+}
+
+// paragraphs splits text at a blank line: \n[ \t]*\n.
+func paragraphs(s []rune) []block {
+	var found []block
 	start := 0
 	for i := 0; i < len(s); i++ {
 		if s[i] != '\n' {
 			continue
 		}
 		j := i + 1
-		if !lines {
-			for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
-				j++
-			}
-			if j >= len(s) || s[j] != '\n' {
-				continue
-			}
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
 			j++
 		}
-		found = append(found, s[start:i])
-		start = j
-		i = j - 1
+		if j >= len(s) || s[j] != '\n' {
+			continue
+		}
+		found = append(found, block{text: s[start:i]})
+		start = j + 1
+		i = j
 	}
-	return append(found, s[start:])
+	return append(found, block{text: s[start:]})
 }
 
-// Sentences splits neutralized text into whole sentences (units.sentences). A line break inside a
-// paragraph is a wrap; only a blank line or closing punctuation ends a sentence. With lines, every line
-// break ends one.
-func Sentences(safe string, lines bool) ([]string, error) {
-	if !utf8.ValidString(safe) {
-		return nil, ErrInvalidText
+// messageBlocks splits a chat message into blocks. A line break is a wrap, except that a blank line ends a
+// block and each of these starts one: a line that starts a list item, a line that starts with a speaker
+// label, a run of lines that start a block quote (> or &gt;), which is marked quoted, and the line that
+// opens a code fence. The line after a block quote, and the line after the one that closes a code fence,
+// start one too. Inside a code block nothing else starts a block.
+func messageBlocks(s []rune) []block {
+	var found []block
+	ended, fenced, quoting := true, false, false
+	for start := 0; start <= len(s); {
+		end := start
+		for end < len(s) && s[end] != '\n' {
+			end++
+		}
+		line := s[start:end]
+		start = end + 1
+		if spacesOnly(line) {
+			ended, quoting = true, false
+			continue
+		}
+		trimmed := strip(line)
+		begins, closes, quoted := false, false, false
+		switch {
+		case fenced:
+			closes = hasSuffix(trimmed, "```")
+			fenced = !closes
+		case hasPrefix(trimmed, "```"):
+			begins = true
+			closes = len(trimmed) > 3 && hasSuffix(trimmed, "```")
+			fenced = !closes
+		case hasPrefix(trimmed, ">") || hasPrefix(trimmed, "&gt;"):
+			begins, quoted = !quoting, true
+		default:
+			begins = quoting || listItem(line) || speakerLabel(trimmed)
+		}
+		if ended || begins {
+			found = append(found, block{quoted: quoted})
+		} else {
+			found[len(found)-1].text = append(found[len(found)-1].text, '\n')
+		}
+		found[len(found)-1].text = append(found[len(found)-1].text, line...)
+		ended, quoting = closes, quoted
 	}
-	found := []string{}
-	for _, paragraph := range paragraphs([]rune(safe), lines) {
+	return found
+}
+
+// spacesOnly is whether a line holds only spaces and tabs, as a blank line between paragraphs does.
+func spacesOnly(line []rune) bool {
+	for _, c := range line {
+		if c != ' ' && c != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
+func hasSuffix(s []rune, word string) bool {
+	n := len([]rune(word))
+	return len(s) >= n && literal(s, len(s)-n, len(s), word)
+}
+
+// listItem is whether a line starts a list item: after any spaces, a Markdown marker (-, +, *, or one to
+// nine digits then . or )) or a bullet Slack writes for a list (•, ◦ or ▪), then a space or the end of the
+// line.
+func listItem(line []rune) bool {
+	j := 0
+	for j < len(line) && u.IsSpace(line[j]) {
+		j++
+	}
+	switch {
+	case j < len(line) && in(line[j], "-+*•◦▪"):
+		j++
+	case j < len(line) && asciiDigit(line[j]):
+		k := j
+		for k < len(line) && k-j < 9 && asciiDigit(line[k]) {
+			k++
+		}
+		if k == len(line) || !in(line[k], ".)") {
+			return false
+		}
+		j = k + 1
+	default:
+		return false
+	}
+	return j == len(line) || u.IsSpace(line[j])
+}
+
+// speakerLabel is whether a line starts with a speaker label, as a pasted exchange writes one: one to
+// three words of letters, the first capitalized and all of them at most 40 characters, then a colon, a
+// space and more, as in "Dana Reyes: we can sign".
+func speakerLabel(line []rune) bool {
+	i := 0
+	for range 3 {
+		if i >= len(line) || !u.IsAlpha(line[i]) || i == 0 && !u.IsUpper(line[i]) {
+			return false
+		}
+		for i < len(line) && (u.IsAlpha(line[i]) || in(line[i], "'’.-")) {
+			i++
+		}
+		if i > 40 {
+			return false
+		}
+		if i < len(line) && line[i] == ':' {
+			return i+2 < len(line) && u.IsSpace(line[i+1]) && !u.IsSpace(line[i+2])
+		}
+		if i >= len(line) || line[i] != ' ' {
+			return false
+		}
+		i++
+	}
+	return false
+}
+
+// Sentences splits neutralized text into whole sentences. A line break inside a paragraph is a wrap;
+// only a blank line or closing punctuation ends a sentence. With lines, as in a Slack message, the blocks
+// messageBlocks finds end sentences too.
+func Sentences(safe string, lines bool) ([]string, error) {
+	found, _, err := sentences(safe, lines)
+	return found, err
+}
+
+// sentences is Sentences, with whether each sentence lies in a block quote.
+func sentences(safe string, lines bool) ([]string, []bool, error) {
+	if !utf8.ValidString(safe) {
+		return nil, nil, ErrInvalidText
+	}
+	text := []rune(safe)
+	parts := paragraphs(text)
+	if lines {
+		parts = messageBlocks(text)
+	}
+	found, quoted := []string{}, []bool{}
+	for _, paragraph := range parts {
 		var line []rune
-		for i, field := range fields(paragraph) {
+		for i, field := range fields(paragraph.text) {
 			if i > 0 {
 				line = append(line, ' ')
 			}
@@ -72,15 +199,15 @@ func Sentences(safe string, lines bool) ([]string, error) {
 		start := 0
 		for _, end := range SentenceEnds(line) {
 			if !continues(line, start, end.End1, end.End2) {
-				found = append(found, string(line[start:end.End1]))
+				found, quoted = append(found, string(line[start:end.End1])), append(quoted, paragraph.quoted)
 				start = end.End2
 			}
 		}
 		if start < len(line) {
-			found = append(found, string(line[start:]))
+			found, quoted = append(found, string(line[start:])), append(quoted, paragraph.quoted)
 		}
 	}
-	return found, nil
+	return found, quoted, nil
 }
 
 func count(s []rune, c rune, from, to int) int {

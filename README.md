@@ -110,7 +110,7 @@ Role                  customer (label matches contact [2])
 Time                  2027-01-12T15:00:00Z
 On the card           yes
 Source text SHA-256   105807d2…
-Neutralizer version   3
+Neutralizer version   4
 ```
 
 > **A changed card is refused.** `inspect` checks a card against its seal first, and refuses one

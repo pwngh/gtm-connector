@@ -17,7 +17,7 @@ import (
 
 // Rules, as units.py names them.
 const (
-	SanitizerVersion = 3
+	SanitizerVersion = 4
 	ShownSentences   = 12
 	ShownRecords     = 5
 	MaxSentence      = 300
@@ -26,6 +26,9 @@ const (
 	staleDays        = 60
 	runGapMS         = 2000
 	bridgeGapMS      = 10_000
+	// QuotedBasis is the basis of a sentence in a block quote of a Slack message: the author quoted it, so
+	// the author's role is not its speaker's.
+	QuotedBasis = "quoted by the message's author"
 )
 
 // GapCodes is every line NOT READ can print, by code, with its disposition.
@@ -70,6 +73,7 @@ type Unit struct {
 	Contact          *int
 	Text             string
 	Partial          bool
+	Quoted           bool   // in a block quote of a Slack message: words the author quoted, not their own
 	Shown            string // "yes", "cut", "later", "long" or "more"
 	Span             *UnitSpan
 	RawSHA256        string
@@ -113,7 +117,7 @@ func (u Unit) Value() *strictjson.Object {
 			"start_ms", optional(u.Span.StartMS), "end_ms", optional(u.Span.EndMS))
 	}
 	for _, kv := range [][2]any{{"at", optional(u.At)}, {"speaker", optional(u.Speaker)}, {"role", u.Role},
-		{"basis", u.Basis}, {"contact", optional(u.Contact)}, {"text", u.Text}, {"partial", u.Partial},
+		{"basis", u.Basis}, {"contact", optional(u.Contact)}, {"text", u.Text}, {"partial", u.Partial}, {"quoted", u.Quoted},
 		{"shown", u.Shown}, {"span", span}, {"raw_sha256", u.RawSHA256},
 		{"sanitizer_version", u.SanitizerVersion}} {
 		o.Set(kv[0].(string), kv[1])

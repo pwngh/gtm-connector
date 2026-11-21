@@ -36,11 +36,8 @@ func Functions(it Item) []string {
 	return TextFunctions
 }
 
-// canonical is the encoding outputs are compared and digested in: json.dumps(value, ensure_ascii=True,
-// separators=(",", ":")), as the oracle wrote its outputs.
-func canonical(value any) (string, error) {
-	return strictjson.Dumps(value, strictjson.DumpOptions{EnsureASCII: true, Compact: true})
-}
+// canonical is the encoding outputs are compared and digested in.
+func canonical(value any) (string, error) { return strictjson.Canonical.Dumps(value) }
 
 // Digest is the SHA-256 of an output's canonical encoding.
 func Digest(encoded string) string {
