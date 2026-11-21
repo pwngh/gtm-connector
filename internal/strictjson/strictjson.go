@@ -1,5 +1,6 @@
 // Package strictjson parses JSON as gtm_connector/strict_json.py does: it refuses duplicate keys,
 // non-finite numbers and lone surrogates, and gives each refusal the type and message Python gives.
+// Nesting past MaxDepth is refused with ErrTooDeep, whose message is its own.
 //
 // Values are nil, bool, string, *big.Int, []any, *Object, and for a number with a fraction or an exponent
 // either float64 (Loads and LoadsText, like Python's default) or Decimal (LoadsDecimal, like
@@ -22,7 +23,8 @@ type Object struct {
 
 // Error is a refusal, named by the Python exception type that strict_json raises for it.
 type Error struct {
-	Type    string // ValueError, JSONDecodeError, UnicodeDecodeError, UnicodeEncodeError or InvalidOperation
+	// ValueError, JSONDecodeError, UnicodeDecodeError, UnicodeEncodeError, InvalidOperation or RecursionError
+	Type    string
 	Message string
 }
 
@@ -30,6 +32,17 @@ func (e *Error) Error() string { return e.Type + ": " + e.Message }
 
 // maxIntDigits is CPython's default limit for converting a decimal string to an int.
 const maxIntDigits = 4300
+
+// MaxDepth is how many arrays and objects, counted together, a document may have open at once.
+// Python's own limit is the room left on its thread's stack, so it is not one number: CPython 3.14.6
+// first refuses at 116,203 levels on the main thread and at 1,646 in a thread with a 256 KiB stack.
+// MaxDepth is the deepest document the oracle records Python reading (library/strict_json.json), which
+// is below both.
+const MaxDepth = 1000
+
+// ErrTooDeep is the refusal of a document nested past MaxDepth, where Python raises RecursionError.
+// Every reader returns this value itself, so errors.Is finds it.
+var ErrTooDeep = &Error{"RecursionError", fmt.Sprintf("JSON is nested deeper than %d levels", MaxDepth)}
 
 // Loads parses one UTF-8 document, after one optional byte-order mark, as strict_json.loads(bytes) does.
 func Loads(document []byte) (any, error) { return loads(document, false) }
@@ -273,9 +286,8 @@ func (p *parser) document() (any, error) {
 	return value, nil
 }
 
-// frame is one open array or object. The parser keeps them on its own stack, so deep nesting cannot
-// overflow the Go stack. Python stops at a depth that depends on its thread's stack; Go sets no limit
-// yet (backend plan section 4, item 6).
+// frame is one open array or object. The parser keeps them on its own stack, which holds at most
+// MaxDepth frames, so deep nesting cannot overflow the Go stack or grow the heap.
 type frame struct {
 	array   []any
 	object  *rawObject
@@ -293,6 +305,10 @@ func (p *parser) value(idx int) (any, int, error) {
 		// Open containers until a scalar or an empty container is read.
 		if idx >= len(p.text) {
 			return nil, 0, expectingValue{idx}
+		}
+		// An array or object that opens here is one level inside every open frame.
+		if (p.text[idx] == '[' || p.text[idx] == '{') && len(stack) >= MaxDepth {
+			return nil, 0, ErrTooDeep
 		}
 		switch p.text[idx] {
 		case '[':

@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pwngh/gtm-connector/internal/oracletest"
 )
@@ -226,17 +229,122 @@ func TestPythonBehaviour(t *testing.T) {
 	}
 }
 
-// Python's main thread parses 116,207 levels. Go parses as deep without growing its stack.
-func TestDeepNesting(t *testing.T) {
-	depth := 116_207
-	value, err := Loads([]byte(strings.Repeat("[", depth) + strings.Repeat("]", depth)))
-	if err != nil {
-		t.Fatal(err)
+// nested is a document with this many arrays or objects open around a 1. The kind is "array", "object"
+// or "mixed", which opens an array and an object in turn.
+func nested(kind string, levels int) string {
+	var open, shut strings.Builder
+	for i := 0; i < levels; i++ {
+		if kind == "array" || kind == "mixed" && i%2 == 0 {
+			open.WriteString("[")
+			shut.WriteString("]")
+		} else {
+			open.WriteString(`{"a":`)
+			shut.WriteString("}")
+		}
 	}
-	for i := 0; i < depth-1; i++ {
-		value = value.([]any)[0]
+	closers := []byte(shut.String())
+	for i, j := 0, len(closers)-1; i < j; i, j = i+1, j-1 {
+		closers[i], closers[j] = closers[j], closers[i]
 	}
-	if len(value.([]any)) != 0 {
-		t.Fatal("innermost array is not empty")
+	return open.String() + "1" + string(closers)
+}
+
+// levelsOf counts the arrays and objects around the innermost value.
+func levelsOf(value any) int {
+	for levels := 0; ; levels++ {
+		switch v := value.(type) {
+		case []any:
+			value = v[0]
+		case *Object:
+			value = v.Values[0]
+		default:
+			return levels
+		}
+	}
+}
+
+// Every reader reads a document nested MaxDepth levels and refuses one nested a level deeper, whether the
+// levels are arrays, objects or both.
+func TestNestingLimit(t *testing.T) {
+	readers := map[string]func(string) (any, error){
+		"Loads":        func(s string) (any, error) { return Loads([]byte(s)) },
+		"LoadsDecimal": func(s string) (any, error) { return LoadsDecimal([]byte(s)) },
+		"LoadsText":    LoadsText,
+		"LoadsLoose":   func(s string) (any, error) { return LoadsLoose([]byte(s)) },
+	}
+	for name, read := range readers {
+		for _, kind := range []string{"array", "object", "mixed"} {
+			value, err := read(nested(kind, MaxDepth))
+			if err != nil {
+				t.Fatalf("%s, %s at the limit: %v", name, kind, err)
+			}
+			if got := levelsOf(value); got != MaxDepth {
+				t.Fatalf("%s, %s at the limit: read %d levels", name, kind, got)
+			}
+			value, err = read(nested(kind, MaxDepth+1))
+			var refusal *Error
+			if value != nil || !errors.Is(err, ErrTooDeep) || !errors.As(err, &refusal) || refusal.Type != "RecursionError" {
+				t.Fatalf("%s, %s one past the limit: %v, %v", name, kind, value, err)
+			}
+		}
+	}
+}
+
+// An empty array or object counts as a level, a level that has closed does not, and a document that is
+// too deep is refused as too deep before it is refused for anything after that point.
+func TestNestingLimitCounts(t *testing.T) {
+	open, shut := strings.Repeat("[", MaxDepth), strings.Repeat("]", MaxDepth)
+	for document, tooDeep := range map[string]bool{
+		open + shut:                false,
+		open[1:] + "{}" + shut[1:]: false,
+		"[" + open + shut + "]":    true,
+		open + "{}" + shut:         true,
+		"[" + open:                 true,
+		open + "{":                 true,
+		"[" + open + "1" + shut:    true,
+		"[" + open + "x":           true,
+		// Many levels, one after the other, at the limit.
+		open[1:] + strings.Repeat("[1],{},", 2000) + "[]" + shut[1:]: false,
+		"[" + strings.Repeat(open[1:]+shut[1:]+",", 10) + "1]":       false,
+	} {
+		_, err := Loads([]byte(document))
+		if errors.Is(err, ErrTooDeep) != tooDeep || !tooDeep && err != nil {
+			t.Errorf("%.20q (%d bytes): too deep is %t, got %v", document, len(document), tooDeep, err)
+		}
+	}
+}
+
+// Ten million open arrays are refused at level MaxDepth+1. What the parser allocates is counted in frames,
+// not in the document's levels, and its stack does not grow. Only the text follows the document's size:
+// four bytes a character once decoded, and in LoadsLoose one copy of the bytes before that.
+func TestTenMillionLevelsAreRefused(t *testing.T) {
+	document := bytes.Repeat([]byte("["), 10_000_000)
+	for name, read := range map[string]func([]byte) (any, error){"Loads": Loads, "LoadsLoose": LoadsLoose} {
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
+		started := time.Now()
+		_, err := read(document)
+		elapsed := time.Since(started)
+		runtime.ReadMemStats(&after)
+		if !errors.Is(err, ErrTooDeep) {
+			t.Fatalf("%s: %v", name, err)
+		}
+		objects := after.Mallocs - before.Mallocs
+		bytesUsed := after.TotalAlloc - before.TotalAlloc
+		stack := int64(after.StackInuse) - int64(before.StackInuse)
+		t.Logf("%s: %v, %d allocations, %d bytes, stack %+d bytes", name, elapsed, objects, bytesUsed, stack)
+		if objects > 8*MaxDepth {
+			t.Errorf("%s: %d allocations for %d levels read", name, objects, MaxDepth)
+		}
+		if limit := uint64(5*len(document) + 1<<20); bytesUsed > limit {
+			t.Errorf("%s: allocated %d bytes, more than the text and 1 MiB (%d)", name, bytesUsed, limit)
+		}
+		if stack > 1<<20 {
+			t.Errorf("%s: the stack grew by %d bytes", name, stack)
+		}
+		if elapsed > 5*time.Second {
+			t.Errorf("%s: took %v", name, elapsed)
+		}
 	}
 }
