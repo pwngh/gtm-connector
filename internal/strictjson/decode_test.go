@@ -47,6 +47,7 @@ func TestDecode(t *testing.T) {
 	for body, refusal := range map[string]error{
 		`{"format": "a", "format": "b"}`:          nil, // Loads's own refusal
 		`{"format": "a", "other": 1}`:             ErrUnknownMember,
+		"\xef\xbb\xbf{}":                          ErrByteOrderMark,
 		`{"Format": "a"}`:                         ErrUnknownMember,
 		`{"FORMAT": "a"}`:                         ErrUnknownMember,
 		`{"Skipped": "a"}`:                        ErrUnknownMember,
@@ -85,5 +86,56 @@ func TestDecode(t *testing.T) {
 		if err := Decode([]byte(body), &list); !errors.Is(err, ErrWrongType) {
 			t.Errorf("%s into a list of strings: %v", body, err)
 		}
+	}
+}
+
+// A type Decode cannot fill is refused before the document is read, whatever the document holds: a field of
+// a kind it does not read, a tagged field it cannot set, and two fields of one name, at any depth. The last
+// two are made at run time, as go vet refuses them written out.
+func TestDecodeRefusesATypeItCannotFillBeforeReading(t *testing.T) {
+	text := reflect.TypeFor[string]()
+	hidden := reflect.StructOf([]reflect.StructField{
+		{Name: "Name", Type: text, Tag: `json:"name"`},
+		{Name: "secret", PkgPath: "strictjson", Type: text, Tag: `json:"secret"`},
+	})
+	twice := reflect.StructOf([]reflect.StructField{
+		{Name: "First", Type: text, Tag: `json:"name"`},
+		{Name: "Second", Type: text, Tag: `json:"name"`},
+	})
+	nested := reflect.StructOf([]reflect.StructField{
+		{Name: "Items", Type: reflect.SliceOf(twice), Tag: `json:"items"`},
+	})
+	type mapped struct {
+		Name string         `json:"name"`
+		More map[string]any `json:"more"`
+	}
+	type pointed struct {
+		Next *entry `json:"next"`
+	}
+	for name, into := range map[string]any{
+		"a map field":          &mapped{},
+		"an unexported field":  reflect.New(hidden).Interface(),
+		"two fields, one name": reflect.New(twice).Interface(),
+		"a nested type":        reflect.New(nested).Interface(),
+		"a pointer field":      &pointed{},
+		"a map":                &map[string]string{},
+		"no pointer":           entry{},
+		"a nil pointer":        (*entry)(nil),
+	} {
+		for _, document := range []string{`{}`, `{"name": "a"}`, `not json`} {
+			if err := Decode([]byte(document), into); !errors.Is(err, ErrUnsupportedType) {
+				t.Errorf("%s, %s: got %v, want %v", name, document, err, ErrUnsupportedType)
+			}
+		}
+	}
+	// A type that refers to itself is read as any other.
+	type tree struct {
+		Name     string `json:"name"`
+		Children []tree `json:"children"`
+	}
+	var got tree
+	if err := Decode([]byte(`{"name": "a", "children": [{"name": "b", "children": []}]}`), &got); err != nil ||
+		len(got.Children) != 1 || got.Children[0].Name != "b" {
+		t.Fatalf("a type that refers to itself: %+v, %v", got, err)
 	}
 }
