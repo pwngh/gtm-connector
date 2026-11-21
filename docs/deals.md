@@ -35,31 +35,31 @@ card until someone decides it.
 
 ## What flags a deal
 
-One list of rules flags a deal, and any raised rule turns it red. The first seven read record fields
-and dates alone, and [Deal cards](cards.md#signals) gives each one's exact wording. The last five
-read what people said.
+One list of rules flags a deal, and any raised rule turns it red. The first seven are the signals a
+card raises today, from record fields and dates alone, and [Deal cards](cards.md#signals) gives each
+one's exact condition and wording. The last five are the planned flags.
 
 | Rule | When it is raised |
 | --- | --- |
-| Still open near the renewal | An opportunity is open and the renewal is 30 days away or less |
-| Renewal passed | The renewal date is before the card's date and no opportunity is open |
-| Contract ended | No contract ends on or after the card's date, and one ended before it |
-| Close date after the renewal | An open opportunity closes after the renewal date |
+| Still open near the renewal | An opportunity is open, and the renewal date, or on Salesforce the contract end the card counts to, is 30 days away or less, or today. On the demo CRM, also when it has passed. |
+| Renewal passed | On the demo CRM, the renewal date is before the card's date and no opportunity is open |
+| Contract ended | On Salesforce, no contract ends on or after the card's date, and one ended before it |
+| Close date after the renewal | An open opportunity closes after the renewal date, or on Salesforce after the contract end the card counts to |
 | Contact with no role | A contact has no title |
-| Stale call | The newest dated call that was read is more than 60 days old |
-| CRM at risk | The CRM marks the account at risk |
+| Stale call | The newest call that was read with a valid time, dated on or before the card's date, is more than 60 days old, counted from its UTC date |
+| CRM at risk | The demo CRM marks the account at risk. Salesforce maps no renewal risk. |
 | Customer silence | No customer reply near the renewal, in the sources that were read |
 | Close-date slippage | The renewal date was pushed again |
 | Single-threaded deal | Only one person on the customer side is talking |
 | Pricing or seat conflict | A figure in Slack or on a call differs from the CRM. A person resolves it. |
 | Legal or security blocker | A person marked a sentence as a legal or security blocker. Wording alone never raises it. |
 
-If a source was not read, a rule answers unknown, not silence.
+If a source a rule needs was not read, the rule answers unknown, not silence.
 
 ## The card
 
 - **Renewal countdown and ARR,** from typed CRM fields.
-- **What changed.** Two things carry that name. New to you is the sentences, record values and unread sources that differ from the card you last opened: it is yours alone, and a teammate reading the card does not clear it. New on the card is what differs from the card published before it: it is the same for everyone, and it is what an alert or a webhook reports.
+- **What changed.** Two things carry that name. New to you is the sentences, record values and unread sources that differ from the card you last opened: it is yours alone, and a teammate reading the card does not clear it. New on the card is the sentences and the record values it holds that the card published before it did not: it is the same for everyone, and it is what an alert or a webhook counts.
 - **Exact buyer quotes and titles.** A quotation is one whole sentence, never a cut one.
 - **Promises you made:** seller sentences marked as commitments.
 - **Missing or unread sources.**

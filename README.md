@@ -204,7 +204,7 @@ PostgreSQL URL. More in [running it](docs/operations.md).
 Ten invented deals, each built to break one property. The [parity test](internal/cards/parity_test.go)
 rebuilds every card in [`testdata/oracle/cards/cases.jsonl.gz`](testdata/oracle/cards/cases.jsonl.gz)
 byte for byte. Eight of the ten hold their property today. The two whose rules are still on the
-[roadmap](docs/ROADMAP.md), marked blockers and the channel cap, are recorded as the card is now,
+[roadmap](docs/ROADMAP.md), marked blockers and the channel window, are recorded as the card is now,
 and are recorded again when the rule lands.
 
 | Case | Property it guards |
@@ -224,9 +224,8 @@ and are recorded again when the rule lands.
 
 ## System Guarantees
 
-- **Receipt-first execution:** a tool runs only after its receipt is committed. A refused call keeps
-  its receipt, with the one exception the
-  [security review](SECURITY_REVIEW.md#1-a-receipt-comes-before-every-tool-call) names.
+- **Receipt-first execution:** a tool runs only after its receipt is committed. A call the gate
+  refuses after that keeps its receipt, and a call whose receipt cannot be committed does not run.
 - **Privilege isolation:** one source's grant never opens another, and a person reads only the deals
   granted to them.
 - **Unambiguous deal binding:** a call or thread joins a deal only by a rule you configured. One that

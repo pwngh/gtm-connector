@@ -40,8 +40,9 @@ check`, `debug slack`, `token` for MCP client tokens, `deal` for deals and `mcp 
 source is wired into those commands. `postgres.ReceiptStore` runs the card maker on PostgreSQL.
 `mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`
 and `mcp stdio` serves on stdin and stdout.
-`oidc` signs a person in through an identity provider. `render` builds the Slack alert and the webhook
-body from a card, and nothing sends them yet. `pins` checks the build files against `pins.json`.
+`oidc` signs a person in through an identity provider. `render` reads what a message outside the web
+app needs from a deal, its rule results and a card, and `render/slack` and `render/webhook` build the
+Slack alert and the webhook body from that; nothing sends them yet. `pins` checks the build files against `pins.json`.
 Under `sources/`, `sourcehttp` is the transport the Salesforce and Slack readers share, `echo` finds a
 credential in what a source sent back, and `childenv` is the environment a program the connector
 starts is given.
