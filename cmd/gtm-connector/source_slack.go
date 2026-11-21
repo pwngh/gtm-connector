@@ -184,19 +184,20 @@ func sameValue(a, b any) bool {
 // liveSlack is a workspace's live Slack: the reader of its mapped threads.
 type liveSlack struct{ reader *slack.Reader }
 
-// Messages reads the thread mapped to the account. An account with no thread is not selected, and a refusal
-// is the diagnostic its code names.
-func (l liveSlack) Messages(ctx context.Context, accountID string) ([]*strictjson.Object, *strictjson.Object, error) {
-	records, snapshot, err := l.reader.ReadThread(ctx, accountID)
+// Messages reads the thread mapped to the account, with its authors. An account with no thread is not
+// selected, and a refusal is the diagnostic its code names.
+func (l liveSlack) Messages(ctx context.Context, accountID string) (messages, members []*strictjson.Object,
+	snapshot *strictjson.Object, err error) {
+	messages, members, snapshot, err = l.reader.ReadThreadWithMembers(ctx, accountID)
 	var refused *slack.Error
 	switch {
 	case errors.As(err, &refused) && refused.Code == "slack_mapping_missing":
-		return nil, nil, cards.ErrNotSelected
+		return nil, nil, nil, cards.ErrNotSelected
 	case errors.As(err, &refused):
 		failed := slackSourceFailure(refused)
-		return nil, nil, &cards.Diagnostic{Exit: failed.code, Message: failed.message, Next: failed.next}
+		return nil, nil, nil, &cards.Diagnostic{Exit: failed.code, Message: failed.message, Next: failed.next}
 	}
-	return records, snapshot, err
+	return messages, members, snapshot, err
 }
 
 // openSlack opens the live Slack of a workspace from its row: the binding it is pinned to, its mapped

@@ -66,7 +66,7 @@ func refusedWhole(t *testing.T, archive string) {
 	if err := restore(ctx, fresh, target, archive); err == nil {
 		t.Fatal("restored")
 	}
-	if v, _ := fresh.SchemaVersion(ctx); v != 0 {
+	if v, _ := fresh.AppliedMigrations(ctx); len(v) != 0 {
 		t.Fatal("a refused restore left a schema")
 	}
 	if entries, _ := os.ReadDir(target); len(entries) != 0 {
@@ -83,16 +83,16 @@ func TestRestoreReadsItsJSONStrictly(t *testing.T) {
 	const password = "0123456789abcdef0123456789abcdef"
 	for name, change := range map[string]func(string) string{
 		"a version named twice": func(m string) string {
-			return strings.Replace(m, `"version": 1,`, `"version": 2, "version": 1,`, 1)
+			return strings.Replace(m, `"version": 2,`, `"version": 1, "version": 2,`, 1)
 		},
 		"a field the format does not have": func(m string) string {
-			return strings.Replace(m, `"version": 1,`, `"version": 1, "note": "x",`, 1)
+			return strings.Replace(m, `"version": 2,`, `"version": 2, "note": "x",`, 1)
 		},
 		"a field in another case":   func(m string) string { return strings.Replace(m, `"format"`, `"Format"`, 1) },
-		"a version with a fraction": func(m string) string { return strings.Replace(m, `"version": 1,`, `"version": 1.0,`, 1) },
+		"a version with a fraction": func(m string) string { return strings.Replace(m, `"version": 2,`, `"version": 2.0,`, 1) },
 		"a manifest nested past the limit": func(m string) string {
-			return strings.Replace(m, `"version": 1,`,
-				`"version": 1, "note": `+strings.Repeat("[", 1001)+strings.Repeat("]", 1001)+`,`, 1)
+			return strings.Replace(m, `"version": 2,`,
+				`"version": 2, "note": `+strings.Repeat("[", 1001)+strings.Repeat("]", 1001)+`,`, 1)
 		},
 		"a manifest over its size": func(m string) string { return m + strings.Repeat(" ", maxManifestBytes) },
 	} {

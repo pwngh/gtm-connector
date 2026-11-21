@@ -15,6 +15,10 @@
 //	                                 serve MCP on stdin and stdout, for an assistant app that starts it
 //	gtm-connector token new --scope SCOPE
 //	                                 make a bearer token for an MCP client; also token list and token revoke ID
+//	gtm-connector grant ACCOUNT --to EMAIL [--revoke]
+//	                                 give a person who signs in through the identity provider one account, or end it;
+//	                                 grant --disable --to EMAIL ends their sessions and sign-ins until --enable
+//	gtm-connector grants             list the people who sign in through the identity provider, and their grants
 //	gtm-connector debug calls ACTION import, list or inspect call transcript exports
 //	gtm-connector debug salesforce check
 //	                                 check a Salesforce sign-in, its fields and its renewal dates
@@ -34,6 +38,10 @@
 //	GTM_CONTAINER_LISTEN    inside a container only: the address to listen on instead
 //	GTM_PUBLIC_ORIGIN, GTM_ALLOWED_HOSTS
 //	GTM_WEB_DIR             a folder to serve the web app from, instead of the build inside the binary
+//	GTM_DEMO_SIGN_IN        on (the default) or off: the demo sign-in of the web app
+//	GTM_OIDC_ISSUER         sign people in through their company's identity provider, with GTM_OIDC_CLIENT_ID,
+//	                        GTM_OIDC_WORKSPACE, GTM_OIDC_ALLOWED_DOMAINS or GTM_OIDC_TENANT_CLAIM and GTM_OIDC_TENANT,
+//	                        and optionally GTM_OIDC_REDIRECT_URL and GTM_OIDC_SESSION_MINUTES (serve.go, signin.go)
 package main
 
 import (
@@ -92,6 +100,9 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   admit FOLDER                admit the cards and receipts a Python state folder holds
   mcp stdio --scope SCOPE     serve MCP on stdin and stdout, for an assistant app that starts it
   token new --scope SCOPE     make a bearer token for an MCP client; also token list and token revoke ID
+  grant ACCOUNT --to EMAIL    give a person who signs in through the identity provider one account; --revoke ends it,
+                              and grant --disable --to EMAIL ends their sessions and sign-ins until --enable
+  grants                      list the people who sign in through the identity provider, and their grants
   debug calls ACTION          import a call transcript export for an account, list imports, inspect one
   debug salesforce check      check a Salesforce sign-in, its fields and its renewal dates
   debug slack ACTION          sign in to Slack, map a thread to an account, or check its read
@@ -100,8 +111,9 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   health                      check that the local server answers
   version                     print the commit this binary was built from
 
-demo, connect, accounts, brief, deal, inspect, audit, admit, mcp, token, debug calls, debug salesforce and
-debug slack take --json, --state-dir WORKSPACE and --help. Not in this build: every other debug command.
+demo, connect, accounts, brief, deal, inspect, audit, admit, mcp, token, grant, grants, debug calls,
+debug salesforce and debug slack take --json, --state-dir WORKSPACE and --help. Not in this build: every
+other debug command.
 `
 
 func main() {

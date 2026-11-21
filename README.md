@@ -46,19 +46,19 @@ RECORD VALUES, from CRM fields and connector arithmetic
   Contact: "Marian Holt"; role "Deputy general counsel"; email "marian@thornfield-wren.example" [2]
 
 SAID, whole sentences as recorded; not record values
-  Customer, by a speaker label equal to one contact's name
-    [5] call 2027-01-12T15:00:00Z; "Marian Holt", role "Deputy general counsel" [2]
+  Customer side
+    [5] call 2027-01-12T15:00:00Z; "Marian Holt", role "Deputy general counsel" read 2027-01-15 [2], by name
         "Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved."
-    [6] call 2027-01-12T15:00:00Z; "Marian Holt", role "Deputy general counsel" [2]
+    [6] call 2027-01-12T15:00:00Z; "Marian Holt", role "Deputy general counsel" read 2027-01-15 [2], by name
         "Please do not put a date on the order form."
-  Seller, by a listed seller's name or ID
-    [4] call 2027-01-12T15:00:00Z; "Morgan Reed"
+  Seller side
+    [4] call 2027-01-12T15:00:00Z; "Morgan Reed", by name
         "We will have the order form countersigned by January 30."
-    [7] Slack 2027-01-12T16:00:00Z; "Avery Linden"
+    [7] Slack 2027-01-12T16:00:00Z; "Avery Linden", by name
         "Heads up [mention channel]: their general counsel will not sign until the zero-retention and client-consent rider is approved."
-    [8] Slack 2027-01-12T16:00:00Z; "Avery Linden"
+    [8] Slack 2027-01-12T16:00:00Z; "Avery Linden", by name
         "Their procurement lead mentioned USD 300,000 for a smaller seat count."
-    [9] Slack 2027-01-12T16:00:00Z; "Avery Linden"
+    [9] Slack 2027-01-12T16:00:00Z; "Avery Linden", by name
         "The redline is attached, see rider redline v4 [link files.thornfield-wren.example]."
 
 NOT READ
@@ -71,9 +71,12 @@ NOT READ
 
 - **Record values** come from typed CRM fields and connector arithmetic. The seller's "January 30"
   and the second-hand "USD 300,000" are sentences someone said, so they stay under SAID.
-- **A speaker role** comes from a label, never from wording. A seller is a name or ID the operator
-  listed. A customer is a speaker matched to exactly one contact of the account, and the card
-  prints that contact's title beside it. Anything else is unknown.
+- **A speaker role** comes from who the speaker is, never from wording. The connector names the
+  person by the strongest identifier the source carries: a Slack author's profile, the call's
+  attendee list, an alias, then the label as a name. A seller is a Salesforce user or a listed
+  seller; a customer is a contact of the account, and the card prints that contact's title with the
+  day it was read. Each sentence says how its speaker was matched, here by name. Two candidates, or
+  none, leave the role unknown.
 - **A quotation** is one whole sentence. A sentence too long to show is counted, never cut.
 - **Source text is data.** The channel mention and the link were neutralized before anything
   displayed them, and the card says how many were.
@@ -106,11 +109,15 @@ Receipt               b63a52fb-… (read_call_notes, ok)
 Text                  "Our general counsel will not sign until the zero-retention and client-consent rider for AI processing is approved."
 Speaker               "Marian Holt"
 Next by this speaker  6
-Role                  customer (label matches contact [2])
+Role                  customer (by name)
 Time                  2027-01-12T15:00:00Z
 On the card           yes
 Source text SHA-256   105807d2…
 Neutralizer version   5
+Speaker rules         1
+Rung                  4
+Matched               name "Marian Holt"
+Matched from          crm/contacts/con-003, receipt 5e0c41d7-… (get_account, ok)
 ```
 
 > **A changed card is refused.** `inspect` checks a card against its seal first, and refuses one
@@ -124,7 +131,7 @@ Neutralizer version   5
 4. **Read the Deal card,** your 30-second renewal snapshot. Click any line for its source proof, track blockers on the checklist and playbook, or ask the council what is blocking the renewal.
 5. **The deal closes.** It is archived with its final card.
 
-If your engineer has turned the matches queue on, new calls and threads wait for your OK first.
+A call or thread that fits more than one deal waits for your OK first, and reaches no card until then.
 More in [working a deal](docs/deals.md).
 
 ## For RevOps and GTM engineers

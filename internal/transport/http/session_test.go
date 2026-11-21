@@ -302,7 +302,10 @@ func TestSignInRotatesTheSessionAndCSRF(t *testing.T) {
 }
 
 func TestSessionsExpireAndCanBeRevoked(t *testing.T) {
-	s := newSite(t, 300*time.Millisecond)
+	// The read of a fresh session must reach the server within the session's life, which takes a busy
+	// runner more than a few hundred milliseconds, so the session lasts two seconds.
+	const life = 2 * time.Second
+	s := newSite(t, life)
 	b := s.browser(t)
 	if r := b.signIn("demo-reader", readerPassword); r.status != 200 {
 		t.Fatal(r.status)
@@ -310,7 +313,7 @@ func TestSessionsExpireAndCanBeRevoked(t *testing.T) {
 	if r := b.do(http.MethodGet, "/api/v1/cards/"+s.Card.ID, nil, nil); r.status != 200 {
 		t.Fatalf("fresh session: %d", r.status)
 	}
-	time.Sleep(400 * time.Millisecond)
+	time.Sleep(life + 500*time.Millisecond)
 	if r := b.do(http.MethodGet, "/api/v1/cards/"+s.Card.ID, nil, nil); r.status != 401 {
 		t.Fatalf("expired session: %d", r.status)
 	}
@@ -700,11 +703,14 @@ func TestEveryWriteNeedsItsCSRFToken(t *testing.T) {
 	for _, pattern := range writes {
 		method, path, _ := strings.Cut(pattern, " ")
 		var body any
-		// Past the token check, sign-in answers 200, and the deal route 404: this site registers no deals.
+		// Past the token check, sign-in answers 200, the deal route 404: this site registers no deals, and a
+		// decision of a match the site does not hold 403.
 		answer := http.StatusOK
 		switch {
 		case path == "/v1/deals":
 			body, answer = map[string]string{"account": postgrestest.Account}, http.StatusNotFound
+		case path == "/v1/matches/{match}":
+			body, answer = map[string]string{"decision": "reject"}, http.StatusForbidden
 		case method == http.MethodPost:
 			body = map[string]string{"login": "demo-reader", "password": readerPassword}
 		}

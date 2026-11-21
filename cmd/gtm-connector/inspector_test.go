@@ -24,12 +24,13 @@ import (
 	"github.com/pwngh/gtm-connector/internal/storage/postgres/pgtest"
 )
 
-// TestInspector runs the pinned Inspector CLI against the binary, as a person sets it up: setup, demo and
-// token new, then serve, with the Inspector calling /mcp over HTTPS with each token, and then starting mcp
-// stdio itself. It checks discovery, the five tools and their schemas, a read by each of the five tools over
-// HTTPS and by get_account, read_call_notes and read_slack_messages over stdio, each marked untrusted data,
-// the six cross-source denials, an unknown bearer, one finished receipt for each tool call, and that no token
-// reaches the Inspector's output, the audit log or serve's log. It needs Node 22, npx and PostgreSQL, and may
+// TestInspector runs the pinned Inspector CLI against the binary, as a person sets it up: setup, demo, a deal
+// with its card, and token new, then serve, with the Inspector calling /mcp over HTTPS with each token, and
+// then starting mcp stdio itself. It checks discovery, the seven tools and their schemas, a read by each of
+// the five read tools and the two deal tools over HTTPS and by get_account, read_call_notes,
+// read_slack_messages and read_deal_card over stdio, each marked untrusted data, the six cross-source
+// denials, an unknown bearer, one finished receipt for each tool call, and that no token reaches the
+// Inspector's output, the audit log or serve's log. It needs Node 22, npx and PostgreSQL, and may
 // download the Inspector, so it runs only when GTM_INSPECTOR=1.
 func TestInspector(t *testing.T) {
 	if os.Getenv("GTM_INSPECTOR") != "1" {
@@ -77,19 +78,31 @@ func TestInspector(t *testing.T) {
 	}
 	gtm("setup")
 	gtm("demo")
-	issued := map[string]string{} // each token, by its scope
-	issue := func(scope string) string {
+	// A deal of acc-003, and its card, which reads all three sources.
+	var deal struct{ ID string }
+	created, _ := gtm("deal", "new", "acc-003", "--json")
+	if err := json.Unmarshal([]byte(created), &deal); err != nil || deal.ID == "" {
+		t.Fatalf("deal new: %v %s", err, created)
+	}
+	gtm("brief", "acc-003")
+	issued := map[string]string{} // each token, by its scopes
+	issue := func(scopes ...string) string {
 		var made issuedToken
-		out, _ := gtm("token", "new", "--scope", scope, "--json")
+		arguments := []string{"token", "new", "--json"}
+		for _, scope := range scopes {
+			arguments = append(arguments, "--scope", scope)
+		}
+		out, _ := gtm(arguments...)
 		if err := json.Unmarshal([]byte(out), &made); err != nil || made.Token == "" {
 			t.Fatalf("token new: %v", err)
 		}
-		issued[scope] = made.Token
+		issued[strings.Join(scopes, " ")] = made.Token
 		return made.Token
 	}
 	for _, scope := range []string{"crm:read", "calls:read", "slack:read"} {
 		issue(scope)
 	}
+	issue("crm:read", "calls:read", "slack:read")
 	serve := exec.Command(binary, "serve")
 	serve.Env, serve.Dir = host, t.TempDir()
 	serveLog := &lockedBuffer{}
@@ -171,11 +184,16 @@ func TestInspector(t *testing.T) {
 		arguments := []string{"--config", config, "--server", "gtm-connector", "--format", "json", "--stored-auth-only",
 			"--quiet", "--method", method}
 		if tool != "" {
-			argument := "account_id=acc-003"
-			if tool == "search_accounts" {
-				argument = "query=Thornfield"
+			arguments = append(arguments, "--tool-name", tool)
+			switch tool {
+			case "search_accounts":
+				arguments = append(arguments, "--tool-arg", "query=Thornfield")
+			case "read_deal_card":
+				arguments = append(arguments, "--tool-arg", "deal_id="+deal.ID)
+			case "list_deals":
+			default:
+				arguments = append(arguments, "--tool-arg", "account_id=acc-003")
 			}
-			arguments = append(arguments, "--tool-name", tool, "--tool-arg", argument)
 		}
 		code, stdout, stderr := invoke(60*time.Second, arguments...)
 		for _, token := range issued {
@@ -198,7 +216,8 @@ func TestInspector(t *testing.T) {
 	}
 	message := func(failure map[string]any) string { return fmt.Sprint(dig(failure, "error", "message")) }
 	scopes := map[string]any{"search_accounts": "crm:read", "get_account": "crm:read", "list_opportunities": "crm:read",
-		"read_call_notes": "calls:read", "read_slack_messages": "slack:read"}
+		"read_call_notes": "calls:read", "read_slack_messages": "slack:read", "list_deals": "crm:read",
+		"read_deal_card": "crm:read"}
 	discover := func() {
 		t.Helper()
 		if discovery := run("initialize", "", true); discovery["protocolVersion"] != "2026-07-28" || dig(discovery, "capabilities", "tools") == nil {
@@ -242,6 +261,12 @@ func TestInspector(t *testing.T) {
 	messages := run("tools/call", "read_slack_messages", true)
 	denied("get_account", "crm:read")
 	denied("read_call_notes", "calls:read")
+	// The deal tools: the deals a crm:read token may read, and the deal's card for a token whose scopes cover
+	// every source the card read.
+	overHTTPS(issued["crm:read"])
+	deals := run("tools/call", "list_deals", true)
+	overHTTPS(issued["crm:read calls:read slack:read"])
+	card := run("tools/call", "read_deal_card", true)
 	// An unknown bearer is refused for its authentication, HTTP 401, not for any other reason.
 	overHTTPS("invalid-fixture-token")
 	if refused := message(run("initialize", "", false)); !strings.Contains(refused, "requires authorization (HTTP 401)") {
@@ -257,6 +282,8 @@ func TestInspector(t *testing.T) {
 	stdioNotes := run("tools/call", "read_call_notes", true)
 	stdioMessages := run("tools/call", "read_slack_messages", true)
 	denied("get_account", "crm:read")
+	overStdio("crm:read", "calls:read", "slack:read")
+	stdioCard := run("tools/call", "read_deal_card", true)
 
 	for _, c := range []struct {
 		result map[string]any
@@ -271,6 +298,9 @@ func TestInspector(t *testing.T) {
 		{stdioAccount, "crm", []string{"crm/accounts/acc-003", "crm/contacts/con-003"}},
 		{stdioNotes, "calls", []string{"calls/call_notes/note-003", "calls/call_notes/note-003b"}},
 		{stdioMessages, "slack", []string{"slack/messages/msg-003"}},
+		{deals, "deals", []string{"deals/" + deal.ID}},
+		{card, "deals", []string{"deals/" + deal.ID, cardRef(card)}},
+		{stdioCard, "deals", []string{"deals/" + deal.ID, cardRef(card)}},
 	} {
 		data, _ := c.result["structuredContent"].(map[string]any)
 		var refs []string
@@ -283,7 +313,15 @@ func TestInspector(t *testing.T) {
 		}
 	}
 
-	// Each stdio process revoked its own token when it ended; the three printed ones are live.
+	// The deal's card over both transports: its sealed text, its lines as data, and its seal.
+	text := fmt.Sprint(dig(card, "structuredContent", "card", "text"))
+	lines, _ := dig(card, "structuredContent", "card", "lines").([]any)
+	if !strings.HasPrefix(text, "DEAL CARD: ") || len(lines) == 0 || !strings.HasPrefix(cardRef(card), "briefs/") ||
+		!reflect.DeepEqual(dig(card, "structuredContent", "card"), dig(stdioCard, "structuredContent", "card")) {
+		t.Fatalf("the deal's card %v", dig(card, "structuredContent", "card"))
+	}
+
+	// Each stdio process revoked its own token when it ended; the four printed ones are live.
 	list, _ := gtm("token", "list", "--json")
 	var tokens []issuedToken
 	json.Unmarshal([]byte(list), &tokens)
@@ -292,7 +330,7 @@ func TestInspector(t *testing.T) {
 		states[token.State]++
 		callers[token.Caller] = true
 	}
-	if !reflect.DeepEqual(states, map[string]int{"live": 3, "revoked": 7}) {
+	if !reflect.DeepEqual(states, map[string]int{"live": 4, "revoked": 8}) {
 		t.Fatalf("tokens %v", states)
 	}
 
@@ -317,13 +355,13 @@ func TestInspector(t *testing.T) {
 			ok = append(ok, row.AuditID)
 		}
 	}
-	if want := []int{200, 200, 200, 403, 200, 403, 403, 403, 200, 403, 403, 200, 403, 200, 200, 403}; !reflect.DeepEqual(statuses, want) ||
-		!reflect.DeepEqual(counts, []int{2, 1, 1, 0, 2, 0, 0, 0, 1, 0, 0, 2, 0, 2, 1, 0}) {
+	if want := []int{200, 200, 200, 403, 200, 403, 403, 403, 200, 403, 403, 200, 200, 200, 403, 200, 200, 403, 200}; !reflect.DeepEqual(statuses, want) ||
+		!reflect.DeepEqual(counts, []int{2, 1, 1, 0, 2, 0, 0, 0, 1, 0, 0, 1, 2, 2, 0, 2, 1, 0, 2}) {
 		t.Fatalf("receipts: %v %v", statuses, counts)
 	}
 	var released []string
-	for _, result := range []map[string]any{account, search, opportunities, notes, messages, stdioAccount, stdioNotes,
-		stdioMessages} {
+	for _, result := range []map[string]any{account, search, opportunities, notes, messages, deals, card, stdioAccount,
+		stdioNotes, stdioMessages, stdioCard} {
 		released = append(released, fmt.Sprint(dig(result, "_meta", "gtm.demo/auditId")))
 	}
 	if !reflect.DeepEqual(ok, released) {
@@ -336,4 +374,13 @@ func TestInspector(t *testing.T) {
 			}
 		}
 	}
+}
+
+// cardRef is the record reference of the card a read_deal_card result released: its second record.
+func cardRef(result map[string]any) string {
+	records, _ := dig(result, "structuredContent", "records").([]any)
+	if len(records) != 2 {
+		return ""
+	}
+	return fmt.Sprint(dig(records[1], "record_ref"))
 }

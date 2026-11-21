@@ -18,6 +18,9 @@ const (
 	SalesforceUser Kind = "salesforce_user"
 	// Name is a name the person goes by. Value is the name as the source wrote it.
 	Name Kind = "name"
+	// ParticipantName is a name compared only when its holder is one of the meeting's known participants, the
+	// people its attendee list names by email (rung 5), and never with a label on its own. Value is the name.
+	ParticipantName Kind = "participant_name"
 	// ListedSeller is an entry of the operator's seller list. Value is the entry, a name or a Slack ID.
 	ListedSeller Kind = "listed_seller"
 	// Alias is an alias an engineer mapped to the person. It appears only in a Result.

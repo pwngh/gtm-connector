@@ -177,6 +177,10 @@ func Anonymous(label string) bool {
 	return anonymous[head]
 }
 
+// Address is an email address as Resolve compares one: on one line and in lower case, with its domain, or
+// false when the text is not an address.
+func Address(text string) (address, domain string, ok bool) { return email(text) }
+
 // email is an address in lower case and its domain, or false when text is not an address.
 func email(text string) (address, domain string, ok bool) {
 	address = u.LowerString(Label(text))

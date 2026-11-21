@@ -121,7 +121,7 @@ func TestTheCardReadsMapTheFourObjects(t *testing.T) {
 	}
 	want := []string{
 		`{"id": "acc-sf-` + account + `", "source_id": "` + account + `", "backend": "salesforce", ` +
-			`"name": "Invented Account", "industry": null, "account_number": null, ` +
+			`"name": "Invented Account", "industry": null, "account_number": null, "website": null, ` +
 			`"record_ref": "crm/accounts/acc-sf-` + account + `"}`,
 		`{"id": "con-sf-003000000000000AAA", "source_id": "003000000000000AAA", "backend": "salesforce", ` +
 			`"account_id": "acc-sf-` + account + `", "name": "First Person", "title": "Buyer", ` +
@@ -163,7 +163,7 @@ func TestTheCardReadsMapTheFourObjects(t *testing.T) {
 		"/services/data/v68.0/sobjects/Contact/describe",
 		"/services/data/v68.0/sobjects/Opportunity/describe",
 		"/services/data/v68.0/sobjects/Contract/describe",
-		queryPrefix + "SELECT Id, Name, Industry, AccountNumber FROM Account WHERE Id = '" + account + "' ORDER BY Id LIMIT 101",
+		queryPrefix + "SELECT Id, Name, Industry, AccountNumber, Website FROM Account WHERE Id = '" + account + "' ORDER BY Id LIMIT 101",
 		queryPrefix + "SELECT Id, AccountId, Name, Title, Email FROM Contact" + owned,
 		queryPrefix + "SELECT Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate FROM Contract" + owned,
 		queryPrefix + "SELECT Id, AccountId, Name, StageName, Amount, CloseDate, IsClosed, IsWon FROM Opportunity" + owned,
@@ -273,7 +273,7 @@ func TestAnExpiredTokenAsksSFOnce(t *testing.T) {
 		org.Requests = nil
 		return org, sf, reader, accountID
 	}
-	accountQuery := queryPrefix + "SELECT Id, Name, Industry, AccountNumber FROM Account WHERE Id = '" + account +
+	accountQuery := queryPrefix + "SELECT Id, Name, Industry, AccountNumber, Website FROM Account WHERE Id = '" + account +
 		"' ORDER BY Id LIMIT 101"
 	t.Run("sf gives a token the org accepts", func(t *testing.T) {
 		org, sf, reader, accountID := start(t)

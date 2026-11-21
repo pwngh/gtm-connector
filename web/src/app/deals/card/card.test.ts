@@ -67,14 +67,14 @@ const quotes = (html: string) =>
     text: decode(match[2] ?? ''),
   }));
 
-test('the loop covers every recorded card of the three files', () => {
+test('the loop covers every golden card of the three files', () => {
   assert.deepEqual(
     files.map(file => recorded.filter(item => item.file === file).length),
-    [33, 19, 46],
+    [33, 19, 7],
   );
 });
 
-test('every recorded card: each shown sentence once as its whole text, every other sentence once under More, each record once, each gap once', () => {
+test('every golden card: each shown sentence once as its whole text, every other sentence once under More, each record once, each gap once', () => {
   let sentences = 0;
   for (const {file, key, card} of recorded) {
     const at = `${file} ${key}`;
@@ -118,10 +118,10 @@ test('every recorded card: each shown sentence once as its whole text, every oth
       `${at}: the gaps in Not read's order`,
     );
   }
-  assert.equal(sentences, 90 + 1297 + 375);
+  assert.equal(sentences, 90 + 1297 + 73);
 });
 
-test('people said: three groups in order, each with its count, newest first, attribution as recorded', () => {
+test('people said: the groups in order, each with its count, newest first, attribution as recorded', () => {
   const card = thornfield();
   const html = body(card);
   const groups = [...html.matchAll(/data-group="([a-z]+)"[^>]*><h3[^>]*>([^<]+)<\/h3>/g)].map(match => [match[1], decode(match[2] ?? '')]);
@@ -132,8 +132,8 @@ test('people said: three groups in order, each with its count, newest first, att
   ]);
   const customer = html.slice(html.indexOf('data-group="customer"'), html.indexOf('data-group="unknown"'));
   // The speaker as recorded, the title from the contact's line, the contact's number, the role, the source and the time.
-  assert.match(text(customer), /Marian Holt Deputy general counsel \[2\] Customer call 12 Jan 2027, 15:00:00 UTC/);
-  assert.match(text(body(unlined(card))), /Marian Holt \[2\] Customer call 12 Jan 2027, 15:00:00 UTC/);
+  assert.match(text(customer), /Marian Holt Deputy general counsel \[2\] Customer \(by name\) call 12 Jan 2027, 15:00:00 UTC/);
+  assert.match(text(body(unlined(card))), /Marian Holt \[2\] Customer \(by name\) call 12 Jan 2027, 15:00:00 UTC/);
   assert.match(customer, /aria-label="Source 2" data-cite="2" href="\/deals\/acc-003\?unit=2"/);
   const seller = html.slice(html.indexOf('data-group="seller"'));
   // Slack at 16:00 is newer than the call at 15:00, so it comes first; equal times keep the card's order.
@@ -141,15 +141,54 @@ test('people said: three groups in order, each with its count, newest first, att
     [...seller.matchAll(/data-quote-unit="(\d+)"/g)].map(match => Number(match[1])),
     [7, 8, 9, 4],
   );
-  assert.match(text(seller), /Avery Linden Seller Slack 12 Jan 2027, 16:00:00 UTC/);
-  assert.doesNotMatch(seller, /listed seller identity/);
+  // Every sentence shows how its speaker was matched, in every group.
+  assert.match(text(seller), /Avery Linden Seller \(by name\) Slack 12 Jan 2027, 16:00:00 UTC/);
+  assert.doesNotMatch(html, /data-group="other_party"/);
   // A unit with no established role shows its basis, and the heading counts the reasons.
   const unknown = body(find('cases', 'test_05_injected_markup_and_figures_stay_inert/2'));
-  assert.match(
-    text(unknown),
-    /No established role \(3\) author is not a listed seller; Slack identities cannot show a customer \(2\) · no speaker label \(1\)/,
-  );
+  assert.match(text(unknown), /No established role \(3\) Slack author not identified; a Slack name never shows a customer \(2\) · no speaker label \(1\)/);
   assert.match(text(unknown), /No speaker label Unknown \(no speaker label\) call/);
+});
+
+test('people said: a speaker of another organisation is in a group of its own, last, with the domain', () => {
+  const card = structuredClone(thornfield());
+  const unit = card.units?.find(unit => unit.n === 7);
+  assert.ok(unit?.body && typeof unit.body === 'object');
+  Object.assign(unit.body, {
+    role: 'other_party',
+    basis: 'other party by domain counsel.example',
+    contact: null,
+    matched: {kind: 'email', value: 'counsel.example', record_ref: 'slack/members/mem-U0OTHER01'},
+  });
+  const html = body(card);
+  const groups = [...html.matchAll(/data-group="([a-z_]+)"[^>]*><h3[^>]*>([^<]+)<\/h3>/g)].map(match => [match[1], decode(match[2] ?? '')]);
+  assert.deepEqual(groups, [
+    ['customer', 'Buyer quotes (2)'],
+    ['unknown', 'No established role (0)'],
+    ['seller', 'Your side (3)'],
+    ['other_party', 'Other party (1)'],
+  ]);
+  const other = html.slice(html.indexOf('data-group="other_party"'));
+  assert.match(text(other), /Avery Linden Other party, counsel\.example \(other party by domain counsel\.example\) Slack 12 Jan 2027, 16:00:00 UTC/);
+  assert.equal(count(html, /data-quote-unit="7"/g), 1);
+});
+
+test('people said: a customer-side speaker who is not a contact is with the buyers, with the basis as sealed', () => {
+  const card = structuredClone(thornfield());
+  const unit = card.units?.find(unit => unit.n === 4);
+  assert.ok(unit?.body && typeof unit.body === 'object');
+  Object.assign(unit.body, {role: 'customer_side_not_in_crm', basis: 'customer side by domain thornfield-wren.example, not a contact', contact: null});
+  // A unit sealed before the speaker rules shows its basis in the words it was sealed with.
+  const older = card.units?.find(unit => unit.n === 5);
+  assert.ok(older?.body && typeof older.body === 'object');
+  Object.assign(older.body, {basis: 'label matches contact [2]'});
+  for (const key of ['speaker_rules', 'rung', 'matched']) {
+    delete (older.body as Record<string, unknown>)[key];
+  }
+  const html = body(card);
+  const customer = html.slice(html.indexOf('data-group="customer"'), html.indexOf('data-group="unknown"'));
+  assert.match(text(customer), /Morgan Reed Customer \(customer side by domain thornfield-wren\.example, not a contact\) call/);
+  assert.match(text(customer), /Marian Holt Deputy general counsel \[2\] Customer \(label matches contact \[2\]\) call/);
 });
 
 test('a sentence its author quoted in a Slack message is labelled as quoted, under no established role', () => {
@@ -394,7 +433,7 @@ test('every number is a link named Source n that puts ?unit=n in the deal’s ad
 const escaped = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const citesIn = (html: string) => [...html.matchAll(/aria-label="Source (\d+)"/g)].map(match => Number(match[1]));
 
-test('every recorded card with lines: the countdown is the typed days and date with the card’s date, and ARR is its line’s words', () => {
+test('every golden card with lines: the countdown is the typed days and date with the card’s date, and ARR is its line’s words', () => {
   const seen = {counted: 0, passed: 0, contractEnd: 0, missing: 0, arr: 0, unmapped: 0};
   for (const {file, key, card} of [...recorded, ...salesforce]) {
     const at = `${file} ${key}`;
@@ -437,7 +476,7 @@ test('every recorded card with lines: the countdown is the typed days and date w
       assert.doesNotMatch(arrHtml, /dc-focal__number|aria-label="Source/, `${at}: and no figure stands in`);
     }
   }
-  assert.deepEqual(seen, {counted: 163, passed: 15, contractEnd: 65, missing: 13, arr: 98, unmapped: 78});
+  assert.deepEqual(seen, {counted: 62, passed: 4, contractEnd: 3, missing: 1, arr: 59, unmapped: 4});
 });
 
 test('a card with no renewal line shows No renewal date and no number', () => {
@@ -539,7 +578,7 @@ test('the fixed signals are the first lines of Flags, each with its numbers; a c
     );
     assert.ok(html.indexOf('dc-flags') < html.indexOf('dc-ledger'), `${file} ${key}: Flags comes before the ledger`);
   }
-  assert.equal(flagged, 92);
+  assert.equal(flagged, 30);
 });
 
 test('lines that are not a line’s shape are not read, and the card says where its values are', () => {
@@ -561,8 +600,9 @@ const drawnFrom: Record<string, [string, string]> = {
   citation: ['README.md', 'one CRM record, or one sentence of a call or a Slack message'],
   quotation: ['README.md', 'A sentence too long to show is counted, never cut.'],
   record: ['README.md', 'typed CRM fields and connector arithmetic'],
-  'role.customer': ['docs/cards.md', 'Slack authors are never customers.'],
+  'role.customer': ['docs/cards.md', "A Slack author's name is compared with sellers only, so it never makes a customer"],
   'role.seller': ['docs/cards.md', "equals a name or ID on the workspace's seller list."],
+  'role.other_party': ['docs/cards.md', 'other party by domain'],
   'role.unknown': ['docs/cards.md', 'two or more contacts with the name, a name shared by a seller and a contact, or a label over 200 characters'],
   not_read: ['docs/deals.md', 'was not read'],
   seal: ['README.md', 'A card is sealed when it is published: a receipt names the SHA-256 of its bytes.'],

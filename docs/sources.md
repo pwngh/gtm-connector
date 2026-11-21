@@ -27,7 +27,7 @@ Sellers: "Morgan Reed"
 | Source | Reads | Connect with |
 | --- | --- | --- |
 | [Demo data](#demo-data) | The invented book: 30 accounts with their contacts, opportunities, call notes and Slack messages | `connect demo` |
-| [Salesforce](#salesforce) | Account, Contact, Opportunity and Contract records of one org, through an `sf` login or a token handed to the container | `connect salesforce --org ALIAS --state-dir NAME`, or `--token-env` |
+| [Salesforce](#salesforce) | Account, Contact, Opportunity and Contract records of one org, and its Standard users for speaker roles, through an `sf` login or a token handed to the container | `connect salesforce --org ALIAS --state-dir NAME`, or `--token-env` |
 | [Call transcripts](#call-transcripts) | TXT, WebVTT and SRT files imported one at a time, one excerpt per account | `connect calls`, then `debug calls import` |
 | [Slack](#slack) | One mapped thread per account, read live | `debug slack connect`, `connect slack`, then `debug slack map` |
 
@@ -69,7 +69,9 @@ receipts.
 | Option | Meaning |
 | --- | --- |
 | `--state-dir NAME` | The workspace, `demo` by default. Give every later command the same name. |
-| `--seller NAME` | With `salesforce`, `calls` or `slack`: a seller's name or Slack user ID, for [speaker roles](cards.md). Repeat it for each, at most 200, each of 1 to 200 characters. The list replaces the saved one. `connect demo` does not take it. |
+| `--seller NAME` | With `salesforce`, `calls` or `slack`: a seller's name or Slack user ID, for [speaker roles](cards.md#speaker-roles). Repeat it for each, at most 200, each of 1 to 200 characters. The list replaces the saved one. `connect demo` does not take it. |
+| `--alias [CONTENT_SHA256:]LABEL=TARGET` | With `salesforce`, `calls` or `slack`: maps a speaker label to a person, an email address or a seller entry. See [the CLI](cli.md#speaker-settings). |
+| `--company-domain DOMAIN` | With `salesforce`, `calls` or `slack`: one of your company's own mail domains. See [the CLI](cli.md#speaker-settings). |
 | `--remove` | Detaches the source and takes no other option. Removing the CRM removes its calls and Slack. |
 | `--org`, `--environment` | With `salesforce`. See [Salesforce](#salesforce). |
 
@@ -295,8 +297,8 @@ docker compose up -d app
 
 ### Records
 
-Account IDs are `acc-sf-` followed by the 18-character Salesforce ID. Contacts, opportunities and
-contracts are `con-sf-`, `opp-sf-` and `ctr-sf-` the same way.
+Account IDs are `acc-sf-` followed by the 18-character Salesforce ID. Contacts, opportunities,
+contracts and users are `con-sf-`, `opp-sf-`, `ctr-sf-` and `usr-sf-` the same way.
 
 | Object | Returned fields |
 | --- | --- |
@@ -304,6 +306,7 @@ contracts are `con-sf-`, `opp-sf-` and `ctr-sf-` the same way.
 | Contact | `Name` to `name`; nullable `Title` and `Email` to `title` and `email`; `AccountId` to `account_id` |
 | Opportunity | `Name` to `name`; raw `StageName` to `stage`; `CloseDate` to `close_date`; `IsClosed` and `IsWon` to `is_closed` and `is_won`; nullable `AccountId` to `account_id`; `Amount` to a decimal string or null in `amount_decimal`; `currency` is always null, meaning unknown |
 | Contract | `AccountId` to `account_id`; raw `Status` to `status`; `StatusCode` to `status_code`, one of `Draft`, `InApproval` or `Activated`; nullable `StartDate`, `EndDate` and `ContractTerm` to `start_date`, `end_date` and `contract_term` |
+| User | `Name` to `name`; nullable `Email` to `email`; `IsActive` to `is_active`. Only users whose `UserType` is `Standard` are read. |
 
 `accounts --query TEXT` finds the accounts whose name holds the text literally. It returns the first
 100 by name and then ID, and says when more match.
@@ -324,6 +327,18 @@ A [Deal card](cards.md) for a Salesforce account plans from the Contract with th
 | No such contract | `Contract end: Missing: no contract ends on or after DATE`, and a signal naming the latest earlier end date when there is one |
 | Other contracts | One `Contract` line each with its status and end date, five at most |
 | An opportunity | Name, stage, amount, close date and outcome. The amount prints `(currency Missing)`. |
+
+A Salesforce card also reads the org's users, as the `list_users` read under a `crm:read` receipt of
+its own: `SELECT Id, Name, Email, IsActive FROM User WHERE UserType = 'Standard'`, every page of it. A
+user is a seller for [speaker roles](cards.md#speaker-roles), active or not, since a rep who has left
+still speaks on an old call; a user is matched by user ID and email, and an active user's name only
+within a call's attendee list. An org with more than 50,000 Standard users has none read: the read
+finishes as an error with no rows, and the card is made without them and says so under NOT READ
+(`CRM: the org's users were not read: ...`). The account's own read includes its `Website`, which
+names the account's domain for speaker roles. A portal or community user is never read, because one can be on
+the customer's side. The read binds every user it returned, and the card shows none of them; a
+sentence whose speaker was matched to a user names that user's record, which `inspect BRIEF_ID N`
+traces to the `list_users` receipt.
 
 Every Salesforce card says under NOT READ that annual recurring revenue and renewal risk are not
 mapped from standard Salesforce fields. Beside Salesforce, calls and Slack read nothing until
@@ -370,6 +385,7 @@ attempted). A step's `code` is `ok`, `missing_fields`, `renewal_fields_unmapped`
 | GET attempts per operation | 12, retries included |
 | Response data per operation | 1 MiB. A compressed response is refused, and so is a 200 response labelled as anything but `application/json`. |
 | Pages per query | 10. A tenth page that is not the last is refused. |
+| Standard users of the org (`list_users`) | 50,000, read in pages under a budget of their own. More and no user is read; the card is made without them and says so. |
 | Contacts, opportunities and contracts of one account | 1,000 each. One more fails with `salesforce_result_limit`. The account, its contacts and its contracts are one read and share its 12 requests and 1 MiB, so wide rows or many pages can fail below 1,000. No partial records are returned. |
 | Opportunities listed across accounts (`list_opportunities` with no account) | 100 |
 | `--query` text | 200 characters, with no control characters |
@@ -421,6 +437,7 @@ gtm-connector connect calls --state-dir renewals --seller 'Morgan Reed'
 gtm-connector debug calls import meeting.vtt --account acc-007 --state-dir renewals
 gtm-connector debug calls import meeting.vtt --account acc-007 --cues 8:14 --called-at 2027-01-14T15:00:00Z --state-dir renewals
 gtm-connector debug calls import meeting.txt --account acc-007 --speaker-names --state-dir renewals
+gtm-connector debug calls import meeting.txt --account acc-007 --speaker-names --attendees attendees.json --state-dir renewals
 gtm-connector debug calls list --state-dir renewals
 gtm-connector debug calls inspect IMPORT_ID --full --state-dir renewals
 gtm-connector brief acc-007 --state-dir renewals
@@ -478,6 +495,7 @@ Only `connect calls` connects them again.
 | `--lines FIRST:LAST`, `--cues FIRST:LAST` | The excerpt, in TXT lines or in VTT or SRT cues. Ranges count from 1 and include the end. Each number is 1 to 99999 with no leading zero. Give one at most. |
 | `--called-at TIMESTAMP` | The meeting time, ISO 8601 with a `T` and a UTC offset, such as `2027-01-15T10:00:00Z`. Without it the call time stays unknown, and the card prints `call time Missing`. |
 | `--speaker-names` | States that every line or cue opens with its speaker's name and a colon. See [Speaker names](#speaker-names). |
+| `--attendees FILE` | The call's attendee list: each speaker label with an email address. See [Attendees](#attendees). |
 | `--reassign` | Moves content that belongs to another account to this one. |
 | `--after IMPORT_ID` | `list`: continues after the `next_after` of the last page. A page holds 100 imports. |
 | `--full` | `inspect`: every unit of the file and its original text. |
@@ -556,6 +574,35 @@ checks on a name are made at import: an accepted import is read by its layout al
 > **A stated layout does not show who spoke.** It says how the file is read. Anyone who can start a
 > line of the file can write a name there. State it only of an export whose lines the recorder wrote.
 
+### Attendees
+
+`--attendees FILE` gives the call's attendee list, which names the person behind a speaker label by
+an email address. A card reads it before the label as a name: see [speaker roles](cards.md#speaker-roles).
+The file is strict JSON of at most 64 KiB, read with the same checks as the export: not a symbolic
+link, and not replaced or changed while it is read.
+
+```json
+{"schema_version": 1, "attendees": [
+  {"label": "Dana Crest", "email": "dana@acme.example"},
+  {"label": "Morgan Reed", "email": "morgan@northwind.example"}
+]}
+```
+
+- The object has exactly `schema_version`, the integer `1`, and `attendees`, a list of 1 to 200 rows.
+- A row has exactly `label` and `email`. The same label and email twice is refused.
+- A label is the speaker label as the transcript writes it: text that is not empty on one line, at
+  most 200 characters.
+- An email is at most 254 bytes with one `@`. The part before it is 1 to 64 printable ASCII
+  characters with no space, quote, angle bracket, comma, semicolon or backslash. The domain is
+  lower-case letters, digits and hyphens in labels of at most 63 characters, with at least one dot.
+- Several rows under one label are people behind one microphone, such as a meeting room. They give
+  the label a side only when every one of them is on it.
+
+The rows are kept in the import's manifest, so the import's ID and the `read_call_notes` receipt of a
+card cover them. No command prints a label or an email of the list: the import result says only how
+many rows it holds. Importing the same transcript with another list, or without one, makes a new
+import, which becomes the account's.
+
 ### Results
 
 `import` and `inspect` print a table of the import. `list` prints one block per import on a terminal
@@ -564,7 +611,7 @@ Provider identity and source statements are unverified.` on stderr.
 
 | Result | JSON keys |
 | --- | --- |
-| `import` | `schema_version`, `source: "imported_transcript"`, `status` (`imported` or `unchanged`), `created`, `selected`, `reassigned`, `resolution_receipt_id`, then the import's metadata |
+| `import` | `schema_version`, `source: "imported_transcript"`, `status` (`imported` or `unchanged`), `created`, `selected`, `reassigned`, `resolution_receipt_id`, then the import's metadata, and `attendees`, the number of rows, when `--attendees` was given |
 | `list` | `schema_version`, `source`, `imports` (each the metadata with `active`), and `next_after` (an import ID or null) |
 | `inspect` | `schema_version`, `source`, `import` (the metadata with `active`), `body`, `units`, and with `--full` the original text |
 | Metadata | `import_id`, `account_id`, `format`, `called_at`, `imported_at`, `content_sha256`, `requested_range`, `cited_range`, `total_units`, `unit_kind` (`lines` or `cues`), `selection_mode` (`default` or `explicit`), `speaker_names` |
@@ -579,6 +626,7 @@ Provider identity and source statements are unverified.` on stderr.
 | Returned units, context included | 256 |
 | Quoted text with its units | 120 KiB of ASCII-escaped JSON. The saved record stays under 128 KiB. |
 | A name under `--speaker-names` | 100 characters |
+| An attendee file | 64 KiB, 1 to 200 rows |
 | A page of `debug calls list` | 100 imports |
 
 ### Call transcript errors
@@ -592,6 +640,8 @@ holds no imports is refused as `source_identity_mismatch` with exit 3.
 | `calls_import_too_large` | 2 | The export passes 2 MiB or 10,000 units. | Use a smaller export. |
 | `calls_excerpt_too_large` | 2 | The excerpt passes its text, unit or record limit. | Select fewer cues or lines. |
 | `calls_speaker_names_missing` | 2 | `--speaker-names` was given and a line or cue does not open with a name and a colon. | Import the file without `--speaker-names`. |
+| `calls_attendees_invalid` | 2 | The attendee file is not an attendee list as [Attendees](#attendees) gives it, or is a link or was replaced. | Give JSON with `schema_version` 1 and 1 to 200 attendees, each a label and an email, with no row twice. |
+| `calls_attendees_too_large` | 2 | The attendee file passes 64 KiB. | Name fewer attendees. |
 | `calls_import_not_found` | 2 | The import is not in this workspace. | Run `debug calls list`. |
 | `calls_account_not_found` | 2 | The CRM holds no such account. | Check the ID with `accounts`. |
 | `calls_reassign_required` | 3 | The content belongs to another account. | Review it. Add `--reassign` only to move it. |
@@ -602,7 +652,7 @@ holds no imports is refused as `source_identity_mismatch` with exit 3.
 | `calls_association_invalid` | 4 | The CRM answer and its receipt did not agree. Nothing was imported. | Check the CRM connection and retry. |
 | `calls_association_failed` | 4 | The audited CRM read did not complete. Nothing was imported. | Check the CRM connection and retry. |
 | `calls_source_unavailable` | 5 | The CRM connection could not be reached. | Check the setup and retry. |
-| `calls_import_io` | 1 | The export or the store could not be read or written. | Check permissions and retry. |
+| `calls_import_io` | 1 | The export, the attendee file or the store could not be read or written. | Check permissions and retry. |
 
 Options that cannot go together, a missing `FILE` or `--account`, and an unknown action are refused
 with exit 2 before anything is read.
@@ -644,9 +694,13 @@ The Slack app needs:
 
 - [PKCE](https://docs.slack.dev/authentication/using-pkce/) enabled as a public client;
 - the exact redirect `http://localhost:PORT/slack/callback` registered, `PORT` from 1024 to 65535;
-- the user scope `channels:history`, `groups:history` or both, approved for the workspace.
+- the user scope `channels:history`, `groups:history` or both, approved for the workspace;
+- for [speaker roles](cards.md#speaker-roles) by the author's profile, also `users:read`, which gives
+  each author's Slack workspace, and `users:read.email`, which gives the author's profile email.
 
-No other scope is requested, and a grant that returns other scopes is refused. A bot grant is refused
+No other scope is requested, and a grant that returns other scopes is refused. A sign-in needs a
+history scope: one that asks only for `users:read` or `users:read.email` is refused as
+`slack_invalid_configuration`. A bot grant is refused
 as `slack_token_type_unsupported`.
 
 The sign-in is saved in the credentials folder, in `slack-WORKSPACE.json` (mode 0600, one file for
@@ -675,7 +729,7 @@ Ctrl-C exits 130. An approval or a save that already finished is not undone, so 
 | Option | Meaning |
 | --- | --- |
 | `--client-id`, `--redirect-uri` | `connect` only, required. The existing app's public client ID and its exact registered redirect. |
-| `--user-scope` | `connect` only. `channels:history` (the default) or `groups:history` for private channels. Repeat it for both. Passing it replaces the default. |
+| `--user-scope` | `connect` only. `channels:history` (the default), `groups:history` for private channels, `users:read` and `users:read.email`. Repeat it for each. Passing it replaces the default. |
 | `--team-id` | `connect` only. Requires this Slack workspace. It is never printed. |
 | `--state-dir NAME` | Every `debug slack` action. The workspace, `demo` by default. |
 
@@ -731,9 +785,29 @@ a login.
 | Files, attachments and blocks | Counted and left out |
 
 On a card, a live message's speaker is the raw Slack user ID it carries. A deleted parent carries
-`USLACKBOT`, and a message with no user, such as some app messages, has no speaker label. Its role is
-seller when that user ID is in the workspace's seller list and unknown otherwise: a Slack author is
-never matched to a customer contact. A `slack:read` grant can read every mapped account its token is
+`USLACKBOT`, and a message with no user, such as some app messages, has no speaker label.
+
+A card's read of the thread then asks `GET https://slack.com/api/users.info` for each distinct
+author, in user ID order, under the same sign-in, deadline and response bytes, at most 50 a read. It
+keeps one member record for each author, `slack/members/mem-USER`, bound by the same
+`read_slack_messages` receipt: the author's user ID, the Slack workspace (`team_id`) the profile names,
+whether that is the signed-in user's own workspace (`home`), the profile email, `profile` (`read`,
+`missing_scope`, `over_limit` or `not_read`) and `missing_scopes`. A profile email is kept only when it
+is a valid address, with its domain in lower case; any other is no email.
+
+- Without `users:read` no profile is asked for. Every member is `missing_scope`, with no team and no
+  email, and its `missing_scopes` lists `users:read` and `users:read.email`.
+- With `users:read` but not `users:read.email` the team is read and the email is not, and
+  `missing_scopes` lists `users:read.email`.
+- An author past the first 50 is `over_limit` and is not asked for.
+- An author Slack does not find or show (`user_not_found`, `user_not_visible`), or whose profile answer
+  is malformed or names another user or no valid team, is `not_read`, and the read goes on. A 429
+  after the one retry, an expired token after the one refresh, and a failed request still refuse the
+  read.
+
+The read never fails for a missing profile scope: the author's role falls to what the card can still
+match, the seller list. See [speaker roles](cards.md#speaker-roles). The `read_slack_messages` MCP
+tool returns the messages alone. A `slack:read` grant can read every mapped account its token is
 granted; see [MCP](mcp.md).
 
 ### `debug slack check`
@@ -772,7 +846,8 @@ could not be verified) or `slack_receipt_invalid` (no final receipt matches the 
 
 | Limit | Value |
 | --- | --- |
-| Requests of one read | `conversations.replies` only, with at most one refresh and the identity check after it, all sharing the budget below |
+| Requests of one read | `conversations.replies`, with at most one refresh and the identity check after it, all sharing the budget below; then `users.info` for the authors |
+| `users.info` requests of one read | 50, apart from the 10 attempts below, within the same deadline and response bytes. A 429 takes the read's one rate retry, and an expired token its one refresh. |
 | HTTP attempts, authentication and failures included | 10 |
 | Response bytes across those attempts | 1 MiB |
 | One authentication response | 64 KiB |
@@ -815,11 +890,11 @@ A reason sets the exit code of a command, and is a step `code` in `debug slack c
 | `slack_mapping_missing`, `slack_mapping_conflict` | 3 | Run `debug slack map` for the account. For a conflict, review `--replace` and `--reassign`. |
 | `slack_source_mismatch` | 3 | Connect the original CRM and Slack identity in the original workspace. |
 | `slack_identity_unchecked` | 3 | Run `debug slack status --check`. |
-| `slack_thread_unavailable`, `slack_forbidden`, `slack_thread_changed`, `slack_thread_incomplete` | 3 | Check the selected parent, the history scope and channel access. For a changed or incomplete thread, retry when it is stable. |
+| `slack_thread_unavailable`, `slack_forbidden`, `slack_thread_changed`, `slack_thread_incomplete` | 3 | Check the selected parent, the history scope, the profile scopes and channel access. For a changed or incomplete thread, retry when it is stable. |
 | `slack_resource_limit`, `slack_output_too_large` | 3 | Select a smaller thread. |
 | `slack_clock_invalid` | 3 | Correct the local clock, which moved backward. |
 | `slack_mapping_invalid`, `slack_snapshot_invalid` | 4 | Keep the private state and inspect the setup before recreating it. |
-| `slack_response_invalid`, `slack_rate_limited`, `slack_timeout`, `slack_unavailable` | 5 | Run `debug slack status`, wait, then retry. |
+| `slack_response_invalid`, `slack_rate_limited`, `slack_timeout`, `slack_unavailable` | 5 | Run `debug slack status`, wait, then retry. A profile answer for another user, or of another shape, is `slack_response_invalid` for the whole read. |
 | `slack_storage_failed` | 1 | Fix access to the credentials folder, then run `debug slack status`. |
 
 An error message starts with its reason. Slack's own error text is never included.

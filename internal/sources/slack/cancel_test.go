@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -19,22 +20,44 @@ import (
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
 
-// cancelled runs a read whose answers never finish, cancels it shortly after, and requires that it returns
-// the cancel at once, with no result.
+// cancelled runs a read whose answers never finish, and requires that it returns the cancel at once, with no
+// result. The cancel comes 30 ms after the read sends the request it then waits on: one that hangs, one
+// whose body stalls, or one answered 429, after which the read waits to retry. Everything the read did before
+// that request is done by then, however slow the runner. A read that never sends such a request is
+// cancelled after ten seconds and fails the test.
 func cancelled(t *testing.T, b *bench, replies []reply, auth ...reply) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	b.slack.replies, b.slack.auth = replies, auth
-	timer := time.AfterFunc(30*time.Millisecond, cancel)
-	defer timer.Stop()
-	started := time.Now()
+	cancelledAt := make(chan time.Time, 1)
+	b.slack.before = func(s sent) {
+		next := b.slack.auth
+		if strings.HasSuffix(s.path, "conversations.replies") {
+			next = b.slack.replies
+		}
+		if len(next) > 0 && (next[0].hang || next[0].stall || next[0].status == http.StatusTooManyRequests) {
+			time.AfterFunc(30*time.Millisecond, func() {
+				select {
+				case cancelledAt <- time.Now():
+				default:
+				}
+				cancel()
+			})
+		}
+	}
+	defer time.AfterFunc(10*time.Second, cancel).Stop()
 	read, err := b.reader.ReadSlackMessages(ctx, accountID)
 	if read != nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v, want the cancel", err)
 	}
-	if waited := time.Since(started); waited > 3*time.Second {
-		t.Fatalf("the read returned %v after the cancel", waited)
+	select {
+	case at := <-cancelledAt:
+		if waited := time.Since(at); waited > 3*time.Second {
+			t.Fatalf("the read returned %v after the cancel", waited)
+		}
+	default:
+		t.Fatal("the read never sent the request it waits on")
 	}
 	if last := b.last(); last.Code != "cancelled" || last.ReturnedMessages != 0 {
 		t.Fatalf("report %+v", last)
@@ -463,19 +486,19 @@ func TestOverAConnection(t *testing.T) {
 		t.Fatalf("redirect: %v after %v", err, got)
 	}
 
-	// A cancel closes a response that is still arriving.
+	// A cancel closes a response that is still arriving. It comes once the reader has taken the part of the
+	// body the server sent, while the server waits.
 	b = fresh()
-	b.reader.Transport = rewrite{transport, "dribble"}
 	ctx, cancel := context.WithCancel(context.Background())
-	time.AfterFunc(50*time.Millisecond, cancel)
+	defer cancel()
+	b.reader.Transport = arriving{rewrite{transport, "dribble"}, len(`{"ok":true,`), cancel}
 	if _, err := b.reader.ReadSlackMessages(ctx, accountID); !errors.Is(err, context.Canceled) {
 		t.Fatalf("dribble: %v", err)
 	}
-	for wait := 0; !stopped.Load(); wait++ {
-		if wait > 200 {
+	for deadline := time.Now().Add(5 * time.Second); !stopped.Load(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
 			t.Fatal("the server never saw the connection close")
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	if b.last().MessageResponseBytes != 11 {
 		t.Fatalf("report %+v", b.last())
@@ -494,4 +517,36 @@ func (r rewrite) RoundTrip(request *http.Request) (*http.Response, error) {
 		request.URL.RawQuery += "&cursor=" + r.cursor
 	}
 	return r.next.RoundTrip(request)
+}
+
+// arriving is a transport whose answer calls then once its body has given its first want bytes.
+type arriving struct {
+	next http.RoundTripper
+	want int
+	then func()
+}
+
+func (a arriving) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := a.next.RoundTrip(request)
+	if err == nil {
+		response.Body = &counted{ReadCloser: response.Body, left: a.want, then: a.then}
+	}
+	return response, err
+}
+
+// counted is a body that calls then once it has given its first left bytes.
+type counted struct {
+	io.ReadCloser
+	left int
+	then func()
+}
+
+func (c *counted) Read(p []byte) (int, error) {
+	n, err := c.ReadCloser.Read(p)
+	if c.left > 0 {
+		if c.left -= n; c.left <= 0 {
+			c.then()
+		}
+	}
+	return n, err
 }

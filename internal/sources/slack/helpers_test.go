@@ -254,14 +254,15 @@ func formShown(form string) string {
 	return strings.Join(members, "&")
 }
 
-// script is a transport that answers page requests and sign-in requests from two queues, and never
-// reaches a network.
+// script is a transport that answers page requests, profile requests and sign-in requests from three
+// queues, and never reaches a network.
 type script struct {
-	t       testing.TB
-	replies []reply
-	auth    []reply
-	sent    []sent
-	before  func(sent) // runs before each answer, as another process or a slow network would
+	t        testing.TB
+	replies  []reply
+	auth     []reply
+	profiles []reply
+	sent     []sent
+	before   func(sent) // runs before each answer, as another process or a slow network would
 }
 
 func (s *script) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -279,8 +280,11 @@ func (s *script) RoundTrip(request *http.Request) (*http.Response, error) {
 		s.before(seen)
 	}
 	queue := &s.auth
-	if strings.HasSuffix(seen.path, "conversations.replies") {
+	switch {
+	case strings.HasSuffix(seen.path, "conversations.replies"):
 		queue = &s.replies
+	case strings.HasSuffix(seen.path, "users.info"):
+		queue = &s.profiles
 	}
 	if len(*queue) == 0 {
 		s.t.Errorf("unexpected request %s %s", seen.method, seen.path)

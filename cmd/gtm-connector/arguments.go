@@ -39,7 +39,8 @@ var commands = map[string]arguments{
 	"accounts": {options: []option{{name: "--query", value: true}}, help: accountsHelp},
 	"brief": {options: []option{{name: "--as-of", value: true}, {name: "--without-calls"}}, required: "account_id",
 		help: briefHelp},
-	"inspect": {options: []option{{name: "--role", value: true, choices: []string{"customer", "seller", "unknown"}}},
+	"inspect": {options: []option{{name: "--role", value: true, choices: []string{"customer", "customer_side_not_in_crm", "seller",
+		"other_party", "unknown"}}},
 		required: "ID", numbers: true, help: inspectHelp},
 	"audit": {options: []option{{name: "--brief", value: true}, {name: "--tool", value: true},
 		{name: "--caller", value: true}, {name: "--status", value: true, choices: []string{"ok", "error", "pending"}},
@@ -48,13 +49,17 @@ var commands = map[string]arguments{
 		{name: "--scope", value: true, repeat: true, choices: []string{"crm:read", "calls:read", "slack:read"}},
 		{name: "--org", value: true}, {name: "--token-env"},
 		{name: "--environment", value: true, choices: []string{"developer", "sandbox", "production"}},
-		{name: "--seller", value: true, repeat: true}, {name: "--remove"},
+		{name: "--seller", value: true, repeat: true}, {name: "--alias", value: true, repeat: true},
+		{name: "--company-domain", value: true, repeat: true}, {name: "--remove"},
 		{name: "--transport", value: true, choices: []string{"http", "stdio"}}, {name: "--config-file", value: true}},
 		optional: "provider", choices: append(append([]string{"status"}, providerNames()...), assistantApps...),
 		help: connectHelp},
 	"demo": {options: []option{{name: "--again"}}, help: demoHelp},
 	"admit": {options: []option{{name: "--from-org", value: true, required: true},
 		{name: "--export-sha256", value: true, required: true}}, required: "FOLDER", help: admitHelp},
+	"grant": {options: []option{{name: "--to", value: true}, {name: "--subject", value: true}, {name: "--revoke"},
+		{name: "--disable"}, {name: "--enable"}}, optional: "ACCOUNT", help: grantHelp},
+	"grants": {options: []option{{name: "--to", value: true}, {name: "--subject", value: true}}, help: grantsHelp},
 }
 
 // parsed is one command line, read.
@@ -148,7 +153,7 @@ func (a arguments) parse(tokens []string) (parsed, error) {
 		switch {
 		case literal || !isOption:
 			// The argument with fixed values is checked where it stands, before what follows it.
-			if a.optional != "" && len(p.positionals) == 0 && !slices.Contains(a.choices, token) {
+			if a.optional != "" && a.choices != nil && len(p.positionals) == 0 && !slices.Contains(a.choices, token) {
 				return p, usageError("argument " + a.optional + ": invalid choice (choose from " +
 					quotedChoices(a.choices) + ")")
 			}

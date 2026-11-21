@@ -277,8 +277,18 @@
   gap: var(--gc-space-4);
 }
 
-.fr-signin__form > .ui-button {
+.fr-signin__form > .ui-button,
+.fr-signin__company {
   justify-self: start;
+}
+
+.fr .fr-signin__subtitle {
+  margin: var(--gc-space-2) 0 0;
+  color: var(--gc-ink);
+  font: var(--gc-body);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-shadow: none;
 }
 
 .fr-code {

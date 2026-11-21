@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/pwngh/gtm-connector/internal/evidence"
 	"github.com/pwngh/gtm-connector/internal/storage/postgres"
 	"github.com/pwngh/gtm-connector/internal/strictjson"
 )
@@ -24,8 +25,12 @@ import (
 var assistantApps = []string{"inspector", "claude-code", "claude-desktop", "cursor"}
 
 // connectOptions are connect's own options, in the order a refusal lists them.
-var connectOptions = []string{"--config-file", "--environment", "--org", "--remove", "--scope", "--seller",
-	"--token-env", "--transport"}
+var connectOptions = []string{"--alias", "--company-domain", "--config-file", "--environment", "--org", "--remove",
+	"--scope", "--seller", "--token-env", "--transport"}
+
+// speakerOptions are the options that set who a card's speakers are: the seller list and the speaker
+// settings. Every real source's connect takes them.
+var speakerOptions = []string{"--seller", "--alias", "--company-domain"}
 
 // validSellers is whether a list is one a workspace may hold as its sellers: at most 200 names or Slack
 // IDs, each of 1 to 200 characters.
@@ -158,6 +163,28 @@ func (r *run) connect(ctx context.Context) (any, error) {
 	if listed && !validSellers(sellers) {
 		return nil, refused("Name at most 200 sellers with --seller, each a name or Slack ID of 1 to 200 characters.")
 	}
+	domains, domainsGiven := r.args.lists["--company-domain"]
+	for _, d := range domains {
+		if !evidence.ValidDomain(d) {
+			return nil, refused("A --company-domain is a mail domain in lower case, such as example.com.")
+		}
+	}
+	if len(domains) > evidence.MaxCompanyDomains {
+		return nil, refused("Name at most %d company domains with --company-domain.", evidence.MaxCompanyDomains)
+	}
+	texts, aliasesGiven := r.args.lists["--alias"]
+	var aliases []evidence.Alias
+	for _, text := range texts {
+		alias, ok := parseAlias(text)
+		if !ok {
+			return nil, refused("An --alias is LABEL=EMAIL or LABEL=SELLER, with CONTENT_SHA256: before the label " +
+				"for one call's transcript. The label and a seller have 1 to 200 characters.")
+		}
+		aliases = append(aliases, alias)
+	}
+	if len(aliases) > evidence.MaxAliases {
+		return nil, refused("Name at most %d aliases with --alias.", evidence.MaxAliases)
+	}
 	if kinds[0].attach == nil {
 		return nil, &failure{code: 3, message: "connect " + name + " is not available in this build. " +
 			"Nothing was connected, and demo data is never read in its place."}
@@ -165,7 +192,32 @@ func (r *run) connect(ctx context.Context) (any, error) {
 	if err := r.open(ctx); err != nil {
 		return nil, err
 	}
-	before, after, err := r.attach(ctx, kinds, sellers)
+	// The speaker settings: each list given replaces the saved one, and one not given is kept.
+	speakers := ""
+	if domainsGiven || aliasesGiven {
+		saved := speakerSettings{}
+		if r.exists {
+			text, err := r.store.Speakers(ctx, r.workspace.ID)
+			if err != nil {
+				return nil, err
+			}
+			if saved, err = readSpeakers(text); err != nil {
+				return nil, err
+			}
+		}
+		if domainsGiven {
+			saved.domains = domains
+		}
+		if aliasesGiven {
+			saved.aliases = aliases
+		}
+		speakers = saved.encode()
+		if len(speakers) > evidence.MaxSettingsBytes {
+			return nil, refused("The speaker settings would take %d bytes, and a workspace holds at most %d. Name "+
+				"fewer or shorter aliases. Nothing was saved.", len(speakers), evidence.MaxSettingsBytes)
+		}
+	}
+	before, after, err := r.attach(ctx, kinds, sellers, speakers)
 	if err != nil {
 		return nil, err
 	}
@@ -191,6 +243,7 @@ func (r *run) connected(ctx context.Context) (any, error) {
 	}
 	var rows []postgres.Connection
 	sellers := []any{}
+	var speakers speakerSettings
 	if r.exists {
 		var err error
 		if rows, err = r.store.Connections(ctx, r.workspace.ID); err != nil {
@@ -203,9 +256,24 @@ func (r *run) connected(ctx context.Context) (any, error) {
 		for _, seller := range saved {
 			sellers = append(sellers, seller)
 		}
+		text, err := r.store.Speakers(ctx, r.workspace.ID)
+		if err != nil {
+			return nil, err
+		}
+		if speakers, err = readSpeakers(text); err != nil {
+			return nil, err
+		}
 	}
 	sources, err := shownSources(rows, connectedSources(rows))
-	return strictjson.NewObject("schema_version", 1, "sources", sources, "sellers", sellers), err
+	status := strictjson.NewObject("schema_version", 1, "sources", sources, "sellers", sellers)
+	// The speaker settings are listed when they are set.
+	if len(speakers.domains) > 0 {
+		status.Set("company_domains", speakers.domainValues())
+	}
+	if len(speakers.aliases) > 0 {
+		status.Set("aliases", speakers.aliasValues())
+	}
+	return status, err
 }
 
 // pinnedElsewhere refuses a source whose identity is not the one its workspace is pinned to.
@@ -228,7 +296,8 @@ var unpinned = &failure{code: 3, next: "gtm-connector connect --help",
 // that is not that one is refused here for every kind. A CRM with an identity is refused in a workspace
 // whose CRM row has no pin, as the Python package refuses a state folder with no pinned connection. So
 // calls and Slack, which belong to their CRM, are only ever kept beside the CRM they were connected to.
-func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string) (before, after []postgres.Connection, err error) {
+func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string,
+	speakers string) (before, after []postgres.Connection, err error) {
 	holds := "demo"
 	switch {
 	case kinds[0].besideDemo && r.exists:
@@ -304,7 +373,7 @@ func (r *run) attach(ctx context.Context, kinds []*sourceKind, sellers []string)
 			return postgres.SourceUpdate{}, local("This workspace's sources changed while connect ran. Nothing was " +
 				"saved. Run the command again.")
 		}
-		return postgres.SourceUpdate{Changes: changes, Sellers: sellers}, nil
+		return postgres.SourceUpdate{Changes: changes, Sellers: sellers, Speakers: speakers}, nil
 	})
 	if errors.Is(err, postgres.ErrDemoCallNotes) {
 		err = demoCallNotesHeld

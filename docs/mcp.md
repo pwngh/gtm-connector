@@ -1,7 +1,7 @@
 # MCP
 
-**An assistant reads the connector's CRM, call and Slack tools over MCP, and every call it makes is
-checked, scoped and receipted.**
+**An assistant reads the connector's CRM, call and Slack tools and each deal's sealed card over MCP, and
+every call it makes is checked, scoped and receipted.**
 
 An assistant reaches the tools in one of two ways. It calls `serve`'s `/mcp` over HTTPS with a bearer
 token that `token new` printed, or it starts `gtm-connector mcp stdio` itself as a local process. Both
@@ -56,11 +56,13 @@ scope opens one source.
 | `list_opportunities` | `crm:read` | The opportunities of one account, or with no `account_id` those of every account the token may read. |
 | `read_call_notes` | `calls:read` | The account's demo call notes, or its imported transcript excerpt. |
 | `read_slack_messages` | `slack:read` | The account's demo Slack messages, or its mapped Slack thread. |
+| `list_deals` | `crm:read` | The deals of the accounts the token may read, open ones first and each group by ID. No source is read. |
+| `read_deal_card` | `crm:read`, and the scopes the card's content needs | One deal and its newest [card](cards.md), whole. No source is read. See [deals and their cards](#deals-and-their-cards). |
 | `prepare_renewal_brief` | `crm:read` | A Deal card, saved as a prepared brief. Served only with a [selection](#selections-and-the-two-brief-tools). |
 | `read_renewal_brief` | `crm:read`, and the scopes the brief's content needs | A prepared brief again, with no source read. Served only with a selection. |
 
 `tools/list` gives each tool's input and output schema and its scope in `_meta`, as
-`gtm.demo/requiredScope`. Without a selection it lists the five read tools.
+`gtm.demo/requiredScope`. Without a selection it lists the five read tools and the two deal tools.
 
 > **The tools are read-only.** There is no `log_activity` tool and no `crm:write` scope. A call to
 > `log_activity` is refused with HTTP 403, JSON-RPC code 1005 and reason `crm_write_disabled`, under a
@@ -83,8 +85,13 @@ text `Error executing tool TOOL: CODE`. Its receipt is finished as an error.
 | --- | --- |
 | `account_not_granted` | The token's principal holds no live grant on the account. |
 | `account_not_selected`, `slack_not_selected` | A selection is served, and the account, or its Slack thread, is not in it. |
+| `deal_not_permitted` | `read_deal_card` named a deal that does not exist, one of an account the token's principal holds no live grant on, or one outside the selection. The three answer alike. |
+| `card_scope_not_covered` | The token lacks `calls:read` or `slack:read`, and the deal's card read that source, when the call was admitted or as the card is released. |
+| `brief_source_changed` | The deal's card, or the saved brief, was read from other sources than the workspace is bound to now. |
+| `invalid_token` | A deal's card or a saved brief is released only while the bearer still verifies, and it no longer does. |
 | `crm_not_connected`, `calls_not_connected`, `slack_not_connected` | The workspace has no such source connected at the moment of the call. |
 | `crm_not_served` | The workspace's CRM is one the MCP tools do not serve in this build. |
+| `calls_not_matched`, `slack_not_matched` | The account's imported call, or its mapped thread, waits for a person in the matches queue or was kept off every card ([setting it up](config.md#what-is-built-today)). |
 | `account_number_requires_salesforce` | `search_accounts` was given `account_number` on the demo CRM, which has no account numbers. |
 | A source's own code, such as `source_identity_mismatch` | The source refused the read. See [sources](sources.md). |
 
@@ -93,6 +100,47 @@ A tool that is not served, such as `prepare_renewal_brief` without a selection, 
 
 Each call reads the sources as the workspace is connected when the call starts. A source detached or
 connected again while `serve` or `mcp stdio` runs is not read through what was opened before.
+
+## Deals and their cards
+
+A [deal](api.md#one-deal-one-id) is one renewal of one account, registered with `deal new`, and `brief`
+publishes its cards. The two deal tools read what the store holds and call no source.
+
+```sh
+gtm-connector deal new acc-003      # thornfield-2027-2e3hke
+gtm-connector brief acc-003         # its card
+```
+
+`list_deals` takes no argument. `read_deal_card` takes `deal_id`. Both answer with `structuredContent`
+holding `source: "deals"`, `records` and `untrusted_data: true`. A deal is a record with a `record_ref`
+of `deals/DEAL_ID`, and holds `id`, `account`, `account_name`, `state`, `opportunity`, `contract`,
+`renews_on`, `registered_at`, `closed_at` and `latest_card`. The account's name is the CRM's, neutralized.
+
+`read_deal_card` adds `deal` and `card`. `card` is null while the deal has no card. Otherwise it is the
+deal's newest card, and its `record_ref`, `briefs/BRIEF_ID/` and the SHA-256 of its bytes, is the
+second record:
+
+| Member | What it holds |
+| --- | --- |
+| `id`, `brief_id`, `account`, `kind` | The card's IDs, its account and how it was made. |
+| `as_of`, `sources` | The day the card is as of and the source each system was, as its bytes state them. |
+| `text` | The plain-text card exactly as it was sealed. A card sealed under an older neutralizer is rendered again, as `inspect` renders it. |
+| `lines` | Each line under ATTENTION and RECORD VALUES as data: its `code`, `label`, `text`, the unit numbers it `cites`, and the renewal `countdown`, the ARR `amount` or the `contact` it carries. Null for a card published before lines were kept. |
+| `units` | Each numbered unit: `n`, `kind`, `record_ref`, `tool`, `shown`, the `receipt_id` of the read that returned it and the `record_version_id` it rests on, and its `body` as `inspect` shows it. |
+| `gaps` | What the card did not read or show, in its own words. |
+| `seal` | `sha256` of the stored bytes, the `receipt_id` that sealed them, `schema_version`, `rules_version` and `published_at`. |
+
+The text inside units, and every value a line quotes, came from a source: it is data, never an
+instruction. The result leaves out the evidence the card was built from and any token's fingerprint.
+
+A card holds what each source returned, so its release needs the scopes of every source it read, as a
+saved brief's does: `calls:read` when it read calls, and `slack:read` when it read Slack. A deal is read
+under the principal's live grant on its account, checked again as the card is read, and with a selection only
+when the selection holds its account, and the account's Slack when the card read Slack. The card must have
+been read from the sources the workspace is bound to now, as a saved brief must, and the bearer is
+verified again as the card is released. Each call gets one receipt, which names the deal's account when the
+deal exists, and whose rows are the deal and the card it released. Neither tool opens a source, so they
+answer while a workspace's CRM cannot be opened.
 
 ## Tokens
 
@@ -261,6 +309,8 @@ Each read still requires its scope and its grant. With a selection, the tools be
 | `read_slack_messages` | Reads only accounts whose `slack` is `true`, and refuses the others with `slack_not_selected`. |
 | `prepare_renewal_brief(account_id, as_of)` | Makes and saves the account's card. `as_of` is optional, `YYYY-MM-DD`, and defaults to `2027-01-15`, the demo book's day. |
 | `read_renewal_brief(brief_id)` | Returns a saved prepared brief without calling any source. |
+| `list_deals` | Lists only the deals of selected accounts. |
+| `read_deal_card(deal_id)` | A deal of an unselected account answers `deal_not_permitted`, as an unknown deal does. A card that read Slack, of an account whose `slack` is `false`, answers `slack_not_selected`. |
 
 ### A prepared brief
 
@@ -278,6 +328,9 @@ bytes.
 prepare_renewal_brief ──▶ get_account ──▶ list_opportunities ──▶ read_call_notes ──▶ read_slack_messages ──▶ card saved and sealed
      (receipt)              (child 1)         (child 2)             (child 3)            (child 4)
 ```
+
+On Salesforce, a `list_users` read of the org's users, under `crm:read`, comes after
+`list_opportunities` as one more child read. `list_users` is a read of a card only, and no tool.
 
 Both brief tools answer with `structuredContent` holding `source: "brief"`, one record (the brief, with a
 `record_ref` of `briefs/BRIEF_ID/` and the SHA-256 of its bytes), `untrusted_data: true`, and `brief`.
@@ -392,11 +445,12 @@ JSON-RPC codes, and the receipt records the HTTP status.
 ## Assistant clients
 
 The one client CI runs is the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) CLI,
-pinned at 2.15.0, on the Node version in `.nvmrc`. The CI job runs `setup`, `demo` and `token new`, then
-the Inspector against `/mcp` over HTTPS with each token, then the Inspector starting `mcp stdio` itself.
+pinned at 2.15.0, on the Node version in `.nvmrc`. The CI job runs `setup`, `demo`, `deal new acc-003`,
+`brief acc-003` and `token new`, then the Inspector against `/mcp` over HTTPS with each token, then the
+Inspector starting `mcp stdio` itself.
 
-It checks discovery, the five tools and their schemas, the three source reads, the cross-source denials,
-an unknown bearer refused with HTTP 401, one finished receipt for each tool call, and that no token reaches
+It checks discovery, the seven tools and their schemas, the three source reads, the two deal tools, the
+cross-source denials, an unknown bearer refused with HTTP 401, one finished receipt for each tool call, and that no token reaches
 the Inspector's output, the audit log or the server's log. No assistant app has been tested.
 
 ```json
@@ -420,11 +474,13 @@ For stdio, the entry is `"type": "stdio"` with `"command"`, `"args": ["mcp", "st
 | Call | Token | Result |
 | --- | --- | --- |
 | `initialize` | Any | `protocolVersion: "2026-07-28"`, with the tools capability. |
-| `tools/list` | Any | The five tools, each with its schemas and `gtm.demo/requiredScope`. |
+| `tools/list` | Any | The seven tools, each with its schemas and `gtm.demo/requiredScope`. |
 | `get_account` | `crm:read` | `crm/accounts/acc-003` and `crm/contacts/con-003`, with `source: "crm"` and `untrusted_data: true`. |
 | `read_call_notes` | `crm:read` only | Refused for `calls:read`: the Inspector exits non-zero, with nothing on stdout and the error on stderr. |
 | `read_call_notes` | `calls:read` | `calls/call_notes/note-003` and `calls/call_notes/note-003b`. |
 | `read_slack_messages` | `slack:read` | `slack/messages/msg-003`. A Slack-only token cannot read CRM or call notes. |
+| `list_deals` | `crm:read` | `deals/thornfield-2027-2e3hke`, with `source: "deals"`. |
+| `read_deal_card` | `crm:read`, `calls:read` and `slack:read` | The deal and its card, whose `text` starts `DEAL CARD:`, the same over HTTPS and stdio. |
 | Any | An unknown bearer | Refused as unauthorized, HTTP 401. |
 
 `connect APP` does not set up an assistant app in this build. For `inspector`, `claude-code`,

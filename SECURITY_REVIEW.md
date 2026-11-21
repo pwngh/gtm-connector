@@ -30,11 +30,13 @@ and `TestOnlyACallPastTheBearerCheckIsCounted`.
 ## Who holds authority
 
 The connector trusts the machine it runs on and the person who runs it. Everyone else reaches it
-through a check: an assistant with a bearer token, and a browser with a signed-in session.
+through a check: an assistant with a bearer token, and a browser with a signed-in session. When
+`serve` signs people in through their company's identity provider, it also trusts that provider to say
+who a person is.
 
 ```text
 assistant ─────── HTTPS, bearer ───▶ ┌──────────────────────┐ ──▶ PostgreSQL, as the app role
-browser ───────── HTTPS, cookie ───▶ │ serve: /mcp and /api │
+browser ───────── HTTPS, cookie ───▶ │ serve: /mcp and /api │ ──▶ the identity provider: discovery, keys, the code
 assistant app ─── stdin, stdout ───▶ │ mcp stdio            │ ──▶ Salesforce: an sf login or a token
 operator ──────── database URL ────▶ │ every other command  │ ──▶ Slack: the saved sign-in
                                      └──────────────────────┘
@@ -46,12 +48,18 @@ Three things carry the operator's authority, and whoever holds one holds that pa
   commands connect with. The owner role's URL (`GTM_OWNER_DATABASE_URL`) runs setup, migrations,
   backup and restore. That role owns the tables, so it can switch their triggers off.
 - **The credentials folder** (`GTM_CREDENTIALS_DIR`). It holds the TLS key and certificate, the key that
-  signs the browser's pre-sessions, the demo sign-in's password, and each workspace's Slack sign-in.
+  signs the browser's pre-sessions and sign-in flows, the demo sign-in's password, each workspace's
+  Slack sign-in, and the identity provider's client secret when the client is confidential.
 - **The source logins.** An `sf` alias's login or a Salesforce token handed to the process, and the
   saved Slack sign-in. The connector reads with whatever they may read, through its fixed queries.
 
 > **Whoever holds the app role's credentials holds every workspace.** Give the app role's URL, and its
 > password, only to people who may read every connected workspace.
+
+The identity provider holds authority of its own. With `GTM_OIDC_ISSUER` set, its ID token decides who a
+person is. Whoever administers the provider can make an account in an allowed domain or tenant, or sign
+in as any of its people, and so read what the operator has granted that person. The provider grants
+nothing itself: a person it signs in for the first time reads nothing until the operator runs `grant`.
 
 That role cannot change the schema or switch a trigger off. Within the triggers' rules, it reads and
 writes rows:
@@ -61,8 +69,9 @@ writes rows:
 - With it, the binary issues a token for any connected workspace, with any read scope, and serves
   `mcp stdio` for one. Neither asks for a session or any other sign-in.
 - It writes principals, grants, token rows and session rows directly. A token row it writes is a
-  working bearer. A session row it writes is accepted for any enabled person, of any workspace: the
-  demo-only rule is on password sign-in, not on sessions.
+  working bearer. A session row it writes is accepted for any enabled person whose sign-in `serve`
+  offers: a demo person's while the demo sign-in is on, and a provider's person's only for the provider
+  and the workspace `serve` signs in. The demo-only rule is on password sign-in, not on sessions.
 - It can read a pending receipt's lease token, and so finish that receipt in place of the process
   that started it.
 - A workspace's kind does not show that its evidence is invented: a demo workspace may hold imported
@@ -75,7 +84,7 @@ writes rows:
 | `serve` listens on a loopback address and refuses any other `GTM_LISTEN`. Only `GTM_CONTAINER_LISTEN`, set for a container's own network, takes another address. | `TestServeListensOnLoopbackOnly` (`cmd/gtm-connector`) |
 | `serve` speaks TLS 1.3 only, with the certificate `setup` wrote. | `TestServeSpeaksOnlyTLS13`, `TestServeAnswersMCPOverTLS` (`cmd/gtm-connector`) |
 | Outside `/mcp`, `serve` answers only the Hosts it is configured with, which also blocks DNS rebinding: any other Host gets 421, and another allowed Host is sent on to the public origin. `/mcp` admits the public origin's own Host alone (rule 3). | `TestWrongHostIsRefused`, `TestOtherAllowedHostsGoToThePublicOrigin` (`transport/http`), `TestOptionsStarMeetsTheHostCheck` (`cmd/gtm-connector`) |
-| The browser signs in with a password only, and the database holds a password sign-in only for a person of a demo workspace. A principal reads nothing of another workspace. | `TestSessionsRotateExpireAndRevoke` (`storage/postgres`), `TestOtherWorkspacesAndMissingThings` (`authz`) |
+| The browser signs in two ways: the demo sign-in, with a password the database holds only for a person of a demo workspace, and sign-in through the identity provider, which stores no password. `serve` refuses to start with the demo sign-in on beside a provider that signs in a workspace of real sources. With the demo sign-in off, it signs nobody in and a demo person's session opens nothing. A principal reads nothing of another workspace. | `TestSessionsRotateExpireAndRevoke` (`storage/postgres`), `TestOtherWorkspacesAndMissingThings` (`authz`), `TestServeRefusesSignInSettingsItCannotServe` (`cmd/gtm-connector`), `TestSessionsFollowTheSignInsOffered` (`transport/http`) |
 
 ### Tokens
 
@@ -97,6 +106,39 @@ describes both.
 | A revoked token is refused from its next call. | `TestATokenFromTheCommandOpensMCP`, `TestStdioCommandGrantsAndRevocation` (`cmd/gtm-connector`) |
 | A token gets 60 tool calls in 60 seconds. A call is counted once the gate's checks of its size, its parsing, its Host and its bearer have passed, whether a later check refuses it or not, and a call those checks refuse is not counted. The next one is refused `rate_limited`: HTTP 429 with a `Retry-After` header over HTTPS, and JSON-RPC code 1002 over stdio. | `TestOnlyACallPastTheBearerCheckIsCounted`, `TestRateLimitCountsScopeDenials`, `TestMountedBadTokensAreRefused` (`transport/mcp`), `TestStdioCommandChargesScopeDenials` (`cmd/gtm-connector`) |
 | The token of `mcp stdio` lasts at most two minutes unless the running process renews it. It is revoked when the session ends: at the end of input, when the app closes stdout, and when the app stops reading. | `TestStdioTokenLastsTwoMinutes`, `TestStdioCommandCRMOnlyReadsCRMAndNeverWidens`, `TestStdioClosedStdoutRevokesTheToken`, `TestStdioClientThatStopsReadingRevokesTheToken` (`cmd/gtm-connector`) |
+
+### Sign-in through the identity provider
+
+With `GTM_OIDC_ISSUER` set, `serve` signs the people of one workspace in through their company's identity
+provider, with the OpenID Connect authorization code flow and PKCE, as a confidential or a public client.
+[Running it](docs/operations.md#sign-in-through-your-identity-provider) says how to set it up. A person
+is the issuer and the subject of the provider's ID token, never an email. They start with no grant, and
+the operator gives each account with `grant`, under a receipt. A deal is read through a grant on its
+account, as a card is. Ops takes no role of its own: Coverage and Activity read through the same grants.
+
+```text
+browser ── /api/v1/session/oidc ──▶ serve: flow cookie ──▶ provider: sign-in ──▶ /api/v1/session/oidc/callback
+        ──▶ serve: state, code + verifier, ID token, nonce ──▶ session for the person ──▶ the page asked for
+```
+
+| Claim | Test |
+| --- | --- |
+| A sign-in starts at `/api/v1/session/oidc`, which sets a flow cookie (`__Host-`, `Secure`, `HttpOnly`, `SameSite=Lax`) that holds a random flow ID, its expiry and the page to return to, under an HMAC with the session key. The state, the nonce and the PKCE verifier are derived from the flow ID with that key, so the browser holds none of them. The provider gets the verifier's S256 challenge, and only the verifier opens the code. | `TestASignInThroughTheProvider` (`transport/http`), `TestTheCodeOpensOnlyWithItsVerifier` (`oidc`) |
+| The callback starts no session, and sends the provider no code, for a missing, expired or foreign flow cookie, a wrong or repeated state, an authorization response without the `iss` its provider adds, and a flow that has signed in once already, even when the provider would take its code twice. A used flow is recorded by its flow ID, and the cookie's parts are read as strict base64, so a cookie respelled in the bits base64 leaves unused is refused too. | `TestSignInsThatAreRefused`, `TestAFlowSignsInOnceHoweverItsCookieIsSpelled` (`transport/http`), `TestDiscoveryRefusals` (`oidc`) |
+| The ID token is verified with a key of the provider's key set that fits its algorithm (RS256 to RS512, PS256 to PS512, ES256 to ES512, or EdDSA, which a key or a token may also name Ed25519) and, when the token names one, its key ID. `alg: none`, HS256 keyed with the provider's public key, a critical header and an access token's type are refused, no key is taken from the token, and an RSA key under 2048 bits verifies nothing. | `TestTokensThatDoNotVerify`, `TestEveryAlgorithmOfTheProvidersKeys`, `TestAKeyPublishedAsEd25519VerifiesEdDSA` (`oidc`) |
+| Its claims: `iss` is the issuer, `aud` this client and no other, `azp` this client when it is there, `exp` not passed, `iat` at most ten minutes old and `nbf` passed, each with a minute's leeway, `nonce` the flow's own, and `sub` plain text. A claim named twice refuses the token. A token another sign-in received is refused for its nonce. | `TestTokensThatDoNotVerify` (`oidc`), `TestSignInsThatAreRefused` (`transport/http`) |
+| The provider's key set is kept for at most an hour, or as long as its `Cache-Control` says, at least a minute. A token under a key the kept set lacks reads the set again, at most once in ten seconds, so a key the provider rotated in signs in, and a key it retired verifies nothing once the set is read again. | `TestKeyRotation` (`oidc`) |
+| The discovery document must name the configured issuer, give https endpoints, and take the S256 challenge. A discovery document or a key set that fails to read is not asked for again for five seconds, so sign-ins do not wait on a failing provider one after another. | `TestDiscoveryRefusals`, `TestAFailingProviderIsAskedAgainAfterFiveSeconds` (`oidc`) |
+| Only a person the configuration allows signs in: an email the provider verified in an allowed domain, and the tenant claim (`hd` or `tid`) when one is set. `email_verified` counts as true or false, or the text `"true"` or `"false"`; any other value refuses the token. A person refused gets no principal. `serve` refuses a configuration that names neither a domain nor a tenant. | `TestWhoMaySignIn`, `TestEmailVerifiedSentAsText` (`oidc`), `TestSignInsThatAreRefused` (`transport/http`), `TestServeRefusesSignInSettingsItCannotServe` (`cmd/gtm-connector`) |
+| A person is found by issuer and subject: another subject with the same email is another person. A new person reads nothing, and with a grant on one account reads that account alone, until it is revoked. | `TestASignInThroughTheProvider` (`transport/http`), `TestGrantsThroughTheCommandOpenAccountsInTheBrowser` (`cmd/gtm-connector`) |
+| Ops is read through the same grants: the account list, an account's cards, a card, a receipt and the deals hold the accounts a person is granted and no other, and a person granted every account reads the whole book. | `TestOpsReadsOnlyWhatAPersonIsGranted` (`transport/http`) |
+| A sign-in returns only to a page of the web app; any other address returns to `/`. | `TestASignInReturnsOnlyToThisApp` (`transport/http`) |
+| A session from the provider lasts 60 minutes, or `GTM_OIDC_SESSION_MINUTES`, from 5 to 720. It opens nothing once `serve` no longer signs in that provider's workspace. A sign-in ends the session the browser held. | `TestSessionsFollowTheSignInsOffered`, `TestSigningOutOffersTheProvidersSignOut` (`transport/http`) |
+| `serve`'s surface itself refuses the demo sign-in beside a provider that signs in a workspace of real sources, as `serve` does before it listens. | `TestTheDemoSignInIsRefusedBesideAProviderOfALiveWorkspace` (`transport/http`), `TestServeRefusesSignInSettingsItCannotServe` (`cmd/gtm-connector`) |
+| A sign-out ends the session at the connector and, for a person of the provider, offers the provider's own sign-out page when the provider publishes one. It leaves the provider's own session as it is. | `TestSigningOutOffersTheProvidersSignOut` (`transport/http`), `TestTheEndSessionAddressIsTheProvidersForThisClient` (`oidc`) |
+| A sign-in, kept or refused, gets no receipt. It is one line of the log of `serve`, by the principal and the workspace, or by the reason it was refused, with no token, code, secret or email. | `TestASignInThroughTheProvider`, `TestSignInsThatAreRefused` (`transport/http`) |
+| `grant` gives or revokes one person's grant on one account, and `grant --disable` ends a person's sessions at once and refuses their sign-ins, with their grants kept, until `grant --enable`. Each change runs under a receipt committed before it, the change commits with that receipt's finish, and a person or an account the workspace does not have keeps its receipt, finished as an error. | `TestGrantsThroughTheCommandOpenAccountsInTheBrowser`, `TestDisablingAPersonEndsTheirSessionsAtOnce` (`cmd/gtm-connector`) |
+| The grant commands name only people of the issuer `serve` signs in through, `GTM_OIDC_ISSUER`: `--to` by an email that issuer verified, `--subject` by subject. A subject given as `--to`, an email the provider did not verify, and a person of another issuer name nobody, and an email two people share is refused with the subjects it matched. | `TestGrantNamesOnlyAPersonOfServesIssuer`, `TestGrantsThroughTheCommandOpenAccountsInTheBrowser` (`cmd/gtm-connector`) |
 
 ## 1. A receipt comes before every tool call
 
@@ -200,7 +242,7 @@ In the browser, a session reads a card, a unit or a receipt only through a grant
 | The database's clock decides expiry: a process whose clock is behind still refuses a token the database says has expired. | `TestMountedExpiryIsTheDatabasesClock` (`transport/mcp`) |
 | Once the token of `mcp stdio` has expired, calls and listings are refused, nothing is retried with another token, and the expired token is never renewed. | `TestStdioCommandExpiredTokenIsRefusedNotRetried` (`cmd/gtm-connector`) |
 | The browser API takes its session cookie only. A bearer, alone or beside the cookie, is refused, and the cookie opens nothing at `/mcp`. | `TestCookiesAndBearerTokensNeverCross` (`transport/http`), `TestMountedBadTokensAreRefused` (`transport/mcp`) |
-| The session cookie is `__Host-` named, `Secure`, `HttpOnly` and `SameSite=Lax`. Sign-in rotates the session and its CSRF token, a pre-session signs in once, and a session expires, can be revoked, and ends when its principal is disabled. | `TestSignInRotatesTheSessionAndCSRF`, `TestConcurrentSignInsFromOnePreSession`, `TestSessionsExpireAndCanBeRevoked`, `TestADisabledPrincipalIsSignedOut` (`transport/http`) |
+| The session cookie is `__Host-` named, `Secure`, `HttpOnly` and `SameSite=Lax`. Sign-in rotates the session and its CSRF token, a pre-session signs in once, also under a cookie respelled in the bits base64 leaves unused, and a session expires, can be revoked, and ends when its principal is disabled. | `TestSignInRotatesTheSessionAndCSRF`, `TestConcurrentSignInsFromOnePreSession`, `TestAPreSessionSignsInOnceHoweverItsCookieIsSpelled`, `TestSessionsExpireAndCanBeRevoked`, `TestADisabledPrincipalIsSignedOut` (`transport/http`) |
 | Every browser write needs one `Origin` equal to the public origin and the session's own CSRF token. | `TestWritesNeedTheConfiguredOrigin`, `TestEveryWriteNeedsItsCSRFToken` (`transport/http`) |
 | `/mcp` admits only the public origin's own Host, over TLS, with no `Origin` header. | `TestMountedHostAndOriginChecks` (`transport/mcp`) |
 | Salesforce: the first HTTP 401 in a read asks for the login once more, and the read goes on only with a login of the same org and user. Any other login is refused, and nothing is read with it. | `TestAnExpiredTokenAsksSFOnce`, `TestAnExpiredTokenReadsTheEnvironmentOnce`, `TestALoginReadsAsOneUser`, `TestATokenForAnotherOrgThanTheAliasNamesIsRefused` (`sources/salesforce`) |
@@ -217,7 +259,7 @@ bytes. Publication checks every unit against the read it cites, in one transacti
 
 | Claim | Test |
 | --- | --- |
-| The card maker writes a card from its evidence alone: from the recorded evidence it rebuilds all 450 recorded cards byte for byte, with the same units, gaps and seal. | `TestCardsFromDemoStores`, `TestCardsFromRecordedInputs` (`cards`) |
+| The card maker writes a card from its evidence alone: it builds every one of the 450 recorded cards from its inputs, each verifies against its seal and its read receipts, and each of the 90 golden cards is its recorded bytes, with the same units, gaps and seal. | `TestCardsFromInputs` (`cards`) |
 | The database refuses a card whose seal does not name its bytes, whose unit and gap rows differ from its bytes, or whose units cite a read that did not finish ok, a read of another account or brief, a read whose source has moved, or a record version that read did not bind. | `TestCardSealMustNameItsBytes`, `TestTheTriggersHoldTheCardRules`, `TestACardHoldsExactlyTheRowsItCounts`, `TestPublishChecksEveryUnitsProvenance` (`storage/postgres`) |
 | A card, its units, gaps and lines, and every record version and binding are never changed or deleted once written. | `TestDurableRowsRefuseChange` (`storage/postgres`) |
 | Evidence that fails a check gives no card: a refused evidence vector, a live thread that is not its snapshot, another workspace's transcript, and a read whose source moved. | `TestEvidenceVectors` (`evidence`), `TestAThreadThatFailsItsSnapshotGivesNoCard`, `TestAnotherWorkspacesTranscriptGivesNoCardOnPostgres`, `TestReceiptsRuleOnPostgres` (`cards`) |
@@ -239,8 +281,8 @@ whole sentence with its speaker's role, which comes from a label and never from 
 | A bare mail address in quotation text becomes `[link mail]`, as one in angle brackets does, since a client may link either, also one whose domain starts with `www.`. A `]` right before a `(` in a quotation gets a space between, so no quotation, and no marker beside a `(`, is a Markdown link: of random text, no quotation holds `](` or a bare address. A contact's email, a record value the connector writes, is shown as the CRM holds it. A unit sealed under neutralizer version 4 is shown with its address replaced. | `TestABareMailAddressInAQuotationIsNeutralized`, `TestNoQuotationIsALinkOrABareAddress`, `TestACardQuotesNoBareAddressAndKeepsTheContactsEmail`, `TestAUnitOfVersion4ShowsNoBareAddress` (`evidence`) |
 | A unit sealed under an older neutralizer version is shown under today's rules, its quotation and speaker neutralized again, by `inspect`, the CLI's card, the web API and the brief tools. Its card's bytes stay as sealed and still verify. | `TestAnOlderCardsTextIsRenderedAgain` (`evidence`), `TestACardSealedUnderOlderRulesVerifiesAndShows`, `TestTheCLIPrintsAnOlderCardRenderedAgain` (`cmd/gtm-connector`), `TestAUnitSavedUnderOlderRulesIsShownUnderTodays` (`transport/http`), `TestABriefToolShowsAnOlderUnitUnderTodaysRules` (`mcptools`) |
 | The browser's account names, the receipt arguments `inspect` shows and the names of members in printed JSON are neutralized too, and `--json` writes format characters as escapes. | `TestAccountsListThePrincipalsGrants` (`transport/http`), `TestInspectShowsAReceiptsArgumentsInert`, `TestNeutralMakesMemberNamesInert`, `TestFormatCharactersAreEscapedInJSON` (`cmd/gtm-connector`) |
-| A quotation is a whole sentence: one an excerpt's edge cuts is kept as a unit marked partial and never quoted in the card's text, and a figure inside a sentence stays there and never becomes a record value. | `TestCardsFromDemoStores` (`cards`, its ten invented cases), `TestExcerptEdgeCutsASentence` (`evidence`) |
-| A speaker's role comes from a label, never from wording: a seller's retelling stays the seller's, a name a seller and a contact share is unknown, and a stated name is the only label of its cue. | `TestCardsFromDemoStores` (`cards`, its ten invented cases), `TestAStatedNameIsTheOnlyLabelOfACue` (`evidence`), `TestAVoiceTagAfterAStatedNameIsRefused` (`sources/calls`) |
+| A quotation is a whole sentence: one an excerpt's edge cuts is kept as a unit marked partial and never quoted in the card's text, and a figure inside a sentence stays there and never becomes a record value. | `TestCardsFromInputs` (`cards`, its ten invented cases), `TestExcerptEdgeCutsASentence` (`evidence`) |
+| A speaker's role comes from a label, never from wording: a seller's retelling stays the seller's, a name a seller and a contact share is unknown, and a stated name is the only label of its cue. | `TestCardsFromInputs` (`cards`, its ten invented cases), `TestAStatedNameIsTheOnlyLabelOfACue` (`evidence`), `TestAVoiceTagAfterAStatedNameIsRefused` (`sources/calls`) |
 | Every response of the web app carries a Content-Security-Policy that names no other origin and allows no inline script but the theme script, which it names by its hash. | `TestEveryDocumentIsUnderThePolicy` (`transport/http`) |
 
 ### Where source text shows
@@ -250,7 +292,7 @@ show source text as it is stored, for checking a seal or tracing a read.
 
 | Surface | What it shows | Who can reach it | Test |
 | --- | --- | --- | --- |
-| The card's text: `brief`, `GET /api/v1/cards/{card}/text`, the web app | Rendered and neutralized | The app role's URL; a session with a grant on the card's account | `TestCardsFromDemoStores` (`cards`), `TestACardServesItsLinesAndItsText` (`transport/http`) |
+| The card's text: `brief`, `GET /api/v1/cards/{card}/text`, the web app | Rendered and neutralized | The app role's URL; a session with a grant on the card's account | `TestCardsFromInputs` (`cards`), `TestACardServesItsLinesAndItsText` (`transport/http`) |
 | Units, gaps and lines: `inspect BRIEF_ID`, `GET /api/v1/cards/{card}`, the `text` and `units` of the two brief tools | Rendered and neutralized, as sealed | The app role's URL; a session with a grant; a token with `crm:read`, a grant and a selection | `TestReadmeShowsWhatTheInspectCommandPrints` (`cmd/gtm-connector`), `TestEvidenceReadsNeedAGrant` (`transport/http`) |
 | `accounts`, `inspect ACCOUNT_ID`, `inspect RECEIPT_ID`, `GET /api/v1/accounts` | Neutralized | The app role's URL; a session | `TestInspectShowsAReceiptsArgumentsInert`, `TestNeutralMakesMemberNamesInert` (`cmd/gtm-connector`), `TestAccountsListThePrincipalsGrants` (`transport/http`) |
 | `GET /api/v1/cards/{card}/bytes` | Export: the whole sealed artifact, its `evidence.records` unneutralized. The web app fetches it for each card it opens, to check the seal, and drops `evidence` as it parses it. | A session with a grant on the card's account | `TestEvidenceReadsNeedAGrant` (`transport/http`) |
@@ -280,7 +322,7 @@ since, so a source detached or connected again is never read through what was op
 | `serve` and `mcp stdio` read the sources as connected when each call starts: a source removed while they run is refused, and read again once connected again. | `TestServeFollowsWhatTheWorkspaceIsConnectedTo`, `TestStdioReadsTheSourcesAsTheyAreConnectedNow` (`cmd/gtm-connector`) |
 | A source stays pinned to the identity it was first connected to, also after it is removed. Another org or Slack user is refused, and the database refuses a changed pin from any writer. | `TestUpdateSourcesSavesAChangeAndFencesIt` (`storage/postgres`), `TestAWorkspaceKeepsTheCRMItWasPinnedTo`, `TestAPinnedWorkspaceRefusesASignInOfAnotherUser` (`cmd/gtm-connector`) |
 | A transcript import is saved only under the workspace's own finished read that returned its account. An import or a Slack mapping is saved only while its sources are at the generations it was made under. | `TestAnImportNeedsTheReadThatResolvedItsAccount`, `TestAnImportIsSavedOnlyAtTheGenerationsItWasMadeUnder`, `TestSlackMappingsRefuseAMovedConnection` (`storage/postgres`), `TestAMappingIsNotSavedAfterSlackIsDetached` (`cmd/gtm-connector`) |
-| The Salesforce and Slack readers' own transports dial nothing, and `sf` is never run, unless `sourcehttp.Live` is on, which the binary's `main` turns on. Four tests turn it on, each to run an invented `sf` of its own. | `TestNothingIsDialledUnlessTheProcessIsLive` (`sources/sourcehttp`), `TestAReaderWithNoOptionsReachesNothing` (`sources/salesforce`), `TestAReaderWithNoTransportReachesNothing` (`sources/slack`) |
+| The Salesforce and Slack readers' own transports dial nothing, and `sf` is never run, unless `sourcehttp.Live` is on, which the binary's `main` turns on. Four tests turn it on, each to run an invented `sf` of its own. The identity provider's client uses the same transport. | `TestNothingIsDialledUnlessTheProcessIsLive` (`sources/sourcehttp`), `TestAReaderWithNoOptionsReachesNothing` (`sources/salesforce`), `TestAReaderWithNoTransportReachesNothing` (`sources/slack`), `TestNothingIsReachedWithoutATransportAndNothingIsRepeated` (`oidc`) |
 | `demo` builds its cards from the book inside the binary, and makes them in its tests with `sourcehttp.Live` off. | `TestDemoPublishesTheBookForTheDemoSignIn` (`cmd/gtm-connector`) |
 
 A read across a source change reads nothing and binds nothing, and what the caller sees depends on
@@ -317,7 +359,8 @@ its SHA-256.**
 | The readers speak HTTP/1.1 only, so Go's HTTP/2 debug log cannot print a bearer. They check the server's certificate, refuse TLS below 1.2, take no proxy and follow no redirect. | `TestTheBearerIsNotInTheHTTP2DebugLog`, `TestTheReadersOwnTransportSpeaksHTTP1`, `TestAnswersOutsideTheShapeAreRefused` (`sources/salesforce`), `TestTheCertificateAndTheTLSVersionAreChecked` (`sources/sourcehttp`), `TestTheReadersOwnTransport`, `TestOverAConnection` (`sources/slack`) |
 | An error the connector did not word itself prints a fixed line or a SQLSTATE, never a driver's text, which can name a host, a role or a password. The install commands never print back what they were given, and a source's refusal is its fixed code. | `TestAnUnexpectedErrorPrintsNoneOfItsText`, `TestAFailingStorePrintsItsCodeOnly`, `TestTheInstallCommandsPrintNoneOfWhatTheyWereGiven` (`cmd/gtm-connector`), `TestAnAnswerSFDidNotGiveIsNoLogin` (`sources/salesforce`), `TestAFailedReadKeepsOnlyTheSourcesDiagnostic` (`cards`) |
 | `debug salesforce check` prints no record, account or org ID, address or token. The report of a Slack read, which `debug slack check` prints from, holds no ID, timestamp, token or message text. | `TestSalesforceIsReadByEveryCommand` (`cmd/gtm-connector`), `TestTheReportHoldsNoSourceValue` (`sources/slack`) |
-| A backup is written with mode 0600 and never over another file, and it carries the credential files `setup` makes. It leaves the Slack sign-ins out, since a copy of one could still be a valid sign-in. | `TestBackupAndRestoreKeepState`, `TestABackupLeavesTheSlackSignInOut` (`cmd/gtm-connector`) |
+| A backup is written with mode 0600 and never over another file, and it carries the credential files `setup` makes. It leaves the Slack sign-ins out, since a copy of one could still be a valid sign-in, and the identity provider's client secret. | `TestBackupAndRestoreKeepState`, `TestABackupLeavesTheSlackSignInOut` (`cmd/gtm-connector`) |
+| The identity provider's client secret is the file `oidc-client-secret` in the credentials folder, under the folder's rules, and never an environment variable. The secret and the ID token reach no refusal and no answer of the server. The log of `serve` gives a refused sign-in's reason in fixed words, with no code, state, secret or token. A refused setting is not printed back, since an issuer can name a company's tenant. | `TestTheClientSecretIsACredentialFile`, `TestServeRefusesSignInSettingsItCannotServe`, `TestGrantsThroughTheCommandOpenAccountsInTheBrowser` (`cmd/gtm-connector`), `TestSignInsThatAreRefused` (`transport/http`), `TestNothingIsReachedWithoutATransportAndNothingIsRepeated` (`oidc`) |
 | `setup` writes no owner secret, which no command uses. It leaves an `owner-secret` file an earlier setup wrote as it is and says so in one line, a backup does not carry it, and a backup of an earlier setup that carries it restores without installing it. | `TestNoCommandKeepsTheUnusedOwnerSecret` (`cmd/gtm-connector`) |
 
 ## Claims no test checks yet
@@ -375,6 +418,12 @@ its SHA-256.**
   apart, and a restart starts the count again.
 - **The session cookie is bound to its host, not its port.** A browser also sends it to another
   program that serves the same host.
+- **A person the identity provider disables keeps the session they hold until it expires.** That is
+  60 minutes unless `GTM_OIDC_SESSION_MINUTES` says otherwise, or until the operator runs
+  `grant --disable`, which ends it at once. The connector does not ask the provider again during a
+  session, and does not end the provider's own session: sign-out only offers its page.
+- **The identity provider says who a person is.** Its administrators can sign in as any of its people in
+  an allowed domain or tenant. Grants decide what that person reads.
 - **Evidence is kept for good.** The connector never deletes a receipt, a card or a record version,
   and there is no retention period. Only the operator, by removing the database, removes them.
 - **Roles and quotations are as good as their labels.** A seller is whoever the operator lists. A
@@ -397,6 +446,9 @@ and an invented Slack, with a local PostgreSQL.
 
 - Sandbox and production Salesforce behaviour has only invented answers behind it.
 - No Slack workspace or Slack app has been signed in to.
+- No real identity provider has been signed in to. Every sign-in runs against an invented provider, so
+  the claims a real provider sends, such as `email_verified`, `hd` and `tid`, have only invented values
+  behind them.
 - No call provider is reached: transcripts are files the operator imports.
 - The only MCP client run against the binary is the Inspector CLI, in CI. No assistant app has been
   tested.

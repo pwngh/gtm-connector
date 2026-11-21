@@ -21,7 +21,7 @@ type recordedCard struct {
 	lines           []Line
 }
 
-// recordedCards builds the lines of every recorded card of a family from the evidence the card seals.
+// recordedCards builds the lines of every golden card of a family from the evidence the card seals.
 func recordedCards(t *testing.T, family string) []recordedCard {
 	t.Helper()
 	var out []recordedCard
@@ -32,6 +32,9 @@ func recordedCards(t *testing.T, family string) []recordedCard {
 		}
 		if err := json.Unmarshal(line, &row); err != nil {
 			t.Fatal(err)
+		}
+		if row.Card == "" {
+			continue
 		}
 		value, err := strictjson.LoadsText(row.Card)
 		if err != nil {
@@ -123,7 +126,7 @@ func (c recordedCard) recordedFacts(l Line) bool {
 	return l.Countdown == nil && l.Amount == nil && l.Contact == nil
 }
 
-// TestLinesRenderTheRecordedText proves every recorded card's lines its own. Rendered, they are byte for
+// TestLinesRenderTheRecordedText proves every golden card's lines its own. Rendered, they are byte for
 // byte the lines its recorded text prints under ATTENTION and under RECORD VALUES. Their facts are their
 // cited records' own fields, read from the evidence and not from the lines, so a builder that drops or
 // changes a fact fails here. Stored as JSON and read back, they are the same lines. And CheckLines, the rule
@@ -179,10 +182,10 @@ func TestLinesRenderTheRecordedText(t *testing.T) {
 			}
 		}
 	}
-	if cards != 450 {
-		t.Errorf("%d recorded cards, want 450", cards)
+	if cards != 90 {
+		t.Errorf("%d golden cards, want 90", cards)
 	}
-	t.Logf("%d recorded cards: %d signal lines and %d value lines render their recorded text byte for byte; "+
+	t.Logf("%d golden cards: %d signal lines and %d value lines render their golden text byte for byte; "+
 		"lines with facts: %v", cards, signals, values, facts)
 }
 

@@ -33,10 +33,11 @@ const (
 
 // GapCodes is every line NOT READ can print, by code, with its disposition.
 var GapCodes = map[string]string{
-	"crm_unmapped_fields": "not_read", "calls_denied": "not_read", "calls_excerpt": "not_read",
+	"crm_unmapped_fields": "not_read", "crm_users_not_read": "not_read", "calls_denied": "not_read", "calls_excerpt": "not_read",
 	"calls_outside_records": "not_read", "slack_not_requested": "not_read", "slack_denied": "not_read",
 	"slack_thread": "not_read", "slack_channel": "not_read", "calls_not_connected": "not_read",
 	"slack_not_connected": "not_read", "slack_not_selected": "not_read",
+	"calls_not_matched": "not_read", "slack_not_matched": "not_read",
 	"crm_more_opportunities": "read_not_shown", "crm_more_contracts": "read_not_shown",
 	"crm_more_contacts": "read_not_shown", "sentences_cut": "read_not_shown", "sentences_more": "read_not_shown",
 	"sentences_long": "read_not_shown", "sentences_later": "read_not_shown",
@@ -66,10 +67,11 @@ type Unit struct {
 	RecordRef string
 	Tool      string
 
-	At               *string
-	Speaker          *string
-	Role             string // "customer", "seller" or "unknown"
-	Basis            string
+	At      *string
+	Speaker *string
+	// Role is "customer", "seller", "customer_side_not_in_crm", "other_party" or "unknown".
+	Role             string
+	Basis            string // how the role was decided, in words
 	Contact          *int
 	Text             string
 	Partial          bool
@@ -78,6 +80,13 @@ type Unit struct {
 	Span             *UnitSpan
 	RawSHA256        string
 	SanitizerVersion int
+	// SpeakerRules is the version of the speaker rules the role was decided under (SpeakerRules), Rung the
+	// rung of the ladder that decided (0 for none), and Matched the identifier that decided, or nil.
+	SpeakerRules int
+	Rung         int
+	Matched      *Matched
+
+	contactSeen bool // whether the speaker was tied to a contact, for the calls_no_contact gap
 }
 
 // UnitSpan is where a sentence of an imported transcript lies: its cues or lines, and their times.
@@ -95,8 +104,9 @@ type Gap struct {
 	Text        string
 }
 
-// RoleCounts counts sentences by role.
-type RoleCounts struct{ Customer, Seller, Unknown int }
+// RoleCounts counts sentences by the side their role is on: Customer counts customers and customer-side
+// speakers not in the CRM.
+type RoleCounts struct{ Customer, Seller, OtherParty, Unknown int }
 
 func optional[T any](p *T) any {
 	if p == nil {
@@ -122,6 +132,11 @@ func (u Unit) Value() *strictjson.Object {
 		{"sanitizer_version", u.SanitizerVersion}} {
 		o.Set(kv[0].(string), kv[1])
 	}
+	if u.SpeakerRules > 0 {
+		o.Set("speaker_rules", u.SpeakerRules)
+		o.Set("rung", u.Rung)
+		o.Set("matched", u.Matched.value())
+	}
 	return o
 }
 
@@ -130,7 +145,7 @@ func (g Gap) Value() *strictjson.Object {
 	var byRole any
 	if g.ByRole != nil {
 		byRole = strictjson.NewObject("customer", g.ByRole.Customer, "seller", g.ByRole.Seller,
-			"unknown", g.ByRole.Unknown)
+			"other_party", g.ByRole.OtherParty, "unknown", g.ByRole.Unknown)
 	}
 	var count any
 	if g.Count != nil {
@@ -373,6 +388,10 @@ var sourceRules = map[string]sourceRule{
 	"opportunities": {"crm", "opp", "list_opportunities"},
 	"call_notes":    {"calls", "note", "read_call_notes"},
 	"messages":      {"slack", "msg", "read_slack_messages"},
+	// Read only for a card made under the speaker rules: the org's Standard users, and the authors of a live
+	// Slack thread.
+	"users":   {"crm", "usr", "list_users"},
+	"members": {"slack", "mem", "read_slack_messages"},
 }
 
 func oneOf(v any, choices ...string) bool {
@@ -450,7 +469,13 @@ type validated struct {
 }
 
 func validate(evidence *strictjson.Object) validated {
-	if evidence == nil || len(evidence.Keys) != len(evidenceKeys) {
+	// Evidence made under the speaker rules holds a people object; evidence made before them holds none.
+	var settings any
+	speakerRules := false
+	if evidence != nil {
+		settings, speakerRules = evidence.Get("people")
+	}
+	if evidence == nil || len(evidence.Keys) != len(evidenceKeys)+flagInt(speakerRules) {
 		reject("Evidence has an unsupported shape.")
 	}
 	for _, key := range evidenceKeys {
@@ -458,20 +483,32 @@ func validate(evidence *strictjson.Object) validated {
 			reject("Evidence has an unsupported shape.")
 		}
 	}
+	if speakerRules && !validPeople(settings) {
+		reject("Evidence has unsupported speaker settings.")
+	}
 	crm, calls, slack := field(evidence, "crm_backend"), field(evidence, "calls_backend"), field(evidence, "slack_backend")
 	notesStatus, slackStatus := field(evidence, "notes_status"), field(evidence, "slack_status")
 	if !oneOf(crm, "sqlite", "salesforce") || !oneOf(calls, "fixture", "imported", "none") ||
 		!oneOf(slack, "fixture", "slack", "none") ||
-		!oneOf(notesStatus, "available", "denied", "not_connected") ||
-		!oneOf(slackStatus, "available", "denied", "not_requested", "not_connected", "not_selected") ||
+		!oneOf(notesStatus, "available", "denied", "not_connected", "not_matched") ||
+		!oneOf(slackStatus, "available", "denied", "not_requested", "not_connected", "not_selected", "not_matched") ||
 		(calls == "none") != (notesStatus == "not_connected") ||
 		(slack == "none") != (slackStatus == "not_connected") ||
-		slackStatus == "not_selected" && slack != "slack" {
+		slackStatus == "not_selected" && slack != "slack" ||
+		notesStatus == "not_matched" && calls != "imported" || slackStatus == "not_matched" && slack != "slack" {
 		reject("Evidence names an unknown source or outcome.")
 	}
 	salesforce, imported := crm == "salesforce", calls == "imported"
+	// Evidence under the speaker rules states whether the org's users were read: on a Salesforce CRM only.
+	usersStatus := UsersNone
+	if speakerRules {
+		usersStatus = str(field(object(settings), "users"))
+		if (usersStatus == UsersNone) == salesforce {
+			reject("Evidence has unsupported speaker settings.")
+		}
+	}
 	withCalls := calls != "none"
-	withSlack := oneOf(slackStatus, "available", "denied", "not_selected")
+	withSlack := oneOf(slackStatus, "available", "denied", "not_selected", "not_matched")
 	liveSlack := withSlack && slack == "slack"
 	crmBinding, callsBinding := field(evidence, "crm_binding"), field(evidence, "calls_binding")
 	if imported && (!ValidBinding(callsBinding, "crm_backend", crm.(string)) || !equal(crmBinding, callsBinding)) {
@@ -512,7 +549,8 @@ func validate(evidence *strictjson.Object) validated {
 	tables := map[string]bool{}
 	for name := range sourceRules {
 		switch {
-		case name == "contracts" && !salesforce, name == "messages" && !withSlack, name == "call_notes" && !withCalls:
+		case name == "contracts" && !salesforce, name == "messages" && !withSlack, name == "call_notes" && !withCalls,
+			name == "users" && !(salesforce && speakerRules), name == "members" && !(liveSlack && speakerRules):
 		default:
 			tables[name] = true
 		}
@@ -557,12 +595,23 @@ func validate(evidence *strictjson.Object) validated {
 				reject("Salesforce record identity does not match its source.")
 			}
 		}
+		// A user belongs to the org, not to the account.
 		owner := any(identifier)
-		if table != "accounts" {
+		switch table {
+		case "accounts":
+		case "users":
+			owner = accountID
+			if !validUser(record) {
+				reject("A Salesforce user record has an unsupported shape.")
+			}
+		default:
 			owner = field(record, "account_id")
 		}
 		if owner != accountID {
 			reject("Evidence contains a record for a different account.")
+		}
+		if table == "members" && !validMember(record) {
+			reject("A Slack member record has an unsupported shape.")
 		}
 		if imported && table == "call_notes" && !ValidImportedRecord(record, accountID, callsBinding) {
 			reject("Imported transcript evidence does not match its immutable selected revision.")
@@ -578,7 +627,7 @@ func validate(evidence *strictjson.Object) validated {
 		reject("Imported calls hold at most one selected transcript excerpt for an account.")
 	}
 	if liveSlack && slackStatus != "available" {
-		if len(groups["messages"]) > 0 || field(evidence, "thread_snapshot") != nil {
+		if len(groups["messages"]) > 0 || len(groups["members"]) > 0 || field(evidence, "thread_snapshot") != nil {
 			reject("A Slack read that returned nothing cannot contain a snapshot or messages.")
 		}
 	} else if liveSlack && !validSlackSnapshot(groups["messages"], field(evidence, "thread_snapshot"), accountID,
@@ -613,7 +662,9 @@ func validate(evidence *strictjson.Object) validated {
 		}
 		denied := toolName == "read_call_notes" && notesStatus == "denied" ||
 			toolName == "read_slack_messages" && slackStatus == "denied"
-		unselected := toolName == "read_slack_messages" && slackStatus == "not_selected"
+		unselected := toolName == "read_slack_messages" && oneOf(slackStatus, "not_selected", "not_matched") ||
+			toolName == "read_call_notes" && notesStatus == "not_matched" ||
+			toolName == "list_users" && usersStatus == UsersNotRead
 		status, code := "ok", 200
 		switch {
 		case denied:
@@ -658,11 +709,15 @@ type Sources struct {
 	CRMBackend, CallsBackend, SlackBackend string
 	CRMBinding, CallsBinding, SlackBinding any
 	Sellers                                []string
+	// CompanyDomains are the seller's own email domains, and Aliases the speaker labels the operator mapped
+	// to people. A card seals both in its evidence's people object.
+	CompanyDomains []string
+	Aliases        []Alias
 }
 
 // Assemble is briefing.assemble_evidence's snapshot: the records and receipts of one card's reads, the
 // outcome of each optional source, and the sellers its roles come from.
-func Assemble(briefID, accountID, asOf string, records, receipts []any, notesStatus, slackStatus string,
+func Assemble(briefID, accountID, asOf string, records, receipts []any, notesStatus, slackStatus, usersStatus string,
 	threadSnapshot any, s Sources) *strictjson.Object {
 	sellers := make([]any, len(s.Sellers))
 	for i, seller := range s.Sellers {
@@ -678,7 +733,30 @@ func Assemble(briefID, accountID, asOf string, records, receipts []any, notesSta
 		"records", records, "receipts", receipts, "notes_status", notesStatus, "slack_status", slackStatus,
 		"crm_backend", s.CRMBackend, "crm_binding", s.CRMBinding, "calls_backend", s.CallsBackend,
 		"calls_binding", s.CallsBinding, "slack_backend", s.SlackBackend, "slack_binding", s.SlackBinding,
-		"thread_snapshot", threadSnapshot, "sellers", sellers, "demo_sellers", demo)
+		"thread_snapshot", threadSnapshot, "sellers", sellers, "demo_sellers", demo, "people", s.people(usersStatus))
+}
+
+// People is the evidence's people object of a card on a CRM other than Salesforce: the version of the
+// speaker rules, the company's domains and the aliases.
+func (s Sources) People() *strictjson.Object { return s.people(UsersNone) }
+
+// people is the people object with the state of the org's users read: UsersNone for a CRM other than
+// Salesforce, UsersRead, or UsersNotRead.
+func (s Sources) people(users string) *strictjson.Object {
+	domains := make([]any, len(s.CompanyDomains))
+	for i, d := range s.CompanyDomains {
+		domains[i] = d
+	}
+	aliases := make([]any, len(s.Aliases))
+	for i, a := range s.Aliases {
+		var call any
+		if a.Call != "" {
+			call = a.Call
+		}
+		aliases[i] = strictjson.NewObject("label", a.Label, "call", call, "target", a.Target)
+	}
+	return strictjson.NewObject("rules_version", SpeakerRules, "company_domains", domains, "aliases", aliases,
+		"users", users)
 }
 
 // FixtureCRMBinding is the binding of the demo CRM: the digest of its fixed identity

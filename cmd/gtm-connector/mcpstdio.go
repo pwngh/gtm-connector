@@ -122,7 +122,7 @@ func (r *run) serveStdio(ctx context.Context, in io.Reader, out io.Writer) error
 	// tools use, so a source removed or replaced while the process runs is refused here too.
 	config, err := mcptools.Stdio(mcptools.Config{Resource: c.publicOrigin + "/mcp", Issuer: c.publicOrigin,
 		WorkspaceID: r.workspace.ID, Store: r.store, Receipts: &postgres.ReceiptStore{Store: r.store},
-		Open: toolSources(r.store, r.workspace), Selection: selection}, raw)
+		Open: toolSources(r.store, r.workspace), Bound: toolBindings(r.store, r.workspace), Selection: selection}, raw)
 	if err != nil {
 		return err
 	}

@@ -14,8 +14,9 @@ import (
 	"github.com/pwngh/gtm-connector/internal/sources/salesforce/salesforcetest"
 )
 
-// readWithin is the token file read through the variables, failed if it takes a second: a refused file
-// must be refused at once, never waited on.
+// readWithin is the token file read through the variables, failed if it takes five seconds: a refused file
+// must be refused at once, never waited on. A read that waits on a named pipe waits forever, so the bound
+// only has to outlast a plain read on a busy runner.
 func readWithin(t *testing.T, path string) (login, error) {
 	t.Helper()
 	t.Setenv(InstanceVariable, salesforcetest.Instance)
@@ -33,7 +34,7 @@ func readWithin(t *testing.T, path string) (login, error) {
 	select {
 	case got := <-answered:
 		return got.given, got.err
-	case <-time.After(time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("the token file was waited on")
 		return login{}, nil
 	}

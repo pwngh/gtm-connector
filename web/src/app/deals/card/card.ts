@@ -33,20 +33,52 @@ export function recordsOf(card: CardDetail): RecordUnit[] {
 /** A whole sentence the card shows. A cut unit is never one, whatever else it says. */
 export const onCard = (sentence: Sentence): boolean => sentence.shown === 'yes' && !sentence.partial;
 
-export type GroupId = 'customer' | 'unknown' | 'seller';
+export type GroupId = 'customer' | 'unknown' | 'seller' | 'other_party';
 
-/** The three groups of what people said, in the order a rep reads them. */
-export const groups: {id: GroupId; title: string}[] = [
-  {id: 'customer', title: 'Buyer quotes'},
-  {id: 'unknown', title: 'No established role'},
-  {id: 'seller', title: 'Your side'},
+/**
+ * The groups of what people said, in the order a rep reads them: the buyers, those of no established
+ * role, your side, then other organisations. The last is shown only when a sentence is in it.
+ */
+export const groups: {id: GroupId; title: string; always: boolean}[] = [
+  {id: 'customer', title: 'Buyer quotes', always: true},
+  {id: 'unknown', title: 'No established role', always: true},
+  {id: 'seller', title: 'Your side', always: true},
+  {id: 'other_party', title: 'Other party', always: false},
 ];
 
-/** The group a sentence belongs to. A role that is not customer or seller is not established. */
-export const groupOf = (sentence: Sentence): GroupId => (sentence.role === 'customer' || sentence.role === 'seller' ? sentence.role : 'unknown');
+/** The group a sentence belongs to. A customer-side speaker who is not a contact is with the buyers; any
+ * other role that is not customer, seller or another party is not on either side. */
+export function groupOf(sentence: Sentence): GroupId {
+  switch (sentence.role) {
+    case 'customer':
+    case 'customer_side_not_in_crm':
+      return 'customer';
+    case 'seller':
+    case 'other_party':
+      return sentence.role;
+  }
+  return 'unknown';
+}
 
 /** The role in a word. */
-export const roleWords: Record<GroupId, string> = {customer: 'Customer', seller: 'Seller', unknown: 'Unknown'};
+export const roleWords: Record<GroupId, string> = {customer: 'Customer', seller: 'Seller', unknown: 'Unknown', other_party: 'Other party'};
+
+/** The organisation of a speaker of another party: the domain its basis names, as sealed. */
+export function partyDomain(sentence: Sentence): string | null {
+  const named = /^other party by domain (\S+)$/.exec(sentence.basis ?? '');
+  return named?.[1] ?? null;
+}
+
+/**
+ * Who a sentence is from, in words: its role, the domain of another party, and how the speaker was
+ * matched, as sealed. A unit sealed before the speaker rules shows its basis in the words it was sealed
+ * with.
+ */
+export function roleOf(sentence: Sentence): string {
+  const group = groupOf(sentence);
+  const domain = group === 'other_party' ? partyDomain(sentence) : null;
+  return `${roleWords[group]}${domain ? `, ${domain}` : ''} (${sentence.basis ?? 'basis not recorded'})`;
+}
 
 /** Where a sentence was said: a call, Slack, or the source as recorded. */
 export function sourceWord(source: string | null): string {
@@ -125,10 +157,12 @@ export function notShown(sentences: readonly Sentence[]): Reason[] {
 export const wholeSources = new Set([
   'calls_denied',
   'calls_not_connected',
+  'calls_not_matched',
   'slack_denied',
   'slack_not_connected',
   'slack_not_requested',
   'slack_not_selected',
+  'slack_not_matched',
   'crm_unmapped_fields',
 ]);
 

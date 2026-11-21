@@ -36,6 +36,8 @@ type Deal struct {
 	ClosedAt                           *time.Time
 	// LatestCard is the newest card published for the deal, or nil.
 	LatestCard *DealCard
+	// Read are the matches of the calls and threads the newest card read. Deal and ViewDeal fill it.
+	Read []Match
 }
 
 // DealCard names one card of a deal.
@@ -222,8 +224,12 @@ func (s *Store) Deal(ctx context.Context, workspaceID, ref string) (Deal, error)
 	if !validUUID(workspaceID) {
 		return Deal{}, ErrNotFound
 	}
-	return scanDeal(s.pool.QueryRow(ctx, `SELECT `+dealColumns+dealFrom+`
+	d, err := scanDeal(s.pool.QueryRow(ctx, `SELECT `+dealColumns+dealFrom+`
 		WHERE d.workspace_id = $1 AND d.ref = $2`, workspaceID, ref))
+	if err == nil && d.LatestCard != nil {
+		d.Read, err = cardMatches(ctx, s.pool, workspaceID, d.LatestCard.ID)
+	}
+	return d, err
 }
 
 // Deals lists a workspace's deals: the open ones first, each group by ID.
@@ -263,9 +269,11 @@ func (s *Store) CloseDeal(ctx context.Context, workspaceID, ref string) (d Deal,
 }
 
 // bindOpenDeal binds a card being published to its account's open deal, inside the publication's
-// transaction, when the account has one that was registered by the time the card was. The share lock holds
-// a close off until the publication commits.
-func bindOpenDeal(ctx context.Context, tx pgx.Tx, card Card) error {
+// transaction, when the account has one that was registered by the time the card was, with the matches of
+// the calls and threads it read. The share lock holds a close off until the publication commits. A card whose
+// calls and threads were read for another deal, or with no deal, is refused with ErrDealChanged, and so is one
+// whose match was decided again since it was read.
+func bindOpenDeal(ctx context.Context, tx pgx.Tx, card Card, read *CardDeal) error {
 	var ref string
 	err := tx.QueryRow(ctx, `SELECT ref FROM deals
 		WHERE workspace_id = $1 AND account_ref = $2 AND state = 'open' AND registered_at <= $3 FOR SHARE`,
@@ -276,9 +284,24 @@ func bindOpenDeal(ctx context.Context, tx pgx.Tx, card Card) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref) VALUES ($1, $2, $3, $4)`,
-		card.WorkspaceID, card.ID, ref, card.AccountRef)
-	return err
+	if read.Ref != "" && read.Ref != ref || read.Ref == "" && read.Unmatched > 0 {
+		return ErrDealChanged
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref) VALUES ($1, $2, $3, $4)`,
+		card.WorkspaceID, card.ID, ref, card.AccountRef); err != nil {
+		return err
+	}
+	for _, match := range read.Matches {
+		_, err := tx.Exec(ctx, `INSERT INTO deal_card_matches (workspace_id, card_id, match_id) VALUES ($1, $2, $3)`,
+			card.WorkspaceID, card.ID, match)
+		if sqlState(err) == "GT024" {
+			return fmt.Errorf("%w: %w", ErrDealChanged, err)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // DealOfBrief is the deal a card belongs to, by its brief ID, or "" for a card of no deal.
@@ -340,6 +363,9 @@ func (s *Store) ViewDeal(ctx context.Context, v Viewer, ref string) (Deal, error
 		var err error
 		deal, err = scanDeal(tx.QueryRow(ctx, `SELECT `+dealColumns+dealFrom+`
 			WHERE d.workspace_id = $1 AND d.ref = $2`, v.WorkspaceID, ref))
+		if err == nil && deal.LatestCard != nil {
+			deal.Read, err = cardMatches(ctx, tx, v.WorkspaceID, deal.LatestCard.ID)
+		}
 		return err
 	})
 	return deal, err

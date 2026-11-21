@@ -33,7 +33,8 @@ const (
 )
 
 // allowedScopes are the Slack user scopes a sign-in may hold, in the order every scope list is kept.
-var allowedScopes = []string{"channels:history", "groups:history"}
+// users:read and users:read.email let a read ask users.info for each author's team and profile email.
+var allowedScopes = []string{"channels:history", "groups:history", scopeUsersRead, scopeUsersEmail}
 
 // Secret is an access or refresh token. It guards against a token being written out as plain text by
 // accident: it prints as "[redacted]" under every format verb and refuses to be marshalled, as a value or as

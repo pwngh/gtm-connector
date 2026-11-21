@@ -4,7 +4,9 @@
 // A read is one operation. It asks the fixed endpoint conversations.replies for the selected thread up to
 // the moment the read began, follows cursors to the end, and returns every message or none. Its requests,
 // with the one token refresh and the identity check that follows it, share one 20-second deadline, ten HTTP
-// attempts and 1 MiB of response bytes. Files, attachments and blocks are counted and left out.
+// attempts and 1 MiB of response bytes. Files, attachments and blocks are counted and left out. With
+// users:read, the read then asks users.info for each distinct author, at most 50 requests under the same
+// deadline and bytes (profiles.go).
 //
 // The reader holds no storage of its own. Mappings gives the thread selected for an account, and Connection
 // the saved sign-in under its lock. Each is called under a context that ends at the read's deadline. A
@@ -177,6 +179,11 @@ type ThreadRead struct {
 	// Snapshot describes the read the messages are checked against: the mapping, the cutoff, the counts and
 	// a digest of every message.
 	Snapshot *strictjson.Object
+	// Members are the thread's authors, one for each distinct user_id in user ID order: id ("mem-" and the
+	// user ID), account_id, user_id, team_id, home (whether team_id is the sign-in's own team), email,
+	// profile ("read", "missing_scope" or "over_limit") and missing_scopes, the ones of users:read and
+	// users:read.email the sign-in lacks. They are not in the snapshot.
+	Members []*strictjson.Object
 	// Scopes are the scopes held by each sign-in that returned a page of this read, sorted. They are private
 	// and never part of a tool result.
 	Scopes []string
@@ -192,6 +199,7 @@ type Report struct {
 	Duration, MappingTime, CredentialTime, ThreadTime time.Duration
 
 	APICalls, AuthCalls, MessageCalls                      int
+	ProfileCalls                                           int // users.info requests, which APICalls leaves out
 	ResponseBytes, AuthResponseBytes, MessageResponseBytes int
 	Pages, RawRows, MessagesSeen, ReturnedMessages         int
 	Duplicates, RefreshAttempts, TokenRetries, RateRetries int
@@ -228,7 +236,7 @@ func (r *Reader) ReadSlackMessages(ctx context.Context, accountID string) (*Thre
 			PaginationComplete: p.complete, Duration: max(0, r.Clock.monotonic()-b.started),
 			MappingTime: p.spent["mapping"], CredentialTime: p.spent["credential_binding"],
 			ThreadTime: p.spent["thread_read"], APICalls: b.httpAttempts, AuthCalls: b.authAttempts,
-			MessageCalls: b.messageAttempts, ResponseBytes: b.responseBytes, AuthResponseBytes: b.authBytes,
+			MessageCalls: b.messageAttempts, ProfileCalls: b.profileAttempts, ResponseBytes: b.responseBytes, AuthResponseBytes: b.authBytes,
 			MessageResponseBytes: b.messageBytes, Pages: p.pages, RawRows: p.rawRows, MessagesSeen: p.seen,
 			Duplicates: p.duplicates, RefreshAttempts: b.refreshAttempts, TokenRetries: flag(b.tokenRetried),
 			RateRetries: flag(b.rateRetried)}
@@ -255,15 +263,26 @@ func (r *Reader) ReadThread(ctx context.Context, accountID string) (records []*s
 	if err != nil {
 		return nil, nil, err
 	}
-	return withRefs(read.Records), read.Snapshot, nil
+	return withRefs(read.Records, "messages"), read.Snapshot, nil
 }
 
-func withRefs(records []*strictjson.Object) []*strictjson.Object {
+// ReadThreadWithMembers is ReadThread with the thread's authors as a card reads them: the members carry
+// record_ref "slack/members/<id>".
+func (r *Reader) ReadThreadWithMembers(ctx context.Context, accountID string) (messages, members []*strictjson.Object,
+	snapshot *strictjson.Object, err error) {
+	read, err := r.ReadSlackMessages(ctx, accountID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return withRefs(read.Records, "messages"), withRefs(read.Members, "members"), read.Snapshot, nil
+}
+
+func withRefs(records []*strictjson.Object, table string) []*strictjson.Object {
 	out := make([]*strictjson.Object, len(records))
 	for i, record := range records {
 		id, _ := record.Get("id")
 		out[i] = record.Copy()
-		out[i].Set("record_ref", "slack/messages/"+id.(string))
+		out[i].Set("record_ref", "slack/"+table+"/"+id.(string))
 	}
 	return out
 }
@@ -527,13 +546,18 @@ func (r *Reader) read(ctx context.Context, b *budget, p *progress, accountID str
 		records[i] = m.record(sealed, accountID, chosen.channel)
 	}
 	result := make([]any, len(records))
-	for i, record := range withRefs(records) {
+	for i, record := range withRefs(records, "messages") {
 		result[i] = record
 	}
 	output, _ := canonical(strictjson.NewObject("source", "slack", "records", result, "untrusted_data", true,
 		"thread_snapshot", snapshot))
 	if len(output) > maxOutputBytes {
 		return nil, refuse("slack_output_too_large")
+	}
+	// The authors' profiles are read once the thread is whole, under the sign-in that read its last page.
+	members, err := r.members(ctx, b, p, held, authors(messages), accountID)
+	if err != nil {
+		return nil, err
 	}
 	if _, err := b.remaining(); err != nil {
 		return nil, err
@@ -543,7 +567,7 @@ func (r *Reader) read(ctx context.Context, b *budget, p *progress, accountID str
 		granted = append(granted, scope)
 	}
 	sort.Strings(granted)
-	return &ThreadRead{Records: records, Snapshot: snapshot, Scopes: granted}, nil
+	return &ThreadRead{Records: records, Snapshot: snapshot, Members: members, Scopes: granted}, nil
 }
 
 // wait is the pause a 429 asked for before the one retry. The caller has checked that it ends before the

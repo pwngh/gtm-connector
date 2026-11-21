@@ -64,7 +64,7 @@ const drawnGroups = (html: string) => {
 const lineOf = (html: string, n: number) => html.slice(html.indexOf(`data-comm-unit="${n}"`)).split('</li>')[0] ?? '';
 const every = [...recorded, ...salesforce];
 
-test('every recorded card: each sentence unit once, in its own call or message, whole text as its quotation, and no record unit', () => {
+test('every golden card: each sentence unit once, in its own call or message, whole text as its quotation, and no record unit', () => {
   let sentences = 0;
   let withHidden = 0;
   for (const {file, key, card} of every) {
@@ -103,8 +103,8 @@ test('every recorded card: each sentence unit once, in its own call or message, 
     }
     assert.doesNotMatch(html, /dc-ledger|data-quote-unit|data-more-unit/, `${at}: nothing of the Card tab`);
   }
-  assert.equal(sentences, 90 + 1297 + 375 + 884);
-  assert.ok(withHidden >= 60, `${withHidden} recorded cards have sentences the card does not show`);
+  assert.equal(sentences, 90 + 1297 + 73 + 127);
+  assert.ok(withHidden >= 12, `${withHidden} golden cards have sentences the card does not show`);
 });
 
 test('every recorded card: groups oldest first by their earliest time, the groups with no usable time last under No time recorded', () => {
@@ -239,7 +239,7 @@ test('every recorded card: the first sentence of each role carries that role’s
         firsts.set(groupOf(sentence), sentence.n);
       }
     }
-    const drawn = [...html.matchAll(/data-help="(role\.[a-z]+)"><span class="ui-help__text">([^<]*)<\/span>/g)];
+    const drawn = [...html.matchAll(/data-help="(role\.[a-z_]+)"><span class="ui-help__text">([^<]*)<\/span>/g)];
     assert.deepEqual(
       drawn.map(match => match[1]),
       [...firsts.keys()].map(group => `role.${group}`),

@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -53,6 +54,15 @@ type Config struct {
 	// Deals, when set, registers deals for POST /v1/deals. Without it that
 	// route answers 404.
 	Deals DealRegistry
+	// OIDC, when set, signs the people of one workspace in through their
+	// company's identity provider.
+	OIDC *OIDC
+	// DemoSignInOff turns the demo sign-in off: it signs nobody in, and a
+	// demo person's session opens nothing.
+	DemoSignInOff bool
+	// Log, when set, is told each sign-in through the identity provider,
+	// kept or refused, in fixed words.
+	Log *slog.Logger
 }
 
 // DefaultClientRoutes are the web app's routes: "/" and these prefixes,
@@ -64,6 +74,9 @@ var DefaultClientRoutes = []string{"/deals", "/ops"}
 type Sessions interface {
 	LiveSession(ctx context.Context, idSHA256 []byte) (postgres.Session, error)
 	SignIn(ctx context.Context, admitted postgres.Admission, idSHA256 []byte, principal postgres.Principal, ttl time.Duration) (time.Time, error)
+	SignInPerson(ctx context.Context, admitted postgres.Admission, idSHA256 []byte, w postgres.Workspace,
+		who postgres.PersonIdentity, ttl time.Duration, previous []byte) (postgres.Principal, time.Time, error)
+	PreSessionUsed(ctx context.Context, idSHA256 []byte) (bool, error)
 	RevokeSession(ctx context.Context, idSHA256 []byte) error
 	DemoPrincipalByLogin(ctx context.Context, login string) (postgres.Principal, []byte, error)
 	MigrationState(ctx context.Context) (postgres.MigrationState, error)
@@ -103,6 +116,20 @@ func New(cfg Config, sessions Sessions, evidence authz.Evidence) (*Server, error
 	}
 	if len(cfg.ClientRoutes) == 0 {
 		cfg.ClientRoutes = DefaultClientRoutes
+	}
+	if o := cfg.OIDC; o != nil {
+		switch {
+		case o.Client == nil || o.Workspace.ID == "":
+			return nil, errors.New("sign-in through an identity provider needs its client and its workspace")
+		case o.Workspace.Kind != "demo" && !cfg.DemoSignInOff:
+			return nil, fmt.Errorf("the demo sign-in is on beside sign-in through the identity provider for the "+
+				"live workspace %s; set GTM_DEMO_SIGN_IN=off", o.Workspace.Slug)
+		case o.Client.RedirectURL() != cfg.PublicOrigin+OIDCCallbackPath:
+			return nil, fmt.Errorf("the identity provider's redirect URL must be the public origin followed by %s",
+				OIDCCallbackPath)
+		case o.SessionTTL <= 0:
+			o.SessionTTL = DefaultOIDCSessionTTL
+		}
 	}
 	s := &Server{cfg: cfg, sessions: sessions, evidence: evidence, hosts: map[string]bool{},
 		host: strings.ToLower(origin.Host), policy: fmt.Sprintf(basePolicy, ""), web: cfg.Web}
@@ -152,6 +179,8 @@ func (s *Server) apiRoutes() []route {
 		{pattern: "GET /api/v1/session", read: s.getSession},
 		{pattern: "POST /api/v1/session", signIn: true, write: s.signIn},
 		{pattern: "DELETE /api/v1/session", write: s.signOut},
+		{pattern: "GET " + OIDCStartPath, read: s.startOIDC},
+		{pattern: "GET " + OIDCCallbackPath, read: s.finishOIDC},
 		{pattern: "GET /api/v1/accounts", read: s.signedIn(s.accounts)},
 		{pattern: "GET /api/v1/accounts/{account}/cards", read: s.signedIn(s.accountCards)},
 		{pattern: "GET /api/v1/cards/{card}", read: s.signedIn(s.card)},
@@ -162,6 +191,8 @@ func (s *Server) apiRoutes() []route {
 		{pattern: "GET /v1/deals", read: s.signedIn(s.deals)},
 		{pattern: "POST /v1/deals", write: s.registerDeal},
 		{pattern: "GET /v1/deals/{deal}", read: s.signedIn(s.deal)},
+		{pattern: "GET /v1/matches", read: s.signedIn(s.matches)},
+		{pattern: "POST /v1/matches/{match}", write: s.decideMatch},
 	}
 }
 

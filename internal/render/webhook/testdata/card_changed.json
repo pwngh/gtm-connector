@@ -8,8 +8,8 @@
     "previous_status": "green"
   },
   "card": {
-    "id": "card-fde3db2e4f27",
-    "sha256": "fde3db2e4f2733cad82a2534940f3b97a6cb3998bda4b97f6c4d152a3afbb40c",
+    "id": "card-b59b292f7200",
+    "sha256": "b59b292f72002d5988300e2e045de85d52cb60a1f45c9576fb390c17956f8ebb",
     "as_of": "2027-01-15"
   },
   "renewal": {
@@ -56,7 +56,7 @@
   ],
   "unread": [],
   "changes": {
-    "since_card": "card-cddbe9c0c0d0",
+    "since_card": "card-41bbe7f6823c",
     "since": "2027-01-15T09:10:00Z",
     "sentences": {
       "customer": 2,
@@ -66,7 +66,7 @@
     "values": 0
   },
   "links": {
-    "card": "https://gtm.example.internal/deals/acc-003?card=card-fde3db2e4f27",
-    "api": "https://gtm.example.internal/api/v1/cards/card-fde3db2e4f27"
+    "card": "https://gtm.example.internal/deals/acc-003?card=card-b59b292f7200",
+    "api": "https://gtm.example.internal/api/v1/cards/card-b59b292f7200"
   }
 }

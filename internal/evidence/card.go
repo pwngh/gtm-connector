@@ -24,6 +24,13 @@ type card struct {
 	gaps          []Gap
 	titles        map[int]string
 	unshownTitles map[int]any
+	receipts      map[string]*strictjson.Object // each read's receipt, by tool
+	readOn        string                        // the day the account and its contacts were read, or ""
+	// contactRows are the account's contacts in ID order, and contactNumbers their unit numbers by ID.
+	contactRows    []*strictjson.Object
+	contactNumbers map[string]int
+	// indexes are the people of the card, built once for each seller list a source reads.
+	indexes map[string]*speakers
 	// known is whether a label names a known person of the card, as speakerRole compares one: a contact of
 	// the account or a listed seller. A line of a message that opens with such a label is that person's turn.
 	known func(name string) bool
@@ -153,9 +160,16 @@ func label(value any) string {
 	return ""
 }
 
+// role is a speaker's role as a unit records it: the role, its basis in words, the contact's unit number
+// for a customer who is a contact, the rung that decided, and the identifier that decided.
 type role struct {
 	role, basis string
 	contact     *int
+	rung        int
+	matched     *Matched
+	// contactSeen is whether the speaker was tied to a contact: by the person, a candidate, or a label equal
+	// to a contact's name.
+	contactSeen bool
 }
 
 type contact struct {
@@ -163,10 +177,8 @@ type contact struct {
 	n    int
 }
 
-var noContact = [2]string{"listed seller identity", "label matches no listed seller and no contact"}
-
-// named is the contacts a speaker label equals, and whether it equals a listed seller, as speakerRole
-// compares them: each a label on one line.
+// named is the contacts a speaker label equals, and whether it equals a listed seller: each a label on one
+// line.
 func named(name string, sellers []string, contacts []contact) (matches []contact, listed bool) {
 	for _, c := range contacts {
 		if label(c.name) == name {
@@ -189,30 +201,12 @@ func knownPerson(value any, sellers []string, contacts []contact) bool {
 	return listed || len(matches) > 0
 }
 
-// speakerRole is units.speaker_role: a role from identity only.
-func speakerRole(value any, sellers []string, contacts []contact, slack bool) role {
-	name := label(value)
-	if name == "" {
-		return role{"unknown", "no speaker label", nil}
+// labelOf is a run's label, or "" for none.
+func labelOf(l *string) string {
+	if l == nil {
+		return ""
 	}
-	if slack {
-		contacts = nil
-	}
-	matches, listed := named(name, sellers, contacts)
-	switch {
-	case listed && len(matches) > 0:
-		return role{"unknown", "label matches a listed seller and a contact", nil}
-	case listed:
-		return role{"seller", noContact[0], nil}
-	case len(matches) == 1:
-		n := matches[0].n
-		return role{"customer", fmt.Sprintf("label matches contact [%d]", n), &n}
-	case len(matches) > 1:
-		return role{"unknown", fmt.Sprintf("label matches %d contacts", len(matches)), nil}
-	case slack:
-		return role{"unknown", "author is not a listed seller; Slack identities cannot show a customer", nil}
-	}
-	return role{"unknown", noContact[1], nil}
+	return *l
 }
 
 // part is one piece of a record's speech, in order: its speaker label, its text and, in an imported
@@ -315,7 +309,8 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			}
 		}
 		if speaker != nil && length(*speaker) > MaxLabel {
-			speaker, who = nil, role{"unknown", fmt.Sprintf("speaker label over %d characters", MaxLabel), nil}
+			speaker, who = nil, role{role: "unknown", basis: fmt.Sprintf("speaker label over %d characters", MaxLabel),
+				contactSeen: true}
 		}
 		// Each cue is neutralized on its own, so a sentence can be placed among the cues by counting its
 		// characters, spaces apart.
@@ -363,7 +358,7 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			// relayed: its speaker label is the author's, and no role is established for it.
 			spokenBy := who
 			if quotedAt[position] {
-				spokenBy = role{"unknown", QuotedBasis, nil}
+				spokenBy = role{role: "unknown", basis: QuotedBasis}
 			}
 			reached, size = reached+size, nonSpace(sentence)
 			from := bisect(ends, reached, true)
@@ -398,7 +393,9 @@ func (c *card) spoken(row *strictjson.Object, table string, parts []part, at any
 			c.units = append(c.units, Unit{N: len(c.units) + 1, Kind: "sentence", Source: rule.system,
 				RecordRef: str(field(row, "record_ref")), Tool: rule.tool, At: shownAt, Speaker: speaker,
 				Role: spokenBy.role, Basis: spokenBy.basis, Contact: spokenBy.contact, Text: sentence,
-				Partial: partial, Quoted: quotedAt[position], Shown: shown, Span: span, RawSHA256: rawDigest, SanitizerVersion: SanitizerVersion})
+				Partial: partial, Quoted: quotedAt[position], Shown: shown, Span: span, RawSHA256: rawDigest,
+				SanitizerVersion: SanitizerVersion, SpeakerRules: SpeakerRules, Rung: spokenBy.rung,
+				Matched: spokenBy.matched, contactSeen: spokenBy.contactSeen})
 		}
 		if len(found) > 0 && cut {
 			waiting[name] = true
@@ -563,6 +560,7 @@ func (c *card) crm(asOf time.Time) []contact {
 	for i, row := range contacts {
 		named[i] = contact{field(row, "name"), contactNumbers[rowID(row)]}
 	}
+	c.contactRows, c.contactNumbers = contacts, contactNumbers
 	contracts := byID(c.groups["contracts"])
 	contractNumbers := map[string]int{}
 	for _, row := range contracts {
@@ -630,6 +628,10 @@ func (c *card) crm(asOf time.Time) []contact {
 		}
 		c.gap("crm_unmapped_fields", "CRM: annual recurring revenue and renewal risk are not mapped "+
 			"from standard Salesforce fields.", nil, false, nil)
+		if people, ok := c.evidence.Get("people"); ok && field(object(people), "users") == UsersNotRead {
+			c.gap("crm_users_not_read", "CRM: the org's users were not read: it holds more than 50,000 Standard users, "+
+				"so no speaker is matched to a Salesforce user.", nil, false, nil)
+		}
 	} else {
 		renewal := dayOf(field(account, "renewal_date"))
 		renewalDay = &renewal
@@ -856,8 +858,7 @@ func (c *card) sellers(backend string) []string {
 	return out
 }
 
-func (c *card) calls(asOf time.Time, contacts []contact) {
-	sellers := c.sellers("calls_backend")
+func (c *card) calls(asOf time.Time) {
 	notes := c.groups["call_notes"]
 	imported := field(c.evidence, "calls_backend") == "imported"
 	switch field(c.evidence, "notes_status") {
@@ -866,6 +867,10 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 		return
 	case "denied":
 		c.gap("calls_denied", "Calls: not read. The grant lacks calls:read.", nil, false, nil)
+		return
+	case "not_matched":
+		c.gap("calls_not_matched", "Calls: not read. The account's transcript is not matched to this card.", nil,
+			false, nil)
 		return
 	}
 	if len(notes) == 0 {
@@ -876,13 +881,7 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 		}
 		return
 	}
-	roleOf := func(l *string) role {
-		var v any
-		if l != nil {
-			v = *l
-		}
-		return speakerRole(v, sellers, contacts, false)
-	}
+	who := c.speakersOf("calls_backend")
 	sorted := append([]*strictjson.Object(nil), notes...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		a, b := pyStr(field(sorted[i], "called_at")), pyStr(field(sorted[j], "called_at"))
@@ -891,6 +890,7 @@ func (c *card) calls(asOf time.Time, contacts []contact) {
 	firstUnit := map[string]int{}
 	for _, note := range sorted {
 		ref := str(field(note, "record_ref"))
+		roleOf := func(l *string) role { return who.resolve(c, callRef(note, labelOf(l))) }
 		if !imported {
 			speaker, _ := note.Get("speaker")
 			firstUnit[ref] = c.spoken(note, "call_notes", whole(speaker, field(note, "body")),
@@ -958,13 +958,14 @@ func (c *card) slack(contacts []contact) {
 	case "denied":
 		c.gap("slack_denied", "Slack: not read. The grant lacks slack:read.", nil, false, nil)
 		return
+	case "not_matched":
+		c.gap("slack_not_matched", "Slack: not read. The account's thread is not matched to this card.", nil, false,
+			nil)
+		return
 	}
-	roleOf := func(l *string) role {
-		var v any
-		if l != nil {
-			v = *l
-		}
-		return speakerRole(v, sellers, nil, true)
+	who := c.speakersOf("slack_backend")
+	roleOf := func(message *strictjson.Object) func(*string) role {
+		return func(l *string) role { return who.resolve(c, c.slackRef(message, labelOf(l))) }
 	}
 	read := func(n int) string {
 		if n == 1 {
@@ -980,7 +981,7 @@ func (c *card) slack(contacts []contact) {
 			if speaker != "" {
 				label = speaker
 			}
-			c.spoken(message, "messages", whole(label, field(message, "body")), field(message, "sent_at"), roleOf,
+			c.spoken(message, "messages", whole(label, field(message, "body")), field(message, "sent_at"), roleOf(message),
 				false, false)
 		}
 		counts := object(field(object(field(c.evidence, "thread_snapshot")), "counts"))
@@ -994,8 +995,9 @@ func (c *card) slack(contacts []contact) {
 			total.Add(total, n)
 		}
 		c.gap("slack_thread", fmt.Sprintf("Slack: %s from one selected thread, and paging completed. Not read: "+
-			"files (%s), attachments (%s), blocks (%s), earlier versions of edited messages, and every other thread.",
-			read(len(c.groups["messages"])), left["files"], left["attachments"], left["blocks"]), total, false, nil)
+			"files (%s), attachments (%s), blocks (%s), earlier versions of edited messages, and every other thread.%s",
+			read(len(c.groups["messages"])), left["files"], left["attachments"], left["blocks"], c.profilesNotRead()),
+			total, false, nil)
 		return
 	}
 	messages := append([]*strictjson.Object(nil), c.groups["messages"]...)
@@ -1015,7 +1017,7 @@ func (c *card) slack(contacts []contact) {
 		}
 		files.Add(files, attached)
 		first := c.spoken(message, "messages", whole(field(message, "author"), field(message, "body")),
-			field(message, "sent_at"), roleOf, false, false)
+			field(message, "sent_at"), roleOf(message), false, false)
 		if attached.Sign() != 0 {
 			attachedTo = append(attachedTo, fmt.Sprintf("[%d]", first))
 		}
@@ -1055,7 +1057,9 @@ func cardTime(at *string) string {
 	return "time " + strictjson.Quote(*at)
 }
 
-var roles = []string{"customer", "seller", "unknown"}
+// roles are the sections of SAID, in the order sentences are dealt to them: the customer side (a customer,
+// or a customer-side speaker not in the CRM), the seller side, another party, and no established role.
+var roles = []string{"customer", "seller", "other_party", "unknown"}
 
 type recency struct {
 	timed   bool
@@ -1119,7 +1123,7 @@ func (c *card) said() []string {
 	for _, r := range roles {
 		var queue []*Unit
 		for _, u := range spoken {
-			if u.Shown == "more" && u.Role == r {
+			if u.Shown == "more" && side(u.Role) == r {
 				queue = append(queue, u)
 			}
 		}
@@ -1138,8 +1142,8 @@ func (c *card) said() []string {
 		}
 	}
 	var lines []string
-	headings := map[string]string{"customer": "Customer, by a speaker label equal to one contact's name",
-		"seller": "Seller, by a listed seller's name or ID", "unknown": "No established role"}
+	headings := map[string]string{"customer": "Customer side", "seller": "Seller side", "other_party": "Other party",
+		"unknown": "No established role"}
 	for _, r := range roles {
 		chosen := append([]*Unit(nil), queues[r][:dealt[r]]...)
 		// A sentence with no time is printed last in its role, as it is dealt last.
@@ -1167,8 +1171,16 @@ func (c *card) said() []string {
 					title = c.text(unshown)
 					c.titles[*u.Contact] = title
 				}
-				who += fmt.Sprintf(", role %s [%d]", title, *u.Contact)
-			} else if r == "unknown" && u.Basis != "no speaker label" {
+				read := ""
+				if c.readOn != "" && title != "Missing" {
+					read = " read " + c.readOn
+				}
+				who += fmt.Sprintf(", role %s%s [%d]", title, read, *u.Contact)
+			}
+			switch {
+			case r != "unknown":
+				who += ", " + u.Basis
+			case u.Basis != "no speaker label":
 				who += " (" + u.Basis + ")"
 			}
 			lines = append(lines, fmt.Sprintf("    [%d] %s %s; %s", u.N, where, cardTime(u.At), who),
@@ -1183,11 +1195,13 @@ func (c *card) said() []string {
 				continue
 			}
 			n++
-			switch u.Role {
+			switch side(u.Role) {
 			case "customer":
 				counts.Customer++
 			case "seller":
 				counts.Seller++
+			case "other_party":
+				counts.OtherParty++
 			default:
 				counts.Unknown++
 			}
@@ -1199,7 +1213,8 @@ func (c *card) said() []string {
 		for _, rc := range []struct {
 			n    int
 			role string
-		}{{counts.Customer, "customer"}, {counts.Seller, "seller"}, {counts.Unknown, "unknown"}} {
+		}{{counts.Customer, "customer"}, {counts.Seller, "seller"}, {counts.OtherParty, "other party"},
+			{counts.Unknown, "unknown"}} {
 			if rc.n > 0 {
 				parts = append(parts, fmt.Sprintf("%d %s", rc.n, rc.role))
 			}
@@ -1239,7 +1254,7 @@ func (c *card) said() []string {
 		records[u.RecordRef] = true
 		if u.Speaker != nil {
 			labelled = true
-			allUnmatched = allUnmatched && (u.Basis == noContact[0] || u.Basis == noContact[1])
+			allUnmatched = allUnmatched && !u.contactSeen
 		}
 	}
 	if labelled && allUnmatched {
@@ -1272,9 +1287,19 @@ func (c *card) said() []string {
 func build(evidence *strictjson.Object) ([]Unit, string, []Gap, []Line) {
 	v := validate(evidence)
 	asOf := dayOf(field(evidence, "as_of"))
-	c := &card{evidence: evidence, groups: v.groups, titles: map[int]string{}, unshownTitles: map[int]any{}}
+	c := &card{evidence: evidence, groups: v.groups, titles: map[int]string{}, unshownTitles: map[int]any{},
+		receipts: v.receipts}
+	// A contact's title is shown with the day the account was read.
+	if receipt := v.receipts["get_account"]; receipt != nil {
+		started, _ := receipt.Get("started_at")
+		if at, ok := started.(string); ok && len(at) >= 10 {
+			if _, err := Day(at[:10]); err == nil {
+				c.readOn = at[:10]
+			}
+		}
+	}
 	contacts := c.crm(asOf)
-	c.calls(asOf, contacts)
+	c.calls(asOf)
 	c.slack(contacts)
 	said := c.said()
 	if len(said) == 0 {
@@ -1421,6 +1446,23 @@ func NewTrace(evidence *strictjson.Object) *Trace {
 		}
 	}
 	return t
+}
+
+// Source is the receipt of the read that returned a record of the evidence, by its record_ref: the record
+// a speaker's identifier came from. It is false for a record the evidence does not hold, or one its read's
+// receipt does not bind.
+func (t *Trace) Source(ref string) (receipt *strictjson.Object, ok bool) {
+	parts := strings.Split(ref, "/")
+	if len(parts) != 3 {
+		return nil, false
+	}
+	rule, known := sourceRules[parts[1]]
+	at, found := t.receipts[rule.tool]
+	from, recorded := t.records[ref]
+	if !known || !found || at >= t.receiptsEnd || !recorded || from >= t.recordsEnd || !t.inRows(at, ref) {
+		return nil, false
+	}
+	return t.receiptList[at], true
 }
 
 func (t *Trace) inRows(receipt int, ref string) bool {

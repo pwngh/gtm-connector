@@ -274,7 +274,10 @@ func (w *world) byEmail(f *finding, address string) {
 type mail struct {
 	address, domain string
 	home            bool
-	ref             Identifier
+	// member is an address of a member of the seller's own Slack workspace, whom no domain puts on the
+	// customer side.
+	member bool
+	ref    Identifier
 }
 
 // emailsOf is the reference's emails: the Slack profile email and the meeting tool's participant email.
@@ -282,12 +285,13 @@ func (r Ref) emailsOf(homeTeam string) []mail {
 	var out []mail
 	if r.Slack != nil {
 		if a, d, ok := email(r.Slack.Email); ok {
-			out = append(out, mail{a, d, homeTeam != "" && r.Slack.Team == homeTeam,
+			home := homeTeam != "" && r.Slack.Team == homeTeam
+			out = append(out, mail{a, d, home, home,
 				Identifier{Kind: Email, Value: a, Scope: r.Slack.Team, From: r.From}})
 		}
 	}
 	if a, d, ok := email(r.Email); ok {
-		out = append(out, mail{a, d, true, Identifier{Kind: Email, Value: a, From: r.From}})
+		out = append(out, mail{a, d, true, false, Identifier{Kind: Email, Value: a, From: r.From}})
 	}
 	return out
 }
@@ -338,7 +342,7 @@ func (w *world) sideByDomain(f *finding, mails []mail) {
 			f.shared = true
 			continue
 		}
-		if side == "" {
+		if side == "" || side == CustomerNotInCRM && m.member {
 			continue
 		}
 		if f.side == "" {
@@ -383,7 +387,7 @@ func (w *world) attendees(r Ref, label string, anon bool) finding {
 		}
 		w.byEmail(&f, address)
 		_, d, _ := email(address)
-		m := mail{address, d, true, Identifier{Kind: Email, Value: address, From: r.From}}
+		m := mail{address, d, true, false, Identifier{Kind: Email, Value: address, From: r.From}}
 		if len(f.people) > 0 {
 			for _, i := range f.people {
 				if w.contradicts(i, d) {
@@ -495,7 +499,7 @@ func (w *world) variant(r Ref, label string, anon bool) finding {
 	}
 	for _, i := range participants.people {
 		for _, id := range w.people[i].Identifiers {
-			if id.Kind == Name && Variant(id.Value) == v {
+			if (id.Kind == Name || id.Kind == ParticipantName) && Variant(id.Value) == v {
 				f.add(i, id)
 			}
 		}

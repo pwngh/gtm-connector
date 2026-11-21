@@ -19,8 +19,10 @@ import (
 // and a limit does. No receipt is left pending by a cancel, a store that does not answer, a lost
 // acknowledgement or a source that panics.
 
-// short is the limit these tests give the maker in place of SettleLimit.
-const short = 200 * time.Millisecond
+// short is the limit these tests give the maker in place of SettleLimit. It also bounds each receipt write
+// that must go through before the step a test holds, which a busy runner can take more than a few hundred
+// milliseconds to commit on PostgreSQL; a second leaves those writes room and still ends the held step.
+const short = time.Second
 
 // stalled is a store that does not answer, as a database behind a lock does: its publication, or its
 // finishing of a receipt, waits until the context it was given ends. With refusal set its publication fails

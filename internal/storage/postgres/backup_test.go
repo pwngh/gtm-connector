@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"slices"
 	"strings"
@@ -23,7 +24,7 @@ func tables(t *testing.T, url string) []string {
 // new table cannot be dropped from backups without anyone deciding it.
 func TestEveryTableIsBackedUpOrLeftOut(t *testing.T) {
 	f := postgrestest.New(t)
-	backedUp := postgres.BackupTableNames(postgres.LatestSchemaVersion())
+	backedUp := postgres.BackupTableNames(postgres.MigrationNames())
 	for _, table := range tables(t, f.URL) {
 		_, left := postgres.NotBackedUp()[table]
 		if slices.Contains(backedUp, table) == left {
@@ -64,7 +65,7 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 		ExpiresAt: time.Now().Add(time.Hour)}, id(10), f.Reader, time.Hour)
 	ok(t, err)
 	// One transcript imported through an AccountNumber fills the five tables of imports.
-	publish(t, imports(t, f), importing{binding: salesforceBinding, account: "acc-sf-001000000000001AAA",
+	imported := publish(t, imports(t, f), importing{binding: salesforceBinding, account: "acc-sf-001000000000001AAA",
 		number: "INVENTED-1"})
 	// One mapped thread fills the Slack mappings.
 	_, _, err = f.Store.SaveSlackMapping(ctx, f.Workspace.ID,
@@ -75,6 +76,9 @@ func fillEveryTable(t *testing.T, f *postgrestest.Fixture) {
 	during := postgrestest.Publish(t, f, postgrestest.Account, f.Reader.ID, "brief-deal")
 	ok(t, sql(t, f, `INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref) VALUES ($1, $2, $3, $4)`,
 		f.Workspace.ID, during.Card.ID, deal.Ref, postgrestest.Account))
+	// A deal of the imported call's account matches the call, and a card of the deal that read it names it.
+	importID, _ := imported.Get("import_id")
+	matchedCard(t, f, "acc-sf-001000000000001AAA", importID.(string))
 	// The Python card of a recorded folder fills the admitted cards and receipts.
 	folder, word := pythonFolder(t)
 	added, err := f.Store.Admit(ctx, f.Workspace.ID, word, []postgres.AdmittedCard{{BriefID: pythonBrief, Kind: "cli",
@@ -94,12 +98,12 @@ func TestABackupRestoresEveryRow(t *testing.T) {
 	fillEveryTable(t, f)
 	files := dump(t, f)
 	fresh, url := freshStoreURL(t)
-	ok(t, fresh.Restore(ctx, strings.Repeat("d", 64), files.version, files.copies, opener(files.data)))
+	ok(t, fresh.Restore(ctx, strings.Repeat("d", 64), files.applied, files.copies, opener(files.data)))
 
 	every := func(u, table string) string {
 		return scalar(t, u, `SELECT coalesce(string_agg(x::text, E'\n' ORDER BY x::text), '') FROM `+table+` x`)
 	}
-	for _, table := range postgres.BackupTableNames(postgres.LatestSchemaVersion()) {
+	for _, table := range postgres.BackupTableNames(postgres.MigrationNames()) {
 		before, after := every(f.URL, table), every(url, table)
 		if before == "" {
 			t.Errorf("the fixture leaves %s empty", table)
@@ -121,4 +125,39 @@ func TestABackupRestoresEveryRow(t *testing.T) {
 	if n := scalar(t, url, "SELECT count(*)::text FROM restores"); n != "1" {
 		t.Errorf("%s restores recorded", n)
 	}
+}
+
+// matchedCard registers a deal of account, matches the account's imported call to it, and publishes a card
+// of the deal whose reads returned the call, bound to the deal with its match.
+func matchedCard(t *testing.T, f *postgrestest.Fixture, account, importID string) {
+	t.Helper()
+	ok(t, f.Store.GrantAccount(ctx, f.Workspace.ID, f.Reader.ID, account))
+	deal := postgrestest.RegisterDeal(t, f, account, "", "matched")
+	made, err := f.Store.MatchAccount(ctx, f.Workspace.ID, account)
+	ok(t, err)
+	if len(made) != 1 || made[0].State != "matched" || made[0].DealRef != deal.Ref {
+		t.Fatalf("the call's match: %+v", made)
+	}
+	calls, err := f.Store.EnsureConnection(ctx, f.Workspace, "calls", "imported")
+	ok(t, err)
+	record := postgrestest.Record("accounts", account, "id", account, "name", "Invented account")
+	pub, call, read := postgrestest.PreparedFor(t, f.Store, f, account, "matched-call", "brief-matched", f.Reader.ID,
+		postgres.TokenID(""), record)
+	note := postgres.RecordVersion{Source: "calls", Table: "call_notes", RecordID: importID,
+		Body: []byte(`{"id":"` + importID + `","record_ref":"calls/call_notes/` + importID + `"}`)}
+	notes, _, err := f.Store.RunChildRead(ctx, postgres.ChildReadStart{ParentID: call.ID, Ordinal: 2,
+		Tool: "read_call_notes", Scope: "calls:read", ConnectionID: calls.ID, BriefID: "brief-matched",
+		Arguments: []byte(`{"account_id":"` + account + `"}`), Lease: time.Minute,
+	}, func(context.Context) ([]postgres.RecordVersion, error) { return []postgres.RecordVersion{note}, nil })
+	ok(t, err)
+	pub.ReadReceiptIDs = append(pub.ReadReceiptIDs, notes.ID)
+	pub.Bytes = postgrestest.CardBytes(t, call, account, "brief-matched", []postgres.Receipt{read, notes},
+		[]postgres.RecordVersion{record, note}, pub.Units, pub.Gaps)
+	postgrestest.WithLines(t, &pub, postgrestest.AccountLine())
+	card, err := f.Store.PublishCard(ctx, pub)
+	ok(t, err)
+	ok(t, sql(t, f, `INSERT INTO deal_cards (workspace_id, card_id, deal_ref, account_ref) VALUES ($1, $2, $3, $4)`,
+		f.Workspace.ID, card.ID, deal.Ref, account))
+	ok(t, sql(t, f, `INSERT INTO deal_card_matches (workspace_id, card_id, match_id) VALUES ($1, $2, $3)`,
+		f.Workspace.ID, card.ID, made[0].ID))
 }
