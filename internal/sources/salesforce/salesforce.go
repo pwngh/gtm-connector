@@ -307,6 +307,11 @@ func FromSF(ctx context.Context, alias string, o Options) (*Reader, error) {
 // operation runs one bounded read, after the checks every first read makes: the org against the selected
 // environment, and outside Developer Edition the four objects' fields.
 func (r *Reader) operation(ctx context.Context, run func(o *operation) error) error {
+	return r.bounded(ctx, true, run)
+}
+
+// bounded is operation, with the fields of the four objects checked or not.
+func (r *Reader) bounded(ctx context.Context, capabilities bool, run func(o *operation) error) error {
 	select {
 	case r.turn <- struct{}{}:
 	case <-ctx.Done():
@@ -329,7 +334,7 @@ func (r *Reader) operation(ctx context.Context, run func(o *operation) error) er
 		}
 		r.editionVerified = true
 	}
-	if r.environment != "developer" {
+	if capabilities && r.environment != "developer" {
 		if err := o.checkCapabilities(); err != nil {
 			return err
 		}
@@ -419,6 +424,84 @@ func (r *Reader) PrepareConnection(ctx context.Context) (Identity, error) {
 		return nil
 	})
 	return identity, err
+}
+
+// CheckEnvironment gives the org's identity once it is checked against the selected environment. It
+// describes no object and reads no record, so that the fields of each object can be checked apart.
+func (r *Reader) CheckEnvironment(ctx context.Context) (Identity, error) {
+	var identity Identity
+	err := r.bounded(ctx, false, func(*operation) error {
+		identity = Identity{InstanceURL: r.instanceURL, OrganizationID: r.organizationID, Environment: r.environment}
+		return nil
+	})
+	return identity, err
+}
+
+// Objects are the four objects the reader maps, in the order they are checked.
+func Objects() []string {
+	names := make([]string, len(required))
+	for i, object := range required {
+		names[i] = object.object
+	}
+	return names
+}
+
+// MissingFields describes one of the four objects and gives how many fields of it are mapped, and those it
+// does not expose, in the order they are mapped. An object that is not queryable is salesforce_forbidden.
+func (r *Reader) MissingFields(ctx context.Context, object string) (mapped int, missing []string, err error) {
+	err = r.bounded(ctx, false, func(o *operation) error {
+		for _, each := range required {
+			if each.object != object {
+				continue
+			}
+			names, err := o.describe(object)
+			if err != nil {
+				return err
+			}
+			mapped, missing = len(each.fields), []string{}
+			for _, field := range each.fields {
+				if !names[field] {
+					missing = append(missing, field)
+				}
+			}
+			return nil
+		}
+		return refuse(invalidArguments)
+	})
+	return mapped, missing, err
+}
+
+// RenewalCandidate reads the Contract with the earliest EndDate on or after the day, among Draft,
+// InApproval and Activated contracts, ties broken by ID: the contract a card of its account plans from,
+// with its record_ref. It is nil when the org holds none.
+func (r *Reader) RenewalCandidate(ctx context.Context, asOf string) (*strictjson.Object, error) {
+	if _, err := evidence.Day(asOf); err != nil {
+		return nil, refuse(invalidArguments)
+	}
+	var candidate *strictjson.Object
+	err := r.operation(ctx, func(o *operation) error {
+		rows, err := o.query("SELECT "+contractFields+" FROM Contract WHERE EndDate >= "+asOf+
+			" AND StatusCode IN ('Draft', 'InApproval', 'Activated') ORDER BY EndDate, Id LIMIT 1", 1)
+		if err != nil || len(rows) == 0 {
+			return err
+		}
+		related, _ := rows[0].Get("AccountId")
+		account, err := nativeID(related)
+		if err != nil {
+			return err
+		}
+		record, err := contractRecord(rows[0], account)
+		if err != nil {
+			return err
+		}
+		ends, _ := record.Get("end_date")
+		if end, _ := ends.(string); end == "" || end < asOf {
+			return refuse(invalidResponse)
+		}
+		candidate = referenced("contracts", []*strictjson.Object{record})[0]
+		return nil
+	})
+	return candidate, err
 }
 
 // Account is one account with its contacts and its contracts, each ordered by ID.

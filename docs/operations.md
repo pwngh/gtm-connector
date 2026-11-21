@@ -37,6 +37,35 @@ with one line: `the database is encoded as SQL_ASCII; create it with ENCODING 'U
 > **Demo data and real sources never share a workspace.** The database refuses a real connection in
 > the demo workspace.
 
+## Connect Salesforce
+
+Sign in with [`sf`](https://developer.salesforce.com/tools/salesforcecli) under an alias, then
+connect a workspace of its own to that org. The default workspace holds demo data, so name one
+with `--state-dir` and give every later command the same name.
+
+```sh
+sf org login web --alias gtm-de
+gtm debug salesforce check --sf-org gtm-de
+gtm connect salesforce --org gtm-de --state-dir gtm-de --seller 'Morgan Reed'
+gtm debug salesforce check --state-dir gtm-de
+gtm accounts --query SEARCH_TEXT --state-dir gtm-de
+gtm brief ACCOUNT_ID --state-dir gtm-de
+```
+
+- `connect salesforce` reads the alias's login through `sf`, checks the org against `--environment`
+  (`developer` by default, `sandbox` or `production`) and pins the workspace to the org's address,
+  ID and environment. It saves the alias, the environment and a digest of that identity, never the
+  token, address or ID, and reads no record. The workspace refuses any other org, also after
+  `connect salesforce --remove`.
+- Each later command signs in again on its first read, and reads nothing from an org that is not
+  the pinned one. Every read is a tool call under a receipt that `audit` lists.
+- `debug salesforce check --sf-org ALIAS` checks the sign-in, the environment and the four objects'
+  fields before anything is connected, and reads no record. `--state-dir NAME` checks a connected
+  workspace and adds an account search, the contract a renewal plans from, and that account's reads,
+  each under a receipt. The report holds counts and codes, no record. A failed check prints its
+  report and exits 4.
+- A token handed to the container instead of `sf` is not read yet.
+
 ## Health
 
 `/healthz` answers 200 `{"status":"ok"}` when the database is reachable and its applied migrations

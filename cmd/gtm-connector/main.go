@@ -14,6 +14,8 @@
 //	                                 serve MCP on stdin and stdout, for an assistant app that starts it
 //	gtm-connector token new --scope SCOPE
 //	                                 make a bearer token for an MCP client; also token list and token revoke ID
+//	gtm-connector debug salesforce check
+//	                                 check a Salesforce sign-in, its fields and its renewal dates
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
 //	gtm-connector health             check that the local server answers
@@ -87,13 +89,14 @@ var usage = `usage: gtm-connector [--version] [--json] COMMAND ...
   audit                       list the receipts of the audit log
   mcp stdio --scope SCOPE     serve MCP on stdin and stdout, for an assistant app that starts it
   token new --scope SCOPE     make a bearer token for an MCP client; also token list and token revoke ID
+  debug salesforce check      check a Salesforce sign-in, its fields and its renewal dates
   backup --out FILE           write PostgreSQL and the credentials folder to FILE
   restore --in FILE           restore FILE into an empty database and credentials folder
   health                      check that the local server answers
   version                     print the commit this binary was built from
 
 demo, connect, accounts, brief, inspect, audit, mcp and token take --json, --state-dir WORKSPACE and --help.
-Not in this build: ` + strings.Join(notInBuild, ", ") + ".\n"
+Not in this build: ` + strings.Join(notInBuild, ", ") + ", except debug salesforce check.\n"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -136,6 +139,9 @@ func dispatch(ctx context.Context, argv []string, s screen) int {
 	}
 	if runClient, client := clientCommands[name]; client {
 		return runClient(ctx, args, s)
+	}
+	if name == "debug" && len(args) > 0 && args[0] == "salesforce" {
+		return debugSalesforce(ctx, args[1:], s)
 	}
 	var err error
 	switch name {

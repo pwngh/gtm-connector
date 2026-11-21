@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -72,7 +73,8 @@ import (
 //     before the read (ownerRead). A card without --as-of is planned from today for a real CRM (day), and
 //     the workspace's seller list reaches every card (sources).
 //
-// TestASourceRegisteredInItsKindIsReadByEveryCommand wires a CRM this way, against an invented org.
+// The salesforce entry is wired this way (source_salesforce.go). TestSalesforceIsReadByEveryCommand runs
+// every command through it against an invented org.
 
 // crmSource is a workspace's CRM.
 type crmSource interface {
@@ -179,7 +181,8 @@ var sourceKinds = []*sourceKind{
 		backend: "fixture", described: demoData, attach: attachDemo, calls: demoCalls},
 	{provider: "demo", source: "slack", mode: "demo", shown: "demo", title: "Demo data", detail: "demo data",
 		backend: "fixture", described: demoData, attach: attachDemo, slack: demoSlack},
-	// internal/sources/salesforce reads it. Nothing opens it here yet.
+	// An org signed in with sf, read by internal/sources/salesforce (source_salesforce.go). The mode
+	// env_token, a token handed to the container, is of this kind and is not read in this build.
 	{provider: "salesforce", source: "crm", mode: "sf", shown: "salesforce", title: "Salesforce",
 		detail: "Salesforce", live: true, options: []string{"--org", "--environment", "--seller"},
 		backend: "salesforce", bound: func(row postgres.Connection, _ any) any {
@@ -187,7 +190,8 @@ var sourceKinds = []*sourceKind{
 		},
 		described: func(binding *strictjson.Object) string {
 			return "Salesforce (" + oneLine(cellText(get(binding, "environment"))) + "), identity verified"
-		}},
+		},
+		attach: attachSalesforce, crm: openSalesforce},
 	// internal/sources/calls reads them. Nothing opens them here yet. Imports are bound to their CRM.
 	{provider: "calls", source: "calls", mode: "imported", shown: "imported", title: "Call transcripts", plural: true,
 		detail: "imported transcripts", live: true, options: []string{"--seller"},
@@ -531,6 +535,8 @@ type toolCall struct {
 	tool      string
 	arguments *strictjson.Object
 	account   string // the account the call names, or ""
+	// scope is the scope of a read that is no MCP tool, such as a check's. "" is the tool's own.
+	scope string
 }
 
 // errDenied is a tool call whose grant lacks the tool's scope. Its receipt is finished as refused, and
@@ -548,7 +554,7 @@ const settling = 5 * time.Second
 func (r *reads) call(ctx context.Context, c toolCall,
 	read func(context.Context) ([]*strictjson.Object, error)) (receipts.Receipt, []*strictjson.Object, error) {
 	log := &postgres.ReceiptStore{Store: r.store}
-	scope := mcp.Definitions[c.tool].Scope
+	scope := cmp.Or(c.scope, mcp.Definitions[c.tool].Scope)
 	row := r.rows[strings.TrimSuffix(scope, ":read")]
 	started, err := log.Start(ctx, receipts.Start{WorkspaceID: r.workspace.ID,
 		OperationID: fmt.Sprintf("%s/%d", c.run, c.request), TokenID: c.token, Tool: c.tool, Scope: scope,

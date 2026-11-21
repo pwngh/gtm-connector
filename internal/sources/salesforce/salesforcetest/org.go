@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/pwngh/gtm-connector/internal/strictjson"
+	"github.com/pwngh/gtm-connector/internal/unicodetab"
 )
 
 // The invented login every test reads with.
@@ -32,8 +33,18 @@ var Objects = map[string][]string{
 	"Contract":    {"Id", "AccountId", "Status", "StatusCode", "StartDate", "ContractTerm", "EndDate"},
 }
 
-var soql = regexp.MustCompile(`^SELECT ([A-Za-z, ]+) FROM (Account|Contact|Opportunity|Contract) ` +
-	`WHERE (Id|AccountId) = '([A-Za-z0-9]{18})' ORDER BY Id LIMIT (101|1001)$`)
+var (
+	soql = regexp.MustCompile(`^SELECT ([A-Za-z, ]+) FROM (Account|Contact|Opportunity|Contract) ` +
+		`WHERE (Id|AccountId) = '([A-Za-z0-9]{18})' ORDER BY Id LIMIT (101|1001)$`)
+	// An account search by a literal part of the name, or of every account.
+	search = regexp.MustCompile(`^SELECT Id, Name, Industry, AccountNumber FROM Account` +
+		`(?: WHERE Name LIKE '%((?:[^\\']|\\.)*)%')? ORDER BY Name, Id LIMIT 101$`)
+	// The contract a renewal plans from.
+	candidate = regexp.MustCompile(`^SELECT Id, AccountId, Status, StatusCode, StartDate, ContractTerm, EndDate ` +
+		`FROM Contract WHERE EndDate >= ([0-9]{4}-[0-9]{2}-[0-9]{2}) AND StatusCode IN \('Draft', 'InApproval', ` +
+		`'Activated'\) ORDER BY EndDate, Id LIMIT 1$`)
+	unescaped = regexp.MustCompile(`\\(.)`)
+)
 
 type cursor struct {
 	object, account string
@@ -160,6 +171,10 @@ func (o *Org) answer(request *http.Request, path, query string) *http.Response {
 	case query == "SELECT Id, OrganizationType, IsSandbox FROM Organization LIMIT 1":
 		page = cursor{object: "Organization", rows: []*strictjson.Object{
 			strictjson.NewObject("Id", o.ID, "OrganizationType", o.Edition, "IsSandbox", o.Sandbox)}}
+	case search.MatchString(query):
+		page = cursor{object: "Account", rows: o.named(search.FindStringSubmatch(query)[1])}
+	case candidate.MatchString(query):
+		page = cursor{object: "Contract", rows: o.ending(candidate.FindStringSubmatch(query)[1])}
 	default:
 		asked := soql.FindStringSubmatch(query)
 		if asked == nil || asked[1] != strings.Join(Objects[asked[2]], ", ") ||
@@ -196,6 +211,54 @@ func (o *Org) answer(request *http.Request, path, query string) *http.Response {
 		o.cursors[next] = page
 	}
 	return Respond(200, encode(document))
+}
+
+// named is the accounts whose name holds this escaped LIKE text, in any letter case, by name and then ID,
+// and at most 101 of them, as a search reads them.
+func (o *Org) named(escaped string) []*strictjson.Object {
+	part := unicodetab.LowerString(unescaped.ReplaceAllString(escaped, "$1"))
+	var found []*strictjson.Object
+	for _, rows := range o.rows["Account"] {
+		for _, row := range rows {
+			name, _ := row.Get("Name")
+			if text, _ := name.(string); strings.Contains(unicodetab.LowerString(text), part) {
+				found = append(found, row)
+			}
+		}
+	}
+	sort.Slice(found, func(i, j int) bool {
+		a, _ := found[i].Get("Name")
+		b, _ := found[j].Get("Name")
+		if a != b {
+			return a.(string) < b.(string)
+		}
+		return idOf(found[i]) < idOf(found[j])
+	})
+	return found[:min(len(found), 101)]
+}
+
+// ending is the one Draft, InApproval or Activated contract with the earliest EndDate on or after the day,
+// ties broken by ID, or none.
+func (o *Org) ending(day string) []*strictjson.Object {
+	var first *strictjson.Object
+	var firstEnd string
+	for _, rows := range o.rows["Contract"] {
+		for _, row := range rows {
+			value, _ := row.Get("EndDate")
+			status, _ := row.Get("StatusCode")
+			end, dated := value.(string)
+			if !dated || end < day || status != "Draft" && status != "InApproval" && status != "Activated" {
+				continue
+			}
+			if first == nil || end < firstEnd || end == firstEnd && idOf(row) < idOf(first) {
+				first, firstEnd = row, end
+			}
+		}
+	}
+	if first == nil {
+		return []*strictjson.Object{}
+	}
+	return []*strictjson.Object{first}
 }
 
 // refuse keeps a request this org does not know for the test to fail on, and answers it with no data.
