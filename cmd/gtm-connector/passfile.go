@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -36,7 +35,7 @@ func checkPassfile(databaseURL string) error {
 		return nil
 	}
 	if mode := info.Mode().Perm(); mode&0o077 != 0 {
-		return fmt.Errorf("the password file %s has mode %04o; no one but its owner may have access to it, so make it 0600", shellQuote(oneLine(path)), mode)
+		return local("the password file %s has mode %04o; no one but its owner may have access to it, so make it 0600", shellQuote(oneLine(path)), mode)
 	}
 	return nil
 }

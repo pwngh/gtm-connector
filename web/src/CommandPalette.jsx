@@ -1,10 +1,7 @@
 import React,{useEffect,useId,useLayoutEffect,useRef,useState} from 'react';
-import {Search,CornerDownLeft,Command,FileText,Layers,Compass} from 'lucide-react';
+import {Search,CornerDownLeft,Command,Compass} from 'lucide-react';
 
-// The walkthrough's wording is the default; the server's app passes its own.
-const walkthroughEmpty=<><h3>No matching records</h3><p>Try an account name, “review,” or an evidence ID.</p></>;
-
-export default function CommandPalette({items,placeholder='Find a record, source, or action…',inputLabel='Find a record or action',empty=walkthroughEmpty}){
+export default function CommandPalette({items,placeholder,inputLabel,empty}){
   const [query,setQuery]=useState(''),[active,setActive]=useState(0);
   const listId=useId(),optionRefs=useRef([]),inputRef=useRef(null);
   // Take focus only if it is still on the dialog itself, never from Close.
@@ -24,7 +21,7 @@ export default function CommandPalette({items,placeholder='Find a record, source
   return <div className="command-palette">
     <div className="command-input"><Search size={22}/><input ref={inputRef} role="combobox" aria-label={inputLabel} aria-controls={listId} aria-expanded="true" aria-autocomplete="list" aria-activedescendant={results.length?`${listId}-${index}`:undefined} placeholder={placeholder} value={query} onChange={e=>{setQuery(e.target.value);setActive(0)}} onKeyDown={handleKey}/><kbd>esc</kbd></div>
     <div className="command-results" id={listId} role="listbox" aria-label="Workspace results">
-      {results.map((item,i)=>{const Icon=item.icon||(item.group==='Evidence'?FileText:item.group==='Accounts'?Layers:Compass);return <React.Fragment key={item.label}>{(i===0||results[i-1].group!==item.group)&&<div className="command-group-title" role="presentation">{item.group||'Workspace'}</div>}<button ref={node=>optionRefs.current[i]=node} type="button" tabIndex={-1} role="option" id={`${listId}-${i}`} aria-selected={i===index} className={`command-option ${i===index?'selected':''}`} onMouseMove={()=>setActive(i)} onClick={item.onSelect}><span className="command-option-icon"><Icon size={19}/></span><span className="command-option-copy"><strong>{item.label}</strong><small>{item.sub}</small></span><CornerDownLeft size={15} className="command-option-hint"/></button></React.Fragment>})}
+      {results.map((item,i)=>{const Icon=item.icon||Compass;return <React.Fragment key={item.label}>{(i===0||results[i-1].group!==item.group)&&<div className="command-group-title" role="presentation">{item.group||'Workspace'}</div>}<button ref={node=>optionRefs.current[i]=node} type="button" tabIndex={-1} role="option" id={`${listId}-${i}`} aria-selected={i===index} className={`command-option ${i===index?'selected':''}`} onMouseMove={()=>setActive(i)} onClick={item.onSelect}><span className="command-option-icon"><Icon size={19}/></span><span className="command-option-copy"><strong>{item.label}</strong><small>{item.sub}</small></span><CornerDownLeft size={15} className="command-option-hint"/></button></React.Fragment>})}
       {!results.length&&<div className="command-empty"><Search size={25}/>{empty}</div>}
     </div>
     <div className="command-footer"><span><Command size={14}/> Workspace command</span><span><kbd>↑</kbd><kbd>↓</kbd> navigate <kbd>↵</kbd> open</span></div>

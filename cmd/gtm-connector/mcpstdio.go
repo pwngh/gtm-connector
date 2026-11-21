@@ -95,7 +95,7 @@ func (r *run) serveStdio(ctx context.Context, in io.Reader, out io.Writer) error
 	}
 	c, err := loadConfig()
 	if err != nil {
-		return err
+		return local("%s", err)
 	}
 	if err := r.open(ctx); err != nil {
 		return err
@@ -103,13 +103,12 @@ func (r *run) serveStdio(ctx context.Context, in io.Reader, out io.Writer) error
 	// Receipts that an earlier process left pending when it was killed or lost the database are finished
 	// here, as serve finishes them, so an install that only runs stdio keeps none.
 	if err := finishExpired(ctx, r.store); err != nil {
-		return mountError(err)
+		return err
 	}
-	from, err := r.reads(ctx)
-	if err != nil {
-		return mountError(err)
+	if _, err := r.reads(ctx); err != nil {
+		return err
 	}
-	raw, issued, err := issueClientToken(ctx, r.store, r.workspace, from, scopeSet(r.args.lists["--scope"]), stdioLifetime)
+	raw, issued, err := issueClientToken(ctx, r.store, r.workspace, scopeSet(r.args.lists["--scope"]), stdioLifetime)
 	if err != nil {
 		return err
 	}
@@ -117,9 +116,11 @@ func (r *run) serveStdio(ctx context.Context, in io.Reader, out io.Writer) error
 	serving, stop := context.WithCancel(ctx)
 	defer stop()
 	go renew(serving, r.store, r.workspace.ID, issued.ID)
+	// Each call reads the workspace's sources as they are connected when it starts, through the seam serve's
+	// tools use, so a source removed or replaced while the process runs is refused here too.
 	config, err := mcptools.Stdio(mcptools.Config{Resource: c.publicOrigin + "/mcp", Issuer: c.publicOrigin,
 		WorkspaceID: r.workspace.ID, Store: r.store, Receipts: &postgres.ReceiptStore{Store: r.store},
-		Source: from.book, Sources: from.sources, Connections: from.connections, Selection: selection}, raw)
+		Open: toolSources(r.store, r.workspace), Selection: selection}, raw)
 	if err != nil {
 		return err
 	}
@@ -164,12 +165,26 @@ func finishExpired(ctx context.Context, store *postgres.Store) error {
 }
 
 // issueClientToken makes a token for the workspace's MCP clients principal and gives it, never stored, with
-// its row. The principal's grants on the connected book's accounts and the token are written in one
-// transaction, so a token that cannot be stored widens no other token's access.
-func issueClientToken(ctx context.Context, store *postgres.Store, workspace postgres.Workspace, from reads,
+// its row. The principal's grants on the connected CRM's accounts and the token are written in one
+// transaction, so a token that cannot be stored widens no other token's access. The MCP tools serve only a
+// workspace connected to the demo data in this build, as serve's tools say, so a workspace with no CRM or
+// another CRM gets no token.
+func issueClientToken(ctx context.Context, store *postgres.Store, workspace postgres.Workspace,
 	scopes []string, lifetime time.Duration) (string, postgres.ClientToken, error) {
+	from, err := workspaceReads(ctx, store, workspace)
+	switch {
+	case err != nil:
+		return "", postgres.ClientToken{}, err
+	case from.backend("crm") != "sqlite":
+		return "", postgres.ClientToken{}, &failure{code: 3, message: "This workspace's CRM is " +
+			from.described("crm") + ", which the MCP tools do not serve in this build."}
+	}
+	book, err := seededBook()
+	if err != nil {
+		return "", postgres.ClientToken{}, err
+	}
 	var accounts []postgres.ClientAccount
-	for _, account := range from.book.Accounts() {
+	for _, account := range book.Accounts() {
 		accounts = append(accounts, postgres.ClientAccount{Ref: account.ID, Name: account.Name})
 	}
 	raw := randomToken()
@@ -180,7 +195,7 @@ func issueClientToken(ctx context.Context, store *postgres.Store, workspace post
 		return "", issued, &failure{code: 3, message: "The " + postgres.ClientsName + " principal of this workspace is " +
 			"disabled, so no client token is issued for it."}
 	case err != nil:
-		return "", issued, mountError(err)
+		return "", issued, err
 	}
 	return raw, issued, nil
 }

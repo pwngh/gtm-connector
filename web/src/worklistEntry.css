@@ -1,8 +1,0 @@
-.wl-step-entry {font-size:1rem;line-height:1.6;overflow-wrap:anywhere}
-.wl-step-entry h3 {font-size:1.125rem;margin:0 0 10px;scroll-margin-block:85px 24px}
-.wl-step-entry h3:focus {outline:3px solid var(--blue);outline-offset:5px}
-.wl-step-entry h4 {font-size:.875rem;margin:0 0 8px;font-weight:600}
-.wl-step-entry p {font-size:1rem;margin:0 0 12px}
-.wl-step-entry ul {padding-left:20px;margin:0}
-.wl-step-prerequisites,.wl-step-output {border-left:3px solid var(--line);padding:12px 15px;margin:15px 0}
-.step-summary .wl-step-entry .button {font-size:1rem;min-height:44px;white-space:normal}

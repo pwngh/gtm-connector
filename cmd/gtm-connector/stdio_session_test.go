@@ -222,11 +222,11 @@ func withoutPassword(t *testing.T, databaseURL string) string {
 
 // GTM_PUBLIC_ORIGIN with a user name or password is refused for every command, and never repeated.
 func TestAnOriginWithCredentialsIsRefused(t *testing.T) {
+	d := stdioDemo(t)
 	t.Setenv("GTM_PUBLIC_ORIGIN", "https://operator:origin-secret@127.0.0.1:8443")
 	if _, err := loadConfig(); err == nil || err.Error() != "GTM_PUBLIC_ORIGIN must not hold a user name or password" {
 		t.Fatalf("loadConfig: %v", err)
 	}
-	d := stdioDemo(t)
 	code, stdout, stderr := d.tokenCommand(t, "new", "--scope", "crm:read", "--json")
 	if code != 1 || stdout != "" || strings.Contains(stdout+stderr, "origin-secret") {
 		t.Fatalf("token new: %d %s%s", code, stdout, stderr)
@@ -257,5 +257,38 @@ func TestAFailedIssuanceWidensNothing(t *testing.T) {
 	}
 	if got := d.count(t, `SELECT count(*) FROM principals WHERE kind = 'machine'`); got != 0 {
 		t.Errorf("a failed issuance made %d machine principals", got)
+	}
+}
+
+// The stdio server reads the workspace's sources through the seam serve's tools use, as they are connected
+// when each call starts: once the CRM is removed a call is refused under its receipt and reads nothing, and
+// once it is connected again, under a new generation, the next call is served.
+func TestStdioReadsTheSourcesAsTheyAreConnectedNow(t *testing.T) {
+	d := stdioDemo(t)
+	p := startStdio(t, d, "--scope", "crm:read")
+	p.send(stdioStart, stdioReady, stdioCall(2, "get_account", `{"account_id":"acc-003"}`))
+	p.answer(1)
+	if read := p.answer(2); dig(read, "result", "isError") != false {
+		t.Fatalf("before the removal %v", read)
+	}
+	if code, _, stderr := d.read(t, "connect", "demo", "--remove"); code != 0 {
+		t.Fatalf("connect demo --remove: %d %s", code, stderr)
+	}
+	p.send(stdioCall(3, "get_account", `{"account_id":"acc-003"}`))
+	if refused := p.answer(3); dig(refused, "result", "isError") != true ||
+		!strings.Contains(stringOf(dig(refused, "result", "content")), "crm_not_connected") {
+		t.Fatalf("after the removal %v", refused)
+	}
+	if code, _, stderr := d.read(t, "connect", "demo"); code != 0 {
+		t.Fatalf("connect demo: %d %s", code, stderr)
+	}
+	p.send(stdioCall(4, "get_account", `{"account_id":"acc-003"}`))
+	if read := p.answer(4); dig(read, "result", "isError") != false {
+		t.Fatalf("after connecting again %v", read)
+	}
+	p.stop()
+	if got := outcomes(stdioReceipts(t, d)); len(got) != 3 || got[0] != "get_account ok 200" || got[2] != "get_account ok 200" ||
+		!strings.HasPrefix(got[1], "get_account error") {
+		t.Fatalf("receipts %v", got)
 	}
 }

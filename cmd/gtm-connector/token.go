@@ -107,16 +107,15 @@ func (r *run) newToken(ctx context.Context) (any, error) {
 	}
 	c, err := loadConfig()
 	if err != nil {
-		return nil, err
+		return nil, local("%s", err)
 	}
 	if err := r.open(ctx); err != nil {
 		return nil, err
 	}
-	from, err := r.reads(ctx)
-	if err != nil {
-		return nil, mountError(err)
+	if _, err := r.reads(ctx); err != nil {
+		return nil, err
 	}
-	raw, issued, err := issueClientToken(ctx, r.store, r.workspace, from, scopeSet(r.args.lists["--scope"]),
+	raw, issued, err := issueClientToken(ctx, r.store, r.workspace, scopeSet(r.args.lists["--scope"]),
 		time.Duration(minutes)*time.Minute)
 	if err != nil {
 		return nil, err
@@ -139,7 +138,7 @@ func (r *run) listTokens(ctx context.Context) (any, error) {
 	}
 	tokens, err := r.store.MachineTokens(ctx, r.workspace.ID)
 	if err != nil {
-		return nil, mountError(err)
+		return nil, err
 	}
 	now := time.Now()
 	for _, t := range tokens {
@@ -165,7 +164,7 @@ func (r *run) revokeToken(ctx context.Context) (any, error) {
 	case errors.Is(err, postgres.ErrNotFound):
 		return nil, refused("No token in this workspace has that ID.")
 	case err != nil:
-		return nil, mountError(err)
+		return nil, err
 	}
 	return tokenObject(revoked, time.Now()), nil
 }

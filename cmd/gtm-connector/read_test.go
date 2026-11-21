@@ -20,7 +20,7 @@ func (d *demoDatabase) read(t *testing.T, tokens ...string) (code int, stdout, s
 	t.Setenv("GTM_DATABASE_URL", d.appURL)
 	rest, asJSON := withoutJSON(tokens)
 	var out, errs bytes.Buffer
-	code = runRead(ctx, rest[0], rest[1:], screen{out: &out, err: &errs, json: asJSON})
+	code = runCommand(ctx, rest[0], rest[1:], screen{out: &out, err: &errs, json: asJSON})
 	return code, out.String(), errs.String()
 }
 
@@ -219,8 +219,7 @@ func TestBriefWithoutCallsInANamedWorkspace(t *testing.T) {
 // source the read commands do not read is refused by name and never read as demo data.
 func TestReadCommandsRefuseWhatIsNotConnected(t *testing.T) {
 	d := setUpDemo(t)
-	const advice = "No CRM is connected. Run gtm-connector connect salesforce --org ALIAS%[1]s, or gtm-connector " +
-		"connect demo%[1]s for invented data."
+	const advice = "No CRM is connected. Run gtm-connector connect demo%[1]s for invented data."
 	for _, tokens := range [][]string{{"accounts"}, {"brief", "acc-003"}, {"inspect", "acc-003"},
 		{"brief", "not an account"}} {
 		if code, message, next := d.refusal(t, 2, tokens...); code != "usage_error" ||
@@ -384,7 +383,7 @@ func TestAuditFollows(t *testing.T) {
 	var errs bytes.Buffer
 	done := make(chan int)
 	go func() {
-		done <- runRead(following, "audit", []string{"--follow", "--tool", "save_brief"}, screen{out: &out, err: &errs, json: true})
+		done <- runCommand(following, "audit", []string{"--follow", "--tool", "save_brief"}, screen{out: &out, err: &errs, json: true})
 	}()
 	wait := func(want int) {
 		t.Helper()
@@ -460,20 +459,34 @@ func TestArgumentsAreRefusedAsTheRecordedParserRefusesThem(t *testing.T) {
 		{"inspect", "x 1 2x", "argument N: a number printed on the card, such as 5"},
 		{"inspect", "x --role seller y", "argument N: a number printed on the card, such as 5"},
 	} {
-		if _, err := readCommands[c.command].parse(strings.Fields(c.tokens)); err == nil || err.Error() != c.message {
+		if _, err := commands[c.command].parse(strings.Fields(c.tokens)); err == nil || err.Error() != c.message {
 			t.Errorf("%s %s: %v", c.command, c.tokens, err)
 		}
 	}
 	// An option may be shortened or joined to its argument, a number below zero is an argument, and what
 	// follows "--" is never an option.
-	got, err := readCommands["inspect"].parse([]string{"--state=a folder", "--rol", "seller", "brief", "-5", "--", "-7"})
+	got, err := commands["inspect"].parse([]string{"--state=a folder", "--rol", "seller", "brief", "-5", "--", "-7"})
 	state, _ := got.text("--state-dir")
 	role, _ := got.text("--role")
 	if err != nil || state != "a folder" || role != "seller" || strings.Join(got.positionals, " ") != "brief -5 -7" {
 		t.Errorf("%+v %v", got, err)
 	}
-	if got, err := readCommands["audit"].parse([]string{"--statu", "ok", "-h", "--bogus"}); err != nil || !got.help {
+	if got, err := commands["audit"].parse([]string{"--statu", "ok", "-h", "--bogus"}); err != nil || !got.help {
 		t.Errorf("help after an option: %+v %v", got, err)
+	}
+	// An option that may be given again keeps each of its arguments in order, and the one argument connect
+	// may be given can stand after an option.
+	got, err = commands["connect"].parse([]string{"--seller", "Dana Crest", "calls", "--seller=U0731P9Q2R", "--sell", "-7"})
+	if err != nil || strings.Join(got.lists["--seller"], "|") != "Dana Crest|U0731P9Q2R|-7" ||
+		strings.Join(got.positionals, " ") != "calls" {
+		t.Errorf("%+v %v", got, err)
+	}
+	if got, err := commands["connect"].parse([]string{"--remove", "demo"}); err != nil || got.positionals[0] != "demo" {
+		t.Errorf("an argument after an option: %+v %v", got, err)
+	}
+	if _, err := commands["connect"].parse([]string{"hubspot", "--environment", "staging"}); err == nil ||
+		!strings.HasPrefix(err.Error(), "argument provider: invalid choice") {
+		t.Errorf("the first mistake on the line is the one reported: %v", err)
 	}
 	if rest, asJSON := withoutJSON([]string{"--json", "brief", "--json", "--", "--json"}); !asJSON ||
 		strings.Join(rest, " ") != "brief -- --json" {
@@ -483,20 +496,20 @@ func TestArgumentsAreRefusedAsTheRecordedParserRefusesThem(t *testing.T) {
 
 func TestHelpAndUsageErrorsNeedNoDatabase(t *testing.T) {
 	t.Setenv("GTM_DATABASE_URL", "")
-	for command, spec := range readCommands {
+	for command, spec := range commands {
 		var out, errs bytes.Buffer
-		if code := runRead(ctx, command, []string{"--help"}, screen{out: &out, err: &errs}); code != 0 ||
+		if code := runCommand(ctx, command, []string{"--help"}, screen{out: &out, err: &errs}); code != 0 ||
 			out.String() != spec.help || errs.Len() != 0 || !strings.HasPrefix(spec.help, "usage: gtm-connector "+command+" [-h] [--json] [--state-dir STATE_DIR]") {
 			t.Errorf("%s --help: exit %d\n%s%s", command, code, out.String(), errs.String())
 		}
 	}
 	var out, errs bytes.Buffer
-	if code := runRead(ctx, "inspect", []string{"note-7"}, screen{out: &out, err: &errs}); code != 2 || out.Len() != 0 ||
+	if code := runCommand(ctx, "inspect", []string{"note-7"}, screen{out: &out, err: &errs}); code != 2 || out.Len() != 0 ||
 		errs.String() != "Error: "+inspectForms+"\nNext: gtm-connector inspect --help\n" {
 		t.Errorf("inspect of nothing it reads: exit %d\n%s", code, errs.String())
 	}
 	errs.Reset()
-	if code := runRead(ctx, "accounts", nil, screen{out: &out, err: &errs, json: true}); code != 1 ||
+	if code := runCommand(ctx, "accounts", nil, screen{out: &out, err: &errs, json: true}); code != 1 ||
 		errs.String() != `{"error": {"code": "local_failure", "message": "set GTM_DATABASE_URL to the app role's PostgreSQL URL", `+
 			`"next": "gtm-connector accounts --help"}}`+"\n" {
 		t.Errorf("accounts with no database: exit %d\n%s", code, errs.String())

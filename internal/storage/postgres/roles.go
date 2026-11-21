@@ -95,6 +95,10 @@ func (s *Store) EnsureAppRole(ctx context.Context, name, password string) error 
 	return nil
 }
 
+// ErrNotAppRole is CheckAppRole's refusal.
+var ErrNotAppRole = errors.New("the server and demo connect as the app role, which owns no table; " +
+	"GTM_DATABASE_URL names the owner or a superuser")
+
 // CheckAppRole refuses a connection that could change the schema or switch
 // a trigger off: a superuser, or a member of the role that owns the tables.
 func (s *Store) CheckAppRole(ctx context.Context) error {
@@ -108,8 +112,7 @@ func (s *Store) CheckAppRole(ctx context.Context) error {
 		return err
 	}
 	if powerful {
-		return errors.New("the server and demo connect as the app role, which owns no table; " +
-			"GTM_DATABASE_URL names the owner or a superuser")
+		return ErrNotAppRole
 	}
 	return nil
 }

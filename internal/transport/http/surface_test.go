@@ -228,7 +228,8 @@ func TestConfigIsChecked(t *testing.T) {
 	}
 }
 
-// Item 12: every response carries the CSP; the shell's inline theme script
+// Item 12: every response carries the CSP, which names no other origin for
+// styles, fonts or anything else; the shell's inline theme script
 // is allowed by its hash and no other inline script is; content types come
 // from a fixed table.
 func TestEveryDocumentIsUnderThePolicy(t *testing.T) {
@@ -252,7 +253,8 @@ func TestEveryDocumentIsUnderThePolicy(t *testing.T) {
 		w := send(s, http.MethodGet, path, "127.0.0.1:8443", nil)
 		policy := w.Header().Get("Content-Security-Policy")
 		if w.Header().Get("Content-Type") != kind || !strings.Contains(policy, "script-src 'self' "+allowed+";") ||
-			strings.Contains(policy, "unsafe-inline' https://fonts.gstatic") || !strings.Contains(policy, "https://fonts.googleapis.com") {
+			!strings.Contains(policy, "style-src 'self' 'unsafe-inline';") || !strings.Contains(policy, "font-src 'self';") ||
+			strings.Contains(policy, "://") {
 			t.Errorf("%s: %q, policy %q", path, w.Header().Get("Content-Type"), policy)
 		}
 	}

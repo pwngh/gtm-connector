@@ -3,14 +3,8 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
-	"io"
-	"log/slog"
-	"net"
-	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -33,82 +27,6 @@ type issuedToken struct {
 	CreatedAt                                string  `json:"created_at"`
 	ExpiresAt                                string  `json:"expires_at"`
 	RevokedAt                                *string `json:"revoked_at"`
-}
-
-// served is serve's surface on a TLS listener, as serve runs it, and a client that trusts its certificate.
-type served struct {
-	address string
-	client  *http.Client
-	logs    *lockedBuffer
-}
-
-func serveDemo(t *testing.T, d *demoDatabase) *served {
-	t.Helper()
-	store, err := openAppStore(ctx, config{databaseURL: d.appURL})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(store.Close)
-	creds, err := openCredentials(privateDir(t), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer creds.Close()
-	if _, err := creds.setUp(certificateHosts(nil)); err != nil {
-		t.Fatal(err)
-	}
-	pair, key, err := serving(creds)
-	if err != nil {
-		t.Fatal(err)
-	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := &served{address: listener.Addr().String(), logs: &lockedBuffer{}}
-	surface, err := newSurface(ctx, store, config{publicOrigin: "https://" + s.address, allowedHosts: []string{s.address}}, key, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { surface.Close() })
-	server := newServer(surface, pair, slog.New(slog.NewTextHandler(s.logs, nil)))
-	go server.ServeTLS(listener, "", "")
-	t.Cleanup(func() { server.Close() })
-	leaf, err := x509.ParseCertificate(pair.Certificate[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool := x509.NewCertPool()
-	pool.AddCert(leaf)
-	s.client = &http.Client{Timeout: 20 * time.Second, Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS13}}}
-	return s
-}
-
-// call posts one tools/call to /mcp with a bearer and gives the status and the reply.
-func (s *served) call(t *testing.T, bearer, tool string, arguments map[string]any) (int, map[string]any) {
-	t.Helper()
-	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{
-		"name": tool, "arguments": arguments, "_meta": json.RawMessage(mcpMeta)}})
-	request, err := http.NewRequest(http.MethodPost, "https://"+s.address+"/mcp", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for header, value := range map[string]string{"Content-Type": "application/json", "Accept": "application/json",
-		"Mcp-Protocol-Version": "2026-07-28", "Mcp-Method": "tools/call", "Mcp-Name": tool, "Authorization": "Bearer " + bearer} {
-		request.Header.Set(header, value)
-	}
-	response, err := s.client.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	raw, _ := io.ReadAll(response.Body)
-	var reply map[string]any
-	if err := json.Unmarshal(raw, &reply); err != nil {
-		t.Fatalf("%s: %d %q", tool, response.StatusCode, raw)
-	}
-	return response.StatusCode, reply
 }
 
 // After setup and demo, token new makes a token that is shown once and stored as its SHA-256 only, for the
@@ -141,15 +59,15 @@ func TestATokenFromTheCommandOpensMCP(t *testing.T) {
 		t.Fatalf("the MCP clients principal holds %d grants, not 30", got)
 	}
 
-	s := serveDemo(t, d)
+	s := startServe(t, d, nil)
 	account := map[string]any{"account_id": "acc-003"}
-	if status, read := s.call(t, issued.Token, "get_account", account); status != 200 || dig(read, "result", "isError") != false {
+	if status, read := s.call(s.address, "get_account", issued.Token, account); status != 200 || dig(read, "result", "isError") != false {
 		t.Fatalf("get_account: %d %v", status, read)
 	}
-	if status, read := s.call(t, issued.Token, "read_call_notes", account); status != 200 || dig(read, "result", "isError") != false {
+	if status, read := s.call(s.address, "read_call_notes", issued.Token, account); status != 200 || dig(read, "result", "isError") != false {
 		t.Fatalf("read_call_notes: %d %v", status, read)
 	}
-	if status, denied := s.call(t, issued.Token, "read_slack_messages", account); status != 403 || reasonOf(denied) != "insufficient_scope" {
+	if status, denied := s.call(s.address, "read_slack_messages", issued.Token, account); status != 403 || reasonOf(denied) != "insufficient_scope" {
 		t.Fatalf("read_slack_messages: %d %v", status, denied)
 	}
 
@@ -172,7 +90,7 @@ func TestATokenFromTheCommandOpensMCP(t *testing.T) {
 	if code != 0 || !strings.HasPrefix(stdout, "Revoked token "+issued.ID+".") {
 		t.Fatalf("token revoke: %d %s", code, stdout)
 	}
-	if status, refused := s.call(t, issued.Token, "get_account", account); status != 401 || reasonOf(refused) != "invalid_token" {
+	if status, refused := s.call(s.address, "get_account", issued.Token, account); status != 401 || reasonOf(refused) != "invalid_token" {
 		t.Fatalf("a revoked token: %d %v", status, refused)
 	}
 	code, stdout, _ = d.tokenCommand(t, "list", "--json")
@@ -194,7 +112,7 @@ func TestATokenFromTheCommandOpensMCP(t *testing.T) {
 		expires_at = now() - interval '1 second' WHERE id = $1`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if status, refused := s.call(t, second.Token, "get_account", account); status != 401 || reasonOf(refused) != "invalid_token" {
+	if status, refused := s.call(s.address, "get_account", second.Token, account); status != 401 || reasonOf(refused) != "invalid_token" {
 		t.Fatalf("an expired token: %d %v", status, refused)
 	}
 	_, stdout, _ = d.tokenCommand(t, "list")
@@ -246,8 +164,8 @@ func TestClientTokenGrantsAndWorkspaces(t *testing.T) {
 	if granted, err := d.owner.HasAccountGrant(ctx, d.workspace.ID, principal, "acc-003"); granted || err != nil {
 		t.Fatalf("issuing a token gave back a revoked grant: %v", err)
 	}
-	s := serveDemo(t, d)
-	if status, refused := s.call(t, second.Token, "get_account", map[string]any{"account_id": "acc-003"}); status != 200 ||
+	s := startServe(t, d, nil)
+	if status, refused := s.call(s.address, "get_account", second.Token, map[string]any{"account_id": "acc-003"}); status != 200 ||
 		!strings.Contains(stringOf(dig(refused, "result", "content")), "account_not_granted") {
 		t.Fatalf("an account no longer granted: %d %v", status, refused)
 	}
@@ -259,7 +177,7 @@ func TestClientTokenGrantsAndWorkspaces(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &other); code != 0 || err != nil || other.Workspace != "elsewhere" {
 		t.Fatalf("a token of another workspace: %d %s", code, stderr)
 	}
-	if status, refused := s.call(t, other.Token, "get_account", map[string]any{"account_id": "acc-007"}); status != 401 ||
+	if status, refused := s.call(s.address, "get_account", other.Token, map[string]any{"account_id": "acc-007"}); status != 401 ||
 		reasonOf(refused) != "invalid_token" {
 		t.Fatalf("another workspace's token: %d %v", status, refused)
 	}

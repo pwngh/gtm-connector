@@ -27,14 +27,20 @@ func (s *server) run(ctx context.Context, call mcp.Call) (json.RawMessage, error
 	if err != nil || arguments == nil || call.Invocation == nil {
 		return nil, errors.New("a call needs its arguments and its invocation")
 	}
+	// What the call reads was opened before its receipt started. A workspace whose sources could not be
+	// opened, or were changed since, is refused here, under that receipt, before anything is read.
+	view, err := s.recorder.opened(call.Invocation.AuditID)
+	if err != nil {
+		return nil, err
+	}
 	var result *strictjson.Object
 	switch call.Tool {
 	case "prepare_renewal_brief":
-		result, err = s.prepare(ctx, call.Invocation, arguments)
+		result, err = s.prepare(ctx, view, call.Invocation, arguments)
 	case "read_renewal_brief":
-		result, err = s.reread(ctx, call.Invocation, arguments)
+		result, err = s.reread(ctx, view, call.Invocation, arguments)
 	default:
-		result, err = s.read(ctx, call, arguments)
+		result, err = s.read(ctx, view, call, arguments)
 	}
 	if err != nil {
 		return nil, err
@@ -105,7 +111,7 @@ func (s *server) readable(ctx context.Context, inv *mcp.Invocation) ([]string, e
 }
 
 // read is one of the five direct reads: the records, from the tool's own source, bound to the call's receipt.
-func (s *server) read(ctx context.Context, call mcp.Call, arguments *strictjson.Object) (*strictjson.Object, error) {
+func (s *server) read(ctx context.Context, view Opened, call mcp.Call, arguments *strictjson.Object) (*strictjson.Object, error) {
 	account, given := arguments.Get("account_id")
 	accountID, _ := account.(string)
 	var records []*strictjson.Object
@@ -124,7 +130,7 @@ func (s *server) read(ctx context.Context, call mcp.Call, arguments *strictjson.
 		if err != nil {
 			return nil, err
 		}
-		records, more = s.Source.Search(text, accounts)
+		records, more = view.Source.Search(text, accounts)
 	case "list_opportunities":
 		if !given || account == nil {
 			// With no account, the grants and the selection limit the list itself.
@@ -132,7 +138,7 @@ func (s *server) read(ctx context.Context, call mcp.Call, arguments *strictjson.
 			if err != nil {
 				return nil, err
 			}
-			records = s.Source.Opportunities(accounts)
+			records = view.Source.Opportunities(accounts)
 			break
 		}
 		fallthrough
@@ -144,15 +150,18 @@ func (s *server) read(ctx context.Context, call mcp.Call, arguments *strictjson.
 			return nil, err
 		}
 		switch {
-		case call.Tool == "read_call_notes" && s.Sources.CallsBackend == "none":
+		case call.Tool == "read_call_notes" && view.Sources.CallsBackend == "none":
 			return nil, mcp.ToolError("calls_not_connected")
-		case call.Tool == "read_slack_messages" && s.Sources.SlackBackend == "none":
+		case call.Tool == "read_slack_messages" && view.Sources.SlackBackend == "none":
 			return nil, mcp.ToolError("slack_not_connected")
 		}
-		system, found, err := s.Source.Read(ctx, call.Tool, accountID)
+		system, found, err := view.Source.Read(ctx, call.Tool, accountID)
+		var refusal mcp.ToolError
 		switch {
 		case errors.Is(err, demo.ErrAccountNotFound):
 			return nil, mcp.ToolError("account not found")
+		case errors.As(err, &refusal):
+			return nil, refusal
 		case err != nil:
 			return nil, err
 		case system != readSource[call.Tool]:
@@ -191,7 +200,7 @@ func (s *server) principal(inv *mcp.Invocation) cards.Principal {
 
 // prepare is prepare_renewal_brief. The maker runs under the receipt the gate committed for the call and
 // starts no other; that receipt, finished with the saved bytes' digest, is the brief's seal.
-func (s *server) prepare(ctx context.Context, inv *mcp.Invocation, arguments *strictjson.Object) (*strictjson.Object, error) {
+func (s *server) prepare(ctx context.Context, view Opened, inv *mcp.Invocation, arguments *strictjson.Object) (*strictjson.Object, error) {
 	outer, found := s.recorder.outer(inv.AuditID)
 	if !found {
 		return nil, errors.New("the call has no pending receipt")
@@ -205,7 +214,9 @@ func (s *server) prepare(ctx context.Context, inv *mcp.Invocation, arguments *st
 	if err := s.requireGranted(ctx, inv, account); err != nil {
 		return nil, err
 	}
-	sealed, err := s.maker.Prepare(ctx, cards.Prepare{Principal: s.principal(inv), Selection: s.Selection,
+	maker := &cards.Maker{Receipts: s.Receipts, Source: view.Source, Sources: view.Sources, Connections: view.Connections,
+		Generations: view.Generations, NewID: s.NewID, Now: s.Now}
+	sealed, err := maker.Prepare(ctx, cards.Prepare{Principal: s.principal(inv), Selection: s.Selection,
 		Outer: &outer, Arguments: arguments})
 	var code *cards.CodeError
 	switch {
@@ -231,7 +242,7 @@ func (s *server) prepare(ctx context.Context, inv *mcp.Invocation, arguments *st
 // brief counts only if its own outer call finished ok for these exact bytes, and it is released only while
 // the selection, the source bindings, the principal's grant on its account and the scopes the caller's
 // bearer carries at that moment still cover what it holds.
-func (s *server) reread(ctx context.Context, inv *mcp.Invocation, arguments *strictjson.Object) (*strictjson.Object, error) {
+func (s *server) reread(ctx context.Context, view Opened, inv *mcp.Invocation, arguments *strictjson.Object) (*strictjson.Object, error) {
 	id, _ := member(arguments, "brief_id").(string)
 	card, err := s.Store.CardByBrief(ctx, s.WorkspaceID, id)
 	if errors.Is(err, postgres.ErrNotFound) {
@@ -243,7 +254,7 @@ func (s *server) reread(ctx context.Context, inv *mcp.Invocation, arguments *str
 		// A card saved by brief is not a prepared brief, and this tool reads only those.
 		return nil, mcp.ToolError("brief_not_found")
 	}
-	_, verifyErr := cards.VerifyPrepared(ctx, card.Bytes, id, cards.StoreLog{Store: s.Receipts, WorkspaceID: s.WorkspaceID}, s.Sources)
+	_, verifyErr := cards.VerifyPrepared(ctx, card.Bytes, id, cards.StoreLog{Store: s.Receipts, WorkspaceID: s.WorkspaceID}, view.Sources)
 	var code *cards.CodeError
 	switch {
 	case verifyErr == nil || errors.Is(verifyErr, cards.ErrForeign):

@@ -4,4 +4,4 @@ import {createServerStore} from './serverSession.js';
 import {createApiClient} from './api.js';
 
 const root = createRoot(document.getElementById('root'));
-boot({store: createServerStore(createApiClient()), show: view => root.render(view), loadWalkthrough: () => import('./main.jsx')});
+boot({store: createServerStore(createApiClient()), show: view => root.render(view)});
