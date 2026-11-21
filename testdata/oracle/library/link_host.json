@@ -63,7 +63,7 @@
   },
   {
    "input": "slack://open",
-   "host": "open",
+   "host": "unknown host",
    "running_text": null
   },
   {
@@ -103,7 +103,7 @@
   },
   {
    "input": "http://xn--bcher-kva.example/",
-   "host": "xn--bcher-kva.example",
+   "host": "unknown host",
    "running_text": null
   },
   {
@@ -743,7 +743,7 @@
   },
   {
    "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa://good.example/",
-   "host": "good.example",
+   "host": "unknown host",
    "running_text": null
   },
   {
@@ -792,6 +792,41 @@
    "running_text": null
   },
   {
+   "input": "custom://UPPER.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "ws://good.example/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "WSS://good.example/",
+   "host": "good.example",
+   "running_text": null
+  },
+  {
+   "input": "ssh://good.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://xn--bcher-kva.example/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://good.XN--p1ai/",
+   "host": "unknown host",
+   "running_text": null
+  },
+  {
+   "input": "https://axn--b.example/",
+   "host": "axn--b.example",
+   "running_text": null
+  },
+  {
    "input": "<https://a.example/x|label>",
    "host": "unknown host",
    "running_text": null
@@ -828,7 +863,7 @@
   },
   {
    "input": "slack://x",
-   "host": "x",
+   "host": "unknown host",
    "running_text": null
   },
   {

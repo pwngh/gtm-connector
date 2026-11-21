@@ -1,6 +1,7 @@
 """Units, neutralized text, speaker roles, and the evidence checks behind a card."""
 
 from copy import deepcopy
+import random
 import time
 import unittest
 
@@ -78,8 +79,7 @@ class NeutralizedText(unittest.TestCase):
             self.assertNotRegex(safe_text(raw)[0], r"\[[0-9]+\]", raw)
 
     def test_a_link_in_any_form_is_reduced_to_its_host(self):
-        for raw, safe in (("<slack://channel?id=C1|open>", "open [link channel]"),
-                          ("ftp://files.example/a.pdf", "[link files.example]"),
+        for raw, safe in (("ftp://files.example/a.pdf", "[link files.example]"),
                           ("see //evil.example/x now", "see [link evil.example] now"),
                           ("[a](//evil.example)", "a [link evil.example]"),
                           ("<//evil.example|x>", "x [link evil.example]"),
@@ -92,7 +92,12 @@ class NeutralizedText(unittest.TestCase):
                           ("/https://evil.example", "/[link evil.example]"),
                           ("HTTPS://UPPER.example/A", "[link upper.example]"),
                           # Slack renders any target|label pair as a link, whatever the target is.
-                          ("<x|y>", "y [link x]"), ("<not a url|label>", "label [link unknown host]")):
+                          ("<x|y>", "y [link x]"), ("<not a url|label>", "label [link unknown host]"),
+                          # A browser keeps the host of a scheme it does not know as an opaque name.
+                          ("<slack://channel?id=C1|open>", "open [link unknown host]"),
+                          ("custom://UPPER.example/ now", "[link unknown host] now"),
+                          ("[deck](ssh://files.example/)", "deck [link unknown host]"),
+                          ("wss://files.example/x", "[link files.example]")):
             self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
         # A relative markdown target, a path, a ratio, and a comparison are not links.
         for plain in ("see [docs](relative/path)", "a/b // c", "a//b", "either/or", "3 < 4 > 2", "ratio 1://2",
@@ -108,7 +113,9 @@ class NeutralizedText(unittest.TestCase):
         # A browser reads a backslash before the path as a slash, so it opens evil.example here.
         for raw, safe in (("<http://evil.example\\@good.example/|deck>", "deck [link unknown host]"),
                           ("http://evil.example\\@good.example/ now", "[link unknown host] now"),
-                          ("[deck](http://evil.example\\@good.example/)", "deck [link unknown host]"),
+                          # In a Markdown target a backslash before punctuation is an escape, so the browser is
+                          # given http://evil.example@good.example/ and opens good.example.
+                          ("[deck](http://evil.example\\@good.example/)", "deck [link good.example]"),
                           ("<//evil.example\\@good.example|deck>", "deck [link unknown host]"),
                           ("<C:\\path|deck>", "deck [link unknown host]"),
                           # A control character in the host, or anywhere before the path.
@@ -152,9 +159,8 @@ class NeutralizedText(unittest.TestCase):
                 ("https://first.example\n.second.example/x", "[link unknown host]\n.second.example/x", 0),
                 ("https://first.example\r.second.example/x", "[link unknown host][U+000D].second.example/x", 1),
                 ("https://first.example\r\n\t.second.example/x", "[link unknown host]\n .second.example/x", 0),
-                # A line break ends a Slack token, so the link in it is read as running text.
-                ("<https://first.example\n.second.example/x|deck>",
-                 "<[link unknown host]\n.second.example/x|deck>", 0),
+                # A Slack token with a | part holds a line break.
+                ("<https://first.example\n.second.example/x|deck>", "deck [link unknown host]", 0),
                 ("[deck](https://first.example\t.second.example/x)",
                  "[deck]([link unknown host] .second.example/x)", 0),
                 # What follows can also turn the host into a user name, or go on after closing punctuation.
@@ -182,15 +188,16 @@ class NeutralizedText(unittest.TestCase):
         for plain in ("[docs](relative/path)", "[docs](a/b:c)", "[time](12:30)", "[docs](:x)", "(note: fine)",
                       "[docs] (tel:5551234)"):
             self.assertEqual(safe_text(plain), (plain, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}))
-        # A client also reads a target after a label that holds a line break or brackets, after a target cut by
-        # a control character, and after a bracketed word the connector wrote. No output keeps one with a scheme.
+        # A client also reads a link whose label holds a line break or brackets, whose target holds parentheses
+        # or a control character, or whose label is a bracketed word the connector wrote. The whole link becomes
+        # its label and a marker, and a link the marker then starts is read too.
         for raw, safe, links, controls in (
-                ("[de\nck](HTTPS:/files.example)", "[de\nck]([link unknown host]", 1, 0),
-                ("[a [b] c]( tel:5551234 )", "[a [b] c]( [link unknown host] )", 1, 0),
-                ("[deck](HTTPS:/files.example/\x1cx)", "[deck]([link unknown host]", 1, 1),
-                ("[deck](javascript:alert(1))", "[deck]([link unknown host]", 1, 0),
+                ("[de\nck](HTTPS:/files.example)", "de\nck [link unknown host]", 1, 0),
+                ("[a [b] c]( tel:5551234 )", "a [b] c [link unknown host]", 1, 0),
+                ("[deck](HTTPS:/files.example/\x1cx)", "deck [link unknown host]", 1, 1),
+                ("[deck](javascript:alert(1))", "deck [link unknown host]", 1, 0),
                 ("<https://files.example>(HTTPS:/second.example/x)", "link files.example [link unknown host]", 2, 0),
-                ("\x00(tel:5551234)(tel:5551234)", "[U+0000]([link unknown host]", 1, 1)):
+                ("\x00(tel:5551234)(tel:5551234)", "U+0000 link unknown host [link unknown host]", 2, 1)):
             self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": links, "controls": controls,
                                                      "brackets": 0}), raw)
             self.assertEqual(safe_text(safe), (safe, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}), raw)
@@ -234,11 +241,12 @@ class NeutralizedText(unittest.TestCase):
                 # A control character or an inner token leaves no space, so the finished text is still a link.
                 ("<tel:555\x1c1234>", "[link unknown host]", 1, 1),
                 ("<tel:555<#|>1234>", "[link unknown host]", 1, 0),
-                # What follows the bracket it leaves is read too.
-                ("<tel:1>(tel:2)", "[link unknown host]([link unknown host]", 2, 0),
+                # What follows the marker it leaves is read too.
+                ("<tel:1>(tel:2)", "link unknown host [link unknown host]", 2, 0),
                 ("<tel:1>: tel:2", "[link unknown host]: [link unknown host]", 2, 0),
-                ("[deck](<https:/files.example/a b>)", "[deck](<[link unknown host] b>)", 1, 0),
-                ("[deck](< tel:5551234 x>)", "[deck](< [link unknown host] x>)", 1, 0)):
+                # A mail address in angle brackets is a mail link.
+                ("<a@files.example>", "[link mail]", 1, 0),
+                ("mail <a.b+c@files-1.example> now", "mail [link mail] now", 1, 0)):
             mentions = raw.count("<#")
             self.assertEqual(safe_text(raw), (safe, {"mentions": mentions, "links": links, "controls": controls,
                                                      "brackets": 0}), raw)
@@ -279,6 +287,140 @@ class NeutralizedText(unittest.TestCase):
                       "[deck] : https:/files.example", "[deck]: relative/path", "[]: tel:5551234",
                       "[deck]: tel:5551234 'the' deck'"):
             self.assertEqual(safe_text(plain), (plain, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}))
+
+    def test_a_link_in_the_finished_text_is_replaced_and_nothing_around_it(self):
+        # The parentheses of a target pair as a client pairs them, so the dot after the link stays the sentence's.
+        raw = "See [deck](https:/files.example/deck(v2)). The deal is blocked."
+        safe, counts = safe_text(raw)
+        self.assertEqual(safe, "See deck [link unknown host]. The deal is blocked.")
+        self.assertEqual(counts["links"], 1)
+        self.assertEqual(sentences(safe), ["See deck [link unknown host].", "The deal is blocked."])
+        for raw, safe in (("[deck](tel:5551234).", "deck [link unknown host]."),
+                          ("[deck](https:/a.example/b(c)d) now", "deck [link unknown host] now"),
+                          ("[deck](tel:5551234 \"the deck\"), then", "deck [link unknown host], then"),
+                          ("[deck](tel:5551234\n'the\ndeck'\n) then", "deck [link unknown host] then")):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+        # No link starts without a [label], and one whose parentheses do not close, or whose title runs past a
+        # blank line or is followed by words, is no link.
+        for plain in ("x ]( deal: y", "We said ]( deal: and moved on.", "[deck](tel:1(2)", "[deck](tel:1 'a\n\nb')",
+                      "[deck](tel:1 'a' b)", "[deck](tel:1 x)", "[deck]\n\n(tel:1)"):
+            self.assertEqual(safe_text(plain), (plain, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}))
+
+    def test_a_link_with_its_target_in_angle_brackets_is_replaced_whole(self):
+        for raw, safe in (("[deck](<https:/files.example/a b>)", "deck [link unknown host]"),
+                          ("[deck](< tel:5551234 x>)", "deck [link unknown host]"),
+                          ("[deck](<https://files.example/a b> \"t\")", "deck [link files.example]"),
+                          ("[deck](<tel:5551234>)", "deck [link unknown host]"),
+                          # Slack's link token reads no Markdown target, and a link after an open mention is read.
+                          ("[deck](\n <https://files.example/a b>)", "deck [link files.example]"),
+                          ("<@[doc](https://c.example/z)", "[user]doc [link c.example]")):
+            mentions = raw.count("<@")
+            self.assertEqual(safe_text(raw), (safe, {"mentions": mentions, "links": 1, "controls": 0, "brackets": 0}),
+                             raw)
+            self.assertEqual(safe_text(safe), (safe, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}), raw)
+        self.assertEqual(safe_text("[x](<@U1>)"), ("[x]([user U1])", {"mentions": 1, "links": 0, "controls": 0,
+                                                                     "brackets": 0}))
+
+    def test_a_reference_definition_is_read_only_where_a_paragraph_starts(self):
+        for raw, safe, links in (
+                # In a block quote, with a title that runs over lines.
+                (">  [deck]: https:/files.example\n>   'the title\n>   continues'\n>\n> [deck]",
+                 ">  [deck]: [link unknown host]\n>   'the title\n>   continues'\n>\n> [deck]", 1),
+                ("We said:\n> [deck]: tel:5551234", "We said:\n> [deck]: [link unknown host]", 1),
+                # In a list item, after a heading, and one after another.
+                ("Items\n- [deck]: tel:5551234", "Items\n- [deck]: [link unknown host]", 1),
+                ("# Notes\n[deck]: tel:5551234", "# Notes\n[deck]: [link unknown host]", 1),
+                ("[a]: tel:1\n[b]: tel:2\nsee [a]", "[a]: [link unknown host]\n[b]: [link unknown host]\nsee [a]", 2),
+                # A title on the next line that is not one leaves the definition without a title.
+                ('[deck]: tel:5551234\n"the deck" was sent', '[deck]: [link unknown host]\n"the deck" was sent', 1)):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": links, "controls": 0, "brackets": 0}),
+                             raw)
+            self.assertEqual(safe_text(safe), (safe, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}), raw)
+        # A definition cannot go on a paragraph, and a title that never closes makes the line ordinary text.
+        for plain in ("We kept a log.\n[10:32]: Dana:\nShe agreed.", "[10:32]: Dana: 'we can sign\n\nLater.",
+                      "> We kept a log.\n> [10:32]: Dana:", "> We kept a log.\n[10:32]: Dana:",
+                      "[10:32]: Dana: (laughs\nand then she said yes"):
+            self.assertEqual(safe_text(plain), (plain, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}))
+
+    def test_a_markdown_target_is_read_with_its_escapes_and_character_references(self):
+        # A client gives the browser https://files.example/@other.example/, which opens files.example.
+        for raw, safe in (("[deck](https://files.example&sol;@other.example/)", "deck [link files.example]"),
+                          ("[deck](https://files.example&#47;@other.example/)", "deck [link files.example]"),
+                          ("[deck](https://files.example&#X2f;@other.example/)", "deck [link files.example]"),
+                          ("[deck](https://files.example\\/@other.example/)", "deck [link files.example]"),
+                          ("[deck](https://files.example&nosuch;@other.example/)", "deck [link other.example]"),
+                          ("[deck](https://files.example&#0;/)", "deck [link unknown host]"),
+                          ("[deck](https://files.example&#1114112;/)", "deck [link unknown host]"),
+                          # A scheme or a colon spelled with a reference or an escape is still a scheme.
+                          ("[deck](&#104;ttps:&sol;&sol;files.example/)", "deck [link files.example]"),
+                          ("[deck](https\\:/files.example)", "deck [link unknown host]"),
+                          ("[deck](https&colon;//files.example/x(1))", "deck [link files.example]"),
+                          # A target that starts with // opens a host whatever follows it.
+                          ("[deck](//%66iles.example/)", "deck [link unknown host]"),
+                          ("[deck](///files.example)", "deck [link unknown host]"),
+                          # An angle-bracket link reads references, and Slack does not, so the two hosts differ.
+                          ("<https://files.example&sol;@other.example/>", "[link unknown host]"),
+                          ("<https://files.example/a&amp;b|deck>", "deck [link files.example]"),
+                          # So does a link in running text, which a client reads with its references.
+                          ("see https://files.example&sol;@other.example/ now", "see [link unknown host] now")):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+        self.assertEqual(safe_text("[deck]: &#104;ttps:&sol;&sol;files.example&sol;@other.example/")[0],
+                         "[deck]: [link files.example]")
+        # A relative target opens a path on the page that shows the card, whatever it holds.
+        for plain in ("[deck](relative/path)", "[deck](files.example&sol;x)", "[deck](a\\/b:c)"):
+            self.assertEqual(safe_text(plain), (plain, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}))
+
+    def test_a_link_in_running_text_runs_as_a_github_client_reads_it(self):
+        for raw, safe in (
+                # The link runs to a space or a <, so a quote, a ] or a > can start a user name or end the host.
+                ("See https://files.example'@other.example/a then", "See [link unknown host] then"),
+                ("See https://files.example] then", "See [link unknown host] then"),
+                ("See https://files.example>@other.example then", "See [link unknown host] then"),
+                ('See https://files.example/a"b>c then', "See [link files.example] then"),
+                # Closing punctuation, a ) that closes no ( in the link, and a reference at its end stay outside.
+                ('"https://files.example/x"', '"[link files.example]"'),
+                ("(see https://files.example/a_(b)) now", "(see [link files.example]) now"),
+                ("see https://files.example/a&amp; now", "see [link files.example]&amp; now"),
+                ("see https://files.example/a_~*: now", "see [link files.example]_~*: now"),
+                # The scheme is the letters right before ://.
+                ("see...https://files.example/x now", "see...[link files.example] now"),
+                ("svn+ssh://files.example/x", "[link unknown host]")):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+
+    def test_a_label_a_browser_refuses_is_not_shown(self):
+        # Checking an xn-- label takes the IDNA tables, so no host that holds one is shown.
+        for raw, safe in (("https://xn--bcher-kva.example/ now", "[link unknown host] now"),
+                          ("<https://files.XN--p1ai/|deck>", "deck [link unknown host]"),
+                          ("<https://files.example.xn--/|deck>", "deck [link unknown host]"),
+                          ("<https://axn--b.example/|deck>", "deck [link axn--b.example]")):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": 0, "links": 1, "controls": 0, "brackets": 0}), raw)
+
+    def test_a_slack_token_is_read_innermost_first_and_may_hold_a_line_break(self):
+        for raw, safe, mentions, links in (
+                ("<https:/files.example|outer <https://inner.example|inner>>",
+                 "outer inner [link inner.example] [link unknown host]", 0, 2),
+                ("<https:/files.example|one\ntwo>", "one\ntwo [link unknown host]", 0, 1),
+                ("We agree <#<@U1> will not sign> today.", "We agree [channel] today.", 2, 0),
+                ("<x|<y|<z|deep>>>", "deep [link z] [link y] [link x]", 0, 3),
+                ("<a <b> c>", "<a <b> c>", 0, 0),
+                ("<https://files.example\n>", "<[link unknown host]\n>", 0, 1)):
+            self.assertEqual(safe_text(raw), (safe, {"mentions": mentions, "links": links, "controls": 0,
+                                                     "brackets": 0}), raw)
+        # Folding the lines of a sentence leaves no token behind.
+        self.assertEqual(sentences(safe_text("<https:/files.example|one\ntwo>")[0]), ["one two [link unknown host]"])
+
+    def test_neutral_text_stays_as_it_is(self):
+        # Pieces that form tokens, links and definitions inside each other, broken or whole.
+        pieces = ("<", ">", "|", "<@U1>", "<#C1|", "<!here", "<https://a.example|", "<tel:1>", "<a@b.example>",
+                  "[", "]", "](", ")", "(", "[deck](", "tel:1", "https:/x.example", "https://x.example", "www.",
+                  "//x.example", "[7]", "\x00", "\x1c", "\t", "\n", "\n\n", "> ", "- ", "]: ", "'", '"', " ", "\\",
+                  "&sol;", "&#104;", "x", "Dana:", ".", "mailto:")
+        generator = random.Random(7)
+        for _ in range(4000):
+            raw = "".join(generator.choice(pieces) for _ in range(generator.randrange(1, 12)))
+            safe, _ = safe_text(raw)
+            self.assertEqual(safe_text(safe), (safe, {"mentions": 0, "links": 0, "controls": 0, "brackets": 0}),
+                             raw)
 
     def test_a_host_a_browser_rewrites_or_refuses_is_not_shown(self):
         for raw, safe in (

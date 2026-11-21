@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from decimal import Decimal, localcontext
+from html.entities import html5
 import json
 import sys
 from typing import Any
@@ -61,7 +62,16 @@ HOSTS = (
     "file://C:/x", "FILE://good.example/x", "a" * 32 + "://good.example/", "a" * 33 + "://good.example/",
     # A dot that ends the host is part of it. A host of dots or hyphens, an empty host, and a second @.
     "https://good.example./x", "https://good.example.", "https://good.example..", "http://./", "http://-/",
-    "https:///good.example", "https://user@@good.example/", "https://good.example@/")
+    "https:///good.example", "https://user@@good.example/", "https://good.example@/",
+    # A scheme a browser does not know keeps its host opaque, and no host with an xn-- label is shown.
+    "custom://UPPER.example/", "ws://good.example/", "WSS://good.example/", "ssh://good.example/",
+    "https://xn--bcher-kva.example/", "https://good.XN--p1ai/", "https://axn--b.example/")
+# Markdown destinations with escapes and character references, read with escapes and without them.
+REFERENCES = (
+    "https://good.example&sol;@evil.example/", "&#104;ttps:&sol;&sol;good.example/", "https\\:/good.example",
+    "a&#X2f;b&#47;c&#x2F;", "&#0;&#1114112;&#xD800;&#x110000;&#1234567;&#12345678;&#x1234567;", "&amp;&amp",
+    "&nosuch;&AMP;&ampx;&semi;&NotNestedGreaterGreater;&CounterClockwiseContourIntegral;", "&#;&#x;&;",
+    "\\!\\\\\\a\\ \\", "&lt;&gt;&quot;&apos;&nbsp;&copy;&fjlig;", "\\&amp;")
 JSON_VALUES: tuple[Any, ...] = (
     "", "plain", 'quote " and backslash \\ and slash /', "\x00\x01\x1f\x7f\x80\x9f", "\t\n\r\x0b\x0c\x08",
     "\u2028\u2029\u0085", "\u00e9\u00df\u4e2d\U0001f642", "\ufeff\u200b\u202e", "</script>&<>'", "\ud83d\ude00",
@@ -136,7 +146,6 @@ DOCUMENTS: tuple[bytes | str, ...] = (
 # Section 4 of the backend plan: oracle behaviour the Go port will change on purpose. The cases are recorded here
 # as the oracle gives them; the Go side writes its own reviewed expectations.
 DIFFERENCES = {
-    "safe_text_twice": "We agree <#<@U1> will not sign> today.",
     "sentence_opener_quote": 'They said yes. "maybe later" was the reply.',
     "sentence_opener_accent": 'They said yes. "\u00e9lan" was the word.',
     "sentence_unicode_16_letter": "He agreed. \U00010d70xyz goes on.",
@@ -219,6 +228,13 @@ def generate(writer: Writer) -> None:
         "note": ("the host a card shows for a link target, and for a www. address the host it shows in running "
                  "text"),
         "cases": [_link_host(target) for target in targets]}, len(targets))
+    entities = {name[:-1]: value for name, value in sorted(html5.items()) if name.endswith(";")}
+    writer.json("library/references.json", {
+        "note": ("the HTML5 named references a Markdown destination reads, by name without its ;, and units._unescape "
+                 "of each case, with escapes and without them"),
+        "entities": entities,
+        "cases": [{"input": text, "escapes": units._unescape(text), "references": units._unescape(text, False)}
+                  for text in REFERENCES]}, len(entities) + len(REFERENCES))
     values = JSON_VALUES + NON_FINITE
     writer.json("library/json_dumps.json", {
         "note": ("json.dumps under the options the package uses: default (CLI errors and progress), ascii_false "
@@ -236,11 +252,8 @@ def generate(writer: Writer) -> None:
     writer.json("library/strict_json.json", {
         "note": "strict_json.loads of each document (hex of its bytes, or of a str's UTF-8): the value, or the refusal",
         "cases": [_document(document) for document in DOCUMENTS]}, len(DOCUMENTS))
-    once = units.safe_text(DIFFERENCES["safe_text_twice"])[0]
     writer.json("library/differences.json", {
         "note": "Backend plan section 4: what the oracle does where Go will differ on purpose",
-        "safe_text_twice": {"input": DIFFERENCES["safe_text_twice"], "once": once,
-                            "twice": units.safe_text(once)[0]},
         "sentences": {name: {"input": DIFFERENCES[name], "sentences": units.sentences(DIFFERENCES[name])}
                       for name in ("sentence_opener_quote", "sentence_opener_accent", "sentence_unicode_16_letter")}},
         len(DIFFERENCES))

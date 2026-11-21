@@ -228,14 +228,24 @@ listed below with inert words.
 
 - A Slack mention becomes `[mention channel]`, `[user U123]`, or `[channel C123]`.
 - A link of any scheme, a `//host` address, or a `www.` address becomes its label and `[link host]`.
+  That covers a Slack token, a Markdown link with its whole `[label](target)`, an angle-bracket link
+  such as `<tel:5551234>`, the target of a reference definition such as `[deck]: tel:5551234` where a
+  paragraph starts, and a link in running text up to a space or a `<`. A mail link, `mailto:` or an
+  address in angle brackets such as `<dana@files.example>`, becomes `[link mail]`. A Markdown target
+  is read with its escapes and character references, as a Markdown client reads it. A relative target
+  such as `[deck](notes/q3)` stays as written: it opens a path on the page that shows the card, not a
+  host the source chose.
   The host is the one a browser opens, read as the URL Standard reads it. A link becomes
   `[link unknown host]` when a browser would open another host than the one written, or none:
   - a backslash, a control character, a tab or a line break before its path or query
-  - no `//` after its scheme, as in `https:/files.example`, a Markdown target `(tel:5551234)`, an
-    angle-bracket link `<tel:5551234>`, or a reference definition `[deck]: tel:5551234` on its own line
+  - no `//` after its scheme, as in `https:/files.example` or `tel:5551234`
+  - a scheme other than `http`, `https`, `ftp`, `ws` and `wss`, whose host a browser does not read
   - a host a browser reads as a number, such as `0xc0000201`, unless it is four plain decimal parts
     such as `192.0.2.1`
-  - a port that is not a number up to 65535, a host in brackets, or a `file:` link
+  - a port that is not a number up to 65535, a host in brackets, or a label that starts with `xn--`,
+    which takes the IDNA tables to check
+  - a host that a client reading the link another way would not open: up to a quote or a `>`, or with
+    its character references read
   - in running text, a dot right after the host, which may end the host or the sentence
 
   A leading `www.` is not shown, because a client would turn it back into a link: a link to

@@ -270,18 +270,12 @@ func TestLinkHost(t *testing.T) {
 // decisions land, Go matches the oracle here too.
 func TestDifferencesStillMatchOracle(t *testing.T) {
 	var fixture struct {
-		SafeTextTwice struct{ Input, Once, Twice string } `json:"safe_text_twice"`
-		Sentences     map[string]struct {
+		Sentences map[string]struct {
 			Input     string   `json:"input"`
 			Sentences []string `json:"sentences"`
 		} `json:"sentences"`
 	}
 	oracletest.JSON(t, "library/differences.json", &fixture)
-	once, _, _ := SafeText(fixture.SafeTextTwice.Input)
-	twice, _, _ := SafeText(once)
-	if once != fixture.SafeTextTwice.Once || twice != fixture.SafeTextTwice.Twice {
-		t.Errorf("safe_text twice: got %q then %q", once, twice)
-	}
 	for name, c := range fixture.Sentences {
 		if got, _ := Sentences(c.Input, false); !reflect.DeepEqual(got, c.Sentences) {
 			t.Errorf("%s: got %q, want %q", name, got, c.Sentences)
@@ -296,7 +290,9 @@ func TestAmbiguousLinkHost(t *testing.T) {
 		// A browser reads a backslash before the path as a slash, so it opens evil.example here.
 		{`<http://evil.example\@good.example/|deck>`, "deck [link unknown host]"},
 		{`http://evil.example\@good.example/ now`, "[link unknown host] now"},
-		{`[deck](http://evil.example\@good.example/)`, "deck [link unknown host]"},
+		// In a Markdown target a backslash before punctuation is an escape, so the browser is given
+		// http://evil.example@good.example/ and opens good.example.
+		{`[deck](http://evil.example\@good.example/)`, "deck [link good.example]"},
 		{`<//evil.example\@good.example|deck>`, "deck [link unknown host]"},
 		{`<C:\path|deck>`, "deck [link unknown host]"},
 		// A control character in the host, or anywhere before the path.
@@ -360,8 +356,8 @@ func TestLinkCutByTabOrLineBreak(t *testing.T) {
 		{"https://first.example\n.second.example/x", "[link unknown host]\n.second.example/x", 0},
 		{"https://first.example\r.second.example/x", "[link unknown host][U+000D].second.example/x", 1},
 		{"https://first.example\r\n\t.second.example/x", "[link unknown host]\n .second.example/x", 0},
-		// A line break ends a Slack token, so the link in it is read as running text.
-		{"<https://first.example\n.second.example/x|deck>", "<[link unknown host]\n.second.example/x|deck>", 0},
+		// A Slack token with a | part holds a line break.
+		{"<https://first.example\n.second.example/x|deck>", "deck [link unknown host]", 0},
 		{"[deck](https://first.example\t.second.example/x)", "[deck]([link unknown host] .second.example/x)", 0},
 		// What follows can also turn the host into a user name, or go on after closing punctuation.
 		{"//first.example\t@second.example/x", "[link unknown host] @second.example/x", 0},
@@ -401,18 +397,19 @@ func TestMarkdownLinkWithAnyScheme(t *testing.T) {
 			t.Errorf("SafeText(%q): got %q %+v %v", plain, text, counts, err)
 		}
 	}
-	// A client also reads a target after a label that holds a line break or brackets, after a target cut by a
-	// control character, and after a bracketed word the connector wrote. No output keeps one with a scheme.
+	// A client also reads a link whose label holds a line break or brackets, whose target holds parentheses or a
+	// control character, or whose label is a bracketed word the connector wrote. The whole link becomes its
+	// label and a marker, and a link the marker then starts is read too.
 	for _, c := range []struct {
 		raw, safe       string
 		links, controls int
 	}{
-		{"[de\nck](HTTPS:/files.example)", "[de\nck]([link unknown host]", 1, 0},
-		{"[a [b] c]( tel:5551234 )", "[a [b] c]( [link unknown host] )", 1, 0},
-		{"[deck](HTTPS:/files.example/\x1cx)", "[deck]([link unknown host]", 1, 1},
-		{"[deck](javascript:alert(1))", "[deck]([link unknown host]", 1, 0},
+		{"[de\nck](HTTPS:/files.example)", "de\nck [link unknown host]", 1, 0},
+		{"[a [b] c]( tel:5551234 )", "a [b] c [link unknown host]", 1, 0},
+		{"[deck](HTTPS:/files.example/\x1cx)", "deck [link unknown host]", 1, 1},
+		{"[deck](javascript:alert(1))", "deck [link unknown host]", 1, 0},
 		{"<https://files.example>(HTTPS:/second.example/x)", "link files.example [link unknown host]", 2, 0},
-		{"\x00(tel:5551234)(tel:5551234)", "[U+0000]([link unknown host]", 1, 1},
+		{"\x00(tel:5551234)(tel:5551234)", "U+0000 link unknown host [link unknown host]", 2, 1},
 	} {
 		text, counts, err := SafeText(c.raw)
 		if err != nil || text != c.safe || counts != (Counts{Links: c.links, Controls: c.controls}) {
@@ -482,11 +479,12 @@ func TestAngleBracketLinkWithScheme(t *testing.T) {
 		// A control character or an inner token leaves no space, so the finished text is still a link.
 		{"<tel:555\x1c1234>", "[link unknown host]", 1, 1},
 		{"<tel:555<#|>1234>", "[link unknown host]", 1, 0},
-		// What follows the bracket it leaves is read too.
-		{"<tel:1>(tel:2)", "[link unknown host]([link unknown host]", 2, 0},
+		// What follows the marker it leaves is read too.
+		{"<tel:1>(tel:2)", "link unknown host [link unknown host]", 2, 0},
 		{"<tel:1>: tel:2", "[link unknown host]: [link unknown host]", 2, 0},
-		{"[deck](<https:/files.example/a b>)", "[deck](<[link unknown host] b>)", 1, 0},
-		{"[deck](< tel:5551234 x>)", "[deck](< [link unknown host] x>)", 1, 0},
+		// A mail address in angle brackets is a mail link.
+		{"<a@files.example>", "[link mail]", 1, 0},
+		{"mail <a.b+c@files-1.example> now", "mail [link mail] now", 1, 0},
 	} {
 		want := Counts{Mentions: strings.Count(c.raw, "<#"), Links: c.links, Controls: c.controls}
 		text, counts, err := SafeText(c.raw)

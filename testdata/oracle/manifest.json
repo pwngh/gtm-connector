@@ -2,12 +2,12 @@
  "python_version": "3.14.6",
  "python_build": "3.14.6 (main, Jun 25 2026, 00:12:50) [Clang 14.0.3 (clang-1403.0.22.14.1)]",
  "unicode_version": "16.0.0",
- "package_sha256": "67161f80248d9706961ca2fd940fa0c6fb8820921fdd74184b5d272c651f3f6e",
+ "package_sha256": "40bce05115e84755a52ffe8b7153d1759d34286f7ed2065d673b08a20804b987",
  "generator": "tools/oracle/generate.py",
  "files": {
   "cards/books_calls.jsonl.gz": {
-   "sha256": "a5b8cccd0fa6b0c866ee640c9b26292d4352857d3250d9d79e3e214d0e5a7bd9",
-   "bytes": 2517132,
+   "sha256": "455081bc62e1b2c54bbf8cdb5d66f605f27d65b0d37ecc3d8bf86c6140d9628d",
+   "bytes": 2517316,
    "records": 82
   },
   "cards/books_demo.jsonl.gz": {
@@ -76,13 +76,13 @@
    "records": 33
   },
   "corpora/patterns.json": {
-   "sha256": "3d1c8ca8b1ade242516c8b6530b576b1817ea24f7cb41b7aa72cecf8ccd08a46",
-   "bytes": 46664,
+   "sha256": "3bd21b7bf68a213523c1f2a960da22bb3cbf0b3508648f9f17440fc222d80f65",
+   "bytes": 46670,
    "records": 30
   },
   "corpora/safe_text.jsonl.gz": {
-   "sha256": "d43222113bb2d0049ed8c314a2b9dd1cc9874a89916d5d2c25d182972eb52e0f",
-   "bytes": 10734235,
+   "sha256": "d2a328d4a8af9d0093f9e0e325e10512deeeda02592d0c835811a3cf2c319463",
+   "bytes": 10764923,
    "records": 104767
   },
   "corpora/sentences.jsonl.gz": {
@@ -182,9 +182,9 @@
    "records": 32
   },
   "library/differences.json": {
-   "sha256": "28b500ef6b8e9bdc38a7ba765848d0df803a8d664fca5cfdfc4a8c5b519ae882",
-   "bytes": 789,
-   "records": 4
+   "sha256": "f50aadaf56a497af2a207b3ac1a7db089561f84f868a327a075b0f65b396110c",
+   "bytes": 615,
+   "records": 3
   },
   "library/json_dumps.json": {
    "sha256": "8237057d8551ba94b167c8f097f74c26faa665e594b1dd0fa5f70c5ca2a9217d",
@@ -192,9 +192,14 @@
    "records": 56
   },
   "library/link_host.json": {
-   "sha256": "79e4b84e0382e1928b1855e42c2a75c5e22d20d92e7feaa54557cc3c1f236dcc",
-   "bytes": 48653,
-   "records": 485
+   "sha256": "586a8d9a9fabc17f607157138d95b5443a732aa8c0ed3a057b7eba9b3d71b5d4",
+   "bytes": 49351,
+   "records": 492
+  },
+  "library/references.json": {
+   "sha256": "d7e4c893a6bfa3b51d323c1d0c19d0bdb895732bcfbdc32b836c28a0f14b916f",
+   "bytes": 50776,
+   "records": 2136
   },
   "library/strict_json.json": {
    "sha256": "f68de0a1ab0bd26f843a5b0a8c03cfddd746972f8caf27d6329b08c0495dd4e4",
@@ -202,7 +207,7 @@
    "records": 85
   },
   "scanners/index.json": {
-   "sha256": "34c594c8ac4fd7f65a6892abf84296e527ee3bcf7dca89433a3ff0e197699e26",
+   "sha256": "d3d68f3b145615814e7259f7f1047f09a95ec349da19dbc6c062bdf58f134988",
    "bytes": 1045,
    "records": 7
   },
@@ -232,8 +237,8 @@
    "records": 24767
   },
   "scanners/units_raw_link.jsonl.gz": {
-   "sha256": "21e93da2c80e5e0414c0b9f02679e25df4cd69f6698f8acb92c52d2492c84f44",
-   "bytes": 208074,
+   "sha256": "922209636e38a712763d1065acc08c83633e8758356069ce8c87ca7fe511906c",
+   "bytes": 206791,
    "records": 24767
   },
   "scanners/units_sentence_end.jsonl.gz": {

@@ -93,14 +93,8 @@ type Span struct{ Start, End int }
 // link is a www. address.
 func rawLinkHead(s []rune, i int) (end int, www, ok bool) {
 	n := len(s)
-	if u.IgnoreCaseAZ(s[i]) {
-		j := i + 1
-		for j < n && j-i-1 < 31 && foldScheme(s[j]) {
-			j++
-		}
-		if literal(s, j, n, "://") {
-			return j + 3, false, true
-		}
+	if end, ok := schemeHead(s, i); ok {
+		return end, false, true
 	}
 	if literalFold(s, i, n, "mailto:") {
 		return i + 7, false, true
@@ -113,6 +107,23 @@ func rawLinkHead(s []rune, i int) (end int, www, ok bool) {
 		return i + 2, false, true
 	}
 	return 0, false, false
+}
+
+// schemeHead is where units._SCHEME_HEAD.match(s, i) ends: a scheme of up to 32 characters and ://, under
+// IGNORECASE.
+func schemeHead(s []rune, i int) (int, bool) {
+	n := len(s)
+	if i >= n || !u.IgnoreCaseAZ(s[i]) {
+		return 0, false
+	}
+	j := i + 1
+	for j < n && j-i-1 < 31 && foldScheme(s[j]) {
+		j++
+	}
+	if literal(s, j, n, "://") {
+		return j + 3, true
+	}
+	return 0, false
 }
 
 // rawLink is one match of _RAW_LINK.
@@ -131,7 +142,7 @@ func rawLinks(s []rune) []rawLink {
 			continue
 		}
 		j := head
-		for j < len(s) && !u.ReSpace(s[j]) && !in(s[j], `<>"'`) {
+		for j < len(s) && !u.ReSpace(s[j]) && s[j] != '<' && !(s[j] == '[' && markerAhead(s, j+1)) {
 			j++
 		}
 		found = append(found, rawLink{Span{i, j}, www})
@@ -140,7 +151,24 @@ func rawLinks(s []rune) []rawLink {
 	return found
 }
 
-// RawLinks is _RAW_LINK.finditer(text) (units.py line 121, under IGNORECASE).
+// markerAhead is whether a word the connector writes for a Slack token starts at s[i], after its [, under
+// IGNORECASE: (?:link|mention) |(?:user|channel)[ \]].
+func markerAhead(s []rune, i int) bool {
+	n := len(s)
+	for _, word := range []string{"link ", "mention "} {
+		if literalFold(s, i, n, word) {
+			return true
+		}
+	}
+	for _, word := range []string{"user", "channel"} {
+		if j := i + len(word); literalFold(s, i, n, word) && j < n && (s[j] == ' ' || s[j] == ']') {
+			return true
+		}
+	}
+	return false
+}
+
+// RawLinks is _RAW_LINK.finditer(text) (units.py line 122, under IGNORECASE).
 func RawLinks(s []rune) []Span {
 	var found []Span
 	for _, link := range rawLinks(s) {
@@ -153,7 +181,7 @@ func RawLinks(s []rune) []Span {
 // it at End2.
 type SentenceEnd struct{ Start, End1, End2 int }
 
-// SentenceEnds is _SENTENCE_END.finditer(line) (units.py line 312).
+// SentenceEnds is _SENTENCE_END.finditer(line) (units.py line 622).
 func SentenceEnds(s []rune) []SentenceEnd {
 	var found []SentenceEnd
 	n := len(s)
@@ -185,7 +213,7 @@ var openers = []string{"We", "Our", "They", "Their", "He", "She", "It", "Its", "
 	"This", "That", "These", "Those", "The", "A", "An", "In", "On", "At", "For", "If", "When", "As", "There",
 	"But", "And", "So", "Then", "However", "Therefore"}
 
-// Opener is _OPENER.match(line, pos, endpos) (units.py line 342): the first alternative, in order, that
+// Opener is _OPENER.match(line, pos, endpos) (units.py line 652): the first alternative, in order, that
 // is not followed by a word character, a dot or a hyphen.
 func Opener(s []rune, pos, end int) (int, bool) {
 	pos, end = clamp(s, pos, end)
@@ -201,7 +229,7 @@ func Opener(s []rune, pos, end int) (int, bool) {
 	return 0, false
 }
 
-// Named is _NAMED.match(text) (units.py line 432): the speaker's name runs from Start to NameEnd, and
+// Named is _NAMED.match(text) (units.py line 742): the speaker's name runs from Start to NameEnd, and
 // the words start at End.
 type Named struct{ Start, NameEnd, End int }
 
@@ -507,7 +535,7 @@ type VoiceTag struct {
 	Named              bool
 }
 
-// voiceTag is _VOICE.match(s, i) (units.py line 156). classesEnd is where the tag's classes end from the
+// voiceTag is _VOICE.match(s, i) (units.py line 159). classesEnd is where the tag's classes end from the
 // character after "<v".
 func voiceTag(s []rune, i int, classesEnd func(int) int) (VoiceTag, bool) {
 	n := len(s)
@@ -596,7 +624,7 @@ func cueStamp(s []rune, i int) (int, bool) {
 	return clock(i)
 }
 
-// cueMarkup is _CUE_MARKUP.match(s, i) (units.py line 166): the end of the match.
+// cueMarkup is _CUE_MARKUP.match(s, i) (units.py line 169): the end of the match.
 func cueMarkup(s []rune, i int) (int, bool) {
 	n := len(s)
 	if i >= n || s[i] != '<' {
