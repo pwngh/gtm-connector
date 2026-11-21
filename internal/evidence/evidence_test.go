@@ -185,13 +185,12 @@ func TestWindowedSearches(t *testing.T) {
 	}
 }
 
-// A row whose text differs from the recorded one only where Go shows the host of a valid xn-- label is a known
-// difference: Python showed every such host as unknown host.
+// Every row of the safe_text corpus gives the recorded text and counts. With -update, a row Go now neutralizes
+// otherwise is written again.
 func TestSafeTextCorpus(t *testing.T) {
 	m := oracletest.NewMismatches(t, "safe_text")
-	known := 0
-	defer func() { t.Logf("safe_text: %d rows show the host of a valid xn-- label", known) }()
-	for _, line := range oracletest.Lines(t, "corpora/safe_text.jsonl.gz") {
+	golden := oracletest.NewGolden(t, "corpora/safe_text.jsonl.gz", strictjson.Canonical.Dumps)
+	for i, line := range golden.Lines() {
 		var row struct {
 			input, text string
 			counts      [4]int
@@ -207,13 +206,18 @@ func TestSafeTextCorpus(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := [4]int{counts.Mentions, counts.Links, counts.Controls, counts.Brackets}
-		if text != row.text && oracletest.PythonHosts(text) == row.text {
-			known++
-			text = row.text
+		if text == row.text && got == row.counts {
+			continue
 		}
-		if text != row.text || got != row.counts {
+		if !oracletest.Update() {
 			m.Add("%q: got %q %v, want %q %v", row.input, text, got, row.text, row.counts)
+			continue
 		}
+		old, err := strictjson.Loads(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		golden.Set(i, old, []any{row.input, text, []any{int64(got[0]), int64(got[1]), int64(got[2]), int64(got[3])}})
 	}
 }
 
@@ -259,39 +263,60 @@ func TestSentencesCorpus(t *testing.T) {
 	}
 }
 
-// The host a card shows for each recorded link target, and for a www. address in running text. The host of a
-// valid xn-- label, which Python showed as unknown host, is a known difference.
+// The host a card shows for each recorded link target, and for a www. address in running text. With -update,
+// a case Go now answers otherwise is written again.
 func TestLinkHost(t *testing.T) {
-	var fixture struct {
-		Cases []struct {
-			Input       string  `json:"input"`
-			Host        string  `json:"host"`
-			RunningText *string `json:"running_text"`
-		} `json:"cases"`
+	const name = "library/link_host.json"
+	data := oracletest.Read(t, name)
+	value, err := strictjson.Loads(data)
+	if err != nil {
+		t.Fatal(err)
 	}
-	oracletest.JSON(t, "library/link_host.json", &fixture)
+	pretty := strictjson.DumpOptions{EnsureASCII: true, Indent: 1}
+	if was, err := pretty.Dumps(value); oracletest.Update() && (err != nil || was+"\n" != string(data)) {
+		t.Fatalf("%s: the file's encoding is not reproduced (%v)", name, err)
+	}
+	cases, _ := value.(*strictjson.Object).Get("cases")
 	m := oracletest.NewMismatches(t, "the host of a link target")
-	named, running := 0, 0
-	for _, c := range fixture.Cases {
+	named, running, changed := 0, 0, 0
+	for _, c := range cases.([]any) {
 		m.Row()
-		if c.Host != unknownHost {
+		recorded := c.(*strictjson.Object)
+		input, _ := recorded.Get("input")
+		for _, reading := range []struct {
+			key  string
+			bare bool
+		}{{"host", false}, {"running_text", true}} {
+			want, _ := recorded.Get(reading.key)
+			if want == nil {
+				continue
+			}
+			if reading.bare {
+				running++
+			}
+			got := linkHost([]rune(input.(string)), reading.bare)
+			if got == want {
+				continue
+			}
+			if !oracletest.Update() {
+				m.Add("_host(%q, bare=%v): got %q, want %q", input, reading.bare, got, want)
+				continue
+			}
+			recorded.Set(reading.key, got)
+			changed++
+		}
+		if host, _ := recorded.Get("host"); host != unknownHost {
 			named++
 		}
-		if got := linkHost([]rune(c.Input), false); got != c.Host &&
-			oracletest.PythonHosts("[link "+got+"]") != "[link "+c.Host+"]" {
-			m.Add("_host(%q): got %q, want %q", c.Input, got, c.Host)
-		}
-		if c.RunningText != nil {
-			running++
-			if got := linkHost([]rune(c.Input), true); got != *c.RunningText &&
-				oracletest.PythonHosts("[link "+got+"]") != "[link "+*c.RunningText+"]" {
-				m.Add("_host(%q, bare=True): got %q, want %q", c.Input, got, *c.RunningText)
-			}
-		}
+	}
+	if changed > 0 {
+		now, _ := pretty.Dumps(value)
+		oracletest.Write(t, name, []byte(now+"\n"))
+		t.Logf("%s: %d answers written again", name, changed)
 	}
 	// Both answers and both readings must be exercised.
-	if named < 50 || len(fixture.Cases)-named < 50 || running < 5 {
-		t.Errorf("the oracle has %d named hosts of %d and %d www. addresses", named, len(fixture.Cases), running)
+	if named < 50 || len(cases.([]any))-named < 50 || running < 5 {
+		t.Errorf("the oracle has %d named hosts of %d and %d www. addresses", named, len(cases.([]any)), running)
 	}
 }
 
@@ -359,8 +384,9 @@ func TestLinkHostWithNoSlashesAfterScheme(t *testing.T) {
 		{"<files.example:8443/x|deck>", "deck [link unknown host]"},
 		// A scheme too long for its // to be found is not read as a host either.
 		{"[deck](" + strings.Repeat("a", 40) + "://files.example/)", "deck [link unknown host]"},
-		// A www. address, a // address and a link with its // keep the host before a port or a colon.
-		{"<files.example/x|deck>", "deck [link files.example]"},
+		// A www. address, a // address and a link with its // keep the host before a port or a colon. A
+		// target with no scheme and no // is relative to the page and names no host.
+		{"<files.example/x|deck>", "deck [link unknown host]"},
 		{"www.files.example:8443/x now", "[link files.example] now"},
 		{"<//files.example:8443/x|deck>", "deck [link files.example]"},
 		{"<https://files.example/a:b|deck>", "deck [link files.example]"},
@@ -486,7 +512,7 @@ func TestWWWAddress(t *testing.T) {
 		{"<https://www.192.0.2.1/|deck>", "deck [link unknown host]"},
 		{"<https://www./|deck>", "deck [link unknown host]"},
 		// Two slashes in a path are not the start of a host.
-		{"<files.example/a//b|deck>", "deck [link files.example]"},
+		{"<files.example/a//b|deck>", "deck [link unknown host]"},
 		{"<https://files.example/a//b|deck>", "deck [link files.example]"},
 		{"<//files.example/a//b|deck>", "deck [link files.example]"},
 	})

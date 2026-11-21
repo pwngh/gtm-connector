@@ -103,8 +103,9 @@ func linkHost(target []rune, bare bool) string {
 	if hasPrefix(u.Lower(target), "mailto:") {
 		return "mail"
 	}
+	// A target with no scheme and no // names no host: a browser resolves it against the page it is on.
 	authority, _, named, ok := linkAuthority(target, bare)
-	if !ok {
+	if !ok || !named {
 		return unknownHost
 	}
 	// A backslash, a control character or a bracket gives no host, and so does a character whose compatibility

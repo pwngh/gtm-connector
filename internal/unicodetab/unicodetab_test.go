@@ -79,6 +79,37 @@ func TestNFKCNetloc(t *testing.T) {
 	checkEvery(t, "NFKC netloc marks", netloc.Ranges, NFKCNetloc)
 }
 
+func TestJoiningTypes(t *testing.T) {
+	var joining map[string]json.RawMessage
+	oracletest.JSON(t, "unicode/joining_types.json", &joining)
+	want := make([]byte, MaxRune+1)
+	for c := range want {
+		want[c] = 'U'
+	}
+	for _, kind := range []string{"L", "D", "R", "T"} {
+		var ranges [][2]int
+		if err := json.Unmarshal(joining[kind], &ranges); err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range ranges {
+			for c := r[0]; c <= r[1]; c++ {
+				want[c] = kind[0]
+			}
+		}
+	}
+	m := oracletest.NewMismatches(t, "joining types")
+	for c := rune(0); c <= MaxRune; c++ {
+		m.Row()
+		if got := JoiningType(c); got != want[c] {
+			m.Add("U+%04X: got %c, want %c", c, got, want[c])
+		}
+	}
+	// ARABIC LETTER BEH joins on both sides, ALEF on the right only, and a combining mark is transparent.
+	if JoiningType(0x628) != 'D' || JoiningType(0x627) != 'R' || JoiningType(0x64B) != 'T' || JoiningType('1') != 'U' {
+		t.Error("the joining types of BEH, ALEF, FATHATAN and 1")
+	}
+}
+
 func TestCategories(t *testing.T) {
 	var categories struct {
 		Runs [][3]any `json:"runs"`

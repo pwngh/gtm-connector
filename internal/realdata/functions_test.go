@@ -56,15 +56,14 @@ func TestOutputsMatchOracleFixtures(t *testing.T) {
 			}
 		}
 	}
-	// Enough rows of each corpus to see every shape; the evidence tests check every row. Go shows the host of a
-	// valid xn-- label, which Python showed as unknown host: a known difference.
+	// Enough rows of each corpus to see every shape; the evidence tests check every row.
 	const rows = 5000
 	safe := oracletest.NewMismatches(t, "safe_text outputs")
 	for _, line := range oracletest.Lines(t, "corpora/safe_text.jsonl.gz")[:rows] {
 		safe.Row()
 		row := loadList(t, line)
 		want, _ := canonical([]any{row[1], row[2]})
-		if got := Outputs(textItem(row[0].(string)))[at("safe_text")]; oracletest.PythonHosts(got) != want {
+		if got := Outputs(textItem(row[0].(string)))[at("safe_text")]; got != want {
 			safe.Add("%s", line)
 		}
 	}

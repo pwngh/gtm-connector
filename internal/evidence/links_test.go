@@ -135,6 +135,27 @@ func TestRawLinkExtent(t *testing.T) {
 	})
 }
 
+// A target with no scheme and no // names no host: a browser resolves it against the page it is on. Only a
+// target with a scheme and an authority, or a protocol-relative //host, shows its host.
+func TestRelativeTargetShowsNoHost(t *testing.T) {
+	checkLinks(t, [][2]string{
+		{"[deck]: <xn--bcher-kva.example/path>", "[deck]: [link unknown host]"},
+		{"[deck]: <files.example/path>", "[deck]: [link unknown host]"},
+		{"<xn--bcher-kva.example/path|deck>", "deck [link unknown host]"},
+		{"<files.example|deck>", "deck [link unknown host]"},
+		{"[deck]: <//xn--bcher-kva.example/path>", "[deck]: [link xn--bcher-kva.example]"},
+		{"<//files.example/x|deck>", "deck [link files.example]"},
+	})
+	safe, _, _ := SafeText("[deck]: <xn--bcher-kva.example/path>\n\nSee [deck].")
+	if safe != "[deck]: [link unknown host]\n\nSee [deck]." {
+		t.Errorf("a reference definition and its use: got %q", safe)
+	}
+	// An inline Markdown link to a relative target is left as text, with no host marker.
+	for _, plain := range []string{"[deck](<xn--bcher-kva.example/path>)", "[deck](xn--bcher-kva.example/path)"} {
+		neutral(t, plain, plain, Counts{})
+	}
+}
+
 // The cases of test_a_slack_token_is_read_innermost_first_and_may_hold_a_line_break of the removed Python suite.
 func TestSlackTokenInnermostFirst(t *testing.T) {
 	for _, c := range []struct {
@@ -145,7 +166,8 @@ func TestSlackTokenInnermostFirst(t *testing.T) {
 			"outer inner [link inner.example] [link unknown host]", 0, 2},
 		{"<https:/files.example|one\ntwo>", "one\ntwo [link unknown host]", 0, 1},
 		{"We agree <#<@U1> will not sign> today.", "We agree [channel] today.", 2, 0},
-		{"<x|<y|<z|deep>>>", "deep [link z] [link y] [link x]", 0, 3},
+		{"<x|<y|<z|deep>>>", "deep [link unknown host] [link unknown host] [link unknown host]", 0, 3},
+		{"<//x|<//y|<//z|deep>>>", "deep [link z] [link y] [link x]", 0, 3},
 		{"<a <b> c>", "<a <b> c>", 0, 0},
 		{"<https://files.example\n>", "<[link unknown host]\n>", 0, 1},
 	} {

@@ -42,9 +42,12 @@ func TestPunycodeLabel(t *testing.T) {
 		// digit in a name with a right-to-left label.
 		{"https://xn--a-0hc.example/", "[link unknown host]"},
 		{"https://1.xn--9dbne9b.example/", "[link unknown host]"},
-		// The joiner rules: a zero width non-joiner after no virama, and a lone zero width joiner.
+		// The joiner rules: a zero width non-joiner after no virama, one between a joining letter and a digit,
+		// which joins nothing, and a lone zero width joiner. A non-joiner between two joining letters is valid.
 		{"https://xn--x-dha079u.example/", "[link unknown host]"},
+		{"https://xn--1-0mc899q.example/", "[link unknown host]"},
 		{"https://xn--1ug.example/", "[link unknown host]"},
+		{"https://xn--mgbn2ecje63gr19l.example/", "[link xn--mgbn2ecje63gr19l.example]"},
 		// A label that starts with a combining mark, holds a character the mapping changes or drops, is not
 		// NFC, or holds a character Unicode 17.0.0 added, which Unicode 16.0.0 leaves unassigned.
 		{"https://xn--a-wbb.example/", "[link unknown host]"},
@@ -60,17 +63,18 @@ func TestPunycodeLabel(t *testing.T) {
 	})
 }
 
-// urlParserDifferences are the generated hosts a link shows that the recorded parser refuses. Each has a
-// right-to-left label with a letter or mark Unicode 14.0 added, from U+061D and U+0870 to U+08B5. Unicode
-// 16.0.0 gives each of them the bidi class AL or NSM, the label passes every rule of UTS #46, and Node's parser
-// (ada 3.4.4) refuses it, as it does any such label beside an older right-to-left letter.
-var urlParserDifferences = map[string]bool{
-	"xn--7dbby13z":                           true,
-	"b2b.example.xn--4dbf2a94v":              true,
-	"xn--cgbaflb":                            true,
-	"xn--9ybbe":                              true,
-	"xn--5xbb7aa1d.example":                  true,
-	"xn--dmb07bsoianak.files.xn--fsqu85c14z": true,
+// urlParserDifferences are the generated hosts a link shows that the recorded parser refuses, with what the
+// link shows. Each has a right-to-left label with a letter or mark Unicode 14.0 added, from U+061D and U+0870
+// to U+08B5. Unicode 16.0.0 gives each of them the bidi class AL or NSM, and the label passes every rule of
+// UTS #46. ada 3.4.4's bidi table lacks those characters, so it reads the label as mixing directions and
+// refuses it.
+var urlParserDifferences = map[string]string{
+	"xn--7dbby13z":                           "xn--7dbby13z",
+	"b2b.example.xn--4dbf2a94v":              "b2b.example.xn--4dbf2a94v",
+	"xn--cgbaflb":                            "xn--cgbaflb",
+	"xn--9ybbe":                              "xn--9ybbe",
+	"xn--5xbb7aa1d.example":                  "xn--5xbb7aa1d.example",
+	"xn--dmb07bsoianak.files.xn--fsqu85c14z": "xn--dmb07bsoianak.files.xn--fsqu85c14z",
 }
 
 // TestHostsMatchTheURLParser checks, on 20,000 generated hosts with xn-- labels, that a link shows a host only
@@ -90,7 +94,7 @@ func TestHostsMatchTheURLParser(t *testing.T) {
 	lines := bufio.NewScanner(unzipped)
 	lines.Scan()
 	t.Logf("recorded with %s", lines.Text())
-	inputs, opened, shown, stricter := 0, 0, 0, 0
+	inputs, opened, shown, stricter, differences := 0, 0, 0, 0, 0
 	for lines.Scan() {
 		var row [2]*string
 		decode(t, lines.Bytes(), &row)
@@ -101,7 +105,12 @@ func TestHostsMatchTheURLParser(t *testing.T) {
 			shown++
 		}
 		if row[1] == nil {
-			if got != unknownHost && !urlParserDifferences[host] {
+			if display, ok := urlParserDifferences[host]; ok {
+				differences++
+				if got != display {
+					t.Errorf("%s: a link shows %q, want %q", host, got, display)
+				}
+			} else if got != unknownHost {
 				t.Errorf("%s: a link shows %q, and the URL parser refuses it", host, got)
 			}
 			continue
@@ -125,7 +134,8 @@ func TestHostsMatchTheURLParser(t *testing.T) {
 	t.Logf("%d hosts: the parser opens %d, a link shows %d, and shows %d of the rest as unknown host", inputs,
 		opened, shown, stricter)
 	// Showing no host would meet the property, so most valid hosts must be shown.
-	if inputs != 20000 || shown < 8000 {
-		t.Errorf("%d hosts and %d shown", inputs, shown)
+	if inputs != 20000 || shown < 8000 || differences != len(urlParserDifferences) {
+		t.Errorf("%d hosts, %d shown and %d of the %d known differences", inputs, shown, differences,
+			len(urlParserDifferences))
 	}
 }

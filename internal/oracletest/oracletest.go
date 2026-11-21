@@ -142,31 +142,6 @@ func (m *Mismatches) Add(format string, args ...any) {
 // Count is the number of rows that differ so far.
 func (m *Mismatches) Count() int { return m.total }
 
-// PythonHosts is text as the Python package showed it: each link marker whose host holds an xn-- label reads
-// [link unknown host]. Python had no IDNA tables to check such a label, and Go shows the host of a valid one,
-// so a test that compares Go's text with a recorded one counts that change as a known difference through it.
-func PythonHosts(text string) string {
-	var out strings.Builder
-	for {
-		start := strings.Index(text, "[link ")
-		if start < 0 {
-			break
-		}
-		end := strings.IndexByte(text[start:], ']')
-		if end < 0 {
-			break
-		}
-		marker := text[start : start+end+1]
-		if host := marker[len("[link ") : len(marker)-1]; strings.HasPrefix(host, "xn--") || strings.Contains(host, ".xn--") {
-			marker = "[link unknown host]"
-		}
-		out.WriteString(text[:start] + marker)
-		text = text[start+end+1:]
-	}
-	out.WriteString(text)
-	return out.String()
-}
-
 // FirstDifference is the first line where two texts differ, for a mismatch report.
 func FirstDifference(got, want string) string {
 	a, b := strings.Split(got, "\n"), strings.Split(want, "\n")

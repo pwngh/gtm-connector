@@ -363,17 +363,21 @@ listed below with inert words.
 - A Slack mention becomes `[mention channel]`, `[mention here]`, `[mention everyone]` or
   `[mention group]`, `[user U123]` or `[channel C123]`.
 - A link of any scheme (`scheme://`), a `mailto:` address, a `//host` address or a `www.` address
-  becomes its label, if it has one, and `[link host]`. A `mailto:` link shows `[link mail]`.
+  becomes its label, if it has one, and `[link host]`. A `mailto:` link shows `[link mail]`. The host
+  is shown without a leading `www.`, which a browser keeps: `https://www.files.example/` shows
+  `[link files.example]`.
 - A link with a backslash or a control character before the end of its host shows
   `[link unknown host]`, because a browser may open a different host than the one written. So does
-  a Slack link `<target|label>` whose target names a scheme with no `//` after it.
+  a Slack link `<target|label>` whose target names a scheme with no `//` after it, and a Slack link
+  or a Markdown reference definition whose target has no scheme and no `//`, such as
+  `<files.example/x|deck>`: a browser opens it on the page's own host.
 - A host with an internationalised label (`xn--` and Punycode) is shown in that ASCII form, lowercased,
   as `[link xn--bcher-kva.example]`: the name a browser looks up, never the Unicode form it decodes to,
   whose letters can look like other letters. A label shows `[link unknown host]` when it fails the
   checks the URL Standard's host parser makes (UTS #46 with Unicode 16.0.0 characters): the Punycode
   does not decode or encode back to the same label, the decoded name holds a character the mapping
   changes or refuses, starts with a combining mark or with `xn--`, is only ASCII, or breaks the
-  right-to-left or joiner rules.
+  right-to-left rule or the joiner rules of RFC 5892.
 - A control, direction-changing or invisible format character becomes its code, such as `[U+202E]`.
 - A bracketed number such as `[3]` becomes `(3)`, because a card cites its units that way.
 
