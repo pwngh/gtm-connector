@@ -8,6 +8,10 @@
 //	gtm-connector brief ACCOUNT      make and print the Deal card for one account
 //	gtm-connector inspect ID         show an account, a saved card, numbers on it, or a receipt
 //	gtm-connector audit              list the receipts of the audit log
+//	gtm-connector mcp stdio --scope SCOPE
+//	                                 serve MCP on stdin and stdout, for an assistant app that starts it
+//	gtm-connector token new --scope SCOPE
+//	                                 make a bearer token for an MCP client; also token list and token revoke ID
 //	gtm-connector backup --out FILE  write PostgreSQL and the credentials folder to FILE
 //	gtm-connector restore --in FILE  restore FILE into an empty database
 //	gtm-connector health             check that the local server answers
@@ -56,12 +60,16 @@ commands:
   brief ACCOUNT      make and print the Deal card for one account
   inspect ID         show an account, a saved card, numbers on it, or a receipt
   audit              list the receipts of the audit log
+  mcp stdio --scope SCOPE
+                     serve MCP on stdin and stdout, for an assistant app that starts it
+  token new --scope SCOPE
+                     make a bearer token for an MCP client; also token list and token revoke ID
   backup --out FILE  write PostgreSQL and the credentials folder to FILE
   restore --in FILE  restore FILE into an empty database and credentials folder
   health             check that the local server answers
   version            print the commit this binary was built from
 
-accounts, brief, inspect and audit take --json, --state-dir WORKSPACE and --help.
+accounts, brief, inspect, audit, mcp and token take --json, --state-dir WORKSPACE and --help.
 `
 
 func main() {
@@ -78,6 +86,11 @@ func main() {
 		}
 		if _, reads := readCommands[tokens[0]]; reads {
 			code := runRead(ctx, tokens[0], tokens[1:], newScreen(asJSON))
+			stop()
+			os.Exit(code)
+		}
+		if runClient, client := clientCommands[tokens[0]]; client {
+			code := runClient(ctx, tokens[1:], newScreen(asJSON))
 			stop()
 			os.Exit(code)
 		}

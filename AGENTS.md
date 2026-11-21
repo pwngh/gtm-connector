@@ -41,9 +41,10 @@ package comment states the ladder and the rules, and nothing calls it yet.
 `storage/postgres` holds the migrations and every query (its triggers enforce the receipt and card
 rules for any writer), `authz` the grant checks on evidence reads, `transport/http` the browser
 surface, and `cmd/gtm-connector` `setup`, `serve`, `demo`, `backup` and `restore`, with the read commands
-`accounts`, `brief`, `inspect` and `audit` on demo data. `postgres.ReceiptStore` runs the card maker on
-PostgreSQL.
-`mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`.
+`accounts`, `brief`, `inspect` and `audit` on demo data, `token` for MCP client tokens and `mcp stdio`.
+`postgres.ReceiptStore` runs the card maker on PostgreSQL.
+`mcptools` holds the MCP gate's tokens, receipts and tools on the store, which `serve` mounts at `/mcp`
+and `mcp stdio` serves on stdin and stdout.
 Tests that need PostgreSQL skip without `GTM_TEST_DATABASE_URL`; `make test` sets it.
 
 ```sh

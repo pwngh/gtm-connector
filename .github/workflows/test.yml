@@ -149,23 +149,42 @@ jobs:
       - if: failure()
         run: docker compose logs --no-color
 
+  # The pinned Inspector CLI against the binary, on the pinned PostgreSQL: setup, demo and token new, then
+  # serve's /mcp over HTTPS with each token, and mcp stdio started by the Inspector. The same sequence runs
+  # against the gate in process.
   inspector:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:19.0-alpine3.24@sha256:8b0ff4cdf221f0c53d7fcda681d3b461be725c492cd881c5ec9c0ad25023f188
+        env:
+          POSTGRES_USER: gtm
+          POSTGRES_DB: gtm
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+        # Trust authentication, so the port answers on the runner's loopback only.
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gtm -d gtm"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      GTM_TEST_DATABASE_URL: postgres://gtm@localhost:5432/gtm?sslmode=disable
+      GTM_REQUIRE_DATABASE: '1'
+      GTM_INSPECTOR: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
-          python-version: '3.11'
+          # The pinned patch (pins.json), never the newest of a range.
+          go-version: '1.27.4'
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version-file: .nvmrc
-      - run: |
-          python3 -m venv .venv
-          .venv/bin/python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
-          .venv/bin/python scripts/check-inspector.py
+      - run: go test -count=1 -run '^TestInspector$' -v ./cmd/gtm-connector ./internal/transport/mcp
 
   web:
     runs-on: ubuntu-latest

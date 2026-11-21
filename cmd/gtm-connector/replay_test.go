@@ -43,9 +43,6 @@ var notPorted = map[string]string{
 	"audit by tool": "the recorded list opens with the seal of the recorded demo's card, which the binary's demo does not make",
 	"audit by brief": "the recording numbers these receipts where the audit step before it first prints them, " +
 		"and that step does not match",
-	"mcp help":               "mcp is not ported",
-	"mcp without its action": "mcp is not ported",
-	"mcp without a scope":    "mcp is not ported",
 }
 
 // clocked names the steps that print what the recorder's clock decided: a receipt's started_at, the card
@@ -432,6 +429,9 @@ func TestRecordedCommandSession(t *testing.T) {
 				// The step prints nothing here, so what it numbers in the recording is counted as issued.
 				r.skip(r.numbered(), s)
 				t.Skip("GTM_TEST_DATABASE_URL is not set")
+			}
+			if change := recordedHelp[s.Label]; change != nil {
+				s.Stdout, s.Compared = change(t, s.Stdout), "exactly"
 			}
 			compared := func(text string) string { return text }
 			if timed[s.Label] {

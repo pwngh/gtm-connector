@@ -149,7 +149,5 @@ Rerun `connect` with other `--scope` values to replace the grant while the serve
 | `read_call_notes` | `calls:read` | `calls/call_notes/note-003` and `calls/call_notes/note-003b`, marked as untrusted data. |
 | `read_slack_messages` | `slack:read` | `slack/messages/msg-003`. A Slack-only grant cannot read CRM or call notes. |
 
-CI runs `scripts/check-inspector.py` with the pinned Inspector CLI in temporary state. It requires
-discovery, valid schemas for all six tools (twelve schemas), all three source reads, all six
-cross-source denials, HTTP 429 at the rate limit, HTTP 401 for an invalid bearer token, ten
-finalized receipts for ten tool attempts, and zero activities.
+CI no longer runs the Inspector against this package. It runs the pinned Inspector CLI against the
+Go binary instead, over HTTPS and stdio: see [MCP clients](../operations.md#mcp-clients).
