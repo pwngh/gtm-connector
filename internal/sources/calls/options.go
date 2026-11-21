@@ -83,14 +83,15 @@ func CalledAt(text string) (string, error) {
 	return moment.Format("2006-01-02T15:04:05.000000Z"), nil
 }
 
-// ReadExport reads the file to import: a regular file of at most the 2 MiB an export may hold, reached
-// through no symbolic link at any step of its path, and the same file, unchanged, from the check before it
-// is opened to the end of the read. A file that is replaced is refused as invalid; one that changes while it
-// is read could not be read whole, and is refused as such.
+// ReadExport reads the file to import: a regular file of at most the 2 MiB an export may hold, that is not
+// itself a link, and the same file, unchanged, from the check before it is opened to the end of the read.
+// The folder it is in is the person's choice and may be reached through links. A file that is replaced is
+// refused as invalid; one that changes while it is read could not be read whole, and is refused as such.
 func ReadExport(path string) ([]byte, error) { return readExport(path, nil) }
 
-// readExport is ReadExport. When step is not nil it runs after the path is checked ("checked") and after the
-// file is read ("read"), for a test that changes the file there.
+// readExport is ReadExport. When step is not nil it runs after the path is checked ("checked"), after its
+// folder is resolved ("resolved") and after the file is read ("read"), for a test that changes the file or
+// the folder there.
 func readExport(path string, step func(stage string)) ([]byte, error) {
 	checked, err := os.Lstat(path)
 	if err != nil {
@@ -102,7 +103,7 @@ func readExport(path string, step func(stage string)) ([]byte, error) {
 	if step != nil {
 		step("checked")
 	}
-	descriptor, err := openWithoutLinks(path)
+	descriptor, err := openInFolder(path, step)
 	if err != nil {
 		return nil, err
 	}
@@ -137,37 +138,30 @@ func readExport(path string, step func(stage string)) ([]byte, error) {
 	return raw, nil
 }
 
-// openWithoutLinks opens a file for reading one step of its path at a time, from the root or the working
-// folder, each step relative to the one before and none through a symbolic link.
-func openWithoutLinks(path string) (int, error) {
-	start := "."
-	if filepath.IsAbs(path) {
-		start = "/"
-	}
-	descriptor, err := unix.Open(start, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+// openInFolder opens a file for reading by its name in its folder, never through a link. The folder is
+// the one the person named: its path is resolved once, links and all, and opened. The file is opened from
+// that folder with O_NOFOLLOW, so it cannot be a link. A folder swapped after it was resolved gives another
+// file than the one checked, which the caller's comparison of device and inode refuses.
+func openInFolder(path string, step func(stage string)) (int, error) {
+	folder, err := filepath.EvalSymlinks(filepath.Dir(path))
 	if err != nil {
 		return -1, ErrIO
 	}
-	var steps []string
-	for _, step := range strings.Split(filepath.Clean(path), "/") {
-		if step != "" && step != "." {
-			steps = append(steps, step)
-		}
+	if step != nil {
+		step("resolved")
 	}
-	for i, step := range steps {
-		flags := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_DIRECTORY
-		if i == len(steps)-1 {
-			flags = unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
-		}
-		next, err := unix.Openat(descriptor, step, flags, 0)
-		unix.Close(descriptor)
-		switch {
-		case errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR):
-			return -1, ErrInvalid
-		case err != nil:
-			return -1, ErrIO
-		}
-		descriptor = next
+	directory, err := unix.Open(folder, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, ErrIO
+	}
+	defer unix.Close(directory)
+	descriptor, err := unix.Openat(directory, filepath.Base(path),
+		unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
+	switch {
+	case errors.Is(err, unix.ELOOP):
+		return -1, ErrInvalid
+	case err != nil:
+		return -1, ErrIO
 	}
 	return descriptor, nil
 }

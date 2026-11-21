@@ -489,21 +489,12 @@ func TestTheCommandLineChoicesOfAnImport(t *testing.T) {
 	}
 }
 
-// realFolder is a new folder whose path holds no symbolic link, which a temporary folder's can (on macOS,
-// /var is one).
-func realFolder(t *testing.T) string {
-	t.Helper()
-	folder, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return folder
-}
-
-// A file is read only through a path with no symbolic link in it, only if it is the file that was checked,
-// and only if it did not change while it was read.
+// A file is read only if it is not itself a link, only if it is the file that was checked, and only if it
+// did not change while it was read. The folders on the way are the person's choice: a link among them is
+// followed once, when the folder is resolved, and a folder swapped after that is caught as another file.
 func TestAnExportIsReadThroughNoLinkAndUnchanged(t *testing.T) {
-	folder := realFolder(t)
+	// On macOS a temporary folder is reached through /var, which is a link.
+	folder := t.TempDir()
 	inner := filepath.Join(folder, "inner")
 	if err := os.Mkdir(inner, 0o700); err != nil {
 		t.Fatal(err)
@@ -524,8 +515,30 @@ func TestAnExportIsReadThroughNoLinkAndUnchanged(t *testing.T) {
 	if err := os.Symlink(inner, linked); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadExport(filepath.Join(linked, "call.txt")); err != ErrInvalid {
-		t.Errorf("a parent folder that is a link ended with %v", err)
+	if raw, err := ReadExport(filepath.Join(linked, "call.txt")); err != nil || string(raw) != "We will sign.\n" {
+		t.Errorf("a parent folder that is a link: %q, %v", raw, err)
+	}
+	if err := os.Symlink(path, filepath.Join(inner, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadExport(filepath.Join(inner, "link.txt")); err != ErrInvalid {
+		t.Errorf("a file that is a link ended with %v", err)
+	}
+	swapped := func(stage string) {
+		if stage == "resolved" {
+			if err := os.Rename(inner, inner+"-before"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(inner, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("We will not sign.\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := readExport(filepath.Join(linked, "call.txt"), swapped); err != ErrInvalid {
+		t.Errorf("a folder swapped after it was resolved ended with %v", err)
 	}
 	replaced := func(stage string) {
 		if stage == "checked" {
@@ -553,7 +566,7 @@ func TestAnExportIsReadThroughNoLinkAndUnchanged(t *testing.T) {
 }
 
 func TestOnlyARegularFileWithinTheLimitIsRead(t *testing.T) {
-	folder := realFolder(t)
+	folder := t.TempDir()
 	write := func(name string, size int) string {
 		path := filepath.Join(folder, name)
 		if err := os.WriteFile(path, []byte(strings.Repeat("x", size)), 0o600); err != nil {

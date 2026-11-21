@@ -214,16 +214,9 @@ func TestImportedTranscriptsMakeTheRecordedCards(t *testing.T) {
 	}
 }
 
-// exports is a new folder for transcript exports whose path holds no symbolic link, as an import requires
-// (a temporary folder's can: on macOS, /var is one).
-func exports(t *testing.T) string {
-	t.Helper()
-	folder, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return folder
-}
+// exports is a new folder for transcript exports. On macOS its path goes through /var, a link, as a
+// person's own folders can.
+func exports(t *testing.T) string { return t.TempDir() }
 
 // meeting is an invented call of the demo book's acc-007: its contact speaks, then a listed seller.
 const meeting = "WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\n<v Dana Crest>We will sign the renewal this quarter.\n\n" +
@@ -333,10 +326,16 @@ func TestDebugCallsBesideTheDemoCRM(t *testing.T) {
 	if err := os.Symlink(file, link); err != nil {
 		t.Fatal(err)
 	}
-	// A folder on the way to the file that is a link.
+	// A folder on the way to the file that is a link is the person's choice, and is followed: the same
+	// file through it is the same import. The file itself as a link (link.vtt) is refused below.
 	linkedFolder := filepath.Join(folder, "linked")
 	if err := os.Symlink(folder, linkedFolder); err != nil {
 		t.Fatal(err)
+	}
+	stdout, _ = d.succeeded(t, with("--json", "debug", "calls", "import", filepath.Join(linkedFolder, "meeting.vtt"),
+		"--account", "acc-007")...)
+	if through := object(t, stdout); get(through, "status") != "unchanged" || get(through, "import_id") != importID {
+		t.Errorf("an import through a linked folder:\n%s", stdout)
 	}
 	for _, c := range []struct {
 		code    int
@@ -363,8 +362,6 @@ func TestDebugCallsBesideTheDemoCRM(t *testing.T) {
 		{2, []string{"debug", "calls", "import", file, "--account", "acc-007", "--cues", "1:200"},
 			"calls_import_invalid: " + callFailures["calls_import_invalid"], "gtm-connector debug calls import --help"},
 		{2, []string{"debug", "calls", "import", link, "--account", "acc-007"},
-			"calls_import_invalid: " + callFailures["calls_import_invalid"], "gtm-connector debug calls import --help"},
-		{2, []string{"debug", "calls", "import", filepath.Join(linkedFolder, "meeting.vtt"), "--account", "acc-007"},
 			"calls_import_invalid: " + callFailures["calls_import_invalid"], "gtm-connector debug calls import --help"},
 		{2, []string{"debug", "calls", "import", large, "--account", "acc-007"},
 			"calls_import_too_large: " + callFailures["calls_import_too_large"], "gtm-connector debug calls import --help"},
