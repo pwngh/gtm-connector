@@ -60,7 +60,7 @@ func reseal(t *testing.T, evidence *strictjson.Object) {
 const (
 	otherSnapshot = "Live Slack evidence does not match its complete bounded source snapshot."
 	noSnapshot    = "Only a live Slack read carries a thread snapshot."
-	liveThread    = "gemini/0" // three messages of one thread, read in one page, with three blocks left out
+	liveThread    = "gemini/0" // three messages of one thread, read in one page, whose blocks repeat their text
 )
 
 // slackRefusals are the changes to a live Slack thread's evidence that the removed
@@ -100,9 +100,9 @@ var slackRefusals = []struct {
 	{"a file counted as left out", func(_, s, _ *strictjson.Object) {
 		memberObject(s, "counts").Set("omitted_files", 1)
 	}, true, otherSnapshot},
-	{"a block not counted as left out", func(_, s, _ *strictjson.Object) {
-		memberObject(s, "counts").Set("omitted_blocks", 0)
-	}, false, otherSnapshot},
+	{"a block counted as left out", func(_, s, _ *strictjson.Object) {
+		memberObject(s, "counts").Set("omitted_blocks", 1)
+	}, true, otherSnapshot},
 	{"more sign-in requests than a read makes", func(_, s, _ *strictjson.Object) {
 		memberObject(s, "counts").Set("auth_attempts", 11)
 	}, true, otherSnapshot},
@@ -186,7 +186,7 @@ func TestResealedThreadIsAccepted(t *testing.T) {
 		t.Fatal(err)
 	}
 	const line = "  Slack: 3 messages were read from one selected thread, and paging completed. Not read: files (0), " +
-		"attachments (0), blocks (3), earlier versions of edited messages, and every other thread."
+		"attachments (0), blocks (0), earlier versions of edited messages, and every other thread."
 	if !strings.Contains(text, line+"\n") {
 		t.Errorf("the card lacks %q:\n%s", line, text)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pwngh/gtm-connector/internal/strictjson"
@@ -181,11 +182,15 @@ func (t thread) normalize(row any) (*message, error) {
 			return nil, invalid
 		}
 		for _, item := range list {
-			if _, isObject := object(item); !isObject {
+			block, isObject := object(item)
+			if !isObject {
 				return nil, invalid
 			}
+			// A rich-text block that only repeats the text is no part the read leaves out.
+			if text, isText := body.(string); part != "blocks" || !isText || !repeats(block, text) {
+				omissions[part]++
+			}
 		}
-		omissions[part] = len(list)
 	}
 	var edited any
 	var editStamp, editor any
@@ -249,6 +254,84 @@ func (t thread) normalize(row any) (*message, error) {
 		"user_id", user, "bot_id", bot, "edited", edited, "omissions", left)
 	return &message{stamp: stampValue.(string), micros: micros, text: content, omissions: omissions,
 		manifest: manifest}, nil
+}
+
+// slackEscapes writes &, < and > as Slack writes them in a message's text.
+var slackEscapes = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// repeats is whether a rich-text block holds only what the message's text holds, so the block is no part of
+// the message that a read of the text leaves out. Slack adds such a block to every message a person posts.
+// Each text run, line by line, each link's address and label, each emoji's name and each mention's ID must
+// stand in the text, written as Slack writes them there, one after another in the block's order. A link
+// with a label of its own must stand as <address|label>, so no label stands for an address the text lacks. A block
+// of another type, or one with an element not named here, does not repeat the text.
+func repeats(block *strictjson.Object, text string) bool {
+	rest := text
+	// stands is whether a leaf stands in what is left of the text, which then starts after it.
+	stands := func(leaf any, before, after string) bool {
+		word, isText := leaf.(string)
+		whole := before + slackEscapes.Replace(word) + after
+		at := strings.Index(rest, whole)
+		if !isText || at < 0 {
+			return false
+		}
+		rest = rest[at+len(whole):]
+		return true
+	}
+	var walk func(element any, top bool) bool
+	walk = func(element any, top bool) bool {
+		o, isObject := object(element)
+		if !isObject {
+			return false
+		}
+		member := func(key string) any {
+			value, _ := o.Get(key)
+			return value
+		}
+		switch kind := member("type"); kind {
+		case "rich_text", "rich_text_section", "rich_text_list", "rich_text_quote", "rich_text_preformatted":
+			list, isList := member("elements").([]any)
+			if !isList || top != (kind == "rich_text") {
+				return false
+			}
+			for _, child := range list {
+				if !walk(child, false) {
+					return false
+				}
+			}
+			return true
+		case "text":
+			run, isText := member("text").(string)
+			for _, line := range strings.Split(run, "\n") {
+				if !isText || !stands(line, "", "") {
+					return false
+				}
+			}
+			return true
+		case "link":
+			// In the text a link is <address|label>, <address>, or the address alone, which for a mail link
+			// is the address after mailto:.
+			address, isText := member("url").(string)
+			label, labeled := o.Get("text")
+			if stands(address, "<", "") {
+				return !labeled || label == address || stands(label, "|", "")
+			}
+			bare := strings.TrimPrefix(address, "mailto:")
+			return isText && (!labeled || label == address || label == bare) && stands(bare, "", "")
+		case "emoji":
+			return stands(member("name"), ":", ":")
+		case "user":
+			return stands(member("user_id"), "<@", "")
+		case "channel":
+			return stands(member("channel_id"), "<#", "")
+		case "usergroup":
+			return stands(member("usergroup_id"), "<!subteam^", "")
+		case "broadcast":
+			return stands(member("range"), "<!", "")
+		}
+		return false
+	}
+	return walk(block, true)
 }
 
 // nextCursor is the cursor of the page after this one, or nil at the end of the thread. A cursor that

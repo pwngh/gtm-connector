@@ -783,7 +783,7 @@ a login.
 | Plain, `bot_message`, `me_message`, `file_share` or `thread_broadcast` | Accepted |
 | `tombstone` | Accepted only as the selected parent, written by Slack's system user `USLACKBOT`, for a deleted parent that still has replies |
 | Any other hidden message, edit or delete wrapper, other subtype, or a message with no text | Refuses the whole read |
-| Files, attachments and blocks | Counted and left out |
+| Files, attachments and blocks | Counted and left out. A rich-text block that only repeats the message's text is not counted: Slack adds one to every message a person posts, and each of its text runs, links, emoji and mentions stands in the text, in order. |
 
 On a card, a live message's speaker is the raw Slack user ID it carries. A deleted parent carries
 `USLACKBOT`, and a message with no user, such as some app messages, has no speaker label.

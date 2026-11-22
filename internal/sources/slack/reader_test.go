@@ -905,3 +905,59 @@ func TestExitCodes(t *testing.T) {
 		t.Errorf("%d reasons, and the Python reader has 26", len(exitCodes))
 	}
 }
+
+// A rich-text block that only repeats the message's text holds nothing the read left out, so it is not
+// counted: each of its text runs, links, emoji and mentions stands in the text, in order. Slack adds such a
+// block to every message a person posts. A block of another type, or a rich-text block with words the text
+// lacks or an element the reader does not know, is counted.
+func TestARichTextBlockThatRepeatsTheTextIsNotCounted(t *testing.T) {
+	rich := func(elements ...string) string {
+		return `{"type":"rich_text","block_id":"b1","elements":[` + strings.Join(elements, ",") + `]}`
+	}
+	within := func(kind string, elements ...string) string {
+		return `{"type":"` + kind + `","elements":[` + strings.Join(elements, ",") + `]}`
+	}
+	section := func(elements ...string) string { return within("rich_text_section", elements...) }
+	text := func(s string) string { return `{"type":"text","text":` + strictjson.Quote(s) + `}` }
+	for _, c := range []struct {
+		name, body, blocks string
+		want               int
+	}{
+		{"plain", "We signed.", rich(section(text("We signed."))), 0},
+		{"styled, with a link, an emoji and mentions",
+			"*Pelham &amp; Oster* signed :tada: <https://a.example/x?y=1&amp;z=2|the order> see <https://b.example> cc <@U0ABC123> <#C0ABC123|deals> <!subteam^S0ABC123> <!here>",
+			rich(section(`{"type":"text","text":"Pelham & Oster","style":{"bold":true}}`, text(" signed "),
+				`{"type":"emoji","name":"tada","unicode":"1f389"}`, text(" "),
+				`{"type":"link","url":"https://a.example/x?y=1&z=2","text":"the order"}`, text(" see "),
+				`{"type":"link","url":"https://b.example"}`, text(" cc "), `{"type":"user","user_id":"U0ABC123"}`, text(" "),
+				`{"type":"channel","channel_id":"C0ABC123"}`, text(" "), `{"type":"usergroup","usergroup_id":"S0ABC123"}`,
+				text(" "), `{"type":"broadcast","range":"here"}`)), 0},
+		{"a list, a quote and code", "Asks:\n• SSO\n• audit logs\n&gt; We will sign.\n&gt; By Friday.\n```seats = 40```",
+			rich(section(text("Asks:\n")), within("rich_text_list", section(text("SSO")), section(text("audit logs"))),
+				within("rich_text_quote", text("We will sign.\nBy Friday.")), within("rich_text_preformatted", text("seats = 40"))), 0},
+		{"a mail address and a link that the text holds bare", "Write to ap@a.example or see https://a.example/q.",
+			rich(section(text("Write to "), `{"type":"link","url":"mailto:ap@a.example","text":"ap@a.example"}`, text(" or see "),
+				`{"type":"link","url":"https://a.example/q"}`, text("."))), 0},
+		{"a label over another address", "Write to ap@a.example.",
+			rich(section(text("Write to "), `{"type":"link","url":"mailto:other@b.example","text":"ap@a.example"}`, text("."))), 1},
+		{"two rich-text blocks", "We signed. Today.", rich(section(text("We signed."))) + "," + rich(section(text("Today."))), 0},
+		{"words the text lacks", "We signed.", rich(section(text("We signed. The price is $40."))), 1},
+		{"a link the text lacks", "See the order.", rich(section(text("See "),
+			`{"type":"link","url":"https://a.example/x","text":"the order"}`, text("."))), 1},
+		{"words in another order", "one two", rich(section(text("two"), text(" "), text("one"))), 1},
+		{"words used twice", "one", rich(section(text("one"), text("one"))), 1},
+		{"another type of block", "We signed.", `{"type":"section","text":{"type":"mrkdwn","text":"We signed."}}`, 1},
+		{"an element the reader does not know", "We signed.",
+			rich(section(text("We signed."), `{"type":"date","timestamp":1700000000,"format":"{date}","fallback":"We signed."}`)), 1},
+		{"a text run that is no text", "We signed.", rich(section(`{"type":"text","text":7}`)), 1},
+		{"one that repeats and one that does not", "We signed.", rich(section(text("We signed."))) + `,{"type":"divider"}`, 1},
+	} {
+		b := newBench(t)
+		read := b.reads([]reply{page(msg(parentTS, `"text":`+strictjson.Quote(c.body), `"blocks":[`+c.blocks+`]`))})
+		blocks, _ := integer(member(t, read.Records[0], "slack_message", "omissions", "blocks"))
+		if blocks != c.want || count(t, read, "omitted_blocks") != c.want {
+			t.Errorf("%s: %d blocks counted as not read, and %d in the read's counts, want %d", c.name, blocks,
+				count(t, read, "omitted_blocks"), c.want)
+		}
+	}
+}
