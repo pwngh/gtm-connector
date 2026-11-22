@@ -719,6 +719,12 @@ func TestAccountsGivesOneShapeWithAndWithoutAQuery(t *testing.T) {
 		}
 		org.Add(rows.(*strictjson.Object))
 	}
+	spaced, err := strictjson.LoadsText(`{"Account": [{"Id": "001000000000999AAA", "Name": "Birch  Mills plc",
+		"Industry": "Testing", "AccountNumber": null}], "Contact": [], "Opportunity": [], "Contract": []}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	org.Add(spaced.(*strictjson.Object))
 	where := []string{"--state-dir", "invented-books"}
 	if code, _, stderr := d.read(t, append([]string{"connect", "salesforce", "--org", salesforcetest.Alias,
 		"--environment", "production"}, where...)...); code != 0 {
@@ -735,6 +741,12 @@ func TestAccountsGivesOneShapeWithAndWithoutAQuery(t *testing.T) {
 		{append([]string{"accounts"}, where...), 100, true},
 		{append([]string{"accounts", "--query", "Overflow"}, where...), 100, true},
 		{append([]string{"accounts", "--query", "Gemini export 0"}, where...), 1, false},
+		// A name holds the query's words in their order, so one written with two spaces is found.
+		{append([]string{"accounts", "--query", "Birch Mills"}, where...), 1, false},
+		{append([]string{"accounts", "--query", "birch   PLC"}, where...), 1, false},
+		{append([]string{"accounts", "--query", "Mills Birch"}, where...), 0, false},
+		{[]string{"accounts", "--query", "Thornfield LLP"}, 1, false},
+		{[]string{"accounts", "--query", "LLP Thornfield"}, 0, false},
 	} {
 		code, stdout, stderr := d.read(t, append(c.tokens, "--json")...)
 		var page map[string]json.RawMessage
@@ -752,6 +764,14 @@ func TestAccountsGivesOneShapeWithAndWithoutAQuery(t *testing.T) {
 		_, _, stderr = d.read(t, c.tokens...)
 		if said := strings.Contains(stderr, "Showing the first 100 accounts. More match"); said != c.more {
 			t.Errorf("%v as text: stderr %q", c.tokens, stderr)
+		}
+		// A search that finds nothing says so, on stderr, so piped rows stay rows, and never repeats the
+		// query, which may be a credential typed by mistake.
+		if said := strings.Contains(stderr, "No account matches."); said != (c.listed == 0) {
+			t.Errorf("%v as text: stderr %q", c.tokens, stderr)
+		}
+		if at := slices.Index(c.tokens, "--query"); c.listed == 0 && strings.Contains(stderr, c.tokens[at+1]) {
+			t.Errorf("%v as text: stderr repeats the query: %q", c.tokens, stderr)
 		}
 	}
 }

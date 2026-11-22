@@ -157,10 +157,16 @@ func runCommand(ctx context.Context, command string, tokens []string, s screen) 
 		return 0
 	}
 	fmt.Fprintln(s.out, r.human(result))
-	if cut, ok := result.(*strictjson.Object); ok && command == "accounts" && get(cut, "has_more") == true {
+	if page, ok := result.(*strictjson.Object); ok && command == "accounts" {
 		// On stderr, so piped rows stay rows.
-		listed, _ := get(cut, "accounts").([]any)
-		fmt.Fprintf(s.err, "Showing the first %d accounts. More match; narrow the search with --query.\n", len(listed))
+		listed, _ := get(page, "accounts").([]any)
+		switch {
+		case get(page, "has_more") == true:
+			fmt.Fprintf(s.err, "Showing the first %d accounts. More match; narrow the search with --query.\n", len(listed))
+		case len(listed) == 0:
+			// The query is not repeated: what was typed there may be a credential.
+			fmt.Fprintln(s.err, "No account matches.")
+		}
 	}
 	return 0
 }

@@ -51,7 +51,7 @@ scope opens one source.
 
 | Tool | Scope | Returns |
 | --- | --- | --- |
-| `search_accounts` | `crm:read` | The first 100 accounts whose name contains `query` as literal text, ordered by name and then ID. With `account_number` and an empty `query`, at most two accounts with exactly that Salesforce AccountNumber. |
+| `search_accounts` | `crm:read` | The first 100 accounts whose name holds the words of `query` in their order, each as literal text with anything between them, ordered by name and then ID. A `query` of no words is every account the grant and the selection allow. With `account_number` and an empty `query`, at most two accounts with exactly that Salesforce AccountNumber. |
 | `get_account` | `crm:read` | One account and its contacts, and with Salesforce its standard Contracts. |
 | `list_opportunities` | `crm:read` | The opportunities of one account, or with no `account_id` those of every account the token may read. |
 | `read_call_notes` | `calls:read` | The account's demo call notes, or its imported transcript excerpt. |

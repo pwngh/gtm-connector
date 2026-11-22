@@ -255,7 +255,7 @@ options:
   --json                Write the documented JSON result for scripts.
   --state-dir STATE_DIR
                         Read this workspace (default: demo).
-  --query QUERY         Match this literal part of an account name.
+  --query QUERY         Match account names that hold these words, in order.
 
 Example: gtm-connector accounts --query Thornfield
 `

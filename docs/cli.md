@@ -248,8 +248,11 @@ they have reached. With `--json`, each progress line is one object with a single
 
 ### `accounts`
 
-`accounts` searches the connected CRM by account name. `--query TEXT` matches a literal part of the
-name, ignoring ASCII case; without it every account matches. Rows are ordered by name and then ID.
+`accounts` searches the connected CRM by account name. `--query TEXT` matches a name that holds the
+words of the text in their order, each as literal text, with anything between them, so `Alder Mills`
+finds `Alder  Mills plc`. On the demo book only the letters A to Z match in either case; Salesforce
+compares letters as its own `LIKE` does. Without `--query`, or with a text of no words, every account
+matches. Rows are ordered by name and then ID.
 
 ```text
 ID       ACCOUNT              INDUSTRY        RENEWAL
@@ -258,8 +261,8 @@ acc-003  Thornfield Wren LLP  Legal services  2027-02-08
 
 `--json` gives one object, with or without `--query`: `accounts`, an array of at most 100 account
 objects as the CRM returns them, and `has_more`, which is `true` when more accounts match and
-`false` otherwise. Text output then adds one line on stderr that says more match. Names are
-neutralized as a card's text is.
+`false` otherwise. Text output then adds one line on stderr that says more match, or `No account
+matches.` when none does, without the text searched for. Names are neutralized as a card's text is.
 
 On the demo book the search is no tool call. On any other CRM it is a `search_accounts` call under a
 receipt that `audit` lists.

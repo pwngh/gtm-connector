@@ -526,6 +526,46 @@ func TestSearchesAreFixedQueries(t *testing.T) {
 		return reader, &asked
 	}
 	ctx := context.Background()
+	t.Run("the words of a name", func(t *testing.T) {
+		// A name is searched by the query's words in their order, each literal, with anything between them,
+		// so a name written with two spaces is found by its words.
+		reader, asked := search(rows(2, "null"))
+		for query, where := range map[string]string{
+			"Alder Mills":  `Name LIKE '%Alder%Mills%'`,
+			"  50%  _off ": `Name LIKE '%50\%%\_off%'`,
+		} {
+			*asked = nil
+			if _, _, err := reader.SearchAccounts(ctx, query, nil, nil); err != nil {
+				t.Fatal(query, err)
+			}
+			want := `SELECT Id, Name, Industry, AccountNumber FROM Account WHERE ` + where + ` ORDER BY Name, Id LIMIT 101`
+			if !reflect.DeepEqual(*asked, []string{want}) {
+				t.Errorf("%q asked %v, want %s", query, *asked, want)
+			}
+		}
+		// A query with no word names no condition: it is every account.
+		*asked = nil
+		if _, _, err := reader.SearchAccounts(ctx, "   ", nil, nil); err != nil || len(*asked) != 0 {
+			t.Errorf("a query of spaces: %v, asked %v", err, *asked)
+		}
+	})
+	t.Run("the words of a name within a selection", func(t *testing.T) {
+		// The selection is in the query itself, with words or with none.
+		reader, asked := search(rows(1, "null"))
+		for query, where := range map[string]string{
+			"Account  0": `Name LIKE '%Account%0%' AND Id IN ('001000000000000000')`,
+			"   ":        `Id IN ('001000000000000000')`,
+		} {
+			*asked = nil
+			if accounts, _, err := reader.SearchAccounts(ctx, query, nil, []string{first}); err != nil || len(accounts) != 1 {
+				t.Fatal(query, len(accounts), err)
+			}
+			want := `SELECT Id, Name, Industry, AccountNumber FROM Account WHERE ` + where + ` ORDER BY Name, Id LIMIT 101`
+			if !reflect.DeepEqual(*asked, []string{want}) {
+				t.Errorf("%q asked %v, want %s", query, *asked, want)
+			}
+		}
+	})
 	t.Run("a name", func(t *testing.T) {
 		reader, asked := search(rows(101, "null"))
 		accounts, more, err := reader.SearchAccounts(ctx, `50%_O'Brien\`, nil, nil)

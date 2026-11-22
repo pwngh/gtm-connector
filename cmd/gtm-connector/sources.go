@@ -82,8 +82,8 @@ type crmSource interface {
 	// list_opportunities its opportunities; and list_users, which only a CRM with users is asked for, the
 	// org's users a speaker can be. An account the CRM does not hold is errAccountNotFound.
 	Read(ctx context.Context, tool, accountID string) ([]*strictjson.Object, error)
-	// SearchAccounts gives the accounts whose name holds the query as literal text, the first hundred by
-	// name and then ID, and whether more match.
+	// SearchAccounts gives the accounts whose name holds the query's words in their order, each as literal
+	// text, the first hundred by name and then ID, and whether more match.
 	SearchAccounts(ctx context.Context, query string) (accounts []*strictjson.Object, more bool, err error)
 }
 

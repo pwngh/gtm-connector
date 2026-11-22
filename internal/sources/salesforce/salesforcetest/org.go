@@ -42,7 +42,7 @@ var Objects = map[string][]string{
 var (
 	soql = regexp.MustCompile(`^SELECT ([A-Za-z, ]+) FROM (Account|Contact|Opportunity|Contract) ` +
 		`WHERE (Id|AccountId) = '([A-Za-z0-9]{18})' ORDER BY Id LIMIT (101|1001)$`)
-	// An account search by a literal part of the name, or of every account, either within a selection.
+	// An account search by a LIKE pattern on the name, or of every account, either within a selection.
 	search = regexp.MustCompile(`^SELECT Id, Name, Industry, AccountNumber FROM Account` +
 		`(?: WHERE (?:Name LIKE '%((?:[^\\']|\\.)*)%')?(?: AND )?(?:Id IN \(([^)]*)\))?)? ORDER BY Name, Id LIMIT 101$`)
 	// The opportunities of a selection of accounts.
@@ -295,10 +295,33 @@ func selected(list string) map[string]bool {
 	return ids
 }
 
-// named is the accounts whose name holds this escaped LIKE text, in any letter case, among the selected ones
+// named is the accounts whose name matches this escaped LIKE pattern, in any letter case, among the selected ones
 // when there is a selection, by name and then ID, and at most 101 of them, as a search reads them.
 func (o *Org) named(escaped string, within map[string]bool) []*strictjson.Object {
-	part := unicodetab.LowerString(unescaped.ReplaceAllString(escaped, "$1"))
+	// A % that no backslash escapes matches anything.
+	parts := []string{""}
+	for i := 0; i < len(escaped); i++ {
+		switch {
+		case escaped[i] == '%':
+			parts = append(parts, "")
+			continue
+		case escaped[i] == '\\' && i+1 < len(escaped):
+			i++
+		}
+		parts[len(parts)-1] += escaped[i : i+1]
+	}
+	holds := func(name string) bool {
+		rest := unicodetab.LowerString(name)
+		for _, part := range parts {
+			part = unicodetab.LowerString(part)
+			at := strings.Index(rest, part)
+			if at < 0 {
+				return false
+			}
+			rest = rest[at+len(part):]
+		}
+		return true
+	}
 	var found []*strictjson.Object
 	for account, rows := range o.rows["Account"] {
 		if within != nil && !within[account] {
@@ -306,7 +329,7 @@ func (o *Org) named(escaped string, within map[string]bool) []*strictjson.Object
 		}
 		for _, row := range rows {
 			name, _ := row.Get("Name")
-			if text, _ := name.(string); strings.Contains(unicodetab.LowerString(text), part) {
+			if text, _ := name.(string); holds(text) {
 				found = append(found, row)
 			}
 		}

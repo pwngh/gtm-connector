@@ -308,8 +308,9 @@ contracts and users are `con-sf-`, `opp-sf-`, `ctr-sf-` and `usr-sf-` the same w
 | Contract | `AccountId` to `account_id`; raw `Status` to `status`; `StatusCode` to `status_code`, one of `Draft`, `InApproval` or `Activated`; nullable `StartDate`, `EndDate` and `ContractTerm` to `start_date`, `end_date` and `contract_term` |
 | User | `Name` to `name`; nullable `Email` to `email`; `IsActive` to `is_active`. Only users whose `UserType` is `Standard` are read. |
 
-`accounts --query TEXT` finds the accounts whose name holds the text literally. It returns the first
-100 by name and then ID, and says when more match.
+`accounts --query TEXT` finds the accounts whose name holds the words of the text in their order, each
+literally, with anything between them. It returns the first 100 by name and then ID, and says when
+more match.
 
 ### What a card reads
 
