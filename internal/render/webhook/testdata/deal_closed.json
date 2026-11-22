@@ -8,8 +8,8 @@
     "previous_status": "green"
   },
   "card": {
-    "id": "card-b59b292f7200",
-    "sha256": "b59b292f72002d5988300e2e045de85d52cb60a1f45c9576fb390c17956f8ebb",
+    "id": "card-705759972d80",
+    "sha256": "705759972d80f135ffa2596460799b1cd0bdb5c66ad290d20ca48e3af9460bfb",
     "as_of": "2027-01-15"
   },
   "renewal": {
@@ -57,7 +57,7 @@
   "unread": [],
   "changes": null,
   "links": {
-    "card": "https://gtm.example.internal/deals/acc-003?card=card-b59b292f7200",
-    "api": "https://gtm.example.internal/api/v1/cards/card-b59b292f7200"
+    "card": "https://gtm.example.internal/deals/acc-003?card=card-705759972d80",
+    "api": "https://gtm.example.internal/api/v1/cards/card-705759972d80"
   }
 }
